@@ -55,6 +55,7 @@ import type { LiveModelsCatalog } from "@/lib/agent-runtime-models";
 import { getAgentModelPresentation } from "@/lib/agents-list-model-display";
 import { formatCost } from "@/lib/cost-format";
 import { modelTierLabel } from "@/lib/model-tiers";
+import { describeModelResolution, taskDisplayModel } from "@/lib/task-model-resolution";
 import { taskListTitle } from "@/lib/task-title";
 import { cn, formatElapsed, formatSmartTime } from "@/lib/utils";
 
@@ -208,28 +209,39 @@ function DescriptionCell({ title, prompt }: { title?: string; prompt?: string })
 }
 
 function ModelCell({
-  model,
-  modelTier,
+  task,
   liveCatalog,
 }: {
-  model: string | undefined;
-  modelTier: string | undefined;
+  task: Pick<AgentTask, "model" | "modelTier" | "resolvedModel" | "modelSource" | "modelAlias">;
   liveCatalog?: LiveModelsCatalog;
 }) {
-  if (!model && !modelTier) return DASH;
-  if (!model) {
+  const shown = taskDisplayModel(task);
+  if (!shown && !task.modelTier) return DASH;
+  if (!shown) {
     return (
       <Badge variant="outline" size="tag">
-        tier: {modelTierLabel(modelTier)}
+        tier: {modelTierLabel(task.modelTier)}
       </Badge>
     );
   }
-  const presentation = getAgentModelPresentation(model, liveCatalog);
-  return (
+  const presentation = getAgentModelPresentation(shown, liveCatalog);
+  const cell = (
     <span className="inline-flex items-center gap-1.5">
       <ProviderIcon provider={presentation?.providerId} className="h-3.5 w-3.5" />
-      <span className="truncate">{presentation?.label ?? model}</span>
+      <span className="truncate">{presentation?.label ?? shown}</span>
     </span>
+  );
+  const lines = describeModelResolution(task);
+  if (lines.length === 0) return cell;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{cell}</TooltipTrigger>
+      <TooltipContent side="right" align="start">
+        {lines.map((line) => (
+          <div key={line}>{line}</div>
+        ))}
+      </TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -642,11 +654,7 @@ export function TasksTable({
         width: 180,
         ...fixed,
         cellRenderer: (p: { data?: AgentTask }) => (
-          <ModelCell
-            model={p.data?.model}
-            modelTier={p.data?.modelTier}
-            liveCatalog={modelsCatalog?.providers}
-          />
+          <ModelCell task={p.data ?? {}} liveCatalog={modelsCatalog?.providers} />
         ),
       },
       {

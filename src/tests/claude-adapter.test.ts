@@ -124,6 +124,16 @@ describe("ClaudeSession spawn env — reasoning_effort", () => {
     expect(spawnedEnvs[0]?.CLAUDE_CODE_EFFORT_LEVEL).toBe("high");
   });
 
+  test("reasoningEffort: 'high' on the tier-default shortname opus sets CLAUDE_CODE_EFFORT_LEVEL", async () => {
+    const adapter = new ClaudeAdapter(async () => {});
+    await adapter.createSession(
+      makeConfig({ model: "opus", reasoningEffort: "high", env: CLEAN_ENV }),
+    );
+
+    expect(spawnedEnvs).toHaveLength(1);
+    expect(spawnedEnvs[0]?.CLAUDE_CODE_EFFORT_LEVEL).toBe("high");
+  });
+
   test("reasoningEffort: 'off' on a legacy budget_tokens-capable model sets MAX_THINKING_TOKENS=0, no effort env", async () => {
     const adapter = new ClaudeAdapter(async () => {});
     await adapter.createSession(

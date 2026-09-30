@@ -22,6 +22,7 @@ import { ConfigChip } from "../components/ConfigChip.tsx";
 import { useConfirm } from "../components/ConfirmDialog.tsx";
 import { CrownIcon } from "../components/CrownIcon.tsx";
 import { type Column, DataTable } from "../components/DataTable.tsx";
+import { EffortChip } from "../components/EffortChip.tsx";
 import { EntityLink } from "../components/EntityLink.tsx";
 import {
   fmtAgo,
@@ -587,6 +588,7 @@ export default function RunDetailsPage(props: {
                 configIds={r.configIds}
                 cells={run.cells}
                 attempts={attempts}
+                efforts={r.efforts}
                 cellHref={(scenarioId, configId) =>
                   `#/runs/${runId}/attempts/${runId}_${scenarioId}_${configId}_0`
                 }
@@ -1017,6 +1019,16 @@ function AttemptSummary(props: {
         <Meta label="Model">
           <ModelChip model={attempt.tokens?.model ?? config?.model ?? null} />
         </Meta>
+        <Meta label="Effort">
+          {attempt.reasoningEffort ? (
+            <EffortChip
+              effort={attempt.reasoningEffort}
+              applied={attempt.appliedReasoningEffort ?? null}
+            />
+          ) : (
+            <span className="dim">Harness default</span>
+          )}
+        </Meta>
         <Meta label="Tokens">
           <TokensValue tokens={attempt.tokens} />
         </Meta>
@@ -1024,7 +1036,7 @@ function AttemptSummary(props: {
           <EntityLink kind="scenario" id={attempt.scenarioId} />
         </Meta>
         <Meta label="Config">
-          <ConfigChip configId={attempt.configId} link />
+          <ConfigChip configId={attempt.configId} link effort={null} />
         </Meta>
       </div>
       {props.tasks !== null ? (
@@ -1572,8 +1584,12 @@ function MemberSection(props: {
         <div className="pv-rows">
           <SbRow label="Config">
             <span className="rd-member-config">
-              <ConfigChip configId={effConfigId} link />
+              <ConfigChip configId={effConfigId} link effort={null} />
               <ModelChip model={effModel} />
+              <EffortChip
+                effort={e.reasoningEffort}
+                applied={e.reasoningEffort ? (e.appliedReasoningEffort ?? null) : undefined}
+              />
               {overridden ? (
                 <Tooltip
                   text={`Overrides the cell config (${props.cellConfigId})${

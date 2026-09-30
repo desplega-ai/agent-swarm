@@ -61,6 +61,9 @@ function NewRunForm(props: { onClose: () => void }): ReactNode {
   const [scenarioSel, setScenarioSel] = useState<Set<string> | null>(null);
   const [configSel, setConfigSel] = useState<Set<string> | null>(null);
   const [judgeModel, setJudgeModel] = useState<string | null>(null);
+  // Per-run effort overrides by config id (null = harness default). A config with
+  // no entry runs at its own default effort.
+  const [efforts, setEfforts] = useState<Record<string, string | null>>({});
   const [attempts, setAttempts] = useState(1);
   const [concurrency, setConcurrency] = useState(2);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -154,6 +157,10 @@ function NewRunForm(props: { onClose: () => void }): ReactNode {
         attemptsPerCell: clamp(attempts, 1, 10),
         concurrency: clamp(concurrency, 1, 8),
       };
+      const overrides = Object.fromEntries(
+        Object.entries(efforts).filter(([id]) => body.configIds.includes(id)),
+      );
+      if (Object.keys(overrides).length > 0) body.efforts = overrides;
       if (name.trim().length > 0) body.name = name.trim();
       if (judge.trim().length > 0) body.judgeModel = judge.trim();
       const { runId } = await createRun(body);
@@ -232,7 +239,7 @@ function NewRunForm(props: { onClose: () => void }): ReactNode {
       <div className="form-field">
         <span className="form-label">
           Configs{" "}
-          <InfoTip text="Harness × model under test — every selected config becomes a matrix column" />
+          <InfoTip text="Harness × model under test — every selected config becomes a matrix column. A selected config that takes reasoning effort gets a select for this run." />
         </span>
         {/* v7.7 item 1: one-click preset buttons. Click REPLACES the selection
             with preset.configIds ∩ catalog — same semantics as the frozen
@@ -257,7 +264,18 @@ function NewRunForm(props: { onClose: () => void }): ReactNode {
             })}
           </div>
         ) : null}
-        <ConfigMultiSelect configs={configs.data} selected={selConfigs} onChange={setConfigSel} />
+        <ConfigMultiSelect
+          configs={configs.data}
+          selected={selConfigs}
+          onChange={setConfigSel}
+          efforts={efforts}
+          onEffortChange={(id, effort) =>
+            setEfforts((prev) => {
+              const { [id]: _dropped, ...rest } = prev;
+              return effort === undefined ? rest : { ...rest, [id]: effort };
+            })
+          }
+        />
       </div>
 
       <div className="form-row-2">

@@ -2,12 +2,18 @@ import { parseArgs } from "node:util";
 import { DEFAULT_CONFIG_IDS } from "../configs/index.ts";
 import { CONFIG_PRESETS, expandPresetSelection } from "../configs/presets.ts";
 import { DEFAULT_SCENARIO_IDS } from "../scenarios/index.ts";
+import { getResolutionCatalog } from "./cost/catalog.ts";
 import { getDb, initDb } from "./db/client.ts";
 import { createRun, getRun, listAttempts, listRuns, resetErrorAttempts } from "./db/queries.ts";
 import { loadRegistry } from "./registry.ts";
 import { type CellSummary, summarizeRun } from "./results.ts";
 import { executeRun, killAllActiveStacks } from "./runner/index.ts";
 import { assertRunConfigsResolve, ensureRunConfigPins } from "./runner/run-configs.ts";
+import {
+  type EffortOverrides,
+  parseEffortOverrides,
+  planRunEfforts,
+} from "./runner/run-efforts.ts";
 import { DEFAULT_PASS_THRESHOLD } from "./scoring.ts";
 
 /**
@@ -60,6 +66,9 @@ Options:
   --preset <id>          named config set, repeatable; presets expand in flag
                          order ahead of --configs ids, deduped keeping the
                          first occurrence (neither flag → the default configs)
+  --effort <cfg=level>   reasoning effort for one config, repeatable (a level the
+                         config's harness + model take, or "default" for the
+                         harness default); overrides the config's own default
   --attempts <n>         attempts per scenario × config cell (default 1)
   --concurrency <n>      parallel attempts, one sandbox stack each (default 2)
   --max-retries <n>      retries per errored attempt (default 1)
@@ -79,6 +88,18 @@ function parseCsv(value: string | undefined, fallback: string[]): string[] {
     .filter(Boolean);
 }
 
+/** `--effort claude-opus=high --effort pi-kimi=default` → per-config overrides ("default" = none). */
+function parseEffortFlags(flags: string[]): EffortOverrides {
+  const raw: Record<string, string | null> = {};
+  for (const flag of flags) {
+    const eq = flag.indexOf("=");
+    if (eq <= 0) throw new Error(`--effort expects <configId>=<level>, got "${flag}"`);
+    const level = flag.slice(eq + 1);
+    raw[flag.slice(0, eq)] = level === "default" ? null : level;
+  }
+  return parseEffortOverrides(raw);
+}
+
 async function cmdRun(argv: string[]): Promise<void> {
   const { values } = parseArgs({
     args: argv,
@@ -87,6 +108,7 @@ async function cmdRun(argv: string[]): Promise<void> {
       scenarios: { type: "string" },
       configs: { type: "string" },
       preset: { type: "string", multiple: true },
+      effort: { type: "string", multiple: true },
       help: { type: "boolean" },
       attempts: { type: "string", default: "1" },
       concurrency: { type: "string", default: "2" },
@@ -118,6 +140,13 @@ async function cmdRun(argv: string[]): Promise<void> {
   }
 
   await assertRunConfigsResolve(registry, scenarioIds, configIds);
+  const efforts = planRunEfforts({
+    registry,
+    scenarioIds,
+    configIds,
+    overrides: parseEffortFlags(values.effort ?? []),
+    catalog: await getResolutionCatalog(),
+  });
   const db = await initDb();
   const runId = `run-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, "").replace("-", "").replace("-", "")}-${crypto.randomUUID().slice(0, 6)}`;
   await createRun(db, {
@@ -128,6 +157,7 @@ async function cmdRun(argv: string[]): Promise<void> {
     attemptsPerCell: Math.max(1, Number(values.attempts)),
     concurrency: Math.max(1, Number(values.concurrency)),
     judgeModel: values["judge-model"],
+    efforts,
   });
   await ensureRunConfigPins(db, runId, registry, scenarioIds, configIds);
   console.log(
@@ -195,9 +225,14 @@ async function cmdShow(argv: string[]): Promise<void> {
   const summary = summarizeRun(run, attempts);
 
   console.log(`\n${run.id} [${run.status}] mean±CI @n=${run.attemptsPerCell}`);
-  const colWidth = Math.max(...run.configIds.map((c) => c.length), 16) + 2;
+  // A config run at a reasoning effort reads `claude-opus@high` in the header.
+  const columnLabel = (configId: string) =>
+    run.efforts?.[configId] ? `${configId}@${run.efforts[configId]}` : configId;
+  const colWidth = Math.max(...run.configIds.map((c) => columnLabel(c).length), 16) + 2;
   const rowHeader = Math.max(...run.scenarioIds.map((s) => s.length), 8) + 2;
-  console.log(" ".repeat(rowHeader) + run.configIds.map((c) => c.padEnd(colWidth)).join(""));
+  console.log(
+    " ".repeat(rowHeader) + run.configIds.map((c) => columnLabel(c).padEnd(colWidth)).join(""),
+  );
   for (const scenarioId of run.scenarioIds) {
     const cells = run.configIds.map((configId) => {
       const cell = summary.cells.find(

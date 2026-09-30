@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { WORKER_SPEC_RESERVED_ENV } from "../registry.ts";
 import type { HarnessConfig } from "../types.ts";
 import { apiRuntimeEnv, workerRuntimeEnv } from "./sandbox.ts";
 
@@ -207,6 +208,29 @@ describe("workerRuntimeEnv v7 member env (§9.3 frozen merge order)", () => {
     expect(env.MODEL_OVERRIDE).toBe("openrouter/deepseek/deepseek-v4-flash");
     expect(env.OPENROUTER_API_KEY).toBe("example-or-test-key");
     expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
+  });
+});
+
+describe("workerRuntimeEnv reasoning effort", () => {
+  const base: HarnessConfig = { id: "claude-haiku", provider: "claude", model: "claude-haiku-4-5" };
+
+  beforeEach(() => {
+    process.env.CLAUDE_CODE_OAUTH_TOKEN = "example-oauth-test";
+  });
+
+  test("the config's effort reaches the worker as REASONING_EFFORT_OVERRIDE", () => {
+    expect(workerEnvFor({ ...base, reasoningEffort: "high" }).REASONING_EFFORT_OVERRIDE).toBe(
+      "high",
+    );
+    expect(workerEnvFor({ ...base, reasoningEffort: "off" }).REASONING_EFFORT_OVERRIDE).toBe("off");
+  });
+
+  test("no effort sends no variable, so the harness default applies", () => {
+    expect("REASONING_EFFORT_OVERRIDE" in workerEnvFor(base)).toBe(false);
+  });
+
+  test("the env key is reserved, so a roster member's spec.env cannot set it", () => {
+    expect(WORKER_SPEC_RESERVED_ENV.has("REASONING_EFFORT_OVERRIDE")).toBe(true);
   });
 });
 

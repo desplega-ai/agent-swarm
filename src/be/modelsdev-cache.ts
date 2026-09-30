@@ -18,6 +18,8 @@ export interface ModelsDevModel {
   name?: string;
   cost?: ModelsDevCostBlock;
   limit?: { context?: number };
+  release_date?: string;
+  status?: string;
   reasoning?: boolean;
   reasoning_options?: ModelsDevReasoningOption[];
 }

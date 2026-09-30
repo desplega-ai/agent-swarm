@@ -203,3 +203,27 @@ describe("MULTI_RUNTIME_ENABLED on the authenticated stats endpoint", () => {
     });
   });
 });
+
+describe("SWARM_DEV_MODE on the authenticated stats endpoint", () => {
+  test("defaults off and reflects changes without exposing the flag on health", async () => {
+    const previous = process.env.SWARM_DEV_MODE;
+    try {
+      for (const [raw, expected] of [
+        [undefined, false],
+        ["true", true],
+        ["false", false],
+        ["1", true],
+        ["0", false],
+        ["invalid", false],
+      ] as const) {
+        restoreEnv("SWARM_DEV_MODE", raw);
+        const stats = await api("GET", "/api/stats");
+        expect(stats.status).toBe(200);
+        expect(stats.body.devMode).toBe(expected);
+        expect((await api("GET", "/health")).body.devMode).toBeUndefined();
+      }
+    } finally {
+      restoreEnv("SWARM_DEV_MODE", previous);
+    }
+  });
+});

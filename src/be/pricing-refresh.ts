@@ -6,14 +6,25 @@ import {
   type InsertPricingRowInput,
   insertPricingRow,
 } from "./db";
-import { updateLiveModelsCatalog } from "./models-catalog";
+import {
+  applyOverlayPricingRows,
+  buildCatalogEntries,
+  countModelCatalog,
+  expireMatchedOverlays,
+  getModelCatalogMeta,
+  reloadModelsCatalog,
+  replaceModelCatalog,
+  touchModelCatalogCheckedAt,
+  updateModelCatalogMeta,
+} from "./model-catalog-store";
 import type { ModelsDevCache } from "./modelsdev-cache";
 import { buildModelsDevSeedRows, type PricingSeedRow } from "./seed-pricing";
 
 const MODELSDEV_API_URL = "https://models.dev/api.json";
 export const PRICING_REFRESH_INTERVAL_MS = 12 * 60 * 60 * 1000;
+/** Unforced `refreshModelCatalog()` calls skip the network when the last models.dev check (200 or 304) is younger than this. */
+export const MODEL_CATALOG_FRESH_MS = 4 * 60 * 60 * 1000;
 
-let lastETag: string | null = null;
 let refreshLoopStarted = false;
 
 interface RefreshPricingOptions {
@@ -28,6 +39,11 @@ export interface PricingRefreshResult {
   unchanged: number;
   pruned: number;
   etag?: string;
+  /** Catalog keys ("provider/modelId") new since the previous fetch. */
+  added?: string[];
+  /** Overlay rows auto-expired because upstream now matches. */
+  expiredOverlays?: string[];
+  catalogModels?: number;
 }
 
 function logPricingRefresh(message: string): void {
@@ -129,17 +145,29 @@ export async function refreshPricingFromModelsDev(
 ): Promise<PricingRefreshResult> {
   const fetchImpl = opts.fetchImpl ?? fetch;
   const now = opts.now ?? Date.now();
-  const headers: Record<string, string> = lastETag ? { "If-None-Match": lastETag } : {};
+  const meta = await getModelCatalogMeta();
+  // Only send validators when the table is populated — a 304 against an empty
+  // table (fresh DB, same ETag) would leave the catalog empty.
+  const catalogCount = await countModelCatalog();
+  const headers: Record<string, string> = {};
+  if (catalogCount > 0 && meta.etag) headers["If-None-Match"] = meta.etag;
+  if (catalogCount > 0 && meta.lastModified) headers["If-Modified-Since"] = meta.lastModified;
 
   const response = await fetchImpl(MODELSDEV_API_URL, { headers });
   if (response.status === 304) {
+    await touchModelCatalogCheckedAt(now);
+    await updateModelCatalogMeta({ lastCheckedAt: now });
+    await reloadModelsCatalog();
     const result: PricingRefreshResult = {
       status: "not_modified",
       candidateRows: 0,
       inserted: 0,
       unchanged: 0,
       pruned: 0,
-      etag: lastETag ?? undefined,
+      etag: meta.etag ?? undefined,
+      added: [],
+      expiredOverlays: [],
+      catalogModels: catalogCount,
     };
     await auditPricingRefresh(result);
     logPricingRefresh("models.dev returned 304; pricing rows unchanged");
@@ -151,34 +179,148 @@ export async function refreshPricingFromModelsDev(
 
   const cache = (await response.json()) as ModelsDevCache;
   const etag = response.headers.get("etag");
-  updateLiveModelsCatalog(cache, now);
+  const lastModified = response.headers.get("last-modified");
+  const entries = buildCatalogEntries(cache, now);
+  const added = await replaceModelCatalog(entries);
   const rows = buildModelsDevSeedRows(cache);
   const { inserted, unchanged } = await insertChangedPricingRows(rows, now);
+  const expiredOverlays = await expireMatchedOverlays();
+  // Overlay prices only fill (provider, model, tokenClass) gaps upstream left.
+  const overlayInserted = await applyOverlayPricingRows(now);
   const pruned = await prunePricingHistory(2);
-  lastETag = etag;
+  await updateModelCatalogMeta({ etag, lastModified, lastFetchAt: now, lastCheckedAt: now });
+  await reloadModelsCatalog();
 
   const result: PricingRefreshResult = {
     status: "refreshed",
     candidateRows: rows.length,
-    inserted,
+    inserted: inserted + overlayInserted,
     unchanged,
     pruned,
-    etag: lastETag ?? undefined,
+    etag: etag ?? undefined,
+    added,
+    expiredOverlays,
+    catalogModels: entries.length,
   };
   await auditPricingRefresh(result);
   logPricingRefresh(
-    `refreshed ${rows.length} candidate row(s); inserted=${inserted}; unchanged=${unchanged}; pruned=${pruned}`,
+    `refreshed ${rows.length} candidate row(s); inserted=${inserted}; unchanged=${unchanged}; pruned=${pruned}; catalog=${entries.length}; added=${added.length}; expiredOverlays=${expiredOverlays.length}`,
   );
   return result;
 }
 
-async function runPricingRefreshSafely(): Promise<void> {
-  try {
-    await refreshPricingFromModelsDev();
-  } catch (err) {
-    logPricingRefreshError("refresh failed", err);
-    await auditPricingRefreshFailure(err);
+export interface ModelCatalogRefreshResult {
+  status: "updated" | "not-modified" | "skipped-fresh" | "skipped-cooldown" | "error";
+  models: number;
+  added: string[];
+  checkedAt: number | null;
+  /** Set with `skipped-cooldown`: milliseconds until a forced refresh is accepted again. */
+  retryAfterMs?: number;
+  error?: string;
+}
+
+/** Minimum gap between forced refreshes accepted from callers (HTTP route, MCP tool). */
+export const MODEL_CATALOG_FORCE_COOLDOWN_MS = 60 * 1000;
+
+let refreshInFlight: Promise<ModelCatalogRefreshResult> | null = null;
+let lastForcedRefreshAt: number | null = null;
+
+/** Test-only: forget the in-flight refresh and the forced-refresh cooldown. */
+export function resetModelCatalogRefreshGuardForTests(): void {
+  refreshInFlight = null;
+  lastForcedRefreshAt = null;
+}
+
+/**
+ * `pi update --models` for the swarm. Unforced calls skip the network when the
+ * last fetch is younger than MODEL_CATALOG_FRESH_MS; `force` always fetches
+ * (still conditional on the stored ETag). Never throws — failures come back as
+ * `status: "error"` and the catalog keeps serving the last good table (or the
+ * vendored snapshot).
+ */
+export function refreshModelCatalog(
+  opts: { force?: boolean } & RefreshPricingOptions = {},
+): Promise<ModelCatalogRefreshResult> {
+  // Single flight: a refresh that is already running serves every concurrent caller, so a burst of
+  // requests (or the boot loop racing a forced call) costs one models.dev fetch.
+  if (refreshInFlight) return refreshInFlight;
+  const run = runModelCatalogRefresh(opts).finally(() => {
+    if (refreshInFlight === run) refreshInFlight = null;
+  });
+  refreshInFlight = run;
+  return run;
+}
+
+/**
+ * Caller-facing entry for the HTTP route and the MCP tool: `refreshModelCatalog` plus a cooldown
+ * on `force`. A forced call within MODEL_CATALOG_FORCE_COOLDOWN_MS of the previous one does not
+ * fetch; it reports `skipped-cooldown` and how long to wait. Unforced calls pass straight through
+ * (they already skip the network while the table is fresh).
+ */
+export async function requestModelCatalogRefresh(
+  opts: { force?: boolean } & RefreshPricingOptions = {},
+): Promise<ModelCatalogRefreshResult> {
+  const now = opts.now ?? Date.now();
+  if (opts.force) {
+    const waitMs =
+      lastForcedRefreshAt === null
+        ? 0
+        : lastForcedRefreshAt + MODEL_CATALOG_FORCE_COOLDOWN_MS - now;
+    if (waitMs > 0) {
+      const meta = await getModelCatalogMeta().catch(() => null);
+      return {
+        status: "skipped-cooldown",
+        models: await countModelCatalog().catch(() => 0),
+        added: [],
+        checkedAt: meta?.lastCheckedAt ?? null,
+        retryAfterMs: waitMs,
+      };
+    }
+    lastForcedRefreshAt = now;
   }
+  return refreshModelCatalog({ ...opts, now });
+}
+
+async function runModelCatalogRefresh(
+  opts: { force?: boolean } & RefreshPricingOptions = {},
+): Promise<ModelCatalogRefreshResult> {
+  const now = opts.now ?? Date.now();
+  try {
+    const meta = await getModelCatalogMeta();
+    const count = await countModelCatalog();
+    if (
+      !opts.force &&
+      count > 0 &&
+      meta.lastCheckedAt !== null &&
+      now - meta.lastCheckedAt < MODEL_CATALOG_FRESH_MS
+    ) {
+      await reloadModelsCatalog();
+      return { status: "skipped-fresh", models: count, added: [], checkedAt: meta.lastCheckedAt };
+    }
+    const result = await refreshPricingFromModelsDev({ fetchImpl: opts.fetchImpl, now });
+    return {
+      status: result.status === "refreshed" ? "updated" : "not-modified",
+      models: result.catalogModels ?? (await countModelCatalog()),
+      added: result.added ?? [],
+      checkedAt: now,
+    };
+  } catch (err) {
+    logPricingRefreshError("model catalog refresh failed", err);
+    await auditPricingRefreshFailure(err);
+    const meta = await getModelCatalogMeta().catch(() => null);
+    return {
+      status: "error",
+      models: await countModelCatalog().catch(() => 0),
+      added: [],
+      checkedAt: meta?.lastCheckedAt ?? null,
+      error: scrubSecrets(err instanceof Error ? err.message : String(err)),
+    };
+  }
+}
+
+async function runPricingRefreshSafely(): Promise<void> {
+  // refreshModelCatalog never throws; errors are logged + audited inside.
+  await refreshModelCatalog();
 }
 
 export function startPricingRefreshLoop(): void {

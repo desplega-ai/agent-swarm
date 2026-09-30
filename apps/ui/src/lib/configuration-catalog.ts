@@ -19,6 +19,7 @@ import {
   Cpu,
   Database,
   HeartPulse,
+  Layers,
   type LucideIcon,
   Palette,
   Plug,
@@ -26,6 +27,7 @@ import {
   Workflow,
 } from "lucide-react";
 
+import type { ModelTierPreview } from "@/api/types";
 import type { DurationUnit } from "./configuration-values";
 
 const DOCS = "https://docs.agent-swarm.dev/docs/";
@@ -58,6 +60,17 @@ export interface ConfigCatalogEntry {
   /** Read once at boot — saving is not enough, the server must restart. */
   restartRequired?: boolean;
   placeholder?: string;
+  /**
+   * Model tier rows only: what the value resolves to on the server right now
+   * (from `GET /api/models-catalog/tiers`), shown under the description.
+   */
+  resolvesTo?: {
+    model: string | null;
+    alias: string | null;
+    source: "tier-config" | "tier-default";
+    /** A configured value resolved to nothing, so the built-in default applies. */
+    fellBack?: boolean;
+  };
 }
 
 export interface ConfigCatalogGroup {
@@ -66,6 +79,56 @@ export interface ConfigCatalogGroup {
   description: string;
   icon: LucideIcon;
   entries: ConfigCatalogEntry[];
+}
+
+/**
+ * The Model tiers group is not in `CONFIGURATION_GROUPS`: its rows (one per
+ * provider and tier), their defaults and what they resolve to come from
+ * `GET /api/models-catalog/tiers`, so the dashboard has no copy of the
+ * server's tier defaults. Merged into the page by `withModelTierGroup`.
+ */
+export function modelTierConfigGroup(tiers: ModelTierPreview[]): ConfigCatalogGroup | null {
+  if (tiers.length === 0) return null;
+  return {
+    id: "model-tiers",
+    title: "Model tiers",
+    description:
+      "Which model a modelTier task runs on each harness provider. Values are a model id, a CLI alias, or a latest: alias; the resolved model below is what the API picks from the live catalog today. A task's explicit model and a worker's own MODEL_TIER_* env still win.",
+    icon: Layers,
+    entries: tiers.map((row) => ({
+      key: row.key,
+      label: `${row.provider} ${row.tier} tier model`,
+      description: `Model a ${row.provider} worker runs for modelTier=${row.tier} tasks. A model id, a CLI alias, or latest:<anthropic|openai|openrouter>/<target>[@stable|@any].`,
+      kind: "string" as const,
+      placeholder: row.defaultValue,
+      defaultValue: row.defaultValue,
+      docsUrl: `${DOCS}ui/configuration`,
+      // Only worth a line when it adds something: an alias moved to a concrete
+      // id, or a value the catalog cannot resolve. A plain id or CLI alias that
+      // resolves to itself is already shown as the value / Default.
+      resolvesTo:
+        row.alias || row.resolvedModel !== (row.configured ?? row.defaultValue)
+          ? {
+              model: row.resolvedModel,
+              alias: row.alias,
+              source: row.source,
+              fellBack: row.configured !== null && row.source === "tier-default",
+            }
+          : undefined,
+    })),
+  };
+}
+
+/** Insert the live Model tiers group right after the Harness group. */
+export function withModelTierGroup(
+  groups: ConfigCatalogGroup[],
+  tiers: ModelTierPreview[] | undefined,
+): ConfigCatalogGroup[] {
+  const tierGroup = tiers ? modelTierConfigGroup(tiers) : null;
+  if (!tierGroup) return groups;
+  const at = groups.findIndex((group) => group.id === "harness");
+  if (at === -1) return [...groups, tierGroup];
+  return [...groups.slice(0, at + 1), tierGroup, ...groups.slice(at + 1)];
 }
 
 export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
@@ -313,6 +376,15 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
     icon: Cpu,
     entries: [
       {
+        key: "SWARM_DEV_MODE",
+        label: "Dev mode",
+        description:
+          "Bypass dashboard version checks for deployments that follow main. Keep the API current with the dashboard. Shows a DEV badge.",
+        kind: "boolean",
+        defaultValue: "false",
+        docsUrl: `${DOCS}ui/configuration#dev-mode`,
+      },
+      {
         key: "CLAUDE_TRANSPORT",
         label: "Default Claude transport",
         description:
@@ -408,6 +480,26 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         options: ["fail", "fallback"],
         defaultValue: "fail",
         restartRequired: false,
+        docsUrl: `${DOCS}ui/configuration`,
+      },
+      {
+        key: "MODEL_LATEST_SOAK_DAYS",
+        label: "latest: alias soak",
+        description:
+          "A `latest:...@stable` tier value skips models released fewer than this many days ago. 0 disables the soak. Preview ids and unpriced models are always skipped on @stable.",
+        kind: "number",
+        unit: "days",
+        defaultValue: "2",
+        placeholder: "2",
+        docsUrl: `${DOCS}ui/configuration`,
+      },
+      {
+        key: "MODEL_AUTO_UPGRADE",
+        label: "Auto-upgrade latest: aliases",
+        description:
+          "When off, every `latest:` alias stays on the model it last resolved to, even after a newer model lands in the catalog. Turn back on to let aliases move again.",
+        kind: "boolean",
+        defaultValue: "true",
         docsUrl: `${DOCS}ui/configuration`,
       },
     ],

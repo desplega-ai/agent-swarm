@@ -360,6 +360,15 @@
               "max"
             ]
           },
+          "resolvedModel": {
+            "type": "string"
+          },
+          "modelSource": {
+            "type": "string"
+          },
+          "modelAlias": {
+            "type": "string"
+          },
           "scheduleId": {
             "type": "string"
           },
@@ -9645,6 +9654,19 @@
                   "runtimeInstanceId": {
                     "type": "string",
                     "minLength": 1
+                  },
+                  "modelTierOverrides": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "harnessCliVersion": {
+                    "type": "string",
+                    "maxLength": 64
                   }
                 },
                 "required": [
@@ -10090,7 +10112,7 @@
       },
       "patch": {
         "summary": "Update an agent's runtime harness and default model",
-        "description": "Updates `agents.harness_provider` and agent-scoped runtime config. The settings apply to future provider sessions. For `model`, `reasoning_effort`, and `claude.transport`: omit the field to leave it unchanged, send `null` to clear the corresponding override, or send a value to set it.",
+        "description": "Updates `agents.harness_provider` and agent-scoped runtime config. The settings apply to future provider sessions. For `model`, `reasoning_effort`, and `claude.transport`: omit the field to leave it unchanged, send `null` to clear the corresponding override, or send a value to set it. A `model` the model catalog does not list is a 400 unless `allow_custom_model` is true. A `latest:` alias is not accepted here (aliases resolve for a task's model and for `MODEL_TIER_*` values); `reasoning_effort` must be one the harness and model support.",
         "tags": [
           "Agents"
         ],
@@ -22850,6 +22872,12 @@
                                     },
                                     "output": {
                                       "type": "number"
+                                    },
+                                    "cache_read": {
+                                      "type": "number"
+                                    },
+                                    "cache_write": {
+                                      "type": "number"
                                     }
                                   }
                                 },
@@ -22860,6 +22888,12 @@
                                       "type": "number"
                                     }
                                   }
+                                },
+                                "release_date": {
+                                  "type": "string"
+                                },
+                                "status": {
+                                  "type": "string"
                                 },
                                 "reasoning": {
                                   "type": "boolean"
@@ -22903,6 +22937,726 @@
                     "updatedAt",
                     "providers"
                   ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/models-catalog/tiers": {
+      "get": {
+        "summary": "Preview what each model tier resolves to per harness provider",
+        "description": "One row per provider and tier: the built-in default, the `MODEL_TIER_<PROVIDER>_<TIER>` value stored in swarm config (if any), which layer wins, and the concrete model it resolves to against the current catalog (`latest:` aliases resolved with the same soak and auto-upgrade rules as claim time, without recording a resolution). Ignores per-worker `MODEL_TIER_*` overrides and per-task models.",
+        "tags": [
+          "Pricing"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Tier previews",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "tiers": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "provider": {
+                            "type": "string",
+                            "enum": [
+                              "claude",
+                              "codex",
+                              "pi",
+                              "devin",
+                              "claude-managed",
+                              "opencode",
+                              "acp",
+                              "dsh"
+                            ]
+                          },
+                          "tier": {
+                            "type": "string",
+                            "enum": [
+                              "smol",
+                              "regular",
+                              "smart",
+                              "ultra"
+                            ]
+                          },
+                          "key": {
+                            "type": "string"
+                          },
+                          "defaultValue": {
+                            "type": "string"
+                          },
+                          "configured": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "source": {
+                            "type": "string",
+                            "enum": [
+                              "tier-config",
+                              "tier-default"
+                            ]
+                          },
+                          "resolvedModel": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "alias": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "provider",
+                          "tier",
+                          "key",
+                          "defaultValue",
+                          "configured",
+                          "source",
+                          "resolvedModel",
+                          "alias"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "tiers"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/models-catalog/refresh": {
+      "post": {
+        "summary": "Refresh the model catalog from models.dev",
+        "description": "Unforced calls skip the network when the last models.dev check is younger than 4h (`skipped-fresh`). `force: true` always fetches, still conditional on the stored ETag (`not-modified` on 304), but a forced call within a minute of the previous one returns `skipped-cooldown` with `retryAfterMs`. Concurrent refreshes share one fetch. Lead agent or operator only. `added` lists provider/modelId keys new since the previous fetch.",
+        "tags": [
+          "Pricing"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "force": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Refresh outcome",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "updated",
+                        "not-modified",
+                        "skipped-fresh",
+                        "skipped-cooldown",
+                        "error"
+                      ]
+                    },
+                    "models": {
+                      "type": "number"
+                    },
+                    "added": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "checkedAt": {
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    },
+                    "retryAfterMs": {
+                      "type": "number"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "models",
+                    "added",
+                    "checkedAt"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/models-catalog/overlay": {
+      "put": {
+        "summary": "Upsert one model-catalog overlay row",
+        "description": "Overlay facts win per non-null field over the models.dev row; overlay-only models are served too. Overlay prices fill pricing-table gaps (never override an active price). With `expiresWhenUpstreamMatches` (default true) the row is deleted once upstream matches every non-null fact.",
+        "tags": [
+          "Pricing"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "provider": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "modelId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "family": {
+                    "type": "string"
+                  },
+                  "releaseDate": {
+                    "type": "string"
+                  },
+                  "contextWindow": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0
+                  },
+                  "maxOutput": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0
+                  },
+                  "reasoning": {
+                    "type": "boolean"
+                  },
+                  "reasoningOptions": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string"
+                        },
+                        "values": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      },
+                      "required": [
+                        "type"
+                      ]
+                    }
+                  },
+                  "pricing": {
+                    "type": "object",
+                    "properties": {
+                      "input": {
+                        "type": "number",
+                        "minimum": 0
+                      },
+                      "output": {
+                        "type": "number",
+                        "minimum": 0
+                      },
+                      "cache_read": {
+                        "type": "number",
+                        "minimum": 0
+                      },
+                      "cache_write": {
+                        "type": "number",
+                        "minimum": 0
+                      }
+                    }
+                  },
+                  "status": {
+                    "type": "string"
+                  },
+                  "reason": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "verifiedBy": {
+                    "type": "string"
+                  },
+                  "expiresWhenUpstreamMatches": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "provider",
+                  "modelId",
+                  "reason"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Overlay row upserted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "provider": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "modelId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "name": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "family": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "releaseDate": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "contextWindow": {
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    },
+                    "maxOutput": {
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    },
+                    "reasoning": {
+                      "type": [
+                        "boolean",
+                        "null"
+                      ]
+                    },
+                    "reasoningOptions": {
+                      "type": [
+                        "array",
+                        "null"
+                      ],
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string"
+                          },
+                          "values": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        "required": [
+                          "type"
+                        ]
+                      }
+                    },
+                    "pricing": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "properties": {
+                        "input": {
+                          "type": "number",
+                          "minimum": 0
+                        },
+                        "output": {
+                          "type": "number",
+                          "minimum": 0
+                        },
+                        "cache_read": {
+                          "type": "number",
+                          "minimum": 0
+                        },
+                        "cache_write": {
+                          "type": "number",
+                          "minimum": 0
+                        }
+                      }
+                    },
+                    "status": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "reason": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "verifiedBy": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "expiresWhenUpstreamMatches": {
+                      "type": "boolean"
+                    },
+                    "createdAt": {
+                      "type": "number"
+                    },
+                    "updatedAt": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "provider",
+                    "modelId",
+                    "reason",
+                    "expiresWhenUpstreamMatches",
+                    "createdAt",
+                    "updatedAt"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Delete one model-catalog overlay row",
+        "tags": [
+          "Pricing"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "provider": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "modelId": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "provider",
+                  "modelId"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Overlay row deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "deleted": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "deleted"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/models-catalog/harness-support": {
+      "get": {
+        "summary": "List harness CLI model support rows",
+        "description": "Whether a catalog model runs on a given `claude` / `codex` CLI version, as recorded by workers after a model's first run. No row means unknown (allowed at claim).",
+        "tags": [
+          "Pricing"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "harness",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "cliVersion",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Support rows, newest first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "rows": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "harness": {
+                            "type": "string"
+                          },
+                          "cliVersion": {
+                            "type": "string"
+                          },
+                          "modelId": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "ok",
+                              "unsupported",
+                              "unknown"
+                            ]
+                          },
+                          "checkedAt": {
+                            "type": "number"
+                          },
+                          "error": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "harness",
+                          "cliVersion",
+                          "modelId",
+                          "status",
+                          "checkedAt",
+                          "error"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "rows"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "summary": "Record whether a harness CLI version accepts a model",
+        "description": "Written by workers: `ok` after a model's first successful run, `unsupported` when the CLI rejects the model id. Claim-time resolution falls back (alias/tier) or fails fast (explicit model) on `unsupported`.",
+        "tags": [
+          "Pricing"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "harness": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 32
+                  },
+                  "cliVersion": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64
+                  },
+                  "modelId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "ok",
+                      "unsupported",
+                      "unknown"
+                    ]
+                  },
+                  "error": {
+                    "type": "string",
+                    "maxLength": 4000
+                  }
+                },
+                "required": [
+                  "harness",
+                  "cliVersion",
+                  "modelId",
+                  "status"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Support row upserted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "harness": {
+                      "type": "string"
+                    },
+                    "cliVersion": {
+                      "type": "string"
+                    },
+                    "modelId": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "ok",
+                        "unsupported",
+                        "unknown"
+                      ]
+                    },
+                    "checkedAt": {
+                      "type": "number"
+                    },
+                    "error": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "harness",
+                    "cliVersion",
+                    "modelId",
+                    "status",
+                    "checkedAt",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -28283,6 +29037,16 @@
             "description": "Identifies the concrete runtime instance (worker process) making the call, as generated at its boot. Required to poll for work when multi-runtime mode (MULTI_RUNTIME_ENABLED) is on; ignored otherwise.",
             "name": "X-Runtime-Instance-ID",
             "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "URL-encoded JSON {provider: {tier: model}} of the worker's MODEL_TIER_* env overrides. Stored on the agent row and applied at claim time (modelSource=worker-env)."
+            },
+            "required": false,
+            "description": "URL-encoded JSON {provider: {tier: model}} of the worker's MODEL_TIER_* env overrides. Stored on the agent row and applied at claim time (modelSource=worker-env).",
+            "name": "X-Model-Tier-Overrides",
+            "in": "header"
           }
         ],
         "responses": {
@@ -30304,6 +31068,9 @@
                       "ultra"
                     ]
                   },
+                  "allowCustomModel": {
+                    "type": "boolean"
+                  },
                   "scheduleType": {
                     "type": "string",
                     "enum": [
@@ -31714,6 +32481,9 @@
                       null
                     ]
                   },
+                  "allowCustomModel": {
+                    "type": "boolean"
+                  },
                   "nextRunAt": {
                     "type": [
                       "string",
@@ -32104,6 +32874,9 @@
                       "ultra",
                       null
                     ]
+                  },
+                  "allowCustomModel": {
+                    "type": "boolean"
                   },
                   "nextRunAt": {
                     "type": [
@@ -43616,13 +44389,17 @@
                     },
                     "multiRuntimeEnabled": {
                       "type": "boolean"
+                    },
+                    "devMode": {
+                      "type": "boolean"
                     }
                   },
                   "required": [
                     "agents",
                     "tasks",
                     "steeringEnabled",
-                    "multiRuntimeEnabled"
+                    "multiRuntimeEnabled",
+                    "devMode"
                   ]
                 }
               }
@@ -44986,6 +45763,15 @@
                                   "ultra"
                                 ]
                               },
+                              "resolvedModel": {
+                                "type": "string"
+                              },
+                              "modelSource": {
+                                "type": "string"
+                              },
+                              "modelAlias": {
+                                "type": "string"
+                              },
                               "effort": {
                                 "type": "string",
                                 "enum": [
@@ -45258,6 +46044,9 @@
                       "ultra"
                     ]
                   },
+                  "allowCustomModel": {
+                    "type": "boolean"
+                  },
                   "effort": {
                     "type": "string",
                     "enum": [
@@ -45292,7 +46081,7 @@
             }
           },
           "400": {
-            "description": "Validation error, or agentId/offeredTo targets an extension identity",
+            "description": "Validation error, an unknown `model` (set `allowCustomModel` to store a custom id), or agentId/offeredTo targets an extension identity",
             "content": {
               "application/json": {
                 "schema": {

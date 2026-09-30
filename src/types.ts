@@ -231,6 +231,25 @@ export function resolveModelTier(opts: {
   return DEFAULT_MODEL_TIER_MAP[opts.harnessProvider]?.[tier];
 }
 
+export type ModelTierOverrides = Partial<Record<string, Partial<Record<ModelTier, string>>>>;
+
+/**
+ * The worker's own MODEL_TIER_<TIER> / MODEL_TIER_MAP overrides, keyed by its
+ * harness provider, in the shape the worker sends on register and poll so the
+ * server can apply them at claim time. Values only (model ids), never secrets.
+ */
+export function parseWorkerModelTierOverrides(
+  env: Record<string, string | undefined>,
+  harnessProvider: ProviderName,
+): ModelTierOverrides {
+  const tiers: Partial<Record<ModelTier, string>> = { ...parseTierMapJson(env.MODEL_TIER_MAP) };
+  for (const tier of MODEL_TIERS) {
+    const direct = env[`MODEL_TIER_${tier.toUpperCase()}`]?.trim();
+    if (direct) tiers[tier] = direct;
+  }
+  return Object.keys(tiers).length > 0 ? { [harnessProvider]: tiers } : {};
+}
+
 export function resolveTaskModelSelection(opts: {
   model?: string | null;
   modelTier?: string | null;
@@ -612,6 +631,12 @@ export const AgentTaskSchema = z
     model: z.string().optional(),
     modelTier: ModelTierSchema.optional(),
     effort: ReasoningEffortSchema.optional(),
+    // Claim-time model resolution (server-side, see runbooks/model-tiers.md).
+    // resolvedModel is what the worker runs; modelSource says which layer won;
+    // modelAlias is the `latest:` alias the value came from, when any.
+    resolvedModel: z.string().optional(),
+    modelSource: z.string().optional(),
+    modelAlias: z.string().optional(),
 
     // Schedule linking (optional — set when task was created by a schedule).
     // z.string(): also reachable verbatim from the create-task query param.
@@ -2420,6 +2445,9 @@ export type AgentTaskSummary = Pick<
   | "scheduleId"
   | "model"
   | "modelTier"
+  | "resolvedModel"
+  | "modelSource"
+  | "modelAlias"
   | "effort"
   | "provider"
   | "requestedByUserId"

@@ -215,7 +215,8 @@ export function apiRuntimeEnv(swarmKey: string): Record<string, string> {
  * Per-member sandbox env (exported for tests). Built from the member's
  * EFFECTIVE config; frozen merge order (v7 §9.3, later wins):
  *   1. base runtime env (AGENT_ROLE = member role; MAX_CONCURRENT_TASKS "1"
- *      for workers / "2" for the lead — the worker entrypoint's lead default);
+ *      for workers / "2" for the lead — the worker entrypoint's lead default;
+ *      MODEL_OVERRIDE and REASONING_EFFORT_OVERRIDE from the effective config);
  *   2. credentialsForConfig(effectiveConfig) — per-member credential isolation;
  *   3. effectiveConfig.env ?? {};
  *   4. identity envs via defaultMemberIdentity(role, index, spec) (v7.5
@@ -254,6 +255,10 @@ export function workerRuntimeEnv(opts: {
     AGENT_ID: opts.agentId,
     HARNESS_PROVIDER: config.provider,
     ...(config.model ? { MODEL_OVERRIDE: config.model } : {}),
+    // The worker reads this per task (runner.ts: task effort → REASONING_EFFORT_OVERRIDE)
+    // and applies it through its harness adapter; a level the model does not take is a
+    // no-op there, which the attempt's applied-effort capture surfaces.
+    ...(config.reasoningEffort ? { REASONING_EFFORT_OVERRIDE: config.reasoningEffort } : {}),
     YOLO: "true",
     MAX_CONCURRENT_TASKS: role === "lead" ? "2" : "1",
     WORKER_LOG_DIR: "/logs",

@@ -4,6 +4,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useUpdateAgentRuntime } from "@/api/hooks/use-agents";
 import { resolvedConfigsQuery } from "@/api/hooks/use-config-api";
 import type { EnvPresenceMap } from "@/api/hooks/use-integrations-meta";
+import { useModelTiers } from "@/api/hooks/use-model-tiers";
+import { useModelsCatalog } from "@/api/hooks/use-models-catalog";
 import type {
   AgentWithTasks,
   OnboardingAgentsMethod,
@@ -19,7 +21,11 @@ import { SegmentedControl, type SegmentedControlOption } from "@/components/ui/s
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useAutosave, useContinueAction, useContinueHold } from "@/hooks/use-autosave";
-import { HARNESS_LABEL, hasRuntimeCredential } from "@/lib/agent-runtime-models";
+import {
+  HARNESS_LABEL,
+  hasRuntimeCredential,
+  type LiveModelsCatalog,
+} from "@/lib/agent-runtime-models";
 import { formatCost } from "@/lib/cost-format";
 import {
   DIAL_LEVEL_LABEL,
@@ -67,11 +73,11 @@ interface Row {
   agent: AgentWithTasks;
   /** `null`: the harness picks its own model (Devin, Claude Managed, ACP) or is unknown. */
   harness: DialHarness | null;
-  /** A dial row's resolved config is still loading (or loading again after a failure). */
+  /** A dial row's resolved config or the model tiers are still loading (or loading again after a failure). */
   loading: boolean;
-  /** A dial row's resolved config did not load: Continue skips this agent. */
+  /** A dial row's resolved config or the model tiers did not load: Continue skips this agent. */
   loadFailed: boolean;
-  /** Load the resolved config again. */
+  /** Load the resolved config and the model tiers again. */
   retry: () => void;
   model: string;
   effort: string;
@@ -90,12 +96,19 @@ function configValue(configs: SwarmConfig[] | undefined, key: string): SwarmConf
   return configs?.find((c) => c.key === key);
 }
 
+/** The model tiers every dial level reads (`useModelTiers`). */
+interface TiersState {
+  status: "loading" | "failed" | "ready";
+  retry: () => void;
+}
+
 function buildRow(
   agent: AgentWithTasks,
   query: UseQueryResult<SwarmConfig[]>,
   intent: Intent | undefined,
   remembered: DialLevel | undefined,
   context: DialContext,
+  tiers: TiersState,
 ): Row {
   const harness = dialHarness(agent.harnessProvider);
   const configs = query.data;
@@ -114,10 +127,18 @@ function buildRow(
   return {
     agent,
     harness,
-    // Only a dial row needs its resolved config.
-    loading: Boolean(harness) && !loaded && (query.isPending || query.isFetching),
-    loadFailed: Boolean(harness) && !loaded && query.isError && !query.isFetching,
-    retry: () => void query.refetch(),
+    // Only a dial row needs its resolved config and the tiers: without the tiers
+    // no level has a model, so the row never shows or writes a guess.
+    loading:
+      Boolean(harness) &&
+      ((!loaded && (query.isPending || query.isFetching)) || tiers.status === "loading"),
+    loadFailed:
+      Boolean(harness) &&
+      ((!loaded && query.isError && !query.isFetching) || tiers.status === "failed"),
+    retry: () => {
+      void query.refetch();
+      if (tiers.status === "failed") tiers.retry();
+    },
     model,
     effort,
     position,
@@ -130,8 +151,13 @@ function buildRow(
 }
 
 /** "High effort · $5.00 in, $25.00 out per 1M tokens" for a model. */
-function modelDetails(harness: DialHarness, model: string, effort: string | null): string | null {
-  const price = dialPrice({ harness, model, effort: null, custom: false });
+function modelDetails(
+  harness: DialHarness,
+  model: string,
+  effort: string | null,
+  catalog: LiveModelsCatalog | null,
+): string | null {
+  const price = dialPrice({ harness, model, effort: null, custom: false }, catalog);
   const details = [
     effort ? `${REASONING_EFFORT_LABEL[effort as ReasoningEffortLevel] ?? effort} effort` : null,
     price
@@ -153,7 +179,8 @@ function ModelTip({
   effort: string | null;
   note?: string;
 }) {
-  const details = modelDetails(harness, model, effort);
+  const { data: modelsCatalog } = useModelsCatalog();
+  const details = modelDetails(harness, model, effort, modelsCatalog?.providers ?? null);
   return (
     <span className="flex flex-col gap-0.5">
       <ModelLabel model={model} className="font-medium" />
@@ -165,12 +192,12 @@ function ModelTip({
 }
 
 function levelOptions(
-  tip: (level: DialLevel) => SegmentedControlOption<DialLevel>["tooltip"],
+  describe: (level: DialLevel) => Pick<SegmentedControlOption<DialLevel>, "tooltip" | "disabled">,
 ): SegmentedControlOption<DialLevel>[] {
   return DIAL_LEVELS.map((level) => ({
     value: level,
     label: DIAL_LEVEL_LABEL[level],
-    tooltip: tip(level),
+    ...describe(level),
   }));
 }
 
@@ -180,7 +207,8 @@ function levelOptions(
  * at once. Picks store at once. Viewing never stores: agents without a model
  * override show Optimal (recommended) with a hollow dot, and Continue stores
  * Optimal for them, then completes the step with the level every agent got.
- * Continue waits until every dial row has loaded.
+ * Continue waits until every dial row and the model tiers have loaded: a level
+ * is the model of a Model Tier, so nothing shows or stores before they do.
  */
 export function AgentModels({
   agents,
@@ -211,7 +239,22 @@ export function AgentModels({
     [agents],
   );
   const openrouter = hasRuntimeCredential("OPENROUTER_API_KEY", configs, presence);
-  const context = useMemo<DialContext>(() => ({ openrouter }), [openrouter]);
+  const { data: modelsCatalog } = useModelsCatalog();
+  const catalog = modelsCatalog?.providers ?? null;
+  const tiersQuery = useModelTiers();
+  const tiers = tiersQuery.data ?? null;
+  const context = useMemo<DialContext>(
+    () => ({ openrouter, catalog, tiers }),
+    [openrouter, catalog, tiers],
+  );
+  const { refetch: refetchTiers } = tiersQuery;
+  const tiersState = useMemo<TiersState>(
+    () => ({
+      status: tiers ? "ready" : tiersQuery.isError && !tiersQuery.isFetching ? "failed" : "loading",
+      retry: () => void refetchTiers(),
+    }),
+    [tiers, tiersQuery.isError, tiersQuery.isFetching, refetchTiers],
+  );
 
   // The call and cache entry of `useResolvedConfigs({ agentId })`, one per agent.
   const resolved = useQueries({
@@ -262,15 +305,17 @@ export function AgentModels({
   );
 
   const rows = listed.map((agent, index) =>
-    buildRow(agent, resolved[index], intents[agent.id], remembered[agent.id], context),
+    buildRow(agent, resolved[index], intents[agent.id], remembered[agent.id], context, tiersState),
   );
   const dialRows = rows.filter((row) => row.harness !== null);
   useContinueHold(
     agentsLoading
       ? "Loading agents…"
-      : dialRows.some((row) => row.loading)
-        ? "Loading agent settings…"
-        : null,
+      : dialRows.length > 0 && tiersState.status === "loading"
+        ? "Loading model tiers…"
+        : dialRows.some((row) => row.loading)
+          ? "Loading agent settings…"
+          : null,
   );
   // A row that did not load is left out: Continue skips it (its icon says so).
   const shownLevels = dialRows.filter((row) => !row.loadFailed).map((row) => row.shown);
@@ -297,9 +342,19 @@ export function AgentModels({
             throw new Error("The agent settings did not load. Retry them, or skip.");
           }
           const results = await Promise.allSettled(
-            defaults.map((row) =>
-              write(row.agent.id, dialSetting(row.harness as DialHarness, RECOMMENDED, context)),
-            ),
+            defaults.map((row) => {
+              const setting = dialSetting(row.harness as DialHarness, RECOMMENDED, context);
+              // A tier with no model for this harness: never store a guess.
+              if (!setting) {
+                const harnessName = HARNESS_LABEL[row.harness as DialHarness] ?? row.harness;
+                return Promise.reject(
+                  new Error(
+                    `No model is set for ${DIAL_LEVEL_LABEL[RECOMMENDED]} on ${harnessName}. Set its model tier on the Configuration page, or skip.`,
+                  ),
+                );
+              }
+              return write(row.agent.id, setting);
+            }),
           );
           const failed = results.filter((r): r is PromiseRejectedResult => r.status === "rejected");
           if (failed.length > 0) {
@@ -388,6 +443,13 @@ export function AgentModels({
   );
 }
 
+/** Why a level has no model: the tiers still load, or its tier names no model for the harness. */
+function noModelNote(context: DialContext): string {
+  return context.tiers
+    ? "No model is set for this level on this harness. Set its model tier on the Configuration page."
+    : "Loading model tiers…";
+}
+
 /** Cheap, Optimal (recommended), Max: one tile per level, applied to every agent. */
 function LevelTiles({
   value,
@@ -409,9 +471,9 @@ function LevelTiles({
         // One line per model: two harnesses can run the same model (pi, opencode).
         const settings = [
           ...new Map(
-            harnesses.map((harness) => {
+            harnesses.flatMap((harness) => {
               const setting = dialSetting(harness, level, context);
-              return [`${setting.model}:${setting.effort}`, setting] as const;
+              return setting ? [[`${setting.model}:${setting.effort}`, setting] as const] : [];
             }),
           ).values(),
         ];
@@ -446,19 +508,25 @@ function LevelTiles({
                 </span>
                 <span className="text-xs text-muted-foreground">{LEVEL_BLURB[level]}</span>
                 <span className="flex flex-col gap-1 text-xs">
-                  {settings.map((setting) => (
-                    <span
-                      key={`${setting.model}:${setting.effort}`}
-                      className="flex min-w-0 items-center gap-1.5"
-                    >
-                      <ModelLabel model={setting.model} />
-                      {setting.effort ? (
-                        <span className="shrink-0 text-muted-foreground">
-                          {REASONING_EFFORT_LABEL[setting.effort]}
-                        </span>
-                      ) : null}
+                  {settings.length > 0 ? (
+                    settings.map((setting) => (
+                      <span
+                        key={`${setting.model}:${setting.effort}`}
+                        className="flex min-w-0 items-center gap-1.5"
+                      >
+                        <ModelLabel model={setting.model} />
+                        {setting.effort ? (
+                          <span className="shrink-0 text-muted-foreground">
+                            {REASONING_EFFORT_LABEL[setting.effort]}
+                          </span>
+                        ) : null}
+                      </span>
+                    ))
+                  ) : (
+                    <span className="text-muted-foreground">
+                      {context.tiers ? "No model for this level." : "Loading model tiers…"}
                     </span>
-                  ))}
+                  )}
                 </span>
               </button>
             </TooltipTrigger>
@@ -469,7 +537,11 @@ function LevelTiles({
                   return (
                     <span key={harness} className="flex flex-col gap-0.5">
                       <span className="opacity-70">{HARNESS_LABEL[harness] ?? harness}</span>
-                      <ModelTip harness={harness} model={setting.model} effort={setting.effort} />
+                      {setting ? (
+                        <ModelTip harness={harness} model={setting.model} effort={setting.effort} />
+                      ) : (
+                        <span className="opacity-70">{noModelNote(context)}</span>
+                      )}
                     </span>
                   );
                 })}
@@ -553,14 +625,18 @@ function AgentModelRow({
               disabled={row.loading}
               options={levelOptions((level) => {
                 const setting = dialSetting(harness, level, context);
-                return (
-                  <ModelTip
-                    harness={harness}
-                    model={setting.model}
-                    effort={setting.effort}
-                    note={level === RECOMMENDED ? "Recommended" : undefined}
-                  />
-                );
+                // A level whose tier has no model here cannot be picked.
+                if (!setting) return { tooltip: noModelNote(context), disabled: true };
+                return {
+                  tooltip: (
+                    <ModelTip
+                      harness={harness}
+                      model={setting.model}
+                      effort={setting.effort}
+                      note={level === RECOMMENDED ? "Recommended" : undefined}
+                    />
+                  ),
+                };
               })}
             />
             {status ? (

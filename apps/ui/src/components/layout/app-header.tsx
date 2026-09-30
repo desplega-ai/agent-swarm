@@ -1,6 +1,6 @@
 import { Github } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import { useHealth } from "@/api/hooks/use-stats";
+import { useHealth, useStats } from "@/api/hooks/use-stats";
 import type { StatusHealth } from "@/api/types";
 import { useStatusContext } from "@/app/status-context";
 import { ContextPanelToggle } from "@/components/context-panel/context-session-panel";
@@ -8,6 +8,7 @@ import { MoonIcon } from "@/components/icons/moon";
 import { SunIcon } from "@/components/icons/sun";
 import { NotificationBell } from "@/components/notifications/notification-bell";
 import { SetupPill } from "@/components/onboarding/setup-pill";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { SidebarTrigger } from "@/components/ui/sidebar";
@@ -33,6 +34,7 @@ const HEALTH_LABEL: Record<StatusHealth, string> = {
 export function AppHeader() {
   const { theme, toggleTheme } = useTheme();
   const { data: health, isError, error: healthError } = useHealth();
+  const stats = useStats();
   const { data: status, error: statusError } = useStatusContext();
   const { activeConnection } = useConfig();
   const navigate = useNavigate();
@@ -62,6 +64,11 @@ export function AppHeader() {
       </div>
 
       <div className="flex items-center gap-3">
+        {isHealthy && !stats.isError && stats.data?.devMode === true && (
+          <Badge variant="outline" size="tag" title="Dev mode: UI version checks are bypassed">
+            Dev
+          </Badge>
+        )}
         {/* Phase 2: aggregate health badge — clickable, pulls from /status. */}
         {aggregateHealth ? (
           <Tooltip>

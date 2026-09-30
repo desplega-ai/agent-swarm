@@ -34,6 +34,7 @@ import type { SkillCreateResponse } from "@anthropic-ai/sdk/resources/beta/skill
 import { toFile } from "@anthropic-ai/sdk/uploads";
 
 import { buildSkillContent, type SkillTemplateConfig } from "../be/seed-skills/render";
+import { DEFAULT_MODEL_TIER_MAP } from "../types";
 import { getApiKey } from "../utils/api-key";
 import { promptHiddenInput } from "./codex-login.js";
 
@@ -65,7 +66,8 @@ export type ClaudeManagedSetupResult = {
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
-const DEFAULT_AGENT_MODEL = "claude-sonnet-5";
+/** The claude-managed `regular` tier default — no per-model constant here. */
+const DEFAULT_AGENT_MODEL = DEFAULT_MODEL_TIER_MAP["claude-managed"].regular;
 const SKILLS_DIR_RELATIVE = "plugin/commands";
 const SEEDED_SKILLS_DIR_RELATIVE = "templates/skills";
 const SKILLS_BETA_HEADER = "skills-2025-10-02";

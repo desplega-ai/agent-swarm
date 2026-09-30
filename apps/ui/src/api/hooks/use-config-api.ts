@@ -38,8 +38,11 @@ export function resolvedConfigsQuery(filters?: ResolvedConfigFilters) {
   });
 }
 
-export function useResolvedConfigs(filters?: ResolvedConfigFilters) {
-  return useQuery(resolvedConfigsQuery(filters));
+export function useResolvedConfigs(
+  filters?: ResolvedConfigFilters,
+  options?: { enabled?: boolean },
+) {
+  return useQuery({ ...resolvedConfigsQuery(filters), enabled: options?.enabled ?? true });
 }
 
 export function useUpsertConfig() {

@@ -225,4 +225,14 @@ const COLUMN_MIGRATIONS = [
   "ALTER TABLE judgments ADD COLUMN weight REAL",
   // Concrete model an attempt ran on (harness-reported, else the run's pin).
   "ALTER TABLE attempts ADD COLUMN resolved_model TEXT",
+  // Reasoning effort (REASONING_EFFORT_OVERRIDE for the worker under test).
+  // A config's default effort; NULL = the harness default.
+  "ALTER TABLE harness_configs ADD COLUMN reasoning_effort TEXT",
+  // The run's effective effort per config id, snapshotted at creation
+  // ({"claude-opus":"high"}); NULL on runs created before efforts existed.
+  "ALTER TABLE eval_runs ADD COLUMN efforts_json TEXT",
+  // Effort the attempt's worker was launched with, and the one its harness
+  // reported applying (agent latestModel). NULL = harness default / none reported.
+  "ALTER TABLE attempts ADD COLUMN reasoning_effort TEXT",
+  "ALTER TABLE attempts ADD COLUMN applied_reasoning_effort TEXT",
 ];

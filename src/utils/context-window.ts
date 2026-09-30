@@ -4,7 +4,10 @@
  * This module is safe for both API and worker code — it has NO database imports.
  *
  * Phase 4 + Phase 9 of the cost-tracking plan:
- *   - `getContextWindowSize` now resolves shortnames, family-versioned ids
+ *   - Model-catalog phase 4: windows come from the model catalog (no
+ *     per-model table). A new model gets the right window as soon as it
+ *     lands in `model_catalog`.
+ *   - `getContextWindowSize` resolves shortnames, family-versioned ids
  *     (`claude-sonnet-4-6`), AND dated full ids (`claude-sonnet-4-6-20251004`)
  *     by stripping the trailing date suffix. Previously the dated form fell
  *     to the 200k default — wildly wrong for sonnet/opus 4.x.
@@ -17,6 +20,9 @@
  *     deprecated; new code should use `computeContextUsedUnified`.
  */
 
+import { buildClaudeShortnameMap } from "@desplega/model-catalog";
+import { runtimeCatalogModel, runtimeCatalogSection } from "./runtime-model-catalog";
+
 /**
  * Phase 9: stamp this onto every `context_usage` event the adapter emits.
  * Callers that compute their own number for legacy reasons (e.g. pi-mono
@@ -25,43 +31,6 @@
  */
 export const CONTEXT_FORMULA = "input-cache-output" as const;
 
-const CONTEXT_WINDOW_DEFAULTS: Record<string, number> = {
-  // Anthropic Fable / Mythos tier
-  "claude-fable-5-1": 1_000_000,
-  "claude-mythos-5-1": 1_000_000,
-  "claude-opus-5-5": 1_000_000,
-  "claude-opus-5": 1_000_000,
-  "claude-fable-5": 1_000_000,
-  "claude-mythos-5": 1_000_000,
-  "claude-sonnet-5-5": 1_000_000,
-  "claude-sonnet-5": 1_000_000,
-  // Anthropic 4.x family
-  "claude-opus-4-8": 1_000_000,
-  "claude-opus-4-7": 1_000_000,
-  "claude-opus-4-6": 1_000_000,
-  "claude-opus-4-5": 1_000_000,
-  "claude-opus-4-1": 200_000,
-  "claude-opus-4-0": 200_000,
-  "claude-sonnet-4-6": 1_000_000,
-  "claude-sonnet-4-5": 1_000_000,
-  "claude-sonnet-4-0": 200_000,
-  "claude-haiku-4-5": 200_000,
-  // Anthropic 3.x family (legacy)
-  "claude-3-7-sonnet": 200_000,
-  "claude-3-5-sonnet": 200_000,
-  "claude-3-5-haiku": 200_000,
-  "claude-3-opus": 200_000,
-  "claude-3-sonnet": 200_000,
-  "claude-3-haiku": 200_000,
-  // Shortnames used by the local-CLI adapter and pi-mono OpenRouter mirror.
-  fable: 1_000_000,
-  mythos: 1_000_000,
-  opus: 1_000_000,
-  sonnet: 1_000_000,
-  haiku: 200_000,
-  default: 200_000,
-};
-
 const DEFAULT_CONTEXT_WINDOW = 200_000;
 
 /**
@@ -69,30 +38,55 @@ const DEFAULT_CONTEXT_WINDOW = 200_000;
  * resolve to the same window as the family-versioned id.
  *
  * `claude-sonnet-4-6-20251004` → `claude-sonnet-4-6`
- * `claude-haiku-4-5-20251001`  → `claude-haiku-4-5`
- *
- * Anthropic's dated full ids are always `${family}-${major}-${minor}-${YYYYMMDD}`,
- * so an 8-digit trailing date is a reliable signal.
  */
 function stripAnthropicDateSuffix(model: string): string {
   return model.replace(/-(\d{8})$/, "");
 }
 
+let shortnameMap: { section: Record<string, unknown>; map: Record<string, string> } | null = null;
+
+/** Claude CLI shortnames (`opus`, `sonnet`, ...) → newest catalog id. */
+function resolveClaudeShortname(model: string): string | undefined {
+  const section = runtimeCatalogSection("anthropic");
+  if (!shortnameMap || shortnameMap.section !== section) {
+    shortnameMap = { section, map: buildClaudeShortnameMap(section) };
+  }
+  return shortnameMap.map[model.trim().toLowerCase()];
+}
+
+function catalogContext(provider: string, model: string): number | undefined {
+  const context = runtimeCatalogModel(provider, model)?.limit?.context;
+  return typeof context === "number" && context > 0 ? context : undefined;
+}
+
+/**
+ * Context window (tokens) for a model id, read from the model catalog
+ * (`src/utils/runtime-model-catalog.ts`: live `model_catalog` + overlay,
+ * vendored models.dev snapshot offline). Accepts Anthropic ids (dated or
+ * not), Claude CLI shortnames, OpenAI/Codex ids and `provider/model` ids.
+ * Unknown models get a conservative 200k so percent math stays finite.
+ */
 export function getContextWindowSize(model: string): number {
-  // Fast path: exact match (shortname or family-versioned id).
-  if (CONTEXT_WINDOW_DEFAULTS[model] !== undefined) {
-    return CONTEXT_WINDOW_DEFAULTS[model];
+  if (!model) return DEFAULT_CONTEXT_WINDOW;
+  const slash = model.indexOf("/");
+  if (slash > 0) {
+    const scoped = catalogContext(model.slice(0, slash), model.slice(slash + 1));
+    if (scoped) return scoped;
   }
-  // Dated full id → strip suffix and retry.
+  for (const provider of ["anthropic", "openai"]) {
+    const exact = catalogContext(provider, model);
+    if (exact) return exact;
+  }
   const stripped = stripAnthropicDateSuffix(model);
-  if (stripped !== model && CONTEXT_WINDOW_DEFAULTS[stripped] !== undefined) {
-    return CONTEXT_WINDOW_DEFAULTS[stripped];
+  if (stripped !== model) {
+    const dated = catalogContext("anthropic", stripped);
+    if (dated) return dated;
   }
-  // OpenAI / GPT family — most reasoning models have 200k+; we keep this
-  // conservative and let callers override via models.dev rates if they want.
-  // Specific gpt-5.x context windows are >1M but the local-CLI adapter
-  // generally doesn't surface those; the API recompute path uses the rate
-  // table, not the window. The 200k default keeps the math safe.
+  const shortname = resolveClaudeShortname(model);
+  if (shortname) {
+    const resolved = catalogContext("anthropic", shortname);
+    if (resolved) return resolved;
+  }
   return DEFAULT_CONTEXT_WINDOW;
 }
 

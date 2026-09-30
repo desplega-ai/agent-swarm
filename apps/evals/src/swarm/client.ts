@@ -1,4 +1,5 @@
-import type { SwarmTask } from "../types.ts";
+import { isEffortLevel } from "../cost/effort.ts";
+import type { ReasoningEffortLevel, SwarmTask } from "../types.ts";
 
 const TERMINAL_STATUSES = new Set(["completed", "failed", "cancelled", "superseded"]);
 
@@ -40,6 +41,8 @@ export interface AgentJson {
   provider: string | null;
   /** Worker-pushed harness provider; preferred over `provider` for display. */
   harnessProvider: string | null;
+  /** credStatus.latestModel.reasoningEffort: the effort the harness reported applying. */
+  appliedReasoningEffort: ReasoningEffortLevel | null;
 }
 
 function normalizeAgent(raw: Record<string, unknown>): AgentJson {
@@ -54,7 +57,15 @@ function normalizeAgent(raw: Record<string, unknown>): AgentJson {
     lastActivityAt: typeof raw.lastActivityAt === "string" ? raw.lastActivityAt : null,
     provider: typeof raw.provider === "string" ? raw.provider : null,
     harnessProvider: typeof raw.harnessProvider === "string" ? raw.harnessProvider : null,
+    appliedReasoningEffort: appliedEffort(raw.credStatus),
   };
+}
+
+/** `credStatus.latestModel.reasoningEffort`, when the worker reported a valid level. */
+function appliedEffort(credStatus: unknown): ReasoningEffortLevel | null {
+  const latest = (credStatus as { latestModel?: { reasoningEffort?: unknown } } | null)
+    ?.latestModel;
+  return isEffortLevel(latest?.reasoningEffort) ? latest.reasoningEffort : null;
 }
 
 /** Thin authenticated client for one attempt's swarm API. */

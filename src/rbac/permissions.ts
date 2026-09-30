@@ -153,6 +153,16 @@ export const PERMISSIONS = {
     description: "Delete any swarm-config entry.",
     namespace: "config",
   },
+  "models.catalog.write": {
+    description:
+      "Force a model-catalog refresh from models.dev or write/delete model-catalog overlay rows.",
+    namespace: "models",
+  },
+  "models.harness-support.write": {
+    description:
+      "Record whether a pinned harness CLI version accepts a model (a worker reports its own probe results; the operator may correct any row).",
+    namespace: "models",
+  },
   "config.read.secrets": {
     description: "Read unmasked secret config values.",
     namespace: "config",

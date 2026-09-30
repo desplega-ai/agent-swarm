@@ -22,6 +22,8 @@ human_free_reclassify_queue # internal work queue, rows deleted as the drain fin
 memory_link
 memory_rating
 memory_retrieval
+model_catalog          # system-written models.dev projection (173)
+model_catalog_meta     # single-row fetch state (173)
 oauth_apps
 oauth_authorizations   # attribution via connectedByUserId (117)
 oauth_pending          # ephemeral PKCE state, 10-min GC (117)
@@ -38,3 +40,5 @@ tracker_agent_mapping
 tracker_sync
 user_identity_events
 wait_states
+model_alias_resolutions
+harness_model_support

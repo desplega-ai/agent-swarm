@@ -8,6 +8,7 @@ import type {
   JudgeStep,
   JudgmentRow,
   PhaseTimings,
+  ReasoningEffortLevel,
   RunStatus,
   SandboxInfo,
   TokenTotals,
@@ -24,6 +25,7 @@ function rowToRun(r: Row): EvalRunRow {
     attemptsPerCell: Number(r.attempts_per_cell),
     concurrency: Number(r.concurrency),
     judgeModel: (r.judge_model as string) ?? null,
+    efforts: parseJsonColumn<Record<string, ReasoningEffortLevel>>(r.efforts_json),
     createdAt: r.created_at as string,
     finishedAt: (r.finished_at as string) ?? null,
   };
@@ -57,6 +59,8 @@ function rowToAttempt(r: Row): AttemptRow {
     costSource: (r.cost_source as CostSource) ?? null,
     judgeCostUsd: r.judge_cost_usd === null ? null : Number(r.judge_cost_usd),
     tokens: parseJsonColumn<TokenTotals>(r.tokens_json),
+    reasoningEffort: (r.reasoning_effort as ReasoningEffortLevel) ?? null,
+    appliedReasoningEffort: (r.applied_reasoning_effort as ReasoningEffortLevel) ?? null,
     sandbox: parseJsonColumn<SandboxInfo>(r.sandbox_json),
     // v7 §10.1 — null on pre-v7 rows (readers fall back to sandbox.workers).
     workers: parseJsonColumn<WorkerRosterEntry[]>(r.workers_json),
@@ -103,11 +107,14 @@ export async function createRun(
     attemptsPerCell: number;
     concurrency: number;
     judgeModel?: string;
+    /** Effective effort per config id (see `planRunEfforts`); `{}` when no config has one. */
+    efforts?: Record<string, ReasoningEffortLevel>;
   },
 ): Promise<void> {
   await db.execute({
-    sql: `INSERT INTO eval_runs (id, name, scenario_ids, config_ids, attempts_per_cell, concurrency, judge_model)
-          VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    sql: `INSERT INTO eval_runs
+            (id, name, scenario_ids, config_ids, attempts_per_cell, concurrency, judge_model, efforts_json)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     args: [
       run.id,
       run.name ?? null,
@@ -116,6 +123,7 @@ export async function createRun(
       run.attemptsPerCell,
       run.concurrency,
       run.judgeModel ?? null,
+      JSON.stringify(run.efforts ?? {}),
     ],
   });
 }
@@ -168,6 +176,8 @@ export async function updateAttempt(
     /** Pre-serialized JSON strings — callers JSON.stringify, stored as-is. */
     tokensJson: string | null;
     resolvedModel: string | null;
+    reasoningEffort: ReasoningEffortLevel | null;
+    appliedReasoningEffort: ReasoningEffortLevel | null;
     sandboxJson: string | null;
     workersJson: string | null;
     timingsJson: string | null;
@@ -192,6 +202,8 @@ export async function updateAttempt(
     judgeCostUsd: "judge_cost_usd",
     tokensJson: "tokens_json",
     resolvedModel: "resolved_model",
+    reasoningEffort: "reasoning_effort",
+    appliedReasoningEffort: "applied_reasoning_effort",
     sandboxJson: "sandbox_json",
     workersJson: "workers_json",
     timingsJson: "timings_json",

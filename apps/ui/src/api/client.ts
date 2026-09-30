@@ -73,6 +73,7 @@ import type {
   MetricSaveResponse,
   MetricsListResponse,
   MintTokenResponse,
+  ModelTierPreview,
   OAuthAppDiscoveryResult,
   OAuthAuthorization,
   OAuthAuthorizeUrlResult,
@@ -286,6 +287,13 @@ class ApiClient {
     const url = `${this.getBaseUrl()}/api/models-catalog`;
     const res = await fetch(url, { headers: this.getHeaders() });
     if (!res.ok) throw new Error(`Failed to fetch models catalog: ${res.status}`);
+    return res.json();
+  }
+
+  async fetchModelTiers(): Promise<{ tiers: ModelTierPreview[] }> {
+    const url = `${this.getBaseUrl()}/api/models-catalog/tiers`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to fetch model tiers: ${res.status}`);
     return res.json();
   }
 

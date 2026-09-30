@@ -587,6 +587,9 @@ describe("script connections", () => {
       markMigrationApplied(database, "177_events_event_agent_created_index.sql");
       // 182 alters agent_tasks, which this migration-112-only fixture does not create.
       markMigrationApplied(database, "182_task_human_free_flag.sql");
+      // 184 alters agents and agent_tasks, which this migration-112-only fixture
+      // does not create.
+      markMigrationApplied(database, "184_model_catalog.sql");
       // 185 and 186 alter agent_tasks, which this partial fixture creates without its columns.
       markMigrationApplied(database, "185_agent_task_attempt.sql");
       markMigrationApplied(database, "186_agent_task_attempt_runtime.sql");

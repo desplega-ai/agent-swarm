@@ -22,7 +22,9 @@ COPY package.json bun.lock bunfig.toml ./
 COPY apps/ui/package.json ./apps/ui/
 COPY apps/templates-ui/package.json ./apps/templates-ui/
 COPY apps/evals/package.json ./apps/evals/
+COPY packages/model-catalog/package.json ./packages/model-catalog/
 RUN bun install --frozen-lockfile
+COPY packages/model-catalog ./packages/model-catalog
 
 COPY apps/evals ./apps/evals
 COPY src/e2b ./src/e2b

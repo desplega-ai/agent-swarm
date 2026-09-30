@@ -2,8 +2,13 @@ import { join, normalize, sep } from "node:path";
 import { attachmentContentDisposition } from "../../../../src/utils/content-disposition.ts";
 import { DEFAULT_CONFIG_IDS } from "../../configs/index.ts";
 import { CONFIG_PRESETS } from "../../configs/presets.ts";
-import { getCatalog, refreshCatalog, startCatalogRefresh } from "../cost/catalog.ts";
-import { getClaudeAliasMap, listOpenrouterModels } from "../cost/pricing.ts";
+import {
+  getCatalog,
+  getResolutionCatalog,
+  refreshCatalog,
+  startCatalogRefresh,
+} from "../cost/catalog.ts";
+import { getClaudeAliasMap, listHarnessModels, listOpenrouterModels } from "../cost/pricing.ts";
 import { getDb, initDb } from "../db/client.ts";
 import { listHarnessConfigs } from "../db/harness-configs.ts";
 import {
@@ -21,7 +26,7 @@ import {
 } from "../db/queries.ts";
 import { getJudgeLive } from "../judge/live-registry.ts";
 import { getAttemptProgress } from "../live/attempt-progress.ts";
-import { loadRegistry, serializeConfig, serializeScenario } from "../registry.ts";
+import { loadRegistry, serializeScenario } from "../registry.ts";
 import { summarizeRun } from "../results.ts";
 import {
   executeRun,
@@ -31,6 +36,7 @@ import {
   reconcileOrphanedRuns,
 } from "../runner/index.ts";
 import { assertRunConfigsResolve, ensureRunConfigPins } from "../runner/run-configs.ts";
+import { parseEffortOverrides, planRunEfforts } from "../runner/run-efforts.ts";
 import { type SessionLogRow, SwarmClient } from "../swarm/client.ts";
 import { cleanVersion } from "../swarm/version.ts";
 import {
@@ -45,7 +51,13 @@ import {
   type SandboxInfo,
 } from "../types.ts";
 import { type AnalyticsSourceRow, buildAnalytics } from "./analytics.ts";
-import { createConfig, initHarnessConfigs, patchConfig } from "./configs-routes.ts";
+import {
+  createConfig,
+  effortLevelsFor,
+  initHarnessConfigs,
+  patchConfig,
+  serializeConfigResolved,
+} from "./configs-routes.ts";
 
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data, null, 2), {
@@ -398,7 +410,7 @@ export const ANALYTICS_SQL = `
                 json_extract(a.sandbox_json, '$.workers[0].version')
               ) END AS worker_version,
          r.name AS run_name, r.created_at AS run_created_at,
-         a.resolved_model, rc.resolved_model AS pinned_model
+         a.resolved_model, a.reasoning_effort, rc.resolved_model AS pinned_model
   FROM attempts a JOIN eval_runs r ON r.id = a.run_id
   LEFT JOIN eval_run_configs rc ON rc.run_id = a.run_id AND rc.config_id = a.config_id
   ORDER BY r.created_at ASC, a.attempt_index ASC`;
@@ -572,6 +584,8 @@ export async function startServer(
             attemptsPerCell?: number;
             concurrency?: number;
             judgeModel?: string;
+            /** configId → reasoning effort (null = harness default), over the config default. */
+            efforts?: unknown;
           } | null;
           if (!body?.scenarioIds?.length || !body?.configIds?.length) {
             return json({ error: "scenarioIds and configIds are required" }, 400);
@@ -584,8 +598,16 @@ export async function startServer(
           for (const id of body.configIds) {
             if (!registry.configs.has(id)) return json({ error: `unknown config "${id}"` }, 400);
           }
+          let efforts: Awaited<ReturnType<typeof planRunEfforts>>;
           try {
             await assertRunConfigsResolve(registry, body.scenarioIds, body.configIds);
+            efforts = planRunEfforts({
+              registry,
+              scenarioIds: body.scenarioIds,
+              configIds: body.configIds,
+              overrides: parseEffortOverrides(body.efforts),
+              catalog: await getResolutionCatalog(),
+            });
           } catch (err) {
             return json({ error: err instanceof Error ? err.message : String(err) }, 400);
           }
@@ -598,6 +620,7 @@ export async function startServer(
             attemptsPerCell: Math.max(1, body.attemptsPerCell ?? 1),
             concurrency: Math.max(1, body.concurrency ?? 2),
             judgeModel: body.judgeModel || undefined,
+            efforts,
           });
           await ensureRunConfigPins(db, runId, registry, body.scenarioIds, body.configIds);
           startRunExecution(db, runId);
@@ -815,9 +838,10 @@ export async function startServer(
           const sources = new Map(
             (await listHarnessConfigs(db)).map((r) => [r.config.id, r.source]),
           );
+          const catalog = await getResolutionCatalog();
           return json(
             [...registry.configs.values()].map((c) => ({
-              ...serializeConfig(c),
+              ...serializeConfigResolved(c, catalog),
               isDefault: DEFAULT_CONFIG_IDS.includes(c.id),
               source: sources.get(c.id) ?? "seed",
             })),
@@ -827,7 +851,10 @@ export async function startServer(
           if (!(await isAuthorized(req))) return unauthorized();
           const result = await createConfig(db, await req.json().catch(() => null));
           if (!result.ok) return json({ error: result.error }, result.status);
-          return json(serializeConfig(result.config), result.status);
+          return json(
+            serializeConfigResolved(result.config, await getResolutionCatalog()),
+            result.status,
+          );
         },
       },
       "/api/configs/:id": {
@@ -835,8 +862,17 @@ export async function startServer(
           if (!(await isAuthorized(req))) return unauthorized();
           const result = await patchConfig(db, req.params.id, await req.json().catch(() => null));
           if (!result.ok) return json({ error: result.error }, result.status);
-          return json(serializeConfig(result.config), result.status);
+          return json(
+            serializeConfigResolved(result.config, await getResolutionCatalog()),
+            result.status,
+          );
         },
+      },
+      /** Reasoning efforts a harness takes for a model or alias (config form + new-run dialog). */
+      "/api/effort-levels": async (req) => {
+        if (!(await isAuthorized(req))) return unauthorized();
+        const result = effortLevelsFor(new URL(req.url).searchParams, await getResolutionCatalog());
+        return result.ok ? json(result.body) : json({ error: result.error }, result.status);
       },
       /** Quick-run config presets (v7.7 item 1) — static catalog data, validated by registry.test.ts. */
       "/api/presets": async (req) => {
@@ -845,7 +881,11 @@ export async function startServer(
       },
       "/api/models": async (req) => {
         if (!(await isAuthorized(req))) return unauthorized();
+        // The judge picker list: openrouter only.
         const models = await listOpenrouterModels();
+        // Display-only claude (anthropic) + codex (openai) entries, so the UI
+        // can name and price any config or attempt model id, not just openrouter's.
+        const harnessModels = await listHarnessModels();
         // v7 §8: frozen claude alias map (fable → claude-fable-5, …) so the UI
         // resolves bare aliases stored on historical rows at display time.
         const aliases = await getClaudeAliasMap();
@@ -853,6 +893,7 @@ export async function startServer(
         return json({
           defaultJudgeModel: DEFAULT_JUDGE_MODEL,
           models,
+          harnessModels,
           aliases,
           catalog: { source, fetchedAt },
         });
@@ -885,6 +926,7 @@ export async function startServer(
         const filter: AnalyticsFilter = {
           harnesses: parseFilterCsv(params.get("harnesses")),
           configIds: parseFilterCsv(params.get("configs")),
+          efforts: parseFilterCsv(params.get("efforts")),
         };
         const res = await db.execute(ANALYTICS_SQL);
         const rows: AnalyticsSourceRow[] = res.rows.map((r) => ({
@@ -898,6 +940,7 @@ export async function startServer(
           judgeCostUsd: r.judge_cost_usd === null ? null : Number(r.judge_cost_usd),
           durationMs: r.duration_ms === null ? null : Number(r.duration_ms),
           resolvedModel: (r.resolved_model as string) ?? null,
+          reasoningEffort: (r.reasoning_effort as string) ?? null,
           pinnedModel: (r.pinned_model as string) ?? null,
           tokenModel: (r.token_model as string) ?? null,
           // v7 §6.1: token sums; numOrNull guards stored-JSON garbage (no NaN).

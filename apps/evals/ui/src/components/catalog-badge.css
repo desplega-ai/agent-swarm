@@ -1,0 +1,19 @@
+/* Model-catalog freshness badge + refresh button (configs header). */
+.catalog-badge {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.catalog-badge-chip {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  cursor: default;
+}
+
+/* Snapshot = no live fetch yet: flag it with the accent color. */
+.catalog-badge-snapshot {
+  color: var(--accent);
+}

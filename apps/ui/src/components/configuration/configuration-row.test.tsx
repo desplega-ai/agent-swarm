@@ -35,7 +35,7 @@ const RBAC: ConfigCatalogEntry = {
   defaultValue: "true",
 } as ConfigCatalogEntry;
 
-function renderRow(saved: string | null) {
+function renderRow(saved: string | null, entry: ConfigCatalogEntry = RBAC, inEnv = true) {
   const client = new QueryClient();
   const configs: SwarmConfig[] =
     saved === null
@@ -45,7 +45,7 @@ function renderRow(saved: string | null) {
             id: "c1",
             scope: "global",
             scopeId: null,
-            key: RBAC.key,
+            key: entry.key,
             value: saved,
             isSecret: false,
             envPath: null,
@@ -59,7 +59,7 @@ function renderRow(saved: string | null) {
   return renderToStaticMarkup(
     <QueryClientProvider client={client}>
       <TooltipProvider>
-        <ConfigurationRow entry={RBAC} inEnv />
+        <ConfigurationRow entry={entry} inEnv={inEnv} />
       </TooltipProvider>
     </QueryClientProvider>,
   );
@@ -78,5 +78,49 @@ describe("ConfigurationRow remove-override action", () => {
 
   test("no saved value, nothing to remove", () => {
     expect(renderRow(null)).not.toContain("Remove the saved value");
+  });
+});
+
+describe("ConfigurationRow model tier resolution", () => {
+  const TIER: ConfigCatalogEntry = {
+    key: "MODEL_TIER_CLAUDE_SMART",
+    label: "claude smart tier model",
+    description: "Model a claude worker runs for modelTier=smart tasks.",
+    kind: "string",
+    defaultValue: "opus",
+    resolvesTo: { model: "claude-opus-5-5", alias: "latest:anthropic/opus", source: "tier-config" },
+  };
+
+  test("shows the concrete model, its alias and the winning layer", () => {
+    const html = renderRow("latest:anthropic/opus", TIER, false);
+    expect(html).toContain("claude-opus-5-5");
+    expect(html).toContain("latest:anthropic/opus");
+    expect(html).toContain("(configured)");
+  });
+
+  test("labels the built-in default and an alias that resolves to nothing", () => {
+    const html = renderRow(
+      null,
+      { ...TIER, resolvesTo: { model: null, alias: null, source: "tier-default" } },
+      false,
+    );
+    expect(html).toContain("nothing in the catalog");
+    expect(html).toContain("(built-in default)");
+  });
+
+  test("says so when a configured value matched nothing and the default applies", () => {
+    const html = renderRow(
+      "latest:openai/nope",
+      {
+        ...TIER,
+        resolvesTo: { model: "opus", alias: null, source: "tier-default", fellBack: true },
+      },
+      false,
+    );
+    expect(html).toContain("configured value matched nothing, built-in default");
+  });
+
+  test("rows without a resolution render no Resolves to line", () => {
+    expect(renderRow(null)).not.toContain("Resolves to");
   });
 });

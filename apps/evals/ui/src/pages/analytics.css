@@ -259,3 +259,11 @@
   align-items: center;
   gap: 5px;
 }
+
+/* Effort pills in the Models table. */
+.an-efforts {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+}

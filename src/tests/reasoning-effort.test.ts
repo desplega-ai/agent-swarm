@@ -9,11 +9,14 @@
  */
 
 import { describe, expect, test } from "bun:test";
+import { reasoningLevelsForModel } from "@desplega/model-catalog";
 import {
   applyReasoningEffort,
   REASONING_EFFORT_LEVELS,
+  type ReasoningHarness,
   reasoningCapability,
 } from "../providers/reasoning-effort";
+import { runtimeCatalogSection } from "../utils/runtime-model-catalog";
 
 describe("REASONING_EFFORT_LEVELS", () => {
   test("is the closed normalized enum", () => {
@@ -241,5 +244,111 @@ describe("applyReasoningEffort — opencode-options shape", () => {
     expect(applyReasoningEffort("opencode", "openai/gpt-5.3-codex", "off")).toEqual({
       kind: "noop",
     });
+  });
+});
+
+// The offered levels, the API's validation and the harness application all read the same
+// answer. This matrix pins it per (harness, model) so the swarm app's pickers, the runtime
+// PATCH and the run-time adapters cannot drift apart.
+describe("harness × model → effort matrix", () => {
+  const matrix: {
+    harness: "claude" | "codex" | "pi" | "opencode";
+    model: string;
+    levels: string[];
+  }[] = [
+    { harness: "claude", model: "claude-opus-5-5", levels: ["low", "medium", "high", "xhigh"] },
+    { harness: "claude", model: "claude-sonnet-5-5", levels: ["low", "medium", "high", "xhigh"] },
+    { harness: "claude", model: "claude-haiku-4-5", levels: ["off", "low", "medium", "high"] },
+    {
+      harness: "codex",
+      model: "gpt-5.6-sol",
+      levels: ["off", "low", "medium", "high", "xhigh", "max"],
+    },
+    { harness: "codex", model: "gpt-6-astra", levels: ["low", "medium", "high", "xhigh", "max"] },
+    { harness: "codex", model: "gpt-5.1-codex", levels: ["low", "medium", "high"] },
+    { harness: "pi", model: "openrouter/deepseek/deepseek-v4.1-flash", levels: ["low", "high"] },
+    {
+      harness: "pi",
+      model: "openrouter/anthropic/claude-opus-5.5",
+      levels: ["low", "medium", "high", "xhigh"],
+    },
+    {
+      harness: "opencode",
+      model: "openrouter/deepseek/deepseek-v4.1-flash",
+      levels: ["low", "high"],
+    },
+    { harness: "pi", model: "openrouter/qwen/qwen3-coder-flash", levels: [] },
+    { harness: "claude", model: "totally-custom-model-xyz", levels: [] },
+  ];
+
+  for (const { harness, model, levels } of matrix) {
+    test(`${harness} ${model}: ${levels.length > 0 ? levels.join(", ") : "no effort"}`, () => {
+      expect(reasoningCapability(harness, model).levels).toEqual(levels);
+      // Every offered level is applied, every other level is dropped: what a picker offers is what
+      // reaches the harness.
+      for (const level of REASONING_EFFORT_LEVELS) {
+        const applied = applyReasoningEffort(harness, model, level);
+        const takes = levels.includes(level);
+        // opencode has no explicit off, so its `off` is a noop even when offered.
+        const expectNoop = !takes || (harness === "opencode" && level === "off");
+        expect(applied.kind === "noop").toBe(expectNoop);
+      }
+    });
+  }
+});
+
+describe("Claude CLI shortnames (the tier defaults) take effort like the model they stand for", () => {
+  test("opus, sonnet, haiku and fable resolve to their newest catalog model", () => {
+    expect(reasoningCapability("claude", "opus")).toEqual(
+      reasoningCapability("claude", "claude-opus-5-5"),
+    );
+    expect(reasoningCapability("claude", "sonnet")).toEqual(
+      reasoningCapability("claude", "claude-sonnet-5-5"),
+    );
+    expect(reasoningCapability("claude", "haiku").levels).toContain("off");
+    expect(reasoningCapability("claude", "fable").supported).toBe(true);
+  });
+
+  test("shortnames mean nothing to the other harnesses", () => {
+    expect(reasoningCapability("codex", "opus").supported).toBe(false);
+    expect(reasoningCapability("pi", "opus").supported).toBe(false);
+  });
+});
+
+// The evals app validates and lists efforts with `reasoningLevelsForModel` (packages/model-catalog);
+// the worker applies them with `reasoningCapability`. They are two entry points to one rule, and
+// this pins them together over the real snapshot so an eval can never accept a level the worker
+// would drop (or hide one it would take).
+describe("reasoningLevelsForModel agrees with reasoningCapability", () => {
+  const catalog = {
+    anthropic: { models: runtimeCatalogSection("anthropic") },
+    openai: { models: runtimeCatalogSection("openai") },
+    openrouter: { models: runtimeCatalogSection("openrouter") },
+  };
+  const pairs: [ReasoningHarness, string][] = [
+    ...Object.keys(catalog.anthropic.models).map((id): [ReasoningHarness, string] => [
+      "claude",
+      id,
+    ]),
+    ...["opus", "sonnet", "haiku", "fable"].map((id): [ReasoningHarness, string] => ["claude", id]),
+    ...Object.keys(catalog.openai.models).map((id): [ReasoningHarness, string] => ["codex", id]),
+    ...Object.keys(catalog.openrouter.models).flatMap((id): [ReasoningHarness, string][] => [
+      ["pi", `openrouter/${id}`],
+      ["opencode", `openrouter/${id}`],
+    ]),
+    ["pi", "anthropic/claude-opus-5-5"],
+    ["opencode", "openai/gpt-5.6-sol"],
+    ["claude", "not-a-model"],
+    ["pi", "no-provider-prefix"],
+  ];
+
+  test("gives the same levels for every catalog model on every harness", () => {
+    expect(pairs.length).toBeGreaterThan(100);
+    const mismatches = pairs.filter(
+      ([harness, model]) =>
+        JSON.stringify(reasoningLevelsForModel(harness, model, catalog)) !==
+        JSON.stringify(reasoningCapability(harness, model).levels),
+    );
+    expect(mismatches).toEqual([]);
   });
 });

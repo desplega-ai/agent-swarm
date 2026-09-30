@@ -30,6 +30,7 @@
  * nothing (empty aggregates, never an error).
  */
 
+import { REASONING_EFFORT_LEVELS } from "@desplega/model-catalog";
 import { resolveClaudeAlias } from "../cost/model-alias.ts";
 import { legacyAliasModel } from "../cost/resolve-alias.ts";
 import type { Registry } from "../runner/index.ts";
@@ -64,6 +65,8 @@ export interface AnalyticsSourceRow {
   resolvedModel?: string | null;
   /** eval_run_configs.resolved_model — the run's pin for an alias config. */
   pinnedModel?: string | null;
+  /** attempts.reasoning_effort — the effort the worker was launched with (null = harness default / old rows). */
+  reasoningEffort?: string | null;
   /** json_extract(tokens_json, '$.model') — dominant observed model id. */
   tokenModel: string | null;
   /** json_extract(tokens_json, '$.inputTokens') — null on rows without token capture (v7 §6.1). */
@@ -145,6 +148,25 @@ function modelKey(
   }
   if (key === null) return `(${row.configId})`;
   return resolveClaudeAlias(key, aliasMap) ?? key;
+}
+
+/** Effort key of attempts that ran at the harness default (no effort set). */
+export const ANALYTICS_NO_EFFORT = "default";
+
+/** The effort an attempt ran at, or the default key. */
+function effortKey(row: AnalyticsSourceRow): string {
+  return row.reasoningEffort || ANALYTICS_NO_EFFORT;
+}
+
+/** Effort keys low → high (canonical enum order), unknown values after them, the default key last. */
+function sortEffortKeys(keys: Iterable<string>): string[] {
+  const order: readonly string[] = REASONING_EFFORT_LEVELS;
+  const rank = (key: string): number => {
+    if (key === ANALYTICS_NO_EFFORT) return order.length + 1;
+    const i = order.indexOf(key);
+    return i === -1 ? order.length : i;
+  };
+  return [...keys].sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
 }
 
 /**
@@ -287,6 +309,8 @@ interface ModelAcc extends MetricAcc {
   /** Contributing harness keys (v7 §7.2 scatter), first-seen order. */
   harnesses: Set<string>;
   configIds: Set<string>;
+  /** Effort keys of the model's attempts (`ANALYTICS_NO_EFFORT` = harness default). */
+  efforts: Set<string>;
   runIds: Set<string>;
   /** Runs with ≥1 priced attempt (avgCostPerRun denominator). */
   pricedRunIds: Set<string>;
@@ -372,12 +396,15 @@ export function buildAnalytics(
 ): AnalyticsResponse {
   // filterOptions over ALL rows BEFORE filtering (first-seen order) — the bar
   // keeps every option visible while a filter is active.
-  const filterOptions: AnalyticsFilterOptions = { harnesses: [], configIds: [] };
+  const filterOptions: AnalyticsFilterOptions = { harnesses: [], configIds: [], efforts: [] };
   for (const row of sourceRows) {
     const harness = harnessKey(row.configId, registry);
     if (!filterOptions.harnesses.includes(harness)) filterOptions.harnesses.push(harness);
     if (!filterOptions.configIds.includes(row.configId)) filterOptions.configIds.push(row.configId);
+    const effort = effortKey(row);
+    if (!filterOptions.efforts?.includes(effort)) filterOptions.efforts?.push(effort);
   }
+  filterOptions.efforts = sortEffortKeys(filterOptions.efforts ?? []);
 
   const harnessSet =
     filter !== undefined && filter !== null && filter.harnesses.length > 0
@@ -387,16 +414,22 @@ export function buildAnalytics(
     filter !== undefined && filter !== null && filter.configIds.length > 0
       ? new Set(filter.configIds)
       : null;
+  const effortSet =
+    filter !== undefined && filter !== null && (filter.efforts?.length ?? 0) > 0
+      ? new Set(filter.efforts)
+      : null;
   const rows =
-    harnessSet === null && configSet === null
+    harnessSet === null && configSet === null && effortSet === null
       ? sourceRows
       : sourceRows.filter(
           (row) =>
             (configSet === null || configSet.has(row.configId)) &&
-            (harnessSet === null || harnessSet.has(harnessKey(row.configId, registry))),
+            (harnessSet === null || harnessSet.has(harnessKey(row.configId, registry))) &&
+            (effortSet === null || effortSet.has(effortKey(row))),
         );
   // appliedFilter = the filter when any axis is non-empty, else null.
-  const appliedFilter = harnessSet !== null || configSet !== null ? (filter ?? null) : null;
+  const appliedFilter =
+    harnessSet !== null || configSet !== null || effortSet !== null ? (filter ?? null) : null;
 
   const scenarioIds: string[] = [];
   const configIds: string[] = [];
@@ -404,6 +437,7 @@ export function buildAnalytics(
   const models = new Map<string, ModelAcc>();
   const harnessGroups = new Map<string, GroupAcc>();
   const vendorGroups = new Map<string, GroupAcc>();
+  const effortGroups = new Map<string, GroupAcc>();
 
   for (const row of rows) {
     if (!scenarioIds.includes(row.scenarioId)) scenarioIds.push(row.scenarioId);
@@ -462,6 +496,7 @@ export function buildAnalytics(
         providers: new Set(),
         harnesses: new Set(),
         configIds: new Set(),
+        efforts: new Set(),
         runIds: new Set(),
         pricedRunIds: new Set(),
         pairedCostUsd: 0,
@@ -474,6 +509,7 @@ export function buildAnalytics(
     if (config) modelAcc.providers.add(config.provider);
     modelAcc.harnesses.add(harness);
     modelAcc.configIds.add(row.configId);
+    modelAcc.efforts.add(effortKey(row));
     modelAcc.runIds.add(row.runId);
     if (row.costUsd !== null) modelAcc.pricedRunIds.add(row.runId);
     if (row.costUsd !== null && row.durationMs !== null) {
@@ -484,6 +520,7 @@ export function buildAnalytics(
     // ---- harness / vendor rollups (v7 §7) ----
     accumulateGroup(harnessGroups, harness, row, model);
     accumulateGroup(vendorGroups, modelAcc.vendor, row, model);
+    accumulateGroup(effortGroups, effortKey(row), row, model);
   }
 
   const matrix: AnalyticsCell[] = [...cells.values()].map((cell) => {
@@ -542,6 +579,7 @@ export function buildAnalytics(
         minCostUsd: minOrNull(m.costs),
         maxCostUsd: maxOrNull(m.costs),
         vendor: m.vendor,
+        efforts: sortEffortKeys(m.efforts),
         tokens,
       };
       const point: AnalyticsScatterPoint = {
@@ -637,6 +675,7 @@ export function buildAnalytics(
     series,
     harnesses: sortGroups(harnessGroups),
     vendors: sortGroups(vendorGroups),
+    efforts: sortGroups(effortGroups),
     scatter,
     filterOptions,
     appliedFilter,

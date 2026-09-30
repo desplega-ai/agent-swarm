@@ -1,6 +1,7 @@
 import { normalizeSlackReactionShortcode } from "../slack/reaction-shortcode";
 import { ProviderNameSchema } from "../types";
 import { parseTaskToolManifest } from "../utils/task-tool-manifest";
+import { isTierConfigKey, validateTierConfigValue } from "./model-tier-keys";
 
 /**
  * Guards against storing reserved keys in the swarm_config table.
@@ -274,6 +275,7 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
     return null;
   },
   ...booleanValidators([
+    "SWARM_DEV_MODE",
     "MULTI_RUNTIME_ENABLED",
     "STEERING_ENABLED",
     "MEMORY_HYBRID_SEARCH",
@@ -304,6 +306,7 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
     "SWARM_HIDE_CLOUD_PROMO",
     "DB_QUERY_BOUNDED_ENABLED",
     "DB_RETENTION_DRY_RUN",
+    "MODEL_AUTO_UPGRADE",
   ]),
   ...enumValidator("SLACK_MODE", ["socket", "http"]),
   ...enumValidator("SLACK_THREAD_STEERING", ["off", "lead", "all"]),
@@ -359,6 +362,8 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
   ),
   // 0 is meaningful here: "auto-assign nothing this sweep".
   ...integerValidators(["HEARTBEAT_MAX_AUTO_ASSIGN"], 0),
+  // 0 disables the `latest:...@stable` soak window.
+  ...integerValidators(["MODEL_LATEST_SOAK_DAYS"], 0),
   // 0 turns approval auto-cancellation off.
   ...integerValidators(["APPROVAL_REQUEST_AUTO_CANCELLATION_DAYS"], 0),
   // Below ~100 tokens the preamble can't fit a useful summary; above 20000
@@ -378,6 +383,7 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
 };
 
 export function validateConfigValue(key: string, value: unknown): string | null {
+  if (isTierConfigKey(key)) return validateTierConfigValue(key.toUpperCase(), value);
   const validator = VALIDATED_KEYS[key.toUpperCase()];
   return validator ? validator(value) : null;
 }

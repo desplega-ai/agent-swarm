@@ -40,6 +40,7 @@ export const WORKER_SPEC_RESERVED_ENV = new Set([
   "AGENT_ID",
   "HARNESS_PROVIDER",
   "MODEL_OVERRIDE",
+  "REASONING_EFFORT_OVERRIDE",
   "MAX_CONCURRENT_TASKS",
   "YOLO",
   "DESPLEGA_TELEMETRY_ENV",
@@ -473,6 +474,7 @@ export function serializeConfig(c: HarnessConfig) {
     model: c.model ?? null,
     modelAlias: c.modelAlias ?? null,
     modelTier: c.modelTier ?? null,
+    reasoningEffort: c.reasoningEffort ?? null,
     envKeys: c.env ? Object.keys(c.env) : [],
     /** v7.6 item D: AA benchmark block; null = unmatched (UI renders nothing). */
     aa: getAaForConfig(c.id),

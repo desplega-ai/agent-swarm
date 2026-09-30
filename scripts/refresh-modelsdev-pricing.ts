@@ -1,8 +1,7 @@
 #!/usr/bin/env bun
 /**
- * Refresh the vendored models.dev snapshot at `src/be/modelsdev-cache.json`,
- * plus the slim reasoning-capability snapshot at
- * `src/providers/modelsdev-reasoning.json` derived from the same fetched data.
+ * Refresh the vendored models.dev snapshot at `src/be/modelsdev-cache.json`
+ * (the offline fallback for the runtime model catalog).
  *
  * Usage: `bun run scripts/refresh-modelsdev-pricing.ts`
  *
@@ -16,30 +15,11 @@ import path from "node:path";
 import { PINNED_MODELSDEV_ENTRIES } from "../src/be/models-catalog";
 
 const CACHE_PATH = path.join(process.cwd(), "src", "be", "modelsdev-cache.json");
-const REASONING_SNAPSHOT_PATH = path.join(
-  process.cwd(),
-  "src",
-  "providers",
-  "modelsdev-reasoning.json",
-);
 const MODELSDEV_URL = "https://models.dev/api.json";
 // Limited-availability models that are intentionally vendored even when models.dev
 // does not list them yet. Shared with the live catalog (`src/be/models-catalog.ts`)
 // so both surfaces pin the same set. Add future manual pins as "provider/model-id".
 const PINNED_ENTRIES = PINNED_MODELSDEV_ENTRIES;
-
-// Providers actually reachable by the four local harnesses' model pickers
-// (mirrors `SNAPSHOT_ORDER` + `BEDROCK_SNAPSHOT_ID` in
-// `apps/ui/src/lib/agent-runtime-models.ts`). The full models.dev payload carries
-// 140+ providers and 5000+ models; `src/providers/reasoning-effort.ts` only
-// ever looks up these four, so the reasoning snapshot stays "slim" by scope
-// rather than by field count alone.
-const REASONING_SNAPSHOT_PROVIDERS = [
-  "anthropic",
-  "openai",
-  "openrouter",
-  "amazon-bedrock",
-] as const;
 
 interface CostBlock {
   input?: number;
@@ -67,54 +47,6 @@ interface ProviderEntry {
 }
 
 type Cache = Record<string, ProviderEntry>;
-
-interface SlimReasoningOption {
-  type: string;
-  values?: string[];
-}
-
-interface SlimModelEntry {
-  id: string;
-  reasoning: boolean;
-  reasoningOptions?: SlimReasoningOption[];
-}
-
-type SlimReasoningCache = Partial<
-  Record<(typeof REASONING_SNAPSHOT_PROVIDERS)[number], Record<string, SlimModelEntry>>
->;
-
-/**
- * Derive the slim `src/providers/modelsdev-reasoning.json` snapshot from a
- * fully-fetched (or locally vendored) models.dev cache. Keeps only the fields
- * `src/providers/reasoning-effort.ts` actually reads: `id`, the `reasoning`
- * boolean support-gate, and any `reasoning_options` entries (camelCased,
- * `min`/other keys dropped — the helper only reads `type` and `values`).
- */
-export function deriveReasoningSnapshot(cache: Cache): SlimReasoningCache {
-  const snapshot: SlimReasoningCache = {};
-  for (const providerId of REASONING_SNAPSHOT_PROVIDERS) {
-    const models = cache[providerId]?.models;
-    if (!models) continue;
-    const slimModels: Record<string, SlimModelEntry> = {};
-    for (const [modelKey, model] of Object.entries(models)) {
-      const reasoningOptions = Array.isArray(model.reasoning_options)
-        ? model.reasoning_options
-            .filter((o) => typeof o.type === "string")
-            .map((o) => ({
-              type: o.type as string,
-              ...(Array.isArray(o.values) ? { values: o.values } : {}),
-            }))
-        : [];
-      slimModels[modelKey] = {
-        id: model.id ?? modelKey,
-        reasoning: Boolean(model.reasoning),
-        ...(reasoningOptions.length > 0 ? { reasoningOptions } : {}),
-      };
-    }
-    snapshot[providerId] = slimModels;
-  }
-  return snapshot;
-}
 
 function loadCurrent(): Cache | null {
   try {
@@ -236,10 +168,6 @@ async function main(): Promise<void> {
   }
   writeFileSync(CACHE_PATH, `${JSON.stringify(next, null, 2)}\n`);
   console.log(`Wrote ${CACHE_PATH}`);
-
-  const reasoningSnapshot = deriveReasoningSnapshot(next);
-  writeFileSync(REASONING_SNAPSHOT_PATH, `${JSON.stringify(reasoningSnapshot, null, 2)}\n`);
-  console.log(`Wrote ${REASONING_SNAPSHOT_PATH}`);
 }
 
 if (import.meta.main) {

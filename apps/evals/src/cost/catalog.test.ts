@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { reasoningLevelsForModel } from "@desplega/model-catalog";
 import { getDb, initDb, resetDbForTests } from "../db/client.ts";
 import {
   getCatalog,
+  getResolutionCatalog,
   getSnapshotCatalog,
   loadCatalogFromDb,
   MAX_CATALOG_BYTES,
@@ -158,6 +160,62 @@ describe("model catalog", () => {
     });
     expect(Object.keys(out ?? {}).sort()).toEqual(["anthropic", "openai", "openrouter"]);
     expect(out?.anthropic?.models).toEqual({ a: { name: "M", cost: { input: 1 } } });
+  });
+
+  test("sanitizing keeps the reasoning options the effort rule reads", () => {
+    const model = {
+      name: "M",
+      reasoning: true,
+      reasoning_options: [
+        { type: "effort", values: ["high", "xhigh"], junk: 1 },
+        { type: "budget_tokens", min: 1024 },
+        { values: ["low"] },
+        "bad",
+      ],
+    };
+    const section = (models: unknown) => ({ id: "x", name: "X", models });
+    const out = sanitizeCatalog({
+      anthropic: section({ a: model }),
+      openai: section({ o: model }),
+      openrouter: section({ r: model }),
+    });
+    expect(out?.anthropic?.models.a).toEqual({
+      name: "M",
+      reasoning: true,
+      reasoning_options: [{ type: "effort", values: ["high", "xhigh"] }, { type: "budget_tokens" }],
+    });
+  });
+
+  test("a live model keeps its effort levels instead of the low/medium/high fallback", async () => {
+    const db = getDb();
+    const payload = await getSnapshotCatalog();
+    await refreshCatalog({
+      db,
+      fetchImpl: fakeFetch([
+        () => new Response(JSON.stringify(payload), { headers: { etag: '"live"' } }),
+      ]),
+    });
+    const catalog = await getResolutionCatalog();
+    expect(reasoningLevelsForModel("codex", "gpt-5.5", catalog)).toContain("xhigh");
+    expect(reasoningLevelsForModel("pi", "openrouter/deepseek/deepseek-v4-flash", catalog)).toEqual(
+      ["high", "xhigh"],
+    );
+  });
+
+  test("a DB payload persisted without reasoning options is refetched, not revalidated", async () => {
+    const db = getDb();
+    const old = structuredClone(await getSnapshotCatalog());
+    for (const section of Object.values(old))
+      for (const m of Object.values(section.models)) delete m.reasoning_options;
+    await db.execute({
+      sql: "INSERT INTO model_catalog_cache (id, fetched_at, etag, payload) VALUES (1, ?, ?, ?)",
+      args: [new Date().toISOString(), '"old"', JSON.stringify(old)],
+    });
+    expect(await loadCatalogFromDb(db)).toBe(true);
+    const state = await getCatalog();
+    expect(state.source).toBe("db");
+    expect(state.etag).toBeNull();
+    expect(state.fetchedAt).toBeNull();
   });
 
   test("revalidates with the stored ETag and handles 304", async () => {

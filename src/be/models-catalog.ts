@@ -60,8 +60,12 @@ export interface CatalogReasoningOption {
 export interface CatalogModel {
   id: string;
   name?: string;
-  cost?: { input?: number; output?: number };
+  cost?: { input?: number; output?: number; cache_read?: number; cache_write?: number };
   limit?: { context?: number };
+  /** models.dev `release_date` (ISO date). Drives newest-first ordering in harness lists. */
+  release_date?: string;
+  /** models.dev `status` (e.g. "deprecated"). Deprecated models drop out of harness lists. */
+  status?: string;
   reasoning?: boolean;
   reasoning_options?: CatalogReasoningOption[];
 }
@@ -94,9 +98,20 @@ function slimModel(modelKey: string, model: ModelsDevModel): CatalogModel {
     id: model.id ?? modelKey,
     ...(model.name !== undefined ? { name: model.name } : {}),
     ...(model.cost !== undefined
-      ? { cost: { input: model.cost.input, output: model.cost.output } }
+      ? {
+          cost: {
+            input: model.cost.input,
+            output: model.cost.output,
+            ...(model.cost.cache_read !== undefined ? { cache_read: model.cost.cache_read } : {}),
+            ...(model.cost.cache_write !== undefined
+              ? { cache_write: model.cost.cache_write }
+              : {}),
+          },
+        }
       : {}),
     ...(model.limit?.context !== undefined ? { limit: { context: model.limit.context } } : {}),
+    ...(typeof model.release_date === "string" ? { release_date: model.release_date } : {}),
+    ...(typeof model.status === "string" ? { status: model.status } : {}),
     ...(model.reasoning !== undefined ? { reasoning: model.reasoning } : {}),
     ...(reasoningOptions.length > 0 ? { reasoning_options: reasoningOptions } : {}),
   };
@@ -148,22 +163,61 @@ function mergePinnedEntries(catalog: ModelsCatalog): void {
   }
 }
 
-/** Called by the pricing-refresh loop after every successful full models.dev fetch. */
-export function updateLiveModelsCatalog(cache: ModelsDevCache, now = Date.now()): void {
-  const catalog = buildModelsCatalog(cache);
+/**
+ * Install a freshly built live catalog (already merged with the persistent
+ * table + overlay by `src/be/model-catalog-store.ts`). Pinned snapshot entries
+ * are re-merged so they never drop out of the picker.
+ */
+export function setLiveModelsCatalog(catalog: ModelsCatalog, updatedAt: number | null): void {
   mergePinnedEntries(catalog);
   liveCatalog = catalog;
-  liveUpdatedAt = now;
+  liveUpdatedAt = updatedAt;
+}
+
+/**
+ * Legacy in-memory update from a raw models.dev payload. The refresh path now
+ * persists to `model_catalog` and reloads via `reloadModelsCatalog()`; this
+ * stays for callers/tests that only have a payload in hand.
+ */
+export function updateLiveModelsCatalog(cache: ModelsDevCache, now = Date.now()): void {
+  setLiveModelsCatalog(buildModelsCatalog(cache), now);
+}
+
+/** Drop the in-memory catalog so the next async read rebuilds it from the DB. */
+export function invalidateModelsCatalog(): void {
+  liveCatalog = null;
+  liveUpdatedAt = null;
+  snapshotOverride = null;
+}
+
+export function isModelsCatalogLoaded(): boolean {
+  return liveCatalog !== null;
+}
+
+/** Deep copy of the slimmed vendored snapshot (safe to mutate). */
+export function snapshotModelsCatalog(): ModelsCatalog {
+  return structuredClone(bundledSnapshotCatalog());
+}
+
+/** Snapshot with overlay rows layered on; served while the table is empty. */
+let snapshotOverride: ModelsCatalog | null = null;
+export function setSnapshotOverlayCatalog(catalog: ModelsCatalog | null): void {
+  snapshotOverride = catalog;
 }
 
 export function getModelsCatalog(): ModelsCatalogResult {
   if (liveCatalog) {
     return { source: "live", updatedAt: liveUpdatedAt, providers: liveCatalog };
   }
-  return { source: "snapshot", updatedAt: null, providers: bundledSnapshotCatalog() };
+  return {
+    source: "snapshot",
+    updatedAt: null,
+    providers: snapshotOverride ?? bundledSnapshotCatalog(),
+  };
 }
 
 export function resetModelsCatalogForTests(): void {
   liveCatalog = null;
   liveUpdatedAt = null;
+  snapshotOverride = null;
 }
