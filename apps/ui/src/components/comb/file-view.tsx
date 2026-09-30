@@ -5,6 +5,7 @@ import { useAgentFsLs, useAgentFsStat } from "@/api/hooks/use-agent-fs";
 import { useCombLayout } from "@/components/comb/comb-layout";
 import { CommentRail } from "@/components/comb/comment-rail";
 import { renderMentionPicker } from "@/components/comb/mention-picker";
+import { PresenceLayer } from "@/components/comb/presence-layer";
 import { ReviewChangesButton } from "@/components/comb/review/review-changes-button";
 import { ReviewPanel, ReviewRangeNotice } from "@/components/comb/review/review-panel";
 import { SendBatchButton, SendThreadButton } from "@/components/comb/send-to-swarm";
@@ -106,22 +107,26 @@ function FileBody({ file, stat }: { file: DrivePath; stat: StatResult }) {
   const review = notice ? null : requested;
   return (
     <div className="flex min-h-0 flex-1 gap-3">
-      <div ref={setViewerRef} className={VIEWER_PANE}>
-        {review ? (
-          <ReviewPanel
-            key={`${review.from}..${review.to}`}
-            file={file}
-            stat={stat}
-            range={review}
-            readOnly={readOnly}
-            onReadOnly={markReadOnly}
-          />
-        ) : (
-          <>
-            {notice ? <ReviewRangeNotice message={notice} /> : null}
-            <FileViewer file={file} stat={stat} />
-          </>
-        )}
+      {/* The pane plus the presence layer on top of it (other people's pointers). */}
+      <div className="relative flex min-h-[24rem] min-w-0 flex-1 lg:min-h-0">
+        <div ref={setViewerRef} className={VIEWER_PANE}>
+          {review ? (
+            <ReviewPanel
+              key={`${review.from}..${review.to}`}
+              file={file}
+              stat={stat}
+              range={review}
+              readOnly={readOnly}
+              onReadOnly={markReadOnly}
+            />
+          ) : (
+            <>
+              {notice ? <ReviewRangeNotice message={notice} /> : null}
+              <FileViewer file={file} stat={stat} />
+            </>
+          )}
+        </div>
+        <PresenceLayer file={file} stat={stat} viewerRef={viewerRef} review={review !== null} />
       </div>
       {/* Comment rail (step-7). Mount points: threadActions, railHeaderActions, renderComposerExtras. */}
       <CommentRail

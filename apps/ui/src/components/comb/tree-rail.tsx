@@ -4,6 +4,7 @@ import { type KeyboardEvent, useEffect, useId, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { agentFsLsQuery, useAgentFsAccess } from "@/api/hooks/use-agent-fs";
 import { PinnedList } from "@/components/comb/pinned-list";
+import { PresenceDots } from "@/components/comb/presence-avatars";
 import { MiddleTruncation } from "@/components/ui/middle-truncation";
 import { ancestorFolders, type CombLocation, combPath, parentFolder } from "@/lib/comb/paths";
 import { type FolderListing, flattenTree, visibleFolders } from "@/lib/comb/tree";
@@ -229,6 +230,7 @@ function DriveTree({
             >
               <Icon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
               <MiddleTruncation>{row.name}</MiddleTruncation>
+              {row.isFolder ? null : <PresenceDots path={row.path} />}
             </Link>
           </div>
         );
