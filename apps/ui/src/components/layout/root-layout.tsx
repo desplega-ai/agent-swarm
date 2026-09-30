@@ -63,6 +63,13 @@ export function RootLayout() {
 
   return (
     <StatusProvider pollIntervalMs={30_000}>
+      {/* First focusable element: keyboard users jump past the sidebar. */}
+      <a
+        href="#main-content"
+        className="sr-only focus:not-sr-only focus:fixed focus:top-3 focus:left-3 focus:z-[100] focus:rounded-md focus:bg-background focus:px-3 focus:py-2 focus:text-sm focus:font-medium focus:text-foreground focus:shadow-md focus:outline-none focus:ring-2 focus:ring-ring/60"
+      >
+        Skip to content
+      </a>
       <ContextPanelProvider>
         <SidebarProvider className="h-svh max-w-full overflow-hidden">
           <AppSidebar />
@@ -73,8 +80,10 @@ export function RootLayout() {
               back to overflow-hidden and pages own their scroll regions
               (pinned headers, grid-internal scrolling). */}
             <main
+              id="main-content"
+              tabIndex={-1}
               className={cn(
-                "flex flex-1 flex-col min-h-0 min-w-0 overflow-x-hidden overflow-y-auto lg:overflow-hidden",
+                "flex flex-1 flex-col min-h-0 min-w-0 overflow-x-hidden overflow-y-auto lg:overflow-hidden outline-none",
                 mainPadding,
               )}
             >

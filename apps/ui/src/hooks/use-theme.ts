@@ -22,6 +22,21 @@ const MODE_STORAGE_KEY = "agent-swarm-mode";
 const PRESET_STORAGE_KEY = "agent-swarm-theme-preset";
 const DARK_QUERY = "(prefers-color-scheme: dark)";
 
+/**
+ * Swap theme tokens with every transition paused. Buttons, sidebar rows and
+ * cards carry 100-400ms color transitions, so a bare class flip smears the new
+ * palette through each of them at a different speed. `.theme-switching`
+ * (globals.css) zeroes transitions; the forced style read commits the new
+ * colors before the class comes off on the next frame.
+ */
+function withoutTransitions(apply: () => void) {
+  const root = document.documentElement;
+  root.classList.add("theme-switching");
+  apply();
+  void window.getComputedStyle(root).color;
+  requestAnimationFrame(() => root.classList.remove("theme-switching"));
+}
+
 const ThemeContext = createContext<ThemeContextValue | undefined>(undefined);
 
 function getStoredMode(): ThemeMode {
@@ -77,20 +92,18 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const root = document.documentElement;
-    if (theme === "dark") {
-      root.classList.add("dark");
-    } else {
-      root.classList.remove("dark");
-    }
+    if (root.classList.contains("dark") === (theme === "dark")) return;
+    withoutTransitions(() => root.classList.toggle("dark", theme === "dark"));
   }, [theme]);
 
   useEffect(() => {
     const root = document.documentElement;
-    if (preset === DEFAULT_THEME_ID) {
-      root.removeAttribute("data-theme");
-    } else {
-      root.setAttribute("data-theme", preset);
-    }
+    const next = preset === DEFAULT_THEME_ID ? null : preset;
+    if (root.getAttribute("data-theme") === next) return;
+    withoutTransitions(() => {
+      if (next) root.setAttribute("data-theme", next);
+      else root.removeAttribute("data-theme");
+    });
   }, [preset]);
 
   const setMode = useCallback((newMode: ThemeMode) => {

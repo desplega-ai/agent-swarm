@@ -316,10 +316,15 @@ export default function AgentDetailPage() {
               }}
               autoFocus
             />
-            <Button size="icon" variant="ghost" onClick={saveName}>
+            <Button size="icon" variant="ghost" onClick={saveName} aria-label="Save name">
               <Check className="h-4 w-4" />
             </Button>
-            <Button size="icon" variant="ghost" onClick={() => setEditing(false)}>
+            <Button
+              size="icon"
+              variant="ghost"
+              onClick={() => setEditing(false)}
+              aria-label="Cancel rename"
+            >
               <X className="h-4 w-4" />
             </Button>
           </div>
@@ -327,7 +332,7 @@ export default function AgentDetailPage() {
           <div className="flex items-center gap-2.5">
             <AgentAvatarDisc agentId={id} agentName={agent.name} size="md" />
             <h1 className="text-3xl font-bold tracking-tight">{agent.name}</h1>
-            <Button size="icon" variant="ghost" onClick={startEditing}>
+            <Button size="icon" variant="ghost" onClick={startEditing} aria-label="Rename agent">
               <Pencil className="h-4 w-4" />
             </Button>
           </div>
@@ -523,6 +528,7 @@ export default function AgentDetailPage() {
                 className="h-8 w-8"
                 disabled={taskPage === 0}
                 onClick={() => setParam("taskPage", taskPage - 1, { defaultValue: "0" })}
+                aria-label="Previous page"
               >
                 <ArrowLeft className="h-4 w-4" />
               </Button>
@@ -535,6 +541,7 @@ export default function AgentDetailPage() {
                 className="h-8 w-8"
                 disabled={taskPage >= taskTotalPages - 1}
                 onClick={() => setParam("taskPage", taskPage + 1, { defaultValue: "0" })}
+                aria-label="Next page"
               >
                 <ArrowLeft className="h-4 w-4 rotate-180" />
               </Button>

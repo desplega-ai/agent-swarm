@@ -340,19 +340,21 @@ summary {
  * so it outranks Tailwind's layered transition utilities. `button.tsx` owns
  * WHAT changes (variant colors, active:scale); this block owns only WHEN. */
 [data-slot="button"] {
-  transition-property: color, background-color, border-color, transform;
+  /* Tailwind v4's `active:scale-*` writes the standalone `scale` property,
+   * not `transform`, so both are listed or the press snaps untimed. */
+  transition-property: color, background-color, border-color, transform, scale;
   transition-timing-function: var(--ease-snappy);
   transition-duration: 200ms;
-  transition-delay: 50ms, 50ms, 50ms, 0s;
+  transition-delay: 50ms, 50ms, 50ms, 0s, 0s;
 }
 
 [data-slot="button"]:hover {
-  transition-duration: 0s, 0s, 0s, 200ms;
+  transition-duration: 0s, 0s, 0s, 200ms, 200ms;
   transition-delay: 0s;
 }
 
 [data-slot="button"]:active {
-  transition-duration: 0s, 0s, 0s, 100ms;
+  transition-duration: 0s, 0s, 0s, 100ms, 100ms;
   transition-delay: 0s;
 }
 
@@ -373,6 +375,16 @@ summary {
 [data-sidebar="menu-button"]:hover {
   transition-duration: 0s, 0s, 200ms, 200ms, 200ms;
   transition-delay: 0s;
+}
+
+/* Theme switch — set by use-theme.ts for the one frame the dark class or
+ * preset flips, so the new palette lands at once instead of smearing through
+ * each control's own color transition. */
+.theme-switching,
+.theme-switching *,
+.theme-switching *::before,
+.theme-switching *::after {
+  transition: none !important;
 }
 
 /* Scrollbar */

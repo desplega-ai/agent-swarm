@@ -750,10 +750,10 @@ function focusFirstInvalid(root: HTMLElement | null) {
   });
 }
 
-function MissingFieldsHint({ fields }: { fields: string[] }) {
+function MissingFieldsHint({ fields, id }: { fields: string[]; id?: string }) {
   if (fields.length === 0) return null;
   return (
-    <p role="alert" className="text-sm text-status-error-strong">
+    <p id={id} role="alert" className="text-sm text-status-error-strong">
       Required: {fields.join(", ")}
     </p>
   );
@@ -2649,6 +2649,8 @@ export function OAuthAppDialog({
   const [tokenBodyFormat, setTokenBodyFormat] = useState<"form" | "json">("form");
   const [extraParams, setExtraParams] = useState<Array<{ key: string; value: string }>>([]);
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [showErrors, setShowErrors] = useState(false);
+  const contentRef = useRef<HTMLDivElement>(null);
   const isEdit = Boolean(app);
 
   const selectedPreset = useMemo<OAuthPreset | null>(
@@ -2658,6 +2660,7 @@ export function OAuthAppDialog({
 
   useEffect(() => {
     if (!open) return;
+    setShowErrors(false);
     setPresetId("");
     setProvider(app?.provider ?? "");
     setClientId(app?.clientId ?? "");
@@ -2708,6 +2711,13 @@ export function OAuthAppDialog({
   }
 
   async function submit() {
+    if (missingFields.length > 0) {
+      setShowErrors(true);
+      // The endpoint fields live under Advanced; open it so they can take focus.
+      if (invalid.authorizeUrl || invalid.tokenUrl) setShowAdvanced(true);
+      focusFirstInvalid(contentRef.current);
+      return;
+    }
     try {
       await upsert.mutateAsync({
         // On edit, target the exact row by id so a same-provider sibling app
@@ -2741,19 +2751,30 @@ export function OAuthAppDialog({
     onOpenChange(false);
   }
 
-  const canSubmit = presetId
-    ? Boolean(clientId.trim() && (isEdit || clientSecret.trim()))
-    : Boolean(
-        provider.trim() &&
-          clientId.trim() &&
-          authorizeUrl.trim() &&
-          tokenUrl.trim() &&
-          (isEdit || clientSecret.trim()),
-      );
+  // A preset hydrates provider and endpoints server-side, so only the client
+  // credentials are required with one.
+  const invalid = {
+    provider: !presetId && !provider.trim(),
+    clientId: !clientId.trim(),
+    clientSecret: !isEdit && !clientSecret.trim(),
+    authorizeUrl: !presetId && !authorizeUrl.trim(),
+    tokenUrl: !presetId && !tokenUrl.trim(),
+  };
+  const missingFields = [
+    invalid.provider && "Provider",
+    invalid.clientId && "Client ID",
+    invalid.clientSecret && "Client Secret",
+    invalid.authorizeUrl && "Authorize URL",
+    invalid.tokenUrl && "Token URL",
+  ].filter((field): field is string => Boolean(field));
+  const markInvalid = (field: keyof typeof invalid) => (showErrors && invalid[field]) || undefined;
+  const errorId = "oauth-app-missing-fields";
+  const describeInvalid = (field: keyof typeof invalid) =>
+    markInvalid(field) ? errorId : undefined;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[85dvh] overflow-y-auto sm:max-w-3xl">
+      <DialogContent ref={contentRef} className="max-h-[85dvh] overflow-y-auto sm:max-w-3xl">
         <DialogHeader className="pb-2">
           <DialogTitle>{isEdit ? "Edit OAuth App" : "Add OAuth App"}</DialogTitle>
           <DialogDescription>
@@ -2824,6 +2845,8 @@ export function OAuthAppDialog({
                 onChange={(event) => setProvider(event.target.value)}
                 disabled={isEdit || Boolean(presetId)}
                 placeholder="github"
+                aria-invalid={markInvalid("provider")}
+                aria-describedby={describeInvalid("provider")}
               />
             </div>
             <div className="space-y-2">
@@ -2834,6 +2857,8 @@ export function OAuthAppDialog({
                 value={clientId}
                 onChange={(event) => setClientId(event.target.value)}
                 placeholder="Iv1.8a61f9b3a7aba766"
+                aria-invalid={markInvalid("clientId")}
+                aria-describedby={describeInvalid("clientId")}
               />
             </div>
           </div>
@@ -2847,6 +2872,8 @@ export function OAuthAppDialog({
               autoComplete="new-password"
               aria-label="Client secret"
               placeholder={isEdit ? "unchanged" : "3c9d1f2e8ab74650cd1208d586cf1a2b34e5d6f7"}
+              invalid={markInvalid("clientSecret")}
+              describedBy={describeInvalid("clientSecret")}
             />
           </div>
           <div className="space-y-2">
@@ -2900,6 +2927,8 @@ export function OAuthAppDialog({
                       value={authorizeUrl}
                       onChange={(event) => setAuthorizeUrl(event.target.value)}
                       placeholder="https://github.com/login/oauth/authorize"
+                      aria-invalid={markInvalid("authorizeUrl")}
+                      aria-describedby={describeInvalid("authorizeUrl")}
                     />
                   </div>
                   <div className="space-y-2">
@@ -2910,6 +2939,8 @@ export function OAuthAppDialog({
                       value={tokenUrl}
                       onChange={(event) => setTokenUrl(event.target.value)}
                       placeholder="https://github.com/login/oauth/access_token"
+                      aria-invalid={markInvalid("tokenUrl")}
+                      aria-describedby={describeInvalid("tokenUrl")}
                     />
                   </div>
                 </div>
@@ -3011,12 +3042,13 @@ export function OAuthAppDialog({
             ) : null}
           </div>
           <InlineError error={upsert.error ?? discover.error} />
+          <MissingFieldsHint id={errorId} fields={showErrors ? missingFields : []} />
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
-          <Button onClick={submit} disabled={!canSubmit || upsert.isPending}>
+          <Button onClick={submit} disabled={upsert.isPending}>
             Save
           </Button>
         </DialogFooter>

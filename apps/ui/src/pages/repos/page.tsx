@@ -315,6 +315,7 @@ export default function ReposPage() {
                   e.stopPropagation();
                   handleEdit(repo);
                 }}
+                aria-label={`Edit ${repo.name}`}
               >
                 <Pencil className="h-3 w-3" />
               </Button>
@@ -326,6 +327,7 @@ export default function ReposPage() {
                   e.stopPropagation();
                   setDeleteTarget(repo);
                 }}
+                aria-label={`Delete ${repo.name}`}
               >
                 <Trash2 className="h-3 w-3" />
               </Button>
