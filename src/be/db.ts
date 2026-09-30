@@ -14200,3 +14200,7 @@ export async function countScriptRunJournalAgentTaskSteps(runId: string): Promis
   );
   return row?.count ?? 0;
 }
+
+export function qaProbeFrozenBody(): number {
+  return 1;
+}
