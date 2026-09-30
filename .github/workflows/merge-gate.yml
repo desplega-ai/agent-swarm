@@ -620,7 +620,7 @@ jobs:
         run: |
           set +e
           mkdir -p .bun-test-timings/next
-          ( sleep 270; echo "=== WATCHDOG"; ps -eo pid,ppid,stat,pcpu,pmem,etime,cmd | grep -a "bun\|http.ts" | grep -v grep | cut -c1-230; echo "TMP=$TMPDIR RT=$RUNNER_TEMP"; for f in $(find /tmp "$RUNNER_TEMP" -name "server-on.log" -o -name "server-off.log" -o -name "extension-admission.log" 2>/dev/null); do echo "== $f"; tail -50 "$f"; done; for p in $(pgrep -f "src/http.ts"); do echo "-- pid $p wchan: $(cat /proc/$p/wchan 2>/dev/null)"; ls /proc/$p/task | wc -l; done ) &
+          ( sleep 270; echo "=== WATCHDOG"; ps -eo pid,ppid,stat,pcpu,etime,cmd | grep -a "test-worker" | grep -v grep | cut -c1-120; echo "--- repo root files by mtime"; ls -lat --time-style=full-iso . | head -25; echo "--- tmp by mtime"; ls -lat --time-style=full-iso /tmp "$RUNNER_TEMP" 2>/dev/null | head -30; sudo apt-get install -y -qq strace >/dev/null 2>&1; for p in $(pgrep -f test-worker); do echo "--- strace $p"; timeout 4 sudo strace -f -p $p -e trace=openat,stat,newfstatat,read,write -s 120 2>&1 | head -40; echo "--- fds $p"; ls -l /proc/$p/fd 2>/dev/null | awk '{print $NF}' | sort | uniq -c | sort -rn | head -15; done ) &
           WD=$!
           timeout 420 bun run test:root -- --timeout 10000 --parallel=4 --shard=${{ matrix.shard }}/2 \
             --update-timings --timings=.bun-test-timings/next/${{ matrix.shard }}.json \
