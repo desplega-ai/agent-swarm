@@ -12209,6 +12209,7 @@ export interface paths {
                                 /** @enum {string} */
                                 type: "task_assigned";
                                 taskId: string;
+                                triggerSurface?: string;
                                 task: components["schemas"]["AgentTask"] & {
                                     attachments: {
                                         /** Format: uuid */

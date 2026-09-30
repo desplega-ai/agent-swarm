@@ -29164,6 +29164,9 @@
                             "taskId": {
                               "type": "string"
                             },
+                            "triggerSurface": {
+                              "type": "string"
+                            },
                             "task": {
                               "allOf": [
                                 {
