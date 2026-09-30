@@ -2,7 +2,7 @@
 date: 2026-09-30T12:00:00+02:00
 author: Claude (for Taras)
 plan_type: dag
-status: in-progress
+status: completed
 last_updated: 2026-09-30
 last_updated_by: Claude
 autonomy: autopilot
@@ -229,21 +229,21 @@ graph TD
 
 | ID | Name | Repo | Depends on | Status | File |
 |----|------|------|------------|--------|------|
-| step-1 | agent-fs comment prefix + drive-members op | agent-fs | — | ready | [step-1.md](./step-1.md) |
-| step-2 | agent-fs comment mentions | agent-fs | step-1 | ready | [step-2.md](./step-2.md) |
-| step-3 | agent-fs drive change stream | agent-fs | step-2 | ready | [step-3.md](./step-3.md) |
-| step-4 | Comb shell, flag, connect | agent-swarm | — | ready | [step-4.md](./step-4.md) |
-| step-5 | Browse + text viewers | agent-swarm | step-4 | ready | [step-5.md](./step-5.md) |
-| step-6 | Media + table viewers | agent-swarm | step-5 | ready | [step-6.md](./step-6.md) |
-| step-7 | Comments with anchors | agent-swarm | step-5 | ready | [step-7.md](./step-7.md) |
-| step-8 | Mention picker + bell | agent-swarm | step-7, step-2 | ready | [step-8.md](./step-8.md) |
-| step-9 | Send to swarm | agent-swarm | step-7, step-1 | ready | [step-9.md](./step-9.md) |
-| step-10 | Review changes | agent-swarm | step-7 | ready | [step-10.md](./step-10.md) |
-| step-11 | Live updates | agent-swarm | step-7, step-3 | ready | [step-11.md](./step-11.md) |
-| step-12 | Sidebar pins | agent-swarm | step-5 | ready | [step-12.md](./step-12.md) |
-| step-13 | Links stay in-app | agent-swarm | step-5 | ready | [step-13.md](./step-13.md) |
-| step-14 | Docs, E2E, full-loop QA | agent-swarm | step-6, step-8, step-9, step-10, step-11, step-12, step-13 | ready | [step-14.md](./step-14.md) |
-| step-15 | Release agent-fs + bump swarm pins | both | step-3 | ready | [step-15.md](./step-15.md) |
+| step-1 | agent-fs comment prefix + drive-members op | agent-fs | — | done | [step-1.md](./step-1.md) |
+| step-2 | agent-fs comment mentions | agent-fs | step-1 | done | [step-2.md](./step-2.md) |
+| step-3 | agent-fs drive change stream | agent-fs | step-2 | done | [step-3.md](./step-3.md) |
+| step-4 | Comb shell, flag, connect | agent-swarm | — | done | [step-4.md](./step-4.md) |
+| step-5 | Browse + text viewers | agent-swarm | step-4 | done | [step-5.md](./step-5.md) |
+| step-6 | Media + table viewers | agent-swarm | step-5 | done | [step-6.md](./step-6.md) |
+| step-7 | Comments with anchors | agent-swarm | step-5 | done | [step-7.md](./step-7.md) |
+| step-8 | Mention picker + bell | agent-swarm | step-7, step-2 | done | [step-8.md](./step-8.md) |
+| step-9 | Send to swarm | agent-swarm | step-7, step-1 | done | [step-9.md](./step-9.md) |
+| step-10 | Review changes | agent-swarm | step-7 | done | [step-10.md](./step-10.md) |
+| step-11 | Live updates | agent-swarm | step-7, step-3 | done | [step-11.md](./step-11.md) |
+| step-12 | Sidebar pins | agent-swarm | step-5 | done | [step-12.md](./step-12.md) |
+| step-13 | Links stay in-app | agent-swarm | step-5 | done | [step-13.md](./step-13.md) |
+| step-14 | Docs, E2E, full-loop QA | agent-swarm | step-6, step-8, step-9, step-10, step-11, step-12, step-13 | done | [step-14.md](./step-14.md) |
+| step-15 | Release agent-fs + bump swarm pins | both | step-3 | done | [step-15.md](./step-15.md) |
 
 > **Canonical dependencies and execution status live in each `step-<n>.md`'s frontmatter.** This table is a derived snapshot at plan creation. During `/v-implement`, frontmatter `status` (`ready` → `claimed` → `done`) is the source of truth. Re-render this table when you want a current view.
 
@@ -268,17 +268,17 @@ Run before kicking off any step:
 
 Run after all steps complete:
 
-- [ ] agent-swarm typecheck: `bun run tsc:check`
-- [ ] agent-swarm unit tests: `bun run test:root -- --parallel=4`
-- [ ] Dashboard: `cd apps/ui && bun run lint && bunx tsc -b && bun run check:tokens`
-- [ ] Route checks: `bun run check:rbac-coverage && bun run check:openapi-response-coverage`
-- [ ] OpenAPI fresh: `bun run docs:openapi && git diff --exit-code openapi.json`
-- [ ] Promise checks: `bun scripts/check-floating-promises.ts && bun scripts/check-promise-sinks.ts`
-- [ ] UI E2E smoke: `bun run e2e:ui -- --grep @smoke`
-- [ ] Black-box E2E: `bun run e2e`
-- [ ] agent-fs: `cd "$AFS" && bun run typecheck && bun run test && bun run scripts/e2e.ts "bun run packages/cli/src/index.ts --" --local-only`
-- [ ] Flag off: with `COMB_ENABLED` unset, `/status` reports `agent_fs.comb.enabled=false`, the nav has no Comb item, `POST /api/comb/review-batches` answers 404, and task attachment links still point at `live.agent-fs.dev`.
-- [ ] Full loop (step-14 QA doc) passes locally with a real lead + worker.
+- [x] agent-swarm typecheck: `bun run tsc:check`
+- [x] agent-swarm unit tests: `bun run test:root -- --parallel=4`
+- [x] Dashboard: `cd apps/ui && bun run lint && bunx tsc -b && bun run check:tokens`
+- [x] Route checks: `bun run check:rbac-coverage && bun run check:openapi-response-coverage`
+- [x] OpenAPI fresh: `bun run docs:openapi && git diff --exit-code openapi.json`
+- [x] Promise checks: `bun scripts/check-floating-promises.ts && bun scripts/check-promise-sinks.ts`
+- [x] UI E2E smoke: `bun run e2e:ui -- --grep @smoke`
+- [x] Black-box E2E: `bun run e2e`
+- [x] agent-fs: `cd "$AFS" && bun run typecheck && bun run test && bun run scripts/e2e.ts "bun run packages/cli/src/index.ts --" --local-only`
+- [x] Flag off: with `COMB_ENABLED` unset, `/status` reports `agent_fs.comb.enabled=false`, the nav has no Comb item, `POST /api/comb/review-batches` answers 404, and task attachment links still point at `live.agent-fs.dev`.
+- [x] Full loop (step-14 QA doc) passes locally with a real lead + worker.
 - [ ] Manual: after step-15, prod agent-fs `/health` lists `comment-path-prefix`, `drive-members`, `comment-mentions`, `change-stream`, and Taras enables `COMB_ENABLED` on the prod swarm and runs one review loop on a real file.
 
 ## Appendix
