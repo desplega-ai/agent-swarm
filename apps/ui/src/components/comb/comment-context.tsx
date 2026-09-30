@@ -13,6 +13,8 @@ export interface CommentContextValue {
   /** agent-fs answered 403 on a comment write: the human is a drive viewer. */
   readOnly: boolean;
   markReadOnly: () => void;
+  /** step-10: `author → authorDisplayName` over the file's loaded comments and replies. */
+  authorNames: ReadonlyMap<string, string>;
   /** Step-8 mounts the mention picker here (every composer gets it). */
   renderComposerExtras?: (ctx: ComposerExtrasContext) => ReactNode;
 }

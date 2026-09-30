@@ -30,7 +30,7 @@ import { useCommentAnchors } from "@/hooks/use-comment-anchors";
 import { useConfig } from "@/hooks/use-config";
 import type { CommentAddParams, CommentListEntry, StatResult } from "@/lib/agent-fs/types";
 import type { AnchorResolution } from "@/lib/comb/comment-anchor";
-import { COMMENT_LIST_MAX } from "@/lib/comb/comments";
+import { COMMENT_LIST_MAX, commentAuthorNames } from "@/lib/comb/comments";
 import type { DomTextSpace } from "@/lib/comb/dom-text-space";
 import { browserStorage, type OutboxEntry, sweepExpiredDrafts } from "@/lib/comb/drafts";
 import type { DrivePath } from "@/lib/comb/paths";
@@ -95,6 +95,19 @@ export interface CommentRailProps {
   railHeaderActions?: (ctx: { file: DrivePath; open: CommentListEntry[] }) => ReactNode;
   /** Composer mount point: step-8 mention picker. Every composer of the file gets it. */
   renderComposerExtras?: (ctx: ComposerExtrasContext) => ReactNode;
+  /**
+   * step-10: read-only (a 403 on a write), owned by the page so the rail and
+   * the review share it.
+   */
+  readOnly: boolean;
+  onReadOnly: () => void;
+  /**
+   * step-10: URL params that put something other than the file in the viewer
+   * pane (`diff`, the review). Selecting a card removes them in the same
+   * navigation, so the thread shows in the file. When one is set, the
+   * narrow-layout sheet closes and a deep link does not open it.
+   */
+  viewerParams?: readonly string[];
 }
 
 /**
@@ -110,6 +123,9 @@ export function CommentRail({
   threadActions,
   railHeaderActions,
   renderComposerExtras,
+  readOnly,
+  onReadOnly,
+  viewerParams,
 }: CommentRailProps) {
   const access = useAgentFsAccess();
   const { apiUrl } = useConfig().config;
@@ -117,13 +133,13 @@ export function CommentRail({
   const threads = query.data?.threads ?? NO_THREADS;
   const open = useMemo(() => threads.filter((thread) => !thread.resolved), [threads]);
   const resolved = useMemo(() => threads.filter((thread) => thread.resolved), [threads]);
+  const authorNames = useMemo(() => commentAuthorNames(threads), [threads]);
   const queryClient = useQueryClient();
   const reduceMotion = useReducedMotion() ?? false;
 
   // Expired drafts of any file go once the rail mounts.
   useEffect(() => sweepExpiredDrafts(browserStorage(), Date.now()), []);
 
-  const [readOnly, setReadOnly] = useState(false);
   const scope = useMemo(
     () => ({
       apiUrl,
@@ -167,25 +183,37 @@ export function CommentRail({
   // The `?comment=` link this rail has already selected (and scrolled to).
   const linkRef = useRef<{ id: string; scrolled: boolean } | null>(null);
 
+  // step-10: what the viewer pane shows instead of the file ("" = the file).
+  const viewerState = viewerParams?.map((name) => searchParams.get(name) ?? "").join("") ?? "";
+
   const activate = useCallback(
     (id: string) => {
       setActiveId(id);
-      linkRef.current = { id, scrolled: true };
       setSearchParams(
         (params) => {
           const next = new URLSearchParams(params);
           next.set("comment", id);
+          // step-10: leave the review in the same navigation.
+          for (const name of viewerParams ?? []) next.delete(name);
           return next;
         },
         { replace: true },
       );
+      if (viewerState) {
+        // step-10: the file renders next. The deep-link effect scrolls to the
+        // passage once it resolves.
+        linkRef.current = { id, scrolled: false };
+        setSheetOpen(false);
+        return;
+      }
+      linkRef.current = { id, scrolled: true };
       const anchor = anchors.get(id);
       if (scrollToPassage(space, anchor, reduceMotion)) setSheetOpen(false);
       else if (anchor?.status === "lost") {
         toast.info("The text this comment pointed to is no longer in the file.");
       }
     },
-    [anchors, space, reduceMotion, setSearchParams],
+    [anchors, space, reduceMotion, setSearchParams, viewerParams, viewerState],
   );
 
   // Deep link `?comment=<id>`: once the thread loads, open its tab (and the
@@ -200,14 +228,19 @@ export function CommentRail({
       if (!thread) return;
       setTab(thread.resolved ? "resolved" : "open");
       setActiveId(linkedId);
-      if (!wide) setSheetOpen(true);
+      if (!wide && !viewerState) setSheetOpen(true);
       link = { id: linkedId, scrolled: false };
       linkRef.current = link;
     }
     if (!link.scrolled && scrollToPassage(space, anchors.get(linkedId), reduceMotion)) {
       link.scrolled = true;
     }
-  }, [linkedId, threads, anchors, space, wide, reduceMotion]);
+  }, [linkedId, threads, anchors, space, wide, reduceMotion, viewerState]);
+
+  // step-10: a review opened (from "Review changes" in the sheet): the sheet gives way to it.
+  useEffect(() => {
+    if (viewerState) setSheetOpen(false);
+  }, [viewerState]);
 
   // Keep the selected or doc-hovered card in view in the rail.
   const listRef = useRef<HTMLDivElement>(null);
@@ -241,10 +274,11 @@ export function CommentRail({
       scope,
       outbox,
       readOnly,
-      markReadOnly: () => setReadOnly(true),
+      markReadOnly: onReadOnly,
+      authorNames,
       renderComposerExtras,
     }),
-    [file, scope, outbox, readOnly, renderComposerExtras],
+    [file, scope, outbox, readOnly, onReadOnly, authorNames, renderComposerExtras],
   );
 
   const rail = (

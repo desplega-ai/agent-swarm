@@ -1,9 +1,11 @@
 import { AlertCircle, FileX } from "lucide-react";
-import { type ReactNode, useRef } from "react";
-import { Link, Navigate } from "react-router-dom";
+import { type ReactNode, useReducer, useRef } from "react";
+import { Link, Navigate, useSearchParams } from "react-router-dom";
 import { useAgentFsLs, useAgentFsStat } from "@/api/hooks/use-agent-fs";
 import { CommentRail } from "@/components/comb/comment-rail";
 import { FileHeader } from "@/components/comb/file-header";
+import { ReviewChangesButton } from "@/components/comb/review/review-changes-button";
+import { ReviewPanel, ReviewRangeNotice } from "@/components/comb/review/review-panel";
 import { FileViewer } from "@/components/comb/viewers/file-viewer";
 import { ViewerSkeleton } from "@/components/comb/viewers/viewer-skeleton";
 import { EmptyState } from "@/components/shared/empty-state";
@@ -12,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { AgentFsError } from "@/lib/agent-fs/client";
 import type { StatResult } from "@/lib/agent-fs/types";
 import { combPath, type DrivePath, parentFolder } from "@/lib/comb/paths";
+import { DIFF_PARAM, parseDiffRange, reviewRangeNotice } from "@/lib/comb/review";
 
 /**
  * One file: the header, then the viewer in its own scroll pane. A folder URL
@@ -48,9 +51,20 @@ export function FileView({ file }: { file: DrivePath }) {
   return <ViewerSkeleton />;
 }
 
+// step-10: the review (`?diff=`) replaces the file in the viewer pane.
+const VIEWER_PARAMS = [DIFF_PARAM];
+
 function FileBody({ file, stat }: { file: DrivePath; stat: StatResult }) {
   // Comment anchors, selection, and highlights live in the viewer pane.
   const viewerRef = useRef<HTMLDivElement>(null);
+  // step-10: one read-only flag for the rail and the review. A 403 on any write sets it.
+  const [readOnly, markReadOnly] = useReducer(() => true, false);
+  // step-10: `?diff=<from>..<to>` shows the review (the diff) in place of the
+  // viewer. A range this file cannot show opens the file with a notice.
+  const [searchParams] = useSearchParams();
+  const requested = parseDiffRange(searchParams.get(DIFF_PARAM));
+  const notice = requested ? reviewRangeNotice(requested, file.path, stat) : null;
+  const review = notice ? null : requested;
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3">
       <FileHeader file={file} stat={stat} />
@@ -59,10 +73,35 @@ function FileBody({ file, stat }: { file: DrivePath; stat: StatResult }) {
           ref={viewerRef}
           className="min-h-[24rem] min-w-0 flex-1 overflow-auto rounded-xl border border-border bg-card lg:min-h-0"
         >
-          <FileViewer file={file} stat={stat} />
+          {review ? (
+            <ReviewPanel
+              key={`${review.from}..${review.to}`}
+              file={file}
+              stat={stat}
+              range={review}
+              readOnly={readOnly}
+              onReadOnly={markReadOnly}
+            />
+          ) : (
+            <>
+              {notice ? <ReviewRangeNotice message={notice} /> : null}
+              <FileViewer file={file} stat={stat} />
+            </>
+          )}
         </div>
         {/* Comment rail (step-7). Mount points: threadActions, railHeaderActions, renderComposerExtras. */}
-        <CommentRail file={file} stat={stat} viewerRef={viewerRef} />
+        <CommentRail
+          file={file}
+          stat={stat}
+          viewerRef={viewerRef}
+          // step-10: the shared read-only flag, the review param, and "Review changes (vX → vY)".
+          readOnly={readOnly}
+          onReadOnly={markReadOnly}
+          viewerParams={VIEWER_PARAMS}
+          threadActions={(thread) => (
+            <ReviewChangesButton file={file} stat={stat} thread={thread} />
+          )}
+        />
       </div>
     </div>
   );

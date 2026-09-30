@@ -102,6 +102,21 @@ export function versionAt(
   return found ?? (complete ? undefined : oldest);
 }
 
+/**
+ * The file version a comment was made on: its `fileVersion`, else the one
+ * `versionAt` finds in the file's `log` (newest first, at most
+ * `COMB_LOG_LIMIT` entries). Undefined when neither knows.
+ */
+export function commentFileVersion(
+  comment: { fileVersion?: number; createdAt: string },
+  versions: ReadonlyArray<{ version: number; createdAt: string }> | undefined,
+): number | undefined {
+  if (comment.fileVersion != null) return comment.fileVersion;
+  return versions
+    ? versionAt(versions, comment.createdAt, versions.length < COMB_LOG_LIMIT)
+    : undefined;
+}
+
 /** The file's `log` as `anchorInputs` sees it. */
 export interface AnchorLog {
   /** The log is still loading: comments that need it wait. */
@@ -111,7 +126,7 @@ export interface AnchorLog {
 
 /**
  * The anchor input of every anchored comment (file-level comments have
- * none). A comment without `fileVersion` takes it from the log (`versionAt`),
+ * none). A comment without `fileVersion` takes it from the log (`commentFileVersion`),
  * and waits while the log loads rather than trust its stored lines too early.
  */
 export function anchorInputs(
@@ -119,16 +134,23 @@ export function anchorInputs(
   currentVersion: number | undefined,
   log: AnchorLog,
 ): Array<{ id: string; version?: number; input: AnchorInput }> {
-  const complete = (log.versions?.length ?? 0) < COMB_LOG_LIMIT;
   const out: Array<{ id: string; version?: number; input: AnchorInput }> = [];
   for (const comment of comments) {
-    let fileVersion = comment.fileVersion;
-    if (fileVersion == null) {
-      if (log.loading) continue;
-      fileVersion = log.versions ? versionAt(log.versions, comment.createdAt, complete) : undefined;
-    }
+    if (comment.fileVersion == null && log.loading) continue;
+    const fileVersion = commentFileVersion(comment, log.versions);
     const entry = commentAnchorInput({ ...comment, fileVersion }, currentVersion);
     if (entry) out.push({ id: comment.id, ...entry }); // null: file-level comment
   }
   return out;
+}
+
+/** `author → authorDisplayName` over every loaded comment and reply that has a name. */
+export function commentAuthorNames(threads: readonly CommentListEntry[]): Map<string, string> {
+  const names = new Map<string, string>();
+  for (const thread of threads) {
+    for (const entry of [thread, ...thread.replies]) {
+      if (entry.authorDisplayName) names.set(entry.author, entry.authorDisplayName);
+    }
+  }
+  return names;
 }
