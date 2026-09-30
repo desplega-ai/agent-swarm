@@ -59,7 +59,7 @@ export function FolderComments({ folder }: { folder: DrivePath }) {
           <div key={path} className="border-b border-border-subtle px-3 py-2 last:border-b-0">
             <Link
               to={combPath({ ...folder, path })}
-              className="font-mono text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+              className="rounded-sm font-mono text-xs text-muted-foreground underline-offset-2 outline-none hover:text-foreground hover:underline focus-visible:ring-2 focus-visible:ring-ring/60"
             >
               {path.slice(folder.path.length) || path}
             </Link>
@@ -68,7 +68,7 @@ export function FolderComments({ folder }: { folder: DrivePath }) {
                 <li key={thread.id}>
                   <Link
                     to={`${combPath({ ...folder, path })}?comment=${encodeURIComponent(thread.id)}`}
-                    className="hover-linger flex min-w-0 items-baseline gap-2 rounded-md px-1.5 py-1 text-sm transition-colors hover:bg-accent/50"
+                    className="hover-linger flex min-w-0 items-baseline gap-2 rounded-md px-1.5 py-1 text-sm outline-none transition-colors hover:bg-accent/50 focus-visible:bg-accent/50 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/60"
                   >
                     <span className="max-w-[40%] shrink-0 truncate text-xs font-medium">
                       {thread.authorDisplayName || authorLabel(thread.author)}

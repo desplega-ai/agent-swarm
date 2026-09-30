@@ -50,7 +50,7 @@ export function CombBreadcrumbs({ location }: { location: CombLocation }) {
                 ) : (
                   <Link
                     to={combPath({ ...location, path })}
-                    className="block truncate transition-colors hover:text-foreground"
+                    className="block truncate rounded-sm outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60"
                   >
                     {label}
                   </Link>

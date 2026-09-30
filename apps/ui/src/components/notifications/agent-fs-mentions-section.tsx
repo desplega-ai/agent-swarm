@@ -98,7 +98,7 @@ function MentionItem({
     <Link
       to={to}
       onClick={onOpen}
-      className="hover-linger flex gap-2.5 px-4 py-2 outline-none transition-colors hover:bg-accent/50 focus-visible:bg-accent/50"
+      className="hover-linger flex gap-2.5 px-4 py-2 outline-none transition-colors hover:bg-accent/50 focus-visible:bg-accent/50 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/60"
     >
       <span
         aria-hidden

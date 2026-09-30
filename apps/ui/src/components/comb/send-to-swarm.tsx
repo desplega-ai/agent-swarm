@@ -252,7 +252,7 @@ function SendBatchDialog({
                   checked={checked.has(thread.id)}
                   disabled={full && !checked.has(thread.id)}
                   onChange={() => toggle(thread.id)}
-                  className="mt-0.5 size-4 shrink-0 rounded border-input accent-primary"
+                  className="mt-0.5 size-4 shrink-0 rounded border-input accent-primary outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
                 />
                 <span className="flex min-w-0 flex-col gap-0.5">
                   <span className="flex min-w-0 items-baseline gap-1.5 text-xs text-muted-foreground">

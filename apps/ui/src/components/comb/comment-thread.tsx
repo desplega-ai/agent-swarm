@@ -270,7 +270,12 @@ export function CommentThread({
       </header>
 
       {quote ? (
-        <button type="button" onClick={activate} title="Show in the file" className="text-left">
+        <button
+          type="button"
+          onClick={activate}
+          title="Show in the file"
+          className="rounded-sm text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+        >
           <QuoteExcerpt text={quote} struck={anchor?.status === "lost"} />
         </button>
       ) : null}
