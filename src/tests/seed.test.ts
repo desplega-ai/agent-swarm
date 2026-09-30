@@ -131,6 +131,45 @@ describe("seeder harness — versioning rule", () => {
     expect(upstream.get("x")).toBe("h-x2");
   });
 
+  test("edited then reset to current source -> re-baselined, and later source changes apply", async () => {
+    const source = new Map([["r", "h-A"]]);
+    const upstream = new Map<string, string>();
+    const seeder = makeFakeSeeder("reset-test", source, upstream);
+
+    await runSeeder(seeder, { quiet: true }); // seededHash=A, live=A
+    source.set("r", "h-B"); // source moves to B
+    upstream.set("r", "h-B"); // live was edited, then reset to byte-identical B
+
+    const first = await runSeeder(seeder, { quiet: true });
+    expect(first.updated).toBe(0);
+    expect(first.skippedUnchanged).toBe(1);
+    expect(first.skippedUserModified).toBe(0);
+    expect((await getSeedState("reset-test", "r"))?.seededHash).toBe("h-B");
+
+    source.set("r", "h-C"); // a later upstream change must now land
+    const second = await runSeeder(seeder, { quiet: true });
+    expect(second.updated).toBe(1);
+    expect(second.skippedUserModified).toBe(0);
+    expect(upstream.get("r")).toBe("h-C");
+    expect((await getSeedState("reset-test", "r"))?.seededHash).toBe("h-C");
+  });
+
+  test("edited to a hash matching neither seed state nor source -> still preserved", async () => {
+    const source = new Map([["u", "h-A"]]);
+    const upstream = new Map<string, string>();
+    const seeder = makeFakeSeeder("reset-preserve-test", source, upstream);
+
+    await runSeeder(seeder, { quiet: true }); // seededHash=A
+    source.set("u", "h-B");
+    upstream.set("u", "h-X");
+
+    const result = await runSeeder(seeder, { quiet: true });
+    expect(result.updated).toBe(0);
+    expect(result.skippedUserModified).toBe(1);
+    expect(upstream.get("u")).toBe("h-X");
+    expect((await getSeedState("reset-preserve-test", "u"))?.seededHash).toBe("h-A");
+  });
+
   test("pre-existing entity differing from source with no seed state -> preserved (conservative)", async () => {
     const source = new Map([["y", "h-src"]]);
     const upstream = new Map([["y", "h-pre-existing"]]); // pre-exists, never seeded
