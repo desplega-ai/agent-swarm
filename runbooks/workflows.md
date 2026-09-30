@@ -405,6 +405,19 @@ Every row is checked by a test that feeds a laya-shaped result through the same 
 - **`model` is not defaulted.** laya answers a `model` it does not know with HTTP 200 and routes on the text instead (`jev-latest` and a typo both went to `english`), so a default would be sent as if it meant something. Leaving `model` unset auto-routes. A `model` you set is sent as written, and a misspelled one is still ignored by laya: read `routing.model` to see which checkpoint answered.
 - **Which confidence.** laya reports two numbers for a `choice` or `score`. Its `confidence` is entropy-based (a top probability of 0.47 reads about 0.15). Its `answer_confidence` is the top probability. The node reads `answer_confidence`, so `output.answers.<q>.confidence` and the `humanReview` band are the top probability. Reason: a `noul` answer's band number is already the probability of the side taken, and the band is one number per node, so it now means the same on every question type. Cost: laya's entropy-based number, which also reflects how the rest of the probability is spread, is not kept; a band copied from a TypeSafe workflow still needs tuning, and a laya server that omits `answer_confidence` fails the step (`answers.<q>.answer_confidence must be a finite number between 0 and 1`) rather than quietly falling back to the other number.
 - **The key is required.** A laya server that runs without a token is not supported by this provider: the preflight asks for `LAYA_API_KEY`.
+- **Prefer `choice` over `noul` on laya for now.** Observed on laya-server 0.1.0: a `noul` sentiment question returned close to 0 for every input, clearly positive text included, while the same judgment as a three-way `choice` answered positive 0.94, negative 0.98, and mixed 0.71. This is a model observation, not a node rule; the node accepts `noul` on laya and validates it as on any provider. Check a `noul` question against known inputs before routing on it.
+
+A complete workflow (setup, a manual trigger, this node with a review band, and a branch on the answer) is the "Example: a laya decision end to end" section of [concepts/workflows.mdx](../docs-site/content/docs/(documentation)/concepts/workflows.mdx).
+
+#### Self-hosting: running your own laya server
+
+A swarm that uses `provider: laya` needs a laya server of its own. Nothing goes through a desplega API: the swarm's API server POSTs to `${LAYA_URL}/v1/systemone` with `Authorization: Bearer ${LAYA_API_KEY}` (`SYSTEM_ONE_PROVIDERS` in `src/workflows/executors/system-one-providers.ts`, request in `system-one-decision.ts`).
+
+- **Run the server.** Install `@desplega.ai/laya-server` from npm (Node 22+), or build the image from laya-js's Dockerfile; no container image is published. laya-js has a Kubernetes example in `deploy/k8s` and per-platform guides in [docs/deploy](https://github.com/desplega-ai/laya-js/tree/main/docs/deploy). The weights download from the public Hugging Face repo `desplega/laya-onnx` with no token.
+- **Reachability.** `LAYA_URL` must be reachable from the swarm's API server, not from the workers. It must be `https`, except for `localhost`.
+- **The key.** Set the same value as `LAYA_API_KEY` in the laya server's environment and as the swarm's global secret. laya-server accepts unauthenticated calls when its `LAYA_API_KEY` is unset, but the swarm always requires the secret.
+- **Sizing.** laya-js's docs size one fp32 checkpoint at about 3 GB of RAM, and the Kubernetes example requests 1 CPU with a 3 GiB limit. Its own evals measured the Docker image peaking at 7.0 GB RSS under load (laya-js PR #12, Phase 10); a fix is in progress. Until it lands, give the container about 8 GB, not 3 GiB.
+- **No laya server?** Keep the default `typesafe` provider, which needs only `TYPESAFE_API_KEY`.
 
 ### Thresholds, retries, and credentials
 

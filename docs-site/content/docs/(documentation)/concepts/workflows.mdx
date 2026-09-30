@@ -120,6 +120,80 @@ The swarm checks a `system-one-decision` node's key before first use. Set `TYPES
 - **Starting a run** fails before any node executes when the key is missing. The run is recorded as `failed` with no steps and no request sent. Retrying a failed run is refused, and the run stays failed, while a node still to run needs a missing key.
 - **A key the provider refuses** (HTTP 401 or 403) fails the step with `<KEY> was rejected by <provider>` and is not retried.
 
+#### Example: a laya decision end to end
+
+This workflow classifies a text with `provider: laya`, sends borderline answers to a person, and branches on the result. It is the definition of the `system-one-decision-demo` workflow that was run live against laya.
+
+1. **Run your own laya server.** Calls do not go through any desplega API: your swarm's API server calls your laya server directly, so it must be able to reach it. laya is `@desplega.ai/laya-server` from [laya-js](https://github.com/desplega-ai/laya-js), on npm or built from its Dockerfile (no image is published). The [deploy guide](https://github.com/desplega-ai/laya-js/tree/main/docs/deploy) covers Docker, Kubernetes, and hosted platforms. It runs on CPU; plan for about 8 GB of RAM for now, since the Docker image has been measured peaking at 7 GB under load. Give the server a `LAYA_API_KEY` and wait for `GET /health` to return `status: "ok"`. Without a laya server, use the default `typesafe` provider instead.
+2. **Point the swarm at it.** Set `LAYA_URL` to the server's base URL as a global config value (`set-config`, scope `global`, not secret). Set `LAYA_API_KEY` to the same token you gave the server as a global secret on the Secrets page (Settings > Secrets). The URL must be `https`; plain `http` is accepted for `localhost` only.
+3. **Create the workflow** with a manual trigger:
+
+```json
+{
+  "name": "system-one-decision-demo",
+  "triggerSchema": { "type": "object", "required": ["text"], "properties": { "text": { "type": "string" } } },
+  "definition": {
+    "onNodeFailure": "fail",
+    "nodes": [
+      {
+        "id": "decide",
+        "type": "system-one-decision",
+        "inputs": { "text": "trigger.text" },
+        "config": {
+          "provider": "laya",
+          "state": "{{text}}",
+          "questions": {
+            "sentiment": {
+              "type": "choice",
+              "instructions": "What is the sentiment of this customer review?",
+              "criteria": { "positive": "satisfied", "negative": "unhappy", "mixed": "both good and bad" }
+            }
+          },
+          "returns": { "sentiment": { "type": "choice" } },
+          "timeoutMs": 30000,
+          "maxRetries": 1,
+          "humanReview": {
+            "band": { "min": 0.5, "max": 0.8 },
+            "approvers": { "roles": ["lead"], "policy": "any" },
+            "title": "Borderline laya answer",
+            "timeout": { "seconds": 900, "action": "reject" }
+          }
+        },
+        "next": { "approved": "gate", "rejected": "rejected-end", "timeout": "timeout-end" }
+      },
+      {
+        "id": "gate",
+        "type": "property-match",
+        "inputs": { "s": "decide.answers.sentiment.choice" },
+        "config": { "conditions": [{ "field": "s", "op": "eq", "value": "positive" }], "mode": "all" },
+        "next": { "true": "pass-end", "false": "fail-end" }
+      },
+      { "id": "pass-end", "type": "script", "config": { "runtime": "bash", "script": "echo pass" } },
+      { "id": "fail-end", "type": "script", "config": { "runtime": "bash", "script": "echo fail" } },
+      { "id": "rejected-end", "type": "script", "config": { "runtime": "bash", "script": "echo rejected" } },
+      { "id": "timeout-end", "type": "script", "config": { "runtime": "bash", "script": "echo timeout" } }
+    ]
+  }
+}
+```
+
+Set `approvers` to whoever reviews the borderline answers. Replace the `script` end nodes with the real work for each branch.
+
+4. **Trigger it** with `trigger-workflow` (`triggerData: { "text": "..." }`), the dashboard, or `POST /api/workflows/<id>/trigger` with the body `{ "text": "..." }`.
+5. **Read the result** on the `decide` step. `answers.sentiment.choice` is the label, `answers.sentiment.confidence` is laya's top probability, and `routing.model` is the checkpoint that answered (`english` for English text; laya picks it from the text because the node sends no `model`). When the confidence falls in the band, the run waits on an approval; after it resolves, `review.status` says how and `review.questions.sentiment.decidedBy` says whether the model or a person produced the answer.
+
+The live runs of this definition:
+
+| Input | Answer | Confidence | Path |
+|---|---|---|---|
+| Clearly positive review | `positive` | 0.94 | `approved` → `gate` → `pass-end` |
+| Clearly negative review | `negative` | 0.98 | `approved` → `gate` → `fail-end` |
+| Mixed review | `mixed` | 0.71 | in the band: waited, a person approved, then `gate` → `fail-end` |
+
+Each laya call took under 0.7 s.
+
+Prefer `choice` questions on laya for now. On laya-server 0.1.0, a `noul` question asking whether the review was positive returned close to 0 for every input, including clearly positive ones, while the same judgment as a `choice` answered correctly. Check a `noul` question against a few known inputs before you rely on it.
+
 ### Foreach fan-out
 
 A `foreach` node resolves `config.over` to an array, creates one `agent-task` child for each item, waits for all children to finish, and exposes an aggregate result to its successor. Use an exact interpolation token for `over` so the value remains an array; `itemKey` must identify a unique, non-empty string property on every item.
