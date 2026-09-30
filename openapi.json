@@ -2049,7 +2049,8 @@
             "enum": [
               "page",
               "workflow",
-              "schedule"
+              "schedule",
+              "agent-fs-path"
             ]
           },
           "itemId": {
@@ -18235,7 +18236,8 @@
               "enum": [
                 "page",
                 "workflow",
-                "schedule"
+                "schedule",
+                "agent-fs-path"
               ]
             },
             "required": false,
@@ -18313,7 +18315,8 @@
                     "enum": [
                       "page",
                       "workflow",
-                      "schedule"
+                      "schedule",
+                      "agent-fs-path"
                     ]
                   },
                   "itemId": {
@@ -18349,7 +18352,8 @@
                       "enum": [
                         "page",
                         "workflow",
-                        "schedule"
+                        "schedule",
+                        "agent-fs-path"
                       ]
                     },
                     "itemId": {

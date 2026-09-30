@@ -1044,7 +1044,7 @@ export type InboxItemState = z.infer<typeof InboxItemStateSchema>;
 // User Favorites (principal-scoped stars for app navigation)
 // ============================================================================
 
-export const FavoriteItemTypeSchema = z.enum(["page", "workflow", "schedule"]);
+export const FavoriteItemTypeSchema = z.enum(["page", "workflow", "schedule", "agent-fs-path"]);
 export type FavoriteItemType = z.infer<typeof FavoriteItemTypeSchema>;
 
 export const UserFavoriteSchema = z

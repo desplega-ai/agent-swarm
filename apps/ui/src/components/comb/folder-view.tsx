@@ -4,6 +4,7 @@ import { useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAgentFsLs } from "@/api/hooks/use-agent-fs";
 import { OpenInAgentFsButton } from "@/components/comb/file-actions";
+import { PinButton } from "@/components/comb/pin-button";
 import { useAuthorLabel } from "@/components/comb/use-author-label";
 import { DataGrid } from "@/components/shared/data-grid";
 import { EmptyState } from "@/components/shared/empty-state";
@@ -124,7 +125,8 @@ export function FolderView({ folder }: { folder: DrivePath }) {
         description={count}
         action={
           <>
-            {/* Folder actions: later steps add buttons here (step-12 pin). */}
+            {/* Folder actions: later steps add buttons here. The root is the Comb item, so no pin. */}
+            {folder.path === "/" ? null : <PinButton target={folder} />}
             <OpenInAgentFsButton target={folder} />
           </>
         }

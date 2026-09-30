@@ -4,8 +4,12 @@ import {
   baseName,
   childPath,
   combPath,
+  drivePins,
   parentFolder,
   parseCombSplat,
+  parsePinId,
+  pinIdFor,
+  pinLabel,
   resolveRelative,
 } from "./paths";
 
@@ -132,5 +136,57 @@ describe("resolveRelative", () => {
     expect(resolveRelative(from, "mailto:a@b.c")).toBeNull();
     expect(resolveRelative(from, "//cdn.example.com/x.js")).toBeNull();
     expect(resolveRelative(from, "")).toBeNull();
+  });
+});
+
+describe("pins", () => {
+  test("pinIdFor and parsePinId round-trip files, folders, and the root", () => {
+    for (const path of [
+      "/comb-qa/",
+      "/comb-qa/notes.md",
+      "/",
+      "/my docs/Q3 plan 100%.md",
+      "/a/%20literal/",
+      "/%E2%9C%93 done.md",
+    ]) {
+      const id = pinIdFor({ ...IDS, path });
+      expect(parsePinId(id)).toEqual({ ...IDS, path });
+    }
+    expect(pinIdFor({ ...IDS, path: "/comb-qa/" })).toBe("org-1/drive-1/comb-qa/");
+    expect(pinIdFor({ ...IDS, path: "/" })).toBe("org-1/drive-1/");
+  });
+
+  test("parsePinId rejects ids without an org and a drive, and dot segments", () => {
+    expect(parsePinId("")).toBeNull();
+    expect(parsePinId("org-1")).toBeNull();
+    expect(parsePinId("org-1/drive-1")).toBeNull();
+    expect(parsePinId("/drive-1/a.md")).toBeNull();
+    expect(parsePinId("org-1//a.md")).toBeNull();
+    expect(parsePinId("org-1/drive-1/../a.md")).toBeNull();
+    expect(parsePinId("org-1/drive-1/a/./b.md")).toBeNull();
+  });
+
+  test("pinLabel", () => {
+    expect(pinLabel("/comb-qa/")).toBe("comb-qa/");
+    expect(pinLabel("/comb-qa/notes.md")).toBe("notes.md");
+    expect(pinLabel("/")).toBe("/");
+  });
+
+  test("drivePins keeps one drive, the newest `limit` pins, sorted by label", () => {
+    const ids = [
+      "org-1/drive-1/z.md",
+      "org-1/drive-2/other.md",
+      "org-1/drive-1/b/",
+      "not-a-pin",
+      "org-1/drive-1/docs/a10.md",
+      "org-1/drive-1/a2.md",
+    ];
+    expect(drivePins(ids, IDS).map((pin) => pin.path)).toEqual([
+      "/a2.md",
+      "/docs/a10.md",
+      "/b/",
+      "/z.md",
+    ]);
+    expect(drivePins(ids, IDS, 2).map((pin) => pin.path)).toEqual(["/b/", "/z.md"]);
   });
 });

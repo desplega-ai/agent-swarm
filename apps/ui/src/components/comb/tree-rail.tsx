@@ -3,6 +3,7 @@ import { ChevronRight, File, Folder, FolderOpen } from "lucide-react";
 import { type KeyboardEvent, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { agentFsLsQuery, useAgentFsAccess } from "@/api/hooks/use-agent-fs";
+import { PinnedList } from "@/components/comb/pinned-list";
 import { ancestorFolders, type CombLocation, combPath } from "@/lib/comb/paths";
 import { type FolderListing, flattenTree, visibleFolders } from "@/lib/comb/tree";
 import { cn } from "@/lib/utils";
@@ -24,7 +25,7 @@ function indent(level: number): string {
  * Keyboard: Up/Down move, Right opens or enters a folder, Left closes it or
  * goes to the parent, Home/End jump, Enter opens the row.
  */
-export function TreeRail({
+function DriveTree({
   location,
   onNavigate,
 }: {
@@ -201,5 +202,15 @@ export function TreeRail({
         );
       })}
     </div>
+  );
+}
+
+/** The Comb side rail: the pinned list (step-12) on top of the drive tree. */
+export function TreeRail(props: Parameters<typeof DriveTree>[0]) {
+  return (
+    <>
+      <PinnedList location={props.location} onNavigate={props.onNavigate} />
+      <DriveTree {...props} />
+    </>
   );
 }

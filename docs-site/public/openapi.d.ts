@@ -6219,7 +6219,7 @@ export interface paths {
         get: {
             parameters: {
                 query?: {
-                    itemType?: "page" | "workflow" | "schedule";
+                    itemType?: "page" | "workflow" | "schedule" | "agent-fs-path";
                     itemIds?: string;
                 };
                 header?: never;
@@ -6263,7 +6263,7 @@ export interface paths {
                 content: {
                     "application/json": {
                         /** @enum {string} */
-                        itemType: "page" | "workflow" | "schedule";
+                        itemType: "page" | "workflow" | "schedule" | "agent-fs-path";
                         itemId: string;
                         favorite: boolean;
                     };
@@ -6279,7 +6279,7 @@ export interface paths {
                         "application/json": {
                             favorite: boolean;
                             /** @enum {string} */
-                            itemType: "page" | "workflow" | "schedule";
+                            itemType: "page" | "workflow" | "schedule" | "agent-fs-path";
                             itemId: string;
                             row: components["schemas"]["UserFavorite"] | null;
                         };
@@ -22755,7 +22755,7 @@ export interface components {
             id: string;
             userId?: string;
             /** @enum {string} */
-            itemType: "page" | "workflow" | "schedule";
+            itemType: "page" | "workflow" | "schedule" | "agent-fs-path";
             itemId: string;
             createdAt: string;
             lastUpdatedAt: string;

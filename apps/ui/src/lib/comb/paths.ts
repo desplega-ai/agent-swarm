@@ -127,3 +127,49 @@ export function resolveRelative(
   const body = `/${segments.join("/")}`;
   return { path: isFolder ? `${body}/` : body, suffix };
 }
+
+// Pins (step-12): a favorite with item type `agent-fs-path` and the item id
+// `<orgId>/<driveId>/<path>`. The path is raw (not URL-encoded) and has no
+// leading "/". A folder keeps its trailing "/", so the drive root is
+// `<orgId>/<driveId>/`.
+
+/** The favorite item id of a drive path. */
+export function pinIdFor({ orgId, driveId, path }: DrivePath): string {
+  return `${orgId}/${driveId}/${path.replace(/^\/+/, "")}`;
+}
+
+/** The drive path of a pin id. Null without an org and a drive, or with a "." or ".." segment. */
+export function parsePinId(id: string): DrivePath | null {
+  const [orgId, driveId, ...rest] = id.split("/");
+  if (!orgId || !driveId || rest.length === 0) return null;
+  if (rest.some((segment) => segment === "." || segment === "..")) return null;
+  return { orgId, driveId, path: `/${rest.join("/")}` };
+}
+
+/** The label of a pin: its last segment, plus "/" for a folder. */
+export function pinLabel(path: string): string {
+  if (path === "/") return "/";
+  return isFolderPath(path) ? `${baseName(path)}/` : baseName(path);
+}
+
+/**
+ * The pins of one drive, sorted by label (then by path). `ids` come newest
+ * first, as `GET /api/favorites` lists them, so `limit` keeps the newest pins.
+ */
+export function drivePins(
+  ids: readonly string[],
+  drive: { orgId: string; driveId: string },
+  limit = Number.POSITIVE_INFINITY,
+): DrivePath[] {
+  const pins: DrivePath[] = [];
+  for (const id of ids) {
+    if (pins.length >= limit) break;
+    const pin = parsePinId(id);
+    if (pin && pin.orgId === drive.orgId && pin.driveId === drive.driveId) pins.push(pin);
+  }
+  const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
+  return pins.sort(
+    (a, b) =>
+      collator.compare(pinLabel(a.path), pinLabel(b.path)) || collator.compare(a.path, b.path),
+  );
+}
