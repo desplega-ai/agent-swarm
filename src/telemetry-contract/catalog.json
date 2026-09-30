@@ -703,10 +703,7 @@
         },
         "via": {
           "type": "string",
-          "enum": [
-            "api",
-            "mcp"
-          ],
+          "enum": ["api", "mcp"],
           "description": "Interface that created the workflow. Sent as the property source in v1."
         }
       }
@@ -724,10 +721,7 @@
         },
         "via": {
           "type": "string",
-          "enum": [
-            "api",
-            "mcp"
-          ],
+          "enum": ["api", "mcp"],
           "description": "Interface that deleted the workflow. Sent as the property source in v1."
         }
       }
