@@ -55,6 +55,7 @@ Usage:
   bun src/cli.ts show <runId> [--detail]  # print result matrix (mean±CI; --detail adds best@n/pass@1)
   bun src/cli.ts serve [--port 4801] # API + UI
   bun src/cli.ts registry            # list available scenarios + configs
+  bun src/cli.ts publish --suite 1.0 --run <runId> [--out <dir>]  # freeze a finished matrix run for /benchmark
 
 Defaults: scenarios=${DEFAULT_SCENARIO_IDS.join(",")} configs=${DEFAULT_CONFIG_IDS.join(",")}
 Presets (--preset, repeatable; see run --help): ${CONFIG_PRESETS.map((p) => p.id).join(", ")}
@@ -338,6 +339,40 @@ export function formatShowCell(cell: CellSummary, passThreshold: number, detail:
   return `${head} [best ${best} · @1 ${at1}]`;
 }
 
+async function cmdPublish(argv: string[]): Promise<void> {
+  const { values } = parseArgs({
+    args: argv,
+    options: {
+      suite: { type: "string" },
+      run: { type: "string" },
+      out: { type: "string" },
+    },
+  });
+  if (!values.suite || !values.run) {
+    throw new Error("usage: publish --suite <version> --run <matrixRunId> [--out <dir>]");
+  }
+  const { publishBenchmark } = await import("./benchmark-publish.ts");
+  const db = await initDb();
+  const result = await publishBenchmark(db, {
+    suiteVersion: values.suite,
+    runId: values.run,
+    outDir: values.out,
+  });
+  if (!result.ok) {
+    console.error(`refusing to publish ${SUITE_ID} ${values.suite} from run ${values.run}:`);
+    for (const reason of result.refusals) console.error(`  - ${reason}`);
+    process.exitCode = 1;
+    return;
+  }
+  const { snapshot } = result;
+  console.log(
+    `published ${snapshot.suite.id} ${snapshot.suite.version} from run ${snapshot.run.id}: ${snapshot.scenarios.length} scenarios x ${snapshot.configs.length} configs -> ${result.outDir}`,
+  );
+  console.log(
+    `  ${result.files.length} files; commit them in their own PR (merging it publishes).`,
+  );
+}
+
 function cmdRegistry(): void {
   const registry = loadRegistry();
   console.log("scenarios:");
@@ -373,6 +408,9 @@ if (import.meta.main) {
       }
       case "registry":
         cmdRegistry();
+        break;
+      case "publish":
+        await cmdPublish(rest);
         break;
       default:
         console.log(HELP);

@@ -25,6 +25,10 @@ content hash of each version is pinned in `scenario-hashes.ts`;
   module moves both hashes: bump both, append both hashes, one changelog line
   each.
 
+- **Held-out scenarios** (`HELD_OUT_SCENARIO_IDS` in `suite.ts`) are in the
+  suite, run and scored, but `publish` never writes them into a snapshot.
+  Changing the held-out set changes what a snapshot covers: treat it as MAJOR.
+
 `1.0` is the suite Phase 10 publishes; until then it stays open and Phases 7-8
 add scenarios to it without a MAJOR bump. Nothing published depends on it yet.
 

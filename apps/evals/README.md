@@ -43,7 +43,10 @@ EVALS_DB_PATH=$PWD/evals.db bun --env-file=../../.env src/cli.ts run --scenarios
 EVALS_DB_PATH=$PWD/evals.db bun --env-file=../../.env src/cli.ts resume <runId>   # continue an interrupted run
 EVALS_DB_PATH=$PWD/evals.db bun --env-file=../../.env src/cli.ts show <runId>     # terminal result matrix
 EVALS_DB_PATH=$PWD/evals.db bun --env-file=../../.env src/cli.ts serve            # UI on http://localhost:4801
+EVALS_DB_PATH=$PWD/evals.db bun --env-file=../../.env src/cli.ts publish --suite 1.0 --run <runId>  # freeze a matrix run for /benchmark
 ```
+
+`publish` writes a frozen snapshot plus a disclosure bundle to `benchmark/<suite>/`, which the server serves without auth at `/benchmark`. It refuses a run that is not finished, misses a public scenario × config cell, has any cell under 5 graded attempts, or fails grader validation. Held-out scenarios (`HELD_OUT_SCENARIO_IDS` in `scenarios/suite.ts`) never enter the snapshot. Commit the written directory in its own PR: merging it is what makes the numbers public. Methodology: [docs/methodology.md](docs/methodology.md). For local UI work, `bun scripts/benchmark-fixture.ts /tmp/bm` writes a synthetic snapshot; serve it with `EVALS_BENCHMARK_DIR=/tmp/bm`.
 
 Scheduled-tier presets (`--preset nightly-canary`, `--preset weekly-matrix`) also carry a run plan (repeats and metered cap) that explicit flags override; `--scenarios suite` expands to every scenario of the current suite version. `POST /api/runs` takes the same via `preset` and `maxMeteredUsd`; a `preset` with no `scenarioIds` runs the whole suite. No schedule is switched on: these only name what a run contains.
 

@@ -66,6 +66,7 @@ import {
   SUITE_ANALYTICS_SQL,
   SUITES_SQL,
 } from "./analytics-source.ts";
+import { serveBenchmarkIndex, serveBenchmarkSnapshot } from "./benchmark-routes.ts";
 import {
   createConfig,
   effortLevelsFor,
@@ -539,6 +540,16 @@ export async function startServer(
         }
         return new Response(index);
       },
+      // Public benchmark (Phase 10): the SPA page and its frozen snapshots, no auth.
+      "/benchmark": async () => {
+        const index = Bun.file(join(UI_DIST, "benchmark.html"));
+        if (!(await index.exists())) {
+          return json({ error: "UI not built — run `bun run ui:build` in evals/" }, 500);
+        }
+        return new Response(index);
+      },
+      "/api/public/benchmark": () => serveBenchmarkIndex(),
+      "/api/public/benchmark/:version": (req) => serveBenchmarkSnapshot(req.params.version),
       "/health": () => json({ ok: true }),
       "/api/runs": {
         GET: async (req) => {

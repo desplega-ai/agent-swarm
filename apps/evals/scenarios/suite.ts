@@ -36,6 +36,35 @@ export const SUITE_SCENARIO_VERSIONS: Readonly<Record<string, number>> = {
   "human-in-loop-solo": 1,
 };
 
+/**
+ * Held-out scenarios (plan Q7). They stay in the manifest, run in the weekly
+ * matrix and are scored like the rest, but `publish` never writes them into a
+ * snapshot, so a config tuned to the public scenarios shows up as a gap between
+ * its public and held-out scores. A held-out swarm scenario's `-solo` baseline is
+ * held out with it.
+ *
+ * delegation-chain mirrors delegation-probe (delegation, single agent) and
+ * capability-routing mirrors the four public swarm scenarios; it is also the one
+ * swarm scenario without a solo baseline, so holding it out costs no published
+ * swarm-vs-solo delta.
+ */
+export const HELD_OUT_SCENARIO_IDS: readonly string[] = ["delegation-chain", "capability-routing"];
+
+const SOLO_SUFFIX = "-solo";
+
+/** True for a held-out scenario and for the `-solo` baseline of one. */
+export function isHeldOut(scenarioId: string): boolean {
+  const base = scenarioId.endsWith(SOLO_SUFFIX)
+    ? scenarioId.slice(0, -SOLO_SUFFIX.length)
+    : scenarioId;
+  return HELD_OUT_SCENARIO_IDS.includes(scenarioId) || HELD_OUT_SCENARIO_IDS.includes(base);
+}
+
+/** Manifest scenario ids a snapshot may publish, in manifest order. */
+export function publicSuiteScenarioIds(): string[] {
+  return Object.keys(SUITE_SCENARIO_VERSIONS).filter((id) => !isHeldOut(id));
+}
+
 /** `1.0` when the scenario at that version is in the manifest, else null. */
 export function suiteVersionFor(scenarioId: string, scenarioVersion: number): string | null {
   return SUITE_SCENARIO_VERSIONS[scenarioId] === scenarioVersion ? SUITE_VERSION : null;
