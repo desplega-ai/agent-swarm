@@ -133,12 +133,6 @@ export default function RootLayout({ children }: { children: ReactNode }) {
           minHeight: "100vh",
         }}
       >
-        <a
-          href="#main"
-          className="sr-only focus:not-sr-only focus:fixed focus:top-3 focus:left-3 focus:z-[100] focus:rounded-md focus:border focus:bg-fd-background focus:px-4 focus:py-2 focus:text-sm focus:font-medium focus:text-fd-foreground focus:shadow-lg focus:outline-none focus:ring-2 focus:ring-fd-ring"
-        >
-          Skip to content
-        </a>
         <RootProvider>{children}</RootProvider>
       </body>
     </html>

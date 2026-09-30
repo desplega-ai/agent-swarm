@@ -5,8 +5,8 @@ import { Container } from "fumadocs-ui/layouts/docs/page/slots/container";
 import type { ComponentProps } from "react";
 
 /**
- * Wraps the page in the one `<main>` landmark and gives the layout's "Skip to content"
- * link (`#main`) something to land on. `contents` keeps the box out of the layout grid,
+ * Wraps the page in the one `<main>` landmark.
+ * `contents` keeps the box out of the layout grid,
  * so the article still sits in Fumadocs' `main` grid area.
  */
 function MainContainer(props: ComponentProps<"article">) {
