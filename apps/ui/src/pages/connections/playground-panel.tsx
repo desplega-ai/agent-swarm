@@ -389,6 +389,7 @@ export function PlaygroundPanel({ defaultAgentId }: { defaultAgentId?: string })
               <SelectTrigger
                 ref={agentTriggerRef}
                 className="w-44"
+                aria-label="Run as agent"
                 aria-invalid={agentMissing || undefined}
                 aria-describedby={agentMissing ? "playground-agent-error" : undefined}
               >
