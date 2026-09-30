@@ -22,6 +22,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { useAgentFs } from "@/contexts/agent-fs-context";
 import { useCurrentUser } from "@/contexts/current-user-context";
 import { INTEGRATIONS } from "@/lib/integrations-catalog";
 import { cn, sessionDisplayTitle } from "@/lib/utils";
@@ -79,22 +80,24 @@ const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12
 // Pages use 32-char random-hex IDs (`lower(hex(randomblob(16)))`), not UUIDs.
 const HEX32_REGEX = /^[0-9a-f]{32}$/i;
 
+function decodeSegment(segment: string): string {
+  // Malformed percent escapes ("/%", "/apps/%ZZ") make decodeURIComponent
+  // throw, and the header renders OUTSIDE the route error boundary, so an
+  // uncaught URIError here would take down the whole shell. Show the raw
+  // segment instead.
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    return segment;
+  }
+}
+
 /** Fallback for segments without a routeLabels entry: kebab-case → Title Case
  * ("embed-test" → "Embed Test"). Keeps unknown routes readable without having
  * to register every new path here; routeLabels stays for names automatic
  * casing can't produce ("mcp-servers" → "MCP Servers", "keys" → "API Keys"). */
 function humanizeSegment(segment: string): string {
-  // Malformed percent escapes ("/%", "/apps/%ZZ") make decodeURIComponent
-  // throw — and the header renders OUTSIDE the route error boundary, so an
-  // uncaught URIError here would take down the whole shell. Show the raw
-  // segment instead.
-  let decoded = segment;
-  try {
-    decoded = decodeURIComponent(segment);
-  } catch {
-    // keep the raw segment
-  }
-  return decoded
+  return decodeSegment(segment)
     .split("-")
     .map((word) => (word ? word[0].toUpperCase() + word.slice(1) : word))
     .join(" ");
@@ -128,6 +131,7 @@ export function Breadcrumbs() {
   // draw and no in-page h1 anymore). Called before the early return so hook
   // order stays stable across routes.
   const { user } = useCurrentUser();
+  const { driveId: swarmDriveId } = useAgentFs();
 
   // Detail routes (/<parent>/:id[/...]) get a contextual leaf name fetched
   // from the matching single-entity hook instead of the truncated raw id.
@@ -224,10 +228,15 @@ export function Breadcrumbs() {
     ? (appMeta?.app.definition.pages?.[appPageName]?.title ?? appPageName)
     : undefined;
 
+  // `/file/~/<org>/<drive>/<path>`: `~` and the org id are not routes, so they
+  // are dropped from the trail. The drive reads "Swarm drive" when it is the
+  // swarm's own drive, and file path segments keep their exact names.
+  const isCombPath = parent === "file" && segments[1] === "~";
+
   const crumbs = segments
     .map((segment, index) => {
       const defaultPath = `/${segments.slice(0, index + 1).join("/")}`;
-      const path = routeRedirects[segment] ?? defaultPath;
+      const path = (!isCombPath && routeRedirects[segment]) || defaultPath;
       let label = formatSegment(segment, segments[index - 1]);
       // Pretty-print the detail-id leaf with the resolved entity name. Only the
       // id segment at index 1 is replaced — other path segments keep their
@@ -241,11 +250,22 @@ export function Breadcrumbs() {
       if (index === 2 && metricId && segment === metricId && metricMeta?.title) {
         label = metricMeta.title.trim();
       }
+      if (isCombPath && index === 3) {
+        label =
+          segment === swarmDriveId
+            ? "Swarm drive"
+            : segment.length > 8
+              ? `${segment.slice(0, 8)}...`
+              : segment;
+      }
+      if (isCombPath && index > 3) label = decodeSegment(segment);
       const isLast = index === segments.length - 1;
 
       return { path, label, isLast };
     })
-    .filter((_, index) => !(appPageName && index === 2));
+    .filter(
+      (_, index) => !(appPageName && index === 2) && !(isCombPath && (index === 1 || index === 2)),
+    );
 
   const leaf = crumbs[crumbs.length - 1];
 

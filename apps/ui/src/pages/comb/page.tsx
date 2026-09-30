@@ -20,16 +20,15 @@ import { Button } from "@/components/ui/button";
 import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { PageHeader } from "@/components/ui/page-header";
 import { useAgentFs } from "@/contexts/agent-fs-context";
+import { fileRedirectPath } from "@/lib/agent-fs/state";
 
 /** Comb: the swarm's agent-fs drive, read with the human's own agent-fs key. */
 export default function CombPage() {
   const agentFs = useAgentFs();
   const { orgId: routeOrgId } = useParams();
 
-  // `/file` opens the swarm drive once `/status` names it.
-  if (!routeOrgId && agentFs.endpoint && agentFs.orgId && agentFs.driveId) {
-    return <Navigate to={`/file/~/${agentFs.orgId}/${agentFs.driveId}/`} replace />;
-  }
+  const redirect = fileRedirectPath(routeOrgId, agentFs);
+  if (redirect) return <Navigate to={redirect} replace />;
 
   switch (agentFs.state) {
     case "loading":

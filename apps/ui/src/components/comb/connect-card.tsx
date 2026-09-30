@@ -12,16 +12,15 @@ import { SettingsRow } from "@/components/ui/settings-row";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAgentFs } from "@/contexts/agent-fs-context";
 import { useCurrentUser } from "@/contexts/current-user-context";
-import { AgentFsClient, AgentFsError } from "@/lib/agent-fs/client";
+import { AgentFsClient } from "@/lib/agent-fs/client";
+import {
+  type ConnectFlowDeps,
+  type ConnectOutcome,
+  connectWithKey,
+  createAndConnect,
+} from "./connect-flow";
 
 type ConnectTab = "create" | "paste";
-
-/** A failure with a message written for the person connecting. */
-class ConnectError extends Error {}
-
-function inviteMessage(email: string): string {
-  return `Ask a swarm admin to invite ${email} to the drive.`;
-}
 
 /**
  * Connect this browser to agent-fs as the human (not the swarm): create an
@@ -50,93 +49,57 @@ export function ConnectCard() {
   if (!endpoint) return null;
   const driveReady = orgId !== null && driveId !== null;
 
-  async function hasDriveAccess(client: AgentFsClient): Promise<boolean> {
-    if (!orgId || !driveId) return false;
-    try {
-      await client.callOp(orgId, "ls", { path: "/" }, driveId);
-      return true;
-    } catch (err) {
-      if (err instanceof AgentFsError && (err.status === 403 || err.status === 404)) return false;
-      throw err;
-    }
-  }
-
-  /** Verify the key, get drive access, then save the credential. */
-  async function finish(key: string) {
-    if (!endpoint) return;
-    const client = new AgentFsClient({ endpoint, apiKey: key });
-    const me = await client.getMe();
-    // Invite only without access: the invite sets the role, so an admin who
-    // connects must not be downgraded to editor.
-    if (!(await hasDriveAccess(client))) {
-      try {
-        await api.inviteAgentFsMember({ email: me.email, role: "editor" });
-      } catch {
-        throw new ConnectError(inviteMessage(me.email));
-      }
+  const deps: ConnectFlowDeps = {
+    register: (address) => AgentFsClient.register({ endpoint, email: address }),
+    getMe: (key) => new AgentFsClient({ endpoint, apiKey: key }).getMe(),
+    ls: (key) =>
+      new AgentFsClient({ endpoint, apiKey: key }).callOp(
+        orgId as string,
+        "ls",
+        { path: "/" },
+        driveId as string,
+      ),
+    invite: async (address) => {
+      await api.inviteAgentFsMember({ email: address, role: "editor" });
       void invalidateStatusQuery(queryClient);
-      if (!(await hasDriveAccess(client))) throw new ConnectError(inviteMessage(me.email));
-    }
-    connect({
-      apiKey: key,
-      userId: me.userId,
-      email: me.email,
-      displayName: me.displayName ?? null,
-      connectedAt: new Date().toISOString(),
-    });
-  }
+    },
+    connect,
+  };
 
-  async function run(action: () => Promise<void>) {
+  async function run(action: () => Promise<ConnectOutcome>) {
     setBusy(true);
     setError(null);
-    try {
-      await action();
-    } catch (err) {
-      if (err instanceof ConnectError) setError(err.message);
-      else if (err instanceof AgentFsError && err.status === 401) {
-        setError("agent-fs does not accept this key.");
-      } else setError(err instanceof Error ? err.message : "Could not connect to agent-fs.");
-    } finally {
-      setBusy(false);
+    const outcome = await action();
+    setBusy(false);
+    if (outcome.kind === "email-taken") {
+      setTab("paste");
+      setNotice("This email already has an agent-fs account. Paste its key.");
+    } else if (outcome.kind === "failed") {
+      if (outcome.newKey) {
+        // Keep the new key in the paste field, so the person can copy it and
+        // connect after an admin invites them.
+        setApiKey(outcome.newKey);
+        setTab("paste");
+        setNotice(
+          "Your new agent-fs key is in the field below. Copy it before you leave this page.",
+        );
+      }
+      setError(outcome.message);
     }
   }
 
   function onCreate(event: FormEvent) {
     event.preventDefault();
     const address = email.trim();
-    if (!address || !endpoint) return;
-    void run(async () => {
-      let key: string;
-      try {
-        key = (await AgentFsClient.register({ endpoint, email: address })).apiKey;
-      } catch (err) {
-        if (err instanceof AgentFsError && err.status === 409) {
-          setTab("paste");
-          setNotice("This email already has an agent-fs account. Paste its key.");
-          return;
-        }
-        throw err;
-      }
-      try {
-        await finish(key);
-      } catch (err) {
-        // agent-fs shows a new key only once. Keep it in the paste field, so
-        // the person can copy it and connect after an admin invites them.
-        setApiKey(key);
-        setTab("paste");
-        setNotice(
-          "Your new agent-fs key is in the field below. Copy it before you leave this page.",
-        );
-        throw err;
-      }
-    });
+    if (!address || !driveReady) return;
+    void run(() => createAndConnect(deps, address));
   }
 
   function onPaste(event: FormEvent) {
     event.preventDefault();
     const key = apiKey.trim();
-    if (!key) return;
-    void run(() => finish(key));
+    if (!key || !driveReady) return;
+    void run(() => connectWithKey(deps, key));
   }
 
   function onTabChange(next: string) {

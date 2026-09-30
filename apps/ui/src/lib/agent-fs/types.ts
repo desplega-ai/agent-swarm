@@ -1,9 +1,9 @@
 // agent-fs wire types that Comb uses.
 //
-// Copied from agent-fs `packages/core/src/ops/types.ts` and
-// `live/src/api/types.ts` at commit e713bc6 (v0.14.0). `Date` fields become
-// ISO strings, because these values arrive as JSON. Keep names in sync with
-// the source so more of `live/` can be ported later.
+// `packages/core/src/ops/types.ts` and `live/src/api/types.ts`, copied from
+// agent-fs e713bc6 (main after v0.14.0). `Date` fields become ISO strings,
+// because these values arrive as JSON. Keep names in sync with the source so
+// more of `live/` can be ported later.
 
 /** `GET /health` (public). `features` is absent on older servers. */
 export interface HealthResponse {
