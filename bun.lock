@@ -57,6 +57,7 @@
       "devDependencies": {
         "@biomejs/biome": "^2.3.10",
         "@desplega.ai/slack-mock": "^0.4.0",
+        "@desplega/dummy-probe": "workspace:*",
         "@desplega/model-catalog": "workspace:*",
         "@faker-js/faker": "^10.4.0",
         "@opencode-ai/plugin": "1.18.33",
@@ -185,6 +186,10 @@
         "typescript": "~5.9.3",
         "vite": "^7.3.5",
       },
+    },
+    "packages/dummy-probe": {
+      "name": "@desplega/dummy-probe",
+      "version": "0.0.1",
     },
     "packages/model-catalog": {
       "name": "@desplega/model-catalog",
@@ -378,6 +383,8 @@
     "@desplega.ai/localtunnel": ["@desplega.ai/localtunnel@2.2.0", "", { "dependencies": { "axios": "0.21.4", "debug": "4.3.2", "openurl": "1.1.1", "yargs": "17.1.1" }, "bin": { "lt": "bin/lt.js" } }, "sha512-HK+ML28ey2FzIxutyQEhiJzkKSViGGNzlUV82Zov8SIXS/jAL+yt0O1fW/FV5v2BJGNINifOttP2JYN67bf9qA=="],
 
     "@desplega.ai/slack-mock": ["@desplega.ai/slack-mock@0.4.0", "", { "bin": { "slack-mock": "dist/cli.js" } }, "sha512-2wGXzipl94S4+czfLLjyoNmOEwmhE4XgX7QflU+mTqHoJL9c8eKciygeoQLYhfgpfa2DyfCR+mhbmsV8s8khhQ=="],
+
+    "@desplega/dummy-probe": ["@desplega/dummy-probe@workspace:packages/dummy-probe"],
 
     "@desplega/model-catalog": ["@desplega/model-catalog@workspace:packages/model-catalog"],
 
