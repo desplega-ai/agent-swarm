@@ -86,8 +86,10 @@ export function scenarioHashInputs(
   for (const name of scenarioFixtureFiles(scenario)) {
     fixtures[name] = sha256(readFileSync(join(fixturesDir, name)));
   }
+  // A `-solo` baseline is derived in its swarm scenario's module, so it hashes that source.
+  const sourceFile = `${scenario.baselineOf ?? scenario.id}.ts`;
   const source = sha256(
-    normalizeSourceTokens(readFileSync(join(scenariosDir, `${scenario.id}.ts`), "utf8")),
+    normalizeSourceTokens(readFileSync(join(scenariosDir, sourceFile), "utf8")),
   );
   return { definition, fixtures, source };
 }

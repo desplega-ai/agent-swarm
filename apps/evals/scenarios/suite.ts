@@ -25,6 +25,10 @@ export const SUITE_SCENARIO_VERSIONS: Readonly<Record<string, number>> = {
   "script-authoring": 1,
   "delegation-chain": 2,
   "tool-routing": 1,
+  "fanout-research": 1,
+  "fanout-research-solo": 1,
+  "worker-recovery": 1,
+  "worker-recovery-solo": 1,
 };
 
 /** `1.0` when the scenario at that version is in the manifest, else null. */

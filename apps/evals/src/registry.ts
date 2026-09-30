@@ -1,6 +1,7 @@
 import { getAaForConfig } from "../configs/aa.ts";
 import { configs } from "../configs/index.ts";
 import { scenarios } from "../scenarios/index.ts";
+import { soloVariantId } from "./baseline.ts";
 import { validateConfigModel } from "./cost/resolve-alias.ts";
 import { normalizeOutcome } from "./normalize-outcome.ts";
 import type { Registry } from "./runner/index.ts";
@@ -291,6 +292,63 @@ export function validateScenario(s: Scenario): string[] {
   return errors;
 }
 
+/**
+ * Cross-scenario rules for single-agent baselines (plan Q6). A `-solo` variant
+ * is only a fair baseline while it stays in lockstep with its swarm scenario:
+ * one worker and no lead, the same timeout and budgets, the same version, and a
+ * rubric whose every dimension also exists in the swarm rubric at the same
+ * weight (so the comparison in src/baseline.ts scores both on the same
+ * dimensions). Returns violations prefixed by the offending scenario id.
+ */
+export function validateBaselinePairs(all: Scenario[]): string[] {
+  const errors: string[] = [];
+  const byId = new Map(all.map((s) => [s.id, s]));
+  for (const solo of all) {
+    if (solo.baselineOf === undefined) continue;
+    const at = `scenario "${solo.id}"`;
+    const swarm = byId.get(solo.baselineOf);
+    if (!swarm) {
+      errors.push(`${at}: baselineOf "${solo.baselineOf}" is not a registered scenario`);
+      continue;
+    }
+    if (solo.id !== soloVariantId(swarm.id)) {
+      errors.push(`${at}: a baseline of "${swarm.id}" must be named "${soloVariantId(swarm.id)}"`);
+    }
+    if (swarm.baselineOf !== undefined) {
+      errors.push(`${at}: baselineOf "${swarm.id}" is itself a baseline`);
+    }
+    if (swarm.lead === undefined) {
+      errors.push(`${at}: baselineOf "${swarm.id}" has no lead, so it is not a swarm scenario`);
+    }
+    if (solo.lead !== undefined) errors.push(`${at}: a solo baseline must not have a lead`);
+    if (scenarioWorkerCount(solo.workers) !== 1) {
+      errors.push(`${at}: a solo baseline must boot exactly 1 worker`);
+    }
+    if (solo.seed?.workerFailures?.length) {
+      errors.push(`${at}: a solo baseline must not inject worker failures`);
+    }
+    for (const key of ["version", "timeoutMs", "budgetUsd", "budgetMs"] as const) {
+      if (solo[key] !== swarm[key]) {
+        errors.push(
+          `${at}: ${key} ${solo[key]} differs from "${swarm.id}" (${swarm[key]}); a baseline runs at the same budget`,
+        );
+      }
+    }
+    const swarmDims = new Map(normalizeOutcome(swarm.outcome).dimensions.map((d) => [d.name, d]));
+    for (const dim of normalizeOutcome(solo.outcome).dimensions) {
+      const twin = swarmDims.get(dim.name);
+      if (!twin) {
+        errors.push(`${at}: dimension "${dim.name}" does not exist in "${swarm.id}"`);
+      } else if (twin.weight !== dim.weight) {
+        errors.push(
+          `${at}: dimension "${dim.name}" weight ${dim.weight} differs from "${swarm.id}" (${twin.weight})`,
+        );
+      }
+    }
+  }
+  return errors;
+}
+
 /** DB-backed config rows (harness_configs) layered over the code seeds; null = code only. */
 let dbConfigs: { configs: HarnessConfig[]; archivedIds: Set<string> } | null = null;
 
@@ -330,6 +388,7 @@ export function loadRegistry(): Registry {
       violations.push(`scenario "${scenario.id}": ${error}`);
     }
   }
+  violations.push(...validateBaselinePairs(scenarios));
   for (const config of configs) {
     for (const error of validateConfigModel(config)) {
       violations.push(`config "${config.id}": ${error}`);
@@ -372,6 +431,8 @@ export interface SerializedScenario {
   workerSpecs: SerializedWorkerSpec[] | null;
   /** Null when the scenario defines no lead (v7 §12). */
   lead: SerializedWorkerSpec | null;
+  /** Swarm scenario id this single-agent baseline pairs with (plan Q6); null otherwise. */
+  baselineOf: string | null;
   tasks: {
     title: string;
     description: string;
@@ -429,6 +490,7 @@ export function serializeScenario(s: Scenario): SerializedScenario {
     workers: scenarioWorkerCount(s.workers),
     workerSpecs: Array.isArray(s.workers) ? s.workers.map(serializeWorkerSpec) : null,
     lead: s.lead ? serializeWorkerSpec(s.lead) : null,
+    baselineOf: s.baselineOf ?? null,
     tasks: s.tasks.map((t) => ({
       title: t.title,
       description: t.description,

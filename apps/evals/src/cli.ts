@@ -1,11 +1,19 @@
 import { parseArgs } from "node:util";
 import { DEFAULT_CONFIG_IDS } from "../configs/index.ts";
 import { CONFIG_PRESETS, expandPresetSelection, presetRunDefaults } from "../configs/presets.ts";
-import { DEFAULT_SCENARIO_IDS } from "../scenarios/index.ts";
+import { DEFAULT_SCENARIO_IDS, scenarios } from "../scenarios/index.ts";
 import { SUITE_ID, SUITE_SCENARIO_VERSIONS, SUITE_VERSION } from "../scenarios/suite.ts";
+import { baselinePairs, compareSwarmSolo, formatComparison } from "./baseline.ts";
 import { getResolutionCatalog } from "./cost/catalog.ts";
 import { getDb, initDb } from "./db/client.ts";
-import { createRun, getRun, listAttempts, listRuns, resetErrorAttempts } from "./db/queries.ts";
+import {
+  createRun,
+  getRun,
+  listAttempts,
+  listJudgments,
+  listRuns,
+  resetErrorAttempts,
+} from "./db/queries.ts";
 import { loadRegistry } from "./registry.ts";
 import { type CellSummary, summarizeRun } from "./results.ts";
 import { executeRun, killAllActiveStacks } from "./runner/index.ts";
@@ -275,6 +283,34 @@ async function cmdShow(argv: string[]): Promise<void> {
       `  ${attempt.exclusion === "cancelled" ? "cancelled" : "error"} ${attempt.scenarioId}×${attempt.configId}#${attempt.attemptIndex}: ${attempt.error?.split("\n")[0]}`,
     );
   }
+  // Swarm vs single-agent baseline (plan Q6), for every pair the run covers.
+  const pairs = baselinePairs(scenarios).filter(
+    (p) => run.scenarioIds.includes(p.swarmId) && run.scenarioIds.includes(p.soloId),
+  );
+  if (pairs.length > 0) {
+    console.log("\nswarm vs solo baseline (* = the Δscore CI excludes 0):");
+    for (const pair of pairs) {
+      console.log(`  ${pair.swarmId}: Δscore on ${pair.dimensions.join(" + ")}`);
+      for (const configId of run.configIds) {
+        const load = async (scenarioId: string) =>
+          Promise.all(
+            attempts
+              .filter((a) => a.scenarioId === scenarioId && a.configId === configId)
+              .map(async (attempt) => ({
+                attempt,
+                judgments: await listJudgments(db, attempt.id),
+              })),
+          );
+        const comparison = compareSwarmSolo(
+          pair,
+          configId,
+          await load(pair.swarmId),
+          await load(pair.soloId),
+        );
+        console.log(`    ${formatComparison(comparison)}`);
+      }
+    }
+  }
 }
 
 /**
@@ -305,7 +341,7 @@ export function formatShowCell(cell: CellSummary, passThreshold: number, detail:
 function cmdRegistry(): void {
   const registry = loadRegistry();
   console.log("scenarios:");
-  for (const s of registry.scenarios.values()) console.log(`  ${s.id.padEnd(20)} ${s.name}`);
+  for (const s of registry.scenarios.values()) console.log(`  ${s.id.padEnd(22)} ${s.name}`);
   console.log("configs:");
   for (const c of registry.configs.values())
     console.log(`  ${c.id.padEnd(24)} ${c.provider}${c.model ? ` / ${c.model}` : ""}`);
