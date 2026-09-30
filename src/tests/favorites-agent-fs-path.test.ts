@@ -12,7 +12,6 @@ import { setRequestAuth } from "../utils/request-auth-context";
 // Migration 188 adds the Comb pin item type `agent-fs-path` to user_favorites.
 
 const TEST_DB_PATH = "./test-favorites-agent-fs-path.sqlite";
-const MIGRATION_DB_PATH = "./test-favorites-agent-fs-path-migration.sqlite";
 const MIGRATIONS_DIR = join(import.meta.dir, "../be/migrations");
 
 async function removeDb(path: string): Promise<void> {
@@ -134,13 +133,9 @@ describe("favorites: agent-fs-path item type (fresh DB)", () => {
 });
 
 describe("migration 188 (existing DB)", () => {
-  afterAll(async () => {
-    await removeDb(MIGRATION_DB_PATH);
-  });
-
+  // In memory: the full migration chain on a file DB passed the 10 s test timeout on a loaded CI shard.
   test("keeps every favorite row and the indexes, and widens the CHECK", async () => {
-    await removeDb(MIGRATION_DB_PATH);
-    const db = new Database(MIGRATION_DB_PATH, { create: true });
+    const db = new Database(":memory:");
     try {
       runMigrations(db);
 
