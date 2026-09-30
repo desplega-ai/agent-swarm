@@ -522,3 +522,49 @@ describe("memory rater config reload", () => {
     expect(process.env.MEMORY_RATERS).toBe("");
   });
 });
+
+describe("deleting a reloadable config row", () => {
+  // One key per test: the runner remembers each overridden key's boot value
+  // for the life of the process.
+  const keys = ["PI_CODEMODE", "PI_TOOL_DEFERRAL", "SWARM_ORG_NAME"];
+  const saved = new Map(keys.map((key) => [key, process.env[key]]));
+  afterEach(() => {
+    for (const [key, value] of saved) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  });
+
+  async function reload(agentId: string, configs: Array<{ key: string; value: string }>) {
+    mockResponsesByAgentId.set(agentId, { status: 200, body: { configs } });
+    const result = await fetchResolvedEnv(testUrl, "key", agentId);
+    return applyResolvedEnvToProcessEnv(result.env);
+  }
+
+  test("unset at boot: deleting the row unsets the var", async () => {
+    delete process.env.PI_CODEMODE;
+    await reload("row-delete-unset", [{ key: "PI_CODEMODE", value: "true" }]);
+    expect(process.env.PI_CODEMODE).toBe("true");
+
+    const changed = await reload("row-delete-unset", []);
+    expect(changed).toContain("PI_CODEMODE");
+    expect(process.env.PI_CODEMODE).toBeUndefined();
+  });
+
+  test("set at boot: deleting the overriding row restores the boot value", async () => {
+    process.env.PI_TOOL_DEFERRAL = "false";
+    await reload("row-delete-boot", [{ key: "PI_TOOL_DEFERRAL", value: "true" }]);
+    expect(process.env.PI_TOOL_DEFERRAL).toBe("true");
+
+    const changed = await reload("row-delete-boot", []);
+    expect(changed).toContain("PI_TOOL_DEFERRAL");
+    expect(process.env.PI_TOOL_DEFERRAL).toBe("false");
+  });
+
+  test("set at boot and never overridden: untouched", async () => {
+    process.env.SWARM_ORG_NAME = "container-org";
+    const changed = await reload("row-never-set", []);
+    expect(changed).not.toContain("SWARM_ORG_NAME");
+    expect(process.env.SWARM_ORG_NAME).toBe("container-org");
+  });
+});

@@ -13,6 +13,7 @@ import { Spinner } from "../components/Spinner.tsx";
 import { SuiteSelect } from "../components/SuiteSelect.tsx";
 import { InfoTip } from "../components/Tooltip.tsx";
 import { navigate, replaceHashQuery, useHashRoute, usePoll } from "../hooks.ts";
+import { paretoFrontier } from "../lib/pareto.ts";
 import {
   buildFrontierDots,
   type DotShape,
@@ -286,6 +287,16 @@ function leaderboardColumns(k: number, showHarness: boolean): Column<Leaderboard
 
 // ---- pieces ----
 
+/**
+ * The line drawn on the chart. `suite`: the API's frontier, full-coverage
+ * configs only. `shown`: the frontier of every plotted config, used when the
+ * API has no frontier to draw.
+ */
+interface FrontierLine {
+  scope: "suite" | "shown";
+  dots: FrontierDot[];
+}
+
 function LegendMarker(props: { shape: DotShape; hollow?: boolean }): ReactNode {
   return (
     <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
@@ -301,7 +312,11 @@ function LegendMarker(props: { shape: DotShape; hollow?: boolean }): ReactNode {
   );
 }
 
-function ChartLegend(props: { dots: FrontierDot[]; anyLine: boolean; anyDim: boolean }): ReactNode {
+function ChartLegend(props: {
+  dots: FrontierDot[];
+  line: FrontierLine | null;
+  anyDim: boolean;
+}): ReactNode {
   const harnesses = [...new Set(props.dots.map((d) => d.harness))];
   const shapes = SHAPE_LEGEND.filter((s) => props.dots.some((d) => d.shape === s.shape));
   const groups: { key: string; node: ReactNode }[] = [];
@@ -348,13 +363,22 @@ function ChartLegend(props: { dots: FrontierDot[]; anyLine: boolean; anyDim: boo
       </span>,
     );
   }
-  if (props.anyLine) {
+  if (props.line !== null) {
+    const suite = props.line.scope === "suite";
     marks.push(
-      <span className="lb-legend-item" key="line" title="No config beats these on both axes">
+      <span
+        className="lb-legend-item"
+        key="line"
+        title={
+          suite
+            ? "No config beats these on both axes"
+            : "No config plotted here beats these on both axes. Drawn from the shown configs, hollow ones included, so it is not the full-suite frontier."
+        }
+      >
         <svg width="26" height="10" viewBox="0 0 26 10" aria-hidden="true">
           <line className="frontier-line" x1="1" x2="25" y1="5" y2="5" />
         </svg>
-        frontier
+        {suite ? "frontier" : "frontier of the shown configs"}
       </span>,
     );
   }
@@ -530,7 +554,22 @@ function RankingView(): ReactNode {
       trackConfigIds(board, track, harness),
     );
     const ids = axis === "cost" ? frontier.frontier.cost : frontier.frontier.time;
-    return { ...built, line: frontierLine(built.dots, ids) };
+    const suiteLine = frontier.status === "ok" ? frontierLine(built.dots, ids) : [];
+    // The full-suite frontier when the API has one to draw. Otherwise a line is
+    // still drawn, from every plotted config, and the legend says it covers
+    // only the shown configs.
+    const line: FrontierLine =
+      suiteLine.length > 1
+        ? { scope: "suite", dots: suiteLine }
+        : {
+            scope: "shown",
+            dots: paretoFrontier(
+              built.dots,
+              (d) => d.x,
+              (d) => d.y,
+            ),
+          };
+    return { ...built, line };
   }, [frontier, board, axis, track, harness]);
 
   const columns = useMemo(
@@ -581,7 +620,7 @@ function RankingView(): ReactNode {
 
   const picks = frontier.status === "ok" ? frontierPicks(frontier) : [];
   const dots = dotsResult?.dots ?? [];
-  const line = dotsResult?.line ?? [];
+  const line = dotsResult !== null && dotsResult.line.dots.length > 1 ? dotsResult.line : null;
 
   return (
     <>
@@ -601,7 +640,7 @@ function RankingView(): ReactNode {
           </strong>{" "}
           {frontier.status === "empty"
             ? "Pick another suite above, or start a run of this one."
-            : `${frontier.warnings.join(" ")} Hollow markers are not trusted yet, so no frontier line is drawn.`}
+            : `${frontier.warnings.join(" ")} Hollow markers are not trusted yet.${line !== null ? " The dashed line is the frontier of the configs shown only, not a full-suite frontier." : ""}`}
         </div>
       ) : null}
 
@@ -627,7 +666,7 @@ function RankingView(): ReactNode {
           </div>
           <FrontierChart
             dots={dots}
-            line={line}
+            line={line?.dots ?? []}
             colorOf={(d) => harnessColor(d.harness)}
             xLabel={
               axis === "cost"
@@ -646,7 +685,7 @@ function RankingView(): ReactNode {
                   : "No config has a timing yet"
             }
           />
-          <ChartLegend dots={dots} anyLine={line.length > 1} anyDim={dots.some((d) => d.dim)} />
+          <ChartLegend dots={dots} line={line} anyDim={dots.some((d) => d.dim)} />
           {dotsResult !== null && dotsResult.unplotted.length > 0 ? (
             <p className="dim lb-foot">
               Not plotted, no {axis === "cost" ? "price" : "timing"} yet:{" "}

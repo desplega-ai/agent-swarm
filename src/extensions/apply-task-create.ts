@@ -1,3 +1,4 @@
+import { explicitModelErrorForAgent } from "../be/model-validation";
 import type { RequestInfo } from "../tools/utils";
 import { type CreateTaskOptions, CreateTaskOptionsSchema } from "../types";
 import { scrubSecrets } from "../utils/secret-scrubber";
@@ -48,6 +49,8 @@ type ApplyPreTaskCreateArgs = {
   options: CreateTaskOptions;
   origin: TaskCreateOrigin;
   requestInfo?: RequestInfo;
+  /** The caller's escape hatch for an uncatalogued `model`; the harness check ignores it. */
+  allowCustomModel?: boolean;
 };
 
 export type ApplyPreTaskCreateResult =
@@ -77,6 +80,9 @@ export async function applyPreTaskCreate(
     ? (`extension:${creatingExtension.record.name}` as const)
     : args.origin;
 
+  // The last extension that rewrote `model` or `agentId`. The final pair is re-checked
+  // against the assignee's harness, because the caller validated the pre-hook pair only.
+  let modelEditor: { id: string; name: string } | undefined;
   const result = await dispatchPre(
     "pre.task.create",
     {
@@ -110,6 +116,9 @@ export async function applyPreTaskCreate(
 
         const { description: _description, ...optionChanges } = filtered;
         CreateTaskOptionsSchema.parse({ ...currentOptions, ...optionChanges });
+        if ("model" in optionChanges || "agentId" in optionChanges) {
+          modelEditor = { id: extension.id, name: extension.name };
+        }
         return filtered;
       },
     },
@@ -127,9 +136,26 @@ export async function applyPreTaskCreate(
   }
 
   const { description, ...optionChanges } = result.data;
+  const options = CreateTaskOptionsSchema.parse({ ...args.options, ...optionChanges });
+  if (modelEditor) {
+    const modelError = await explicitModelErrorForAgent({
+      model: options.model,
+      // An unchanged model already passed the caller's catalog check; only the harness
+      // check is new for it.
+      allowCustomModel: args.allowCustomModel || options.model === args.options.model,
+      agentId: options.agentId,
+    });
+    if (modelError) {
+      return {
+        kind: "blocked",
+        reason: `pre.task.create rewrite from extension "${modelEditor.name}" is invalid: ${modelError}`,
+        extension: modelEditor,
+      };
+    }
+  }
   return {
     kind: "proceed",
     description: description ?? args.description,
-    options: CreateTaskOptionsSchema.parse({ ...args.options, ...optionChanges }),
+    options,
   };
 }

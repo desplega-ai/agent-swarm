@@ -136,6 +136,7 @@ export class AgentTaskExecutor extends BaseExecutor<
         contextKey: workflowContextKey({ workflowRunId: meta.runId }),
       },
       origin: "workflow",
+      allowCustomModel: config.allowCustomModel,
     });
     if (preCreate.kind === "blocked") {
       throw new TaskCreationBlockedError(preCreate.reason, preCreate.extension);

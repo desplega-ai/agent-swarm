@@ -94,7 +94,7 @@ export const taskActionInputSchema = z.object({
     .min(1)
     .optional()
     .describe(
-      "Concrete model override for the created task, interpreted by the claiming worker's harness/provider. This does not switch providers. Only used with 'create' action.",
+      "Concrete model override for the created task, interpreted by the claiming worker's harness/provider. This does not switch providers. Only used with 'create' action. The model must run on the assignee's harness (an Anthropic model on a Claude agent, an OpenAI model on a Codex agent); a mismatch is rejected.",
     ),
   modelTier: ModelTierSchema.optional().describe(
     "Portable model tier for the created task: 'smol', 'regular', 'smart', or 'ultra'. Resolved when a worker claims/runs the task. Only used with 'create' action.",
@@ -322,6 +322,7 @@ export async function taskActionHandler(
       },
       origin: "mcp",
       requestInfo: ctx.requestInfo,
+      allowCustomModel: input.allowCustomModel,
     });
     if (preCreate.kind === "blocked") {
       return taskActionResult({ success: false, message: preCreate.reason }, agentId);

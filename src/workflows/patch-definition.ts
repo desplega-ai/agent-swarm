@@ -2,6 +2,7 @@ import { getDbClient, getWorkflow, updateWorkflow } from "../be/db";
 import type { Workflow, WorkflowDefinition, WorkflowPatch } from "../types";
 import { applyDefinitionPatch, definitionNodeIds, validateDefinition } from "./definition";
 import type { ExecutorRegistry } from "./executors/registry";
+import { workflowModelErrors } from "./model-validation";
 import { snapshotWorkflow } from "./version";
 
 export type PatchWorkflowDefinitionResult =
@@ -51,6 +52,10 @@ export async function patchWorkflowDefinition(options: {
     });
     if (!validation.valid) {
       return { ok: false, reason: "invalid", errors: validation.errors };
+    }
+    const modelErrors = await workflowModelErrors(patchResult.definition);
+    if (modelErrors.length > 0) {
+      return { ok: false, reason: "invalid", errors: modelErrors };
     }
 
     let version: number | null = null;

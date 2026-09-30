@@ -116,9 +116,18 @@ export const CONFIG_PRESETS: ConfigPreset[] = [
     id: "weekly-matrix",
     label: "Weekly matrix",
     description:
-      "Canary configs + Codex 6 astra + DeepSeek V4.1 Flash, 5 repeats, $12 metered cap.",
-    configIds: ["claude-opus-5.5", "codex-6-luna", "codex-6-astra", "pi-deepseek-v4.1-flash"],
-    runDefaults: { attemptsPerCell: 5, maxMeteredUsd: 12 },
+      "Canary configs + Codex 6.1 sol + Codex 6 astra + DeepSeek V4.1 Flash, 5 repeats, $37 metered cap.",
+    // Claude and Codex run on subscription, so the cap is mostly E2B time:
+    // ~375 attempts: E2B ~$19 (measured $0.02-0.10 each) + judge ~$11 (~$0.03
+    // each) + DeepSeek tokens ~$1 = ~$31, plus 20%.
+    configIds: [
+      "claude-opus-5.5",
+      "codex-6.1-sol",
+      "codex-6-luna",
+      "codex-6-astra",
+      "pi-deepseek-v4.1-flash",
+    ],
+    runDefaults: { attemptsPerCell: 5, maxMeteredUsd: 37 },
   },
 ];
 

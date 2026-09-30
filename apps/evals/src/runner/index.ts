@@ -1,5 +1,5 @@
 import type { Client } from "@libsql/client";
-import { suiteVersionFor } from "../../scenarios/suite.ts";
+import { isHeldOut, suiteVersionFor } from "../../scenarios/suite.ts";
 import {
   attemptMeteredUsd,
   configBilling,
@@ -320,6 +320,7 @@ export function buildSandboxInfo(stack: StackHandle): SandboxInfo {
       configId: w.member.overridden ? w.member.config.id : null,
       provider: w.member.overridden ? w.member.config.provider : null,
       model: w.member.overridden ? (w.member.config.model ?? null) : null,
+      billing: w.billing,
     })),
   };
 }
@@ -2235,6 +2236,25 @@ export async function pool<T>(
 }
 
 /**
+ * Start order for a run's attempts. Public scenarios go before held-out ones,
+ * so a run stopped by its cost cap has spent on cells a benchmark can publish.
+ * Within each group, attempts go round-robin: every cell's first attempt, then
+ * every cell's second, and so on, so a partial run covers the whole matrix
+ * thinly instead of a few cells fully.
+ */
+export function scheduleAttempts<
+  T extends Pick<AttemptRow, "scenarioId" | "configId" | "attemptIndex">,
+>(attempts: T[], heldOut: (scenarioId: string) => boolean = isHeldOut): T[] {
+  return [...attempts].sort(
+    (a, b) =>
+      Number(heldOut(a.scenarioId)) - Number(heldOut(b.scenarioId)) ||
+      a.attemptIndex - b.attemptIndex ||
+      a.scenarioId.localeCompare(b.scenarioId) ||
+      a.configId.localeCompare(b.configId),
+  );
+}
+
+/**
  * Execute (or resume) an eval run: every unfinished attempt in the
  * scenarios x configs x attemptsPerCell matrix, with safe retry. Attempts that
  * already reached a terminal state are skipped, so re-invoking after a crash
@@ -2277,7 +2297,7 @@ export async function executeRun(opts: {
   const swept = await sweepSandboxes(runId, baseLog);
   if (swept > 0) baseLog(`swept ${swept} leaked sandbox(es) from a previous execution`);
 
-  const unfinished = await listUnfinishedAttempts(db, runId);
+  const unfinished = scheduleAttempts(await listUnfinishedAttempts(db, runId));
   baseLog(
     `run ${runId}: ${unfinished.length} attempt(s) to execute (concurrency ${run.concurrency})`,
   );

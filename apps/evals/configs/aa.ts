@@ -456,6 +456,8 @@ export const AA_UNMATCHED_CONFIG_IDS: Record<string, string> = {
   "codex-6-astra": "released after the 2026-06-12 AA snapshot",
   "codex-6-sol": "released after the 2026-06-12 AA snapshot",
   "codex-6-luna": "released after the 2026-06-12 AA snapshot",
+  "codex-6.1-sol": "released after the 2026-06-12 AA snapshot",
+  "codex-5.6": "released after the 2026-06-12 AA snapshot",
 };
 
 /** Joined blocks, built eagerly so a mapping → missing-row typo fails at import. */

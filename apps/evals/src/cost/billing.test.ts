@@ -6,6 +6,7 @@ import {
   DEFAULT_SUBSCRIPTION_CONFIG_CONCURRENCY,
   e2bUsdPerSandboxHour,
   estimateSandboxUsd,
+  recordedBilling,
   sandboxHourlyUsd,
   subscriptionConfigConcurrency,
   WORKER_SANDBOX_SHAPE,
@@ -19,12 +20,16 @@ describe("configBilling mirrors the credential the sandbox is given", () => {
     expect(configBilling({ provider: "claude" }, {})).toBe("metered");
   });
 
-  test("codex: only OPENAI_API_KEY reaches the sandbox, so metered unless declared a flat plan", () => {
+  test("codex: the swarm's ChatGPT credential -> subscription, else OPENAI_API_KEY -> metered", () => {
     expect(configBilling({ provider: "codex" }, { OPENAI_API_KEY: "k" })).toBe("metered");
+    expect(
+      configBilling(
+        { provider: "codex" },
+        { EVALS_SWARM_API_URL: "http://swarm", EVALS_SWARM_API_KEY: "k" },
+      ),
+    ).toBe("subscription");
+    // The retired flag alone no longer books API spend as $0.
     expect(configBilling({ provider: "codex" }, { EVALS_CODEX_BILLING: "subscription" })).toBe(
-      "subscription",
-    );
-    expect(configBilling({ provider: "codex" }, { EVALS_CODEX_BILLING: "metered" })).toBe(
       "metered",
     );
   });
@@ -98,6 +103,20 @@ describe("attemptMeteredUsd", () => {
     expect(attemptMeteredUsd(attempt, "metered", 0.1)).toBeCloseTo(1 + 0.02 + 0.2, 10);
     expect(attemptMeteredUsd(attempt, "subscription", 0.1)).toBeCloseTo(0.02 + 0.2, 10);
     expect(attemptMeteredUsd(attempt, "subscription")).toBeCloseTo(0.02 + 0.1332 + 0.3312, 6);
+  });
+
+  test("billing recorded at boot wins over the fallback", () => {
+    const billed = (...b: ("subscription" | "metered")[]) =>
+      ({ workers: b.map((billing) => ({ billing })) }) as never;
+    const attempt = { costUsd: 1, judgeCostUsd: 0, durationMs: 0 };
+    expect(attemptMeteredUsd({ ...attempt, sandbox: billed("subscription") }, "metered")).toBe(0);
+    expect(attemptMeteredUsd({ ...attempt, sandbox: billed("metered") }, "subscription")).toBe(1);
+    // one metered member makes the attempt's agent cost count
+    expect(
+      attemptMeteredUsd({ ...attempt, sandbox: billed("subscription", "metered") }, "subscription"),
+    ).toBe(1);
+    expect(recordedBilling(sandbox(2))).toBeNull();
+    expect(recordedBilling(null)).toBeNull();
   });
 
   test("unpriced parts count as zero, never NaN", () => {

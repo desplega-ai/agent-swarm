@@ -151,13 +151,14 @@ export type PreparedTaskCreate = { description: string; options: CreateTaskOptio
 export async function prepareTaskWithSiblingAwareness(
   description: string,
   options: CreateTaskOptions,
-  args: { origin?: TaskCreateOrigin } = {},
+  args: { origin?: TaskCreateOrigin; allowCustomModel?: boolean } = {},
 ): Promise<PreparedTaskCreate> {
   const preCreate = await applyPreTaskCreate({
     description,
     options,
     // Preserve the plan's REST default for callers without an explicit ingress origin.
     origin: args.origin ?? "rest",
+    allowCustomModel: args.allowCustomModel,
   });
   if (preCreate.kind === "blocked") {
     throw new TaskCreationBlockedError(preCreate.reason, preCreate.extension);
@@ -168,7 +169,7 @@ export async function prepareTaskWithSiblingAwareness(
 export async function createTaskWithSiblingAwareness(
   description: string,
   options: CreateTaskOptions,
-  args: { origin?: TaskCreateOrigin } = {},
+  args: { origin?: TaskCreateOrigin; allowCustomModel?: boolean } = {},
 ): Promise<AgentTask> {
   const { description: d, options: o } = await prepareTaskWithSiblingAwareness(
     description,

@@ -78,6 +78,18 @@ function LoginScreen({
   );
 }
 
+/** The header wraps on narrow viewports, so publish its real height for the
+ *  sticky offsets that sit below it (`--app-header-h`). */
+function trackHeaderHeight(el: HTMLElement | null): (() => void) | undefined {
+  if (!el) return undefined;
+  const root = document.documentElement;
+  const observer = new ResizeObserver(() => {
+    root.style.setProperty("--app-header-h", `${el.offsetHeight}px`);
+  });
+  observer.observe(el);
+  return () => observer.disconnect();
+}
+
 export default function App(): ReactNode {
   const { parts, path } = useHashRoute();
   const [apiKey, setApiKey] = useState(() => getStoredApiKey());
@@ -151,7 +163,7 @@ export default function App(): ReactNode {
 
   return (
     <>
-      <header className="app-header">
+      <header className="app-header" ref={trackHeaderHeight}>
         <a className="brand" href="#/leaderboard">
           <img src="/logo.png" width={22} height={22} alt="swarm logo" />
           <span className="wordmark">
@@ -171,8 +183,14 @@ export default function App(): ReactNode {
           <a className={section === "configs" ? "pill active" : "pill"} href="#/configs">
             Configs
           </a>
-          <a className="pill" href="/benchmark">
-            Benchmark
+          <a
+            className="pill"
+            href="/benchmark"
+            target="_blank"
+            rel="noopener"
+            title="Open the public benchmark in a new tab"
+          >
+            Benchmark ↗
           </a>
         </nav>
         <button

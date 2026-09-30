@@ -15,16 +15,21 @@
  * deployment, an ACP-only model). Harnesses whose model namespace the catalog does not
  * describe (`acp`, `devin`, `dsh`) skip the check when the caller names the harness.
  *
- * Claim time does not re-check: a task that was created before this check, or with the
- * escape hatch, still runs.
+ * Harness compatibility: when the harness is known, a concrete id or `latest:` alias must
+ * belong to the catalog section that harness's CLI talks to (`harnessModelError`). The
+ * escape hatch does not bypass this for an id the catalog files under another section:
+ * the flag means "the catalog does not know this id yet", not "run an Anthropic id in
+ * Codex". Claim time re-checks the harness (see `resolveTaskModel`).
  */
 import {
   buildClaudeShortnameMap,
+  type HarnessCatalogSections,
+  harnessModelMismatch,
   isAlias,
   type ModelsDevCatalog,
   parseAlias,
 } from "@desplega/model-catalog";
-import { getAgentById } from "./db";
+import { getAgentById, getAllAgents } from "./db";
 import { loadModelsCatalog } from "./model-catalog-store";
 import { resolveLatestAlias } from "./model-tier-resolution";
 
@@ -70,6 +75,35 @@ export interface ExplicitModelCheck {
   allowCustomModel?: boolean;
   /** The harness the model is for, when known (the assignee or the agent being configured). */
   harnessProvider?: string | null;
+  /** The assignee, when known: named in the harness mismatch message. */
+  agentId?: string | null;
+  agentName?: string | null;
+}
+
+/** Null when `model` runs on `harness`, else the reason. Pure; only judges claude, claude-managed, codex. */
+export const harnessModelError = harnessModelMismatch;
+
+/** `harnessModelError` against the current catalog, for callers with no agent row (claim path). */
+export async function harnessModelErrorFor(
+  model: string,
+  harness: string | null | undefined,
+): Promise<string | null> {
+  const { providers } = await loadModelsCatalog();
+  return harnessModelMismatch(model, harness, providers as HarnessCatalogSections, {});
+}
+
+/**
+ * Pool claim filter: false when an unassigned task pins a `model` that `harness` cannot
+ * run, so an incompatible worker skips it and a compatible one takes it. `isAgentEligibleForTask`
+ * stays sync and catalog-free; this runs next to it.
+ */
+export async function poolTaskRunsOnHarness(
+  task: { model?: string | null } | null | undefined,
+  harness: string | null | undefined,
+): Promise<boolean> {
+  const model = task?.model?.trim();
+  if (!model) return true;
+  return (await harnessModelErrorFor(model, harness)) === null;
 }
 
 /**
@@ -78,8 +112,21 @@ export interface ExplicitModelCheck {
  */
 export async function explicitModelError(check: ExplicitModelCheck): Promise<string | null> {
   const model = check.model?.trim();
-  if (!model || check.allowCustomModel) return null;
+  if (!model) return null;
   if (check.harnessProvider && FREE_FORM_HARNESSES.has(check.harnessProvider)) return null;
+
+  const { providers } = await loadModelsCatalog();
+  const catalog = providers as CatalogSections;
+  if (check.harnessProvider) {
+    const mismatch = harnessModelMismatch(
+      model,
+      check.harnessProvider,
+      catalog as HarnessCatalogSections,
+      { agentId: check.agentId, agentName: check.agentName },
+    );
+    if (mismatch) return mismatch;
+  }
+  if (check.allowCustomModel) return null;
 
   if (isAlias(model)) {
     if (!parseAlias(model)) {
@@ -91,8 +138,6 @@ export async function explicitModelError(check: ExplicitModelCheck): Promise<str
       : `Model alias "${model}" matches no model in the catalog. Check the provider and family, or use a concrete model id.`;
   }
 
-  const { providers } = await loadModelsCatalog();
-  const catalog = providers as CatalogSections;
   if (Object.keys(catalog).length === 0) return null;
   if (isKnownCatalogModel(model, catalog)) return null;
   return `Unknown model "${model}": it is not in the model catalog. Use a catalog model id, a Claude CLI shortname (opus, sonnet, haiku, fable), a latest:<provider>/<family> alias, or modelTier. To run a custom model id anyway, set allowCustomModel: true (allow_custom_model on the agent runtime).`;
@@ -101,12 +146,43 @@ export async function explicitModelError(check: ExplicitModelCheck): Promise<str
 /**
  * `explicitModelError` for a model that will run on `agentId` (or on whichever
  * worker claims it when there is none): the assignee's harness decides whether
- * the catalog describes its models.
+ * the catalog describes its models, and whether the model runs on it.
+ *
+ * Pool task (no agent): a concrete model must run on the harness of at least one
+ * registered agent, else no claim can ever succeed. With no agents registered
+ * there is nothing to judge against, and the check passes.
  */
 export async function explicitModelErrorForAgent(
-  check: Omit<ExplicitModelCheck, "harnessProvider"> & { agentId?: string | null },
+  check: Omit<ExplicitModelCheck, "harnessProvider" | "agentName">,
 ): Promise<string | null> {
-  if (!check.model?.trim() || check.allowCustomModel) return null;
+  const model = check.model?.trim();
+  if (!model) return null;
   const agent = check.agentId ? await getAgentById(check.agentId) : null;
-  return explicitModelError({ ...check, harnessProvider: agent?.harnessProvider ?? null });
+  if (agent) {
+    return explicitModelError({
+      ...check,
+      agentId: agent.id,
+      agentName: agent.name,
+      harnessProvider: agent.harnessProvider ?? agent.provider ?? null,
+    });
+  }
+  if (!check.agentId && !isAlias(model)) {
+    const poolError = await poolHarnessModelError(model);
+    if (poolError) return poolError;
+  }
+  return explicitModelError({ ...check, harnessProvider: null });
+}
+
+async function poolHarnessModelError(model: string): Promise<string | null> {
+  const agents = await getAllAgents({ slim: true });
+  if (agents.length === 0) return null;
+  const { providers } = await loadModelsCatalog();
+  const sections = providers as HarnessCatalogSections;
+  const harnesses = new Set<string>();
+  for (const agent of agents) {
+    const harness = agent.harnessProvider ?? agent.provider ?? null;
+    if (!harnessModelMismatch(model, harness, sections)) return null;
+    if (harness) harnesses.add(harness);
+  }
+  return `Model "${model}" does not run on any registered agent harness (${[...harnesses].sort().join(", ")}). Use modelTier (smol, regular, smart, ultra) for portable intent, or omit model and let the claiming agent resolve it.`;
 }
