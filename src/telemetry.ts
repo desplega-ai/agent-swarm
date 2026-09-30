@@ -26,7 +26,8 @@ let cachedHasEmailChannel = false;
 let cachedInstallMethod = "manual";
 let cachedInstallPreset: string | undefined;
 
-function isEnabled(): boolean {
+/** Effective opt-out state: `ANONYMIZED_TELEMETRY` (default on). Read at call time. */
+export function isTelemetryEnabled(): boolean {
   return isEnvFlagEnabled("ANONYMIZED_TELEMETRY", true);
 }
 
@@ -310,7 +311,7 @@ export async function initTelemetry(
   setConfig: (key: string, value: string) => Promise<void> | void,
   options: InitTelemetryOptions = {},
 ): Promise<void> {
-  if (!isEnabled()) return;
+  if (!isTelemetryEnabled()) return;
   source = sourceId;
   const generateIfMissing = options.generateIfMissing === true;
 
@@ -433,7 +434,7 @@ function getTelemetryEnvironment(): string {
 
 /** Fire-and-forget telemetry event. Never throws, never blocks. */
 export function track(options: TrackOptions): void {
-  if (!isEnabled() || !installationId) return;
+  if (!isTelemetryEnabled() || !installationId) return;
   try {
     const payload = {
       product: PRODUCT,
@@ -619,7 +620,7 @@ export function emitIntegrationConnected(
   providerSlug: string | null | undefined,
   firstOfType: boolean,
 ): boolean {
-  if (!isEnabled() || !installationId) return false;
+  if (!isTelemetryEnabled() || !installationId) return false;
   const provider = _resolveIntegrationProvider(providerSlug);
   telemetry.integration("connected", {
     type,

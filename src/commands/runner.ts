@@ -1049,7 +1049,7 @@ export async function provisionAgentFsAfterRegistration(opts: {
  *
  * - STEERING_ENABLED — read per-poll by `isSteeringEnabled()` and by the
  *   system-prompt builder; flipping it mid-run just gates a feature.
- * - ANONYMIZED_TELEMETRY — read per-event by `telemetry.isEnabled()`.
+ * - ANONYMIZED_TELEMETRY — read per-event by `isTelemetryEnabled()`.
  * - MEMORY_RATERS — read per hook/prompt invocation.
  * - TEMPLATE_REGISTRY_URL — read per registry fetch.
  * - SLACK_DISABLE — read by the prompt builder to gate the Slack tool section.
