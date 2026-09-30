@@ -84,6 +84,8 @@ export interface AnalyticsSourceRow {
   tokenOutput: number | null;
   tokenCacheRead: number | null;
   tokenCacheWrite: number | null;
+  /** attempts.suite_version — the suite this attempt belongs to; null off-suite and on old rows. */
+  suiteVersion?: string | null;
   /** Raw stored sandbox versions — may carry ANSI dirt; cleaned on read. */
   apiVersion: string | null;
   workerVersion: string | null;
@@ -147,7 +149,7 @@ function tokenValue(v: number | null): number {
  * the latest concrete family id so old and new rows group together; concrete
  * ids and the parenthesized fallback pass through untouched.
  */
-function modelKey(
+export function modelKey(
   row: AnalyticsSourceRow,
   registry: Registry,
   aliasMap: Record<string, string>,
@@ -173,7 +175,7 @@ function modelKey(
 export const ANALYTICS_NO_EFFORT = "default";
 
 /** The effort an attempt ran at, or the default key. */
-function effortKey(row: AnalyticsSourceRow): string {
+export function effortKey(row: AnalyticsSourceRow): string {
   return row.reasoningEffort || ANALYTICS_NO_EFFORT;
 }
 
@@ -193,7 +195,7 @@ function sortEffortKeys(keys: Iterable<string>): string[] {
  * configId; when the config left the catalog, the configId prefix before the
  * first "-" ("claude-fable" → "claude"); final fallback "(unknown)".
  */
-function harnessKey(configId: string, registry: Registry): string {
+export function harnessKey(configId: string, registry: Registry): string {
   const provider = registry.configs.get(configId)?.provider;
   if (provider) return provider;
   const prefix = configId.split("-")[0] ?? "";
@@ -406,6 +408,29 @@ function sortGroups(groups: Map<string, GroupAcc>): AnalyticsGroupRollup[] {
     .sort((a, b) => b.attempts - a.attempts || a.group.localeCompare(b.group));
 }
 
+/**
+ * Rows kept by a filter: (configIds empty OR row.configId ∈ configIds) AND
+ * (harnesses empty OR harnessKey ∈ harnesses) AND (efforts empty OR effortKey ∈
+ * efforts). A null/undefined filter keeps every row.
+ */
+export function filterRows(
+  rows: AnalyticsSourceRow[],
+  registry: Registry,
+  filter?: AnalyticsFilter | null,
+): AnalyticsSourceRow[] {
+  if (filter === undefined || filter === null) return rows;
+  const harnessSet = filter.harnesses.length > 0 ? new Set(filter.harnesses) : null;
+  const configSet = filter.configIds.length > 0 ? new Set(filter.configIds) : null;
+  const effortSet = (filter.efforts?.length ?? 0) > 0 ? new Set(filter.efforts) : null;
+  if (harnessSet === null && configSet === null && effortSet === null) return rows;
+  return rows.filter(
+    (row) =>
+      (configSet === null || configSet.has(row.configId)) &&
+      (harnessSet === null || harnessSet.has(harnessKey(row.configId, registry))) &&
+      (effortSet === null || effortSet.has(effortKey(row))),
+  );
+}
+
 export function buildAnalytics(
   sourceRows: AnalyticsSourceRow[],
   registry: Registry,
@@ -434,30 +459,15 @@ export function buildAnalytics(
   }
   filterOptions.efforts = sortEffortKeys(filterOptions.efforts ?? []);
 
-  const harnessSet =
-    filter !== undefined && filter !== null && filter.harnesses.length > 0
-      ? new Set(filter.harnesses)
-      : null;
-  const configSet =
-    filter !== undefined && filter !== null && filter.configIds.length > 0
-      ? new Set(filter.configIds)
-      : null;
-  const effortSet =
-    filter !== undefined && filter !== null && (filter.efforts?.length ?? 0) > 0
-      ? new Set(filter.efforts)
-      : null;
-  const rows =
-    harnessSet === null && configSet === null && effortSet === null
-      ? sourceRows
-      : sourceRows.filter(
-          (row) =>
-            (configSet === null || configSet.has(row.configId)) &&
-            (harnessSet === null || harnessSet.has(harnessKey(row.configId, registry))) &&
-            (effortSet === null || effortSet.has(effortKey(row))),
-        );
+  const rows = filterRows(sourceRows, registry, filter);
   // appliedFilter = the filter when any axis is non-empty, else null.
-  const appliedFilter =
-    harnessSet !== null || configSet !== null || effortSet !== null ? (filter ?? null) : null;
+  const filterActive =
+    filter !== undefined &&
+    filter !== null &&
+    (filter.harnesses.length > 0 ||
+      filter.configIds.length > 0 ||
+      (filter.efforts?.length ?? 0) > 0);
+  const appliedFilter = filterActive ? (filter ?? null) : null;
 
   const scenarioIds: string[] = [];
   const configIds: string[] = [];

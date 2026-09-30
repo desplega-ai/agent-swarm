@@ -93,7 +93,7 @@ Local-first dashboard + API; **runs can be triggered, resumed, and cancelled fro
 - `#/scenarios` — searchable scenario registry; `#/scenarios/:id` shows what the scenario will do (tasks, seeding, checks, judges, rubric) + recent attempts across runs.
 - Light/dark theme (persisted, follows `prefers-color-scheme`).
 
-Key endpoints: `GET/POST /api/runs`, `POST /api/runs/:id/{resume,cancel}`, `GET /api/runs/:id`, `GET /api/attempts/:id{,/transcript}`, `GET /api/scenarios{,/:id}`, `GET/POST /api/configs`, `PATCH /api/configs/:id`, `GET /api/models`, `POST /api/models/refresh`, `GET /api/artifacts/:id`.
+Key endpoints: `GET/POST /api/runs`, `POST /api/runs/:id/{resume,cancel}`, `GET /api/runs/:id`, `GET /api/attempts/:id{,/transcript}`, `GET /api/scenarios{,/:id}`, `GET/POST /api/configs`, `PATCH /api/configs/:id`, `GET /api/models`, `POST /api/models/refresh`, `GET /api/analytics`, `GET /api/analytics/{suites,frontier,leaderboard,heatmap,reliability,compare}`, `GET /api/artifacts/:id`.
 
 `GET /api/models` feeds every model name and price in the UI: `models` is the judge picker list (openrouter only), `harnessModels` holds the claude (anthropic) and codex (openai) entries used only to name and price ids, `aliases` maps bare claude shortnames, and `catalog` says whether the data is `live`, `db` (last persisted fetch) or the committed `snapshot`, and when it was fetched. `GET /api/configs` rows carry `resolvedModel`: what a `modelAlias` resolves to today. The Configs page shows the catalog badge and a refresh button (`POST /api/models/refresh`).
 
@@ -106,6 +106,19 @@ and tests.
 `POST /api/runs` and `POST /api/runs/:id/resume` are also guarded by
 `EVALS_MAX_CONCURRENT_RUNS` (default `1`). The cap counts runs actively executing inside the
 serve process; when the cap is reached, the API returns HTTP 429.
+
+### Suite analytics API
+
+Answers "which setup is best" for one suite version. `GET /api/analytics/{frontier,leaderboard,heatmap,reliability,compare}` all take `suite` (default: the current suite in `scenarios/suite.ts`) and the same `harnesses`, `configs` and `efforts` CSV filters as `GET /api/analytics`. `GET /api/analytics/suites` lists the suites that have attempts. Only attempts stamped with that `suite_version` count; off-suite and `cancelled` attempts are ignored, and `error` attempts are counted but never scored.
+
+- **Score.** The mean of per-scenario means, so a scenario with extra attempts does not dominate. The 95% CI is a seeded stratified bootstrap over the attempts inside each scenario (the suite's scenarios are fixed). $/attempt is aggregated the same way; agent time is a pooled median of `timings.tasksMs`.
+- **Full suite.** A config is ranked, and counts toward the pooled frontier, only when every scenario of the suite has a graded attempt. Others are listed with `rank: null`.
+- **`lowN`.** A cell under 3 graded attempts. A `lowN` config never sits on the pooled frontier, so a thin run returns `status: "low-n"` and empty frontiers, not a misleading one. `frontier.status` is `ok`, `low-n`, `no-full-coverage` or `empty`.
+- **`frontier`.** Pooled non-dominated sets for score vs $/attempt and score vs agent time, plus a per-scenario frontier that accepts partial coverage. A config with unpriced attempts (`costComplete: false`) stays off the cost frontier.
+- **`leaderboard`.** Two tracks: `fixedHarness` (one group per harness, every model ranked within it) and `bestHarnessPerModel`. Each row has `rank`, a bootstrap `rankSpread`, `passAt1`, `passPowK` (`?k=`, default 3; the unbiased chance that k attempts on a scenario all pass, averaged over scenarios with at least k graded attempts), $/attempt, p50 agent time, tokens, `resolvedModel`, `efforts` and `suiteVersion`.
+- **`heatmap`.** Scenario x config pass fractions, plus an `anyConfig` row per scenario (`configsPassing: 0` means no config ever passes it).
+- **`reliability`.** Per config, a pass^k and pass@k curve for k = 1..`maxK` (default 5) and a per-run score trend with CI bands (last 60 runs).
+- **`compare?a=&b=`.** Per-scenario means for both configs and a paired bootstrap of the difference that resamples scenarios, not attempts. It reports a CI only with at least 5 shared scenarios.
 
 ## Deploying the eval service
 
