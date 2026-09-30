@@ -15,7 +15,7 @@ export default function MarkdownViewer({ file, stat }: ViewerProps) {
   return (
     <TextGate file={file} stat={stat}>
       {(text) => (
-        <article className="mx-auto max-w-[72ch] px-6 py-5 text-sm leading-relaxed">
+        <article className="prose-doc mx-auto max-w-[72ch] px-6 py-5">
           <CombMarkdown text={text} doc={file} DriveImage={DriveImage} liveUrl={liveUrl} />
         </article>
       )}

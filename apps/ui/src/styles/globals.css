@@ -765,3 +765,10 @@ summary {
   background: var(--color-muted);
   font-weight: 600;
 }
+
+/* Streamdown frames each table in its own bordered scroll box. Inside it, drop
+ * the table margin and the outer cell borders, so the frame is not drawn twice. */
+.prose-doc [data-streamdown="table-wrapper"] table {
+  margin: 0;
+  border-style: hidden;
+}
