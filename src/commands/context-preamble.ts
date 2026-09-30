@@ -105,7 +105,10 @@ export async function fetchTaskContextForPreamble(
 function formatAttachmentPointer(
   att: NonNullable<TaskContextForPreamble["attachments"]>[number],
 ): string {
-  const pointer = taskAttachmentDisplayUrl(att as TaskAttachment);
+  // Worker-side: this process gets swarm_config only for RELOADABLE_ENV_KEYS
+  // (runner.ts), so COMB_ENABLED and APP_URL may differ from the API's. Keep
+  // the live URL here. Agents read the file with the agent-fs CLI anyway.
+  const pointer = taskAttachmentDisplayUrl(att as TaskAttachment, { comb: false });
   return pointer || "(no pointer)";
 }
 

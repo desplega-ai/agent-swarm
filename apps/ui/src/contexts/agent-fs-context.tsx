@@ -188,3 +188,8 @@ export function useAgentFs(): AgentFsContextValue {
   }
   return ctx;
 }
+
+/** `useAgentFs()` for shared components that also render outside the provider (`/setup`). */
+export function useOptionalAgentFs(): AgentFsContextValue | null {
+  return useContext(AgentFsContext);
+}

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
+import { MemoryRouter } from "react-router-dom";
 import { AttachmentName, buildAgentFsLiveUrl } from "./task-attachment-link";
 
 describe("task attachment links", () => {
@@ -77,5 +78,35 @@ describe("task attachment links", () => {
       if (previousDriveId === undefined) delete process.env.VITE_AGENT_FS_DEFAULT_DRIVE_ID;
       else process.env.VITE_AGENT_FS_DEFAULT_DRIVE_ID = previousDriveId;
     }
+  });
+
+  test("uses the server live URL and the swarm drive for rows without ids", () => {
+    const drive = {
+      liveUrl: "https://files.example.test/",
+      defaultOrgId: "swarm-org",
+      defaultDriveId: "swarm-drive",
+    };
+    expect(
+      buildAgentFsLiveUrl({ path: "a b.md", orgId: "org-1", driveId: "drive-1", ...drive }),
+    ).toBe("https://files.example.test/file/~/org-1/drive-1/a%20b.md");
+    expect(buildAgentFsLiveUrl({ path: "a b.md", ...drive })).toBe(
+      "https://files.example.test/file/~/swarm-org/swarm-drive/a%20b.md",
+    );
+    expect(buildAgentFsLiveUrl({ path: "a b.md", orgId: "org-1", ...drive })).toBeNull();
+  });
+
+  test("renders an in-app route as a same-tab link", () => {
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <AttachmentName
+          href="https://live.agent-fs.dev/file/~/org-1/drive-1/report.md"
+          to="/file/~/org-1/drive-1/report.md"
+          name="Report"
+        />
+      </MemoryRouter>,
+    );
+
+    expect(html).toContain('href="/file/~/org-1/drive-1/report.md"');
+    expect(html).not.toContain("target=");
   });
 });

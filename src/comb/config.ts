@@ -2,8 +2,8 @@ import {
   getAgentFsDefaultDriveId,
   getAgentFsDefaultOrgId,
   getAgentFsLiveUrl,
+  isCombEnabled,
 } from "../utils/constants";
-import { isEnvFlagEnabled } from "../utils/env-flag";
 
 /** The Comb block of `/status` (`agent_fs.comb`), before snake-casing. */
 export interface CombConfig {
@@ -28,7 +28,7 @@ function trimUrl(value: string | undefined): string | null {
 export function getCombConfig(): CombConfig {
   const internalUrl = trimUrl(process.env.AGENT_FS_API_URL);
   return {
-    enabled: isEnvFlagEnabled("COMB_ENABLED", false) && internalUrl !== null,
+    enabled: isCombEnabled(),
     apiUrl: trimUrl(process.env.AGENT_FS_PUBLIC_URL) ?? internalUrl,
     liveUrl: getAgentFsLiveUrl(),
     orgId: getAgentFsDefaultOrgId() ?? null,

@@ -3,6 +3,7 @@ import { useMemo, useState } from "react";
 import { Link, Navigate, useParams } from "react-router-dom";
 import { CombBreadcrumbs } from "@/components/comb/breadcrumbs";
 import { ConnectCard } from "@/components/comb/connect-card";
+import { OpenInAgentFsButton } from "@/components/comb/file-actions";
 import { FileView } from "@/components/comb/file-view";
 import { FolderView } from "@/components/comb/folder-view";
 import { TreeRail } from "@/components/comb/tree-rail";
@@ -74,13 +75,24 @@ export default function CombPage() {
     case "needs-connect":
     case "invalid-key":
       return (
-        <div className="flex flex-1 items-center justify-center py-8">
+        <div className="flex flex-1 flex-col items-center justify-center gap-3 py-8">
           <ConnectCard />
+          <RouteOpenInAgentFs />
         </div>
       );
     case "ready":
       return <ConnectedView />;
   }
+}
+
+/**
+ * step-13: Slack and prompt links point at Comb. Without a key, the file or
+ * folder in the route still opens in the agent-fs live UI.
+ */
+function RouteOpenInAgentFs() {
+  const { orgId, driveId, "*": splat } = useParams();
+  if (!orgId || !driveId) return null;
+  return <OpenInAgentFsButton target={parseCombSplat({ orgId, driveId, splat })} />;
 }
 
 function ConnectedView() {

@@ -14,6 +14,7 @@ import {
 } from "react";
 import { Link } from "react-router-dom";
 import { type Components, defaultRehypePlugins, Streamdown } from "streamdown";
+import { combPathForLink } from "../../../lib/comb/links";
 import { combPath, type DrivePath, resolveRelative } from "../../../lib/comb/paths";
 import { rehypeSourceLines } from "../../../lib/comb/rehype-source-lines";
 
@@ -36,6 +37,11 @@ export const COMB_REHYPE_PLUGINS = [
 
 /** The file being rendered, for resolving relative links. */
 const CombDocContext = createContext<DrivePath | null>(null);
+/**
+ * The agent-fs live UI host (`useAgentFs().liveUrl`), so live links to drive
+ * files open in Comb (step-13). Provided around `CombMarkdown`.
+ */
+export const CombLiveUrlContext = createContext<string | null>(null);
 
 type ElementProps<Tag extends keyof React.JSX.IntrinsicElements> = ComponentProps<Tag> & {
   node?: unknown;
@@ -45,6 +51,7 @@ const LINK_CLASS = "text-primary underline underline-offset-2 hover:opacity-80";
 
 function CombLink({ node: _node, href, children, ...rest }: ElementProps<"a">) {
   const doc = useContext(CombDocContext);
+  const liveUrl = useContext(CombLiveUrlContext);
   const target = doc && href ? resolveRelative(doc.path, href) : null;
   if (doc && target) {
     return (
@@ -56,8 +63,18 @@ function CombLink({ node: _node, href, children, ...rest }: ElementProps<"a">) {
       </Link>
     );
   }
-  // An in-page anchor stays in the tab. Other links open a new tab (step-13
-  // turns agent-fs live links into Comb links).
+  // step-13: an agent-fs live link or a dashboard file link also opens in Comb.
+  // Comb renders a file only while connected, so no state check is needed.
+  const appOrigin = typeof window === "undefined" ? "" : window.location.origin;
+  const combTo = href ? combPathForLink(href, { liveUrl, appOrigin }) : null;
+  if (combTo) {
+    return (
+      <Link to={combTo} className={LINK_CLASS}>
+        {children}
+      </Link>
+    );
+  }
+  // An in-page anchor stays in the tab. Other links open a new tab.
   if (href?.startsWith("#")) {
     return (
       <a href={href} className={LINK_CLASS} {...rest}>

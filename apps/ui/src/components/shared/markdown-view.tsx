@@ -1,6 +1,8 @@
 import Editor from "@monaco-editor/react";
 import type { ReactNode } from "react";
+import { Link } from "react-router-dom";
 import { Streamdown } from "streamdown";
+import { useCombLinks } from "@/hooks/use-comb-links";
 import { useTheme } from "@/hooks/use-theme";
 import { cn, normalizeNewlines } from "@/lib/utils";
 import { CopyButton } from "./copy-button";
@@ -131,21 +133,29 @@ const STREAMDOWN_COMPONENTS = {
   pre({ children }: { children?: ReactNode }) {
     return <>{children}</>;
   },
-  // Markdown links always open in a new tab — markdown is rendered inside
-  // dialogs/panels where in-place navigation would lose state.
-  a({ children, href }: { children?: ReactNode; href?: string }) {
-    return (
-      <a
-        href={href}
-        target="_blank"
-        rel="noreferrer"
-        className="text-primary underline underline-offset-2 hover:opacity-80"
-      >
-        {children}
-      </a>
-    );
-  },
+  a: MarkdownLink,
 };
+
+const LINK_CLASS = "text-primary underline underline-offset-2 hover:opacity-80";
+
+// Markdown links open in a new tab, because markdown renders inside dialogs and
+// panels where in-place navigation would lose state. Exception: an agent-fs
+// link opens the file in Comb (same tab) while Comb is connected.
+function MarkdownLink({ children, href }: { children?: ReactNode; href?: string }) {
+  const combTo = useCombLinks()(href);
+  if (combTo) {
+    return (
+      <Link to={combTo} className={LINK_CLASS}>
+        {children}
+      </Link>
+    );
+  }
+  return (
+    <a href={href} target="_blank" rel="noreferrer" className={LINK_CLASS}>
+      {children}
+    </a>
+  );
+}
 
 /**
  * Markdown renderer used across the app. Wraps Streamdown with:
