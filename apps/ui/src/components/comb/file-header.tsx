@@ -22,8 +22,8 @@ export function FileHeader({ file, stat }: { file: DrivePath; stat: StatResult }
     <PageHeader
       title={
         <div className="min-w-0">
-          <h2 className="truncate text-base font-semibold">{baseName(file.path)}</h2>
-          <p className="flex flex-wrap items-center gap-x-1.5 text-xs text-muted-foreground">
+          <h2 className="truncate text-base font-semibold sm:sr-only">{baseName(file.path)}</h2>
+          <p className="flex min-h-5 flex-wrap items-center gap-x-1.5 text-xs text-muted-foreground">
             {facts.map((fact) => (
               <span key={fact} className="after:ml-1.5 after:content-['·']">
                 {fact}
