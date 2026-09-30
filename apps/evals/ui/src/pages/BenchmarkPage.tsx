@@ -412,6 +412,10 @@ function PublicHeader(props: {
   );
 }
 
+/** Methodology source of truth; linked from the empty state, before any snapshot exists. */
+const METHODOLOGY_URL =
+  "https://github.com/desplega-ai/agent-swarm/blob/main/apps/evals/docs/methodology.md";
+
 export default function BenchmarkPage(): ReactNode {
   const [index, setIndex] = useState<BenchmarkIndex | null>(null);
   const [version, setVersion] = useState<string | null>(readVersionParam);
@@ -447,7 +451,14 @@ export default function BenchmarkPage(): ReactNode {
   if (error) {
     body = <p className="bm-empty">Could not load the benchmark: {error}</p>;
   } else if (index !== null && index.versions.length === 0) {
-    body = <p className="bm-empty">No benchmark has been published yet.</p>;
+    body = (
+      <p className="bm-empty">
+        No benchmark has been published yet.{" "}
+        <a href={METHODOLOGY_URL} target="_blank" rel="noopener">
+          Read how the benchmark is run ↗
+        </a>
+      </p>
+    );
   } else if (snapshot === null) {
     body = <Spinner label="loading benchmark" />;
   } else if (snapshot.schema > SUPPORTED_SNAPSHOT_SCHEMA) {
