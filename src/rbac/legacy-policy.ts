@@ -216,6 +216,23 @@ const taskFsMutate: LegacyRule = {
   },
 };
 
+/**
+ * task.progress.write — operator OR user OR lead OR task-assignee OR unassigned
+ * task (store-progress, POST /api/tasks/{id}/progress). A worker once completed
+ * a workflow sibling's task with its own report; the creator gets no write
+ * here, unlike task.fs.mutate. Leads may write, unlike HTTP finish.
+ */
+const taskProgressWrite: LegacyRule = {
+  name: "operator-or-user-or-lead-or-task-assignee",
+  denyReason: "requires operator, user, lead agent, or task assignee",
+  evaluate: (principal, resource) => {
+    if (principal.kind === "operator" || principal.kind === "user") return true;
+    if (actsAsLead(principal)) return true;
+    if (resource?.kind !== "task") return false;
+    return resource.agentId == null || resource.agentId === principal.agentId;
+  },
+};
+
 /** All named (non-composite) rule kinds, keyed by identifier. */
 export const LEGACY_RULES = {
   "operator-or-user": operatorOrUser,
@@ -246,6 +263,7 @@ export const LEGACY_POLICY = {
   "task.steer.own": requesterOwnsTask,
   "task.action.own": requesterOwnsTask,
   "task.fs.mutate": taskFsMutate,
+  "task.progress.write": taskProgressWrite,
   "favorite.write.own": anyAuthenticated,
   "memory.learning.inject": leadOnly,
   "memory.edit.any": leadOrResourceOwner,

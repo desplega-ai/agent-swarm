@@ -22,6 +22,7 @@ import {
   upsertTaskCitations,
 } from "@/be/task-citations";
 import { AgentFsProvider } from "@/fs/agent-fs-provider";
+import { can } from "@/rbac";
 import { runTaskTerminalEffects } from "@/tasks/task-terminal-effects";
 import {
   getTaskOutputValidationError,
@@ -51,19 +52,26 @@ const BLOCKED_WAITING_PATTERN =
 const BLOCKED_WAITING_MIN_ELAPSED_MS = 3 * 60 * 1000;
 
 /**
- * Only the assigned agent may write a task's progress, status, or artifacts.
- * Workflow siblings see each other's task ids in their prompt, and a worker
- * once completed a sibling's task with its own report. Leads keep cross-task
- * writes (the task-citations suite pins lead completion of a worker task);
- * unassigned tasks stay writable, matching `POST /api/tasks/:id/finish`.
- * Returns the refusal message, naming the caller's own task so it can retry.
+ * Only the assigned agent may write a task's progress, status, or artifacts
+ * (`task.progress.write`). Workflow siblings see each other's task ids in
+ * their prompt, and a worker once completed a sibling's task with its own
+ * report. Leads keep cross-task writes (the task-citations suite pins lead
+ * completion of a worker task); unassigned tasks stay writable, matching
+ * `POST /api/tasks/:id/finish`. Returns the refusal message, naming the
+ * caller's own task so it can retry.
  */
 async function foreignTaskWriteError(
   caller: { id: string; isLead?: boolean },
   task: { id: string; agentId?: string | null },
   sourceTaskId: string | undefined,
 ): Promise<string | undefined> {
-  if (!task.agentId || task.agentId === caller.id || caller.isLead) return undefined;
+  const decision = can({
+    principal: { kind: "agent", agentId: caller.id, isLead: caller.isLead === true },
+    verb: "task.progress.write",
+    resource: { kind: "task", taskId: task.id, agentId: task.agentId },
+    source: "mcp",
+  });
+  if (decision.allow) return undefined;
   const sourceTask = sourceTaskId ? await getTaskById(sourceTaskId) : null;
   const ownTask =
     sourceTask?.agentId === caller.id ? sourceTask : await getAgentCurrentTask(caller.id);

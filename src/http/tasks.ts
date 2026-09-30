@@ -371,6 +371,7 @@ const cancelTaskRoute = route({
   responses: {
     200: { description: "Task cancelled", schema: TaskActionResultSchema },
     400: { description: "Cannot cancel terminal task" },
+    403: { description: "Agent caller is neither a lead nor the task creator" },
     404: { description: "Task not found" },
   },
 });
@@ -537,6 +538,7 @@ const updateTaskProgressRoute = route({
   body: z.object({ progress: z.string().min(1) }),
   responses: {
     200: { description: "Progress updated", schema: z.object({ success: z.literal(true) }) },
+    403: { description: "Task is assigned to another agent" },
     404: { description: "Task not found" },
   },
 });
@@ -745,6 +747,24 @@ async function canActOnOwnTask(
   }
 
   return can({ principal, verb: "task.action.own", resource, source: "http" }).allow;
+}
+
+/**
+ * Principal for task writes (progress, cancel). Workers share the swarm API
+ * key, so on an operator bearer the X-Agent-ID header is the caller's
+ * identity, as in POST /api/tasks/{id}/finish. A keyed call without it (the
+ * runner wrapper, the dashboard) stays the operator.
+ */
+async function resolveTaskWritePrincipal(
+  req: IncomingMessage,
+  myAgentId: string | undefined,
+): Promise<RbacPrincipal> {
+  const auth = getRequestAuth(req);
+  if (auth?.kind === "user") return { kind: "user", userId: auth.userId };
+  const agentId = auth?.kind === "agent" ? auth.agentId : myAgentId;
+  if (!agentId) return { kind: "operator" };
+  const agent = await getAgentById(agentId);
+  return { kind: "agent", agentId, isLead: agent?.isLead === true };
 }
 
 // ─── Handler ─────────────────────────────────────────────────────────────────
@@ -1032,6 +1052,22 @@ export async function handleTasks(
 
     if (!task) {
       jsonError(res, "Task not found", 404);
+      return true;
+    }
+
+    // Humans may cancel any task. Agents get the MCP cancel-task policy:
+    // lead or task creator.
+    const principal = await resolveTaskWritePrincipal(req, myAgentId);
+    if (
+      principal.kind === "agent" &&
+      !can({
+        principal,
+        verb: "task.cancel.any",
+        resource: { kind: "task", taskId: task.id, creatorAgentId: task.creatorAgentId },
+        source: "http",
+      }).allow
+    ) {
+      jsonError(res, "Only the lead or task creator can cancel tasks.", 403);
       return true;
     }
 
@@ -1369,14 +1405,31 @@ export async function handleTasks(
   if (updateTaskProgressRoute.match(req.method, pathSegments)) {
     const parsed = await updateTaskProgressRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const task = await getTaskById(parsed.params.id);
+    const principal = await resolveTaskWritePrincipal(req, myAgentId);
 
-    if (!task) {
+    // Check and write in one transaction so a reassignment cannot slip between.
+    const status = await getDbClient().transaction(async (): Promise<200 | 403 | 404> => {
+      const task = await getTaskById(parsed.params.id);
+      if (!task) return 404;
+      const decision = can({
+        principal,
+        verb: "task.progress.write",
+        resource: { kind: "task", taskId: task.id, agentId: task.agentId },
+        source: "http",
+      });
+      if (!decision.allow) return 403;
+      await updateTaskProgress(parsed.params.id, parsed.body.progress);
+      return 200;
+    });
+
+    if (status === 404) {
       jsonError(res, "Task not found", 404);
       return true;
     }
-
-    await updateTaskProgress(parsed.params.id, parsed.body.progress);
+    if (status === 403) {
+      jsonError(res, "Task is assigned to another agent", 403);
+      return true;
+    }
     updateTaskProgressRoute.respond(res, 200, { success: true });
     return true;
   }

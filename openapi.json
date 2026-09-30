@@ -46374,6 +46374,16 @@
               }
             }
           },
+          "403": {
+            "description": "Agent caller is neither a lead nor the task creator",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "404": {
             "description": "Task not found",
             "content": {
@@ -47112,6 +47122,16 @@
                   "required": [
                     "success"
                   ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Task is assigned to another agent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
