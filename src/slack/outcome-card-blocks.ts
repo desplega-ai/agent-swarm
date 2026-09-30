@@ -108,11 +108,15 @@ export function failureHint(failureClass: FailureClass | undefined): string | un
  * without them can still post. Source: the Errors tables of
  * https://docs.slack.dev/reference/methods/chat.postMessage and
  * https://docs.slack.dev/reference/methods/chat.update:
- * - `invalid_blocks`: "The blocks were invalid for the requesting user" (a
- *   workspace, plan or client that does not offer these blocks).
- * - `invalid_blocks_format`: the blocks do not match the Block Kit syntax
- *   Slack accepts there (e.g. no `context_actions` / `feedback_buttons`).
+ * - `invalid_blocks`: "The blocks were invalid for the requesting user".
+ * - `invalid_blocks_format`: the blocks do not match the Block Kit syntax.
  * - `msg_blocks_too_long`: the action blocks pushed the card past the limit.
+ *
+ * UNVERIFIED: we have not observed how a workspace without the feature (a
+ * plan or permission that lacks `context_actions` / `feedback_buttons`)
+ * rejects these blocks, and Slack does not document that mapping. We assume it
+ * is one of the block errors above. If it answers with another code, the card
+ * send fails instead of falling back. The tests exercise only these codes.
  *
  * Everything else is rethrown untouched: invalid credentials (`invalid_auth`,
  * `not_authed`, `token_revoked`, `token_expired`, `account_inactive`), a
