@@ -180,6 +180,7 @@ const workflowCorrectnessCheck: DeterministicCheck = {
 
 export const workflowAuthoring: Scenario = {
   id: "workflow-authoring",
+  version: 1,
   name: "Workflow authoring",
   description:
     "Author a multi-node workflow through the swarm workflow tool, grading the persisted DAG, input mappings, reusable swarm-script selection, and trigger schema.",

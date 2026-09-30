@@ -79,7 +79,11 @@ export function summarizeRun(run: EvalRunRow, attempts: AttemptRow[]): RunSummar
       const cellAttempts = attempts
         .filter((a) => a.scenarioId === scenarioId && a.configId === configId)
         .sort((a, b) => a.attemptIndex - b.attemptIndex);
-      const finished = cellAttempts.filter((a) => ["passed", "failed", "error"].includes(a.status));
+      // An excluded attempt (cancelled, harness crash) says nothing about the model:
+      // it leaves the pass-rate denominator and passedFirst.
+      const finished = cellAttempts.filter(
+        (a) => ["passed", "failed", "error"].includes(a.status) && !a.exclusion,
+      );
       const scores = cellAttempts.map((a) => a.score).filter((s): s is number => s !== null);
       const costs = cellAttempts.map((a) => a.costUsd).filter((c): c is number => c !== null);
       const durations = cellAttempts
@@ -100,7 +104,7 @@ export function summarizeRun(run: EvalRunRow, attempts: AttemptRow[]): RunSummar
         finished: finished.length,
         passedAny: cellAttempts.some((a) => a.status === "passed"),
         passedFirst:
-          first && ["passed", "failed", "error"].includes(first.status)
+          first && ["passed", "failed", "error"].includes(first.status) && !first.exclusion
             ? first.status === "passed"
             : null,
         bestScore: scores.length ? Math.max(...scores) : null,
@@ -113,7 +117,8 @@ export function summarizeRun(run: EvalRunRow, attempts: AttemptRow[]): RunSummar
         avgDurationMs: durations.length
           ? durations.reduce((a, b) => a + b, 0) / durations.length
           : null,
-        errors: cellAttempts.filter((a) => a.status === "error").length,
+        errors: cellAttempts.filter((a) => a.status === "error" && a.exclusion !== "cancelled")
+          .length,
         passed: passedCount,
         pricedAttempts: costs.length,
         avgCostUsd: totalCostUsd === null ? null : totalCostUsd / costs.length,
@@ -123,7 +128,9 @@ export function summarizeRun(run: EvalRunRow, attempts: AttemptRow[]): RunSummar
   const costsAll = cells.map((c) => c.totalCostUsd).filter((c): c is number => c !== null);
   const judgeCosts = attempts.map((a) => a.judgeCostUsd).filter((c): c is number => c !== null);
   const durationsAll = attempts.map((a) => a.durationMs).filter((d): d is number => d !== null);
-  const finishedAttempts = attempts.filter((a) => ["passed", "failed", "error"].includes(a.status));
+  const finishedAttempts = attempts.filter(
+    (a) => ["passed", "failed", "error"].includes(a.status) && !a.exclusion,
+  );
   return {
     run,
     cells,
@@ -136,7 +143,8 @@ export function summarizeRun(run: EvalRunRow, attempts: AttemptRow[]): RunSummar
       judgeCostUsd: judgeCosts.length ? judgeCosts.reduce((a, b) => a + b, 0) : null,
       totalDurationMs: durationsAll.length ? durationsAll.reduce((a, b) => a + b, 0) : null,
       passedAttempts: attempts.filter((a) => a.status === "passed").length,
-      errorAttempts: attempts.filter((a) => a.status === "error").length,
+      errorAttempts: attempts.filter((a) => a.status === "error" && a.exclusion !== "cancelled")
+        .length,
       unpricedAttempts: finishedAttempts.filter(
         (a) => a.costUsd === null || a.costSource === "unpriced",
       ).length,

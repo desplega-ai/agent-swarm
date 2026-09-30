@@ -1,0 +1,145 @@
+/* Outcome panel on the run page (Phase 6): verdict, gates, dimensions. Tokens live in styles.css. */
+
+.ao-verdict {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-top: 4px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-left-width: 3px;
+  border-radius: 6px;
+  font-weight: 600;
+}
+
+.ao-verdict-score {
+  margin-left: auto;
+  font-family: var(--font-mono);
+}
+
+.ao-passed {
+  border-left-color: var(--green);
+}
+
+.ao-failed {
+  border-left-color: var(--red);
+}
+
+/* an error is not a failed grade: amber, dashed, apart from the red of a fail */
+.ao-error {
+  border-style: dashed;
+  border-left-style: solid;
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.ao-cancelled,
+.ao-unfinished {
+  border-left-color: var(--dim);
+  color: var(--dim);
+}
+
+.ao-note {
+  margin-top: 6px;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.ao-section {
+  margin-top: 12px;
+}
+
+.ao-label {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--dim);
+}
+
+.ao-agg {
+  font-family: var(--font-mono);
+  letter-spacing: 0;
+  color: var(--text);
+}
+
+.ao-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ao-row {
+  display: grid;
+  grid-template-columns: 14px auto 1fr;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12.5px;
+}
+
+.ao-dim {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  font-size: 12.5px;
+}
+
+.ao-dim-head {
+  display: grid;
+  grid-template-columns: auto auto 1fr auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.ao-name {
+  font-weight: 500;
+}
+
+.ao-weight,
+.ao-score {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+}
+
+.ao-mark {
+  font-family: var(--font-mono);
+  font-weight: 700;
+}
+
+.ao-pass {
+  color: var(--green);
+}
+
+.ao-fail {
+  color: var(--red);
+}
+
+.ao-bar {
+  height: 6px;
+  min-width: 40px;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--border), transparent 40%);
+  overflow: hidden;
+}
+
+.ao-bar-fill {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+
+.ao-reason {
+  font-size: 11.5px;
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}

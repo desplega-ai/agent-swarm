@@ -1,13 +1,23 @@
 import { describe, expect, test } from "bun:test";
 import { configs } from "../configs/index.ts";
-import { CONFIG_PRESETS, expandPresetSelection } from "../configs/presets.ts";
+import { CONFIG_PRESETS, expandPresetSelection, presetRunDefaults } from "../configs/presets.ts";
+import { SCENARIO_CARDS, scenarioCard } from "../scenarios/cards.ts";
+import { scenarios } from "../scenarios/index.ts";
+import { SCENARIO_HASHES } from "../scenarios/scenario-hashes.ts";
 import { serializeConfig, serializeScenario, validateScenario } from "./registry.ts";
-import type { CheckResult, DeterministicCheck, DimensionSpec, Scenario } from "./types.ts";
+import {
+  type CheckResult,
+  type DeterministicCheck,
+  type DimensionSpec,
+  type Scenario,
+  scenarioWorkerCount,
+} from "./types.ts";
 
 /** Minimal valid scenario; tests override single fields to isolate one rule. */
 function scenario(overrides: Partial<Scenario>): Scenario {
   return {
     id: "test-scenario",
+    version: 1,
     name: "Test scenario",
     tasks: [{ title: "t0", description: "d0" }],
     outcome: {},
@@ -18,6 +28,15 @@ function scenario(overrides: Partial<Scenario>): Scenario {
 describe("validateScenario (v6 §0.11 frozen rules)", () => {
   test("a plain single-task scenario is valid", () => {
     expect(validateScenario(scenario({}))).toEqual([]);
+  });
+
+  test("version must be a positive integer", () => {
+    expect(validateScenario(scenario({ version: 3 }))).toEqual([]);
+    for (const bad of [0, -1, 1.5, Number.NaN]) {
+      expect(validateScenario(scenario({ version: bad }))).toEqual([
+        `version must be a positive integer, got ${bad}`,
+      ]);
+    }
   });
 
   test("workers bounds: 1..3 accepted, 0 / 4 / non-integers rejected", () => {
@@ -232,14 +251,51 @@ describe("serializeScenario — workerSpecs + lead (v7 §9/§12)", () => {
 });
 
 describe("CONFIG_PRESETS (v7.7 item 1 — frozen contract)", () => {
-  test("display order is frozen: frontier, challengers, oss, claude-family, budget", () => {
+  test("display order is frozen: frontier, challengers, oss, claude-family, budget, then the scheduled tiers", () => {
     expect(CONFIG_PRESETS.map((p) => p.id)).toEqual([
       "frontier",
       "challengers",
       "oss",
       "claude-family",
       "budget",
+      "nightly-canary",
+      "weekly-matrix",
     ]);
+  });
+
+  test("scheduled tiers name the plan's reference configs and carry a valid run plan", () => {
+    const nightly = CONFIG_PRESETS.find((p) => p.id === "nightly-canary");
+    const weekly = CONFIG_PRESETS.find((p) => p.id === "weekly-matrix");
+    expect(nightly?.configIds).toEqual(["claude-opus-5.5", "codex-6-luna"]);
+    expect(weekly?.configIds).toEqual([
+      "claude-opus-5.5",
+      "codex-6.1-sol",
+      "codex-6-luna",
+      "codex-6-astra",
+      "pi-deepseek-v4.1-flash",
+    ]);
+    expect(nightly?.runDefaults).toEqual({ attemptsPerCell: 3, maxMeteredUsd: 2 });
+    expect(weekly?.runDefaults).toEqual({ attemptsPerCell: 5, maxMeteredUsd: 37 });
+    for (const preset of CONFIG_PRESETS) {
+      const plan = preset.runDefaults;
+      if (!plan) continue;
+      expect(Number.isInteger(plan.attemptsPerCell) && plan.attemptsPerCell >= 1).toBe(true);
+      expect(Number.isFinite(plan.maxMeteredUsd) && plan.maxMeteredUsd > 0).toBe(true);
+    }
+  });
+
+  test("presetRunDefaults: first preset that sets a field wins; presets without a plan add nothing", () => {
+    expect(presetRunDefaults(["nightly-canary"])).toEqual({ attemptsPerCell: 3, maxMeteredUsd: 2 });
+    expect(presetRunDefaults(["budget", "weekly-matrix"])).toEqual({
+      attemptsPerCell: 5,
+      maxMeteredUsd: 37,
+    });
+    expect(presetRunDefaults(["nightly-canary", "weekly-matrix"])).toEqual({
+      attemptsPerCell: 3,
+      maxMeteredUsd: 2,
+    });
+    expect(presetRunDefaults(["budget"])).toEqual({});
+    expect(() => presetRunDefaults(["nope"])).toThrow('unknown preset "nope"');
   });
 
   test("preset ids are unique; configIds non-empty with no internal duplicates", () => {
@@ -362,7 +418,7 @@ describe("expandPresetSelection — CLI --preset expansion (v7.7 item 1)", () =>
 
   test("unknown preset throws the frozen error before anything else", () => {
     expect(() => expandPresetSelection(["nope"], [])).toThrow(
-      'unknown preset "nope" (available: frontier, challengers, oss, claude-family, budget)',
+      'unknown preset "nope" (available: frontier, challengers, oss, claude-family, budget, nightly-canary, weekly-matrix)',
     );
   });
 });
@@ -595,5 +651,130 @@ describe("validateScenario dependsOn (round 10 — relaxed range + cycle chain e
       'task 0 ("A"): dependsOn entry 9 must reference an existing task index [0, 2]',
     );
     expect(errors).toContain('dependency cycle: 0 ("A") → 1 ("B") → 0 ("A")');
+  });
+});
+
+describe("validateScenario — member profiles, workerExec, humanInput (Phase 8)", () => {
+  test("a declared profile, per-worker seeding and a canned human are valid together", () => {
+    expect(
+      validateScenario(
+        scenario({
+          workers: [
+            { name: "a", profile: { role: "ops", capabilities: ["on-call"] } },
+            { name: "b" },
+          ],
+          seed: { workerExec: [{ worker: 1, commands: ["true"] }] },
+          humanInput: { reply: "EU only" },
+          awaitSpawnedTasks: true,
+        }),
+      ),
+    ).toEqual([]);
+  });
+
+  test("a profile must say something, within the API's limits", () => {
+    expect(validateScenario(scenario({ workers: [{ profile: {} }] }))).toEqual([
+      "workers[0].profile must set role, description or capabilities",
+    ]);
+    expect(
+      validateScenario(
+        scenario({ workers: [{ profile: { role: "x".repeat(101), capabilities: [" "] } }] }),
+      ),
+    ).toEqual([
+      "workers[0].profile.role must be 1..100 chars",
+      "workers[0].profile.capabilities entries must be non-empty strings",
+    ]);
+  });
+
+  test("workerExec targets a booted worker and runs something", () => {
+    expect(
+      validateScenario(
+        scenario({
+          workers: 2,
+          seed: {
+            workerExec: [
+              { worker: 2, commands: ["true"] },
+              { worker: 0, commands: [] },
+            ],
+          },
+        }),
+      ),
+    ).toEqual([
+      "seed.workerExec[0].worker 2 out of range [0, 1]",
+      "seed.workerExec[1].commands is empty",
+    ]);
+  });
+
+  test("humanInput needs a reply and awaitSpawnedTasks (the answer is a follow-up task)", () => {
+    expect(validateScenario(scenario({ humanInput: { reply: " " } }))).toEqual([
+      "humanInput.reply must be non-empty",
+      "humanInput requires awaitSpawnedTasks",
+    ]);
+  });
+});
+
+describe("scenario cards (Phase 6): every registered scenario says what it tests", () => {
+  const TOPOLOGIES = ["single-agent", "swarm"];
+  const FLOWS = ["parallel", "sequential"];
+  const KINDS = ["regression", "capability"];
+
+  test("every registered scenario has a card, and no card is orphaned", () => {
+    const registered = scenarios.map((s) => s.id).sort();
+    expect(Object.keys(SCENARIO_CARDS).sort()).toEqual(registered);
+  });
+
+  test("summary, agentDoes and scoredBy are real sentences, not placeholders", () => {
+    for (const s of scenarios) {
+      const card = scenarioCard(s.id);
+      expect(card, s.id).not.toBeNull();
+      for (const field of ["summary", "agentDoes", "scoredBy"] as const) {
+        const text = card?.[field] ?? "";
+        expect(text.trim().length, `${s.id}.${field}`).toBeGreaterThanOrEqual(40);
+        expect(text, `${s.id}.${field}`).not.toMatch(/\b(TODO|TBD|FIXME)\b/);
+      }
+    }
+  });
+
+  test("tags carry one value from each axis", () => {
+    for (const s of scenarios) {
+      const tags = scenarioCard(s.id)?.tags;
+      expect(TOPOLOGIES, s.id).toContain(tags?.topology ?? "");
+      expect(FLOWS, s.id).toContain(tags?.flow ?? "");
+      expect(KINDS, s.id).toContain(tags?.kind ?? "");
+    }
+  });
+
+  test("the topology tag matches the roster: a lead or several workers is a swarm", () => {
+    for (const s of scenarios) {
+      const isSwarm = s.lead !== undefined || scenarioWorkerCount(s.workers) > 1;
+      expect(scenarioCard(s.id)?.tags.topology, s.id).toBe(isSwarm ? "swarm" : "single-agent");
+    }
+  });
+
+  test("a solo baseline is a single-agent scenario", () => {
+    for (const s of scenarios.filter((x) => x.baselineOf !== undefined)) {
+      expect(scenarioCard(s.id)?.tags.topology, s.id).toBe("single-agent");
+    }
+  });
+
+  test("the changelog has one line per pinned version, so a bump cannot skip the card", () => {
+    for (const s of scenarios) {
+      const pinned = (SCENARIO_HASHES[s.id] ?? []).map((h) => h.version);
+      const noted = (scenarioCard(s.id)?.changelog ?? []).map((c) => c.version);
+      expect(noted, s.id).toEqual(pinned);
+      expect(noted.at(-1), s.id).toBe(s.version);
+      for (const entry of scenarioCard(s.id)?.changelog ?? []) {
+        expect(entry.note.trim().length, `${s.id} v${entry.version}`).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  test("serializeScenario carries the card and the suite it belongs to", () => {
+    const sql = scenarios.find((s) => s.id === "sql-audit") as Scenario;
+    const j = serializeScenario(sql);
+    expect(j.card).toEqual(scenarioCard("sql-audit"));
+    expect(j.suite).toBe("swarm-evals@1.0");
+    // A scenario outside the manifest (or at another version) has no suite.
+    expect(serializeScenario(scenario({ id: "sql-audit", version: 99 })).suite).toBeNull();
+    expect(serializeScenario(scenario({ id: "not-registered" })).card).toBeNull();
   });
 });

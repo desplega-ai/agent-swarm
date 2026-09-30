@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { WORKER_SPEC_RESERVED_ENV } from "../registry.ts";
 import type { HarnessConfig } from "../types.ts";
-import { apiRuntimeEnv, workerRuntimeEnv } from "./sandbox.ts";
+import { apiRuntimeEnv, memberBilling, workerRuntimeEnv } from "./sandbox.ts";
 
 const ENV_KEYS = [
   "OPENROUTER_API_KEY",
@@ -11,6 +11,8 @@ const ENV_KEYS = [
   "EMBEDDING_API_KEY",
   "EMBEDDING_MODEL",
   "EMBEDDING_API_BASE_URL",
+  "EVALS_SWARM_API_URL",
+  "EVALS_SWARM_API_KEY",
 ] as const;
 const saved: Record<string, string | undefined> = {};
 for (const k of ENV_KEYS) saved[k] = process.env[k];
@@ -63,6 +65,34 @@ describe("workerRuntimeEnv credential gating (v7.6 §A2 — interim claude OPENR
       env: { OPENROUTER_API_KEY: "example-per-config-key" },
     });
     expect(env.OPENROUTER_API_KEY).toBe("example-per-config-key");
+  });
+});
+
+describe("codex credentials: subscription source withholds OPENAI_API_KEY", () => {
+  const codex: HarnessConfig = { id: "codex-6-luna", provider: "codex", model: "gpt-6-luna" };
+
+  test("no swarm source: OPENAI_API_KEY is forwarded (metered)", () => {
+    delete process.env.EVALS_SWARM_API_URL;
+    delete process.env.EVALS_SWARM_API_KEY;
+    process.env.OPENAI_API_KEY = "example-openai-key";
+    expect(workerEnvFor(codex).OPENAI_API_KEY).toBe("example-openai-key");
+  });
+
+  test("swarm source set: OPENAI_API_KEY never reaches the sandbox, and none is required", () => {
+    process.env.EVALS_SWARM_API_URL = "http://swarm.example";
+    process.env.EVALS_SWARM_API_KEY = "example-swarm-key";
+    process.env.OPENAI_API_KEY = "example-openai-key";
+    expect(workerEnvFor(codex).OPENAI_API_KEY).toBeUndefined();
+    delete process.env.OPENAI_API_KEY;
+    expect(() => workerEnvFor(codex)).not.toThrow();
+  });
+
+  test("memberBilling follows what the member received", () => {
+    expect(memberBilling("codex", {}, true)).toBe("subscription");
+    expect(memberBilling("codex", { OPENAI_API_KEY: "k" }, false)).toBe("metered");
+    expect(memberBilling("claude", { CLAUDE_CODE_OAUTH_TOKEN: "t" }, false)).toBe("subscription");
+    expect(memberBilling("claude", { ANTHROPIC_API_KEY: "k" }, false)).toBe("metered");
+    expect(memberBilling("pi", { OPENROUTER_API_KEY: "k" }, false)).toBe("metered");
   });
 });
 

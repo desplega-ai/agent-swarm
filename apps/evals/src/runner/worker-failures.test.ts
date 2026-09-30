@@ -41,6 +41,7 @@ describe("ScenarioSeed.workerFailures — type shape", () => {
 describe("validateScenario — workerFailures back-compat", () => {
   const base: Scenario = {
     id: "wf-test",
+    version: 1,
     name: "wf test",
     tasks: [{ title: "t0", description: "d0" }],
     outcome: {},

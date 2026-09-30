@@ -37,6 +37,7 @@ import { getEmbeddingProvider } from "../be/memory";
 import { getFileStorageProvider } from "../fs/registry";
 import { getSlackConfiguration } from "../slack/config";
 import { getSlackConnectionState } from "../slack/connection-state";
+import { isTelemetryEnabled } from "../telemetry";
 import { type AgentCredStatus, AutomationIntegrationIdSchema, ProviderNameSchema } from "../types";
 import { route } from "./route-def";
 import { json, jsonError } from "./utils";
@@ -119,6 +120,16 @@ export const StatusActivitySchema = z.object({
 });
 export type StatusActivity = z.infer<typeof StatusActivitySchema>;
 
+/**
+ * Effective telemetry opt-out state (`ANONYMIZED_TELEMETRY`, on by default).
+ * The dashboard reads it to stop its own browser-side notification events when
+ * the operator opted out.
+ */
+export const StatusTelemetrySchema = z.object({
+  enabled: z.boolean(),
+});
+export type StatusTelemetry = z.infer<typeof StatusTelemetrySchema>;
+
 export const StatusAgentFsSchema = z.object({
   configured: z.boolean(),
   base_url: z.string().nullable(),
@@ -171,6 +182,8 @@ export const StatusResponseSchema = z.object({
   automations: z.array(AutomationStatusSchema),
   /** Phase 2: rolled-up health for the always-on header badge. */
   health: StatusHealthSchema,
+  /** Additive: absent on servers that predate it, so consumers treat missing as enabled. */
+  telemetry: StatusTelemetrySchema.optional(),
 });
 export type StatusResponse = z.infer<typeof StatusResponseSchema>;
 
@@ -692,6 +705,7 @@ export async function buildStatusPayload(): Promise<StatusResponse> {
     },
     automations,
     health: computeHealth(setup),
+    telemetry: { enabled: isTelemetryEnabled() },
   };
 }
 
@@ -721,7 +735,7 @@ const getStatus = route({
   pattern: ["status"],
   summary: "Identity + setup readiness + live activity for the swarm dashboard",
   description:
-    "Single source of truth consumed by the UI home page. Identity comes from SWARM_* envs; setup milestones each emit `unverified | configured | verified`; automations report `running | needs_setup` from the same runtime preflight used at dispatch; activity counts agents alive in the last 5 min and tasks created in the last 24h; agent_fs reports whether AGENT_FS_API_URL is set.",
+    "Single source of truth consumed by the UI home page. Identity comes from SWARM_* envs; setup milestones each emit `unverified | configured | verified`; automations report `running | needs_setup` from the same runtime preflight used at dispatch; activity counts agents alive in the last 5 min and tasks created in the last 24h; agent_fs reports whether AGENT_FS_API_URL is set; telemetry reports the effective ANONYMIZED_TELEMETRY opt-out state.",
   tags: ["Status"],
   responses: {
     200: { description: "Status payload", schema: StatusResponseSchema },

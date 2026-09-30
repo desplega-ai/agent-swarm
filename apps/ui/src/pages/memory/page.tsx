@@ -311,6 +311,7 @@ export default function MemoryPage() {
               size="icon"
               variant="destructive-outline"
               className="h-7 w-7"
+              aria-label={`Delete memory ${row.name}`}
               onClick={(e) => {
                 e.stopPropagation();
                 setDeleteTarget(row);

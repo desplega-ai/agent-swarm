@@ -89,18 +89,61 @@ function commandExists(command: string): Promise<boolean> {
   });
 }
 
-function agentFs(args: string[], output = false): Promise<{ code: number | null; stdout: string }> {
+const UPLOAD_TIMEOUT_MS = 60_000;
+const UPLOAD_ATTEMPTS = 2;
+
+function agentFs(
+  args: string[],
+  output = false,
+  timeoutMs?: number,
+): Promise<{ code: number | null; stdout: string; timedOut: boolean }> {
   return new Promise((resolve) => {
     const child = spawn("agent-fs", args, {
       stdio: ["ignore", output ? "pipe" : "ignore", "ignore"],
     });
     let stdout = "";
+    let timedOut = false;
+    const timer = timeoutMs
+      ? setTimeout(() => {
+          timedOut = true;
+          child.kill("SIGKILL");
+        }, timeoutMs)
+      : undefined;
     child.stdout?.on("data", (chunk: Buffer) => {
       stdout += chunk.toString();
     });
-    child.once("error", () => resolve({ code: null, stdout }));
-    child.once("close", (code) => resolve({ code, stdout }));
+    child.once("error", () => {
+      clearTimeout(timer);
+      resolve({ code: null, stdout, timedOut });
+    });
+    child.once("close", (code) => {
+      clearTimeout(timer);
+      resolve({ code, stdout, timedOut });
+    });
   });
+}
+
+// Each upload gets a hard timeout so one hung agent-fs call cannot stall the
+// whole publish step. A timeout or spawn error (code null) is retried once.
+async function uploadWithRetry(item: UploadItem): Promise<void> {
+  const args = [
+    "write",
+    item.remotePath,
+    "--file",
+    item.localPath,
+    "-m",
+    `ui-e2e ${process.env.GITHUB_SHA ?? "unknown"}`,
+  ];
+  for (let attempt = 1; attempt <= UPLOAD_ATTEMPTS; attempt += 1) {
+    const result = await agentFs(args, false, UPLOAD_TIMEOUT_MS);
+    if (result.code === 0) return;
+    const transient = result.timedOut || result.code === null;
+    const reason = result.timedOut
+      ? `agent-fs write timed out after ${UPLOAD_TIMEOUT_MS / 1000}s`
+      : `agent-fs write exited with ${result.code}`;
+    if (!transient || attempt === UPLOAD_ATTEMPTS) throw new Error(reason);
+    console.warn(`Upload attempt ${attempt} for ${item.remotePath} failed: ${reason}. Retrying.`);
+  }
 }
 
 async function runPool<T>(
@@ -186,15 +229,7 @@ async function main(): Promise<void> {
   let failedUploads = 0;
   await runPool(plan.items, options.concurrency, async (item, index) => {
     try {
-      const result = await agentFs([
-        "write",
-        item.remotePath,
-        "--file",
-        item.localPath,
-        "-m",
-        `ui-e2e ${process.env.GITHUB_SHA ?? "unknown"}`,
-      ]);
-      if (result.code !== 0) throw new Error(`agent-fs write exited with ${result.code}`);
+      await uploadWithRetry(item);
       publishedByIndex[index] = artifactOutput(item, orgId as string, driveId as string);
     } catch (error) {
       failedUploads += 1;

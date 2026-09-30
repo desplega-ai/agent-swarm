@@ -4822,6 +4822,26 @@
                             "format",
                             "header"
                           ]
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "format": {
+                              "type": "string",
+                              "enum": [
+                                "standard-webhooks"
+                              ]
+                            },
+                            "toleranceSeconds": {
+                              "type": "integer",
+                              "exclusiveMinimum": 0,
+                              "default": 300,
+                              "description": "Maximum allowed clock skew, in seconds, for the webhook-timestamp header"
+                            }
+                          },
+                          "required": [
+                            "format"
+                          ]
                         }
                       ],
                       "description": "Optional webhook verification format. Omit to keep legacy HMAC-SHA256 behavior with fallback header scanning."
@@ -5449,6 +5469,26 @@
                           "required": [
                             "format",
                             "header"
+                          ]
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "format": {
+                              "type": "string",
+                              "enum": [
+                                "standard-webhooks"
+                              ]
+                            },
+                            "toleranceSeconds": {
+                              "type": "integer",
+                              "exclusiveMinimum": 0,
+                              "default": 300,
+                              "description": "Maximum allowed clock skew, in seconds, for the webhook-timestamp header"
+                            }
+                          },
+                          "required": [
+                            "format"
                           ]
                         }
                       ],
@@ -24805,7 +24845,7 @@
     "/status": {
       "get": {
         "summary": "Identity + setup readiness + live activity for the swarm dashboard",
-        "description": "Single source of truth consumed by the UI home page. Identity comes from SWARM_* envs; setup milestones each emit `unverified | configured | verified`; automations report `running | needs_setup` from the same runtime preflight used at dispatch; activity counts agents alive in the last 5 min and tasks created in the last 24h; agent_fs reports whether AGENT_FS_API_URL is set.",
+        "description": "Single source of truth consumed by the UI home page. Identity comes from SWARM_* envs; setup milestones each emit `unverified | configured | verified`; automations report `running | needs_setup` from the same runtime preflight used at dispatch; activity counts agents alive in the last 5 min and tasks created in the last 24h; agent_fs reports whether AGENT_FS_API_URL is set; telemetry reports the effective ANONYMIZED_TELEMETRY opt-out state.",
         "tags": [
           "Status"
         ],
@@ -25151,6 +25191,17 @@
                         "ok",
                         "degraded",
                         "broken"
+                      ]
+                    },
+                    "telemetry": {
+                      "type": "object",
+                      "properties": {
+                        "enabled": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "enabled"
                       ]
                     }
                   },
@@ -39004,6 +39055,9 @@
                     "type": "string",
                     "minLength": 1
                   },
+                  "allowCustomModel": {
+                    "type": "boolean"
+                  },
                   "parentTaskId": {
                     "type": "string",
                     "format": "uuid"
@@ -46033,7 +46087,8 @@
                     "type": "string"
                   },
                   "model": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "Concrete model override for this task, interpreted by the assignee's harness/provider. The model must run on the assignee's harness (an Anthropic model on a Claude agent, an OpenAI model on a Codex agent); a mismatch is rejected."
                   },
                   "modelTier": {
                     "type": "string",
@@ -51997,6 +52052,26 @@
                                     "format",
                                     "header"
                                   ]
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "format": {
+                                      "type": "string",
+                                      "enum": [
+                                        "standard-webhooks"
+                                      ]
+                                    },
+                                    "toleranceSeconds": {
+                                      "type": "integer",
+                                      "exclusiveMinimum": 0,
+                                      "default": 300,
+                                      "description": "Maximum allowed clock skew, in seconds, for the webhook-timestamp header"
+                                    }
+                                  },
+                                  "required": [
+                                    "format"
+                                  ]
                                 }
                               ],
                               "description": "Optional webhook verification format. Omit to keep legacy HMAC-SHA256 behavior with fallback header scanning."
@@ -52368,6 +52443,26 @@
                                   "required": [
                                     "format",
                                     "header"
+                                  ]
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "format": {
+                                      "type": "string",
+                                      "enum": [
+                                        "standard-webhooks"
+                                      ]
+                                    },
+                                    "toleranceSeconds": {
+                                      "type": "integer",
+                                      "exclusiveMinimum": 0,
+                                      "default": 300,
+                                      "description": "Maximum allowed clock skew, in seconds, for the webhook-timestamp header"
+                                    }
+                                  },
+                                  "required": [
+                                    "format"
                                   ]
                                 }
                               ],

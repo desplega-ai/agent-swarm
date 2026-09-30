@@ -1303,6 +1303,10 @@ export type WebhookVerification =
   | {
       format: "token-equality";
       header: string;
+    }
+  | {
+      format: "standard-webhooks";
+      toleranceSeconds?: number;
     };
 
 export interface TriggerConfig {
@@ -2728,6 +2732,11 @@ export interface StatusIdentity {
   org_id: string | null;
 }
 
+/** Effective telemetry opt-out state (`ANONYMIZED_TELEMETRY`) as reported by the API. */
+export interface StatusTelemetry {
+  enabled: boolean;
+}
+
 export interface FeedbackInput {
   submission_id: string;
   user_id: string;
@@ -2789,6 +2798,8 @@ export interface StatusResponse {
   automations?: StatusAutomation[];
   /** Phase 2: rolled-up health for the always-on header badge. */
   health: StatusHealth;
+  /** Absent when the dashboard talks to an older API; treat absence as enabled. */
+  telemetry?: StatusTelemetry;
 }
 
 export interface TestConnectionResponse {

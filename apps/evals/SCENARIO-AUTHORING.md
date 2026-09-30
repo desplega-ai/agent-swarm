@@ -69,7 +69,9 @@ A scenario is a `Scenario` object (`src/types.ts:302`) exported from `scenarios/
 | `description?` | `string` | Free text. |
 | `workers?` | `number \| WorkerSpec[]` | `N` homogeneous default workers, OR one configured worker per entry. Default 1, **max 3**. `WorkerSpec` (`src/types.ts:290`): `name` / `template` / `systemPrompt` / `configId` / `model` / `env`. Reserved env keys (`API_KEY`, `MCP_BASE_URL`, `AGENT_ID`, …) are rejected. |
 | `lead?` | `WorkerSpec` | Boots one extra sandbox with `AGENT_ROLE=lead`. Does **not** count toward the 3-worker cap. Required if any task uses `worker: "lead"`. |
-| `seed?` | `ScenarioSeed` | `exec` (shell in worker 0), `memories` (indexed via memory API), `sqlDump` (fixture filename), `workerFailures` (failure injection). See §3. |
+| `seed?` | `ScenarioSeed` | `exec` (shell in worker 0), `workerExec` (shell in a chosen worker, strict), `memories` (indexed via memory API), `sqlDump` (fixture filename), `workerFailures` (failure injection). See §3. |
+| `workers[i].profile?` | `WorkerProfile` | Declared `role` / `description` / `capabilities`, written by the runner before any task; what a lead reads in `get-swarm` (capability-routing). |
+| `humanInput?` | `HumanInputSpec` | Canned reply the runner gives every `request-human-input` of the attempt; the answer arrives as a `hitl-follow-up` task, so it requires `awaitSpawnedTasks` (human-in-loop). |
 | `tasks` | `TaskSpec[]` | The initial task(s). `TaskSpec` (`src/types.ts:81`): `title`, `description`, `worker?` (index, or `"lead"` → unassigned, routed to the lead), `dependsOn?` (indices of prerequisite tasks; cycles/self-refs/out-of-range rejected at load). |
 | `outcome` | `OutcomeSpec` | Gates + dimensions (§1). |
 | `timeoutMs?` | `number` | Per-attempt wall-clock budget. Default 10 min. delegation-probe uses `15 * 60_000`. |
@@ -77,10 +79,18 @@ A scenario is a `Scenario` object (`src/types.ts:302`) exported from `scenarios/
 
 The task `description` is **scenario data** — author it inline in the module (like delegation-probe and distributed-audit do). This is NOT the `src/prompts/` template-registry rule (that governs runner/hook/provider prompts in the main repo, not eval scenario text).
 
-### Registration — two places, both required
+### Registration — required places
 
 1. Import + append to the `scenarios` array in **`scenarios/index.ts`**.
 2. Add the `id` to **`EXPECTED_IDS`** in `scenarios/scenarios.test.ts` (line ~40). `scenarios.test.ts` asserts the registry keys exactly equal `EXPECTED_IDS` — forget step 2 and the suite fails.
+3. Set `version: 1` on the scenario, list it in **`scenarios/suite.ts`**, and pin its hash in **`scenarios/scenario-hashes.ts`** (`bun scripts/scenario-hash.ts <id>`). Add a line to `scenarios/CHANGELOG.md`. Later, ANY prompt, fixture or check change bumps `version`, appends a new hash and adds a changelog line; `scenarios/versioning.test.ts` fails otherwise.
+4. Write a reference fixture in **`scenarios/grader-fixtures/<id>.ts`** and register it in `grader-fixtures/index.ts`. `scenarios/grader-validation.test.ts` requires it and checks that a do-nothing agent cannot pass and your reference solution cannot fail (see §10 for the synthetic-context pattern; `grader-validation-support.ts` has `makeContext`, `toolCallRows`, `gradeOffline`).
+
+5. Add a card in **`scenarios/cards.ts`**: `summary`, `agentDoes` and `scoredBy` in plain English, the three tags (`single-agent` / `swarm`, `parallel` / `sequential`, `regression` / `capability`) and one `changelog` line per version. The Scenarios page renders it. The card sits apart from the scenario module on purpose: the scenario hash covers the module's source, so a sentence added there would demand a version bump. `src/registry.test.ts` fails if a scenario has no card, a card has no scenario, the topology tag disagrees with the roster, or the changelog skips a pinned version.
+
+### Swarm scenarios ship with a single-agent baseline
+
+A swarm scenario (one with a `lead`) should come with a `<id>-solo` variant so a result can say how much the swarm adds (plan Q6). Derive it with `soloVariant(swarm, { task, outcome, worker?, seed?, awaitSpawnedTasks? })` from `scenarios/orchestration-utils.ts` and register both. The helper keeps the pair in lockstep: one worker, no lead, the swarm's seed minus `workerFailures`, the same `version`, `timeoutMs`, `budgetUsd` and `budgetMs`, and `baselineOf` set. Write the solo `task` as the lead's brief with only the orchestration instructions swapped out, and the solo `outcome` as the swarm rubric's outcome dimensions (same names and weights), read from worker 0. `validateBaselinePairs` (`src/registry.ts`) fails the registry on any drift. `bun src/cli.ts show <runId>` prints Δscore on the shared quality dimensions (efficiency excluded), the token multiple and Δagent time for each pair the run covers (`src/baseline.ts`). Pass `seed` when teammates hold different files (`workerExec`): the lone worker gets everything the team held between them (`implement-review.ts`). Worked examples: `fanout-research.ts`, `worker-recovery.ts`, `implement-review.ts`, `human-in-loop.ts`. A scenario whose score IS the orchestration (`capability-routing.ts`) has no solo variant.
 
 Every scenario is **shape-validated at registry load** (`validateScenario`, `src/registry.ts`): bad definitions fail `bun src/cli.ts registry` / server boot with the full violation list. Run `bun src/cli.ts registry` as your first sanity check after authoring.
 

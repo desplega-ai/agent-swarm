@@ -80,8 +80,10 @@
   grid-template-columns: 58px 14px minmax(0, 1fr) 18px;
 }
 
-.ll-row:hover {
-  background: var(--panel-2);
+@media (hover: hover) {
+  .ll-row:hover {
+    background: var(--panel-2);
+  }
 }
 
 .ll-ts {

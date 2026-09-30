@@ -16,7 +16,7 @@ import {
   statusGlyphInfo,
 } from "../components/StatusBadge.tsx";
 import { InfoTip } from "../components/Tooltip.tsx";
-import { navigate, useModels, usePoll } from "../hooks.ts";
+import { navigate, useHashRoute, useModels, usePoll } from "../hooks.ts";
 import type { CellJson, RunListItem, RunVersions } from "../types.ts";
 import { NewRunDialog } from "./NewRunDialog.tsx";
 import "./runs.css";
@@ -550,7 +550,11 @@ export default function RunsPage(): ReactNode {
   const [tableMode, setTableMode] = useState<TableMode>(loadTableMode);
   const [statusFilter, setStatusFilter] = useState<string[]>([]);
   const [scenarioFilter, setScenarioFilter] = useState<string[]>([]);
-  const [configFilter, setConfigFilter] = useState<string[]>([]);
+  // `#/runs?config=a,b` opens the page already narrowed (the Leaderboard row click).
+  const initialConfigs = useHashRoute().query.get("config");
+  const [configFilter, setConfigFilter] = useState<string[]>(() =>
+    (initialConfigs ?? "").split(",").filter(Boolean),
+  );
   const [effortFilter, setEffortFilter] = useState<string[]>([]);
 
   const toggleTableMode = () => {

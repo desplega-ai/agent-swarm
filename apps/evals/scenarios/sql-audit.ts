@@ -104,6 +104,7 @@ const anomalyCorrect: DeterministicCheck = {
 
 export const sqlAudit: Scenario = {
   id: "sql-audit",
+  version: 1,
   name: "SQL audit",
   description: [
     "The API DB is pre-seeded from a seed carrying 20 historical tasks across",

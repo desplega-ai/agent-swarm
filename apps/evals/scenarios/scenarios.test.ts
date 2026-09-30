@@ -46,6 +46,15 @@ const EXPECTED_IDS = [
   "script-authoring",
   "delegation-chain",
   "tool-routing",
+  "fanout-research",
+  "fanout-research-solo",
+  "worker-recovery",
+  "worker-recovery-solo",
+  "implement-review",
+  "implement-review-solo",
+  "capability-routing",
+  "human-in-loop",
+  "human-in-loop-solo",
 ];
 
 describe("scenario registry", () => {
@@ -280,8 +289,8 @@ describe("spec'd scenario shapes (v9 orchestration substrate)", () => {
     expect(s.outcome.gates?.map((g) => g.name)).toContain("routing-structured-output");
   });
 
-  test("registry lists 6 active scenarios", () => {
-    expect(scenarios.map((x) => x.id)).toHaveLength(6);
+  test("registry lists 15 active scenarios (11 + 4 solo baselines of the swarm ones)", () => {
+    expect(scenarios.map((x) => x.id)).toHaveLength(15);
   });
 });
 

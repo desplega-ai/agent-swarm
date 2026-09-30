@@ -2160,6 +2160,8 @@ export interface PatchResult {
 
 // Presets only: Slack-style separate timestamp headers, asymmetric signatures,
 // and generic signature-template DSLs are intentionally out of scope for v1.
+// `standard-webhooks` follows https://www.standardwebhooks.com/ (symmetric v1 only):
+// fixed webhook-id / webhook-timestamp / webhook-signature headers, so no `header`.
 export const WebhookVerificationSchema = z.discriminatedUnion("format", [
   z.object({
     format: z.literal("hmac-sha256"),
@@ -2193,6 +2195,15 @@ export const WebhookVerificationSchema = z.discriminatedUnion("format", [
   z.object({
     format: z.literal("token-equality"),
     header: z.string().min(1).describe("Header containing the shared token to compare"),
+  }),
+  z.object({
+    format: z.literal("standard-webhooks"),
+    toleranceSeconds: z
+      .number()
+      .int()
+      .positive()
+      .default(300)
+      .describe("Maximum allowed clock skew, in seconds, for the webhook-timestamp header"),
   }),
 ]);
 export type WebhookVerification = z.infer<typeof WebhookVerificationSchema>;

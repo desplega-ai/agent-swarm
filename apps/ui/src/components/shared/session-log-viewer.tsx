@@ -2812,7 +2812,7 @@ export function SessionLogViewer({
                 onClick={() => stickToBottom("smooth")}
                 aria-label="Scroll to latest"
                 className={cn(
-                  "absolute bottom-4 left-1/2 z-10 inline-flex -translate-x-1/2 cursor-pointer items-center gap-2 rounded-full bg-primary px-3.5 py-[7px] text-[12.5px] font-semibold text-primary-foreground shadow-lg transition-all",
+                  "absolute bottom-4 left-1/2 z-10 inline-flex -translate-x-1/2 cursor-pointer items-center gap-2 rounded-full bg-primary px-3.5 py-[7px] text-[12.5px] font-semibold text-primary-foreground shadow-lg transition-[translate,opacity]",
                   atBottom
                     ? "pointer-events-none translate-y-3 opacity-0"
                     : "translate-y-0 opacity-100",

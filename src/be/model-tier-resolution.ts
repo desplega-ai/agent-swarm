@@ -26,7 +26,9 @@
  * See runbooks/model-tiers.md.
  */
 import {
+  type HarnessCatalogSections,
   harnessCatalogSection,
+  harnessModelMismatch,
   isAlias,
   type ModelsDevCatalog,
   type ModelsDevModel,
@@ -320,27 +322,64 @@ export function taskModelCandidates(
   return candidates;
 }
 
-/** Resolve a task's model at claim time. Null when the task names neither model nor tier. */
+/** A task-pinned `model` from another harness family: the claim fails fast with this reason. */
+export interface TaskModelHarnessMismatch {
+  harnessMismatch: string;
+}
+
+export function harnessMismatchReason(model: string, harness: string): string {
+  return `[model-harness-mismatch] Model "${model}" does not run on the ${harness} harness of this worker. The task pinned a model from another harness family. Re-create the task with modelTier or with a ${harness} model.`;
+}
+
+/**
+ * Resolve a task's model at claim time. Null when the task names neither model nor tier.
+ * A tier layer (worker env, tier config, tier default) whose value does not run on the
+ * claiming harness is skipped; a task-pinned `model` that does not is a hard mismatch.
+ */
 export async function resolveTaskModel(
   input: ResolveTaskModelInput,
-): Promise<TaskModelResolution | null> {
+): Promise<TaskModelResolution | TaskModelHarnessMismatch | null> {
+  const harness = input.harnessProvider ?? null;
+  const judged = harness !== null && harnessCatalogSection(harness) !== null;
+  const sections = judged
+    ? ((await loadResolutionCatalog()).catalog as HarnessCatalogSections)
+    : {};
   for (const candidate of taskModelCandidates(input)) {
+    let resolution: TaskModelResolution | null = null;
     if (!isAlias(candidate.value)) {
-      return { resolvedModel: candidate.value, modelSource: candidate.source, modelAlias: null };
-    }
-    const resolved = await resolveLatestAlias(candidate.value, input.now, {
-      record: input.record,
-    });
-    if (resolved) {
-      return {
-        resolvedModel: resolved,
+      resolution = {
+        resolvedModel: candidate.value,
         modelSource: candidate.source,
-        modelAlias: candidate.value.trim().toLowerCase(),
+        modelAlias: null,
       };
+    } else {
+      const resolved = await resolveLatestAlias(candidate.value, input.now, {
+        record: input.record,
+      });
+      if (resolved) {
+        resolution = {
+          resolvedModel: resolved,
+          modelSource: candidate.source,
+          modelAlias: candidate.value.trim().toLowerCase(),
+        };
+      }
     }
-    console.warn(
-      `[model-tiers] ${candidate.source} alias ${candidate.value} resolved to nothing; trying next layer`,
-    );
+    if (!resolution) {
+      console.warn(
+        `[model-tiers] ${candidate.source} alias ${candidate.value} resolved to nothing; trying next layer`,
+      );
+      continue;
+    }
+    if (judged && harnessModelMismatch(resolution.resolvedModel, harness, sections)) {
+      if (candidate.source === "model") {
+        return { harnessMismatch: harnessMismatchReason(candidate.value, harness) };
+      }
+      console.warn(
+        `[model-tiers] ${candidate.source} value ${candidate.value} does not run on ${harness}; trying next layer`,
+      );
+      continue;
+    }
+    return resolution;
   }
   return null;
 }
@@ -389,15 +428,17 @@ export async function previewModelTiers(
         now: opts.now,
         record: false,
       });
+      // No task `model` here, so a harness mismatch cannot occur; keep the type honest.
+      const previewed = resolution && "harnessMismatch" in resolution ? null : resolution;
       rows.push({
         provider,
         tier,
         key,
         defaultValue: DEFAULT_MODEL_TIER_MAP[provider][tier],
         configured,
-        source: resolution?.modelSource === "tier-config" ? "tier-config" : "tier-default",
-        resolvedModel: resolution?.resolvedModel ?? null,
-        alias: resolution?.modelAlias ?? null,
+        source: previewed?.modelSource === "tier-config" ? "tier-config" : "tier-default",
+        resolvedModel: previewed?.resolvedModel ?? null,
+        alias: previewed?.modelAlias ?? null,
       });
     }
   }
@@ -450,7 +491,10 @@ async function applyCliSupport(
 }
 
 export type ClaimModelFields = Partial<TaskModelResolution> & {
-  /** Set when the task's explicit model is rejected by this worker's CLI; the worker fails the task. */
+  /**
+   * Set when the task's explicit model is rejected by this worker's CLI, or belongs to another
+   * harness family (`[model-harness-mismatch]`); the worker fails the task without a spawn.
+   */
   modelUnsupported?: string;
 };
 
@@ -470,6 +514,7 @@ export async function recordClaimModelResolution(
     workerOverrides: await getAgentModelTierOverrides(agent.id),
   });
   if (!resolved) return {};
+  if ("harnessMismatch" in resolved) return { modelUnsupported: resolved.harnessMismatch };
   const checked = await applyCliSupport(
     resolved,
     harnessProvider,

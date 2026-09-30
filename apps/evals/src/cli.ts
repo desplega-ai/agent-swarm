@@ -1,10 +1,19 @@
 import { parseArgs } from "node:util";
 import { DEFAULT_CONFIG_IDS } from "../configs/index.ts";
-import { CONFIG_PRESETS, expandPresetSelection } from "../configs/presets.ts";
-import { DEFAULT_SCENARIO_IDS } from "../scenarios/index.ts";
+import { CONFIG_PRESETS, expandPresetSelection, presetRunDefaults } from "../configs/presets.ts";
+import { DEFAULT_SCENARIO_IDS, scenarios } from "../scenarios/index.ts";
+import { SUITE_ID, SUITE_SCENARIO_VERSIONS, SUITE_VERSION } from "../scenarios/suite.ts";
+import { baselinePairs, compareSwarmSolo, formatComparison } from "./baseline.ts";
 import { getResolutionCatalog } from "./cost/catalog.ts";
 import { getDb, initDb } from "./db/client.ts";
-import { createRun, getRun, listAttempts, listRuns, resetErrorAttempts } from "./db/queries.ts";
+import {
+  createRun,
+  getRun,
+  listAttempts,
+  listJudgments,
+  listRuns,
+  resetErrorAttempts,
+} from "./db/queries.ts";
 import { loadRegistry } from "./registry.ts";
 import { type CellSummary, summarizeRun } from "./results.ts";
 import { executeRun, killAllActiveStacks } from "./runner/index.ts";
@@ -46,6 +55,7 @@ Usage:
   bun src/cli.ts show <runId> [--detail]  # print result matrix (mean±CI; --detail adds best@n/pass@1)
   bun src/cli.ts serve [--port 4801] # API + UI
   bun src/cli.ts registry            # list available scenarios + configs
+  bun src/cli.ts publish --suite 1.0 --run <runId> [--out <dir>]  # freeze a finished matrix run for /benchmark
 
 Defaults: scenarios=${DEFAULT_SCENARIO_IDS.join(",")} configs=${DEFAULT_CONFIG_IDS.join(",")}
 Presets (--preset, repeatable; see run --help): ${CONFIG_PRESETS.map((p) => p.id).join(", ")}
@@ -61,7 +71,8 @@ const RUN_HELP = `Usage: bun src/cli.ts run [options]
 
 Options:
   --name <n>             optional display name for the run
-  --scenarios a,b        scenario ids (default: ${DEFAULT_SCENARIO_IDS.join(",")})
+  --scenarios a,b        scenario ids, or "suite" for every scenario of ${SUITE_ID}@${SUITE_VERSION}
+                         (default: ${DEFAULT_SCENARIO_IDS.join(",")})
   --configs x,y          config ids (default: ${DEFAULT_CONFIG_IDS.join(",")})
   --preset <id>          named config set, repeatable; presets expand in flag
                          order ahead of --configs ids, deduped keeping the
@@ -69,7 +80,9 @@ Options:
   --effort <cfg=level>   reasoning effort for one config, repeatable (a level the
                          config's harness + model take, or "default" for the
                          harness default); overrides the config's own default
-  --attempts <n>         attempts per scenario × config cell (default 1)
+  --attempts <n>         attempts per scenario × config cell (default: the preset's, else 1)
+  --max-metered-usd <n>  hard cap on the run's metered spend (default: the preset's, else none).
+                         Past it the runner starts nothing new and cancels the rest.
   --concurrency <n>      parallel attempts, one sandbox stack each (default 2)
   --max-retries <n>      retries per errored attempt (default 1)
   --judge-model <id>     OpenRouter judge model override
@@ -110,7 +123,8 @@ async function cmdRun(argv: string[]): Promise<void> {
       preset: { type: "string", multiple: true },
       effort: { type: "string", multiple: true },
       help: { type: "boolean" },
-      attempts: { type: "string", default: "1" },
+      attempts: { type: "string" },
+      "max-metered-usd": { type: "string" },
       concurrency: { type: "string", default: "2" },
       "max-retries": { type: "string", default: "1" },
       "judge-model": { type: "string" },
@@ -121,7 +135,9 @@ async function cmdRun(argv: string[]): Promise<void> {
     return;
   }
   const registry = loadRegistry();
-  const scenarioIds = parseCsv(values.scenarios, DEFAULT_SCENARIO_IDS);
+  const scenarioIds = parseCsv(values.scenarios, DEFAULT_SCENARIO_IDS).flatMap((id) =>
+    id === "suite" ? Object.keys(SUITE_SCENARIO_VERSIONS) : [id],
+  );
   // v7.7 item 1: presets expand in flag order ahead of explicit --configs ids,
   // deduped keeping the first occurrence. Unknown presets throw here — before
   // any DB write. Neither flag → the unchanged DEFAULT_CONFIG_IDS fallback.
@@ -139,6 +155,17 @@ async function cmdRun(argv: string[]): Promise<void> {
       throw new Error(`unknown config "${id}" (see: bun src/cli.ts registry)`);
   }
 
+  // Explicit flags win over the presets' run plan.
+  const planned = presetRunDefaults(presetIds);
+  const attemptsPerCell = Math.max(1, Number(values.attempts ?? planned.attemptsPerCell ?? 1));
+  const maxMeteredUsd =
+    values["max-metered-usd"] !== undefined
+      ? Number(values["max-metered-usd"])
+      : planned.maxMeteredUsd;
+  if (maxMeteredUsd !== undefined && !(Number.isFinite(maxMeteredUsd) && maxMeteredUsd > 0)) {
+    throw new Error(`--max-metered-usd must be a positive number, got "${maxMeteredUsd}"`);
+  }
+
   await assertRunConfigsResolve(registry, scenarioIds, configIds);
   const efforts = planRunEfforts({
     registry,
@@ -154,14 +181,16 @@ async function cmdRun(argv: string[]): Promise<void> {
     name: values.name,
     scenarioIds,
     configIds,
-    attemptsPerCell: Math.max(1, Number(values.attempts)),
+    attemptsPerCell,
     concurrency: Math.max(1, Number(values.concurrency)),
     judgeModel: values["judge-model"],
     efforts,
+    maxMeteredUsd,
   });
   await ensureRunConfigPins(db, runId, registry, scenarioIds, configIds);
   console.log(
-    `created ${runId}: ${scenarioIds.length} scenario(s) x ${configIds.length} config(s) x ${values.attempts} attempt(s)`,
+    `created ${runId}: ${scenarioIds.length} scenario(s) x ${configIds.length} config(s) x ${attemptsPerCell} attempt(s)` +
+      (maxMeteredUsd !== undefined ? `, metered cost cap $${maxMeteredUsd.toFixed(2)}` : ""),
   );
   const controller = installSignalHandlers();
   await executeRun({
@@ -252,8 +281,36 @@ async function cmdShow(argv: string[]): Promise<void> {
   );
   for (const attempt of attempts.filter((a) => a.status === "error")) {
     console.log(
-      `  error ${attempt.scenarioId}×${attempt.configId}#${attempt.attemptIndex}: ${attempt.error?.split("\n")[0]}`,
+      `  ${attempt.exclusion === "cancelled" ? "cancelled" : "error"} ${attempt.scenarioId}×${attempt.configId}#${attempt.attemptIndex}: ${attempt.error?.split("\n")[0]}`,
     );
+  }
+  // Swarm vs single-agent baseline (plan Q6), for every pair the run covers.
+  const pairs = baselinePairs(scenarios).filter(
+    (p) => run.scenarioIds.includes(p.swarmId) && run.scenarioIds.includes(p.soloId),
+  );
+  if (pairs.length > 0) {
+    console.log("\nswarm vs solo baseline (* = the Δscore CI excludes 0):");
+    for (const pair of pairs) {
+      console.log(`  ${pair.swarmId}: Δscore on ${pair.dimensions.join(" + ")}`);
+      for (const configId of run.configIds) {
+        const load = async (scenarioId: string) =>
+          Promise.all(
+            attempts
+              .filter((a) => a.scenarioId === scenarioId && a.configId === configId)
+              .map(async (attempt) => ({
+                attempt,
+                judgments: await listJudgments(db, attempt.id),
+              })),
+          );
+        const comparison = compareSwarmSolo(
+          pair,
+          configId,
+          await load(pair.swarmId),
+          await load(pair.soloId),
+        );
+        console.log(`    ${formatComparison(comparison)}`);
+      }
+    }
   }
 }
 
@@ -282,10 +339,44 @@ export function formatShowCell(cell: CellSummary, passThreshold: number, detail:
   return `${head} [best ${best} · @1 ${at1}]`;
 }
 
+async function cmdPublish(argv: string[]): Promise<void> {
+  const { values } = parseArgs({
+    args: argv,
+    options: {
+      suite: { type: "string" },
+      run: { type: "string" },
+      out: { type: "string" },
+    },
+  });
+  if (!values.suite || !values.run) {
+    throw new Error("usage: publish --suite <version> --run <matrixRunId> [--out <dir>]");
+  }
+  const { publishBenchmark } = await import("./benchmark-publish.ts");
+  const db = await initDb();
+  const result = await publishBenchmark(db, {
+    suiteVersion: values.suite,
+    runId: values.run,
+    outDir: values.out,
+  });
+  if (!result.ok) {
+    console.error(`refusing to publish ${SUITE_ID} ${values.suite} from run ${values.run}:`);
+    for (const reason of result.refusals) console.error(`  - ${reason}`);
+    process.exitCode = 1;
+    return;
+  }
+  const { snapshot } = result;
+  console.log(
+    `published ${snapshot.suite.id} ${snapshot.suite.version} from run ${snapshot.run.id}: ${snapshot.scenarios.length} scenarios x ${snapshot.configs.length} configs -> ${result.outDir}`,
+  );
+  console.log(
+    `  ${result.files.length} files; commit them in their own PR (merging it publishes).`,
+  );
+}
+
 function cmdRegistry(): void {
   const registry = loadRegistry();
   console.log("scenarios:");
-  for (const s of registry.scenarios.values()) console.log(`  ${s.id.padEnd(20)} ${s.name}`);
+  for (const s of registry.scenarios.values()) console.log(`  ${s.id.padEnd(22)} ${s.name}`);
   console.log("configs:");
   for (const c of registry.configs.values())
     console.log(`  ${c.id.padEnd(24)} ${c.provider}${c.model ? ` / ${c.model}` : ""}`);
@@ -317,6 +408,9 @@ if (import.meta.main) {
       }
       case "registry":
         cmdRegistry();
+        break;
+      case "publish":
+        await cmdPublish(rest);
         break;
       default:
         console.log(HELP);

@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Event as OpencodeEvent } from "@opencode-ai/sdk";
+import { resolveProviderOutput, trackAssistantText } from "../commands/runner";
 import type {
   ProviderEvent,
   ProviderResult,
@@ -927,6 +928,122 @@ describe("OpencodeSession — context_usage emission (phase 9 fix)", () => {
 
 // ── DES-300: per-task isolation ────────────────────────────────────────────────
 
+describe("OpencodeSession — assistant text for final-message validation", () => {
+  beforeEach(() => {
+    mock.restore();
+  });
+
+  const SESSION = "sess-abc-123";
+
+  function messageUpdated(
+    id: string,
+    role: "assistant" | "user",
+    completed: boolean,
+  ): OpencodeEvent {
+    const now = Date.now();
+    return {
+      type: "message.updated",
+      properties: {
+        info: {
+          id,
+          sessionID: SESSION,
+          role,
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: completed ? { created: now, completed: now + 1 } : { created: now },
+          parentID: "",
+          modelID: "m",
+          providerID: "p",
+          mode: "live",
+          path: { cwd: "/", root: "/" },
+        } as never,
+      },
+    };
+  }
+
+  function textPart(
+    messageID: string,
+    id: string,
+    text: string,
+    extra: { synthetic?: boolean; ignored?: boolean } = {},
+  ): OpencodeEvent {
+    return {
+      type: "message.part.updated",
+      properties: {
+        part: { id, sessionID: SESSION, messageID, type: "text", text, ...extra } as never,
+      },
+    };
+  }
+
+  const idle: OpencodeEvent = { type: "session.idle", properties: { sessionID: SESSION } };
+
+  function assistantTexts(emitted: ProviderEvent[]): string[] {
+    return emitted.flatMap((e) =>
+      e.type === "message" && e.role === "assistant" ? [e.content] : [],
+    );
+  }
+
+  test("the runner's final-message buffer holds the last step's text, ready for outputSchema validation", async () => {
+    const final = JSON.stringify({ verdict: "pass", score: 3 });
+    const { emitted } = await driveSession([
+      messageUpdated("m1", "assistant", false),
+      textPart("m1", "p1", "Checking the page first."),
+      messageUpdated("m1", "assistant", true),
+      // Step 2 is tool-free and carries the answer.
+      messageUpdated("m2", "assistant", false),
+      textPart("m2", "p2", final),
+      messageUpdated("m2", "assistant", true),
+      idle,
+    ]);
+
+    expect(assistantTexts(emitted)).toEqual(["Checking the page first.", final]);
+
+    const holder: { value?: string } = {};
+    for (const e of emitted) trackAssistantText(holder, e);
+    expect(resolveProviderOutput({ output: undefined }, holder)).toBe(final);
+  });
+
+  test("user-message text and synthetic or ignored parts are never emitted as assistant text", async () => {
+    const { emitted } = await driveSession([
+      messageUpdated("u1", "user", true),
+      textPart("u1", "pu", "the task prompt"),
+      messageUpdated("m1", "assistant", false),
+      textPart("m1", "p-synth", "injected reminder", { synthetic: true }),
+      textPart("m1", "p-ign", "ignored text", { ignored: true }),
+      textPart("m1", "p1", "real answer"),
+      messageUpdated("m1", "assistant", true),
+      idle,
+    ]);
+
+    expect(assistantTexts(emitted)).toEqual(["real answer"]);
+  });
+
+  test("streamed snapshots and replayed finalized updates emit the message once, with its full text", async () => {
+    const { emitted } = await driveSession([
+      messageUpdated("m1", "assistant", false),
+      textPart("m1", "p1", '{"a"'),
+      textPart("m1", "p1", '{"a": 1}'),
+      messageUpdated("m1", "assistant", true),
+      messageUpdated("m1", "assistant", true),
+      idle,
+    ]);
+
+    expect(assistantTexts(emitted)).toEqual(['{"a": 1}']);
+  });
+
+  test("a text part that lands after its message finalized re-emits the fuller text", async () => {
+    const { emitted } = await driveSession([
+      messageUpdated("m1", "assistant", false),
+      textPart("m1", "p1", "first half. "),
+      messageUpdated("m1", "assistant", true),
+      textPart("m1", "p2", "second half."),
+      idle,
+    ]);
+
+    expect(assistantTexts(emitted)).toEqual(["first half.", "first half. second half."]);
+  });
+});
+
 describe("OpencodeAdapter — per-task isolation (DES-300)", () => {
   let prevOpencodeSkillsDir: string | undefined;
 
@@ -1038,6 +1155,37 @@ describe("OpencodeAdapter — per-task isolation (DES-300)", () => {
     }
   });
 
+  test("swarm MCP headers carry the task id and context key", async () => {
+    const events: OpencodeEvent[] = [
+      { type: "session.idle", properties: { sessionID: "sess-abc-123" } },
+    ];
+    await driveSession(
+      events,
+      testConfig({ taskId: "task-1", contextKey: "task:slack:C1:1700000000.000100" }),
+    );
+
+    const opts = lastCreateOpencodeConfig as {
+      config?: { mcp?: Record<string, { headers?: Record<string, string> }> };
+    };
+    const headers = opts.config?.mcp?.swarm?.headers;
+    expect(headers?.["X-Source-Task-Id"]).toBe("task-1");
+    expect(headers?.["X-Context-Key"]).toBe("task:slack:C1:1700000000.000100");
+  });
+
+  test("swarm MCP headers omit the context key when the task has none", async () => {
+    const events: OpencodeEvent[] = [
+      { type: "session.idle", properties: { sessionID: "sess-abc-123" } },
+    ];
+    await driveSession(events, testConfig({ taskId: "task-1" }));
+
+    const opts = lastCreateOpencodeConfig as {
+      config?: { mcp?: Record<string, { headers?: Record<string, string> }> };
+    };
+    const headers = opts.config?.mcp?.swarm?.headers;
+    expect(headers?.["X-Source-Task-Id"]).toBe("task-1");
+    expect(headers?.["X-Context-Key"]).toBeUndefined();
+  });
+
   test("swarm MCP headers omit the runtime identity when unset", async () => {
     const prev = process.env.SWARM_RUNTIME_INSTANCE_ID;
     delete process.env.SWARM_RUNTIME_INSTANCE_ID;
@@ -1076,7 +1224,7 @@ describe("OpencodeAdapter — per-task isolation (DES-300)", () => {
   });
 
   test("per-task config file is written as valid JSON", async () => {
-    const cfg = testConfig({ taskId: "task-cfg-json" });
+    const cfg = testConfig({ taskId: "task-cfg-json", contextKey: "task:api:ctx-1" });
     await inspectSessionBeforeIdle(cfg, async () => {
       const configFile = Bun.file("/tmp/opencode-task-cfg-json.json");
       const exists = await configFile.exists();
@@ -1084,9 +1232,16 @@ describe("OpencodeAdapter — per-task isolation (DES-300)", () => {
       if (exists) {
         const text = await configFile.text();
         expect(() => JSON.parse(text)).not.toThrow();
-        const parsed = JSON.parse(text) as { mcp?: unknown; permission?: unknown };
+        const parsed = JSON.parse(text) as {
+          mcp?: { swarm?: { headers?: Record<string, string> } };
+          permission?: unknown;
+        };
         expect(parsed.mcp).toBeDefined();
         expect(parsed.permission).toBeDefined();
+        // The per-task file must carry the task identity too: `opencode serve`
+        // reads this file (via OPENCODE_CONFIG), not the in-process object.
+        expect(parsed.mcp?.swarm?.headers?.["X-Source-Task-Id"]).toBe("task-cfg-json");
+        expect(parsed.mcp?.swarm?.headers?.["X-Context-Key"]).toBe("task:api:ctx-1");
       }
     });
 

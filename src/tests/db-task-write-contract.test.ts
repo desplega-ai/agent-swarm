@@ -444,6 +444,7 @@ value:isExtensionAgent
 value:isPendingSlackMessage
 value:isPoolAffinityEnforcementEnabled
 value:isSettledSlackMessage
+value:isSlackThreadAwaitingHuman
 value:isSqliteVecAvailable
 value:kvPrefixUpperBound
 value:listAgentsWithCredStatusByProvider
@@ -465,6 +466,7 @@ value:listScriptRunJournalSteps
 value:listScriptRuns
 value:listSkillFileManifest
 value:listSkills
+value:listSlackThreadsAwaitingHuman
 value:listTaskTemplates
 value:listUserFavorites
 value:listWorkflowRuns

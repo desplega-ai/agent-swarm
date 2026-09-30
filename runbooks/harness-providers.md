@@ -120,6 +120,14 @@ MCP tools return `isError` on the wire `CallToolResult` (see [runbooks/mcp-tool-
 
 **pi**: `mcpToolsToDefinitions` in `src/providers/pi-mono-adapter.ts` calls `mcpClient.callTool(...)` and gets the raw result back. pi-agent-core derives a tool call's error flag from whether the wrapped `execute()` **throws** — not from any field on a resolved return value. The adapter therefore checks `result.isError` and `throw`s (rather than returning) when it's true; without that, a failed script/tool call would resolve normally and pi-agent-core would report it to the model as a success.
 
+On success the pi wrapper also returns the server's `structuredContent` next to the text, and sets `outputSchema` from `tools/list`. pi never sends `structuredContent` to the model; codemode scripts receive it instead of text. pi does not validate `outputSchema`, so our loose `z.looseObject` schemas pass as plain JSON Schema.
+
+**pi installed MCP servers** go through pi's MCP extension, not our client: the adapter maps them with `toPiMcpServers` and the swarm hook registers them on `session_start`. The adapter must call `session.bindExtensions({})`, since the SDK never emits `session_start` by itself. Keep the replaced `loadConfig` so pi never reads `mcp.json` files, and keep escaping resolved values with `escapePiConfigValue`.
+
+**pi tool deferral** (`PI_TOOL_DEFERRAL`, default off): non-core swarm tools get `exposure: "deferred"` and the session adds pi's `tool_search`. The adapter's `traits` getter reads the same flag for `hasToolSearch`, so the prompt and the session agree. Keep both reads on `process.env`. Pilot procedure: the harness-providers guide, section "pi tool deferral".
+
+**pi codemode** (`PI_CODEMODE`, default off): adds `createCodemodeExtension({ mode: "on", models: false })`, wrapped by `createBoundedCodemodeExtension` (120 s per-script deadline, 32 nested calls, 4 concurrent), and `+codemode` on every pi session. Never switch to `mode: "only"`: lifecycle tools must stay directly callable.
+
 ## Live task steering
 
 `ProviderSession.deliverSteering?(delivery: SteerDelivery): Promise<SteerDeliveryResult>` is the optional live-input seam. `ProviderTraits.steerModes` advertises the modes an adapter can provide; an absent field means `[]`.
@@ -183,7 +191,7 @@ Tasks may carry an optional JSON Schema on `outputSchema` (see `CreateTaskOption
 | `claude` | Yes | Via MCP + `claude -p --json-schema` extraction fallback in `handleStructuredOutputFallback` |
 | `claude-managed` | Yes | Via MCP |
 | `codex` | Yes | Via MCP |
-| `opencode` | Yes | Via MCP |
+| `opencode` | Yes | Via MCP; the runner also validates the final assistant message (see the fallback order below) |
 | `pi` (`pi-mono`) | Yes | Via MCP |
 | `devin` | Conditional | Only when `HAS_MCP=true`. In default mode the schema is **not** enforced — Devin's free-form output is stored as-is. |
 
@@ -194,7 +202,7 @@ When supported, validation happens in the `store-progress` MCP tool (see `src/to
 When a session ends without an explicit `store-progress` call, `ensureTaskFinished` (`src/commands/runner.ts`) fills `task.output` from the first of:
 
 1. Adapter-owned `ProviderResult.output` (`claude`, `pi`/`pi-mono`, `claude-managed`, `devin`).
-2. **Runner-buffered last assistant text** — the runner's provider-event loop buffers the last non-empty assistant `message` event (`trackAssistantText`), capped at 30,000 characters (`… [truncated]` marker beyond that). Used only when the adapter didn't populate `output` itself (`codex` today; any future adapter that emits `message` events but no `ProviderResult.output`). Empty buffer (for example `opencode`, which never emits `message` events) is a no-op — behavior is byte-identical to having no `providerOutput` at all.
+2. **Runner-buffered last assistant text** — the runner's provider-event loop buffers the last non-empty assistant `message` event (`trackAssistantText`), capped at 30,000 characters (`… [truncated]` marker beyond that). Used only when the adapter didn't populate `output` itself (`codex` and `opencode`; any future adapter that emits `message` events but no `ProviderResult.output`). `opencode` emits one assistant `message` per finalized assistant message, built from its non-synthetic, non-ignored `text` parts, so the last one is the final answer. An empty buffer (an adapter that emits no assistant `message` events) is a no-op — behavior is byte-identical to having no `providerOutput` at all. For a task with an `outputSchema`, a buffered final message that is valid JSON matching the schema becomes `task.output`; otherwise the task falls through to #3, which for every non-`claude` adapter fails it with the "not provided via store-progress" reason.
 3. `claude -p --json-schema` extraction fallback (`handleStructuredOutputFallback`), when the task has an `outputSchema` and neither #1 nor #2 produced text that validates against it. The extraction prompt includes the captured text (from #1 or #2) as a "Final Agent Message" section ahead of progress-log history.
 4. Sentinel `"Process completed successfully (no output captured)"` when no schema and no text of any kind was captured.
 

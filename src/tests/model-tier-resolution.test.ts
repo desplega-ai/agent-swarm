@@ -267,6 +267,98 @@ describe("claim-time resolution via /api/poll", () => {
   });
 });
 
+describe("claim-time harness guard", () => {
+  test("a directed task pinning an Anthropic model on a Codex worker fails fast with a tagged reason", async () => {
+    const worker = await createAgent({
+      name: "w-codex-mismatch",
+      isLead: false,
+      status: "idle",
+      maxTasks: 1,
+      harnessProvider: "codex",
+    });
+    // createTaskExtended bypasses the create-time check, like a task written before the guard.
+    const task = await createTaskExtended("review", {
+      agentId: worker.id,
+      model: "claude-opus-5-5",
+    });
+    const trigger = await callPoll(worker.id, header({}));
+    expect(trigger?.type).toBe("task_assigned");
+    expect(trigger?.taskId).toBe(task.id);
+    expect(String(trigger?.task.modelUnsupported)).toStartWith(
+      '[model-harness-mismatch] Model "claude-opus-5-5" does not run on the codex harness of this worker.',
+    );
+    expect(trigger?.task.resolvedModel).toBeUndefined();
+    expect(await taskRow(task.id)).toEqual({
+      resolvedModel: null,
+      modelSource: null,
+      modelAlias: null,
+    });
+  });
+
+  test("incompatible worker-env and tier-config values are skipped for the next layer", async () => {
+    process.env.MODEL_TIER_CODEX_SMART = "claude-opus-5-5";
+    const worker = await createAgent({
+      name: "w-codex-env",
+      isLead: false,
+      status: "idle",
+      maxTasks: 1,
+      harnessProvider: "codex",
+    });
+    const task = await createTaskExtended("smart", { agentId: worker.id, modelTier: "smart" });
+    const trigger = await callPoll(worker.id, header({ codex: { smart: "claude-opus-5-5" } }));
+    expect(trigger?.task.modelSource).not.toBe("worker-env");
+    expect(await taskRow(task.id)).toEqual({
+      resolvedModel: "gpt-5.6-sol",
+      modelSource: "tier-default",
+      modelAlias: null,
+    });
+  });
+
+  test("a pool task pinning an Anthropic model is skipped by Codex and claimed by Claude", async () => {
+    const codex = await createAgent({
+      name: "w-pool-codex",
+      isLead: false,
+      status: "idle",
+      maxTasks: 1,
+      harnessProvider: "codex",
+    });
+    const claude = await createAgent({
+      name: "w-pool-claude",
+      isLead: false,
+      status: "idle",
+      maxTasks: 1,
+      harnessProvider: "claude",
+    });
+    const task = await createTaskExtended("pool", { model: "claude-opus-5-5" });
+    const codexTrigger = await callPoll(codex.id, header({}));
+    expect(codexTrigger?.type === "task_assigned" && codexTrigger.taskId === task.id).toBe(false);
+    const claudeTrigger = await callPoll(claude.id, header({}));
+    expect(claudeTrigger?.type).toBe("task_assigned");
+    expect(claudeTrigger?.taskId).toBe(task.id);
+    expect(claudeTrigger?.task.resolvedModel).toBe("claude-opus-5-5");
+  });
+
+  test("Codex claims compatible pool work queued behind more incompatible tasks than the poll limit", async () => {
+    const codex = await createAgent({
+      name: "w-pool-codex-deep",
+      isLead: false,
+      status: "idle",
+      maxTasks: 1,
+      harnessProvider: "codex",
+    });
+    // Six higher-priority Anthropic tasks: more than the poll's five-candidate limit.
+    for (let i = 0; i < 6; i++) {
+      await createTaskExtended(`opus ${i}`, { model: "claude-opus-5-5", priority: 90 });
+    }
+    const compatible = await createTaskExtended("sol", { model: "gpt-5.6-sol", priority: 10 });
+
+    const trigger = await callPoll(codex.id, header({}));
+
+    expect(trigger?.type).toBe("task_assigned");
+    expect(trigger?.taskId).toBe(compatible.id);
+  });
+});
+
 describe("task list summaries", () => {
   test("carry the claim-time resolution the dashboard table shows", async () => {
     const worker = await createAgent({

@@ -204,6 +204,7 @@ const shardCoverage: DeterministicCheck = {
 
 export const distributedAudit: Scenario = {
   id: "distributed-audit",
+  version: 1,
   name: "Distributed audit",
   description: [
     "The same seeded task history as sql-audit (30 terminal tasks across",

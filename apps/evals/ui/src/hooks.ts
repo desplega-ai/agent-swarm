@@ -4,20 +4,25 @@ import { buildModelResolver } from "./lib/model-resolve.ts";
 import type { CatalogInfo, ConfigJson, ModelJson, ModelsResponse } from "./types.ts";
 
 export interface Route {
-  /** "#/runs/a/attempts/b" → ["runs", "a", "attempts", "b"] */
+  /** "#/runs/a/attempts/b?x=1" → ["runs", "a", "attempts", "b"] (the query is not a part). */
   parts: string[];
   /** The full hash path, e.g. "#/runs/a/attempts/b". */
   path: string;
+  /** The hash's `?key=value` pairs, e.g. "#/runs?config=x" → config=x. */
+  query: URLSearchParams;
 }
 
 function parseHash(): Route {
   const raw = window.location.hash || "#/";
-  const path = raw.startsWith("#") ? raw.slice(1) : raw;
+  const withoutHash = raw.startsWith("#") ? raw.slice(1) : raw;
+  const queryAt = withoutHash.indexOf("?");
+  const path = queryAt === -1 ? withoutHash : withoutHash.slice(0, queryAt);
+  const query = new URLSearchParams(queryAt === -1 ? "" : withoutHash.slice(queryAt + 1));
   const parts = path
     .split("/")
     .filter(Boolean)
     .map((p) => decodeURIComponent(p));
-  return { parts, path: raw };
+  return { parts, path: raw, query };
 }
 
 export function useHashRoute(): Route {
@@ -33,6 +38,25 @@ export function useHashRoute(): Route {
 /** path starts with "#/". */
 export function navigate(path: string): void {
   window.location.hash = path;
+}
+
+/**
+ * Rewrite the hash's query in place (no history entry, no route change), so a
+ * page can keep its view state (`#/leaderboard?suite=1.0&x=time`) shareable.
+ * A key set to null or "" is removed.
+ */
+export function replaceHashQuery(values: Record<string, string | null>): void {
+  const raw = window.location.hash || "#/";
+  const withoutHash = raw.startsWith("#") ? raw.slice(1) : raw;
+  const queryAt = withoutHash.indexOf("?");
+  const path = queryAt === -1 ? withoutHash : withoutHash.slice(0, queryAt);
+  const query = new URLSearchParams(queryAt === -1 ? "" : withoutHash.slice(queryAt + 1));
+  for (const [key, value] of Object.entries(values)) {
+    if (value === null || value === "") query.delete(key);
+    else query.set(key, value);
+  }
+  const qs = query.toString();
+  window.history.replaceState(null, "", `#${path}${qs ? `?${qs}` : ""}`);
 }
 
 export function usePoll<T>(

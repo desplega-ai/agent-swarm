@@ -459,6 +459,7 @@ function ConfigKeyCombobox({
   scopeId,
   placeholder = "GITHUB_TOKEN",
   id,
+  invalid,
 }: {
   value: string;
   onChange: (value: string) => void;
@@ -466,6 +467,7 @@ function ConfigKeyCombobox({
   scopeId?: string | null;
   placeholder?: string;
   id?: string;
+  invalid?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
@@ -500,7 +502,10 @@ function ConfigKeyCombobox({
           variant="outline"
           role="combobox"
           aria-expanded={open}
-          className="w-full justify-between font-normal"
+          aria-invalid={invalid || undefined}
+          // The outline variant's dark:border-input outranks the base
+          // aria-invalid border, so restate it for dark mode.
+          className="w-full justify-between font-normal dark:aria-invalid:border-destructive"
         >
           <span
             className={cn(
@@ -735,6 +740,25 @@ export function InlineError({ error }: { error?: unknown }) {
 }
 
 /** Surface a mutation failure as a toast (inline errors are reserved for page-load errors). */
+// Save stays enabled until the request starts: an incomplete form explains
+// itself on submit (missing fields listed, marked aria-invalid, first one
+// focused) instead of sitting behind a dead button.
+function focusFirstInvalid(root: HTMLElement | null) {
+  // After React commits the error state, so the aria-invalid marks exist.
+  requestAnimationFrame(() => {
+    root?.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus();
+  });
+}
+
+function MissingFieldsHint({ fields }: { fields: string[] }) {
+  if (fields.length === 0) return null;
+  return (
+    <p role="alert" className="text-sm text-status-error-strong">
+      Required: {fields.join(", ")}
+    </p>
+  );
+}
+
 export function toastMutationError(error: unknown) {
   toast.error(error instanceof Error ? error.message : String(error));
 }
@@ -987,6 +1011,8 @@ export function AddConnectionDialog({
     error: catalogError,
   } = useIntegrationsCatalog();
   const [step, setStep] = useState<"catalog" | "form">(connection ? "form" : "catalog");
+  const [showErrors, setShowErrors] = useState(false);
+  const contentRef = useRef<HTMLDivElement>(null);
   const [catalogHint, setCatalogHint] = useState("");
   const [resolvingCatalogId, setResolvingCatalogId] = useState<string | null>(null);
   const surfaceLookup = useIntegrationsSurface();
@@ -1022,6 +1048,7 @@ export function AddConnectionDialog({
   // Reset form fields + loaded surface state. Runs on open, on close, and
   // when navigating back to the catalog step so a new selection starts clean.
   const resetForm = useCallback(() => {
+    setShowErrors(false);
     setCatalogHint("");
     setSurface(null);
     setSurfaceDomainInput("");
@@ -1322,6 +1349,13 @@ export function AddConnectionDialog({
   }
 
   async function submit() {
+    if (missingFields.length > 0) {
+      setShowErrors(true);
+      // The catalog step renders no fields; show the form so the marks land.
+      setStep("form");
+      focusFirstInvalid(contentRef.current);
+      return;
+    }
     const parsedHosts = splitList(allowedHosts);
     const authInput = kind === "mcp" ? undefined : buildAuthInput();
     const common = {
@@ -1400,22 +1434,37 @@ export function AddConnectionDialog({
           ? Boolean(authConfigKey.trim())
           : Boolean(authSecret.trim()) || canPreserveSecret;
 
-  const canSubmit = Boolean(
-    slug.trim() &&
-      (kind === "mcp"
-        ? mcpServerId
-        : kind === "graphql"
-          ? baseUrl.trim()
-          : // openapi: a vendored spec, an existing connection, or a provided spec source.
-            vendoredSlug ||
-            isEdit ||
-            (specMode === "url" ? openapiSpecUrl.trim() : openapiSpecJson.trim())) &&
-      authReady,
-  );
+  const invalid = {
+    slug: !slug.trim(),
+    mcpServer: kind === "mcp" && !mcpServerId,
+    baseUrl: kind === "graphql" && !baseUrl.trim(),
+    // openapi: a vendored spec, an existing connection, or a provided spec source.
+    spec:
+      kind === "openapi" &&
+      !(
+        vendoredSlug ||
+        isEdit ||
+        (specMode === "url" ? openapiSpecUrl.trim() : openapiSpecJson.trim())
+      ),
+    auth: !authReady,
+  };
+  const missingFields = [
+    invalid.slug && "Slug",
+    invalid.mcpServer && "MCP Server",
+    invalid.baseUrl && "Base URL",
+    invalid.spec && (specMode === "url" ? "Spec URL" : "Inline JSON"),
+    invalid.auth &&
+      (authType === "oauth"
+        ? "OAuth authorization"
+        : useExistingConfigKey
+          ? "Config Key"
+          : "Secret"),
+  ].filter((field): field is string => Boolean(field));
+  const markInvalid = (field: keyof typeof invalid) => (showErrors && invalid[field]) || undefined;
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="max-h-[85dvh] overflow-y-auto sm:max-w-3xl">
+      <DialogContent ref={contentRef} className="max-h-[85dvh] overflow-y-auto sm:max-w-3xl">
         <DialogHeader className="pb-2">
           <DialogTitle>{isEdit ? "Edit Connection" : "Add Connection"}</DialogTitle>
           <DialogDescription>
@@ -1524,6 +1573,7 @@ export function AddConnectionDialog({
                 <Input
                   value={slug}
                   onChange={(event) => setSlug(event.target.value)}
+                  aria-invalid={markInvalid("slug")}
                   placeholder="github"
                 />
               </div>
@@ -1545,7 +1595,7 @@ export function AddConnectionDialog({
                   MCP Server
                 </FieldLabel>
                 <Select value={mcpServerId} onValueChange={setMcpServerId}>
-                  <SelectTrigger>
+                  <SelectTrigger aria-invalid={markInvalid("mcpServer")}>
                     <SelectValue placeholder="Select server" />
                   </SelectTrigger>
                   <SelectContent>
@@ -1567,6 +1617,7 @@ export function AddConnectionDialog({
                     <Input
                       value={baseUrl}
                       onChange={(event) => setBaseUrl(event.target.value)}
+                      aria-invalid={markInvalid("baseUrl")}
                       placeholder="https://api.github.com"
                     />
                   </div>
@@ -1607,6 +1658,7 @@ export function AddConnectionDialog({
                         <Input
                           value={openapiSpecUrl}
                           onChange={(event) => setOpenapiSpecUrl(event.target.value)}
+                          aria-invalid={markInvalid("spec")}
                           placeholder="https://example.com/openapi.json"
                         />
                         {specUrlIsYaml ? (
@@ -1623,6 +1675,7 @@ export function AddConnectionDialog({
                         <Textarea
                           value={openapiSpecJson}
                           onChange={(event) => setOpenapiSpecJson(event.target.value)}
+                          aria-invalid={markInvalid("spec")}
                           className="min-h-40 font-mono text-xs"
                           placeholder={`{"openapi": "3.1.0", "info": {"title": "GitHub API"}, "paths": {...}}`}
                         />
@@ -1702,6 +1755,7 @@ export function AddConnectionDialog({
                           value={authConfigKey}
                           onChange={setAuthConfigKey}
                           scope="global"
+                          invalid={markInvalid("auth")}
                         />
                       </div>
                     ) : (
@@ -1714,6 +1768,7 @@ export function AddConnectionDialog({
                           onChange={setAuthSecret}
                           autoComplete="new-password"
                           aria-label="Secret"
+                          invalid={markInvalid("auth")}
                           placeholder={
                             canPreserveSecret
                               ? "Leave blank to keep current secret"
@@ -1750,11 +1805,16 @@ export function AddConnectionDialog({
           </div>
         )}
 
+        <MissingFieldsHint fields={showErrors ? missingFields : []} />
         <DialogFooter>
           <Button variant="outline" onClick={() => handleOpenChange(false)}>
             Cancel
           </Button>
-          <Button onClick={submit} disabled={!canSubmit || upsert.isPending}>
+          <Button
+            onClick={submit}
+            disabled={upsert.isPending}
+            status={upsert.isPending ? "loading" : "idle"}
+          >
             Save
           </Button>
         </DialogFooter>
@@ -1784,10 +1844,13 @@ function CredentialBindingDialog({
   const [scope, setScope] = useState<ScriptConnectionScope>("global");
   const [scopeId, setScopeId] = useState("");
   const [headerManuallyEdited, setHeaderManuallyEdited] = useState(false);
+  const [showErrors, setShowErrors] = useState(false);
+  const contentRef = useRef<HTMLDivElement>(null);
   const isEdit = Boolean(binding);
 
   useEffect(() => {
     if (!open) return;
+    setShowErrors(false);
     const nextConfigKey = binding?.configKey ?? "";
     const nextHeaderTemplate =
       binding?.headerTemplate ?? (binding ? "" : defaultHeaderTemplate(""));
@@ -1814,6 +1877,11 @@ function CredentialBindingDialog({
   }, [configKey, headerManuallyEdited, open]);
 
   async function submit() {
+    if (missingFields.length > 0) {
+      setShowErrors(true);
+      focusFirstInvalid(contentRef.current);
+      return;
+    }
     try {
       await upsert.mutateAsync({
         id: binding?.id,
@@ -1839,16 +1907,25 @@ function CredentialBindingDialog({
   }
 
   const placeholder = configPlaceholder(configKey.trim());
-  const canSubmit =
-    configKey.trim() &&
-    allowedHosts.length > 0 &&
-    (headerTemplate.trim() || queryTemplate.trim()) &&
-    (scope === "global" || scopeId.trim()) &&
-    (authKind !== "oauth" || oauthAuthorizationId.trim());
+  const invalid = {
+    configKey: !configKey.trim(),
+    oauth: authKind === "oauth" && !oauthAuthorizationId.trim(),
+    allowedHosts: allowedHosts.length === 0,
+    template: !headerTemplate.trim() && !queryTemplate.trim(),
+    scopeId: scope !== "global" && !scopeId.trim(),
+  };
+  const missingFields = [
+    invalid.configKey && "Config Key",
+    invalid.oauth && "OAuth Authorization",
+    invalid.allowedHosts && "Allowed Hosts",
+    invalid.template && "Header or Query Template",
+    invalid.scopeId && "Scope ID",
+  ].filter((field): field is string => Boolean(field));
+  const markInvalid = (field: keyof typeof invalid) => (showErrors && invalid[field]) || undefined;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[85dvh] overflow-y-auto sm:max-w-2xl">
+      <DialogContent ref={contentRef} className="max-h-[85dvh] overflow-y-auto sm:max-w-2xl">
         <DialogHeader className="pb-2">
           <DialogTitle>{isEdit ? "Edit Binding" : "Add Binding"}</DialogTitle>
           <DialogDescription>
@@ -1866,6 +1943,7 @@ function CredentialBindingDialog({
                 onChange={setConfigKey}
                 scope={scope}
                 scopeId={scopeId || null}
+                invalid={markInvalid("configKey")}
               />
             </div>
             <div className="space-y-2">
@@ -1913,6 +1991,7 @@ function CredentialBindingDialog({
               onChange={setAllowedHosts}
               placeholder="api.github.com uploads.github.com"
               ariaLabel="Allowed host"
+              invalid={markInvalid("allowedHosts")}
             />
           </div>
 
@@ -1950,6 +2029,7 @@ function CredentialBindingDialog({
                   setHeaderTemplate(event.target.value);
                   setHeaderManuallyEdited(true);
                 }}
+                aria-invalid={markInvalid("template")}
                 placeholder={`Authorization: Bearer ${placeholder}`}
                 className="pr-8 font-mono text-xs"
               />
@@ -1975,6 +2055,7 @@ function CredentialBindingDialog({
               <Input
                 value={queryTemplate}
                 onChange={(event) => setQueryTemplate(event.target.value)}
+                aria-invalid={markInvalid("template")}
                 placeholder={`access_token=${placeholder}`}
                 className="pr-8 font-mono text-xs"
               />
@@ -2018,6 +2099,7 @@ function CredentialBindingDialog({
                 <Input
                   value={scopeId}
                   onChange={(event) => setScopeId(event.target.value)}
+                  aria-invalid={markInvalid("scopeId")}
                   placeholder="a1b2c3d4-e5f6-7890-abcd-ef1234567890"
                 />
               </div>
@@ -2037,11 +2119,16 @@ function CredentialBindingDialog({
 
           <InlineError error={upsert.error} />
         </div>
+        <MissingFieldsHint fields={showErrors ? missingFields : []} />
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
-          <Button onClick={submit} disabled={!canSubmit || upsert.isPending}>
+          <Button
+            onClick={submit}
+            disabled={upsert.isPending}
+            status={upsert.isPending ? "loading" : "idle"}
+          >
             Save
           </Button>
         </DialogFooter>
@@ -2454,11 +2541,13 @@ function TagInput({
   onChange,
   placeholder,
   ariaLabel,
+  invalid,
 }: {
   values: string[];
   onChange: (values: string[]) => void;
   placeholder: string;
   ariaLabel: string;
+  invalid?: boolean;
 }) {
   const [draft, setDraft] = useState("");
 
@@ -2469,7 +2558,12 @@ function TagInput({
   }
 
   return (
-    <div className="flex min-h-10 flex-wrap items-center gap-2 rounded-md border px-2 py-1.5">
+    <div
+      className={cn(
+        "flex min-h-10 flex-wrap items-center gap-2 rounded-md border px-2 py-1.5",
+        invalid && "border-destructive",
+      )}
+    >
       {values.map((value) => (
         <Badge key={value} variant="outline" className="gap-1 pr-1 normal-case" size="tag">
           {value}
@@ -2487,6 +2581,7 @@ function TagInput({
         className="min-w-32 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
         value={draft}
         aria-label={ariaLabel}
+        aria-invalid={invalid || undefined}
         placeholder={values.length ? "" : placeholder}
         onChange={(event) => setDraft(event.target.value)}
         onKeyDown={(event) => {

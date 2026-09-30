@@ -21,6 +21,10 @@ Each attempt (one cell of the matrix, run `n` times per cell):
 - Every execution starts by **sweeping leaked sandboxes** of that run (matched via `metadata.swarm`), so a SIGKILL'd run never leaves orphans past one resume.
 - Ctrl-C (CLI) and server shutdown abort gracefully: stop starting attempts, tear down live sandboxes, leave interrupted attempts resumable.
 - Infra failures retry with fresh sandboxes (`--max-retries`); harness-level task failures are *results*, not retried.
+- **Attempt hygiene.** A crash of the harness or its provider is not a model failure. Task failures that match `src/runner/harness-crash.ts` (context overflow, a dead provider stream) and tasks that time out with no session-log row end the attempt as `error` with `attempts.exclusion = 'harness-error'`; no score, pass rate or analytics aggregate counts them. Provider errors and no-output timeouts retry once on a fresh sandbox; a context overflow does not. Model-caused failures (tool loops, bad answers) stay `failed`.
+- **Dead runs leave nothing in flight.** On boot the server marks every run still `running` as `failed` (as before) and closes out every attempt still `pending`/`running`/`judging` as `error` + `exclusion = 'cancelled'`. Cancelling a run does the same to its unfinished attempts. Cancelled attempts are not attempts: analytics drops them, and `resume` resets them to `pending`. The status column stays inside its existing CHECK constraint (`pending, running, judging, passed, failed, error`), so `exclusion` carries the reason.
+- **Hard cost cap.** `--max-metered-usd <n>` (or a preset's) caps a run's metered spend: agent cost of configs billed per token, plus the judge, plus an E2B estimate (published per-second rates x the two sandbox shapes, about $0.13/h for the API sandbox and $0.33/h per worker; `EVALS_E2B_USD_PER_SANDBOX_HOUR` replaces it with one flat rate per sandbox). Once finished attempts reach the cap the runner starts nothing new and cancels the rest (`exclusion = 'cancelled'`). Attempts already running finish, so the total can pass the cap by up to `--concurrency` attempts. Billing follows the credential the sandbox gets: claude with an OAuth token is a subscription, claude with an API key is metered, codex on the swarm's ChatGPT credential is a subscription and codex on `OPENAI_API_KEY` is metered, pi/opencode are metered (`src/cost/billing.ts`). Each attempt records the billing of what its members actually booted with, and the cap reads that record.
+- **Per-config concurrency.** A subscription-billed config runs at most 3 attempts at once whatever `--concurrency` says (`EVALS_SUBSCRIPTION_CONFIG_CONCURRENCY`), so one run cannot drain a subscription's rate window.
 
 ## Usage
 
@@ -39,7 +43,12 @@ EVALS_DB_PATH=$PWD/evals.db bun --env-file=../../.env src/cli.ts run --scenarios
 EVALS_DB_PATH=$PWD/evals.db bun --env-file=../../.env src/cli.ts resume <runId>   # continue an interrupted run
 EVALS_DB_PATH=$PWD/evals.db bun --env-file=../../.env src/cli.ts show <runId>     # terminal result matrix
 EVALS_DB_PATH=$PWD/evals.db bun --env-file=../../.env src/cli.ts serve            # UI on http://localhost:4801
+EVALS_DB_PATH=$PWD/evals.db bun --env-file=../../.env src/cli.ts publish --suite 1.0 --run <runId>  # freeze a matrix run for /benchmark
 ```
+
+`publish` writes a frozen snapshot plus a disclosure bundle to `benchmark/<suite>/`, which the server serves without auth at `/benchmark`. It refuses a run that is not finished, misses a public scenario × config cell, has any cell under 5 graded attempts, or fails grader validation. Held-out scenarios (`HELD_OUT_SCENARIO_IDS` in `scenarios/suite.ts`) never enter the snapshot. Commit the written directory in its own PR: merging it is what makes the numbers public. Methodology: [docs/methodology.md](docs/methodology.md). For local UI work, `bun scripts/benchmark-fixture.ts /tmp/bm` writes a synthetic snapshot; serve it with `EVALS_BENCHMARK_DIR=/tmp/bm`.
+
+Scheduled-tier presets (`--preset nightly-canary`, `--preset weekly-matrix`) also carry a run plan (repeats and metered cap) that explicit flags override; `--scenarios suite` expands to every scenario of the current suite version. `POST /api/runs` takes the same via `preset` and `maxMeteredUsd`; a `preset` with no `scenarioIds` runs the whole suite. No schedule is switched on: these only name what a run contains.
 
 ### Evaluating a branch
 
@@ -82,12 +91,14 @@ It requires `EMBEDDING_API_KEY` in the repo-root `.env` (the API sandbox embeds 
 
 Local-first dashboard + API; **runs can be triggered, resumed, and cancelled from the UI** and execute inside the serve process:
 
-- `#/runs` — run list + matrix, live in-flight attempts with elapsed time, cancel/resume.
-- `#/runs/:id/attempts/:attemptId` — per-attempt judgments (incl. agentic-judge tool inputs AND outputs in `raw`), phase timings, sandbox info, assets, and a chat-style transcript viewer parsed from the raw session logs (legacy `#/runs/:id/cells/:scenario/:config` URLs redirect).
+- `#/leaderboard` (home) — the best setups for one suite version: a Pareto chart (score vs $/attempt or agent time, log x axis, 95% CI whiskers, colour = harness, shape = reasoning effort, dashed line = frontier, hollow marker = partial coverage or under 3 attempts on some scenario) and the ranking table (rank with its range, score ± CI, pass@1, pass^k, $/attempt, p50 time, tokens, attempts). A suite selector and a fixed-harness / best-harness-per-model track toggle; a row click opens that config's runs. With no config that ran the whole suite it draws no frontier and says why. View state lives in the hash (`#/leaderboard?suite=1.0&x=time&track=free&harness=claude`). `#/leaderboard/heatmap` is the scenario x config pass-rate grid (an all-red column is broken or too hard, an all-green one has stopped separating setups; a cell opens its attempts). `#/leaderboard/reliability` shows pass@1 against pass^k per config and each config's run-to-run score with a 95% band. `#/leaderboard/analytics` is the earlier Analytics page (trends, cost matrix, models, rollups); `#/analytics` redirects there.
+- `#/scenarios` — one card per scenario (what it tests, what the agent does, how it is scored, tags, version, suite membership, changelog), from `scenarios/cards.ts`; the table view and the full definition sit behind it.
+- `#/runs` — run list + matrix, live in-flight attempts with elapsed time, cancel/resume. `#/runs?config=<id>` opens it narrowed to one config.
+- `#/runs/:id/attempts/:attemptId` — an Outcome panel first (verdict, gates, then each dimension with a one-line reason; an `error` attempt is shown apart from a `failed` one), then per-attempt judgments (incl. agentic-judge tool inputs AND outputs in `raw`), phase timings, sandbox info, assets, and a chat-style transcript viewer parsed from the raw session logs (legacy `#/runs/:id/cells/:scenario/:config` URLs redirect).
 - `#/scenarios` — searchable scenario registry; `#/scenarios/:id` shows what the scenario will do (tasks, seeding, checks, judges, rubric) + recent attempts across runs.
 - Light/dark theme (persisted, follows `prefers-color-scheme`).
 
-Key endpoints: `GET/POST /api/runs`, `POST /api/runs/:id/{resume,cancel}`, `GET /api/runs/:id`, `GET /api/attempts/:id{,/transcript}`, `GET /api/scenarios{,/:id}`, `GET/POST /api/configs`, `PATCH /api/configs/:id`, `GET /api/models`, `POST /api/models/refresh`, `GET /api/artifacts/:id`.
+Key endpoints: `GET/POST /api/runs`, `POST /api/runs/:id/{resume,cancel}`, `GET /api/runs/:id`, `GET /api/attempts/:id{,/transcript}`, `GET /api/scenarios{,/:id}`, `GET/POST /api/configs`, `PATCH /api/configs/:id`, `GET /api/models`, `POST /api/models/refresh`, `GET /api/analytics`, `GET /api/analytics/{suites,frontier,leaderboard,heatmap,reliability,compare,cell}`, `GET /api/artifacts/:id`.
 
 `GET /api/models` feeds every model name and price in the UI: `models` is the judge picker list (openrouter only), `harnessModels` holds the claude (anthropic) and codex (openai) entries used only to name and price ids, `aliases` maps bare claude shortnames, and `catalog` says whether the data is `live`, `db` (last persisted fetch) or the committed `snapshot`, and when it was fetched. `GET /api/configs` rows carry `resolvedModel`: what a `modelAlias` resolves to today. The Configs page shows the catalog badge and a refresh button (`POST /api/models/refresh`).
 
@@ -100,6 +111,20 @@ and tests.
 `POST /api/runs` and `POST /api/runs/:id/resume` are also guarded by
 `EVALS_MAX_CONCURRENT_RUNS` (default `1`). The cap counts runs actively executing inside the
 serve process; when the cap is reached, the API returns HTTP 429.
+
+### Suite analytics API
+
+Answers "which setup is best" for one suite version. `GET /api/analytics/{frontier,leaderboard,heatmap,reliability,compare}` all take `suite` (default: the current suite in `scenarios/suite.ts`) and the same `harnesses`, `configs` and `efforts` CSV filters as `GET /api/analytics`. `GET /api/analytics/suites` lists the suites that have attempts. Only attempts stamped with that `suite_version` count; off-suite and `cancelled` attempts are ignored, and `error` attempts are counted but never scored.
+
+- **Score.** The mean of per-scenario means, so a scenario with extra attempts does not dominate. The 95% CI is a seeded stratified bootstrap over the attempts inside each scenario (the suite's scenarios are fixed). $/attempt is aggregated the same way; agent time is a pooled median of `timings.tasksMs`.
+- **Full suite.** A config is ranked, and counts toward the pooled frontier, only when every scenario of the suite has a graded attempt. Others are listed with `rank: null`.
+- **`lowN`.** A cell under 3 graded attempts. A `lowN` config never sits on the pooled frontier, so a thin run returns `status: "low-n"` and empty frontiers, not a misleading one. `frontier.status` is `ok`, `low-n`, `no-full-coverage` or `empty`.
+- **`frontier`.** Pooled non-dominated sets for score vs $/attempt and score vs agent time, plus a per-scenario frontier that accepts partial coverage. A config with unpriced attempts (`costComplete: false`) stays off the cost frontier.
+- **`leaderboard`.** Two tracks: `fixedHarness` (one group per harness, every model ranked within it) and `bestHarnessPerModel`. Each row has `rank`, a bootstrap `rankSpread`, `passAt1`, `passPowK` (`?k=`, default 3; the unbiased chance that k attempts on a scenario all pass, averaged over scenarios with at least k graded attempts), $/attempt, p50 agent time, tokens, `resolvedModel`, `efforts` and `suiteVersion`.
+- **`heatmap`.** Scenario x config pass fractions, plus an `anyConfig` row per scenario (`configsPassing: 0` means no config ever passes it).
+- **`reliability`.** Per config, a pass^k and pass@k curve for k = 1..`maxK` (default 5) and a per-run score trend with CI bands (last 60 runs).
+- **`cell?scenario=&config=`.** The attempts behind one heatmap cell, newest run first (`suite` as above; up to 100, `truncated` says if there were more), so a reader can open one and read its transcript. `cancelled` and off-suite attempts are left out, `error` ones are listed and counted apart.
+- **`compare?a=&b=`.** Per-scenario means for both configs and a paired bootstrap of the difference that resamples scenarios, not attempts. It reports a CI only with at least 5 shared scenarios.
 
 ## Deploying the eval service
 
@@ -128,7 +153,9 @@ Required Dokploy env/secrets:
 | `OPENROUTER_API_KEY` | yes | Judges and pi/opencode workers. |
 | `CLAUDE_CODE_OAUTH_TOKEN` | yes for claude configs | Claude Code OAuth workers. |
 | `ANTHROPIC_API_KEY` | yes for Anthropic API configs | Anthropic-backed claude workers when used. |
-| `OPENAI_API_KEY` | yes for codex configs | Codex workers. |
+| `EVALS_SWARM_API_URL` + `EVALS_SWARM_API_KEY` | for codex on subscription | The swarm whose `codex_oauth_<slot>` ChatGPT credential codex members boot with. The sandbox gets the access token only (blank refresh token); refresh happens host-side through the swarm's locked refresher, so no sandbox rotates the shared token. When set, `OPENAI_API_KEY` is never forwarded and a credential failure fails the boot (`src/swarm/codex-auth.ts`). |
+| `EVALS_CODEX_OAUTH_SLOT` | no | Slot to borrow (default `0`). Point it at a slot reserved for evals to keep eval usage off the swarm workers' rate window. |
+| `OPENAI_API_KEY` | yes for codex without the two vars above | Codex workers, metered. |
 | `EMBEDDING_API_KEY` | yes for memory-seeded scenarios | API-sandbox memory embeddings; `OPENAI_API_KEY` is not a fallback. |
 | `EMBEDDING_MODEL` | no | Optional embedding model override passed to the API sandbox. |
 | `EMBEDDING_API_BASE_URL` | no | Optional embedding API base URL passed to the API sandbox. |
@@ -228,6 +255,14 @@ Judge model precedence: `scenario.judge.model` > run `--judge-model` > `EVAL_JUD
 
 Scoring per cell: the headline is a convergent **mean dimension-score ± bootstrap CI** with a **Wilson pass-rate** companion (the CI tightens ~1/√n, so `n` is a confidence dial, not a luck dial), surfaced in `show`/serve as a ✓/~/✗ threshold-vs-CI indicator; `passedAny`/pass@1/`bestScore` remain as drill-down fields. Plus total cost and avg duration. Cost is **always tracked** via a fallback chain: harness-reported session-cost rows (`costSource: "harness"`) → recomputed from per-message token usage × the models.dev pricing snapshot (`"recomputed"`) → tagged `"unpriced"` with any extracted tokens still stored. **Token usage is tracked universally**: when harness-priced rows carry no token columns, the recompute extractor still runs (tokens only — cost/source untouched), so every attempt with parseable harness output stores `tokens_json`. On heterogeneous rosters the extractor runs per member (each member's provider/model/session files) and results merge.
 
+## Suite versions and grader validation
+
+Scenarios carry an integer `version`, and `scenarios/suite.ts` lists the versions that make up `swarm-evals@1.0`. Every attempt records `scenario_version`, and `suite_version` when its scenario at that version is in the manifest (NULL otherwise, so off-suite runs never mix into a suite chart). `scenarios/scenario-hashes.ts` pins a content hash per version (prompt, fixtures and check source); `bun test scenarios/versioning.test.ts` fails when content changes without a bump. `scenarios/CHANGELOG.md` has the bump rules.
+
+`scenarios/grader-validation.test.ts` grades every registered scenario offline: a null agent (tasks completed, nothing done) must score below 0.75 and fail a scenario gate even under a judge that gives full marks, and a reference solution (`scenarios/grader-fixtures/<id>.ts`) must pass every gate. A new scenario fails the suite until it has a fixture.
+
+The DB gained additive columns (`attempts.scenario_version`, `suite_version`, `exclusion`; `eval_runs.max_metered_usd`) via the usual boot-time `ALTER TABLE`; agent time (`agentMs`, from `timings_json.tasksMs`, sandbox boot and seeding excluded) is derived at query time.
+
 ## Database
 
 The DB of record is the Turso database `swarm-evals-local`, accessed through a **libsql embedded replica**: a local WAL file at `evals/evals-replica.db` (gitignored, disposable — rebuilt by sync) whose writes forward synchronously to the remote primary. `initDb()` syncs on boot, pulls in the background every 60 s, and asserts the replica is in WAL mode. Configuration is explicit — with no env set, `bun src/cli.ts serve` fails with a clear error instead of silently creating an empty DB:
@@ -252,6 +287,9 @@ The DB of record is the Turso database `swarm-evals-local`, accessed through a *
 | `EVALS_API_KEY` | static master key for deployed `/api/*`; when unset the API is open for local dev/tests |
 | `EVALS_MAX_CONCURRENT_RUNS` | max active runs accepted by `serve` (default `1`; over-cap creates/resumes return 429) |
 | `EVALS_PORT` | serve port override |
+| `EVALS_CODEX_BILLING` | `subscription` if the `OPENAI_API_KEY` given to codex workers fronts a flat plan; default metered (counts toward the run's cost cap) |
+| `EVALS_SUBSCRIPTION_CONFIG_CONCURRENCY` | max concurrent attempts per subscription-billed config (default `3`) |
+| `EVALS_E2B_USD_PER_SANDBOX_HOUR` | flat per-sandbox E2B price for the cost cap's sandbox estimate; unset = E2B's published rates for the API (2 vCPU / 2 GiB) and worker (4 vCPU / 8 GiB) templates, see `src/cost/billing.ts` |
 | `EVALS_MODEL_CATALOG_REFRESH` | set to `off` to skip the models.dev boot load and 6h refresh and serve the committed snapshot (see [Model catalog](#model-catalog-and-latest-aliases)) |
 | `EVALS_E2B_TEMPLATE_API` / `EVALS_E2B_TEMPLATE_WORKER` | template overrides (default `agent-swarm-{api,worker}-latest`; see [Evaluating a branch](#evaluating-a-branch)) |
 

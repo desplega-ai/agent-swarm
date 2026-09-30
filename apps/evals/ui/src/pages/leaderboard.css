@@ -1,0 +1,230 @@
+/* Leaderboard page (Phase 5): frontier chart + ranking table. Shared tokens live
+   in styles.css, chart styles in components/charts/charts.css, .an-* in analytics.css. */
+
+.lb-tabs {
+  display: flex;
+  flex-wrap: wrap; /* 320px: the four view tabs must not push the page sideways */
+  gap: 2px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 10px;
+}
+
+.lb-tab {
+  padding: 6px 12px;
+  margin-bottom: -1px;
+  color: var(--dim);
+  font-size: 12.5px;
+  text-decoration: none;
+  border-bottom: 2px solid transparent;
+}
+
+.lb-tab:hover {
+  color: var(--text);
+}
+
+.lb-tab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+.lb-tab:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.lb-head {
+  display: flex;
+  align-items: center;
+  gap: 8px 16px;
+  flex-wrap: wrap;
+  padding: 2px 0 10px;
+}
+
+.lb-head .btn {
+  margin-left: auto;
+}
+
+.lb-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.lb-select {
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 3px 8px;
+  font-family: var(--font-sans);
+  font-size: 12px;
+}
+
+.lb-select:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.lb-banner {
+  margin-bottom: 12px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  border-color: color-mix(in oklab, var(--accent), var(--border) 55%);
+  background: color-mix(in oklab, var(--accent), var(--panel) 92%);
+}
+
+/* ---- "who is best" cards ---- */
+
+.lb-picks {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.lb-pick {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  text-align: left;
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-family: var(--font-sans);
+  cursor: pointer;
+}
+
+.lb-pick:hover {
+  border-color: var(--accent);
+}
+
+.lb-pick:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.lb-pick-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--dim);
+}
+
+.lb-pick-config {
+  font-size: 14px;
+  font-weight: 600;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lb-pick-stats {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.lb-pick-stats strong {
+  font-size: 18px;
+  color: var(--accent);
+}
+
+/* ---- chart legend + tooltip extras ---- */
+
+.lb-legend {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--dim);
+}
+
+.lb-legend-group {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+}
+
+.lb-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.lb-legend-sep {
+  width: 1px;
+  height: 12px;
+  background: var(--border);
+}
+
+.lb-foot {
+  margin: 8px 0 0;
+  font-size: 11.5px;
+}
+
+.lb-tip-note {
+  margin-top: 3px;
+  font-size: 10.5px;
+}
+
+/* ---- table cells ---- */
+
+.lb-rank {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.lb-rank-spread {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+}
+
+.lb-model {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.lb-score {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  font-family: var(--font-mono);
+}
+
+.lb-ci {
+  font-size: 10.5px;
+}
+
+.lb-attempts {
+  font-family: var(--font-mono);
+  white-space: nowrap;
+}
+
+.lb-badge {
+  margin-left: 6px;
+  padding: 0 5px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-family: var(--font-sans);
+  font-size: 10px;
+  color: var(--dim);
+}
+
+@media (max-width: 900px) {
+  .lb-picks {
+    grid-template-columns: 1fr;
+  }
+}

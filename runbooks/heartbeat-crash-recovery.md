@@ -18,14 +18,14 @@ flowchart TD
   expire --> offers["releaseStaleOfferedTasksForOfflineAgents()<br/>offers on offline/deleted offerees → pool"]
   offers --> detect["reclaimStalledTasks() (§2)"]
   detect --> health["checkWorkerHealth()<br/>busy ↔ idle (skips offline)"]
-  health --> assign["autoAssignPoolTasks()<br/>per-task: first idle worker satisfying<br/>isAgentEligibleForTask (§4) — else leave queued"]
+  health --> assign["autoAssignPoolTasks()<br/>per-task: first idle worker satisfying<br/>isAgentEligibleForTask (§4) and<br/>poolTaskRunsOnHarness — else leave queued"]
   assign --> cleanup["cleanupStaleResources()<br/>stale sessions (30m), reviewing,<br/>inbox, mentions, workflow runs,<br/>+ approval timeout + auto-cancel sweeps<br/>+ unpinUnclaimedTasks: unstarted pins back to pool (§3)<br/>+ escalateStarvedPoolTasks: zero-eligible-agent pool tasks (§4)"]
 ```
 
 - **No boot-time sweep.** The API does not scan `in_progress` tasks at boot. After an API restart, an orphaned `in_progress` task is handled by the normal sweep: once its thresholds pass, §2 reclaims it. Workers run in their own containers and outlive an API restart, so a live worker keeps its task.
 - **Worker side** (`src/commands/runner.ts`): the worker registers its active session (POST `/api/active-sessions`, keyed on the per-task runner session id) *before* it starts the provider spawn, and fills in the provider session id on `session_init`. So the window in which an `in_progress` task has no session row is one HTTP round trip, not the whole spawn. On spawn failure the worker fails the task and then removes the row.
 - The **boot-triage seed script** (`src/be/seed-scripts/catalog/boot-triage.ts`) mirrors this logic: it flags `in_progress` tasks that are on an offline agent OR whose session's `lastHeartbeatAt` is older than `stuckMinutes` ago (no fresh session heartbeat).
-- `autoAssignPoolTasks` and `claimTask`/`assignUnassignedTaskPending` are gated by the **routing-affinity eligibility check** (§4, `isAgentEligibleForTask`) — a pooled task tagged with a `routingAffinity` snapshot (from a resume, an Unpin, or an explicit `requiredCapabilities` on a fresh `send-task`) can only go to a role/capability-matching agent. Untagged tasks are unaffected — assignment stays open to any idle (non-lead) worker, exactly as before. `autoAssignPoolTasks` **does** skip idle workers whose `emptyPollCount >= MAX_EMPTY_POLLS` (the poll gate) — assigning to them would just have them exit on their next poll. The filter reads `emptyPollCount` off the rows `getIdleWorkersWithCapacity()` already returns (no per-worker re-query). Note the poll gate is cleared on a genuine `waiting_for_credentials -> ready` recovery (`updateAgentCredentialState`) and on re-register, but **not** by routine post-task `ready:true` credential reports.
+- `autoAssignPoolTasks` and `claimTask`/`assignUnassignedTaskPending` are gated by the **routing-affinity eligibility check** (§4, `isAgentEligibleForTask`) — a pooled task tagged with a `routingAffinity` snapshot (from a resume, an Unpin, or an explicit `requiredCapabilities` on a fresh `send-task`) can only go to a role/capability-matching agent. Untagged tasks are unaffected — assignment stays open to any idle (non-lead) worker, exactly as before. The pool paths (`autoAssignPoolTasks` and the poll auto-claim scan) also apply `poolTaskRunsOnHarness(task, harness)` (`src/be/model-validation.ts`): a task that pins a `model` the worker's harness cannot run is skipped for that worker and waits for a compatible one ([model-tiers.md § Harness compatibility](./model-tiers.md)). `autoAssignPoolTasks` **does** skip idle workers whose `emptyPollCount >= MAX_EMPTY_POLLS` (the poll gate) — assigning to them would just have them exit on their next poll. The filter reads `emptyPollCount` off the rows `getIdleWorkersWithCapacity()` already returns (no per-worker re-query). Note the poll gate is cleared on a genuine `waiting_for_credentials -> ready` recovery (`updateAgentCredentialState`) and on re-register, but **not** by routine post-task `ready:true` credential reports.
 - `checkWorkerHealth` only flips `busy↔idle` (it pre-filters `offline`) and never sets `offline`. A successful `/api/poll` dispatch updates the agent to `busy` in the same transaction that starts a pre-assigned task or claims a pool task; the worker-only `poll-task` tool does the same for its direct pending-task path. The heartbeat sweep remains the reconciliation backstop for any other task-state transition that leaves `agents.status` stale. Leads can become `busy` while running a directly assigned task, but remain structurally excluded from pool assignment (`getIdleWorkersWithCapacity` and the pool dispatch query filter `isLead=0`). `offline` has two writers: the graceful `POST /close` handler (`src/http/core.ts`), and — only when `MULTI_RUNTIME_ENABLED` is enabled — the stale-runtime expiry in §1a. With the flag explicitly off, a hard-crashed (SIGKILL) worker is still never auto-offlined.
 
 ### Workflow recovery
@@ -336,15 +336,16 @@ The consumer cross-product has three distinct policies. Pool selection always ap
 | `getPendingTaskForAgent` | Re-check invalid affinity and Lead-only authorization; do not reinterpret ordinary provenance |
 | `acceptTask` / `claimOfferedTask` | Re-check invalid affinity and Lead-only authorization on the established offer |
 | `claimTask` / `assignUnassignedTaskPending` | Full eligibility before the atomic pool claim |
-| `getUnassignedTaskIdsForAgent` / HTTP poll | Filter by full eligibility before budget admission and claim |
-| `autoAssignPoolTasks` | Select only idle, capable workers that pass full eligibility |
+| `getUnassignedTaskIdsForAgent` / HTTP poll | Filter by full eligibility and harness model compatibility inside the paginated scan, before budget admission and claim |
+| `autoAssignPoolTasks` | Select only idle, capable workers that pass full eligibility and can run the task's pinned model |
+| `escalateStarvedPoolTasks` | Count only registered agents that pass full eligibility and can run the task's pinned model |
 | `resolveLeadOnlyRecoveryAssignment` | Full eligibility for the source candidate and replacement Lead |
 
 Every consumer of the `unassigned` pool calls the **same** `isAgentEligibleForTask` predicate (`src/be/db.ts`) — there is no second implementation to drift out of sync:
 
 - `claimTask` / `assignUnassignedTaskPending` — pre-check before the atomic `UPDATE … WHERE status='unassigned'` (static per (agent, task), so it doesn't reopen the claim race). Rejection logs a distinct `task_claim_rejected_affinity` event and returns `null` — same shape as "already claimed by someone else", so existing callers (poll auto-claim, `task-action claim`) degrade safely.
-- `getUnassignedTaskIdsForAgent` (replaces the unfiltered `getUnassignedTaskIds` on the poll auto-claim path in `src/http/poll.ts`) — pages through the pool in `max(limit * 5, ELIGIBILITY_SCAN_BATCH_SIZE)`-row windows, filtering each through the predicate, until `limit` eligible IDs are found or the pool is exhausted (capped at `ELIGIBILITY_SCAN_CAP` rows scanned), so an ineligible task is never even offered to the budget-admission gate. Before this paginated scan (PR #954 review), a single fixed window meant more than `~25` ineligible affinity-tagged tasks at the head of the priority order could hide all eligible work behind them, no matter how many times this was called.
-- `autoAssignPoolTasks` — pages through the pool in `POOL_SCAN_BATCH_SIZE`-row windows (via `getUnassignedPoolTasks(limit, offset)`); for each task in a window (priority/creation order), picks the first idle worker that has capacity **and** passes the predicate. Continues to the next window until it has assigned `MAX_AUTO_ASSIGN_PER_SWEEP` tasks or exhausted the pool (capped at `POOL_SCAN_CAP` rows scanned this sweep); a task with no eligible worker anywhere in the scanned pool is left queued (not blindly assigned to the next worker in line). Same PR #954 fix: a single bounded fetch of `MAX_AUTO_ASSIGN_PER_SWEEP` rows used to mean a run of high-priority ineligible affinity tasks could suppress lower-priority eligible work indefinitely — every sweep re-fetched the same ineligible head-of-line rows, so the starvation never self-resolved even as idle eligible workers came and went.
+- `getUnassignedTaskIdsForAgent` (replaces the unfiltered `getUnassignedTaskIds` on the poll auto-claim path in `src/http/poll.ts`) — pages through the pool in `max(limit * 5, ELIGIBILITY_SCAN_BATCH_SIZE)`-row windows, filtering each through the predicate and the caller's optional `accept` filter (the poll path passes `poolTaskRunsOnHarness` for its harness), until `limit` eligible IDs are found or the pool is exhausted (capped at `ELIGIBILITY_SCAN_CAP` rows scanned), so an ineligible task is never even offered to the budget-admission gate. Before this paginated scan (PR #954 review), a single fixed window meant more than `~25` ineligible affinity-tagged tasks at the head of the priority order could hide all eligible work behind them, no matter how many times this was called. The harness filter runs inside the scan for the same reason: filtering the five returned IDs afterwards let five incompatible head-of-line tasks hide compatible work (PR #1764 review).
+- `autoAssignPoolTasks` — pages through the pool in `POOL_SCAN_BATCH_SIZE`-row windows (via `getUnassignedPoolTasks(limit, offset)`); for each task in a window (priority/creation order), picks the first idle worker that has capacity, passes the predicate **and** can run the task's pinned model (`poolTaskRunsOnHarness`). Continues to the next window until it has assigned `MAX_AUTO_ASSIGN_PER_SWEEP` tasks or exhausted the pool (capped at `POOL_SCAN_CAP` rows scanned this sweep); a task with no eligible worker anywhere in the scanned pool is left queued (not blindly assigned to the next worker in line). Same PR #954 fix: a single bounded fetch of `MAX_AUTO_ASSIGN_PER_SWEEP` rows used to mean a run of high-priority ineligible affinity tasks could suppress lower-priority eligible work indefinitely — every sweep re-fetched the same ineligible head-of-line rows, so the starvation never self-resolved even as idle eligible workers came and went.
 - `task-action` `claim` — same predicate, with a human-readable rejection ("requires role X; yours is Y") so an agent can self-correct instead of retry-looping.
 
 **Where a `routingAffinity` snapshot comes from** (`buildRoutingAffinityFromAgent(agentId)` snapshots an agent's current `role`/`harnessProvider`/`capabilities`; `createTaskExtended` auto-inherits a parent's `routingAffinity` on `parentTaskId` when the child doesn't set its own, except for the explicit control-plane opt-out above):
@@ -353,7 +354,7 @@ Every consumer of the `unassigned` pool calls the **same** `isAgentEligibleForTa
 2. **`unpinUnclaimedTasks`** (§3) keeps a row's existing `routingAffinity`, or stamps a snapshot of the agent that held the pin, when it returns the row to the pool. A reclaimed task therefore only reaches a role-matching agent.
 3. **`send-task`** / **`task-action create`** accept an optional `requiredCapabilities: string[]` — written into a fresh pool task's `routingAffinity` with `role` left unset. Per the predicate above, a capabilities-only snapshot (no `role`) is eligible for nobody but its declaring agent (n/a here — there is none), so such a task always ends up escalated to the Lead by §4's starvation check below; it's a way to *record* a requirement for the Lead's judgment, not to auto-route today.
 
-**Starvation escalation** (`escalateStarvedPoolTasks`, wired into `cleanupStaleResources` — runs every sweep): an `unassigned` task carrying a `routingAffinity`, queued longer than `POOL_AFFINITY_ESCALATION_MIN`, with **zero eligible registered agents** (any status — an offline-but-matching agent still counts as "not starved"; this is "nobody of that role exists", not "everyone's busy right now") gets a Lead `task.pool.starved.decision` follow-up (`createPoolStarvationDecisionTask`, `taskType: "reroute-decision"`, idempotent per original task).
+**Starvation escalation** (`escalateStarvedPoolTasks`, wired into `cleanupStaleResources` — runs every sweep): an `unassigned` task carrying a `routingAffinity`, queued longer than `POOL_AFFINITY_ESCALATION_MIN`, with **zero eligible registered agents** (eligible = passes the predicate **and** `poolTaskRunsOnHarness` for its harness; any status — an offline-but-matching agent still counts as "not starved"; this is "nobody of that role exists", not "everyone's busy right now") gets a Lead `task.pool.starved.decision` follow-up (`createPoolStarvationDecisionTask`, `taskType: "reroute-decision"`, idempotent per original task).
 
 ### Pseudocode (current)
 
@@ -381,14 +382,27 @@ while assignedCount < MAX_AUTO_ASSIGN_PER_SWEEP and offset < POOL_SCAN_CAP:
     for task in batch:
         if assignedCount >= MAX_AUTO_ASSIGN_PER_SWEEP: break
         worker = first idle worker w/ capacity where isAgentEligibleForTask(w, task)
+                 and poolTaskRunsOnHarness(task, w.harnessProvider)     # pinned model runs here
         if worker: assign(task, worker); assignedCount += 1        # else: leave queued, keep scanning
     offset += len(batch)
     if len(batch) < POOL_SCAN_BATCH_SIZE: break                    # pool exhausted
 
+# HTTP poll auto-claim (getUnassignedTaskIdsForAgent(agent, 5, accept)):
+accept = task -> poolTaskRunsOnHarness(task, agent.harnessProvider)
+ids, offset = [], 0
+while len(ids) < 5 and offset < ELIGIBILITY_SCAN_CAP:
+    batch = next unassigned rows (same order), max(5 * 5, ELIGIBILITY_SCAN_BATCH_SIZE) per page
+    for task in batch:
+        if isAgentEligibleForTask(agent, task) and accept(task): ids.append(task.id)
+    offset += len(batch); stop when the pool is exhausted
+budget gate on ids, then the claim loop tries each id in order
+
 # every sweep, inside cleanupStaleResources:
 escalateStarvedPoolTasks():
     for task in getStaleUnassignedAffinityTasks(now - POOL_AFFINITY_ESCALATION_MIN):
-        if any(isAgentEligibleForTask(agent, task) for agent in getAllAgents() if not agent.isLead):
+        if any(isAgentEligibleForTask(agent, task)
+               and poolTaskRunsOnHarness(task, agent.harnessProvider)
+               for agent in getAllAgents() if not agent.isLead):
             continue                                        # someone (any status) matches — keep queued
         createPoolStarvationDecisionTask(original=task) → Lead
 ```

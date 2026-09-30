@@ -14,26 +14,37 @@ import {
 } from "@earendil-works/pi-ai/providers/all";
 import type {
   AgentSessionEvent,
+  AgentToolResult,
   CreateAgentSessionOptions,
+  ExtensionFactory,
+  McpServerConfig,
   SessionStats,
   ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 import {
   type AgentSession,
   createAgentSession,
+  createCodemodeExtension,
+  createMcpExtension,
+  createToolSearchExtension,
   DefaultResourceLoader,
   getAgentDir,
   ModelRuntime,
   SessionManager,
+  SettingsManager,
 } from "@earendil-works/pi-coding-agent";
 import { type TSchema, Type } from "typebox";
+import "./pi-codemode-runtime";
+import { CORE_TOOLS } from "../tools/tool-config";
 import { classifyAwsSdkError } from "../utils/aws-error-classifier";
+import { parseEnvFlag } from "../utils/env-flag";
+import { fetchInstalledMcpServers } from "../utils/mcp-server-fetcher";
 import { swarmRuntimeInstanceId } from "../utils/multi-runtime";
 import { DEFAULT_OPENROUTER_BASE_URL, getOpenRouterBaseUrl } from "../utils/openrouter-base-url";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { readPkgVersion } from "./harness-version";
 import { createSwarmHooksExtension } from "./pi-mono-extension";
-import { McpHttpClient } from "./pi-mono-mcp-client";
+import { McpHttpClient, type McpTool } from "./pi-mono-mcp-client";
 import { applyReasoningEffort, type ReasoningEffort } from "./reasoning-effort";
 import type {
   CostData,
@@ -305,20 +316,63 @@ function jsonSchemaToTypeBox(schema: Record<string, unknown>): TSchema {
   return Type.Unsafe(schema);
 }
 
+type ToolStructuredContent = NonNullable<AgentToolResult["structuredContent"]>;
+
+/** Namespace pi shows for swarm tools in `tool_search` and codemode listings. */
+export const SWARM_TOOL_NAMESPACE = { name: "agent-swarm" } as const;
+
+/**
+ * `PI_TOOL_DEFERRAL`: hide non-core swarm tools behind pi's `tool_search`.
+ * Off by default until a pilot measures the prompt-cache cost of mid-session
+ * tool-set changes. Read from `process.env` by both the adapter traits (which
+ * pick the prompt's tool-discovery line) and `createSession`, so the prompt
+ * and the session always agree.
+ */
+export function isPiToolDeferralEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return parseEnvFlag(env.PI_TOOL_DEFERRAL, false);
+}
+
+/**
+ * `PI_CODEMODE`: add pi's codemode tool (a harness-side JS sandbox whose
+ * scripts call tools) next to the declared tools, on every pi session.
+ * Off by default.
+ */
+export function isPiCodemodeEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return parseEnvFlag(env.PI_CODEMODE, false);
+}
+
+/**
+ * Tools that stay declared to the model when deferral is on: the lifecycle
+ * set Claude also keeps out of ToolSearch, plus any tool the server preloads
+ * for this task through `_meta["anthropic/alwaysLoad"]` (task tool manifests).
+ */
+export function isCoreSwarmTool(tool: McpTool): boolean {
+  return CORE_TOOLS.has(tool.name) || tool._meta?.["anthropic/alwaysLoad"] === true;
+}
+
 /**
  * Convert MCP tools to pi-mono ToolDefinition objects.
  * Exported for the isError-propagation conformance test — pi-agent-core
  * derives a tool result's error flag solely from execute() throwing.
+ *
+ * With `deferNonCore`, tools outside the core set get `exposure: "deferred"`:
+ * pi leaves them out of the model's tool list until `tool_search` loads them.
  */
 export function mcpToolsToDefinitions(
   mcpClient: McpHttpClient,
-  tools: Array<{ name: string; description?: string; inputSchema: Record<string, unknown> }>,
+  tools: McpTool[],
+  options: { deferNonCore?: boolean; namespace?: { name: string } } = {},
 ): ToolDefinition[] {
   return tools.map((tool) => ({
     name: tool.name,
     label: tool.name,
     description: tool.description || tool.name,
     parameters: jsonSchemaToTypeBox(tool.inputSchema),
+    ...(tool.outputSchema && { outputSchema: jsonSchemaToTypeBox(tool.outputSchema) }),
+    ...(options.namespace && { namespace: options.namespace }),
+    ...(options.deferNonCore && {
+      exposure: isCoreSwarmTool(tool) ? ("direct" as const) : ("deferred" as const),
+    }),
     async execute(_toolCallId, params) {
       const result = await mcpClient.callTool(tool.name, params as Record<string, unknown>);
       const text = result.content
@@ -334,6 +388,10 @@ export function mcpToolsToDefinitions(
       return {
         content: [{ type: "text" as const, text: text || "(no output)" }],
         details: undefined,
+        // Not sent to the model; codemode scripts read it instead of the text.
+        ...(result.structuredContent && {
+          structuredContent: result.structuredContent as ToolStructuredContent,
+        }),
       };
     },
   }));
@@ -1076,16 +1134,264 @@ export class PiMonoSession implements ProviderSession {
   }
 }
 
+/** Per-session pi feature switches resolved from flags. */
+export interface PiSessionFeatures {
+  toolDeferral: boolean;
+  /** The agent has installed MCP servers for pi's MCP extension to connect. */
+  installedMcp?: boolean;
+  /** PI_CODEMODE is on. */
+  codemode?: boolean;
+}
+
+/**
+ * pi's MCP extension with config files disabled. Servers come only from
+ * `pi.registerMcpServer` (the swarm hook): a stray `~/.pi/agent/mcp.json` or
+ * a repo's `.pi/mcp.json` must never add servers to a swarm session.
+ */
+export function createSwarmMcpExtension(): ExtensionFactory {
+  return createMcpExtension({
+    loadConfig: () => ({ servers: [], errors: [], autoEnableCodemode: false }),
+  });
+}
+
+/** Extension factories for a pi session: ours first, then pi built-ins the flags turn on. */
+export function piExtensionFactories(
+  swarmExtension: ExtensionFactory,
+  features: PiSessionFeatures,
+): ExtensionFactory[] {
+  const factories: ExtensionFactory[] = [swarmExtension];
+  if (features.toolDeferral) factories.push(createToolSearchExtension());
+  if (features.installedMcp) factories.push(createSwarmMcpExtension());
+  if (features.codemode) factories.push(createBoundedCodemodeExtension());
+  return factories;
+}
+
+/** Hard deadline for one codemode script. pi's default is none. */
+export const PI_CODEMODE_TIMEOUT_MS = 120_000;
+/** Nested tool calls one codemode script may start. */
+export const PI_CODEMODE_MAX_NESTED_CALLS = 32;
+/** Nested tool calls one codemode script may run at once. */
+export const PI_CODEMODE_MAX_CONCURRENT_CALLS = 4;
+
+export interface CodemodeLimits {
+  timeoutMs: number;
+  maxNestedCalls: number;
+  maxConcurrentCalls: number;
+}
+
+const DEFAULT_CODEMODE_LIMITS: CodemodeLimits = {
+  timeoutMs: PI_CODEMODE_TIMEOUT_MS,
+  maxNestedCalls: PI_CODEMODE_MAX_NESTED_CALLS,
+  maxConcurrentCalls: PI_CODEMODE_MAX_CONCURRENT_CALLS,
+};
+
+/**
+ * pi's codemode extension with a per-script deadline and nested-call budget.
+ * pi has no option for either: a script runs until it returns unless its own
+ * `// @options` line sets `timeout_ms`. Both limits abort the signal pi hands
+ * the sandbox, which interrupts the QuickJS worker and fails the codemode call.
+ *
+ * "on" keeps declared tools declared; "only" would hide the lifecycle tools
+ * behind scripts. `models: false` keeps model calls out of scripts, where
+ * they would bypass the session's cost accounting.
+ */
+export function createBoundedCodemodeExtension(
+  limits: CodemodeLimits = DEFAULT_CODEMODE_LIMITS,
+): ExtensionFactory {
+  const codemode = createCodemodeExtension({ mode: "on", models: false });
+  return (pi) =>
+    codemode(
+      new Proxy(pi, {
+        get(target, prop) {
+          if (prop === "registerTool") {
+            return (tool: ToolDefinition) => target.registerTool(boundCodemodeTool(tool, limits));
+          }
+          const value = Reflect.get(target, prop, target);
+          return typeof value === "function" ? value.bind(target) : value;
+        },
+      }),
+    );
+}
+
+export function boundCodemodeTool(tool: ToolDefinition, limits: CodemodeLimits): ToolDefinition {
+  return {
+    ...tool,
+    execute: async (toolCallId, params, signal, onUpdate, ctx) => {
+      const script = new AbortController();
+      const stop = (message: string) => {
+        if (!script.signal.aborted) script.abort(new Error(message));
+      };
+      const onOuterAbort = () =>
+        script.abort(signal?.reason ?? new Error("Codemode script cancelled"));
+      if (signal?.aborted) onOuterAbort();
+      else signal?.addEventListener("abort", onOuterAbort, { once: true });
+      const timer = setTimeout(
+        () => stop(`Codemode script exceeded its ${limits.timeoutMs} ms deadline`),
+        limits.timeoutMs,
+      );
+
+      let started = 0;
+      let running = 0;
+      const waiters: Array<() => void> = [];
+      const release = () => {
+        running--;
+        waiters.shift()?.();
+      };
+      const executeTool: typeof ctx.executeTool = async (name, args, options) => {
+        if (script.signal.aborted) throw new Error("Codemode script already stopped");
+        if (++started > limits.maxNestedCalls) {
+          const message = `Codemode script exceeded its budget of ${limits.maxNestedCalls} nested tool calls`;
+          stop(message);
+          throw new Error(message);
+        }
+        while (running >= limits.maxConcurrentCalls) {
+          await new Promise<void>((resolve) => {
+            waiters.push(resolve);
+            script.signal.addEventListener("abort", () => resolve(), { once: true });
+          });
+          if (script.signal.aborted) {
+            waiters.shift()?.();
+            throw new Error("Codemode script already stopped");
+          }
+        }
+        running++;
+        try {
+          return await ctx.executeTool(name, args, {
+            ...options,
+            signal: options?.signal ?? script.signal,
+          });
+        } finally {
+          release();
+        }
+      };
+      // pi defines `executeTool` non-writable and non-configurable, so a Proxy
+      // may not return a different function for it. Copy the descriptors onto
+      // a fresh object instead; the getters stay lazy, as in pi's own copies.
+      const boundedCtx = ctx
+        ? (Object.defineProperties(
+            {},
+            {
+              ...Object.getOwnPropertyDescriptors(ctx),
+              executeTool: { value: executeTool, enumerable: true },
+            },
+          ) as typeof ctx)
+        : ctx;
+
+      try {
+        return await tool.execute(toolCallId, params, script.signal, onUpdate, boundedCtx);
+      } finally {
+        clearTimeout(timer);
+        signal?.removeEventListener("abort", onOuterAbort);
+      }
+    },
+  };
+}
+
+/**
+ * Escape a literal for pi's config-value resolver, which runs values that
+ * start with `!` as shell commands and expands `$VAR`. Header and env values
+ * from the API are resolved secrets, never templates.
+ */
+function escapePiConfigValue(value: string): string {
+  const escaped = value.replace(/\$/g, () => "$$");
+  return escaped.startsWith("!") ? `$${escaped}` : escaped;
+}
+
+function escapeValues(values: unknown): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (!values || typeof values !== "object") return out;
+  for (const [key, value] of Object.entries(values as Record<string, unknown>)) {
+    if (typeof value === "string") out[key] = escapePiConfigValue(value);
+  }
+  return out;
+}
+
+/**
+ * Map installed servers (`fetchInstalledMcpServers(..., "claude")` entries)
+ * to pi MCP configs. pi speaks stdio and streamable HTTP; `sse` entries map to
+ * HTTP, which is how the previous pi client already reached them. Tools stay
+ * `direct`, as before: the prompt lists these servers as in the tool list.
+ */
+export function toPiMcpServers(
+  installed: Record<string, Record<string, unknown>> | null,
+): Record<string, McpServerConfig> {
+  const servers: Record<string, McpServerConfig> = {};
+  for (const [name, entry] of Object.entries(installed ?? {})) {
+    if (typeof entry.command === "string") {
+      servers[name] = {
+        type: "stdio",
+        command: entry.command,
+        args: Array.isArray(entry.args) ? entry.args.map(String) : [],
+        env: escapeValues(entry.env),
+        exposure: "direct",
+      };
+    } else if (typeof entry.url === "string") {
+      servers[name] = {
+        type: "http",
+        url: entry.url,
+        headers: escapeValues(entry.headers),
+        exposure: "direct",
+      };
+    }
+  }
+  return servers;
+}
+
+/** `defaultTools` additions (`+name`) that activate the built-in tools above. */
+export function piDefaultToolAdditions(features: PiSessionFeatures): string[] {
+  const additions: string[] = [];
+  if (features.toolDeferral) additions.push("+tool_search");
+  if (features.codemode) additions.push("+codemode");
+  return additions;
+}
+
+/**
+ * Builds and loads the resource loader for a pi SDK session.
+ *
+ * The cwd is a task repo clone, which is not trusted, and this worker process
+ * holds swarm credentials and tools. So the loader reads nothing from the repo:
+ * `projectTrusted: false` blocks `.pi/extensions`, packages, settings and
+ * SYSTEM.md, and `noContextFiles` blocks AGENTS.md/CLAUDE.md from the cwd and
+ * its ancestors. The system prompt comes only from the server (`systemPrompt`).
+ */
+export async function createPiResourceLoader(opts: {
+  cwd: string;
+  agentDir: string;
+  systemPrompt?: string;
+  extensionFactories: ExtensionFactory[];
+}): Promise<{ resourceLoader: DefaultResourceLoader; settingsManager: SettingsManager }> {
+  const settingsManager = SettingsManager.create(opts.cwd, opts.agentDir, {
+    projectTrusted: false,
+  });
+  const resourceLoader = new DefaultResourceLoader({
+    cwd: opts.cwd,
+    agentDir: opts.agentDir,
+    settingsManager,
+    noContextFiles: true,
+    appendSystemPrompt: opts.systemPrompt ? [opts.systemPrompt] : undefined,
+    extensionFactories: opts.extensionFactories,
+  });
+  // createAgentSession only reloads a loader it builds itself. Without this
+  // call a passed loader stays empty: no appended system prompt and no
+  // extensions (swarm hooks, tool_search) reach the session.
+  await resourceLoader.reload();
+  return { resourceLoader, settingsManager };
+}
+
 export class PiMonoAdapter implements ProviderAdapter {
   readonly name = "pi";
-  readonly traits: ProviderTraits = {
-    hasMcp: true,
-    hasToolSearch: false,
-    // Pi reads ~/.pi/agent/skills itself and advertises them natively.
-    nativeSkillDiscovery: true,
-    hasLocalEnvironment: true,
-    steerModes: ["steer", "queue"],
-  };
+  // A getter so the prompt's tool-discovery line follows PI_TOOL_DEFERRAL
+  // live: the runner rebuilds the system prompt from traits on every task.
+  get traits(): ProviderTraits {
+    return {
+      hasMcp: true,
+      hasToolSearch: isPiToolDeferralEnabled(),
+      // Pi reads ~/.pi/agent/skills itself and advertises them natively.
+      nativeSkillDiscovery: true,
+      hasLocalEnvironment: true,
+      steerModes: ["steer", "queue"],
+    };
+  }
   private lastCwd = ".";
 
   async createSession(config: ProviderSessionConfig): Promise<ProviderSession> {
@@ -1099,6 +1405,7 @@ export class PiMonoAdapter implements ProviderAdapter {
     const createdSymlink = createAgentsMdSymlink(config.cwd);
 
     // 2. Discover MCP tools from swarm endpoint
+    const deferTools = isPiToolDeferralEnabled();
     let customTools: ToolDefinition[] = [];
     if (config.apiUrl && config.apiKey) {
       try {
@@ -1117,81 +1424,31 @@ export class PiMonoAdapter implements ProviderAdapter {
         }
         await mcpClient.initialize();
         const tools = await mcpClient.listTools();
-        customTools = mcpToolsToDefinitions(mcpClient, tools);
+        customTools = mcpToolsToDefinitions(mcpClient, tools, {
+          deferNonCore: deferTools,
+          namespace: SWARM_TOOL_NAMESPACE,
+        });
+        const deferredCount = deferTools ? tools.filter((t) => !isCoreSwarmTool(t)).length : 0;
         console.log(
-          `\x1b[2m[${config.role}]\x1b[0m Discovered ${tools.length} MCP tools from swarm`,
+          `\x1b[2m[${config.role}]\x1b[0m Discovered ${tools.length} MCP tools from swarm` +
+            (deferTools ? ` (${deferredCount} deferred behind tool_search)` : ""),
         );
       } catch (err) {
         console.warn(`\x1b[33m[${config.role}] Failed to discover MCP tools: ${err}\x1b[0m`);
       }
+    }
 
-      // 2b. Discover tools from installed MCP servers (HTTP/SSE transport only)
-      try {
-        const mcpServersRes = await fetch(
-          `${config.apiUrl}/api/agents/${config.agentId}/mcp-servers?resolveSecrets=true`,
-          {
-            headers: {
-              Authorization: `Bearer ${config.apiKey}`,
-              "X-Agent-ID": config.agentId,
-            },
-          },
-        );
-        if (mcpServersRes.ok) {
-          const mcpServersData = (await mcpServersRes.json()) as {
-            servers: Array<{
-              name: string;
-              transport: string;
-              url?: string;
-              headers?: string;
-              isActive: boolean;
-              isEnabled: boolean;
-              resolvedHeaders?: Record<string, string>;
-            }>;
-          };
-          const httpServers = mcpServersData.servers.filter(
-            (s) =>
-              s.isActive &&
-              s.isEnabled &&
-              (s.transport === "http" || s.transport === "sse") &&
-              s.url,
-          );
-
-          for (const srv of httpServers) {
-            try {
-              const srvClient = new McpHttpClient(srv.url!, "", "");
-              srvClient.useRawUrl = true;
-              // Build custom headers from static headers + resolved secret headers
-              let parsedHeaders: Record<string, string> = {};
-              try {
-                parsedHeaders = srv.headers ? JSON.parse(srv.headers) : {};
-              } catch {
-                // invalid JSON
-              }
-              srvClient.customHeaders = {
-                ...parsedHeaders,
-                ...(srv.resolvedHeaders || {}),
-              };
-              await srvClient.initialize();
-              const srvTools = await srvClient.listTools();
-              // Prefix tool names with mcp__<server-name>__ to avoid conflicts
-              const prefixed = mcpToolsToDefinitions(srvClient, srvTools).map((t) => ({
-                ...t,
-                name: `mcp__${srv.name}__${t.name}`,
-              }));
-              customTools.push(...prefixed);
-              console.log(
-                `\x1b[2m[${config.role}]\x1b[0m Discovered ${srvTools.length} tools from MCP server "${srv.name}"`,
-              );
-            } catch (srvErr) {
-              console.warn(
-                `\x1b[33m[${config.role}] Failed to discover tools from MCP server "${srv.name}": ${srvErr}\x1b[0m`,
-              );
-            }
-          }
-        }
-      } catch {
-        // Non-fatal — installed MCP server tool discovery is optional
-      }
+    // 2b. Installed MCP servers (stdio and HTTP) go to pi's own MCP extension,
+    // which registers their tools as mcp__<server>__<tool>.
+    const installedMcpServers =
+      config.apiUrl && config.apiKey && config.agentId
+        ? await fetchInstalledMcpServers(config.apiUrl, config.apiKey, config.agentId, "claude")
+        : null;
+    const piMcpServers = toPiMcpServers(installedMcpServers);
+    if (Object.keys(piMcpServers).length > 0) {
+      console.log(
+        `\x1b[2m[${config.role}]\x1b[0m Registering ${Object.keys(piMcpServers).length} installed MCP server(s) with pi`,
+      );
     }
 
     const sessionEnv = config.env ?? process.env;
@@ -1218,15 +1475,31 @@ export class PiMonoAdapter implements ProviderAdapter {
       taskId: config.taskId,
       isLead: config.role === "lead",
       env: sessionEnv,
+      mcpServers: piMcpServers,
     });
 
-    // 5. Create resource loader with system prompt + extension
-    const resourceLoader = new DefaultResourceLoader({
+    const features: PiSessionFeatures = {
+      toolDeferral: deferTools,
+      installedMcp: Object.keys(piMcpServers).length > 0,
+      codemode: isPiCodemodeEnabled(),
+    };
+    if (features.codemode) {
+      console.log(`\x1b[2m[${config.role}]\x1b[0m codemode on`);
+    }
+
+    // 5. Create resource loader with system prompt + extensions. SDK sessions
+    // load no built-in pi extension, so tool_search is added explicitly.
+    const { resourceLoader, settingsManager } = await createPiResourceLoader({
       cwd: config.cwd,
       agentDir: getAgentDir(),
-      appendSystemPrompt: config.systemPrompt ? [config.systemPrompt] : undefined,
-      extensionFactories: [swarmExtension],
+      systemPrompt: config.systemPrompt,
+      extensionFactories: piExtensionFactories(swarmExtension, features),
     });
+    // tool_search registers inactive; `+` adds it to the default tool set.
+    const extraDefaultTools = piDefaultToolAdditions(features);
+    if (extraDefaultTools.length > 0) {
+      settingsManager.applyOverrides({ defaultTools: extraDefaultTools });
+    }
 
     // 6. Build session options
     const reasoningApplication = applyReasoningEffort("pi", config.model, config.reasoningEffort);
@@ -1239,12 +1512,16 @@ export class PiMonoAdapter implements ProviderAdapter {
       model,
       customTools,
       resourceLoader,
+      settingsManager,
       modelRuntime,
       ...reasoningSessionOptions,
     };
 
-    // 7. Create the session
+    // 7. Create the session. bindExtensions emits session_start, which the
+    // SDK never does on its own: the swarm hook and pi's MCP extension (which
+    // connects the installed servers) both run on it.
     const { session } = await createAgentSession(sessionOptions);
+    await session.bindExtensions({});
 
     return new PiMonoSession(session, config, createdSymlink, appliedReasoningEffort);
   }

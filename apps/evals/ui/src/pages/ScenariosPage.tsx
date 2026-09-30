@@ -7,12 +7,13 @@ import { fmtAgo, fmtDuration, humanizeKey } from "../components/format.ts";
 import { Markdown } from "../components/Markdown.tsx";
 import { ModelChip } from "../components/ModelChip.tsx";
 import { PrettyView } from "../components/PrettyView.tsx";
+import { Seg } from "../components/Seg.tsx";
 import { Spinner } from "../components/Spinner.tsx";
 import { CostBadge, StatusScore, statusGlyphInfo } from "../components/StatusBadge.tsx";
 import { InfoTip, Tooltip } from "../components/Tooltip.tsx";
 import { navigate, usePoll } from "../hooks.ts";
 import { explainCheck } from "../lib/check-descriptions.ts";
-import type { AttemptJson, ScenarioJson, WorkerSpecJson } from "../types.ts";
+import type { AttemptJson, ScenarioCardJson, ScenarioJson, WorkerSpecJson } from "../types.ts";
 import "./scenarios.css";
 
 type JudgeKind = "llm" | "agentic";
@@ -121,14 +122,144 @@ const scenarioColumns: Column<ScenarioJson>[] = [
   },
 ];
 
+type CardTags = ScenarioCardJson["tags"];
+
+/** One tag: the label a reader sees and the sentence behind it. */
+const TAG_INFO: Record<string, { label: string; tip: string }> = {
+  "single-agent": { label: "single agent", tip: "One agent does the whole job." },
+  swarm: { label: "swarm", tip: "A lead and its workers share the job." },
+  parallel: { label: "parallel", tip: "Several agents work at the same time." },
+  sequential: {
+    label: "sequential",
+    tip: "One step feeds the next, or one agent works through the task.",
+  },
+  regression: {
+    label: "regression",
+    tip: "An agent that works should pass this every time, so a drop means something broke.",
+  },
+  capability: {
+    label: "capability",
+    tip: "Hard enough to tell setups apart, so failures are expected and the score has headroom.",
+  },
+};
+
+function TagPills(props: { tags: CardTags }): ReactNode {
+  const { topology, flow, kind } = props.tags;
+  return (
+    <span className="sc-tags">
+      {[topology, flow, kind].map((t) => (
+        <Tooltip key={t} text={TAG_INFO[t]?.tip ?? t}>
+          <span className={`sc-tag sc-tag-${t}`}>{TAG_INFO[t]?.label ?? t}</span>
+        </Tooltip>
+      ))}
+    </span>
+  );
+}
+
+/** `swarm-evals@1.0`, or a dim note when this version is outside the frozen suite. */
+function SuiteChip(props: { scenario: ScenarioJson }): ReactNode {
+  const { suite, version } = props.scenario;
+  return suite ? (
+    <Tooltip text="This scenario version is part of the frozen suite the leaderboard ranks">
+      <span className="chip sc-suite">{suite}</span>
+    </Tooltip>
+  ) : (
+    <Tooltip text="Not in the frozen suite: its attempts do not count on the leaderboard">
+      <span className="chip dim sc-suite">
+        {version === undefined ? "no suite" : `v${version} · outside suite`}
+      </span>
+    </Tooltip>
+  );
+}
+
+function ScenarioTile(props: { scenario: ScenarioJson }): ReactNode {
+  const s = props.scenario;
+  const card = s.card ?? null;
+  return (
+    <a className="sc-tile" href={`#/scenarios/${s.id}`}>
+      <span className="sc-tile-head">
+        <span className="sc-tile-name">{s.name}</span>
+        {s.version !== undefined ? <span className="dim sc-tile-ver">v{s.version}</span> : null}
+      </span>
+      <span className="sc-tile-id">{s.id}</span>
+      <span className="sc-tile-summary">
+        {card ? card.summary : (s.description ?? "No card written for this scenario yet.")}
+      </span>
+      <span className="sc-tile-foot">
+        {card ? <TagPills tags={card.tags} /> : null}
+        <SuiteChip scenario={s} />
+      </span>
+    </a>
+  );
+}
+
+type TopologyFilter = "all" | CardTags["topology"];
+type KindFilter = "all" | CardTags["kind"];
+
+const TOPOLOGY_OPTIONS: readonly { key: TopologyFilter; label: string }[] = [
+  { key: "all", label: "All" },
+  { key: "single-agent", label: "Single agent" },
+  { key: "swarm", label: "Swarm" },
+];
+const KIND_OPTIONS: readonly { key: KindFilter; label: string }[] = [
+  { key: "all", label: "All" },
+  { key: "regression", label: "Regression" },
+  { key: "capability", label: "Capability" },
+];
+
+function ScenarioCards(props: { scenarios: ScenarioJson[] }): ReactNode {
+  const [topology, setTopology] = useState<TopologyFilter>("all");
+  const [kind, setKind] = useState<KindFilter>("all");
+  const shown = props.scenarios
+    .filter((s) => topology === "all" || s.card?.tags.topology === topology)
+    .filter((s) => kind === "all" || s.card?.tags.kind === kind)
+    .sort((a, b) => a.id.localeCompare(b.id));
+  return (
+    <>
+      <div className="sc-filters">
+        <span className="dim">Who works</span>
+        <Seg options={TOPOLOGY_OPTIONS} value={topology} onChange={setTopology} />
+        <span className="dim">Why it is here</span>
+        <Seg options={KIND_OPTIONS} value={kind} onChange={setKind} />
+        <span className="dim sc-count">
+          {shown.length} of {props.scenarios.length}
+        </span>
+      </div>
+      {shown.length === 0 ? (
+        <div className="dim">No scenario matches these filters</div>
+      ) : (
+        <div className="sc-tiles">
+          {shown.map((s) => (
+            <ScenarioTile key={s.id} scenario={s} />
+          ))}
+        </div>
+      )}
+    </>
+  );
+}
+
 function ScenarioList(): ReactNode {
   const { data, error, loading } = usePoll(listScenarios, null, []);
+  const [view, setView] = useState<"cards" | "table">("cards");
   return (
     <div className="panel">
-      <h3 className="panel-title">Scenarios{data ? ` · ${data.length}` : ""}</h3>
+      <div className="an-panel-head">
+        <h3 className="panel-title">Scenarios{data ? ` · ${data.length}` : ""}</h3>
+        <div className="an-controls">
+          <Seg
+            options={[
+              { key: "cards", label: "Cards" },
+              { key: "table", label: "Table" },
+            ]}
+            value={view}
+            onChange={setView}
+          />
+        </div>
+      </div>
       {error ? <div className="sc-error">{error}</div> : null}
       {loading && !data ? <Spinner label="Loading scenarios…" /> : null}
-      {data ? (
+      {data && view === "cards" ? <ScenarioCards scenarios={data} /> : null}
+      {data && view === "table" ? (
         <DataTable
           rows={data}
           columns={scenarioColumns}
@@ -691,6 +822,61 @@ interface ScenarioDetailData {
   recentAttempts: AttemptJson[];
 }
 
+/** The plain-English card: what it tests, what the agent does, how it is scored, and its history. */
+function CardPanel(props: { scenario: ScenarioJson }): ReactNode {
+  const s = props.scenario;
+  const card = s.card ?? null;
+  if (card === null) {
+    return (
+      <div className="panel">
+        <h3 className="panel-title">What this tests</h3>
+        <div className="dim">No card is written for this scenario yet.</div>
+      </div>
+    );
+  }
+  return (
+    <div className="panel sc-card">
+      <div className="sc-card-head">
+        <h3 className="panel-title">What this tests</h3>
+        <TagPills tags={card.tags} />
+        <SuiteChip scenario={s} />
+        {s.version !== undefined ? <span className="dim">version {s.version}</span> : null}
+        {s.baselineOf ? (
+          <span className="dim">
+            single-agent baseline of{" "}
+            <a className="entity-link" href={`#/scenarios/${s.baselineOf}`}>
+              {s.baselineOf}
+            </a>
+          </span>
+        ) : null}
+      </div>
+      <p className="sc-card-summary">{card.summary}</p>
+      <div className="sc-card-cols">
+        <section>
+          <div className="sc-card-label">What the agent does</div>
+          <p>{card.agentDoes}</p>
+        </section>
+        <section>
+          <div className="sc-card-label">How it is scored</div>
+          <p>{card.scoredBy}</p>
+        </section>
+      </div>
+      <details className="sc-changelog">
+        <summary>
+          Changelog · {card.changelog.length} {card.changelog.length === 1 ? "version" : "versions"}
+        </summary>
+        <ol className="sc-changelog-list">
+          {[...card.changelog].reverse().map((c) => (
+            <li key={c.version}>
+              <span className="chip">v{c.version}</span> {c.note}
+            </li>
+          ))}
+        </ol>
+      </details>
+    </div>
+  );
+}
+
 function ScenarioDetail(props: { scenarioId: string }): ReactNode {
   const { data, error, loading } = usePoll(() => getScenario(props.scenarioId), null, [
     props.scenarioId,
@@ -753,6 +939,7 @@ function ScenarioDetail(props: { scenarioId: string }): ReactNode {
         ) : null}
         {error ? <span className="sc-error">{error}</span> : null}
       </div>
+      <CardPanel scenario={scenario} />
       <div className="panel">
         <h3 className="panel-title">
           Definition <InfoTip text="Checks always include the implicit tasks-completed check" />

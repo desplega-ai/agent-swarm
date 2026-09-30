@@ -46,6 +46,7 @@ describe("PiMonoAdapter.createSession — reasoning_effort", () => {
       model: undefined,
       subscribe: () => () => {},
       dispose: () => {},
+      bindExtensions: async () => {},
     };
   }
 
@@ -136,6 +137,7 @@ describe("PiMonoAdapter.createSession — OPENROUTER_BASE_URL gateway", () => {
           model: undefined,
           subscribe: () => () => {},
           dispose: () => {},
+          bindExtensions: async () => {},
         },
       };
     }) as typeof piCodingAgent.createAgentSession);
@@ -191,6 +193,7 @@ describe("PiMonoAdapter.createSession — MCP runtime identity header", () => {
           model: undefined,
           subscribe: () => () => {},
           dispose: () => {},
+          bindExtensions: async () => {},
         },
       };
     }) as typeof piCodingAgent.createAgentSession);

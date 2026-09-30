@@ -149,7 +149,7 @@ function ChannelSidebar({
                 <AlertDialogTrigger asChild>
                   <button
                     type="button"
-                    className="h-4 w-4 shrink-0 inline-flex items-center justify-center rounded opacity-0 group-hover/ch:opacity-100 text-muted-foreground hover:text-status-error-strong transition-all"
+                    className="h-4 w-4 shrink-0 inline-flex items-center justify-center rounded opacity-0 group-hover/ch:opacity-100 text-muted-foreground hover:text-status-error-strong transition-[opacity,color]"
                     onClick={(e) => e.stopPropagation()}
                   >
                     <Trash2 className="h-3 w-3" />

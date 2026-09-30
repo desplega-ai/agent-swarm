@@ -168,6 +168,7 @@ const reusabilityCheck: DeterministicCheck = {
 
 export const scriptAuthoring: Scenario = {
   id: "script-authoring",
+  version: 1,
   name: "Swarm-script authoring",
   description:
     "Create and test a reusable typed swarm script through script-upsert and script-run, grading source, run output, and behavioral tool use.",
