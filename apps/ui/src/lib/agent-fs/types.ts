@@ -69,6 +69,21 @@ export interface DriveMembersResult {
   members: DriveMember[];
 }
 
+/** One version in the `log` op answer (newest first). */
+export interface VersionEntry {
+  version: number;
+  author: string;
+  createdAt: string;
+  operation: string;
+  message?: string;
+  diffSummary?: string;
+  size?: number;
+}
+
+export interface LogResult {
+  versions: VersionEntry[];
+}
+
 export interface DiffChange {
   type: "add" | "remove" | "context";
   content: string;
@@ -121,6 +136,39 @@ export interface CommentListEntry extends CommentEntry {
 
 export interface CommentListResult {
   comments: CommentListEntry[];
+}
+
+/** `comment-add`. A root needs `path`. A reply needs `parentId` (it takes the root's path). */
+export interface CommentAddParams {
+  path?: string;
+  body: string;
+  parentId?: string;
+  /** Drive-member user ids or emails (agent-fs feature `comment-mentions`). */
+  mentions?: string[];
+  lineStart?: number;
+  lineEnd?: number;
+  quotedContent?: string;
+  quote?: CommentQuote;
+}
+
+export interface CommentAddResult {
+  id: string;
+  path: string;
+  body: string;
+  parentId?: string;
+  lineStart?: number;
+  lineEnd?: number;
+  quote?: CommentQuote;
+  author: string;
+  authorDisplayName?: string;
+  createdAt: string;
+}
+
+export interface CommentResolveResult {
+  id: string;
+  resolved: boolean;
+  resolvedBy?: string;
+  resolvedAt?: string;
 }
 
 export interface CommentNotificationEntry {

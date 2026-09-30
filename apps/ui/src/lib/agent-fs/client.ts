@@ -38,6 +38,7 @@ interface RequestOptions {
   body?: unknown;
   apiKey?: string;
   signal?: AbortSignal;
+  cache?: RequestCache;
 }
 
 function trimEndpoint(endpoint: string): string {
@@ -69,6 +70,7 @@ async function send(url: string, opts: RequestOptions = {}): Promise<Response> {
       headers,
       body: opts.body === undefined ? undefined : JSON.stringify(opts.body),
       signal: opts.signal,
+      cache: opts.cache,
     });
   } catch (err) {
     // Let react-query see its own cancellation.
@@ -157,6 +159,9 @@ export class AgentFsClient {
     const res = await send(this.getRawUrl(orgId, driveId, path), {
       apiKey: this.#apiKey,
       signal: opts.signal,
+      // agent-fs answers `max-age=60`: without a revalidation, a new version
+      // reads the old bytes for up to a minute.
+      cache: "no-cache",
     });
     return res.blob();
   }

@@ -1,7 +1,8 @@
 import { AlertCircle, FileX } from "lucide-react";
-import type { ReactNode } from "react";
+import { type ReactNode, useRef } from "react";
 import { Link, Navigate } from "react-router-dom";
 import { useAgentFsLs, useAgentFsStat } from "@/api/hooks/use-agent-fs";
+import { CommentRail } from "@/components/comb/comment-rail";
 import { FileHeader } from "@/components/comb/file-header";
 import { FileViewer } from "@/components/comb/viewers/file-viewer";
 import { ViewerSkeleton } from "@/components/comb/viewers/viewer-skeleton";
@@ -42,14 +43,20 @@ export function FileView({ file }: { file: DrivePath }) {
 }
 
 function FileBody({ file, stat }: { file: DrivePath; stat: StatResult }) {
+  // Comment anchors, selection, and highlights live in the viewer pane.
+  const viewerRef = useRef<HTMLDivElement>(null);
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3">
       <FileHeader file={file} stat={stat} />
       <div className="flex min-h-0 flex-1 gap-4">
-        <div className="min-h-[24rem] min-w-0 flex-1 overflow-auto rounded-xl border border-border bg-card lg:min-h-0">
+        <div
+          ref={viewerRef}
+          className="min-h-[24rem] min-w-0 flex-1 overflow-auto rounded-xl border border-border bg-card lg:min-h-0"
+        >
           <FileViewer file={file} stat={stat} />
         </div>
-        {/* Comment rail (step-7) mounts here, beside the viewer pane. */}
+        {/* Comment rail (step-7). Mount points: threadActions, railHeaderActions, renderComposerExtras. */}
+        <CommentRail file={file} stat={stat} viewerRef={viewerRef} />
       </div>
     </div>
   );
