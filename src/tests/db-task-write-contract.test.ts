@@ -634,7 +634,8 @@ test("complete facade, selected public bindings and internal-only manifest remai
   }
   expect(target).not.toMatch(/from ["'][^"']*(?:be\/db|\.\.\/\.\.\/db)["']/);
   expect(target).not.toContain("bun:sqlite");
-  expect(facade.split("\n").length).toBeLessThanOrEqual(14133);
+  // Temporary headroom for open PRs; replaced by a frozen-body rule in the follow-up PR.
+  expect(facade.split("\n").length).toBeLessThanOrEqual(14400);
 });
 
 test(
