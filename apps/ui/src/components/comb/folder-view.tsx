@@ -147,6 +147,7 @@ export function FolderView({ folder }: { folder: DrivePath }) {
                 row.type,
                 row.isFolder ? null : formatBytes(row.size),
                 row.modifiedAt ? formatRelative(row.modifiedAt) : null,
+                row.author || null,
               ]}
             />
           ))}

@@ -85,7 +85,7 @@ const HEX32_REGEX = /^[0-9a-f]{32}$/i;
  * casing can't produce ("mcp-servers" → "MCP Servers", "keys" → "API Keys"). */
 function humanizeSegment(segment: string): string {
   // Malformed percent escapes ("/%", "/apps/%ZZ") make decodeURIComponent
-  // throw — and the header renders OUTSIDE the route error boundary, so an
+  // throw, and the header renders OUTSIDE the route error boundary, so an
   // uncaught URIError here would take down the whole shell. Show the raw
   // segment instead.
   let decoded = segment;

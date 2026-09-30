@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router-dom";
-import { CombMarkdown } from "../../components/comb/viewers/comb-markdown";
+import { CombMarkdown } from "./comb-markdown";
 
 const DOC = { orgId: "org-1", driveId: "drive-1", path: "/notes/readme.md" };
 
@@ -102,12 +102,70 @@ describe("Comb markdown source lines", () => {
     expect(links).not.toContain("[blocked]");
   });
 
+  test("links that escape the drive route render inert, with no href", () => {
+    const escapes = render(
+      "[a](%2e%2e/%2e%2e/%2e%2e/%2e%2e/settings) [b](.%2e/x.md) [c](..%2F..%2Fx) [d](?q=1)",
+    );
+    expect(escapes).not.toContain("href=");
+    expect(escapes).toContain("<span>a</span>");
+    expect(escapes).toContain("<span>c</span>");
+  });
+
   test("sanitize still drops script URLs and script tags", () => {
     const unsafe = render(
       '[x](javascript:alert(1))\n\n<script>alert(2)</script>\n\n<a href="javascript:alert(3)">y</a>',
     );
     expect(unsafe).not.toContain("javascript:");
     expect(unsafe).not.toContain("<script");
+  });
+
+  test("sanitize drops iframes, on* handlers, and data: links", () => {
+    const unsafe = render(
+      [
+        '<iframe src="https://evil.example/frame"></iframe>',
+        "",
+        '<a href="https://example.com" onclick="alert(1)" onmouseover="alert(2)">x</a>',
+        "",
+        '<img src="https://example.com/a.png" onerror="alert(3)">',
+        "",
+        "[d](data:text/html;base64,PHNjcmlwdD5hbGVydCg0KTwvc2NyaXB0Pg==)",
+        "",
+        '<a href="data:text/html,hi">e</a>',
+      ].join("\n"),
+    );
+    expect(unsafe).not.toContain("<iframe");
+    expect(unsafe).not.toContain("evil.example");
+    expect(unsafe.toLowerCase()).not.toMatch(/\son[a-z]+=/);
+    expect(unsafe).not.toContain("data:");
+    expect(unsafe).toContain('href="https://example.com"');
+  });
+
+  test("sanitize drops <style> with its CSS text", () => {
+    const styled = render("<style>body { display: none; }</style>\n\nAfter the style.");
+    expect(styled).not.toContain("<style");
+    expect(styled).not.toContain("display: none");
+    expect(styled).toContain("After the style.");
+  });
+
+  test("web images load, drive images show a placeholder that links to the file", () => {
+    const images = render(
+      "![Chart](https://example.com/chart.png)\n\n![Diagram](./img/diagram.png)",
+    );
+    expect(images).toContain('src="https://example.com/chart.png"');
+    expect(images).toContain('alt="Chart"');
+    expect(images).not.toMatch(/<img[^>]*diagram/);
+    const placeholder = openingTag(images, "span", "Diagram");
+    expect(placeholder).toContain("data-comb-skip");
+    expect(images).toContain('href="/file/~/org-1/drive-1/notes/img/diagram.png"');
+  });
+
+  test("a leading YAML block renders as markdown with the file's own lines", () => {
+    const withYaml = render("---\ntitle: Notes\n---\n\nBody text.");
+    expect(withYaml).toMatch(/<hr[^>]*data-line-start="1"/);
+    const heading = openingTag(withYaml, "h2", "title: Notes");
+    expect(heading).toContain('data-line-start="2"');
+    expect(heading).toContain('data-line-end="3"');
+    expect(openingTag(withYaml, "p", "Body text.")).toContain('data-line-start="5"');
   });
 
   test("inline code keeps the chip style", () => {

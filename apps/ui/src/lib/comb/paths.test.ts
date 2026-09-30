@@ -41,6 +41,12 @@ describe("parseCombSplat", () => {
   test("duplicate slashes collapse", () => {
     expect(parseCombSplat({ ...IDS, splat: "a//b.md" }).path).toBe("/a/b.md");
   });
+
+  test("dot segments are dropped", () => {
+    expect(parseCombSplat({ ...IDS, splat: "../../x" }).path).toBe("/x");
+    expect(parseCombSplat({ ...IDS, splat: "a/./../b.md" }).path).toBe("/a/b.md");
+    expect(parseCombSplat({ ...IDS, splat: "../" })).toEqual({ ...IDS, path: "/", isFolder: true });
+  });
 });
 
 describe("combPath", () => {
@@ -52,20 +58,21 @@ describe("combPath", () => {
     expect(combPath({ ...IDS, path: "/" })).toBe("/file/~/org-1/drive-1/");
   });
 
-  test("encodes each segment and keeps existing %HH escapes", () => {
+  test("encodes each segment once, a literal % included", () => {
     expect(combPath({ ...IDS, path: "/my docs/a b#1?.md" })).toBe(
       "/file/~/org-1/drive-1/my%20docs/a%20b%231%3F.md",
     );
-    expect(combPath({ ...IDS, path: "/already%20encoded/100%.md" })).toBe(
-      "/file/~/org-1/drive-1/already%20encoded/100%25.md",
+    expect(combPath({ ...IDS, path: "/a%20b/100%.md" })).toBe(
+      "/file/~/org-1/drive-1/a%2520b/100%25.md",
     );
   });
 
   test("round-trips through a decoded splat", () => {
-    const path = "/my docs/notes (v2).md";
-    const url = combPath({ ...IDS, path });
-    const splat = decodeURIComponent(url.slice("/file/~/org-1/drive-1/".length));
-    expect(parseCombSplat({ ...IDS, splat }).path).toBe(path);
+    for (const path of ["/my docs/notes (v2).md", "/a%20b.md", "/q/100%.md"]) {
+      const url = combPath({ ...IDS, path });
+      const splat = decodeURIComponent(url.slice("/file/~/org-1/drive-1/".length));
+      expect(parseCombSplat({ ...IDS, splat }).path).toBe(path);
+    }
   });
 });
 
@@ -124,6 +131,28 @@ describe("resolveRelative", () => {
       path: "/docs/guide/b.md",
       suffix: "?comment=1",
     });
+  });
+
+  test("escaped dot segments and separators never leave the drive", () => {
+    expect(resolveRelative(from, "%2e%2e/%2e%2e/%2e%2e/settings")).toBeNull();
+    expect(resolveRelative(from, "%2E%2E/x.md")).toBeNull();
+    expect(resolveRelative(from, ".%2e/x.md")).toBeNull();
+    expect(resolveRelative(from, "%2e/x.md")).toBeNull();
+    expect(resolveRelative(from, "..%2F..%2Fx")).toBeNull();
+    expect(resolveRelative(from, "a%2Fb.md")).toBeNull();
+    expect(resolveRelative(from, "..%5C..%5Cx")).toBeNull();
+    expect(resolveRelative(from, "..\\..\\x")).toBeNull();
+  });
+
+  test("every resolved path stays a drive path with no dot segments", () => {
+    for (const href of ["./b.md", "../x/c.md", "../../../../../../settings", "a/../../b/./c.md"]) {
+      const target = resolveRelative(from, href);
+      expect(target).not.toBeNull();
+      expect(target?.path.startsWith("/")).toBe(true);
+      expect(target?.path.split("/")).not.toContain("..");
+      expect(target?.path.split("/")).not.toContain(".");
+    }
+    expect(resolveRelative(from, "a/../../b/./c.md")?.path).toBe("/docs/b/c.md");
   });
 
   test("anchors and absolute URLs stay untouched", () => {

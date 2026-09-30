@@ -18,7 +18,8 @@ export interface CombLocation extends DrivePath {
 
 /**
  * Parse the route params of `/file/~/:orgId/:driveId/*`. react-router passes
- * the splat decoded. An empty splat or a trailing "/" means a folder.
+ * the splat decoded. An empty splat or a trailing "/" means a folder. "." and
+ * ".." segments are dropped: they are not names in a drive.
  */
 export function parseCombSplat(params: {
   orgId: string;
@@ -26,7 +27,7 @@ export function parseCombSplat(params: {
   splat: string | undefined;
 }): CombLocation {
   const splat = params.splat ?? "";
-  const segments = splat.split("/").filter(Boolean);
+  const segments = splat.split("/").filter((s) => s !== "" && s !== "." && s !== "..");
   const isFolder = segments.length === 0 || splat.endsWith("/");
   const body = segments.join("/");
   const path = segments.length === 0 ? "/" : isFolder ? `/${body}/` : `/${body}`;
@@ -39,19 +40,14 @@ export function isFolderPath(path: string): boolean {
 }
 
 /**
- * Encode one path segment. Existing `%HH` escapes stay as they are, the same
- * rule as `buildAgentFsLiveUrl` (`src/utils/constants.ts`).
+ * The dashboard route for a drive path. Folders keep their trailing "/". Each
+ * segment is a decoded name, so it is encoded once ("a%20b.md" stays that name).
  */
-function encodeSegment(segment: string): string {
-  return encodeURIComponent(segment).replace(/%25([0-9a-f]{2})/gi, "%$1");
-}
-
-/** The dashboard route for a drive path. Folders keep their trailing "/". */
 export function combPath({ orgId, driveId, path }: DrivePath): string {
   const encoded = path
     .replace(/^\/+/, "")
     .split("/")
-    .map((segment) => encodeSegment(segment))
+    .map((segment) => encodeURIComponent(segment))
     .join("/");
   return `/file/~/${orgId}/${driveId}/${encoded}`;
 }
@@ -95,11 +91,21 @@ function safeDecode(segment: string): string {
 /** A URL with a scheme (`https:`, `mailto:`) or a protocol-relative `//host`. */
 const ABSOLUTE_URL_RE = /^(?:[a-z][a-z0-9+.-]*:|\/\/)/i;
 
+/** True for an href that leaves the dashboard: a scheme or a protocol-relative `//host`. */
+export function isAbsoluteUrl(href: string): boolean {
+  return ABSOLUTE_URL_RE.test(href.trim());
+}
+
 /**
  * Resolve a markdown link against the file that contains it. Returns the drive
  * path plus the untouched `?query` / `#hash` suffix, or null when the link does
  * not point into the drive (an absolute URL, an in-page `#anchor`, an empty
  * href). A leading "/" means the drive root, like the agent-fs live UI.
+ *
+ * A literal "." or ".." moves inside the drive and stops at its root. A segment
+ * that decodes to "." or "..", or to a name with "/" or "\" (`%2e%2e`,
+ * `..%2F..`), is not a drive name: the link resolves to null, so it can never
+ * leave the drive route.
  */
 export function resolveRelative(
   fromFilePath: string,
@@ -118,8 +124,13 @@ export function resolveRelative(
   const parts = pathPart.split("/");
   for (const part of parts) {
     if (part === "" || part === ".") continue;
-    if (part === "..") segments.pop();
-    else segments.push(safeDecode(part));
+    if (part === "..") {
+      segments.pop();
+      continue;
+    }
+    const name = safeDecode(part);
+    if (name === "." || name === ".." || /[/\\]/.test(name)) return null;
+    segments.push(name);
   }
   const last = parts[parts.length - 1];
   const isFolder = last === "" || last === "." || last === "..";

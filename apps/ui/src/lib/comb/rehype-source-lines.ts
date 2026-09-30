@@ -1,7 +1,9 @@
 // Ported from agent-fs `live/src/lib/dom-text-space.ts` (`rehypeSourceLines`,
 // v0.14.0). Comb renders the whole document at once (Streamdown
-// `mode="static"`), so positions are document-absolute and there is no
-// frontmatter offset.
+// `mode="static"`), so positions are document-absolute. Comb does not parse
+// frontmatter. live/ strips a leading `---` YAML block and offsets the lines.
+// Comb renders that block as plain markdown (a rule, then the YAML lines as a
+// setext heading), so every stamp is still the file's own line number.
 
 interface HastNode {
   type: string;

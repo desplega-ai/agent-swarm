@@ -1,10 +1,10 @@
 import { Info } from "lucide-react";
 import { AlertCallout } from "@/components/ui/alert-callout";
+import { splitTextLines, TEXT_VIEWER_MAX_LINES } from "@/lib/comb/text-lines";
 import type { ViewerProps } from "./file-viewer";
 import { TextGate } from "./text-gate";
 
-/** Longer files show this many lines and a notice to download the rest. */
-export const TEXT_VIEWER_MAX_LINES = 20_000;
+export { TEXT_VIEWER_MAX_LINES };
 
 /**
  * Plain text, one row per line: `data-line-start` / `data-line-end` carry the
@@ -13,11 +13,7 @@ export const TEXT_VIEWER_MAX_LINES = 20_000;
  * No syntax highlighting in v1.
  */
 export function TextLines({ text }: { text: string }) {
-  const lines = text.split(/\r?\n/);
-  // A final newline ends the last line. It does not start a new one.
-  if (lines.length > 1 && lines[lines.length - 1] === "") lines.pop();
-  const truncated = lines.length > TEXT_VIEWER_MAX_LINES;
-  const shown = truncated ? lines.slice(0, TEXT_VIEWER_MAX_LINES) : lines;
+  const { shown, total, truncated } = splitTextLines(text);
   const gutterWidth = `${String(shown.length).length + 2}ch`;
 
   return (
@@ -25,8 +21,8 @@ export function TextLines({ text }: { text: string }) {
       {truncated ? (
         <div className="p-3" data-comb-skip>
           <AlertCallout tone="info" icon={Info}>
-            Showing the first {TEXT_VIEWER_MAX_LINES.toLocaleString()} of{" "}
-            {lines.length.toLocaleString()} lines. Download the file to read all of it.
+            Showing the first {TEXT_VIEWER_MAX_LINES.toLocaleString()} of {total.toLocaleString()}{" "}
+            lines. Download the file to read all of it.
           </AlertCallout>
         </div>
       ) : null}

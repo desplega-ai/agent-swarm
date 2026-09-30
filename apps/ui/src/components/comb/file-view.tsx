@@ -24,9 +24,15 @@ export function FileView({ file }: { file: DrivePath }) {
   const unversioned = stat.data !== undefined && stat.data.currentVersion === undefined;
 
   if (notFound || unversioned) {
+    // A 404 keeps the last `stat.data`. Never show that stale file: it was
+    // deleted or moved while open.
     return (
       <FolderRedirect file={file}>
-        {stat.data ? <FileBody file={file} stat={stat.data} /> : <FileNotFound file={file} />}
+        {notFound || !stat.data ? (
+          <FileNotFound file={file} />
+        ) : (
+          <FileBody file={file} stat={stat.data} />
+        )}
       </FolderRedirect>
     );
   }

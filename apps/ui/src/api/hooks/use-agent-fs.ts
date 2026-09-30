@@ -13,11 +13,10 @@ import type { AgentFsClient } from "@/lib/agent-fs/client";
 import { agentFsKey, agentFsRetry } from "@/lib/agent-fs/query";
 import type { DriveMembersResult, LsResult, StatResult } from "@/lib/agent-fs/types";
 import type { DrivePath } from "@/lib/comb/paths";
+import { type AgentFsText, COMB_TEXT_MAX_BYTES, readDriveText } from "@/lib/comb/text-content";
 
 export { agentFsKey, agentFsRetry };
-
-/** Text files above this size are not loaded (the viewer offers a download). */
-export const COMB_TEXT_MAX_BYTES = 2 * 1024 * 1024;
+export { type AgentFsText, COMB_TEXT_MAX_BYTES };
 
 /** The connected client (null until `ready`) and the key parts for drive queries. */
 export interface AgentFsAccess {
@@ -90,39 +89,28 @@ export function useAgentFsStat(target: DrivePath) {
   });
 }
 
-/** `text` is null when the file is larger than `maxBytes` (`tooLarge`). */
-export type AgentFsText = { tooLarge: false; text: string } | { tooLarge: true; text: null };
-
 /**
- * The file as text, read through the raw bytes route (`cat` stops at 200
- * lines). The key ends with the file revision from `stat`, so the bytes load
- * once per version: `stat` polls and a new version refetches. The previous
- * version stays on screen while the next one loads.
+ * The file as text (`readDriveText`, `tooLarge` above `COMB_TEXT_MAX_BYTES`).
+ * The key ends with the file revision from `stat`, so the bytes load once per
+ * version: `stat` polls and a new version refetches. The previous version
+ * stays on screen while the next one loads.
  */
-export function useAgentFsText(target: DrivePath, opts: { maxBytes?: number } = {}) {
+export function useAgentFsText(target: DrivePath) {
   const access = useAgentFsAccess();
-  const maxBytes = opts.maxBytes ?? COMB_TEXT_MAX_BYTES;
   const stat = useAgentFsStat(target).data;
   const revision = stat ? (stat.currentVersion ?? stat.etag ?? stat.modifiedAt) : null;
   const fileKey = drivePathKey(access, target, "content");
   return useQuery({
     queryKey: [...fileKey, revision] as const,
-    queryFn: async ({ signal }): Promise<AgentFsText> => {
-      if (stat && stat.size > maxBytes) return { tooLarge: true, text: null };
-      const blob = await (access.client as AgentFsClient).fetchRaw(
-        target.orgId,
-        target.driveId,
-        target.path,
-        { signal },
-      );
-      return { tooLarge: false, text: await blob.text() };
-    },
+    queryFn: ({ signal }): Promise<AgentFsText> =>
+      readDriveText(access.client as AgentFsClient, target, stat as StatResult, signal),
     enabled: access.client !== null && stat !== undefined,
     retry: agentFsRetry,
     staleTime: Number.POSITIVE_INFINITY,
     refetchInterval: false,
-    // File bytes can be large: drop them soon after the viewer unmounts.
-    gcTime: 5 * 60_000,
+    // One entry per revision: drop each as soon as no viewer reads it, so a
+    // file that changes on every poll does not pile up copies of its bytes.
+    gcTime: 0,
     placeholderData: (previous, previousQuery) =>
       previousQuery && sameKeyPrefix(previousQuery.queryKey, fileKey) ? previous : undefined,
   });

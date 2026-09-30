@@ -52,5 +52,13 @@ describe("flattenTree", () => {
     ]);
     const deep = rows.find((r) => r.kind === "entry" && r.path === "/docs/deep/");
     expect(deep).toMatchObject({ posinset: 1, setsize: 2, isFolder: true });
+    const status = rows.filter((r) => r.kind === "status");
+    expect(status.map((r) => r.folder)).toEqual(["/docs/deep/", "/empty/"]);
+  });
+
+  test("a root that is not listed yet is one status row", () => {
+    expect(flattenTree(() => "error", new Set())).toEqual([
+      { kind: "status", key: "/:error", folder: "/", level: 1, status: "error" },
+    ]);
   });
 });

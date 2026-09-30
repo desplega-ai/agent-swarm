@@ -7,7 +7,21 @@ import { Spinner } from "@/components/ui/spinner";
 import { useAgentFs } from "@/contexts/agent-fs-context";
 import { baseName, combPath, type DrivePath } from "@/lib/comb/paths";
 
-/** Download the file's bytes (raw route, with the human's key) through a temporary blob link. */
+function clickLink(href: string, download?: string) {
+  const link = document.createElement("a");
+  link.href = href;
+  if (download) link.download = download;
+  document.body.append(link);
+  link.click();
+  link.remove();
+}
+
+/**
+ * Download the file. A server with presigned URLs (S3) answers with an
+ * `attachment` URL, so the browser streams the file itself. Otherwise (local
+ * storage answers an `app` link) the raw bytes load with the human's key into
+ * a temporary blob link.
+ */
 export function DownloadButton({ file }: { file: DrivePath }) {
   const { client } = useAgentFsAccess();
   const [pending, setPending] = useState(false);
@@ -16,14 +30,16 @@ export function DownloadButton({ file }: { file: DrivePath }) {
     if (!client) return;
     setPending(true);
     try {
+      const signed = await client
+        .getSignedUrl(file.orgId, file.driveId, file.path, { disposition: "attachment" })
+        .catch(() => null);
+      if (signed?.kind === "presigned") {
+        clickLink(signed.url);
+        return;
+      }
       const blob = await client.fetchRaw(file.orgId, file.driveId, file.path);
       const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = baseName(file.path) || "download";
-      document.body.append(link);
-      link.click();
-      link.remove();
+      clickLink(url, baseName(file.path) || "download");
       // Some browsers read the blob after `click()` returns.
       setTimeout(() => URL.revokeObjectURL(url), 1000);
     } catch (err) {

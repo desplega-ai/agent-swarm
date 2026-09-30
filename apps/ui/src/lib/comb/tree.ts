@@ -25,7 +25,14 @@ export type TreeRow =
       posinset: number;
       setsize: number;
     }
-  | { kind: "status"; key: string; level: number; status: "loading" | "error" | "empty" };
+  | {
+      kind: "status";
+      key: string;
+      /** The folder whose listing this row reports on. */
+      folder: string;
+      level: number;
+      status: "loading" | "error" | "empty";
+    };
 
 /** Folders whose listing the tree shows: the root plus each open folder with open ancestors. */
 export function visibleFolders(expanded: ReadonlySet<string>): string[] {
@@ -44,12 +51,12 @@ export function flattenTree(
   const walk = (folder: string, level: number) => {
     const result = listing(folder);
     if (result === "loading" || result === "error") {
-      rows.push({ kind: "status", key: `${folder}:${result}`, level, status: result });
+      rows.push({ kind: "status", key: `${folder}:${result}`, folder, level, status: result });
       return;
     }
     if (result.length === 0) {
       if (folder !== "/")
-        rows.push({ kind: "status", key: `${folder}:empty`, level, status: "empty" });
+        rows.push({ kind: "status", key: `${folder}:empty`, folder, level, status: "empty" });
       return;
     }
     const sorted = sortEntries(result);

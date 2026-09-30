@@ -29,6 +29,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { MiddleTruncation } from "@/components/ui/middle-truncation";
+import { formatBytes } from "@/lib/format-bytes";
 import { scrubSecretText } from "@/lib/scrub-secrets";
 import { cn } from "@/lib/utils";
 
@@ -51,15 +52,6 @@ function resolveHref(a: TaskAttachment): string | null {
     case "shared-fs":
       return null;
   }
-}
-
-function formatSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  const kb = bytes / 1024;
-  if (kb < 1024) return `${kb.toFixed(1)} KB`;
-  const mb = kb / 1024;
-  if (mb < 1024) return `${mb.toFixed(1)} MB`;
-  return `${(mb / 1024).toFixed(2)} GB`;
 }
 
 function KindBadge({ kind }: { kind: TaskAttachmentKind }) {
@@ -380,7 +372,7 @@ function AttachmentRow({
       const metadata = [
         attachment.kind === "agent-fs" ? "Agent FS" : null,
         label !== attachment.kind ? label : null,
-        attachment.sizeBytes != null ? formatSize(attachment.sizeBytes) : null,
+        attachment.sizeBytes != null ? formatBytes(attachment.sizeBytes) : null,
       ]
         .filter(Boolean)
         .join(" · ");
@@ -451,7 +443,7 @@ function AttachmentRow({
             </MiddleTruncation>
             <span className="block truncate font-mono text-[10px] uppercase text-muted-foreground">
               {label}
-              {attachment.sizeBytes != null ? ` · ${formatSize(attachment.sizeBytes)}` : ""}
+              {attachment.sizeBytes != null ? ` · ${formatBytes(attachment.sizeBytes)}` : ""}
             </span>
           </span>
           {previewKind ? (
@@ -553,7 +545,7 @@ function AttachmentRow({
             <p className="font-mono text-[10px] text-muted-foreground/70">
               {[
                 attachment.mimeType,
-                attachment.sizeBytes != null ? formatSize(attachment.sizeBytes) : null,
+                attachment.sizeBytes != null ? formatBytes(attachment.sizeBytes) : null,
               ]
                 .filter(Boolean)
                 .join(" · ")}

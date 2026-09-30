@@ -1,9 +1,9 @@
 import { useQueries } from "@tanstack/react-query";
 import { ChevronRight, File, Folder, FolderOpen } from "lucide-react";
-import { type KeyboardEvent, useEffect, useRef, useState } from "react";
+import { type KeyboardEvent, useEffect, useId, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { agentFsLsQuery, useAgentFsAccess } from "@/api/hooks/use-agent-fs";
-import { ancestorFolders, type CombLocation, combPath } from "@/lib/comb/paths";
+import { ancestorFolders, type CombLocation, combPath, parentFolder } from "@/lib/comb/paths";
 import { type FolderListing, flattenTree, visibleFolders } from "@/lib/comb/tree";
 import { cn } from "@/lib/utils";
 
@@ -45,9 +45,15 @@ export function TreeRail({
     setExpanded((prev) => (open.every((f) => prev.has(f)) ? prev : new Set([...prev, ...open])));
   }, [orgId, driveId, currentPath, isFolder]);
 
+  // Only the folder in view polls. Other open folders refetch when they open
+  // and on window focus.
+  const currentFolder = isFolder ? currentPath : parentFolder(currentPath);
   const folders = visibleFolders(expanded);
   const listings = useQueries({
-    queries: folders.map((path) => agentFsLsQuery(access, { orgId, driveId, path })),
+    queries: folders.map((path) => {
+      const query = agentFsLsQuery(access, { orgId, driveId, path });
+      return path === currentFolder ? query : { ...query, refetchInterval: false as const };
+    }),
   });
   const byFolder = new Map(folders.map((folder, index) => [folder, listings[index]]));
   const rows = flattenTree((folder): FolderListing => {
@@ -62,11 +68,25 @@ export function TreeRail({
     entries.find((row) => row.path === currentPath)?.path ??
     entries[0]?.path;
 
-  // Keep the current row in view after navigation and after its folder loads.
+  // Scroll the current row into view once per navigation, as soon as the row
+  // exists. Opening or loading another folder does not move the rail.
+  const scrolledTo = useRef<string | null>(null);
   const rowCount = rows.length;
   useEffect(() => {
-    if (rowCount > 0) itemRefs.current.get(currentPath)?.scrollIntoView({ block: "nearest" });
+    if (rowCount === 0 || scrolledTo.current === currentPath) return;
+    const row = itemRefs.current.get(currentPath);
+    if (!row) return;
+    row.scrollIntoView({ block: "nearest" });
+    scrolledTo.current = currentPath;
   }, [currentPath, rowCount]);
+
+  // Status rows are visual only. Each one describes its folder's treeitem.
+  const idPrefix = useId();
+  const statusIds = new Map<string, string>();
+  for (const [index, row] of rows.entries()) {
+    if (row.kind === "status") statusIds.set(row.folder, `${idPrefix}-status-${index}`);
+  }
+  const busy = rows.some((row) => row.kind === "status" && row.status === "loading");
 
   const setOpen = (path: string, open: boolean) =>
     setExpanded((prev) => {
@@ -126,11 +146,17 @@ export function TreeRail({
   if (rows.length === 0) {
     return <p className="px-3 py-2 text-sm text-muted-foreground">The drive is empty.</p>;
   }
+  // The root is not listed yet (a root status row is the only row).
+  const [first] = rows;
+  if (first?.kind === "status") {
+    return <p className="px-3 py-2 text-sm text-muted-foreground">{STATUS_TEXT[first.status]}</p>;
+  }
 
   return (
     <div
       role="tree"
       aria-label="Drive files"
+      aria-busy={busy}
       className="flex flex-col gap-px p-1.5 text-sm"
       onKeyDown={onKeyDown}
     >
@@ -139,7 +165,8 @@ export function TreeRail({
           return (
             <div
               key={row.key}
-              role="none"
+              id={statusIds.get(row.folder)}
+              aria-hidden="true"
               className="py-1 text-xs text-muted-foreground"
               style={{ paddingLeft: `calc(${indent(row.level)} + 1.25rem)` }}
             >
@@ -161,10 +188,11 @@ export function TreeRail({
             style={{ paddingLeft: indent(row.level) }}
           >
             {row.isFolder ? (
+              // Mouse only: the treeitem opens and closes with the arrow keys.
               <button
                 type="button"
                 tabIndex={-1}
-                aria-label={open ? `Collapse ${row.name}` : `Expand ${row.name}`}
+                aria-hidden="true"
                 onClick={() => setOpen(row.path, !open)}
                 className="flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground"
               >
@@ -185,6 +213,7 @@ export function TreeRail({
               aria-setsize={row.setsize}
               aria-posinset={row.posinset}
               aria-expanded={row.isFolder ? open : undefined}
+              aria-describedby={statusIds.get(row.path)}
               aria-selected={selected}
               tabIndex={row.path === tabStop ? 0 : -1}
               onFocus={() => setFocusPath(row.path)}

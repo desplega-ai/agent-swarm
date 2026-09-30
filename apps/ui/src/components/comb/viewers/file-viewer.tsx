@@ -30,7 +30,7 @@ export const VIEWERS: Record<FileKind, LazyExoticComponent<ComponentType<ViewerP
 
 /** Route a file to its viewer by extension (and content type for unknown extensions). */
 export function FileViewer({ file, stat }: ViewerProps) {
-  const Viewer = VIEWERS[getFileKind(file.path, stat.contentType)];
+  const Viewer = VIEWERS[getFileKind(file.path, stat.contentType, stat.size)];
   return (
     <Suspense fallback={<ViewerSkeleton />}>
       <Viewer file={file} stat={stat} />
