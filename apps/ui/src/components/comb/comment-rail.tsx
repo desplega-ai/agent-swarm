@@ -83,11 +83,8 @@ import {
   SearchToggle,
 } from "./rail-filters";
 import { SelectionCommentButton } from "./selection-comment-button";
-<<<<<<< HEAD
 import { CommentPanel } from "./side-panels";
-=======
 import { useAuthorLabel } from "./use-author-label";
->>>>>>> comb-r2-comments
 import { type CommentOutbox, useCommentOutbox } from "./use-comment-outbox";
 import { useDomTextSpace } from "./use-dom-text-space";
 import { useThreadSwarmStates } from "./use-thread-swarm-states";
