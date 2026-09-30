@@ -380,10 +380,11 @@ function useLocalSelection(
  * Paint each peer's selection in their color (CSS Custom Highlight API, like
  * the comment passages). A selection resolves like a comment anchor: exact
  * quote with context, then the line range. A lost anchor paints nothing.
- * Returns each peer's painted range, for the name label.
+ * Returns each peer's painted ranges (one per text run, so a selection over
+ * several code rows skips their line numbers), for the name label.
  */
 function usePeerSelections(space: DomTextSpace | null, here: readonly PresencePeer[]) {
-  const ranges = useRef(new Map<string, Range>());
+  const ranges = useRef(new Map<string, Range[]>());
   // Resolving scans the text: resolve a selection once per text space.
   const cache = useRef<{ space: DomTextSpace | null; byKey: Map<string, AnchorResolution> }>({
     space: null,
@@ -394,7 +395,7 @@ function usePeerSelections(space: DomTextSpace | null, here: readonly PresencePe
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: `signature` holds every selection read here
   useEffect(() => {
-    const painted = new Map<string, Range>();
+    const painted = new Map<string, Range[]>();
     ranges.current = painted;
     if (!space) return;
     if (cache.current.space !== space) cache.current = { space, byKey: new Map() };
@@ -413,10 +414,10 @@ function usePeerSelections(space: DomTextSpace | null, here: readonly PresencePe
       if (resolution.status === "lost" || resolution.start == null || resolution.end == null) {
         continue;
       }
-      const range = space.toRange(resolution.start, resolution.end);
-      if (!range) continue;
-      painted.set(id, range);
-      groups.set(color, [...(groups.get(color) ?? []), range]);
+      const parts = space.toRanges(resolution.start, resolution.end);
+      if (parts.length === 0) continue;
+      painted.set(id, parts);
+      groups.set(color, [...(groups.get(color) ?? []), ...parts]);
     }
     if (!supportsHighlights()) return;
     for (const [color, list] of groups)
@@ -471,7 +472,7 @@ function usePeerPositions(
   kind: FileKind,
   space: DomTextSpace | null,
   here: readonly PresencePeer[],
-  selRanges: RefObject<Map<string, Range>>,
+  selRanges: RefObject<Map<string, Range[]>>,
 ) {
   const reduceMotion = useReducedMotion() ?? false;
   const cursors = useRef(new Map<string, HTMLElement>());
@@ -533,7 +534,7 @@ function usePeerPositions(
       }
       const label = labels.current.get(peer.id);
       if (label) {
-        const rects = selRanges.current?.get(peer.id)?.getClientRects();
+        const rects = selRanges.current?.get(peer.id)?.at(-1)?.getClientRects();
         const end = rects && rects.length > 0 ? rects[rects.length - 1] : null;
         if (end) {
           label.style.height = `${end.height}px`;

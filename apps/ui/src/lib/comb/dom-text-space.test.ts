@@ -268,6 +268,72 @@ function textNode(root: HTMLElement, line: number, text: string, nth = 0): Text 
   throw new Error(`row ${line} has no text node "${text}"`);
 }
 
+/** Gutter text nodes (`data-comb-skip` line numbers) that the ranges cover. */
+function paintedGutters(root: HTMLElement, ranges: Range[]): string[] {
+  const gutters = [...root.querySelectorAll("[data-comb-skip]")].map((el) => el.firstChild);
+  return ranges.flatMap((range) =>
+    gutters.flatMap((node) => (node && range.intersectsNode(node) ? [(node as Text).data] : [])),
+  );
+}
+
+describe("toRanges: paint runs that leave skipped content out", () => {
+  test("a passage over three rows is one range per row, and no line number is painted", () => {
+    const root = mount([1, 2, 3].map((n) => row(n, `line ${n} text`)).join(""));
+    const space = buildDomTextSpace(root);
+    const start = space.text.indexOf("1 text");
+    const end = space.text.indexOf("3 text") + 1;
+    // One range over the same offsets covers the gutters of rows 2 and 3.
+    expect(paintedGutters(root, [space.toRange(start, end) as Range])).toEqual(["2", "3"]);
+    const ranges = space.toRanges(start, end);
+    expect(ranges.map((r) => r.toString())).toEqual(["1 text", "line 2 text", "line 3"]);
+    expect(paintedGutters(root, ranges)).toEqual([]);
+  });
+
+  test("highlighted rows split per row too, never inside a row's tokens", () => {
+    const root = tokenPane();
+    const space = buildDomTextSpace(root);
+    const start = space.text.indexOf("object");
+    const end = space.text.indexOf("})") + 2;
+    const ranges = space.toRanges(start, end);
+    expect(ranges.map((r) => r.toString())).toEqual(["object({", SOURCE[1], "})"]);
+    expect(paintedGutters(root, ranges)).toEqual([]);
+  });
+
+  test("a blank row between two rows paints nothing, not even its line number", () => {
+    const root = mount([row(1, "a = 1"), row(2, ""), row(3, "b = 2")].join(""));
+    const space = buildDomTextSpace(root);
+    const ranges = space.toRanges(0, space.text.indexOf("b") + 1);
+    expect(ranges.map((r) => r.toString())).toEqual(["a = 1", "b"]);
+    expect(paintedGutters(root, ranges)).toEqual([]);
+  });
+
+  test("text without skipped content stays one range (soft line breaks, inline marks, blocks)", () => {
+    const root = mount(
+      [
+        '<p data-line-start="1" data-line-end="2">One <strong>soft</strong>\nbreak.</p>',
+        '<p data-line-start="4" data-line-end="4">Next <em>block</em>.</p>',
+      ].join(""),
+    );
+    const space = buildDomTextSpace(root);
+    const ranges = space.toRanges(0, space.text.length - 1);
+    expect(ranges).toHaveLength(1);
+    expect(ranges[0].toString()).toBe(space.toRange(0, space.text.length - 1)?.toString() ?? "");
+  });
+
+  test("a button inside a paragraph splits the run around it", () => {
+    const space = buildDomTextSpace(renderPane());
+    const start = space.text.indexOf("Hello");
+    const ranges = space.toRanges(start, start + "Hello world".length);
+    expect(ranges.map((r) => r.toString())).toEqual(["Hello ", "world"]);
+  });
+
+  test("an empty or reversed span gives no ranges", () => {
+    const space = buildDomTextSpace(renderPane());
+    expect(space.toRanges(5, 5)).toEqual([]);
+    expect(space.toRanges(6, 2)).toEqual([]);
+  });
+});
+
 describe("dom-text-space over highlighted code (one text node per token)", () => {
   test("the token rows read as the file's own text, line by line", () => {
     for (const [i, parts] of TOKENS.entries()) {

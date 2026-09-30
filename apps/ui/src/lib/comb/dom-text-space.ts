@@ -31,6 +31,13 @@ export interface DomTextSpace extends TextSpace {
   offsetToLineEnd(offset: number): number | null;
   /** DOM Range for [start, end) offsets. */
   toRange(start: number, end: number): Range | null;
+  /**
+   * DOM Ranges that cover [start, end) and nothing else: one Range per run of
+   * text with no skipped content inside it. The CSS Highlight API paints
+   * every text node in a Range, so one Range over several text viewer rows
+   * would also paint their line numbers (`data-comb-skip`). Use these to paint.
+   */
+  toRanges(start: number, end: number): Range[];
   /** Text offset of a DOM boundary point (e.g. a Selection range edge). */
   pointToOffset(node: Node, offset: number): number | null;
   /** Blocks (elements carrying source lines) intersecting [start, end). */
@@ -88,6 +95,8 @@ export function isSkippedElement(el: Element): boolean {
 interface Segment {
   node: Text;
   start: number;
+  /** Skipped content (a gutter, a button) comes between this text and the text before it. */
+  afterSkip: boolean;
 }
 
 interface Block {
@@ -130,20 +139,26 @@ export function buildDomTextSpace(root: HTMLElement): DomTextSpace {
   const segments: Segment[] = [];
   const segmentStart = new Map<Text, number>();
   const blocks: Block[] = [];
+  // Set when the walk skips an element: the next text starts a new paint run.
+  let skipped = false;
 
   const walk = (node: Node) => {
     if (node.nodeType === Node.TEXT_NODE) {
       const data = (node as Text).data;
       if (data) {
-        segments.push({ node: node as Text, start: length });
+        segments.push({ node: node as Text, start: length, afterSkip: skipped });
         segmentStart.set(node as Text, length);
+        skipped = false;
         append(data);
       }
       return;
     }
     if (node.nodeType !== Node.ELEMENT_NODE) return;
     const el = node as HTMLElement;
-    if (isSkippedElement(el)) return;
+    if (isSkippedElement(el)) {
+      skipped = true;
+      return;
+    }
     const isBlock = BLOCK_TAGS.has(el.tagName);
     if (isBlock) breakLine();
     const start = length;
@@ -194,16 +209,35 @@ export function buildDomTextSpace(root: HTMLElement): DomTextSpace {
   const innermost = (list: Block[]) =>
     list.filter((b) => !list.some((o) => o !== b && b.el.contains(o.el)));
 
+  const toRange = (start: number, end: number): Range | null => {
+    const a = toPoint(start, false);
+    const b = toPoint(end, true);
+    if (!a || !b) return null;
+    const range = document.createRange();
+    range.setStart(a[0], a[1]);
+    range.setEnd(b[0], b[1]);
+    return range;
+  };
+
   return {
     text,
-    toRange(start, end) {
-      const a = toPoint(start, false);
-      const b = toPoint(end, true);
-      if (!a || !b) return null;
-      const range = document.createRange();
-      range.setStart(a[0], a[1]);
-      range.setEnd(b[0], b[1]);
-      return range;
+    toRange,
+    toRanges(start, end) {
+      if (end <= start) return [];
+      // Split at every text that follows skipped content. A split falls
+      // between two text nodes, so no character is left out.
+      const cuts = [start];
+      const last = segmentAt(end - 1);
+      for (let i = segmentAt(start) + 1; i <= last; i++) {
+        if (segments[i].afterSkip && segments[i].start > start) cuts.push(segments[i].start);
+      }
+      cuts.push(end);
+      const ranges: Range[] = [];
+      for (let i = 0; i + 1 < cuts.length; i++) {
+        const range = toRange(cuts[i], cuts[i + 1]);
+        if (range && !range.collapsed) ranges.push(range);
+      }
+      return ranges;
     },
     pointToOffset(node, offset) {
       if (node.nodeType === Node.TEXT_NODE) {

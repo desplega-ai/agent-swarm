@@ -52,12 +52,12 @@ export function CommentHighlights({
   onActivate,
 }: CommentHighlightsProps) {
   // Painted ranges by comment id with their text length, for hit-testing.
-  const rangesRef = useRef(new Map<string, { range: Range; length: number }>());
+  const rangesRef = useRef(new Map<string, { ranges: Range[]; length: number }>());
   const callbacks = useRef({ onHover, onActivate });
   callbacks.current = { onHover, onActivate };
 
   useEffect(() => {
-    const ranges = new Map<string, { range: Range; length: number }>();
+    const ranges = new Map<string, { ranges: Range[]; length: number }>();
     rangesRef.current = ranges;
     if (!space) return;
     const native = supportsHighlights();
@@ -80,17 +80,18 @@ export function CommentHighlights({
       const emphasized = emphasizedIds.has(id);
       if (!painted && !emphasized) return;
       if (resolution.start == null || resolution.end == null) return;
-      const range = space.toRange(resolution.start, resolution.end);
-      if (!range) return;
-      ranges.set(id, { range, length: resolution.end - resolution.start });
+      // One range per text run: a passage over several code rows skips their line numbers.
+      const parts = space.toRanges(resolution.start, resolution.end);
+      if (parts.length === 0) return;
+      ranges.set(id, { ranges: parts, length: resolution.end - resolution.start });
       // A pending passage keeps the pending style when it moved: the card says "Moved".
       const style = pendingIds.has(id)
         ? "pending"
         : resolution.status === "moved"
           ? "moved"
           : "anchored";
-      if (painted) groups[style].push(range);
-      if (emphasized) groups.active.push(range);
+      if (painted) groups[style].push(...parts);
+      if (emphasized) groups.active.push(...parts);
       if (!native) {
         markBlocks(
           resolution.start,
@@ -104,12 +105,11 @@ export function CommentHighlights({
       }
     });
     if (pending) {
-      groups.active.push(pending);
-      if (!native) {
-        const start = space.pointToOffset(pending.startContainer, pending.startOffset);
-        const end = space.pointToOffset(pending.endContainer, pending.endOffset);
-        if (start != null && end != null) markBlocks(start, end, FALLBACK_ACTIVE_CLASS);
-      }
+      const start = space.pointToOffset(pending.startContainer, pending.startOffset);
+      const end = space.pointToOffset(pending.endContainer, pending.endOffset);
+      const known = start != null && end != null;
+      groups.active.push(...(known ? space.toRanges(start, end) : [pending]));
+      if (!native && known) markBlocks(start, end, FALLBACK_ACTIVE_CLASS);
     }
 
     if (native) {
@@ -134,14 +134,16 @@ export function CommentHighlights({
     const hitAt = (x: number, y: number): string | null => {
       let hit: string | null = null;
       let hitLength = Number.POSITIVE_INFINITY;
-      rangesRef.current.forEach(({ range, length }, id) => {
+      rangesRef.current.forEach(({ ranges, length }, id) => {
         if (length >= hitLength) return;
-        for (const rect of range.getClientRects()) {
-          if (x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) {
-            hit = id;
-            hitLength = length;
-            break;
-          }
+        const over = ranges.some((range) =>
+          Array.from(range.getClientRects()).some(
+            (rect) => x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom,
+          ),
+        );
+        if (over) {
+          hit = id;
+          hitLength = length;
         }
       });
       return hit;

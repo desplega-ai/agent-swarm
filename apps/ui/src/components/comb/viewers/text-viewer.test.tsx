@@ -119,6 +119,25 @@ describe("TextLines with syntax highlighting", () => {
     await highlighted.unmount();
   });
 
+  test("a passage over several highlighted rows paints one range per row, never a line number", async () => {
+    const view = await mountLines(SOURCE, "ts");
+    const space = buildDomTextSpace(view.container);
+    const start = space.text.indexOf("One batch");
+    const end = space.text.indexOf("commentIds") + "commentIds".length;
+    const ranges = space.toRanges(start, end);
+    expect(ranges.map((range) => range.toString())).toEqual([
+      "One batch holds up to 50 comments.",
+      "export const Batch = z.object({",
+      "  commentIds",
+    ]);
+    const gutters = [...view.container.querySelectorAll("[data-comb-skip]")];
+    expect(gutters.length).toBeGreaterThan(0);
+    for (const range of ranges) {
+      for (const gutter of gutters) expect(range.intersectsNode(gutter)).toBe(false);
+    }
+    await view.unmount();
+  });
+
   test("the theme picks the token colors (vsDark in dark, github in light)", async () => {
     const constColor = (container: Element) =>
       (tokenSpans(container)[0] as HTMLElement | undefined)?.style.color;
