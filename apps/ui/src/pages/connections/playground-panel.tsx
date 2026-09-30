@@ -244,6 +244,8 @@ export function PlaygroundPanel({ defaultAgentId }: { defaultAgentId?: string })
   const [expanded, setExpanded] = useState(false);
   const [saveOpen, setSaveOpen] = useState(false);
   const [saveName, setSaveName] = useState("");
+  const [saveNameInvalid, setSaveNameInvalid] = useState(false);
+  const saveNameRef = useRef<HTMLInputElement>(null);
   const [selectedScriptId, setSelectedScriptId] = useState("");
   const [pendingScriptId, setPendingScriptId] = useState<string | null>(null);
   // Last loaded/saved source — the "clean" baseline for unsaved-edit detection.
@@ -282,12 +284,19 @@ export function PlaygroundPanel({ defaultAgentId }: { defaultAgentId?: string })
   function openSaveDialog() {
     const selected = scriptById.get(selectedScriptId);
     setSaveName(selected ? kebabCase(selected.name) : "playground-script");
+    setSaveNameInvalid(false);
     setSaveOpen(true);
   }
 
   async function submitSave() {
     const name = saveName.trim();
-    if (!name || !agentId) return;
+    if (!name) {
+      // Save stays enabled; an empty name explains itself on submit.
+      setSaveNameInvalid(true);
+      saveNameRef.current?.focus();
+      return;
+    }
+    if (!agentId) return;
     try {
       const saved = await upsert.mutateAsync({
         name,
@@ -430,15 +439,30 @@ export function PlaygroundPanel({ defaultAgentId }: { defaultAgentId?: string })
             </DialogDescription>
           </DialogHeader>
           <Input
+            ref={saveNameRef}
             value={saveName}
-            onChange={(event) => setSaveName(event.target.value)}
+            onChange={(event) => {
+              setSaveName(event.target.value);
+              setSaveNameInvalid(false);
+            }}
             placeholder="my-script-name"
             aria-label="Script name"
+            aria-invalid={saveNameInvalid || undefined}
+            aria-describedby={saveNameInvalid ? "save-script-name-error" : undefined}
             autoFocus
             onKeyDown={(event) => {
               if (event.key === "Enter") void submitSave();
             }}
           />
+          {saveNameInvalid ? (
+            <p
+              id="save-script-name-error"
+              role="alert"
+              className="text-sm text-status-error-strong"
+            >
+              Enter a script name.
+            </p>
+          ) : null}
           <InlineError error={upsert.error} />
           <DialogFooter>
             <Button variant="outline" onClick={() => setSaveOpen(false)}>
@@ -446,7 +470,8 @@ export function PlaygroundPanel({ defaultAgentId }: { defaultAgentId?: string })
             </Button>
             <Button
               onClick={() => void submitSave()}
-              disabled={!saveName.trim() || upsert.isPending}
+              disabled={upsert.isPending}
+              status={upsert.isPending ? "loading" : "idle"}
             >
               Save
             </Button>

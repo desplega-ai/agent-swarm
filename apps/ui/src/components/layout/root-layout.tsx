@@ -63,6 +63,16 @@ export function RootLayout() {
 
   return (
     <StatusProvider pollIntervalMs={30_000}>
+      {/* First focusable element: lets keyboard users jump past the sidebar.
+        A button, not <a href="#main">: a fragment link would push a history
+        entry and leak #main into the URL the context panel captures. */}
+      <button
+        type="button"
+        onClick={() => document.getElementById("main")?.focus()}
+        className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-50 focus:rounded-md focus:bg-background focus:px-3 focus:py-2 focus:text-sm focus:font-medium focus:shadow-md focus:ring-2 focus:ring-ring"
+      >
+        Skip to content
+      </button>
       <ContextPanelProvider>
         <SidebarProvider className="h-svh max-w-full overflow-hidden">
           <AppSidebar />
@@ -73,8 +83,10 @@ export function RootLayout() {
               back to overflow-hidden and pages own their scroll regions
               (pinned headers, grid-internal scrolling). */}
             <main
+              id="main"
+              tabIndex={-1}
               className={cn(
-                "flex flex-1 flex-col min-h-0 min-w-0 overflow-x-hidden overflow-y-auto lg:overflow-hidden",
+                "flex flex-1 flex-col min-h-0 min-w-0 overflow-x-hidden overflow-y-auto lg:overflow-hidden focus:outline-none",
                 mainPadding,
               )}
             >

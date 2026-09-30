@@ -152,10 +152,11 @@ export function SubmitBar({
           aria-valuemax={progress.total}
           aria-valuenow={progress.answered}
         >
+          {/* scaleX, not width: a compositor-only animation. */}
           <motion.div
-            className="h-full bg-primary"
+            className="h-full w-full origin-left bg-primary"
             initial={false}
-            animate={{ width: `${pct}%` }}
+            animate={{ scaleX: pct / 100 }}
             transition={{ duration: 0.3, ease: SNAPPY }}
           />
         </div>
