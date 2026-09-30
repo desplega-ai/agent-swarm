@@ -1038,6 +1038,37 @@ describe("OpencodeAdapter — per-task isolation (DES-300)", () => {
     }
   });
 
+  test("swarm MCP headers carry the task id and context key", async () => {
+    const events: OpencodeEvent[] = [
+      { type: "session.idle", properties: { sessionID: "sess-abc-123" } },
+    ];
+    await driveSession(
+      events,
+      testConfig({ taskId: "task-1", contextKey: "task:slack:C1:1700000000.000100" }),
+    );
+
+    const opts = lastCreateOpencodeConfig as {
+      config?: { mcp?: Record<string, { headers?: Record<string, string> }> };
+    };
+    const headers = opts.config?.mcp?.swarm?.headers;
+    expect(headers?.["X-Source-Task-Id"]).toBe("task-1");
+    expect(headers?.["X-Context-Key"]).toBe("task:slack:C1:1700000000.000100");
+  });
+
+  test("swarm MCP headers omit the context key when the task has none", async () => {
+    const events: OpencodeEvent[] = [
+      { type: "session.idle", properties: { sessionID: "sess-abc-123" } },
+    ];
+    await driveSession(events, testConfig({ taskId: "task-1" }));
+
+    const opts = lastCreateOpencodeConfig as {
+      config?: { mcp?: Record<string, { headers?: Record<string, string> }> };
+    };
+    const headers = opts.config?.mcp?.swarm?.headers;
+    expect(headers?.["X-Source-Task-Id"]).toBe("task-1");
+    expect(headers?.["X-Context-Key"]).toBeUndefined();
+  });
+
   test("swarm MCP headers omit the runtime identity when unset", async () => {
     const prev = process.env.SWARM_RUNTIME_INSTANCE_ID;
     delete process.env.SWARM_RUNTIME_INSTANCE_ID;
@@ -1076,7 +1107,7 @@ describe("OpencodeAdapter — per-task isolation (DES-300)", () => {
   });
 
   test("per-task config file is written as valid JSON", async () => {
-    const cfg = testConfig({ taskId: "task-cfg-json" });
+    const cfg = testConfig({ taskId: "task-cfg-json", contextKey: "task:api:ctx-1" });
     await inspectSessionBeforeIdle(cfg, async () => {
       const configFile = Bun.file("/tmp/opencode-task-cfg-json.json");
       const exists = await configFile.exists();
@@ -1084,9 +1115,16 @@ describe("OpencodeAdapter — per-task isolation (DES-300)", () => {
       if (exists) {
         const text = await configFile.text();
         expect(() => JSON.parse(text)).not.toThrow();
-        const parsed = JSON.parse(text) as { mcp?: unknown; permission?: unknown };
+        const parsed = JSON.parse(text) as {
+          mcp?: { swarm?: { headers?: Record<string, string> } };
+          permission?: unknown;
+        };
         expect(parsed.mcp).toBeDefined();
         expect(parsed.permission).toBeDefined();
+        // The per-task file must carry the task identity too: `opencode serve`
+        // reads this file (via OPENCODE_CONFIG), not the in-process object.
+        expect(parsed.mcp?.swarm?.headers?.["X-Source-Task-Id"]).toBe("task-cfg-json");
+        expect(parsed.mcp?.swarm?.headers?.["X-Context-Key"]).toBe("task:api:ctx-1");
       }
     });
 

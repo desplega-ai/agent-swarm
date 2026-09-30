@@ -761,6 +761,12 @@ export class OpencodeAdapter implements ProviderAdapter {
         headers: {
           Authorization: `Bearer ${config.apiKey}`,
           "X-Agent-ID": config.agentId,
+          // Per-task identity, same as claude/codex. Without it `store-progress`
+          // has no default task, so the model must hand-type a UUID and can
+          // copy a sibling's or parent's id from the prompt. The config file
+          // and `opencode serve` are already per task, so this is not shared.
+          "X-Source-Task-Id": taskId,
+          ...(config.contextKey ? { "X-Context-Key": config.contextKey } : {}),
           ...(runtimeInstanceId ? { "X-Runtime-Instance-ID": runtimeInstanceId } : {}),
         },
       },
