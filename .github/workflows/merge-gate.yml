@@ -620,15 +620,13 @@ jobs:
         run: |
           set +e
           mkdir -p .bun-test-timings/next
-          timeout 500 bun test --timeout 10000 --parallel=4 --shard=${{ matrix.shard }}/2 \
+          ( sleep 330; echo "=== WATCHDOG ps"; ps -eo pid,ppid,stat,pcpu,etime,cmd --sort=ppid | cut -c1-200 | head -70; ls -d /tmp/rbac-e2e-* 2>/dev/null; for f in /tmp/rbac-e2e-*/*.log; do echo "== $f"; tail -40 "$f"; done ) &
+          WD=$!
+          timeout 420 bun run test:root -- --timeout 10000 --parallel=4 --shard=${{ matrix.shard }}/2 \
             --update-timings --timings=.bun-test-timings/next/${{ matrix.shard }}.json \
-            $(ls .bun-test-timings/*.json 2>/dev/null | sed 's/^/--timings=/') > /tmp/shard.log 2>&1
-          echo "=== bun test exit: $?"
-          tail -5 /tmp/shard.log
-          echo "=== last groups"; grep -a "##\[group\]\|^src/.*test.ts" /tmp/shard.log | tail -3
-          ls -d /tmp/rbac-e2e-* 2>/dev/null
-          for f in /tmp/rbac-e2e-*/*.log; do echo "=== $f"; tail -60 "$f"; done
-          echo "=== procs"; ps aux --sort=-%cpu | head -15 | cut -c1-200
+            $(ls .bun-test-timings/*.json 2>/dev/null | sed 's/^/--timings=/')
+          echo "=== test:root exit: $?"
+          kill $WD 2>/dev/null
           echo "duration_ms=1" >> "$GITHUB_OUTPUT"
           echo "status=failure" >> "$GITHUB_OUTPUT"
           exit 1
