@@ -777,6 +777,16 @@ export interface ResolvedEnvResult {
 // Preserve the deployment value before config reloads mutate process.env.
 const deploymentMemoryRaters = process.env.MEMORY_RATERS;
 
+/**
+ * Container value (undefined when unset) of each RELOADABLE_ENV_KEYS entry a
+ * swarm_config row has overwritten in process.env, recorded before the first
+ * overwrite. A reload starts from process.env, so without this a deleted row
+ * would leave its value in place until the container restarts. Keys no row
+ * ever overwrote are absent and keep the container value. MEMORY_RATERS keeps
+ * its own deployment snapshot above.
+ */
+const rowOverriddenBootEnv = new Map<string, string | undefined>();
+
 export async function fetchResolvedEnv(
   apiUrl: string,
   apiKey: string,
@@ -827,6 +837,11 @@ export async function fetchResolvedEnv(
         // Only reset after a successful fetch so outages retain the current value.
         env.MEMORY_RATERS =
           baseEnv === process.env ? deploymentMemoryRaters : baseEnv.MEMORY_RATERS;
+        // Same for every other key a row overwrote: start from the container
+        // value, so a row that is gone no longer applies.
+        if (baseEnv === process.env) {
+          for (const [key, bootValue] of rowOverriddenBootEnv) env[key] = bootValue;
+        }
 
         if (data.configs?.length) {
           scriptsOnlyConfigValue = data.configs.find(
@@ -1112,11 +1127,20 @@ export function applyResolvedEnvToProcessEnv(
   const changed: string[] = [];
   for (const key of RELOADABLE_ENV_KEYS) {
     const next = freshEnv[key];
-    if (key === "MEMORY_RATERS" && next === undefined && process.env[key] !== undefined) {
+    if (
+      next === undefined &&
+      process.env[key] !== undefined &&
+      (key === "MEMORY_RATERS" || rowOverriddenBootEnv.has(key))
+    ) {
+      // A deleted row for a key the container never set. Keys no row
+      // overwrote stay as the container set them.
       delete process.env[key];
       changed.push(key);
     } else if (next !== undefined && next !== process.env[key]) {
       const previous = process.env[key];
+      if (key !== "MEMORY_RATERS" && !rowOverriddenBootEnv.has(key)) {
+        rowOverriddenBootEnv.set(key, previous);
+      }
       process.env[key] = next;
       changed.push(key);
       // Make a reload that blanks a previously-set value loud — silently
