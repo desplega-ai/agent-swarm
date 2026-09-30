@@ -836,6 +836,7 @@ export class DevinAdapter implements ProviderAdapter {
     // enumerate the installed skills.
     return {
       hasMcp,
+      hasToolSearch: false,
       nativeSkillDiscovery: false,
       hasLocalEnvironment: false,
       steerModes: ["queue"],

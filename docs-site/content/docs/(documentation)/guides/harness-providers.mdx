@@ -681,6 +681,8 @@ If the runner reuses an existing repo clone that has local changes, `ensureRepoF
   Template resolution goes over HTTP (`configureHttpResolver(apiUrl, apiKey)` at `runner.ts:2206`) to obey the API/worker DB boundary. Prompt files under `src/prompts/` must remain pure — no `bun:sqlite` or `src/be/db` imports. Enforced by `scripts/check-db-boundary.sh`.
 </Callout>
 
+Swarm tool-discovery guidance follows the adapter's `hasToolSearch` trait (false when omitted). Claude Code sets it to true for native ToolSearch. Codex, OpenCode, pi, ACP, Claude Managed, Devin, and dsh set it to false; MCP-enabled sessions receive guidance that swarm tools are already in the tool list. This trait changes prompt text only, not tool registration.
+
 ### How each adapter delivers the prompt
 
 - **Claude** — CLI flag: `cmd.push("--append-system-prompt", this.config.systemPrompt)` at [`claude-adapter.ts:245–247`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/claude-adapter.ts).

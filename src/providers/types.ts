@@ -216,6 +216,8 @@ export interface ProviderResult {
 export interface ProviderTraits {
   /** Provider can call MCP tools (store-progress, task-action, skills, slack-reply, etc.) */
   hasMcp: boolean;
+  /** Provider hides MCP tools behind a native tool search. Defaults to false. */
+  hasToolSearch?: boolean;
   /**
    * Provider discovers installed skills on its own — it reads the local skills
    * tree and ambient-injects each skill's name + description into the session

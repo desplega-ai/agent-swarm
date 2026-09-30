@@ -119,6 +119,7 @@ export const getBasePrompt = async (args: BasePromptArgs): Promise<string> => {
   const { role, agentId, traits } = args;
   const {
     hasMcp = true,
+    hasToolSearch = false,
     hasLocalEnvironment: hasLocalEnv = true,
     nativeSkillDiscovery = true,
   } = traits ?? {};
@@ -221,12 +222,17 @@ export const getBasePrompt = async (args: BasePromptArgs): Promise<string> => {
 
   // I. Tools and skills. Skipped without MCP: the discovery tools are MCP tools.
   if (hasMcp) {
+    const discoveryResult = await resolveTemplateAsync(
+      hasToolSearch ? "system.agent.tool_discovery.search" : "system.agent.tool_discovery.direct",
+      {},
+    );
     const toolsResult = await resolveTemplateAsync(
       "system.agent.tools_skills",
       renderToolsAndSkillsVars({
         skillsSummary: args.skillsSummary,
         mcpServers: args.mcpServers,
         nativeSkillDiscovery,
+        toolDiscovery: discoveryResult.text,
         hasLocalEnv,
       }),
     );
@@ -272,7 +278,8 @@ function renderToolsAndSkillsVars(input: {
   mcpServers?: string[];
   nativeSkillDiscovery: boolean;
   hasLocalEnv: boolean;
-}): { skills: string; mcp_servers: string } {
+  toolDiscovery: string;
+}): { skills: string; mcp_servers: string; tool_discovery: string } {
   let section = "";
 
   const skills = input.skillsSummary ?? [];
@@ -307,7 +314,11 @@ function renderToolsAndSkillsVars(input: {
       ? `Connected MCP servers: ${servers.join(", ")}. Their tools are in your tool list.\n`
       : "";
 
-  return { skills: section, mcp_servers: mcpLine };
+  return {
+    skills: section,
+    mcp_servers: mcpLine,
+    tool_discovery: input.toolDiscovery,
+  };
 }
 
 /**

@@ -358,6 +358,7 @@ export class ACPAdapter implements ProviderAdapter {
 
   readonly traits: ProviderTraits = {
     hasMcp: true,
+    hasToolSearch: false,
     hasLocalEnvironment: true,
   };
 
