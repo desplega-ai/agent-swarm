@@ -611,9 +611,7 @@ function emit(
         orgName: orgIdentity.organization_name,
         orgDomain: cachedOrgDomain,
         installationId,
-        actor: userId
-          ? { userId, role: actor?.role ?? roleResolver?.(userId) ?? null }
-          : undefined,
+        actor: userId ? { userId, role: actor?.role ?? roleResolver?.(userId) ?? null } : undefined,
         isCloud,
         isE2b: cachedIsE2b,
         swarmVersion: pkg.version,

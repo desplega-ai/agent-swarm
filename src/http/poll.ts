@@ -629,7 +629,10 @@ export async function handlePoll(
                   });
                 });
                 const claimedRequestedBy = await buildTriggerRequestedBy(claimed);
-                const claimedTriggerSurface = await resolveTriggerSurface(claimed.id, claimed.source);
+                const claimedTriggerSurface = await resolveTriggerSurface(
+                  claimed.id,
+                  claimed.source,
+                );
                 return {
                   trigger: {
                     type: "task_assigned",
