@@ -83,7 +83,7 @@ jobs:
           # install), and the dep-graph inputs (.dependency-cruiser.cjs, plugin/) are all
           # load-bearing for this job since the workspace migration. The Dockerfiles
           # feed the Bun version-pin check (check:bun-version).
-          LINT=$(match '^(src/|apps/evals/|package\.json$|bun\.lock|bunfig\.toml$|turbo\.json$|konsistent\.json$|tsconfig\.json$|biome\.json$|\.dependency-cruiser\.cjs$|plugin/opencode-plugins/|apps/(ui|templates-ui)/package\.json$|Dockerfile$|Dockerfile\.worker$|scripts/check-bun-version\.ts$|templates/extensions/|scripts/build-extension-(catalog|manifest-schema)\.ts$)')
+          LINT=$(match '^(src/|apps/evals/|package\.json$|bun\.lock|bunfig\.toml$|turbo\.json$|konsistent\.json$|tsconfig\.json$|biome\.json$|\.dependency-cruiser\.cjs$|plugin/opencode-plugins/|apps/(ui|templates-ui)/package\.json$|Dockerfile$|Dockerfile\.worker$|scripts/check-bun-version\.ts$|templates/extensions/|scripts/build-extension-(catalog|manifest-schema)\.ts$|packages/telemetry-contract/|scripts/(sync-telemetry-contract|gen-telemetry-docs)\.ts$|docs-site/content/docs/\(documentation\)/reference/telemetry\.mdx$)')
 
           # tests: src/ + scripts that tests import + lockfile/tsconfig + bunfig ([test]
           # preload + pathIgnorePatterns) + member manifests (root frozen install).
@@ -397,6 +397,15 @@ jobs:
       - name: Check Bun version pins
         run: bun run check:bun-version
 
+      # The vendored proxy event catalog must match its recorded sha256s (offline: the
+      # proxy repo is private), and the public telemetry docs table must be generated
+      # from it. See packages/telemetry-contract/src/index.ts.
+      - name: Check vendored telemetry contract
+        run: bun run check:telemetry-contract
+
+      - name: Check telemetry docs are generated from the catalog
+        run: bun run check:telemetry-docs
+
       - name: Check realtime browser bundle
         run: bun run check:realtime-browser
 
@@ -608,27 +617,19 @@ jobs:
 
       - name: Run tests
         id: tests
-        # apps/evals/ is excluded from the root run via bunfig.toml pathIgnorePatterns
-        # (it's a separate bun package with its own deps + its own CI test step in
-        # the lint-and-typecheck job). --parallel=4 runs each test file in its own
-        # worker process (implies --isolate), 4 at a time per runner; the restored
-        # per-file durations balance files across the 2 shards by total time.
-        # --timeout 10000 matches ci.yml (main): 4 workers saturate the runner and
-        # bunfig.toml no longer sets a global retry.
         run: |
-          start=$(date +%s%3N)
           set +e
           mkdir -p .bun-test-timings/next
-          echo "timings snapshot: $(cat .bun-test-timings/snapshot-key.txt 2>/dev/null || echo none)"
-          # shellcheck disable=SC2046
-          bun run test:root -- --timeout 10000 --parallel=4 --shard=${{ matrix.shard }}/2 \
+          ( sleep 270; echo "=== WATCHDOG"; ps -eo pid,ppid,stat,pcpu,etime,cmd | grep -a "test-worker" | grep -v grep | cut -c1-120; echo "--- repo root files by mtime"; ls -lat --time-style=full-iso . | head -25; echo "--- tmp by mtime"; ls -lat --time-style=full-iso /tmp "$RUNNER_TEMP" 2>/dev/null | head -30; sudo apt-get install -y -qq strace >/dev/null 2>&1; for p in $(pgrep -f test-worker); do echo "--- strace $p"; timeout 4 sudo strace -f -p $p -e trace=openat,stat,newfstatat,read,write -s 120 2>&1 | head -40; echo "--- fds $p"; ls -l /proc/$p/fd 2>/dev/null | awk '{print $NF}' | sort | uniq -c | sort -rn | head -15; done ) &
+          WD=$!
+          timeout 420 bun run test:root -- --timeout 10000 --parallel=4 --shard=${{ matrix.shard }}/2 \
             --update-timings --timings=.bun-test-timings/next/${{ matrix.shard }}.json \
             $(ls .bun-test-timings/*.json 2>/dev/null | sed 's/^/--timings=/')
-          code=$?
-          set -e
-          echo "duration_ms=$(( $(date +%s%3N) - start ))" >> "$GITHUB_OUTPUT"
-          echo "status=$([ $code -eq 0 ] && echo success || echo failure)" >> "$GITHUB_OUTPUT"
-          exit $code
+          echo "=== test:root exit: $?"
+          kill $WD 2>/dev/null
+          echo "duration_ms=1" >> "$GITHUB_OUTPUT"
+          echo "status=failure" >> "$GITHUB_OUTPUT"
+          exit 1
 
       - name: Upload this shard's test timings
         if: always()
