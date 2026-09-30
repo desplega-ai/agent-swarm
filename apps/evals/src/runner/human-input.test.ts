@@ -68,11 +68,37 @@ describe("cannedAnswer", () => {
     expect(cannedAnswer(question, REPLY)).toEqual(expected);
   });
 
-  test("cannedResponses keys every question by id", () => {
-    expect(cannedResponses(request("r", [q("text"), q("boolean")]), REPLY)).toEqual({
-      "q-text": REPLY,
-      "q-boolean": true,
+  test("cannedResponses keys every question by id and marks generic structured answers", () => {
+    expect(cannedResponses(request("r", [q("text"), q("boolean")]), { reply: REPLY })).toEqual({
+      responses: { "q-text": REPLY, "q-boolean": true },
+      fallbacks: ["q-boolean"],
     });
+  });
+
+  test("the scenario's own answer wins when the respond route would accept it", () => {
+    const options = [
+      { value: "include", label: "Include emails" },
+      { value: "exclude", label: "Exclude emails" },
+    ];
+    const res = cannedResponses(
+      request("r", [q("single-select", { options }), q("boolean"), q("multi-select", { options })]),
+      {
+        reply: "Do not include email addresses.",
+        answer: (question) =>
+          question.type === "single-select"
+            ? "exclude"
+            : question.type === "boolean"
+              ? false
+              : ["not-an-option"],
+      },
+    );
+    expect(res.responses).toEqual({
+      "q-single-select": "exclude",
+      "q-boolean": false,
+      // Invalid own answer (not an option) falls back to the generic mapping.
+      "q-multi-select": ["include"],
+    });
+    expect(res.fallbacks).toEqual(["q-multi-select"]);
   });
 });
 

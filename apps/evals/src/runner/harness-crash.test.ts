@@ -46,6 +46,14 @@ describe("classifyFailureReason", () => {
     expect(classifyFailureReason("Provider returned error")?.kind).toBe("provider-error");
   });
 
+  test("a subscription session limit is a non-retryable provider error, not a model failure", () => {
+    const crash = classifyFailureReason(
+      "Session error (exit code 1): You've hit your session limit · resets 12pm (UTC)",
+    );
+    expect(crash?.kind).toBe("provider-error");
+    expect(crash?.retryable).toBe(false);
+  });
+
   test("model-caused failures never match", () => {
     for (const reason of [
       'tool-loop: Detected ping-pong loop: alternating between "get-task-details" and "get-task-details" for 6 calls.',

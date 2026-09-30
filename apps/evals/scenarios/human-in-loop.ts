@@ -1,6 +1,7 @@
 import type {
   CheckResult,
   DeterministicCheck,
+  HumanQuestion,
   JudgeContext,
   OutcomeSpec,
   Scenario,
@@ -23,9 +24,11 @@ import { apiList, soloVariant, workerTasks } from "./orchestration-utils.ts";
  * Graded:
  *   - gate: `/workspace/export/customers.json` exists (the reply names it).
  *   - `clarification` (3, swarm only, deterministic): a request exists (else 0);
- *     then the mean of: no export task went to the analyst before the first
- *     question; the hitl-follow-up task completed (the work resumed); a task
- *     went to the analyst after the answer.
+ *     then the mean of: the hitl-follow-up task completed (the work resumed),
+ *     and a task went to the analyst after the answer. Asking "before any work"
+ *     is NOT checked: in the first real run every lead had the analyst profile
+ *     the data (read-only) before asking, which made the questions sharper.
+ *     A guessed export is caught by correctness instead.
  *   - `question-quality` (2, judge): did the question target the material
  *     ambiguity (which customers, which fields may leave, format)?
  *   - `correctness` (3, deterministic): the export holds exactly the EU ids,
@@ -65,6 +68,65 @@ const REPLY = [
   "Do not include email addresses or any other contact data; they must not leave the company.",
   `Name the file customers.json in ${EXPORT_DIR}/.`,
 ].join(" ");
+
+// ---- the canned human's structured answers ----
+//
+// Leads ask with select and boolean questions, not just free text. A keyword
+// match of the reply against option names contradicts the reply ("do not
+// include email addresses" names "include"), so the scenario answers those
+// itself, in the reply's terms. Shapes seen in the first real run are pinned in
+// human-in-loop.test.ts. Anything unrecognized falls back to the generic
+// mapping, and the human-input.json artifact lists it.
+
+const PII = /e-?mails?|contact|personal|\bpii\b|privacy/i;
+const REMOVE = /\b(exclude|excluded|omit|remove|drop|strip|without|no|none|redact)\b/i;
+const FORMAT = /format|file type/i;
+const FIELDS = /field|column|attribute/i;
+const RECIPIENT = /recipient|receive|audience|destination/i;
+const SCOPE = /customer|scope|subset|segment|region|record/i;
+const EU = /\beu\b|europe/i;
+const WANTED_FIELD = /\b(id|ids|name|names|plan|plans)\b/i;
+
+type Option = NonNullable<HumanQuestion["options"]>[number];
+const optionText = (o: Option) => `${o.value} ${o.label} ${o.description ?? ""}`;
+
+export function answerQuestion(q: HumanQuestion): unknown {
+  const options = q.options ?? [];
+  const label = `${q.label} ${q.description ?? ""}`;
+  const find = (yes: RegExp, no?: RegExp) =>
+    options.find((o) => yes.test(optionText(o)) && !no?.test(optionText(o)))?.value;
+  switch (q.type) {
+    case "boolean":
+      // "Include emails?" -> false; "Exclude emails?" -> true.
+      if (PII.test(label)) return REMOVE.test(label);
+      if (EU.test(label) || /\bjson\b/i.test(label)) return true;
+      return undefined;
+    case "single-select":
+      if (PII.test(label)) return find(REMOVE);
+      if (FORMAT.test(label)) return find(/json/i);
+      if (RECIPIENT.test(label)) return find(/northwind|partner|external/i);
+      if (SCOPE.test(label))
+        return find(/\beu\b|europe|region|subset|specific|some|filter/i, /\ball\b/i);
+      return undefined;
+    case "multi-select":
+      if (options.some((o) => EU.test(optionText(o)))) {
+        return options.filter((o) => EU.test(optionText(o))).map((o) => o.value);
+      }
+      if (FIELDS.test(label) || options.some((o) => PII.test(optionText(o)))) {
+        return options
+          .filter(
+            (o) =>
+              WANTED_FIELD.test(`${o.value} ${o.label}`) &&
+              !PII.test(optionText(o)) &&
+              !/region|country/i.test(optionText(o)),
+          )
+          .map((o) => o.value);
+      }
+      return undefined;
+    default:
+      return undefined;
+  }
+}
 
 function writeFile(path: string, content: string): string {
   const b64 = Buffer.from(content).toString("base64");
@@ -158,8 +220,6 @@ function timeOf(value: unknown): number | null {
   return Number.isNaN(ms) ? null : ms;
 }
 
-const EXPORT_WORD = /export/i;
-
 const clarificationCheck: DeterministicCheck = {
   name: "clarification-paper-trail",
   fn: async (ctx): Promise<CheckResult> => {
@@ -169,9 +229,6 @@ const clarificationCheck: DeterministicCheck = {
     if (requests.length === 0) {
       return { pass: false, score: 0, detail: "nobody asked the requester (no approval request)" };
     }
-    const asked = Math.min(
-      ...requests.map((r) => timeOf(r.createdAt)).filter((v): v is number => v !== null),
-    );
     const answered = Math.min(
       ...requests.map((r) => timeOf(r.resolvedAt)).filter((v): v is number => v !== null),
     );
@@ -179,21 +236,15 @@ const clarificationCheck: DeterministicCheck = {
     const toAnalyst = workerTasks(ctx, lead?.agentId).filter(
       (t) => t.agentId === ctx.workers[ANALYST]?.agentId,
     );
-    const guessedFirst = toAnalyst.some(
-      (t) =>
-        (timeOf(t.createdAt) ?? Number.POSITIVE_INFINITY) < asked &&
-        EXPORT_WORD.test(`${t.title}\n${t.description}`),
-    );
     const followUps = ctx.tasks.filter((t: SwarmTask) => t.taskType === "hitl-follow-up");
     const resumed = followUps.some((t) => ["done", "completed"].includes(t.status));
     const workAfterAnswer =
       Number.isFinite(answered) && toAnalyst.some((t) => (timeOf(t.createdAt) ?? 0) >= answered);
-    const parts = [guessedFirst ? 0 : 1, resumed ? 1 : 0, workAfterAnswer ? 1 : 0];
-    const score = parts.reduce((a, b) => a + b, 0) / parts.length;
+    const score = ((resumed ? 1 : 0) + (workAfterAnswer ? 1 : 0)) / 2;
     return {
       pass: score >= 1,
       score,
-      detail: `clarification ${score.toFixed(2)} — ${requests.length} request(s), asked before dispatching the export=${!guessedFirst}, follow-up completed=${resumed}, analyst task after the answer=${workAfterAnswer}`,
+      detail: `clarification ${score.toFixed(2)} — ${requests.length} request(s), follow-up completed=${resumed}, analyst task after the answer=${workAfterAnswer}`,
     };
   },
 };
@@ -206,8 +257,9 @@ const QUESTION_RUBRIC = [
   "data), and the format. Score 0-1: 1 = the questions cover scope AND data sensitivity (format",
   "optional); 0.5 = they cover one of the two, or one open question that plainly invites both",
   "('which customers and which fields should the partner get?'); 0 = no request, or only",
-  "procedural questions (deadline, file location). Fewer, sharper questions beat many. Do not",
-  "grade the export itself.",
+  "procedural questions (deadline, file location). Fewer, sharper questions beat many.",
+  "That one api_get is all the evidence you need: do not run commands, read files or grade the",
+  "export (deterministic checks do that); call submit_verdict right after it.",
 ].join(" ");
 
 function sharedDimensions(): NonNullable<OutcomeSpec["dimensions"]> {
@@ -215,7 +267,7 @@ function sharedDimensions(): NonNullable<OutcomeSpec["dimensions"]> {
     {
       name: "question-quality",
       weight: 2,
-      judge: { rubric: QUESTION_RUBRIC, agentic: true, maxSteps: 6 },
+      judge: { rubric: QUESTION_RUBRIC, agentic: true, maxSteps: 10 },
     },
     { name: "correctness", weight: 3, checks: [exportCorrectness] },
     { name: "efficiency", weight: 1 },
@@ -251,8 +303,8 @@ export const humanInLoop: Scenario = {
   description: [
     "An ambiguous request (a customer export for a partner) where the right output depends on",
     "details only the requester has: which customers, which fields may leave, which format. The",
-    "runner answers request-human-input with a canned reply. Graded on the paper trail (asked",
-    "before dispatching, resumed after the answer; clarification, 3), the question itself (judge,",
+    "runner answers request-human-input with a canned reply. Graded on the paper trail (asked,",
+    "resumed and dispatched after the answer; clarification, 3), the question itself (judge,",
     "2), the export against the reply (correctness, 3) and cost and time (efficiency, 1).",
   ].join(" "),
   workers: [{ name: "analyst" }],
@@ -265,7 +317,7 @@ export const humanInLoop: Scenario = {
       description: LEAD_BRIEF,
     },
   ],
-  humanInput: { reply: REPLY },
+  humanInput: { reply: REPLY, answer: answerQuestion },
   outcome: {
     gates: [exportExists],
     dimensions: [

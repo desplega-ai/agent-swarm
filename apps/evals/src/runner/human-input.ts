@@ -58,11 +58,56 @@ export function cannedAnswer(q: ApprovalQuestionJson, reply: string): unknown {
   }
 }
 
+/** Mirror of the respond route's per-question check (root src/http/approval-requests.ts). */
+export function isValidAnswer(q: ApprovalQuestionJson, answer: unknown): boolean {
+  const inOptions = (v: unknown) =>
+    typeof v === "string" && (!q.options || q.options.some((o) => o.value === v));
+  switch (q.type) {
+    case "approval":
+      return (
+        typeof answer === "object" &&
+        answer !== null &&
+        typeof (answer as { approved?: unknown }).approved === "boolean"
+      );
+    case "text":
+      return typeof answer === "string" && answer.trim().length > 0;
+    case "single-select":
+      return typeof answer === "string" && answer.length > 0 && inOptions(answer);
+    case "multi-select":
+      return (
+        Array.isArray(answer) &&
+        answer.length >= Math.max(1, q.minSelections ?? 0) &&
+        (q.maxSelections === undefined || answer.length <= q.maxSelections) &&
+        answer.every(inOptions)
+      );
+    case "boolean":
+      return typeof answer === "boolean";
+    default:
+      return false;
+  }
+}
+
+/**
+ * Responses for a request: the scenario's own answer where it gives a valid
+ * one, else the generic mapping. `fallbacks` names the questions that took the
+ * generic mapping, so a run shows where the canned human may have guessed.
+ */
 export function cannedResponses(
   request: Pick<ApprovalRequestJson, "questions">,
-  reply: string,
-): Record<string, unknown> {
-  return Object.fromEntries(request.questions.map((q) => [q.id, cannedAnswer(q, reply)]));
+  spec: HumanInputSpec,
+): { responses: Record<string, unknown>; fallbacks: string[] } {
+  const responses: Record<string, unknown> = {};
+  const fallbacks: string[] = [];
+  for (const q of request.questions) {
+    const own = spec.answer?.(q);
+    if (own !== undefined && isValidAnswer(q, own)) {
+      responses[q.id] = own;
+    } else {
+      responses[q.id] = cannedAnswer(q, spec.reply);
+      if (q.type !== "text" && q.type !== "approval") fallbacks.push(q.id);
+    }
+  }
+  return { responses, fallbacks };
 }
 
 /** One answered request, persisted as the `human-input.json` artifact. */
@@ -72,6 +117,8 @@ export interface AnsweredRequest {
   sourceTaskId: string | null;
   questions: ApprovalQuestionJson[];
   responses: Record<string, unknown>;
+  /** Structured questions answered by the generic mapping, not the scenario's own answer. */
+  fallbacks: string[];
   askedAt: string;
   answeredAt: string;
   error: string | null;
@@ -121,7 +168,7 @@ export class HumanResponder {
     let count = 0;
     for (const request of pending) {
       if (this.answered.some((a) => a.id === request.id)) continue;
-      const responses = cannedResponses(request, this.spec.reply);
+      const { responses, fallbacks } = cannedResponses(request, this.spec);
       let error: string | null = null;
       try {
         await this.client.respondApprovalRequest(request.id, responses, CANNED_HUMAN);
@@ -137,6 +184,7 @@ export class HumanResponder {
         sourceTaskId: request.sourceTaskId,
         questions: request.questions,
         responses,
+        fallbacks,
         askedAt: request.createdAt,
         answeredAt: new Date().toISOString(),
         error,

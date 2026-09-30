@@ -365,6 +365,26 @@ export interface WorkerProfile {
  */
 export interface HumanInputSpec {
   reply: string;
+  /**
+   * Scenario-owned answer for a structured question (select, boolean), so the
+   * canned human never contradicts its own reply (e.g. picks "include" on an
+   * email question because the reply says "do not include"). Return undefined,
+   * or a value the respond route would reject, to fall back to the generic
+   * mapping; the artifact marks every fallback.
+   */
+  answer?: (question: HumanQuestion) => unknown;
+}
+
+/** One `request-human-input` question (root src/tools/request-human-input.ts QuestionSchema). */
+export interface HumanQuestion {
+  id: string;
+  type: "approval" | "text" | "single-select" | "multi-select" | "boolean";
+  label: string;
+  required?: boolean;
+  description?: string;
+  options?: { value: string; label: string; description?: string }[];
+  minSelections?: number;
+  maxSelections?: number;
 }
 
 export interface Scenario {

@@ -51,6 +51,13 @@ export const HARNESS_CRASH_SIGNATURES: HarnessCrashSignature[] = [
     retryable: true,
   },
   { kind: "provider-error", pattern: /^Provider returned error\b/i, retryable: true },
+  // Claude Code on a subscription: "You've hit your session limit · resets 12pm (UTC)".
+  // Not retried: every retry inside the window hits the same limit.
+  {
+    kind: "provider-error",
+    pattern: /\bYou've hit your (?:session|usage|weekly|daily) limit\b/i,
+    retryable: false,
+  },
 ];
 
 export interface HarnessCrash {

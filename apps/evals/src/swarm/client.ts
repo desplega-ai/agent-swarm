@@ -1,5 +1,5 @@
 import { isEffortLevel } from "../cost/effort.ts";
-import type { ReasoningEffortLevel, SwarmTask } from "../types.ts";
+import type { HumanQuestion, ReasoningEffortLevel, SwarmTask } from "../types.ts";
 
 const TERMINAL_STATUSES = new Set(["completed", "failed", "cancelled", "superseded"]);
 
@@ -28,16 +28,8 @@ export interface SessionCostRow {
  * The GET /api/agents subset the roster capture consumes (v7 §10.1 — per the
  * root AgentSchema: src/types.ts + src/http/agents.ts `listAgents`, slim shape).
  */
-/** One question of an approval request (root src/tools/request-human-input.ts QuestionSchema). */
-export interface ApprovalQuestionJson {
-  id: string;
-  type: "approval" | "text" | "single-select" | "multi-select" | "boolean";
-  label: string;
-  required?: boolean;
-  options?: { value: string; label: string; description?: string }[];
-  minSelections?: number;
-  maxSelections?: number;
-}
+/** One question of an approval request (same shape as the scenario-facing type). */
+export type ApprovalQuestionJson = HumanQuestion;
 
 /** Approval request as `GET /api/approval-requests` returns it (full shape). */
 export interface ApprovalRequestJson {
