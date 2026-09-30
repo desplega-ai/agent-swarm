@@ -1,4 +1,5 @@
 import { DownloadButton, OpenInAgentFsButton } from "@/components/comb/file-actions";
+import { UpdatedChip } from "@/components/comb/live-indicator";
 import { PinButton } from "@/components/comb/pin-button";
 import { VersionsMenu } from "@/components/comb/review/versions-menu";
 import { useAuthorLabel } from "@/components/comb/use-author-label";
@@ -31,6 +32,8 @@ export function FileHeader({ file, stat }: { file: DrivePath; stat: StatResult }
             <time dateTime={stat.modifiedAt} title={stat.modifiedAt}>
               {formatRelative(stat.modifiedAt)}
             </time>
+            {/* step-11: "Updated to vN" after another actor's version. */}
+            <UpdatedChip file={file} />
           </p>
         </div>
       }

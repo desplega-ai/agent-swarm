@@ -19,6 +19,7 @@ import { toast } from "sonner";
 import { useAgentFs } from "@/contexts/agent-fs-context";
 import { useDataUrl, useObjectUrl } from "@/hooks/use-object-url";
 import { type AgentFsClient, AgentFsError } from "@/lib/agent-fs/client";
+import { drivePoll } from "@/lib/agent-fs/invalidation";
 import { agentFsKey, agentFsRetry } from "@/lib/agent-fs/query";
 import type {
   CommentAddParams,
@@ -63,14 +64,17 @@ export interface AgentFsAccess {
   /** `useAgentFs().endpoint`, so the `connect()` eviction matches every key. */
   endpoint: string;
   userId: string | null;
+  /** The drive whose change stream is live (step-11). See `drivePoll`. */
+  liveDriveId?: string | null;
 }
 
 export function useAgentFsAccess(): AgentFsAccess {
-  const { state, client, endpoint, credential } = useAgentFs();
+  const { state, client, endpoint, credential, liveDriveId } = useAgentFs();
   return {
     client: state === "ready" ? client : null,
     endpoint: endpoint ?? "",
     userId: credential?.userId ?? null,
+    liveDriveId,
   };
 }
 
@@ -103,6 +107,7 @@ export function agentFsLsQuery(access: AgentFsAccess, target: DrivePath) {
       ),
     enabled: access.client !== null,
     retry: agentFsRetry,
+    refetchInterval: drivePoll(access, target, "ls"),
   });
 }
 
@@ -125,6 +130,7 @@ export function useAgentFsStat(target: DrivePath) {
       ),
     enabled: access.client !== null,
     retry: agentFsRetry,
+    refetchInterval: drivePoll(access, target, "stat"),
   });
 }
 
@@ -425,10 +431,11 @@ export function agentFsCommentsQuery(access: AgentFsAccess, file: DrivePath) {
     },
     enabled: access.client !== null,
     retry: agentFsRetry,
+    refetchInterval: drivePoll(access, file, "comments"),
   });
 }
 
-/** The file's threads. Polls on the dashboard default (10 s). Split open and resolved by `thread.resolved`. */
+/** The file's threads. Polls every 10 s unless the drive is live. Split open and resolved by `thread.resolved`. */
 export function useAgentFsComments(file: DrivePath) {
   return useQuery(agentFsCommentsQuery(useAgentFsAccess(), file));
 }

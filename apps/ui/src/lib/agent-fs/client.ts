@@ -39,6 +39,7 @@ interface RequestOptions {
   apiKey?: string;
   signal?: AbortSignal;
   cache?: RequestCache;
+  accept?: string;
 }
 
 function trimEndpoint(endpoint: string): string {
@@ -62,6 +63,7 @@ async function send(url: string, opts: RequestOptions = {}): Promise<Response> {
   const headers: Record<string, string> = {};
   if (opts.body !== undefined) headers["Content-Type"] = "application/json";
   if (opts.apiKey) headers.Authorization = `Bearer ${opts.apiKey}`;
+  if (opts.accept) headers.Accept = opts.accept;
 
   let res: Response;
   try {
@@ -177,5 +179,24 @@ export class AgentFsClient {
     options: { disposition?: SignedUrlDisposition; expiresIn?: number } = {},
   ): Promise<SignedUrlResult> {
     return this.callOp<SignedUrlResult>(orgId, "signed-url", { path, ...options }, driveId);
+  }
+
+  /**
+   * Open the drive change stream (`GET .../events`, Server-Sent Events, feature
+   * `change-stream`). Resolves with the body once the headers arrive. A 401
+   * (key), 404 (not a member), or 429 (too many streams) rejects with an
+   * `AgentFsError`. Abort `signal` to close the stream.
+   */
+  async openEvents(
+    orgId: string,
+    driveId: string,
+    opts: { signal?: AbortSignal } = {},
+  ): Promise<ReadableStream<Uint8Array>> {
+    const res = await send(
+      `${this.endpoint}/orgs/${encodeURIComponent(orgId)}/drives/${encodeURIComponent(driveId)}/events`,
+      { apiKey: this.#apiKey, signal: opts.signal, accept: "text/event-stream" },
+    );
+    if (!res.body) throw new AgentFsError(0, "NO_BODY", "agent-fs sent an empty event stream");
+    return res.body;
   }
 }

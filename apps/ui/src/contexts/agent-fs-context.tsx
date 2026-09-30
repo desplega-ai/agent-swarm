@@ -14,7 +14,9 @@ import {
   useMemo,
   useSyncExternalStore,
 } from "react";
+import { useMatch } from "react-router-dom";
 import { useStatusContext } from "@/app/status-context";
+import { type AgentFsLive, type LiveState, useAgentFsLive } from "@/hooks/use-agent-fs-live";
 import { useConfig } from "@/hooks/use-config";
 import { AgentFsClient, type AgentFsError } from "@/lib/agent-fs/client";
 import {
@@ -28,9 +30,9 @@ import { agentFsKey, agentFsRetry, recheckMeOnAuthError } from "@/lib/agent-fs/q
 import { type AgentFsState, combEndpoint, deriveAgentFsState } from "@/lib/agent-fs/state";
 import type { MeResponse } from "@/lib/agent-fs/types";
 
-export type { AgentFsState };
+export type { AgentFsState, LiveState };
 
-export interface AgentFsContextValue {
+export interface AgentFsContextValue extends AgentFsLive {
   state: AgentFsState;
   /** Browser-facing agent-fs URL. Null while disabled. Build query keys from it. */
   endpoint: string | null;
@@ -164,6 +166,16 @@ export function AgentFsProvider({ children }: { children: ReactNode }) {
     [statusPending, endpoint, hasCredential, me, meError],
   );
 
+  // Live updates (step-11): the change stream follows the drive in view, on Comb pages only.
+  const combRoute = useMatch("/file/~/:orgId/:driveId/*");
+  const { liveState, liveRelayed, liveDriveId, subscribeLive } = useAgentFsLive({
+    client: state === "ready" && features.has("change-stream") ? client : null,
+    endpoint,
+    userId,
+    orgId: combRoute?.params.orgId ?? null,
+    driveId: combRoute?.params.driveId ?? null,
+  });
+
   // Memoized: every link and attachment row reads this context.
   const orgId = comb?.org_id ?? null;
   const driveId = comb?.drive_id ?? null;
@@ -183,6 +195,10 @@ export function AgentFsProvider({ children }: { children: ReactNode }) {
       connect,
       disconnect,
       retry,
+      liveState,
+      liveRelayed,
+      liveDriveId,
+      subscribeLive,
     }),
     [
       state,
@@ -198,6 +214,10 @@ export function AgentFsProvider({ children }: { children: ReactNode }) {
       connect,
       disconnect,
       retry,
+      liveState,
+      liveRelayed,
+      liveDriveId,
+      subscribeLive,
     ],
   );
 

@@ -6,6 +6,7 @@ import { ConnectCard } from "@/components/comb/connect-card";
 import { OpenInAgentFsButton } from "@/components/comb/file-actions";
 import { FileView } from "@/components/comb/file-view";
 import { FolderView } from "@/components/comb/folder-view";
+import { LiveIndicator } from "@/components/comb/live-indicator";
 import { TreeRail } from "@/components/comb/tree-rail";
 import { EmptyState } from "@/components/shared/empty-state";
 import { PageSkeleton } from "@/components/shared/page-skeleton";
@@ -148,6 +149,8 @@ function ConnectedView() {
         }
         action={
           <div className="flex items-center gap-2">
+            {/* step-11: live updates indicator. */}
+            {location ? <LiveIndicator /> : null}
             <Badge variant="outline" className="hidden max-w-sm sm:inline-flex" title={connectedAs}>
               <span className="truncate">{connectedAs}</span>
             </Badge>
