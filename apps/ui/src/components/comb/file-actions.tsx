@@ -4,9 +4,11 @@ import { toast } from "sonner";
 import { useAgentFsAccess } from "@/api/hooks/use-agent-fs";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useAgentFs } from "@/contexts/agent-fs-context";
 import { drivePathToLiveUrl } from "@/lib/comb/links";
 import { baseName, type DrivePath } from "@/lib/comb/paths";
+import { formatBytes } from "@/lib/format-bytes";
 
 function clickLink(href: string, download?: string) {
   const link = document.createElement("a");
@@ -26,10 +28,16 @@ function clickLink(href: string, download?: string) {
 export function DownloadButton({
   file,
   variant = "outline",
+  iconOnly = false,
+  bytes,
 }: {
   file: DrivePath;
   /** `default` where Download is the state's one next action (no preview). */
   variant?: "outline" | "default";
+  /** An icon button with a tooltip (the file header). */
+  iconOnly?: boolean;
+  /** The file size, for the tooltip. */
+  bytes?: number;
 }) {
   const { client } = useAgentFsAccess();
   const [pending, setPending] = useState(false);
@@ -57,6 +65,30 @@ export function DownloadButton({
     }
   };
 
+  if (iconOnly) {
+    const label = bytes === undefined ? "Download" : `Download (${formatBytes(bytes)})`;
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            size="icon-sm"
+            variant="ghost"
+            onClick={() => {
+              if (!pending) void download();
+            }}
+            // Not `disabled` while it downloads: the tooltip keeps its pointer events.
+            aria-disabled={pending || !client}
+            className="aria-disabled:opacity-50"
+            aria-label={label}
+          >
+            {pending ? <Spinner /> : <Download />}
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent side="bottom">{label}</TooltipContent>
+      </Tooltip>
+    );
+  }
+
   return (
     <Button
       size="sm"
@@ -75,17 +107,34 @@ export function DownloadButton({
  * Open the same file or folder in the agent-fs live UI (new tab). Hidden
  * without a live URL, and for a path that would leave the drive (step-13).
  * `labeled`: keep the text on phones (the button stands alone).
+ * `iconOnly`: an icon button with a tooltip (headers).
  */
 export function OpenInAgentFsButton({
   target,
   labeled = false,
+  iconOnly = false,
 }: {
   target: DrivePath;
   labeled?: boolean;
+  iconOnly?: boolean;
 }) {
   const { liveUrl } = useAgentFs();
   const href = liveUrl ? drivePathToLiveUrl(target, liveUrl) : null;
   if (!href) return null;
+  if (iconOnly) {
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button asChild size="icon-sm" variant="ghost">
+            <a href={href} target="_blank" rel="noreferrer" aria-label="Open in agent-fs">
+              <ExternalLink />
+            </a>
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent side="bottom">Open in agent-fs</TooltipContent>
+      </Tooltip>
+    );
+  }
   return (
     <Button asChild size="sm" variant="outline">
       <a href={href} target="_blank" rel="noreferrer" aria-label="Open in agent-fs">

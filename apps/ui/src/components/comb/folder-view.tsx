@@ -117,8 +117,8 @@ export function FolderView({ folder }: { folder: DrivePath }) {
         action={
           <>
             {/* Folder actions: later steps add buttons here. The root is the Comb item, so no pin. */}
-            {folder.path === "/" ? null : <PinButton target={folder} />}
-            <OpenInAgentFsButton target={folder} />
+            {folder.path === "/" ? null : <PinButton target={folder} className="size-8" />}
+            <OpenInAgentFsButton target={folder} iconOnly />
           </>
         }
       />

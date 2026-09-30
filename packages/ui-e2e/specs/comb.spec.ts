@@ -101,7 +101,8 @@ test("Comb connects, comments, replies, and resolves on agent-fs", { tag: "@loca
     await page.getByRole("tab", { name: "Paste a key" }).click();
     await page.getByRole("textbox", { name: "agent-fs key" }).fill(human.apiKey);
     await page.getByRole("button", { name: "Connect", exact: true }).click();
-    await expect(page.getByText(`Connected as ${humanEmail}`)).toBeVisible();
+    // The account button in the Comb header names who is connected.
+    await expect(page.getByRole("button", { name: `Connected as ${humanEmail}` })).toBeVisible();
 
     await page.goto(`/file/~/${drive}/comb-e2e/notes.md`);
     await expect(page.getByRole("heading", { name: "E2E notes" })).toBeVisible();
