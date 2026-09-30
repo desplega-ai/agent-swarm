@@ -56,7 +56,7 @@ import { formatRelative } from "@/lib/relative-time";
 import { DiffViewer } from "./diff-viewer";
 
 /** Revert answered 409: a version newer than the reviewed one landed. */
-export const STALE_REVIEW_MESSAGE = "The file changed, reload the diff";
+export const STALE_REVIEW_MESSAGE = "The file changed. Reload the diff";
 
 interface ReviewPanelProps {
   file: DrivePath;

@@ -75,13 +75,13 @@ function Line({ line }: { line: DiffLine }) {
     >
       <span
         aria-hidden
-        className="w-10 shrink-0 select-none pr-1 text-right tabular-nums text-muted-foreground/50"
+        className="w-10 shrink-0 select-none pr-1 text-right tabular-nums text-muted-foreground"
       >
         {line.oldLine ?? ""}
       </span>
       <span
         aria-hidden
-        className="w-10 shrink-0 select-none pr-1 text-right tabular-nums text-muted-foreground/50"
+        className="w-10 shrink-0 select-none pr-1 text-right tabular-nums text-muted-foreground"
       >
         {line.newLine ?? ""}
       </span>

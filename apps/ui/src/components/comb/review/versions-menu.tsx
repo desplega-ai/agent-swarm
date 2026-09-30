@@ -12,6 +12,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { StatResult } from "@/lib/agent-fs/types";
 import type { DrivePath } from "@/lib/comb/paths";
 import { DIFF_PARAM, formatDiffRange, showReviewEntry } from "@/lib/comb/review";
@@ -27,6 +28,27 @@ export function VersionsMenu({ file, stat }: { file: DrivePath; stat: StatResult
   const [, setSearchParams] = useSearchParams();
   const current = stat.currentVersion;
   if (current === undefined || !showReviewEntry(file.path, stat)) return null;
+  // Nothing to compare yet: a blocked button that says why, no menu.
+  if (current <= 1) {
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            size="sm"
+            variant="outline"
+            aria-disabled="true"
+            aria-label="Versions"
+            className="aria-disabled:opacity-50"
+            onClick={(event) => event.preventDefault()}
+          >
+            <History />
+            <span className="hidden sm:inline">Versions</span>
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>Only one version so far</TooltipContent>
+      </Tooltip>
+    );
+  }
 
   const compare = (version: number) =>
     setSearchParams((params) => {
