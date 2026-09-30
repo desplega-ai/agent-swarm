@@ -94,6 +94,8 @@ Connect to `/api/realtime?ticket=<ticket>`. `/@swarm/realtime` accepts the same 
 
 Use namespace `presence:comb:<orgId>:<driveId>` and room name `default`.
 Both IDs must match `[A-Za-z0-9_-]{1,64}`. Put the current file path in the presence payload.
+The IDs must be the configured Comb drive (`AGENT_FS_DEFAULT_ORG_ID`, `AGENT_FS_DEFAULT_DRIVE_ID`), and Comb must be on.
+The server does not check agent-fs drive membership: any dashboard principal with `comb.presence` sees the selections.
 Only operator and active user dashboard principals may use these rooms.
 Agents and page sessions cannot join them. RBAC users need `comb.presence`.
 The server accepts only `join`, `leave`, and `presence` for this namespace.

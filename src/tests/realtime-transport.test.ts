@@ -13,6 +13,10 @@ type SocketHeaders = Record<string, string>;
 const dbPath = `/tmp/test-realtime-transport-${Date.now()}-${randomUUID()}.sqlite`;
 const apiKey = `realtime-test-${randomUUID()}`;
 const pageSecret = `realtime-page-secret-${randomUUID()}`;
+// Comb presence only opens for the configured drive while Comb is on.
+const combOrgId = randomUUID();
+const combDriveId = randomUUID();
+const combNamespace = `presence:comb:${combOrgId}:${combDriveId}`;
 let baseUrl = "";
 let socketUrl = "";
 let server: Subprocess;
@@ -279,6 +283,10 @@ beforeAll(async () => {
       JIRA_DISABLE: "true",
       AGENTMAIL_DISABLE: "true",
       OAUTH_KEEPALIVE_DISABLE: "true",
+      COMB_ENABLED: "true",
+      AGENT_FS_API_URL: "http://127.0.0.1:9",
+      AGENT_FS_DEFAULT_ORG_ID: combOrgId,
+      AGENT_FS_DEFAULT_DRIVE_ID: combDriveId,
     },
     stdout: "ignore",
     stderr: "ignore",
@@ -475,6 +483,10 @@ describe("realtime transport", () => {
         JIRA_DISABLE: "true",
         AGENTMAIL_DISABLE: "true",
         OAUTH_KEEPALIVE_DISABLE: "true",
+        COMB_ENABLED: "true",
+        AGENT_FS_API_URL: "http://127.0.0.1:9",
+        AGENT_FS_DEFAULT_ORG_ID: combOrgId,
+        AGENT_FS_DEFAULT_DRIVE_ID: combDriveId,
       },
       stdout: "ignore",
       stderr: "ignore",
@@ -561,7 +573,7 @@ describe("realtime transport", () => {
     const aliasUrl = socketUrl.replace("/@swarm/realtime", "/api/realtime");
     const operator = await openSocket({}, `${aliasUrl}?ticket=${operatorTicket.ticket}`);
     const user = await openSocket({}, `${socketUrl}?ticket=${userTicket.ticket}`);
-    const namespace = `presence:comb:${randomUUID()}:${randomUUID()}`;
+    const namespace = combNamespace;
     try {
       const operatorHello = await operator.next((frame) => frame.type === "hello");
       expect(operatorHello.me).toMatchObject({ kind: "guest" });
@@ -609,6 +621,14 @@ describe("realtime transport", () => {
       operator.send({ id: 7, op: "join", name: "another", namespace });
       const roomDenied = await operator.next((frame) => frame.type === "error" && frame.id === 7);
       expect(roomDenied.error).toContain("default room");
+      operator.send({
+        id: 8,
+        op: "join",
+        name: "default",
+        namespace: `presence:comb:${combOrgId}:${randomUUID()}`,
+      });
+      const driveDenied = await operator.next((frame) => frame.type === "error" && frame.id === 8);
+      expect(driveDenied.error).toContain("configured Comb drive");
 
       await closeSocket(operator);
       const left = await user.next(
@@ -637,7 +657,7 @@ describe("realtime transport", () => {
         id: 1,
         op: "join",
         name: "default",
-        namespace: `presence:comb:${randomUUID()}:${randomUUID()}`,
+        namespace: combNamespace,
       });
       const denied = await client.next((frame) => frame.type === "error" && frame.id === 1);
       expect(denied.error).toContain("dashboard authentication");

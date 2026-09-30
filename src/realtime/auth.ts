@@ -1,6 +1,7 @@
 import type { IncomingMessage } from "node:http";
 import { getAgentById, getTaskById } from "../be/db";
 import { getUserGrant } from "../be/rbac-roles";
+import { getCombConfig } from "../comb/config";
 import { mcpOverflowAuthError } from "../kv-overflow";
 import { reservedNamespaceError } from "../kv-reserved-namespaces";
 import { can, isRbacEnabled } from "../rbac";
@@ -108,6 +109,16 @@ export async function authorizeRoomNamespace(
   if (namespace.startsWith("presence:comb:")) {
     if (!COMB_PRESENCE_NAMESPACE.test(namespace)) {
       return "invalid Comb presence namespace";
+    }
+    // Presence is for the swarm's shared Comb drive only, and only while Comb is on.
+    const comb = getCombConfig();
+    if (!comb.enabled) return "Comb is off";
+    if (
+      !comb.orgId ||
+      !comb.driveId ||
+      namespace !== `presence:comb:${comb.orgId}:${comb.driveId}`
+    ) {
+      return "Comb presence is only available for the configured Comb drive";
     }
     if (info.pageId || info.agentId || (!info.isOperator && !info.userId)) {
       return "Comb presence requires dashboard authentication";

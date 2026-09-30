@@ -44,10 +44,34 @@ describe("realtime room namespace guards", () => {
   });
 
   test("limits Comb presence namespaces to dashboard presence operations", async () => {
-    const previous = process.env.RBAC_ENABLED;
+    const keys = [
+      "RBAC_ENABLED",
+      "COMB_ENABLED",
+      "AGENT_FS_API_URL",
+      "AGENT_FS_DEFAULT_ORG_ID",
+      "AGENT_FS_DEFAULT_DRIVE_ID",
+    ] as const;
+    const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
     process.env.RBAC_ENABLED = "false";
+    process.env.COMB_ENABLED = "true";
+    process.env.AGENT_FS_API_URL = "http://agent-fs.test";
+    process.env.AGENT_FS_DEFAULT_ORG_ID = "org_123";
+    process.env.AGENT_FS_DEFAULT_DRIVE_ID = "drive-456";
     const namespace = "presence:comb:org_123:drive-456";
     try {
+      // Only the configured drive, and only while Comb is on.
+      await expect(
+        authorizeRoomNamespace(
+          "presence:comb:org_123:other-drive",
+          { isOperator: true, callOrigin: "ws" },
+          "join",
+        ),
+      ).resolves.toContain("configured Comb drive");
+      process.env.COMB_ENABLED = "false";
+      await expect(
+        authorizeRoomNamespace(namespace, { isOperator: true, callOrigin: "ws" }, "join"),
+      ).resolves.toBe("Comb is off");
+      process.env.COMB_ENABLED = "true";
       await expect(
         authorizeRoomNamespace(namespace, { isOperator: true, callOrigin: "ws" }, "join"),
       ).resolves.toBeNull();
@@ -78,8 +102,10 @@ describe("realtime room namespace guards", () => {
         ),
       ).resolves.toContain("invalid");
     } finally {
-      if (previous === undefined) delete process.env.RBAC_ENABLED;
-      else process.env.RBAC_ENABLED = previous;
+      for (const key of keys) {
+        if (previous[key] === undefined) delete process.env[key];
+        else process.env[key] = previous[key];
+      }
     }
   });
 
