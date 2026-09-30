@@ -1,49 +1,16 @@
-import { useQuery } from "@tanstack/react-query";
 import { MessageSquare } from "lucide-react";
 import { useMemo } from "react";
 import { Link } from "react-router-dom";
-import { agentFsCommentsKey, agentFsRetry, useAgentFsAccess } from "@/api/hooks/use-agent-fs";
+import { useFolderThreads } from "@/api/hooks/use-agent-fs";
 import { SendBatchButton } from "@/components/comb/send-to-swarm";
 import { useAuthorLabel } from "@/components/comb/use-author-label";
 import { useCombServiceUserId } from "@/components/comb/use-comb-service-user";
 import { Badge } from "@/components/ui/badge";
 import { useAgentFs } from "@/contexts/agent-fs-context";
-import type { AgentFsClient } from "@/lib/agent-fs/client";
-import type { CommentListEntry, CommentListResult } from "@/lib/agent-fs/types";
-import { type FileThreads, listFileThreads } from "@/lib/comb/comments";
+import type { CommentListEntry } from "@/lib/agent-fs/types";
+import { commentCombPath } from "@/lib/comb/comments";
 import { hasSwarmMarker, isSentToSwarm } from "@/lib/comb/markers";
 import { combPath, type DrivePath } from "@/lib/comb/paths";
-
-/**
- * Open root comments on every file below `folder` (`comment-list
- * {pathPrefix}`, agent-fs feature `comment-path-prefix`). The key lives under
- * the drive's comment prefix, so a send or a new comment refreshes it.
- */
-function useFolderComments(folder: DrivePath, enabled: boolean) {
-  const access = useAgentFsAccess();
-  return useQuery({
-    queryKey: agentFsCommentsKey(access, folder, "prefix", folder.path),
-    queryFn: ({ signal }): Promise<FileThreads> =>
-      listFileThreads([folder.path], async (pathPrefix, offset, limit) => {
-        const page = await (access.client as AgentFsClient).callOp<CommentListResult>(
-          folder.orgId,
-          "comment-list",
-          { pathPrefix, limit, offset },
-          folder.driveId,
-          { signal },
-        );
-        return page.comments;
-      }),
-    enabled: enabled && access.client !== null,
-    retry: agentFsRetry,
-    refetchInterval: 10_000, // step-11: drivePoll
-  });
-}
-
-/** agent-fs returns comment paths in either stored form. Comb paths start with "/". */
-function normalizedPath(path: string): string {
-  return `/${path.replace(/^\/+/, "")}`;
-}
 
 /**
  * The folder's "Open comments" panel: open threads grouped by file, with
@@ -53,7 +20,7 @@ function normalizedPath(path: string): string {
 export function FolderComments({ folder }: { folder: DrivePath }) {
   const { features } = useAgentFs();
   const supported = features.has("comment-path-prefix");
-  const query = useFolderComments(folder, supported);
+  const query = useFolderThreads(folder, supported);
   const authorLabel = useAuthorLabel(folder);
   const serviceUserId = useCombServiceUserId();
   const threads = query.data?.threads;
@@ -61,7 +28,7 @@ export function FolderComments({ folder }: { folder: DrivePath }) {
   const groups = useMemo(() => {
     const byPath = new Map<string, CommentListEntry[]>();
     for (const thread of threads ?? []) {
-      const path = normalizedPath(thread.path);
+      const path = commentCombPath(thread.path);
       byPath.set(path, [...(byPath.get(path) ?? []), thread]);
     }
     return [...byPath].sort(([a], [b]) => a.localeCompare(b));

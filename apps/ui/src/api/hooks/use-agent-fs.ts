@@ -5,7 +5,8 @@
 // pass `retry: agentFsRetry`. Keys start with "agent-fs", so these results
 // never persist to the dashboard's localStorage query cache, and
 // `disconnect()` drops them all at once. This file imports the context, never
-// the reverse.
+// the reverse. The one swarm API call here is `useSendCombReviewBatch`: it
+// refreshes these agent-fs comment queries.
 
 import {
   type QueryKey,
@@ -15,6 +16,8 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 import { useState } from "react";
+import { api } from "@/api/client";
+import type { CombReviewBatchInput, CombReviewBatchResult } from "@/api/types";
 import { useAgentFs } from "@/contexts/agent-fs-context";
 import { useDataUrl, useObjectUrl } from "@/hooks/use-object-url";
 import { type AgentFsClient, AgentFsError } from "@/lib/agent-fs/client";
@@ -471,5 +474,60 @@ export function agentFsDiffQuery(access: AgentFsAccess, file: DrivePath, v1: num
     refetchInterval: false,
     retry: false,
     gcTime: 5 * 60_000,
+  });
+}
+
+// --- Send to swarm (step-9) --------------------------------------------------
+
+/**
+ * Open root threads on every file below `folder` (`comment-list {pathPrefix}`,
+ * agent-fs feature `comment-path-prefix`), newest first. The key lives under
+ * the drive's comment prefix, so a send or a new comment refreshes it. Key:
+ * `(..., "comments", "prefix", folderPath)`.
+ */
+export function useFolderThreads(folder: DrivePath, enabled: boolean) {
+  const access = useAgentFsAccess();
+  return useQuery({
+    queryKey: agentFsCommentsKey(access, folder, "prefix", folder.path),
+    queryFn: ({ signal }): Promise<FileThreads> => {
+      const client = connectedClient(access);
+      return listFileThreads([folder.path], async (pathPrefix, offset, limit) => {
+        const page = await client.callOp<CommentListResult>(
+          folder.orgId,
+          "comment-list",
+          { pathPrefix, limit, offset },
+          folder.driveId,
+          { signal },
+        );
+        return page.comments;
+      });
+    },
+    enabled: enabled && access.client !== null,
+    retry: agentFsRetry,
+    refetchInterval: 10_000, // step-11: drivePoll
+  });
+}
+
+/**
+ * "Send to swarm": `POST /api/comb/review-batches` for comments of `drive`.
+ * Settling refreshes every comment query of the drive (the file rails and the
+ * folder lists), so the "Sent to the swarm" replies show at once. The caller
+ * passes its toasts as `onSuccess` and `onError`.
+ */
+export function useSendCombReviewBatch(
+  drive: { orgId: string; driveId: string },
+  callbacks: {
+    onSuccess?: (result: CombReviewBatchResult) => void;
+    onError?: (error: Error) => void;
+  } = {},
+) {
+  const access = useAgentFsAccess();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: Pick<CombReviewBatchInput, "commentIds" | "scopePath">) =>
+      api.sendCombReviewBatch({ orgId: drive.orgId, driveId: drive.driveId, ...input }),
+    onSuccess: callbacks.onSuccess,
+    onError: callbacks.onError,
+    onSettled: () => queryClient.invalidateQueries({ queryKey: agentFsCommentsKey(access, drive) }),
   });
 }

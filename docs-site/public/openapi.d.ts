@@ -4901,7 +4901,7 @@ export interface paths {
         put?: never;
         /**
          * Send agent-fs comments to the swarm as one lead task
-         * @description Comb's 'Send to swarm'. The server reads each comment again from agent-fs with its bootstrap key, skips replies, resolved comments, and comments already sent, and creates ONE task for the lead. Each sent comment gets a `[comb:sent task=<id>]` reply from the swarm service account. A comment is sent at most once. Answers 404 while COMB_ENABLED is off.
+         * @description Comb's 'Send to swarm'. The server reads each comment again from agent-fs with its bootstrap key, skips replies, resolved comments, and comments already sent, and creates ONE task for the lead. Each sent comment gets a `[comb:sent task=<id>]` reply from the swarm service account. A comment is sent at most once. When an earlier send lost its reply, the batch posts that reply again (`repaired`). Answers 404 while COMB_ENABLED is off.
          */
         post: {
             parameters: {
@@ -4921,6 +4921,28 @@ export interface paths {
                 };
             };
             responses: {
+                /** @description No new task: the batch only posted missing 'sent' replies again */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            taskId: string | null;
+                            sent: string[];
+                            skipped: {
+                                id: string;
+                                /** @enum {string} */
+                                reason: "not-found" | "reply" | "resolved" | "already-sent";
+                                taskId?: string;
+                            }[];
+                            repaired: {
+                                id: string;
+                                taskId: string;
+                            }[];
+                        };
+                    };
+                };
                 /** @description Task created */
                 201: {
                     headers: {
@@ -4928,12 +4950,17 @@ export interface paths {
                     };
                     content: {
                         "application/json": {
-                            taskId: string;
+                            taskId: string | null;
                             sent: string[];
                             skipped: {
                                 id: string;
                                 /** @enum {string} */
                                 reason: "not-found" | "reply" | "resolved" | "already-sent";
+                                taskId?: string;
+                            }[];
+                            repaired: {
+                                id: string;
+                                taskId: string;
                             }[];
                         };
                     };
@@ -4965,7 +4992,7 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
-                /** @description Nothing to send (every comment was skipped), or the template is disabled */
+                /** @description Nothing to send (every comment was skipped) */
                 409: {
                     headers: {
                         [name: string]: unknown;
@@ -4977,6 +5004,7 @@ export interface paths {
                                 id: string;
                                 /** @enum {string} */
                                 reason: "not-found" | "reply" | "resolved" | "already-sent";
+                                taskId?: string;
                             }[];
                         };
                     };
@@ -4999,13 +5027,21 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
-                /** @description agent-fs is not set up for this swarm */
+                /** @description agent-fs or the swarm drive is not set up, or an operator disabled a Comb review template */
                 503: {
                     headers: {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
+                        "application/json": {
+                            error: string;
+                            skipped: {
+                                id: string;
+                                /** @enum {string} */
+                                reason: "not-found" | "reply" | "resolved" | "already-sent";
+                                taskId?: string;
+                            }[];
+                        };
                     };
                 };
             };

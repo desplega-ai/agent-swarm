@@ -233,12 +233,9 @@ async function throwTriggerSchemaErrorIfMatch(res: Response, genericLabel: strin
 }
 
 /**
- * A rejected extension install. `POST /api/extensions/install` answers 400 with
- * `{ error: "extension_validation_failed", diagnostics: string[] }` when the
- * catalog bundle fails validation, and 404 for an unknown template; the catalog
- * page renders `diagnostics` inline, one line per finding.
+ * "Send to swarm" failed. A 409 or 503 carries why each comment was left out
+ * (an "already-sent" entry names its task when known).
  */
-/** "Send to swarm" failed. A 409 carries why each comment was left out. */
 export class CombSendError extends Error {
   readonly status: number;
   readonly skipped: CombSkippedComment[];
@@ -251,6 +248,12 @@ export class CombSendError extends Error {
   }
 }
 
+/**
+ * A rejected extension install. `POST /api/extensions/install` answers 400 with
+ * `{ error: "extension_validation_failed", diagnostics: string[] }` when the
+ * catalog bundle fails validation, and 404 for an unknown template; the catalog
+ * page renders `diagnostics` inline, one line per finding.
+ */
 export class ExtensionInstallError extends Error {
   readonly diagnostics: string[];
   constructor(message: string, diagnostics: string[]) {

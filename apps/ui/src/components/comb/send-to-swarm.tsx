@@ -1,11 +1,10 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Send } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { api, CombSendError } from "@/api/client";
-import { agentFsCommentsKey, useAgentFsAccess } from "@/api/hooks/use-agent-fs";
-import type { CombReviewBatchResult, CombSkippedComment, CombSkipReason } from "@/api/types";
+import { CombSendError } from "@/api/client";
+import { useSendCombReviewBatch } from "@/api/hooks/use-agent-fs";
+import type { CombRepairedComment, CombSkippedComment, CombSkipReason } from "@/api/types";
 import { useAuthorLabel } from "@/components/comb/use-author-label";
 import { useCombServiceUserId } from "@/components/comb/use-comb-service-user";
 import { Button } from "@/components/ui/button";
@@ -21,7 +20,8 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { CommentListEntry } from "@/lib/agent-fs/types";
-import { canSendThread, eligibleForBatch } from "@/lib/comb/batch";
+import { COMB_BATCH_MAX, canSendThread, eligibleForBatch } from "@/lib/comb/batch";
+import { commentCombPath, lineRangeLabel } from "@/lib/comb/comments";
 import type { DrivePath } from "@/lib/comb/paths";
 
 type Drive = { orgId: string; driveId: string };
@@ -37,7 +37,7 @@ function plural(count: number, word: string): string {
   return `${count} ${word}${count === 1 ? "" : "s"}`;
 }
 
-/** "2 already sent, 1 resolved." for the toast. */
+/** "Left out: 2 already sent, 1 resolved." for the toast. */
 function skippedSummary(skipped: CombSkippedComment[]): string | undefined {
   if (skipped.length === 0) return undefined;
   const counts = new Map<CombSkipReason, number>();
@@ -46,35 +46,47 @@ function skippedSummary(skipped: CombSkippedComment[]): string | undefined {
   return `Left out: ${parts.join(", ")}.`;
 }
 
+function repairedSummary(repaired: CombRepairedComment[]): string | undefined {
+  if (repaired.length === 0) return undefined;
+  return `Posted the missing task link on ${plural(repaired.length, "earlier comment")}.`;
+}
+
 /**
- * `POST /api/comb/review-batches`: one lead task for the comments. Toasts the
- * result and refreshes every comment query of the drive (the file rails and
- * the folder lists), so the "Sent to the swarm" replies show at once.
+ * `useSendCombReviewBatch` with the result toasts. A send that only repaired
+ * the missing replies of an earlier send (no new task) links that task.
  */
 function useSendToSwarm(drive: Drive) {
-  const access = useAgentFsAccess();
-  const queryClient = useQueryClient();
   const navigate = useNavigate();
-  return useMutation({
-    mutationFn: (input: { commentIds: string[]; scopePath: string }) =>
-      api.sendCombReviewBatch({ orgId: drive.orgId, driveId: drive.driveId, ...input }),
-    onSuccess: ({ taskId, sent, skipped }: CombReviewBatchResult) => {
-      toast.success(`Sent ${plural(sent.length, "comment")} · task ${taskId.slice(0, 8)}`, {
-        description: skippedSummary(skipped),
-        action: { label: "Open task", onClick: () => navigate(`/tasks/${taskId}`) },
-      });
+  const openTask = (taskId: string) => ({
+    label: "Open task",
+    onClick: () => navigate(`/tasks/${taskId}`),
+  });
+  return useSendCombReviewBatch(drive, {
+    onSuccess: ({ taskId, sent, skipped, repaired }) => {
+      const description =
+        [skippedSummary(skipped), repairedSummary(repaired)].filter(Boolean).join(" ") || undefined;
+      const linked = taskId ?? repaired[0]?.taskId;
+      toast.success(
+        taskId
+          ? `Sent ${plural(sent.length, "comment")} · task ${taskId.slice(0, 8)}`
+          : "Already sent to the swarm",
+        { description, action: linked ? openTask(linked) : undefined },
+      );
     },
     onError: (error) => {
-      const skipped = error instanceof CombSendError ? skippedSummary(error.skipped) : undefined;
-      toast.error(error.message, { description: skipped });
+      const skipped = error instanceof CombSendError ? error.skipped : [];
+      const tasks = [...new Set(skipped.flatMap((item) => (item.taskId ? [item.taskId] : [])))];
+      toast.error(error.message, {
+        description: skippedSummary(skipped),
+        action: tasks.length === 1 ? openTask(tasks[0] as string) : undefined,
+      });
     },
-    onSettled: () => queryClient.invalidateQueries({ queryKey: agentFsCommentsKey(access, drive) }),
   });
 }
 
 /**
  * Thread action (the comment rail's `threadActions`): "Send to swarm" on an
- * open root comment that was not sent yet, with a confirm popover.
+ * open root comment with `@swarm` that was not sent yet, with a confirm popover.
  */
 export function SendThreadButton({ file, thread }: { file: DrivePath; thread: CommentListEntry }) {
   const serviceUserId = useCombServiceUserId();
@@ -205,10 +217,14 @@ function SendBatchDialog({
 }) {
   const send = useSendToSwarm(drive);
   const authorLabel = useAuthorLabel(drive);
-  // Every comment starts checked. The list is fixed while the dialog is open.
+  // The list is fixed while the dialog is open. One send carries at most
+  // COMB_BATCH_MAX comments: the first ones start checked, the rest wait.
   const [listed] = useState(threads);
-  const [checked, setChecked] = useState(() => new Set(threads.map((thread) => thread.id)));
+  const [checked, setChecked] = useState(
+    () => new Set(threads.slice(0, COMB_BATCH_MAX).map((thread) => thread.id)),
+  );
   const selected = listed.filter((thread) => checked.has(thread.id));
+  const full = checked.size >= COMB_BATCH_MAX;
 
   const toggle = (id: string) =>
     setChecked((current) => {
@@ -234,6 +250,7 @@ function SendBatchDialog({
                 <input
                   type="checkbox"
                   checked={checked.has(thread.id)}
+                  disabled={full && !checked.has(thread.id)}
                   onChange={() => toggle(thread.id)}
                   className="mt-0.5 size-4 shrink-0 rounded border-input accent-primary"
                 />
@@ -243,10 +260,8 @@ function SendBatchDialog({
                       {thread.authorDisplayName || authorLabel(thread.author)}
                     </span>
                     <span className="shrink-0 font-mono text-[11px]">
-                      {showPaths ? `/${thread.path.replace(/^\/+/, "")} ` : ""}
-                      {thread.lineStart
-                        ? `L${thread.lineStart}${thread.lineEnd && thread.lineEnd !== thread.lineStart ? `-${thread.lineEnd}` : ""}`
-                        : "File"}
+                      {showPaths ? `${commentCombPath(thread.path)} ` : ""}
+                      {lineRangeLabel(thread.lineStart, thread.lineEnd) ?? "File"}
                     </span>
                   </span>
                   <span className="line-clamp-2 break-words text-sm">{thread.body}</span>
@@ -255,6 +270,11 @@ function SendBatchDialog({
             </li>
           ))}
         </ul>
+        {listed.length > COMB_BATCH_MAX ? (
+          <p className="text-xs text-muted-foreground">
+            Only the first {COMB_BATCH_MAX} are sent in one batch. Send again for the rest.
+          </p>
+        ) : null}
         <DialogFooter>
           <DialogClose asChild>
             <Button variant="ghost">Cancel</Button>

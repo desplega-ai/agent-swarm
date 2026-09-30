@@ -5,8 +5,10 @@ import {
   COMB_LOG_LIMIT,
   COMMENT_LIST_MAX,
   COMMENT_PAGE_SIZE,
+  commentCombPath,
   commentReadPaths,
   commentWritePath,
+  lineRangeLabel,
   listFileThreads,
   mergeCommentLists,
   versionAt,
@@ -44,6 +46,15 @@ describe("comment paths", () => {
       "comb-qa/notes.md",
       "/comb-qa/notes.md",
     ]);
+    expect(commentCombPath("comb-qa/notes.md")).toBe("/comb-qa/notes.md");
+    expect(commentCombPath("//comb-qa/notes.md")).toBe("/comb-qa/notes.md");
+  });
+
+  test("line labels read L3, L3-5, or nothing", () => {
+    expect(lineRangeLabel(3, 5)).toBe("L3-5");
+    expect(lineRangeLabel(3, 3)).toBe("L3");
+    expect(lineRangeLabel(3)).toBe("L3");
+    expect(lineRangeLabel(undefined, 5)).toBeNull();
   });
 
   test("a comment's version is the newest one written at or before it", () => {

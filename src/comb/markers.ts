@@ -19,18 +19,19 @@ interface Authored {
 }
 
 /**
- * True when a reply of the thread is the swarm's "sent" reply: it starts with
+ * The task id of the thread's "sent" reply, or null. The reply starts with
  * the marker, and the swarm service account wrote it. Without a known service
  * account, any author except the thread's own author counts.
  */
-export function isSentToSwarm(
+export function sentTaskId(
   thread: { author: string },
   replies: ReadonlyArray<Authored>,
   serviceUserId: string | null,
-): boolean {
-  return replies.some(
-    (reply) =>
-      SENT_MARKER_RE.test(reply.body) &&
-      (serviceUserId ? reply.author === serviceUserId : reply.author !== thread.author),
-  );
+): string | null {
+  for (const reply of replies) {
+    const bySwarm = serviceUserId ? reply.author === serviceUserId : reply.author !== thread.author;
+    const taskId = bySwarm ? SENT_MARKER_RE.exec(reply.body)?.[1] : undefined;
+    if (taskId) return taskId;
+  }
+  return null;
 }

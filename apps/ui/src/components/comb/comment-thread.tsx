@@ -11,6 +11,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { AgentFsError } from "@/lib/agent-fs/client";
 import type { CommentEntry, CommentListEntry } from "@/lib/agent-fs/types";
 import { type AnchorResolution, commentQuote } from "@/lib/comb/comment-anchor";
+import { lineRangeLabel } from "@/lib/comb/comments";
 import { sentReplyTaskId, splitSwarmMarkers } from "@/lib/comb/markers";
 import { formatRelative } from "@/lib/relative-time";
 import { cn } from "@/lib/utils";
@@ -128,10 +129,7 @@ export function CommentThread({
   const lineEnd = anchor?.lineStart != null ? anchor.lineEnd : thread.lineEnd;
   const badge = anchor && anchor.status !== "anchored" ? ANCHOR_BADGES[anchor.status] : null;
   const fileLevel = !quote && thread.lineStart == null;
-  const lines =
-    lineStart && anchor?.status !== "lost"
-      ? `L${lineStart}${lineEnd && lineEnd !== lineStart ? `-${lineEnd}` : ""}`
-      : null;
+  const lines = anchor?.status !== "lost" ? lineRangeLabel(lineStart, lineEnd) : null;
 
   // A closed reply box gives focus back to the Reply button.
   const replyButtonRef = useRef<HTMLButtonElement>(null);

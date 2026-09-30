@@ -687,6 +687,10 @@ export function computeHealth(setup: SetupMilestone[]): StatusHealth {
 // ─── Public payload builder (also exported for tests) ────────────────────────
 
 export async function buildStatusPayload(): Promise<StatusResponse> {
+  // step-9: the agent-fs identity lookup (at most 2 s) runs while the DB work below does.
+  const combServiceUserId = getCombConfig().enabled
+    ? getCombServiceUserId()
+    : Promise.resolve(null);
   const automationSetup = await getAutomationSetupStates();
   const setup = await buildSetup(automationSetup);
   const automationInputs = await listEnabledAutomationPreflightInputs();
@@ -695,22 +699,23 @@ export async function buildStatusPayload(): Promise<StatusResponse> {
   const automations: AutomationStatus[] = automationInputs
     .map((automation) => toStatus(preflightAutomation(automation, automationSetup)))
     .sort((a, b) => a.name.localeCompare(b.name) || a.kind.localeCompare(b.kind));
+  const activity = await getInstanceActivity();
   return {
     identity: buildIdentity(),
     setup,
-    activity: await getInstanceActivity(),
+    activity,
     agent_fs: {
       configured: !!process.env.AGENT_FS_API_URL,
       base_url: process.env.AGENT_FS_API_URL ?? null,
       ...getAgentFsStatusProvider(),
-      comb: await getCombStatus(),
+      comb: getCombStatus(await combServiceUserId),
     },
     automations,
     health: computeHealth(setup),
   };
 }
 
-async function getCombStatus(): Promise<StatusAgentFs["comb"]> {
+function getCombStatus(serviceUserId: string | null): StatusAgentFs["comb"] {
   const comb = getCombConfig();
   return {
     enabled: comb.enabled,
@@ -718,7 +723,7 @@ async function getCombStatus(): Promise<StatusAgentFs["comb"]> {
     live_url: comb.liveUrl,
     org_id: comb.orgId,
     drive_id: comb.driveId,
-    service_user_id: comb.enabled ? await getCombServiceUserId() : null,
+    service_user_id: comb.enabled ? serviceUserId : null,
   };
 }
 

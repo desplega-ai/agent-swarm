@@ -53,7 +53,7 @@ describe("sent marker: server and dashboard agree", () => {
   test("both decide 'sent' the same way, with and without a known service account", () => {
     for (const serviceUserId of [SERVICE, null]) {
       for (const thread of THREADS) {
-        expect(server.isSentToSwarm(thread, thread.replies, serviceUserId)).toBe(
+        expect(server.sentTaskId(thread, thread.replies, serviceUserId) !== null).toBe(
           ui.isSentToSwarm(thread, serviceUserId),
         );
       }
@@ -62,7 +62,7 @@ describe("sent marker: server and dashboard agree", () => {
 
   test("a known service account is the only trusted author", () => {
     const byOther = THREADS[3] as (typeof THREADS)[number];
-    expect(server.isSentToSwarm(byOther, byOther.replies, SERVICE)).toBe(false);
-    expect(server.isSentToSwarm(byOther, byOther.replies, null)).toBe(true);
+    expect(server.sentTaskId(byOther, byOther.replies, SERVICE)).toBeNull();
+    expect(server.sentTaskId(byOther, byOther.replies, null)).toBe(TASK_ID);
   });
 });

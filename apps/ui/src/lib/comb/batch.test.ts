@@ -59,8 +59,9 @@ describe("eligibleForBatch", () => {
 });
 
 describe("canSendThread", () => {
-  test("a one-thread send does not need @swarm", () => {
-    expect(canSendThread(thread({ body: "no marker" }))).toBe(true);
+  test("a one-thread send needs @swarm, like the batch", () => {
+    expect(canSendThread(thread())).toBe(true);
+    expect(canSendThread(thread({ body: "no marker" }))).toBe(false);
     expect(canSendThread(thread({ resolved: true }))).toBe(false);
     expect(canSendThread(thread({}, [sentBy("svc")]), "svc")).toBe(false);
   });

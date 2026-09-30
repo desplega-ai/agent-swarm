@@ -15085,7 +15085,7 @@
     "/api/comb/review-batches": {
       "post": {
         "summary": "Send agent-fs comments to the swarm as one lead task",
-        "description": "Comb's 'Send to swarm'. The server reads each comment again from agent-fs with its bootstrap key, skips replies, resolved comments, and comments already sent, and creates ONE task for the lead. Each sent comment gets a `[comb:sent task=<id>]` reply from the swarm service account. A comment is sent at most once. Answers 404 while COMB_ENABLED is off.",
+        "description": "Comb's 'Send to swarm'. The server reads each comment again from agent-fs with its bootstrap key, skips replies, resolved comments, and comments already sent, and creates ONE task for the lead. Each sent comment gets a `[comb:sent task=<id>]` reply from the swarm service account. A comment is sent at most once. When an earlier send lost its reply, the batch posts that reply again (`repaired`). Answers 404 while COMB_ENABLED is off.",
         "tags": [
           "Comb"
         ],
@@ -15119,7 +15119,8 @@
                   },
                   "scopePath": {
                     "type": "string",
-                    "minLength": 1
+                    "minLength": 1,
+                    "maxLength": 1024
                   }
                 },
                 "required": [
@@ -15133,15 +15134,18 @@
           }
         },
         "responses": {
-          "201": {
-            "description": "Task created",
+          "200": {
+            "description": "No new task: the batch only posted missing 'sent' replies again",
             "content": {
               "application/json": {
                 "schema": {
                   "type": "object",
                   "properties": {
                     "taskId": {
-                      "type": "string"
+                      "type": [
+                        "string",
+                        "null"
+                      ]
                     },
                     "sent": {
                       "type": "array",
@@ -15165,6 +15169,9 @@
                               "resolved",
                               "already-sent"
                             ]
+                          },
+                          "taskId": {
+                            "type": "string"
                           }
                         },
                         "required": [
@@ -15172,12 +15179,106 @@
                           "reason"
                         ]
                       }
+                    },
+                    "repaired": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "taskId": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "taskId"
+                        ]
+                      }
                     }
                   },
                   "required": [
                     "taskId",
                     "sent",
-                    "skipped"
+                    "skipped",
+                    "repaired"
+                  ]
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Task created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "taskId": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "sent": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "skipped": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "reason": {
+                            "type": "string",
+                            "enum": [
+                              "not-found",
+                              "reply",
+                              "resolved",
+                              "already-sent"
+                            ]
+                          },
+                          "taskId": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "reason"
+                        ]
+                      }
+                    },
+                    "repaired": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "taskId": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "taskId"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "taskId",
+                    "sent",
+                    "skipped",
+                    "repaired"
                   ]
                 }
               }
@@ -15214,7 +15315,7 @@
             }
           },
           "409": {
-            "description": "Nothing to send (every comment was skipped), or the template is disabled",
+            "description": "Nothing to send (every comment was skipped)",
             "content": {
               "application/json": {
                 "schema": {
@@ -15239,6 +15340,9 @@
                               "resolved",
                               "already-sent"
                             ]
+                          },
+                          "taskId": {
+                            "type": "string"
                           }
                         },
                         "required": [
@@ -15277,11 +15381,47 @@
             }
           },
           "503": {
-            "description": "agent-fs is not set up for this swarm",
+            "description": "agent-fs or the swarm drive is not set up, or an operator disabled a Comb review template",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "skipped": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "reason": {
+                            "type": "string",
+                            "enum": [
+                              "not-found",
+                              "reply",
+                              "resolved",
+                              "already-sent"
+                            ]
+                          },
+                          "taskId": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "reason"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "skipped"
+                  ]
                 }
               }
             }

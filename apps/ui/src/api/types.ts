@@ -2772,6 +2772,14 @@ export type CombSkipReason = "not-found" | "reply" | "resolved" | "already-sent"
 export interface CombSkippedComment {
   id: string;
   reason: CombSkipReason;
+  /** The task an "already-sent" comment went to, when known. */
+  taskId?: string;
+}
+
+/** A comment of an earlier send whose missing "sent" reply this send posted. */
+export interface CombRepairedComment {
+  id: string;
+  taskId: string;
 }
 
 export interface CombReviewBatchInput {
@@ -2784,9 +2792,11 @@ export interface CombReviewBatchInput {
 }
 
 export interface CombReviewBatchResult {
-  taskId: string;
+  /** The new task. Null when the send only posted missing "sent" replies again (HTTP 200). */
+  taskId: string | null;
   sent: string[];
   skipped: CombSkippedComment[];
+  repaired: CombRepairedComment[];
 }
 
 export interface StatusAgentFs {

@@ -22,6 +22,17 @@ export function commentReadPaths(path: string): [string, string] {
   return [bare, `/${bare}`];
 }
 
+/** The Comb path ("/docs/a.md") of a comment, whichever form agent-fs stored. */
+export function commentCombPath(path: string): string {
+  return `/${commentWritePath(path)}`;
+}
+
+/** "L3-5", "L3", or null for a comment without lines. */
+export function lineRangeLabel(lineStart?: number | null, lineEnd?: number | null): string | null {
+  if (!lineStart) return null;
+  return lineEnd && lineEnd !== lineStart ? `L${lineStart}-${lineEnd}` : `L${lineStart}`;
+}
+
 /** One thread list from several `comment-list` answers: no duplicates, newest first. */
 export function mergeCommentLists(lists: CommentListEntry[][]): CommentListEntry[] {
   const byId = new Map<string, CommentListEntry>();

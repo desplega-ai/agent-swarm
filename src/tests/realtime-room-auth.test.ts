@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import type { IncomingMessage } from "node:http";
-import { isReservedNamespace, reservedRoomKeyError } from "../kv-reserved-namespaces";
+import {
+  isReservedNamespace,
+  reservedNamespaceError,
+  reservedRoomKeyError,
+} from "../kv-reserved-namespaces";
 import { authorizeRoomNamespace, resolveRoomNamespace, roomRequestInfo } from "../realtime/auth";
 
 describe("realtime room namespace guards", () => {
@@ -27,6 +31,15 @@ describe("realtime room namespace guards", () => {
 
   test("retains the apps namespace reservation", () => {
     expect(isReservedNamespace("apps:demo")).toBe(true);
+  });
+
+  test("reserves the comb namespace family for Comb's send claims", () => {
+    expect(isReservedNamespace("comb")).toBe(true);
+    expect(isReservedNamespace("comb:sent")).toBe(true);
+    expect(reservedNamespaceError("comb:sent")).toContain("Comb");
+    expect(reservedNamespaceError("apps")).toContain("swarm apps");
+    expect(isReservedNamespace("combo")).toBe(false);
+    expect(isReservedNamespace("user:comb")).toBe(false);
   });
 
   test("does not trust an agent header from a user bearer request", () => {
