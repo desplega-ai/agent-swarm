@@ -1,14 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { DiffChange } from "../agent-fs/types";
-import {
-  DIFF_CONTEXT_LINES,
-  DIFF_FOLD_MIN_LINES,
-  type DiffLine,
-  type DiffRow,
-  diffHasChanges,
-  diffLines,
-  diffRows,
-} from "./diff-lines";
+import { DIFF_MAX_ROWS, type DiffRow, diffHasChanges, diffLines, diffRows } from "./diff-lines";
 
 /**
  * live/'s DiffViewer line numbers, copied from agent-fs
@@ -52,11 +44,11 @@ const remove = (content: string, oldLine?: number): DiffChange => ({
   oldLine,
 });
 
-/** Compact row view: line numbers, "gap:N", or "fold:N". */
+/** Compact row view: line numbers, "gap:N", or "cap:N". */
 function shape(rows: DiffRow[]): string[] {
   return rows.map((row) => {
     if (row.kind === "gap") return `gap:${row.lines}`;
-    if (row.kind === "fold") return `fold:${row.lines}`;
+    if (row.kind === "cap") return `cap:${row.lines}`;
     const sign = row.line.type === "add" ? "+" : row.line.type === "remove" ? "-" : " ";
     return `${sign}${row.line.oldLine ?? ""}/${row.line.newLine ?? ""}`;
   });
@@ -153,88 +145,49 @@ describe("diffRows", () => {
     expect(shape(diffRows(lines))).toEqual(["+/1", "gap:7", "+/9"]);
   });
 
-  test("folds a long unchanged run between two changes, keeping context on both sides", () => {
-    const keep = DIFF_CONTEXT_LINES * 2;
-    const runLength = keep + DIFF_FOLD_MIN_LINES + 6; // hides 10 lines
-    const lines = diffLines([
-      remove("a", 1),
-      ...contextRun(runLength, 2, 1),
-      add("b", runLength + 1),
-    ]);
+  test("an unchanged run inside a hunk shows in full (no folds)", () => {
+    // agent-fs's widest unchanged run inside a hunk: 4 lines after a change, 4 before the next.
+    const lines = diffLines([remove("a", 1), ...contextRun(8, 2, 1), add("b", 9)]);
     const rows = diffRows(lines);
-    expect(shape(rows)).toEqual([
-      "-1/",
-      " 2/1",
-      " 3/2",
-      " 4/3",
-      "fold:10",
-      " 15/14",
-      " 16/15",
-      " 17/16",
-      "+/17",
-    ]);
-    // The fold id is its first hidden line: unfolding it shows every line.
-    const fold = rows.find((row) => row.kind === "fold");
-    expect(fold).toEqual({ kind: "fold", id: 4, lines: 10 });
-    expect(diffRows(lines, new Set([4])).filter((row) => row.kind === "line")).toHaveLength(
-      lines.length,
-    );
+    expect(rows).toHaveLength(lines.length);
+    expect(rows.every((row) => row.kind === "line")).toBe(true);
   });
 
-  test("folds only when the hidden part reaches the minimum", () => {
-    const keep = DIFF_CONTEXT_LINES * 2;
-    const below = diffLines([
-      remove("a"),
-      ...Array.from({ length: keep + DIFF_FOLD_MIN_LINES - 1 }, (_, i) => ctx(`c${i}`)),
-      add("b"),
-    ]);
-    expect(diffRows(below).some((row) => row.kind === "fold")).toBe(false);
-
-    const at = diffLines([
-      remove("a"),
-      ...Array.from({ length: keep + DIFF_FOLD_MIN_LINES }, (_, i) => ctx(`c${i}`)),
-      add("b"),
-    ]);
-    expect(diffRows(at).filter((row) => row.kind === "fold")).toEqual([
-      { kind: "fold", id: 1 + DIFF_CONTEXT_LINES, lines: DIFF_FOLD_MIN_LINES },
-    ]);
-  });
-
-  test("a run at the start or the end keeps context only next to the change", () => {
-    const lines = diffLines([
-      ...Array.from({ length: 10 }, (_, i) => ctx(`head ${i}`)),
-      add("x"),
-      ...Array.from({ length: 10 }, (_, i) => ctx(`tail ${i}`)),
-    ]);
-    expect(shape(diffRows(lines))).toEqual([
-      "fold:7",
-      " 8/8",
-      " 9/9",
-      " 10/10",
-      "+/11",
-      " 11/12",
-      " 12/13",
-      " 13/14",
-      "fold:7",
-    ]);
-  });
-
-  test("a diff with no change folds every unchanged line", () => {
+  test("a diff with no change has only unchanged rows", () => {
     const changes = Array.from({ length: 5 }, (_, i) => ctx(`c${i}`));
     expect(diffHasChanges(changes)).toBe(false);
-    expect(shape(diffRows(diffLines(changes)))).toEqual(["fold:5"]);
+    expect(shape(diffRows(diffLines(changes)))).toEqual([" 1/1", " 2/2", " 3/3", " 4/4", " 5/5"]);
     expect(diffRows(diffLines([]))).toEqual([]);
   });
+});
 
-  test("every line index appears once across rows and folds", () => {
-    const lines: DiffLine[] = diffLines([
-      ...contextRun(12, 1, 1),
-      remove("a", 13),
-      ...contextRun(12, 14, 13),
+describe("diffRows cap", () => {
+  test("stops at the row limit and counts the lines left out", () => {
+    const lines = diffLines([
+      ...contextRun(2, 1, 1),
+      add("x", 3),
+      // Gap row before this hunk: it counts as a row, not as a line.
+      ...contextRun(3, 10, 11),
     ]);
+    // Rows: 1/1, 2/2, +3, gap:7, 10/11, 11/12, 12/13.
+    expect(shape(diffRows(lines, 4))).toEqual([" 1/1", " 2/2", "+/3", "gap:7", "cap:3"]);
+    // Exactly at the limit: every row, no cap.
+    expect(shape(diffRows(lines, 7))).toEqual([
+      " 1/1",
+      " 2/2",
+      "+/3",
+      "gap:7",
+      " 10/11",
+      " 11/12",
+      " 12/13",
+    ]);
+  });
+
+  test("the default limit keeps big diffs to DIFF_MAX_ROWS rows plus the cap row", () => {
+    const lines = diffLines(Array.from({ length: DIFF_MAX_ROWS + 250 }, (_, i) => add(`l${i}`)));
     const rows = diffRows(lines);
-    const shown = rows.filter((row) => row.kind === "line").length;
-    const hidden = rows.reduce((sum, row) => sum + (row.kind === "fold" ? row.lines : 0), 0);
-    expect(shown + hidden).toBe(lines.length);
+    expect(rows).toHaveLength(DIFF_MAX_ROWS + 1);
+    expect(rows.at(-1)).toEqual({ kind: "cap", lines: 250 });
+    expect(diffRows(lines.slice(0, DIFF_MAX_ROWS)).some((row) => row.kind === "cap")).toBe(false);
   });
 });

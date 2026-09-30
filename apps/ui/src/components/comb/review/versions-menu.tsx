@@ -14,23 +14,26 @@ import {
 } from "@/components/ui/dropdown-menu";
 import type { StatResult } from "@/lib/agent-fs/types";
 import type { DrivePath } from "@/lib/comb/paths";
-import { DIFF_PARAM, formatDiffRange } from "@/lib/comb/review";
+import { DIFF_PARAM, formatDiffRange, showReviewEntry } from "@/lib/comb/review";
 import { formatRelative } from "@/lib/relative-time";
 
 /**
- * The file's versions (`log`). Picking an older one compares it with the
- * current version (`?diff=<picked>..<current>`, a new history entry). The log
- * loads when the menu opens.
+ * The file's versions (`log`), for text files only (`showReviewEntry`).
+ * Picking an older one compares it with the current version
+ * (`?diff=<picked>..<current>`, a new history entry, no linked thread). The
+ * log loads when the menu opens.
  */
 export function VersionsMenu({ file, stat }: { file: DrivePath; stat: StatResult }) {
   const [, setSearchParams] = useSearchParams();
   const current = stat.currentVersion;
-  if (current === undefined) return null;
+  if (current === undefined || !showReviewEntry(file.path, stat)) return null;
 
   const compare = (version: number) =>
     setSearchParams((params) => {
       const next = new URLSearchParams(params);
       next.set(DIFF_PARAM, formatDiffRange({ from: version, to: current }));
+      // A compare is not a thread's review: it resolves nothing.
+      next.delete("comment");
       return next;
     });
 

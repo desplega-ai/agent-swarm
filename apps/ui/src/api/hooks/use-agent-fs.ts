@@ -34,7 +34,6 @@ import type {
 } from "@/lib/agent-fs/types";
 import {
   COMB_LOG_LIMIT,
-  commentAuthorNames,
   commentReadPaths,
   type FileThreads,
   listFileThreads,
@@ -495,14 +494,6 @@ export function useAgentFsLog(
 /** The diff from `from` to `to` (`from < to`). Same cache entry as the comment anchors. */
 export function useAgentFsDiff(file: DrivePath, from: number, to: number) {
   return useQuery(agentFsDiffQuery(useAgentFsAccess(), file, from, to));
-}
-
-const NO_AUTHOR_NAMES: ReadonlyMap<string, string> = new Map();
-
-/** `author → authorDisplayName` over the file's loaded comments (the rail's query, no extra call). */
-export function useCommentAuthorNames(file: DrivePath): ReadonlyMap<string, string> {
-  const query = agentFsCommentsQuery(useAgentFsAccess(), file);
-  return useQuery({ ...query, select: commentAuthorNames }).data ?? NO_AUTHOR_NAMES;
 }
 
 /**

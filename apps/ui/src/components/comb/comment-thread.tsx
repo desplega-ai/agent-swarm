@@ -2,11 +2,7 @@ import { Check, CheckCheck, MessageSquare, RotateCcw, Send, TriangleAlert } from
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
-import {
-  useCommentAuthorNames,
-  useDriveMembers,
-  useResolveComment,
-} from "@/api/hooks/use-agent-fs";
+import { useResolveComment } from "@/api/hooks/use-agent-fs";
 import { useAuthorLabel } from "@/components/comb/use-author-label";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -89,13 +85,11 @@ function Reply({ thread, reply }: { thread: CommentListEntry; reply: CommentEntr
  * server lists them, else "another member".
  */
 function ResolvedBy({ thread }: { thread: CommentListEntry }) {
-  const { file } = useCommentContext();
-  const names = useCommentAuthorNames(file);
-  const members = useDriveMembers(file).data?.members;
+  const { file, authorNames } = useCommentContext();
+  const authorLabel = useAuthorLabel(file);
   const { resolvedBy, resolvedAt } = thread;
   if (!resolvedBy) return null;
-  const member = members?.find((m) => m.userId === resolvedBy);
-  const name = names.get(resolvedBy) || member?.displayName || member?.email || "another member";
+  const name = authorNames.get(resolvedBy) || authorLabel(resolvedBy, "another member");
   return (
     <p className="flex flex-wrap items-center gap-x-1.5 text-xs text-muted-foreground">
       <CheckCheck className="size-3.5 shrink-0" aria-hidden />

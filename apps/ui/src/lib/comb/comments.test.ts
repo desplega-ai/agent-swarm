@@ -6,6 +6,7 @@ import {
   COMMENT_LIST_MAX,
   COMMENT_PAGE_SIZE,
   commentAuthorNames,
+  commentFileVersion,
   commentReadPaths,
   commentWritePath,
   listFileThreads,
@@ -154,20 +155,41 @@ describe("anchorInputs (useCommentAnchors' log fallback)", () => {
 describe("commentAuthorNames", () => {
   test("maps the authors of threads and replies to their display names", () => {
     const reply = { ...thread("r", "2026-09-30T10:01:00.000Z"), author: "u2" };
-    const names = commentAuthorNames({
-      threads: [
-        thread("a", "2026-09-30T10:00:00.000Z", {
-          author: "u1",
-          authorDisplayName: "QA Human",
-          replies: [{ ...reply, authorDisplayName: "Agent" }],
-        }),
-        thread("b", "2026-09-30T09:00:00.000Z", { author: "u3" }),
-      ],
-      truncated: false,
-    });
+    const names = commentAuthorNames([
+      thread("a", "2026-09-30T10:00:00.000Z", {
+        author: "u1",
+        authorDisplayName: "QA Human",
+        replies: [{ ...reply, authorDisplayName: "Agent" }],
+      }),
+      thread("b", "2026-09-30T09:00:00.000Z", { author: "u3" }),
+    ]);
     expect([...names]).toEqual([
       ["u1", "QA Human"],
       ["u2", "Agent"],
     ]);
+  });
+});
+
+describe("commentFileVersion", () => {
+  test("a stored fileVersion wins over the log", () => {
+    expect(
+      commentFileVersion({ fileVersion: 1, createdAt: "2026-09-30T09:30:00.000Z" }, VERSIONS),
+    ).toBe(1);
+  });
+
+  test("without fileVersion: from the log, or unknown without one", () => {
+    const comment = { createdAt: "2026-09-30T09:30:00.000Z" };
+    expect(commentFileVersion(comment, VERSIONS)).toBe(2);
+    expect(commentFileVersion(comment, undefined)).toBeUndefined();
+    // Older than every version of a complete log: unknown.
+    expect(commentFileVersion({ createdAt: "2026-09-30T07:00:00.000Z" }, VERSIONS)).toBeUndefined();
+  });
+
+  test("a full log stands in with its oldest version", () => {
+    const full = Array.from({ length: COMB_LOG_LIMIT }, (_, i) => ({
+      version: COMB_LOG_LIMIT - i + 100,
+      createdAt: new Date(Date.UTC(2026, 8, 30) - i * 1000).toISOString(),
+    }));
+    expect(commentFileVersion({ createdAt: "2026-01-01T00:00:00.000Z" }, full)).toBe(101);
   });
 });

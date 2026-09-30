@@ -1,32 +1,34 @@
 // Ported from agent-fs `live/src/components/viewers/DiffViewer.tsx` (agent-fs
-// 0.15.0), same props. Comb changes: line numbers come from `diffLines`
+// 0.15.0), plus a `label`. Comb changes: line numbers come from `diffLines`
 // (agent-fs's own numbers when it sends them, else live/'s count), status
-// tokens replace the green and red palette literals, long unchanged runs fold
-// ("Show 24 unchanged lines"), a row marks the lines left out between hunks,
-// long lines wrap at spaces (`break-words`, not `break-all`), and each
-// changed line tells screen readers whether it was added or removed.
+// tokens replace the green and red palette literals, a row marks the lines
+// left out between hunks, a diff past `DIFF_MAX_ROWS` rows ends in a "too
+// large" row, long lines wrap at spaces (`break-words`, not `break-all`),
+// screen readers skip the line numbers, and each changed line tells them
+// whether it was added or removed.
 
-import { ChevronsUpDown, Ellipsis } from "lucide-react";
-import { useMemo, useState } from "react";
+import { Ellipsis, FileWarning } from "lucide-react";
+import { useMemo } from "react";
 import type { DiffChange } from "@/lib/agent-fs/types";
 import { type DiffLine, diffLines, diffRows } from "@/lib/comb/diff-lines";
 import { cn } from "@/lib/utils";
 
 interface DiffViewerProps {
   changes: DiffChange[];
+  /** The accessible name of the diff ("Changes from v1 to v3"). */
+  label: string;
   className?: string;
 }
 
-function unchangedLines(count: number) {
-  return `${count} unchanged ${count === 1 ? "line" : "lines"}`;
+function lineCount(count: number) {
+  return `${count.toLocaleString()} ${count === 1 ? "line" : "lines"}`;
 }
 
-export function DiffViewer({ changes, className }: DiffViewerProps) {
-  const [unfolded, setUnfolded] = useState<ReadonlySet<number>>(() => new Set());
-  const rows = useMemo(() => diffRows(diffLines(changes), unfolded), [changes, unfolded]);
+export function DiffViewer({ changes, label, className }: DiffViewerProps) {
+  const rows = useMemo(() => diffRows(diffLines(changes)), [changes]);
 
   return (
-    <div className={cn("overflow-auto font-mono text-xs", className)}>
+    <section aria-label={label} className={cn("overflow-auto font-mono text-xs", className)}>
       {rows.map((row) => {
         if (row.kind === "line") return <Line key={`l${row.index}`} line={row.line} />;
         if (row.kind === "gap") {
@@ -36,23 +38,24 @@ export function DiffViewer({ changes, className }: DiffViewerProps) {
               className="flex items-center gap-2 border-y border-dashed border-border-subtle py-1 pl-24 text-muted-foreground"
             >
               <Ellipsis className="size-3.5" aria-hidden />
-              {unchangedLines(row.lines)}
+              {lineCount(row.lines)} unchanged
             </div>
           );
         }
         return (
-          <button
-            key={`f${row.id}`}
-            type="button"
-            onClick={() => setUnfolded((current) => new Set(current).add(row.id))}
-            className="hover-linger flex w-full items-center gap-2 border-y border-border-subtle bg-muted/40 py-1 pl-24 text-left text-muted-foreground transition-colors outline-none hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60 focus-visible:ring-inset"
+          <div
+            key="cap"
+            className="flex items-start gap-2 border-t border-border-subtle px-4 py-3 font-sans text-sm text-muted-foreground"
           >
-            <ChevronsUpDown className="size-3.5" aria-hidden />
-            Show {unchangedLines(row.lines)}
-          </button>
+            <FileWarning className="mt-0.5 size-4 shrink-0" aria-hidden />
+            <span>
+              Diff too large: the last {lineCount(row.lines)} {row.lines === 1 ? "is" : "are"} not
+              shown. Download both versions, or open the file in agent-fs.
+            </span>
+          </div>
         );
       })}
-    </div>
+    </section>
   );
 }
 
@@ -70,10 +73,16 @@ function Line({ line }: { line: DiffLine }) {
         line.type === "remove" && "bg-status-error/10",
       )}
     >
-      <span className="w-10 shrink-0 select-none pr-1 text-right tabular-nums text-muted-foreground/50">
+      <span
+        aria-hidden
+        className="w-10 shrink-0 select-none pr-1 text-right tabular-nums text-muted-foreground/50"
+      >
         {line.oldLine ?? ""}
       </span>
-      <span className="w-10 shrink-0 select-none pr-1 text-right tabular-nums text-muted-foreground/50">
+      <span
+        aria-hidden
+        className="w-10 shrink-0 select-none pr-1 text-right tabular-nums text-muted-foreground/50"
+      >
         {line.newLine ?? ""}
       </span>
       <span
