@@ -503,7 +503,9 @@ function ConfigKeyCombobox({
           role="combobox"
           aria-expanded={open}
           aria-invalid={invalid || undefined}
-          className="w-full justify-between font-normal"
+          // The outline variant's dark:border-input outranks the base
+          // aria-invalid border, so restate it for dark mode.
+          className="w-full justify-between font-normal dark:aria-invalid:border-destructive"
         >
           <span
             className={cn(
