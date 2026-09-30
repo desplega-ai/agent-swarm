@@ -1,0 +1,191 @@
+diff --git a/src/providers/harness-version.ts b/src/providers/harness-version.ts
+index 6bc26ac9c..37d0b9310 100644
+--- a/src/providers/harness-version.ts
++++ b/src/providers/harness-version.ts
+@@ -1,4 +1,7 @@
+ import { spawnSync } from "node:child_process";
++import { appendFileSync as __tAppend } from "node:fs";
++const __T = (m: string) => { try { __tAppend("/tmp/hang-trace.log", `${Date.now()} pid=${process.pid} ${m}\n`); } catch {} };
++
+ 
+ type PackageJson = { version?: unknown };
+ 
+@@ -25,10 +28,12 @@ function readCliVersion(packageName: string, spawn: typeof spawnSync): string |
+   if (!command) return undefined;
+ 
+   try {
++    __T(`spawnSync ${command.command} BEGIN`);
+     const result = spawn(command.command, command.args, {
+       encoding: "utf8",
+       stdio: ["ignore", "pipe", "pipe"],
+     });
++    __T(`spawnSync ${command.command} END status=${result.status} signal=${result.signal}`);
+     return parseCliVersion(`${result.stdout ?? ""}\n${result.stderr ?? ""}`);
+   } catch {
+     return undefined;
+diff --git a/src/providers/pi-mono-adapter.ts b/src/providers/pi-mono-adapter.ts
+index ab5b87296..b0871f1dc 100644
+--- a/src/providers/pi-mono-adapter.ts
++++ b/src/providers/pi-mono-adapter.ts
+@@ -6,6 +6,9 @@
+  * discovered at session creation and registered as custom tools.
+  */
+ 
++import { appendFileSync as __tAppend } from "node:fs";
++const __T = (m: string) => { try { __tAppend("/tmp/hang-trace.log", `${Date.now()} pid=${process.pid} ${m}\n`); } catch {} };
++
+ import { existsSync, lstatSync, symlinkSync, unlinkSync } from "node:fs";
+ import { join } from "node:path";
+ import {
+@@ -795,7 +798,9 @@ export class PiMonoSession implements ProviderSession {
+     this.sessionStartedAt = Date.now();
+ 
+     // Emit session_init immediately
++    __T("ctor: before readPkgVersion");
+     const piVersion = readPkgVersion("@earendil-works/pi-coding-agent");
++    __T(`ctor: after readPkgVersion ${piVersion}`);
+     this.emit({
+       type: "session_init",
+       sessionId: this._sessionId,
+@@ -808,6 +813,7 @@ export class PiMonoSession implements ProviderSession {
+     this.agentSession.subscribe((event) => this.handleAgentEvent(event));
+ 
+     // Start the prompt and track completion
++    __T("ctor: before runSession");
+     this.completionPromise = this.runSession();
+   }
+ 
+@@ -978,10 +984,12 @@ export class PiMonoSession implements ProviderSession {
+ 
+   private async runSession(): Promise<ProviderResult> {
+     try {
++      __T("runSession: start");
+       // Send the prompt
+       await this.agentSession.prompt(this.config.prompt, {
+         source: "rpc",
+       });
++      __T("runSession: prompt returned");
+ 
+       // Wait for the agent to finish (poll until not streaming)
+       await this.waitForIdle();
+@@ -1050,11 +1058,13 @@ export class PiMonoSession implements ProviderSession {
+         appliedReasoningEffort: this.appliedReasoningEffort,
+       };
+     } finally {
++      __T("runSession: finally begin");
+       this.sessionEnded = true;
+       await this.logFileHandle.end();
+       if (this.createdSymlink) {
+         cleanupAgentsMdSymlink(this.config.cwd);
+       }
++      __T("runSession: before dispose");
+       this.agentSession.dispose();
+     }
+   }
+@@ -1402,6 +1412,7 @@ export class PiMonoAdapter implements ProviderAdapter {
+     );
+ 
+     // 1. Set up AGENTS.md symlink
++    __T("createSession: begin");
+     const createdSymlink = createAgentsMdSymlink(config.cwd);
+ 
+     // 2. Discover MCP tools from swarm endpoint
+@@ -1438,6 +1449,7 @@ export class PiMonoAdapter implements ProviderAdapter {
+       }
+     }
+ 
++    __T("createSession: tools discovered");
+     // 2b. Installed MCP servers (stdio and HTTP) go to pi's own MCP extension,
+     // which registers their tools as mcp__<server>__<tool>.
+     const installedMcpServers =
+@@ -1451,14 +1463,17 @@ export class PiMonoAdapter implements ProviderAdapter {
+       );
+     }
+ 
++    __T("createSession: installed mcp fetched");
+     const sessionEnv = config.env ?? process.env;
+ 
+     // 3. Resolve model
+     // Write the gateway override BEFORE ModelRuntime.create — the runtime
+     // loads `<agentDir>/models.json` exactly once at creation.
+     await ensureOpenRouterModelsOverride(getAgentDir(), sessionEnv);
++    __T("createSession: override written");
+     const builtinModel = resolveModel(config.model, sessionEnv);
+     const modelRuntime = await createPiRuntimeAuth(sessionEnv);
++    __T("createSession: runtime auth ready");
+     // models.json overrides (e.g. the OpenRouter gateway baseUrl) only apply
+     // to models resolved through the runtime's composed store; the builtin
+     // catalog object from `resolveModel` carries the hardcoded upstream URL
+@@ -1467,6 +1482,7 @@ export class PiMonoAdapter implements ProviderAdapter {
+       ? (modelRuntime.getModel(builtinModel.provider, builtinModel.id) ?? builtinModel)
+       : builtinModel;
+ 
++    __T("createSession: model resolved");
+     // 4. Create swarm hooks extension
+     const swarmExtension = createSwarmHooksExtension({
+       apiUrl: config.apiUrl,
+@@ -1495,6 +1511,7 @@ export class PiMonoAdapter implements ProviderAdapter {
+       systemPrompt: config.systemPrompt,
+       extensionFactories: piExtensionFactories(swarmExtension, features),
+     });
++    __T("createSession: resource loader ready");
+     // tool_search registers inactive; `+` adds it to the default tool set.
+     const extraDefaultTools = piDefaultToolAdditions(features);
+     if (extraDefaultTools.length > 0) {
+@@ -1520,8 +1537,11 @@ export class PiMonoAdapter implements ProviderAdapter {
+     // 7. Create the session. bindExtensions emits session_start, which the
+     // SDK never does on its own: the swarm hook and pi's MCP extension (which
+     // connects the installed servers) both run on it.
++    __T("createSession: before createAgentSession");
+     const { session } = await createAgentSession(sessionOptions);
++    __T("createSession: before bindExtensions");
+     await session.bindExtensions({});
++    __T("createSession: after bindExtensions");
+ 
+     return new PiMonoSession(session, config, createdSymlink, appliedReasoningEffort);
+   }
+diff --git a/src/tests/pi-tool-exposure.test.ts b/src/tests/pi-tool-exposure.test.ts
+index 6c95f0923..195e4bb8f 100644
+--- a/src/tests/pi-tool-exposure.test.ts
++++ b/src/tests/pi-tool-exposure.test.ts
+@@ -17,6 +17,8 @@ import {
+ } from "../providers/pi-mono-adapter";
+ import type { ProviderSessionConfig } from "../providers/types";
+ 
++import { appendFileSync as __tAppend } from "node:fs";
++const __T = (m: string) => { try { __tAppend("/tmp/hang-trace.log", `${Date.now()} pid=${process.pid} ${m}\n`); } catch {} };
+ const inputSchema = { type: "object", properties: {} };
+ 
+ function tool(name: string, extra: Partial<McpTool> = {}): McpTool {
+@@ -221,6 +223,7 @@ describe("PiMonoAdapter.createSession — tool deferral wiring", () => {
+   }
+ 
+   async function captureSessionOptions(): Promise<Record<string, unknown>> {
++    __T("test: captureSessionOptions begin");
+     let captured: Record<string, unknown> = {};
+     spy = spyOn(piCodingAgent, "createAgentSession").mockImplementation((async (
+       opts: Record<string, unknown>,
+@@ -312,6 +315,7 @@ describe("PiMonoAdapter.createSession — real pi session", () => {
+   });
+ 
+   async function realSession() {
++    __T("test: realSession begin");
+     const server = Bun.serve({
+       port: 0,
+       async fetch(req) {
+diff --git a/src/tests/preload.ts b/src/tests/preload.ts
+index a843cf533..8b892e047 100644
+--- a/src/tests/preload.ts
++++ b/src/tests/preload.ts
+@@ -1,5 +1,10 @@
+ import { Database } from "bun:sqlite";
+-import { afterEach } from "bun:test";
++import { afterEach, beforeEach } from "bun:test";
++import { appendFileSync as __tAppend } from "node:fs";
++const __T = (m: string) => { try { __tAppend("/tmp/hang-trace.log", `${Date.now()} pid=${process.pid} ${m}\n`); } catch {} };
++let __n = 0;
++beforeEach(() => __T(`TEST START #${++__n}`));
++afterEach(() => __T(`TEST END   #${__n}`));
+ import { createHash } from "node:crypto";
+ import {
+   existsSync,

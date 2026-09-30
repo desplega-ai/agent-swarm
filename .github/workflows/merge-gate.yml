@@ -619,13 +619,30 @@ jobs:
           start=$(date +%s%3N)
           set +e
           mkdir -p .bun-test-timings/next
-          echo "timings snapshot: $(cat .bun-test-timings/snapshot-key.txt 2>/dev/null || echo none)"
+          git apply .github/hang-probe/trace.patch && echo "trace patch applied"
+          rm -f /tmp/hang-trace.log
+          ( sleep 150; echo "=== WATCHDOG 150s"
+            echo "--- zombies"; ps -eo pid,ppid,stat,pcpu,etime,comm | awk '$3 ~ /Z/'
+            echo "--- workers"; ps -eo pid,ppid,stat,pcpu,etime,args | grep -a test-worker | grep -av grep | cut -c1-130
+            for round in 1 2; do
+              for p in $(pgrep -f "test-worker"); do
+                echo "--- round $round worker $p threads"
+                for t in /proc/$p/task/*; do echo "$(cat $t/comm) $(awk '{print "state="$3" utime="$14" stime="$15}' $t/stat 2>/dev/null) syscall=$(cat $t/syscall 2>/dev/null | cut -c1-40)"; done
+              done
+              sleep 5
+            done
+            echo "--- trace tail per pid"
+            for pid in $(awk '{print $2}' /tmp/hang-trace.log | sort -u); do echo "## $pid"; grep -a " $pid " /tmp/hang-trace.log | tail -14 | sed 's/^/   /'; done
+          ) &
+          WD=$!
           # shellcheck disable=SC2046
-          bun run test:root -- --timeout 10000 --parallel=4 --shard=${{ matrix.shard }}/2 \
+          timeout 300 bun run test:root -- --timeout 10000 --parallel=4 --shard=${{ matrix.shard }}/2 \
             --update-timings --timings=.bun-test-timings/next/${{ matrix.shard }}.json \
             $(ls .bun-test-timings/*.json 2>/dev/null | sed 's/^/--timings=/')
           code=$?
-          set -e
+          echo "=== test:root exit: $code"
+          kill $WD 2>/dev/null
+          echo "=== trace tail (all)"; tail -40 /tmp/hang-trace.log
           echo "duration_ms=$(( $(date +%s%3N) - start ))" >> "$GITHUB_OUTPUT"
           echo "status=$([ $code -eq 0 ] && echo success || echo failure)" >> "$GITHUB_OUTPUT"
           exit $code
