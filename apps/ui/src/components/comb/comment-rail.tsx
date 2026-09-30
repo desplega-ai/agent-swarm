@@ -9,7 +9,6 @@ import {
   useMemo,
   useRef,
   useState,
-  useSyncExternalStore,
 } from "react";
 import { useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
@@ -28,6 +27,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useCommentAnchors } from "@/hooks/use-comment-anchors";
 import { useConfig } from "@/hooks/use-config";
+import { useMediaQuery } from "@/hooks/use-media-query";
 import type { CommentAddParams, CommentListEntry, StatResult } from "@/lib/agent-fs/types";
 import type { AnchorResolution } from "@/lib/comb/comment-anchor";
 import { COMMENT_LIST_MAX, commentAuthorNames } from "@/lib/comb/comments";
@@ -59,17 +59,6 @@ const NO_THREADS: CommentListEntry[] = [];
 
 // The rail sits beside the viewer from `lg` up. Below that it is a bottom sheet.
 const WIDE_QUERY = "(min-width: 1024px)";
-
-function useWideLayout(): boolean {
-  return useSyncExternalStore(
-    (onChange) => {
-      const query = window.matchMedia(WIDE_QUERY);
-      query.addEventListener("change", onChange);
-      return () => query.removeEventListener("change", onChange);
-    },
-    () => window.matchMedia(WIDE_QUERY).matches,
-  );
-}
 
 /** Scroll the viewer pane to a comment's passage. False when it has none. */
 function scrollToPassage(
@@ -179,7 +168,7 @@ export function CommentRail({
   const [hover, setHover] = useState<{ id: string; from: "doc" | "card" } | null>(null);
   const [pending, setPending] = useState<Range | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
-  const wide = useWideLayout();
+  const wide = useMediaQuery(WIDE_QUERY);
 
   // The `?comment=` link this rail has already selected (and scrolled to).
   const linkRef = useRef<{ id: string; scrolled: boolean } | null>(null);

@@ -1,5 +1,5 @@
 import { FolderOpen, FolderTree, HardDrive, Unplug } from "lucide-react";
-import { useMemo, useState, useSyncExternalStore } from "react";
+import { useMemo, useState } from "react";
 import { Link, Navigate, useParams } from "react-router-dom";
 import { CombBreadcrumbs } from "@/components/comb/breadcrumbs";
 import { ConnectCard } from "@/components/comb/connect-card";
@@ -26,6 +26,7 @@ import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/ui/page-header";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { useAgentFs } from "@/contexts/agent-fs-context";
+import { useMediaQuery } from "@/hooks/use-media-query";
 import { fileRedirectPath } from "@/lib/agent-fs/state";
 import { parseCombSplat } from "@/lib/comb/paths";
 
@@ -105,21 +106,10 @@ function RouteOpenInAgentFs() {
 // The tree rail sits beside the file from 1440px up. Below that it opens in a sheet.
 const TREE_INLINE_QUERY = "(min-width: 1440px)";
 
-function useTreeInline(): boolean {
-  return useSyncExternalStore(
-    (onChange) => {
-      const query = window.matchMedia(TREE_INLINE_QUERY);
-      query.addEventListener("change", onChange);
-      return () => query.removeEventListener("change", onChange);
-    },
-    () => window.matchMedia(TREE_INLINE_QUERY).matches,
-  );
-}
-
 function ConnectedView() {
   const { me, disconnect } = useAgentFs();
   const { orgId, driveId, "*": splat } = useParams();
-  const treeInline = useTreeInline();
+  const treeInline = useMediaQuery(TREE_INLINE_QUERY);
   const [treeOpen, setTreeOpen] = useState(false);
   const location = useMemo(
     () => (orgId && driveId ? parseCombSplat({ orgId, driveId, splat }) : null),
