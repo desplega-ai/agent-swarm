@@ -719,6 +719,7 @@ export class OpencodeAdapter implements ProviderAdapter {
 
   readonly traits: ProviderTraits = {
     hasMcp: true,
+    hasToolSearch: false,
     // Same inline-resolver pattern as codex (`resolveSlashSkillPrompt`) — no
     // ambient skill awareness, so the system prompt enumerates them.
     nativeSkillDiscovery: false,

@@ -129,7 +129,6 @@ const UNGATED_TOOL_FILES: Record<string, string> = {
   "src/tools/slack-download-file.ts": PIN_REASON,
   "src/tools/slack-list-channels.ts": PIN_REASON,
   "src/tools/slack-reply.ts": PIN_REASON,
-  "src/tools/store-progress.ts": PIN_REASON,
   "src/tools/swarm-x.ts": PIN_REASON,
   "src/tools/tracker/tracker-link-task.ts": PIN_REASON,
   "src/tools/tracker/tracker-map-agent.ts": PIN_REASON,

@@ -65,6 +65,11 @@ export const PERMISSIONS = {
     description: "Mutate a task's filesystem artifacts and attachments.",
     namespace: "task",
   },
+  "task.progress.write": {
+    description:
+      "Write a task's progress, status, or output (its assignee, a lead, a human, or anyone while unassigned).",
+    namespace: "task",
+  },
   "favorite.write.own": {
     description: "Set a favorite the caller owns.",
     namespace: "favorite",

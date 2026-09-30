@@ -8,6 +8,7 @@ import {
   createWorkflowRunStep,
   getTaskById,
   initDb,
+  startTask,
 } from "../be/db";
 import type { ExecutorMeta } from "../types";
 import { AgentTaskConfigSchema, AgentTaskExecutor } from "../workflows/executors/agent-task";
@@ -222,5 +223,34 @@ describe("AgentTaskExecutor — workspace scoping", () => {
     expect(task!.dir).toBeUndefined();
     expect(task!.vcsRepo).toBeUndefined();
     expect(task!.model).toBeUndefined();
+  });
+
+  test("parallel tasks of one run get no sibling block and no sibling parent", async () => {
+    const executor = new AgentTaskExecutor(mockDeps);
+    const worker = await createAgent({ name: "Foreach worker", isLead: false, status: "idle" });
+    const run = await createWorkflowRun({ id: crypto.randomUUID(), workflowId });
+    const runChild = async (nodeId: string) => {
+      const step = await createWorkflowRunStep({
+        id: crypto.randomUUID(),
+        runId: run.id,
+        nodeId,
+        nodeType: "agent-task",
+      });
+      const result = await executor.run({
+        config: { agentId: worker.id, template: `Review ${nodeId}` },
+        context: {},
+        meta: { runId: run.id, stepId: step.id, nodeId, workflowId, dryRun: false },
+      });
+      return (await getTaskById((result as { correlationId: string }).correlationId))!;
+    };
+
+    const first = await runChild("item-0");
+    await startTask(first.id);
+    const second = await runChild("item-1");
+
+    expect(second.contextKey).toBe(first.contextKey);
+    expect(second.task).toBe("Review item-1");
+    expect(second.task).not.toContain(first.id);
+    expect(second.parentTaskId).toBeUndefined();
   });
 });

@@ -38,16 +38,22 @@ item:
 | upstream state                          | source state | action       |
 |------------------------------------------|--------------|--------------|
 | absent                                   | —            | **create**   |
+| byte-identical to current source         | —            | no-op; seed state re-baselined to the source hash |
 | pristine (matches last-seeded hash)       | changed      | **update**   |
 | pristine                                  | unchanged    | no-op        |
 | user-modified (≠ last-seeded hash)        | any          | **preserve** |
 
+Rows are checked top to bottom. The source-identical check runs before the
+pristine check: a live copy byte-identical to the current source holds nothing
+user-authored, so it is in sync whatever `seed_state` says. This lets an entity
+that was edited and later reset to source pick up the next source change,
+instead of staying classed user-modified forever.
+
 "Pristine" = the live copy still hashes identically to what the framework last
 wrote. A user edit makes the upstream hash diverge, so it is never clobbered —
 even if the source definition also changed. With no recorded state (a
-pre-existing entity, or the first run after this framework landed), an entity is
-treated as pristine only when it is byte-identical to the source; otherwise it
-is conservatively preserved.
+pre-existing entity, or the first run after this framework landed), an entity
+that differs from the source is conservatively preserved.
 
 ## The scripts seeder — `src/be/seed-scripts/`
 

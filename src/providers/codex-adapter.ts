@@ -2373,6 +2373,7 @@ export class CodexAdapter implements ProviderAdapter {
   readonly name = "codex";
   readonly traits: ProviderTraits = {
     hasMcp: true,
+    hasToolSearch: false,
     // No native skill system: `resolveSlashSkillPrompt` only inlines a SKILL.md
     // when a turn prompt opens with `/name`, so the system prompt must
     // enumerate the installed skills for the agent to know they exist.

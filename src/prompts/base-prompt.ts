@@ -7,7 +7,7 @@
  *              memory, communication, secrets) from session-templates.ts
  *   E          outputs (gated on AGENT_FS_API_URL and the pages capability)
  *   H          deployment-gated notes: slack, steering
- *   I          tools and skills (deferred-tools line, skills, MCP server names)
+ *   I          tools and skills (harness tool discovery, skills, MCP server names)
  *   J          agent notes: CLAUDE.md for codex, opencode, pi, only when edited
  *   K          repository (per task)
  *
@@ -119,6 +119,7 @@ export const getBasePrompt = async (args: BasePromptArgs): Promise<string> => {
   const { role, agentId, traits } = args;
   const {
     hasMcp = true,
+    hasToolSearch = false,
     hasLocalEnvironment: hasLocalEnv = true,
     nativeSkillDiscovery = true,
   } = traits ?? {};
@@ -221,12 +222,17 @@ export const getBasePrompt = async (args: BasePromptArgs): Promise<string> => {
 
   // I. Tools and skills. Skipped without MCP: the discovery tools are MCP tools.
   if (hasMcp) {
+    const discoveryResult = await resolveTemplateAsync(
+      hasToolSearch ? "system.agent.tool_discovery.search" : "system.agent.tool_discovery.direct",
+      {},
+    );
     const toolsResult = await resolveTemplateAsync(
       "system.agent.tools_skills",
       renderToolsAndSkillsVars({
         skillsSummary: args.skillsSummary,
         mcpServers: args.mcpServers,
         nativeSkillDiscovery,
+        toolDiscovery: discoveryResult.text,
         hasLocalEnv,
       }),
     );
@@ -265,14 +271,15 @@ export const getBasePrompt = async (args: BasePromptArgs): Promise<string> => {
 /**
  * Dynamic lines for `system.agent.tools_skills`. The static text lives in the
  * template so operators can override or skip the section; only the lists that
- * depend on the installed skills and MCP servers are built here.
+ * depend on the installed skills, MCP servers, and harness are built here.
  */
 function renderToolsAndSkillsVars(input: {
   skillsSummary?: { name: string; description: string }[];
   mcpServers?: string[];
   nativeSkillDiscovery: boolean;
   hasLocalEnv: boolean;
-}): { skills: string; mcp_servers: string } {
+  toolDiscovery: string;
+}): { skills: string; mcp_servers: string; tool_discovery: string } {
   let section = "";
 
   const skills = input.skillsSummary ?? [];
@@ -307,7 +314,11 @@ function renderToolsAndSkillsVars(input: {
       ? `Connected MCP servers: ${servers.join(", ")}. Their tools are in your tool list.\n`
       : "";
 
-  return { skills: section, mcp_servers: mcpLine };
+  return {
+    skills: section,
+    mcp_servers: mcpLine,
+    tool_discovery: input.toolDiscovery,
+  };
 }
 
 /**
