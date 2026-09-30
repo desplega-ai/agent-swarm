@@ -41,7 +41,7 @@ below. Each trace was checked against the code by reading it; none has a bun rep
 ### CX8: the join fires while a branch is waiting for, or running, its retry
 
 `executeStep` reports a step that failed with a retry pending as `completed` with no successors,
-so the walk adds the branch to `completedNodeIds` (`engine.ts:387`). When a sibling branch
+so the walk adds the branch to `completedNodeIds` (`engine.ts:405` on `80949f9aa`). When a sibling branch
 completes, the F6 batch gate sees that branch in `completedNodeIds` and runs `M`, even when the
 retry poller has already claimed the branch and is executing it. `M` runs without the branch's
 output. This is the gap F2 (`FixPendingRetryGate`) was proposed for.
@@ -217,6 +217,18 @@ Re-run on `main` @ `795526ca3` (tla2tools 1.8, BFS). Distinct states at a violat
 | `Fix-CX1` .. `Fix-CX7` | all hold | 4,073 / 471,850 / 308,120 / 113,010 / 26,296 / 3,325 / 3,778 | 36-47 |
 | `Ctl-CX2` .. `Ctl-CX7` | all find their CX | 809 / 2,055 / 29,904 / 6,466 / 116 / 965 | 12-29 |
 | `Probe-input-await.cfg` | CX6 found | 119 | 12 |
+
+Re-run on `main` @ `80949f9aa` (tla2tools 1.8, BFS, `-workers auto -deadlock`) after syncing with #1706 and #1715. Neither PR changes a modelled guard, so the `.tla` and `.cfg` files are unchanged and every config gives the same verdict as on `795526ca3`.
+
+| Config | Result | Distinct states | Trace |
+|---|---|---|---|
+| `Workflows.cfg` | `JoinWaitsForBranches` violated (CX8) | 30,087 | 24 |
+| `Long.cfg` | `AtMostOneExecuting` violated (crash trace) | 22,331 | 20 |
+| `Cal-bf12ab53.cfg` / control | found / holds | 415 / 160 | 11 / - |
+| `Cal-d4753302.cfg` / control | found / found | 4,266 / 3,165 | 32 / 32 |
+| `Fix-CX1` .. `Fix-CX7` | all hold | 4,073 / 471,850 / 308,120 / 113,010 / 26,296 / 3,325 / 3,778 | - |
+| `Ctl-CX2` .. `Ctl-CX7` | all find their CX | 2,073 / 2,451 / 23,232 / 9,507 / 506 / 1,326 | 22 / 21 / 28 / 29 / 12 / 27 |
+| `Probe-input-await.cfg` | CX6 found | 791 | 12 |
 
 The long simulation on `main` @ `2180cd401` with 3 branches produced 1,456 violating traces: 1,438
 `TerminalRunStaysQuiet`, 11 `JoinWaitsForAll`, 3 `ExecutesOnce`, 2 `AtMostOneExecuting`,
