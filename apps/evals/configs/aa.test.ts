@@ -35,7 +35,7 @@ describe("AA mapping completeness (v7.6 item D, frozen)", () => {
 
   test("frozen counts: 59 matched, 25 unmatched, 32 distinct AA rows", () => {
     expect(Object.keys(CONFIG_AA_ROWS).length).toBe(60);
-    expect(Object.keys(AA_UNMATCHED_CONFIG_IDS).length).toBe(57);
+    expect(Object.keys(AA_UNMATCHED_CONFIG_IDS).length).toBe(59);
     // 32: Haiku, Sonnet 4.6 (max), Opus 4.8 (max), Opus 4.7 (max), Fable 5,
     // DS Flash (High), DS Pro (High), Gemini 3.5 Flash, Gemini 3.1 Pro Preview
     // (v7.7 item 1), Qwen3 Coder Next, gpt-oss-120b (high),

@@ -37,6 +37,7 @@ import { getExecutorRegistry, startWorkflowExecution } from "../workflows";
 import { definitionNodeIds, generateEdges, validateDefinition } from "../workflows/definition";
 import { TriggerSchemaError } from "../workflows/engine";
 import { validateJsonSchema } from "../workflows/json-schema-validator";
+import { workflowModelErrors } from "../workflows/model-validation";
 import { patchWorkflowDefinition } from "../workflows/patch-definition";
 import { workflowSaveWarnings } from "../workflows/readiness";
 import { cancelWorkflowRun, retryFailedRun } from "../workflows/resume";
@@ -575,6 +576,11 @@ export async function handleWorkflows(
       jsonError(res, `Invalid definition: ${validation.errors.join("; ")}`, 400);
       return true;
     }
+    const modelErrors = await workflowModelErrors(parsed.body.definition);
+    if (modelErrors.length > 0) {
+      jsonError(res, `Invalid definition: ${modelErrors.join("; ")}`, 400);
+      return true;
+    }
 
     const trustedUserId = await resolveHttpAuditUserId(req, myAgentId);
     let key: string | undefined;
@@ -747,6 +753,11 @@ export async function handleWorkflows(
       });
       if (!validation.valid) {
         jsonError(res, `Invalid definition: ${validation.errors.join("; ")}`, 400);
+        return true;
+      }
+      const modelErrors = await workflowModelErrors(body.definition);
+      if (modelErrors.length > 0) {
+        jsonError(res, `Invalid definition: ${modelErrors.join("; ")}`, 400);
         return true;
       }
     }

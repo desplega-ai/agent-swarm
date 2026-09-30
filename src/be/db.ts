@@ -895,6 +895,44 @@ export async function getSlackTasksInThread(
   return rows.map(rowToAgentTask);
 }
 
+/**
+ * Slack threads with an open human request raised by one of their own tasks
+ * (`request-human-input`): the swarm cannot go on until a person answers.
+ * A request past its `expiresAt` is about to become a timeout follow-up, so
+ * it no longer counts as waiting.
+ */
+export async function listSlackThreadsAwaitingHuman(): Promise<
+  Array<{ channelId: string; threadTs: string }>
+> {
+  return getDbClient().query<{ channelId: string; threadTs: string }>(
+    `SELECT DISTINCT task.slackChannelId AS channelId, task.slackThreadTs AS threadTs
+       FROM approval_requests request
+       JOIN agent_tasks task ON task.id = request.sourceTaskId
+       WHERE request.status = 'pending'
+       AND (request.expiresAt IS NULL OR request.expiresAt > strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+       AND task.slackChannelId IS NOT NULL
+       AND task.slackThreadTs IS NOT NULL`,
+  );
+}
+
+export async function isSlackThreadAwaitingHuman(
+  channelId: string,
+  threadTs: string,
+): Promise<boolean> {
+  const row = await getDbClient().get<{ waiting: number }>(
+    `SELECT 1 AS waiting
+       FROM approval_requests request
+       JOIN agent_tasks task ON task.id = request.sourceTaskId
+       WHERE request.status = 'pending'
+       AND (request.expiresAt IS NULL OR request.expiresAt > strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+       AND task.slackChannelId = ?
+       AND task.slackThreadTs = ?
+       LIMIT 1`,
+    [channelId, threadTs],
+  );
+  return !!row;
+}
+
 export async function markTaskSlackReplySent(taskId: string): Promise<void> {
   await getDbClient().run(`UPDATE agent_tasks SET slackReplySent = 1 WHERE id = ?`, [taskId]);
 }
@@ -3333,9 +3371,15 @@ const ELIGIBILITY_SCAN_CAP = Number(process.env.ELIGIBILITY_SCAN_CAP) || 500;
  * JSON-parsing `routingAffinity` in SQL) until `limit` eligible tasks are
  * found or the pool is exhausted, capped at `ELIGIBILITY_SCAN_CAP` rows
  * scanned so a pool full of ineligible tasks can't turn every poll into an
- * unbounded scan.
+ * unbounded scan. `accept` adds a caller-side filter (e.g. harness model
+ * compatibility) that runs inside the scan, so rejected rows do not use up
+ * the `limit`.
  */
-export async function getUnassignedTaskIdsForAgent(agentId: string, limit = 10): Promise<string[]> {
+export async function getUnassignedTaskIdsForAgent(
+  agentId: string,
+  limit = 10,
+  accept?: (task: AgentTask) => boolean | Promise<boolean>,
+): Promise<string[]> {
   const agent = await getAgentById(agentId);
   if (!agent) return [];
 
@@ -3352,7 +3396,7 @@ export async function getUnassignedTaskIdsForAgent(agentId: string, limit = 10):
 
     for (const row of rows) {
       const task = rowToAgentTask(row);
-      if (isAgentEligibleForTask(agent, task)) {
+      if (isAgentEligibleForTask(agent, task) && (!accept || (await accept(task)))) {
         eligible.push(task.id);
         if (eligible.length >= limit) break;
       }

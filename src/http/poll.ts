@@ -33,6 +33,7 @@ import {
   recordClaimModelResolution,
   setAgentModelTierOverrides,
 } from "../be/model-tier-resolution";
+import { poolTaskRunsOnHarness } from "../be/model-validation";
 import { touchRuntimeInstance } from "../be/multi-runtime";
 import { hasCapability } from "../server";
 import { fetchChannelActivity } from "../slack/channel-activity";
@@ -536,7 +537,14 @@ export async function handlePoll(
           // `isAgentEligibleForTask`, so an ineligible task is never even
           // offered to the budget gate below or the claim loop.
           if (await hasCapacity(myAgentId)) {
-            const unassignedIds = await getUnassignedTaskIdsForAgent(myAgentId, 5);
+            // A pool task that pins a model this harness cannot run waits for a compatible
+            // worker (runbooks/model-tiers.md § Harness compatibility). Filter before the
+            // budget gate so an incompatible first candidate never drives a refusal.
+            const harness = agent.harnessProvider ?? agent.provider ?? null;
+            // The filter runs inside the paginated scan, so incompatible rows never use up the limit.
+            const unassignedIds = await getUnassignedTaskIdsForAgent(myAgentId, 5, (task) =>
+              poolTaskRunsOnHarness(task, harness),
+            );
             // Budget admission gate (Phase 3). Pool path is workers-only —
             // per-agent budgets matter most here, but we still check global.
             // Only run the gate when there's at least one candidate task; an

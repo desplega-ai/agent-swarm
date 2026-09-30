@@ -291,7 +291,7 @@ Sends a task to a specific agent, creates an unassigned task for the pool, or of
 | `parentTaskId` | `uuid` | No | - | Parent task ID for session continuity. Child task will resume the parent's Claude session. Auto-routes to the same worker unless agentId is explicitly provided. |
 | `dir` | `string` | No | - | Working directory (absolute path) for the agent to start in. If the directory doesn't exist, falls back to the default working directory. |
 | `vcsRepo` | `string` | No | - | VCS repo identifier (e.g., 'desplega-ai/agent-swarm' for GitHub or 'group/project' for GitLab). Links the task to a registered repo for workspace context. |
-| `model` | `string` | No | - | Concrete model override for this task, interpreted by the assignee's harness/provider. This does not switch providers. Prefer modelTier for portable intent. |
+| `model` | `string` | No | - | Concrete model override for this task, interpreted by the assignee's harness/provider. This does not switch providers. Prefer modelTier for portable intent. The model must run on the assignee's harness (an Anthropic model on a Claude agent, an OpenAI model on a Codex agent); a mismatch is rejected. |
 | `modelTier` | `smol \| regular \| smart \| ultra` | No | - | Portable model tier for this task: 'smol', 'regular', 'smart', or 'ultra'. Resolved at claim/run time using the assignee's harness/provider. Legacy model shortnames map as haiku→smol, sonnet→regular, opus→smart, fable→ultra. |
 | `allowCustomModel` | `boolean` | No | - | Accept a `model` the model catalog does not list. Without it an unknown model id is rejected. Only for ids the catalog cannot know yet (a fresh launch, a private deployment). |
 | `effort` | `off \| low \| medium \| high \| xhigh \| max` | No | - | Reasoning effort for this task: 'off', 'low', 'medium', 'high', 'xhigh', or 'max'. If omitted, the assignee's REASONING_EFFORT_OVERRIDE/default applies. |
@@ -460,7 +460,7 @@ Perform task pool operations: create unassigned tasks, claim/release tasks from 
 | `taskId` | `uuid` | No | - | Task ID (required for claim/release/accept/reject). |
 | `reason` | `string` | No | - | Reason for rejection (optional for 'reject'). |
 | `dir` | `string` | No | - | Working directory (absolute path) for the agent to start in. Only used with 'create' action. |
-| `model` | `string` | No | - | Concrete model override for the created task, interpreted by the claiming worker's harness/provider. This does not switch providers. Only used with 'create' action. |
+| `model` | `string` | No | - | Concrete model override for the created task, interpreted by the claiming worker's harness/provider. This does not switch providers. Only used with 'create' action. The model must run on the assignee's harness (an Anthropic model on a Claude agent, an OpenAI model on a Codex agent); a mismatch is rejected. |
 | `modelTier` | `smol \| regular \| smart \| ultra` | No | - | Portable model tier for the created task: 'smol', 'regular', 'smart', or 'ultra'. Resolved when a worker claims/runs the task. Only used with 'create' action. |
 | `allowCustomModel` | `boolean` | No | - | Accept a `model` the model catalog does not list. Without it an unknown model id is rejected. Only used with 'create' action. |
 | `effort` | `off \| low \| medium \| high \| xhigh \| max` | No | - | Reasoning effort for the created task: 'off', 'low', 'medium', 'high', 'xhigh', or 'max'. Only used with 'create' action. |
@@ -1024,7 +1024,7 @@ Create a new scheduled task. For recurring: provide cronExpression or intervalMs
 | `targetAgentId` | `string` | No | - | Agent to assign tasks to (omit for task pool) |
 | `timezone` | `string` | No | "UTC" | Timezone for cron schedules |
 | `enabled` | `boolean` | No | true | Whether the schedule is enabled (default: true) |
-| `model` | `string` | No | - | Concrete model override for tasks created by this schedule. Interpreted by each assignee's harness/provider and does not switch providers. Prefer modelTier for portable intent. |
+| `model` | `string` | No | - | Concrete model override for tasks created by this schedule. Interpreted by each assignee's harness/provider and does not switch providers. Prefer modelTier for portable intent. The model must run on the assignee's harness (an Anthropic model on a Claude agent, an OpenAI model on a Codex agent); a mismatch is rejected. |
 | `modelTier` | `smol \| regular \| smart \| ultra` | No | - | Portable model tier for tasks created by this schedule: 'smol', 'regular', 'smart', or 'ultra'. Resolved by each assignee's harness/provider at run time. |
 | `allowCustomModel` | `boolean` | No | - | Accept a `model` the model catalog does not list. Without it an unknown model id is rejected. Only for ids the catalog cannot know yet. |
 
@@ -1071,7 +1071,7 @@ Update an existing scheduled task. Any registered agent can update schedules.
 | `targetAgentId` | `string` | No | - | New target agent ID |
 | `timezone` | `string` | No | - | New timezone |
 | `enabled` | `boolean` | No | - | Enable or disable the schedule |
-| `model` | `string` | No | - | Concrete model override for tasks created by this schedule. Set to null to clear. |
+| `model` | `string` | No | - | Concrete model override for tasks created by this schedule. Set to null to clear. The model must run on the assignee's harness (an Anthropic model on a Claude agent, an OpenAI model on a Codex agent); a mismatch is rejected. |
 | `modelTier` | `smol \| regular \| smart \| ultra` | No | - | Portable model tier for tasks created by this schedule. Set to null to clear. |
 | `allowCustomModel` | `boolean` | No | - | Accept a `model` the model catalog does not list. Without it an unknown model id is rejected. Only for ids the catalog cannot know yet. |
 
@@ -1101,7 +1101,7 @@ Patch an existing scheduled task by shallow-merging provided fields over the cur
 | `targetAgentId` | `string` | No | - | New target agent ID |
 | `timezone` | `string` | No | - | New timezone |
 | `enabled` | `boolean` | No | - | Enable or disable the schedule |
-| `model` | `string` | No | - | Concrete model override for tasks created by this schedule. Set to null to clear. |
+| `model` | `string` | No | - | Concrete model override for tasks created by this schedule. Set to null to clear. The model must run on the assignee's harness (an Anthropic model on a Claude agent, an OpenAI model on a Codex agent); a mismatch is rejected. |
 | `modelTier` | `smol \| regular \| smart \| ultra` | No | - | Portable model tier for tasks created by this schedule. Set to null to clear. |
 | `allowCustomModel` | `boolean` | No | - | Accept a `model` the model catalog does not list. Without it an unknown model id is rejected. Only for ids the catalog cannot know yet. |
 

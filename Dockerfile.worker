@@ -48,7 +48,7 @@ COPY tsconfig.json ./
 # --bytecode --format=esm (Bun 1.4 lifted the CJS-only restriction): the binary
 # boots on every container start AND every hook invocation, so the ~4x faster
 # startup (388 -> 81 ms measured) is worth the ~130 MB larger binary.
-RUN bun build ./src/cli.tsx --compile --bytecode --format=esm --compile-exec-argv='--expose-gc' --outfile ./agent-swarm
+RUN bun build ./src/cli.tsx ./src/providers/pi-binary-root/src/extensions/codemode/worker.ts --root ./src/providers/pi-binary-root --compile --bytecode --format=esm --compile-exec-argv='--expose-gc' --outfile ./agent-swarm
 
 # ─── Stage: worker-base — minimal system + all harness CLIs ──────────────────
 FROM ubuntu:24.04 AS worker-base

@@ -559,16 +559,20 @@ export async function handleSchedules(
       jsonError(res, "Schedule not found", 404);
       return true;
     }
+    // A move to another agent re-judges the stored model against the new harness.
+    const agentChanged =
+      parsed.body.targetAgentId !== undefined &&
+      parsed.body.targetAgentId !== existing.targetAgentId;
     if (parsed.body.model !== undefined || parsed.body.modelTier !== undefined) {
       const normalizedModel = splitLegacyModelAlias({
         model: parsed.body.model,
         modelTier: parsed.body.modelTier,
       });
       // A model the schedule already stores is not re-judged, so an unrelated edit still saves.
-      if (normalizedModel.model !== existing.model) {
+      if (normalizedModel.model !== existing.model || agentChanged) {
         const modelError = await explicitModelErrorForAgent({
           model: normalizedModel.model,
-          allowCustomModel,
+          allowCustomModel: allowCustomModel || normalizedModel.model === existing.model,
           agentId: parsed.body.targetAgentId ?? existing.targetAgentId,
         });
         if (modelError) {
@@ -579,6 +583,17 @@ export async function handleSchedules(
       if (parsed.body.model !== undefined) body.model = normalizedModel.model ?? null;
       if (parsed.body.modelTier !== undefined || normalizedModel.modelTier) {
         body.modelTier = normalizedModel.modelTier ?? null;
+      }
+    } else if (agentChanged && existing.model) {
+      // Harness only: the stored id already passed the catalog check when it was written.
+      const modelError = await explicitModelErrorForAgent({
+        model: existing.model,
+        allowCustomModel: true,
+        agentId: parsed.body.targetAgentId ?? existing.targetAgentId,
+      });
+      if (modelError) {
+        jsonError(res, modelError, 400);
+        return true;
       }
     }
 

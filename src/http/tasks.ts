@@ -269,7 +269,12 @@ const createTask = route({
       outputSchema: z.record(z.string(), z.unknown()).optional(),
       contextKey: z.string().optional(),
       requestedByUserId: z.string().optional(),
-      model: z.string().optional(),
+      model: z
+        .string()
+        .optional()
+        .describe(
+          "Concrete model override for this task, interpreted by the assignee's harness/provider. The model must run on the assignee's harness (an Anthropic model on a Claude agent, an OpenAI model on a Codex agent); a mismatch is rejected.",
+        ),
       modelTier: ModelTierSchema.optional(),
       /**
        * Accept a `model` the catalog does not list. Without it an unknown id is a 400; with it
@@ -960,7 +965,7 @@ export async function handleTasks(
           }),
           effort: parsed.body.effort,
         },
-        { origin: "rest" },
+        { origin: "rest", allowCustomModel: parsed.body.allowCustomModel },
       );
 
       ensure({

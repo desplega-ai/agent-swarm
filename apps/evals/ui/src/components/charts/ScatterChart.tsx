@@ -1,4 +1,5 @@
 import { type ReactNode, useMemo, useState } from "react";
+import { paretoFrontier } from "../../lib/pareto.ts";
 import { fmtCompact, leftMarginFor, niceTicks, useContainerWidth } from "./chart-utils.ts";
 import "./charts.css";
 
@@ -230,6 +231,12 @@ export function ScatterChart(props: {
    * true scale instead of the plotted range.
    */
   yDomain?: "zero" | "fit" | [number, number];
+  /**
+   * Draw the Pareto frontier of the plotted points (lower x and higher y are
+   * better) as a dashed line, with `label` in the legend. It covers only the
+   * points passed in, so the label should say so.
+   */
+  frontier?: { label: string } | null;
   emptyText?: string;
 }): ReactNode {
   const [ref, width] = useContainerWidth();
@@ -339,6 +346,21 @@ export function ScatterChart(props: {
     }
   }
 
+  const frontierLabel = props.frontier?.label ?? null;
+  const frontierPts =
+    frontierLabel === null
+      ? []
+      : paretoFrontier(
+          pts,
+          (p) => p.x,
+          (p) => p.y,
+        );
+  const frontierPath =
+    frontierPts.length > 1
+      ? frontierPts.map((p, i) => `${i === 0 ? "M" : "L"}${sx(p.x)} ${sy(p.y)}`).join("")
+      : null;
+  const onFrontier = new Set(frontierPath === null ? [] : frontierPts.map((p) => p.key));
+
   const hovered = hoverKey === null ? null : (pts.find((p) => p.key === hoverKey) ?? null);
 
   const onMove = (e: React.MouseEvent<SVGSVGElement>) => {
@@ -426,12 +448,19 @@ export function ScatterChart(props: {
             {props.yLabel}
           </text>
         ) : null}
+        {frontierPath !== null ? <path className="frontier-line" d={frontierPath} /> : null}
         {pts.map((p) => {
           const at = labelPlacements?.get(p.key) ?? null;
           return (
             <g key={p.key}>
               <circle
-                className={p.key === hoverKey ? "chart-scatter-dot hover" : "chart-scatter-dot"}
+                className={[
+                  "chart-scatter-dot",
+                  onFrontier.has(p.key) ? "on-frontier" : "",
+                  p.key === hoverKey ? "hover" : "",
+                ]
+                  .filter(Boolean)
+                  .join(" ")}
                 cx={sx(p.x)}
                 cy={sy(p.y)}
                 r={p.r ?? 5}
@@ -446,14 +475,24 @@ export function ScatterChart(props: {
           );
         })}
       </svg>
-      {groups.length > 1 ? (
+      {groups.length > 1 || frontierPath !== null ? (
         <div className="chart-legend">
-          {groups.map((g) => (
-            <span className="chart-legend-item" key={g.name}>
-              <span className="chart-dot" style={{ background: g.color }} />
-              {g.name}
+          {groups.length > 1
+            ? groups.map((g) => (
+                <span className="chart-legend-item" key={g.name}>
+                  <span className="chart-dot" style={{ background: g.color }} />
+                  {g.name}
+                </span>
+              ))
+            : null}
+          {frontierPath !== null ? (
+            <span className="chart-legend-item" title="No plotted point beats these on both axes">
+              <svg width="26" height="10" viewBox="0 0 26 10" aria-hidden="true">
+                <line className="frontier-line" x1="1" x2="25" y1="5" y2="5" />
+              </svg>
+              {frontierLabel}
             </span>
-          ))}
+          ) : null}
         </div>
       ) : null}
       {hovered !== null

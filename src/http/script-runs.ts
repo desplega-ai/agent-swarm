@@ -22,6 +22,7 @@ import {
   updateScriptRunIfRunning,
   upsertScriptRunJournalStep,
 } from "../be/db";
+import { explicitModelErrorForAgent } from "../be/model-validation";
 import { lintWorkflowLabels } from "../script-workflows/label-lint";
 import { scriptRunMaxAgentTasks, scriptRunMaxSteps } from "../script-workflows/limits";
 import {
@@ -102,6 +103,8 @@ const agentTaskBodySchema = z.object({
   dir: z.string().min(1).optional(),
   vcsRepo: z.string().min(1).optional(),
   model: z.string().min(1).optional(),
+  /** Accept a `model` the catalog does not list (same escape hatch as POST /api/tasks). */
+  allowCustomModel: z.boolean().optional(),
   parentTaskId: z.string().uuid().optional(),
   requestedByUserId: z.string().optional(),
   outputSchema: z.record(z.string(), z.unknown()).optional(),
@@ -619,6 +622,15 @@ export async function handleScriptRuns(
     const contextKey = `script-run:${run.id}:${parsed.body.stepKey}`;
     let task = await getLatestScriptRunStepTaskByContextKey(contextKey);
     if (!task) {
+      const modelError = await explicitModelErrorForAgent({
+        model: parsed.body.model,
+        allowCustomModel: parsed.body.allowCustomModel,
+        agentId: parsed.body.agentId,
+      });
+      if (modelError) {
+        jsonError(res, modelError, 400);
+        return true;
+      }
       try {
         task = await createTaskExtended(
           parsed.body.template ?? parsed.body.task ?? parsed.body.stepKey,

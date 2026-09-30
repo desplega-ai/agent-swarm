@@ -278,6 +278,72 @@ function titleOf<T>(col: Column<T>, row: T): string | undefined {
   return undefined;
 }
 
+// One ResizeObserver for every cell; each cell registers the check that decides
+// whether its text is currently ellipsized.
+const truncationChecks = new Map<Element, () => void>();
+let truncationObserver: ResizeObserver | null = null;
+
+function watchTruncation(el: Element, check: () => void): () => void {
+  truncationObserver ??= new ResizeObserver((entries) => {
+    for (const entry of entries) truncationChecks.get(entry.target)?.();
+  });
+  truncationChecks.set(el, check);
+  truncationObserver.observe(el);
+  return () => {
+    truncationChecks.delete(el);
+    truncationObserver?.unobserve(el);
+  };
+}
+
+/** One body cell. An ellipsized value is revealed through the portal Tooltip,
+ *  which opens on hover and on keyboard focus: in a link row the link takes
+ *  focus, otherwise the truncated cell itself becomes a tab stop. A rich
+ *  column `tooltip` always wins over the plain text. */
+function Cell(props: {
+  text: string | undefined;
+  tip: ReactNode | null;
+  href: string | null;
+  children: ReactNode;
+}): ReactNode {
+  const [el, setEl] = useState<HTMLDivElement | null>(null);
+  const [truncated, setTruncated] = useState(false);
+  const measured = props.tip !== null || props.text !== undefined;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: re-measure when the value changes; the observer only fires on size changes
+  useLayoutEffect(() => {
+    if (!el || !measured) return;
+    const check = () => setTruncated(el.scrollWidth > el.clientWidth);
+    check();
+    return watchTruncation(el, check);
+  }, [el, measured, props.text]);
+
+  const tipText = props.tip ?? (truncated ? (props.text ?? null) : null);
+  const cell = (
+    <div
+      ref={setEl}
+      className="dt-cell"
+      title={tipText === null ? props.text : undefined}
+      tabIndex={props.href === null && truncated ? 0 : undefined}
+    >
+      {props.children}
+    </div>
+  );
+  const inner =
+    props.href !== null ? (
+      <a className="dt-row-link" href={props.href}>
+        {cell}
+      </a>
+    ) : (
+      cell
+    );
+  return tipText !== null ? (
+    <Tooltip block wide={props.tip !== null} text={tipText}>
+      {inner}
+    </Tooltip>
+  ) : (
+    inner
+  );
+}
+
 function compareValues(a: string | number | null, b: string | number | null): number {
   if (a === null && b === null) return 0;
   if (a === null) return 1; // nulls last (for asc)
@@ -344,6 +410,9 @@ export function DataTable<T>(props: DataTableProps<T>): ReactNode {
     }
     return out;
   }, [rows, columns, query, filters, sort]);
+
+  const filtering =
+    query.trim().length > 0 || Object.values(filters).some((selected) => selected.length > 0);
 
   const toggleSort = (key: string) => {
     setSort((prev) =>
@@ -424,7 +493,23 @@ export function DataTable<T>(props: DataTableProps<T>): ReactNode {
             {visible.length === 0 ? (
               <tr>
                 <td className="dt-empty" colSpan={colCount}>
-                  {props.emptyText ?? "Nothing here yet"}
+                  {rows.length > 0 && filtering ? (
+                    <>
+                      No rows match the current search and filters.
+                      <button
+                        type="button"
+                        className="btn"
+                        onClick={() => {
+                          setQuery("");
+                          setFilters({});
+                        }}
+                      >
+                        Clear filters
+                      </button>
+                    </>
+                  ) : (
+                    (props.emptyText ?? "Nothing here yet")
+                  )}
                 </td>
               </tr>
             ) : (
@@ -471,31 +556,15 @@ export function DataTable<T>(props: DataTableProps<T>): ReactNode {
                     ) : null}
                     {columns.map((col) => {
                       const tip = col.tooltip?.(row) ?? null;
-                      const cell = (
-                        <div
-                          className="dt-cell"
-                          title={tip === null ? titleOf(col, row) : undefined}
-                        >
-                          {col.render(row)}
-                        </div>
-                      );
-                      const wrapped =
-                        tip !== null ? (
-                          <Tooltip block wide text={tip}>
-                            {cell}
-                          </Tooltip>
-                        ) : (
-                          cell
-                        );
                       return (
                         <td key={col.key} className={col.align ? `align-${col.align}` : undefined}>
-                          {href !== null ? (
-                            <a className="dt-row-link" href={href}>
-                              {wrapped}
-                            </a>
-                          ) : (
-                            wrapped
-                          )}
+                          <Cell
+                            text={tip === null ? titleOf(col, row) : undefined}
+                            tip={tip}
+                            href={href}
+                          >
+                            {col.render(row)}
+                          </Cell>
                         </td>
                       );
                     })}

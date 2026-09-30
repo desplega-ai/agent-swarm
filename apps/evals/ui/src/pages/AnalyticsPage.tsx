@@ -602,7 +602,7 @@ function EfficiencySection(props: { scatter: AnalyticsScatterPoint[] }): ReactNo
     <div className="panel">
       <SectionHead
         title={`Efficiency — ${yKey === "score" ? "Score" : "Pass Rate"} vs ${xDef.label}`}
-        tip="One dot per model: quality on the y axis against the selected spend metric (avg tokens, cost, or duration per attempt) on the x axis — lower is always better on x. Dot size scales with attempts. The green corner is the most attractive quadrant (high quality, low spend) and the red corner the least attractive; the y axis is pinned to the full 0–1 range (Score 0.00–1.00, Pass Rate 0–100%) so the quadrants stay correct and comparable across runs, while the x axis auto-scales to the data."
+        tip="One dot per model: quality on the y axis against the selected spend metric (avg tokens, cost, or duration per attempt) on the x axis — lower is always better on x. Dot size scales with attempts. The green corner is the most attractive quadrant (high quality, low spend) and the red corner the least attractive; the y axis is pinned to the full 0–1 range (Score 0.00–1.00, Pass Rate 0–100%) so the quadrants stay correct and comparable across runs, while the x axis auto-scales to the data. The dashed line is the Pareto frontier of the models shown: none of the plotted models beats them on both axes. It covers only what is plotted, not a full-suite frontier."
       >
         <span className="an-seg-label dim">X</span>
         <Seg
@@ -647,6 +647,9 @@ function EfficiencySection(props: { scatter: AnalyticsScatterPoint[] }): ReactNo
         // range) and the chart stays comparable across runs. Score renders as
         // fixed-decimal ticks (fmtScore), Pass Rate as 0–100% (fmtPct).
         yDomain={[0, 1]}
+        // Always drawn, from the dots on screen only: no suite-coverage rule
+        // here (the Leaderboard frontier and the public benchmark keep theirs).
+        frontier={{ label: "Pareto frontier of the models shown" }}
         showLabels={points.length <= SCATTER_LABEL_CAP}
         emptyText="No graded attempts with this metric yet — v7 runs capture tokens for every attempt"
       />

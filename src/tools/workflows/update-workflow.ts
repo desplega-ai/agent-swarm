@@ -19,6 +19,7 @@ import {
 } from "@/types";
 import { getExecutorRegistry } from "@/workflows";
 import { definitionNodeIds, validateDefinition } from "@/workflows/definition";
+import { workflowModelErrors } from "@/workflows/model-validation";
 import { withSaveWarnings, workflowSaveWarnings } from "@/workflows/readiness";
 import { snapshotAndUpdateWorkflow } from "@/workflows/version";
 
@@ -120,6 +121,10 @@ export const registerUpdateWorkflowTool = (server: McpServer) => {
           });
           if (!validation.valid) {
             return toolErr(`Invalid definition: ${validation.errors.join("; ")}`);
+          }
+          const modelErrors = await workflowModelErrors(definition);
+          if (modelErrors.length > 0) {
+            return toolErr(`Invalid definition: ${modelErrors.join("; ")}`);
           }
         }
 
