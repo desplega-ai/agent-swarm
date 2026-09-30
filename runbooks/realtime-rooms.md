@@ -86,6 +86,20 @@ Run a single API replica. Sticky sessions do not provide shared state between re
 Room transport and snapshots do not scrub document content. Never store secrets in a room.
 Logs and error messages still pass through the secret scrubber.
 
+## Dashboard presence (Comb)
+
+The dashboard requests a one-shot ticket with `POST /api/realtime/ticket` and its normal bearer token.
+The ticket expires after 60 seconds and becomes invalid after its first WebSocket upgrade attempt.
+Connect to `/api/realtime?ticket=<ticket>`. `/@swarm/realtime` accepts the same ticket.
+
+Use namespace `presence:comb:<orgId>:<driveId>` and room name `default`.
+Both IDs must match `[A-Za-z0-9_-]{1,64}`. Put the current file path in the presence payload.
+Only operator and active user dashboard principals may use these rooms.
+Agents and page sessions cannot join them. RBAC users need `comb.presence`.
+The server accepts only `join`, `leave`, and `presence` for this namespace.
+It rejects `update`, `change`, `reset`, `publish`, `subscribe`, and `unsubscribe`.
+Presence keeps the existing 8 KiB payload limit and never writes room state to the database.
+
 ## Development and verification
 
 Regenerate the browser module after changing the browser SDK or shared document operations:

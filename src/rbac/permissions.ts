@@ -232,6 +232,10 @@ export const PERMISSIONS = {
     description: "Write another agent's task:agent: KV namespace.",
     namespace: "kv",
   },
+  "comb.presence": {
+    description: "Use dashboard presence rooms for Comb drives.",
+    namespace: "comb",
+  },
   "page.delete.any": {
     description: "Delete a page the caller does not own.",
     namespace: "page",

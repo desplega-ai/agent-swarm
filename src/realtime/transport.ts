@@ -7,6 +7,7 @@ import { findUserById } from "../be/users";
 import { resolveHttpRequestAuth } from "../http/auth";
 import { getApiKey } from "../utils/api-key";
 import { extractAndVerifyCookie } from "../utils/page-session";
+import type { HttpRequestAuth } from "../utils/request-auth-context";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { authorizeRoomNamespace, resolveRoomNamespace } from "./auth";
 import { realtimeBus } from "./bus";
@@ -20,6 +21,7 @@ import {
   roomTopic,
   roomView,
 } from "./rooms";
+import { redeemRealtimeTicket } from "./tickets";
 
 const nameSchema = z.string().regex(/^[a-zA-Z0-9_-]{1,64}$/);
 const messageSchema = z.object({
@@ -56,14 +58,47 @@ type Identity = {
   isOperator?: boolean;
 };
 type Viewer = { userId: string; name: string; kind: "user" | "guest" | "agent" };
+type AuthenticatedConnection = {
+  identity: Identity;
+  me: Viewer;
+  expiresAt: number | undefined;
+};
 
 function header(req: IncomingMessage, name: string): string | undefined {
   const value = req.headers[name];
   return Array.isArray(value) ? value[0] : value;
 }
 
-async function authenticate(req: IncomingMessage) {
+function identityFromHttpAuth(
+  req: IncomingMessage,
+  auth: HttpRequestAuth,
+): AuthenticatedConnection {
+  const agentId = auth.kind === "operator" ? header(req, "x-agent-id") : undefined;
+  const guestId = `guest-${crypto.randomUUID()}`;
+  return {
+    identity: {
+      agentId,
+      sourceTaskId: header(req, "x-source-task-id"),
+      userId: auth.kind === "user" ? auth.userId : undefined,
+      isOperator: auth.kind === "operator",
+    } satisfies Identity,
+    me: {
+      userId: auth.kind === "user" ? auth.userId : (agentId ?? guestId),
+      name: auth.kind === "user" ? auth.user.name : (agentId ?? `Guest ${guestId.slice(-6)}`),
+      kind: auth.kind === "user" ? "user" : agentId ? "agent" : "guest",
+    } as Viewer,
+    expiresAt: undefined,
+  };
+}
+
+async function authenticate(req: IncomingMessage): Promise<AuthenticatedConnection> {
   const url = new URL(req.url ?? "/", "http://localhost");
+  const ticket = url.searchParams.get("ticket");
+  if (ticket) {
+    const auth = redeemRealtimeTicket(ticket);
+    if (!auth) throw new Error("Authentication required");
+    return identityFromHttpAuth(req, auth);
+  }
   const pageId = url.searchParams.get("pageId");
   if (pageId) {
     // Browser credentials must never authorize cross-origin socket requests.
@@ -90,22 +125,7 @@ async function authenticate(req: IncomingMessage) {
   }
   const auth = await resolveHttpRequestAuth(req, getApiKey());
   if (!auth) throw new Error("Authentication required");
-  const agentId = auth.kind === "operator" ? header(req, "x-agent-id") : undefined;
-  const guestId = `guest-${crypto.randomUUID()}`;
-  return {
-    identity: {
-      agentId,
-      sourceTaskId: header(req, "x-source-task-id"),
-      userId: auth.kind === "user" ? auth.userId : undefined,
-      isOperator: auth.kind === "operator",
-    } satisfies Identity,
-    me: {
-      userId: auth.kind === "user" ? auth.userId : (agentId ?? guestId),
-      name: auth.kind === "user" ? auth.user.name : (agentId ?? `Guest ${guestId.slice(-6)}`),
-      kind: auth.kind === "user" ? "user" : agentId ? "agent" : "guest",
-    } as Viewer,
-    expiresAt: undefined,
-  };
+  return identityFromHttpAuth(req, auth);
 }
 
 function channelTopic(namespace: string, name: string): string {
@@ -116,11 +136,12 @@ export function attachRealtimeTransport(server: Server): () => void {
   const wss = new WebSocketServer({ noServer: true, maxPayload: 3 * 1024 * 1024 });
   let pendingUpgrades = 0;
   let closing = false;
-  // The dedicated path bypasses HTTP proxying. Authentication precedes upgrade.
+  // Authentication precedes upgrade on both direct and proxied paths.
   const onUpgrade = (req: IncomingMessage, socket: import("node:stream").Duplex, head: Buffer) => {
+    const path = req.url?.split("?")[0];
     if (
       closing ||
-      req.url?.split("?")[0] !== "/@swarm/realtime" ||
+      (path !== "/@swarm/realtime" && path !== "/api/realtime") ||
       wss.clients.size + pendingUpgrades >= 1000
     ) {
       socket.destroy();
@@ -227,8 +248,10 @@ function connect(ws: WebSocket, auth: Awaited<ReturnType<typeof authenticate>>):
       const resolved = await resolveRoomNamespace(msg.namespace, auth.identity);
       if ("error" in resolved) throw new Error(resolved.error);
       const namespace = resolved.namespace;
-      const write = ["update", "change", "reset", "presence", "publish"].includes(msg.op);
-      const denied = await authorizeRoomNamespace(namespace, auth.identity, write);
+      if (namespace.startsWith("presence:comb:") && msg.name !== "default") {
+        throw new Error("Comb presence uses the default room");
+      }
+      const denied = await authorizeRoomNamespace(namespace, auth.identity, msg.op);
       if (denied) throw new Error(typeof denied === "string" ? denied : "Forbidden");
       if (closed) return;
       const key = roomTopic(namespace, msg.name);
@@ -261,7 +284,7 @@ function connect(ws: WebSocket, auth: Awaited<ReturnType<typeof authenticate>>):
             room = await getRoom(namespace, msg.name, msg.schemaVersion, { create: false });
           } catch (error) {
             if (!(error instanceof Error) || error.message !== "room does not exist") throw error;
-            const creationDenied = await authorizeRoomNamespace(namespace, auth.identity, true);
+            const creationDenied = await authorizeRoomNamespace(namespace, auth.identity, "join");
             if (creationDenied) throw new Error(creationDenied);
             if (closed) return;
             room = await getRoom(namespace, msg.name, msg.schemaVersion);
