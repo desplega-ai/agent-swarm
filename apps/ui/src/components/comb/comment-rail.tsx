@@ -568,6 +568,7 @@ function OutboxCard({
         <Tooltip>
           <TooltipTrigger asChild>
             <span
+              // biome-ignore lint/a11y/noNoninteractiveTabindex: focus opens the tooltip, so keyboard users can read why it was not sent
               tabIndex={0}
               className="flex items-center gap-1.5 rounded-sm font-medium text-status-error-strong outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
             >
