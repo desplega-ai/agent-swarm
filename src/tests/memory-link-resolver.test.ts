@@ -61,6 +61,40 @@ describe("resolveLinks", () => {
     expect(fsLinks[0]!.resolver).toBe("agent-fs-path");
   });
 
+  test("a dashboard (Comb) file link resolves to the same target as the live URL", () => {
+    const route =
+      "/file/~/648a5f3c-35c8-4f11-8673-b89de52cd6bd/2faf73ba-4eee-4472-8b3b-359c4ed6bfbb/thoughts/final%20plan.md";
+    const savedAppUrl = process.env.APP_URL;
+    const savedDashboardUrl = process.env.DASHBOARD_URL;
+    process.env.APP_URL = "https://swarm.example.com/dash/";
+    delete process.env.DASHBOARD_URL;
+    try {
+      const fsTargets = (content: string) =>
+        resolveLinks(content)
+          .filter((l) => l.linkType === "agent-fs-file")
+          .map((l) => ({ targetId: l.targetId, metadata: l.metadata }));
+      const live = fsTargets(`Plan at https://live.agent-fs.dev${route}`);
+      expect(live).toHaveLength(1);
+      expect(fsTargets(`Plan at https://swarm.example.com/dash${route}`)).toEqual(live);
+      expect(fsTargets(`Plan at http://localhost:5274${route}`)).toEqual(live);
+      // Another host, or the app host without its path prefix, is not a file link.
+      expect(fsTargets(`Plan at https://other.example.com${route}`)).toEqual([]);
+      expect(fsTargets(`Plan at https://swarm.example.com${route}`)).toEqual([]);
+      // A known host must start the host name.
+      expect(fsTargets(`Plan at https://evil-swarm.example.com/dash${route}`)).toEqual([]);
+      expect(fsTargets(`Plan at https://notlocalhost:9${route}`)).toEqual([]);
+      expect(fsTargets(`Plan at https://myagent-fs${route}`)).toEqual([]);
+      // Hosts are case-insensitive.
+      expect(fsTargets(`Plan at https://SWARM.Example.com/dash${route}`)).toEqual(live);
+      expect(fsTargets(`Plan at https://LIVE.AGENT-FS.DEV${route}`)).toEqual(live);
+    } finally {
+      if (savedAppUrl === undefined) delete process.env.APP_URL;
+      else process.env.APP_URL = savedAppUrl;
+      if (savedDashboardUrl === undefined) delete process.env.DASHBOARD_URL;
+      else process.env.DASHBOARD_URL = savedDashboardUrl;
+    }
+  });
+
   test("extracts agent-ui page links", () => {
     const links = resolveLinks(
       "See app.agent-swarm.dev/pages/abc12345-1234-1234-1234-123456789abc",

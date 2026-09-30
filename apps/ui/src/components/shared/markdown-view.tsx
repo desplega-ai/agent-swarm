@@ -1,9 +1,11 @@
 import Editor from "@monaco-editor/react";
 import type { ReactNode } from "react";
 import { Streamdown } from "streamdown";
+import { useCombLinks } from "@/hooks/use-comb-links";
 import { useTheme } from "@/hooks/use-theme";
 import { cn, normalizeNewlines } from "@/lib/utils";
 import { CopyButton } from "./copy-button";
+import { InAppOrExternalLink } from "./in-app-or-external-link";
 
 // Returns prettified JSON text if `text` parses to an object/array, else null.
 function tryPrettyJson(text: string): string | null {
@@ -131,21 +133,24 @@ const STREAMDOWN_COMPONENTS = {
   pre({ children }: { children?: ReactNode }) {
     return <>{children}</>;
   },
-  // Markdown links always open in a new tab — markdown is rendered inside
-  // dialogs/panels where in-place navigation would lose state.
-  a({ children, href }: { children?: ReactNode; href?: string }) {
-    return (
-      <a
-        href={href}
-        target="_blank"
-        rel="noreferrer"
-        className="text-primary underline underline-offset-2 hover:opacity-80"
-      >
-        {children}
-      </a>
-    );
-  },
+  a: MarkdownLink,
 };
+
+// Markdown links open in a new tab, because markdown renders inside dialogs and
+// panels where in-place navigation would lose state. Exception: an agent-fs
+// link opens the file in Comb (same tab) while Comb is connected.
+function MarkdownLink({ children, href }: { children?: ReactNode; href?: string }) {
+  const combTo = useCombLinks()(href);
+  return (
+    <InAppOrExternalLink
+      to={combTo}
+      href={href}
+      className="text-primary underline underline-offset-2 hover:opacity-80"
+    >
+      {children}
+    </InAppOrExternalLink>
+  );
+}
 
 /**
  * Markdown renderer used across the app. Wraps Streamdown with:

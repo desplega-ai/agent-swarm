@@ -1,6 +1,8 @@
 import { Quote } from "lucide-react";
 import { CollapsibleSection } from "@/components/shared/collapsible-section";
+import { InAppOrExternalLink } from "@/components/shared/in-app-or-external-link";
 import { Badge } from "@/components/ui/badge";
+import { useCombLinks } from "@/hooks/use-comb-links";
 import {
   citationDropReason,
   citationHttpUrl,
@@ -44,6 +46,7 @@ export function TaskCitationsSection({
   output: string;
   citations: readonly TaskCitation[];
 }) {
+  const toComb = useCombLinks();
   const used = citedIndices(output);
   const missing = [...used].filter((index) => !citations.some((entry) => entry.index === index));
   if (!citations.length && !missing.length) return null;
@@ -63,6 +66,7 @@ export function TaskCitationsSection({
         {rows.map((citation) => {
           const state = citationState(citation, used);
           const href = citation.resolvedUrl ? citationHttpUrl(citation.resolvedUrl) : null;
+          const combTo = toComb(href);
           return (
             <li key={citation.index} className="flex flex-col gap-0.5">
               <div className="flex flex-wrap items-center gap-2">
@@ -74,14 +78,13 @@ export function TaskCitationsSection({
                   {state.label}
                 </Badge>
                 {href ? (
-                  <a
+                  <InAppOrExternalLink
+                    to={combTo}
                     href={href}
-                    target="_blank"
-                    rel="noreferrer"
                     className="text-primary underline-offset-4 hover:underline"
                   >
                     {citation.label || citation.ref}
-                  </a>
+                  </InAppOrExternalLink>
                 ) : (
                   <span>{citation.label || citation.ref}</span>
                 )}

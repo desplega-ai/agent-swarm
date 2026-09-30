@@ -1,19 +1,22 @@
 import { useState } from "react";
 import { useAgentFsMediaUrl } from "@/api/hooks/use-agent-fs";
+import { useAgentFs } from "@/contexts/agent-fs-context";
 import { CombMarkdown, type DriveImageProps } from "./comb-markdown";
 import type { ViewerProps } from "./file-viewer";
 import { TextGate } from "./text-gate";
 
 /**
  * Markdown files, rendered. Every block carries `data-line-start` /
- * `data-line-end` (see `comb-markdown.tsx`). Relative links stay in Comb.
+ * `data-line-end` (see `comb-markdown.tsx`). Relative links and agent-fs live
+ * links stay in Comb.
  */
 export default function MarkdownViewer({ file, stat }: ViewerProps) {
+  const { liveUrl } = useAgentFs();
   return (
     <TextGate file={file} stat={stat}>
       {(text) => (
         <article className="mx-auto max-w-4xl px-6 py-5 text-sm leading-relaxed">
-          <CombMarkdown text={text} doc={file} DriveImage={DriveImage} />
+          <CombMarkdown text={text} doc={file} DriveImage={DriveImage} liveUrl={liveUrl} />
         </article>
       )}
     </TextGate>

@@ -2,6 +2,8 @@
  * Shared constants used across worker- and server-side code.
  */
 
+import { isEnvFlagEnabled } from "./env-flag";
+
 /** Maximum profile-file length in JavaScript characters (not UTF-8 bytes). */
 export const MAX_PROFILE_FILE_LENGTH = 256 * 1024;
 
@@ -106,20 +108,24 @@ export function getAgentFsDefaultDriveId(): string | undefined {
   return raw || undefined;
 }
 
-/**
- * Resolve a public agent-fs live URL for an attachment when we have enough
- * info — `path` plus a matched `orgId`/`driveId` pair. When a row supplies
- * neither ID, the pair may come from env-var defaults. A partial row never
- * mixes its ID with a default; callers fall back to the raw
- * `agent-fs:<path>` display instead.
- *
- * Shape:  ${liveHost}/file/~/<orgId>/<driveId>/<normalized-path>
- */
-export function buildAgentFsLiveUrl(opts: {
+/** An agent-fs file for a link: its path plus an optional org/drive pair. */
+export interface AgentFsFileRef {
   path?: string | null;
   orgId?: string | null;
   driveId?: string | null;
-}): string | null {
+}
+
+/** A "." or ".." path segment, raw or encoded (`%2e`). */
+const DOT_SEGMENT_RE = /^(?:\.|%2e){1,2}$/i;
+
+/**
+ * `<orgId>/<driveId>/<encoded-path>` for an agent-fs file link, when we have
+ * enough info: `path` plus a matched `orgId`/`driveId` pair. When a row
+ * supplies neither ID, the pair may come from env-var defaults. A partial row
+ * never mixes its ID with a default. A "." or ".." segment returns null: the
+ * browser would resolve it to a path outside the drive.
+ */
+function agentFsFileRoute(opts: AgentFsFileRef): string | null {
   const path = opts.path?.trim();
   if (!path) return null;
   const rowOrgId = opts.orgId?.trim();
@@ -128,13 +134,48 @@ export function buildAgentFsLiveUrl(opts: {
   const orgId = hasRowId ? rowOrgId : getAgentFsDefaultOrgId();
   const driveId = hasRowId ? rowDriveId : getAgentFsDefaultDriveId();
   if (!orgId || !driveId) return null;
-  const host = getAgentFsLiveUrl();
-  const normalizedPath = path.replace(/^\/+/, "");
+  const segments = path.replace(/^\/+/, "").split("/");
+  if (segments.some((segment) => DOT_SEGMENT_RE.test(segment))) return null;
   // Never double-encode an already-encoded segment: preserve existing %HH
   // escapes byte-for-byte, including in segments that also contain raw text.
-  const encodedPath = normalizedPath
-    .split("/")
+  const encodedPath = segments
     .map((segment) => encodeURIComponent(segment).replace(/%25([0-9a-f]{2})/gi, "%$1"))
     .join("/");
-  return `${host}/file/~/${orgId}/${driveId}/${encodedPath}`;
+  return `${orgId}/${driveId}/${encodedPath}`;
+}
+
+/**
+ * Resolve a public agent-fs live URL for an attachment (see
+ * {@link agentFsFileRoute} for the id, dot-segment, and encoding rules). Null
+ * when that route is null; callers fall back to the raw `agent-fs:<path>`
+ * display instead.
+ *
+ * Shape:  ${liveHost}/file/~/<orgId>/<driveId>/<normalized-path>
+ */
+export function buildAgentFsLiveUrl(opts: AgentFsFileRef): string | null {
+  const route = agentFsFileRoute(opts);
+  return route ? `${getAgentFsLiveUrl()}/file/~/${route}` : null;
+}
+
+/**
+ * Comb (the agent-fs review space in the dashboard) is on: `COMB_ENABLED` plus
+ * an agent-fs API URL. `getCombConfig()` (`src/comb/config.ts`) reports it.
+ */
+export function isCombEnabled(): boolean {
+  const apiUrl = process.env.AGENT_FS_API_URL?.trim().replace(/\/+$/, "");
+  return isEnvFlagEnabled("COMB_ENABLED", false) && Boolean(apiUrl);
+}
+
+/**
+ * The dashboard (Comb) URL for an agent-fs file, same id and encoding rules as
+ * {@link buildAgentFsLiveUrl}. Null unless Comb is on AND an explicit
+ * `APP_URL` / `DASHBOARD_URL` is set: the hosted default dashboard cannot open
+ * a self-hosted swarm's files.
+ *
+ * Shape:  ${appUrl}/file/~/<orgId>/<driveId>/<normalized-path>
+ */
+export function buildCombFileUrl(opts: AgentFsFileRef): string | null {
+  if (!isCombEnabled() || getConfiguredAppUrls().length === 0) return null;
+  const route = agentFsFileRoute(opts);
+  return route ? `${getAppUrl()}/file/~/${route}` : null;
 }

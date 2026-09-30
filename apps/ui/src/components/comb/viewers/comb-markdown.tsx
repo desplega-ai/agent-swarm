@@ -17,6 +17,7 @@ import {
 } from "react";
 import { Link } from "react-router-dom";
 import { type Components, defaultRehypePlugins, Streamdown } from "streamdown";
+import { combPathForLink } from "../../../lib/comb/links";
 import {
   baseName,
   combPath,
@@ -65,10 +66,15 @@ export interface DriveImageProps {
   fallback: ReactNode;
 }
 
-/** The file being rendered (relative links resolve against it) and its drive image renderer. */
+/**
+ * The file being rendered (relative links resolve against it), its drive image
+ * renderer, and the agent-fs live UI host (`useAgentFs().liveUrl`), so live
+ * links to drive files open in Comb (step-13). `CombMarkdown` provides it.
+ */
 const CombDocContext = createContext<{
   doc: DrivePath;
   DriveImage?: ComponentType<DriveImageProps>;
+  liveUrl: string | null;
 } | null>(null);
 
 type ElementProps<Tag extends keyof React.JSX.IntrinsicElements> = ComponentProps<Tag> & {
@@ -78,7 +84,9 @@ type ElementProps<Tag extends keyof React.JSX.IntrinsicElements> = ComponentProp
 const LINK_CLASS = "text-primary underline underline-offset-2 hover:opacity-80";
 
 function CombLink({ node: _node, href, children, ...rest }: ElementProps<"a">) {
-  const doc = useContext(CombDocContext)?.doc;
+  const ctx = useContext(CombDocContext);
+  const doc = ctx?.doc;
+  const liveUrl = ctx?.liveUrl ?? null;
   const target = doc && href ? resolveRelative(doc.path, href) : null;
   if (doc && target) {
     return (
@@ -90,8 +98,18 @@ function CombLink({ node: _node, href, children, ...rest }: ElementProps<"a">) {
       </Link>
     );
   }
-  // An in-page anchor stays in the tab. Other links open a new tab (step-13
-  // turns agent-fs live links into Comb links).
+  // step-13: an agent-fs live link or a dashboard file link also opens in Comb.
+  // Comb renders a file only while connected, so no state check is needed.
+  const appOrigin = typeof window === "undefined" ? "" : window.location.origin;
+  const combTo = href ? combPathForLink(href, { liveUrl, appOrigin }) : null;
+  if (combTo) {
+    return (
+      <Link to={combTo} className={LINK_CLASS}>
+        {children}
+      </Link>
+    );
+  }
+  // An in-page anchor stays in the tab. Other links open a new tab.
   if (href?.startsWith("#")) {
     return (
       <a href={href} className={LINK_CLASS} {...rest}>
@@ -158,7 +176,8 @@ function CombImage({ node: _node, src, alt, ...rest }: ElementProps<"img">) {
  *   `MarkdownView`) builds its own DOM, which comment anchors cannot address.
  *   `pre` marks its child the way Streamdown's own `pre` does, so `code`
  *   renders blocks and `inlineCode` renders inline spans.
- * - Relative links open the target file in Comb.
+ * - Relative links, agent-fs live links, and dashboard file links open the
+ *   target file in Comb.
  * - Web images load. Drive images load through `DriveImage`. Without it, they
  *   show a placeholder that links to the file.
  */
@@ -195,20 +214,24 @@ export const COMB_MD_COMPONENTS: Components = {
  * Render a markdown file. `doc` is the file itself (its links resolve against
  * it). `DriveImage` renders relative images from the drive. This module keeps
  * relative imports only, so the caller passes the data-loading component in.
+ * `liveUrl` is the agent-fs live UI host: live links to drive files open in
+ * Comb (step-13).
  */
 export function CombMarkdown({
   text,
   doc,
   DriveImage,
+  liveUrl = null,
 }: {
   text: string;
   doc: DrivePath;
   DriveImage?: ComponentType<DriveImageProps>;
+  liveUrl?: string | null;
 }): ReactNode {
   const { orgId, driveId, path } = doc;
   const ctx = useMemo(
-    () => ({ doc: { orgId, driveId, path }, DriveImage }),
-    [orgId, driveId, path, DriveImage],
+    () => ({ doc: { orgId, driveId, path }, DriveImage, liveUrl }),
+    [orgId, driveId, path, DriveImage, liveUrl],
   );
   return (
     <CombDocContext.Provider value={ctx}>

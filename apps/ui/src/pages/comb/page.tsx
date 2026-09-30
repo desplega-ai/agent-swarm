@@ -3,6 +3,7 @@ import { useMemo, useState } from "react";
 import { Link, Navigate, useParams } from "react-router-dom";
 import { CombBreadcrumbs } from "@/components/comb/breadcrumbs";
 import { ConnectCard } from "@/components/comb/connect-card";
+import { OpenInAgentFsButton } from "@/components/comb/file-actions";
 import { FileView } from "@/components/comb/file-view";
 import { FolderView } from "@/components/comb/folder-view";
 import { TreeRail } from "@/components/comb/tree-rail";
@@ -46,9 +47,12 @@ export default function CombPage() {
           title="Comb is off"
           description="Comb shows the swarm's agent-fs drive here. Turn on COMB_ENABLED in Settings, Configuration. Comb needs agent-fs."
           action={
-            <Button asChild size="sm">
-              <Link to="/settings/configuration?search=COMB_ENABLED">Open Configuration</Link>
-            </Button>
+            <>
+              <Button asChild size="sm">
+                <Link to="/settings/configuration?search=COMB_ENABLED">Open Configuration</Link>
+              </Button>
+              <RouteOpenInAgentFs />
+            </>
           }
           fullPage
         />
@@ -64,9 +68,12 @@ export default function CombPage() {
               : `No answer from ${agentFs.endpoint}. Check AGENT_FS_PUBLIC_URL in Settings, Configuration.`
           }
           action={
-            <Button size="sm" variant="outline" onClick={agentFs.retry}>
-              Retry
-            </Button>
+            <>
+              <Button size="sm" variant="outline" onClick={agentFs.retry}>
+                Retry
+              </Button>
+              <RouteOpenInAgentFs />
+            </>
           }
           fullPage
         />
@@ -74,13 +81,25 @@ export default function CombPage() {
     case "needs-connect":
     case "invalid-key":
       return (
-        <div className="flex flex-1 items-center justify-center py-8">
+        <div className="flex flex-1 flex-col items-center justify-center gap-3 py-8">
           <ConnectCard />
+          <RouteOpenInAgentFs />
         </div>
       );
     case "ready":
       return <ConnectedView />;
   }
+}
+
+/**
+ * step-13: Slack and prompt links point at Comb. Without a key, with Comb off
+ * (a rollback), or with agent-fs unreachable, the file or folder in the route
+ * still opens in the agent-fs live UI.
+ */
+function RouteOpenInAgentFs() {
+  const { orgId, driveId, "*": splat } = useParams();
+  if (!orgId || !driveId) return null;
+  return <OpenInAgentFsButton target={parseCombSplat({ orgId, driveId, splat })} />;
 }
 
 function ConnectedView() {

@@ -5,7 +5,8 @@ import { useAgentFsAccess } from "@/api/hooks/use-agent-fs";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { useAgentFs } from "@/contexts/agent-fs-context";
-import { baseName, combPath, type DrivePath } from "@/lib/comb/paths";
+import { drivePathToLiveUrl } from "@/lib/comb/links";
+import { baseName, type DrivePath } from "@/lib/comb/paths";
 
 function clickLink(href: string, download?: string) {
   const link = document.createElement("a");
@@ -63,12 +64,14 @@ export function DownloadButton({ file }: { file: DrivePath }) {
   );
 }
 
-/** Open the same file or folder in the agent-fs live UI (new tab). Hidden without a live URL. */
+/**
+ * Open the same file or folder in the agent-fs live UI (new tab). Hidden
+ * without a live URL, and for a path that would leave the drive (step-13).
+ */
 export function OpenInAgentFsButton({ target }: { target: DrivePath }) {
   const { liveUrl } = useAgentFs();
-  if (!liveUrl) return null;
-  // The live UI uses the same `/file/~/<org>/<drive>/<path>` scheme as Comb.
-  const href = `${liveUrl.replace(/\/+$/, "")}${combPath(target)}`;
+  const href = liveUrl ? drivePathToLiveUrl(target, liveUrl) : null;
+  if (!href) return null;
   return (
     <Button asChild size="sm" variant="outline">
       <a href={href} target="_blank" rel="noreferrer" aria-label="Open in agent-fs">

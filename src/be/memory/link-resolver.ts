@@ -6,6 +6,7 @@
  * Phase 1: capture layer only — no traversal tools, no reranker integration.
  */
 import { getDbClient } from "@/be/db";
+import { getConfiguredAppUrls } from "@/utils/constants";
 
 export type LinkType =
   | "wikilink"
@@ -41,8 +42,8 @@ const WIKILINK_RE = /\[\[([^\]]+)\]\]/g;
 const PR_HASH_RE = /(?:^|[\s(])#(\d{1,5})(?=[\s,.)!?]|$)/gm;
 const PR_PREFIX_RE = /\bPR\s*#(\d{1,5})\b/gi;
 const GITHUB_PR_URL_RE = /https?:\/\/github\.com\/([\w.-]+)\/([\w.-]+)\/pull\/(\d+)/g;
-const AGENT_FS_PATH_RE =
-  /(?:agent-fs|live\.agent-fs\.dev)\/file\/~\/([a-f0-9-]+)\/([a-f0-9-]+)\/([\w/.%-]+)/g;
+const AGENT_FS_LIVE_HOSTS = String.raw`agent-fs|live\.agent-fs\.dev`;
+const AGENT_FS_FILE_ROUTE = String.raw`\/file\/~\/([a-f0-9-]+)\/([a-f0-9-]+)\/([\w/.%-]+)`;
 const AGENT_UI_PAGE_RE = /(?:app\.[^/]+|localhost:\d+)\/pages\/([a-f0-9-]+)/g;
 const AGENT_UI_TASK_RE = /(?:app\.[^/]+|localhost:\d+)\/tasks\/([a-f0-9-]+)/g;
 
@@ -111,9 +112,34 @@ const prMatcher: Matcher = (content) => {
   return results;
 };
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
+}
+
+/**
+ * agent-fs file links: the live UI, and the dashboard (Comb) at a configured
+ * `APP_URL` / `DASHBOARD_URL` or `localhost:<port>`. Both use the same
+ * `/file/~/<org>/<drive>/<path>` route and path encoding, so they resolve to
+ * the same target. Built per call: a config reload can change the app URLs.
+ * A host must start the host name (`evil-swarm.example.com` does not match
+ * `swarm.example.com`). Hosts are case-insensitive.
+ */
+function agentFsPathRegex(): RegExp {
+  const appHosts = getConfiguredAppUrls().flatMap((value) => {
+    try {
+      const url = new URL(value);
+      return [escapeRegExp(`${url.host}${url.pathname.replace(/\/+$/, "")}`)];
+    } catch {
+      return [];
+    }
+  });
+  const hosts = [AGENT_FS_LIVE_HOSTS, ...appHosts, String.raw`localhost:\d+`].join("|");
+  return new RegExp(`(?<![\\w.-])(?:${hosts})${AGENT_FS_FILE_ROUTE}`, "gi");
+}
+
 const agentFsMatcher: Matcher = (content) => {
   const results: MatcherResult[] = [];
-  for (const match of content.matchAll(AGENT_FS_PATH_RE)) {
+  for (const match of content.matchAll(agentFsPathRegex())) {
     const orgId = match[1]!;
     const driveId = match[2]!;
     const path = match[3]!;
