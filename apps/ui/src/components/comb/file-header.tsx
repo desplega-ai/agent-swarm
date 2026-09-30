@@ -1,4 +1,5 @@
 import { DownloadButton, OpenInAgentFsButton } from "@/components/comb/file-actions";
+import { PinButton } from "@/components/comb/pin-button";
 import { useAuthorLabel } from "@/components/comb/use-author-label";
 import { PageHeader } from "@/components/ui/page-header";
 import type { StatResult } from "@/lib/agent-fs/types";
@@ -34,7 +35,8 @@ export function FileHeader({ file, stat }: { file: DrivePath; stat: StatResult }
       }
       action={
         <>
-          {/* File actions: later steps add buttons here (step-12 pin). */}
+          {/* File actions: later steps add buttons here. */}
+          <PinButton target={file} />
           <DownloadButton file={file} />
           <OpenInAgentFsButton target={file} />
         </>
