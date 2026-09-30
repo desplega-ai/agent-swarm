@@ -1,10 +1,10 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import { countSessions, getRootTaskChain, getTaskById, listRecentSessions } from "../be/db";
-import { getTaskSteeringFields } from "../be/steering";
-import { getTaskCitations, TaskCitationSchema } from "../be/task-citations";
+import { getTaskSteeringFieldsForTasks } from "../be/steering";
+import { getTaskCitationsForTasks, TaskCitationSchema } from "../be/task-citations";
 import { mintSessionToken, revokeSessionToken } from "../be/users";
-import { AgentTaskSchema, AgentTaskStatusSchema, SteerModeSchema } from "../types";
+import { type AgentTask, AgentTaskSchema, AgentTaskStatusSchema, SteerModeSchema } from "../types";
 import { getRequestAuth } from "../utils/request-auth-context";
 import { route } from "./route-def";
 import { jsonError } from "./utils";
@@ -274,20 +274,19 @@ export async function handleSessions(
       return true;
     }
     const chain = await getRootTaskChain(parsed.params.rootTaskId);
-    getSession.respond(res, 200, {
-      root: {
-        ...root,
-        ...(await getTaskSteeringFields(root)),
-        citations: await getTaskCitations(root.id),
-      },
-      chain: await Promise.all(
-        chain.map(async (task) => ({
-          ...task,
-          ...(await getTaskSteeringFields(task)),
-          citations: await getTaskCitations(task.id),
-        })),
-      ),
+    // Fixed query count regardless of chain length: one agents lookup and one
+    // citations lookup for the whole chain (chunked past 500 ids).
+    const tasks = [root, ...chain];
+    const [steering, citations] = await Promise.all([
+      getTaskSteeringFieldsForTasks(tasks),
+      getTaskCitationsForTasks(tasks.map((task) => task.id)),
+    ]);
+    const decorate = (task: AgentTask) => ({
+      ...task,
+      ...steering.get(task.id)!,
+      citations: citations.get(task.id)!,
     });
+    getSession.respond(res, 200, { root: decorate(root), chain: chain.map(decorate) });
     return true;
   }
 

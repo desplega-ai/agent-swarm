@@ -7,6 +7,10 @@
  * completion, then grades the outcome (LLM judge + deterministic checks).
  */
 
+import type { ReasoningEffortLevel } from "@desplega/model-catalog";
+
+export type { ReasoningEffortLevel };
+
 export type HarnessProvider = "claude" | "pi" | "codex" | "opencode";
 
 export type ModelTier = "smol" | "regular" | "smart" | "ultra";
@@ -27,6 +31,14 @@ export interface HarnessConfig {
   modelAlias?: string;
   /** Portable tier intent; resolved by the worker at claim time. */
   modelTier?: ModelTier;
+  /**
+   * Reasoning effort the worker runs at (REASONING_EFFORT_OVERRIDE). Must be a
+   * level the harness + resolved model accept, per the shared catalog rule
+   * (`reasoningLevelsForModel`). A run snapshots the effective value in
+   * `eval_runs.efforts_json` (a per-run override wins over this default).
+   * Unset = the harness default, unchanged.
+   */
+  reasoningEffort?: ReasoningEffortLevel;
   /** Extra env vars for the worker container (merged over defaults). */
   env?: Record<string, string>;
 }
@@ -678,6 +690,14 @@ export interface WorkerRosterEntry {
    */
   configId: string | null;
   model: string | null;
+  /** Effort this member was launched with (REASONING_EFFORT_OVERRIDE); null = harness default. */
+  reasoningEffort?: ReasoningEffortLevel | null;
+  /**
+   * Effort the member's harness reported applying (agent `latestModel`); null
+   * when it reported none. A launched effort with no matching applied value
+   * means the harness ignored it (unsupported pair, or it never reported).
+   */
+  appliedReasoningEffort?: ReasoningEffortLevel | null;
   /** Worker build version (copied from boot capture). */
   version: string | null;
   /** Task ids of this attempt assigned to this member. */
@@ -839,6 +859,12 @@ export interface EvalRunRow {
   concurrency: number;
   /** Run-level judge model override (scenario-level model still wins). */
   judgeModel: string | null;
+  /**
+   * Effective reasoning effort per config id, snapshotted at run creation (a
+   * per-run override over the config default). Configs without an effort are
+   * absent. Null on runs created before efforts existed.
+   */
+  efforts?: Record<string, ReasoningEffortLevel> | null;
   createdAt: string;
   finishedAt: string | null;
 }
@@ -862,6 +888,10 @@ export interface AttemptRow {
   /** Aggregate judge LLM cost (harness overhead) — NEVER included in costUsd. */
   judgeCostUsd: number | null;
   tokens: TokenTotals | null;
+  /** Effort the attempt's worker was launched with; null = harness default (and pre-effort rows). */
+  reasoningEffort?: ReasoningEffortLevel | null;
+  /** Effort the cell config's harness reported applying; null = none reported. */
+  appliedReasoningEffort?: ReasoningEffortLevel | null;
   sandbox: SandboxInfo | null;
   /** v7 §10: per-worker roster + cost (`workers_json`). Null on pre-v7 rows. */
   workers?: WorkerRosterEntry[] | null;
@@ -1048,6 +1078,8 @@ export interface AnalyticsModel {
   maxCostUsd?: number | null;
   /** v7 §7: model vendor (anthropic/openai/…); "(unknown)" fallback. */
   vendor?: string;
+  /** Distinct effort keys the model's attempts ran at (`ANALYTICS_NO_EFFORT` = the harness default). */
+  efforts?: string[];
   /** v7 §11: token sums over the model's token-bearing attempts. */
   tokens?: AnalyticsTokenSums | null;
 }
@@ -1109,6 +1141,8 @@ export interface AnalyticsSeries {
 export interface AnalyticsFilter {
   harnesses: string[];
   configIds: string[];
+  /** Effort keys (`ANALYTICS_NO_EFFORT` = the harness default). Optional: absent = no filter. */
+  efforts?: string[];
 }
 
 /**
@@ -1119,6 +1153,8 @@ export interface AnalyticsFilter {
 export interface AnalyticsFilterOptions {
   harnesses: string[];
   configIds: string[];
+  /** Distinct effort keys, canonical low→high order, the default key last. */
+  efforts?: string[];
 }
 
 export interface AnalyticsResponse {
@@ -1136,6 +1172,8 @@ export interface AnalyticsResponse {
   harnesses?: AnalyticsGroupRollup[];
   /** v7 §7: rollups by model vendor, sorted by attempts desc. */
   vendors?: AnalyticsGroupRollup[];
+  /** Rollups by reasoning effort (`ANALYTICS_NO_EFFORT` = the harness default), sorted by attempts desc. */
+  efforts?: AnalyticsGroupRollup[];
   /** v7 §7/§11: one point per model key (scatter: accuracy vs tokens). */
   scatter?: AnalyticsScatterPoint[];
   /** v7.6 §C3: pre-filter option lists. Optional for old cached payloads; the v7.6 server always fills it. */

@@ -86,6 +86,9 @@ export type AgentTaskRow = {
   model: string | null;
   modelTier: string | null;
   effort: string | null;
+  resolvedModel?: string | null;
+  modelSource?: string | null;
+  modelAlias?: string | null;
   scheduleId: string | null;
   workflowRunId: string | null;
   workflowRunStepId: string | null;
@@ -146,6 +149,9 @@ type AgentTaskSummaryRow = Pick<
   | "scheduleId"
   | "model"
   | "modelTier"
+  | "resolvedModel"
+  | "modelSource"
+  | "modelAlias"
   | "effort"
   | "provider"
   | "requestedByUserId"
@@ -198,7 +204,8 @@ const LIST_COLUMNS = {
     ${TASK_PREVIEW_SQL}, agent_tasks.title, agent_tasks.status, agent_tasks.source,
     agent_tasks.taskType, agent_tasks.tags, agent_tasks.priority, agent_tasks.dependsOn,
     agent_tasks.offeredTo, agent_tasks.acceptedAt, agent_tasks.parentTaskId,
-    agent_tasks.scheduleId, agent_tasks.model, agent_tasks.modelTier, agent_tasks.effort,
+    agent_tasks.scheduleId, agent_tasks.model, agent_tasks.modelTier,
+    agent_tasks.resolvedModel, agent_tasks.modelSource, agent_tasks.modelAlias, agent_tasks.effort,
     agent_tasks.provider, agent_tasks.requestedByUserId, agent_tasks.progress,
     agent_tasks.createdAt, agent_tasks.lastUpdatedAt, agent_tasks.finishedAt,
     agent_tasks.peakContextPercent`,
@@ -300,6 +307,9 @@ export function rowToAgentTask(row: AgentTaskRow): AgentTask {
     claudeSessionId: row.claudeSessionId ?? undefined,
     model: row.model ?? undefined,
     modelTier: parseModelTier(row.modelTier) ?? undefined,
+    resolvedModel: row.resolvedModel ?? undefined,
+    modelSource: row.modelSource ?? undefined,
+    modelAlias: row.modelAlias ?? undefined,
     effort: ReasoningEffortSchema.safeParse(row.effort).success
       ? (row.effort as ReasoningEffort)
       : undefined,
@@ -363,6 +373,9 @@ export function rowToAgentTaskSummary(row: AgentTaskSummaryRow): AgentTaskSummar
     scheduleId: row.scheduleId ?? undefined,
     model: row.model ?? undefined,
     modelTier: parseModelTier(row.modelTier) ?? undefined,
+    resolvedModel: row.resolvedModel ?? undefined,
+    modelSource: row.modelSource ?? undefined,
+    modelAlias: row.modelAlias ?? undefined,
     effort: ReasoningEffortSchema.safeParse(row.effort).success
       ? (row.effort as ReasoningEffort)
       : undefined,
@@ -456,6 +469,48 @@ export async function getSupersededTasksWithoutResume(
     [finishedBefore, finishedAfter],
   );
   return rows.map(rowToAgentTask);
+}
+
+/** Statuses a dependent can hold before it ever started running. */
+export const NEVER_STARTED_TASK_STATUSES = [
+  "draft",
+  "backlog",
+  "unassigned",
+  "offered",
+  "reviewing",
+  "pending",
+];
+
+/**
+ * Superseded tasks that already have a resume child but still have
+ * never-started dependents waiting on them, paired with their latest resume.
+ * A crash after the resume is created but before
+ * `backfillSupersedeTaskResumeTaskId` leaves this state, and
+ * {@link getSupersededTasksWithoutResume} no longer sees it.
+ */
+export async function getSupersededTasksWithUnsettledDependents(
+  finishedBefore: string,
+  finishedAfter: string,
+): Promise<{ taskId: string; resumeTaskId: string }[]> {
+  const placeholders = NEVER_STARTED_TASK_STATUSES.map(() => "?").join(", ");
+  return getDbClient().query<{ taskId: string; resumeTaskId: string }>(
+    `SELECT taskId, resumeTaskId FROM (
+       SELECT t.id AS taskId, t.finishedAt AS finishedAt,
+              (SELECT c.id FROM agent_tasks c
+                 WHERE c.parentTaskId = t.id AND c.taskType = 'resume'
+                 ORDER BY c.createdAt DESC LIMIT 1) AS resumeTaskId
+         FROM agent_tasks t
+         WHERE t.status = 'superseded'
+           AND t.finishedAt < ?
+           AND t.finishedAt > ?
+           AND EXISTS (
+             SELECT 1 FROM agent_tasks d, json_each(d.dependsOn) AS j
+              WHERE j.value = t.id AND d.status IN (${placeholders})
+           ))
+     WHERE resumeTaskId IS NOT NULL
+     ORDER BY finishedAt ASC`,
+    [finishedBefore, finishedAfter, ...NEVER_STARTED_TASK_STATUSES],
+  );
 }
 
 /**

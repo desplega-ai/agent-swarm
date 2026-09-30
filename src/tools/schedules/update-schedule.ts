@@ -12,6 +12,7 @@ import {
   isExtensionAgent,
   updateScheduledTask,
 } from "@/be/db";
+import { explicitModelErrorForAgent } from "@/be/model-validation";
 import { mergeScheduleTiming, validateRecurringTiming } from "@/be/schedules/validate";
 import { getScript } from "@/be/scripts/db";
 import { calculateNextRun } from "@/scheduler";
@@ -73,6 +74,12 @@ export const updateScheduleInputSchema = z.object({
   modelTier: ModelTierSchema.nullable()
     .optional()
     .describe("Portable model tier for tasks created by this schedule. Set to null to clear."),
+  allowCustomModel: z
+    .boolean()
+    .optional()
+    .describe(
+      "Accept a `model` the model catalog does not list. Without it an unknown model id is rejected. Only for ids the catalog cannot know yet.",
+    ),
 });
 
 const scheduleDataShape = {
@@ -139,6 +146,7 @@ export const registerUpdateScheduleTool = (server: McpServer) => {
         enabled,
         model,
         modelTier,
+        allowCustomModel,
       },
       requestInfo,
       _meta,
@@ -248,6 +256,15 @@ export const registerUpdateScheduleTool = (server: McpServer) => {
         if (enabled !== undefined) updateData.enabled = enabled;
         if (model !== undefined || modelTier !== undefined) {
           const normalizedModel = splitLegacyModelAlias({ model, modelTier });
+          // A model the schedule already stores is not re-judged, so an unrelated edit still saves.
+          if (normalizedModel.model !== schedule.model) {
+            const modelError = await explicitModelErrorForAgent({
+              model: normalizedModel.model,
+              allowCustomModel,
+              agentId: targetAgentId ?? schedule.targetAgentId,
+            });
+            if (modelError) return toolErr(modelError);
+          }
           if (model !== undefined) updateData.model = normalizedModel.model ?? null;
           if (modelTier !== undefined || normalizedModel.modelTier) {
             updateData.modelTier = normalizedModel.modelTier ?? null;

@@ -36,7 +36,9 @@ import {
 import type { SteerDeliveryResult } from "../providers/types.ts";
 import { initTelemetry, telemetry } from "../telemetry.ts";
 import {
+  type ModelTierOverrides,
   type ProviderName,
+  parseWorkerModelTierOverrides,
   type ReasoningEffort,
   type RepoGuidelines,
   resolveTaskModelSelection,
@@ -55,9 +57,11 @@ import {
   type RateLimitWindowTelemetry,
   resolveCodexCreditsExhaustedCooldownMs,
 } from "../utils/error-tracker.ts";
+import { probeHarnessCliVersion, reportHarnessModelOutcome } from "../utils/harness-cli-version.ts";
 import { resolveHarnessProvider } from "../utils/harness-provider.ts";
 import { prettyPrintLine, prettyPrintStderr } from "../utils/pretty-print.ts";
 import { terminateRegisteredProcessGroups } from "../utils/process-group.ts";
+import { refreshRuntimeModelCatalog } from "../utils/runtime-model-catalog.ts";
 import { resolveScriptsOnlyMode } from "../utils/scripts-only-mode.ts";
 import { scrubSecrets } from "../utils/secret-scrubber.ts";
 import { refreshSkillsIfChanged } from "../utils/skills-refresh.ts";
@@ -1220,6 +1224,8 @@ const SWARM_TOOL_LABELS: Record<string, string | null> = {
   "set-config": "⚙️ Setting config",
   "list-config": "⚙️ Listing config",
   "delete-config": "⚙️ Deleting config",
+  "model-catalog-refresh": "🧠 Refreshing model catalog",
+  "model-catalog-overlay-upsert": "🧠 Updating model catalog overlay",
   // Schedules
   "create-schedule": "📅 Creating schedule",
   "list-schedules": "📅 Listing schedules",
@@ -2909,6 +2915,16 @@ interface PollOptions {
   pollInterval: number;
   pollTimeout: number;
   since?: string; // Optional: for filtering finished tasks
+  /** Live harness provider; keys the MODEL_TIER_* overrides sent with the poll. */
+  harnessProvider?: ProviderName;
+}
+
+/**
+ * The worker's own MODEL_TIER_* overrides, parsed from its process env (not
+ * the swarm_config-merged env: global config is already visible server-side).
+ */
+function workerModelTierOverrides(provider: ProviderName): ModelTierOverrides {
+  return parseWorkerModelTierOverrides(process.env, provider);
 }
 
 type RequesterProfile = NonNullable<Trigger["requestedBy"]>;
@@ -2990,6 +3006,8 @@ export async function registerAgent(opts: {
       provider,
       harness_provider: harnessProvider,
       runtimeInstanceId: opts.runtimeInstanceId,
+      modelTierOverrides: workerModelTierOverrides(harnessProvider),
+      harnessCliVersion: (await probeHarnessCliVersion(harnessProvider)) ?? undefined,
     }),
   });
 
@@ -3035,6 +3053,14 @@ async function pollForTrigger(opts: PollOptions): Promise<Trigger | null> {
 
 async function pollForTriggerOnce(opts: PollOptions): Promise<Trigger | null> {
   const startTime = Date.now();
+  // Keep the process-wide model catalog fresh (TTL-cached, never throws) so
+  // context windows, pricing and reasoning levels cover models added to the
+  // API's catalog after this worker booted.
+  void refreshRuntimeModelCatalog({
+    apiUrl: opts.apiUrl,
+    apiKey: opts.apiKey,
+    agentId: opts.agentId,
+  });
   const headers: Record<string, string> = {
     "X-Agent-ID": opts.agentId,
   };
@@ -3045,6 +3071,11 @@ async function pollForTriggerOnce(opts: PollOptions): Promise<Trigger | null> {
     headers.Authorization = `Bearer ${opts.apiKey}`;
   }
   injectTraceContext(headers);
+  if (opts.harnessProvider) {
+    headers["X-Model-Tier-Overrides"] = encodeURIComponent(
+      JSON.stringify(workerModelTierOverrides(opts.harnessProvider)),
+    );
+  }
 
   while (Date.now() - startTime < opts.pollTimeout) {
     try {
@@ -3527,6 +3558,9 @@ async function spawnProviderProcess(
     taskId?: string;
     model?: string;
     modelTier?: string;
+    /** Server claim-time resolution (task.resolvedModel); wins over the local one. */
+    resolvedModel?: string;
+    modelSource?: string;
     effort?: ReasoningEffort;
     resumeSessionId?: string;
     harnessProvider: ProviderName;
@@ -3562,7 +3596,7 @@ async function spawnProviderProcess(
       opts.apiKey,
       opts.agentId,
       process.env,
-      opts.model,
+      opts.resolvedModel || opts.model,
       {
         repoId: sessionRepo?.id,
         provider: adapter.name as ProviderName,
@@ -3619,7 +3653,20 @@ async function spawnProviderProcess(
     harnessProvider: opts.harnessProvider,
     env: freshEnv,
   });
-  const taskModel = taskModelSelection.model || "";
+  // The server resolves the model at claim time (worker-env > tier-config >
+  // tier-default, `latest:` aliases, guardrails) and records it on the task.
+  // The local resolution stays as a check: a difference usually means the
+  // server saw a stale MODEL_TIER_* override or a swarm_config tier value.
+  if (
+    opts.resolvedModel &&
+    taskModelSelection.model &&
+    taskModelSelection.model !== opts.resolvedModel
+  ) {
+    console.log(
+      `[${opts.role}] model resolution mismatch for task ${opts.taskId ?? "?"}: server=${opts.resolvedModel} (${opts.modelSource ?? "?"}) local=${taskModelSelection.model}; using server value`,
+    );
+  }
+  const taskModel = opts.resolvedModel || taskModelSelection.model || "";
   const model = taskModel || configModel || "";
 
   // Resolve Codex OAuth pool slot BEFORE building ProviderSessionConfig so we
@@ -4516,6 +4563,17 @@ async function checkCompletedProcesses(
         failureReason = result.failureReason;
         console.log(`[${role}] Detected error for task ${taskId.slice(0, 8)}: ${failureReason}`);
       }
+
+      // Record whether this worker's CLI accepts the model (harness_model_support).
+      void reportHarnessModelOutcome({
+        apiUrl: apiConfig.apiUrl,
+        apiKey: apiConfig.apiKey,
+        agentId: apiConfig.agentId,
+        harness: harnessProvider,
+        model,
+        exitCode: result.exitCode,
+        failureReason,
+      });
 
       // If rate-limited and we know which key was used, report it.
       // Codex adapter prefixes failure reasons with `[rate-limit]` /
@@ -5911,6 +5969,8 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
               taskId: task.id,
               model: (task as { model?: string }).model,
               modelTier: (task as { modelTier?: string }).modelTier,
+              resolvedModel: (task as { resolvedModel?: string }).resolvedModel,
+              modelSource: (task as { modelSource?: string }).modelSource,
               effort: (task as { effort?: ReasoningEffort }).effort,
               harnessProvider: state.harnessProvider,
               cwd: resumeCwd,
@@ -6127,6 +6187,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
         pollInterval: PollIntervalMs,
         runtimeInstanceId,
         pollTimeout: effectiveTimeout,
+        harnessProvider: state.harnessProvider,
       });
 
       if (trigger) {
@@ -6407,6 +6468,16 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
           .join("\n\n");
         const taskSystemPrompt = taskPromptParts + cwdWarning;
 
+        // The server refused the task's explicit model for this worker's CLI
+        // version (harness_model_support = unsupported): fail fast, no spawn.
+        const modelUnsupported = (trigger.task as { modelUnsupported?: string } | undefined)
+          ?.modelUnsupported;
+        if (trigger.taskId && modelUnsupported) {
+          console.log(`[${role}] ${modelUnsupported}`);
+          await ensureTaskFinished(apiConfig, role, trigger.taskId, 1, modelUnsupported);
+          continue;
+        }
+
         iteration++;
         const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
         const taskIdSlice = trigger.taskId?.slice(0, 8) || "notask";
@@ -6472,6 +6543,9 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
               taskId: trigger.taskId,
               model: taskModel,
               modelTier: taskModelTier,
+              resolvedModel: (trigger.task as { resolvedModel?: string } | undefined)
+                ?.resolvedModel,
+              modelSource: (trigger.task as { modelSource?: string } | undefined)?.modelSource,
               effort: taskEffort,
               harnessProvider: state.harnessProvider,
               cwd: effectiveCwd,

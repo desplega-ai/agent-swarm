@@ -36,7 +36,7 @@ The easiest way to deploy a full swarm with API, workers, and lead agent.
 
 ### Prerequisites
 
-- Docker & Docker Compose installed
+- Docker & Docker Compose installed (rootless Podman with a Compose provider also works; see [Rootless Podman](https://docs.agent-swarm.dev/docs/guides/podman-rootless))
 - One supported harness credential from the table below
 - An API key (any secret string you choose — all services share this key)
 

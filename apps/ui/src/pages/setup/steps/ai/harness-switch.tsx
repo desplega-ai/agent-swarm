@@ -40,7 +40,10 @@ export function HarnessSwitch({
   /** Harnesses the user can switch to. More than one renders a picker. */
   targets: readonly ProviderName[];
   agents: AgentWithTasks[];
-  /** How dsh routes, for the carried model level. */
+  /**
+   * How dsh routes and what each model tier resolves to, for the carried model
+   * level. `tiers` absent means they still load: the switch waits.
+   */
   dialContext: DialContext;
 }) {
   const queryClient = useQueryClient();
@@ -49,6 +52,9 @@ export function HarnessSwitch({
   const [busy, setBusy] = useState(false);
 
   const count = checked.size;
+  // The carried level is the target harness's tier model: without the tiers
+  // an agent on a dial level would switch with its old harness's model id.
+  const tiersLoading = !dialContext.tiers && dialHarness(target) !== null;
   const targetName = HARNESS_LABEL[target] ?? target;
 
   function toggle(id: string) {
@@ -74,8 +80,8 @@ export function HarnessSwitch({
       const effort = configs.find((c) => c.key === "REASONING_EFFORT_OVERRIDE")?.value;
       const level =
         model?.scope === "agent" ? dialLevelOfAnyHarness(model.value, effort, dialContext) : null;
-      if (level) {
-        const setting = dialSetting(harness, level, dialContext);
+      const setting = level ? dialSetting(harness, level, dialContext) : null;
+      if (setting) {
         await api.updateAgentRuntime({
           id,
           harnessProvider: harness,
@@ -158,11 +164,13 @@ export function HarnessSwitch({
         <Button
           type="button"
           variant="outline"
-          disabled={count === 0 || busy}
+          disabled={count === 0 || busy || tiersLoading}
           onClick={switchAgents}
         >
-          {busy ? <Spinner className="size-4" /> : null}
-          Switch {count} agent{count === 1 ? "" : "s"} to {targetName}
+          {busy || tiersLoading ? <Spinner className="size-4" /> : null}
+          {tiersLoading
+            ? "Loading model tiers…"
+            : `Switch ${count} agent${count === 1 ? "" : "s"} to ${targetName}`}
         </Button>
       </div>
     </div>

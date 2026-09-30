@@ -91,6 +91,16 @@ OTEL_TRACE_POLL=1
 
 Truthy values: `1`, `true`, `yes`, `on` (case-insensitive). Anything else (including unset/empty) keeps poll spans off. Expect span volume to roughly double when this is enabled.
 
+### Exporting API logs
+
+The API's console output (including the slow-statement warnings above) goes to stdout by default. To also send it to the collector as OTLP log records, set on the API process:
+
+```bash
+OTEL_EXPORT_API_LOGS=true
+```
+
+It uses the same `OTEL_EXPORTER_OTLP_ENDPOINT` and resource as traces, and needs no extra collector setup. Each record carries a severity (`console.warn` → `WARN`, `console.error` → `ERROR`, `console.log` → `INFO`), the active span's trace context, and a body passed through the secret scrubber and cut at 16 KB. Stdout output is unchanged. The setting is read at startup, so restart the API after changing it. `OTEL_LOGS_EXPORTER` and `OTEL_EXPORTER_OTLP_LOGS_*` follow the standard OpenTelemetry meaning.
+
 ## How It Works
 
 At startup, the API server and workers call `initOtel()`. If `OTEL_EXPORTER_OTLP_ENDPOINT` is absent, all tracing functions are no-ops. If it is present, Agent Swarm starts the OpenTelemetry Node SDK with an OTLP HTTP trace exporter.
@@ -427,6 +437,26 @@ Tags on every metric:
 | `outcome` (on `sweeps` and `table_duration_ms` only) | `converged`, `budget_exhausted`, `error` |
 
 `outcome` takes `converged` (the table's backlog is fully drained), `budget_exhausted` (the tick's time budget ran out before the table drained — expected during a large initial backlog), or `error` (the sweep threw). An error is also visible as an ERROR span status on the `db.retention.table` span, with the exception recorded on that span.
+
+### Event Loop Delay
+
+The API process samples its own event-loop delay with `perf_hooks.monitorEventLoopDelay` and exports it as the semconv `nodejs.eventloop.delay.*` gauges. Each export reads the histogram and resets it, so every point covers one export interval (60 s).
+
+| Metric | Instrument | Unit | Meaning |
+| --- | --- | --- | --- |
+| `nodejs.eventloop.delay.max` | Gauge | `s` | Longest stall since the last export. The signal to alert on. |
+| `nodejs.eventloop.delay.p99`, `.p90`, `.p50` | Gauge | `s` | Delay percentiles since the last export. |
+| `nodejs.eventloop.delay.min`, `.mean` | Gauge | `s` | Minimum and mean delay since the last export. |
+
+Use this metric when clients report slow requests that server spans do not show. Every database call runs synchronously on the API's single event loop, and a request's server span only starts once the loop is free. A request that queued behind a 3 s query therefore still reports a short span.
+
+The API also logs any single synchronous SQLite statement that ran for 100 ms or more:
+
+```text
+[db-client] slow sync statement blocked the event loop for 1694ms: SELECT * FROM agent_tasks ORDER BY createdAt DESC
+```
+
+The SQL is whitespace-collapsed, cut at 200 characters and passed through the secret scrubber. Parameters are never logged.
 
 ### Metric Temporality
 

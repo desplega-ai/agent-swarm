@@ -17,7 +17,7 @@ import { seedPricingFromModelsDev } from "../be/seed-pricing";
 import { handleCore } from "../http/core";
 import { handlePricing } from "../http/pricing";
 import { getPathSegments, parseQueryParams } from "../http/utils";
-import { CODEX_MODEL_PRICING } from "../providers/codex-models";
+import { codexModelPricingTable } from "../providers/codex-models";
 import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-pricing-routes.sqlite";
@@ -112,7 +112,7 @@ describe("Phase 6 — /api/pricing REST surface", () => {
         (r: { provider: string; effectiveFrom: number }) =>
           r.provider === "codex" && r.effectiveFrom === 0,
       );
-      for (const model of Object.keys(CODEX_MODEL_PRICING)) {
+      for (const model of Object.keys(codexModelPricingTable())) {
         for (const tokenClass of ["input", "cached_input", "output"]) {
           expect(
             seedRows.some(

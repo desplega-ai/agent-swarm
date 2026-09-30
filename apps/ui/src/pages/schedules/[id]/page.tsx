@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useAgents } from "@/api/hooks/use-agents";
 import { useFavoriteToggle } from "@/api/hooks/use-favorites";
+import { useModelsCatalog } from "@/api/hooks/use-models-catalog";
 import {
   useDeleteSchedule,
   useRunScheduleNow,
@@ -22,6 +23,8 @@ import {
 } from "@/components/schedules/schedule-target-fields";
 import { FavoriteButton } from "@/components/shared/favorite-button";
 import { MarkdownView } from "@/components/shared/markdown-view";
+import { ModelCombobox } from "@/components/shared/model-combobox";
+import { ModelLabel } from "@/components/shared/model-logo";
 import {
   ignoreRowClickFromInteractives,
   TasksColumnsMenu,
@@ -70,6 +73,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { findModelOption, modelGroupsForSchedule } from "@/lib/agent-runtime-models";
 import { MODEL_TIER_OPTIONS, modelTierLabel } from "@/lib/model-tiers";
 import { cronTimezone, describeCron, formatInterval } from "@/lib/schedule-format";
 import { formatSmartTime, formatUTCTime } from "@/lib/utils";
@@ -481,9 +485,14 @@ export default function ScheduleDetailPage() {
                 <QuickStat
                   label="Model"
                   value={
-                    schedule.model ? schedule.model : `tier: ${modelTierLabel(schedule.modelTier)}`
+                    schedule.model ? (
+                      <span title={schedule.model}>
+                        <ModelLabel model={schedule.model} />
+                      </span>
+                    ) : (
+                      `tier: ${modelTierLabel(schedule.modelTier)}`
+                    )
                   }
-                  mono={Boolean(schedule.model)}
                 />
               )}
               <QuickStat label="Created" value={formatSmartTime(schedule.createdAt)} />
@@ -597,6 +606,11 @@ function EditScheduleDialog({
   const [targetAgentId, setTargetAgentId] = useState(schedule.targetAgentId ?? "");
   const [timezone, setTimezone] = useState(schedule.timezone);
   const [model, setModel] = useState(schedule.model ?? "");
+  const { data: modelsCatalog } = useModelsCatalog();
+  const modelGroups = useMemo(
+    () => modelGroupsForSchedule(modelsCatalog?.providers),
+    [modelsCatalog?.providers],
+  );
   const [modelTier, setModelTier] = useState(schedule.modelTier ?? "");
   const [params, setParams] = useState<Record<string, unknown>>(schedule.params ?? {});
 
@@ -748,17 +762,15 @@ function EditScheduleDialog({
               </div>
               <div className="space-y-2">
                 <Label>Model</Label>
-                <Select value={model} onValueChange={(v) => setModel(v === "_none" ? "" : v)}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Default" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="_none">Default</SelectItem>
-                    <SelectItem value="haiku">Haiku</SelectItem>
-                    <SelectItem value="sonnet">Sonnet</SelectItem>
-                    <SelectItem value="opus">Opus</SelectItem>
-                  </SelectContent>
-                </Select>
+                <ModelCombobox
+                  value={model}
+                  onChange={setModel}
+                  groups={modelGroups}
+                  selected={findModelOption(model, modelGroups)}
+                  placeholder="Default"
+                  clearLabel="Default"
+                  creatable
+                />
               </div>
             </div>
             <div className="grid grid-cols-2 gap-4">

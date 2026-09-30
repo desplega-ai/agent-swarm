@@ -11,6 +11,7 @@ import {
   getWorkflow,
   isExtensionAgent,
 } from "@/be/db";
+import { explicitModelErrorForAgent } from "@/be/model-validation";
 import { getScript } from "@/be/scripts/db";
 import { calculateNextRun } from "@/scheduler";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
@@ -109,6 +110,12 @@ export const createScheduleInputSchema = z.object({
   modelTier: ModelTierSchema.optional().describe(
     "Portable model tier for tasks created by this schedule: 'smol', 'regular', 'smart', or 'ultra'. Resolved by each assignee's harness/provider at run time.",
   ),
+  allowCustomModel: z
+    .boolean()
+    .optional()
+    .describe(
+      "Accept a `model` the model catalog does not list. Without it an unknown model id is rejected. Only for ids the catalog cannot know yet.",
+    ),
 });
 
 const scheduleDataShape = {
@@ -177,6 +184,7 @@ export const registerCreateScheduleTool = (server: McpServer) => {
         enabled,
         model,
         modelTier,
+        allowCustomModel,
       },
       requestInfo,
       _meta,
@@ -263,8 +271,15 @@ export const registerCreateScheduleTool = (server: McpServer) => {
         }
       }
 
+      const normalizedModel = splitLegacyModelAlias({ model, modelTier });
+      const modelError = await explicitModelErrorForAgent({
+        model: normalizedModel.model,
+        allowCustomModel,
+        agentId: targetAgentId,
+      });
+      if (modelError) return toolErr(modelError);
+
       try {
-        const normalizedModel = splitLegacyModelAlias({ model, modelTier });
         // Calculate initial nextRunAt
         let nextRunAt: string | undefined;
         if (enabled === false) {

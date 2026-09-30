@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { explicitModelErrorForAgent } from "../../be/model-validation";
 import { applyPreTaskCreate } from "../../extensions/apply-task-create";
 import { workflowContextKey } from "../../tasks/context-key";
 import { TaskCreationBlockedError } from "../../tasks/errors";
@@ -30,6 +31,8 @@ export const AgentTaskConfigSchema = z.object({
   vcsRepo: z.string().min(1).optional(),
   model: z.string().min(1).optional(),
   modelTier: ModelTierSchema.optional(),
+  /** Accept a `model` the catalog does not list (a custom id). Without it an unknown id fails the node. */
+  allowCustomModel: z.boolean().optional(),
   effort: ReasoningEffortSchema.optional(),
   parentTaskId: z.string().uuid().optional(),
   requestedByUserId: z.string().optional(),
@@ -98,6 +101,12 @@ export class AgentTaskExecutor extends BaseExecutor<
     }
 
     // 3. Create the task (config is already deep-interpolated by the engine)
+    const modelError = await explicitModelErrorForAgent({
+      model: splitLegacyModelAlias({ model: config.model, modelTier: config.modelTier }).model,
+      allowCustomModel: config.allowCustomModel,
+      agentId: config.agentId,
+    });
+    if (modelError) return { status: "failed", error: modelError };
     const preCreate = await applyPreTaskCreate({
       description: config.template,
       options: {

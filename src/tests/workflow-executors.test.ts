@@ -984,7 +984,7 @@ describe("ValidateExecutor", () => {
 // ─── Registry Wiring ─────────────────────────────────────────
 
 describe("createExecutorRegistry", () => {
-  test("registers all 12 executors (8 instant + 4 async)", () => {
+  test("registers all 13 executors (9 instant + 4 async)", () => {
     const registry = createExecutorRegistry(mockDeps);
     const types = registry.types();
 
@@ -992,6 +992,7 @@ describe("createExecutorRegistry", () => {
     expect(types).toContain("code-match");
     expect(types).toContain("notify");
     expect(types).toContain("raw-llm");
+    expect(types).toContain("system-one-decision");
     expect(types).toContain("script");
     expect(types).toContain("swarm-script");
     expect(types).toContain("vcs");
@@ -1000,7 +1001,7 @@ describe("createExecutorRegistry", () => {
     expect(types).toContain("foreach");
     expect(types).toContain("human-in-the-loop");
     expect(types).toContain("wait");
-    expect(types).toHaveLength(12);
+    expect(types).toHaveLength(13);
   });
 
   test("instant executors have mode instant, async executors have mode async", () => {
@@ -1022,6 +1023,8 @@ describe("createExecutorRegistry", () => {
     expect(registry.get("foreach").mode).toBe("async");
     expect(registry.get("human-in-the-loop").mode).toBe("async");
     expect(registry.get("wait").mode).toBe("async");
+    // Answers at once, but waits when `humanReview` sends an answer to a person.
+    expect(registry.get("system-one-decision").mode).toBe("async");
   });
 
   test("get() retrieves the correct executor by type", () => {

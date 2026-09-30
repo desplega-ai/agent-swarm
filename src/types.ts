@@ -231,6 +231,25 @@ export function resolveModelTier(opts: {
   return DEFAULT_MODEL_TIER_MAP[opts.harnessProvider]?.[tier];
 }
 
+export type ModelTierOverrides = Partial<Record<string, Partial<Record<ModelTier, string>>>>;
+
+/**
+ * The worker's own MODEL_TIER_<TIER> / MODEL_TIER_MAP overrides, keyed by its
+ * harness provider, in the shape the worker sends on register and poll so the
+ * server can apply them at claim time. Values only (model ids), never secrets.
+ */
+export function parseWorkerModelTierOverrides(
+  env: Record<string, string | undefined>,
+  harnessProvider: ProviderName,
+): ModelTierOverrides {
+  const tiers: Partial<Record<ModelTier, string>> = { ...parseTierMapJson(env.MODEL_TIER_MAP) };
+  for (const tier of MODEL_TIERS) {
+    const direct = env[`MODEL_TIER_${tier.toUpperCase()}`]?.trim();
+    if (direct) tiers[tier] = direct;
+  }
+  return Object.keys(tiers).length > 0 ? { [harnessProvider]: tiers } : {};
+}
+
 export function resolveTaskModelSelection(opts: {
   model?: string | null;
   modelTier?: string | null;
@@ -612,6 +631,12 @@ export const AgentTaskSchema = z
     model: z.string().optional(),
     modelTier: ModelTierSchema.optional(),
     effort: ReasoningEffortSchema.optional(),
+    // Claim-time model resolution (server-side, see runbooks/model-tiers.md).
+    // resolvedModel is what the worker runs; modelSource says which layer won;
+    // modelAlias is the `latest:` alias the value came from, when any.
+    resolvedModel: z.string().optional(),
+    modelSource: z.string().optional(),
+    modelAlias: z.string().optional(),
 
     // Schedule linking (optional — set when task was created by a schedule).
     // z.string(): also reachable verbatim from the create-task query param.
@@ -1996,7 +2021,7 @@ export const WorkflowNodeSchema = z
     type: z
       .string()
       .describe(
-        "Executor type: 'agent-task', 'script', 'swarm-script', 'raw-llm', 'validate', 'property-match'",
+        "Executor type: 'agent-task', 'script', 'swarm-script', 'raw-llm', 'system-one-decision', 'validate', 'property-match'",
       ),
     label: z.string().optional().describe("Human-readable label for UI display"),
     config: z
@@ -2005,6 +2030,7 @@ export const WorkflowNodeSchema = z
         "Executor-specific config. For agent-task: { template, outputSchema?, agentId?, routingReason?, routingNote?, tags?, priority?, dir?, vcsRepo?, model? }; configured agentId defaults routingReason to human_pinned. " +
           "For script: { runtime, script, args?, timeout? }. " +
           "For swarm-script: { scriptName, scope?, pinHash?, args?, fsMode?, timeoutMs? (1000-300000) }. " +
+          "For system-one-decision (typed decisions, Jev by default): { provider? ('typesafe' default | 'openrouter' | 'laya'; a literal, never a {{token}}), state, questions: { <id>: { type: 'noul'|'choice'|'score', instructions, criteria? } }, returns: { <id>: { type } }, model? (provider-specific; unset = the provider's default, and laya has none so it sends no model and picks its own checkpoint), timeoutMs?, maxRetries? (0-3), humanReview? { band: { min, max } (0-1, inclusive), approvers: { users?, roles?, policy }, title?, timeout?, notifications? } }; each provider needs its own global secret (TYPESAFE_API_KEY, OPENROUTER_API_KEY, or LAYA_API_KEY; laya also needs the global config LAYA_URL), and a save warns and a run fails before any node executes when one is missing; system-one-decision nodes must not set retry or validation.retry. With humanReview, an answer whose confidence is inside the band waits for a person (human-in-the-loop approval), and next must map ports { approved, rejected?, timeout? }. " +
           "Agent-task templates and ordinary config values support {{interpolation}} from the node's inputs context, including trigger and declared upstream aliases. " +
           "SECURITY: executable source for script/swarm-script nodes does not interpolate trigger.* or upstream node outputs; only input/workflow/swarm/run values are allowed in inline script source, and named swarm-script source is not workflow-interpolated. " +
           "Pass dynamic values through config.args instead (inline script receives them as argv; swarm-script receives its args object). " +
@@ -2412,6 +2438,9 @@ export type AgentTaskSummary = Pick<
   | "scheduleId"
   | "model"
   | "modelTier"
+  | "resolvedModel"
+  | "modelSource"
+  | "modelAlias"
   | "effort"
   | "provider"
   | "requestedByUserId"

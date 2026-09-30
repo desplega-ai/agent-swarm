@@ -2,21 +2,28 @@
  * Normalized per-agent reasoning/effort control, shared across the four
  * local harnesses (`claude`, `codex`, `pi`, `opencode`).
  *
- * Pure module — no DB import, no network I/O at runtime. Capability data is
- * read from the slim, checked-in `modelsdev-reasoning.json` snapshot (derived
- * from the canonical `src/be/modelsdev-cache.json` by
- * `scripts/refresh-modelsdev-pricing.ts`), layered with a small
- * harness-specific override table for quirks the cache can't encode. See
+ * Pure module — no DB import, no network I/O of its own. Capability data is
+ * read from the model catalog (`src/utils/runtime-model-catalog.ts`: live
+ * `model_catalog` + overlay rows, vendored models.dev snapshot offline),
+ * layered with a small harness-specific override table for quirks the
+ * catalog can't encode. A new model's reasoning levels arrive with its
+ * catalog row (model-catalog phase 4). See
  * `thoughts/taras/plans/2026-07-01-agent-reasoning-effort-runtime-control.md`
  * (Phase 1) and `thoughts/taras/research/2026-05-26-agent-reasoning-effort-runtime-control.md`
  * for the design rationale.
  */
 
-import reasoningSnapshotJson from "./modelsdev-reasoning.json";
+import {
+  claudeCatalogModelId,
+  REASONING_EFFORT_LEVELS,
+  type ReasoningEffortLevel,
+  reasoningLevelsFor,
+} from "@desplega/model-catalog";
+import { runtimeCatalogModel, runtimeCatalogSection } from "../utils/runtime-model-catalog";
 
 /** Closed, normalized enum. `minimal` remains out of scope; GPT-5.6 Codex adds `max`. */
-export const REASONING_EFFORT_LEVELS = ["off", "low", "medium", "high", "xhigh", "max"] as const;
-export type ReasoningEffort = (typeof REASONING_EFFORT_LEVELS)[number];
+export { REASONING_EFFORT_LEVELS };
+export type ReasoningEffort = ReasoningEffortLevel;
 
 /** The four local harnesses this feature covers (Devin / claude-managed are out of scope). */
 export type ReasoningHarness = "claude" | "codex" | "pi" | "opencode";
@@ -45,44 +52,7 @@ export type ReasoningEffortApplication =
     }
   | { kind: "noop" };
 
-// --- Slim capability snapshot ------------------------------------------------
-
-interface SlimReasoningOption {
-  type: string;
-  values?: string[];
-}
-
-interface SlimModelEntry {
-  id: string;
-  reasoning: boolean;
-  reasoningOptions?: SlimReasoningOption[];
-}
-
-/**
- * Providers the snapshot covers — mirrors `SNAPSHOT_ORDER` +
- * `BEDROCK_SNAPSHOT_ID` in `apps/ui/src/lib/agent-runtime-models.ts`. Direct
- * `claude`/`codex` model strings (no provider prefix) resolve against
- * `anthropic`/`openai` respectively; `pi`/`opencode` model strings are always
- * `<providerId>/<model-id>` (see `splitProviderModel`).
- */
-type SnapshotProviderId = "anthropic" | "openai" | "openrouter" | "amazon-bedrock";
-
-type ReasoningSnapshot = Partial<Record<SnapshotProviderId, Record<string, SlimModelEntry>>>;
-
-const SNAPSHOT = reasoningSnapshotJson as ReasoningSnapshot;
-
-/** Shared-safe subset accepted by all four harnesses on at least their default models (see research doc). */
-const FALLBACK_LEVELS: ReasoningEffort[] = ["low", "medium", "high"];
-
-/** models.dev `reasoning_options[].type === "effort"` value → our normalized enum. `minimal` intentionally dropped. */
-const EFFORT_VALUE_MAP: Partial<Record<string, ReasoningEffort>> = {
-  none: "off",
-  low: "low",
-  medium: "medium",
-  high: "high",
-  xhigh: "xhigh",
-  max: "max",
-};
+// --- Capability lookup --------------------------------------------------------
 
 function splitProviderModel(model: string): { providerId: string; modelId: string } {
   const slash = model.indexOf("/");
@@ -90,81 +60,33 @@ function splitProviderModel(model: string): { providerId: string; modelId: strin
   return { providerId: model.slice(0, slash), modelId: model.slice(slash + 1) };
 }
 
-function lookupModelEntry(harness: ReasoningHarness, model: string): SlimModelEntry | undefined {
-  if (!model) return undefined;
-  if (harness === "claude") return SNAPSHOT.anthropic?.[model];
-  if (harness === "codex") return SNAPSHOT.openai?.[model];
-  // pi / opencode model strings are always "<provider>/<model-id...>" — the
-  // model id itself may contain further slashes (e.g. openrouter's
-  // "google/gemini-3-flash-preview"), so split on the FIRST slash only.
-  const { providerId, modelId } = splitProviderModel(model);
-  if (!providerId) return undefined;
-  return SNAPSHOT[providerId as SnapshotProviderId]?.[modelId];
-}
-
-function levelsFromReasoningOptions(options: SlimReasoningOption[] | undefined): ReasoningEffort[] {
-  const effortEntry = options?.find((o) => o.type === "effort");
-  if (!effortEntry?.values?.length) return [];
-  const mapped = new Set(
-    effortEntry.values
-      .map((v) => EFFORT_VALUE_MAP[v])
-      .filter((v): v is ReasoningEffort => v !== undefined),
-  );
-  // Preserve canonical ordering rather than whatever order models.dev lists them in.
-  return REASONING_EFFORT_LEVELS.filter((level) => mapped.has(level));
-}
-
-function hasBudgetTokensOption(entry: SlimModelEntry): boolean {
-  return Boolean(entry.reasoningOptions?.some((o) => o.type === "budget_tokens"));
-}
-
 /**
- * Harness-specific quirks the cache doesn't (fully) encode. Kept small — this
- * patches gaps, it does not duplicate the cache. Applied on top of whichever
- * levels resolution step 2/3 already produced.
+ * The (catalog id, catalog facts) a harness's model string names. Direct
+ * `claude`/`codex` strings (no provider prefix) resolve against
+ * `anthropic`/`openai`; a Claude CLI shortname (`opus`, the tier default)
+ * resolves to the newest model of its family. `pi`/`opencode` strings are
+ * always `<providerId>/<model-id>`, and the id may hold more slashes (openrouter's
+ * `google/gemini-3-flash-preview`), so split on the FIRST slash only.
  */
-function applyHarnessOverrides(
+function lookupModel(
   harness: ReasoningHarness,
   model: string,
-  entry: SlimModelEntry,
-  levels: ReasoningEffort[],
-): ReasoningEffort[] {
-  let result = levels;
-
+): { id: string; facts: ReturnType<typeof runtimeCatalogModel> } | undefined {
+  if (!model) return undefined;
+  let providerId: string;
+  let modelId: string;
   if (harness === "claude") {
-    // Claude's native vocabulary has no "off" (see research doc) — we
-    // implement it as a synthetic level via `MAX_THINKING_TOKENS=0`, which
-    // only exists on legacy (non-adaptive-only) models that still expose a
-    // numeric thinking-budget knob (`reasoning_options` carries a
-    // `budget_tokens` entry). Opus 4.7+ models are adaptive-only — effort
-    // only, no `budget_tokens` — so `off` is naturally never added for them,
-    // rather than hardcoding "Opus 4.7" by name.
-    if (hasBudgetTokensOption(entry) && !result.includes("off")) {
-      result = ["off", ...result];
-    }
+    providerId = "anthropic";
+    modelId = claudeCatalogModelId(model, runtimeCatalogSection("anthropic"));
+  } else if (harness === "codex") {
+    providerId = "openai";
+    modelId = model;
+  } else {
+    ({ providerId, modelId } = splitProviderModel(model));
+    if (!providerId) return undefined;
   }
-
-  if (harness !== "codex") {
-    result = result.filter((l) => l !== "max");
-  }
-
-  if (harness === "codex") {
-    // The cache already tends to encode this correctly per model (verified:
-    // `gpt-5.1-codex` excludes xhigh, `gpt-5.1-codex-max` includes it). This
-    // rule is defense-in-depth for models missing from the snapshot (the
-    // {low,medium,high} fallback path), where naming alone should still
-    // decide xhigh eligibility for `*-codex` family models.
-    const isCodexMax = /-codex-max$/.test(model);
-    const isCodexNonMax = /-codex$/.test(model) && !isCodexMax;
-    if (isCodexMax && !result.includes("xhigh")) {
-      result = [...result, "xhigh"];
-    }
-    if (isCodexNonMax) {
-      result = result.filter((l) => l !== "xhigh");
-    }
-  }
-
-  return REASONING_EFFORT_LEVELS.filter((level) => result.includes(level));
+  const facts = runtimeCatalogModel(providerId, modelId);
+  return facts ? { id: modelId, facts } : undefined;
 }
 
 function pickDefault(levels: ReasoningEffort[]): ReasoningEffort | null {
@@ -173,33 +95,15 @@ function pickDefault(levels: ReasoningEffort[]): ReasoningEffort | null {
 }
 
 /**
- * Resolution order:
- *  1. No capability data for (harness, model) at all (custom model strings,
- *     models absent from the snapshot) → unsupported.
- *  2. `reasoning: false` → unsupported, regardless of the override table.
- *  3. `reasoning_options` has a usable `type: "effort"` entry → levels come
- *     from its `values` (mapped/filtered — `none`→`off`, `minimal` dropped).
- *  4. Otherwise (`reasoning: true`, no usable effort entry) → the shared-safe
- *     fallback subset `{low, medium, high}`.
- *  5. Harness-specific override table applied on top for known quirks.
+ * The levels `(harness, model)` accepts, from the catalog facts
+ * (`reasoningLevelsFor`, shared with the swarm app's effort pickers). Unknown
+ * models (custom strings, ids the catalog lacks) and non-reasoning models are
+ * unsupported.
  */
 export function reasoningCapability(harness: ReasoningHarness, model: string): ReasoningCapability {
-  const entry = lookupModelEntry(harness, model);
-  if (!entry || !entry.reasoning) {
-    return { supported: false, levels: [], default: null };
-  }
-
-  let levels = levelsFromReasoningOptions(entry.reasoningOptions);
-  if (levels.length === 0) {
-    levels = [...FALLBACK_LEVELS];
-  }
-
-  levels = applyHarnessOverrides(harness, model, entry, levels);
-
-  if (levels.length === 0) {
-    return { supported: false, levels: [], default: null };
-  }
-
+  const entry = lookupModel(harness, model);
+  const levels = entry ? reasoningLevelsFor(harness, entry.id, entry.facts) : [];
+  if (levels.length === 0) return { supported: false, levels: [], default: null };
   return { supported: true, levels, default: pickDefault(levels) };
 }
 

@@ -1,6 +1,8 @@
 import { z } from "zod";
 import { publishCatalogReportPage } from "./catalog-report";
 
+const MAX_TASK_SCAN_LIMIT = 500;
+
 export const argsSchema = z.object({
   days: z
     .number()
@@ -16,8 +18,9 @@ export const argsSchema = z.object({
     .number()
     .int()
     .positive()
+    .max(MAX_TASK_SCAN_LIMIT)
     .optional()
-    .describe("Max failed tasks to scan (default 500)"),
+    .describe("Max failed tasks to scan (default 500, max 500)"),
   publishPage: z.boolean().optional().describe("Publish an authed HTML page (default true)"),
 });
 
@@ -25,12 +28,29 @@ const REASON_PATTERNS: any[] = [
   { key: "sigterm/killed", re: /sigterm|sigkill|killed|143|137/i },
   { key: "timeout", re: /time?d?\s*out|timeout|deadline/i },
   { key: "context-window", re: /context (window|limit|saturat)|peakcontext|compact/i },
+  { key: "reboot-sweep", re: /reboot sweep/i },
   { key: "not-found", re: /not found|404|missing|no such/i },
   { key: "auth/credentials", re: /unauthorized|401|403|credential|token|forbidden/i },
-  { key: "ci/checks-failed", re: /ci|check.?s? fail|lint|tsc|test.?s? fail/i },
+  { key: "ci/checks-failed", re: /\bci\b|check.?s? fail|lint|tsc|test.?s? fail/i },
   { key: "network", re: /network|econn|fetch failed|socket|dns|502|503|504/i },
   { key: "cancelled", re: /cancel|aborted/i },
 ];
+
+function sanitizeUntrustedReasonSample(reason: unknown): string {
+  return String(reason)
+    .replace(/[\u0000-\u001f\u007f-\u009f]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 200);
+}
+
+function rowsToObjects(result: any): any[] {
+  const payload = result?.data ?? result;
+  const columns: string[] = payload?.columns ?? [];
+  return (payload?.rows ?? []).map((row: any) =>
+    Array.isArray(row) ? Object.fromEntries(columns.map((column, i) => [column, row[i]])) : row,
+  );
+}
 
 function reasonCluster(reason: string): string {
   const r = (reason || "").trim();
@@ -38,7 +58,7 @@ function reasonCluster(reason: string): string {
   for (const p of REASON_PATTERNS) {
     if (p.re.test(r)) return p.key;
   }
-  return r.toLowerCase().slice(0, 48);
+  return "other";
 }
 
 /** Cluster recently failed swarm tasks by reason, agent, or schedule. */
@@ -47,7 +67,7 @@ export default async function taskFailureAudit(args: any, ctx: any) {
   if (!parsed.success) return { error: "invalid args: " + parsed.error.message };
   const days = parsed.data.days || 7;
   const groupBy = parsed.data.groupBy || "reason";
-  const limit = parsed.data.limit || 500;
+  const limit = Math.min(parsed.data.limit ?? MAX_TASK_SCAN_LIMIT, MAX_TASK_SCAN_LIMIT);
   const publishPage = parsed.data.publishPage !== false;
 
   const since = new Date(Date.now() - days * 86400000).toISOString();
@@ -62,17 +82,49 @@ export default async function taskFailureAudit(args: any, ctx: any) {
   const payload: any = res && res.data ? res.data : res;
   const tasks: any = payload && Array.isArray(payload.tasks) ? payload.tasks : [];
 
+  const failureReasons = new Map<string, string>();
+  if (groupBy === "reason") {
+    const tasksNeedingReason = tasks.filter((task: any) => !task.failureReason && task.id);
+    const taskIds = tasksNeedingReason.map((task: any) => task.id as string);
+    if (taskIds.length > 0) {
+      const placeholders = taskIds.map(() => "?").join(", ");
+      const reasonResult: any = await ctx.swarm.db_query({
+        sql: `SELECT id, failureReason FROM agent_tasks WHERE id IN (${placeholders})`,
+        params: taskIds,
+      });
+      const reasonPayload: any = reasonResult?.data ?? reasonResult;
+      if (
+        reasonResult?.success === false ||
+        reasonPayload?.success === false ||
+        reasonPayload?.error
+      ) {
+        return { error: "failure reason projection failed with status " + reasonResult?.status };
+      }
+      if (reasonPayload?.truncated) {
+        return {
+          error: `failure reason projection truncated (${reasonPayload.rows?.length ?? 0} of ${reasonPayload.total ?? "unknown"} rows)`,
+        };
+      }
+      for (const row of rowsToObjects(reasonResult)) {
+        if (typeof row?.id === "string" && typeof row.failureReason === "string") {
+          failureReasons.set(row.id, row.failureReason);
+        }
+      }
+    }
+  }
+
   const groups: any = {};
   for (const t of tasks) {
     let key: string;
     if (groupBy === "agent") key = t.agentId || "(unassigned)";
     else if (groupBy === "schedule") key = t.scheduleId || "(not scheduled)";
-    else key = reasonCluster(t.failureReason || "");
-    if (!groups[key]) groups[key] = { key, count: 0, taskIds: [], sampleReason: "" };
+    else key = reasonCluster(failureReasons.get(t.id) || t.failureReason || "");
+    if (!groups[key]) groups[key] = { key, count: 0, taskIds: [], untrustedWorkerTextSample: "" };
     groups[key].count++;
     if (groups[key].taskIds.length < 5) groups[key].taskIds.push(t.id);
-    if (!groups[key].sampleReason && t.failureReason) {
-      groups[key].sampleReason = String(t.failureReason).slice(0, 200);
+    const failureReason = failureReasons.get(t.id) || t.failureReason;
+    if (!groups[key].untrustedWorkerTextSample && failureReason) {
+      groups[key].untrustedWorkerTextSample = sanitizeUntrustedReasonSample(failureReason);
     }
   }
 
@@ -118,7 +170,7 @@ export default async function taskFailureAudit(args: any, ctx: any) {
                   key: group.key,
                   count: group.count,
                   taskIds: group.taskIds,
-                  sampleReason: group.sampleReason,
+                  untrustedWorkerTextSample: group.untrustedWorkerTextSample,
                 },
               ],
             })),

@@ -680,6 +680,7 @@ describe("buildAnalytics — global filter (v7.6 §C3)", () => {
       expect(res.filterOptions).toEqual({
         harnesses: ["pi", "claude", "ghost"],
         configIds: ["pi-deepseek", "claude-haiku", "ghost-config"],
+        efforts: ["default"],
       });
     }
   });
@@ -770,6 +771,7 @@ describe("buildAnalytics — global filter (v7.6 §C3)", () => {
     expect(res.filterOptions).toEqual({
       harnesses: ["pi", "claude", "ghost"],
       configIds: ["pi-deepseek", "claude-haiku", "ghost-config"],
+      efforts: ["default"],
     });
   });
 
@@ -805,5 +807,62 @@ describe("buildAnalytics — no NaN/Infinity anywhere (hard rule)", () => {
       ALIASES,
     );
     expect(nonFinitePaths(res)).toEqual([]);
+  });
+});
+
+describe("buildAnalytics — reasoning effort", () => {
+  const rows = [
+    row({ configId: "claude-haiku", reasoningEffort: "high", score: 1, status: "passed" }),
+    row({ configId: "claude-haiku", reasoningEffort: "high", score: 0.5, status: "failed" }),
+    row({ configId: "claude-haiku", reasoningEffort: "low", score: 0.25, status: "failed" }),
+    row({ configId: "pi-deepseek", reasoningEffort: null, score: 0.75, status: "passed" }),
+    row({ configId: "pi-deepseek", reasoningEffort: "xhigh", score: 1, status: "passed" }),
+  ];
+
+  test("rolls attempts up by effort; attempts without one group as default", () => {
+    const res = buildAnalytics(rows, registry, ALIASES);
+    expect(res.efforts?.map((g) => [g.group, g.attempts])).toEqual([
+      ["high", 2],
+      ["default", 1],
+      ["low", 1],
+      ["xhigh", 1],
+    ]);
+    const high = res.efforts?.find((g) => g.group === "high");
+    expect(high?.configIds).toEqual(["claude-haiku"]);
+    expect(high?.avgScore).toBeCloseTo(0.75);
+    expect(high?.passRate).toBeCloseTo(0.5);
+  });
+
+  test("filter options list efforts low to high with the default last", () => {
+    const res = buildAnalytics(rows, registry, ALIASES);
+    expect(res.filterOptions?.efforts).toEqual(["low", "high", "xhigh", "default"]);
+  });
+
+  test("effort filter re-aggregates every section over the kept rows", () => {
+    const filter = { harnesses: [], configIds: [], efforts: ["high", "default"] };
+    const res = buildAnalytics(rows, registry, ALIASES, filter);
+    expect(res.appliedFilter).toEqual(filter);
+    expect(res.matrix.reduce((acc, c) => acc + c.attempts, 0)).toBe(3);
+    expect(res.efforts?.map((g) => g.group).sort()).toEqual(["default", "high"]);
+    // the option list keeps every effort visible while filtering
+    expect(res.filterOptions?.efforts).toEqual(["low", "high", "xhigh", "default"]);
+  });
+
+  test("model rollups list the efforts their attempts ran at", () => {
+    const res = buildAnalytics(rows, registry, ALIASES);
+    const byEffort = res.models.flatMap((m) => m.efforts ?? []);
+    expect(new Set(byEffort)).toEqual(new Set(["low", "high", "xhigh", "default"]));
+    const haiku = res.models.find((m) => m.configIds.includes("claude-haiku"));
+    expect(haiku?.efforts).toEqual(["low", "high"]);
+  });
+
+  test("an empty efforts filter is no filter", () => {
+    const res = buildAnalytics(rows, registry, ALIASES, {
+      harnesses: [],
+      configIds: [],
+      efforts: [],
+    });
+    expect(res.appliedFilter).toBeNull();
+    expect(res.matrix.reduce((acc, c) => acc + c.attempts, 0)).toBe(5);
   });
 });

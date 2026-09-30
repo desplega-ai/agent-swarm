@@ -1,24 +1,12 @@
 name: CI
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - "src/**"
-      - "scripts/**"
-      - "package.json"
-      - "bun.lock*"
-      - "bunfig.toml"
-      - "apps/ui/package.json"
-      # The root test run also covers apps/ui/**/*.test.tsx.
-      - "apps/ui/src/**"
-      - "apps/templates-ui/package.json"
-      - "apps/evals/package.json"
-      - "konsistent.json"
-      - "tsconfig.json"
-      - "biome.json"
-      - ".github/workflows/ci.yml"
+  # No push trigger: "Merge Gate" is the only required check, with strict mode and a
+  # merge queue, so every commit on main is a tree a merge_group run already passed.
+  # The nightly run keeps main's bun-test-timings cache (restored by the gate's test
+  # shards) and the ci-timings main baseline fresh.
+  schedule:
+    - cron: "41 2 * * *"
   workflow_dispatch:
 
 jobs:
@@ -229,7 +217,7 @@ jobs:
       # Main must report the same series used as PR baselines.
       # See agent-fs docs/ci-timings.md; reporting is best-effort and never blocks CI.
       - name: Report check timings to ci-timings
-        if: always() && github.event_name == 'push'
+        if: always() && github.ref == 'refs/heads/main'
         continue-on-error: true
         env:
           TOKEN: ${{ secrets.SWARM_CI_TIMINGS_TOKEN }}
@@ -416,7 +404,7 @@ jobs:
       # Each shard reports independently; main provides the baseline for PR
       # comparisons. See agent-fs docs/ci-timings.md.
       - name: Report test timing to ci-timings
-        if: always() && github.event_name == 'push'
+        if: always() && github.ref == 'refs/heads/main'
         continue-on-error: true
         env:
           TOKEN: ${{ secrets.SWARM_CI_TIMINGS_TOKEN }}

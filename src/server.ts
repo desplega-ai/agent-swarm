@@ -73,6 +73,10 @@ import { registerMemoryGetTool } from "./tools/memory-get";
 import { registerMemoryRateTool } from "./tools/memory-rate";
 import { registerMemorySearchTool } from "./tools/memory-search";
 import { registerMemoryStoreTool } from "./tools/memory-store";
+import {
+  registerModelCatalogOverlayUpsertTool,
+  registerModelCatalogRefreshTool,
+} from "./tools/model-catalog";
 import { registerMyAgentInfoTool } from "./tools/my-agent-info";
 import { registerGetOauthAccessTokenTool } from "./tools/oauth-access-token";
 import { registerPollTaskTool } from "./tools/poll-task";
@@ -413,6 +417,8 @@ export async function createServer(
     registerListConfigTool(server);
     registerDeleteConfigTool(server);
     registerCredentialBindingsTool(server);
+    registerModelCatalogRefreshTool(server);
+    registerModelCatalogOverlayUpsertTool(server);
   }
 
   // Scripts capability - reusable script catalog (HTTP MCP only in v1)

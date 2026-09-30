@@ -134,6 +134,11 @@ const getResolvedConfigRoute = route({
   query: z.object({
     agentId: z.string().optional(),
     repoId: z.string().optional(),
+    key: z
+      .string()
+      .min(1)
+      .optional()
+      .describe("Return only the entry with this exact key. Omit to return every resolved entry."),
     includeSecrets: z.enum(["true", "false"]).optional(),
   }),
   responses: {
@@ -216,6 +221,11 @@ const listConfig = route({
   query: z.object({
     scope: z.string().optional(),
     scopeId: z.string().optional(),
+    key: z
+      .string()
+      .min(1)
+      .optional()
+      .describe("Return only entries with this exact key. Omit to return every entry."),
     includeSecrets: z.enum(["true", "false"]).optional(),
   }),
   responses: {
@@ -283,9 +293,12 @@ export async function handleConfig(
     if (!parsed) return true;
     const includeSecrets = parsed.query.includeSecrets === "true";
     const { effectiveIncludeSecrets, secretsNote } = await resolveSecretsRead(req, includeSecrets);
+    const key = parsed.query.key;
+    // Filter by key before masking and before any secret is registered, so a
+    // caller asking for one key never receives the rest (matches get-config).
     const configs = stripApiOnlyKeys(
       await getResolvedConfig(parsed.query.agentId || undefined, parsed.query.repoId || undefined),
-    );
+    ).filter((c) => !key || c.key === key);
     const result = effectiveIncludeSecrets ? configs : maskSecrets(configs);
     if (effectiveIncludeSecrets) {
       for (const c of result) {
@@ -368,6 +381,7 @@ export async function handleConfig(
       await getSwarmConfigs({
         scope: parsed.query.scope || undefined,
         scopeId: parsed.query.scopeId || undefined,
+        key: parsed.query.key,
       }),
     );
     const listResult = effectiveIncludeSecrets ? configs : maskSecrets(configs);

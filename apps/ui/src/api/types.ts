@@ -1,3 +1,4 @@
+import { REASONING_EFFORT_LEVELS, type ReasoningEffortLevel } from "@desplega/model-catalog";
 import type { TaskCitation } from "../../../../src/utils/task-citations";
 // Backend types (mirrored from agent-swarm backend)
 export type AgentStatus = "idle" | "busy" | "offline" | "waiting_for_credentials";
@@ -30,9 +31,32 @@ export type AgentTaskSource =
 export type RoutingReason = "skill" | "continuity" | "overflow" | "human_pinned" | "reroute_fault";
 export type ChannelType = "public" | "dm";
 export type ModelTier = "smol" | "regular" | "smart" | "ultra";
-/** Mirrors `REASONING_EFFORT_LEVELS` in `src/providers/reasoning-effort.ts` (backend). */
-export const REASONING_EFFORT_LEVELS = ["off", "low", "medium", "high", "xhigh", "max"] as const;
-export type ReasoningEffortLevel = (typeof REASONING_EFFORT_LEVELS)[number];
+/** Mirrors `ModelSource` in `src/be/model-tier-resolution.ts` (backend). */
+export type ModelSource =
+  | "model"
+  | "worker-env"
+  | "tier-config"
+  | "tier-default"
+  | "fallback:cli-unsupported";
+/** One row of `GET /api/models-catalog/tiers`: what a tier resolves to for a provider. */
+export interface ModelTierPreview {
+  provider: string;
+  tier: ModelTier;
+  /** swarm_config / env key that overrides the tier globally. */
+  key: string;
+  /** The built-in default for the tier. */
+  defaultValue: string;
+  /** The stored `key` value, or null when unset. */
+  configured: string | null;
+  /** Layer that wins today. */
+  source: "tier-config" | "tier-default";
+  /** Concrete model that layer resolves to now (`latest:` aliases resolved). */
+  resolvedModel: string | null;
+  alias: string | null;
+}
+/** The effort enum, one definition shared with the API (`@desplega/model-catalog`). */
+export { REASONING_EFFORT_LEVELS };
+export type { ReasoningEffortLevel };
 
 export type AcpTarget = "opencode" | "custom";
 
@@ -248,6 +272,12 @@ export interface AgentTask {
   progress?: string;
   model?: string;
   modelTier?: ModelTier;
+  /** Concrete model the server resolved when a worker claimed the task. */
+  resolvedModel?: string;
+  /** Which layer chose `resolvedModel`. */
+  modelSource?: ModelSource;
+  /** The `latest:` alias `resolvedModel` came from, when any. */
+  modelAlias?: string;
   effort?: ReasoningEffortLevel;
   scheduleId?: string;
   parentTaskId?: string;
@@ -803,6 +833,8 @@ export interface DashboardStats {
    * Optional for compatibility with older API servers.
    */
   steeringEnabled?: boolean;
+  /** Dev deployments can bypass UI version checks. Absent on older APIs. */
+  devMode?: boolean;
 }
 
 export type TaskStatus = AgentTaskStatus;
@@ -1146,8 +1178,17 @@ export interface ScheduledTask {
   favorite?: boolean;
 }
 
+/**
+ * `/api/scheduled-tasks?fields=slim` list row: the full `taskTemplate` is
+ * swapped for a bounded `taskTemplatePreview`. Read the template from
+ * `GET /api/schedules/{id}`.
+ */
+export type ScheduledTaskSummary = Omit<ScheduledTask, "taskTemplate"> & {
+  taskTemplatePreview?: string;
+};
+
 export interface ScheduledTasksResponse {
-  scheduledTasks: ScheduledTask[];
+  scheduledTasks: ScheduledTaskSummary[];
 }
 
 export type SwarmConfigScope = "global" | "agent" | "repo";
@@ -2205,6 +2246,20 @@ export interface ApprovalRequest {
 
 export interface ApprovalRequestsResponse {
   approvalRequests: ApprovalRequest[];
+}
+
+/**
+ * `/api/approval-requests?fields=slim` list row: question bodies, answers,
+ * approvers and notification targets are dropped; `questionCount` is added.
+ * Read the full request from `GET /api/approval-requests/{id}`.
+ */
+export type ApprovalRequestSummary = Omit<
+  ApprovalRequest,
+  "questions" | "approvers" | "responses" | "resolutionReason" | "notificationChannels"
+> & { questionCount: number };
+
+export interface ApprovalRequestSummariesResponse {
+  approvalRequests: ApprovalRequestSummary[];
 }
 
 // Skills

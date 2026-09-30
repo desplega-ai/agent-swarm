@@ -1,4 +1,5 @@
 import {
+  type Agent,
   type AgentTask,
   type OnUnsupported,
   PROVIDER_STEER_CAPABILITIES,
@@ -53,16 +54,65 @@ async function providerForTask(task: AgentTask): Promise<ProviderName> {
   return agent?.harnessProvider ?? agent?.provider ?? task.provider ?? "claude";
 }
 
-export async function getTaskSteeringFields(task: AgentTask): Promise<{
+export interface TaskSteeringFields {
   isLeadTask: boolean;
   supportedSteerModes: SteerMode[];
-}> {
-  const agent = task.agentId ? await getAgentById(task.agentId) : null;
+}
+
+type SteeringAgent = Pick<Agent, "isLead" | "provider" | "harnessProvider">;
+
+function steeringFieldsFor(task: AgentTask, agent: SteeringAgent | null): TaskSteeringFields {
   const provider = agent?.harnessProvider ?? agent?.provider ?? task.provider;
   return {
     isLeadTask: agent?.isLead ?? false,
     supportedSteerModes: provider ? PROVIDER_STEER_CAPABILITIES[provider] : [],
   };
+}
+
+export async function getTaskSteeringFields(task: AgentTask): Promise<TaskSteeringFields> {
+  const agent = task.agentId ? await getAgentById(task.agentId) : null;
+  return steeringFieldsFor(task, agent);
+}
+
+/** Bound-parameter chunk for `IN (...)`, well under SQLite's variable limit. */
+const AGENT_ID_CHUNK = 500;
+
+/**
+ * Batched {@link getTaskSteeringFields}: one query per 500 distinct assignees
+ * instead of one full agent row per task. Selects only the three columns the
+ * steering fields read. Keyed by task id.
+ */
+export async function getTaskSteeringFieldsForTasks(
+  tasks: AgentTask[],
+): Promise<Map<string, TaskSteeringFields>> {
+  const agentIds = [...new Set(tasks.flatMap((task) => (task.agentId ? [task.agentId] : [])))];
+  const agents = new Map<string, SteeringAgent>();
+  for (let i = 0; i < agentIds.length; i += AGENT_ID_CHUNK) {
+    const ids = agentIds.slice(i, i + AGENT_ID_CHUNK);
+    const rows = await getDbClient().query<{
+      id: string;
+      isLead: number;
+      provider: string | null;
+      harness_provider: string | null;
+    }>(
+      `SELECT id, isLead, provider, harness_provider FROM agents WHERE id IN (${ids.map(() => "?").join(",")})`,
+      ids,
+    );
+    for (const row of rows) {
+      // Same mapping as rowToAgent for these three fields.
+      agents.set(row.id, {
+        isLead: row.isLead === 1,
+        provider: (row.provider as ProviderName | null) ?? undefined,
+        harnessProvider: (row.harness_provider as ProviderName | null) ?? null,
+      });
+    }
+  }
+  return new Map(
+    tasks.map((task) => [
+      task.id,
+      steeringFieldsFor(task, task.agentId ? (agents.get(task.agentId) ?? null) : null),
+    ]),
+  );
 }
 
 /**

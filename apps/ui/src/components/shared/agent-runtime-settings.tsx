@@ -1,4 +1,5 @@
-import { AlertTriangle, ArrowUpCircle, Check, ChevronsUpDown, Lock, Save } from "lucide-react";
+import { nearestReasoningLevel } from "@desplega/model-catalog";
+import { AlertTriangle, ArrowUpCircle, Save } from "lucide-react";
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -16,6 +17,13 @@ import {
   type ReasoningEffortLevel,
 } from "@/api/types";
 import { HarnessIcon } from "@/components/shared/harness-icon";
+import {
+  formatCacheRates,
+  formatContext,
+  formatCost,
+  ModelCombobox,
+  ModelStatusBadge,
+} from "@/components/shared/model-combobox";
 import { ProviderIcon } from "@/components/shared/provider-icon";
 import {
   AUTO_DESCRIPTION,
@@ -26,17 +34,8 @@ import {
 } from "@/components/shared/reasoning-effort-icon";
 import { AlertCallout } from "@/components/ui/alert-callout";
 import { Button } from "@/components/ui/button";
-import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-} from "@/components/ui/command";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   Select,
   SelectContent,
@@ -49,6 +48,9 @@ import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { ACP_TARGET_CATALOG } from "@/lib/acp-target-catalog";
 import {
+  effortAfterChange,
+  effortLevelsFor,
+  findKnownModel,
   findModelOption,
   HARNESS_LABEL,
   harnessSupportsModelSelection,
@@ -56,11 +58,9 @@ import {
   type LiveBedrockStatus,
   LOCAL_HARNESSES,
   type LocalHarnessProvider,
-  type ModelGroup,
   type ModelOption,
   modelGroupsForAcpTarget,
   modelGroupsForHarness,
-  nearestSupportedLevel,
   pickDefaultModelForHarness,
 } from "@/lib/agent-runtime-models";
 import { cn } from "@/lib/utils";
@@ -203,6 +203,14 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
     [harness, configs, envPresenceQuery.data, liveBedrockStatus, liveCatalog],
   );
   const modelOption = findModelOption(model, groups);
+  // Exactly what the API accepts for this harness and model (empty for a custom
+  // or unlisted model): the picker offers these and nothing else. An effort the
+  // pair cannot take is not sent, whatever the state still holds.
+  const effortLevels = useMemo(
+    () => effortLevelsFor(harness, model, liveCatalog),
+    [harness, model, liveCatalog],
+  );
+  const shownEffort: EffortValue = effort && effortLevels.includes(effort) ? effort : "";
   const acpModelGroups = useMemo(
     () => modelGroupsForAcpTarget(acpTarget, liveCatalog),
     [acpTarget, liveCatalog],
@@ -252,7 +260,7 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
       liveCatalog,
     );
     setHarness(initialHarness);
-    setModel(nextModel || pickDefaultModelForHarness(initialHarness, nextGroups));
+    setModel(nextModel || pickDefaultModelForHarness(initialHarness, nextGroups, liveCatalog));
     setEffort(harnessSupportsModelSelection(initialHarness) ? configuredEffort(configs) : "");
     setAcpTarget(configuredAcpTarget(configs, initialHarness === "acp" ? "custom" : "opencode"));
     const invocation = configuredAcpInvocation(configs);
@@ -267,19 +275,15 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
     setClaudeTransport(persistedClaudeTransport ?? "inherit");
   }, [persistedClaudeTransport]);
 
-  // Clears `effort` whenever it ends up unsupported by the (possibly new)
-  // selected model, rather than silently coercing it to a supported value.
-  function clearEffortIfUnsupported(option: ModelOption | null) {
-    setEffort((current) => {
-      if (!current) return current;
-      if (option?.reasoningLevels && !option.reasoningLevels.includes(current)) return "";
-      return current;
-    });
+  // An effort the new (harness, model) pair cannot take resets to Auto rather
+  // than silently becoming a neighbouring level.
+  function resetUnsupportedEffort(nextHarness: LocalHarnessProvider, nextModel: string) {
+    setEffort((current) => effortAfterChange(current, nextHarness, nextModel, liveCatalog));
   }
 
   function changeModel(nextModel: string) {
     setModel(nextModel);
-    clearEffortIfUnsupported(findModelOption(nextModel, groups));
+    resetUnsupportedEffort(harness, nextModel);
   }
 
   function changeHarness(nextHarness: LocalHarnessProvider) {
@@ -292,13 +296,14 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
     );
     setHarness(nextHarness);
     if (nextHarness === "acp" && harness !== "acp") setAcpTarget("opencode");
-    if (!harnessSupportsModelSelection(nextHarness)) setEffort("");
     const nextModel = findModelOption(model, nextGroups)
       ? model
-      : pickDefaultModelForHarness(nextHarness, nextGroups);
+      : pickDefaultModelForHarness(nextHarness, nextGroups, liveCatalog);
     if (nextModel !== model) setModel(nextModel);
     if (harnessSupportsModelSelection(nextHarness)) {
-      clearEffortIfUnsupported(findModelOption(nextModel, nextGroups));
+      resetUnsupportedEffort(nextHarness, nextModel);
+    } else {
+      setEffort("");
     }
   }
 
@@ -311,8 +316,11 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
         id: agent.id,
         harnessProvider: harness,
         model: modelSelectionEnabled || acpSelected ? model.trim() || null : null,
-        allowCustomModel: modelSelectionEnabled && customMode && !modelOption,
-        reasoningEffort: modelSelectionEnabled ? effort || null : null,
+        // The API rejects a model the catalog does not list unless it is flagged custom. A model
+        // only a worker probe lists (a live Bedrock id) is in the picker but not in the catalog.
+        allowCustomModel:
+          modelSelectionEnabled && !findKnownModel(model.trim(), liveCatalog ?? undefined),
+        reasoningEffort: modelSelectionEnabled ? shownEffort || null : null,
         ...(acpSelected
           ? {
               acp:
@@ -557,11 +565,18 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
         <div className="space-y-1.5">
           <Label>Reasoning effort</Label>
           <ReasoningEffortToggle
-            value={effort}
+            value={shownEffort}
             onChange={setEffort}
-            levels={modelOption?.reasoningLevels}
+            levels={effortLevels}
             modelLabel={modelOption?.label ?? null}
           />
+          {effortLevels.length === 0 ? (
+            <p className="text-xs text-muted-foreground">
+              {model.trim()
+                ? "No reasoning effort applies to this model: the catalog does not list it, or it does not reason."
+                : "Pick a model to set a reasoning effort."}
+            </p>
+          ) : null}
         </div>
       ) : null}
 
@@ -606,8 +621,11 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
           <>
             <span className="flex items-center gap-1.5">
               Effort:{" "}
-              <ReasoningEffortIcon level={effort || undefined} className="text-muted-foreground" />{" "}
-              <code>{effort ? REASONING_EFFORT_LABEL[effort] : AUTO_LABEL}</code>
+              <ReasoningEffortIcon
+                level={shownEffort || undefined}
+                className="text-muted-foreground"
+              />{" "}
+              <code>{shownEffort ? REASONING_EFFORT_LABEL[shownEffort] : AUTO_LABEL}</code>
             </span>
             <span className="flex items-center gap-1.5">
               Last effort:{" "}
@@ -625,19 +643,30 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
         ) : null}
       </div>
 
-      {modelOption?.cost ? (
-        <p className="text-xs text-muted-foreground">
-          <span className="font-mono tabular-nums">
-            {formatCost(modelOption.cost.input) ?? "?"} in /{" "}
-            {formatCost(modelOption.cost.output) ?? "?"} out
-          </span>{" "}
-          per 1M tokens
-          {modelOption.contextWindow
-            ? ` · ${formatContext(modelOption.contextWindow)} context`
-            : ""}
-          . Prices from <code>models.dev</code>{" "}
-          {catalogQuery.data?.source === "live" ? "live catalog" : "snapshot"} — verify against
-          provider billing.
+      {modelOption?.cost || modelOption?.status || modelOption?.releaseDate ? (
+        <p className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs text-muted-foreground">
+          <ModelStatusBadge status={modelOption.status} />
+          {modelOption.cost ? (
+            <span>
+              <span className="font-mono tabular-nums">
+                {formatCost(modelOption.cost.input) ?? "?"} in /{" "}
+                {formatCost(modelOption.cost.output) ?? "?"} out
+              </span>{" "}
+              per 1M tokens
+              {formatCacheRates(modelOption.cost)
+                ? ` · cache ${formatCacheRates(modelOption.cost)}`
+                : ""}
+              {modelOption.contextWindow
+                ? ` · ${formatContext(modelOption.contextWindow)} context`
+                : ""}
+              {modelOption.releaseDate ? ` · released ${modelOption.releaseDate}` : ""}. Prices from{" "}
+              <code>models.dev</code>{" "}
+              {catalogQuery.data?.source === "live" ? "live catalog" : "snapshot"} — verify against
+              provider billing.
+            </span>
+          ) : (
+            <span>Released {modelOption.releaseDate}.</span>
+          )}
         </p>
       ) : null}
     </div>
@@ -693,8 +722,8 @@ function AcpAdvertisedOptions({ options }: { options: AcpSessionConfigOption[] |
 interface ReasoningEffortToggleProps {
   value: EffortValue;
   onChange: (next: EffortValue) => void;
-  /** Undefined = no capability data for the selected model — don't grey out anything. */
-  levels: ReadonlyArray<ReasoningEffortLevel> | undefined;
+  /** The levels the harness accepts for the selected model. Every other level is unavailable. */
+  levels: ReadonlyArray<ReasoningEffortLevel>;
   modelLabel: string | null;
 }
 
@@ -764,7 +793,7 @@ function ReasoningEffortToggle({
         description={AUTO_DESCRIPTION}
       />
       {REASONING_EFFORT_LEVELS.map((level) => {
-        const supported = levels ? levels.includes(level) : true;
+        const supported = levels.includes(level);
         const active = value === level;
 
         if (supported) {
@@ -782,7 +811,7 @@ function ReasoningEffortToggle({
           );
         }
 
-        const suggestion = levels?.length ? nearestSupportedLevel(level, levels) : null;
+        const suggestion = nearestReasoningLevel(level, levels);
         const unsupportedReason = `${modelLabel ?? "This model"} doesn't support "${REASONING_EFFORT_LABEL[level]}"${
           suggestion ? ` — use "${REASONING_EFFORT_LABEL[suggestion]}" instead.` : "."
         }`;
@@ -850,170 +879,5 @@ function UnsupportedApiNotice({
         </span>
       </div>
     </div>
-  );
-}
-
-// Phase 12a — call the shared `formatCost` utility and adapt its return type
-// (this component's call sites expect `null` for missing values rather than
-// the shared utility's placeholder string).
-import { formatCost as sharedFormatCost } from "@/lib/cost-format";
-
-function formatCost(value: number | undefined): string | null {
-  if (value === undefined || value === null) return null;
-  return sharedFormatCost(value);
-}
-
-function formatContext(tokens: number | undefined): string | null {
-  if (!tokens) return null;
-  if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(tokens % 1_000_000 ? 1 : 0)}M`;
-  if (tokens >= 1000) return `${Math.round(tokens / 1000)}k`;
-  return `${tokens}`;
-}
-
-function ModelPrice({
-  cost,
-  contextWindow,
-}: {
-  cost: { input?: number; output?: number } | undefined;
-  contextWindow: number | undefined;
-}) {
-  const inCost = formatCost(cost?.input);
-  const outCost = formatCost(cost?.output);
-  const ctx = formatContext(contextWindow);
-  if (!inCost && !outCost && !ctx) return null;
-  return (
-    <span className="ml-2 hidden shrink-0 flex-col items-end text-[10px] leading-tight text-muted-foreground sm:flex">
-      {(inCost || outCost) && (
-        <span className="font-mono tabular-nums">
-          {inCost ?? "?"} <span className="opacity-60">in</span> · {outCost ?? "?"}{" "}
-          <span className="opacity-60">out</span>
-        </span>
-      )}
-      {ctx && <span className="opacity-70">{ctx} ctx</span>}
-    </span>
-  );
-}
-
-interface ModelComboboxProps {
-  value: string;
-  onChange: (next: string) => void;
-  groups: ModelGroup[];
-  selected: ModelOption | null;
-  placeholder?: string;
-  creatable?: boolean;
-}
-
-function ModelCombobox({
-  value,
-  onChange,
-  groups,
-  selected,
-  placeholder = "Select model",
-  creatable = false,
-}: ModelComboboxProps) {
-  const [open, setOpen] = useState(false);
-  const [search, setSearch] = useState("");
-  const customValue = search.trim();
-  const exactMatch = groups.some((group) =>
-    group.models.some((option) => option.id === customValue),
-  );
-
-  function choose(nextValue: string) {
-    onChange(nextValue);
-    setSearch("");
-    setOpen(false);
-  }
-
-  return (
-    <Popover
-      open={open}
-      onOpenChange={(nextOpen) => {
-        setOpen(nextOpen);
-        if (!nextOpen) setSearch("");
-      }}
-    >
-      <PopoverTrigger asChild>
-        <Button
-          variant="outline"
-          role="combobox"
-          aria-expanded={open}
-          className="w-full justify-between font-normal"
-        >
-          <span className="flex min-w-0 flex-1 items-center gap-2">
-            {selected ? <ProviderIcon provider={selected.providerId} className="h-4 w-4" /> : null}
-            <span className="truncate">{selected ? selected.label : value || placeholder}</span>
-          </span>
-          <ChevronsUpDown className="h-4 w-4 shrink-0 opacity-50" />
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent className="w-(--radix-popover-trigger-width) min-w-[280px] p-0" align="start">
-        <Command
-          filter={(itemValue, search) => {
-            const haystack = itemValue.toLowerCase();
-            const needle = search.toLowerCase().trim();
-            if (!needle) return 1;
-            const tokens = needle.split(/\s+/);
-            return tokens.every((t) => haystack.includes(t)) ? 1 : 0;
-          }}
-        >
-          <CommandInput
-            value={search}
-            onValueChange={setSearch}
-            placeholder={creatable ? "Search or enter a model ID..." : "Search models..."}
-          />
-          <CommandList className="max-h-72">
-            <CommandEmpty>
-              {creatable ? "Type a model ID to use it." : "No models match."}
-            </CommandEmpty>
-            {creatable && customValue && !exactMatch ? (
-              <CommandGroup heading="Custom">
-                <CommandItem value={customValue} onSelect={() => choose(customValue)}>
-                  <span className="truncate">
-                    Use <span className="font-mono">{customValue}</span>
-                  </span>
-                </CommandItem>
-              </CommandGroup>
-            ) : null}
-            {groups.map((group) => (
-              <CommandGroup
-                key={group.provider}
-                heading={
-                  <span className="flex flex-col gap-0.5">
-                    <span className="flex items-center gap-1.5">
-                      {!group.enabled && <Lock className="h-3 w-3" />}
-                      {group.provider}
-                    </span>
-                    {!group.enabled && group.disabledReason ? (
-                      <span className="font-normal text-[10px] text-muted-foreground normal-case">
-                        {group.disabledReason}
-                      </span>
-                    ) : null}
-                  </span>
-                }
-              >
-                {group.models.map((option) => (
-                  <CommandItem
-                    key={option.id}
-                    value={`${option.label} ${option.id} ${option.provider}`}
-                    disabled={!group.enabled}
-                    onSelect={() => choose(option.id)}
-                  >
-                    <Check
-                      className={cn("h-4 w-4", value === option.id ? "opacity-100" : "opacity-0")}
-                    />
-                    <ProviderIcon provider={option.providerId} className="h-4 w-4" />
-                    <span className="flex min-w-0 flex-1 flex-col">
-                      <span className="truncate">{option.label}</span>
-                      <span className="truncate text-xs text-muted-foreground">{option.id}</span>
-                    </span>
-                    <ModelPrice cost={option.cost} contextWindow={option.contextWindow} />
-                  </CommandItem>
-                ))}
-              </CommandGroup>
-            ))}
-          </CommandList>
-        </Command>
-      </PopoverContent>
-    </Popover>
   );
 }

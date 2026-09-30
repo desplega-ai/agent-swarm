@@ -13,6 +13,7 @@ import {
   useUpsertBudget,
 } from "@/api/hooks/use-budgets";
 import { useUsageSummary } from "@/api/hooks/use-costs";
+import { useModelsCatalog } from "@/api/hooks/use-models-catalog";
 import { useLogs } from "@/api/hooks/use-stats";
 import type {
   Agent,
@@ -55,6 +56,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
+import { pricingModelOptions } from "@/lib/agent-runtime-models";
 import { formatCost } from "@/lib/cost-format";
 import { cn, formatSmartTime, formatUTCTime } from "@/lib/utils";
 
@@ -221,6 +223,12 @@ function AddPricingDialog({
   const [pricePerMillionUsd, setPricePerMillionUsd] = useState("");
   const insert = useInsertPricing();
   const [error, setError] = useState<string | null>(null);
+  const { data: modelsCatalog } = useModelsCatalog();
+  // Suggestions only: any id still works, including one the catalog lacks.
+  const modelSuggestions = useMemo(
+    () => pricingModelOptions(provider, modelsCatalog?.providers),
+    [provider, modelsCatalog?.providers],
+  );
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -290,11 +298,28 @@ function AddPricingDialog({
             <div className="space-y-2">
               <Label>Model *</Label>
               <Input
-                placeholder="gpt-4o, claude-opus-4-7, ..."
+                list="pricing-model-suggestions"
+                placeholder="Type or pick a catalog model ID"
                 value={model}
                 onChange={(e) => setModel(e.target.value)}
                 required
               />
+              <datalist id="pricing-model-suggestions">
+                {modelSuggestions.map((option) => (
+                  <option
+                    key={option.id}
+                    value={option.id}
+                    label={[
+                      option.label,
+                      option.cost
+                        ? `${formatCost(option.cost.input, { precision: 2, placeholder: "?" })} in / ${formatCost(option.cost.output, { precision: 2, placeholder: "?" })} out per 1M`
+                        : null,
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")}
+                  />
+                ))}
+              </datalist>
             </div>
             <div className="space-y-2">
               <Label>Price per 1M tokens (USD) *</Label>

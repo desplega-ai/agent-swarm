@@ -4,8 +4,9 @@ import { useCallback, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAgents } from "@/api/hooks/use-agents";
 import { useFavoriteToggle } from "@/api/hooks/use-favorites";
+import { useModelsCatalog } from "@/api/hooks/use-models-catalog";
 import { useCreateSchedule, useScheduledTasks, useUpdateSchedule } from "@/api/hooks/use-schedules";
-import type { ScheduledTask, ScheduledTaskTargetType } from "@/api/types";
+import type { ScheduledTaskSummary, ScheduledTaskTargetType } from "@/api/types";
 import { useStatusContext } from "@/app/status-context";
 import { findAutomation, NeedsSetupBadge } from "@/components/automations/needs-setup-badge";
 import {
@@ -19,6 +20,8 @@ import { EmptyState } from "@/components/shared/empty-state";
 import { FavoriteButton } from "@/components/shared/favorite-button";
 import { FAVORITE_COLUMN } from "@/components/shared/favorite-column";
 import { MobileList, MobileListRow } from "@/components/shared/mobile-list";
+import { ModelCombobox } from "@/components/shared/model-combobox";
+import { ModelLabel } from "@/components/shared/model-logo";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -43,6 +46,7 @@ import { Switch } from "@/components/ui/switch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
+import { findModelOption, modelGroupsForSchedule } from "@/lib/agent-runtime-models";
 import { matchesSearchTerms, searchText } from "@/lib/list-search";
 import { MODEL_TIER_OPTIONS, modelTierLabel } from "@/lib/model-tiers";
 import { cronTimezone, describeCron, formatInterval, scheduleCadence } from "@/lib/schedule-format";
@@ -93,6 +97,11 @@ function ScheduleDialog({
   editData?: ScheduleFormData | null;
 }) {
   const { data: agents } = useAgents();
+  const { data: modelsCatalog } = useModelsCatalog();
+  const modelGroups = useMemo(
+    () => modelGroupsForSchedule(modelsCatalog?.providers),
+    [modelsCatalog?.providers],
+  );
   const [form, setForm] = useState<ScheduleFormData>(editData ?? emptyScheduleForm);
 
   function handleSubmit(e: React.FormEvent) {
@@ -236,20 +245,15 @@ function ScheduleDialog({
               </div>
               <div className="space-y-2">
                 <Label>Model</Label>
-                <Select
+                <ModelCombobox
                   value={form.model}
-                  onValueChange={(v) => setForm({ ...form, model: v === "_none" ? "" : v })}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Default" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="_none">Default</SelectItem>
-                    <SelectItem value="haiku">Haiku</SelectItem>
-                    <SelectItem value="sonnet">Sonnet</SelectItem>
-                    <SelectItem value="opus">Opus</SelectItem>
-                  </SelectContent>
-                </Select>
+                  onChange={(model) => setForm({ ...form, model })}
+                  groups={modelGroups}
+                  selected={findModelOption(form.model, modelGroups)}
+                  placeholder="Default"
+                  clearLabel="Default"
+                  creatable
+                />
               </div>
             </div>
             <div className="grid grid-cols-2 gap-4">
@@ -382,17 +386,17 @@ export default function SchedulesPage() {
   }, [agentMap, scheduleRows, search]);
 
   const handleToggleEnabled = useCallback(
-    (schedule: ScheduledTask, enabled: boolean) => {
+    (schedule: ScheduledTaskSummary, enabled: boolean) => {
       updateSchedule.mutate({ id: schedule.id, data: { enabled } });
     },
     [updateSchedule],
   );
 
-  const columnDefs = useMemo<ColDef<ScheduledTask>[]>(
+  const columnDefs = useMemo<ColDef<ScheduledTaskSummary>[]>(
     () => [
       {
         ...FAVORITE_COLUMN,
-        cellRenderer: (params: ICellRendererParams<ScheduledTask>) => {
+        cellRenderer: (params: ICellRendererParams<ScheduledTaskSummary>) => {
           const schedule = params.data;
           if (!schedule) return null;
           return (
@@ -447,7 +451,7 @@ export default function SchedulesPage() {
         headerName: "Setup",
         width: 190,
         minWidth: 190,
-        cellRenderer: (params: ICellRendererParams<ScheduledTask>) => {
+        cellRenderer: (params: ICellRendererParams<ScheduledTaskSummary>) => {
           const schedule = params.data;
           if (!schedule) return null;
           return (
@@ -466,7 +470,7 @@ export default function SchedulesPage() {
         headerName: "Schedule",
         width: 250,
         minWidth: 200,
-        cellRenderer: (params: ICellRendererParams<ScheduledTask>) => {
+        cellRenderer: (params: ICellRendererParams<ScheduledTaskSummary>) => {
           const data = params.data;
           if (!data) return null;
 
@@ -510,11 +514,13 @@ export default function SchedulesPage() {
       {
         headerName: "Model",
         width: 150,
-        cellRenderer: (params: ICellRendererParams<ScheduledTask>) => {
+        cellRenderer: (params: ICellRendererParams<ScheduledTaskSummary>) => {
           const data = params.data;
           if (!data?.model && !data?.modelTier) return "—";
           return data.model ? (
-            <span className="font-mono text-xs">{data.model}</span>
+            <span className="text-xs" title={data.model}>
+              <ModelLabel model={data.model} />
+            </span>
           ) : (
             <Badge variant="outline" size="tag">
               tier: {modelTierLabel(data.modelTier)}
@@ -534,7 +540,7 @@ export default function SchedulesPage() {
         field: "nextRunAt",
         headerName: "Next Run",
         width: 160,
-        cellRenderer: (params: ICellRendererParams<ScheduledTask>) => {
+        cellRenderer: (params: ICellRendererParams<ScheduledTaskSummary>) => {
           if (!params.value) return <span className="text-muted-foreground">—</span>;
           return (
             <Tooltip>
@@ -550,7 +556,7 @@ export default function SchedulesPage() {
         field: "lastRunAt",
         headerName: "Last Run",
         width: 160,
-        cellRenderer: (params: ICellRendererParams<ScheduledTask>) => {
+        cellRenderer: (params: ICellRendererParams<ScheduledTaskSummary>) => {
           if (!params.value) return <span className="text-muted-foreground">Never</span>;
           return (
             <Tooltip>
@@ -572,7 +578,7 @@ export default function SchedulesPage() {
         field: "enabled",
         headerName: "Enabled",
         width: 100,
-        cellRenderer: (params: ICellRendererParams<ScheduledTask>) => {
+        cellRenderer: (params: ICellRendererParams<ScheduledTaskSummary>) => {
           const schedule = params.data;
           if (!schedule) return null;
           return (
@@ -591,7 +597,7 @@ export default function SchedulesPage() {
   );
 
   const onRowClicked = useCallback(
-    (event: RowClickedEvent<ScheduledTask>) => {
+    (event: RowClickedEvent<ScheduledTaskSummary>) => {
       // Skip navigation when clicking interactive elements (switch, button, etc.)
       const target = event.event?.target as HTMLElement | null;
       if (target?.closest('a, [data-slot="switch"], button')) return;

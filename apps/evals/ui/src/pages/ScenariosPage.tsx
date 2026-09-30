@@ -165,9 +165,17 @@ const attemptColumns: Column<AttemptJson>[] = [
     filterOptions: (rows) => [...new Set(rows.map((a) => a.configId))].sort(),
     filterValue: (a) => a.configId,
     // item 13 (v4): ConfigChip everywhere configs appear — hover card carries the id
-    filterRender: (option) => <ConfigChip configId={option} />,
+    filterRender: (option) => <ConfigChip configId={option} effort={null} />,
     searchText: (a) => a.configId,
-    render: (a) => <ConfigChip configId={a.configId} link />,
+    // The attempt's own effort (what its worker launched with), not the config's current default.
+    render: (a) => (
+      <ConfigChip
+        configId={a.configId}
+        link
+        effort={a.reasoningEffort ?? null}
+        applied={a.reasoningEffort ? (a.appliedReasoningEffort ?? null) : undefined}
+      />
+    ),
   },
   {
     key: "result",

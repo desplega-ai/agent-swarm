@@ -2268,6 +2268,12 @@ export interface paths {
                         /** @enum {string} */
                         harness_provider?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh";
                         runtimeInstanceId?: string;
+                        modelTierOverrides?: {
+                            [key: string]: {
+                                [key: string]: string;
+                            };
+                        };
+                        harnessCliVersion?: string;
                     };
                 };
             };
@@ -2444,7 +2450,7 @@ export interface paths {
         head?: never;
         /**
          * Update an agent's runtime harness and default model
-         * @description Updates `agents.harness_provider` and agent-scoped runtime config. The settings apply to future provider sessions. For `model`, `reasoning_effort`, and `claude.transport`: omit the field to leave it unchanged, send `null` to clear the corresponding override, or send a value to set it.
+         * @description Updates `agents.harness_provider` and agent-scoped runtime config. The settings apply to future provider sessions. For `model`, `reasoning_effort`, and `claude.transport`: omit the field to leave it unchanged, send `null` to clear the corresponding override, or send a value to set it. A `model` the model catalog does not list is a 400 unless `allow_custom_model` is true. A `latest:` alias is not accepted here (aliases resolve for a task's model and for `MODEL_TIER_*` values); `reasoning_effort` must be one the harness and model support.
          */
         patch: {
             parameters: {
@@ -3141,13 +3147,17 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List approval requests with optional filters */
+        /**
+         * List approval requests with optional filters
+         * @description Returns full approval requests by default. Pass `fields=slim` for the list-view shape: `questions`, `approvers`, `responses`, `resolutionReason` and `notificationChannels` are dropped and `questionCount` is added. Fetch one request in full via `GET /api/approval-requests/{id}`.
+         */
         get: {
             parameters: {
                 query?: {
                     status?: string;
                     workflowRunId?: string;
                     limit?: number | null;
+                    fields?: "full" | "slim";
                 };
                 header?: never;
                 path?: never;
@@ -3212,6 +3222,22 @@ export interface paths {
                                 createdBy?: string;
                                 createdAt: string;
                                 updatedAt: string;
+                            }[] | {
+                                id: string;
+                                title: string;
+                                workflowRunId: string | null;
+                                workflowRunStepId: string | null;
+                                sourceTaskId: string | null;
+                                /** @enum {string} */
+                                status: "pending" | "approved" | "rejected" | "timeout" | "cancelled";
+                                resolvedBy: string | null;
+                                resolvedAt: string | null;
+                                timeoutSeconds: number | null;
+                                expiresAt: string | null;
+                                createdBy?: string;
+                                createdAt: string;
+                                updatedAt: string;
+                                questionCount: number;
                             }[];
                         };
                     };
@@ -4365,6 +4391,8 @@ export interface paths {
                 query?: {
                     agentId?: string;
                     repoId?: string;
+                    /** @description Return only the entry with this exact key. Omit to return every resolved entry. */
+                    key?: string;
                     includeSecrets?: "true" | "false";
                 };
                 header?: never;
@@ -4599,6 +4627,8 @@ export interface paths {
                 query?: {
                     scope?: string;
                     scopeId?: string;
+                    /** @description Return only entries with this exact key. Omit to return every entry. */
+                    key?: string;
                     includeSecrets?: "true" | "false";
                 };
                 header?: never;
@@ -5763,6 +5793,12 @@ export interface paths {
                     since?: string;
                     until?: string;
                     limit?: number;
+                    /** @description Comma-separated event names; matches any of them (ANDed with `event`) */
+                    events?: string;
+                    /** @description Comma-separated `data.field` values, used with latestPerDataField */
+                    dataFields?: string;
+                    /** @description When true, return only the newest event per (event, data.field) pair for every name in `event`/`events` and every value in `dataFields` */
+                    latestPerDataField?: "true" | "false";
                 };
                 header?: never;
                 path?: never;
@@ -5778,7 +5814,21 @@ export interface paths {
                     content: {
                         "application/json": {
                             events: components["schemas"]["SwarmEvent"][];
+                            /**
+                             * @description Present only when the request asked for latestPerDataField=true
+                             * @enum {boolean}
+                             */
+                            latestPerDataField?: true;
                         };
+                    };
+                };
+                /** @description Validation error */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
             };
@@ -9065,10 +9115,14 @@ export interface paths {
                                             cost?: {
                                                 input?: number;
                                                 output?: number;
+                                                cache_read?: number;
+                                                cache_write?: number;
                                             };
                                             limit?: {
                                                 context?: number;
                                             };
+                                            release_date?: string;
+                                            status?: string;
                                             reasoning?: boolean;
                                             reasoning_options?: {
                                                 type: string;
@@ -9084,6 +9138,362 @@ export interface paths {
             };
         };
         put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/models-catalog/tiers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Preview what each model tier resolves to per harness provider
+         * @description One row per provider and tier: the built-in default, the `MODEL_TIER_<PROVIDER>_<TIER>` value stored in swarm config (if any), which layer wins, and the concrete model it resolves to against the current catalog (`latest:` aliases resolved with the same soak and auto-upgrade rules as claim time, without recording a resolution). Ignores per-worker `MODEL_TIER_*` overrides and per-task models.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Tier previews */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            tiers: {
+                                /** @enum {string} */
+                                provider: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh";
+                                /** @enum {string} */
+                                tier: "smol" | "regular" | "smart" | "ultra";
+                                key: string;
+                                defaultValue: string;
+                                configured: string | null;
+                                /** @enum {string} */
+                                source: "tier-config" | "tier-default";
+                                resolvedModel: string | null;
+                                alias: string | null;
+                            }[];
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/models-catalog/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Refresh the model catalog from models.dev
+         * @description Unforced calls skip the network when the last models.dev check is younger than 4h (`skipped-fresh`). `force: true` always fetches, still conditional on the stored ETag (`not-modified` on 304), but a forced call within a minute of the previous one returns `skipped-cooldown` with `retryAfterMs`. Concurrent refreshes share one fetch. Lead agent or operator only. `added` lists provider/modelId keys new since the previous fetch.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        force?: boolean;
+                    };
+                };
+            };
+            responses: {
+                /** @description Refresh outcome */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @enum {string} */
+                            status: "updated" | "not-modified" | "skipped-fresh" | "skipped-cooldown" | "error";
+                            models: number;
+                            added: string[];
+                            checkedAt: number | null;
+                            retryAfterMs?: number;
+                            error?: string;
+                        };
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/models-catalog/overlay": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Upsert one model-catalog overlay row
+         * @description Overlay facts win per non-null field over the models.dev row; overlay-only models are served too. Overlay prices fill pricing-table gaps (never override an active price). With `expiresWhenUpstreamMatches` (default true) the row is deleted once upstream matches every non-null fact.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        provider: string;
+                        modelId: string;
+                        name?: string;
+                        family?: string;
+                        releaseDate?: string;
+                        contextWindow?: number;
+                        maxOutput?: number;
+                        reasoning?: boolean;
+                        reasoningOptions?: {
+                            type: string;
+                            values?: string[];
+                        }[];
+                        pricing?: {
+                            input?: number;
+                            output?: number;
+                            cache_read?: number;
+                            cache_write?: number;
+                        };
+                        status?: string;
+                        reason: string;
+                        verifiedBy?: string;
+                        expiresWhenUpstreamMatches?: boolean;
+                    };
+                };
+            };
+            responses: {
+                /** @description Overlay row upserted */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            provider: string;
+                            modelId: string;
+                            name?: string | null;
+                            family?: string | null;
+                            releaseDate?: string | null;
+                            contextWindow?: number | null;
+                            maxOutput?: number | null;
+                            reasoning?: boolean | null;
+                            reasoningOptions?: {
+                                type: string;
+                                values?: string[];
+                            }[] | null;
+                            pricing?: {
+                                input?: number;
+                                output?: number;
+                                cache_read?: number;
+                                cache_write?: number;
+                            } | null;
+                            status?: string | null;
+                            reason: string;
+                            verifiedBy?: string | null;
+                            expiresWhenUpstreamMatches: boolean;
+                            createdAt: number;
+                            updatedAt: number;
+                        };
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        /** Delete one model-catalog overlay row */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        provider: string;
+                        modelId: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Overlay row deleted */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            deleted: boolean;
+                        };
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/models-catalog/harness-support": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List harness CLI model support rows
+         * @description Whether a catalog model runs on a given `claude` / `codex` CLI version, as recorded by workers after a model's first run. No row means unknown (allowed at claim).
+         */
+        get: {
+            parameters: {
+                query?: {
+                    harness?: string;
+                    cliVersion?: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Support rows, newest first */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            rows: {
+                                harness: string;
+                                cliVersion: string;
+                                modelId: string;
+                                /** @enum {string} */
+                                status: "ok" | "unsupported" | "unknown";
+                                checkedAt: number;
+                                error: string | null;
+                            }[];
+                        };
+                    };
+                };
+            };
+        };
+        /**
+         * Record whether a harness CLI version accepts a model
+         * @description Written by workers: `ok` after a model's first successful run, `unsupported` when the CLI rejects the model id. Claim-time resolution falls back (alias/tier) or fails fast (explicit model) on `unsupported`.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        harness: string;
+                        cliVersion: string;
+                        modelId: string;
+                        /** @enum {string} */
+                        status: "ok" | "unsupported" | "unknown";
+                        error?: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Support row upserted */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            harness: string;
+                            cliVersion: string;
+                            modelId: string;
+                            /** @enum {string} */
+                            status: "ok" | "unsupported" | "unknown";
+                            checkedAt: number;
+                            error: string | null;
+                        };
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
         post?: never;
         delete?: never;
         options?: never;
@@ -11764,6 +12174,8 @@ export interface paths {
                 header?: {
                     /** @description Identifies the concrete runtime instance (worker process) making the call, as generated at its boot. Required to poll for work when multi-runtime mode (MULTI_RUNTIME_ENABLED) is on; ignored otherwise. */
                     "X-Runtime-Instance-ID"?: string;
+                    /** @description URL-encoded JSON {provider: {tier: model}} of the worker's MODEL_TIER_* env overrides. Stored on the agent row and applied at claim time (modelSource=worker-env). */
+                    "X-Model-Tier-Overrides"?: string;
                 };
                 path?: never;
                 cookie?: never;
@@ -13048,6 +13460,7 @@ export interface paths {
                         model?: string;
                         /** @enum {string} */
                         modelTier?: "smol" | "regular" | "smart" | "ultra";
+                        allowCustomModel?: boolean;
                         /** @enum {string} */
                         scheduleType?: "recurring" | "one_time";
                         /** @enum {string} */
@@ -13427,6 +13840,7 @@ export interface paths {
                         model?: string | null;
                         /** @enum {string|null} */
                         modelTier?: "smol" | "regular" | "smart" | "ultra" | null;
+                        allowCustomModel?: boolean;
                         nextRunAt?: string | null;
                         /** @enum {string} */
                         targetType?: "agent-task" | "workflow" | "script";
@@ -13618,6 +14032,7 @@ export interface paths {
                         model?: string | null;
                         /** @enum {string|null} */
                         modelTier?: "smol" | "regular" | "smart" | "ultra" | null;
+                        allowCustomModel?: boolean;
                         nextRunAt?: string | null;
                         /** @enum {string} */
                         targetType?: "agent-task" | "workflow" | "script";
@@ -16633,6 +17048,7 @@ export interface paths {
                             };
                             steeringEnabled: boolean;
                             multiRuntimeEnabled: boolean;
+                            devMode: boolean;
                         };
                     };
                 };
@@ -16813,7 +17229,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List scheduled tasks */
+        /**
+         * List scheduled tasks
+         * @description Returns full schedules by default. Pass `fields=slim` for the list-view shape, which swaps the full `taskTemplate` for a bounded `taskTemplatePreview`. Fetch one schedule in full via `GET /api/schedules/{id}`.
+         */
         get: {
             parameters: {
                 query?: {
@@ -16824,6 +17243,7 @@ export interface paths {
                     targetType?: "agent-task" | "workflow" | "script";
                     workflowId?: string;
                     scriptName?: string;
+                    fields?: "full" | "slim";
                 };
                 header?: never;
                 path?: never;
@@ -16903,6 +17323,71 @@ export interface paths {
                                 createdBy?: string;
                                 updatedBy?: string;
                                 favorite?: boolean;
+                            }[] | {
+                                /** Format: uuid */
+                                id: string;
+                                /** @description Non-unique asset directory namespace (for example shared/ or personal/<user-id>/drafts/). Runtime write boundaries normalize and validate the canonical form. */
+                                key: string;
+                                name: string;
+                                description?: string;
+                                cronExpression?: string;
+                                intervalMs?: number;
+                                taskType?: string;
+                                /** @default [] */
+                                tags: string[];
+                                /** @default 50 */
+                                priority: number;
+                                targetAgentId?: string;
+                                /** @default true */
+                                enabled: boolean;
+                                /** Format: date-time */
+                                lastRunAt?: string;
+                                /** Format: date-time */
+                                nextRunAt?: string;
+                                createdByAgentId?: string;
+                                parentTaskId?: string;
+                                requestedDelayMs?: number;
+                                /** Format: date-time */
+                                requestedRunAt?: string;
+                                /** @default UTC */
+                                timezone: string;
+                                /** @default 0 */
+                                consecutiveErrors: number;
+                                /** Format: date-time */
+                                lastErrorAt?: string;
+                                lastErrorMessage?: string;
+                                model?: string;
+                                /** @enum {string} */
+                                modelTier?: "smol" | "regular" | "smart" | "ultra";
+                                /**
+                                 * @default recurring
+                                 * @enum {string}
+                                 */
+                                scheduleType: "recurring" | "one_time";
+                                /**
+                                 * @default agent-task
+                                 * @enum {string}
+                                 */
+                                targetType: "agent-task" | "workflow" | "script";
+                                /** Format: uuid */
+                                workflowId?: string;
+                                scriptName?: string;
+                                scriptArgs?: {
+                                    [key: string]: unknown;
+                                };
+                                params?: {
+                                    [key: string]: unknown;
+                                };
+                                requiredParams?: string[];
+                                requires?: ("slack" | "github" | "linear" | "jira" | "gsc" | "agentmail" | "agentfs")[];
+                                /** Format: date-time */
+                                createdAt: string;
+                                /** Format: date-time */
+                                lastUpdatedAt: string;
+                                createdBy?: string;
+                                updatedBy?: string;
+                                favorite: boolean;
+                                taskTemplatePreview: string;
                             }[];
                         };
                     };
@@ -17057,6 +17542,9 @@ export interface paths {
                                 model?: string;
                                 /** @enum {string} */
                                 modelTier?: "smol" | "regular" | "smart" | "ultra";
+                                resolvedModel?: string;
+                                modelSource?: string;
+                                modelAlias?: string;
                                 /** @enum {string} */
                                 effort?: "off" | "low" | "medium" | "high" | "xhigh" | "max";
                                 /** @enum {string} */
@@ -17140,6 +17628,7 @@ export interface paths {
                         model?: string;
                         /** @enum {string} */
                         modelTier?: "smol" | "regular" | "smart" | "ultra";
+                        allowCustomModel?: boolean;
                         /** @enum {string} */
                         effort?: "off" | "low" | "medium" | "high" | "xhigh" | "max";
                         draft?: boolean;
@@ -17156,7 +17645,7 @@ export interface paths {
                         "application/json": components["schemas"]["AgentTask"];
                     };
                 };
-                /** @description Validation error, or agentId/offeredTo targets an extension identity */
+                /** @description Validation error, an unknown `model` (set `allowCustomModel` to store a custom id), or agentId/offeredTo targets an extension identity */
                 400: {
                     headers: {
                         [name: string]: unknown;
@@ -20871,7 +21360,9 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["Workflow"];
+                        "application/json": components["schemas"]["Workflow"] & {
+                            warnings?: string[];
+                        };
                     };
                 };
                 /** @description Invalid definition */
@@ -21034,7 +21525,9 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["Workflow"];
+                        "application/json": components["schemas"]["Workflow"] & {
+                            warnings?: string[];
+                        };
                     };
                 };
                 /** @description Invalid definition */
@@ -21115,7 +21608,9 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["Workflow"];
+                        "application/json": components["schemas"]["Workflow"] & {
+                            warnings?: string[];
+                        };
                     };
                 };
                 /** @description Invalid patch or resulting definition */
@@ -21167,11 +21662,11 @@ export interface paths {
             requestBody?: {
                 content: {
                     "application/json": {
-                        /** @description Executor type: 'agent-task', 'script', 'swarm-script', 'raw-llm', 'validate', 'property-match' */
+                        /** @description Executor type: 'agent-task', 'script', 'swarm-script', 'raw-llm', 'system-one-decision', 'validate', 'property-match' */
                         type?: string;
                         /** @description Human-readable label for UI display */
                         label?: string;
-                        /** @description Executor-specific config. For agent-task: { template, outputSchema?, agentId?, routingReason?, routingNote?, tags?, priority?, dir?, vcsRepo?, model? }; configured agentId defaults routingReason to human_pinned. For script: { runtime, script, args?, timeout? }. For swarm-script: { scriptName, scope?, pinHash?, args?, fsMode?, timeoutMs? (1000-300000) }. Agent-task templates and ordinary config values support {{interpolation}} from the node's inputs context, including trigger and declared upstream aliases. SECURITY: executable source for script/swarm-script nodes does not interpolate trigger.* or upstream node outputs; only input/workflow/swarm/run values are allowed in inline script source, and named swarm-script source is not workflow-interpolated. Pass dynamic values through config.args instead (inline script receives them as argv; swarm-script receives its args object). NOTE: config.outputSchema on agent-task nodes validates the AGENT's raw JSON output, while node-level outputSchema validates the EXECUTOR's return value ({taskId, taskOutput}). */
+                        /** @description Executor-specific config. For agent-task: { template, outputSchema?, agentId?, routingReason?, routingNote?, tags?, priority?, dir?, vcsRepo?, model? }; configured agentId defaults routingReason to human_pinned. For script: { runtime, script, args?, timeout? }. For swarm-script: { scriptName, scope?, pinHash?, args?, fsMode?, timeoutMs? (1000-300000) }. For system-one-decision (typed decisions, Jev by default): { provider? ('typesafe' default | 'openrouter' | 'laya'; a literal, never a {{token}}), state, questions: { <id>: { type: 'noul'|'choice'|'score', instructions, criteria? } }, returns: { <id>: { type } }, model? (provider-specific; unset = the provider's default, and laya has none so it sends no model and picks its own checkpoint), timeoutMs?, maxRetries? (0-3), humanReview? { band: { min, max } (0-1, inclusive), approvers: { users?, roles?, policy }, title?, timeout?, notifications? } }; each provider needs its own global secret (TYPESAFE_API_KEY, OPENROUTER_API_KEY, or LAYA_API_KEY; laya also needs the global config LAYA_URL), and a save warns and a run fails before any node executes when one is missing; system-one-decision nodes must not set retry or validation.retry. With humanReview, an answer whose confidence is inside the band waits for a person (human-in-the-loop approval), and next must map ports { approved, rejected?, timeout? }. Agent-task templates and ordinary config values support {{interpolation}} from the node's inputs context, including trigger and declared upstream aliases. SECURITY: executable source for script/swarm-script nodes does not interpolate trigger.* or upstream node outputs; only input/workflow/swarm/run values are allowed in inline script source, and named swarm-script source is not workflow-interpolated. Pass dynamic values through config.args instead (inline script receives them as argv; swarm-script receives its args object). NOTE: config.outputSchema on agent-task nodes validates the AGENT's raw JSON output, while node-level outputSchema validates the EXECUTOR's return value ({taskId, taskOutput}). */
                         config?: {
                             [key: string]: unknown;
                         };
@@ -21203,7 +21698,9 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["Workflow"];
+                        "application/json": components["schemas"]["Workflow"] & {
+                            warnings?: string[];
+                        };
                     };
                 };
                 /** @description Invalid patch or resulting definition */
@@ -21951,6 +22448,9 @@ export interface components {
             modelTier?: "smol" | "regular" | "smart" | "ultra";
             /** @enum {string} */
             effort?: "off" | "low" | "medium" | "high" | "xhigh" | "max";
+            resolvedModel?: string;
+            modelSource?: string;
+            modelAlias?: string;
             scheduleId?: string;
             /** Format: uuid */
             workflowRunId?: string | null;
@@ -23027,11 +23527,11 @@ export interface components {
         WorkflowNode: {
             /** @description Unique node identifier, used in 'next' and 'inputs' mappings */
             id: string;
-            /** @description Executor type: 'agent-task', 'script', 'swarm-script', 'raw-llm', 'validate', 'property-match' */
+            /** @description Executor type: 'agent-task', 'script', 'swarm-script', 'raw-llm', 'system-one-decision', 'validate', 'property-match' */
             type: string;
             /** @description Human-readable label for UI display */
             label?: string;
-            /** @description Executor-specific config. For agent-task: { template, outputSchema?, agentId?, routingReason?, routingNote?, tags?, priority?, dir?, vcsRepo?, model? }; configured agentId defaults routingReason to human_pinned. For script: { runtime, script, args?, timeout? }. For swarm-script: { scriptName, scope?, pinHash?, args?, fsMode?, timeoutMs? (1000-300000) }. Agent-task templates and ordinary config values support {{interpolation}} from the node's inputs context, including trigger and declared upstream aliases. SECURITY: executable source for script/swarm-script nodes does not interpolate trigger.* or upstream node outputs; only input/workflow/swarm/run values are allowed in inline script source, and named swarm-script source is not workflow-interpolated. Pass dynamic values through config.args instead (inline script receives them as argv; swarm-script receives its args object). NOTE: config.outputSchema on agent-task nodes validates the AGENT's raw JSON output, while node-level outputSchema validates the EXECUTOR's return value ({taskId, taskOutput}). */
+            /** @description Executor-specific config. For agent-task: { template, outputSchema?, agentId?, routingReason?, routingNote?, tags?, priority?, dir?, vcsRepo?, model? }; configured agentId defaults routingReason to human_pinned. For script: { runtime, script, args?, timeout? }. For swarm-script: { scriptName, scope?, pinHash?, args?, fsMode?, timeoutMs? (1000-300000) }. For system-one-decision (typed decisions, Jev by default): { provider? ('typesafe' default | 'openrouter' | 'laya'; a literal, never a {{token}}), state, questions: { <id>: { type: 'noul'|'choice'|'score', instructions, criteria? } }, returns: { <id>: { type } }, model? (provider-specific; unset = the provider's default, and laya has none so it sends no model and picks its own checkpoint), timeoutMs?, maxRetries? (0-3), humanReview? { band: { min, max } (0-1, inclusive), approvers: { users?, roles?, policy }, title?, timeout?, notifications? } }; each provider needs its own global secret (TYPESAFE_API_KEY, OPENROUTER_API_KEY, or LAYA_API_KEY; laya also needs the global config LAYA_URL), and a save warns and a run fails before any node executes when one is missing; system-one-decision nodes must not set retry or validation.retry. With humanReview, an answer whose confidence is inside the band waits for a person (human-in-the-loop approval), and next must map ports { approved, rejected?, timeout? }. Agent-task templates and ordinary config values support {{interpolation}} from the node's inputs context, including trigger and declared upstream aliases. SECURITY: executable source for script/swarm-script nodes does not interpolate trigger.* or upstream node outputs; only input/workflow/swarm/run values are allowed in inline script source, and named swarm-script source is not workflow-interpolated. Pass dynamic values through config.args instead (inline script receives them as argv; swarm-script receives its args object). NOTE: config.outputSchema on agent-task nodes validates the AGENT's raw JSON output, while node-level outputSchema validates the EXECUTOR's return value ({taskId, taskOutput}). */
             config: {
                 [key: string]: unknown;
             };
@@ -23180,11 +23680,11 @@ export interface components {
                 nodeId: string;
                 /** @description Partial node data to merge */
                 node: {
-                    /** @description Executor type: 'agent-task', 'script', 'swarm-script', 'raw-llm', 'validate', 'property-match' */
+                    /** @description Executor type: 'agent-task', 'script', 'swarm-script', 'raw-llm', 'system-one-decision', 'validate', 'property-match' */
                     type?: string;
                     /** @description Human-readable label for UI display */
                     label?: string;
-                    /** @description Executor-specific config. For agent-task: { template, outputSchema?, agentId?, routingReason?, routingNote?, tags?, priority?, dir?, vcsRepo?, model? }; configured agentId defaults routingReason to human_pinned. For script: { runtime, script, args?, timeout? }. For swarm-script: { scriptName, scope?, pinHash?, args?, fsMode?, timeoutMs? (1000-300000) }. Agent-task templates and ordinary config values support {{interpolation}} from the node's inputs context, including trigger and declared upstream aliases. SECURITY: executable source for script/swarm-script nodes does not interpolate trigger.* or upstream node outputs; only input/workflow/swarm/run values are allowed in inline script source, and named swarm-script source is not workflow-interpolated. Pass dynamic values through config.args instead (inline script receives them as argv; swarm-script receives its args object). NOTE: config.outputSchema on agent-task nodes validates the AGENT's raw JSON output, while node-level outputSchema validates the EXECUTOR's return value ({taskId, taskOutput}). */
+                    /** @description Executor-specific config. For agent-task: { template, outputSchema?, agentId?, routingReason?, routingNote?, tags?, priority?, dir?, vcsRepo?, model? }; configured agentId defaults routingReason to human_pinned. For script: { runtime, script, args?, timeout? }. For swarm-script: { scriptName, scope?, pinHash?, args?, fsMode?, timeoutMs? (1000-300000) }. For system-one-decision (typed decisions, Jev by default): { provider? ('typesafe' default | 'openrouter' | 'laya'; a literal, never a {{token}}), state, questions: { <id>: { type: 'noul'|'choice'|'score', instructions, criteria? } }, returns: { <id>: { type } }, model? (provider-specific; unset = the provider's default, and laya has none so it sends no model and picks its own checkpoint), timeoutMs?, maxRetries? (0-3), humanReview? { band: { min, max } (0-1, inclusive), approvers: { users?, roles?, policy }, title?, timeout?, notifications? } }; each provider needs its own global secret (TYPESAFE_API_KEY, OPENROUTER_API_KEY, or LAYA_API_KEY; laya also needs the global config LAYA_URL), and a save warns and a run fails before any node executes when one is missing; system-one-decision nodes must not set retry or validation.retry. With humanReview, an answer whose confidence is inside the band waits for a person (human-in-the-loop approval), and next must map ports { approved, rejected?, timeout? }. Agent-task templates and ordinary config values support {{interpolation}} from the node's inputs context, including trigger and declared upstream aliases. SECURITY: executable source for script/swarm-script nodes does not interpolate trigger.* or upstream node outputs; only input/workflow/swarm/run values are allowed in inline script source, and named swarm-script source is not workflow-interpolated. Pass dynamic values through config.args instead (inline script receives them as argv; swarm-script receives its args object). NOTE: config.outputSchema on agent-task nodes validates the AGENT's raw JSON output, while node-level outputSchema validates the EXECUTOR's return value ({taskId, taskOutput}). */
                     config?: {
                         [key: string]: unknown;
                     };

@@ -27,6 +27,7 @@ import {
   pauseTask,
   promoteDraftTask,
   resumeTask,
+  settleSupersededTaskDependents,
   supersedeTask,
   updateAgentStatusFromCapacity,
   updateTaskClaudeSessionId,
@@ -34,6 +35,7 @@ import {
   updateTaskTitle,
   updateTaskVcs,
 } from "../be/db";
+import { explicitModelErrorForAgent } from "../be/model-validation";
 import {
   getTaskSteeringFields,
   markSteeringUndeliverable,
@@ -102,6 +104,9 @@ const AgentTaskSummarySchema = AgentTaskSchema.pick({
   scheduleId: true,
   model: true,
   modelTier: true,
+  resolvedModel: true,
+  modelSource: true,
+  modelAlias: true,
   effort: true,
   provider: true,
   requestedByUserId: true,
@@ -266,6 +271,11 @@ const createTask = route({
       requestedByUserId: z.string().optional(),
       model: z.string().optional(),
       modelTier: ModelTierSchema.optional(),
+      /**
+       * Accept a `model` the catalog does not list. Without it an unknown id is a 400; with it
+       * the id is stored as given (a fresh launch, a private deployment).
+       */
+      allowCustomModel: z.boolean().optional(),
       effort: ReasoningEffortSchema.optional(),
       /**
        * Create in `draft` status instead of the normal pending/unassigned/offered
@@ -287,7 +297,10 @@ const createTask = route({
     }),
   responses: {
     201: { description: "Task created", schema: AgentTaskSchema },
-    400: { description: "Validation error, or agentId/offeredTo targets an extension identity" },
+    400: {
+      description:
+        "Validation error, an unknown `model` (set `allowCustomModel` to store a custom id), or agentId/offeredTo targets an extension identity",
+    },
     422: {
       description: "Task creation blocked by an extension",
       schema: z.object({
@@ -858,6 +871,17 @@ export async function handleTasks(
     if (!defaultAgentId) {
       const lead = await getLeadAgent();
       if (lead) defaultAgentId = lead.id;
+    }
+
+    const modelError = await explicitModelErrorForAgent({
+      model: splitLegacyModelAlias({ model: parsed.body.model, modelTier: parsed.body.modelTier })
+        .model,
+      allowCustomModel: parsed.body.allowCustomModel,
+      agentId: defaultAgentId,
+    });
+    if (modelError) {
+      jsonError(res, modelError, 400);
+      return true;
     }
 
     const parentTask = parsed.body.parentTaskId
@@ -1750,6 +1774,7 @@ export async function handleTasks(
     // `skipped` covers parent_not_found / lead_not_found edge cases — the
     // supersede already landed, so log + roll forward without a resume task.
     if (followUp.kind !== "created") {
+      await settleSupersededTaskDependents(parsed.params.id, null);
       console.warn(
         `[Supersede] Task ${parsed.params.id.slice(0, 8)} superseded but resume creation skipped (${
           followUp.kind === "skipped" ? followUp.reason : followUp.kind

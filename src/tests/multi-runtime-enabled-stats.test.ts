@@ -6,7 +6,7 @@ import {
   type Server,
   type ServerResponse,
 } from "node:http";
-import { closeDb, initDb } from "../be/db";
+import { closeDb, createAgent, getDbClient, initDb } from "../be/db";
 import { handleCore } from "../http/core";
 import { handleStats } from "../http/stats";
 import { getPathSegments, parseQueryParams } from "../http/utils";
@@ -161,5 +161,69 @@ describe("MULTI_RUNTIME_ENABLED on the authenticated stats endpoint", () => {
       expect(stats.body.agents).toBeDefined();
       expect(stats.body.tasks).toBeDefined();
     });
+  });
+
+  test("counts non-extension agent statuses without parsing profile fields", async () => {
+    const baseline = (await api("GET", "/api/stats")).body.agents as {
+      total: number;
+      idle: number;
+      busy: number;
+      offline: number;
+    };
+    const malformedMetadataAgent = await createAgent({
+      name: "stats-idle",
+      isLead: false,
+      status: "idle",
+    });
+    await getDbClient().run("UPDATE agents SET capabilities = 'not-json' WHERE id = ?", [
+      malformedMetadataAgent.id,
+    ]);
+    for (const [name, status] of [
+      ["stats-busy", "busy"],
+      ["stats-offline", "offline"],
+      ["stats-waiting", "waiting_for_credentials"],
+    ] as const) {
+      await createAgent({ name, isLead: false, status });
+    }
+    const extension = await createAgent({
+      id: "ext:stats-test",
+      name: "stats extension",
+      isLead: false,
+      status: "idle",
+    });
+    await getDbClient().run("UPDATE agents SET role = 'extension' WHERE id = ?", [extension.id]);
+
+    const stats = await api("GET", "/api/stats");
+
+    expect(stats.body.agents).toEqual({
+      total: baseline.total + 4,
+      idle: baseline.idle + 1,
+      busy: baseline.busy + 1,
+      offline: baseline.offline + 1,
+    });
+  });
+});
+
+describe("SWARM_DEV_MODE on the authenticated stats endpoint", () => {
+  test("defaults off and reflects changes without exposing the flag on health", async () => {
+    const previous = process.env.SWARM_DEV_MODE;
+    try {
+      for (const [raw, expected] of [
+        [undefined, false],
+        ["true", true],
+        ["false", false],
+        ["1", true],
+        ["0", false],
+        ["invalid", false],
+      ] as const) {
+        restoreEnv("SWARM_DEV_MODE", raw);
+        const stats = await api("GET", "/api/stats");
+        expect(stats.status).toBe(200);
+        expect(stats.body.devMode).toBe(expected);
+        expect((await api("GET", "/health")).body.devMode).toBeUndefined();
+      }
+    } finally {
+      restoreEnv("SWARM_DEV_MODE", previous);
+    }
   });
 });

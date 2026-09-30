@@ -19,7 +19,7 @@ export const MODEL_VENDOR_LOGO: Record<ModelVendor, string> = {
 
 const VENDOR_PATTERNS: ReadonlyArray<[RegExp, ModelVendor]> = [
   [/^(anthropic\/|claude|opus|sonnet|haiku|fable)/, "anthropic"],
-  [/^(openai\/|gpt-|o\d|text-embedding-)/, "openai"],
+  [/^(openai\/|gpt-|chatgpt-|o\d|text-embedding-)/, "openai"],
   [/^(deepseek\/|deepseek-)/, "deepseek"],
   [/^(z-ai\/|glm-)/, "zai"],
   [/^(google\/|gemini)/, "google"],

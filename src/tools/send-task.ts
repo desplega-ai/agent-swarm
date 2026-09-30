@@ -17,6 +17,7 @@ import {
   isExtensionAgent,
 } from "@/be/db";
 import { repointTrackerSyncBySwarmId } from "@/be/db-queries/tracker";
+import { explicitModelErrorForAgent } from "@/be/model-validation";
 import { applyPreTaskCreate } from "@/extensions/apply-task-create";
 import { checkSlackRoutingCoherence } from "@/tasks/slack-routing";
 import { findDuplicateTask } from "@/tools/task-dedup";
@@ -136,6 +137,12 @@ export const sendTaskInputSchema = z
     modelTier: ModelTierSchema.optional().describe(
       "Portable model tier for this task: 'smol', 'regular', 'smart', or 'ultra'. Resolved at claim/run time using the assignee's harness/provider. Legacy model shortnames map as haiku→smol, sonnet→regular, opus→smart, fable→ultra.",
     ),
+    allowCustomModel: z
+      .boolean()
+      .optional()
+      .describe(
+        "Accept a `model` the model catalog does not list. Without it an unknown model id is rejected. Only for ids the catalog cannot know yet (a fresh launch, a private deployment).",
+      ),
     effort: ReasoningEffortSchema.optional().describe(
       "Reasoning effort for this task: 'off', 'low', 'medium', 'high', 'xhigh', or 'max'. If omitted, the assignee's REASONING_EFFORT_OVERRIDE/default applies.",
     ),
@@ -268,6 +275,7 @@ export async function sendTaskHandler(
     vcsRepo,
     model,
     modelTier,
+    allowCustomModel,
     effort,
     allowDuplicate,
     slackChannelId,
@@ -313,6 +321,12 @@ export async function sendTaskHandler(
 
   const effectiveVcsRepo = vcsRepo;
   const normalizedModel = splitLegacyModelAlias({ model, modelTier });
+  const modelError = await explicitModelErrorForAgent({
+    model: normalizedModel.model,
+    allowCustomModel,
+    agentId,
+  });
+  if (modelError) return toolErr(modelError, { data: { yourAgentId: creatorAgentId } });
 
   // Auto-default parentTaskId to caller's current task for tree tracking
   const effectiveParentTaskId = parentTaskId ?? sourceTaskId;
