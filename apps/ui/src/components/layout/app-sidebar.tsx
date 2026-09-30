@@ -2,7 +2,6 @@ import type { ForwardRefExoticComponent, ReactNode, RefAttributes } from "react"
 import { useRef, useState } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import { useDashboardCosts } from "@/api/hooks/use-costs";
-import { useFavorites } from "@/api/hooks/use-favorites";
 import { useFeatureGate } from "@/api/hooks/use-feature-gate";
 import { useMetrics } from "@/api/hooks/use-metrics";
 import { useUsers } from "@/api/hooks/use-users";
@@ -46,10 +45,10 @@ import {
 } from "@/components/ui/sidebar";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { navRequirementMet } from "@/lib/agent-fs/state";
-import { combPath, drivePins, pinLabel } from "@/lib/comb/paths";
 import { formatCost } from "@/lib/cost-format";
 import { isDemoMode } from "@/lib/deployment-config";
 import { cn, formatCompactNumber } from "@/lib/utils";
+import { CombSidebarPins } from "./comb-sidebar-pins";
 import { SwarmSwitcher } from "./swarm-switcher";
 
 /** The imperative surface every vendored animated icon exposes. */
@@ -67,12 +66,6 @@ interface NavItem {
   title: string;
   path: string;
   icon: AnimatedIconComponent;
-  children?: Array<{
-    title: string;
-    path: string;
-    /** Hover text, when the title alone is ambiguous (Comb pins). */
-    tooltip?: string;
-  }>;
   /** When set, item is shown as disabled with this tooltip when condition fails. */
   gate?: { minVersion: string };
   /**
@@ -387,23 +380,6 @@ export function AppSidebar() {
   const isHidden = (item: NavItem) =>
     isGated(item) || !navRequirementMet(item.requires, status?.agent_fs?.comb);
 
-  // Comb pins (step-12): the newest 10 pins of the swarm drive, sorted by
-  // label, render as children of the Comb item.
-  const comb = status?.agent_fs?.comb;
-  const { data: pinFavorites } = useFavorites("agent-fs-path", undefined, {
-    enabled: navRequirementMet("comb", comb),
-  });
-  const combPins =
-    comb?.org_id && comb.drive_id
-      ? drivePins(
-          pinFavorites?.favoriteIds ?? [],
-          { orgId: comb.org_id, driveId: comb.drive_id },
-          10,
-        ).map((pin) => ({ title: pinLabel(pin.path), tooltip: pin.path, path: combPath(pin) }))
-      : [];
-  const childrenOf = (item: NavItem) =>
-    item.requires === "comb" ? (combPins.length > 0 ? combPins : undefined) : item.children;
-
   // Live counts surfaced as right-aligned badges on existing nav items.
   // Gated entirely on API ≥1.82 — the backing queries don't even fire on
   // older servers, and `badges` stays empty so nav items render unchanged.
@@ -493,12 +469,10 @@ export function AppSidebar() {
                   <SidebarGroupContent>
                     <SidebarMenu>
                       {items.map((item) => {
-                        const children = childrenOf(item);
                         const isActive =
                           item.path === "/"
                             ? location.pathname === "/"
-                            : location.pathname.startsWith(item.path) ||
-                              !!children?.some((child) => location.pathname.startsWith(child.path));
+                            : location.pathname.startsWith(item.path);
                         if (isHidden(item)) return null;
                         const badge = badges[item.path];
                         return (
@@ -511,27 +485,8 @@ export function AppSidebar() {
                             />
                             {/* Live count — auto-hidden when icon-collapsed. */}
                             {badge != null && <SidebarMenuBadge>{badge}</SidebarMenuBadge>}
-                            {children && (
-                              <div className="ml-6 mt-1 flex flex-col gap-0.5 border-l border-sidebar-border pl-2">
-                                {children.map((child) => (
-                                  <NavLink
-                                    key={child.path}
-                                    to={child.path}
-                                    end
-                                    title={child.tooltip ?? child.title}
-                                    className={({ isActive: childActive }) =>
-                                      cn(
-                                        "truncate rounded-sm px-2 py-1 text-sm transition-colors hover-linger",
-                                        childActive
-                                          ? "bg-sidebar-accent text-sidebar-accent-foreground"
-                                          : "text-sidebar-foreground/70 hover:bg-sidebar-accent/60 hover:text-sidebar-foreground",
-                                      )
-                                    }
-                                  >
-                                    {child.title}
-                                  </NavLink>
-                                ))}
-                              </div>
+                            {item.requires === "comb" && (
+                              <CombSidebarPins comb={status?.agent_fs?.comb} />
                             )}
                           </SidebarMenuItem>
                         );

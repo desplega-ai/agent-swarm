@@ -49,8 +49,7 @@ export function PinnedList({
       </h3>
       <ul className="flex flex-col gap-px text-sm">
         {pins.map((pin) => {
-          // The icon marks folders, so the tree's list drops the trailing "/".
-          const label = pinLabel(pin.path).replace(/\/$/, "");
+          const label = pinLabel(pin.path);
           const selected = pin.path === location.path;
           const Icon = isFolderPath(pin.path) ? Folder : File;
           return (
