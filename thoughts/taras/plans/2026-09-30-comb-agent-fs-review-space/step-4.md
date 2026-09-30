@@ -119,7 +119,7 @@ Read `process.env` on every call (config upserts reload env without a restart).
 - [x] Connect with a new email (`qa-connect-<random>@example.com`): the card registers, invites, and shows "Connected as ...". `agent-browser eval "Object.keys(localStorage).filter(k => k.includes('comb:agent-fs'))"` returns one key. `agent-browser eval "localStorage.getItem('agent-swarm-query-cache-v1')?.includes('\"agent-fs\"') ?? false"` returns `false`.
 - [x] Register the same email again: the card switches to "Paste a key" with the 409 message. Paste the key from the first run: connects.
 - [x] Disconnect: the credential key is gone from localStorage and the card is back.
-- [ ] Record the connect flow (`agent-browser record start/stop`), upload screenshots + recording to agent-fs per LOCAL_TESTING.md "When you need to verify a UI change".
+- [x] Record the connect flow (`agent-browser record start/stop`), upload screenshots + recording to agent-fs per LOCAL_TESTING.md "When you need to verify a UI change".
 
 #### Manual Verification:
 - [ ] Taras reads the connect card copy and the key-storage warning and confirms the wording.

@@ -2,7 +2,7 @@
 id: step-15
 name: Release agent-fs + bump swarm pins
 depends_on: [step-3]
-status: ready
+status: done
 ---
 
 <!-- During /v-implement, `desplega:step-running` adds `assignee` and `claimed_at` while
@@ -40,14 +40,14 @@ Check `runbooks/docker-images.md` and memory "agent-fs pin lockstep" for any oth
 
 #### Automated Verification:
 - [ ] agent-fs release branch is clean: `cd "$AFS" && bun run scripts/sync-versions.ts --check && bun run typecheck && bun run test`
-- [ ] Published: `npm view @desplega.ai/agent-fs@0.15.0 version` prints `0.15.0`, and `docker manifest inspect ghcr.io/desplega-ai/agent-fs:0.15.0` succeeds
-- [ ] No 0.14.0 agent-fs pin remains in the swarm repo: `grep -rn "agent-fs.*0\.14\.0\|AGENT_FS_VERSION=0\.14\.0" --include='*.yml' --include='*.yaml' --include='Dockerfile*' . | grep -v node_modules` prints nothing
-- [ ] Worker image builds: `bun run docker:build:worker:slim`
-- [ ] Compose config is valid: `docker compose -f docker-compose.local.yml config -q`
+- [x] Published: `npm view @desplega.ai/agent-fs@0.15.0 version` prints `0.15.0`, and `docker manifest inspect ghcr.io/desplega-ai/agent-fs:0.15.0` succeeds
+- [x] No 0.14.0 agent-fs pin remains in the swarm repo: `grep -rn "agent-fs.*0\.14\.0\|AGENT_FS_VERSION=0\.14\.0" --include='*.yml' --include='*.yaml' --include='Dockerfile*' . | grep -v node_modules` prints nothing
+- [x] Worker image builds: `bun run docker:build:worker:slim`
+- [x] Compose config is valid: `docker compose -f docker-compose.local.yml config -q`
 
 #### Automated QA:
-- [ ] In the built slim image: `docker run --rm --entrypoint agent-fs <image> --version` prints `0.15.0`, and `docker run --rm --entrypoint sh <image> -c 'grep -c -- "--mention" ~/.claude/skills/agent-fs/SKILL.md'` is at least 1 (adjust the skill path to where `Dockerfile.worker:221-226` installs it).
-- [ ] `docker compose -f docker-compose.local.yml up agent-fs` then `curl -s localhost:7433/health` lists all four Comb features.
+- [x] In the built slim image: `docker run --rm --entrypoint agent-fs <image> --version` prints `0.15.0`, and `docker run --rm --entrypoint sh <image> -c 'grep -c -- "--mention" ~/.claude/skills/agent-fs/SKILL.md'` is at least 1 (adjust the skill path to where `Dockerfile.worker:221-226` installs it).
+- [x] `docker compose -f docker-compose.local.yml up agent-fs` then `curl -s localhost:7433/health` lists all four Comb features.
 
 #### Manual Verification:
 - [ ] Taras merges the agent-fs release PR (publishes to npm and GHCR).
@@ -55,3 +55,9 @@ Check `runbooks/docker-images.md` and memory "agent-fs pin lockstep" for any oth
 - [ ] Prod agent-fs `/health` lists `comment-path-prefix`, `drive-members`, `comment-mentions`, `change-stream` (already true after steps 1-3 auto-deploy; re-check here).
 
 **Implementation Note**: This step is a vertical slice, QA-able on its own. After completing this step, pause for manual confirmation. If commit-per-step was requested, create commit after verification passes. Never push the release commit to agent-fs `main` directly. Use a branch + PR.
+
+## Implementation Notes (part B)
+
+- Branch chore/agent-fs-0.15.0 (worktree /Users/taras/worktrees/agent-swarm/2026-09-30-agent-fs-0150), commit 1eedb93f4. Bumped 9 files: Dockerfile.worker, 3 compose files, chart values.yaml and example values, ui-e2e.yml, DEPLOYMENT.md, agent-fs-co-deployment.mdx. No chart version bump (values-only; Chart.yaml tracks package.json version).
+- Published after about 11 min in the merge queue. Slim image agent-swarm-worker:slim: agent-fs --version = 0.15.0, baked skill has 4 --mention hits. GHCR image /health (via docker exec, image binds loopback) lists all four Comb features.
+- Prod /health re-check and merges are left to Taras.

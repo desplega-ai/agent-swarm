@@ -103,7 +103,10 @@ These were not asked. Each one is cheap to change before implementation.
 2. **Query keys carry the drive.** `agentFsKey(endpoint, userId, orgId, driveId, ...rest)` returns `["agent-fs", endpoint, userId, orgId, driveId, ...rest]`. Drive-independent keys (health, me) pass `null` for org and drive. Invalidation by path matches on `(orgId, driveId, op, path)`.
 3. **Any agent-fs 401 moves Comb to `invalid-key`.** agent-fs queries never retry a 401.
 4. **`comment-list` `pathPrefix` uses a range comparison**, not LIKE + ESCAPE. It is exact, case-sensitive, and uses the `(drive_id, path)` index.
-5. **The migration tail moved to `184_model_catalog.sql`.** step-12 takes the next free number at implementation time.
+5. **The migration tail moved to `184_model_catalog.sql`.** step-12 takes the next free number at implementation time. It is `188`, because open PRs claim 185-187.
+6. **Session surfaces keep Streamdown's link-safety modal.** Task outcome, session logs, and the task detail sheet do not rewrite agent-fs links to Comb. Streamdown does not export its default `a`, so a rewrite would drop the modal for every link there. Task pages, citations, attachments, and Comb markdown do open Comb. Follow-up: rewrite inside the modal flow if Streamdown exposes a hook.
+7. **Flag-off exception: the live host.** The UI prefers `status.agent_fs.comb.live_url` (server `AGENT_FS_LIVE_URL`) over `VITE_AGENT_FS_LIVE_URL`, even with Comb off. An operator who set only the VITE variable gets the server's live host.
+8. **Stacked PRs open as drafts.** agent-fs and agent-swarm do not auto-delete merged head branches, so GitHub does not retarget a stacked PR. #67 merged into its stale base and was replaced by #68. Each stacked PR is a draft with a "merge #X first" banner until its base merges and it is rebased onto `main`.
 
 ## Implementation Approach
 

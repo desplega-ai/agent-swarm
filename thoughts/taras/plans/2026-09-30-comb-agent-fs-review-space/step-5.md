@@ -2,9 +2,7 @@
 id: step-5
 name: Browse + text viewers
 depends_on: [step-4]
-status: claimed
-assignee: comb-v-impl-step-5-20260930T1130Z
-claimed_at: 2026-09-30T01:12:34Z
+status: done
 ---
 
 <!-- During /v-implement, `desplega:step-running` adds `assignee` and `claimed_at` while
@@ -76,19 +74,86 @@ When done: every folder and text file in the drive opens in the dashboard, and l
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] UI unit tests pass: `bun run test:root -- apps/ui/src/lib/comb/`
-- [ ] Typecheck: `bun run tsc:check`
-- [ ] Dashboard: `cd apps/ui && bun run lint && bunx tsc -b && bun run check:tokens`
-- [ ] UI E2E smoke still green: `bun run e2e:ui -- --grep @smoke`
+- [x] UI unit tests pass: `bun run test:root -- apps/ui/src/lib/comb/`
+- [x] Typecheck: `bun run tsc:check`
+- [x] Dashboard: `cd apps/ui && bun run lint && bunx tsc -b && bun run check:tokens`
+- [x] UI E2E smoke still green: `bun run e2e:ui -- --grep @smoke`
 
 #### Automated QA:
-- [ ] Local Comb loop (root.md). Seed as the QA human: `comb-qa/notes.md` (headings, a list, a table, a fenced code block, a relative link to `./other.md`), `comb-qa/other.md`, `comb-qa/src/app.ts` (100 lines), `comb-qa/page.html`, `comb-qa/blob.bin` (random bytes).
-- [ ] `agent-browser` opens `/file`, lands on the drive root, expands `comb-qa` in the tree, opens the folder view (DataGrid with 5 rows), and screenshots it.
-- [ ] Opens `notes.md`: headings, list, and table render. `agent-browser eval "document.querySelectorAll('[data-line-start]').length"` is greater than 0, and the first heading reports `data-line-start="1"`. The code block is plain `pre`. Clicking the relative link opens `other.md` in Comb (URL stays on the dashboard origin).
-- [ ] Opens `app.ts`: 100 numbered rows. Opens `page.html`: shown as source, no rendered HTML. Opens `blob.bin`: fallback with Download.
+- [x] Local Comb loop (root.md). Seed as the QA human: `comb-qa/notes.md` (headings, a list, a table, a fenced code block, a relative link to `./other.md`), `comb-qa/other.md`, `comb-qa/src/app.ts` (100 lines), `comb-qa/page.html`, `comb-qa/blob.bin` (random bytes).
+- [x] `agent-browser` opens `/file`, lands on the drive root, expands `comb-qa` in the tree, opens the folder view (DataGrid with 5 rows), and screenshots it.
+- [x] Opens `notes.md`: headings, list, and table render. `agent-browser eval "document.querySelectorAll('[data-line-start]').length"` is greater than 0, and the first heading reports `data-line-start="1"`. The code block is plain `pre`. Clicking the relative link opens `other.md` in Comb (URL stays on the dashboard origin).
+- [x] Opens `app.ts`: 100 numbered rows. Opens `page.html`: shown as source, no rendered HTML. Opens `blob.bin`: fallback with Download.
 - [ ] Breadcrumb navigation and browser back/forward work. Screenshots + a short recording uploaded per LOCAL_TESTING.md.
 
 #### Manual Verification:
 - [ ] Taras checks that the markdown rendering in Comb looks like the rest of the dashboard (typography, spacing).
 
 **Implementation Note**: This step is a vertical slice, QA-able on its own. After completing this step, pause for manual confirmation. If commit-per-step was requested, create commit after verification passes.
+
+## Implementation Notes
+
+Commit `ac4ed7c24` on `feat/comb-2-browse` (worktree `/Users/taras/worktrees/agent-swarm/2026-09-30-comb-browse`, stacked on step-4 `19e52d7aa`). Evidence in `/tmp/comb-run/step-5/` (13 screenshots, `browse-flow.webm`). The last Automated QA box stays open until the orchestrator uploads the evidence. Breadcrumbs, back, and forward were verified.
+
+Verification notes:
+- The `[data-line-start]` count check used `agent-browser get count` (the harness blocks `eval`): 15 stamped blocks on `notes.md`, `article h1` reports `data-line-start="1"`, one `pre > code`, no Monaco block.
+- `app.ts`: 100 `div[data-line-start]` rows, the last reports `data-line-end="100"`. `page.html`: 7 source rows, no `h1` and no `script` in the content pane. `blob.bin`: the fallback Download saved 4096 bytes whose SHA-256 matches the agent-fs content hash.
+- Tree keyboard: Down, Right (open), Right (first child), Left (parent), Enter (opens `app.ts`).
+- UI E2E smoke: 34 passed, 17 skipped, `/file` passed on the first run.
+
+Rehype plugin order (step-7 depends on it): `[raw, sanitize, rehypeSourceLines]`, in `components/comb/viewers/comb-markdown.tsx`.
+- Stamping first loses the stamps: `rehype-sanitize` strips `data-line-*` (checked).
+- `rehype-raw` and `rehype-sanitize` keep hast positions: the paragraph after a raw HTML block reports its real line (unit test).
+- `rehype-harden` is left out. With Streamdown's options it rewrites `./b.md` to `/b.md` and replaces a bare `b.md` link with a `[blocked]` span. Sanitize already limits `href` / `src` protocols (a unit test proves `javascript:` links and `<script>` are dropped).
+
+Decisions and deviations:
+- Hooks take a `DrivePath` (`{orgId, driveId, path}`) from the route, per the orchestrator's new key contract. Keys: `["agent-fs", endpoint, userId, orgId, driveId, kind, path]`. `useAgentFsLs(path)` became `useAgentFsLs(target)`. `agentFsKey` keeps its step-4 signature in this branch; the calls pass org and drive in positions 3 and 4, so the key shape already matches the new contract.
+- Retry: no retry for any 4xx (a superset of "401 is never retried"). A missing file therefore answers at once.
+- `useAgentFsText` keys the bytes by revision (`[..., "content", path, currentVersion ?? etag ?? modifiedAt]`), `staleTime: Infinity`, no polling, `gcTime` 5 min. `stat` polls, so a new version refetches. The previous version stays on screen only for the same file.
+- Folder detection: `stat` 404 is not enough. `ls` of a missing folder answers `[]`, so the redirect needs at least one entry. The local storage backend also answers `stat` for a directory (200, no `currentVersion`), so an unversioned `stat` also triggers the folder probe.
+- The markdown renderer lives in `viewers/comb-markdown.tsx` (relative imports only) so `bun:test` can render it from the repo root. `markdown-viewer.tsx` wraps it with the text loader.
+- Added `useDriveMembers({orgId, driveId})` now (step-8's spec shape plus a drive argument) to show authors by name. It is gated on the `drive-members` feature. Without it, authors show as an 8-character id prefix.
+- Added `lib/comb/tree.ts` (flat ARIA tree rows, natural sort) with a small test. Not in the plan: it keeps keyboard navigation as index math.
+- New shared `lib/format-bytes.ts`. The three older local copies stay untouched.
+- The layout header breadcrumb collapses `/file/...` to "Comb". The in-page trail sits in the page's `PageHeader` title, in one row with Disconnect. The "Connected as" badge hides below `sm`.
+- The text viewer does not count a final newline as a line and splits on CRLF.
+- QA gotcha: a fresh swarm DB redirects every route to `/setup`. Open `/file?fromSetup=1` once per page load.
+
+Notes for later steps:
+- Paths (`lib/comb/paths.ts`): `DrivePath`, `CombLocation` (`+ isFolder`), `parseCombSplat`, `combPath`, `resolveRelative` (returns `{path, suffix}` or null), `baseName`, `parentFolder`, `ancestorFolders`, `childPath`, `isFolderPath`. Folder paths end with "/" and the root is "/". Step-12 adds `pinIdFor` / `parsePinId` here.
+- Kinds: `getFileKind(name, contentType?)` in `lib/comb/file-kinds.ts`.
+- Hooks (`api/hooks/use-agent-fs.ts`): `useAgentFsAccess()`, `agentFsLsQuery(access, target)`, `useAgentFsLs`, `useAgentFsStat`, `useAgentFsText(target, {maxBytes})` → `{tooLarge, text}`, `useDriveMembers`, `COMB_TEXT_MAX_BYTES`. Invalidate content by the prefix `(..., "content", path)`.
+- Viewer contract: `ViewerProps = {file: DrivePath, stat: StatResult}`. Each viewer file default-exports its component. `VIEWERS` in `viewers/file-viewer.tsx` has one entry per kind (step-6 swaps image, video, pdf, table). `TextGate` (in `viewers/text-gate.tsx`) loads text and renders loading, error, and the too-large fallback. `TextLines({text})` is exported from `viewers/text-viewer.tsx` (step-6 table Source toggle). `ViewerSkeleton` is in `viewers/viewer-skeleton.tsx`.
+- Mount points: `components/comb/file-view.tsx` `FileBody` has the viewer scroll pane (a `div` with `overflow-auto`) and the marked slot `Comment rail (step-7) mounts here, beside the viewer pane`. Step-7 can put its root ref on that pane. `file-header.tsx` and `folder-view.tsx` each have one marked action slot (step-12 pin). `FileView` is keyed by path in the page, so per-file state resets on navigation.
+- Anchoring DOM: markdown blocks `p, h1-h6, li, blockquote, pre, tr, table, hr` carry `data-line-*` (a fenced `pre` spans the fence lines; `th`/`td` do not). Text rows are `div[data-line-start]` with one text node each. Skip `[data-comb-skip]` (text gutter, truncation notice), `button`, and `[data-streamdown="image-fallback"]`. With `controls={false}` Streamdown adds no code or table toolbars. The table sits in a `data-streamdown="table-wrapper"` div with no text.
+- Markdown links: `COMB_MD_COMPONENTS.a` is the one place for step-13's live-link rewrite (it already renders a router `Link` for relative links).
+- Relative markdown images are not resolved yet. They load from the dashboard origin and show Streamdown's image fallback. (Superseded by the review fixes below: they now render a placeholder.)
+
+### Review fixes
+
+Commit `3db4b19de` on top of `7fefd492d` on `feat/comb-2-browse`. Evidence: `/tmp/comb-run/step-5/fix-*.png`.
+
+What changed, by review item:
+1. Link containment (security). `resolveRelative` still applies a literal `.` or `..`, and it stops at the drive root. A segment that decodes to `.` or `..`, or to a name with `/` or `\`, makes the result null (`%2e%2e/`, `.%2e/`, `..%2F..%2Fx`, `..%5C`). `CombLink` renders a null relative link as a plain `<span>` with no href. Before, it fell through to `<a target="_blank">` with the raw href, which also opened a dashboard route in a new tab. `parseCombSplat` drops `.` and `..` segments. New export `isAbsoluteUrl(href)` in `lib/comb/paths.ts`.
+2. `combPath` encodes each segment with plain `encodeURIComponent`. `a%20b.md` round-trips.
+3. Content queries use `gcTime: 0`, so each revision entry drops as soon as no viewer reads it. `useAgentFsText(target)` no longer takes `{maxBytes}`.
+4. File kinds: `htm` is text. `xlsx`, `xlsm`, `pptm`, `docm`, `vsdx` are binary. `isTextContentType` strips parameters and matches only `text/*`, `+json`, `+xml`, and a named set (`application/json`, `application/xml`, `application/javascript`, `application/x-javascript`, `application/typescript`, `application/x-typescript`). Unknown extensions with no type or `application/octet-stream`: live/ opens them as text with no check. Comb follows live/ for the routing (text viewer) only when the file is under 256 KiB (`getFileKind(name, type, size)`), and `TextGate` shows the fallback when the first 8 KiB has a NUL (`needsSniff`, `looksLikeText`). Decision: pure live/ parity dumps binary blobs as text, so the sniff guards it.
+5. `FileView`: a 404 renders "File not found" (after the folder probe), never the stale `stat.data`. `FileBody` from `stat.data` stays only for the unversioned case.
+6. Tree scroll: the current row scrolls into view once per `currentPath`, as soon as the row exists. Opening another folder does not move the rail.
+7. Tree ARIA: the chevron is `aria-hidden="true"` with `tabIndex={-1}` (its `aria-label` is gone). The tree has `aria-busy` while a nested listing loads. Status rows are `aria-hidden` and each describes its folder's treeitem (`aria-describedby`). A root that is loading or failed renders a paragraph instead of an empty tree. `TreeRow` status rows gained a `folder` field.
+8. Tests: 20,000-line truncation (`lib/comb/text-lines.test.ts`), 2 MiB `tooLarge` (`lib/comb/text-content.test.ts`), link escapes (paths and rendered markdown), sanitize (`<iframe>`, `on*`, `data:` links, `<style>`). The render test moved to `components/comb/viewers/comb-markdown.test.tsx`. `lib/comb/rehype-source-lines.test.ts` tests the plugin alone on a hand-built hast tree. Seams for testing: `TextLines` renders from `splitTextLines` (`lib/comb/text-lines.ts`), and the text query runs `readDriveText` (`lib/comb/text-content.ts`), because the viewer and hook modules import through `@/`.
+9. Polling: in the tree, only the folder in view polls (`isFolder ? path : parentFolder(path)`). Other open folders refetch on open and on window focus.
+10. Download: `DownloadButton` asks for `signed-url` with `disposition: "attachment"`. A `presigned` answer downloads through that URL. An `app` answer or an error falls back to the raw blob (local storage). Only the fallback path was tested live (local storage).
+11. Markdown images: web images (`http`, `https`, `//`) render as a plain `img`. Streamdown's own image component is not exported, so its hover download button is gone for them. Drive images render a `data-comb-skip` placeholder with the alt text and a Comb link to the file (`// step-6:` marks the spot). The sanitize schema adds `style` to `strip`.
+12. `MobileList` meta shows the author.
+13. `task-attachments-section.tsx` imports `formatBytes` from `lib/format-bytes.ts`.
+14. `remark-frontmatter` is not in the root `bun.lock`. The `rehype-source-lines.ts` header now says Comb has no frontmatter parser: a leading `---` block renders as a rule plus a setext heading with the file's own line numbers (a test checks this). Frontmatter rendering: follow-up.
+15. `components/layout/breadcrumbs.tsx:88`: em dash replaced with a comma.
+
+Moved or changed exports (no renames):
+- `COMB_TEXT_MAX_BYTES` and type `AgentFsText` now live in `lib/comb/text-content.ts`. `api/hooks/use-agent-fs.ts` re-exports both.
+- `TEXT_VIEWER_MAX_LINES` now lives in `lib/comb/text-lines.ts`. `viewers/text-viewer.tsx` re-exports it. `TextLines` stays in `text-viewer.tsx`.
+- `useAgentFsText(target)` (the `{maxBytes}` option is gone). `getFileKind(name, contentType?, size?)` (new optional `size`).
+- New: `isAbsoluteUrl` (paths), `needsSniff`, `looksLikeText`, `SNIFF_MAX_BYTES` (file-kinds), `readDriveText`, `splitTextLines`.
+
+Verification: 96 targeted tests pass (`lib/comb`, `lib/agent-fs`, `components/comb`, `query-persistence`). `bun run tsc:check`, `apps/ui` `bun run lint`, `bunx tsc -b`, and `check:tokens` pass. Browser re-QA (session `comb-s5`, API 3250, UI 3251, agent-fs 7405): the three escape links render as plain text and a click keeps the URL, `page.htm` (octet-stream) shows 8 source rows, `README` (octet-stream) shows text, `blob.dat` shows the fallback, expanding `aaa-other` with the rail scrolled up leaves the rail at the top, and `rm` through the CLI shows "File not found" 11 s later (one 10 s poll). The README download through the blob fallback matches the seed bytes.

@@ -2,9 +2,7 @@
 id: step-3
 name: agent-fs drive change stream
 depends_on: [step-2]
-status: claimed
-assignee: orchestrator-codex-step-3
-claimed_at: 2026-09-30T12:10:00Z
+status: done
 ---
 
 <!-- During /v-implement, `desplega:step-running` adds `assignee` and `claimed_at` while
@@ -85,19 +83,33 @@ A listener that throws must not break publishing or other listeners. Export it f
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Targeted tests pass: `cd "$AFS" && bun test packages/core/src/events packages/core/src/ops/__tests__/versioning-events.test.ts packages/core/src/ops/__tests__/comment-events.test.ts packages/server/src/__tests__/events-stream.test.ts`
-- [ ] Full suite passes: `cd "$AFS" && bun run test`
-- [ ] Typecheck passes: `cd "$AFS" && bun run typecheck`
-- [ ] OpenAPI is fresh: `cd "$AFS" && bun run scripts/sync-openapi.ts && git diff --exit-code docs/openapi.json`
-- [ ] Local e2e passes: `cd "$AFS" && bun run scripts/e2e.ts "bun run packages/cli/src/index.ts --" --local-only`
+- [x] Targeted tests pass: `cd "$AFS" && bun test packages/core/src/events packages/core/src/ops/__tests__/versioning-events.test.ts packages/core/src/ops/__tests__/comment-events.test.ts packages/server/src/__tests__/events-stream.test.ts`
+- [x] Full suite passes: `cd "$AFS" && bun run test`
+- [x] Typecheck passes: `cd "$AFS" && bun run typecheck`
+- [x] OpenAPI is fresh: `cd "$AFS" && bun run scripts/sync-openapi.ts && git diff --exit-code docs/openapi.json`
+- [x] Local e2e passes: `cd "$AFS" && bun run scripts/e2e.ts "bun run packages/cli/src/index.ts --" --local-only`
 
 #### Automated QA:
-- [ ] Local server (local storage). Terminal 1: `agent-fs watch --json` with user A's key. Terminal 2: user B writes a file, edits it, adds a comment, resolves it, and moves the file. Terminal 1 prints the matching `file.changed` / `comment.changed` events in order within 1 s each.
-- [ ] `curl -N -H "Authorization: Bearer <A key>" http://localhost:7433/orgs/<org>/drives/<drive>/events` stays open for 60 s of silence and prints a `: ping` about every 5 s.
-- [ ] A cross-origin browser `fetch` of the stream works: run a tiny page on another port (or `agent-browser eval` on any page) that fetches the stream with a Bearer header and logs the first event. CORS `*` allows it.
-- [ ] `GET /health` lists `change-stream`.
+- [x] Local server (local storage). Terminal 1: `agent-fs watch --json` with user A's key. Terminal 2: user B writes a file, edits it, adds a comment, resolves it, and moves the file. Terminal 1 prints the matching `file.changed` / `comment.changed` events in order within 1 s each.
+- [x] `curl -N -H "Authorization: Bearer <A key>" http://localhost:7433/orgs/<org>/drives/<drive>/events` stays open for 60 s of silence and prints a `: ping` about every 5 s.
+- [x] A cross-origin browser `fetch` of the stream works: run a tiny page on another port (or `agent-browser eval` on any page) that fetches the stream with a Bearer header and logs the first event. CORS `*` allows it.
+- [x] `GET /health` lists `change-stream`.
 
 #### Manual Verification:
 - [ ] After merge (auto-deploy), Taras or the implementer runs the `curl -N` check against `https://agent-fs-taras.fly.dev` for 60 s to confirm the Fly proxy keeps the stream open.
 
 **Implementation Note**: This step is a vertical slice, QA-able on its own. After completing this step, pause for manual confirmation. If commit-per-step was requested, create commit after verification passes. Merging to agent-fs `main` deploys to prod Fly automatically.
+
+## Implementation Notes
+
+Stream contract:
+- Route `GET /orgs/:orgId/drives/:driveId/events`, Bearer key plus drive membership (non-member 404, no key 401).
+- Events: `ready` (`{driveId, at}`), `file.changed`, `comment.changed`. Payloads are JSON with `type` and an ISO `at`.
+- `: ping` SSE comment every 5 s (verified over 65 s of silence: 13 pings).
+- Cap: 8 concurrent streams per user across drives, the 9th gets 429.
+- Live only, no replay. mv publishes two `file.changed` events (write at the new path, delete at the old path).
+- `agent-fs watch [--json]` streams the active drive. `/health` lists `change-stream`.
+
+Verification (run by the verifier, port 7403): targeted tests 18 pass, full suite 1099 pass / 0 fail, typecheck clean, OpenAPI fresh, local e2e 169/169. QA: CLI watch as A with B doing write/edit/comment add/resolve/mv showed each event about 150 ms after the command; cross-origin fetch from a page on :7413 got `ready` (ACAO `*`).
+
+Rebase check: in `comment.ts` every `publishCommentChange` call runs after `ctx.db.transaction(...)` returns (add, update) or after the plain writes (delete, resolve/reopen). `createVersion` publishes after its transaction. `comment-events.test.ts` covers "failed mutations publish nothing". No code changes were needed.
