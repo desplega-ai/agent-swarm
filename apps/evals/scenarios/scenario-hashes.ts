@@ -34,6 +34,6 @@ export const SCENARIO_HASHES: Readonly<Record<string, readonly PinnedScenarioHas
   "implement-review": [{ version: 1, hash: "cb8b5f8260c133e9" }],
   "implement-review-solo": [{ version: 1, hash: "ab6e075a48cb8f69" }],
   "capability-routing": [{ version: 1, hash: "07161180e8236cb8" }],
-  "human-in-loop": [{ version: 1, hash: "c94ea92b3099db77" }],
-  "human-in-loop-solo": [{ version: 1, hash: "40fa753453d6ae82" }],
+  "human-in-loop": [{ version: 1, hash: "61ac1c21766960da" }],
+  "human-in-loop-solo": [{ version: 1, hash: "7cfc7a2d2e3303f3" }],
 };

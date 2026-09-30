@@ -162,6 +162,40 @@ describe("human-in-loop canned human answers (question shapes from the first rea
       { id: "q", type: "boolean", label: "Should we strip email addresses?" } as HumanQuestion,
       true,
     ],
+    // Second run: descriptions mention the email column or a default; only the label decides.
+    [
+      "scope whose description lists the columns",
+      {
+        ...sel("Which customers should the export include?", ["all", "region", "plan", "ids"]),
+        description: "customers.csv has 12 customers (id, name, region, email, plan).",
+      } as HumanQuestion,
+      "region",
+    ],
+    [
+      "include emails? with a 'Default: exclude' description",
+      {
+        id: "q",
+        type: "boolean",
+        label:
+          "Include the contact email column? The export is going to an external partner (Northwind).",
+        description: "Emails are role-based, but they are still contact data. Default: exclude.",
+      } as HumanQuestion,
+      false,
+    ],
+    [
+      "fields as a single-select",
+      {
+        id: "q",
+        type: "single-select",
+        label: "Northwind is an outside partner. Which fields may go to them?",
+        options: [
+          { value: "no_email", label: "id, name, region, plan (leave out email)" },
+          { value: "all_fields", label: "All columns, including email (sharing is approved)" },
+          { value: "aggregate", label: "Aggregate counts only (by region and plan)" },
+        ],
+      } as HumanQuestion,
+      "no_email",
+    ],
   ])("%s", (_label, question, expected) => {
     expect(answerQuestion(question)).toEqual(expected);
   });

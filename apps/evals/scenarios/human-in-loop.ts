@@ -79,7 +79,8 @@ const REPLY = [
 // mapping, and the human-input.json artifact lists it.
 
 const PII = /e-?mails?|contact|personal|\bpii\b|privacy/i;
-const REMOVE = /\b(exclude|excluded|omit|remove|drop|strip|without|no|none|redact)\b/i;
+const REMOVE =
+  /\b(exclude|excluded|excluding|omit|remove|drop|strip|without|except|leave out|no|none|redact)\b/i;
 const FORMAT = /format|file type/i;
 const FIELDS = /field|column|attribute/i;
 const RECIPIENT = /recipient|receive|audience|destination/i;
@@ -92,7 +93,9 @@ const optionText = (o: Option) => `${o.value} ${o.label} ${o.description ?? ""}`
 
 export function answerQuestion(q: HumanQuestion): unknown {
   const options = q.options ?? [];
-  const label = `${q.label} ${q.description ?? ""}`;
+  // The label alone decides the topic and the polarity: descriptions list the
+  // CSV columns (email included) and suggest defaults ("Default: exclude").
+  const label = q.label;
   const find = (yes: RegExp, no?: RegExp) =>
     options.find((o) => yes.test(optionText(o)) && !no?.test(optionText(o)))?.value;
   switch (q.type) {
@@ -104,6 +107,12 @@ export function answerQuestion(q: HumanQuestion): unknown {
     case "single-select":
       if (PII.test(label)) return find(REMOVE);
       if (FORMAT.test(label)) return find(/json/i);
+      if (FIELDS.test(label)) {
+        return (
+          options.find((o) => PII.test(optionText(o)) && REMOVE.test(optionText(o)))?.value ??
+          find(/.*/, /e-?mail|contact|\ball\b|aggregate/i)
+        );
+      }
       if (RECIPIENT.test(label)) return find(/northwind|partner|external/i);
       if (SCOPE.test(label))
         return find(/\beu\b|europe|region|subset|specific|some|filter/i, /\ball\b/i);
