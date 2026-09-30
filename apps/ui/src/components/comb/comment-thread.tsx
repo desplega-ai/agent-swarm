@@ -1,5 +1,5 @@
 import { Check, MessageSquare, RotateCcw, Send, TriangleAlert } from "lucide-react";
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { Fragment, type ReactNode, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { useResolveComment } from "@/api/hooks/use-agent-fs";
@@ -8,17 +8,18 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { AgentFsError } from "@/lib/agent-fs/client";
-import type { CommentEntry, CommentListEntry } from "@/lib/agent-fs/types";
+import type { CommentEntry, CommentListEntry, CommentMention } from "@/lib/agent-fs/types";
 import { type AnchorResolution, commentQuote } from "@/lib/comb/comment-anchor";
 import { sentReplyTaskId, splitSwarmMarkers } from "@/lib/comb/markers";
+import { splitMentions } from "@/lib/comb/mentions";
 import { formatRelative } from "@/lib/relative-time";
 import { cn } from "@/lib/utils";
 import { CommentComposer, READ_ONLY_MESSAGE, useHasDraft } from "./comment-composer";
 import { useCommentContext } from "./comment-context";
 import { QuoteExcerpt } from "./quote-excerpt";
 
-/** A comment body: plain text, with each `@swarm` token as a chip. */
-function CommentBody({ body }: { body: string }) {
+/** A comment body: plain text, with each `@swarm` token and each `@name` of `mentions` as a chip. */
+function CommentBody({ body, mentions }: { body: string; mentions?: CommentMention[] }) {
   return (
     <p className="whitespace-pre-wrap break-words text-sm">
       {splitSwarmMarkers(body).map((segment, index) =>
@@ -30,10 +31,29 @@ function CommentBody({ body }: { body: string }) {
             {segment.text}
           </span>
         ) : (
-          segment.text
+          splitMentions(segment.text, mentions).map((part, partIndex) =>
+            part.kind === "mention" ? (
+              <MentionChip key={`${index}.${partIndex}`} text={part.text} mention={part.mention} />
+            ) : (
+              <Fragment key={`${index}.${partIndex}`}>{part.text}</Fragment>
+            ),
+          )
         ),
       )}
     </p>
+  );
+}
+
+function MentionChip({ text, mention }: { text: string; mention: CommentMention }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className="rounded-sm bg-muted px-1 font-medium">{text}</span>
+      </TooltipTrigger>
+      <TooltipContent>
+        {mention.displayName ? `${mention.displayName} (${mention.email})` : mention.email}
+      </TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -72,7 +92,7 @@ function Reply({ thread, reply }: { thread: CommentListEntry; reply: CommentEntr
           Sent to the swarm · task <span className="font-mono text-xs">{taskId.slice(0, 8)}</span>
         </Link>
       ) : (
-        <CommentBody body={reply.body} />
+        <CommentBody body={reply.body} mentions={reply.mentions} />
       )}
     </li>
   );
@@ -228,7 +248,7 @@ export function CommentThread({
         </button>
       ) : null}
 
-      <CommentBody body={thread.body} />
+      <CommentBody body={thread.body} mentions={thread.mentions} />
 
       {thread.replies.length > 0 ? (
         <ol className="flex flex-col divide-y divide-border-subtle border-t border-border-subtle">

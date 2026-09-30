@@ -4,6 +4,7 @@ import {
   NOTIFICATION_DEFINITIONS,
   type NotificationDefinition,
 } from "@/lib/notifications/definitions";
+import { AgentFsMentionsSection } from "./agent-fs-mentions-section";
 import { SlackConnectInviteCard } from "./slack-connect-invite-card";
 
 /** Per-key custom card. A definition without an entry falls back to a plain title+body render. */
@@ -14,14 +15,32 @@ const CARD_COMPONENTS: Record<
   slack_connect_invite: SlackConnectInviteCard,
 };
 
-export function NotificationPanel({ stateByKey }: { stateByKey: Map<string, InboxItemState> }) {
+interface NotificationPanelProps {
+  stateByKey: Map<string, InboxItemState>;
+  /** The static definitions need a swarm user (their read state is per user). */
+  showStatic: boolean;
+  /** Comb mentions of the swarm drive, when Comb is connected. */
+  mentionsDrive: { orgId: string; driveId: string } | null;
+  /** A notification opened a page: close the panel. */
+  onNavigate: () => void;
+}
+
+export function NotificationPanel({
+  stateByKey,
+  showStatic,
+  mentionsDrive,
+  onNavigate,
+}: NotificationPanelProps) {
   return (
     <div className="flex flex-col">
       <div className="border-b px-4 py-3">
         <h3 className="text-sm font-semibold">Notifications</h3>
       </div>
       <div className="max-h-96 divide-y overflow-y-auto">
-        {NOTIFICATION_DEFINITIONS.length === 0 ? (
+        {mentionsDrive ? (
+          <AgentFsMentionsSection drive={mentionsDrive} onNavigate={onNavigate} />
+        ) : null}
+        {!showStatic ? null : NOTIFICATION_DEFINITIONS.length === 0 ? (
           <p className="px-4 py-6 text-center text-sm text-muted-foreground">
             No notifications yet.
           </p>

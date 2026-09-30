@@ -1,0 +1,219 @@
+// "@name" mentions in Comb comments (agent-fs feature `comment-mentions`).
+//
+// The composer inserts `@<label>` and sends the member's agent-fs user id in
+// `mentions[]`. agent-fs stores the ids and notifies each mentioned member.
+// The thread renders the tokens that match `comment.mentions` as chips.
+//
+// Relative imports only: `bun:test` runs this from the repo root.
+
+import type { CommentMention, CommentNotificationEntry, DriveMember } from "../agent-fs/types";
+import { commentWritePath } from "./comments";
+import { combPath } from "./paths";
+
+/** agent-fs accounts that the swarm creates for its agents. */
+const AGENT_EMAIL_SUFFIX = "@swarm.local";
+
+/** The picker label of the swarm entry (it inserts the `@swarm` marker). */
+export const SWARM_LABEL = "swarm";
+
+/**
+ * The members a human can mention: everyone except the caller, the swarm's
+ * agent accounts (`@swarm.local`), and the swarm service account.
+ */
+export function pickableMembers(
+  members: readonly DriveMember[],
+  selfUserId: string | null,
+  serviceUserId: string | null = null,
+): DriveMember[] {
+  return members.filter(
+    (member) =>
+      member.userId !== selfUserId &&
+      member.userId !== serviceUserId &&
+      !member.email.toLowerCase().endsWith(AGENT_EMAIL_SUFFIX),
+  );
+}
+
+function localPart(email: string): string {
+  const at = email.indexOf("@");
+  return at > 0 ? email.slice(0, at) : email;
+}
+
+export interface LabeledMember {
+  member: DriveMember;
+  /** The text after "@" in the body. Unique (case-insensitive) in the list. */
+  label: string;
+}
+
+/**
+ * One label per member: the display name, else the email local part. Labels
+ * that repeat (or equal "swarm") get the local part appended, then the full
+ * email.
+ */
+export function labelMembers(members: readonly DriveMember[]): LabeledMember[] {
+  const base = (member: DriveMember) => member.displayName?.trim() || localPart(member.email);
+  const counts = new Map<string, number>([[SWARM_LABEL, 1]]);
+  for (const member of members) {
+    const key = base(member).toLowerCase();
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  const taken = new Set<string>();
+  return members.map((member) => {
+    const name = base(member);
+    const candidates =
+      (counts.get(name.toLowerCase()) ?? 0) > 1
+        ? [`${name} (${localPart(member.email)})`, `${name} (${member.email})`]
+        : [name];
+    const label =
+      candidates.find((candidate) => !taken.has(candidate.toLowerCase())) ??
+      `${name} (${member.userId})`;
+    taken.add(label.toLowerCase());
+    return { member, label };
+  });
+}
+
+/** Characters that continue a name: "@ann" is not a whole token of "@anna". */
+const NAME_CHAR = /[\p{L}\p{N}_-]/u;
+/** Characters of a query while typing ("@al", "@ann.lee"). */
+const QUERY_CHARS = /[\p{L}\p{N}_.-]*$/u;
+const TRAILING_QUERY_CHARS = /^[\p{L}\p{N}_.-]*/u;
+
+/** A mention starts at the text start, after whitespace, or after an opening bracket or quote. */
+function startsToken(text: string, at: number): boolean {
+  return at === 0 || /[\s([{"'“‘]/u.test(text[at - 1]);
+}
+
+/** A mention ends at the text end or at a character that cannot continue a name. */
+function endsToken(text: string, end: number): boolean {
+  const next = text[end];
+  if (next === undefined) return true;
+  if (NAME_CHAR.test(next)) return false;
+  // "@ann." ends a sentence, "@ann.lee" and "@ann@x.io" continue the name.
+  if (next === "." || next === "@") {
+    const after = text[end + 1];
+    return after === undefined || !NAME_CHAR.test(after);
+  }
+  return true;
+}
+
+export interface MentionQuery {
+  /** Index of the "@". */
+  start: number;
+  /** End of the word under the caret (a pick replaces `start..end`). */
+  end: number;
+  /** The text between "@" and the caret. */
+  query: string;
+}
+
+/** The mention being typed: the caret follows `@<word chars>` at a word boundary. */
+export function activeMentionQuery(text: string, caret: number): MentionQuery | null {
+  const before = text.slice(0, caret);
+  const query = QUERY_CHARS.exec(before)?.[0] ?? "";
+  const start = caret - query.length - 1;
+  if (start < 0 || text[start] !== "@" || !startsToken(text, start)) return null;
+  const tail = TRAILING_QUERY_CHARS.exec(text.slice(caret))?.[0] ?? "";
+  return { start, end: caret + tail.length, query };
+}
+
+/** Replace the typed `@query` with `@label ` and put the caret after it. */
+export function insertMention(
+  text: string,
+  range: { start: number; end: number },
+  label: string,
+): { text: string; caret: number } {
+  const before = text.slice(0, range.start);
+  const after = text.slice(range.end);
+  const token = `@${label}`;
+  // Reuse a space that already follows, so a pick never doubles it.
+  const space = after.startsWith(" ") ? "" : " ";
+  return { text: `${before}${token}${space}${after}`, caret: before.length + token.length + 1 };
+}
+
+/**
+ * The longest label (case-insensitive) written as a whole `@label` token at
+ * `at`, or null.
+ */
+function tokenAt<T>(
+  text: string,
+  at: number,
+  labels: ReadonlyArray<readonly [string, T]>,
+): { label: string; value: T } | null {
+  if (text[at] !== "@" || !startsToken(text, at)) return null;
+  for (const [label, value] of labels) {
+    const end = at + 1 + label.length;
+    if (text.slice(at + 1, end).toLowerCase() !== label.toLowerCase()) continue;
+    if (endsToken(text, end)) return { label: text.slice(at + 1, end), value };
+  }
+  return null;
+}
+
+function byLengthDesc<T>(entries: Iterable<readonly [string, T]>): Array<readonly [string, T]> {
+  return [...entries].filter(([label]) => label !== "").sort(([a], [b]) => b.length - a.length);
+}
+
+/**
+ * The user ids whose `@label` appears in the body, in body order, without
+ * duplicates. A deleted token drops its mention.
+ */
+export function collectMentionIds(body: string, labels: ReadonlyMap<string, string>): string[] {
+  const sorted = byLengthDesc(labels);
+  const ids: string[] = [];
+  for (let at = body.indexOf("@"); at !== -1; at = body.indexOf("@", at + 1)) {
+    const token = tokenAt(body, at, sorted);
+    if (!token) continue;
+    if (!ids.includes(token.value)) ids.push(token.value);
+    at += token.label.length;
+  }
+  return ids;
+}
+
+export type MentionSegment =
+  | { kind: "text"; text: string }
+  | { kind: "mention"; text: string; mention: CommentMention };
+
+/**
+ * Split plain text into text and `@name` tokens of the comment's mentions.
+ * A token can be any label the picker writes (display name, email local
+ * part, a disambiguated label) or the email. Agents may write any of them.
+ */
+export function splitMentions(
+  text: string,
+  mentions: readonly CommentMention[] | undefined,
+): MentionSegment[] {
+  if (!mentions || mentions.length === 0 || !text.includes("@")) return [{ kind: "text", text }];
+  const labels = byLengthDesc(
+    mentions.flatMap((mention) => {
+      const local = localPart(mention.email);
+      const name = mention.displayName?.trim() || local;
+      return [name, local, mention.email, `${name} (${local})`, `${name} (${mention.email})`].map(
+        (label) => [label, mention] as const,
+      );
+    }),
+  );
+  const segments: MentionSegment[] = [];
+  let last = 0;
+  for (let at = text.indexOf("@"); at !== -1; at = text.indexOf("@", at + 1)) {
+    const token = tokenAt(text, at, labels);
+    if (!token) continue;
+    if (at > last) segments.push({ kind: "text", text: text.slice(last, at) });
+    const end = at + 1 + token.label.length;
+    segments.push({ kind: "mention", text: text.slice(at, end), mention: token.value });
+    last = end;
+    at = end - 1;
+  }
+  if (last < text.length) segments.push({ kind: "text", text: text.slice(last) });
+  return segments;
+}
+
+/**
+ * The Comb route of a mention notification: the file, with its thread
+ * selected (`?comment=` is the root, so a reply opens its thread). The stored
+ * path can come in either form ("docs/a.md" or "/docs/a.md").
+ */
+export function mentionRoute(
+  drive: { orgId: string; driveId: string },
+  entry: Pick<CommentNotificationEntry, "path" | "commentId" | "parentId">,
+): string {
+  const path = `/${commentWritePath(entry.path)}`;
+  const thread = entry.parentId ?? entry.commentId;
+  return `${combPath({ ...drive, path })}?comment=${encodeURIComponent(thread)}`;
+}

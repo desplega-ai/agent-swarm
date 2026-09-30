@@ -1,9 +1,9 @@
 // agent-fs wire types that Comb uses.
 //
 // `packages/core/src/ops/types.ts` and `live/src/api/types.ts`, copied from
-// agent-fs e713bc6 (main after v0.14.0). `Date` fields become ISO strings,
-// because these values arrive as JSON. Keep names in sync with the source so
-// more of `live/` can be ported later.
+// agent-fs e713bc6 (main after v0.14.0), plus the mention fields of v0.15.0.
+// `Date` fields become ISO strings, because these values arrive as JSON. Keep
+// names in sync with the source so more of `live/` can be ported later.
 
 /** `GET /health` (public). `features` is absent on older servers. */
 export interface HealthResponse {
@@ -108,6 +108,13 @@ export interface CommentQuote {
   suffix?: string;
 }
 
+/** A mentioned drive member (agent-fs feature `comment-mentions`). */
+export interface CommentMention {
+  userId: string;
+  displayName: string | null;
+  email: string;
+}
+
 export interface CommentEntry {
   id: string;
   parentId?: string;
@@ -119,6 +126,8 @@ export interface CommentEntry {
   body: string;
   author: string;
   authorDisplayName?: string;
+  /** Absent on agent-fs before v0.15.0. */
+  mentions?: CommentMention[];
   resolved: boolean;
   resolvedBy?: string;
   resolvedAt?: string;
@@ -174,6 +183,8 @@ export interface CommentResolveResult {
 export interface CommentNotificationEntry {
   /** Notification event ID. */
   id: string;
+  /** agent-fs v0.15.0+. `comment-notification-list` returns only "comment" unless `kinds` says otherwise. */
+  kind?: "comment" | "mention";
   commentId: string;
   parentId?: string;
   path: string;
@@ -186,6 +197,10 @@ export interface CommentNotificationEntry {
 export interface CommentNotificationListResult {
   notifications: CommentNotificationEntry[];
   unreadCount: number;
+}
+
+export interface CommentNotificationReadResult {
+  markedRead: number;
 }
 
 /** Mirrors the `disposition` param of the core `signed-url` op. */
