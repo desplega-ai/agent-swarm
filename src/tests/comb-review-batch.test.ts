@@ -544,14 +544,20 @@ describe("sendReviewBatch", () => {
 
   test("without a lead, the task goes to the pool unassigned", async () => {
     const id = fake.add({ body: "@swarm a" }).id;
-    await getDbClient().run("UPDATE agents SET isLead = 0 WHERE id = ?", [leadId]);
+    // Demote every lead: in a single-process run another test file may have left one.
+    const leads = await getDbClient().query<{ id: string }>(
+      "SELECT id FROM agents WHERE isLead = 1",
+    );
+    await getDbClient().run("UPDATE agents SET isLead = 0 WHERE isLead = 1");
     try {
       const result = await sendReviewBatch(batch([id]));
       const task = await getTaskById(result.taskId as string);
       expect(task?.agentId || null).toBeNull();
       expect(task?.status).toBe("unassigned");
     } finally {
-      await getDbClient().run("UPDATE agents SET isLead = 1 WHERE id = ?", [leadId]);
+      for (const lead of leads) {
+        await getDbClient().run("UPDATE agents SET isLead = 1 WHERE id = ?", [lead.id]);
+      }
     }
   });
 
