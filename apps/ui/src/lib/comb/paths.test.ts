@@ -11,6 +11,8 @@ import {
   pinIdFor,
   pinLabel,
   resolveRelative,
+  SIDEBAR_PIN_PREVIEW,
+  sidebarPins,
 } from "./paths";
 
 const IDS = { orgId: "org-1", driveId: "drive-1" };
@@ -204,8 +206,9 @@ describe("pins", () => {
     }
   });
 
-  test("pinLabel", () => {
-    expect(pinLabel("/comb-qa/")).toBe("comb-qa/");
+  test("pinLabel drops a folder's trailing slash", () => {
+    expect(pinLabel("/comb-qa/")).toBe("comb-qa");
+    expect(pinLabel("/docs/specs/2026/")).toBe("2026");
     expect(pinLabel("/comb-qa/notes.md")).toBe("notes.md");
     expect(pinLabel("/")).toBe("/");
   });
@@ -226,5 +229,50 @@ describe("pins", () => {
       "/z.md",
     ]);
     expect(drivePins(ids, IDS, 2).map((pin) => pin.path)).toEqual(["/b/", "/z.md"]);
+  });
+
+  describe("sidebarPins", () => {
+    // Newest first, as GET /api/favorites lists them.
+    const pinIds = (count: number) =>
+      Array.from({ length: count }, (_, i) => `org-1/drive-1/p${count - i}.md`);
+    const paths = (result: ReturnType<typeof sidebarPins>) => result.pins.map((pin) => pin.path);
+
+    test("lists every pin while folding would hide one pin at most", () => {
+      for (const count of [0, 1, SIDEBAR_PIN_PREVIEW, SIDEBAR_PIN_PREVIEW + 1]) {
+        const result = sidebarPins(pinIds(count), IDS, false);
+        expect(result.pins).toHaveLength(count);
+        expect(result.total).toBe(count);
+        expect(result.foldable).toBe(false);
+      }
+    });
+
+    test("folded, lists the newest pins sorted by label", () => {
+      const result = sidebarPins(pinIds(12), IDS, false);
+      expect(paths(result)).toEqual(["/p8.md", "/p9.md", "/p10.md", "/p11.md", "/p12.md"]);
+      expect(result.total).toBe(12);
+      expect(result.foldable).toBe(true);
+    });
+
+    test("with showAll, lists every pin sorted by label", () => {
+      const result = sidebarPins(pinIds(7), IDS, true);
+      expect(paths(result)).toEqual([
+        "/p1.md",
+        "/p2.md",
+        "/p3.md",
+        "/p4.md",
+        "/p5.md",
+        "/p6.md",
+        "/p7.md",
+      ]);
+      expect(result.total).toBe(7);
+      expect(result.foldable).toBe(true);
+    });
+
+    test("counts only the pins of the drive", () => {
+      const ids = [...pinIds(6), "org-1/drive-2/a.md", "org-1/drive-2/b.md", "not-a-pin"];
+      const result = sidebarPins(ids, IDS, false);
+      expect(result.total).toBe(6);
+      expect(result.foldable).toBe(false);
+    });
   });
 });

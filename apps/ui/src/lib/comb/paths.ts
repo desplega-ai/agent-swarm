@@ -166,10 +166,12 @@ export function parsePinId(id: string): DrivePath | null {
   return { orgId, driveId, path: `/${rest.join("/")}` };
 }
 
-/** The label of a pin: its last segment, plus "/" for a folder. */
+/**
+ * The label of a pin: its last segment. A folder drops its trailing "/", as
+ * every pin list shows a folder icon. The drive root stays "/".
+ */
 export function pinLabel(path: string): string {
-  if (path === "/") return "/";
-  return isFolderPath(path) ? `${baseName(path)}/` : baseName(path);
+  return path === "/" ? "/" : baseName(path);
 }
 
 /**
@@ -192,4 +194,23 @@ export function drivePins(
     (a, b) =>
       collator.compare(pinLabel(a.path), pinLabel(b.path)) || collator.compare(a.path, b.path),
   );
+}
+
+/** The pins the global sidebar lists before its "Show all" row. */
+export const SIDEBAR_PIN_PREVIEW = 5;
+
+/**
+ * The pins of one drive that the global sidebar lists. Folded, it lists the
+ * newest `SIDEBAR_PIN_PREVIEW` pins, so a new pin shows at once. It folds only
+ * when that hides 2 pins or more: the "Show all" row takes one row itself.
+ */
+export function sidebarPins(
+  ids: readonly string[],
+  drive: { orgId: string; driveId: string },
+  showAll: boolean,
+): { pins: DrivePath[]; total: number; foldable: boolean } {
+  const all = drivePins(ids, drive);
+  const foldable = all.length > SIDEBAR_PIN_PREVIEW + 1;
+  const pins = foldable && !showAll ? drivePins(ids, drive, SIDEBAR_PIN_PREVIEW) : all;
+  return { pins, total: all.length, foldable };
 }
