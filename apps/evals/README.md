@@ -120,7 +120,7 @@ Answers "which setup is best" for one suite version. `GET /api/analytics/{fronti
 - **`leaderboard`.** Two tracks: `fixedHarness` (one group per harness, every model ranked within it) and `bestHarnessPerModel`. Each row has `rank`, a bootstrap `rankSpread`, `passAt1`, `passPowK` (`?k=`, default 3; the unbiased chance that k attempts on a scenario all pass, averaged over scenarios with at least k graded attempts), $/attempt, p50 agent time, tokens, `resolvedModel`, `efforts` and `suiteVersion`.
 - **`heatmap`.** Scenario x config pass fractions, plus an `anyConfig` row per scenario (`configsPassing: 0` means no config ever passes it).
 - **`reliability`.** Per config, a pass^k and pass@k curve for k = 1..`maxK` (default 5) and a per-run score trend with CI bands (last 60 runs).
-- **`cell?scenario=&config=`.** The attempts behind one heatmap cell, newest run first (`suite` as above; up to 50, `truncated` says if there were more), so a reader can open one and read its transcript. `cancelled` and off-suite attempts are left out, `error` ones are listed and counted apart.
+- **`cell?scenario=&config=`.** The attempts behind one heatmap cell, newest run first (`suite` as above; up to 100, `truncated` says if there were more), so a reader can open one and read its transcript. `cancelled` and off-suite attempts are left out, `error` ones are listed and counted apart.
 - **`compare?a=&b=`.** Per-scenario means for both configs and a paired bootstrap of the difference that resamples scenarios, not attempts. It reports a CI only with at least 5 shared scenarios.
 
 ## Deploying the eval service
