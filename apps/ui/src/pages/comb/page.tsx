@@ -1,5 +1,5 @@
 import { FolderOpen, FolderTree, HardDrive, Unplug } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useMemo, useState, useSyncExternalStore } from "react";
 import { Link, Navigate, useParams } from "react-router-dom";
 import { CombBreadcrumbs } from "@/components/comb/breadcrumbs";
 import { ConnectCard } from "@/components/comb/connect-card";
@@ -26,7 +26,6 @@ import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/ui/page-header";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { useAgentFs } from "@/contexts/agent-fs-context";
-import { useIsMobile } from "@/hooks/use-mobile";
 import { fileRedirectPath } from "@/lib/agent-fs/state";
 import { parseCombSplat } from "@/lib/comb/paths";
 
@@ -82,7 +81,7 @@ export default function CombPage() {
     case "needs-connect":
     case "invalid-key":
       return (
-        <div className="flex flex-1 flex-col items-center justify-center gap-3 py-8">
+        <div className="flex flex-1 flex-col items-center justify-start gap-3 pt-16 pb-8">
           <ConnectCard />
           <RouteOpenInAgentFs />
         </div>
@@ -100,13 +99,27 @@ export default function CombPage() {
 function RouteOpenInAgentFs() {
   const { orgId, driveId, "*": splat } = useParams();
   if (!orgId || !driveId) return null;
-  return <OpenInAgentFsButton target={parseCombSplat({ orgId, driveId, splat })} />;
+  return <OpenInAgentFsButton target={parseCombSplat({ orgId, driveId, splat })} labeled />;
+}
+
+// The tree rail sits beside the file from 1440px up. Below that it opens in a sheet.
+const TREE_INLINE_QUERY = "(min-width: 1440px)";
+
+function useTreeInline(): boolean {
+  return useSyncExternalStore(
+    (onChange) => {
+      const query = window.matchMedia(TREE_INLINE_QUERY);
+      query.addEventListener("change", onChange);
+      return () => query.removeEventListener("change", onChange);
+    },
+    () => window.matchMedia(TREE_INLINE_QUERY).matches,
+  );
 }
 
 function ConnectedView() {
   const { me, disconnect } = useAgentFs();
   const { orgId, driveId, "*": splat } = useParams();
-  const isMobile = useIsMobile();
+  const treeInline = useTreeInline();
   const [treeOpen, setTreeOpen] = useState(false);
   const location = useMemo(
     () => (orgId && driveId ? parseCombSplat({ orgId, driveId, splat }) : null),
@@ -120,7 +133,7 @@ function ConnectedView() {
         title={
           location ? (
             <>
-              {isMobile ? (
+              {treeInline ? null : (
                 <Sheet open={treeOpen} onOpenChange={setTreeOpen}>
                   <SheetTrigger asChild>
                     <Button variant="outline" size="icon" aria-label="Browse files">
@@ -140,7 +153,7 @@ function ConnectedView() {
                     </div>
                   </SheetContent>
                 </Sheet>
-              ) : null}
+              )}
               <CombBreadcrumbs location={location} />
             </>
           ) : (
@@ -181,14 +194,14 @@ function ConnectedView() {
       />
       {location ? (
         <div className="flex min-h-0 flex-1 gap-4">
-          {isMobile ? null : (
+          {treeInline ? (
             <aside
               aria-label="Drive tree"
               className="w-64 shrink-0 overflow-y-auto rounded-xl border border-border bg-card"
             >
               <TreeRail key={`${location.orgId}/${location.driveId}`} location={location} />
             </aside>
-          )}
+          ) : null}
           <section aria-label="Drive content" className="flex min-h-0 min-w-0 flex-1 flex-col">
             {location.isFolder ? (
               <FolderView folder={location} />

@@ -67,8 +67,15 @@ export function DownloadButton({ file }: { file: DrivePath }) {
 /**
  * Open the same file or folder in the agent-fs live UI (new tab). Hidden
  * without a live URL, and for a path that would leave the drive (step-13).
+ * `labeled`: keep the text on phones (the button stands alone).
  */
-export function OpenInAgentFsButton({ target }: { target: DrivePath }) {
+export function OpenInAgentFsButton({
+  target,
+  labeled = false,
+}: {
+  target: DrivePath;
+  labeled?: boolean;
+}) {
   const { liveUrl } = useAgentFs();
   const href = liveUrl ? drivePathToLiveUrl(target, liveUrl) : null;
   if (!href) return null;
@@ -76,7 +83,7 @@ export function OpenInAgentFsButton({ target }: { target: DrivePath }) {
     <Button asChild size="sm" variant="outline">
       <a href={href} target="_blank" rel="noreferrer" aria-label="Open in agent-fs">
         <ExternalLink />
-        <span className="hidden sm:inline">Open in agent-fs</span>
+        <span className={labeled ? undefined : "hidden sm:inline"}>Open in agent-fs</span>
       </a>
     </Button>
   );
