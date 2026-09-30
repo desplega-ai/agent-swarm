@@ -183,7 +183,7 @@ Tasks may carry an optional JSON Schema on `outputSchema` (see `CreateTaskOption
 | `claude` | Yes | Via MCP + `claude -p --json-schema` extraction fallback in `handleStructuredOutputFallback` |
 | `claude-managed` | Yes | Via MCP |
 | `codex` | Yes | Via MCP |
-| `opencode` | Yes | Via MCP |
+| `opencode` | Yes | Via MCP; the runner also validates the final assistant message (see the fallback order below) |
 | `pi` (`pi-mono`) | Yes | Via MCP |
 | `devin` | Conditional | Only when `HAS_MCP=true`. In default mode the schema is **not** enforced — Devin's free-form output is stored as-is. |
 
@@ -194,7 +194,7 @@ When supported, validation happens in the `store-progress` MCP tool (see `src/to
 When a session ends without an explicit `store-progress` call, `ensureTaskFinished` (`src/commands/runner.ts`) fills `task.output` from the first of:
 
 1. Adapter-owned `ProviderResult.output` (`claude`, `pi`/`pi-mono`, `claude-managed`, `devin`).
-2. **Runner-buffered last assistant text** — the runner's provider-event loop buffers the last non-empty assistant `message` event (`trackAssistantText`), capped at 30,000 characters (`… [truncated]` marker beyond that). Used only when the adapter didn't populate `output` itself (`codex` today; any future adapter that emits `message` events but no `ProviderResult.output`). Empty buffer (for example `opencode`, which never emits `message` events) is a no-op — behavior is byte-identical to having no `providerOutput` at all.
+2. **Runner-buffered last assistant text** — the runner's provider-event loop buffers the last non-empty assistant `message` event (`trackAssistantText`), capped at 30,000 characters (`… [truncated]` marker beyond that). Used only when the adapter didn't populate `output` itself (`codex` and `opencode`; any future adapter that emits `message` events but no `ProviderResult.output`). `opencode` emits one assistant `message` per finalized assistant message, built from its non-synthetic, non-ignored `text` parts, so the last one is the final answer. An empty buffer (an adapter that emits no assistant `message` events) is a no-op — behavior is byte-identical to having no `providerOutput` at all. For a task with an `outputSchema`, a buffered final message that is valid JSON matching the schema becomes `task.output`; otherwise the task falls through to #3, which for every non-`claude` adapter fails it with the "not provided via store-progress" reason.
 3. `claude -p --json-schema` extraction fallback (`handleStructuredOutputFallback`), when the task has an `outputSchema` and neither #1 nor #2 produced text that validates against it. The extraction prompt includes the captured text (from #1 or #2) as a "Final Agent Message" section ahead of progress-log history.
 4. Sentinel `"Process completed successfully (no output captured)"` when no schema and no text of any kind was captured.
 

@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Event as OpencodeEvent } from "@opencode-ai/sdk";
+import { resolveProviderOutput, trackAssistantText } from "../commands/runner";
 import type {
   ProviderEvent,
   ProviderResult,
@@ -926,6 +927,122 @@ describe("OpencodeSession — context_usage emission (phase 9 fix)", () => {
 });
 
 // ── DES-300: per-task isolation ────────────────────────────────────────────────
+
+describe("OpencodeSession — assistant text for final-message validation", () => {
+  beforeEach(() => {
+    mock.restore();
+  });
+
+  const SESSION = "sess-abc-123";
+
+  function messageUpdated(
+    id: string,
+    role: "assistant" | "user",
+    completed: boolean,
+  ): OpencodeEvent {
+    const now = Date.now();
+    return {
+      type: "message.updated",
+      properties: {
+        info: {
+          id,
+          sessionID: SESSION,
+          role,
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: completed ? { created: now, completed: now + 1 } : { created: now },
+          parentID: "",
+          modelID: "m",
+          providerID: "p",
+          mode: "live",
+          path: { cwd: "/", root: "/" },
+        } as never,
+      },
+    };
+  }
+
+  function textPart(
+    messageID: string,
+    id: string,
+    text: string,
+    extra: { synthetic?: boolean; ignored?: boolean } = {},
+  ): OpencodeEvent {
+    return {
+      type: "message.part.updated",
+      properties: {
+        part: { id, sessionID: SESSION, messageID, type: "text", text, ...extra } as never,
+      },
+    };
+  }
+
+  const idle: OpencodeEvent = { type: "session.idle", properties: { sessionID: SESSION } };
+
+  function assistantTexts(emitted: ProviderEvent[]): string[] {
+    return emitted.flatMap((e) =>
+      e.type === "message" && e.role === "assistant" ? [e.content] : [],
+    );
+  }
+
+  test("the runner's final-message buffer holds the last step's text, ready for outputSchema validation", async () => {
+    const final = JSON.stringify({ verdict: "pass", score: 3 });
+    const { emitted } = await driveSession([
+      messageUpdated("m1", "assistant", false),
+      textPart("m1", "p1", "Checking the page first."),
+      messageUpdated("m1", "assistant", true),
+      // Step 2 is tool-free and carries the answer.
+      messageUpdated("m2", "assistant", false),
+      textPart("m2", "p2", final),
+      messageUpdated("m2", "assistant", true),
+      idle,
+    ]);
+
+    expect(assistantTexts(emitted)).toEqual(["Checking the page first.", final]);
+
+    const holder: { value?: string } = {};
+    for (const e of emitted) trackAssistantText(holder, e);
+    expect(resolveProviderOutput({ output: undefined }, holder)).toBe(final);
+  });
+
+  test("user-message text and synthetic or ignored parts are never emitted as assistant text", async () => {
+    const { emitted } = await driveSession([
+      messageUpdated("u1", "user", true),
+      textPart("u1", "pu", "the task prompt"),
+      messageUpdated("m1", "assistant", false),
+      textPart("m1", "p-synth", "injected reminder", { synthetic: true }),
+      textPart("m1", "p-ign", "ignored text", { ignored: true }),
+      textPart("m1", "p1", "real answer"),
+      messageUpdated("m1", "assistant", true),
+      idle,
+    ]);
+
+    expect(assistantTexts(emitted)).toEqual(["real answer"]);
+  });
+
+  test("streamed snapshots and replayed finalized updates emit the message once, with its full text", async () => {
+    const { emitted } = await driveSession([
+      messageUpdated("m1", "assistant", false),
+      textPart("m1", "p1", '{"a"'),
+      textPart("m1", "p1", '{"a": 1}'),
+      messageUpdated("m1", "assistant", true),
+      messageUpdated("m1", "assistant", true),
+      idle,
+    ]);
+
+    expect(assistantTexts(emitted)).toEqual(['{"a": 1}']);
+  });
+
+  test("a text part that lands after its message finalized re-emits the fuller text", async () => {
+    const { emitted } = await driveSession([
+      messageUpdated("m1", "assistant", false),
+      textPart("m1", "p1", "first half. "),
+      messageUpdated("m1", "assistant", true),
+      textPart("m1", "p2", "second half."),
+      idle,
+    ]);
+
+    expect(assistantTexts(emitted)).toEqual(["first half.", "first half. second half."]);
+  });
+});
 
 describe("OpencodeAdapter — per-task isolation (DES-300)", () => {
   let prevOpencodeSkillsDir: string | undefined;

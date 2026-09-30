@@ -386,7 +386,7 @@ Tasks may carry an optional JSON Schema on `outputSchema` that the agent's final
 | `claude` | Yes | Via MCP `store-progress`; CLI extraction fallback if missed |
 | `claude-managed` | Yes | Via MCP `store-progress` |
 | `codex` | Yes | Via MCP `store-progress` |
-| `opencode` | Yes | Via MCP `store-progress` |
+| `opencode` | Yes | Via MCP `store-progress`; the runner also validates the final assistant message, as it does for `codex` |
 | `pi` (`pi-mono`) | Yes | Via MCP `store-progress` |
 | `devin` | Yes | Via MCP `store-progress` when `HAS_MCP=true`; otherwise the runner validates direct `providerOutput` before finishing the task |
 
