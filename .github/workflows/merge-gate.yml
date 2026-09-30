@@ -620,7 +620,7 @@ jobs:
         run: |
           set +e
           mkdir -p .bun-test-timings/next
-          ( sleep 330; echo "=== WATCHDOG ps"; ps -eo pid,ppid,stat,pcpu,etime,cmd --sort=ppid | cut -c1-200 | head -70; ls -d /tmp/rbac-e2e-* 2>/dev/null; for f in /tmp/rbac-e2e-*/*.log; do echo "== $f"; tail -40 "$f"; done ) &
+          ( sleep 270; echo "=== WATCHDOG"; ps -eo pid,ppid,stat,pcpu,pmem,etime,cmd | grep -a "bun\|http.ts" | grep -v grep | cut -c1-230; echo "TMP=$TMPDIR RT=$RUNNER_TEMP"; for f in $(find /tmp "$RUNNER_TEMP" -name "server-on.log" -o -name "server-off.log" -o -name "extension-admission.log" 2>/dev/null); do echo "== $f"; tail -50 "$f"; done; for p in $(pgrep -f "src/http.ts"); do echo "-- pid $p wchan: $(cat /proc/$p/wchan 2>/dev/null)"; ls /proc/$p/task | wc -l; done ) &
           WD=$!
           timeout 420 bun run test:root -- --timeout 10000 --parallel=4 --shard=${{ matrix.shard }}/2 \
             --update-timings --timings=.bun-test-timings/next/${{ matrix.shard }}.json \
