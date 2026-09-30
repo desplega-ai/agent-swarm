@@ -590,6 +590,8 @@ describe("script connections", () => {
       // 184 alters agents and agent_tasks, which this migration-112-only fixture
       // does not create.
       markMigrationApplied(database, "184_model_catalog.sql");
+      // 188 rebuilds user_favorites, which this migration-112-only fixture does not create.
+      markMigrationApplied(database, "188_favorites_agent_fs_path.sql");
 
       const id = crypto.randomUUID();
       const now = new Date().toISOString();
