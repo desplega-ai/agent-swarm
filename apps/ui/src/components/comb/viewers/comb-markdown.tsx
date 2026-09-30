@@ -7,11 +7,13 @@
 import { Image as ImageIcon } from "lucide-react";
 import {
   type ComponentProps,
+  type ComponentType,
   cloneElement,
   createContext,
   isValidElement,
   type ReactNode,
   useContext,
+  useMemo,
 } from "react";
 import { Link } from "react-router-dom";
 import { type Components, defaultRehypePlugins, Streamdown } from "streamdown";
@@ -20,6 +22,7 @@ import {
   combPath,
   type DrivePath,
   isAbsoluteUrl,
+  isFolderPath,
   resolveRelative,
 } from "../../../lib/comb/paths";
 import { rehypeSourceLines } from "../../../lib/comb/rehype-source-lines";
@@ -51,8 +54,22 @@ const combSanitize = [
  */
 export const COMB_REHYPE_PLUGINS = [defaultRehypePlugins.raw, combSanitize, rehypeSourceLines];
 
-/** The file being rendered, for resolving relative links. */
-const CombDocContext = createContext<DrivePath | null>(null);
+/**
+ * Props of the component that renders one drive image inside the markdown. It
+ * shows `fallback` (the placeholder) until the image loads, and when it cannot
+ * load.
+ */
+export interface DriveImageProps {
+  file: DrivePath;
+  alt: string;
+  fallback: ReactNode;
+}
+
+/** The file being rendered (relative links resolve against it) and its drive image renderer. */
+const CombDocContext = createContext<{
+  doc: DrivePath;
+  DriveImage?: ComponentType<DriveImageProps>;
+} | null>(null);
 
 type ElementProps<Tag extends keyof React.JSX.IntrinsicElements> = ComponentProps<Tag> & {
   node?: unknown;
@@ -61,7 +78,7 @@ type ElementProps<Tag extends keyof React.JSX.IntrinsicElements> = ComponentProp
 const LINK_CLASS = "text-primary underline underline-offset-2 hover:opacity-80";
 
 function CombLink({ node: _node, href, children, ...rest }: ElementProps<"a">) {
-  const doc = useContext(CombDocContext);
+  const doc = useContext(CombDocContext)?.doc;
   const target = doc && href ? resolveRelative(doc.path, href) : null;
   if (doc && target) {
     return (
@@ -96,7 +113,8 @@ function CombLink({ node: _node, href, children, ...rest }: ElementProps<"a">) {
 const WEB_IMAGE_RE = /^(?:https?:)?\/\//i;
 
 function CombImage({ node: _node, src, alt, ...rest }: ElementProps<"img">) {
-  const doc = useContext(CombDocContext);
+  const ctx = useContext(CombDocContext);
+  const doc = ctx?.doc;
   if (typeof src !== "string" || !src) return null;
   if (WEB_IMAGE_RE.test(src)) {
     return (
@@ -108,12 +126,13 @@ function CombImage({ node: _node, src, alt, ...rest }: ElementProps<"img">) {
       />
     );
   }
-  // A drive image. The dashboard origin cannot serve it, so show a placeholder
-  // that opens the file in Comb. It is not document text (`data-comb-skip`).
-  // step-6: render the image itself here, through a media URL.
+  // A drive image. `DriveImage` loads it through a media URL. The placeholder
+  // opens the file in Comb, and shows while the image loads, when it cannot
+  // load, and for a `src` that does not resolve into the drive. It is not
+  // document text (`data-comb-skip`).
   const target = doc ? resolveRelative(doc.path, src) : null;
   const label = alt || baseName(target?.path ?? src) || "Image";
-  return (
+  const placeholder = (
     <span
       data-comb-skip
       className="inline-flex max-w-full items-center gap-1.5 rounded-md border border-dashed border-border px-2 py-0.5 align-middle text-xs text-muted-foreground"
@@ -128,6 +147,9 @@ function CombImage({ node: _node, src, alt, ...rest }: ElementProps<"img">) {
       )}
     </span>
   );
+  const DriveImage = ctx?.DriveImage;
+  if (!doc || !target || !DriveImage || isFolderPath(target.path)) return placeholder;
+  return <DriveImage file={{ ...doc, path: target.path }} alt={alt ?? ""} fallback={placeholder} />;
 }
 
 /**
@@ -137,7 +159,8 @@ function CombImage({ node: _node, src, alt, ...rest }: ElementProps<"img">) {
  *   `pre` marks its child the way Streamdown's own `pre` does, so `code`
  *   renders blocks and `inlineCode` renders inline spans.
  * - Relative links open the target file in Comb.
- * - Web images load. Drive images show a placeholder that links to the file.
+ * - Web images load. Drive images load through `DriveImage`. Without it, they
+ *   show a placeholder that links to the file.
  */
 export const COMB_MD_COMPONENTS: Components = {
   pre({ node: _node, children, ...rest }: ElementProps<"pre">) {
@@ -168,10 +191,27 @@ export const COMB_MD_COMPONENTS: Components = {
   img: CombImage,
 };
 
-/** Render a markdown file. `doc` is the file itself (its links resolve against it). */
-export function CombMarkdown({ text, doc }: { text: string; doc: DrivePath }): ReactNode {
+/**
+ * Render a markdown file. `doc` is the file itself (its links resolve against
+ * it). `DriveImage` renders relative images from the drive. This module keeps
+ * relative imports only, so the caller passes the data-loading component in.
+ */
+export function CombMarkdown({
+  text,
+  doc,
+  DriveImage,
+}: {
+  text: string;
+  doc: DrivePath;
+  DriveImage?: ComponentType<DriveImageProps>;
+}): ReactNode {
+  const { orgId, driveId, path } = doc;
+  const ctx = useMemo(
+    () => ({ doc: { orgId, driveId, path }, DriveImage }),
+    [orgId, driveId, path, DriveImage],
+  );
   return (
-    <CombDocContext.Provider value={doc}>
+    <CombDocContext.Provider value={ctx}>
       <Streamdown
         mode="static"
         parseIncompleteMarkdown={false}

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router-dom";
-import { CombMarkdown } from "./comb-markdown";
+import { CombMarkdown, type DriveImageProps } from "./comb-markdown";
 
 const DOC = { orgId: "org-1", driveId: "drive-1", path: "/notes/readme.md" };
 
@@ -157,6 +157,36 @@ describe("Comb markdown source lines", () => {
     const placeholder = openingTag(images, "span", "Diagram");
     expect(placeholder).toContain("data-comb-skip");
     expect(images).toContain('href="/file/~/org-1/drive-1/notes/img/diagram.png"');
+  });
+
+  test("drive images render through DriveImage, unresolvable ones keep the placeholder", () => {
+    const StubImage = ({ file, alt }: DriveImageProps) => (
+      <img data-stub={`${file.orgId}/${file.driveId}${file.path}`} alt={alt} />
+    );
+    const images = renderToStaticMarkup(
+      <MemoryRouter>
+        <CombMarkdown
+          text={[
+            "![Pic](./pic.png)",
+            "",
+            "![Up](../up.png?x=1)",
+            "",
+            "![Esc](%2e%2e/%2e%2e/secret.png)",
+            "",
+            "![Dir](./img/)",
+          ].join("\n")}
+          doc={DOC}
+          DriveImage={StubImage}
+        />
+      </MemoryRouter>,
+    );
+    expect(images).toContain('data-stub="org-1/drive-1/notes/pic.png" alt="Pic"');
+    expect(images).toContain('data-stub="org-1/drive-1/up.png" alt="Up"');
+    // The escaping src and the folder src keep the placeholder, never the stub.
+    expect(images.match(/data-stub=/g)).toHaveLength(2);
+    expect(images.match(/data-comb-skip/g)).toHaveLength(2);
+    expect(images).toContain('<span class="truncate">Esc</span>');
+    expect(openingTag(images, "span", "Dir")).toContain("data-comb-skip");
   });
 
   test("a leading YAML block renders as markdown with the file's own lines", () => {
