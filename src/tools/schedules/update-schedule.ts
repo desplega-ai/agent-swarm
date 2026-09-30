@@ -70,7 +70,9 @@ export const updateScheduleInputSchema = z.object({
     .min(1)
     .nullable()
     .optional()
-    .describe("Concrete model override for tasks created by this schedule. Set to null to clear."),
+    .describe(
+      "Concrete model override for tasks created by this schedule. Set to null to clear. The model must run on the assignee's harness (an Anthropic model on a Claude agent, an OpenAI model on a Codex agent); a mismatch is rejected.",
+    ),
   modelTier: ModelTierSchema.nullable()
     .optional()
     .describe("Portable model tier for tasks created by this schedule. Set to null to clear."),
@@ -254,13 +256,16 @@ export const registerUpdateScheduleTool = (server: McpServer) => {
         if (targetAgentId !== undefined) updateData.targetAgentId = targetAgentId;
         if (timezone !== undefined) updateData.timezone = timezone;
         if (enabled !== undefined) updateData.enabled = enabled;
+        // A move to another agent re-judges the stored model against the new harness.
+        const agentChanged =
+          targetAgentId !== undefined && targetAgentId !== schedule.targetAgentId;
         if (model !== undefined || modelTier !== undefined) {
           const normalizedModel = splitLegacyModelAlias({ model, modelTier });
           // A model the schedule already stores is not re-judged, so an unrelated edit still saves.
-          if (normalizedModel.model !== schedule.model) {
+          if (normalizedModel.model !== schedule.model || agentChanged) {
             const modelError = await explicitModelErrorForAgent({
               model: normalizedModel.model,
-              allowCustomModel,
+              allowCustomModel: allowCustomModel || normalizedModel.model === schedule.model,
               agentId: targetAgentId ?? schedule.targetAgentId,
             });
             if (modelError) return toolErr(modelError);
@@ -269,6 +274,14 @@ export const registerUpdateScheduleTool = (server: McpServer) => {
           if (modelTier !== undefined || normalizedModel.modelTier) {
             updateData.modelTier = normalizedModel.modelTier ?? null;
           }
+        } else if (agentChanged && schedule.model) {
+          // Harness only: the stored id already passed the catalog check when it was written.
+          const modelError = await explicitModelErrorForAgent({
+            model: schedule.model,
+            allowCustomModel: true,
+            agentId: targetAgentId ?? schedule.targetAgentId,
+          });
+          if (modelError) return toolErr(modelError);
         }
 
         // Recalculate nextRunAt based on schedule type

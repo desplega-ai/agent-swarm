@@ -48,6 +48,7 @@ import {
   updateAgentStatus,
 } from "../be/db";
 import { repointTrackerSyncBySwarmId } from "../be/db-queries/tracker";
+import { poolTaskRunsOnHarness } from "../be/model-validation";
 import {
   agentsWithLiveRuntime,
   countActiveRuntimeInstancesForAgent,
@@ -1145,7 +1146,9 @@ async function autoAssignPoolTasks(findings: HeartbeatFindings): Promise<void> {
         for (const w of idleWorkers) {
           if (
             (await reservedForWorker(w.id)) < (w.maxTasks ?? 1) &&
-            isAgentEligibleForTask(w, task)
+            isAgentEligibleForTask(w, task) &&
+            // A pinned model from another harness family waits for a compatible worker.
+            (await poolTaskRunsOnHarness(task, w.harnessProvider ?? w.provider ?? null))
           ) {
             worker = w;
             break;
@@ -1302,7 +1305,17 @@ async function escalateStarvedPoolTasks(findings: HeartbeatFindings): Promise<vo
   const registeredAgents = (await getAllAgents()).filter((a) => !a.isLead);
 
   for (const task of candidates) {
-    const hasEligibleAgent = registeredAgents.some((agent) => isAgentEligibleForTask(agent, task));
+    let hasEligibleAgent = false;
+    for (const agent of registeredAgents) {
+      // Eligible means routable AND able to run the task's pinned model on its harness.
+      if (
+        isAgentEligibleForTask(agent, task) &&
+        (await poolTaskRunsOnHarness(task, agent.harnessProvider ?? agent.provider ?? null))
+      ) {
+        hasEligibleAgent = true;
+        break;
+      }
+    }
     if (hasEligibleAgent) continue; // Someone (any status) matches — keep queued.
 
     const decision = await createPoolStarvationDecisionTask({ original: task });

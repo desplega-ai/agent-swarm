@@ -1,4 +1,5 @@
 import { type ReactNode, useEffect, useMemo, useState } from "react";
+import { getStoredApiKey } from "../api.ts";
 import { colorForGroup } from "../components/charts/chart-utils.ts";
 import { FrontierChart } from "../components/charts/FrontierChart.tsx";
 import { fmtCost, fmtDuration } from "../components/format.ts";
@@ -372,6 +373,8 @@ function PublicHeader(props: {
   onVersion: (v: string) => void;
 }): ReactNode {
   const versions = props.index?.versions ?? [];
+  // Logged in = the evals app has a stored key; anonymous visitors see no link.
+  const [loggedIn] = useState(() => getStoredApiKey() !== null);
   return (
     <header className="app-header bm-header">
       <a className="brand" href="/benchmark">
@@ -400,9 +403,18 @@ function PublicHeader(props: {
           </select>
         </label>
       ) : null}
+      {loggedIn ? (
+        <a className="bm-app-link" href="/#/leaderboard">
+          ← Back to evals
+        </a>
+      ) : null}
     </header>
   );
 }
+
+/** Methodology source of truth; linked from the empty state, before any snapshot exists. */
+const METHODOLOGY_URL =
+  "https://github.com/desplega-ai/agent-swarm/blob/main/apps/evals/docs/methodology.md";
 
 export default function BenchmarkPage(): ReactNode {
   const [index, setIndex] = useState<BenchmarkIndex | null>(null);
@@ -439,7 +451,14 @@ export default function BenchmarkPage(): ReactNode {
   if (error) {
     body = <p className="bm-empty">Could not load the benchmark: {error}</p>;
   } else if (index !== null && index.versions.length === 0) {
-    body = <p className="bm-empty">No benchmark has been published yet.</p>;
+    body = (
+      <p className="bm-empty">
+        No benchmark has been published yet.{" "}
+        <a href={METHODOLOGY_URL} target="_blank" rel="noopener">
+          Read how the benchmark is run ↗
+        </a>
+      </p>
+    );
   } else if (snapshot === null) {
     body = <Spinner label="loading benchmark" />;
   } else if (snapshot.schema > SUPPORTED_SNAPSHOT_SCHEMA) {
