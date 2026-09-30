@@ -38,6 +38,7 @@ import { registerExtensionDisableTool } from "./tools/extension-disable";
 import { registerExtensionEnableTool } from "./tools/extension-enable";
 import { registerExtensionInstallTool } from "./tools/extension-install";
 import { registerExtensionListTool } from "./tools/extension-list";
+import { registerFeedbackListTool } from "./tools/feedback-list";
 import { registerGetMetricsTool } from "./tools/get-metrics";
 import { registerGetSwarmTool } from "./tools/get-swarm";
 import { registerGetTaskDetailsTool } from "./tools/get-task-details";
@@ -382,6 +383,7 @@ export async function createServer(
     registerGetSwarmTool(server);
     registerGetTasksTool(server);
     registerGetMetricsTool(server);
+    registerFeedbackListTool(server);
     registerSendTaskTool(server);
     registerGetTaskDetailsTool(server);
     registerStoreProgressTool(server);

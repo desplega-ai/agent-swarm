@@ -270,6 +270,14 @@ declare module "swarm-sdk" {
     swarm_get(args?: { includeFull?: boolean }): Promise<unknown>;
     agent_info(args?: Record<string, unknown>): Promise<unknown>;
     metrics_get(args?: Record<string, unknown>): Promise<unknown>;
+    feedback_list(args?: {
+      since?: string;
+      rating?: 1 | -1;
+      source?: "slack" | "ui" | "api";
+      agentId?: string;
+      taskId?: string;
+      limit?: number;
+    }): Promise<unknown>;
     user_resolve(args?: {
       kind?: string;
       externalId?: string;

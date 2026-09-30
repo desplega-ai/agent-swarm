@@ -51,6 +51,15 @@ import {
   splitSlackSectionText,
 } from "./blocks";
 import { buildAskClosure, type ClosureState, closureState } from "./closure";
+import {
+  classifyFailure,
+  failureHint,
+  fallbackFooterParts,
+  isSlackOutcomeActionsEnabled,
+  type OutcomeActionKind,
+  outcomeActionBlocks,
+  sendWithBlocksFallback,
+} from "./outcome-card-blocks";
 import { reactionName, type SlackReactionEvent } from "./reaction-shortcode";
 import { getAgentDisplayName, getAgentEmoji } from "./responses";
 import { getSlackOutputAttachments } from "./task-attachments";
@@ -865,7 +874,12 @@ export function withStatusLead(lead: string, body: string): string {
 
 async function outcomeContent(task: AgentTask, slackReplySent: boolean): Promise<string> {
   if (task.status === "failed") {
-    return withStatusLead("❌ **Failed:**", outcomeText(task.failureReason, "Task failed."));
+    const failure = withStatusLead(
+      "❌ **Couldn't finish:**",
+      outcomeText(task.failureReason, "Task failed."),
+    );
+    const hint = failureHint(classifyFailure(task.failureReason));
+    return hint ? `${failure}\n\n${hint}` : failure;
   }
   if (task.status === "cancelled") {
     return withStatusLead(
@@ -1204,6 +1218,7 @@ async function outcomeFooter(
   task: AgentTask,
   tasks: AgentTask[],
   duration: string,
+  extraParts: string[] = [],
 ): Promise<unknown[]> {
   const descendants = buildAskClosure(task, tasks);
   const candidateAgentIds = [
@@ -1226,9 +1241,21 @@ async function outcomeFooter(
       : task.agentId
         ? (await getAgentById(task.agentId))?.name
         : undefined;
-  const parts = [duration, who, getTaskLink(task.id)].filter(Boolean);
+  const parts = [duration, who, getTaskLink(task.id), ...extraParts].filter(Boolean);
   if (parts.length === 0) return [];
   return [{ type: "context", elements: [{ type: "mrkdwn", text: parts.join(" · ") }] }];
+}
+
+/**
+ * Which action row an outcome card gets. A ⏳ deferral is parked, not
+ * answered, and a child card is one worker's piece of the ask: neither gets
+ * one; the ask's own card does.
+ */
+function outcomeActionKind(task: AgentTask): OutcomeActionKind | undefined {
+  if (task.status === "failed" || task.status === "cancelled") return "failure";
+  if (isDeferredTask(task)) return undefined;
+  if (task.status === "completed" || task.status === "in_progress") return "answer";
+  return undefined;
 }
 
 export async function streamOutcomeCard(
@@ -1237,6 +1264,8 @@ export async function streamOutcomeCard(
   options?: {
     buildContent?: (task: AgentTask, slackReplySent: boolean) => Promise<string>;
     conclusionKind?: SlackConclusionKind;
+    /** False for a child card: only the ask's own card carries the action row. */
+    actions?: boolean;
   },
 ): Promise<SlackMessageRecord | null> {
   const app = getSlackApp();
@@ -1264,10 +1293,28 @@ export async function streamOutcomeCard(
   if (!presentation) throw new Error(`Outcome presentation is empty for task ${task.id}`);
   // Sources, attachments, and the footer are captions under the answer, never
   // part of the streamed text, so notifications carry the answer alone.
-  const captions = [
-    ...(await outcomeCaptionBlocks(task, content)),
-    ...(await outcomeFooter(task, tasks, duration)),
+  const captionBlocks = await outcomeCaptionBlocks(task, content);
+  const actionKind = options?.actions === false ? undefined : outcomeActionKind(task);
+  // `fallbackCaptions` carries no interactive blocks: the footer links to the
+  // task instead. It is the card when interactivity is off, and the one retry
+  // when Slack rejects the action blocks with `invalid_blocks`.
+  const fallbackCaptions = [
+    ...captionBlocks,
+    ...(await outcomeFooter(
+      task,
+      tasks,
+      duration,
+      actionKind ? fallbackFooterParts(task.id, actionKind) : [],
+    )),
   ];
+  const captions =
+    actionKind && isSlackOutcomeActionsEnabled()
+      ? [
+          ...captionBlocks,
+          ...(await outcomeFooter(task, tasks, duration)),
+          ...outcomeActionBlocks(task.id, actionKind),
+        ]
+      : fallbackCaptions;
 
   const startPayload: Record<string, unknown> = {
     channel: task.slackChannelId,
@@ -1337,14 +1384,20 @@ export async function streamOutcomeCard(
           `[Slack] chat.startStream failed for task ${task.id}; falling back to chat.postMessage:`,
           error,
         );
-        started = await callSlackWithRetry(app.client, "chat.postMessage", {
-          channel: task.slackChannelId,
-          thread_ts: task.slackThreadTs,
-          text: presentation,
-          blocks: [{ type: "markdown", text: presentation }, ...captions],
-          ...(startPayload.username ? { username: startPayload.username } : {}),
-          ...(startPayload.icon_emoji ? { icon_emoji: startPayload.icon_emoji } : {}),
-        });
+        started = await sendWithBlocksFallback(
+          captions,
+          fallbackCaptions,
+          (blocks) =>
+            callSlackWithRetry(app.client, "chat.postMessage", {
+              channel: task.slackChannelId,
+              thread_ts: task.slackThreadTs,
+              text: presentation,
+              blocks: [{ type: "markdown", text: presentation }, ...blocks],
+              ...(startPayload.username ? { username: startPayload.username } : {}),
+              ...(startPayload.icon_emoji ? { icon_emoji: startPayload.icon_emoji } : {}),
+            }),
+          `chat.postMessage for task ${task.id}`,
+        );
         deliveredViaFallback = true;
       }
     }
@@ -1359,11 +1412,17 @@ export async function streamOutcomeCard(
   }
   if (!deliveredViaFallback) {
     try {
-      await callSlackWithRetry(app.client, "chat.stopStream", {
-        channel: task.slackChannelId,
-        ts: outcome.ts,
-        blocks: captions,
-      });
+      await sendWithBlocksFallback(
+        captions,
+        fallbackCaptions,
+        (blocks) =>
+          callSlackWithRetry(app.client, "chat.stopStream", {
+            channel: task.slackChannelId,
+            ts: outcome.ts,
+            blocks,
+          }),
+        `chat.stopStream for task ${task.id}`,
+      );
     } catch (error) {
       // A process may have stopped the stream before it persisted the final
       // permalink. The message is then a plain message and chat.update below
@@ -1375,12 +1434,18 @@ export async function streamOutcomeCard(
       // slackReplySent snapshot may have since changed. The stream is closed
       // now, so chat.update is allowed: overwrite the text and the caption
       // blocks with the freshly computed presentation.
-      await callSlackWithRetry(app.client, "chat.update", {
-        channel: task.slackChannelId,
-        ts: outcome.ts,
-        text: presentation,
-        blocks: [{ type: "markdown", text: presentation }, ...captions],
-      });
+      await sendWithBlocksFallback(
+        captions,
+        fallbackCaptions,
+        (blocks) =>
+          callSlackWithRetry(app.client, "chat.update", {
+            channel: task.slackChannelId,
+            ts: outcome.ts,
+            text: presentation,
+            blocks: [{ type: "markdown", text: presentation }, ...blocks],
+          }),
+        `chat.update for task ${task.id}`,
+      );
     }
   }
   // chat.startStream/chat.postMessage posting a new message in the thread is
@@ -1694,7 +1759,10 @@ export async function processSlackRenderV2(): Promise<void> {
       if (askId && (await childCardCountFor(askId)) >= CHILD_CARDS_PER_ASK) continue;
       if (!(await checkOutcomeDeliveryGate(task, card))) continue;
       try {
-        const outcome = await streamOutcomeCard(task, tree, { buildContent: childOutcomeContent });
+        const outcome = await streamOutcomeCard(task, tree, {
+          buildContent: childOutcomeContent,
+          actions: false,
+        });
         if (outcome) {
           noteOutcomeDeliverySuccess(task.id);
           childCardsThisTick++;

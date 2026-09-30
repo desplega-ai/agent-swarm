@@ -70,6 +70,7 @@ export const SDK_TOOL_NAME_MAP = {
   agent_info: "my-agent-info",
   agent_join: "join-swarm",
   metrics_get: "get-metrics",
+  feedback_list: "feedback-list",
   user_resolve: "resolve-user",
   user_manage: "manage-user",
   db_query: "db-query",

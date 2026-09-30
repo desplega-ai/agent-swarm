@@ -44,7 +44,7 @@ import {
 } from "../be/db";
 import { upsertTaskCitations } from "../be/task-citations";
 import { createStandaloneScheduleTask } from "../scheduler/schedule-task";
-import { getTaskLink, MAX_SECTION_LENGTH } from "../slack/blocks";
+import { getTaskLink, getTaskUrl, MAX_SECTION_LENGTH } from "../slack/blocks";
 import {
   _noteOutcomeDeliveryFailureForTests,
   _resetSlackRenderV2ForTests,
@@ -87,6 +87,15 @@ let rejectedUpdateMessages: string[] = [];
 let rejectedStopTs: string | undefined;
 let rejectedStopCode = "rate_limited";
 let postMessageErrorCode: string | undefined;
+// Answer `invalid_blocks` to any call whose blocks carry outcome action rows,
+// like a workspace that does not accept them.
+let rejectActionBlocks = false;
+
+function hasActionBlocks(payload: Record<string, unknown>): boolean {
+  return ((payload.blocks as { type?: string }[] | undefined) ?? []).some(
+    (block) => block.type === "actions" || block.type === "context_actions",
+  );
+}
 let disableRenderAfterMethod: string | undefined;
 
 type RemoteMessage = {
@@ -151,6 +160,7 @@ async function backdateLastUpdated(taskIds: string[], secondsAgo: number): Promi
 
 const mockApiCall = mock(async (method: string, payload: Record<string, unknown>) => {
   calls.push({ method, payload });
+  if (rejectActionBlocks && hasActionBlocks(payload)) throw { data: { error: "invalid_blocks" } };
   if (method === disableRenderAfterMethod) {
     disableRenderAfterMethod = undefined;
     process.env.SLACK_RENDER_V2 = "false";
@@ -324,6 +334,8 @@ beforeEach(async () => {
   rejectedStopTs = undefined;
   rejectedStopCode = "rate_limited";
   postMessageErrorCode = undefined;
+  rejectActionBlocks = false;
+  delete process.env.SLACK_OUTCOME_ACTIONS;
   disableRenderAfterMethod = undefined;
   nextUpdateBarrier = undefined;
   _resetSlackRenderV2ForTests();
@@ -1307,7 +1319,7 @@ describe("Slack renderer v2", () => {
       new Date(completedAsk.createdAt),
       new Date(completedAsk.finishedAt ?? completedAsk.lastUpdatedAt),
     );
-    expect(stopped.payload.blocks).toEqual([
+    expect((stopped.payload.blocks as unknown[]).slice(0, -2)).toEqual([
       {
         type: "context",
         elements: [
@@ -1570,7 +1582,9 @@ describe("Slack renderer v2", () => {
       const started = calls.find((call) => call.method === "chat.startStream");
       expect(started?.payload.markdown_text).toBe("✅ The answer <https://example.com/a|[1]>.");
       const stopped = calls.find((call) => call.method === "chat.stopStream");
-      const blocks = stopped?.payload.blocks as { type: string; elements: { text: string }[] }[];
+      const blocks = (
+        stopped?.payload.blocks as { type: string; elements: { text: string }[] }[]
+      ).slice(0, -2);
       expect(blocks.every((block) => block.type === "context")).toBe(true);
       expect(blocks.map((block) => block.elements.map((element) => element.text))).toEqual([
         ["Sources: <https://example.com/a|[1]> Cited"],
@@ -1619,7 +1633,8 @@ describe("Slack renderer v2", () => {
     expect(posted?.payload.text).toBe(answer);
     const blocks = posted?.payload.blocks as { type: string; text?: string }[];
     expect(blocks[0]).toEqual({ type: "markdown", text: answer });
-    expect(blocks.slice(1).every((block) => block.type === "context")).toBe(true);
+    expect(blocks.slice(1, -2).every((block) => block.type === "context")).toBe(true);
+    expect(blocks.slice(-2).map((block) => block.type)).toEqual(["context_actions", "actions"]);
     expect(JSON.stringify(blocks.slice(1))).toContain(
       "Sources: <https://example.com/|[1]> Evidence",
     );
@@ -1849,10 +1864,10 @@ describe("Slack renderer v2", () => {
     await processSlackRenderV2();
 
     const started = calls.find((call) => call.method === "chat.startStream");
-    expect(started?.payload.markdown_text).toContain("❌ **Failed:**");
+    expect(started?.payload.markdown_text).toContain("❌ **Couldn't finish:**");
     const outcome = await getSlackOutcomeMessage(ask.id);
     const remote = remoteMessages.get(remoteKey(channelId, outcome!.ts));
-    expect(remote?.text).toBe(`❌ **Failed:** ${reason.trim()}`);
+    expect(remote?.text).toBe(`❌ **Couldn't finish:** ${reason.trim()}`);
     expect(remote?.text).not.toContain(getTaskLink(ask.id));
     expect(calls.some((call) => call.method === "chat.appendStream")).toBe(false);
     const update = calls.find(
@@ -2122,7 +2137,7 @@ describe("Slack renderer v2", () => {
       new Date(completedAsk.createdAt),
       new Date(completedAsk.finishedAt ?? completedAsk.lastUpdatedAt),
     );
-    expect(stopped.payload.blocks).toEqual([
+    expect((stopped.payload.blocks as unknown[]).slice(0, -2)).toEqual([
       {
         type: "context",
         elements: [{ type: "mrkdwn", text: `${duration} · ${lead.name} · ${getTaskLink(ask.id)}` }],
@@ -4090,5 +4105,104 @@ describe("withStatusLead", () => {
   ])("keeps the blank line before a %s", (_name, body) => {
     expect(withStatusLead("✅", body)).toBe(`✅\n\n${body}`);
     expect(withStatusLead("❌ **Failed:**", body)).toBe(`❌ **Failed:**\n\n${body}`);
+  });
+});
+
+describe("Outcome card actions", () => {
+  async function settledAsk(label: string, settle: (taskId: string) => Promise<unknown>) {
+    const lead = await createAgent({ name: `${label} Lead`, isLead: true, status: "idle" });
+    const { channelId, threadTs } = uniqueSlackAddress(label);
+    const ask = await createTaskExtended(`${label} ask`, {
+      agentId: lead.id,
+      source: "slack",
+      slackChannelId: channelId,
+      slackThreadTs: threadTs,
+      contextKey: slackContextKey({ channelId, threadTs }),
+    });
+    await startTask(ask.id);
+    await ensureSlackThreadTree([ask.id]);
+    await settle(ask.id);
+    await backdateLastUpdated([ask.id], 20);
+    calls.length = 0;
+    _resetSlackRenderV2ForTests();
+    await processSlackRenderV2();
+    return ask;
+  }
+
+  function stopStreamBlocks(): Array<{ type: string; elements?: Array<{ text?: string }> }>[] {
+    return calls
+      .filter((call) => call.method === "chat.stopStream")
+      .map(
+        (call) => call.payload.blocks as Array<{ type: string; elements?: { text?: string }[] }>,
+      );
+  }
+
+  test("A: an answered card ends with feedback, Follow up and Open task", async () => {
+    const ask = await settledAsk("C_ACTIONS_ANSWER", (id) => completeTask(id, "Done."));
+    const [blocks] = stopStreamBlocks();
+    expect(blocks!.slice(-2).map((block) => block.type)).toEqual(["context_actions", "actions"]);
+    const [feedback, buttons] = blocks!.slice(-2) as Array<Record<string, unknown>>;
+    expect(feedback!.type).toBe("context_actions");
+    expect(JSON.stringify(feedback)).toContain(`"value":"down:${ask.id}"`);
+    expect(JSON.stringify(buttons)).toContain('"action_id":"follow_up_task"');
+    expect(JSON.stringify(buttons)).toContain(`"url":"${getTaskUrl(ask.id)}"`);
+  });
+
+  test("B: a failed card says why and offers Retry, Follow up and Open task", async () => {
+    await settledAsk("C_ACTIONS_FAILED", (id) => failTask(id, "Worker crashed mid-run"));
+    const started = calls.find((call) => call.method === "chat.startStream");
+    expect(started?.payload.markdown_text).toBe(
+      "❌ **Couldn't finish:** Worker crashed mid-run\n\n_This looks transient (a crash or timeout), so a retry should work._",
+    );
+    const [blocks] = stopStreamBlocks();
+    const actionIds = (
+      blocks!.at(-1) as unknown as { elements: { action_id: string }[] }
+    ).elements.map((element) => element.action_id);
+    expect(actionIds).toEqual(["retry_task", "follow_up_task", "view_task_logs"]);
+    expect(blocks!.some((block) => block.type === "context_actions")).toBe(false);
+  });
+
+  test("C: with interactivity off the footer carries the links instead of buttons", async () => {
+    process.env.SLACK_OUTCOME_ACTIONS = "false";
+    const ask = await settledAsk("C_ACTIONS_OFF", (id) => completeTask(id, "Done."));
+    const [blocks] = stopStreamBlocks();
+    expect(blocks!.every((block) => block.type === "context")).toBe(true);
+    expect(blocks!.at(-1)!.elements![0]!.text).toEndWith(
+      ` · ${getTaskLink(ask.id)} · <${getTaskUrl(ask.id)}|Retry or follow up> · react :+1: / :-1: to rate`,
+    );
+  });
+
+  test("invalid_blocks retries the stop once with the fallback footer instead of dropping the card", async () => {
+    rejectActionBlocks = true;
+    const ask = await settledAsk("C_ACTIONS_REJECTED", (id) =>
+      failTask(id, "Needs a lead-only permission"),
+    );
+    const attempts = stopStreamBlocks();
+    expect(attempts).toHaveLength(2);
+    expect(attempts[0]!.at(-1)!.type).toBe("actions");
+    expect(attempts[1]!.every((block) => block.type === "context")).toBe(true);
+    expect(attempts[1]!.at(-1)!.elements![0]!.text).toEndWith(
+      `<${getTaskUrl(ask.id)}|Retry or follow up>`,
+    );
+    const started = calls.find((call) => call.method === "chat.startStream");
+    expect(String(started?.payload.markdown_text)).toContain("a plain retry won't help");
+    expect((await getSlackOutcomeMessage(ask.id))?.finalizedAt).toBeDefined();
+  });
+
+  test("invalid_blocks on the postMessage fallback also retries without the action rows", async () => {
+    rejectActionBlocks = true;
+    startStreamFailuresRemaining = 1;
+    try {
+      const ask = await settledAsk("C_ACTIONS_POST_REJECTED", (id) => completeTask(id, "Done."));
+      const posts = calls.filter(
+        (call) => call.method === "chat.postMessage" && String(call.payload.text).startsWith("✅"),
+      );
+      expect(posts).toHaveLength(2);
+      expect(hasActionBlocks(posts[0]!.payload)).toBe(true);
+      expect(hasActionBlocks(posts[1]!.payload)).toBe(false);
+      expect((await getSlackOutcomeMessage(ask.id))?.finalizedAt).toBeDefined();
+    } finally {
+      startStreamFailuresRemaining = 0;
+    }
   });
 });

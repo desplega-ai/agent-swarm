@@ -206,6 +206,7 @@ export interface SwarmSdk {
   swarm_get(args?: { includeFull?: boolean }): Promise<unknown>;
   agent_info(args?: Record<string, unknown>): Promise<unknown>;
   metrics_get(args?: Record<string, unknown>): Promise<unknown>;
+  feedback_list(args?: { since?: string; rating?: 1 | -1; source?: "slack" | "ui" | "api"; agentId?: string; taskId?: string; limit?: number }): Promise<unknown>;
   user_resolve(args?: { kind?: string; externalId?: string; email?: string; userId?: string; name?: string }): Promise<unknown>;
   db_query(args: { sql: string; params?: unknown[] }): Promise<unknown>;
   // --- config ---

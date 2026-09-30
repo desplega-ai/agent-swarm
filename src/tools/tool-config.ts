@@ -218,10 +218,11 @@ export const DEFERRED_TOOLS = new Set([
   // External command routes (1)
   "swarm_x",
 
-  // Other (3)
+  // Other (4)
   "cancel-task",
   "inject-learning",
   "get-metrics",
+  "feedback-list",
 ]);
 
 /** All known tool names = CORE_TOOLS ∪ DEFERRED_TOOLS */

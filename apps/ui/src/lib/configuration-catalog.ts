@@ -712,6 +712,15 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         docsUrl: `${DOCS}guides/slack-integration`,
       },
       {
+        key: "SLACK_OUTCOME_ACTIONS",
+        label: "Slack outcome card buttons",
+        description:
+          "Show 👍/👎 feedback, Follow up, Retry and Open task buttons on v2 outcome cards. Turn off when the Slack app has interactivity disabled; cards then link to the task in the footer instead.",
+        kind: "boolean",
+        defaultValue: "true",
+        docsUrl: `${DOCS}integrations/slack`,
+      },
+      {
         key: "SLACK_CONCLUSION_SETTLE_SEC",
         label: "Conclusion settle window",
         description:

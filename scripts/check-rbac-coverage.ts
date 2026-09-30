@@ -78,6 +78,8 @@ const UNGATED_TOOL_FILES: Record<string, string> = {
     "proxies to /api/extensions which enforces extension.write / GET is ungated",
   "src/tools/extension-list.ts":
     "proxies to /api/extensions which enforces extension.write / GET is ungated",
+  "src/tools/feedback-list.ts":
+    "read-only list of task ratings; open to all authenticated agents like get-tasks",
   "src/tools/get-metrics.ts": PIN_REASON,
   "src/tools/get-swarm.ts": PIN_REASON,
   "src/tools/join-swarm.ts": PIN_REASON,

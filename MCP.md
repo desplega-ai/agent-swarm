@@ -27,6 +27,7 @@ SDK allowlist instead), and HTTP REST routes are generally not gated.
   - [get-swarm](#get-swarm)
   - [get-tasks](#get-tasks)
   - [get-metrics](#get-metrics)
+  - [feedback-list](#feedback-list)
   - [send-task](#send-task)
   - [get-task-details](#get-task-details)
   - [store-progress](#store-progress)
@@ -267,6 +268,21 @@ Returns a list of tasks in the swarm with various filters. Sorted by priority (d
 Returns lightweight swarm-wide counts in a single object — tasks (total + by status), agents (total + by status), workflows (total + enabled), pages, active sessions, skills. Use this instead of fetching full list payloads just to count things. Pure COUNT queries; cheap.
 
 *No parameters*
+
+### feedback-list
+
+**List task feedback**
+
+Lists human ratings of task outcomes (+1 / -1 with an optional note), newest first. Ratings come from the Slack outcome card today (source 'slack'). Use it in self-improvement loops: pull the -1s since your last run, read each task with get-task-details, and turn the pattern into a memory or a fix.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `since` | `unknown` | No | - | Only feedback at or after this ISO timestamp. |
+| `rating` | `unknown` | No | - | 1 for 👍, -1 for 👎. |
+| `source` | `slack \| ui \| api` | No | - | - |
+| `agentId` | `string` | No | - | Only feedback on tasks assigned to this agent. |
+| `taskId` | `string` | No | - | - |
+| `limit` | `number` | No | - | Default 50, max 500. |
 
 ### send-task
 

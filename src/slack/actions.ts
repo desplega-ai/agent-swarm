@@ -5,6 +5,7 @@ import { slackContextKey } from "../tasks/context-key";
 import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
 import { buildCancelledBlocks, getTaskLink } from "./blocks";
 import { resolveSlackUserId } from "./enrich";
+import { registerOutcomeActionHandlers } from "./outcome-actions";
 import { ensureSlackThreadTree, isSlackRenderV2Enabled } from "./render-v2";
 import { getAgentDisplayName, getAgentEmoji } from "./responses";
 
@@ -169,4 +170,7 @@ export function registerActionHandlers(app: App): void {
       }
     }
   });
+
+  // v2 outcome card: feedback and Retry (Follow up reuses follow_up_task above).
+  registerOutcomeActionHandlers(app);
 }
