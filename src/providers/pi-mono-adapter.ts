@@ -14,26 +14,32 @@ import {
 } from "@earendil-works/pi-ai/providers/all";
 import type {
   AgentSessionEvent,
+  AgentToolResult,
   CreateAgentSessionOptions,
+  ExtensionFactory,
   SessionStats,
   ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 import {
   type AgentSession,
   createAgentSession,
+  createToolSearchExtension,
   DefaultResourceLoader,
   getAgentDir,
   ModelRuntime,
   SessionManager,
+  SettingsManager,
 } from "@earendil-works/pi-coding-agent";
 import { type TSchema, Type } from "typebox";
+import { CORE_TOOLS } from "../tools/tool-config";
 import { classifyAwsSdkError } from "../utils/aws-error-classifier";
+import { parseEnvFlag } from "../utils/env-flag";
 import { swarmRuntimeInstanceId } from "../utils/multi-runtime";
 import { DEFAULT_OPENROUTER_BASE_URL, getOpenRouterBaseUrl } from "../utils/openrouter-base-url";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { readPkgVersion } from "./harness-version";
 import { createSwarmHooksExtension } from "./pi-mono-extension";
-import { McpHttpClient } from "./pi-mono-mcp-client";
+import { McpHttpClient, type McpTool } from "./pi-mono-mcp-client";
 import { applyReasoningEffort, type ReasoningEffort } from "./reasoning-effort";
 import type {
   CostData,
@@ -305,20 +311,54 @@ function jsonSchemaToTypeBox(schema: Record<string, unknown>): TSchema {
   return Type.Unsafe(schema);
 }
 
+type ToolStructuredContent = NonNullable<AgentToolResult["structuredContent"]>;
+
+/** Namespace pi shows for swarm tools in `tool_search` and codemode listings. */
+export const SWARM_TOOL_NAMESPACE = { name: "agent-swarm" } as const;
+
+/**
+ * `PI_TOOL_DEFERRAL`: hide non-core swarm tools behind pi's `tool_search`.
+ * Off by default until a pilot measures the prompt-cache cost of mid-session
+ * tool-set changes. Read from `process.env` by both the adapter traits (which
+ * pick the prompt's tool-discovery line) and `createSession`, so the prompt
+ * and the session always agree.
+ */
+export function isPiToolDeferralEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return parseEnvFlag(env.PI_TOOL_DEFERRAL, false);
+}
+
+/**
+ * Tools that stay declared to the model when deferral is on: the lifecycle
+ * set Claude also keeps out of ToolSearch, plus any tool the server preloads
+ * for this task through `_meta["anthropic/alwaysLoad"]` (task tool manifests).
+ */
+export function isCoreSwarmTool(tool: McpTool): boolean {
+  return CORE_TOOLS.has(tool.name) || tool._meta?.["anthropic/alwaysLoad"] === true;
+}
+
 /**
  * Convert MCP tools to pi-mono ToolDefinition objects.
  * Exported for the isError-propagation conformance test — pi-agent-core
  * derives a tool result's error flag solely from execute() throwing.
+ *
+ * With `deferNonCore`, tools outside the core set get `exposure: "deferred"`:
+ * pi leaves them out of the model's tool list until `tool_search` loads them.
  */
 export function mcpToolsToDefinitions(
   mcpClient: McpHttpClient,
-  tools: Array<{ name: string; description?: string; inputSchema: Record<string, unknown> }>,
+  tools: McpTool[],
+  options: { deferNonCore?: boolean; namespace?: { name: string } } = {},
 ): ToolDefinition[] {
   return tools.map((tool) => ({
     name: tool.name,
     label: tool.name,
     description: tool.description || tool.name,
     parameters: jsonSchemaToTypeBox(tool.inputSchema),
+    ...(tool.outputSchema && { outputSchema: jsonSchemaToTypeBox(tool.outputSchema) }),
+    ...(options.namespace && { namespace: options.namespace }),
+    ...(options.deferNonCore && {
+      exposure: isCoreSwarmTool(tool) ? ("direct" as const) : ("deferred" as const),
+    }),
     async execute(_toolCallId, params) {
       const result = await mcpClient.callTool(tool.name, params as Record<string, unknown>);
       const text = result.content
@@ -334,6 +374,10 @@ export function mcpToolsToDefinitions(
       return {
         content: [{ type: "text" as const, text: text || "(no output)" }],
         details: undefined,
+        // Not sent to the model; codemode scripts read it instead of the text.
+        ...(result.structuredContent && {
+          structuredContent: result.structuredContent as ToolStructuredContent,
+        }),
       };
     },
   }));
@@ -1076,16 +1120,42 @@ export class PiMonoSession implements ProviderSession {
   }
 }
 
+/** Per-session pi feature switches resolved from flags. */
+export interface PiSessionFeatures {
+  toolDeferral: boolean;
+}
+
+/** Extension factories for a pi session: ours first, then pi built-ins the flags turn on. */
+export function piExtensionFactories(
+  swarmExtension: ExtensionFactory,
+  features: PiSessionFeatures,
+): ExtensionFactory[] {
+  const factories: ExtensionFactory[] = [swarmExtension];
+  if (features.toolDeferral) factories.push(createToolSearchExtension());
+  return factories;
+}
+
+/** `defaultTools` additions (`+name`) that activate the built-in tools above. */
+export function piDefaultToolAdditions(features: PiSessionFeatures): string[] {
+  const additions: string[] = [];
+  if (features.toolDeferral) additions.push("+tool_search");
+  return additions;
+}
+
 export class PiMonoAdapter implements ProviderAdapter {
   readonly name = "pi";
-  readonly traits: ProviderTraits = {
-    hasMcp: true,
-    hasToolSearch: false,
-    // Pi reads ~/.pi/agent/skills itself and advertises them natively.
-    nativeSkillDiscovery: true,
-    hasLocalEnvironment: true,
-    steerModes: ["steer", "queue"],
-  };
+  // A getter so the prompt's tool-discovery line follows PI_TOOL_DEFERRAL
+  // live: the runner rebuilds the system prompt from traits on every task.
+  get traits(): ProviderTraits {
+    return {
+      hasMcp: true,
+      hasToolSearch: isPiToolDeferralEnabled(),
+      // Pi reads ~/.pi/agent/skills itself and advertises them natively.
+      nativeSkillDiscovery: true,
+      hasLocalEnvironment: true,
+      steerModes: ["steer", "queue"],
+    };
+  }
   private lastCwd = ".";
 
   async createSession(config: ProviderSessionConfig): Promise<ProviderSession> {
@@ -1099,6 +1169,7 @@ export class PiMonoAdapter implements ProviderAdapter {
     const createdSymlink = createAgentsMdSymlink(config.cwd);
 
     // 2. Discover MCP tools from swarm endpoint
+    const deferTools = isPiToolDeferralEnabled();
     let customTools: ToolDefinition[] = [];
     if (config.apiUrl && config.apiKey) {
       try {
@@ -1117,9 +1188,14 @@ export class PiMonoAdapter implements ProviderAdapter {
         }
         await mcpClient.initialize();
         const tools = await mcpClient.listTools();
-        customTools = mcpToolsToDefinitions(mcpClient, tools);
+        customTools = mcpToolsToDefinitions(mcpClient, tools, {
+          deferNonCore: deferTools,
+          namespace: SWARM_TOOL_NAMESPACE,
+        });
+        const deferredCount = deferTools ? tools.filter((t) => !isCoreSwarmTool(t)).length : 0;
         console.log(
-          `\x1b[2m[${config.role}]\x1b[0m Discovered ${tools.length} MCP tools from swarm`,
+          `\x1b[2m[${config.role}]\x1b[0m Discovered ${tools.length} MCP tools from swarm` +
+            (deferTools ? ` (${deferredCount} deferred behind tool_search)` : ""),
         );
       } catch (err) {
         console.warn(`\x1b[33m[${config.role}] Failed to discover MCP tools: ${err}\x1b[0m`);
@@ -1220,13 +1296,25 @@ export class PiMonoAdapter implements ProviderAdapter {
       env: sessionEnv,
     });
 
-    // 5. Create resource loader with system prompt + extension
+    // 5. Create resource loader with system prompt + extensions. SDK sessions
+    // load no built-in pi extension, so tool_search is added explicitly.
+    const settingsManager = SettingsManager.create(config.cwd, getAgentDir());
     const resourceLoader = new DefaultResourceLoader({
       cwd: config.cwd,
       agentDir: getAgentDir(),
+      settingsManager,
       appendSystemPrompt: config.systemPrompt ? [config.systemPrompt] : undefined,
-      extensionFactories: [swarmExtension],
+      extensionFactories: piExtensionFactories(swarmExtension, { toolDeferral: deferTools }),
     });
+    // createAgentSession only reloads a loader it builds itself. Without this
+    // call a passed loader stays empty: no appended system prompt and no
+    // extensions (swarm hooks, tool_search) reach the session.
+    await resourceLoader.reload();
+    // tool_search registers inactive; `+` adds it to the default tool set.
+    const extraDefaultTools = piDefaultToolAdditions({ toolDeferral: deferTools });
+    if (extraDefaultTools.length > 0) {
+      settingsManager.applyOverrides({ defaultTools: extraDefaultTools });
+    }
 
     // 6. Build session options
     const reasoningApplication = applyReasoningEffort("pi", config.model, config.reasoningEffort);
@@ -1239,6 +1327,7 @@ export class PiMonoAdapter implements ProviderAdapter {
       model,
       customTools,
       resourceLoader,
+      settingsManager,
       modelRuntime,
       ...reasoningSessionOptions,
     };

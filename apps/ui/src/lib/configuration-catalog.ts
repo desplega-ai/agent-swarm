@@ -413,6 +413,15 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         docsUrl: `${DOCS}ui/configuration`,
       },
       {
+        key: "PI_TOOL_DEFERRAL",
+        label: "Defer pi swarm tools (pilot)",
+        description:
+          "pi workers only. Keep the core lifecycle tools and any task-manifest tools in the tool list, and load the rest through pi's tool_search. Cuts the tool schema sent with every pi session. Off by default: pilot it on one agent first and compare cost and cache hits. Takes effect on the worker's next task.",
+        kind: "boolean",
+        defaultValue: "false",
+        docsUrl: `${DOCS}guides/harness-providers`,
+      },
+      {
         key: "SCRIPTS_ONLY_MCP",
         label: "Scripts-only MCP",
         description:

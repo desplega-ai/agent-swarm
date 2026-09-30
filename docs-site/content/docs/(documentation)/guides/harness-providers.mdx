@@ -682,13 +682,25 @@ If the runner reuses an existing repo clone that has local changes, `ensureRepoF
   Template resolution goes over HTTP (`configureHttpResolver(apiUrl, apiKey)` at `runner.ts:2206`) to obey the API/worker DB boundary. Prompt files under `src/prompts/` must remain pure — no `bun:sqlite` or `src/be/db` imports. Enforced by `scripts/check-db-boundary.sh`.
 </Callout>
 
-Swarm tool-discovery guidance follows the adapter's `hasToolSearch` trait (false when omitted). Claude Code sets it to true for native ToolSearch. Codex, OpenCode, pi, ACP, Claude Managed, Devin, and dsh set it to false; MCP-enabled sessions receive guidance that swarm tools are already in the tool list. This trait changes prompt text only, not tool registration.
+Swarm tool-discovery guidance follows the adapter's `hasToolSearch` trait (false when omitted). Claude Code sets it to true for native ToolSearch. Codex, OpenCode, ACP, Claude Managed, Devin, and dsh set it to false. pi sets it to the value of `PI_TOOL_DEFERRAL` (below); MCP-enabled sessions receive guidance that swarm tools are already in the tool list. This trait changes prompt text only, not tool registration.
+
+### pi tool deferral
+
+pi SDK sessions load none of pi's built-in extensions, so by default every swarm tool is declared to the model up front. With `PI_TOOL_DEFERRAL=true` the pi adapter:
+
+- marks each swarm tool `exposure: "direct"` when it is in `CORE_TOOLS` (`src/tools/tool-config.ts`) or the server sent `_meta["anthropic/alwaysLoad"]` for it (task tool manifests), and `exposure: "deferred"` otherwise;
+- adds `createToolSearchExtension()` to the session and `+tool_search` to its default tools;
+- reports `hasToolSearch: true`, so the prompt tells the model to load tools through its tool search.
+
+Swarm tools carry `namespace: { name: "agent-swarm" }` and, when the server declares one, their `outputSchema`; results pass `structuredContent` through to pi alongside the text. Tool names do not change.
+
+The flag defaults to `false`. Loading a deferred tool changes the tool set mid-session, and pi falls back to a transcript checkpoint for providers that cannot represent that change, which can invalidate the prompt cache. Pilot it on one pi agent with agent-scoped configuration (`PI_TOOL_DEFERRAL=true`) and compare against a pi agent on the same model: context tokens at session start, cost per task, and cache-read tokens as a share of input tokens. The worker picks the value up on its next task.
 
 ### How each adapter delivers the prompt
 
 - **Claude** — CLI flag: `cmd.push("--append-system-prompt", this.config.systemPrompt)` at [`claude-adapter.ts:245–247`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/claude-adapter.ts).
 - **Codex** — written into `AGENTS.md` in `cwd` inside a `<swarm_system_prompt>` block. The Codex SDK has no `--append-system-prompt` equivalent; this file is the only channel. Entry: `writeCodexAgentsMd(config.cwd, config.systemPrompt)` at [`codex-adapter.ts:761`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/codex-adapter.ts); implementation at [`codex-agents-md.ts:56–119`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/codex-agents-md.ts). If an `AGENTS.md` exists, the block is prepended; otherwise stacked atop any `CLAUDE.md`. Cleanup in the session `finally` at `codex-adapter.ts:738`.
-- **Pi** — SDK parameter: `new DefaultResourceLoader({ appendSystemPrompt: [config.systemPrompt], ... })` passed via `CreateAgentSessionOptions` at [`pi-mono-adapter.ts:508–519`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/pi-mono-adapter.ts).
+- **Pi** — SDK parameter: `new DefaultResourceLoader({ appendSystemPrompt: [config.systemPrompt], extensionFactories, ... })` passed via `CreateAgentSessionOptions` in [`pi-mono-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/pi-mono-adapter.ts). The adapter must `await resourceLoader.reload()` first: `createAgentSession` only reloads a loader it builds itself, and an unloaded loader contributes no appended prompt and no extensions.
 
 ### What this means for a new provider
 
