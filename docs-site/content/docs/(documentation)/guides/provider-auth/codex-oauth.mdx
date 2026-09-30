@@ -304,6 +304,35 @@ set-config key=CODEX_CREDITS_EXHAUSTED_COOLDOWN_MS value=14400000 scope=global
 
 The value must be a **positive integer of milliseconds** (e.g. `"7200000"` — no units suffix, no decimal point). The runner clamps the configured value to the `[5m, 7d]` range; values outside that range are silently brought to the nearest bound at runtime, but the write-time validator at `PUT /api/config` rejects clearly invalid inputs immediately.
 
+### Auth-failure benching
+
+A pool login that fails auth on every task (for example `workspace routing discovery unauthorized (401)`) is benched automatically, so it stops eating tasks.
+
+**Which failures count.** The runner checks the failed task's `failureReason`. A reason counts when it contains `[auth-error]` and none of these transient texts:
+
+- `waiting for the refresh lock` (lock-wait timeout)
+- `refresh rejected (429`, `refresh rejected (5`, `refresh rejected (unknown status` (throttled or upstream error)
+- `out of credits` (handled by [Workspace credits exhausted](#workspace-credits-exhausted))
+- `no credentials found in config store` (slot removed mid-draw)
+- `not a confirmed auth rejection` (revalidation threw a refresh-lock HTTP, network, or persistence error)
+
+**How the bench works.** For each counted failure on a `CODEX_OAUTH` slot, the runner calls `POST /api/keys/report-auth-failure` and waits for the reply. The API counts auth failures in a row per key. At **2 in a row**, it marks the key `rate_limited` for **365 days** and writes the `codex-auth-watch` / `bench:<keySuffix>` KV marker. The slot then drops out of `GET /api/keys/available`. One transient failure followed by a success does not bench: a success resets the count to 0. The runner also waits for the success reset (bounded to 5 seconds) before it processes the next completion, so the API sees success and failure reports in completion order. The API orders auth failures itself, with no worker clock. Each failure gets `authFailureSeq`, one more than the highest value in the table. `GET /api/keys/available` returns that highest value as `authFailureFence`. The runner reads the fence when it draws the slot, before the task starts, and sends it back as `authFence` on the success reset. The API lifts nothing for a failure recorded after that fence. So a late success from any worker, with any clock, cannot clear failures that other tasks recorded after it drew the slot. A success without a fence clears only an ordinary rate limit. A failure recorded while the task ran also keeps its count after the success: the API does not guess which came first.
+
+**How a benched slot returns.** Only proof of health lifts an auth bench:
+
+1. A real task success on the slot. The runner calls `POST /api/keys/clear-rate-limit` with `clearAuthBench: true` and the `authFence` it read with the draw. (The full-pool fallback can still draw a benched slot when no slot is available.)
+2. A re-login. `codex-login` reads `authFailureFence` first, stores the new credentials, then calls `POST /api/keys/clear-rate-limit` with `clearAuthBench: true`, `authFence`, and `keyIndex: <N>` for the slot's key. Failures recorded after the fence were on the fresh login, so a late clear keeps them. If `codex-login` cannot read the fence, it skips the clear and prints a warning. The slot returns to the pool at once. When the new login is a different account, the API also retires the previous login's bench at that slot. The `codex-auth-expiry-watch` script is a backstop: it sees a newer `codex_oauth_<N>` write and clears the bench within about 1 hour.
+
+`POST /api/keys/clear-rate-limit` without `clearAuthBench: true` does not clear a key whose count is 2 or more. So a usage sweep or another caller cannot undo an auth bench by mistake. An ordinary rate-limit report on a benched key never shortens the bench. The bench does not expire on its own: `GET /api/keys/available` never auto-clears a key whose count is 2 or more, even after its deadline.
+
+To re-login a slot, the slot owner runs this with their own ChatGPT account:
+
+```bash
+npx @desplega.ai/agent-swarm codex-login --slot <N> --api-url <public API URL>
+```
+
+`GET /api/keys/status?keyType=CODEX_OAUTH` shows `consecutiveAuthFailures` and `lastAuthFailureAt` for each key.
+
 ### Backwards compatibility
 
 Single-credential deploys keep working unchanged:

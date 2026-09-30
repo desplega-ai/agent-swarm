@@ -14975,7 +14975,7 @@
     "/api/oauth/keep-warm/codex": {
       "post": {
         "summary": "Locked keep-warm refresh sweep across all Codex OAuth pool slots",
-        "description": "Enumerates codex_oauth_* slots and refreshes any older than ~7 days through the same locked getValidCodexOAuth path used at task time. Skips slots already benched by codex-auth-expiry-watch.",
+        "description": "Enumerates codex_oauth_* slots and refreshes any older than ~7 days through the same locked getValidCodexOAuth path used at task time. Skips slots with a codex-auth-watch bench marker (auth-failure bench or codex-auth-expiry-watch).",
         "tags": [
           "OAuth"
         ],
@@ -15647,6 +15647,115 @@
         }
       }
     },
+    "/api/keys/report-auth-failure": {
+      "post": {
+        "summary": "Record an auth failure for a pooled key; bench it after 2 in a row",
+        "tags": [
+          "API Keys"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "keyType": {
+                    "type": "string"
+                  },
+                  "keySuffix": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 10
+                  },
+                  "keyIndex": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "taskId": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "scope": {
+                    "type": "string"
+                  },
+                  "scopeId": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "keyType",
+                  "keySuffix",
+                  "keyIndex"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Failure recorded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "consecutiveAuthFailures": {
+                      "type": "integer"
+                    },
+                    "benched": {
+                      "type": "boolean"
+                    },
+                    "rateLimitedUntil": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "consecutiveAuthFailures",
+                    "benched",
+                    "rateLimitedUntil"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/keys/report-rate-limit-windows": {
       "post": {
         "summary": "Record provider-emitted rate-limit window telemetry for an API key",
@@ -15867,12 +15976,16 @@
                         "string",
                         "null"
                       ]
+                    },
+                    "authFailureFence": {
+                      "type": "integer"
                     }
                   },
                   "required": [
                     "success",
                     "availableIndices",
-                    "totalKeys"
+                    "totalKeys",
+                    "authFailureFence"
                   ]
                 }
               }
@@ -16063,6 +16176,15 @@
                               null
                             ]
                           },
+                          "consecutiveAuthFailures": {
+                            "type": "integer"
+                          },
+                          "lastAuthFailureAt": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
                           "modelLimits": {
                             "type": "array",
                             "items": {
@@ -16118,6 +16240,8 @@
                           "rateLimitWindows",
                           "plan",
                           "planSource",
+                          "consecutiveAuthFailures",
+                          "lastAuthFailureAt",
                           "modelLimits",
                           "createdAt",
                           "updatedAt"
@@ -16390,6 +16514,17 @@
                   },
                   "scopeId": {
                     "type": "string"
+                  },
+                  "clearAuthBench": {
+                    "type": "boolean"
+                  },
+                  "keyIndex": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "authFence": {
+                    "type": "integer",
+                    "minimum": 0
                   }
                 },
                 "required": [

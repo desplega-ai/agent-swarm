@@ -5,7 +5,7 @@ description: A scheduled workflow that first asks "did anything actually happen?
 
 A scheduled workflow that first asks "did anything actually happen?" and **skips silently** if not — so it never produces empty reports or noise commits.
 
-<Mermaid chart={`flowchart LR
+<Mermaid title="No-op workflow: a cron run asks whether anything changed. If not, it exits quietly with no post and no commit. If so, it does the work." chart={`flowchart LR
   C["Cron fires"] --> Q{"Did anything<br/>change?"}
   Q -- no --> NO["No-op: exit quietly<br/>(no post, no commit)"]
   Q -- yes --> WORK["Do the work<br/>(update / report / notify)"]

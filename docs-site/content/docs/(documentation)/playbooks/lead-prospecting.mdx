@@ -24,7 +24,7 @@ description: Plug your prospecting stack into the swarm — daily discovery, dra
 
 Plug your prospecting tools into the swarm and let agents handle discovery, drafting, and scheduling — with a human gate before anything goes out.
 
-<Mermaid chart={`flowchart LR
+<Mermaid title="Lead prospecting: a daily cron discovers companies and contacts, skips those already contacted, drafts outreach and emails a digest. A human gate then either sends via AgentMail or archives the drafts." chart={`flowchart LR
   C["Cron: daily"] --> D["Discover companies<br/>w/ growth signals"]
   D --> F["Find marketing/<br/>growth contacts"]
   F --> X{"Already<br/>contacted?"}

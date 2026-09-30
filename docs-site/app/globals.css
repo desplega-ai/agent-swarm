@@ -8,6 +8,15 @@
 
 /* Amber accent colors — matching new-ui (Zinc base + amber primary) */
 @theme {
+  /* Light page is white (DESIGN.md `background`), not Fumadocs' #f5f5f5, and muted text
+     is darkened to clear 4.5:1 on every light surface it sits on (white 6.0, card 5.3,
+     secondary 5.2). Fumadocs' stock #737373 on #f5f5f5 measured 4.35:1. Dark mode keeps
+     the Fumadocs values, which pass. */
+  --color-fd-background: oklch(1 0 0);
+  --color-fd-muted-foreground: oklch(0.5 0.016 286);
+  /* Sidebar and code-block surface: DESIGN.md `surface`. Shiki's light comment colour
+     (#6A737D) is 4.3:1 on Fumadocs' #f2f2f2 card and 4.65:1 on this. */
+  --color-fd-card: oklch(0.985 0.0015 286);
   --color-fd-primary: oklch(0.555 0.163 48.998);
   --color-fd-primary-foreground: oklch(0.985 0 0);
   --color-fd-ring: oklch(0.555 0.163 48.998);
@@ -21,4 +30,69 @@
   --color-fd-ring: oklch(0.769 0.188 70.08);
   --color-fd-accent: oklch(0.274 0.006 286.033);
   --color-fd-accent-foreground: oklch(0.985 0 0);
+}
+
+/* Type rendering. The font stack stays the OS default (documented divergence in DESIGN.md). */
+html {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Active sidebar row: amber text on its 10% amber tint over the grey sidebar measured 3.9:1
+   in light mode. A darker amber (5.4:1) clears 4.5:1; dark mode already passes. */
+html:not(.dark) :is(#nd-sidebar, #nd-sidebar-mobile) [data-active="true"] {
+  color: oklch(0.5 0.14 49);
+}
+
+#nd-page :is(h1, h2, h3) {
+  text-wrap: balance;
+}
+
+#nd-page p {
+  text-wrap: pretty;
+}
+
+/* Measure: cap long-form text at 72ch (60-75 target). Tables, code and `full: true`
+   pages (API reference) keep their width. List items that wrap a block child keep it too. */
+#nd-page:not([data-full="true"]) :is(p, blockquote, li:not(:has(> pre, > figure, > table, > div))) {
+  max-width: 72ch;
+}
+
+/* Code blocks without a title float the copy button over the first line, where it hid
+   text (the curl sample on API pages). Reserve a gutter beside the scroller for it. */
+figure.shiki > .absolute ~ [role="region"] {
+  margin-inline-end: 2.25rem;
+}
+
+/* Mobile chrome: grow the hit area to 44px without moving the visible controls. */
+@media (max-width: 767px), (pointer: coarse) {
+  #nd-subnav button,
+  button[aria-label="Toggle Theme"] {
+    position: relative;
+  }
+
+  #nd-subnav button::after {
+    content: "";
+    position: absolute;
+    inset: -5px;
+  }
+
+  button[aria-label="Toggle Theme"]::after {
+    content: "";
+    position: absolute;
+    inset: -8px 0;
+  }
+}
+
+/* Docs are a reading surface: no motion for readers who ask for none. Covers the sidebar
+   collapse, the active-row highlight and every other Fumadocs transition. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

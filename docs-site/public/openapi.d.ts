@@ -4835,7 +4835,7 @@ export interface paths {
         put?: never;
         /**
          * Locked keep-warm refresh sweep across all Codex OAuth pool slots
-         * @description Enumerates codex_oauth_* slots and refreshes any older than ~7 days through the same locked getValidCodexOAuth path used at task time. Skips slots already benched by codex-auth-expiry-watch.
+         * @description Enumerates codex_oauth_* slots and refreshes any older than ~7 days through the same locked getValidCodexOAuth path used at task time. Skips slots with a codex-auth-watch bench marker (auth-failure bench or codex-auth-expiry-watch).
          */
         post: {
             parameters: {
@@ -5208,6 +5208,78 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/keys/report-auth-failure": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Record an auth failure for a pooled key; bench it after 2 in a row */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        keyType: string;
+                        keySuffix: string;
+                        keyIndex: number;
+                        /** Format: uuid */
+                        taskId?: string;
+                        scope?: string;
+                        scopeId?: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Failure recorded */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @enum {boolean} */
+                            success: true;
+                            consecutiveAuthFailures: number;
+                            benched: boolean;
+                            rateLimitedUntil: string | null;
+                        };
+                    };
+                };
+                /** @description Validation error */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/keys/report-rate-limit-windows": {
         parameters: {
             query?: never;
@@ -5323,6 +5395,7 @@ export interface paths {
                             totalKeys: number;
                             modelBlockedIndices?: number[];
                             earliestModelResetAt?: string | null;
+                            authFailureFence: number;
                         };
                     };
                 };
@@ -5413,6 +5486,8 @@ export interface paths {
                                 plan: string | null;
                                 /** @enum {string|null} */
                                 planSource: "manual" | "detected" | "estimated" | null;
+                                consecutiveAuthFailures: number;
+                                lastAuthFailureAt: string | null;
                                 modelLimits: {
                                     model: string;
                                     window: string;
@@ -5606,6 +5681,9 @@ export interface paths {
                         keySuffix: string;
                         scope?: string;
                         scopeId?: string;
+                        clearAuthBench?: boolean;
+                        keyIndex?: number;
+                        authFence?: number;
                     };
                 };
             };

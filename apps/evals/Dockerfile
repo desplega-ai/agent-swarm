@@ -10,8 +10,9 @@ ENV EVALS_PORT=4801 \
 # Build with the repo root as context:
 #   docker build -f apps/evals/Dockerfile .
 #
-# The eval runner imports root src/e2b helpers and the models.dev pricing
-# snapshot, so the image needs those repo-root files in addition to evals/.
+# The eval runner imports root src/e2b helpers, the codex ChatGPT OAuth helpers
+# (src/swarm/codex-auth.ts) and the models.dev pricing snapshot, so the image
+# needs those repo-root files in addition to evals/.
 #
 # evals is a member of the root Bun workspace: its deps are recorded ONLY in the
 # root bun.lock (there is no evals/bun.lock anymore). Install at the workspace
@@ -29,6 +30,7 @@ COPY packages/model-catalog ./packages/model-catalog
 COPY apps/evals ./apps/evals
 COPY src/e2b ./src/e2b
 COPY src/utils ./src/utils
+COPY src/providers/codex-oauth ./src/providers/codex-oauth
 COPY src/be/modelsdev-cache.json ./src/be/modelsdev-cache.json
 
 WORKDIR /app/apps/evals

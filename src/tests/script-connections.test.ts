@@ -590,6 +590,8 @@ describe("script connections", () => {
       // 184 alters agents and agent_tasks, which this migration-112-only fixture
       // does not create.
       markMigrationApplied(database, "184_model_catalog.sql");
+      // 185 alters api_key_status, which this migration-112-only fixture does not create.
+      markMigrationApplied(database, "185_api_key_auth_failures.sql");
 
       const id = crypto.randomUUID();
       const now = new Date().toISOString();

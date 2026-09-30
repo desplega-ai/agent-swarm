@@ -131,6 +131,7 @@ export function SwarmConfigSection() {
                   e.stopPropagation();
                   handleEdit(cfg);
                 }}
+                aria-label={`Edit ${cfg.key}`}
               >
                 <Pencil className="h-3 w-3" />
               </Button>
@@ -142,6 +143,7 @@ export function SwarmConfigSection() {
                   e.stopPropagation();
                   setDeleteTarget(cfg);
                 }}
+                aria-label={`Delete ${cfg.key}`}
               >
                 <Trash2 className="h-3 w-3" />
               </Button>

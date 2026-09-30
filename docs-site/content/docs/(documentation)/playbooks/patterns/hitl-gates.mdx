@@ -5,7 +5,7 @@ description: Pause a workflow mid-flight until a human approves in Slack. The ag
 
 Pause a workflow mid-flight until a human approves in Slack. The agent does the work; the human owns the irreversible decision.
 
-<Mermaid chart={`flowchart LR
+<Mermaid title="Human-in-the-loop gate: the agent does the work, the workflow pauses on request-human-input, then proceeds on approve or archives on reject." chart={`flowchart LR
   W["Agent does the work<br/>(draft / audit / plan)"] --> G{{"request-human-input<br/>(workflow pauses)"}}
   G -- "approve" --> GO["Proceed<br/>(send / merge / prune)"]
   G -- "reject" --> STOP["Archive / abort"]
