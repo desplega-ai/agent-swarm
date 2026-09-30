@@ -4,6 +4,7 @@ import { useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAgentFsLs } from "@/api/hooks/use-agent-fs";
 import { OpenInAgentFsButton } from "@/components/comb/file-actions";
+import { FolderComments } from "@/components/comb/folder-comments";
 import { PinButton } from "@/components/comb/pin-button";
 import { useAuthorLabel } from "@/components/comb/use-author-label";
 import { DataGrid } from "@/components/shared/data-grid";
@@ -164,6 +165,8 @@ export function FolderView({ folder }: { folder: DrivePath }) {
           pagination={false}
         />
       )}
+      {/* Open comments below the folder, with "Send N to swarm" (step-9). */}
+      <FolderComments folder={folder} />
     </div>
   );
 }

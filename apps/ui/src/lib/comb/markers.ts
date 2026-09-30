@@ -28,21 +28,30 @@ interface Authored {
 
 /**
  * The task id when `reply` is the swarm's "sent" reply on `thread`, else
- * null. The browser cannot tell which drive member is the swarm service
- * account (`/status` does not name it, and its email is configurable), so
- * the rule is: the marker opens the reply, and the reply's author is not the
- * thread's author. A human cannot mark their own thread as sent.
+ * null. The marker must open the reply, and the swarm service account
+ * (`/status` `agent_fs.comb.service_user_id`) must be its author. When that
+ * id is unknown (null, or an older API), any author except the thread's own
+ * author counts: a human cannot mark their own thread as sent. The server
+ * applies the same rule (`src/comb/markers.ts`).
  */
-export function sentReplyTaskId(thread: { author: string }, reply: Authored): string | null {
-  return reply.author !== thread.author ? sentTaskIdOf(reply) : null;
+export function sentReplyTaskId(
+  thread: { author: string },
+  reply: Authored,
+  serviceUserId: string | null = null,
+): string | null {
+  const bySwarm = serviceUserId ? reply.author === serviceUserId : reply.author !== thread.author;
+  return bySwarm ? sentTaskIdOf(reply) : null;
 }
 
 /** True when any reply of the thread is the swarm's "sent" reply (`sentReplyTaskId`). */
-export function isSentToSwarm(thread: {
-  author: string;
-  replies: ReadonlyArray<Authored>;
-}): boolean {
-  return thread.replies.some((reply) => sentReplyTaskId(thread, reply) !== null);
+export function isSentToSwarm(
+  thread: {
+    author: string;
+    replies: ReadonlyArray<Authored>;
+  },
+  serviceUserId: string | null = null,
+): boolean {
+  return thread.replies.some((reply) => sentReplyTaskId(thread, reply, serviceUserId) !== null);
 }
 
 export type BodySegment = { kind: "text"; text: string } | { kind: "swarm"; text: string };

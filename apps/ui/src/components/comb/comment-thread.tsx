@@ -4,6 +4,7 @@ import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { useResolveComment } from "@/api/hooks/use-agent-fs";
 import { useAuthorLabel } from "@/components/comb/use-author-label";
+import { useCombServiceUserId } from "@/components/comb/use-comb-service-user";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -58,7 +59,8 @@ function Byline({ entry, children }: { entry: CommentEntry; children?: ReactNode
 }
 
 function Reply({ thread, reply }: { thread: CommentListEntry; reply: CommentEntry }) {
-  const taskId = sentReplyTaskId(thread, reply);
+  const serviceUserId = useCombServiceUserId();
+  const taskId = sentReplyTaskId(thread, reply, serviceUserId);
   return (
     <li className="flex flex-col gap-1 py-2">
       <Byline entry={reply} />

@@ -4,6 +4,7 @@ import { Link, Navigate } from "react-router-dom";
 import { useAgentFsLs, useAgentFsStat } from "@/api/hooks/use-agent-fs";
 import { CommentRail } from "@/components/comb/comment-rail";
 import { FileHeader } from "@/components/comb/file-header";
+import { SendBatchButton, SendThreadButton } from "@/components/comb/send-to-swarm";
 import { FileViewer } from "@/components/comb/viewers/file-viewer";
 import { ViewerSkeleton } from "@/components/comb/viewers/viewer-skeleton";
 import { EmptyState } from "@/components/shared/empty-state";
@@ -62,7 +63,16 @@ function FileBody({ file, stat }: { file: DrivePath; stat: StatResult }) {
           <FileViewer file={file} stat={stat} />
         </div>
         {/* Comment rail (step-7). Mount points: threadActions, railHeaderActions, renderComposerExtras. */}
-        <CommentRail file={file} stat={stat} viewerRef={viewerRef} />
+        <CommentRail
+          file={file}
+          stat={stat}
+          viewerRef={viewerRef}
+          // step-9: Send to swarm (one thread, and every open @swarm thread of the file).
+          threadActions={(thread) => <SendThreadButton file={file} thread={thread} />}
+          railHeaderActions={({ open }) => (
+            <SendBatchButton drive={file} scopePath={file.path} threads={open} compact />
+          )}
+        />
       </div>
     </div>
   );

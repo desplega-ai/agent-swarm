@@ -43,6 +43,38 @@ type AgentFsRawUploadResponse = {
   deduped?: boolean;
 };
 
+/** One agent-fs comment (`comment-get`, `comment-add`). Dates arrive as ISO strings. */
+export type AgentFsComment = {
+  id: string;
+  parentId?: string;
+  /** Stored exactly as the client sent it: "docs/a.md" or "/docs/a.md". */
+  path: string;
+  lineStart?: number;
+  lineEnd?: number;
+  quotedContent?: string;
+  quote?: { exact: string; prefix?: string; suffix?: string };
+  body: string;
+  /** agent-fs user id. */
+  author: string;
+  authorDisplayName?: string;
+  resolved: boolean;
+  /** The file version the comment was made on. */
+  fileVersion?: number;
+  createdAt: string;
+};
+
+/** One entry of a file's `log`. */
+export type AgentFsFileVersion = { version: number; createdAt: string };
+
+/** `comment-get`: a comment and its replies (oldest first). */
+export type AgentFsCommentThread = {
+  comment: AgentFsComment;
+  replies: AgentFsComment[];
+};
+
+// A failed identity lookup is not asked again for this long.
+const SERVICE_USER_RETRY_MS = 60_000;
+
 export class AgentFsProvider implements FileStorageProvider {
   readonly id = "agent-fs";
   readonly capabilities = {
@@ -57,6 +89,8 @@ export class AgentFsProvider implements FileStorageProvider {
   private readonly orgId: string;
   private readonly driveId: string;
   private readonly fetchImpl: typeof fetch;
+  private serviceUser: Promise<string> | null = null;
+  private serviceUserRetryAt = 0;
 
   constructor(options: AgentFsProviderOptions = {}) {
     this.apiUrl = stripTrailingSlash(options.apiUrl ?? process.env.AGENT_FS_API_URL ?? "");
@@ -242,6 +276,63 @@ export class AgentFsProvider implements FileStorageProvider {
       path: providerPath(scope),
       version: scope.version,
     })) as FileVersion;
+  }
+
+  // Comb (the dashboard review space) reads and answers comments in the shared
+  // drive with the bootstrap key. These stay narrow on purpose: no generic op
+  // call runs with the bootstrap key.
+
+  /** `comment-get` in the shared drive: the comment and its replies. */
+  async getComment(id: string): Promise<AgentFsCommentThread> {
+    return (await this.ops({ op: "comment-get", id })) as AgentFsCommentThread;
+  }
+
+  /** `log` of one file in the shared drive (at most 200 versions). */
+  async getFileVersions(path: string): Promise<AgentFsFileVersion[]> {
+    const result = asRecord(await this.ops({ op: "log", path, limit: 200 }));
+    return Array.isArray(result?.versions) ? (result.versions as AgentFsFileVersion[]) : [];
+  }
+
+  /** Reply to a root comment in the shared drive. The swarm service account is the author. */
+  async replyToComment(parentId: string, body: string): Promise<AgentFsComment> {
+    return (await this.ops({ op: "comment-add", parentId, body })) as AgentFsComment;
+  }
+
+  /**
+   * The agent-fs user id of this provider's key: the swarm service account
+   * that authors Comb's "sent" replies. One `/auth/me` call, then cached for
+   * the life of the provider (a key change builds a new provider).
+   */
+  getServiceUserId(): Promise<string> {
+    if (!this.serviceUser) {
+      if (Date.now() < this.serviceUserRetryAt) {
+        return Promise.reject(
+          new FilesError("Provider", "agent-fs identity lookup failed recently"),
+        );
+      }
+      this.serviceUser = this.fetchServiceUserId().catch((error: unknown) => {
+        this.serviceUser = null;
+        this.serviceUserRetryAt = Date.now() + SERVICE_USER_RETRY_MS;
+        throw error;
+      });
+    }
+    return this.serviceUser;
+  }
+
+  private async fetchServiceUserId(): Promise<string> {
+    const response = await this.fetchWithDeadline(
+      `${this.apiUrl}/auth/me`,
+      { method: "GET", headers: this.authHeaders() },
+      agentFsRequestTimeoutMs(),
+    );
+    if (!response.ok) {
+      throw await responseToFilesError(response);
+    }
+    const me = asRecord(await response.json().catch(() => null));
+    if (typeof me?.userId !== "string" || !me.userId) {
+      throw new FilesError("Provider", "agent-fs /auth/me did not return a userId");
+    }
+    return me.userId;
   }
 
   private async fetchRaw(

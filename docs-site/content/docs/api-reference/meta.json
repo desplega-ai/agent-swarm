@@ -13,6 +13,7 @@
     "assets",
     "budgets",
     "codex-oauth",
+    "comb",
     "config",
     "core",
     "debug",

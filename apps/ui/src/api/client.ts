@@ -32,6 +32,9 @@ import type {
   ChannelMessage,
   ChannelsResponse,
   ClaudeRuntimeConfig,
+  CombReviewBatchInput,
+  CombReviewBatchResult,
+  CombSkippedComment,
   CreateUserInput,
   CredentialMissingAgent,
   CredentialMissingAgentsResponse,
@@ -235,6 +238,19 @@ async function throwTriggerSchemaErrorIfMatch(res: Response, genericLabel: strin
  * catalog bundle fails validation, and 404 for an unknown template; the catalog
  * page renders `diagnostics` inline, one line per finding.
  */
+/** "Send to swarm" failed. A 409 carries why each comment was left out. */
+export class CombSendError extends Error {
+  readonly status: number;
+  readonly skipped: CombSkippedComment[];
+
+  constructor(message: string, status: number, skipped: CombSkippedComment[] = []) {
+    super(message);
+    this.name = "CombSendError";
+    this.status = status;
+    this.skipped = skipped;
+  }
+}
+
 export class ExtensionInstallError extends Error {
   readonly diagnostics: string[];
   constructor(message: string, diagnostics: string[]) {
@@ -827,6 +843,29 @@ class ApiClient {
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
       throw new Error(err.error || `Failed to invite agent-fs member: ${res.status}`);
+    }
+    return res.json();
+  }
+
+  /**
+   * Comb "Send to swarm": one lead task for these agent-fs comments. The
+   * server reads each comment again and skips any that are resolved,
+   * replies, or already sent.
+   */
+  async sendCombReviewBatch(data: CombReviewBatchInput): Promise<CombReviewBatchResult> {
+    const url = `${this.getBaseUrl()}/api/comb/review-batches`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: this.getHeaders(),
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new CombSendError(
+        err.error || `Failed to send comments to the swarm: ${res.status}`,
+        res.status,
+        Array.isArray(err.skipped) ? err.skipped : [],
+      );
     }
     return res.json();
   }
