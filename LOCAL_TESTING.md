@@ -223,10 +223,11 @@ The static UI build still serves the dashboard unless `E2E_UI_URL` points at a d
 | `E2E_API_KEY` | Bearer for that API. Required with `E2E_API_URL`. |
 | `E2E_UI_URL` | Deployed dashboard to drive instead of the static build. Its origin must be on the API's `APP_URL` for the page preview iframe. |
 | `E2E_REMOTE_SEED=1` | Run the seed once against the remote API (idempotent, every name `e2e-` prefixed). Without it, seeded specs and id routes are skipped. |
+| `E2E_COMB_AGENT_FS_URL` | Local mode only: agent-fs 0.15.0+ server URL that turns on the Comb flow in `specs/comb.spec.ts`. The flow is skipped without it. |
 | `E2E_DEBUG=1` | Log the worker API and every `/api` response. |
 | `E2E_KEEP=1` | Local mode only: keep the DB, the log, and the seed manifest. |
 
-Specs tagged `@local` (none today) run only in local mode. They are for assertions on escape-hatch state such as stalled tasks.
+Specs tagged `@local` (`specs/comb.spec.ts`) run only in local mode. They are for assertions on escape-hatch state such as stalled tasks.
 
 ```bash
 PORT=3999 DATABASE_PATH=/tmp/e2e-remote.sqlite AGENT_SWARM_API_KEY=remotekey NODE_ENV=test \

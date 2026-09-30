@@ -1,10 +1,7 @@
 import { CheckCheck } from "lucide-react";
 import { Link } from "react-router-dom";
-import {
-  type AgentFsMentions,
-  useDriveMembers,
-  useMarkMentionsRead,
-} from "@/api/hooks/use-agent-fs";
+import { type AgentFsMentions, useMarkMentionsRead } from "@/api/hooks/use-agent-fs";
+import { useAuthorLabel } from "@/components/comb/use-author-label";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { CommentNotificationEntry } from "@/lib/agent-fs/types";
@@ -31,11 +28,7 @@ interface AgentFsMentionsSectionProps {
  */
 export function AgentFsMentionsSection({ drive, query, onNavigate }: AgentFsMentionsSectionProps) {
   const markRead = useMarkMentionsRead(drive);
-  const members = useDriveMembers(drive).data?.members;
-  const actorName = (userId: string) => {
-    const member = members?.find((m) => m.userId === userId);
-    return member ? member.displayName || member.email : "someone";
-  };
+  const label = useAuthorLabel(drive);
   const notifications = query.data?.notifications ?? [];
   const unreadCount = query.data?.unreadCount ?? 0;
 
@@ -74,7 +67,7 @@ export function AgentFsMentionsSection({ drive, query, onNavigate }: AgentFsMent
             <li key={entry.id}>
               <MentionItem
                 entry={entry}
-                actor={actorName(entry.actor)}
+                actor={label(entry.actor, "someone")}
                 to={mentionRoute(drive, entry)}
                 onOpen={() => {
                   if (!entry.read) markRead.mutate({ ids: [entry.id] });

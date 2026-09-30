@@ -43,6 +43,8 @@ services:
 
   # Bucket versioning gives agent-fs content diffs and revert (Comb's
   # "Review changes"). agent-fs checks it once at startup, so it runs here first.
+  # On a running stack: docker compose -f docker-compose.local.yml up -d minio-init && \
+  #   docker compose -f docker-compose.local.yml restart agent-fs
   minio-init:
     image: pgsty/minio:RELEASE.2026-08-04T00-00-00Z@sha256:b6bfe7239bfc83fb90d31612d9704d86039dd714f7904b3f1ad68f211e602372
     depends_on:

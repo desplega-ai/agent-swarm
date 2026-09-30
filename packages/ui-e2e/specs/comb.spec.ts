@@ -1,4 +1,3 @@
-import { readTarget } from "../boot/policy";
 import { expect, test } from "../fixtures";
 
 interface CombStatus {
@@ -18,14 +17,12 @@ interface ConfigRow {
 
 // Comb reads the agent-fs server's /health features. The flow below needs
 // agent-fs 0.15.0 or later. Run it locally with an agent-fs server, for example:
-//   E2E_AGENT_FS_URL=http://localhost:7433 bun run e2e:ui -- specs/comb.spec.ts
-const agentFsUrl = process.env.E2E_AGENT_FS_URL?.trim().replace(/\/+$/, "") || null;
+//   E2E_COMB_AGENT_FS_URL=http://localhost:7433 bun run e2e:ui -- specs/comb.spec.ts
+const agentFsUrl = process.env.E2E_COMB_AGENT_FS_URL?.trim().replace(/\/+$/, "") || null;
 
-test("Comb is off without agent-fs", { tag: "@smoke" }, async ({ page, api, swarm, clean }) => {
-  test.skip(
-    readTarget(process.env).mode === "remote",
-    "this test checks the default E2E API, and a remote API can have Comb on",
-  );
+// Both tests are @local: the config drops @local in remote mode, where a remote
+// API can have Comb on and this flow must never write config into it.
+test("Comb is off without agent-fs", { tag: "@local" }, async ({ page, api, swarm, clean }) => {
   const status = await api.get<StatusBody>("/status");
   expect(status.agent_fs?.comb?.enabled).toBe(false);
 
@@ -44,13 +41,16 @@ test("Comb is off without agent-fs", { tag: "@smoke" }, async ({ page, api, swar
   await clean.assertClean();
 });
 
-test("Comb connects, comments, replies, and resolves on agent-fs", async ({
+test("Comb connects, comments, replies, and resolves on agent-fs", { tag: "@local" }, async ({
   page,
   api,
   clean,
   seed,
 }) => {
-  test.skip(!agentFsUrl, "set E2E_AGENT_FS_URL to an agent-fs 0.15.0+ server to run this flow");
+  test.skip(
+    !agentFsUrl,
+    "set E2E_COMB_AGENT_FS_URL to an agent-fs 0.15.0+ server to run this flow",
+  );
   test.skip(!seed, "remote run without seed");
   const baseUrl = agentFsUrl as string;
   const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;

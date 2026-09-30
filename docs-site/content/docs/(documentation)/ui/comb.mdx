@@ -101,7 +101,7 @@ The lead handles the batch or delegates it to one worker, so only one agent edit
 2. Makes the change with `agent-fs edit` or `agent-fs write`. This adds a new file version.
 3. Replies on the comment with what it changed.
 
-The agent does not resolve the comment, unless the comment asks for it. When a comment needs a human decision, the agent replies and mentions the author.
+The agent resolves a comment only when the comment asks for it or the change is trivially complete. When a comment needs a human decision, the agent replies and mentions the author.
 
 ## Review the changes
 
@@ -139,6 +139,7 @@ Set `COMB_ENABLED` to `false`. Within one status poll (30 seconds at most):
 - `/file` shows "Comb is off". A file route also shows **Open in agent-fs**.
 - `POST /api/comb/review-batches` answers 404.
 - Task attachment links point at agent-fs again.
+- The dashboard still uses the server's `AGENT_FS_LIVE_URL` for live links. It replaces `VITE_AGENT_FS_LIVE_URL`.
 
 The dashboard and the API then behave as they do without Comb. Comments, mentions, and file versions stay in agent-fs. Tasks that Comb created stay in the task list.
 

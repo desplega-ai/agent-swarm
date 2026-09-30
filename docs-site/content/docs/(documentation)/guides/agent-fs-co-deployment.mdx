@@ -37,7 +37,7 @@ The first-class agent-fs integration has two deliberate v1 limits:
 
 `docker-compose.local.yml` and `docker-compose.example.yml` include MinIO and agent-fs. The API waits for agent-fs, sets `AGENT_FS_API_URL=http://agent-fs:7433`, and registers a service key on first boot when `API_AGENT_FS_API_KEY` is not supplied.
 
-The `minio-init` service turns on object versioning for the bucket. agent-fs needs it for content diffs and `revert`, which [Comb](/docs/ui/comb) uses to review agent edits. agent-fs checks versioning once at startup. On a stack that predates this change, run `docker compose up` again, then `docker compose restart agent-fs`. Versions written before that keep no stored content. For your own S3 bucket (for example with Helm), turn on versioning before agent-fs starts.
+The `minio-init` service turns on object versioning for the bucket. agent-fs needs it for content diffs and `revert`, which [Comb](/docs/ui/comb) uses to review agent edits. agent-fs checks versioning once at startup. On a running stack, run `docker compose -f docker-compose.local.yml up -d minio-init && docker compose -f docker-compose.local.yml restart agent-fs`. Versions written before that keep no stored content. For your own S3 bucket (for example with Helm), turn on versioning before agent-fs starts.
 
 ```bash
 docker compose -f docker-compose.local.yml up --build
