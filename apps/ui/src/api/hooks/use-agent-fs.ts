@@ -57,15 +57,30 @@ export interface AgentFsAccess {
   /** `useAgentFs().endpoint`, so the `connect()` eviction matches every key. */
   endpoint: string;
   userId: string | null;
+  /** The drive whose change stream is live (step-11). Its queries do not poll. */
+  liveDriveId?: string | null;
 }
 
 export function useAgentFsAccess(): AgentFsAccess {
-  const { state, client, endpoint, credential } = useAgentFs();
+  const { state, client, endpoint, credential, liveDriveId } = useAgentFs();
   return {
     client: state === "ready" ? client : null,
     endpoint: endpoint ?? "",
     userId: credential?.userId ?? null,
+    liveDriveId,
   };
+}
+
+/** The dashboard's default poll (`app/providers.tsx`). */
+const COMB_POLL_MS = 10_000;
+
+/**
+ * `refetchInterval` for `stat`, `ls`, and comment queries: off while the
+ * drive's change stream is live (its events refresh them, see
+ * `keysToInvalidate`), the dashboard's 10 s poll otherwise.
+ */
+function drivePoll(access: AgentFsAccess, target: { driveId: string }) {
+  return access.liveDriveId === target.driveId ? false : COMB_POLL_MS;
 }
 
 /** `["agent-fs", endpoint, userId, orgId, driveId, kind, path]` for one drive path. */
@@ -97,6 +112,7 @@ export function agentFsLsQuery(access: AgentFsAccess, target: DrivePath) {
       ),
     enabled: access.client !== null,
     retry: agentFsRetry,
+    refetchInterval: drivePoll(access, target),
   });
 }
 
@@ -119,6 +135,7 @@ export function useAgentFsStat(target: DrivePath) {
       ),
     enabled: access.client !== null,
     retry: agentFsRetry,
+    refetchInterval: drivePoll(access, target),
   });
 }
 
@@ -348,10 +365,11 @@ export function agentFsCommentsQuery(access: AgentFsAccess, file: DrivePath) {
     },
     enabled: access.client !== null,
     retry: agentFsRetry,
+    refetchInterval: drivePoll(access, file),
   });
 }
 
-/** The file's threads. Polls on the dashboard default (10 s). Split open and resolved by `thread.resolved`. */
+/** The file's threads. Polls every 10 s unless the drive is live. Split open and resolved by `thread.resolved`. */
 export function useAgentFsComments(file: DrivePath) {
   return useQuery(agentFsCommentsQuery(useAgentFsAccess(), file));
 }
