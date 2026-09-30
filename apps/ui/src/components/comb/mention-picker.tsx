@@ -16,6 +16,7 @@ import {
 } from "@/lib/comb/mentions";
 import type { ComposerExtrasContext } from "./comment-composer";
 import { useCommentContext } from "./comment-context";
+import { useCombServiceUserId } from "./use-comb-service-user";
 
 /** The textarea's list attributes, removed when the picker turns off or unmounts. */
 const LIST_ATTRIBUTES = ["aria-autocomplete", "aria-controls", "aria-activedescendant"] as const;
@@ -56,10 +57,11 @@ function MentionPicker({
   const { userId } = useAgentFsAccess();
   const enabled = features.has("comment-mentions") && features.has("drive-members");
   const members = useDriveMembers(file).data?.members;
-  // Step-9 merge: pass `status.agent_fs.comb.service_user_id` as the third argument.
+  // The swarm service account posts the "sent" replies. Nobody mentions it.
+  const serviceUserId = useCombServiceUserId();
   const labeled = useMemo(
-    () => labelMembers(pickableMembers(members ?? [], userId)),
-    [members, userId],
+    () => labelMembers(pickableMembers(members ?? [], userId, serviceUserId)),
+    [members, userId, serviceUserId],
   );
 
   // Only picked labels still in the text are mentions. The ids also reach

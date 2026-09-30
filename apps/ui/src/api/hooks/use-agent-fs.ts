@@ -22,7 +22,7 @@ import type { CombReviewBatchInput, CombReviewBatchResult } from "@/api/types";
 import { useAgentFs } from "@/contexts/agent-fs-context";
 import { useDataUrl, useObjectUrl } from "@/hooks/use-object-url";
 import { type AgentFsClient, AgentFsError } from "@/lib/agent-fs/client";
-import { drivePoll } from "@/lib/agent-fs/invalidation";
+import { agentFsFolderCommentsKey, drivePoll } from "@/lib/agent-fs/invalidation";
 import { agentFsKey, agentFsRetry } from "@/lib/agent-fs/query";
 import type {
   CommentAddParams,
@@ -607,14 +607,15 @@ export function useRevertFile(file: DrivePath) {
 
 /**
  * Open root threads on every file below `folder` (`comment-list {pathPrefix}`,
- * agent-fs feature `comment-path-prefix`), newest first. The key lives under
- * the drive's comment prefix, so a send or a new comment refreshes it. Key:
- * `(..., "comments", "prefix", folderPath)`.
+ * agent-fs feature `comment-path-prefix`), newest first. The key
+ * (`agentFsFolderCommentsKey`) lives under the drive's comment prefix, so a
+ * send or a new comment refreshes it, and a live `comment.changed` event
+ * below the folder does too.
  */
 export function useFolderThreads(folder: DrivePath, enabled: boolean) {
   const access = useAgentFsAccess();
   return useQuery({
-    queryKey: agentFsCommentsKey(access, folder, "prefix", folder.path),
+    queryKey: agentFsFolderCommentsKey(access, folder),
     queryFn: ({ signal }): Promise<FileThreads> => {
       const client = connectedClient(access);
       return listFileThreads([folder.path], async (pathPrefix, offset, limit) => {
@@ -630,7 +631,7 @@ export function useFolderThreads(folder: DrivePath, enabled: boolean) {
     },
     enabled: enabled && access.client !== null,
     retry: agentFsRetry,
-    refetchInterval: 10_000, // step-11: drivePoll
+    refetchInterval: drivePoll(access, folder, "comments"),
   });
 }
 

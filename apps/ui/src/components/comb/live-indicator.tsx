@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { StatusIcon, type StatusTone } from "@/components/shared/status-icon";
 import { Badge } from "@/components/ui/badge";
 import { type LiveState, useAgentFs } from "@/contexts/agent-fs-context";
-import { combEventPath } from "@/lib/agent-fs/invalidation";
+import { commentCombPath } from "@/lib/comb/comments";
 import type { DrivePath } from "@/lib/comb/paths";
 
 /**
@@ -74,7 +74,7 @@ export function UpdatedChip({ file }: { file: DrivePath }) {
     let timer: ReturnType<typeof setTimeout> | undefined;
     const unsubscribe = subscribeLive((event) => {
       if (event.type !== "file.changed" || event.operation === "delete") return;
-      if (event.driveId !== driveId || combEventPath(event.path) !== path) return;
+      if (event.driveId !== driveId || commentCombPath(event.path) !== path) return;
       if (event.actor === userId) return;
       setVersion(event.version);
       clearTimeout(timer);

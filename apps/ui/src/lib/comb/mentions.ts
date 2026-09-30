@@ -13,7 +13,7 @@ import type {
   CommentNotificationListResult,
   DriveMember,
 } from "../agent-fs/types";
-import { commentWritePath } from "./comments";
+import { commentCombPath } from "./comments";
 import { hasSwarmMarker } from "./markers";
 import { combPath } from "./paths";
 
@@ -268,7 +268,7 @@ export function mentionRoute(
   drive: { orgId: string; driveId: string },
   entry: Pick<CommentNotificationEntry, "path" | "commentId" | "parentId">,
 ): string {
-  const path = `/${commentWritePath(entry.path)}`;
+  const path = commentCombPath(entry.path);
   const thread = entry.parentId ?? entry.commentId;
   return `${combPath({ ...drive, path })}?comment=${encodeURIComponent(thread)}`;
 }

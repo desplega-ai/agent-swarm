@@ -198,7 +198,10 @@ export function CommentComposer({
           aria-invalid={error ? true : undefined}
           className="max-h-60 min-h-16 text-sm"
           onKeyDown={(event) => {
-            if (event.defaultPrevented || event.nativeEvent.isComposing) return;
+            // IME composition (Safari ends it with keyCode 229), as in `lib/enter-submit.ts`.
+            if (event.defaultPrevented || event.nativeEvent.isComposing || event.keyCode === 229) {
+              return;
+            }
             if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
               event.preventDefault();
               void send();

@@ -49,6 +49,7 @@ describe("comment paths", () => {
       "/comb-qa/notes.md",
     ]);
     expect(commentCombPath("comb-qa/notes.md")).toBe("/comb-qa/notes.md");
+    expect(commentCombPath("/comb-qa/notes.md")).toBe("/comb-qa/notes.md");
     expect(commentCombPath("//comb-qa/notes.md")).toBe("/comb-qa/notes.md");
   });
 

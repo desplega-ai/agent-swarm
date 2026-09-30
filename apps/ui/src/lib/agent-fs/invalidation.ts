@@ -2,6 +2,7 @@
 // the rules are testable without React. `useAgentFsLive` applies them.
 
 import type { QueryKey } from "@tanstack/react-query";
+import { commentCombPath } from "../comb/comments";
 import { ancestorFolders } from "../comb/paths";
 import { agentFsKey } from "./query";
 import type { DriveEvent } from "./stream";
@@ -61,14 +62,6 @@ export function agentFsFolderCommentsKey(
 }
 
 /**
- * The Comb form of an event path: exactly one leading "/". agent-fs sends a
- * path as its writer stored it ("docs/a.md" or "/docs/a.md").
- */
-export function combEventPath(path: string): string {
-  return `/${path.replace(/^\/+/, "")}`;
-}
-
-/**
  * Query-key prefixes to invalidate for one event.
  *
  * - `file.changed`: the file's `stat`, and the `ls` of every folder above it
@@ -87,11 +80,11 @@ export function keysToInvalidate(event: DriveEvent, ctx: LiveKeyContext): QueryK
     case "ready":
       return LIVE_QUERY_KINDS.map((kind) => key(kind));
     case "file.changed": {
-      const path = combEventPath(event.path);
+      const path = commentCombPath(event.path);
       return [key("stat", path), ...ancestorFolders(path).map((folder) => key("ls", folder))];
     }
     case "comment.changed": {
-      const path = combEventPath(event.path);
+      const path = commentCombPath(event.path);
       return [
         key("comments", path),
         ...ancestorFolders(path).map((folder) =>

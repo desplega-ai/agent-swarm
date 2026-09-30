@@ -22,7 +22,10 @@ export function commentReadPaths(path: string): [string, string] {
   return [bare, `/${bare}`];
 }
 
-/** The Comb path ("/docs/a.md") of a comment, whichever form agent-fs stored. */
+/**
+ * The Comb path ("/docs/a.md") of a path in either stored form: a comment, a
+ * mention notification, or a change-stream event.
+ */
 export function commentCombPath(path: string): string {
   return `/${commentWritePath(path)}`;
 }

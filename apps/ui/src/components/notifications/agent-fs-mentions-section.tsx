@@ -8,7 +8,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { CommentNotificationEntry } from "@/lib/agent-fs/types";
-import { commentWritePath } from "@/lib/comb/comments";
+import { commentCombPath } from "@/lib/comb/comments";
 import { mentionRoute } from "@/lib/comb/mentions";
 import { baseName, parentFolder } from "@/lib/comb/paths";
 import { formatRelative } from "@/lib/relative-time";
@@ -100,7 +100,7 @@ function MentionItem({
   to: string;
   onOpen: () => void;
 }) {
-  const path = `/${commentWritePath(entry.path)}`;
+  const path = commentCombPath(entry.path);
   return (
     <Link
       to={to}

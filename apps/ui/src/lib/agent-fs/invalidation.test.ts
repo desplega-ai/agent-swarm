@@ -2,7 +2,6 @@ import { describe, expect, test } from "bun:test";
 import {
   agentFsFolderCommentsKey,
   COMB_POLL_MS,
-  combEventPath,
   drivePoll,
   keysToInvalidate,
   type LiveKeyContext,
@@ -41,14 +40,6 @@ function commentChanged(path: string) {
     at: "2026-09-30T10:00:00.000Z",
   } satisfies CommentChangedEvent;
 }
-
-describe("combEventPath", () => {
-  test("gives one leading slash for either stored form", () => {
-    expect(combEventPath("docs/a.md")).toBe("/docs/a.md");
-    expect(combEventPath("/docs/a.md")).toBe("/docs/a.md");
-    expect(combEventPath("//docs/a.md")).toBe("/docs/a.md");
-  });
-});
 
 describe("keysToInvalidate", () => {
   test("file.changed: the file's stat and the listing of every folder above it", () => {

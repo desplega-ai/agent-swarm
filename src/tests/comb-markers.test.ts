@@ -3,7 +3,8 @@ import * as ui from "../../apps/ui/src/lib/comb/markers";
 import * as server from "../comb/markers";
 
 // The server posts the "sent" reply and the dashboard reads it. Both copies
-// of the pattern and of the "is it sent" rule must agree.
+// of the pattern and of the "is it sent" rule must agree. The `@swarm` marker
+// (`SWARM_MARKER_RE`) has no server copy: the server does not require it.
 
 const TASK_ID = "0b8e1f5c-3d2a-4c6b-9e7f-1a2b3c4d5e6f";
 const SERVICE = "svc";
@@ -35,9 +36,8 @@ const THREADS: Array<{ author: string; replies: Array<{ author: string; body: st
 ];
 
 describe("sent marker: server and dashboard agree", () => {
-  test("the patterns are the same", () => {
-    expect(server.SENT_MARKER_RE.source).toBe(ui.SENT_MARKER_RE.source);
-    expect(server.SENT_MARKER_RE.flags).toBe(ui.SENT_MARKER_RE.flags);
+  test("the patterns are the same, byte for byte", () => {
+    expect(String(server.SENT_MARKER_RE)).toBe(String(ui.SENT_MARKER_RE));
   });
 
   test("the server's reply parses in the dashboard", () => {
