@@ -260,3 +260,55 @@ table.heat th.heat-corner {
   font-size: 9px;
   font-family: var(--font-mono);
 }
+
+/* ---- frontier chart (Leaderboard: score vs cost / agent time) ---- */
+
+.frontier-grid-x {
+  stroke-dasharray: 2 4;
+  opacity: 0.55;
+}
+
+.frontier-line {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.5;
+  stroke-dasharray: 6 4;
+}
+
+.frontier-dot {
+  fill: var(--dot-color);
+  fill-opacity: 0.92;
+  stroke: var(--panel);
+  stroke-width: 1.5;
+}
+
+/* a config the frontier does not trust: partial coverage, few attempts, or a missing reading */
+.frontier-dot.hollow {
+  fill: transparent;
+  fill-opacity: 1;
+  stroke: var(--dot-color);
+  stroke-width: 2;
+}
+
+.frontier-dot.on-frontier:not(.hollow) {
+  stroke: var(--text);
+}
+
+.frontier-dot.hover {
+  stroke: var(--text);
+  stroke-width: 2;
+}
+
+.frontier-whisker line {
+  stroke-width: 1.4;
+  opacity: 0.75;
+}
+
+/* outside the table track on screen */
+.frontier-group.dim {
+  opacity: 0.3;
+}
+
+.frontier-tip {
+  min-width: 190px;
+}

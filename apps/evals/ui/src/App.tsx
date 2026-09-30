@@ -6,8 +6,8 @@ import {
   setUnauthorizedHandler,
 } from "./api.ts";
 import { navigate, useHashRoute } from "./hooks.ts";
-import AnalyticsPage from "./pages/AnalyticsPage.tsx";
 import ConfigsPage from "./pages/ConfigsPage.tsx";
+import LeaderboardPage from "./pages/LeaderboardPage.tsx";
 import RunDetailsPage from "./pages/RunDetailsPage.tsx";
 import RunsPage from "./pages/RunsPage.tsx";
 import ScenariosPage from "./pages/ScenariosPage.tsx";
@@ -79,7 +79,7 @@ function LoginScreen({
 }
 
 export default function App(): ReactNode {
-  const { parts } = useHashRoute();
+  const { parts, path } = useHashRoute();
   const [apiKey, setApiKey] = useState(() => getStoredApiKey());
   const [authError, setAuthError] = useState<string | null>(null);
 
@@ -105,6 +105,12 @@ export default function App(): ReactNode {
     }
   }, [legacyCell]);
 
+  // Legacy redirect: the Analytics page now lives under the Leaderboard.
+  const legacyAnalytics = parts[0] === "analytics";
+  useEffect(() => {
+    if (legacyAnalytics) window.location.replace("#/leaderboard/analytics");
+  }, [legacyAnalytics]);
+
   if (!apiKey) {
     return (
       <LoginScreen
@@ -123,13 +129,19 @@ export default function App(): ReactNode {
     page = <ScenariosPage scenarioId={parts[1] ?? null} />;
   } else if (parts[0] === "configs") {
     page = <ConfigsPage configId={parts[1] ?? null} />;
-  } else if (parts[0] === "analytics") {
-    page = <AnalyticsPage />;
   } else if (parts[0] === "runs" && parts[1] && !legacyCell) {
     const attemptId = parts[2] === "attempts" && parts[3] ? parts[3] : null;
     page = <RunDetailsPage runId={parts[1]} attemptId={attemptId} />;
+  } else if (parts[0] === "runs") {
+    // keyed by the hash so `#/runs?config=x` opens narrowed and `#/runs` resets it
+    page = <RunsPage key={path} />;
   } else {
-    page = <RunsPage />;
+    // Home: `#/`, `#/leaderboard`, `#/leaderboard/analytics` (and the legacy `#/analytics`).
+    page = (
+      <LeaderboardPage
+        tab={parts[1] === "analytics" || parts[0] === "analytics" ? "analytics" : "ranking"}
+      />
+    );
   }
 
   const section =
@@ -137,28 +149,28 @@ export default function App(): ReactNode {
       ? "scenarios"
       : parts[0] === "configs"
         ? "configs"
-        : parts[0] === "analytics"
-          ? "analytics"
-          : "runs";
+        : parts[0] === "runs"
+          ? "runs"
+          : "leaderboard";
 
   return (
     <>
       <header className="app-header">
-        <a className="brand" href="#/runs">
+        <a className="brand" href="#/leaderboard">
           <img src="/logo.png" width={22} height={22} alt="swarm logo" />
           <span className="wordmark">
             swarm <span className="accent">evals</span>
           </span>
         </a>
         <nav className="nav-pills">
-          <a className={section === "runs" ? "pill active" : "pill"} href="#/runs">
-            Runs
-          </a>
-          <a className={section === "analytics" ? "pill active" : "pill"} href="#/analytics">
-            Analytics
+          <a className={section === "leaderboard" ? "pill active" : "pill"} href="#/leaderboard">
+            Leaderboard
           </a>
           <a className={section === "scenarios" ? "pill active" : "pill"} href="#/scenarios">
             Scenarios
+          </a>
+          <a className={section === "runs" ? "pill active" : "pill"} href="#/runs">
+            Runs
           </a>
           <a className={section === "configs" ? "pill active" : "pill"} href="#/configs">
             Configs

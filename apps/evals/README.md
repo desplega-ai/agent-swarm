@@ -88,7 +88,8 @@ It requires `EMBEDDING_API_KEY` in the repo-root `.env` (the API sandbox embeds 
 
 Local-first dashboard + API; **runs can be triggered, resumed, and cancelled from the UI** and execute inside the serve process:
 
-- `#/runs` — run list + matrix, live in-flight attempts with elapsed time, cancel/resume.
+- `#/leaderboard` (home) — the best setups for one suite version: a Pareto chart (score vs $/attempt or agent time, log x axis, 95% CI whiskers, colour = harness, shape = reasoning effort, dashed line = frontier, hollow marker = partial coverage or under 3 attempts on some scenario) and the ranking table (rank with its range, score ± CI, pass@1, pass^k, $/attempt, p50 time, tokens, attempts). A suite selector and a fixed-harness / best-harness-per-model track toggle; a row click opens that config's runs. With no config that ran the whole suite it draws no frontier and says why. View state lives in the hash (`#/leaderboard?suite=1.0&x=time&track=free&harness=claude`). `#/leaderboard/analytics` is the earlier Analytics page (trends, cost matrix, models, rollups); `#/analytics` redirects there.
+- `#/runs` — run list + matrix, live in-flight attempts with elapsed time, cancel/resume. `#/runs?config=<id>` opens it narrowed to one config.
 - `#/runs/:id/attempts/:attemptId` — per-attempt judgments (incl. agentic-judge tool inputs AND outputs in `raw`), phase timings, sandbox info, assets, and a chat-style transcript viewer parsed from the raw session logs (legacy `#/runs/:id/cells/:scenario/:config` URLs redirect).
 - `#/scenarios` — searchable scenario registry; `#/scenarios/:id` shows what the scenario will do (tasks, seeding, checks, judges, rubric) + recent attempts across runs.
 - Light/dark theme (persisted, follows `prefers-color-scheme`).

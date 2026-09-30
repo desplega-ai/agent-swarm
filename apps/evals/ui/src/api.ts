@@ -1,4 +1,9 @@
 import type {
+  FrontierResponse,
+  LeaderboardResponse,
+  SuitesResponse,
+} from "./lib/suite-analytics.ts";
+import type {
   AnalyticsResponse,
   AttemptDetail,
   AttemptJson,
@@ -242,6 +247,23 @@ export function getAnalytics(filter?: {
   }
   const qs = params.size > 0 ? `?${params.toString()}` : "";
   return request(`/api/analytics${qs}`);
+}
+
+/** Suites with recorded attempts, plus the one the code defines today (`current`). */
+export function getSuites(): Promise<SuitesResponse> {
+  return request("/api/analytics/suites");
+}
+
+/** Score vs $/attempt and vs agent time for one suite version (Phase 4). */
+export function getFrontier(suite: string): Promise<FrontierResponse> {
+  return request(`/api/analytics/frontier?suite=${encodeURIComponent(suite)}`);
+}
+
+/** Per-config ranking for one suite version, in both tracks (Phase 4). */
+export function getLeaderboard(suite: string, k?: number): Promise<LeaderboardResponse> {
+  const params = new URLSearchParams({ suite });
+  if (k !== undefined) params.set("k", String(k));
+  return request(`/api/analytics/leaderboard?${params.toString()}`);
 }
 
 export function artifactUrl(id: string, opts?: { download?: boolean }): string {
