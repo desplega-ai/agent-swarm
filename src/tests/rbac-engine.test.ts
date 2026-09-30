@@ -83,6 +83,7 @@ const LEAD_ONLY_VERBS: PermissionVerb[] = [
 
 const OPERATOR_ONLY_VERBS: PermissionVerb[] = [];
 const LEAD_OR_OPERATOR_OR_USER_VERBS: PermissionVerb[] = ["extension.write", "extension.activate"];
+const OPERATOR_OR_USER_VERBS: PermissionVerb[] = ["comb.presence"];
 
 const LEAD_OR_OPERATOR_VERBS: PermissionVerb[] = ["models.catalog.write"];
 
@@ -187,6 +188,7 @@ describe("verb-group partition", () => {
       ...COMPOSITE_VERBS,
       ...OPERATOR_ONLY_VERBS,
       ...LEAD_OR_OPERATOR_OR_USER_VERBS,
+      ...OPERATOR_OR_USER_VERBS,
       ...LEAD_OR_OPERATOR_VERBS,
       ...AGENT_OR_OPERATOR_VERBS,
     ];
@@ -263,6 +265,23 @@ describe("lead-or-operator-or-user verbs", () => {
   };
   for (const verb of LEAD_OR_OPERATOR_OR_USER_VERBS) {
     test(`${verb}: lead, operator, or user allowed`, () => {
+      expectDecisions(verb, { kind: "none" }, expected);
+    });
+  }
+});
+
+describe("operator-or-user verbs", () => {
+  const expected: Expected = {
+    lead: false,
+    worker: false,
+    ownerWorker: false,
+    creatorWorker: false,
+    userRequester: true,
+    foreignUser: true,
+    operator: true,
+  };
+  for (const verb of OPERATOR_OR_USER_VERBS) {
+    test(`${verb}: the operator or a dashboard user allowed, agents denied`, () => {
       expectDecisions(verb, { kind: "none" }, expected);
     });
   }

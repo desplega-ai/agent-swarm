@@ -30628,6 +30628,53 @@
         }
       }
     },
+    "/api/realtime/ticket": {
+      "post": {
+        "summary": "Issue a one-shot dashboard realtime ticket",
+        "tags": [
+          "Rooms"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "One-shot realtime ticket",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ticket": {
+                      "type": "string"
+                    },
+                    "expiresAt": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "ticket",
+                    "expiresAt"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Comb presence is not allowed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/@swarm/realtime.js": {
       "get": {
         "summary": "Browser SDK for realtime rooms and channels",

@@ -104,7 +104,7 @@ import { handlePagesPublic } from "./pages-public";
 import { handlePoll } from "./poll";
 import { handlePricing } from "./pricing";
 import { handlePromptTemplates } from "./prompt-templates";
-import { handleRealtimeAsset } from "./realtime";
+import { handleRealtimeAsset, handleRealtimeTicket } from "./realtime";
 import { handleRepos } from "./repos";
 import { handleRooms } from "./rooms";
 import { describeRequestRoute } from "./route-def";
@@ -351,6 +351,7 @@ const httpServer = createHttpServer(async (req, res) => {
         () => handleComb(req, res, pathSegments, queryParams, myAgentId),
         () => handleKv(req, res, pathSegments, queryParams),
         () => handleRooms(req, res, pathSegments, queryParams),
+        () => handleRealtimeTicket(req, res, pathSegments, queryParams),
         () => handleRealtimeAsset(req, res),
         () => handleIntegrations(req, res, pathSegments, queryParams),
         () => handlePromptTemplates(req, res, pathSegments, queryParams),
