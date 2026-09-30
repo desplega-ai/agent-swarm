@@ -33,7 +33,8 @@ export function useFavoriteToggle(itemType: FavoriteItemType) {
         queryClient.invalidateQueries({ queryKey: [key] });
       }
       // Returned, so the mutation stays pending until the favorites list is
-      // fresh. A star then never flips back for one render.
+      // fresh. Pin stars read that list, so they never flicker back. Entity
+      // stars (page, workflow, schedule) behave as before.
       return queryClient.invalidateQueries({ queryKey: ["favorites", itemType] });
     },
   });

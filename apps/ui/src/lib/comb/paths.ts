@@ -142,7 +142,16 @@ export function pinIdFor({ orgId, driveId, path }: DrivePath): string {
 export function parsePinId(id: string): DrivePath | null {
   const [orgId, driveId, ...rest] = id.split("/");
   if (!orgId || !driveId || rest.length === 0) return null;
-  if (rest.some((segment) => segment === "." || segment === "..")) return null;
+  // Reject dot segments and separators that only appear after decoding.
+  for (const segment of rest) {
+    let decoded: string;
+    try {
+      decoded = decodeURIComponent(segment);
+    } catch {
+      decoded = segment;
+    }
+    if (decoded === "." || decoded === ".." || /[/\\]/.test(decoded)) return null;
+  }
   return { orgId, driveId, path: `/${rest.join("/")}` };
 }
 

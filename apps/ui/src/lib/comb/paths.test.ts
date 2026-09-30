@@ -164,6 +164,15 @@ describe("pins", () => {
     expect(parsePinId("org-1//a.md")).toBeNull();
     expect(parsePinId("org-1/drive-1/../a.md")).toBeNull();
     expect(parsePinId("org-1/drive-1/a/./b.md")).toBeNull();
+    for (const id of [
+      "o/d/%2e%2e/x",
+      "o/d/.%2e/x",
+      "o/d/%2E%2e/settings",
+      "o/d/a%2Fb",
+      "o/d/a%5Cb",
+    ]) {
+      expect(parsePinId(id)).toBeNull();
+    }
   });
 
   test("pinLabel", () => {

@@ -70,6 +70,8 @@ interface NavItem {
   children?: Array<{
     title: string;
     path: string;
+    /** Hover text, when the title alone is ambiguous (Comb pins). */
+    tooltip?: string;
   }>;
   /** When set, item is shown as disabled with this tooltip when condition fails. */
   gate?: { minVersion: string };
@@ -397,7 +399,7 @@ export function AppSidebar() {
           pinFavorites?.favoriteIds ?? [],
           { orgId: comb.org_id, driveId: comb.drive_id },
           10,
-        ).map((pin) => ({ title: pinLabel(pin.path), path: combPath(pin) }))
+        ).map((pin) => ({ title: pinLabel(pin.path), tooltip: pin.path, path: combPath(pin) }))
       : [];
   const childrenOf = (item: NavItem) =>
     item.requires === "comb" ? (combPins.length > 0 ? combPins : undefined) : item.children;
@@ -516,7 +518,7 @@ export function AppSidebar() {
                                     key={child.path}
                                     to={child.path}
                                     end
-                                    title={child.title}
+                                    title={child.tooltip ?? child.title}
                                     className={({ isActive: childActive }) =>
                                       cn(
                                         "truncate rounded-sm px-2 py-1 text-sm transition-colors hover-linger",

@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { Readable } from "node:stream";
-import { closeDb, initDb } from "../be/db";
+import { closeDb, getDb, initDb } from "../be/db";
 import { runMigrations } from "../be/migrations/runner";
 import { handleFavorites } from "../http/favorites";
 import { getPathSegments, parseQueryParams } from "../http/utils";
@@ -104,6 +104,21 @@ describe("favorites: agent-fs-path item type (fresh DB)", () => {
     });
     const list = await call("GET", "/api/favorites?itemType=agent-fs-path");
     expect(list.body.favoriteIds).toEqual(["org/drive/comb-qa/my notes 100%.md"]);
+  });
+
+  test("GET lists pins newest first", async () => {
+    const db = getDb();
+    const ids = ["org/drive/order/a.md", "org/drive/order/b.md", "org/drive/order/c.md"];
+    for (const [i, itemId] of ids.entries()) {
+      await call("PUT", "/api/favorites", { itemType: "agent-fs-path", itemId, favorite: true });
+      db.run(
+        "UPDATE user_favorites SET lastUpdatedAt = ? WHERE itemType = 'agent-fs-path' AND itemId = ?",
+        [`2030-01-0${i + 1}T00:00:00.000Z`, itemId],
+      );
+    }
+    const list = await call("GET", "/api/favorites?itemType=agent-fs-path");
+    const listed = list.body.favoriteIds.filter((id: string) => id.startsWith("org/drive/order/"));
+    expect(listed).toEqual([...ids].reverse());
   });
 
   test("an unknown item type is still rejected", async () => {

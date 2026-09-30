@@ -10,7 +10,7 @@ export function PinButton({ target }: { target: DrivePath }) {
   const pins = useFavorites("agent-fs-path");
   const toggle = useFavoriteToggle("agent-fs-path");
   // An API without pins rejects the item type. Show no star then.
-  if (pins.isError) return null;
+  if (pins.isError && !pins.data) return null;
 
   const itemId = pinIdFor(target);
   const pinned = pins.data?.favoriteIds.includes(itemId) ?? false;
