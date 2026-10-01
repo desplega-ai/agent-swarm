@@ -741,6 +741,8 @@ Skills are the swarm's portable procedural knowledge — reusable markdown files
     ```
 
     See [`claude-adapter.ts:601`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/claude-adapter.ts).
+
+    The runner's first prompt is still inlined before it reaches the CLI (`resolveClaudePrompt`). Claude Code's native expansion puts the slash args in `<command-args>` and again after `ARGUMENTS:`, and the runner's args carry the whole task body, so native expansion would send the body twice.
   </Tab>
   <Tab value="Prefixed slash-commands">
     **Pi.** Pi-mono supports skills but namespaces them:
@@ -943,7 +945,7 @@ Tool-loop detection (`src/hooks/tool-loop-detection.ts::checkToolLoop`) is reusa
 
 Skills are the swarm's portable procedural knowledge (`/review-pr`, `/implement-issue`, etc.). Each provider handles them differently:
 
-- **Claude**: native slash-commands, so `formatCommand(name) => "/" + name` (`claude-adapter.ts` L601).
+- **Claude**: native slash-commands, so `formatCommand(name) => "/" + name` (`claude-adapter.ts` L601). `createSession` still inlines a leading `/<name>` from `~/.claude/skills/<name>/SKILL.md` (frontmatter stripped) so the task body in the args is not sent twice; commands without a SKILL.md there expand natively.
 - **Pi**: prefixed, `formatCommand(name) => "/skill:" + name` (`pi-mono-adapter.ts` L541); resolved from `~/.pi/agent/skills/<name>/SKILL.md`.
 - **Codex**: no native skills support → [`src/providers/codex-skill-resolver.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/codex-skill-resolver.ts) intercepts a leading `/<name>` in the prompt, reads `${CODEX_SKILLS_DIR ?? ~/.codex/skills}/<name>/SKILL.md`, and inlines it before calling `thread.runStreamed`. The system prompt is delivered by writing `AGENTS.md` into `cwd` (see [`codex-agents-md.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/codex-agents-md.ts)).
 - **OpenCode**: no native `SKILL.md` support → uses the same inline resolver, reads `${OPENCODE_SKILLS_DIR ?? ~/.opencode/skills}/<name>/SKILL.md`, and inlines it before calling `client.session.prompt`.

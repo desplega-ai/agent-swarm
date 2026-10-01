@@ -3251,8 +3251,8 @@ async function buildTaskOutputInstructions(
   return result.text;
 }
 
-/** Build prompt based on trigger type */
-async function buildPromptForTrigger(
+/** Build prompt based on trigger type. Exported for unit testing. */
+export async function buildPromptForTrigger(
   trigger: Trigger,
   defaultPrompt: string,
   fmt: (cmd: string) => string = (cmd) => `/${cmd}`,
