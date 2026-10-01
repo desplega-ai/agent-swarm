@@ -88,10 +88,21 @@ describe("effortLevelsFor: what a harness and model accept", () => {
   });
 
   test("a harness without effort control takes none, whatever the model", () => {
-    for (const harness of ["acp", "dsh", "devin", "claude-managed", "nope"]) {
+    for (const harness of ["acp", "devin", "claude-managed", "nope"]) {
       expect(effortLevelsFor(harness, "claude-opus-5-5")).toEqual([]);
       expect(effortLevelsFor(harness, "openrouter/deepseek/deepseek-v4.1-flash")).toEqual([]);
     }
+  });
+
+  test("dsh reads OpenRouter ids and bare DeepSeek ids from their own sections", () => {
+    expect(effortLevelsFor("dsh", "openrouter/deepseek/deepseek-v4.1-flash")).toEqual([
+      "low",
+      "high",
+      "max",
+    ]);
+    expect(effortLevelsFor("dsh", "deepseek-v4-pro")).toEqual(["off", "high", "max"]);
+    // dsh's own id for V4.1 Flash is not in the catalog: no level is claimed for it.
+    expect(effortLevelsFor("dsh", "deepseek-flash")).toEqual([]);
   });
 
   test("a model that does not reason takes none", () => {

@@ -47511,6 +47511,19 @@
                   },
                   "force": {
                     "type": "boolean"
+                  },
+                  "provider": {
+                    "type": "string",
+                    "enum": [
+                      "claude",
+                      "codex",
+                      "pi",
+                      "devin",
+                      "claude-managed",
+                      "opencode",
+                      "acp",
+                      "dsh"
+                    ]
                   }
                 },
                 "required": [

@@ -182,7 +182,7 @@ The runner consumes these events (not the provider's native ones) to post progre
 | [`src/providers/devin-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/devin-adapter.ts) | Cognition Devin v3 REST API; worker polls the remote session | `DEVIN_API_KEY` + `DEVIN_ORG_ID` |
 | [`src/providers/opencode-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/opencode-adapter.ts) | In-process `@opencode-ai/sdk` server with SSE event mapping | Provider-specific API key, commonly `OPENROUTER_API_KEY` |
 | [`src/providers/acp-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/acp-adapter.ts) | `Bun.spawn` of the selected OpenCode preset or custom target, driven over stdio with `@agentclientprotocol/sdk`'s ndjson `ClientSideConnection` | The ACP target owns its model auth and receives a session-scoped `aseph_` token as the swarm MCP bearer |
-| [`src/providers/dsh-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/dsh-adapter.ts) | Preinstalled DeepSeek Harness CLI, headless JSON over stdin/stdout | `OPENROUTER_API_KEY` for `openrouter/` models; `DEEPSEEK_API_KEY` for native IDs. No MCP, steering, resume, or cost/context telemetry |
+| [`src/providers/dsh-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/dsh-adapter.ts) | Preinstalled DeepSeek Harness CLI, headless JSON over stdin/stdout | `OPENROUTER_API_KEY` for `openrouter/` models; `DEEPSEEK_API_KEY` for native IDs. Swarm MCP via an inserted `dsh-mcp-client`, cost/context from step usage, reasoning effort; no steering or native resume |
 
 ACP session tokens identify the session's agent and task. On the HTTP config routes, non-lead session tokens receive masked secrets and cannot write or delete config; changing `X-Agent-ID` cannot grant lead permissions. The secret scrubber redacts `aseph_` tokens in logs. Session completion starts revocation without waiting for its response. Each revoke request has a five-second timeout and logs HTTP, network, or timeout failures. If revocation fails, the token remains valid until its 24-hour expiry.
 
@@ -1004,6 +1004,73 @@ Existing analogs: `src/tests/codex-*.test.ts`, `src/tests/claude-*.test.ts`, `sr
 
 ---
 
+### Swarm readiness: what a provider must do before it is a worker
+
+Spawning the CLI and returning its final text is not enough. Each item below
+was missed by the dsh adapter and found only by running real tasks
+(2026-10-01). Ship each one with the adapter, or document the gap in this guide
+and in [`runbooks/harness-providers.md`](https://github.com/desplega-ai/agent-swarm/blob/main/runbooks/harness-providers.md).
+
+| Requirement | What to check |
+|---|---|
+| Swarm MCP | The session reaches `${MCP_BASE_URL}/mcp` with `Authorization`, `X-Agent-ID`, `X-Source-Task-Id`, `X-Context-Key` and `X-Runtime-Instance-ID`, and `traits.hasMcp` is `true`. A session that starts without the swarm tools fails instead of running on. With no MCP client, keep `hasMcp: false` and document why. |
+| Failure path | An agent can end a task `failed` (`store-progress` with `status: "failed"`, or a harness-level signal without MCP). An abnormal turn end exits non-zero. |
+| Sandbox | The agent can write `/workspace/shared`, `/workspace/personal` and `/tmp`. A cwd-only write sandbox blocks cross-agent handoff. |
+| Provider recorded | `agent_tasks.provider` is set for every task, including spawn failures (the runner sends `provider` on `/finish`). |
+| Cost and context | `context_usage` per model call, `CostData` with `provider`, routing prefixes in `src/be/pricing-normalize.ts`, and seed rows in `src/be/seed-pricing.ts` so the default tier models price as `pricing-table`. |
+| Model observability | The session log names the model called, or at least the model configured. |
+| Reasoning effort | `config.reasoningEffort` maps to the harness's real setting; the harness is in `REASONING_HARNESSES` and offers only levels it honours. |
+| Dashboard logs | A logs-parser adapter in `apps/ui/src/logs-parser/adapters.ts`, tested on real persisted rows. Without it every row renders as `UNKNOWN`. |
+| Runtime editor | The harness is in `LOCAL_HARNESSES` and `isLocalHarness`, with model groups and effort levels in `apps/ui/src/lib/agent-runtime-models.ts`. |
+
+### How to QA a new harness
+
+Unit tests prove the adapter builds the right command, not that the harness can
+do swarm work. Run this on the deployed swarm before the harness takes general
+worker duty.
+
+**Setup.** Pick a low-usage worker with no in-flight tasks. Record its
+`harness_provider`, `MODEL_OVERRIDE`, `REASONING_EFFORT_OVERRIDE` and
+`AGENT_MAX_TASKS` (`GET /api/agents/<id>/runtime` and agent-scoped config).
+Switch it with `PATCH /api/agents/<id>/runtime` or the Runtime editor, add the
+harness credentials as agent-scoped config, and pin each scenario to it
+(`routingReason: human_pinned`).
+
+**Gates on every task:**
+
+- `agent_tasks.provider` is the new harness, spawn failures included. NULL or another harness means a silent fallback.
+- `agent_tasks.model` matches the request, and the session log names the model.
+- The dashboard renders the session with no `UNKNOWN` rows.
+- A `session_costs` row exists with `costSource: pricing-table`, and the task shows context usage.
+
+**Scenarios:**
+
+| # | Scenario | Pass when |
+|---|---|---|
+| 1 | Smoke: reply with a sentinel string | Exact sentinel, completed |
+| 2 | Write a file under `/workspace/shared`, return its sha256 | File exists, digest matches |
+| 3 | Pure compute (sum of primes below 10000) | Correct value |
+| 4 | Read the repo and cite a file and line | Correct citation |
+| 5 | `modelTier`, then an explicit `model` | Row model and logged model match each |
+| 6 | Model whose credential is missing | `failed` fast with a clear reason, `provider` set |
+| 7 | Call MCP tools (`memory-search`, `store-progress`) | Calls succeed |
+| 8 | Impossible task (read a missing file) | Status `failed`, not `completed` |
+| 9 | Cancel a long `sleep` | `cancelled`, agent idle again, no orphan process |
+| 10 | More tasks than `AGENT_MAX_TASKS` | Extra task rejected at capacity |
+| 11 | Large output with unicode | Intact |
+| 12 | Follow-up via `parentTaskId` | Parent context carried |
+| 13 | Steer a running task | Matches the advertised `steerModes` |
+
+**Bar for general worker duty.** Scenarios 1, 2, 3, 6, 7, 8 and 9 pass, plus
+every gate. A harness that fails 2, 7 or 8 is limited to read-only or
+self-contained work: it cannot hand off through `/workspace/shared`, report
+progress, or fail a task. Scenarios 5 and 10 to 13 may pass as a documented
+degrade.
+
+**Restore.** Put the agent back on the recorded values with the same `PATCH`,
+remove the test credentials, and confirm its next task records the original
+provider.
+
 ## 9. Codex OAuth: the full reference flow
 
 This is documented separately because it is the most involved integration.
@@ -1096,7 +1163,10 @@ Manual verification:
 | Docker bootstrap | `docker-entrypoint.sh`, `Dockerfile.worker` |
 | Hooks (optional) | `src/hooks/*`, `src/providers/<foo>-swarm-events.ts` |
 | Skills resolver (if provider lacks native support) | `src/providers/<foo>-skill-resolver.ts` |
-| Models / pricing (optional) | `src/providers/<foo>-models.ts` |
+| Models / pricing | `src/providers/<foo>-models.ts`, `src/be/seed-pricing.ts`, `src/be/pricing-normalize.ts` |
+| Reasoning effort | `packages/model-catalog/src/reasoning.ts`, `src/providers/reasoning-effort.ts` |
+| Dashboard logs | `apps/ui/src/logs-parser/adapters.ts`, `apps/ui/src/logs-parser/index.ts` |
+| Runtime editor | `apps/ui/src/lib/agent-runtime-models.ts` |
 | Tests | `src/tests/<foo>-*.test.ts` |
 | Integrations UI (optional) | `ui/src/lib/integrations-catalog.ts` |
 | Docs | `CLAUDE.md`, `README.md`, this guide, [Harness Configuration](/docs/guides/harness-configuration) |

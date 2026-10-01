@@ -132,7 +132,6 @@ const TOUCH_POINTS: TouchPoint[] = [
     ],
     exempt: {
       acp: "A generic ACP target owns its own billing and the adapter reports totalCostUsd: 0.",
-      dsh: "The dsh adapter reports no cost data today, so there is nothing to price.",
     },
   },
   {
@@ -168,7 +167,6 @@ const TOUCH_POINTS: TouchPoint[] = [
       "claude-managed":
         "Cloud harness: runs in Anthropic's sandbox, no local runtime to configure.",
       devin: "Cloud harness: runs on Devin's API, no local runtime to configure.",
-      dsh: "KNOWN GAP (#1559): the server's LocalHarnessProviderSchema accepts dsh but the picker does not offer it yet.",
     },
   },
 ];

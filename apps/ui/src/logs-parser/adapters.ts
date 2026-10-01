@@ -910,6 +910,24 @@ export function normalizeDsh(ordered: DecodedRecord[]): NormalizedItem[] {
         );
         break;
       }
+      case "thinking": {
+        // Emitted once a reasoning block is committed, when an effort is set.
+        const text = dshText(ev.text, ev.truncated);
+        if (text) items.push(makeItem(d, "reasoning", { role: "assistant", text }));
+        break;
+      }
+      case "model": {
+        // Written by the swarm adapter, not dsh: the model the patch selected.
+        const effort = asString(ev.reasoningEffort);
+        const subtype = `${asString(ev.provider) ?? "?"} · ${asString(ev.model) ?? "?"}${effort ? ` · effort ${effort}` : ""}`;
+        items.push(
+          makeItem(d, "lifecycle", {
+            role: "system",
+            meta: { ...ev, type: "model.selected", subtype },
+          }),
+        );
+        break;
+      }
       case "text": {
         const text = dshText(ev.text, ev.truncated);
         lastAssistantText = text;

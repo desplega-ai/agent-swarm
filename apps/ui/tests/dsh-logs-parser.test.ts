@@ -113,4 +113,36 @@ describe("dsh reader", () => {
     expect(results.map((b) => (b as ProviderMetaBlock).data.output)).toEqual(["done", "boom"]);
     expect(parsed.items.at(-1)?.kind).toBe("unknown");
   });
+
+  test("the swarm's model line renders as a lifecycle row naming route, model and effort", () => {
+    const blocks = metas(
+      rows([
+        {
+          type: "model",
+          provider: "openrouter",
+          model: "deepseek/deepseek-v4.1-flash",
+          reasoningEffort: "high",
+        },
+        { type: "session", sessionId: "s", cwd: "/w" },
+      ]),
+    );
+    expect(blocks[0]?.data).toMatchObject({
+      type: "model.selected",
+      subtype: "openrouter · deepseek/deepseek-v4.1-flash · effort high",
+    });
+  });
+
+  test("thinking blocks render as reasoning, not unknown rows", () => {
+    const { parsed } = histogram(
+      rows([
+        { type: "session", sessionId: "s", cwd: "/w" },
+        { type: "thinking", text: "Check the file first." },
+        { type: "text", text: "Done." },
+      ]),
+    );
+    expect(parsed.items.some((item) => item.kind === "unknown")).toBe(false);
+    expect(parsed.items.find((item) => item.kind === "reasoning")?.text).toBe(
+      "Check the file first.",
+    );
+  });
 });

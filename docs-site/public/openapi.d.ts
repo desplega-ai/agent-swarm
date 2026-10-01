@@ -18496,6 +18496,8 @@ export interface paths {
                         output?: string;
                         failureReason?: string;
                         force?: boolean;
+                        /** @enum {string} */
+                        provider?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh";
                     };
                 };
             };

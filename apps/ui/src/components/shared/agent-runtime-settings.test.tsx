@@ -134,19 +134,18 @@ describe("AgentRuntimeSettings", () => {
     expect(html).toContain("future Claude sessions");
   });
 
-  test("shows a dsh agent read-only instead of as an editable Claude runtime", () => {
-    resolvedConfigs = [{ key: "MODEL_OVERRIDE", value: "openrouter/deepseek/deepseek-v4.1-flash" }];
+  test("shows a cloud harness read-only instead of as an editable Claude runtime", () => {
+    resolvedConfigs = [{ key: "MODEL_OVERRIDE", value: "devin-model" }];
     const html = renderToStaticMarkup(
       <TooltipProvider>
-        <AgentRuntimeSettings agent={{ ...acpAgent, harnessProvider: "dsh" }} />
+        <AgentRuntimeSettings agent={{ ...acpAgent, harnessProvider: "devin" }} />
       </TooltipProvider>,
     );
 
     expect(html).toContain("Runtime editor unavailable");
-    expect(html).toContain("DeepSeek (dsh)");
-    expect(html).toContain("openrouter/deepseek/deepseek-v4.1-flash");
+    expect(html).toContain("Devin");
+    expect(html).toContain("devin-model");
     expect(html).not.toContain("Save");
-    expect(html).not.toContain("Claude");
   });
 
   test("shows the configured Bridge conflict for an effective SDK selection", () => {
@@ -393,6 +392,7 @@ const ALL_KEYS = {
   ANTHROPIC_API_KEY: true,
   OPENAI_API_KEY: true,
   OPENROUTER_API_KEY: true,
+  DEEPSEEK_API_KEY: true,
 };
 
 async function mountSettings(harness: string) {
@@ -518,6 +518,30 @@ describe("AgentRuntimeSettings reasoning effort", () => {
       "X-High",
       "Max",
     ]);
+    await view.unmount();
+  });
+
+  test("a dsh agent edits its model and the efforts dsh honours on OpenRouter", async () => {
+    resolvedConfigs = [{ key: "MODEL_OVERRIDE", value: "openrouter/deepseek/deepseek-v4.1-flash" }];
+    const view = await mountSettings("dsh");
+    expect(view.container.textContent).toContain("DeepSeek (dsh)");
+    expect(view.container.textContent).not.toContain("Runtime editor unavailable");
+    // OpenRouter sends no reasoning field for an undeclared `off`, so it is not offered.
+    expect(enabled(view.container)).toEqual(["Auto", "Low", "High", "Max"]);
+    await click(effortSegments(view.container).High);
+    await save(view.container);
+    expect(saves.at(-1)).toMatchObject({
+      harnessProvider: "dsh",
+      model: "openrouter/deepseek/deepseek-v4.1-flash",
+      reasoningEffort: "high",
+    });
+    await view.unmount();
+  });
+
+  test("a dsh agent on the direct DeepSeek API can turn thinking off", async () => {
+    resolvedConfigs = [{ key: "MODEL_OVERRIDE", value: "deepseek-v4-pro" }];
+    const view = await mountSettings("dsh");
+    expect(enabled(view.container)).toEqual(["Auto", "Off", "High", "Max"]);
     await view.unmount();
   });
 

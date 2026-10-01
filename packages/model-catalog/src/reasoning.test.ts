@@ -19,9 +19,43 @@ describe("reasoningLevelsFor", () => {
     expect(reasoningLevelsFor("claude", "x", null)).toEqual([]);
     expect(reasoningLevelsFor("claude", "x", { reasoning: false })).toEqual([]);
     expect(reasoningLevelsFor("claude", "x", { ...effort("low"), reasoning: false })).toEqual([]);
-    for (const harness of ["acp", "dsh", "devin", "claude-managed", ""]) {
+    for (const harness of ["acp", "devin", "claude-managed", ""]) {
       expect(reasoningLevelsFor(harness, "x", effort("low", "high"))).toEqual([]);
     }
+  });
+
+  test("dsh keeps max; off only on the direct DeepSeek route, where it is a real toggle", () => {
+    const facts = {
+      ...effort("low", "high", "max"),
+      reasoning_options: [{ type: "toggle" }, ...effort("low", "high", "max").reasoning_options],
+    };
+    expect(reasoningLevelsFor("dsh", "deepseek-v4-pro", facts)).toEqual([
+      "off",
+      "low",
+      "high",
+      "max",
+    ]);
+    expect(reasoningLevelsFor("dsh", "deepseek/deepseek-v4.1-flash", facts)).toEqual([
+      "low",
+      "high",
+      "max",
+    ]);
+    expect(reasoningLevelsFor("dsh", "deepseek-v4-pro", effort("high", "max"))).toEqual([
+      "high",
+      "max",
+    ]);
+  });
+
+  test("dsh model strings resolve to the openrouter or deepseek catalog section", () => {
+    const catalog = {
+      openrouter: { models: { "deepseek/deepseek-v4.1-flash": effort("low", "high") } },
+      deepseek: { models: { "deepseek-v4-pro": effort("high", "max") } },
+    };
+    expect(
+      reasoningLevelsForModel("dsh", "openrouter/deepseek/deepseek-v4.1-flash", catalog),
+    ).toEqual(["low", "high"]);
+    expect(reasoningLevelsForModel("dsh", "deepseek-v4-pro", catalog)).toEqual(["high", "max"]);
+    expect(reasoningLevelsForModel("dsh", "deepseek-flash", catalog)).toEqual([]);
   });
 
   test("effort values map to the enum in canonical order; none is off, minimal is dropped", () => {
