@@ -300,8 +300,8 @@ Run the one-time `bunx @desplega.ai/agent-swarm claude-managed-setup` from your 
 | `GITLAB_URL` | GitLab instance URL (default: `https://gitlab.com`) |
 | `GITLAB_WEBHOOK_SECRET` | Shared secret for webhook verification |
 | `GITLAB_BOT_NAME` | Bot username for @mention detection (default: `agent-swarm-bot`) |
-| `GITLAB_EMAIL` | Git commit email for GitLab repos |
-| `GITLAB_NAME` | Git commit name for GitLab repos |
+| `GITLAB_EMAIL` | Git commit email for GitLab repos (default: `GITHUB_EMAIL`, then `worker-agent@desplega.ai`; not applied when `GITHUB_TOKEN` is set) |
+| `GITLAB_NAME` | Git commit name for GitLab repos (default: `GITHUB_NAME`, then `Worker Agent`; not applied when `GITHUB_TOKEN` is set) |
 | `GITLAB_DISABLE` | Set to `true` to disable GitLab integration |
 
 ## Azure DevOps Integration
@@ -313,8 +313,8 @@ Run the one-time `bunx @desplega.ai/agent-swarm claude-managed-setup` from your 
 | `AZURE_DEVOPS_WEBHOOK_SECRET` | Basic auth password the service-hook subscriptions send; enables the webhook endpoint |
 | `AZURE_DEVOPS_BOT_ID` | Identity GUID of the bot user for `@<GUID>` mentions (default: the PAT owner) |
 | `AZURE_DEVOPS_BOT_NAME` | Name for plain-text `@name` mentions (default: `agent-swarm-bot`) |
-| `AZURE_DEVOPS_EMAIL` | Git commit email for Azure Repos commits |
-| `AZURE_DEVOPS_NAME` | Git commit name for Azure Repos commits |
+| `AZURE_DEVOPS_EMAIL` | Git commit email for Azure Repos commits (default: `GITHUB_EMAIL`, then `worker-agent@desplega.ai`; not applied when `GITHUB_TOKEN` or `GITLAB_TOKEN` is set) |
+| `AZURE_DEVOPS_NAME` | Git commit name for Azure Repos commits (default: `GITHUB_NAME`, then `Worker Agent`; not applied when `GITHUB_TOKEN` or `GITLAB_TOKEN` is set) |
 | `AZURE_DEVOPS_DISABLE` | Set to `true` to disable the Azure DevOps integration |
 
 ## AgentMail Integration

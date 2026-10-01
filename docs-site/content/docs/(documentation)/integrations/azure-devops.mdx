@@ -18,6 +18,8 @@ Create a dedicated Azure DevOps user for the swarm, for example `agent-swarm-bot
 
 Mentions are matched against the PAT owner, so `@agent-swarm-bot` in a PR is what triggers the swarm.
 
+As with GitHub and GitLab, anyone who can comment on a pull request in a connected repository can trigger the swarm with a mention. Give the bot user access only to repositories where you accept that.
+
 ## 2. Configure the swarm
 
 Set these as swarm config values (secret where marked) or as environment variables on the API server and the workers:

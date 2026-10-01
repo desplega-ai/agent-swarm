@@ -654,6 +654,13 @@ elif [ -n "$GITLAB_TOKEN" ]; then
     GITLAB_HOST_BARE=$(echo "$GITLAB_HOST" | sed 's|https\?://||')
     echo "$GITLAB_TOKEN" | glab auth login --hostname "$GITLAB_HOST_BARE" --stdin 2>/dev/null || true
 
+    # git: glab auth login stores no git credentials, so a plain git clone/push
+    # over HTTPS to this host would have none. Same env-reading helper as Azure
+    # DevOps below: the token never lands in ~/.gitconfig or a credential store.
+    # GitLab accepts any non-empty username with a PAT as the password.
+    git config --global "credential.${GITLAB_HOST%/}.helper" \
+        '!f() { test "$1" = get || exit 0; echo username=oauth2; echo "password=${GITLAB_TOKEN}"; }; f'
+
     # Set git user config for GitLab commits (use GitLab-specific env vars or fall back to GitHub ones)
     GITLAB_GIT_EMAIL="${GITLAB_EMAIL:-${GITHUB_EMAIL:-worker-agent@desplega.ai}}"
     GITLAB_GIT_NAME="${GITLAB_NAME:-${GITHUB_NAME:-Worker Agent}}"
@@ -771,10 +778,14 @@ if [ -n "$AGENT_ID" ]; then
                         git reset --hard 'origin/$REPO_BRANCH'" || echo "  Warning: Could not sync ${REPO_NAME}"
                 else
                     echo "  Cloning ${REPO_NAME} to ${REPO_DIR} (branch: ${REPO_BRANCH})..."
-                    # gh cannot parse Azure Repos URLs (…/_git/…); plain git uses the
-                    # Azure DevOps credential helper configured above.
+                    # gh only speaks GitHub: it cannot parse Azure Repos URLs (…/_git/…)
+                    # and POSTs GitHub GraphQL queries to GitLab hosts. Plain git uses the
+                    # credential helpers configured above. GitLab = gitlab.com / gitlab.*
+                    # (same rule as detectVcsProvider) or a self-hosted GITLAB_URL whose
+                    # hostname has no "gitlab." in it (empty glob when GITLAB_URL is unset).
+                    GITLAB_URL_GLOB="${GITLAB_URL:+${GITLAB_URL%/}/*}"
                     case "$REPO_URL" in
-                        *dev.azure.com*|*.visualstudio.com*) CLONE_CMD="git clone '$REPO_URL' '$REPO_DIR' --branch '$REPO_BRANCH' --single-branch" ;;
+                        *dev.azure.com*|*.visualstudio.com*|*gitlab.*|$GITLAB_URL_GLOB) CLONE_CMD="git clone '$REPO_URL' '$REPO_DIR' --branch '$REPO_BRANCH' --single-branch" ;;
                         *) CLONE_CMD="gh repo clone '$REPO_URL' '$REPO_DIR' -- --branch '$REPO_BRANCH' --single-branch" ;;
                     esac
                     gosu worker bash -c "$CLONE_CMD" || echo "  Warning: Could not clone ${REPO_NAME}"
