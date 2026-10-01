@@ -18,13 +18,21 @@
  */
 
 import { createHash } from "node:crypto";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, lstatSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import ts from "typescript";
 import type { Scenario } from "./types.ts";
 
 const SCENARIOS_DIR = join(import.meta.dir, "../scenarios");
 const FIXTURES_DIR = join(SCENARIOS_DIR, "fixtures");
+
+/**
+ * Fixtures are small text files (the largest today is ~35 KB). The caps keep a
+ * hostile or accidental PR (a huge blob, a symlink to a device) from exhausting
+ * the memory of the process that hashes every scenario on each eval test run.
+ */
+const MAX_FIXTURE_FILE_BYTES = 1024 * 1024;
+const MAX_FIXTURE_TOTAL_BYTES = 8 * 1024 * 1024;
 
 /** Keys that describe the scenario to humans; they never reach an agent or a grader. */
 const IGNORED_TOP_LEVEL_KEYS = new Set(["version", "name", "description"]);
@@ -61,15 +69,43 @@ function sha256(input: string | Uint8Array): string {
   return createHash("sha256").update(input).digest("hex");
 }
 
-/** Every file under `dir`, as paths relative to `base` (forward slashes). */
+/**
+ * Every regular file under `dir`, as paths relative to `base` (forward slashes).
+ * A symlink or any other non-regular entry (device, fifo, socket) throws: a
+ * symlink would be followed on read, and a fixture must be bytes in the repo.
+ */
 function walkFiles(base: string, dir: string): string[] {
   const out: string[] = [];
   for (const entry of readdirSync(join(base, dir), { withFileTypes: true })) {
     const rel = `${dir}/${entry.name}`;
     if (entry.isDirectory()) out.push(...walkFiles(base, rel));
-    else out.push(rel);
+    else if (entry.isFile()) out.push(rel);
+    else throw new Error(`scenario fixture ${rel} is not a regular file (symlinks are rejected)`);
   }
   return out;
+}
+
+/**
+ * Read a fixture's bytes, refusing anything but a regular file within the size
+ * caps. `budget.remaining` is the aggregate allowance left for the scenario.
+ */
+function readFixture(path: string, label: string, budget: { remaining: number }): Buffer {
+  const stat = lstatSync(path);
+  if (!stat.isFile()) {
+    throw new Error(`scenario fixture ${label} is not a regular file (symlinks are rejected)`);
+  }
+  if (stat.size > MAX_FIXTURE_FILE_BYTES) {
+    throw new Error(
+      `scenario fixture ${label} is ${stat.size} bytes, over the ${MAX_FIXTURE_FILE_BYTES} byte per-file limit`,
+    );
+  }
+  budget.remaining -= stat.size;
+  if (budget.remaining < 0) {
+    throw new Error(
+      `scenario fixtures exceed the ${MAX_FIXTURE_TOTAL_BYTES} byte aggregate limit at ${label}`,
+    );
+  }
+  return readFileSync(path);
 }
 
 /**
@@ -108,13 +144,16 @@ export function scenarioHashInputs(
     Object.fromEntries(Object.entries(scenario).filter(([k]) => !IGNORED_TOP_LEVEL_KEYS.has(k))),
   );
   const fixtures: Record<string, string> = {};
+  const budget = { remaining: MAX_FIXTURE_TOTAL_BYTES };
   for (const name of scenarioFixtureFiles(scenario, fixturesDir)) {
-    fixtures[name] = sha256(readFileSync(join(fixturesDir, name)));
+    fixtures[name] = sha256(readFixture(join(fixturesDir, name), name, budget));
   }
   // A `-solo` baseline is derived in its swarm scenario's module, so it hashes that source.
   const sourceFile = `${scenario.baselineOf ?? scenario.id}.ts`;
   const source = sha256(
-    normalizeSourceTokens(readFileSync(join(scenariosDir, sourceFile), "utf8")),
+    normalizeSourceTokens(
+      readFixture(join(scenariosDir, sourceFile), sourceFile, budget).toString("utf8"),
+    ),
   );
   return { definition, fixtures, source };
 }
