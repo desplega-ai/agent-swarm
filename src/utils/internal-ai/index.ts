@@ -14,7 +14,9 @@
 
 export {
   type CompleteStructuredOptions,
+  type CompleteStructuredResult,
   completeStructured,
+  completeStructuredWithModel,
 } from "./complete-structured.js";
 export {
   type CredentialKind,
@@ -23,9 +25,14 @@ export {
   type ResolvedCredential,
   resolveCredential,
 } from "./credentials.js";
-export { parseModelStr, resolveModelString } from "./models.js";
+export {
+  MEMORY_RATER_DEFAULT_MODEL,
+  parseModelStr,
+  resolveRaterModelString,
+} from "./models.js";
 export {
   type SummarizeSessionOptions,
+  type SummarizeSessionResult,
   summarizeSession,
   summaryToolSchema,
 } from "./summarize-session.js";

@@ -4,6 +4,7 @@ import { z } from "zod";
 import { SummaryWithRatingsSchema } from "../../be/memory/raters/llm.js";
 import {
   completeStructured,
+  completeStructuredWithModel,
   defaultSpawnClaudeCli,
 } from "../../utils/internal-ai/complete-structured.js";
 import type { ResolvedCredential } from "../../utils/internal-ai/credentials.js";
@@ -526,5 +527,63 @@ describe("defaultSpawnClaudeCli", () => {
       if (savedBridge !== undefined) process.env.SWARM_USE_CLAUDE_BRIDGE = savedBridge;
       await Bun.$`rm -f ${fakeBinary}`.quiet();
     }
+  });
+});
+
+describe("completeStructuredWithModel", () => {
+  const baseOpts = {
+    zodSchema: ResultZodSchema,
+    toolSchema: ResultToolSchema,
+    toolName: "record_result",
+    toolDescription: "Record the result.",
+    systemPrompt: "sys",
+    userPrompt: "user",
+  };
+
+  test("pi-ai path: reports the credential's resolved model next to the data", async () => {
+    const result = await completeStructuredWithModel({
+      ...baseOpts,
+      _credentialOverride: {
+        kind: "openrouter",
+        apiKey: "test",
+        modelDefault: "openrouter/deepseek/deepseek-v4.1-flash",
+      },
+      _complete: async () =>
+        makeMsg([
+          {
+            type: "toolCall",
+            id: "call_1",
+            name: "record_result",
+            arguments: { summary: "ok", count: 7 },
+          },
+        ]),
+    });
+    expect(result).toEqual({
+      data: { summary: "ok", count: 7 },
+      model: "openrouter/deepseek/deepseek-v4.1-flash",
+    });
+  });
+
+  test("assistant-text fallback also reports the model", async () => {
+    const result = await completeStructuredWithModel({
+      ...baseOpts,
+      _credentialOverride: {
+        kind: "openrouter",
+        apiKey: "test",
+        modelDefault: "openrouter/deepseek/deepseek-v4.1-flash",
+      },
+      _complete: async () => makeMsg([{ type: "text", text: '{"summary":"t","count":2}' }]),
+    });
+    expect(result?.model).toBe("openrouter/deepseek/deepseek-v4.1-flash");
+    expect(result?.data).toEqual({ summary: "t", count: 2 });
+  });
+
+  test("claude-cli path: reports the cli model alias", async () => {
+    const result = await completeStructuredWithModel({
+      ...baseOpts,
+      _credentialOverride: { kind: "claude-cli", modelDefault: "haiku" } as ResolvedCredential,
+      _spawnClaudeCli: async () => JSON.stringify({ summary: "cli", count: 1 }),
+    });
+    expect(result).toEqual({ data: { summary: "cli", count: 1 }, model: "haiku" });
   });
 });

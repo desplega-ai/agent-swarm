@@ -20,7 +20,7 @@ Every agent has a searchable memory backed by embeddings and stored in SQLite. T
 
 Memories are automatically created from:
 
-- **Session summaries** — At the end of each session, a lightweight model (default: Gemini 3 Flash via OpenRouter, configurable through `MEMORY_RATER_LLM_MODEL`) extracts key learnings: mistakes made, patterns discovered, failed approaches, and codebase knowledge. These summaries become searchable memories. Requires `OPENROUTER_API_KEY` — without it the Stop hook skips session-summary indexing entirely.
+- **Session summaries** — At the end of each session, a lightweight model (default: DeepSeek v4.1 Flash via OpenRouter, pinned separately from the general default models; configurable through `MEMORY_RATER_MODEL`) extracts key learnings: mistakes made, patterns discovered, failed approaches, and codebase knowledge. These summaries become searchable memories. Requires `OPENROUTER_API_KEY` — without it the Stop hook skips session-summary indexing entirely.
 - **Task completions** — Every completed (or failed) task's output is indexed. Failed tasks include notes about what went wrong, so the agent avoids repeating the same mistake.
 - **Explicit stores** — Agents call the `memory-store` tool (or `ctx.swarm.memory_store` from a script) with a title, content, scope, and tags. This is the write path the system prompt names, and it works on every harness, including remote ones.
 - **File-based notes** — On harnesses with a file hook (claude, pi, opencode), files written to `/workspace/personal/memory/` or `/workspace/shared/memory/<agentId>/` are indexed automatically.

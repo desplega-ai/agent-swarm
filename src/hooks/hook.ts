@@ -426,7 +426,7 @@ export async function runStopHookSessionSummary(
     }
     if (llmRaterEnabled && taskId && ratings.length > 0) {
       try {
-        const events = _buildRatings(ratings, retrievals);
+        const events = _buildRatings(ratings, retrievals, result.model);
         if (events.length > 0) {
           await _postRatings({
             apiUrl,

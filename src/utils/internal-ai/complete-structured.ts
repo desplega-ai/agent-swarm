@@ -192,6 +192,17 @@ export async function defaultSpawnClaudeCli(
   }
 }
 
+/** Parsed output plus the model string that produced it. */
+export interface CompleteStructuredResult<TData> {
+  data: TData;
+  /**
+   * Model that served the call, as resolved from the credential
+   * (`provider/model-id`, or the `claude -p` alias such as `haiku`). Lets
+   * callers record which judge produced the output.
+   */
+  model: string;
+}
+
 /**
  * Run a structured-output completion. Returns the parsed object on success,
  * `null` on auth-missing or exhausted retries (errors logged, never thrown).
@@ -199,6 +210,18 @@ export async function defaultSpawnClaudeCli(
 export async function completeStructured<TZod extends z.ZodTypeAny>(
   opts: CompleteStructuredOptions<TZod>,
 ): Promise<z.infer<TZod> | null> {
+  const result = await completeStructuredWithModel(opts);
+  return result ? result.data : null;
+}
+
+/**
+ * Same as {@link completeStructured}, but also reports the model that served
+ * the call. Use it when the output must be attributable (e.g. `llm` memory
+ * ratings record their judge).
+ */
+export async function completeStructuredWithModel<TZod extends z.ZodTypeAny>(
+  opts: CompleteStructuredOptions<TZod>,
+): Promise<CompleteStructuredResult<z.infer<TZod>> | null> {
   const retries = opts.retries ?? 3;
   const callerTag = opts.callerTag ?? "<unset>";
 
@@ -254,7 +277,7 @@ export async function completeStructured<TZod extends z.ZodTypeAny>(
         }
         const validated = opts.zodSchema.safeParse(parsedJson);
         if (validated.success) {
-          return validated.data;
+          return { data: validated.data, model: cred.modelDefault };
         }
         lastErr = validated.error;
       } catch (err) {
@@ -343,7 +366,7 @@ export async function completeStructured<TZod extends z.ZodTypeAny>(
           if (parsedText !== undefined) {
             const validatedText = opts.zodSchema.safeParse(parsedText);
             if (validatedText.success) {
-              return validatedText.data;
+              return { data: validatedText.data, model: cred.modelDefault };
             }
           }
         }
@@ -354,7 +377,7 @@ export async function completeStructured<TZod extends z.ZodTypeAny>(
 
       const validated = opts.zodSchema.safeParse(toolCall.arguments);
       if (validated.success) {
-        return validated.data;
+        return { data: validated.data, model: cred.modelDefault };
       }
       userPrompt = `${userPrompt}\n\nThe ${opts.toolName} arguments did not validate: ${validated.error.message}. Please retry with correct arguments.`;
       lastErr = validated.error;

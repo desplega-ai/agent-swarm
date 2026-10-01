@@ -16,6 +16,7 @@ import {
 } from "../be/memory/raters/retrieval";
 import { applyRating, ExplicitSelfDuplicateError } from "../be/memory/raters/store";
 import {
+  RATING_MODEL_MAX_LENGTH,
   type RatingEvent,
   REFERENCES_SOURCE_MAX_LENGTH,
   sanitizeReferencesSource,
@@ -496,6 +497,15 @@ const RateEventSchema = z.object({
   reasoning: z.string().max(500).optional(),
   taskId: z.string().uuid().optional(),
   referencesSource: ReferencesSourceSchema.optional(),
+  model: z
+    .string()
+    .trim()
+    .min(1)
+    .max(RATING_MODEL_MAX_LENGTH)
+    .optional()
+    .describe(
+      'Optional. Model that produced an `llm` rating, as "<provider>/<model-id>" (e.g. "openrouter/deepseek/deepseek-v4.1-flash"). Stored in memory_rating.model for `llm` events and ignored for `explicit-self`.',
+    ),
 });
 
 const rateMemory = route({
@@ -1095,6 +1105,7 @@ export async function handleMemory(
           source: e.source,
           reasoning: e.reasoning,
           ...(e.referencesSource !== undefined ? { referencesSource: e.referencesSource } : {}),
+          ...(e.model !== undefined ? { model: e.model } : {}),
         }));
         const rateContextKeyHeader = req.headers["x-context-key"];
         const rateContextKey = Array.isArray(rateContextKeyHeader)
