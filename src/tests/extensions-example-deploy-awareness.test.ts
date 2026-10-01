@@ -9,12 +9,13 @@ import { refreshSecretScrubberCache } from "../utils/secret-scrubber";
 
 const TEST_DB_PATH = "./test-extensions-example-deploy-awareness.sqlite";
 const DOKPLOY_KEY = "deploy-awareness-test-dokploy-key-abcdef";
+const DOKPLOY_URL = "https://dokploy.test";
 const COMPOSE_ID = "compose-under-test";
 
-type DokployRequest = { path: string; apiKey: string | null };
+type DokployRequest = { url: string; apiKey: string | null };
 type Deployment = { status: string; createdAt: string; startedAt?: string };
 
-let dokploy: ReturnType<typeof Bun.serve>;
+let fetchSpy: ReturnType<typeof spyOn>;
 let requests: DokployRequest[];
 let respond: (req: Request) => Response | Promise<Response>;
 let savedEnv: NodeJS.ProcessEnv;
@@ -41,12 +42,7 @@ async function enableTemplate(config: Record<string, unknown> = {}) {
   const installed = await installExtension({
     manifest: template.manifest,
     files: template.files,
-    config: {
-      baseUrl: `http://127.0.0.1:${dokploy.port}`,
-      composeId: COMPOSE_ID,
-      apiKeySecret: "DOKPLOY_API_KEY",
-      ...config,
-    },
+    config: { composeId: COMPOSE_ID, ...config },
   });
   return await enableExtension(installed.extension.id);
 }
@@ -67,19 +63,35 @@ beforeAll(async () => {
   // The API server does this at boot, which is how the key reaches process.env in prod.
   await loadGlobalConfigsIntoEnv(true);
 
-  dokploy = Bun.serve({
-    port: 0,
-    fetch(req) {
-      const url = new URL(req.url);
-      requests.push({ path: `${url.pathname}${url.search}`, apiKey: req.headers.get("x-api-key") });
-      return respond(req);
-    },
-  });
+  // Calls to Dokploy (the default host and the .test hosts these tests use) land here, so a
+  // request to a host the test never expected is recorded instead of leaving the process.
+  // Anything else, such as the background pricing refresh, goes to the real fetch. An aborted
+  // signal rejects, like the real fetch.
+  const realFetch = globalThis.fetch;
+  fetchSpy = spyOn(globalThis, "fetch").mockImplementation((async (
+    input: RequestInfo | URL,
+    init?: RequestInit,
+  ) => {
+    const request = new Request(input, init);
+    const { hostname } = new URL(request.url);
+    if (hostname !== "app.dokploy.com" && !hostname.endsWith(".test")) {
+      return await realFetch(input, init);
+    }
+    requests.push({ url: request.url, apiKey: request.headers.get("x-api-key") });
+    return await Promise.race([
+      Promise.resolve(respond(request)),
+      new Promise<never>((_, reject) =>
+        request.signal.addEventListener("abort", () => reject(request.signal.reason), {
+          once: true,
+        }),
+      ),
+    ]);
+  }) as unknown as typeof fetch);
 });
 
 afterAll(async () => {
   await stopExtensionRuntime();
-  await dokploy.stop(true);
+  fetchSpy.mockRestore();
   closeDb();
   await removeDbFiles();
   for (const key of Object.keys(process.env)) if (!(key in savedEnv)) delete process.env[key];
@@ -92,6 +104,8 @@ beforeEach(async () => {
   await stopExtensionRuntime();
   await getDbClient().run("DELETE FROM extensions");
   await getDbClient().run("DELETE FROM kv_entries");
+  process.env.DOKPLOY_API_KEY = DOKPLOY_KEY;
+  process.env.DOKPLOY_BASE_URL = DOKPLOY_URL;
   requests = [];
   deployments([]);
 });
@@ -111,7 +125,10 @@ describe("deploy-awareness extension", () => {
 
     expect(description).toBe(`fix the flaky test\n\n${note(startedAt)}`);
     expect(requests).toEqual([
-      { path: `/api/deployment.allByCompose?composeId=${COMPOSE_ID}`, apiKey: DOKPLOY_KEY },
+      {
+        url: `${DOKPLOY_URL}/api/deployment.allByCompose?composeId=${COMPOSE_ID}`,
+        apiKey: DOKPLOY_KEY,
+      },
     ]);
     // The key must not reach the description or the cache entry.
     expect(description).not.toContain(DOKPLOY_KEY);
@@ -192,10 +209,7 @@ describe("deploy-awareness extension", () => {
   });
 
   test("a hung Dokploy call is cut off at timeoutMs and the task is created", async () => {
-    respond = (req) =>
-      new Promise<Response>((resolve) =>
-        req.signal.addEventListener("abort", () => resolve(new Response())),
-      );
+    respond = () => new Promise<Response>(() => {});
     await enableTemplate({ timeoutMs: 100 });
 
     const started = Date.now();
@@ -203,12 +217,74 @@ describe("deploy-awareness extension", () => {
     expect(Date.now() - started).toBeLessThan(2_000);
   });
 
-  test("a secret that cannot be read skips the Dokploy call", async () => {
+  test("an unset DOKPLOY_API_KEY skips the Dokploy call", async () => {
     deployments([{ status: "running", createdAt: minutesAgo(1) }]);
-    await enableTemplate({ apiKeySecret: "NO_SUCH_SECRET" });
+    await enableTemplate();
+    delete process.env.DOKPLOY_API_KEY;
 
     expect(await createTask("no key")).toBe("no key");
     expect(requests).toHaveLength(0);
+  });
+
+  test("DOKPLOY_BASE_URL defaults to app.dokploy.com", async () => {
+    deployments([{ status: "done", createdAt: minutesAgo(5) }]);
+    await enableTemplate();
+    delete process.env.DOKPLOY_BASE_URL;
+
+    await createTask("default host");
+
+    expect(requests).toEqual([
+      {
+        url: `https://app.dokploy.com/api/deployment.allByCompose?composeId=${COMPOSE_ID}`,
+        apiKey: DOKPLOY_KEY,
+      },
+    ]);
+  });
+
+  // The old config let a lead name any env var as the key and any host as the target. Both
+  // fields are gone, so a config that still carries them must change nothing.
+  test("a baseUrl or apiKeySecret in the extension config is not a lever", async () => {
+    const encryptionKey = "deploy-awareness-test-encryption-key-123456";
+    process.env.SECRETS_ENCRYPTION_KEY = encryptionKey;
+    const startedAt = minutesAgo(1);
+    deployments([{ status: "running", createdAt: startedAt, startedAt }]);
+    await enableTemplate({
+      baseUrl: "https://attacker.test",
+      apiKeySecret: "SECRETS_ENCRYPTION_KEY",
+    });
+
+    expect(await createTask("lever")).toContain(note(startedAt));
+
+    expect(requests).toEqual([
+      {
+        url: `${DOKPLOY_URL}/api/deployment.allByCompose?composeId=${COMPOSE_ID}`,
+        apiKey: DOKPLOY_KEY,
+      },
+    ]);
+    expect(JSON.stringify(requests)).not.toContain(encryptionKey);
+  });
+
+  test.each([
+    ["an http URL", "http://dokploy.test"],
+    ["a non-http scheme", "ftp://dokploy.test"],
+    ["a value that is not a URL", "dokploy.test"],
+  ])("%s in DOKPLOY_BASE_URL sends no request and the task is still created", async (_name, url) => {
+    deployments([{ status: "running", createdAt: minutesAgo(1) }]);
+    const extension = await enableTemplate();
+    process.env.DOKPLOY_BASE_URL = url;
+    const warn = spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      expect(await createTask("insecure host")).toBe("insecure host");
+
+      expect(requests).toHaveLength(0);
+      const logged = warn.mock.calls.map((call) => call.join(" ")).join("\n");
+      expect(logged).toContain("DOKPLOY_BASE_URL");
+      expect(logged).not.toContain(url);
+      expect(logged).not.toContain(DOKPLOY_KEY);
+    } finally {
+      warn.mockRestore();
+    }
+    expect((await getExtensionById(extension.id))?.status).toBe("enabled");
   });
 
   test("a description that already carries the note is not checked or changed again", async () => {

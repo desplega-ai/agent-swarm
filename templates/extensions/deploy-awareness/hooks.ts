@@ -1,11 +1,11 @@
 import { type CtxFor, modify, type SwarmExtension } from "swarm-extension";
 import { z } from "zod";
 
+// The Dokploy URL and API key are deliberately not config. Extension config is writable by a
+// lead, so a key name or a host here would let it point the API process at any env secret and
+// any host. Both come from the API process environment instead (see readApiKey, readBaseUrl).
 export const config = z.object({
-  baseUrl: z.string().url(),
   composeId: z.string().min(1),
-  // Name of the global swarm_config secret that holds the Dokploy API key. The value is never stored.
-  apiKeySecret: z.string().min(1),
   label: z.string().min(1).default("prod"),
   cacheTtlMs: z.number().int().min(0).default(120_000),
   // Stays under the 5s handler limit, which also covers the secret read and the cache writes.
@@ -34,6 +34,9 @@ type Snapshot = {
 
 type Deployment = { status?: unknown; createdAt?: unknown; startedAt?: unknown };
 
+const API_KEY_ENV = "DOKPLOY_API_KEY";
+const BASE_URL_ENV = "DOKPLOY_BASE_URL";
+const DEFAULT_BASE_URL = "https://app.dokploy.com";
 const CACHE_KEY = "deploy-status";
 // The tail of the note. It does not change with the label or the time, so it marks a task
 // that already carries the note (a resume or a follow-up).
@@ -50,11 +53,24 @@ function errorText(error: unknown): string {
 // The API process hydrates global swarm_config rows into process.env at boot and on config
 // reload. ctx.swarm.config_get cannot serve this: the SDK scrubs every response, so a secret
 // comes back as "[REDACTED:<name>]".
-function readApiKey(ctx: Ctx): string {
-  const name = ctx.config.apiKeySecret;
-  const value = process.env[name];
-  if (!value) throw new Error(`secret ${name} is not set in the API process environment`);
+function readApiKey(): string {
+  const value = process.env[API_KEY_ENV];
+  if (!value) throw new Error(`${API_KEY_ENV} is not set in the API process environment`);
   return value;
+}
+
+// The key goes out in a request header, so the host must be reached over TLS. The value is not
+// echoed: a URL can carry credentials.
+function readBaseUrl(): string {
+  const raw = process.env[BASE_URL_ENV] || DEFAULT_BASE_URL;
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new Error(`${BASE_URL_ENV} is not a valid URL`);
+  }
+  if (url.protocol !== "https:") throw new Error(`${BASE_URL_ENV} must be an https URL`);
+  return raw.replace(/\/+$/, "");
 }
 
 /** The start of the newest deployment when it is still running, else null. */
@@ -72,8 +88,8 @@ function runningSince(deployments: Deployment[], staleAfterMs: number): string |
 }
 
 async function fetchRunningSince(ctx: Ctx): Promise<string | null> {
-  const apiKey = readApiKey(ctx);
-  const base = ctx.config.baseUrl.replace(/\/+$/, "");
+  const apiKey = readApiKey();
+  const base = readBaseUrl();
   const response = await fetch(
     `${base}/api/deployment.allByCompose?composeId=${encodeURIComponent(ctx.config.composeId)}`,
     {
