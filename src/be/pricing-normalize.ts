@@ -55,8 +55,10 @@ const ROUTING_PREFIXES_BY_PROVIDER: Record<PricingProvider, readonly string[]> =
   // A generic ACP target reports whatever model id it likes and has no seeded
   // rate rows, so there is no canonical key to collapse onto — no-op.
   acp: [],
-  // dsh emits bare model ids today — no-op, same as claude/devin/gemini above.
-  dsh: [],
+  // dsh reports `openrouter/<vendor>/<id>` for OpenRouter routes and a bare
+  // DeepSeek id (`deepseek-v4-pro`) for the direct API. Stripping `openrouter/`
+  // lands the former on the openrouter rows; the latter is already canonical.
+  dsh: ["openrouter/"],
 };
 
 /**

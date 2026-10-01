@@ -1,5 +1,6 @@
 import { onTaskStarted } from "../be/task-lifecycle-events";
 import type { AgentTask } from "../types";
+import { scrubSecrets } from "../utils/secret-scrubber";
 import {
   addGraphQLReaction,
   addIssueReaction,
@@ -8,18 +9,27 @@ import {
 } from "./reactions";
 
 /**
- * Add an 👀 eyes reaction to the source GitHub comment/review when a task starts.
- * Called when a task transitions to `in_progress`.
+ * Add an 👀 eyes reaction to the GitHub item that triggered a task: the comment,
+ * review, or issue/PR body. Never throws, because a reaction must not fail task
+ * creation or task start.
  *
- * Handles three GitHub event types:
- * - issue_comment: REST reaction on issue comment
- * - pull_request_review_comment: REST reaction on PR review comment (inline)
- * - pull_request_review: GraphQL reaction on review body (REST doesn't support review reactions)
+ * Called by the webhook handlers right after they create the task, and again when
+ * the task transitions to `in_progress`. GitHub treats a repeated reaction from the
+ * same user as a no-op, so the second call is harmless.
+ *
+ * Auth is chosen in `./reactions`: the App installation token when the task carries
+ * an installation id, else `GITHUB_TOKEN`. Deployments that use a plain webhook plus
+ * a PAT have no installation id, so it is not required here.
+ *
+ * Handles these GitHub event types, each with its own endpoint:
+ * - issue_comment: REST `issues/comments/{id}`
+ * - pull_request_review_comment: REST `pulls/comments/{id}` (inline diff comment)
+ * - pull_request_review: GraphQL on the review node (REST can't react to a review),
+ *   falling back to the PR itself when the payload had no node id
+ * - pull_request / issues: REST `issues/{number}` (the issue or PR body)
  */
-export async function addEyesReactionOnTaskStart(task: AgentTask): Promise<void> {
-  // Only for GitHub-sourced tasks with installation info
+export async function addEyesReactionToTaskSource(task: AgentTask): Promise<void> {
   if (task.source !== "github" || task.vcsProvider !== "github") return;
-  if (!task.vcsInstallationId) return;
 
   const installationId = task.vcsInstallationId;
   const repo = task.vcsRepo;
@@ -47,6 +57,8 @@ export async function addEyesReactionOnTaskStart(task: AgentTask): Promise<void>
         // PR review body — requires GraphQL API
         if (task.vcsNodeId) {
           await addGraphQLReaction(task.vcsNodeId, "EYES", installationId);
+        } else if (task.vcsNumber) {
+          await addIssueReaction(repo, task.vcsNumber, "eyes", installationId);
         }
         break;
       }
@@ -61,9 +73,20 @@ export async function addEyesReactionOnTaskStart(task: AgentTask): Promise<void>
       }
     }
   } catch (error) {
-    // Never fail the task start due to a reaction error
-    console.error("[GitHub] Failed to add eyes reaction on task start:", error);
+    // Never fail task creation or start due to a reaction error
+    console.error(
+      "[GitHub] Failed to add eyes reaction:",
+      scrubSecrets(error instanceof Error ? error.message : String(error)),
+    );
   }
+}
+
+/**
+ * Add an 👀 eyes reaction to the source GitHub item when a task starts.
+ * Called when a task transitions to `in_progress`.
+ */
+export async function addEyesReactionOnTaskStart(task: AgentTask): Promise<void> {
+  await addEyesReactionToTaskSource(task);
 }
 
 let registered = false;

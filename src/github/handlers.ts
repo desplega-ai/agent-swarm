@@ -4,7 +4,6 @@ import { findUserByExternalId } from "../be/users";
 import { resolveTemplate } from "../prompts/resolver";
 import { githubContextKey } from "../tasks/context-key";
 import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
-import { scrubSecrets } from "../utils/secret-scrubber";
 import { getInstallationToken } from "./app";
 import {
   detectMention,
@@ -13,7 +12,7 @@ import {
   isBotAssignee,
   isSwarmLabel,
 } from "./mentions";
-import { addIssueReaction, addReaction } from "./reactions";
+import { addEyesReactionToTaskSource } from "./task-reactions";
 // Side-effect import: registers all GitHub event templates in the in-memory registry
 import "./templates";
 import type {
@@ -286,14 +285,7 @@ export async function handlePullRequest(
       );
     }
 
-    if (installation?.id) {
-      addIssueReaction(repository.full_name, pr.number, "eyes", installation.id).catch((err) =>
-        console.error(
-          "[GitHub] failed to add issue reaction:",
-          scrubSecrets(err instanceof Error ? err.message : String(err)),
-        ),
-      );
-    }
+    addEyesReactionToTaskSource(task).catch(() => {});
 
     return { created: true, taskId: task.id };
   }
@@ -405,14 +397,7 @@ export async function handlePullRequest(
       );
     }
 
-    if (installation?.id) {
-      addIssueReaction(repository.full_name, pr.number, "eyes", installation.id).catch((err) =>
-        console.error(
-          "[GitHub] failed to add issue reaction:",
-          scrubSecrets(err instanceof Error ? err.message : String(err)),
-        ),
-      );
-    }
+    addEyesReactionToTaskSource(task).catch(() => {});
 
     return { created: true, taskId: task.id };
   }
@@ -519,14 +504,7 @@ export async function handlePullRequest(
       );
     }
 
-    if (installation?.id) {
-      addIssueReaction(repository.full_name, pr.number, "eyes", installation.id).catch((err) =>
-        console.error(
-          "[GitHub] failed to add issue reaction:",
-          scrubSecrets(err instanceof Error ? err.message : String(err)),
-        ),
-      );
-    }
+    addEyesReactionToTaskSource(task).catch(() => {});
 
     return { created: true, taskId: task.id };
   }
@@ -619,14 +597,7 @@ export async function handlePullRequest(
   }
 
   // Add 👀 reaction to acknowledge the mention
-  if (installation?.id) {
-    addIssueReaction(repository.full_name, pr.number, "eyes", installation.id).catch((err) =>
-      console.error(
-        "[GitHub] failed to add issue reaction:",
-        scrubSecrets(err instanceof Error ? err.message : String(err)),
-      ),
-    );
-  }
+  addEyesReactionToTaskSource(task).catch(() => {});
 
   return { created: true, taskId: task.id };
 }
@@ -710,14 +681,7 @@ export async function handleIssue(
       );
     }
 
-    if (installation?.id) {
-      addIssueReaction(repository.full_name, issue.number, "eyes", installation.id).catch((err) =>
-        console.error(
-          "[GitHub] failed to add issue reaction:",
-          scrubSecrets(err instanceof Error ? err.message : String(err)),
-        ),
-      );
-    }
+    addEyesReactionToTaskSource(task).catch(() => {});
 
     return { created: true, taskId: task.id };
   }
@@ -817,14 +781,7 @@ export async function handleIssue(
       );
     }
 
-    if (installation?.id) {
-      addIssueReaction(repository.full_name, issue.number, "eyes", installation.id).catch((err) =>
-        console.error(
-          "[GitHub] failed to add issue reaction:",
-          scrubSecrets(err instanceof Error ? err.message : String(err)),
-        ),
-      );
-    }
+    addEyesReactionToTaskSource(task).catch(() => {});
 
     return { created: true, taskId: task.id };
   }
@@ -899,14 +856,7 @@ export async function handleIssue(
   }
 
   // Add 👀 reaction to acknowledge the mention
-  if (installation?.id) {
-    addIssueReaction(repository.full_name, issue.number, "eyes", installation.id).catch((err) =>
-      console.error(
-        "[GitHub] failed to add issue reaction:",
-        scrubSecrets(err instanceof Error ? err.message : String(err)),
-      ),
-    );
-  }
+  addEyesReactionToTaskSource(task).catch(() => {});
 
   return { created: true, taskId: task.id };
 }
@@ -1020,14 +970,7 @@ export async function handleComment(
   }
 
   // Add 👀 reaction to the comment to acknowledge the mention
-  if (installation?.id) {
-    addReaction(repository.full_name, comment.id, "eyes", installation.id).catch((err) =>
-      console.error(
-        "[GitHub] failed to add comment reaction:",
-        scrubSecrets(err instanceof Error ? err.message : String(err)),
-      ),
-    );
-  }
+  addEyesReactionToTaskSource(task).catch(() => {});
 
   return { created: true, taskId: task.id };
 }
@@ -1339,14 +1282,7 @@ export async function handlePullRequestReview(
   }
 
   // Add reaction to acknowledge the review
-  if (installation?.id) {
-    addIssueReaction(repository.full_name, pr.number, "eyes", installation.id).catch((err) =>
-      console.error(
-        "[GitHub] failed to add issue reaction:",
-        scrubSecrets(err instanceof Error ? err.message : String(err)),
-      ),
-    );
-  }
+  addEyesReactionToTaskSource(task).catch(() => {});
 
   return { created: true, taskId: task.id };
 }

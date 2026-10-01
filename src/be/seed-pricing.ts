@@ -229,6 +229,15 @@ export function buildModelsDevSeedRows(cache: ModelsDevCache): PricingSeedRow[] 
     }
   }
 
+  // ---- DeepSeek direct API (dsh with DEEPSEEK_API_KEY, bare ids) ---------
+  const deepseek = cache.deepseek?.models ?? {};
+  for (const [id, model] of Object.entries(deepseek)) {
+    if (!model?.cost) continue;
+    for (const row of projectCostBlock("dsh", id, model.cost)) {
+      rows.push(row);
+    }
+  }
+
   // ---- OpenRouter passthrough (covers gemini + every opencode-routed model)
   const openrouter = cache.openrouter?.models ?? {};
   for (const [id, model] of Object.entries(openrouter)) {
@@ -243,6 +252,13 @@ export function buildModelsDevSeedRows(cache: ModelsDevCache): PricingSeedRow[] 
     // through to costSource='unpriced' even though the model is in the
     // models.dev snapshot.
     for (const row of projectCostBlock("pi", id, model.cost, {
+      anthropicBilled: id.startsWith("anthropic/"),
+    })) {
+      rows.push(row);
+    }
+    // dsh routes `openrouter/<id>` models (all four tier defaults) through
+    // OpenRouter, so it bills at the same rates.
+    for (const row of projectCostBlock("dsh", id, model.cost, {
       anthropicBilled: id.startsWith("anthropic/"),
     })) {
       rows.push(row);

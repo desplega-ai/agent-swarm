@@ -1,6 +1,7 @@
 import {
   buildClaudeShortnameMap,
   claudeCatalogModelId,
+  dshCatalogRef,
   harnessModelIds,
   isReasoningHarness,
   modelDisplayName,
@@ -15,7 +16,7 @@ import modelsCache from "./modelsdev-cache.json";
 // `src/tests/bedrock-model-groups.test.ts`), and a runtime `@/` import cannot
 // resolve there.
 
-export type LocalHarnessProvider = "claude" | "codex" | "pi" | "opencode" | "acp";
+export type LocalHarnessProvider = "claude" | "codex" | "pi" | "opencode" | "acp" | "dsh";
 
 /** USD per 1M tokens, as models.dev names the rates. Cache rates are absent for models without prompt caching. */
 export interface ModelCost {
@@ -139,13 +140,14 @@ function runtimeSectionModels(
 /**
  * The reasoning-effort levels `harness` accepts for `modelId`: exactly what
  * `PATCH /api/agents/:id/runtime` allows, so an effort picker offers these and
- * nothing else. Empty for a harness with no effort control (acp, dsh, devin,
+ * nothing else. Empty for a harness with no effort control (acp, devin,
  * claude-managed), a model the catalog does not list (custom strings), and a
  * model that does not reason.
  *
  * `modelId` is the string the harness stores: a bare id for claude and codex
  * (a Claude CLI shortname such as `opus` resolves to the newest model of its
- * family), `<provider>/<id>` for pi and opencode.
+ * family), `<provider>/<id>` for pi and opencode, `openrouter/<id>` or a bare
+ * DeepSeek API id for dsh.
  */
 export function effortLevelsFor(
   harness: string,
@@ -161,6 +163,8 @@ export function effortLevelsFor(
   } else if (harness === "codex") {
     providerId = "openai";
     catalogId = modelId;
+  } else if (harness === "dsh") {
+    ({ providerId, modelId: catalogId } = dshCatalogRef(modelId));
   } else {
     // The id may hold more slashes (`openrouter/google/gemini-3-flash-preview`).
     const slash = modelId.indexOf("/");
@@ -209,7 +213,21 @@ export function deepseekCatalogModels(
   return runtimeSectionModels("deepseek", liveCatalog);
 }
 
-export const LOCAL_HARNESSES: LocalHarnessProvider[] = ["claude", "codex", "pi", "opencode", "acp"];
+export const LOCAL_HARNESSES: LocalHarnessProvider[] = [
+  "claude",
+  "codex",
+  "pi",
+  "opencode",
+  "dsh",
+  "acp",
+];
+
+/**
+ * The models dsh's DeepSeek-direct route serves out of the box (its bundled
+ * `deepseek-official` catalog). dsh rejects other bare ids, so the picker
+ * offers only these; anything else goes through OpenRouter or a custom id.
+ */
+export const DSH_DIRECT_MODELS = ["deepseek-flash", "deepseek-v4-pro"] as const;
 
 export const HARNESS_LABEL: Record<ProviderName | string, string> = {
   claude: "Claude",
@@ -313,6 +331,8 @@ const FALLBACK_MODEL: Record<LocalHarnessProvider, string> = {
   codex: "",
   pi: "openrouter/google/gemini-3-flash-preview",
   opencode: "openrouter/qwen/qwen3-coder-flash",
+  // The dsh regular-tier default (DEFAULT_MODEL_TIER_MAP.dsh in src/types.ts).
+  dsh: "openrouter/deepseek/deepseek-v4.1-flash",
   acp: "",
 };
 
@@ -379,6 +399,8 @@ export function modelGroupsForHarness(
       },
     ];
   }
+
+  if (harness === "dsh") return dshModelGroups(configs, envPresence, liveCatalog);
 
   const snapshotGroups = SNAPSHOT_ORDER.map((providerId) => {
     const meta = SNAPSHOT_META[providerId];
@@ -460,6 +482,56 @@ export function modelGroupsForHarness(
   }
 
   return snapshotGroups;
+}
+
+/**
+ * dsh reaches models two ways: `openrouter/<id>` with OPENROUTER_API_KEY, or a
+ * bare DeepSeek API id with DEEPSEEK_API_KEY (see `src/providers/dsh-adapter.ts`).
+ */
+function dshModelGroups(
+  configs: SwarmConfig[] | undefined,
+  envPresence: Record<string, boolean> | undefined,
+  liveCatalog?: LiveModelsCatalog | null,
+): ModelGroup[] {
+  const openrouterMeta = SNAPSHOT_META.openrouter;
+  const openrouter = Object.values((liveCatalog?.openrouter ?? CACHE.openrouter)?.models ?? {})
+    .map((m) => ({
+      id: `openrouter/${m.id}`,
+      label: modelDisplayName(m.name) ?? m.id,
+      provider: openrouterMeta.label,
+      providerId: openrouterMeta.iconKey,
+      requiredKey: openrouterMeta.requiredKey,
+      ...catalogFacts(m),
+      reasoningLevels: reasoningLevelsFor("dsh", m.id, m),
+    }))
+    .sort((a, b) => a.label.localeCompare(b.label));
+  const deepseek = deepseekCatalogModels(liveCatalog);
+  const direct: ModelOption[] = DSH_DIRECT_MODELS.map((id) => {
+    const m = deepseek[id];
+    return {
+      id,
+      label: m ? (modelDisplayName(m.name) ?? id) : id,
+      provider: "DeepSeek",
+      providerId: null,
+      requiredKey: "DEEPSEEK_API_KEY",
+      ...(m ? catalogFacts(m) : {}),
+      reasoningLevels: m ? reasoningLevelsFor("dsh", id, m) : [],
+    };
+  });
+  return [
+    {
+      provider: openrouterMeta.label,
+      models: openrouter,
+      requiredKey: openrouterMeta.requiredKey,
+      enabled: hasRuntimeCredential(openrouterMeta.requiredKey, configs, envPresence),
+    },
+    {
+      provider: "DeepSeek",
+      models: direct,
+      requiredKey: "DEEPSEEK_API_KEY",
+      enabled: hasRuntimeCredential("DEEPSEEK_API_KEY", configs, envPresence),
+    },
+  ];
 }
 
 /**
@@ -760,6 +832,7 @@ export function isLocalHarness(
     value === "codex" ||
     value === "pi" ||
     value === "opencode" ||
+    value === "dsh" ||
     value === "acp"
   );
 }

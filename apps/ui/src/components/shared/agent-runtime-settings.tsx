@@ -1,5 +1,5 @@
 import { nearestReasoningLevel } from "@desplega/model-catalog";
-import { AlertTriangle, ArrowUpCircle, Save } from "lucide-react";
+import { AlertTriangle, ArrowUpCircle, Info, Save } from "lucide-react";
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -78,6 +78,7 @@ const CREDENTIAL_KEYS = [
   "OPENAI_API_KEY",
   "OPENROUTER_API_KEY",
   "CODEX_OAUTH",
+  "DEEPSEEK_API_KEY",
 ];
 
 function configuredModel(configs: { key: string; value: string }[] | undefined): string {
@@ -354,6 +355,10 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
     !customMode && modelOption
       ? !groups.find((g) => g.provider === modelOption.provider)?.enabled
       : false;
+
+  if (agent.harnessProvider && !isLocalHarness(agent.harnessProvider)) {
+    return <UnsupportedHarnessNotice agent={agent} configuredModel={model} />;
+  }
 
   if (!gate.supported) {
     return (
@@ -847,7 +852,6 @@ function UnsupportedApiNotice({
   currentVersion: string | null;
   requiredVersion: string;
 }) {
-  const harness = isLocalHarness(agent.harnessProvider) ? agent.harnessProvider : null;
   return (
     <div className="space-y-3">
       <div className="flex items-start gap-2 rounded-md border border-status-info/30 bg-status-info/5 p-3 text-xs">
@@ -866,20 +870,67 @@ function UnsupportedApiNotice({
           </p>
         </div>
       </div>
-      <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
-        <span className="flex items-center gap-2">
-          <span className="text-muted-foreground">Harness:</span>
-          {harness ? <HarnessIcon harness={harness} className="h-4 w-4" /> : null}
-          <span>{harness ? HARNESS_LABEL[harness] : (agent.harnessProvider ?? "unknown")}</span>
-        </span>
-        <span className="flex items-center gap-2">
-          <span className="text-muted-foreground">Model:</span>
-          {modelOption ? (
-            <ProviderIcon provider={modelOption.providerId} className="h-4 w-4" />
-          ) : null}
-          <span>{modelOption ? modelOption.label : configured || "unset"}</span>
-        </span>
+      <ReadOnlyRuntimeSummary
+        agent={agent}
+        modelOption={modelOption}
+        configuredModel={configured}
+      />
+    </div>
+  );
+}
+
+/**
+ * The editor only knows the local harnesses. Any other harness (e.g. dsh) would
+ * otherwise render as "Claude", and saving would switch the agent to Claude.
+ */
+function UnsupportedHarnessNotice({
+  agent,
+  configuredModel,
+}: {
+  agent: Agent;
+  configuredModel: string;
+}) {
+  const label = HARNESS_LABEL[agent.harnessProvider ?? ""] ?? agent.harnessProvider;
+  return (
+    <div className="space-y-3">
+      <div className="flex items-start gap-2 rounded-md border border-status-info/30 bg-status-info/5 p-3 text-xs">
+        <Info className="mt-0.5 h-4 w-4 shrink-0 text-status-info-strong" />
+        <div className="space-y-1">
+          <p className="font-medium text-foreground">Runtime editor unavailable</p>
+          <p className="text-muted-foreground">
+            The dashboard cannot edit the {label} harness yet. Showing current settings read-only.
+          </p>
+        </div>
       </div>
+      <ReadOnlyRuntimeSummary agent={agent} modelOption={null} configuredModel={configuredModel} />
+    </div>
+  );
+}
+
+function ReadOnlyRuntimeSummary({
+  agent,
+  modelOption,
+  configuredModel: configured,
+}: {
+  agent: Agent;
+  modelOption: ModelOption | null;
+  configuredModel: string;
+}) {
+  const provider = agent.harnessProvider;
+  return (
+    <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
+      <span className="flex items-center gap-2">
+        <span className="text-muted-foreground">Harness:</span>
+        <HarnessIcon harness={provider} className="h-4 w-4" />
+        <span>{(provider && HARNESS_LABEL[provider]) ?? provider ?? "unknown"}</span>
+      </span>
+      <span className="flex items-center gap-2">
+        <span className="text-muted-foreground">Model:</span>
+        {modelOption ? (
+          <ProviderIcon provider={modelOption.providerId} className="h-4 w-4" />
+        ) : null}
+        <span>{modelOption ? modelOption.label : configured || "unset"}</span>
+      </span>
     </div>
   );
 }

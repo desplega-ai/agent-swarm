@@ -88,7 +88,7 @@ describe("taskEffortOptions", () => {
   });
 
   test("a harness without effort control is off, with a reason", () => {
-    for (const harness of ["acp", "dsh", "devin", "claude-managed"]) {
+    for (const harness of ["acp", "devin", "claude-managed"]) {
       const options = taskEffortOptions({
         ...base,
         harness,

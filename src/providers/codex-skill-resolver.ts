@@ -77,6 +77,8 @@ export async function resolveSlashSkillPrompt(
     providerLabel: string;
     skillsDir: string;
     emit?: (event: ProviderEvent) => void;
+    /** Drop a leading YAML frontmatter block from SKILL.md before inlining. */
+    stripFrontmatter?: boolean;
   },
 ): Promise<string> {
   if (!prompt) {
@@ -126,6 +128,10 @@ export async function resolveSlashSkillPrompt(
       content: `[${opts.providerLabel}] skill resolver: SKILL.md for /${commandName} exceeds ${MAX_SKILL_CHARS} chars (${skillContent.length}), truncating\n`,
     });
     skillContent = skillContent.slice(0, MAX_SKILL_CHARS);
+  }
+
+  if (opts.stripFrontmatter) {
+    skillContent = skillContent.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, "").trimStart();
   }
 
   // Assemble the user-request body: trailing args from the slash line (if any),

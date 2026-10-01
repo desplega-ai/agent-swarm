@@ -19,6 +19,9 @@ import {
 const TEST_DB_PATH = "./test-db-retention.sqlite";
 const NOW = new Date("2026-08-23T12:00:00.000Z");
 const RETENTION_KEYS = DB_RETENTION_TABLES.map((table) => table.envKey);
+/** Time-horizon tables. Count-based context_versions has its own suite. */
+const AGE_TABLES = DB_RETENTION_TABLES.filter((table) => table.policy === "age");
+type AgeTable = (typeof AGE_TABLES)[number];
 const TUNING_KEYS = [
   "DB_RETENTION_TICK_BUDGET_MS",
   "DB_RETENTION_CATCHUP_INTERVAL_MS",
@@ -30,11 +33,7 @@ async function removeDbFiles(): Promise<void> {
     await unlink(`${TEST_DB_PATH}${suffix}`).catch(() => undefined);
 }
 
-async function insertRow(
-  table: (typeof DB_RETENTION_TABLES)[number]["table"],
-  id: string,
-  createdAt: string,
-): Promise<void> {
+async function insertRow(table: AgeTable["table"], id: string, createdAt: string): Promise<void> {
   const client = getDbClient();
   if (table === "session_logs") {
     await client.run(
@@ -104,11 +103,12 @@ afterEach(async () => {
 });
 
 describe("DB retention", () => {
-  test("keeps the closed allowlist limited to the three approved tables", () => {
+  test("keeps the closed allowlist limited to the four approved tables", () => {
     expect(DB_RETENTION_TABLES.map((table) => table.table)).toEqual([
       "session_logs",
       "agent_log",
       "events",
+      "context_versions",
     ]);
   });
 
@@ -164,7 +164,7 @@ describe("DB retention", () => {
   });
 
   test("is opt-in and rejects invalid retention windows", async () => {
-    for (const table of DB_RETENTION_TABLES)
+    for (const table of AGE_TABLES)
       await insertRow(table.table, `${table.table}-old`, "2026-08-01T00:00:00.000Z");
     process.env.SESSION_LOG_RETENTION_DAYS = "0";
     process.env.AGENT_LOG_RETENTION_DAYS = "abc";
@@ -172,12 +172,12 @@ describe("DB retention", () => {
 
     await runDbRetentionTick({ now: NOW });
 
-    for (const table of DB_RETENTION_TABLES) expect(await countRows(table.table)).toBe(1);
+    for (const table of AGE_TABLES) expect(await countRows(table.table)).toBe(1);
   });
 
   test("sweeps only enabled tables and preserves rows at or after the ISO cutoff", async () => {
     const cutoff = "2026-08-22T12:00:00.000Z";
-    for (const table of DB_RETENTION_TABLES) {
+    for (const table of AGE_TABLES) {
       await insertRow(table.table, `${table.table}-old`, "2026-08-22T11:59:59.999Z");
       await insertRow(table.table, `${table.table}-cutoff`, cutoff);
     }
@@ -226,7 +226,7 @@ describe("DB retention", () => {
   });
 
   test("dry run reports candidates without deleting any enabled table rows", async () => {
-    for (const table of DB_RETENTION_TABLES) {
+    for (const table of AGE_TABLES) {
       process.env[table.envKey] = "1";
       await insertRow(table.table, `${table.table}-old`, "2026-08-01T00:00:00.000Z");
     }
@@ -234,7 +234,7 @@ describe("DB retention", () => {
 
     await runDbRetentionTick({ now: NOW });
 
-    for (const table of DB_RETENTION_TABLES) expect(await countRows(table.table)).toBe(1);
+    for (const table of AGE_TABLES) expect(await countRows(table.table)).toBe(1);
     // A dry run is a single indexed COUNT(*): rowsDeleted is always 0, and the
     // candidate count lives in backlogRemaining instead.
     expect(getDbRetentionStats()).toMatchObject({
@@ -341,7 +341,7 @@ describe("DB retention", () => {
   });
 
   test("delete plan uses the index", async () => {
-    for (const table of DB_RETENTION_TABLES) {
+    for (const table of AGE_TABLES) {
       const plan = await getDbClient().query<{ detail: string }>(
         `EXPLAIN QUERY PLAN DELETE FROM ${table.table} WHERE rowid IN (
            SELECT rowid FROM ${table.table} WHERE ${table.timeColumn} < ? ORDER BY ${table.timeColumn} LIMIT 500
@@ -375,7 +375,7 @@ describe("DB retention", () => {
     process.env.AGENT_LOG_RETENTION_DAYS = "1";
     process.env.EVENTS_RETENTION_DAYS = "1";
     process.env.DB_RETENTION_TICK_BUDGET_MS = "3000";
-    for (const table of DB_RETENTION_TABLES) {
+    for (const table of AGE_TABLES) {
       await insertRow(table.table, `${table.table}-budget`, "2026-08-01T00:00:00.000Z");
     }
 
@@ -408,7 +408,7 @@ describe("DB retention", () => {
       firstCounts[first] = (firstCounts[first] ?? 0) + 1;
     }
 
-    for (const table of DB_RETENTION_TABLES) {
+    for (const table of AGE_TABLES) {
       expect(firstCounts[table.metricsKey]).toBe(2);
     }
   });

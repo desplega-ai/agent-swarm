@@ -358,7 +358,14 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
   // sweep keep running for the default 30000ms.
   ...boundedIntegerValidatorsFor(DB_RETENTION_TUNING_BOUNDS),
   ...boundedIntegerValidators(
-    ["SESSION_LOG_RETENTION_DAYS", "AGENT_LOG_RETENTION_DAYS", "EVENTS_RETENTION_DAYS"],
+    [
+      "SESSION_LOG_RETENTION_DAYS",
+      "AGENT_LOG_RETENTION_DAYS",
+      "EVENTS_RETENTION_DAYS",
+      // A kept-version count, not days. The floor of 1 is what guarantees the
+      // sweep never deletes the newest version of any (agentId, field).
+      "CONTEXT_VERSIONS_KEEP_LATEST",
+    ],
     1,
     MAX_DB_RETENTION_DAYS,
   ),
