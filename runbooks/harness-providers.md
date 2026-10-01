@@ -238,7 +238,7 @@ Bedrock mode is active when **either**:
 1. `BEDROCK_AUTH_MODE=sdk` is set in `swarm_config` (explicit), **or**
 2. `BEDROCK_AUTH_MODE` is absent and `MODEL_OVERRIDE` starts with `amazon-bedrock/` (prefix-inference fallback — preserves the earlier prefix-inference behavior).
 
-`BEDROCK_AUTH_MODE=bearer` is recognised and validated but the full bearer-token path is not implemented yet. Workers in `bearer` mode fall through to the standard credential check (key / auth.json).
+`BEDROCK_AUTH_MODE=bearer` uses a Bedrock API key in `AWS_BEARER_TOKEN_BEDROCK`, which the AWS SDK picks up as the bearer identity. `checkPiMonoCredentials` reports `AWS_BEARER_TOKEN_BEDROCK` as missing when bearer mode is set without it.
 
 ### Credential probe
 
@@ -292,6 +292,18 @@ A dedicated **AWS Bedrock** card appears in the Credentials tab for all `pi`-har
 | Green | `ready` | SDK credential chain is valid; models enumerated. |
 | Red | `blocked` | Probe failed; error text shown. Worker is parked at `credential-wait`. |
 | Grey | `pending` | Worker hasn't reported yet (booting, or Bedrock mode not active). |
+
+## Claude model routes (`packages/model-routing`)
+
+The claude harness credential gate, spawn validator, and live check all derive one **default route** from the worker env with `deriveDefaultRoute("claude", env)` from `@desplega/model-routing` (issue #1800). Precedence: `CLAUDE_CODE_USE_FOUNDRY` > `CLAUDE_CODE_USE_BEDROCK` > `CLAUDE_CODE_USE_VERTEX` > non-Anthropic `ANTHROPIC_BASE_URL` + `ANTHROPIC_AUTH_TOKEN` | `ANTHROPIC_API_KEY` > `CLAUDE_CODE_OAUTH_TOKEN` > `ANTHROPIC_API_KEY`.
+
+- **Gate** (`checkClaudeCredentials`, `validateClaudeCredentials`): `routeCredentialStatus` checks the route provider's `requiredEnv` (gateway key; `ANTHROPIC_FOUNDRY_RESOURCE`; `AWS_REGION`; `CLOUD_ML_REGION` + `ANTHROPIC_VERTEX_PROJECT_ID`). No route → the legacy two-variable missing list.
+- **Live check** (`validateProviderCredentials("claude")`): `validateRoute` runs the provider's `validate` through `createScopedFetch(route.baseUrl)`, which refuses any other origin and never follows redirects. A gateway key is checked with `GET {ANTHROPIC_BASE_URL}/v1/models` (2xx verified, 401/403 failed, 404/405 configured). Subscription is presence-only. Foundry/Bedrock/Vertex have no `validate`, so the report carries no live test and the rollup shows `configured`.
+- **Spawn env** (`withClaudeRouteEnv`): on every route except `claude-subscription`, `CLAUDE_CODE_OAUTH_TOKEN` is blanked. Claude Code 2.1.286 sends the OAuth token as `Authorization: Bearer` to `ANTHROPIC_BASE_URL` when no gateway key is set; a blank token counts as unset.
+- **Internal AI** (`resolveCredential`): `ANTHROPIC_API_KEY` is skipped when `ANTHROPIC_BASE_URL` names a gateway, because pi-ai would send it to `api.anthropic.com`.
+- The `claude-subscription` provider declares `harnesses: ["claude"]`; `assertRouteHarness` rejects it elsewhere.
+
+The package is pure (no `src/`, SQLite, or filesystem imports; enforced by the `no-package-imports-src` dep-cruiser rule). Other harnesses return `null` from `deriveDefaultRoute` and keep their own checks.
 
 ## Native session resume is deprecated (2026-05-28)
 
@@ -412,7 +424,7 @@ The legacy compatibility gates remain unchanged: tmux fail-fast plus the shared 
 
 ### Auth
 
-Same env vars as the default claude flow: `CLAUDE_CODE_OAUTH_TOKEN` (preferred) or `ANTHROPIC_API_KEY`. The credential check is unchanged. The adapter passes OAuth directly into the bridge process; when bridge mode is enabled with Anthropic local auth instead of OAuth, the adapter adds `--desplega-local-auth` so claude-bridge forwards the local auth env into the tmux-launched Claude process.
+Same env vars as the default claude flow (see [Claude model routes](#claude-model-routes-packagesmodel-routing)). The bridge only runs on the subscription route: gateway and cloud routes blank `CLAUDE_CODE_OAUTH_TOKEN`, so the bridge falls back to stock `claude`. The adapter passes OAuth directly into the bridge process; when bridge mode is enabled with Anthropic local auth instead of OAuth, the adapter adds `--desplega-local-auth` so claude-bridge forwards the local auth env into the tmux-launched Claude process.
 
 ### Not a new `HARNESS_PROVIDER`
 

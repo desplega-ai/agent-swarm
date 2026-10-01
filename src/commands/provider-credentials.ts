@@ -18,6 +18,7 @@
  * runs the predicate itself — it just reads the agent row.
  */
 
+import { deriveDefaultRoute, validateRoute } from "@desplega/model-routing";
 import { checkClaudeCredentials } from "../providers/claude-adapter";
 import { checkClaudeManagedCredentials } from "../providers/claude-managed-adapter";
 import { checkCodexCredentials } from "../providers/codex-adapter";
@@ -32,6 +33,7 @@ import type {
   ProviderName,
   ReasoningEffort,
 } from "../types";
+import { CLAUDE_CREDENTIALS_HINT } from "../utils/credentials";
 import { getOpenRouterBaseUrl } from "../utils/openrouter-base-url";
 import { scrubSecrets } from "../utils/secret-scrubber";
 
@@ -172,6 +174,8 @@ export interface LiveValidationResult {
   ok: boolean;
   error?: string;
   latency_ms: number;
+  /** No free live check exists for this credential (cloud routes): report presence only. */
+  skipped?: boolean;
 }
 
 async function timedFetch(
@@ -308,7 +312,7 @@ function parseCodexOAuthAccess(blob: string | undefined): string | null {
  *
  * | Harness          | Accepted credentials (in resolution order)                              | Endpoint                       |
  * |------------------|-------------------------------------------------------------------------|--------------------------------|
- * | `claude`         | `CLAUDE_CODE_OAUTH_TOKEN` (Pro/Max OAuth) → `ANTHROPIC_API_KEY`         | Anthropic `/v1/models`         |
+ * | `claude`         | default route: Foundry / Bedrock / Vertex → gateway (`ANTHROPIC_BASE_URL` + `ANTHROPIC_AUTH_TOKEN` or `ANTHROPIC_API_KEY`) → `CLAUDE_CODE_OAUTH_TOKEN` → `ANTHROPIC_API_KEY` | the route's own `/v1/models`; OAuth presence-only; cloud routes skipped |
  * | `claude-managed` | `ANTHROPIC_API_KEY` (managed agents always use API key + managed envs)  | Anthropic `/v1/models`         |
  * | `codex`          | `~/.codex/auth.json` (file) → `CODEX_OAUTH` (env OAuth) → `OPENAI_API_KEY` | OpenAI `/v1/models` (api-key path only) |
  * | `opencode`       | `OPENROUTER_API_KEY` → `ANTHROPIC_API_KEY` → `OPENAI_API_KEY` (pi-style) | matching provider's `/v1/models` |
@@ -320,23 +324,32 @@ function parseCodexOAuthAccess(blob: string | undefined): string | null {
  * Returns `{ok: true, latency_ms}` on 2xx, `{ok: false, error, latency_ms}`
  * otherwise. Errors are scrubbed via `scrubSecrets` before being returned.
  */
-export async function validateProviderCredentials(provider: string): Promise<LiveValidationResult> {
-  const env = process.env;
+export async function validateProviderCredentials(
+  provider: string,
+  env: Record<string, string | undefined> = process.env,
+): Promise<LiveValidationResult> {
   const startedAt = Date.now();
 
   try {
     switch (provider) {
       case "claude": {
-        // OAuth (Claude Pro/Max via `claude` CLI login) wins over API key —
-        // matches `claude-adapter.ts` and the docker entrypoint precedence.
-        // OAuth tokens get a presence check only (see `presenceCheckOk`).
-        if (env.CLAUDE_CODE_OAUTH_TOKEN) return presenceCheckOk();
-        if (env.ANTHROPIC_API_KEY) return checkAnthropicApiKey(env.ANTHROPIC_API_KEY);
-        return {
-          ok: false,
-          error: "Set either CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY.",
-          latency_ms: Date.now() - startedAt,
-        };
+        // The default route decides where the check goes: a gateway key is
+        // checked against the gateway only (scoped fetch), never against
+        // api.anthropic.com. OAuth stays presence-only; cloud routes have no
+        // free check and report `configured` (no live test).
+        const route = deriveDefaultRoute("claude", env);
+        if (!route) {
+          return {
+            ok: false,
+            error: CLAUDE_CREDENTIALS_HINT,
+            latency_ms: Date.now() - startedAt,
+          };
+        }
+        const result = await validateRoute(route, env);
+        const latency_ms = Date.now() - startedAt;
+        if (result.status === "verified") return { ok: true, latency_ms };
+        if (result.status === "configured") return { ok: true, skipped: true, latency_ms };
+        return { ok: false, error: scrubSecrets(result.reason), latency_ms };
       }
       case "claude-managed": {
         // Managed agents always run with an API key — OAuth not supported on
@@ -483,8 +496,8 @@ export async function buildCredStatusReport(
 ): Promise<AgentCredStatus> {
   const presence = await checkProviderCredentials(provider, env, opts);
   let liveTest: AgentCredStatus["liveTest"] = null;
-  if (presence.ready) {
-    const live = await validateProviderCredentials(provider);
+  const live = presence.ready ? await validateProviderCredentials(provider, env) : null;
+  if (live && !live.skipped) {
     liveTest = {
       ok: live.ok,
       error: live.error ?? null,

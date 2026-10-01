@@ -15,6 +15,7 @@
  * Worker-safe: uses fetch() only, no bun:sqlite import.
  */
 
+import { isFirstPartyAnthropicUrl } from "@desplega/model-routing";
 import {
   InMemoryCredentialStore,
   type OAuthCredential,
@@ -113,7 +114,8 @@ export interface ResolveCredentialOptions {
  *
  * Precedence (top wins):
  *   1. `env.OPENROUTER_API_KEY` (via pi-ai `getEnvApiKey("openrouter")`)
- *   2. `env.ANTHROPIC_API_KEY`  (via pi-ai `getEnvApiKey("anthropic")`)
+ *   2. `env.ANTHROPIC_API_KEY`  (via pi-ai `getEnvApiKey("anthropic")`), unless
+ *      `ANTHROPIC_BASE_URL` points at a gateway (the key is the gateway's)
  *   3. `env.OPENAI_API_KEY`     (via pi-ai `getEnvApiKey("openai")`)
  *   4. codex OAuth (only when `apiUrl && apiKey` are provided)
  *   5. `env.CLAUDE_CODE_OAUTH_TOKEN` → claude-cli fallback
@@ -138,8 +140,14 @@ export async function resolveCredential(
     };
   }
 
-  // 2. Anthropic.
-  const anthropicKey = env.ANTHROPIC_API_KEY ?? getEnvKey("anthropic");
+  // 2. Anthropic. pi-ai sends this key to api.anthropic.com, so skip it when
+  // ANTHROPIC_BASE_URL names a gateway: the key belongs to the gateway (#1800).
+  const anthropicBaseUrl = env.ANTHROPIC_BASE_URL?.trim();
+  const anthropicKeyIsForGateway =
+    Boolean(anthropicBaseUrl) && !isFirstPartyAnthropicUrl(anthropicBaseUrl ?? "");
+  const anthropicKey = anthropicKeyIsForGateway
+    ? undefined
+    : (env.ANTHROPIC_API_KEY ?? getEnvKey("anthropic"));
   if (anthropicKey) {
     return {
       kind: "anthropic",

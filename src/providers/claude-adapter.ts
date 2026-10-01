@@ -1,6 +1,7 @@
 import { readFile, unlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import { deriveDefaultRoute, routeCredentialStatus, routeUnsetEnv } from "@desplega/model-routing";
 import { type Span, trace } from "@opentelemetry/api";
 import {
   type RunStopHookSessionSummaryOpts,
@@ -8,7 +9,7 @@ import {
 } from "../hooks/hook";
 import { isClaudeBridgeEffective, resolveClaudeTransport } from "../utils/claude-transport";
 import { getContextWindowSize } from "../utils/context-window";
-import { validateClaudeCredentials } from "../utils/credentials";
+import { CLAUDE_CREDENTIALS_HINT, validateClaudeCredentials } from "../utils/credentials";
 import {
   parseStderrForErrors,
   redactRateLimitEventLine,
@@ -42,18 +43,45 @@ import type {
 
 /**
  * Predicate used by the worker boot loop and the credential-status endpoint.
- * The claude harness needs EITHER `CLAUDE_CODE_OAUTH_TOKEN` (preferred) or
- * `ANTHROPIC_API_KEY` — both are listed as missing when neither is present.
+ * The claude harness is ready when its default route (subscription, API key,
+ * gateway, Foundry, Bedrock, or Vertex; see `deriveDefaultRoute`) has every
+ * env var it needs. With no route at all, the two first-party credentials are
+ * listed as missing.
  */
 export function checkClaudeCredentials(env: Record<string, string | undefined>): CredStatus {
-  if (env.CLAUDE_CODE_OAUTH_TOKEN || env.ANTHROPIC_API_KEY) {
-    return { ready: true, missing: [], satisfiedBy: "env" };
+  const route = deriveDefaultRoute("claude", env);
+  if (!route) {
+    return {
+      ready: false,
+      missing: ["CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"],
+      hint: CLAUDE_CREDENTIALS_HINT,
+    };
   }
-  return {
-    ready: false,
-    missing: ["CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"],
-    hint: "Set either CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY (one is enough).",
-  };
+  const status = routeCredentialStatus(route, env);
+  if (status.ready) return { ready: true, missing: [], satisfiedBy: "env" };
+  return { ready: false, missing: status.missing, hint: status.hint };
+}
+
+/**
+ * `env` without the credentials its claude default route does not use. On a
+ * gateway or cloud route this drops `CLAUDE_CODE_OAUTH_TOKEN`: Claude Code
+ * 2.1.286 sends that token as `Authorization: Bearer` to ANTHROPIC_BASE_URL
+ * whenever no gateway key outranks it, and claude-bridge authenticates from it.
+ *
+ * Dropped keys are blanked, not deleted, so the `?? process.env` fallbacks in
+ * the binary/transport resolvers cannot bring them back. Claude Code treats a
+ * blank token as unset (verified on 2.1.286).
+ */
+export function withClaudeRouteEnv(
+  env: Record<string, string | undefined>,
+): Record<string, string | undefined> {
+  const route = deriveDefaultRoute("claude", env);
+  if (!route) return env;
+  const unset = routeUnsetEnv("claude", route).filter((key) => env[key]);
+  if (unset.length === 0) return env;
+  const next = { ...env };
+  for (const key of unset) next[key] = "";
+  return next;
 }
 
 /** Task file data written to /tmp for hook to read */
@@ -535,7 +563,7 @@ export function buildClaudeSessionEnvironment(
   model: string,
   taskFilePath: string,
 ): { env: Record<string, string>; appliedReasoningEffort: ReasoningEffort | null } {
-  const sourceEnv = { ...(config.env || process.env) };
+  const sourceEnv = { ...withClaudeRouteEnv(config.env || process.env) };
   // Summaries run in the adapter process. Do not bypass Claude's OAuth filtering for hooks.
   delete sourceEnv.AGENT_SWARM_CLAUDE_OAUTH_TOKEN;
   const reasoningApplication = applyReasoningEffort("claude", model, config.reasoningEffort);
@@ -572,8 +600,7 @@ export async function runClaudeSessionSummary(
       agentId: config.agentId,
       transcript: text,
       env: {
-        ...process.env,
-        ...config.env,
+        ...withClaudeRouteEnv({ ...process.env, ...config.env }),
         AGENT_SWARM_TASK_ID: config.taskId,
         MCP_BASE_URL: config.apiUrl,
         AGENT_SWARM_API_KEY: config.apiKey,
@@ -1035,7 +1062,7 @@ export class ClaudeAdapter implements ProviderAdapter {
 
     const model = config.model || "opus";
 
-    const sourceEnv = config.env || process.env;
+    const sourceEnv = withClaudeRouteEnv(config.env || process.env);
     const transport = resolveClaudeTransport(sourceEnv);
     const credType = validateClaudeCredentials(sourceEnv);
     console.log(`\x1b[2m[claude]\x1b[0m Using credential: ${credType}`);

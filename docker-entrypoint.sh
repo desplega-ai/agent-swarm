@@ -294,8 +294,10 @@ elif [ "$HARNESS_PROVIDER" = "codex" ]; then
     fi
 else
     # Claude auth (default) — soft check; TS-level loop blocks if missing.
-    if [ -z "$CLAUDE_CODE_OAUTH_TOKEN" ] && [ -z "$ANTHROPIC_API_KEY" ]; then
-        echo "Warning: claude provider has no credentials yet (CLAUDE_CODE_OAUTH_TOKEN / ANTHROPIC_API_KEY). Worker will park in credential-wait until creds appear in swarm_config."
+    # Gateway (ANTHROPIC_AUTH_TOKEN) and cloud (CLAUDE_CODE_USE_*) routes count too.
+    if [ -z "$CLAUDE_CODE_OAUTH_TOKEN" ] && [ -z "$ANTHROPIC_API_KEY" ] && [ -z "$ANTHROPIC_AUTH_TOKEN" ] \
+        && [ -z "$CLAUDE_CODE_USE_FOUNDRY" ] && [ -z "$CLAUDE_CODE_USE_BEDROCK" ] && [ -z "$CLAUDE_CODE_USE_VERTEX" ]; then
+        echo "Warning: claude provider has no credentials yet (CLAUDE_CODE_OAUTH_TOKEN / ANTHROPIC_API_KEY / a gateway or cloud route). Worker will park in credential-wait until creds appear in swarm_config."
     fi
 fi
 

@@ -1,4 +1,5 @@
 import { existsSync } from "node:fs";
+import { deriveDefaultRoute, routeCredentialStatus } from "@desplega/model-routing";
 import { type ModelFamily, modelFamilyOf, windowForModelFamily } from "./model-rate-limit-windows";
 
 /** Env vars that may contain comma-separated credential pools */
@@ -271,17 +272,27 @@ export function selectRandomCredential(value: string): {
   return { selected: result.selected, index: result.index, total: result.total };
 }
 
+export const CLAUDE_CREDENTIALS_HINT =
+  "Set CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY, or route Claude Code through a gateway (ANTHROPIC_BASE_URL + ANTHROPIC_AUTH_TOKEN or ANTHROPIC_API_KEY), Microsoft Foundry (CLAUDE_CODE_USE_FOUNDRY), Amazon Bedrock (CLAUDE_CODE_USE_BEDROCK), or Google Vertex AI (CLAUDE_CODE_USE_VERTEX).";
+
+const CLAUDE_CREDENTIAL_TYPE_BY_PROVIDER: Record<string, string> = {
+  "claude-subscription": "oauth",
+  anthropic: "api_key",
+  "anthropic-gateway": "gateway",
+};
+
 /**
- * Validate that at least one Claude credential is available.
- * Priority: CLAUDE_CODE_OAUTH_TOKEN > ANTHROPIC_API_KEY.
- * Returns the credential type found, or throws if neither is set.
+ * Validate that the claude harness has a usable default route (see
+ * `deriveDefaultRoute` in @desplega/model-routing for the precedence).
+ * Returns the credential type found ("oauth", "api_key", "gateway", "foundry",
+ * "bedrock", "vertex"), or throws with what is missing.
  */
-export function validateClaudeCredentials(
-  env: Record<string, string | undefined>,
-): "oauth" | "api_key" {
-  if (env.CLAUDE_CODE_OAUTH_TOKEN) return "oauth";
-  if (env.ANTHROPIC_API_KEY) return "api_key";
-  throw new Error("No Claude credentials found. Set CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY.");
+export function validateClaudeCredentials(env: Record<string, string | undefined>): string {
+  const route = deriveDefaultRoute("claude", env);
+  if (!route) throw new Error(`No Claude credentials found. ${CLAUDE_CREDENTIALS_HINT}`);
+  const status = routeCredentialStatus(route, env);
+  if (!status.ready) throw new Error(`No Claude credentials found. ${status.hint}`);
+  return CLAUDE_CREDENTIAL_TYPE_BY_PROVIDER[route.provider] ?? route.provider;
 }
 
 /**

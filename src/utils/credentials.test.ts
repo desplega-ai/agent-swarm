@@ -146,8 +146,38 @@ describe("validateClaudeCredentials", () => {
 
   it("throws when neither credential is set", () => {
     expect(() => validateClaudeCredentials({})).toThrow(
-      "No Claude credentials found. Set CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY.",
+      "No Claude credentials found. Set CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY, or route",
     );
+  });
+
+  it("accepts gateway and cloud routes without an Anthropic credential", () => {
+    expect(
+      validateClaudeCredentials({
+        ANTHROPIC_BASE_URL: "http://litellm:4000",
+        ANTHROPIC_AUTH_TOKEN: "sk-litellm",
+      }),
+    ).toBe("gateway");
+    expect(
+      validateClaudeCredentials({
+        CLAUDE_CODE_USE_FOUNDRY: "1",
+        ANTHROPIC_FOUNDRY_RESOURCE: "res",
+        ANTHROPIC_FOUNDRY_API_KEY: "az",
+      }),
+    ).toBe("foundry");
+    expect(
+      validateClaudeCredentials({ CLAUDE_CODE_USE_BEDROCK: "1", AWS_REGION: "us-east-1" }),
+    ).toBe("bedrock");
+    expect(
+      validateClaudeCredentials({
+        CLAUDE_CODE_USE_VERTEX: "1",
+        CLOUD_ML_REGION: "us-east5",
+        ANTHROPIC_VERTEX_PROJECT_ID: "p",
+      }),
+    ).toBe("vertex");
+  });
+
+  it("names a route's missing env var", () => {
+    expect(() => validateClaudeCredentials({ CLAUDE_CODE_USE_BEDROCK: "1" })).toThrow("AWS_REGION");
   });
 
   it("treats empty string as missing", () => {
