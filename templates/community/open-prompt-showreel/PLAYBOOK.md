@@ -307,6 +307,7 @@ Title "TLA+", then a particle field counting the model checker's reachable state
 
 | Step | Result |
 |---|---|
+| Sparse clone of the template, `cp`, `setup.sh`, `smoke.sh` | Run against the PR branch (`--branch`); the commands in this playbook target `main`, which has the template once this merges. 14.6 s for `setup.sh`, then `OK: yuv420p 960x540`. |
 | `setup.sh` on a clean directory, stock image | Run. Installs ffprobe, numpy, fonts, logo. Re-run installs nothing. |
 | `FORCE_LOCAL_FFMPEG=1 FORCE_LOCAL_PLAYWRIGHT=1 bash setup.sh` | Run. Pinned ffmpeg tarball passed its sha256; `npm install playwright@1.58.0`; `playwright install chromium` fetched 622 MB; smoke test passed on that toolchain. |
 | `python3 -m venv` + `pip install numpy pillow` | Run. numpy 2.5.3, pillow 12.3.0. |
