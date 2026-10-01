@@ -6,7 +6,7 @@ The worked example is a 24-second video about a model checker finding race condi
 
 ## What You Get
 
-- A 15-30 second video, 1920x1080 (and 1080x1350 for feeds), h264 yuv420p, with music you are allowed to use and a credit line.
+- A 15-30 second video, 1920x1080 (and 1080x1350 for feeds), h264 yuv420p, with music you are allowed to use, a credit line on the end card, and the full attribution in the post.
 - Every number on screen read live from a named source into `facts.json` right before render.
 - The real Agent Swarm logo on the end card, never a redrawn one.
 - A contact sheet per critique round, so a reviewer sees what the maker saw.
@@ -20,7 +20,7 @@ The worked example is a 24-second video about a model checker finding race condi
 - `README.md`: quick start.
 - `lead-prompt.md`: the one-time setup prompt, the per-video brief, and the feedback-round brief.
 - `setup.sh`: idempotent toolchain setup for a worker container.
-- `tools/`: `render.mjs`, `sheet.sh`, `music-analyze.py`, `music-refine.py`, `music-cut.sh`, `fetch-music.sh`, `x-reencode.sh`, `web-compress.sh`.
+- `tools/`: `render.mjs`, `sheet.sh`, `music-analyze.py`, `music-refine.py`, `music-cut.sh`, `music-current.sh`, `fetch-music.sh`, `x-reencode.sh`, `web-compress.sh`.
 - `skills/`: sanitized copies of `open-prompt-showreel`, `video-generation`, `motion-design-video-analysis`, `motion-design-replication`.
 - `example/tla-races/`: the finished reel (`reel.html`), the facts script (`facts.ts`), the facts it produced (`facts.v3.json`), and `smoke.sh`.
 
@@ -92,7 +92,7 @@ Append to the maker's `setupScript` (the `update-profile` tool, field `setupScri
 cd /workspace/personal/showreel-toolkit/example/tla-races && bash smoke.sh
 ```
 
-It renders the example reel to a 16-frame contact sheet and a 2-second mp4 at 960x540, then checks the pixel format. Expected last lines: `OK: yuv420p 960x540`. It needs no network, no `gh`, no agent-fs. It took 7.7 s.
+It renders the example reel to a 16-frame contact sheet and a 2-second mp4 at 960x540 with a generated tone as the audio track. It checks the pixel format and the AAC stream, then renders once more with a broken audio file and checks that `render.mjs` exits non-zero and leaves no mp4. Expected lines: `OK: yuv420p 960x540`, `OK: aac audio`, `OK: failed encode exits non-zero`. It needs no network, no `gh`, no agent-fs. It took 8.8 s.
 
 ### 5. Install the skills
 
@@ -139,7 +139,7 @@ One task, one open prompt. The brief template is in `lead-prompt.md`. Do not wri
 
 - **Content rule:** every number or claim on screen comes from a named source and matches it exactly. Anything not in the source stays off screen. Fewer numbers is fine.
 - **Real brand:** the logo is `apps/ui/public/logo.png`, never a redrawn mark.
-- **Music:** CC0 or CC BY only, credit on the end card and in the output.
+- **Music:** CC0 or CC BY only. Short credit on the end card; source link, license link and the changes made in the output.
 - **Process:** a contact sheet looked at least 3 times.
 
 ### Facts before design
@@ -175,12 +175,12 @@ Stills for contact sheets:
 . /workspace/personal/showreel-toolkit/env.sh
 TK=/workspace/personal/showreel-toolkit
 cd /workspace/personal/<slug>
-export REEL=reel.html FACTS=facts.json MUSIC=music/current.json
+export REEL=reel.html FACTS=facts.json MUSIC=music/<track>.json   # the credit file from fetch-music.sh is enough for stills
 bash $TK/tools/sheet.sh 1920 1080 r1                       # 16 frames, 4x4 -> r1.png
 COLS=5 bash $TK/tools/sheet.sh 1920 1080 t1 "180,183,185,187,189,190,191,192,193,194,196,198,200,203,206,209,212,215,220,230"
 ```
 
-The full render, with audio:
+The full render, with audio. It needs `music/current.json` from the Music section below (it carries the `wav` field; a `--music` file without `wav` renders a silent video and `render.mjs` warns). `render.mjs` creates the output directory and exits non-zero if ffmpeg fails:
 
 ```bash
 node $TK/tools/render.mjs --reel reel.html --w 1920 --h 1080 --facts facts.json \
@@ -203,7 +203,7 @@ The last round checks every on-screen number against `facts.json` and the source
 
 ### Music
 
-CC0 or CC BY only. No NC (it is a company post) and no ND (the track is cut and stretched). Pick a fresh track for each video.
+CC0 or CC BY only. No NC (it is a company post), no ND (the track is cut and stretched) and no SA (it would carry over to the video). Pick a fresh track for each video.
 
 ```bash
 bash $TK/tools/fetch-music.sh incompetech Voltaic music                       # Kevin MacLeod, CC BY 4.0
@@ -212,17 +212,26 @@ bash $TK/tools/fetch-music.sh url https://opengameart.org/sites/default/files/mi
 bash $TK/tools/fetch-music.sh url https://example.com/x.mp3 music "Nope" Someone "CC BY-NC 4.0" https://example.com   # refused
 ```
 
-Both downloads were byte-identical to the files used for the example video. The script writes `music/<slug>.json` with the ready-made credit string, and refuses any license containing `NC` or `ND`.
+Both downloads were byte-identical to the files used for the example video. The script accepts only CC0 1.0 and CC BY 1.0 to 4.0, matched case-insensitively (`cc-by 4.0` works), and refuses NC, ND, SA, "All rights reserved" and any string it does not know. It cannot check the source page, so read the license there yourself. It writes `music/<slug>.json` with the license link and a short `credit` for the end card.
 
-To time the cut to the music, find tempo, beat phase and the drop, then stretch the track so the beats sit on the frame grid and the drop lands on the key reveal:
+To time the cut to the music, find tempo, beat phase and the drop, then stretch the track so the beats sit on the frame grid and the drop lands on the key reveal. Then write `music/current.json`, the file the render reads:
 
 ```bash
 python3 $TK/tools/music-analyze.py music/voltaic.mp3     # bpm, beat phase, top drop candidates (json)
 python3 $TK/tools/music-refine.py music/voltaic.mp3 <bpm> <drop_sec>
 bash $TK/tools/music-cut.sh music/voltaic.mp3 <bpm> <drop_sec> music/cut.wav     # TARGET_BPM=120 DROP_AT=14 DUR=24 by default
+bash $TK/tools/music-current.sh music/voltaic.json music/cut.wav                  # writes music/current.json
 ```
 
-At 30 fps and 120 BPM a beat is 15 frames. On the example track the analyzer returned 120.2 BPM and a strongest drop candidate at 143.3 s. `music-cut.sh` fades in 0.3 s and out 1.7 s, and `DIP=1` ducks the track just before the drop. The credit string from the json goes on the end card and in the output.
+At 30 fps and 120 BPM a beat is 15 frames. On the example track the analyzer returned 120.2 BPM and a strongest drop candidate at 143.3 s. `music-cut.sh` fades in 0.3 s and out 1.7 s, and `DIP=1` ducks the track just before the drop.
+
+`music-current.sh` copies the track json to `music/current.json` and adds `"wav": "music/cut.wav"` (which `render.mjs` muxes in as AAC) and `attribution`. CC BY needs a link to the source, a link to the license and a notice that the track was changed, so the post carries the whole `attribution` string, for example:
+
+```text
+"Mist City" by Section7, https://opengameart.org/content/mist-city, licensed under CC BY 4.0, https://creativecommons.org/licenses/by/4.0/. Changes: trimmed, time-stretched to the video's beat grid, faded in and out, and loudness-normalized.
+```
+
+Set `MODIFIED="..."` to describe the edits more exactly. The short `credit` stays on the end card.
 
 ### Re-encode for X when the source is full range
 
@@ -251,9 +260,9 @@ The maker's output is not the finish line. Before relaying, the Lead:
 1. Opens the contact sheet and looks at the frames, not just the file list.
 2. Opens the end-card frame: real logo, credit line present and readable.
 3. Checks every on-screen number against the maker's `facts.json`, and `facts.json` against the source named in the brief.
-4. Checks the ffprobe line: `h264`, `yuv420p`, exactly 1920x1080 (and 1080x1350), duration as briefed. (`ffprobe` after `setup.sh`, or `ffmpeg -i` stderr in the stock image.)
+4. Checks the ffprobe line: `h264`, `yuv420p`, exactly 1920x1080 (and 1080x1350), duration as briefed, and an `aac` audio stream when the video has music. (`ffprobe` after `setup.sh`, or `ffmpeg -i` stderr in the stock image.)
 5. Plays the share link once.
-6. Relays the share link, the share id and the expiry, plus the music credit. The maker never posts.
+6. Relays the share link, the share id and the expiry, plus the `attribution` string from `music/current.json` (source link, license link, changes made). The maker never posts.
 
 ## Known Gotchas
 
@@ -271,6 +280,7 @@ The maker's output is not the finish line. Before relaying, the Lead:
 | Container restart mid-render | The scratch dir is the only thing that survives | Keep it in `/workspace/personal/<slug>`, name it in the first progress note, upload an interim cut before the long render |
 | Brief and source disagree | The brief says four PRs merged; main has five | The source wins, and the output says so |
 | Invented logo | The first example cut drew its own mark | Use `apps/ui/public/logo.png`; `setup.sh` downloads it and warns if the live site differs |
+| `--music` json without `wav` | The mp4 has no audio; `render.mjs` warns on stderr | Run `music-current.sh` after `music-cut.sh`, render with `music/current.json`, check for an `aac` stream |
 | Music the requester already heard | Same track on every video | Pick a fresh track; offer two alternates when music is in question |
 
 ## Example: TLA+ Races Showreel
@@ -313,12 +323,14 @@ Title "TLA+", then a particle field counting the model checker's reachable state
 | `python3 -m venv` + `pip install numpy pillow` | Run. numpy 2.5.3, pillow 12.3.0. |
 | System `pip install numpy` | Run. Refused (PEP 668). |
 | Fonts from `google/fonts` | Run. Byte-identical to the files used in the example. |
-| `fetch-music.sh` for Voltaic and Mist City | Run. Byte-identical to the files used. NC license refused. |
-| `music-analyze.py`, `music-cut.sh` | Run on Voltaic (120.2 BPM; cut is 24.00 s). |
+| `fetch-music.sh` for Voltaic and Mist City | Run. Byte-identical to the files used. NC, ND, SA, "All rights reserved", a bare `CC BY` and unknown licenses refused; `cc-by 4.0`, `CC0` and `cc by 2.5` normalize and get the right license link. |
+| `music-analyze.py`, `music-cut.sh` | Run on Voltaic (120.2 BPM; cut is 24.00 s). Run on Mist City (129.2 BPM, `atempo=0.929`). |
+| `music-current.sh`, then a 720-frame render at 960x540 with `music/current.json` | Run on the Mist City cut. ffprobe: h264 `yuv420p` 960x540 and an `aac` stream, both 24.00 s. |
+| `render.mjs` with a broken wav, with ffmpeg killed mid-render, with no ffmpeg on `PATH` | Run. Each exits 1 with the ffmpeg exit status in the message and leaves no partial mp4. |
 | `x-reencode.sh` | Run on a `yuvj420p` clip and on `remotion render` output. Both came out `yuv420p(tv, bt709)`. |
 | `web-compress.sh` | Run on the example master (17.8 MB to 2.6 MB). |
 | Remotion `npm install` and a 30-frame render with `--browser-executable=/opt/playwright/chromium` | Run. Remotion 4.0.532, 14 s. |
-| `smoke.sh` | Run on both toolchains. `OK: yuv420p 960x540`. |
+| `smoke.sh` | Run. `OK: yuv420p 960x540`, `OK: aac audio`, `OK: failed encode exits non-zero`. |
 | `apt-get install` of Chromium system libraries | **Not run.** The worker has no root. |
 | `npx remotion studio` | **Not run.** |
 | `skill-create`, `skill-install`, `update-profile`, `agent-fs share-create` | **Not run.** They change a live swarm or publish a link. |

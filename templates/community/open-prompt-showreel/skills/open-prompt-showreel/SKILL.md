@@ -48,13 +48,13 @@ How:
 - Ad hoc: scratch dir, any tools or code you like. No repo, no PR, no shared template.
 - Real brand: Agent Swarm logo = origin/main apps/ui/public/logo.png (verify vs agent-swarm.dev/logo.png). Never draw your own mark.
 - Look at a contact sheet at least 3 times, fixing what looks weak each round; in the last round check every on-screen number against the source and look at the end-card frame.
-- Music optional; CC0 or CC BY only (no NC, no ND); credit line on the end card and in your output.
+- Music optional; CC0 or CC BY only (no NC, no ND, no SA); short credit on the end card; in your output the full attribution from music/current.json (source link, license link, changes made).
 - If you are not on claude-opus-5-5, stop and say so.
 - Nothing is owed to a human by you; Lead reviews and relays.
 
 Deliver to agent-fs thoughts/<maker-agent-id>/videos/<slug>/: <1920x1080 [+ 1080x1350]> h264 yuv420p mp4,
 contact sheet(s), facts.json.
-Output: agent-fs paths, a share-create link per mp4 (url + share id), ffprobe line, model you ran on, each on-screen number with its source, music credit.
+Output: agent-fs paths, a share-create link per mp4 (url + share id), ffprobe line, model you ran on, each on-screen number with its source, music attribution (source link, license link, changes made).
 ```
 
 Optional style add-on for a calmer, premium cut (the "Apple framework"): 3 colors, one background, one font, no HUD/grain; one shot = one idea; ~3 s open and ~2 s held end; key object centered; eased, overlapping keyframes; no hard cuts; ~108 BPM, phrase hit on the first product frame; no SFX. Add it only when asked.
@@ -101,9 +101,9 @@ window.frame = (f) => { render(f); return cv.toDataURL("image/png"); };
 
 ### 5. Music: CC0 / CC BY, timed to the cut
 
-- License: CC0 or CC BY only. No NC (company post), no ND (we cut and stretch it). Sources that worked: incompetech.com (Kevin MacLeod, CC BY 4.0), OpenGameArt (filter by license).
+- License: CC0 or CC BY only. No NC (company post), no ND (we cut and stretch it), no SA (it would carry over to the video). `fetch-music.sh` enforces an allowlist (CC0 1.0, CC BY 1.0-4.0); read the license on the source page yourself. Sources that worked: incompetech.com (Kevin MacLeod, CC BY 4.0), OpenGameArt (filter by license).
 - Pick a fresh track per video; the requester asked for different music on the first TLA+ cut. Offer two alternates when music is in question.
-- Keep a `music/<track>.json`: `{title, artist, license, source, credit, wav}`. The credit string goes on the end card and in the output.
+- `fetch-music.sh` writes `music/<track>.json` (`{title, artist, license, license_url, source, credit}`). After `music-cut.sh`, run `music-current.sh music/<track>.json music/cut.wav`: it writes `music/current.json` with `wav` (without it `render.mjs` renders silent) and `attribution`. Render with `--music music/current.json` and check the mp4 has an `aac` stream. `credit` is the short end-card line; CC BY also needs the source link, the license link and the changes made in the post, which is what `attribution` carries.
 - Time the cut to the music: find tempo, beat phase and the drop (numpy spectral-flux + low-end energy: `music-analyze.py`, `music-refine.py`), then time-stretch so the beats sit on the reel's frame grid (120 BPM = 15 frames per beat at 30 fps) and the drop lands on the key reveal (`music-cut.sh`: `atempo` + trim, fade in 0.3 s, fade out ~1.7 s).
 - When the music is the feedback, also render the 16:9 with two runner-up tracks (audio swap only).
 
@@ -129,7 +129,7 @@ window.frame = (f) => { render(f); return cv.toDataURL("image/png"); };
 - Upload the mp4s, contact sheet(s), `facts.json`, the music json, and `reel.html` so the next round can start from it. After every non-trivial write, `agent-fs stat <path> --json` and check the size.
 - Share link for each final mp4: `agent-fs --org <ORG_ID> --drive <DRIVE_ID> share-create <path> --expires-in 604800 --json`. The share page plays the video inline with no login. Max 7 days; report the url, the share id and the expiry. Do not hand out raw signed URLs or viewer URLs for video.
 - agent-fs serves a raw `.mp4` download as `application/octet-stream`; the share page's player gets `video/mp4`. Mention it rather than retrying.
-- Output (short): paths, share links, ffprobe line, model, each on-screen fact with its source and SHA/run id, music credit, logo source. No Slack post by the maker; Lead relays.
+- Output (short): paths, share links, ffprobe line, model, each on-screen fact with its source and SHA/run id, music attribution (source link, license link, changes made), logo source. No Slack post by the maker; Lead relays.
 
 ## Feedback rounds (v2, v3)
 

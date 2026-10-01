@@ -59,14 +59,14 @@ How:
 - Tools are in /workspace/personal/showreel-toolkit (source env.sh). Real fonts and the real logo are in assets/.
 - Real brand: Agent Swarm logo = origin/main apps/ui/public/logo.png (verify vs agent-swarm.dev/logo.png). Never draw your own mark.
 - Look at a contact sheet at least 3 times, fixing what looks weak each round; in the last round check every on-screen number against the source and look at the end-card frame.
-- Music optional; CC0 or CC BY only (no NC, no ND); credit line on the end card and in your output.
+- Music optional; CC0 or CC BY only (no NC, no ND, no SA); short credit on the end card; in your output the full attribution from music/current.json (source link, license link, changes made).
 - If you are not on claude-opus-5-5, stop and say so instead of rendering.
 - Nothing is owed to a human by you; Lead reviews and relays.
 
 Deliver to agent-fs thoughts/<maker-agent-id>/videos/<slug>/: <1920x1080 [+ 1080x1350]> h264 yuv420p mp4,
 contact sheet(s), facts.json, reel.html.
 Output: agent-fs paths, a share-create link per mp4 (url + share id), ffprobe line, model you ran on,
-each on-screen number with its source, music credit.
+each on-screen number with its source, music attribution (source link, license link, changes made).
 ```
 
 Optional style add-on for a calmer, premium cut: 3 colors, one background, one font, no HUD or grain; one shot = one idea; about 3 s open and 2 s held end; key object centered; eased, overlapping keyframes; no hard cuts; about 108 BPM with the phrase hit on the first product frame; no SFX.
