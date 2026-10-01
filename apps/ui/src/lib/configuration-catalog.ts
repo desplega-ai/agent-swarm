@@ -560,6 +560,15 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         docsUrl: `${DOCS}guides/deployment#database-retention`,
       },
       {
+        key: "CONTEXT_VERSIONS_KEEP_LATEST",
+        label: "Context version retention",
+        description:
+          "Keep only this many newest context_versions rows per agent and field. The newest version is never deleted. Leave unset to disable this table's sweep. Deletion permanently removes older profile history.",
+        kind: "number",
+        placeholder: "100",
+        docsUrl: `${DOCS}guides/deployment#database-retention`,
+      },
+      {
         key: "DB_RETENTION_DRY_RUN",
         label: "Database retention dry run",
         description:

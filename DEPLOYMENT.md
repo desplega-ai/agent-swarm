@@ -202,7 +202,7 @@ docker run --rm -v swarm_api_data:/data -v $(pwd):/backup alpine \
 
 ### Database retention
 
-`SESSION_LOG_RETENTION_DAYS`, `AGENT_LOG_RETENTION_DAYS`, and `EVENTS_RETENTION_DAYS` are disabled until you set them. Each value permanently deletes rows older than its window. Start with `DB_RETENTION_DRY_RUN=true`, confirm the exact would-delete count through the `agentswarm.db.retention.backlog` metric and `GET /api/metrics`, then enable one table at a time.
+`SESSION_LOG_RETENTION_DAYS`, `AGENT_LOG_RETENTION_DAYS`, `EVENTS_RETENTION_DAYS`, and `CONTEXT_VERSIONS_KEEP_LATEST` are disabled until you set them. Each `*_RETENTION_DAYS` value permanently deletes rows older than its window. `CONTEXT_VERSIONS_KEEP_LATEST` is a count, not a window: it keeps that many newest `context_versions` rows per agent and field and deletes older profile history, never the newest version. Start with `DB_RETENTION_DRY_RUN=true`, confirm the exact would-delete count through the `agentswarm.db.retention.backlog` metric and `GET /api/metrics`, then enable one table at a time.
 
 The sweep reads three tuning values on every tick: `DB_RETENTION_TICK_BUDGET_MS` (default `30000`, range `1000`–`300000`), `DB_RETENTION_CATCHUP_INTERVAL_MS` (default `60000`, range `5000`–`3600000`), and `DB_RETENTION_MAX_STATEMENT_MS` (default `250`, range `25`–`5000`). See [runbooks/db-retention.md](./runbooks/db-retention.md) before activation.
 
