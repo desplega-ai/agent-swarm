@@ -31,7 +31,7 @@ this retains the native `llm-deepseek` route. The native Flash ID is
 `deepseek-flash` (V4.1 Flash); OpenRouter uses `deepseek/deepseek-v4.1-flash`.
 There is no fallback across providers when the selected route's key is missing.
 
-The full worker image installs `@deepseek-ai/dsh@0.1.7-alpha.2` at build time
+The full worker image installs `@deepseek-ai/dsh@0.2.0-rc.2` at build time
 in `worker-full-base`, alongside the optional tools in `/opt/global-deps-full`.
 The slim image does not include dsh: use `worker-full` or provision the pinned
 package in your custom image before starting a dsh worker. Both the entrypoint
@@ -52,7 +52,7 @@ connection, live steering, native resume, or cost/context telemetry. The runner
 handles task completion from the returned output. Configure it as a worker;
 lead orchestration needs MCP. Developer-preview compatibility can change.
 
-Verified against the [upstream headless documentation](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.1.7-alpha.2/packages/bundle/headless/README.md)
+Verified against the [upstream headless documentation](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.2.0-rc.2/packages/bundle/headless/README.md)
 and the installed CLI's top-level and headless help.
 
 ## Claude transport selection

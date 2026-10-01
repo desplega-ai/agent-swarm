@@ -168,7 +168,7 @@ Codex needs `CODEX_OAUTH` or `OPENAI_API_KEY`. Pi needs `OPENROUTER_API_KEY` or 
 Opencode needs `OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY`, or `OPENAI_API_KEY`.
 Override models with `E2E_MODEL_CLAUDE`, `E2E_MODEL_CODEX`, `E2E_MODEL_PI`, `E2E_MODEL_OPENCODE`, or `E2E_MODEL_DSH`.
 Dsh defaults to `openrouter/deepseek/deepseek-v4.1-flash` and needs `OPENROUTER_API_KEY`.
-Provision `npm install --global @deepseek-ai/dsh@0.1.7-alpha.2` first, then run
+Provision `npm install --global @deepseek-ai/dsh@0.2.0-rc.2` first, then run
 `DSH_BINARY=$(command -v dsh) bun run e2e --only health --harness dsh`.
 A native `E2E_MODEL_DSH=deepseek-flash` override instead requires `DEEPSEEK_API_KEY`.
 The nightly dsh leg installs that pin explicitly because its slim image omits dsh.
