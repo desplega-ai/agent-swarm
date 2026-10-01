@@ -404,3 +404,136 @@ describe("/mcp-user auth and tool surface", () => {
     expect(names).toContain("send-task");
   });
 });
+
+describe("MCP unknown-session handling (spec: 404 so clients re-initialize)", () => {
+  const UNKNOWN_SESSION = "00000000-0000-4000-8000-0000000000aa";
+  const NOT_FOUND_BODY = {
+    jsonrpc: "2.0",
+    error: { code: -32001, message: "Session not found" },
+    id: null,
+  };
+  const NO_SESSION_BODY = {
+    jsonrpc: "2.0",
+    error: { code: -32000, message: "Bad Request: No valid session ID provided" },
+    id: null,
+  };
+  const toolsList = { jsonrpc: "2.0", id: 2, method: "tools/list", params: {} };
+
+  async function userToken(): Promise<string> {
+    const user = await createUser({ name: "Session 404 User" });
+    return (await mintToken(user.id, "s404", ACTOR)).plaintext;
+  }
+
+  async function agentHeaders(): Promise<Record<string, string>> {
+    const agent = await createAgent({ name: "Session 404 Agent", isLead: false, status: "idle" });
+    return { "X-Agent-ID": agent.id };
+  }
+
+  async function bareRequest(
+    method: "GET" | "DELETE",
+    path: string,
+    headers: Record<string, string>,
+  ): Promise<{ status: number; contentType: string | null; json: unknown }> {
+    const response = await fetch(endpoint(path), { method, headers });
+    return {
+      status: response.status,
+      contentType: response.headers.get("content-type"),
+      json: await response.json(),
+    };
+  }
+
+  test("/mcp-user POST with unknown session id returns 404 and -32001", async () => {
+    const token = await userToken();
+    const { response, payload } = await mcpPost(token, toolsList, UNKNOWN_SESSION);
+    expect(response.status).toBe(404);
+    expect(response.headers.get("content-type")).toContain("application/json");
+    expect(payload).toEqual(NOT_FOUND_BODY);
+  });
+
+  test("/mcp-user GET and DELETE with unknown session id return 404", async () => {
+    const token = await userToken();
+    for (const method of ["GET", "DELETE"] as const) {
+      const result = await bareRequest(method, "/mcp-user", {
+        Authorization: `Bearer ${token}`,
+        "mcp-session-id": UNKNOWN_SESSION,
+      });
+      expect(result.status).toBe(404);
+      expect(result.contentType).toContain("application/json");
+      expect(result.json).toEqual(NOT_FOUND_BODY);
+    }
+  });
+
+  test("/mcp-user POST without session id and non-initialize body returns 400 with SDK wording", async () => {
+    const token = await userToken();
+    const { response, payload } = await mcpPost(token, toolsList);
+    expect(response.status).toBe(400);
+    expect(payload).toEqual(NO_SESSION_BODY);
+  });
+
+  test("/mcp-user GET and DELETE without session id return 400 with JSON body", async () => {
+    const token = await userToken();
+    for (const method of ["GET", "DELETE"] as const) {
+      const result = await bareRequest(method, "/mcp-user", { Authorization: `Bearer ${token}` });
+      expect(result.status).toBe(400);
+      expect(result.json).toEqual(NO_SESSION_BODY);
+    }
+  });
+
+  test("/mcp-user initialize still works", async () => {
+    const token = await userToken();
+    const sessionId = await initialize(token);
+    expect(sessionId.length).toBeGreaterThan(0);
+  });
+
+  test("/mcp POST with unknown session id returns 404 and -32001", async () => {
+    const headers = await agentHeaders();
+    const { response, payload } = await mcpPost(
+      API_KEY,
+      toolsList,
+      UNKNOWN_SESSION,
+      "/mcp",
+      headers,
+    );
+    expect(response.status).toBe(404);
+    expect(response.headers.get("content-type")).toContain("application/json");
+    expect(payload).toEqual(NOT_FOUND_BODY);
+  });
+
+  test("/mcp GET and DELETE with unknown session id return 404", async () => {
+    const headers = await agentHeaders();
+    for (const method of ["GET", "DELETE"] as const) {
+      const result = await bareRequest(method, "/mcp", {
+        Authorization: `Bearer ${API_KEY}`,
+        "mcp-session-id": UNKNOWN_SESSION,
+        ...headers,
+      });
+      expect(result.status).toBe(404);
+      expect(result.json).toEqual(NOT_FOUND_BODY);
+    }
+  });
+
+  test("/mcp POST without session id and non-initialize body returns 400 with SDK wording", async () => {
+    const headers = await agentHeaders();
+    const { response, payload } = await mcpPost(API_KEY, toolsList, undefined, "/mcp", headers);
+    expect(response.status).toBe(400);
+    expect(payload).toEqual(NO_SESSION_BODY);
+  });
+
+  test("/mcp GET and DELETE without session id return 400 with JSON body", async () => {
+    const headers = await agentHeaders();
+    for (const method of ["GET", "DELETE"] as const) {
+      const result = await bareRequest(method, "/mcp", {
+        Authorization: `Bearer ${API_KEY}`,
+        ...headers,
+      });
+      expect(result.status).toBe(400);
+      expect(result.json).toEqual(NO_SESSION_BODY);
+    }
+  });
+
+  test("/mcp initialize still works", async () => {
+    const headers = await agentHeaders();
+    const sessionId = await initialize(API_KEY, "/mcp", headers);
+    expect(sessionId.length).toBeGreaterThan(0);
+  });
+});
