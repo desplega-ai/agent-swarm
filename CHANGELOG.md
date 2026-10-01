@@ -6,6 +6,34 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.160.0] - 2026-10-01
+
+### Added
+- Slack shows a native working status for the whole life of an ask (#1770).
+- Task, schedule and workflow tools reject a model that the assignee's harness cannot run (#1764).
+- Webhook workflow triggers support a `standard-webhooks` verification mode (#1760).
+- pi: opt-in codemode behind `PI_CODEMODE` (#1731), non-core swarm tools deferred behind `tool_search` with `PI_TOOL_DEFERRAL` (#1729), and installed MCP servers connected through pi's MCP extension (#1730).
+- OpenCode emits assistant text so the runner validates the final message against `outputSchema` (#1753).
+- Evals: suite v1 freeze and grader validation (#1741), analytics API (#1744), leaderboard with Pareto frontier (#1755, #1771), scenario cards and heatmap (#1759), fan-out, worker-recovery and swarm scenarios (#1745, #1756), publishable benchmark v1.0 page (#1761), and Codex on the ChatGPT subscription with gpt-6.1-sol and gpt-5.6 (#1772).
+
+### Changed
+- agent-fs bumped to 0.15.0 (#1748); codex bumped to 0.159.2 (#1735).
+- CI: UI e2e artifact uploads time out and retry (#1754); the deploy waits for late Dokploy deployment records (#1742).
+- `db.ts` top-level bodies are frozen by a test instead of a line cap (#1783, #1784).
+- Docs: dashboard design reference (#1757), `system-one-decision` with provider laya (#1750), model-catalog overlay proposals (#1733), TLA+ specs synced (#1738), and `PI_CODEMODE` / `PI_TOOL_DEFERRAL` in the environment variable reference.
+
+### Fixed
+- Claude OAuth key selection is seat-aware for Fable (#1765); a Codex pool login is benched after 2 auth failures in a row (#1763).
+- Boot: linear `memory_fts` backfill and retried worker registration (#1791).
+- `store-progress` refuses writes to another agent's task (#1737).
+- pi codemode runs in the compiled binary, and deleted reloadable config is unset (#1767).
+- Telemetry opt-out is honored in dashboard events (#1773).
+- Tool-search prompt guidance is gated by harness capability (#1727).
+- Memory recall uses task content instead of worker wrappers (#1740).
+- OpenCode sends `X-Source-Task-Id` and `X-Context-Key` on the swarm MCP entry (#1749).
+- Seeding treats a source-identical live copy as in sync (#1734); `task-failure-audit` projects failure reasons for every groupBy (#1736).
+- Dashboard and docs-site UI audit findings (#1743, #1774, #1776); evals image ships the Codex OAuth helpers (#1778).
+
 ## [1.159.0] - 2026-09-30
 
 ### Added
