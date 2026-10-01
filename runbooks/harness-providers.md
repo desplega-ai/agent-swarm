@@ -1,6 +1,6 @@
 # Harness providers runbook
 
-Operational rules for editing or adding harness providers (claude, codex, opencode, pi, devin, acp, future).
+Operational rules for editing or adding harness providers (claude, codex, opencode, pi, devin, acp, dsh, future).
 
 ## Supported providers
 
@@ -13,6 +13,7 @@ Operational rules for editing or adding harness providers (claude, codex, openco
 | Devin | `devin` | `DevinAdapter` | Cloud-managed via Cognition `/sessions` API |
 | Claude Managed | `claude-managed` | `ClaudeManagedAdapter` | Anthropic managed sandbox; SSE relay |
 | ACP | `acp` | `ACPAdapter` | Curated `opencode` preset or a custom [Agent Client Protocol](https://agentclientprotocol.com) command. Session knobs such as model use `session/set_config_option` when advertised, with target-specific startup fallbacks. No swarm-side *model-provider* credential — the target owns its own model auth. The target receives the worker's swarm API key as the swarm MCP bearer, so point custom targets only at binaries you trust |
+| DeepSeek Harness | `dsh` | `DshAdapter` | Spawns `dsh --profile headless --json` per task; OpenRouter or direct DeepSeek API. See [DeepSeek Harness](#deepseek-harness-dsh) below |
 
 ## DeepSeek Harness (`dsh`)
 
@@ -41,16 +42,53 @@ adapter finds `dsh` on PATH. Use the pinned alpha for its required stdin/JSON
 surface.
 
 The adapter launches `--profile headless --patch <temporary-file> --json -`,
-sends the task over stdin, sets the child working directory, and applies the
-model and system prompt through the profile patch. Patch files are private and
+sends the task over stdin, sets the child working directory, and applies
+everything else through the profile patch. Patch files are private (`0600`) and
 removed after exit or cancellation. Credential readiness accepts either environment
 key; session startup requires the key matching the selected model. Readiness
 does not inspect dsh's managed credential store or verify inference.
 
-This minimal integration has local tools and final output, but no swarm MCP
-connection, live steering, native resume, or cost/context telemetry. The runner
-handles task completion from the returned output. Configure it as a worker;
-lead orchestration needs MCP. Developer-preview compatibility can change.
+What the patch sets, and why:
+
+- **Swarm MCP.** The headless profile does not mount dsh's MCP client, so the
+  patch inserts `@deepseek-ai/dsh-mcp-client` as `agent-swarm` over
+  `streamable-http` to `${MCP_BASE_URL}/mcp`, with the same per-task headers the
+  other adapters send (`Authorization`, `X-Agent-ID`, `X-Source-Task-Id`,
+  `X-Context-Key`, `X-Runtime-Instance-ID`). Tools appear as
+  `mcp__agent-swarm__<tool>`, so `traits.hasMcp` is `true` and dsh gets the
+  full worker prompt. dsh downgrades a plugin that fails to start to a
+  `did not activate` warning and runs on without it; the adapter treats that
+  warning as a session failure instead. Installed MCP servers (the
+  `mcp-servers` catalog) are not forwarded yet.
+- **Failure path.** With MCP, a dsh agent reports a blocked or impossible task
+  through `store-progress` with `status: "failed"`, the same as every other
+  harness; the runner's later `/finish` is a no-op on a terminal task. A turn
+  that ends in anything but `completed` also exits non-zero and fails the task.
+- **Sandbox.** dsh's `workspace-write` policy makes only the cwd and `/tmp`
+  writable, has no setting for more roots, and refuses escalation headless, so
+  a dsh agent could not write `/workspace/shared` or `/workspace/personal`. The
+  patch sets `sandbox-policy` to `danger-full-access` and `approval` to `never`:
+  the worker container is the sandbox, as it is for codex.
+- **Reasoning effort.** `REASONING_EFFORT_OVERRIDE` (Runtime editor) becomes
+  `agent-default-model.reasoningEffort`. Levels come from the catalog for the
+  model: `low`/`high`/`max` on OpenRouter DeepSeek models (the adapter declares
+  them on the model, since pi-ai treats a hand-declared model as
+  non-reasoning), plus `off` on the direct DeepSeek API, where it is a real
+  thinking toggle. `deepseek-flash` is not in the models.dev catalog, so it
+  offers no effort and is unpriced.
+- **Cost and context.** Each `status.step_end.usage` (one model call) becomes a
+  `context_usage` snapshot (`input + cacheRead + cacheWrite + output`), and the
+  summed tokens become a `CostData` record with `provider: "dsh"` and
+  `totalCostUsd: 0`. The API prices it from the `dsh` pricing rows, projected
+  from the models.dev `openrouter` section (`openrouter/` stripped) and the
+  `deepseek` section (bare ids).
+- **Model observability.** dsh's stream never names the model it called. The
+  adapter logs a `{"type":"model","provider","model","reasoningEffort"}` line
+  first, which the dashboard renders as a `model.selected` row. That is the
+  model the swarm asked for; proving the model served needs dsh to emit it.
+
+Still missing: live steering (`steerModes: []`) and native resume (follow-ups use
+the context preamble). Developer-preview compatibility can change.
 
 Verified against the [upstream headless documentation](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.2.0-rc.2/packages/bundle/headless/README.md)
 and the installed CLI's top-level and headless help.
@@ -347,6 +385,104 @@ Internal refactors that don't change observable behavior don't need a doc update
 7. Add the new provider to `README.md`'s multi-provider bullet.
 8. Add adapter tests for advertised steering modes and SDK rejection.
 9. Verify the docs build per [docs-site/CLAUDE.md](../docs-site/CLAUDE.md).
+
+A harness that only spawns and returns text is not done. Each item below was
+missed once (dsh, 2026-10-01) and found only by running real tasks; ship them in
+the adapter PR or document the gap in this runbook and the guide.
+
+10. **Swarm MCP.** Wire the swarm MCP server with the per-task headers
+    (`Authorization`, `X-Agent-ID`, `X-Source-Task-Id`, `X-Context-Key`,
+    `X-Runtime-Instance-ID`) and set `traits.hasMcp: true`. Fail the session if
+    the harness starts without the MCP tools; never let it run on silently. If
+    the harness has no MCP client, keep `hasMcp: false`, say so here with the
+    evidence, and accept that it is not a general worker.
+11. **Failure path.** An agent must be able to end a task `failed`. With MCP,
+    that is `store-progress` `status: "failed"`. Without it, the adapter needs a
+    harness-level signal. A non-`completed` turn end must exit non-zero.
+12. **Sandbox.** The harness must be able to write `/workspace/shared`,
+    `/workspace/personal` and `/tmp`. If it sandboxes writes to the cwd, add
+    those roots or run it unsandboxed inside the container.
+13. **Provider on every task row.** `agent_tasks.provider` is written by
+    `session_init`. Check that a spawn failure also records it: the runner
+    sends `provider` on `/finish`, so do not bypass `ensureTaskFinished`.
+14. **Cost and context.** Emit `context_usage` per model call and return
+    `CostData` with `provider: "<name>"`. Add the provider's routing prefixes to
+    `src/be/pricing-normalize.ts` and project its models in
+    `src/be/seed-pricing.ts` so the default tier models price as
+    `costSource: pricing-table`. Update the cost guide and
+    `src/providers/pricing-sources.md`.
+15. **Model observability.** Log the model the session actually calls. If the
+    harness does not report it, log the model the adapter configured and say so.
+16. **Reasoning effort.** Map `config.reasoningEffort` to the harness's real
+    setting, add the harness to `REASONING_HARNESSES` and its model-string rules
+    to `packages/model-catalog/src/reasoning.ts`, and offer only levels the
+    harness honours on that route.
+17. **Dashboard.** Add a logs-parser adapter in
+    `apps/ui/src/logs-parser/adapters.ts` (otherwise every row renders as
+    `UNKNOWN`), with a fixture from real persisted rows. Add the harness to the
+    Runtime editor (`apps/ui/src/lib/agent-runtime-models.ts`): `LOCAL_HARNESSES`,
+    `isLocalHarness`, a model-group branch, and effort levels.
+18. **QA in production.** Run the procedure below before the harness takes
+    general worker duty.
+
+## How to QA a new harness
+
+Unit tests prove the adapter builds the right command. They do not prove the
+harness can do swarm work. Run this on the deployed swarm before calling a
+harness ready.
+
+### Setup
+
+1. Pick a low-usage worker agent. Record its current `harness_provider`,
+   `MODEL_OVERRIDE`, `REASONING_EFFORT_OVERRIDE` and `AGENT_MAX_TASKS`
+   (Runtime editor, or `GET /api/agents/<id>/runtime` plus agent-scoped config).
+   Check it has no in-flight tasks.
+2. Switch it with `PATCH /api/agents/<id>/runtime` (`harness_provider`, `model`,
+   `reasoning_effort`) or the Runtime editor. Set the harness credentials as
+   agent-scoped config. Wait for the worker to pick up the change (next task).
+3. Send each scenario as a task pinned to that agent
+   (`routingReason: human_pinned`).
+
+### Gates on every task
+
+- `agent_tasks.provider` is the new harness, including for tasks that failed
+  to spawn. A NULL or another harness means a silent fallback.
+- `agent_tasks.model` matches the requested model, and the session log shows
+  the model line.
+- The dashboard renders the session with no `UNKNOWN` rows.
+- A `session_costs` row exists with `costSource: pricing-table` and non-zero
+  tokens, and the task shows context usage.
+
+### Scenarios
+
+| # | Scenario | Pass when |
+|---|---|---|
+| 1 | Smoke: reply with a sentinel string | Exact sentinel, completed |
+| 2 | Write a file under `/workspace/shared`, return its sha256 | File exists, digest matches |
+| 3 | Pure compute (e.g. sum of primes below 10000) | Correct value |
+| 4 | Read the repo and cite a file and line | Correct citation |
+| 5 | `modelTier` and an explicit `model` | Row model and logged model match each |
+| 6 | Model whose credential is missing | `failed` fast, clear reason, `provider` set |
+| 7 | Call MCP tools (`memory-search`, `store-progress`) | Tool calls succeed |
+| 8 | Impossible task (read a file that does not exist) | Status `failed`, not `completed` |
+| 9 | Cancel a long `sleep` | `cancelled`, agent back to idle, no orphan process |
+| 10 | Send more tasks than `AGENT_MAX_TASKS` | Extra task rejected at capacity |
+| 11 | Large output with unicode | Intact, untruncated |
+| 12 | Follow-up via `parentTaskId` | Parent context carried |
+| 13 | Steer a running task | Matches the advertised `steerModes` |
+
+### Bar for general worker duty
+
+Scenarios 1, 2, 3, 6, 7, 8 and 9 must pass, plus every gate. A harness that
+fails 2, 7 or 8 can only take read-only or self-contained work, because it
+cannot hand off through `/workspace/shared`, report progress, or fail a task.
+Scenarios 5 and 10 to 13 may pass as a documented degrade.
+
+### Restore
+
+Put the agent back on the values recorded in setup with the same `PATCH`, and
+remove any credentials you added for the test. Confirm the next task on that
+agent records the original provider.
 
 ## Alt-binary: claude-bridge
 

@@ -20,33 +20,63 @@ const YIELD_MS = 25;
  * This is deliberately a closed list. Neither table nor column names may come
  * from operator configuration: a retention policy must never target a table
  * that code review has not explicitly approved as safe to delete from.
+ *
+ * Two policies exist:
+ *  - `age`: the env value is a number of days; rows whose `timeColumn` is older
+ *    than that horizon are deleted.
+ *  - `keepLatest`: the env value is a count; within each `partitionBy` group,
+ *    only the newest `rankBy` rows are kept. The newest row of a group is
+ *    never deleted, because the smallest accepted count is 1.
  */
 export const DB_RETENTION_TABLES = [
   {
     table: "session_logs",
+    policy: "age",
     timeColumn: "createdAt",
     envKey: "SESSION_LOG_RETENTION_DAYS",
     metricsKey: "sessionLogs",
   },
   {
     table: "agent_log",
+    policy: "age",
     timeColumn: "createdAt",
     envKey: "AGENT_LOG_RETENTION_DAYS",
     metricsKey: "agentLog",
   },
   {
     table: "events",
+    policy: "age",
     timeColumn: "createdAt",
     envKey: "EVENTS_RETENTION_DAYS",
     metricsKey: "events",
   },
-] as const satisfies ReadonlyArray<{
-  table: string;
-  timeColumn: string;
-  envKey: string;
-  metricsKey: string;
-  initialBatchSize?: number;
-}>;
+  {
+    // Every profile self-edit stores a full copy of the field, so a large,
+    // frequently edited field grows this table without bound. Ranking runs on
+    // the covering idx_cv_agent_field index, so neither the COUNT nor the
+    // candidate scan reads `content`. Rows are large (a version can be
+    // hundreds of KB), so batches start and stay small.
+    table: "context_versions",
+    policy: "keepLatest",
+    partitionBy: "agentId, field",
+    rankBy: "version",
+    envKey: "CONTEXT_VERSIONS_KEEP_LATEST",
+    metricsKey: "contextVersions",
+    initialBatchSize: 50,
+    maxBatchSize: 100,
+  },
+] as const satisfies ReadonlyArray<
+  {
+    table: string;
+    envKey: string;
+    metricsKey: string;
+    initialBatchSize?: number;
+    maxBatchSize?: number;
+  } & (
+    | { policy: "age"; timeColumn: string }
+    | { policy: "keepLatest"; partitionBy: string; rankBy: string }
+  )
+>;
 
 type RetentionTable = (typeof DB_RETENTION_TABLES)[number];
 type RetentionMetricsKey = RetentionTable["metricsKey"];
@@ -261,8 +291,49 @@ function yieldTick(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, YIELD_MS));
 }
 
-function retentionDays(table: RetentionTable): number | null {
+/** Days for an `age` table, kept-version count for a `keepLatest` table; null when disabled. */
+function retentionValue(table: RetentionTable): number | null {
   return readPositiveIntEnv(table.envKey);
+}
+
+function initialBatchSize(table: RetentionTable): number {
+  return "initialBatchSize" in table ? table.initialBatchSize : DEFAULT_BATCH_SIZE;
+}
+
+function maxBatchSize(table: RetentionTable): number {
+  return "maxBatchSize" in table ? table.maxBatchSize : MAX_BATCH_SIZE;
+}
+
+/** The backlog COUNT and the batched DELETE for one table under its policy. */
+type SweepStatements = {
+  backlogSql: string;
+  /** Takes `params` followed by the batch LIMIT. */
+  deleteSql: string;
+  params: Array<string | number>;
+};
+
+export function sweepStatements(table: RetentionTable, value: number, now: Date): SweepStatements {
+  if (table.policy === "keepLatest") {
+    // ROW_NUMBER over the (partition, rank DESC) index: rank 1 is the newest
+    // row of its group. The DELETE removes the deepest history first, so an
+    // interrupted sweep leaves each group's surviving versions contiguous.
+    const ranked = `SELECT rowid AS rid, ROW_NUMBER() OVER (PARTITION BY ${table.partitionBy} ORDER BY ${table.rankBy} DESC) AS rn FROM ${table.table}`;
+    return {
+      backlogSql: `SELECT COUNT(*) AS n FROM (${ranked}) WHERE rn > ?`,
+      deleteSql: `DELETE FROM ${table.table} WHERE rowid IN (
+         SELECT rid FROM (${ranked}) WHERE rn > ? ORDER BY rn DESC LIMIT ?
+       )`,
+      params: [value],
+    };
+  }
+  const cutoff = new Date(now.getTime() - value * DAY_MS).toISOString();
+  return {
+    backlogSql: `SELECT COUNT(*) AS n FROM ${table.table} WHERE ${table.timeColumn} < ?`,
+    deleteSql: `DELETE FROM ${table.table} WHERE rowid IN (
+         SELECT rowid FROM ${table.table} WHERE ${table.timeColumn} < ? ORDER BY ${table.timeColumn} LIMIT ?
+       )`,
+    params: [cutoff],
+  };
 }
 
 function dryRunEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
@@ -271,17 +342,14 @@ function dryRunEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   return isEnvFlagEnabled("DB_RETENTION_DRY_RUN", true, env);
 }
 
-async function indexedBacklogCount(table: RetentionTable, cutoff: string): Promise<number> {
-  const row = await getDbClient().get<{ n: number }>(
-    `SELECT COUNT(*) AS n FROM ${table.table} WHERE ${table.timeColumn} < ?`,
-    [cutoff],
-  );
+async function indexedBacklogCount(statements: SweepStatements): Promise<number> {
+  const row = await getDbClient().get<{ n: number }>(statements.backlogSql, statements.params);
   return row?.n ?? 0;
 }
 
 async function sweepTable(
   table: RetentionTable,
-  cutoff: string,
+  statements: SweepStatements,
   dryRun: boolean,
   deadline: number,
   signal: AbortSignal,
@@ -290,33 +358,29 @@ async function sweepTable(
   const client = getDbClient();
 
   if (dryRun) {
-    const backlogRemaining = await indexedBacklogCount(table, cutoff);
+    const backlogRemaining = await indexedBacklogCount(statements);
     return {
       rowsDeleted: 0,
       batches: 0,
       backlogRemaining,
       drained: backlogRemaining === 0,
       slowestStatementMs: 0,
-      batchSize: batchSizeByTable[table.metricsKey] ?? DEFAULT_BATCH_SIZE,
+      batchSize: batchSizeByTable[table.metricsKey] ?? initialBatchSize(table),
     };
   }
 
   let rowsDeleted = 0;
   let batches = 0;
   let slowestStatementMs = 0;
-  let size = batchSizeByTable[table.metricsKey] ?? DEFAULT_BATCH_SIZE;
+  let size = batchSizeByTable[table.metricsKey] ?? initialBatchSize(table);
+  const ceiling = maxBatchSize(table);
 
   try {
     while (!signal.aborted && Date.now() < deadline) {
       const limitUsed = size;
       // Never wrap multiple batches in a transaction: one autocommit DELETE per
       // batch, so the write lock and any event-loop stall end with each statement.
-      const result = await client.runTimed(
-        `DELETE FROM ${table.table} WHERE rowid IN (
-         SELECT rowid FROM ${table.table} WHERE ${table.timeColumn} < ? ORDER BY ${table.timeColumn} LIMIT ?
-       )`,
-        [cutoff, limitUsed],
-      );
+      const result = await client.runTimed(statements.deleteSql, [...statements.params, limitUsed]);
       // Execution time only. Wall time around the call also covers waiting for
       // the client's FIFO lock and its BUSY backoff sleeps, neither of which
       // this statement spent in the driver: charging those to the stall metric
@@ -331,7 +395,7 @@ async function sweepTable(
       if (elapsed > maxStatementMs) {
         size = Math.max(MIN_BATCH_SIZE, Math.floor(size / 2));
       } else if (elapsed < maxStatementMs / 5) {
-        size = Math.min(MAX_BATCH_SIZE, size * 2);
+        size = Math.min(ceiling, size * 2);
       }
 
       // A DELETE that changed fewer rows than the LIMIT it used means the
@@ -351,7 +415,7 @@ async function sweepTable(
     // backlogRemaining > 0 drops the table from `undrained`, leaves catch-up
     // unarmed, and publishes that contradiction on /api/metrics until the next
     // hourly tick.
-    const backlogRemaining = await indexedBacklogCount(table, cutoff);
+    const backlogRemaining = await indexedBacklogCount(statements);
     return {
       rowsDeleted,
       batches,
@@ -409,7 +473,7 @@ export function runDbRetentionTick(options: DbRetentionTickOptions = {}): Promis
       const sweepAllTables = async (rawTickSpan: SwarmSpan): Promise<void> => {
         const tickSpan = bestEffortSpan(rawTickSpan);
         const tickDeadline = tickStartedAt + budget;
-        const enabled = DB_RETENTION_TABLES.filter((table) => retentionDays(table) !== null);
+        const enabled = DB_RETENTION_TABLES.filter((table) => retentionValue(table) !== null);
         if (enabled.length === 0) {
           lastSweepOrder = [];
           tickSpan.setAttributes({
@@ -431,18 +495,17 @@ export function runDbRetentionTick(options: DbRetentionTickOptions = {}): Promis
         const undrained = new Set<RetentionMetricsKey>();
 
         const sweepOne = async (table: RetentionTable, tableDeadline: number): Promise<void> => {
-          const days = retentionDays(table);
-          if (days === null) return;
+          const value = retentionValue(table);
+          if (value === null) return;
           const startedAt = Date.now();
           const previous = retentionStats[table.metricsKey];
           const tableSpan = bestEffortStartSpan("db.retention.table", {
             "agentswarm.retention.table": table.table,
           });
           try {
-            const cutoff = new Date(cutoffBase.getTime() - days * DAY_MS).toISOString();
             const result = await sweepTable(
               table,
-              cutoff,
+              sweepStatements(table, value, cutoffBase),
               dryRun,
               tableDeadline,
               abortController.signal,
@@ -529,7 +592,7 @@ export function runDbRetentionTick(options: DbRetentionTickOptions = {}): Promis
               partial?.progress.batchSize ??
               previous?.batchSize ??
               batchSizeByTable[table.metricsKey] ??
-              DEFAULT_BATCH_SIZE;
+              initialBatchSize(table);
             // Committed rows advance the running total and justify the vacuum,
             // exactly as they would have on the success path.
             const cumulative = (cumulativeRowsDeleted[table.metricsKey] ?? 0) + rowsDeleted;
@@ -670,7 +733,7 @@ export function _getLastSweepOrderForTests(): RetentionMetricsKey[] {
 export async function startDbRetention(intervalMs = RETENTION_INTERVAL_MS): Promise<void> {
   if (retentionTimer) return;
   const configured = DB_RETENTION_TABLES.map(
-    (table) => `${table.table}=${retentionDays(table) ?? "disabled"}`,
+    (table) => `${table.table}=${retentionValue(table) ?? "disabled"}`,
   ).join(", ");
   console.log(`[db-retention] starting (${configured}, dryRun=${dryRunEnabled()})`);
   retentionTimer = scheduleContextFree(() =>

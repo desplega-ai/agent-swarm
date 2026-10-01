@@ -34,7 +34,15 @@ const emit = (event) => console.log(JSON.stringify(event));
 emit({ type: "session", sessionId: "dsh-test-session" });
 const mode = process.env.DSH_TEST_MODE;
 if (mode === "abort") { setInterval(() => {}, 1000); }
+else if (mode === "mcp-fail") {
+  console.error("dsh: warning: 1 entry did not activate\\nswarm-mcp (@deepseek-ai/dsh-mcp-client): Error: mcp-client(agent-swarm): initial connection or tool synchronization failed");
+  setInterval(() => {}, 1000);
+}
 else {
+  if (mode === "usage") {
+    emit({ type: "status", phase: "step_end", turn: 1, step: 1, usage: { inputTokens: 1000, outputTokens: 50, cacheReadTokens: 9000 } });
+    emit({ type: "status", phase: "step_end", turn: 1, step: 2, usage: { inputTokens: 200, outputTokens: 30, cacheReadTokens: 10000, cacheWriteTokens: 5, reasoningTokens: 20 } });
+  }
   if (mode === "malformed") console.log("bad json");
   emit({ type: "status", phase: "turn_end", reason: { kind: mode === "failure" ? "error" : "completed" } });
   if (mode !== "missing-final") {
@@ -167,6 +175,130 @@ describe("dsh harness", () => {
       expect(JSON.stringify(patch)).not.toContain("openrouter-test-key");
     });
   }
+
+  test("wires the swarm MCP, runs unsandboxed inside the container, and logs the model", async () => {
+    const config = await fixture();
+    config.apiUrl = "http://api.test:3013";
+    config.apiKey = "swarm-test-key";
+    config.contextKey = "task:ctx";
+    const events: ProviderEvent[] = [];
+    const session = await new DshAdapter().createSession(config);
+    session.onEvent((event) => events.push(event));
+    expect((await session.waitForCompletion()).isError).toBe(false);
+    const { patch } = await Bun.file(join(config.cwd, "invocation.json")).json();
+    expect(patch).toContainEqual({
+      id: "sandbox-policy",
+      config: { mode: "danger-full-access", workspaceRoot: config.cwd },
+    });
+    expect(patch).toContainEqual({ id: "approval", config: { policy: "never" } });
+    const mcp = patch.find((entry: { insert?: unknown[] }) => entry.insert)?.insert;
+    expect(mcp).toHaveLength(1);
+    expect(mcp[0]).toMatchObject({
+      id: "swarm-mcp",
+      name: "@deepseek-ai/dsh-mcp-client",
+      config: {
+        serverName: "agent-swarm",
+        transport: "streamable-http",
+        url: "http://api.test:3013/mcp",
+        failOnStartupError: true,
+      },
+    });
+    // X-Runtime-Instance-ID rides along only in multi-runtime mode.
+    expect(mcp[0].config.headers).toMatchObject({
+      Authorization: "Bearer swarm-test-key",
+      "X-Agent-ID": "agent-test",
+      "X-Source-Task-Id": "task-test",
+      "X-Context-Key": "task:ctx",
+    });
+    expect(events[0]).toEqual({
+      type: "raw_log",
+      content: JSON.stringify({
+        type: "model",
+        provider: "deepseek-official",
+        model: "deepseek-v4-pro",
+      }),
+    });
+  });
+
+  test("fails fast when the swarm MCP client does not activate", async () => {
+    const config = await fixture("mcp-fail");
+    const result = await (await new DshAdapter().createSession(config)).waitForCompletion();
+    expect(result.isError).toBe(true);
+    expect(result.exitCode).not.toBe(0);
+    expect(result.failureReason).toStartWith("dsh could not connect to the swarm MCP server");
+  });
+
+  test("maps step usage to context snapshots and a dsh cost record", async () => {
+    const config = await fixture("usage");
+    config.model = "openrouter/deepseek/deepseek-v4.1-flash";
+    config.env = { ...config.env, OPENROUTER_API_KEY: "openrouter-test-key" };
+    const events: ProviderEvent[] = [];
+    const session = await new DshAdapter().createSession(config);
+    session.onEvent((event) => events.push(event));
+    const result = await session.waitForCompletion();
+    const context = events.filter((event) => event.type === "context_usage");
+    expect(context.map((event) => event.contextUsedTokens)).toEqual([10050, 10235]);
+    expect(context[0]).toMatchObject({ outputTokens: 50, contextFormula: "input-cache-output" });
+    expect(context[0]?.contextTotalTokens).toBeGreaterThan(200_000);
+    expect(result.cost).toMatchObject({
+      sessionId: "dsh-test-session",
+      taskId: "task-test",
+      agentId: "agent-test",
+      totalCostUsd: 0,
+      inputTokens: 1200,
+      outputTokens: 80,
+      cacheReadTokens: 19000,
+      cacheWriteTokens: 5,
+      reasoningOutputTokens: 20,
+      numTurns: 2,
+      model: "openrouter/deepseek/deepseek-v4.1-flash",
+      isError: false,
+      provider: "dsh",
+    });
+    expect(events).toContainEqual(expect.objectContaining({ type: "result", cost: result.cost }));
+  });
+
+  test("reports no cost when dsh sent no usage", async () => {
+    const result = await (
+      await new DshAdapter().createSession(await fixture())
+    ).waitForCompletion();
+    expect(result.cost).toBeUndefined();
+  });
+
+  test("passes a supported effort to dsh and declares it for OpenRouter models", async () => {
+    const direct = await fixture();
+    direct.reasoningEffort = "max";
+    const directResult = await (await new DshAdapter().createSession(direct)).waitForCompletion();
+    expect(directResult.appliedReasoningEffort).toBe("max");
+    const directPatch = (await Bun.file(join(direct.cwd, "invocation.json")).json()).patch;
+    expect(directPatch[0].config).toEqual({
+      provider: "deepseek-official",
+      model: "deepseek-v4-pro",
+      reasoningEffort: "max",
+    });
+
+    const routed = await fixture();
+    routed.model = "openrouter/deepseek/deepseek-v4.1-flash";
+    routed.reasoningEffort = "high";
+    routed.env = { ...routed.env, OPENROUTER_API_KEY: "openrouter-test-key" };
+    await (await new DshAdapter().createSession(routed)).waitForCompletion();
+    const routedPatch = (await Bun.file(join(routed.cwd, "invocation.json")).json()).patch;
+    expect(routedPatch[0].config.reasoningEffort).toBe("high");
+    expect(routedPatch[2].config.providers.openrouter.models).toEqual([
+      {
+        id: "deepseek/deepseek-v4.1-flash",
+        reasoningEfforts: { low: "low", high: "high", max: "max" },
+      },
+    ]);
+
+    // A level the model does not offer is dropped, not sent.
+    const unsupported = await fixture();
+    unsupported.reasoningEffort = "medium";
+    const unsupportedResult = await (
+      await new DshAdapter().createSession(unsupported)
+    ).waitForCompletion();
+    expect(unsupportedResult.appliedReasoningEffort).toBeNull();
+  });
 
   test("defaults to OpenRouter and honors its base URL when both keys exist", async () => {
     const config = await fixture();

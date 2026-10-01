@@ -15,9 +15,27 @@ import { buildClaudeShortnameMap, type HarnessCatalogModel } from "./harness-mod
 export const REASONING_EFFORT_LEVELS = ["off", "low", "medium", "high", "xhigh", "max"] as const;
 export type ReasoningEffortLevel = (typeof REASONING_EFFORT_LEVELS)[number];
 
-/** The four local harnesses with an effort control (Devin, claude-managed, dsh and ACP have none). */
-export const REASONING_HARNESSES = ["claude", "codex", "pi", "opencode"] as const;
+/** The local harnesses with an effort control (Devin, claude-managed and ACP have none). */
+export const REASONING_HARNESSES = ["claude", "codex", "pi", "opencode", "dsh"] as const;
 export type ReasoningHarnessName = (typeof REASONING_HARNESSES)[number];
+
+/**
+ * A dsh model string is either `openrouter/<vendor>/<id>` (OpenRouter route) or
+ * a bare DeepSeek API id such as `deepseek-v4-pro` (direct route). Its catalog
+ * entry lives in the `openrouter` section for the former and the `deepseek`
+ * section for the latter.
+ */
+export function dshCatalogRef(model: string): { providerId: string; modelId: string } {
+  if (model.startsWith("openrouter/")) {
+    return { providerId: "openrouter", modelId: model.slice("openrouter/".length) };
+  }
+  return { providerId: "deepseek", modelId: model };
+}
+
+/** Direct DeepSeek API ids carry no vendor slash; OpenRouter ids always do. */
+function isDshDirectModel(catalogId: string): boolean {
+  return !catalogId.includes("/");
+}
 
 /** The catalog facts effort support reads (models.dev field names). */
 export interface ReasoningModelFacts {
@@ -81,7 +99,16 @@ function applyHarnessOverrides(
     }
   }
 
-  if (harness !== "codex") {
+  if (harness === "dsh") {
+    // dsh passes `max` through on both routes. The DeepSeek API's thinking
+    // toggle is a real `off` there (`thinking: disabled`); on an OpenRouter
+    // route an undeclared `off` sends no reasoning field at all, so the
+    // model's own default (thinking on) applies and `off` would be a lie.
+    const direct = isDshDirectModel(modelId);
+    const hasToggle = facts.reasoning_options?.some((o) => o.type === "toggle") ?? false;
+    if (direct && hasToggle && !result.includes("off")) result = ["off", ...result];
+    if (!direct) result = result.filter((l) => l !== "off");
+  } else if (harness !== "codex") {
     result = result.filter((l) => l !== "max");
   }
 
@@ -144,7 +171,8 @@ export type ReasoningCatalog = Record<
  *
  * `model` is the string the harness stores: a bare id for `claude` and `codex`
  * (a Claude CLI shortname such as `opus` resolves to the newest model of its
- * family), `<providerId>/<model-id>` for `pi` and `opencode`, split on the FIRST
+ * family), `openrouter/<id>` or a bare DeepSeek id for `dsh` ({@link dshCatalogRef}),
+ * `<providerId>/<model-id>` for `pi` and `opencode`, split on the FIRST
  * slash because the id may hold more (`openrouter/google/gemini-3-flash-preview`).
  * Empty for a harness with no effort control, a model the catalog does not
  * list, and a model that does not reason. Callers that hold two catalogs (a
@@ -164,6 +192,8 @@ export function reasoningLevelsForModel(
   } else if (harness === "codex") {
     providerId = "openai";
     catalogId = model;
+  } else if (harness === "dsh") {
+    ({ providerId, modelId: catalogId } = dshCatalogRef(model));
   } else {
     const slash = model.indexOf("/");
     if (slash <= 0) return [];

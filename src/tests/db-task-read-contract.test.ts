@@ -505,6 +505,7 @@ value:recordKeyRateLimitWindows
 value:recordKeySeatMismatch
 value:recordKeyUsage
 value:recordSlackMessage
+value:recordTaskProviderIfUnset
 value:recordTaskPullRequestAttachments
 value:refreshDraftTaskLease
 value:rejectTask

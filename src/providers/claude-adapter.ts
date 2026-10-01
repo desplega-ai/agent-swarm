@@ -25,6 +25,7 @@ import {
 } from "../utils/process-group";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { normalizeClaudeMessage } from "./claude-session-events";
+import { resolveSlashSkillPrompt } from "./codex-skill-resolver";
 import { CTX_MODE_NUDGE_EVERY } from "./ctx-mode-env";
 import { buildOtelTraceparentEnv, isHarnessOtelEnabled } from "./otel-env";
 import { applyReasoningEffort, type ReasoningEffort } from "./reasoning-effort";
@@ -639,6 +640,38 @@ export function getSystemPromptFilePath(taskId: string): string {
   return `/tmp/agent-swarm-system-prompt-${taskId}.txt`;
 }
 
+/**
+ * Inline the runner's leading `/<skill>` command before the prompt reaches
+ * Claude Code.
+ *
+ * Claude Code expands `/<skill> <args>` into `<command-args>{args}</command-args>`
+ * plus the skill text, and appends `ARGUMENTS: {args}` when the skill has no
+ * `$ARGUMENTS` placeholder (a `$ARGUMENTS` placeholder only moves the second
+ * copy). The runner puts the whole task body — task text, context preamble,
+ * memories — in those args, so every task's first message carried it twice.
+ * Inlining the SKILL.md ourselves, with the resolver codex/opencode/dsh already
+ * use, keeps the skill text and sends the body once.
+ *
+ * Commands with no SKILL.md under `<home>/.claude/skills` pass through for
+ * Claude Code to expand natively. Exported for unit testing.
+ */
+export async function resolveClaudePrompt(prompt: string, home: string): Promise<string> {
+  const resolved = await resolveSlashSkillPrompt(prompt, {
+    providerLabel: "claude",
+    skillsDir: join(home, ".claude", "skills"),
+    // Native expansion drops frontmatter too. It also matters for argv: the
+    // `-p` path passes the prompt as a positional, and a leading `---` is
+    // parsed as an unknown option.
+    stripFrontmatter: true,
+    emit: (event) => {
+      if (event.type === "raw_stderr") console.warn(event.content.trimEnd());
+    },
+  });
+  // Any other leading dash would hit the same argv parse error; keep the
+  // native (duplicated but working) form instead.
+  return resolved.startsWith("-") ? prompt : resolved;
+}
+
 class ClaudeSession implements ProviderSession {
   private proc: ReturnType<typeof Bun.spawn>;
   private stdinWriter:
@@ -1067,6 +1100,10 @@ export class ClaudeAdapter implements ProviderAdapter {
     const model = config.model || "opus";
 
     const sourceEnv = withClaudeRouteEnv(config.env || process.env);
+    const sessionConfig: ProviderSessionConfig = {
+      ...config,
+      prompt: await resolveClaudePrompt(config.prompt, process.env.HOME ?? homedir()),
+    };
     const transport = resolveClaudeTransport(sourceEnv);
     const credType = validateClaudeCredentials(sourceEnv);
     console.log(`\x1b[2m[claude]\x1b[0m Using credential: ${credType}`);
@@ -1243,7 +1280,7 @@ export class ClaudeAdapter implements ProviderAdapter {
 
     if (transport === "sdk") {
       return claudeSdk!.createClaudeSdkSession({
-        config,
+        config: sessionConfig,
         model,
         taskFilePath,
         taskFileKey,
@@ -1258,7 +1295,7 @@ export class ClaudeAdapter implements ProviderAdapter {
     }
 
     return new ClaudeSession(
-      config,
+      sessionConfig,
       model,
       taskFilePath,
       taskFileKey,

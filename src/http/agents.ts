@@ -1128,7 +1128,7 @@ export async function handleAgentsRest(
               })
             )[0]?.value ?? "");
       const allowedLevels =
-        harness_provider === "acp" || harness_provider === "dsh"
+        harness_provider === "acp"
           ? []
           : reasoningCapability(harness_provider, modelForValidation ?? "").levels;
       if (!allowedLevels.includes(reasoning_effort)) {

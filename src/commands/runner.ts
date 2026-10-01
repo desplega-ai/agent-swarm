@@ -1641,6 +1641,9 @@ export async function ensureTaskFinished(
   // Exit code 0 = success, non-zero = failure
   let status = exitCode === 0 ? "completed" : "failed";
   const body: Record<string, string> = { status };
+  // The server records it only when no session did, so a spawn failure is
+  // attributed to its harness instead of leaving `provider` NULL.
+  if (provider) body.provider = provider;
 
   // Applies a structured-output fallback result to `body`/`status`. Shared by
   // the no-providerOutput path and the providerOutput-failed-schema-validation
@@ -3251,8 +3254,8 @@ async function buildTaskOutputInstructions(
   return result.text;
 }
 
-/** Build prompt based on trigger type */
-async function buildPromptForTrigger(
+/** Build prompt based on trigger type. Exported for unit testing. */
+export async function buildPromptForTrigger(
   trigger: Trigger,
   defaultPrompt: string,
   fmt: (cmd: string) => string = (cmd) => `/${cmd}`,
