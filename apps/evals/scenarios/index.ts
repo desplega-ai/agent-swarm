@@ -5,6 +5,7 @@ import { delegationProbe } from "./delegation-probe.ts";
 import { fanoutResearch, fanoutResearchSolo } from "./fanout-research.ts";
 import { humanInLoop, humanInLoopSolo } from "./human-in-loop.ts";
 import { implementReview, implementReviewSolo } from "./implement-review.ts";
+import { realDiffAgentFs } from "./real-diff-agent-fs.ts";
 import { scriptAuthoring } from "./script-authoring.ts";
 import { sqlAudit } from "./sql-audit.ts";
 import { toolRouting } from "./tool-routing.ts";
@@ -36,6 +37,7 @@ export const scenarios: Scenario[] = [
   capabilityRouting,
   humanInLoop,
   humanInLoopSolo,
+  realDiffAgentFs,
 ];
 
 // Cheap smoke default for `--scenarios` when none are passed. sql-audit is the

@@ -128,6 +128,20 @@ describe("hashScenario", () => {
     expect(hashScenario(base, { scenariosDir: dir })).not.toBe(before);
   });
 
+  test("changes when a file under the scenario's own fixtures/<id>/ directory changes", () => {
+    const dir = mkdtempSync(join(tmpdir(), "scenario-hash-"));
+    mkdirSync(join(dir, "fixtures", base.id, "repo"), { recursive: true });
+    writeFileSync(join(dir, "fixtures", "sql-audit-history.sql"), "INSERT INTO t VALUES (1);\n");
+    writeFileSync(join(dir, `${base.id}.ts`), "export const x = 1;\n");
+    const hidden = join(dir, "fixtures", base.id, "repo", "hidden.test.ts.txt");
+    writeFileSync(hidden, "test one\n");
+    const before = hashScenario(base, { scenariosDir: dir });
+    writeFileSync(hidden, "test two\n");
+    expect(hashScenario(base, { scenariosDir: dir })).not.toBe(before);
+    writeFileSync(join(dir, "fixtures", base.id, "repo", "added.txt"), "new file\n");
+    expect(hashScenario(base, { scenariosDir: dir })).not.toBe(before);
+  });
+
   test("changes when the scenario source changes, but not for comments or formatting", () => {
     const dir = mkdtempSync(join(tmpdir(), "scenario-hash-"));
     mkdirSync(join(dir, "fixtures"));

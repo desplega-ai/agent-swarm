@@ -5,7 +5,9 @@
  * Three inputs, so no single kind of edit slips through:
  *   1. the scenario object, canonicalized (sorted keys, functions collapsed):
  *      every task prompt, rubric, weight, budget, roster and seed entry;
- *   2. the bytes of every fixture it references (sqlDump, script sourceFile);
+ *   2. the bytes of every fixture it references (sqlDump, script sourceFile) and
+ *      of every file under `scenarios/fixtures/<id>/`, the directory a scenario
+ *      keeps grader-only files in (hidden tests, a seeded repo);
  *   3. the scenario's own source file as a TypeScript token stream: check
  *      logic and module-level answer keys, with comments and formatting
  *      ignored so a Biome reformat or a doc edit never demands a bump.
@@ -16,7 +18,7 @@
  */
 
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import ts from "typescript";
 import type { Scenario } from "./types.ts";
@@ -59,11 +61,34 @@ function sha256(input: string | Uint8Array): string {
   return createHash("sha256").update(input).digest("hex");
 }
 
-/** Bare filenames of the fixtures a scenario reads from scenarios/fixtures/. */
-export function scenarioFixtureFiles(scenario: Scenario): string[] {
+/** Every file under `dir`, as paths relative to `base` (forward slashes). */
+function walkFiles(base: string, dir: string): string[] {
+  const out: string[] = [];
+  for (const entry of readdirSync(join(base, dir), { withFileTypes: true })) {
+    const rel = `${dir}/${entry.name}`;
+    if (entry.isDirectory()) out.push(...walkFiles(base, rel));
+    else out.push(rel);
+  }
+  return out;
+}
+
+/**
+ * Paths, relative to scenarios/fixtures/, of the fixtures a scenario reads: the
+ * bare files it names (sqlDump, script sourceFile) and everything in the
+ * per-scenario directory `fixtures/<id>/` when one exists. A `-solo` baseline
+ * shares its swarm scenario's directory, as it shares its source file.
+ */
+export function scenarioFixtureFiles(
+  scenario: Scenario,
+  fixturesDir: string = FIXTURES_DIR,
+): string[] {
   const files = new Set<string>();
   if (scenario.seed?.sqlDump) files.add(scenario.seed.sqlDump);
   for (const script of scenario.seed?.scripts ?? []) files.add(script.sourceFile);
+  const own = scenario.baselineOf ?? scenario.id;
+  if (existsSync(join(fixturesDir, own))) {
+    for (const path of walkFiles(fixturesDir, own)) files.add(path);
+  }
   return [...files].sort();
 }
 
@@ -83,7 +108,7 @@ export function scenarioHashInputs(
     Object.fromEntries(Object.entries(scenario).filter(([k]) => !IGNORED_TOP_LEVEL_KEYS.has(k))),
   );
   const fixtures: Record<string, string> = {};
-  for (const name of scenarioFixtureFiles(scenario)) {
+  for (const name of scenarioFixtureFiles(scenario, fixturesDir)) {
     fixtures[name] = sha256(readFileSync(join(fixturesDir, name)));
   }
   // A `-solo` baseline is derived in its swarm scenario's module, so it hashes that source.
