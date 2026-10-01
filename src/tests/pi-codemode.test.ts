@@ -9,10 +9,12 @@ import type {
   ExtensionToolContext,
   ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
+import { validateConfigValue } from "../be/swarm-config-guard";
 import {
   type CodemodeLimits,
   createBoundedCodemodeExtension,
   isPiCodemodeEnabled,
+  isPiCodemodeModelsEnabled,
   PiMonoAdapter,
   piDefaultToolAdditions,
   piExtensionFactories,
@@ -29,12 +31,49 @@ describe("PI_CODEMODE flag", () => {
   });
 });
 
+describe("PI_CODEMODE_MODELS flag", () => {
+  test("off by default and for false values", () => {
+    expect(isPiCodemodeModelsEnabled({ PI_CODEMODE: "true" })).toBe(false);
+    expect(isPiCodemodeModelsEnabled({ PI_CODEMODE: "true", PI_CODEMODE_MODELS: "false" })).toBe(
+      false,
+    );
+  });
+
+  test("on only with codemode on", () => {
+    expect(isPiCodemodeModelsEnabled({ PI_CODEMODE: "true", PI_CODEMODE_MODELS: "true" })).toBe(
+      true,
+    );
+    expect(isPiCodemodeModelsEnabled({ PI_CODEMODE_MODELS: "true" })).toBe(false);
+    expect(isPiCodemodeModelsEnabled({ PI_CODEMODE: "false", PI_CODEMODE_MODELS: "true" })).toBe(
+      false,
+    );
+  });
+});
+
+describe("pi pilot flags — config validation", () => {
+  test.each([
+    "PI_TOOL_DEFERRAL",
+    "PI_CODEMODE",
+    "PI_CODEMODE_MODELS",
+  ])("%s accepts boolean literals and rejects anything else", (key) => {
+    expect(validateConfigValue(key, "true")).toBeNull();
+    expect(validateConfigValue(key, "false")).toBeNull();
+    expect(validateConfigValue(key, "maybe")).toContain(`Invalid ${key}`);
+  });
+});
+
 describe("pi extension factories and default tools — codemode", () => {
   const swarm: ExtensionFactory = () => {};
 
   test("codemode adds its extension and +codemode", () => {
     expect(piExtensionFactories(swarm, { toolDeferral: false, codemode: true })).toHaveLength(2);
     expect(piDefaultToolAdditions({ toolDeferral: false, codemode: true })).toEqual(["+codemode"]);
+  });
+
+  test("codemode models adds no extension or default tool of its own", () => {
+    const features = { toolDeferral: false, codemode: true, codemodeModels: true };
+    expect(piExtensionFactories(swarm, features)).toHaveLength(2);
+    expect(piDefaultToolAdditions(features)).toEqual(["+codemode"]);
   });
 
   test("all features together", () => {
@@ -47,6 +86,7 @@ describe("pi extension factories and default tools — codemode", () => {
 describe("PiMonoAdapter.createSession — codemode", () => {
   const envKeys = [
     "PI_CODEMODE",
+    "PI_CODEMODE_MODELS",
     "PI_TOOL_DEFERRAL",
     "PI_CODING_AGENT_DIR",
     "OPENROUTER_API_KEY",
@@ -63,6 +103,7 @@ describe("PiMonoAdapter.createSession — codemode", () => {
     // The session prompts on creation; keep that request off the network.
     process.env.OPENROUTER_BASE_URL = "http://127.0.0.1:9/api/v1";
     delete process.env.PI_CODEMODE;
+    delete process.env.PI_CODEMODE_MODELS;
     delete process.env.PI_TOOL_DEFERRAL;
   });
   afterEach(() => {
@@ -73,7 +114,7 @@ describe("PiMonoAdapter.createSession — codemode", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  async function activeTools(): Promise<string[]> {
+  async function sessionTools(): Promise<{ active: string[]; codemodeDescription: string }> {
     const server = Bun.serve({
       port: 0,
       async fetch(req) {
@@ -107,11 +148,19 @@ describe("PiMonoAdapter.createSession — codemode", () => {
         logFile: join(dir, "session.log"),
       });
       session = (provider as unknown as { agentSession: AgentSession }).agentSession;
-      return session.getActiveToolNames();
+      return {
+        active: session.getActiveToolNames(),
+        codemodeDescription:
+          session.getAllTools().find((tool) => tool.name === "codemode")?.description ?? "",
+      };
     } finally {
       session?.dispose();
       server.stop(true);
     }
+  }
+
+  async function activeTools(): Promise<string[]> {
+    return (await sessionTools()).active;
   }
 
   test("flag on: codemode is added and swarm tools stay declared", async () => {
@@ -120,6 +169,15 @@ describe("PiMonoAdapter.createSession — codemode", () => {
     expect(active).toContain("codemode");
     expect(active).toContain("store-progress");
     expect(active).toContain("create-page");
+  });
+
+  test("models flag: scripts get the models API only when asked, and only with codemode", async () => {
+    process.env.PI_CODEMODE = "true";
+    expect((await sessionTools()).codemodeDescription).not.toContain("`models`");
+    process.env.PI_CODEMODE_MODELS = "true";
+    expect((await sessionTools()).codemodeDescription).toContain("`models`");
+    process.env.PI_CODEMODE = "false";
+    expect(await activeTools()).not.toContain("codemode");
   });
 
   test("flag off: no codemode", async () => {
@@ -132,7 +190,7 @@ describe("PiMonoAdapter.createSession — codemode", () => {
 describe("bounded codemode", () => {
   type Registered = ToolDefinition;
 
-  function registerCodemode(limits: CodemodeLimits): Registered {
+  function registerCodemode(limits: CodemodeLimits, options?: { models?: boolean }): Registered {
     let registered: Registered | undefined;
     const pi = {
       registerTool: (tool: Registered) => {
@@ -142,7 +200,7 @@ describe("bounded codemode", () => {
       getAllTools: () => [],
       appendEntry: () => {},
     } as unknown as ExtensionAPI;
-    createBoundedCodemodeExtension(limits)(pi);
+    createBoundedCodemodeExtension(limits, options)(pi);
     if (!registered) throw new Error("codemode tool was not registered");
     return registered;
   }
@@ -186,6 +244,26 @@ describe("bounded codemode", () => {
   }
 
   const limits = { timeoutMs: 30_000, maxNestedCalls: 32, maxConcurrentCalls: 4 };
+
+  test("scripts have no models API unless models is on", async () => {
+    const code = "return typeof models;";
+    const off = await registerCodemode(limits).execute(
+      "m1",
+      { code },
+      undefined,
+      undefined,
+      fakeCtx().ctx,
+    );
+    expect(textOf(off)).toContain("undefined");
+    const on = await registerCodemode(limits, { models: true }).execute(
+      "m2",
+      { code },
+      undefined,
+      undefined,
+      fakeCtx().ctx,
+    );
+    expect(textOf(on)).toContain("object");
+  }, 20_000);
 
   test("a non-terminating script is interrupted at the deadline", async () => {
     const tool = registerCodemode({ ...limits, timeoutMs: 300 });

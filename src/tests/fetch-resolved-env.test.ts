@@ -523,6 +523,30 @@ describe("memory rater config reload", () => {
   });
 });
 
+describe("agent-scoped PI_CODEMODE_MODELS reaches the worker env", () => {
+  // The server merges global, agent and repo rows into /api/config/resolved
+  // (getResolvedConfig); the worker applies the result to process.env, which
+  // the pi adapter reads when the next task's session starts. PI_CODEMODE and
+  // PI_TOOL_DEFERRAL take the same path and are covered below.
+  const saved = process.env.PI_CODEMODE_MODELS;
+  afterEach(() => {
+    if (saved === undefined) delete process.env.PI_CODEMODE_MODELS;
+    else process.env.PI_CODEMODE_MODELS = saved;
+  });
+
+  test("the row lands in process.env and is reported as changed", async () => {
+    delete process.env.PI_CODEMODE_MODELS;
+    mockResponsesByAgentId.set("pi-pilot-agent", {
+      status: 200,
+      body: { configs: [{ key: "PI_CODEMODE_MODELS", value: "true" }] },
+    });
+    const result = await fetchResolvedEnv(testUrl, "key", "pi-pilot-agent");
+    const changed = applyResolvedEnvToProcessEnv(result.env);
+    expect(changed).toContain("PI_CODEMODE_MODELS");
+    expect(process.env.PI_CODEMODE_MODELS).toBe("true");
+  });
+});
+
 describe("deleting a reloadable config row", () => {
   // One key per test: the runner remembers each overridden key's boot value
   // for the life of the process.

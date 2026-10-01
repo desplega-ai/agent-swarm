@@ -142,6 +142,7 @@ Which credentials you need depends on your selected harness provider:
 | `AWS_REGION` | In either Bedrock mode | — | Required region for Bedrock credential probing and account-accurate model enumeration in SDK or bearer mode |
 | `PI_TOOL_DEFERRAL` | No | `false` | Reloadable boolean. Hides non-core swarm tools behind pi's `tool_search`. See [pi tool deferral](/docs/guides/harness-providers#pi-tool-deferral) |
 | `PI_CODEMODE` | No | `false` | Reloadable boolean. Adds pi's codemode tool, a bounded QuickJS sandbox in which the model's JavaScript calls swarm tools. See [pi codemode](/docs/guides/harness-providers#pi-codemode) |
+| `PI_CODEMODE_MODELS` | No | `false` | Reloadable boolean, effective only with `PI_CODEMODE`. Lets codemode scripts call pi's `models` API (`classify()`, `generateImages()`); the usage counts toward session cost. See [pi codemode](/docs/guides/harness-providers#pi-codemode) |
 
 \* At least one credential source is required (API key, `~/.pi/agent/auth.json`, or the AWS SDK default chain in Bedrock SDK mode). **Do not** pass `CLAUDE_CODE_OAUTH_TOKEN` when using pi-mono — it will override the configured provider. See [Harness Configuration](/docs/guides/harness-configuration) and [Harness Providers](/docs/guides/harness-providers#pi-mono-amazon-bedrock-auth) for details.
 
