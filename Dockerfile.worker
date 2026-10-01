@@ -477,9 +477,10 @@ RUN curl -fsSL "https://gitlab.com/api/v4/projects/gitlab-org%2Fcli/packages/gen
     && rm /tmp/glab.deb
 
 # Install the Azure CLI (az) + azure-devops extension for Azure Repos.
-# ~650 MB uncompressed (the .deb bundles its own Python under /opt/az), so it
-# lives here and not in worker-base. The extension goes to a system path so
-# the worker user finds it at runtime without a root-owned ~/.azure; HOME and
+# ~600 MB uncompressed, ~130 MB compressed (the .deb bundles its own Python
+# under /opt/az), so it lives here and not in worker-base. The extension goes
+# to a system path so the worker user finds it at runtime without a
+# root-owned ~/.azure; HOME and
 # AZURE_CONFIG_DIR are redirected so the build leaves nothing in /home/worker.
 # Auth is env-only (AZURE_DEVOPS_EXT_PAT, exported by docker-entrypoint.sh).
 ARG AZURE_CLI_VERSION=2.90.0
