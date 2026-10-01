@@ -11,6 +11,8 @@ import {
 import { archiveInboundMessage } from "../agentmail/inbound-archive";
 import type { PullRequestCommentedEvent, PullRequestCreatedEvent } from "../azure-devops";
 import {
+  commentedPayloadOf,
+  createdPullRequestOf,
   handlePullRequestCommented,
   handlePullRequestCreated,
   isAzureDevOpsEnabled,
@@ -555,7 +557,8 @@ export async function handleWebhooks(
       // Emit workflow trigger events for Azure DevOps
       switch (eventType) {
         case "git.pullrequest.created": {
-          const pr = (body as unknown as PullRequestCreatedEvent).resource;
+          const pr = createdPullRequestOf(body as unknown as PullRequestCreatedEvent);
+          if (!pr) break;
           workflowEventBus.emit("azure-devops.pull_request.created", {
             repo: canonicalAzureDevOpsRepoUrl(pr.repository.remoteUrl),
             number: pr.pullRequestId,
@@ -567,8 +570,9 @@ export async function handleWebhooks(
           break;
         }
         case "ms.vss-code.git-pullrequest-comment-event": {
-          const { pullRequest: pr, comment } = (body as unknown as PullRequestCommentedEvent)
-            .resource;
+          const payload = commentedPayloadOf(body as unknown as PullRequestCommentedEvent);
+          if (!payload) break;
+          const { pullRequest: pr, comment } = payload;
           workflowEventBus.emit("azure-devops.pull_request.commented", {
             repo: canonicalAzureDevOpsRepoUrl(pr.repository.remoteUrl),
             number: pr.pullRequestId,

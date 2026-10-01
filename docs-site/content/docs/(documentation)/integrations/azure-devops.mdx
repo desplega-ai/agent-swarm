@@ -63,6 +63,7 @@ On the action page of each subscription:
 - **Basic authentication username**: any value, for example `agent-swarm`
 - **Basic authentication password**: the value of `AZURE_DEVOPS_WEBHOOK_SECRET`
 - **Resource details to send**: **All**
+- **Resource version**: for **Pull request commented on**, pick **2.0**. Version 1.0 sends only the comment, without the pull request, so the swarm cannot tell which PR it belongs to and ignores it. Keep the default for **Pull request created**.
 
 Use **Test** on the subscription to check the connection. The test payload has no bot mention, so the swarm answers `{"created":false}`.
 

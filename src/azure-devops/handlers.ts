@@ -106,6 +106,49 @@ function threadIdOf(links: { self?: { href: string }; threads?: { href: string }
   return match ? Number(match[1]) : null;
 }
 
+// ── Payload shape ──
+// Payload types describe the resource versions the docs tell users to pick.
+// A subscription on another resource version still reaches us: a comment hook
+// on resourceVersion 1.0 sends the comment itself as `resource`, with no
+// `resource.comment` or `resource.pullRequest`. Check before reading.
+
+function isPullRequest(value: unknown): value is AzureDevOpsPullRequest {
+  const pr = value as Partial<AzureDevOpsPullRequest> | null | undefined;
+  return (
+    typeof pr?.pullRequestId === "number" &&
+    typeof pr.repository?.id === "string" &&
+    typeof pr.repository.remoteUrl === "string" &&
+    !!pr.repository.project &&
+    !!pr.createdBy
+  );
+}
+
+/** The created event's pull request, or null when the payload lacks the fields we read. */
+export function createdPullRequestOf(
+  event: PullRequestCreatedEvent | null | undefined,
+): AzureDevOpsPullRequest | null {
+  return isPullRequest(event?.resource) ? event.resource : null;
+}
+
+/** The commented event's comment and pull request, or null when either is missing. */
+export function commentedPayloadOf(
+  event: PullRequestCommentedEvent | null | undefined,
+): PullRequestCommentedEvent["resource"] | null {
+  const resource = event?.resource as Partial<PullRequestCommentedEvent["resource"]> | undefined;
+  const comment = resource?.comment;
+  const pullRequest = resource?.pullRequest;
+  if (!isPullRequest(pullRequest) || typeof comment?.id !== "number" || !comment.author) {
+    return null;
+  }
+  return { comment, pullRequest };
+}
+
+function warnMalformed(event: { eventType?: string; resourceVersion?: string } | null | undefined) {
+  console.warn(
+    `[AzureDevOps] Ignoring ${event?.eventType} event with resourceVersion ${event?.resourceVersion ?? "unknown"}: required resource fields are missing`,
+  );
+}
+
 async function findLeadAgent() {
   const agents = await getAllAgents();
   return (
@@ -178,7 +221,11 @@ async function renderAzureDevOpsIdentity(identity: AzureDevOpsIdentityRef): Prom
 export async function handlePullRequestCreated(
   event: PullRequestCreatedEvent,
 ): Promise<HandlerResult> {
-  const pr = event.resource;
+  const pr = createdPullRequestOf(event);
+  if (!pr) {
+    warnMalformed(event);
+    return { created: false };
+  }
   const repo = canonicalAzureDevOpsRepoUrl(pr.repository.remoteUrl);
   console.log(
     `[AzureDevOps] PR #${pr.pullRequestId} created by ${pr.createdBy.displayName} in ${repo}`,
@@ -259,7 +306,12 @@ export async function handlePullRequestCreated(
 export async function handlePullRequestCommented(
   event: PullRequestCommentedEvent,
 ): Promise<HandlerResult> {
-  const { comment, pullRequest: pr } = event.resource;
+  const payload = commentedPayloadOf(event);
+  if (!payload) {
+    warnMalformed(event);
+    return { created: false };
+  }
+  const { comment, pullRequest: pr } = payload;
   const repo = canonicalAzureDevOpsRepoUrl(pr.repository.remoteUrl);
 
   if (comment.commentType === "system") {

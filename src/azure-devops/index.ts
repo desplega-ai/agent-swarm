@@ -14,7 +14,12 @@ export {
   resetAzureDevOps,
   verifyAzureDevOpsWebhook,
 } from "./auth";
-export { handlePullRequestCommented, handlePullRequestCreated } from "./handlers";
+export {
+  commentedPayloadOf,
+  createdPullRequestOf,
+  handlePullRequestCommented,
+  handlePullRequestCreated,
+} from "./handlers";
 export type {
   AzureDevOpsWebhookEvent,
   PullRequestCommentedEvent,
