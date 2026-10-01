@@ -20810,6 +20810,12 @@
                       "session_summary",
                       "task_completion"
                     ]
+                  },
+                  "keyPrefix": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200,
+                    "description": "Only return memories whose key starts with this text (literal, case-sensitive), for example '/facts/'."
                   }
                 },
                 "required": [

@@ -531,7 +531,14 @@ export class SqliteMemoryStore implements MemoryStore {
     agentId: string,
     options: MemorySearchOptions = {},
   ): Promise<MemoryCandidate[]> {
-    const { scope = "all", limit = 10, source, isLead = false, includeExpired = false } = options;
+    const {
+      scope = "all",
+      limit = 10,
+      source,
+      isLead = false,
+      includeExpired = false,
+      keyPrefix,
+    } = options;
 
     const health = this.getHealth();
     if (
@@ -551,6 +558,7 @@ export class SqliteMemoryStore implements MemoryStore {
         source,
         isLead,
         includeExpired,
+        keyPrefix,
       });
     }
 
@@ -564,6 +572,7 @@ export class SqliteMemoryStore implements MemoryStore {
         source,
         isLead,
         includeExpired,
+        keyPrefix,
       });
     }
 
@@ -577,6 +586,7 @@ export class SqliteMemoryStore implements MemoryStore {
         source,
         isLead,
         includeExpired,
+        keyPrefix,
       });
     }
 
@@ -589,6 +599,7 @@ export class SqliteMemoryStore implements MemoryStore {
       source,
       isLead,
       includeExpired,
+      keyPrefix,
     });
   }
 
@@ -602,6 +613,7 @@ export class SqliteMemoryStore implements MemoryStore {
       source?: AgentMemorySource;
       isLead: boolean;
       includeExpired: boolean;
+      keyPrefix?: string;
     },
   ): Promise<MemoryCandidate[]> {
     const overfetchLimit = Math.min(Math.max(options.limit * 4, options.limit), 100);
@@ -682,16 +694,18 @@ export class SqliteMemoryStore implements MemoryStore {
       source?: AgentMemorySource;
       isLead: boolean;
       includeExpired: boolean;
+      keyPrefix?: string;
     },
   ): Promise<MemoryCandidate[]> {
     const match = this.buildFtsMatch(queryText);
     if (!match) return [];
 
-    const { scope, limit, source, isLead, includeExpired } = options;
+    const { scope, limit, source, isLead, includeExpired, keyPrefix } = options;
     const conditions: string[] = ["memory_fts MATCH ?"];
     const params: (Buffer | string | number | null)[] = [match];
 
     this.addScopeConditions(conditions, params, agentId, scope, isLead, "m");
+    this.addKeyPrefixCondition(conditions, params, keyPrefix, "m");
 
     if (source) {
       conditions.push("m.source = ?");
@@ -756,9 +770,10 @@ export class SqliteMemoryStore implements MemoryStore {
       source?: AgentMemorySource;
       isLead: boolean;
       includeExpired: boolean;
+      keyPrefix?: string;
     },
   ): Promise<MemoryCandidate[]> {
-    const { scope, limit, source, isLead, includeExpired } = options;
+    const { scope, limit, source, isLead, includeExpired, keyPrefix } = options;
 
     const embeddingBuffer = serializeEmbedding(queryEmbedding);
     // sqlite-vec hard ceiling is 4096 for knn queries
@@ -768,6 +783,7 @@ export class SqliteMemoryStore implements MemoryStore {
     const params: (Buffer | string | number | null)[] = [embeddingBuffer];
 
     this.addScopeConditions(conditions, params, agentId, scope, isLead, "m");
+    this.addKeyPrefixCondition(conditions, params, keyPrefix, "m");
 
     if (source) {
       conditions.push("m.source = ?");
@@ -810,14 +826,16 @@ export class SqliteMemoryStore implements MemoryStore {
       source?: AgentMemorySource;
       isLead: boolean;
       includeExpired: boolean;
+      keyPrefix?: string;
     },
   ): Promise<MemoryCandidate[]> {
-    const { scope, limit, source, isLead, includeExpired } = options;
+    const { scope, limit, source, isLead, includeExpired, keyPrefix } = options;
 
     const conditions: string[] = ["embedding IS NOT NULL"];
     const params: (string | null)[] = [];
 
     this.addScopeConditions(conditions, params, agentId, scope, isLead);
+    this.addKeyPrefixCondition(conditions, params, keyPrefix);
 
     if (source) {
       conditions.push("source = ?");
@@ -877,15 +895,32 @@ export class SqliteMemoryStore implements MemoryStore {
     }
   }
 
+  /**
+   * Literal prefix match on `key`. substr/length instead of GLOB or LIKE so a
+   * prefix holding `*`, `?`, `[` or `%` is matched as text, not as a pattern.
+   */
+  private addKeyPrefixCondition(
+    conditions: string[],
+    params: (Buffer | string | number | null)[],
+    keyPrefix: string | undefined,
+    tableAlias = "",
+  ): void {
+    if (!keyPrefix) return;
+    const key = tableAlias ? `${tableAlias}.key` : "key";
+    conditions.push(`substr(${key}, 1, length(?)) = ?`);
+    params.push(keyPrefix, keyPrefix);
+  }
+
   private buildListWhereClause(
     agentId: string,
     options: MemoryListOptions,
   ): { whereClause: string; params: (Buffer | string | number | null)[] } {
-    const { scope = "all", isLead = false, ownerAgentId, source, sourcePath } = options;
+    const { scope = "all", isLead = false, ownerAgentId, source, sourcePath, keyPrefix } = options;
     const conditions: string[] = [];
     const params: (Buffer | string | number | null)[] = [];
 
     this.addScopeConditions(conditions, params, agentId, scope, isLead);
+    this.addKeyPrefixCondition(conditions, params, keyPrefix);
 
     if (ownerAgentId) {
       conditions.push("agentId = ?");
@@ -957,21 +992,32 @@ export class SqliteMemoryStore implements MemoryStore {
           );
 
       if (!row) throw new Error("memory not found");
-      if ((row.totalChunks ?? 1) !== 1)
+      // A pure move (newKey, no content fields) may span every chunk; any
+      // content edit still needs a single-chunk row.
+      const moveOnly =
+        input.newKey !== undefined &&
+        input.content === undefined &&
+        input.oldString === undefined &&
+        input.newString === undefined;
+      if (!moveOnly && (row.totalChunks ?? 1) !== 1)
         throw new Error("memory edit only supports single-chunk rows");
       if (input.expectedVersion && input.expectedVersion !== (row.version ?? 1)) {
         throw new Error("memory version conflict");
       }
 
       const previousVersion = row.version ?? 1;
-      const nextContent = applyEditMode(input.mode, row.content, {
-        content: input.content,
-        oldString: input.oldString,
-        newString: input.newString,
-      });
+      const moving = input.newKey !== undefined && input.newKey !== row.key;
+      const nextContent = moveOnly
+        ? row.content
+        : applyEditMode(input.mode, row.content, {
+            content: input.content,
+            oldString: input.oldString,
+            newString: input.newString,
+          });
 
       const nextHash = contentSha256(nextContent);
-      if (nextHash === row.contentHash) {
+      const contentChanged = !moveOnly && nextHash !== row.contentHash;
+      if (!contentChanged && !moving) {
         return {
           result: {
             memory: rowToAgentMemory(row),
@@ -984,31 +1030,81 @@ export class SqliteMemoryStore implements MemoryStore {
         };
       }
 
-      const nextVersion = previousVersion + 1;
+      // Every chunk of the document shares one key, so the move covers all of
+      // them. Legacy multi-chunk manual docs carry a distinct key per chunk and
+      // cannot be located by key: refuse rather than split the document.
+      let targets: AgentMemoryRow[] = [row];
+      if (moving) {
+        const owner = row.agentId ?? null;
+        if (row.key) {
+          targets = await tx.query<AgentMemoryRow>(
+            `SELECT * FROM agent_memory
+             WHERE key = ? AND scope = ? AND coalesce(agentId, '') = coalesce(?, '')
+             ORDER BY chunkIndex ASC`,
+            [row.key, row.scope, owner],
+          );
+        }
+        if (
+          targets.length !== (row.totalChunks ?? 1) ||
+          targets.some((target, index) => target.chunkIndex !== index)
+        ) {
+          throw new Error(
+            "memory move needs every chunk of the document under one key; this document's chunks do not share one, re-store it with a key",
+          );
+        }
+        const taken = await tx.get<{ id: string }>(
+          `SELECT id FROM agent_memory
+           WHERE key = ? AND scope = ? AND coalesce(agentId, '') = coalesce(?, '')
+           LIMIT 1`,
+          [input.newKey!, row.scope, owner],
+        );
+        if (taken) throw new Error(`key "${input.newKey}" is already used in this scope`);
+      }
+
       const now = new Date().toISOString();
-      await tx.run(
-        `INSERT INTO agent_memory_version (id, memory_id, version, content, contentHash, intent, operation, changedByAgentId, createdAt, updatedAt, created_by, updated_by)
-         VALUES (?, ?, ?, ?, ?, ?, 'edit', ?, ?, ?, ?, ?)`,
-        [
-          crypto.randomUUID(),
-          row.id,
-          nextVersion,
-          nextContent,
-          nextHash,
-          input.intent,
-          input.changedByAgentId ?? null,
-          now,
-          now,
-          input.changedByAgentId ?? null,
-          input.changedByAgentId ?? null,
-        ],
-      );
-      await tx.run(
-        `UPDATE agent_memory
-         SET content = ?, contentHash = ?, version = ?, updatedAt = ?
-         WHERE id = ?`,
-        [nextContent, nextHash, nextVersion, now, row.id],
-      );
+      const versionIntent = moving
+        ? `${input.intent} [key ${row.key ?? "(none)"} -> ${input.newKey}]`
+        : input.intent;
+      let nextVersion = previousVersion + 1;
+      for (const target of targets) {
+        const addressed = target.id === row.id;
+        const targetContent = addressed ? nextContent : target.content;
+        const targetHash = addressed
+          ? nextHash
+          : (target.contentHash ?? contentSha256(target.content));
+        const targetVersion = (target.version ?? 1) + 1;
+        if (addressed) nextVersion = targetVersion;
+        await tx.run(
+          `INSERT INTO agent_memory_version (id, memory_id, version, content, contentHash, intent, operation, changedByAgentId, createdAt, updatedAt, created_by, updated_by)
+           VALUES (?, ?, ?, ?, ?, ?, 'edit', ?, ?, ?, ?, ?)`,
+          [
+            crypto.randomUUID(),
+            target.id,
+            targetVersion,
+            targetContent,
+            targetHash,
+            versionIntent,
+            input.changedByAgentId ?? null,
+            now,
+            now,
+            input.changedByAgentId ?? null,
+            input.changedByAgentId ?? null,
+          ],
+        );
+        await tx.run(
+          `UPDATE agent_memory
+           SET content = ?, contentHash = ?, version = ?, updatedAt = ?, key = ?
+           WHERE id = ?`,
+          [
+            targetContent,
+            targetHash,
+            targetVersion,
+            now,
+            moving ? input.newKey! : target.key,
+            target.id,
+          ],
+        );
+      }
 
       return {
         result: {
@@ -1018,13 +1114,14 @@ export class SqliteMemoryStore implements MemoryStore {
             contentHash: nextHash,
             version: nextVersion,
             updatedAt: now,
+            key: moving ? input.newKey! : row.key,
           }),
           changed: true,
           previousVersion,
           version: nextVersion,
           contentHash: nextHash,
         },
-        ftsContent: nextContent,
+        ftsContent: contentChanged ? nextContent : null,
       };
     });
 

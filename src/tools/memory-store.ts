@@ -1,6 +1,13 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
+import { getAgentById } from "@/be/db";
 import { indexMemoryContent } from "@/be/memory/index-content";
+import {
+  leadOnlyKeyViolation,
+  MEMORY_KEY_MAX_LENGTH,
+  MEMORY_KEY_PATTERN,
+  MEMORY_KEY_PATTERN_MESSAGE,
+} from "@/be/memory/key-paths";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 import { AgentMemoryScopeSchema } from "@/types";
 
@@ -46,6 +53,14 @@ export const registerMemoryStoreTool = (server: McpServer) => {
           .min(1)
           .optional()
           .describe("Why this is worth remembering. Kept in the audit trail."),
+        key: z
+          .string()
+          .max(MEMORY_KEY_MAX_LENGTH)
+          .regex(MEMORY_KEY_PATTERN, MEMORY_KEY_PATTERN_MESSAGE)
+          .optional()
+          .describe(
+            "Optional logical path for this memory, for example '/facts/swarm-runtime/sqlite-busy-retry'. Lowercase segments joined by '/', starting with '/'. Search it with memory-search keyPrefix and move it with memory-edit newKey. Fails when you already have a memory with this key in this scope. Paths under /company-story, /entities and /timeline are lead-only. Defaults to an auto key.",
+          ),
       }),
       outputSchema: swarmToolOutputSchema({
         yourAgentId: z.string().optional(),
@@ -54,7 +69,11 @@ export const registerMemoryStoreTool = (server: McpServer) => {
         queued: z.boolean().optional(),
       }),
     },
-    async ({ content, name: requestedName, scope, tags, taskId, intent }, requestInfo, _meta) => {
+    async (
+      { content, name: requestedName, scope, tags, taskId, intent, key },
+      requestInfo,
+      _meta,
+    ) => {
       const name =
         requestedName ??
         content
@@ -74,6 +93,14 @@ export const registerMemoryStoreTool = (server: McpServer) => {
         return toolErr("Agent ID required. Are you registered in the swarm?");
       }
 
+      if (key) {
+        const agent = await getAgentById(requestInfo.agentId);
+        const violation = leadOnlyKeyViolation(key, agent?.isLead ?? false);
+        if (violation) {
+          return toolErr(violation, { data: { yourAgentId: requestInfo.agentId } });
+        }
+      }
+
       try {
         // The caller always owns the row, for both scopes: a swarm memory still
         // records who wrote it (mirrors inject-learning).
@@ -86,6 +113,7 @@ export const registerMemoryStoreTool = (server: McpServer) => {
           sourceTaskId: taskId ?? null,
           tags: normalizedTags,
           intent,
+          key,
         });
 
         return toolOk(
@@ -100,7 +128,14 @@ export const registerMemoryStoreTool = (server: McpServer) => {
           },
         );
       } catch (err) {
-        return toolErr(`Memory store failed: ${(err as Error).message}`, {
+        const message = (err as Error).message;
+        if (key && /UNIQUE constraint failed/i.test(message)) {
+          return toolErr(
+            `Memory store failed: key "${key}" is already used in ${scope} scope. Edit that memory with memory-edit, or pick another key.`,
+            { data: { yourAgentId: requestInfo.agentId } },
+          );
+        }
+        return toolErr(`Memory store failed: ${message}`, {
           data: { yourAgentId: requestInfo.agentId },
         });
       }

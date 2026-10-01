@@ -8,9 +8,31 @@ Provider abstractions live in `src/be/memory/`:
 
 - `EmbeddingProvider` — OpenAI embeddings.
 - `MemoryStore` — SQLite + sqlite-vec for vector search.
-- Reranker scores `similarity × recency_decay × access_boost × usefulness(α, β)`.
+- Reranker scores `similarity × recency_decay × access_boost × source_quality × path_weight × usefulness(α, β)`.
 
 Tuning constants are env-overridable in `src/be/memory/constants.ts`.
+
+## Logical paths (`key`)
+
+A memory's `key` column can hold a logical path such as `/facts/swarm-runtime/slug`
+instead of the auto key `<scope>/<source>/<id>`. All chunks of a document share the
+key. The helpers live in `src/be/memory/key-paths.ts`.
+
+- **Write:** `memory-store` `key` (shape `^/[a-z0-9-]+(/[a-z0-9._-]+)*$`, ≤200 chars).
+  A key already used by the same owner in the same scope fails.
+- **Move:** `memory-edit` `newKey` rewrites every chunk in one transaction and keeps
+  id, α/β, `accessCount` and author. It bumps `version` and writes a version row per
+  chunk. A legacy multi-chunk doc whose chunks carry a key each is refused, not split.
+- **Filter:** `memory-search` and `POST /api/memory/search` `keyPrefix` is a literal,
+  case-sensitive prefix. It is applied in the SQL of the FTS, vec and fallback arms and
+  in graph expansion, so it narrows candidates before the top-K cut. The vec arm still
+  has its pre-existing 4,096-neighbour KNN ceiling, same as `scope` and `source`.
+- **Rank:** `PATH_WEIGHT` in `constants.ts`, longest root wins (`/company-story` 1.4,
+  `/entities` 1.3, `/facts` 1.2, `/decisions` 1.1, `/inbox` 1.0, `/timeline` 0.8). A
+  `/decisions` doc tagged `superseded` weighs 0.3. Keys under no listed root weigh 1.0.
+- **Guard:** only the lead may write or move a key under `/company-story`, `/entities`
+  or `/timeline` (`leadOnlyKeyViolation`). It runs in the `memory-store` and
+  `memory-edit` tools, not in the store layer.
 
 ## Edit authorization
 
@@ -70,7 +92,7 @@ server-side `implicit-citation` source.
 
 ```
 usefulness(α, β) = clamp(2 × α / (α + β), MEMORY_DEMOTION_FLOOR, 2.0)
-score             = similarity × recency_decay × access_boost × usefulness(α, β)
+score             = similarity × recency_decay × access_boost × source_quality × path_weight × usefulness(α, β)
 ```
 
 A fresh memory has `(α=1, β=1)` so `usefulness = 1.0` — it ranks identically
@@ -143,6 +165,7 @@ bun run test:root -- src/tests/memory-reranker.test.ts
 bun run test:root -- src/tests/memory-store.test.ts
 bun run test:root -- src/tests/memory.test.ts
 bun run test:root -- src/tests/memory-e2e.test.ts
+bun run test:root -- src/tests/memory-key-paths.test.ts   # key / newKey / keyPrefix / lead-only guard
 ```
 
 Plus the v1.5 rater suites:
@@ -161,7 +184,8 @@ bun run test:root -- src/tests/memory-rater-e2e.test.ts               # step-7: 
 
 - `src/be/memory/types.ts` — interfaces.
 - `src/be/memory/providers/` — OpenAI embeddings + SQLite/sqlite-vec store.
-- `src/be/memory/reranker.ts` — scoring + `usefulness(α, β)` factor.
+- `src/be/memory/reranker.ts` — scoring + `usefulness(α, β)` and `pathWeight` factors.
+- `src/be/memory/key-paths.ts` — logical-path key pattern and the lead-only roots.
 - `src/be/memory/constants.ts` — env-overridable tuning.
 - `src/be/memory/index.ts` — singletons.
 - `src/be/memory/index-content.ts` — `indexMemoryContent()`: chunk, re-index by

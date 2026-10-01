@@ -2,9 +2,12 @@ import type { AgentMemorySource } from "@/types";
 import {
   ACCESS_BOOST_RECENCY_WINDOW_HOURS,
   accessBoostMaxMultiplier,
+  PATH_WEIGHT,
   recencyDecayHalfLifeDays,
   SOURCE_QUALITY_MULTIPLIER,
+  SUPERSEDED_DECISION_WEIGHT,
 } from "./constants";
+import { isKeyUnderRoot } from "./key-paths";
 import type { MemoryCandidate, RerankOptions } from "./types";
 
 const MS_PER_DAY = 1000 * 60 * 60 * 24;
@@ -45,6 +48,25 @@ export function sourceQuality(source: AgentMemorySource): number {
 }
 
 /**
+ * Path-weight multiplier from the logical path in `key`, by longest matching
+ * root. A key under no weighted root (legacy auto keys, file paths, null)
+ * weighs 1.0, so existing memories score as before. A `/decisions` doc tagged
+ * `superseded` weighs SUPERSEDED_DECISION_WEIGHT instead of the root's weight.
+ */
+export function pathWeight(key: string | null | undefined, tags: readonly string[] = []): number {
+  if (!key) return 1.0;
+  let root: string | undefined;
+  for (const candidate of Object.keys(PATH_WEIGHT)) {
+    if (isKeyUnderRoot(key, candidate) && (!root || candidate.length > root.length)) {
+      root = candidate;
+    }
+  }
+  if (!root) return 1.0;
+  if (root === "/decisions" && tags.includes("superseded")) return SUPERSEDED_DECISION_WEIGHT;
+  return PATH_WEIGHT[root] ?? 1.0;
+}
+
+/**
  * Beta-Binomial usefulness factor for reranking.
  *
  * Plan: thoughts/taras/plans/2026-05-05-memory-rater-v1.5/step-1.md §5
@@ -70,7 +92,7 @@ export function usefulness(alpha: number, beta: number): number {
 
 /**
  * Final score combining similarity, recency decay, access boost,
- * source quality, and Beta-Binomial usefulness.
+ * source quality, path weight, and Beta-Binomial usefulness.
  */
 export function computeScore(candidate: MemoryCandidate, now: Date): number {
   const decay = candidate.recencyDecayApplied
@@ -81,6 +103,7 @@ export function computeScore(candidate: MemoryCandidate, now: Date): number {
     decay *
     accessBoost(candidate.accessedAt, candidate.accessCount, now) *
     sourceQuality(candidate.source) *
+    pathWeight(candidate.key, candidate.tags) *
     usefulness(candidate.alpha, candidate.beta)
   );
 }

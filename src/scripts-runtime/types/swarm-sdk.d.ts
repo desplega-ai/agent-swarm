@@ -157,6 +157,7 @@ declare module "swarm-sdk" {
       scope?: "all" | "agent" | "swarm";
       limit?: number;
       source?: string;
+      keyPrefix?: string;
     }): Promise<unknown>;
     memory_get(args: { memoryId: string; intent: string }): Promise<unknown>;
     memory_rate(args: { id: string; useful: boolean; note?: string }): Promise<unknown>;
@@ -374,6 +375,7 @@ declare module "swarm-sdk" {
       tags?: string[];
       taskId?: string;
       intent?: string;
+      key?: string;
     }): Promise<unknown>;
     memory_edit(args: {
       memoryId?: string;
@@ -385,6 +387,7 @@ declare module "swarm-sdk" {
       newString?: string;
       intent: string;
       expectedVersion?: number;
+      newKey?: string;
     }): Promise<unknown>;
     inject_learning(args: {
       content: string;

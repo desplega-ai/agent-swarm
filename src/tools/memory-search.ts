@@ -4,6 +4,7 @@ import { getAgentById } from "@/be/db";
 import { getEmbeddingProvider, getMemoryStore } from "@/be/memory";
 import { CANDIDATE_SET_MULTIPLIER } from "@/be/memory/constants";
 import { expandCandidatesWithGraph } from "@/be/memory/graph-expansion";
+import { MEMORY_KEY_MAX_LENGTH } from "@/be/memory/key-paths";
 import {
   dedupeMemoryDocumentIds,
   recordMemoryAccesses,
@@ -96,10 +97,18 @@ export const registerMemorySearchTool = (server: McpServer) => {
           ),
         limit: z.number().int().min(1).max(50).default(10).describe("Max results to return."),
         source: AgentMemorySourceSchema.optional().describe("Filter by memory source type."),
+        keyPrefix: z
+          .string()
+          .min(1)
+          .max(MEMORY_KEY_MAX_LENGTH)
+          .optional()
+          .describe(
+            "Only return memories whose key starts with this text, for example '/facts/' or '/entities/people/'. Matched literally, case-sensitive. Include the trailing '/' to stay inside one folder.",
+          ),
       }),
       outputSchema: memorySearchOutputSchema,
     },
-    async ({ query, intent, scope, limit, source }, requestInfo, _meta) => {
+    async ({ query, intent, scope, limit, source, keyPrefix }, requestInfo, _meta) => {
       if (!requestInfo.agentId) {
         return toolErr("Agent ID required. Are you registered in the swarm?");
       }
@@ -122,6 +131,7 @@ export const registerMemorySearchTool = (server: McpServer) => {
           source,
           isLead,
           queryText: query,
+          keyPrefix,
         },
       );
       // Default-on 1-hop memory_link neighbor expansion (disable with
@@ -129,6 +139,7 @@ export const registerMemorySearchTool = (server: McpServer) => {
       const expanded = await expandCandidatesWithGraph(candidates, requestInfo.agentId, {
         scope: scope as "agent" | "swarm" | "all",
         source,
+        keyPrefix,
         isLead,
       });
       if (expanded.length > 0) {
@@ -196,6 +207,7 @@ export const registerMemorySearchTool = (server: McpServer) => {
         limit,
         isLead,
         source,
+        keyPrefix,
       });
 
       const consumedIds = dedupeMemoryDocumentIds(recent);

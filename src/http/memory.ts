@@ -7,6 +7,7 @@ import { CANDIDATE_SET_MULTIPLIER } from "../be/memory/constants";
 import { listEdgesForAgent } from "../be/memory/edges-store";
 import { expandCandidatesWithGraph } from "../be/memory/graph-expansion";
 import { indexMemoryContent } from "../be/memory/index-content";
+import { MEMORY_KEY_MAX_LENGTH } from "../be/memory/key-paths";
 import { refreshLinks } from "../be/memory/link-resolver";
 import { getLinksForMemory, type MemoryLinksResult } from "../be/memory/links-store";
 import {
@@ -108,6 +109,14 @@ const searchMemory = route({
     limit: z.number().int().min(1).max(20).default(5),
     scope: z.enum(["agent", "swarm", "all"]).default("all"),
     source: z.enum(["manual", "file_index", "session_summary", "task_completion"]).optional(),
+    keyPrefix: z
+      .string()
+      .min(1)
+      .max(MEMORY_KEY_MAX_LENGTH)
+      .optional()
+      .describe(
+        "Only return memories whose key starts with this text (literal, case-sensitive), for example '/facts/'.",
+      ),
   }),
   responses: {
     200: {
@@ -677,7 +686,7 @@ export async function handleMemory(
     const parsed = await searchMemory.parse(req, res, pathSegments, new URLSearchParams());
     if (!parsed) return true;
 
-    const { query: originalQuery, intent, limit, scope, source } = parsed.body;
+    const { query: originalQuery, intent, limit, scope, source, keyPrefix } = parsed.body;
     const consumptionHeader = req.headers["x-memory-consumption"];
     const consumptionMode = Array.isArray(consumptionHeader)
       ? consumptionHeader[0]
@@ -701,12 +710,14 @@ export async function handleMemory(
         source,
         isLead: false,
         queryText: query,
+        keyPrefix,
       });
       // Default-on 1-hop memory_link neighbor expansion (disable with
       // MEMORY_GRAPH_EXPANSION=0|false).
       const expanded = await expandCandidatesWithGraph(candidates, myAgentId, {
         scope,
         source,
+        keyPrefix,
         isLead: false,
       });
       const resultLimit = Math.min(limit, 20);

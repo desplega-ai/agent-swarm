@@ -1281,6 +1281,7 @@ Search accumulated memories with natural language.
 | `query` | string | Yes | Natural language search query |
 | `scope` | string | No | `all`, `agent`, or `swarm` |
 | `source` | string | No | Filter by source type |
+| `keyPrefix` | string | No | Only memories whose key starts with this text, for example `/facts/`. Literal and case-sensitive; applied before the result cut |
 | `limit` | number | No | Max results (default: 10) |
 
 When called inside a task, `memory-search` may also return response-side `rateHint` nudges for manual and file-index memories so agents can call `memory_rate(...)` without looking up the signature separately.
@@ -1313,6 +1314,7 @@ the background. The caller always owns the row, for both scopes.
 | `tags` | string[] | No | Free-form tags, for example a repo name or a topic |
 | `taskId` | uuid | No | The task this learning came from |
 | `intent` | string | No | Why this is worth remembering. Kept in the audit trail |
+| `key` | string | No | Logical path such as `/facts/swarm-runtime/slug`, stored on every chunk. Lowercase segments, leading `/`. Fails if you already use that key in the scope. `/company-story`, `/entities` and `/timeline` are lead-only |
 
 Returns `memoryIds`, `chunks`, and `queued`. Search first with `memory-search`
 when a similar memory may exist, then `memory-edit` it instead of storing a
@@ -1336,6 +1338,7 @@ shared visibility does not grant edit permission.
 | `newString` | string | No | Replacement string for `exact` mode; may be empty |
 | `intent` | string | Yes | Why you are editing the memory |
 | `expectedVersion` | number | No | Optional optimistic-concurrency guard |
+| `newKey` | string | No | Move the memory to this logical path on every chunk, keeping ID, rating posterior, access count and author. Alone it is a pure move (no content fields). Same lead-only roots as `memory-store` |
 
 ### memory-delete
 

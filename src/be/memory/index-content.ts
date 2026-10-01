@@ -24,6 +24,11 @@ export interface IndexMemoryContentParams {
   contextKey?: string | null;
   /** Audit-trail reason. Defaults to "index memory content". */
   intent?: string;
+  /**
+   * Logical path stored in the `key` column on every chunk (for example
+   * `/facts/swarm-runtime/x`). Defaults to `sourcePath`, then the auto key.
+   */
+  key?: string | null;
 }
 
 export interface IndexMemoryContentResult {
@@ -106,7 +111,7 @@ export async function indexMemoryContent(
       tags: tags || [],
       contextKey: params.contextKey ?? null,
       intent: params.intent ?? "index memory content",
-      key: sourcePath || null,
+      key: params.key ?? (sourcePath || null),
     })),
   );
 

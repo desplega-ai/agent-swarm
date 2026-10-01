@@ -165,7 +165,7 @@ export interface RoomDecoded {
 
 export interface SwarmSdk {
   // --- memory ---
-  memory_search(args: { query: string; intent: string; scope?: "all" | "agent" | "swarm"; limit?: number; source?: string }): Promise<unknown>;
+  memory_search(args: { query: string; intent: string; scope?: "all" | "agent" | "swarm"; limit?: number; source?: string; keyPrefix?: string }): Promise<unknown>;
   memory_get(args: { memoryId: string; intent: string }): Promise<unknown>;
   memory_rate(args: { id: string; useful: boolean; note?: string }): Promise<unknown>;
   // --- tasks ---
@@ -238,7 +238,7 @@ export interface SwarmSdk {
 
   // --- write: memory ---
   memory_delete(args: { id: string }): Promise<unknown>;
-  memory_store(args: { content: string; name: string; scope?: "agent" | "swarm"; tags?: string[]; taskId?: string; intent?: string }): Promise<unknown>;
+  memory_store(args: { content: string; name: string; scope?: "agent" | "swarm"; tags?: string[]; taskId?: string; intent?: string; key?: string }): Promise<unknown>;
   memory_edit(args: {
     memoryId?: string;
     key?: string;
@@ -249,6 +249,7 @@ export interface SwarmSdk {
     newString?: string;
     intent: string;
     expectedVersion?: number;
+    newKey?: string;
   }): Promise<unknown>;
   inject_learning(args: { content: string; name?: string; scope?: "agent" | "swarm"; source?: string; tags?: string[] }): Promise<unknown>;
 

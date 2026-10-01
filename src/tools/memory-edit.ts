@@ -2,6 +2,12 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { getAgentById } from "@/be/db";
 import { getEmbeddingProvider, getMemoryStore } from "@/be/memory";
+import {
+  leadOnlyKeyViolation,
+  MEMORY_KEY_MAX_LENGTH,
+  MEMORY_KEY_PATTERN,
+  MEMORY_KEY_PATTERN_MESSAGE,
+} from "@/be/memory/key-paths";
 import { refreshLinks } from "@/be/memory/link-resolver";
 import { can } from "@/rbac";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
@@ -38,7 +44,7 @@ export const registerMemoryEditTool = (server: McpServer) => {
     {
       title: "Edit a memory",
       description:
-        "Edit a single memory in place while preserving its ID, usefulness posterior, and audit history. Two modes: 'replace' overwrites the entire content (requires `content`); 'exact' performs a surgical find-and-replace of `oldString` with `newString` within the existing content (fails if `oldString` is missing or ambiguous). Use 'replace' for full rewrites, 'exact' for targeted edits. Agents can edit their own memories; lead agents can edit any scope.",
+        "Edit a single memory in place while preserving its ID, usefulness posterior, and audit history. Two modes: 'replace' overwrites the entire content (requires `content`); 'exact' performs a surgical find-and-replace of `oldString` with `newString` within the existing content (fails if `oldString` is missing or ambiguous). Use 'replace' for full rewrites, 'exact' for targeted edits. Pass `newKey` alone to move the memory to another logical path (every chunk, same ID, posterior, access counts and author). Agents can edit their own memories; lead agents can edit any scope.",
       annotations: { destructiveHint: true },
 
       inputSchema: z.object({
@@ -71,6 +77,14 @@ export const registerMemoryEditTool = (server: McpServer) => {
           ),
         intent: z.string().min(1).describe("Why you are editing this memory."),
         expectedVersion: z.number().int().min(1).optional(),
+        newKey: z
+          .string()
+          .max(MEMORY_KEY_MAX_LENGTH)
+          .regex(MEMORY_KEY_PATTERN, MEMORY_KEY_PATTERN_MESSAGE)
+          .optional()
+          .describe(
+            "Move the memory to this logical path, for example '/facts/swarm-runtime/slug'. Alone it is a pure move: omit content/oldString/newString. Fails when the key is already used in this scope by the same owner. Paths under /company-story, /entities and /timeline are lead-only.",
+          ),
       }),
       outputSchema: swarmToolOutputSchema({
         yourAgentId: z.string().optional(),
@@ -81,7 +95,18 @@ export const registerMemoryEditTool = (server: McpServer) => {
       }),
     },
     async (
-      { memoryId, key, scope, mode, content, oldString, newString, intent, expectedVersion },
+      {
+        memoryId,
+        key,
+        scope,
+        mode,
+        content,
+        oldString,
+        newString,
+        intent,
+        expectedVersion,
+        newKey,
+      },
       requestInfo,
       _meta,
     ) => {
@@ -93,6 +118,14 @@ export const registerMemoryEditTool = (server: McpServer) => {
         return toolErr("memoryId or key+scope required.", {
           data: { yourAgentId: requestInfo.agentId },
         });
+      }
+
+      if (newKey) {
+        const agent = await getAgentById(requestInfo.agentId);
+        const violation = leadOnlyKeyViolation(newKey, agent?.isLead ?? false);
+        if (violation) {
+          return toolErr(violation, { data: { yourAgentId: requestInfo.agentId } });
+        }
       }
 
       try {
@@ -138,9 +171,13 @@ export const registerMemoryEditTool = (server: McpServer) => {
           intent,
           expectedVersion,
           changedByAgentId: requestInfo.agentId,
+          newKey,
         });
 
-        if (result.changed) {
+        // A pure move leaves the content, so the embedding and links stay valid.
+        const contentEdited =
+          content !== undefined || oldString !== undefined || newString !== undefined;
+        if (result.changed && (newKey === undefined || contentEdited)) {
           const provider = getEmbeddingProvider();
           const embedding = await provider.embed(result.memory.content);
           if (embedding) await store.updateEmbedding(result.memory.id, embedding, provider.name);
