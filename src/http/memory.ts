@@ -115,7 +115,7 @@ const searchMemory = route({
       .max(MEMORY_KEY_MAX_LENGTH)
       .optional()
       .describe(
-        "Only return memories whose key starts with this text (literal, case-sensitive), for example '/facts/'.",
+        "Only return memories whose key starts with this text (literal, case-sensitive), for example '/longterm/facts/'.",
       ),
   }),
   responses: {

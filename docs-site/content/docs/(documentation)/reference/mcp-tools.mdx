@@ -1281,7 +1281,7 @@ Search accumulated memories with natural language.
 | `query` | string | Yes | Natural language search query |
 | `scope` | string | No | `all`, `agent`, or `swarm` |
 | `source` | string | No | Filter by source type |
-| `keyPrefix` | string | No | Only memories whose key starts with this text, for example `/facts/`. Literal and case-sensitive; applied before the result cut |
+| `keyPrefix` | string | No | Only memories whose key starts with this text, for example `/longterm/facts/`. Literal and case-sensitive; applied before the result cut |
 | `limit` | number | No | Max results (default: 10) |
 
 When called inside a task, `memory-search` may also return response-side `rateHint` nudges for manual and file-index memories so agents can call `memory_rate(...)` without looking up the signature separately.
@@ -1314,7 +1314,7 @@ the background. The caller always owns the row, for both scopes.
 | `tags` | string[] | No | Free-form tags, for example a repo name or a topic |
 | `taskId` | uuid | No | The task this learning came from |
 | `intent` | string | No | Why this is worth remembering. Kept in the audit trail |
-| `key` | string | No | Logical path such as `/facts/swarm-runtime/slug`, stored on every chunk. Lowercase segments, leading `/`. Fails if you already use that key in the scope. `/company-story`, `/entities` and `/timeline` are lead-only |
+| `key` | string | No | Logical path such as `/longterm/facts/swarm-runtime/slug`, stored on every chunk. Lowercase segments, leading `/`. A `name` that starts with `/longterm/` is used as the key when `key` is absent. Fails if you already use that key in the scope. `/longterm/company-story`, `/longterm/entities` and `/longterm/timeline` are lead-only. A memory with no key is inbox material |
 
 Returns `memoryIds`, `chunks`, and `queued`. Search first with `memory-search`
 when a similar memory may exist, then `memory-edit` it instead of storing a

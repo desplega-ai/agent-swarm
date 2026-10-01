@@ -2,6 +2,7 @@ import type { AgentMemorySource } from "@/types";
 import {
   ACCESS_BOOST_RECENCY_WINDOW_HOURS,
   accessBoostMaxMultiplier,
+  DECISIONS_ROOT,
   PATH_WEIGHT,
   recencyDecayHalfLifeDays,
   SOURCE_QUALITY_MULTIPLIER,
@@ -50,7 +51,7 @@ export function sourceQuality(source: AgentMemorySource): number {
 /**
  * Path-weight multiplier from the logical path in `key`, by longest matching
  * root. A key under no weighted root (legacy auto keys, file paths, null)
- * weighs 1.0, so existing memories score as before. A `/decisions` doc tagged
+ * weighs 1.0, so existing memories score as before. A `/longterm/decisions` doc tagged
  * `superseded` weighs SUPERSEDED_DECISION_WEIGHT instead of the root's weight.
  */
 export function pathWeight(key: string | null | undefined, tags: readonly string[] = []): number {
@@ -62,7 +63,7 @@ export function pathWeight(key: string | null | undefined, tags: readonly string
     }
   }
   if (!root) return 1.0;
-  if (root === "/decisions" && tags.includes("superseded")) return SUPERSEDED_DECISION_WEIGHT;
+  if (root === DECISIONS_ROOT && tags.includes("superseded")) return SUPERSEDED_DECISION_WEIGHT;
   return PATH_WEIGHT[root] ?? 1.0;
 }
 

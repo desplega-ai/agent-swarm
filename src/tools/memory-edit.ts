@@ -83,7 +83,7 @@ export const registerMemoryEditTool = (server: McpServer) => {
           .regex(MEMORY_KEY_PATTERN, MEMORY_KEY_PATTERN_MESSAGE)
           .optional()
           .describe(
-            "Move the memory to this logical path, for example '/facts/swarm-runtime/slug'. Alone it is a pure move: omit content/oldString/newString. Fails when the key is already used in this scope by the same owner. Paths under /company-story, /entities and /timeline are lead-only.",
+            "Move the memory to this logical path, for example '/longterm/facts/swarm-runtime/slug'. Alone it is a pure move: omit content/oldString/newString. Fails when the key is already used in this scope by the same owner. Paths under /longterm/company-story, /longterm/entities and /longterm/timeline are lead-only.",
           ),
       }),
       outputSchema: swarmToolOutputSchema({

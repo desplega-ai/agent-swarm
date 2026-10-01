@@ -7,6 +7,7 @@ import {
   MEMORY_KEY_MAX_LENGTH,
   MEMORY_KEY_PATTERN,
   MEMORY_KEY_PATTERN_MESSAGE,
+  resolveStoreKey,
 } from "@/be/memory/key-paths";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 import { AgentMemoryScopeSchema } from "@/types";
@@ -33,7 +34,7 @@ export const registerMemoryStoreTool = (server: McpServer) => {
           .max(200)
           .optional()
           .describe(
-            "Short title used in search results and the UI. Defaults to the first non-empty content line (up to 200 characters).",
+            "Short title used in search results and the UI. Defaults to the first non-empty content line (up to 200 characters). A name that starts with /longterm/ is also used as the key when no key is given.",
           ),
         scope: AgentMemoryScopeSchema.default("agent").describe(
           "'agent' (default): only you can recall it. 'swarm': every agent can recall it.",
@@ -59,7 +60,7 @@ export const registerMemoryStoreTool = (server: McpServer) => {
           .regex(MEMORY_KEY_PATTERN, MEMORY_KEY_PATTERN_MESSAGE)
           .optional()
           .describe(
-            "Optional logical path for this memory, for example '/facts/swarm-runtime/sqlite-busy-retry'. Lowercase segments joined by '/', starting with '/'. Search it with memory-search keyPrefix and move it with memory-edit newKey. Fails when you already have a memory with this key in this scope. Paths under /company-story, /entities and /timeline are lead-only. Defaults to an auto key.",
+            "Optional logical path for this memory, for example '/longterm/facts/swarm-runtime/sqlite-busy-retry'. Lowercase segments joined by '/', starting with '/'. Search it with memory-search keyPrefix and move it with memory-edit newKey. Fails when you already have a memory with this key in this scope. Paths under /longterm/company-story, /longterm/entities and /longterm/timeline are lead-only. Defaults to an auto key, which makes the memory inbox material.",
           ),
       }),
       outputSchema: swarmToolOutputSchema({
@@ -93,9 +94,18 @@ export const registerMemoryStoreTool = (server: McpServer) => {
         return toolErr("Agent ID required. Are you registered in the swarm?");
       }
 
-      if (key) {
+      const storeKey = resolveStoreKey(key, requestedName);
+      if (storeKey) {
+        // A /longterm/ name becomes the key, so it must hold up as one. Falling
+        // back to an auto key would leave the agent believing it wrote a path.
+        if (!key && !MEMORY_KEY_PATTERN.test(storeKey)) {
+          return toolErr(
+            `Name "${storeKey}" starts with /longterm/, so it is used as the key, but it is not a valid key. ${MEMORY_KEY_PATTERN_MESSAGE}`,
+            { data: { yourAgentId: requestInfo.agentId } },
+          );
+        }
         const agent = await getAgentById(requestInfo.agentId);
-        const violation = leadOnlyKeyViolation(key, agent?.isLead ?? false);
+        const violation = leadOnlyKeyViolation(storeKey, agent?.isLead ?? false);
         if (violation) {
           return toolErr(violation, { data: { yourAgentId: requestInfo.agentId } });
         }
@@ -113,7 +123,7 @@ export const registerMemoryStoreTool = (server: McpServer) => {
           sourceTaskId: taskId ?? null,
           tags: normalizedTags,
           intent,
-          key,
+          key: storeKey,
         });
 
         return toolOk(
@@ -129,9 +139,9 @@ export const registerMemoryStoreTool = (server: McpServer) => {
         );
       } catch (err) {
         const message = (err as Error).message;
-        if (key && /UNIQUE constraint failed/i.test(message)) {
+        if (storeKey && /UNIQUE constraint failed/i.test(message)) {
           return toolErr(
-            `Memory store failed: key "${key}" is already used in ${scope} scope. Edit that memory with memory-edit, or pick another key.`,
+            `Memory store failed: key "${storeKey}" is already used in ${scope} scope. Edit that memory with memory-edit, or pick another key.`,
             { data: { yourAgentId: requestInfo.agentId } },
           );
         }

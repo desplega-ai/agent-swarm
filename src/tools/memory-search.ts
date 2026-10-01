@@ -103,7 +103,7 @@ export const registerMemorySearchTool = (server: McpServer) => {
           .max(MEMORY_KEY_MAX_LENGTH)
           .optional()
           .describe(
-            "Only return memories whose key starts with this text, for example '/facts/' or '/entities/people/'. Matched literally, case-sensitive. Include the trailing '/' to stay inside one folder.",
+            "Only return memories whose key starts with this text, for example '/longterm/facts/' or '/longterm/entities/people/'. Matched literally, case-sensitive. Include the trailing '/' to stay inside one folder.",
           ),
       }),
       outputSchema: memorySearchOutputSchema,

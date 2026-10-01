@@ -8007,7 +8007,7 @@ export interface paths {
                         scope?: "agent" | "swarm" | "all";
                         /** @enum {string} */
                         source?: "manual" | "file_index" | "session_summary" | "task_completion";
-                        /** @description Only return memories whose key starts with this text (literal, case-sensitive), for example '/facts/'. */
+                        /** @description Only return memories whose key starts with this text (literal, case-sensitive), for example '/longterm/facts/'. */
                         keyPrefix?: string;
                     };
                 };

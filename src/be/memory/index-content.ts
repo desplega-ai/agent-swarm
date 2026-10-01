@@ -26,7 +26,7 @@ export interface IndexMemoryContentParams {
   intent?: string;
   /**
    * Logical path stored in the `key` column on every chunk (for example
-   * `/facts/swarm-runtime/x`). Defaults to `sourcePath`, then the auto key.
+   * `/longterm/facts/swarm-runtime/x`). Defaults to `sourcePath`, then the auto key.
    */
   key?: string | null;
 }

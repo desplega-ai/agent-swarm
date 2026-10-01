@@ -1146,7 +1146,7 @@ Search your accumulated memories using natural language. Returns summaries with 
 | `scope` | `all \| agent \| swarm` | No | "all" | Search scope: 'all' (own + swarm), 'agent' (own only), 'swarm' (shared only). |
 | `limit` | `number` | No | 10 | Max results to return. |
 | `source` | `manual \| file_index \| session_summary \| task_completion` | No | - | Filter by memory source type. |
-| `keyPrefix` | `string` | No | - | Only return memories whose key starts with this text, for example '/facts/' or '/entities/people/'. Matched literally, case-sensitive. Include the trailing '/' to stay inside one folder. |
+| `keyPrefix` | `string` | No | - | Only return memories whose key starts with this text, for example '/longterm/facts/' or '/longterm/entities/people/'. Matched literally, case-sensitive. Include the trailing '/' to stay inside one folder. |
 
 ### memory-store
 
@@ -1157,12 +1157,12 @@ Store a learning as a searchable memory: a fix, a pattern, a gotcha, a fact abou
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `content` | `string` | Yes | - | The memory body. Markdown is fine. State the fact, the context it applies to, and the evidence. |
-| `name` | `string` | No | - | Short title used in search results and the UI. Defaults to the first non-empty content line (up to 200 characters). |
+| `name` | `string` | No | - | Short title used in search results and the UI. Defaults to the first non-empty content line (up to 200 characters). A name that starts with /longterm/ is also used as the key when no key is given. |
 | `scope` | `agent \| swarm` | No | "agent" | 'agent' (default): only you can recall it. 'swarm': every agent can recall it. |
 | `tags` | `unknown` | No | - | Free-form tags as an array or a comma-separated string, for example a repo name or a topic. |
 | `taskId` | `uuid` | No | - | The task this learning came from, when there is one. |
 | `intent` | `string` | No | - | Why this is worth remembering. Kept in the audit trail. |
-| `key` | `string` | No | - | Optional logical path for this memory, for example '/facts/swarm-runtime/sqlite-busy-retry'. Lowercase segments joined by '/', starting with '/'. Search it with memory-search keyPrefix and move it with memory-edit newKey. Fails when you already have a memory with this key in this scope. Paths under /company-story, /entities and /timeline are lead-only. Defaults to an auto key. |
+| `key` | `string` | No | - | Optional logical path for this memory, for example '/longterm/facts/swarm-runtime/sqlite-busy-retry'. Lowercase segments joined by '/', starting with '/'. Search it with memory-search keyPrefix and move it with memory-edit newKey. Fails when you already have a memory with this key in this scope. Paths under /longterm/company-story, /longterm/entities and /longterm/timeline are lead-only. Defaults to an auto key, which makes the memory inbox material. |
 
 ### memory-get
 
@@ -1193,7 +1193,7 @@ Edit a single memory in place while preserving its ID, usefulness posterior, and
 | `newString` | `string` | No | - | Replacement for oldString. Required for 'exact' mode. Can be empty to delete. |
 | `intent` | `string` | Yes | - | Why you are editing this memory. |
 | `expectedVersion` | `number` | No | - | - |
-| `newKey` | `string` | No | - | Move the memory to this logical path, for example '/facts/swarm-runtime/slug'. Alone it is a pure move: omit content/oldString/newString. Fails when the key is already used in this scope by the same owner. Paths under /company-story, /entities and /timeline are lead-only. |
+| `newKey` | `string` | No | - | Move the memory to this logical path, for example '/longterm/facts/swarm-runtime/slug'. Alone it is a pure move: omit content/oldString/newString. Fails when the key is already used in this scope by the same owner. Paths under /longterm/company-story, /longterm/entities and /longterm/timeline are lead-only. |
 
 ### memory-delete
 

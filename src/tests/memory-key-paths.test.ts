@@ -5,6 +5,7 @@ import { Readable } from "node:stream";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { closeDb, createAgent, getDbClient, initDb } from "../be/db";
 import { expandCandidatesWithGraph } from "../be/memory/graph-expansion";
+import { indexMemoryContent } from "../be/memory/index-content";
 import { SqliteMemoryStore } from "../be/memory/providers/sqlite-store";
 import { handleMemory } from "../http/memory";
 import { registerMemoryEditTool } from "../tools/memory-edit";
@@ -110,13 +111,13 @@ describe("memory-store key", () => {
       content: "The lane writes consolidated paths and never appends. ".repeat(120),
       name: "multi chunk fact",
       scope: "swarm",
-      key: "/facts/memory/multi-chunk",
+      key: "/longterm/facts/memory/multi-chunk",
     });
 
     expect(result.structuredContent.success).toBe(true);
     expect(result.structuredContent.chunks).toBeGreaterThan(1);
     const keys = await keysOf(result.structuredContent.memoryIds);
-    expect(keys).toEqual(keys.map(() => "/facts/memory/multi-chunk"));
+    expect(keys).toEqual(keys.map(() => "/longterm/facts/memory/multi-chunk"));
   });
 
   test("refuses a second memory under a key the owner already uses in that scope", async () => {
@@ -124,7 +125,7 @@ describe("memory-store key", () => {
       content: "first body of the path",
       name: "first",
       scope: "swarm",
-      key: "/facts/memory/taken",
+      key: "/longterm/facts/memory/taken",
     });
     expect(first.structuredContent.success).toBe(true);
 
@@ -132,49 +133,110 @@ describe("memory-store key", () => {
       content: "second body of the same path",
       name: "second",
       scope: "swarm",
-      key: "/facts/memory/taken",
+      key: "/longterm/facts/memory/taken",
     });
     expect(second.isError).toBe(true);
-    expect(second.structuredContent.message).toContain('key "/facts/memory/taken" is already used');
+    expect(second.structuredContent.message).toContain(
+      'key "/longterm/facts/memory/taken" is already used',
+    );
     const rows = await getDbClient().query("SELECT id FROM agent_memory WHERE name = 'second'");
     expect(rows).toHaveLength(0);
   });
 
-  // The lead-only roots are /company-story, /entities and /timeline. Every
-  // other root, and a root-lookalike such as /entities-archive, stays open.
-  test.each([
-    ["worker", worker, "/company-story", false],
-    ["worker", worker, "/entities/people/taras", false],
-    ["worker", worker, "/timeline/daily/2026-10-01", false],
-    ["worker", worker, "/inbox/note", true],
-    ["worker", worker, "/facts/memory/note", true],
-    ["worker", worker, "/entities-archive/note", true],
-    ["lead", lead, "/company-story", true],
-    ["lead", lead, "/entities/people/taras", true],
-    ["lead", lead, "/timeline/daily/2026-10-01", true],
-  ] as const)("%s writing %s: allowed=%p", async (_who, caller, key, allowed) => {
-    const result = await storeTool(caller, {
-      content: "guard probe body for the path",
-      name: "guard probe",
-      scope: "swarm",
-      key,
-    });
-    const stored = await getDbClient().query("SELECT id FROM agent_memory WHERE key = ?", [key]);
+  // The lead-only roots are /longterm/company-story, /longterm/entities and
+  // /longterm/timeline. Other /longterm roots, and a root-lookalike such as
+  // /longterm/entities-archive, stay open. A /longterm/ name is used as the
+  // key, so the guard must hold for the name route too.
+  const guardRows = [
+    ["worker", worker, "/longterm/company-story", false],
+    ["worker", worker, "/longterm/entities/people/taras", false],
+    ["worker", worker, "/longterm/timeline/daily/2026-10-01", false],
+    ["worker", worker, "/longterm/facts/memory/note", true],
+    ["worker", worker, "/longterm/entities-archive/note", true],
+    ["lead", lead, "/longterm/company-story", true],
+    ["lead", lead, "/longterm/entities/people/taras", true],
+    ["lead", lead, "/longterm/timeline/daily/2026-10-01", true],
+  ] as const;
+  for (const via of ["key", "name"] as const) {
+    test.each(
+      guardRows,
+    )(`${via}: %s writing %s: allowed=%p`, async (_who, caller, path, allowed) => {
+      const result = await storeTool(caller, {
+        content: "guard probe body for the path",
+        scope: "swarm",
+        ...(via === "key" ? { name: "guard probe", key: path } : { name: path }),
+      });
+      const stored = await getDbClient().query("SELECT id FROM agent_memory WHERE key = ?", [path]);
 
-    expect(result.structuredContent.success).toBe(allowed);
-    expect(stored).toHaveLength(allowed ? 1 : 0);
-    if (!allowed) expect(result.structuredContent.message).toContain("lead-only");
+      expect(result.structuredContent.success).toBe(allowed);
+      expect(stored).toHaveLength(allowed ? 1 : 0);
+      if (!allowed) expect(result.structuredContent.message).toContain("lead-only");
+    });
+  }
+
+  test("a /longterm/ name is used as the key when no key is given", async () => {
+    const result = await storeTool(worker, {
+      content: "The lane writes consolidated paths and never appends. ".repeat(120),
+      name: "/longterm/facts/memory/by-name",
+      scope: "swarm",
+    });
+
+    expect(result.structuredContent.success).toBe(true);
+    expect(result.structuredContent.chunks).toBeGreaterThan(1);
+    const ids: string[] = result.structuredContent.memoryIds;
+    expect(await keysOf(ids)).toEqual(ids.map(() => "/longterm/facts/memory/by-name"));
+    const names = await getDbClient().query<{ name: string }>(
+      `SELECT DISTINCT name FROM agent_memory WHERE id IN (${ids.map(() => "?").join(",")})`,
+      ids,
+    );
+    expect(names).toEqual([{ name: "/longterm/facts/memory/by-name" }]);
+  });
+
+  test("an explicit key wins over a /longterm/ name", async () => {
+    const result = await storeTool(worker, {
+      content: "explicit key body",
+      name: "/longterm/facts/memory/name-loses",
+      scope: "swarm",
+      key: "/longterm/facts/memory/key-wins",
+    });
+
+    expect(await keysOf(result.structuredContent.memoryIds)).toEqual([
+      "/longterm/facts/memory/key-wins",
+    ]);
+  });
+
+  test("any other name leaves the auto key", async () => {
+    const result = await storeTool(worker, {
+      content: "plain note body",
+      name: "longterm notes without a leading slash",
+      scope: "swarm",
+    });
+
+    const [key] = await keysOf(result.structuredContent.memoryIds);
+    expect(key).toBe(`swarm/manual/${result.structuredContent.memoryIds[0]}`);
+  });
+
+  test("a /longterm/ name that is not a valid key is refused and nothing is stored", async () => {
+    const result = await storeTool(worker, {
+      content: "bad name body",
+      name: "/longterm/Facts/Not A Key",
+      scope: "swarm",
+    });
+
+    expect(result.isError).toBe(true);
+    expect(result.structuredContent.message).toContain("not a valid key");
+    expect(await getDbClient().query("SELECT id FROM agent_memory")).toHaveLength(0);
   });
 
   test("the input schema rejects keys that could dodge the guard", () => {
     const schema = toolFor(registerMemoryStoreTool, "memory-store").inputSchema!;
     const accepts = (key: string) => schema.safeParse({ content: "x", key }).success;
 
-    expect(accepts("/entities/repos/desplega-ai/agent-swarm")).toBe(true);
-    expect(accepts("/Entities/people/taras")).toBe(false);
-    expect(accepts("/entities//taras")).toBe(false);
-    expect(accepts("/entities/taras/")).toBe(false);
-    expect(accepts("entities/taras")).toBe(false);
+    expect(accepts("/longterm/entities/repos/desplega-ai/agent-swarm")).toBe(true);
+    expect(accepts("/Longterm/entities/people/taras")).toBe(false);
+    expect(accepts("/longterm/entities//taras")).toBe(false);
+    expect(accepts("/longterm/entities/taras/")).toBe(false);
+    expect(accepts("longterm/entities/taras")).toBe(false);
   });
 });
 
@@ -202,7 +264,7 @@ describe("memory-edit newKey", () => {
   }
 
   test("a pure move keeps id, posterior, access count and author, and writes a version row", async () => {
-    const [memory] = await seed("/inbox/draft");
+    const [memory] = await seed(undefined);
     await getDbClient().run(
       "UPDATE agent_memory SET alpha = 4.5, beta = 1.5, accessCount = 7 WHERE id = ?",
       [memory!.id],
@@ -211,44 +273,45 @@ describe("memory-edit newKey", () => {
 
     const result = await editTool(worker, {
       memoryId: memory!.id,
-      newKey: "/facts/memory/draft",
+      newKey: "/longterm/facts/memory/draft",
       intent: "classify the inbox note",
     });
     const after = await snapshot(memory!.id);
 
     expect(result.structuredContent.success).toBe(true);
     expect(result.structuredContent.changed).toBe(true);
-    expect(after).toEqual({ ...before, key: "/facts/memory/draft", version: 2 });
+    expect(before?.key).toBe(`swarm/manual/${memory!.id}`);
+    expect(after).toEqual({ ...before, key: "/longterm/facts/memory/draft", version: 2 });
     const versions = await getDbClient().query<{ version: number; intent: string }>(
       "SELECT version, intent FROM agent_memory_version WHERE memory_id = ? ORDER BY version",
       [memory!.id],
     );
     expect(versions.map((row) => row.version)).toEqual([1, 2]);
     expect(versions[1]!.intent).toBe(
-      "classify the inbox note [key /inbox/draft -> /facts/memory/draft]",
+      `classify the inbox note [key swarm/manual/${memory!.id} -> /longterm/facts/memory/draft]`,
     );
   });
 
   test("a move addressed by key and scope reaches the same document", async () => {
-    const [memory] = await seed("/inbox/by-key");
+    const [memory] = await seed("/longterm/facts/memory/by-key-old");
 
     const result = await editTool(worker, {
-      key: "/inbox/by-key",
+      key: "/longterm/facts/memory/by-key-old",
       scope: "swarm",
-      newKey: "/facts/memory/by-key",
+      newKey: "/longterm/facts/memory/by-key",
       intent: "move by key",
     });
 
     expect(result.structuredContent.success).toBe(true);
-    expect((await snapshot(memory!.id))?.key).toBe("/facts/memory/by-key");
+    expect((await snapshot(memory!.id))?.key).toBe("/longterm/facts/memory/by-key");
   });
 
   test("a move updates every chunk of a multi-chunk document", async () => {
-    const chunks = await seed("/inbox/long", { chunks: 3 });
+    const chunks = await seed("/longterm/facts/memory/long-old", { chunks: 3 });
 
     const result = await editTool(worker, {
       memoryId: chunks[0]!.id,
-      newKey: "/facts/memory/long",
+      newKey: "/longterm/decisions/2026-10-01-long",
       intent: "move a long document",
     });
 
@@ -257,22 +320,24 @@ describe("memory-edit newKey", () => {
       "SELECT id, key, chunkIndex FROM agent_memory ORDER BY chunkIndex",
     );
     expect(rows.map((row) => row.id)).toEqual(chunks.map((chunk) => chunk.id));
-    expect(rows.map((row) => row.key)).toEqual(chunks.map(() => "/facts/memory/long"));
+    expect(rows.map((row) => row.key)).toEqual(
+      chunks.map(() => "/longterm/decisions/2026-10-01-long"),
+    );
   });
 
   test("a key already in use is refused and nothing moves", async () => {
-    const [mover] = await seed("/inbox/mover");
-    await seed("/facts/memory/occupied");
+    const [mover] = await seed("/longterm/facts/memory/mover");
+    await seed("/longterm/facts/memory/occupied");
 
     const result = await editTool(worker, {
       memoryId: mover!.id,
-      newKey: "/facts/memory/occupied",
+      newKey: "/longterm/facts/memory/occupied",
       intent: "collide",
     });
 
     expect(result.isError).toBe(true);
     expect(result.structuredContent.message).toContain("already used");
-    expect((await snapshot(mover!.id))?.key).toBe("/inbox/mover");
+    expect((await snapshot(mover!.id))?.key).toBe("/longterm/facts/memory/mover");
   });
 
   test("a legacy multi-chunk document with a key per chunk is refused instead of split", async () => {
@@ -299,7 +364,7 @@ describe("memory-edit newKey", () => {
 
     const result = await editTool(worker, {
       memoryId: first.id,
-      newKey: "/facts/memory/legacy",
+      newKey: "/longterm/facts/memory/legacy",
       intent: "move a legacy document",
     });
 
@@ -309,29 +374,83 @@ describe("memory-edit newKey", () => {
   });
 
   test("a non-lead cannot move a memory into a lead-only path; the lead can", async () => {
-    const [mine] = await seed("/inbox/mine");
+    const [mine] = await seed(undefined);
 
     const refused = await editTool(worker, {
       memoryId: mine!.id,
-      newKey: "/company-story",
+      newKey: "/longterm/company-story",
       intent: "try to promote",
     });
     expect(refused.isError).toBe(true);
     expect(refused.structuredContent.message).toContain("lead-only");
-    expect((await snapshot(mine!.id))?.key).toBe("/inbox/mine");
+    expect((await snapshot(mine!.id))?.key).toBe(`swarm/manual/${mine!.id}`);
 
     const allowed = await editTool(lead, {
       memoryId: mine!.id,
-      newKey: "/company-story",
+      newKey: "/longterm/company-story",
       intent: "lead consolidates",
     });
     expect(allowed.structuredContent.success).toBe(true);
-    expect((await snapshot(mine!.id))?.key).toBe("/company-story");
+    expect((await snapshot(mine!.id))?.key).toBe("/longterm/company-story");
+  });
+});
+
+describe("file-index re-sync leaves /longterm documents alone", () => {
+  const key = "/longterm/facts/memory/no-backing-file";
+  const filePath = "/workspace/personal/memory/no-backing-file.md";
+
+  const fingerprint = (id: string) =>
+    getDbClient().get<Record<string, unknown>>(
+      "SELECT id, agentId, scope, source, key, sourcePath, content, version FROM agent_memory WHERE id = ?",
+      [id],
+    );
+
+  test.each([
+    "agent",
+    "swarm",
+  ] as const)("%s scope: single- and multi-chunk re-index of a same-named file, and a sourcePath equal to the key", async (scope) => {
+    const stored = await storeTool(worker, {
+      content: "stored through memory-store, so it has no backing file",
+      name: key,
+      scope,
+    });
+    const id: string = stored.structuredContent.memoryIds[0];
+    const before = await fingerprint(id);
+    expect(before?.key).toBe(key);
+    expect(before?.sourcePath).toBeNull();
+
+    const index = (content: string, sourcePath: string) =>
+      indexMemoryContent({
+        agentId: worker,
+        content,
+        name: "no-backing-file",
+        scope,
+        source: "file_index",
+        sourcePath,
+      });
+
+    // Single-chunk path: the first call inserts, the second re-indexes in place.
+    await index("first version of the file, long enough to be one chunk of text", filePath);
+    await index("second version of the file, long enough to be one chunk of text", filePath);
+    // Multi-chunk path: delete by sourcePath, then insert every chunk.
+    await index("A long file body that splits into chunks. ".repeat(120), filePath);
+    const fileRows = await getDbClient().query(
+      "SELECT id FROM agent_memory WHERE source = 'file_index' AND sourcePath = ?",
+      [filePath],
+    );
+    expect(fileRows.length).toBeGreaterThan(1);
+    expect(await fingerprint(id)).toEqual(before);
+
+    // A caller that passes the /longterm key as its sourcePath cannot take it over.
+    await expect(
+      index("body that claims the key as its path, long enough to be a chunk", key),
+    ).rejects.toThrow(/UNIQUE constraint failed/);
+    expect(await fingerprint(id)).toEqual(before);
   });
 });
 
 describe("keyPrefix search", () => {
-  const prefix = "/facts/probe/";
+  const prefix = "/longterm/facts/probe/";
   const LIMIT = 4;
 
   let decoyIds: string[];
@@ -431,13 +550,13 @@ describe("keyPrefix search", () => {
       scope: "all",
       limit: LIMIT,
       queryText: "pathprobe",
-      keyPrefix: "/facts/absent/",
+      keyPrefix: "/longterm/facts/absent/",
     });
     const wildcard = await store.search(queryEmbedding, worker, {
       scope: "all",
       limit: LIMIT,
       queryText: "pathprobe",
-      keyPrefix: "/facts/pro*",
+      keyPrefix: "/longterm/facts/pro*",
     });
 
     expect(none).toEqual([]);
@@ -487,7 +606,7 @@ describe("keyPrefix search", () => {
     // recent-memories listing it uses when search finds nothing.
     const miss = await searchTool(worker, {
       query: "pathprobe",
-      keyPrefix: "/facts/absent/",
+      keyPrefix: "/longterm/facts/absent/",
       limit: LIMIT,
     });
     expect(miss.structuredContent.results).toEqual([]);
