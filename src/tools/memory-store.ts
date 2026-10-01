@@ -3,12 +3,14 @@ import * as z from "zod";
 import { getAgentById } from "@/be/db";
 import { indexMemoryContent } from "@/be/memory/index-content";
 import {
-  leadOnlyKeyViolation,
+  consolidatedKeyMessage,
+  isConsolidatedKey,
   MEMORY_KEY_MAX_LENGTH,
   MEMORY_KEY_PATTERN,
   MEMORY_KEY_PATTERN_MESSAGE,
   resolveStoreKey,
 } from "@/be/memory/key-paths";
+import { can } from "@/rbac";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 import { AgentMemoryScopeSchema } from "@/types";
 
@@ -104,10 +106,23 @@ export const registerMemoryStoreTool = (server: McpServer) => {
             { data: { yourAgentId: requestInfo.agentId } },
           );
         }
-        const agent = await getAgentById(requestInfo.agentId);
-        const violation = leadOnlyKeyViolation(storeKey, agent?.isLead ?? false);
-        if (violation) {
-          return toolErr(violation, { data: { yourAgentId: requestInfo.agentId } });
+        if (isConsolidatedKey(storeKey)) {
+          const agent = await getAgentById(requestInfo.agentId);
+          const decision = can({
+            principal: {
+              kind: "agent",
+              agentId: requestInfo.agentId,
+              isLead: agent?.isLead ?? false,
+            },
+            verb: "memory.write.consolidated",
+            resource: { kind: "none" },
+            source: "mcp",
+          });
+          if (!decision.allow) {
+            return toolErr(consolidatedKeyMessage(storeKey), {
+              data: { yourAgentId: requestInfo.agentId },
+            });
+          }
         }
       }
 

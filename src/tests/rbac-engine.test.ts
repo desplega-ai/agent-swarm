@@ -45,6 +45,7 @@ const LEAD_ONLY_VERBS: PermissionVerb[] = [
   "agent.profile.update.any",
   "agent.context.read.any",
   "memory.learning.inject",
+  "memory.write.consolidated",
   "channel.delete",
   "integration.kapso.manage",
   "integration.slack.post",

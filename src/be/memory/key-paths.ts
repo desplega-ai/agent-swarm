@@ -18,7 +18,7 @@ export const MEMORY_KEY_PATTERN_MESSAGE =
 export const MEMORY_KEY_MAX_LENGTH = 200;
 
 /** Roots only the lead may write: lane-maintained, consolidated paths. */
-const LEAD_ONLY_KEY_ROOTS: readonly string[] = [
+const CONSOLIDATED_KEY_ROOTS: readonly string[] = [
   `${LONGTERM_ROOT}/company-story`,
   `${LONGTERM_ROOT}/entities`,
   `${LONGTERM_ROOT}/timeline`,
@@ -29,14 +29,14 @@ export function isKeyUnderRoot(key: string, root: string): boolean {
   return key === root || key.startsWith(`${root}/`);
 }
 
-export function isLeadOnlyKey(key: string): boolean {
-  return LEAD_ONLY_KEY_ROOTS.some((root) => isKeyUnderRoot(key, root));
+/** True when `key` is under a root that needs the `memory.write.consolidated` permission. */
+export function isConsolidatedKey(key: string): boolean {
+  return CONSOLIDATED_KEY_ROOTS.some((root) => isKeyUnderRoot(key, root));
 }
 
-/** Refusal text for a non-lead write to a lead-only path, or null when the write is allowed. */
-export function leadOnlyKeyViolation(key: string, isLead: boolean): string | null {
-  if (isLead || !isLeadOnlyKey(key)) return null;
-  return `Key "${key}" is under a lead-only path (${LEAD_ONLY_KEY_ROOTS.join(", ")}). Write under ${LONGTERM_ROOT}/facts or leave the key off; the lead consolidates the rest.`;
+/** Refusal text for a write to a lead-only path. The allow/deny decision is `can()`'s. */
+export function consolidatedKeyMessage(key: string): string {
+  return `Key "${key}" is under a lead-only path (${CONSOLIDATED_KEY_ROOTS.join(", ")}). Write under ${LONGTERM_ROOT}/facts or leave the key off; the lead consolidates the rest.`;
 }
 
 /**

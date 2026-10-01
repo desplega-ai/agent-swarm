@@ -3,7 +3,8 @@ import * as z from "zod";
 import { getAgentById } from "@/be/db";
 import { getEmbeddingProvider, getMemoryStore } from "@/be/memory";
 import {
-  leadOnlyKeyViolation,
+  consolidatedKeyMessage,
+  isConsolidatedKey,
   MEMORY_KEY_MAX_LENGTH,
   MEMORY_KEY_PATTERN,
   MEMORY_KEY_PATTERN_MESSAGE,
@@ -120,11 +121,22 @@ export const registerMemoryEditTool = (server: McpServer) => {
         });
       }
 
-      if (newKey) {
+      if (newKey && isConsolidatedKey(newKey)) {
         const agent = await getAgentById(requestInfo.agentId);
-        const violation = leadOnlyKeyViolation(newKey, agent?.isLead ?? false);
-        if (violation) {
-          return toolErr(violation, { data: { yourAgentId: requestInfo.agentId } });
+        const decision = can({
+          principal: {
+            kind: "agent",
+            agentId: requestInfo.agentId,
+            isLead: agent?.isLead ?? false,
+          },
+          verb: "memory.write.consolidated",
+          resource: { kind: "none" },
+          source: "mcp",
+        });
+        if (!decision.allow) {
+          return toolErr(consolidatedKeyMessage(newKey), {
+            data: { yourAgentId: requestInfo.agentId },
+          });
         }
       }
 

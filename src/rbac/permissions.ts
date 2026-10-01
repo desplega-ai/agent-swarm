@@ -82,6 +82,11 @@ export const PERMISSIONS = {
     description: "Edit a memory entry (own entries, or any scope as lead).",
     namespace: "memory",
   },
+  "memory.write.consolidated": {
+    description:
+      "Write or move a memory key under a lead-maintained /longterm root (company-story, entities, timeline).",
+    namespace: "memory",
+  },
   "memory.delete.any": {
     description: "Delete a memory entry (own entries, or swarm-scoped entries as lead).",
     namespace: "memory",
