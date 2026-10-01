@@ -47491,7 +47491,7 @@
         },
         "responses": {
           "200": {
-            "description": "Progress updated",
+            "description": "Progress updated; a no-op once the task is terminal",
             "content": {
               "application/json": {
                 "schema": {

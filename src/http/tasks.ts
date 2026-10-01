@@ -543,7 +543,10 @@ const updateTaskProgressRoute = route({
   params: z.object({ id: z.string() }),
   body: z.object({ progress: z.string().min(1) }),
   responses: {
-    200: { description: "Progress updated", schema: z.object({ success: z.literal(true) }) },
+    200: {
+      description: "Progress updated; a no-op once the task is terminal",
+      schema: z.object({ success: z.literal(true) }),
+    },
     403: { description: "Task is assigned to another agent" },
     404: { description: "Task not found" },
   },
@@ -1426,7 +1429,11 @@ export async function handleTasks(
         source: "http",
       });
       if (!decision.allow) return 403;
-      await updateTaskProgress(parsed.params.id, parsed.body.progress);
+      // A harness keeps streaming after the agent finishes the task; its
+      // late progress must not overwrite a terminal task's last line.
+      if (!isTerminalTaskStatus(task.status)) {
+        await updateTaskProgress(parsed.params.id, parsed.body.progress);
+      }
       return 200;
     });
 

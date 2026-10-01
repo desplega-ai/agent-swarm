@@ -218,6 +218,29 @@ describe("Phase 2 — POST /api/session-costs recompute fires for every provider
     expect(body.cost.costSource).toBe("unpriced");
     expect(body.cost.totalCostUsd).toBe(1.23);
   });
+
+  test("a harness that prices nothing posts 0 and stores no harness cost", async () => {
+    await seedTwoClassRates("dsh", "dsh-zero-model", 2, 10);
+    const res = await authedFetch(`/api/session-costs`, {
+      method: "POST",
+      body: JSON.stringify({
+        sessionId: "dsh-zero-1",
+        agentId: testAgent.id,
+        totalCostUsd: 0,
+        inputTokens: 1_000_000,
+        outputTokens: 0,
+        model: "dsh-zero-model",
+        provider: "dsh",
+        numTurns: 1,
+      }),
+    });
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as CostResponse;
+    expect(body.cost.costSource).toBe("pricing-table");
+    expect(body.cost.totalCostUsd).toBeCloseTo(2, 5);
+    // A stored 0 read as a 100% drift against the recomputed $2.
+    expect(body.cost.harnessCostUsd).toBeNull();
+  });
 });
 
 describe("Migration 128 — modelBreakdown persistence", () => {

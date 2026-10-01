@@ -18448,7 +18448,7 @@ export interface paths {
                 };
             };
             responses: {
-                /** @description Progress updated */
+                /** @description Progress updated; a no-op once the task is terminal */
                 200: {
                     headers: {
                         [name: string]: unknown;

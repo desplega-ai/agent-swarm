@@ -7,6 +7,7 @@ import {
   clampContextPercent,
   getContextWindowSize,
 } from "../utils/context-window";
+import { addDshStepUsage, type DshStepUsage, normalizeDshStepUsage } from "../utils/dsh-usage";
 import { swarmRuntimeInstanceId } from "../utils/multi-runtime";
 import { getOpenRouterBaseUrl } from "../utils/openrouter-base-url";
 import {
@@ -58,19 +59,6 @@ interface DshRun {
   agentId: string;
 }
 
-/** dsh `status.step_end.usage`: disjoint counts, `inputTokens` excludes cache hits. */
-interface DshUsage {
-  inputTokens?: unknown;
-  outputTokens?: unknown;
-  cacheReadTokens?: unknown;
-  cacheWriteTokens?: unknown;
-  reasoningTokens?: unknown;
-}
-
-function count(value: unknown): number {
-  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 0;
-}
-
 /** Catalog key for the context-window lookup: the direct API's ids live under `deepseek/`. */
 function contextWindowKey(model: string): string {
   return model.startsWith("openrouter/") ? model : `deepseek/${model}`;
@@ -103,9 +91,11 @@ class DshSession implements ProviderSession {
   private completion: Promise<ProviderResult>;
   private readonly startedAt = Date.now();
   private readonly contextWindow: number;
-  private steps = 0;
-  private usageSeen = false;
-  private tokens = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0 };
+  /** Highest dsh turn seen. A dsh turn runs one or more steps (model calls). */
+  private turns = 0;
+  private tokens: DshStepUsage | undefined;
+  /** dsh tool_result carries only the call id; the runner wants the tool name. */
+  private toolNames = new Map<string, string>();
 
   constructor(
     private proc: Bun.Subprocess<"pipe", "pipe", "pipe">,
@@ -152,8 +142,24 @@ class DshSession implements ProviderSession {
         this.output = event.text;
       } else if (event.type === "error" && typeof event.message === "string") {
         this.failure = event.message;
+      } else if (event.type === "tool_call" && typeof event.tool === "string") {
+        // The runner turns tool_start into readable task progress, as for the
+        // other harnesses. dsh phase names (step_end, ...) are not progress.
+        const toolCallId = String(event.callId ?? "");
+        this.toolNames.set(toolCallId, event.tool);
+        this.emit({
+          type: "tool_start",
+          toolCallId,
+          toolName: event.tool,
+          args: event.input ?? {},
+        });
+      } else if (event.type === "tool_result") {
+        const toolCallId = String(event.callId ?? "");
+        const toolName = this.toolNames.get(toolCallId) ?? "tool";
+        this.toolNames.delete(toolCallId);
+        this.emit({ type: "tool_end", toolCallId, toolName, result: event.result });
       } else if (event.type === "status" && typeof event.phase === "string") {
-        this.emit({ type: "progress", message: event.phase });
+        if (typeof event.turn === "number") this.turns = Math.max(this.turns, event.turn);
         if (event.phase === "step_end") this.recordStep(event.usage);
         if (event.phase === "turn_end" && event.reason?.kind !== "completed") {
           this.failure =
@@ -167,19 +173,11 @@ class DshSession implements ProviderSession {
     }
   }
 
-  private recordStep(usage: DshUsage | undefined): void {
-    this.steps += 1;
-    if (!usage || typeof usage !== "object") return;
-    const input = count(usage.inputTokens);
-    const output = count(usage.outputTokens);
-    const cacheRead = count(usage.cacheReadTokens);
-    const cacheWrite = count(usage.cacheWriteTokens);
-    this.usageSeen = true;
-    this.tokens.input += input;
-    this.tokens.output += output;
-    this.tokens.cacheRead += cacheRead;
-    this.tokens.cacheWrite += cacheWrite;
-    this.tokens.reasoning += count(usage.reasoningTokens);
+  private recordStep(usage: unknown): void {
+    const step = normalizeDshStepUsage(usage);
+    if (!step) return;
+    this.tokens = addDshStepUsage(this.tokens, step);
+    const { input, output, cacheRead, cacheWrite } = step;
     // One step is one model call, so its prompt plus reply is the context in use.
     const used = input + cacheRead + cacheWrite + output;
     if (used > 0) {
@@ -195,7 +193,7 @@ class DshSession implements ProviderSession {
   }
 
   private buildCost(isError: boolean): CostData | undefined {
-    if (!this.sessionId || !this.usageSeen) return undefined;
+    if (!this.sessionId || !this.tokens) return undefined;
     return {
       sessionId: this.sessionId,
       taskId: this.runInfo.taskId,
@@ -208,7 +206,8 @@ class DshSession implements ProviderSession {
       cacheWriteTokens: this.tokens.cacheWrite,
       reasoningOutputTokens: this.tokens.reasoning,
       durationMs: Date.now() - this.startedAt,
-      numTurns: this.steps,
+      // dsh turns, matching the log viewer's turn rows; steps are model calls.
+      numTurns: this.turns,
       model: this.runInfo.model,
       isError,
       provider: "dsh",

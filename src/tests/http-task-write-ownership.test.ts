@@ -5,7 +5,15 @@ import {
   type Server,
   type ServerResponse,
 } from "node:http";
-import { closeDb, createAgent, createTaskExtended, getTaskById, initDb, startTask } from "../be/db";
+import {
+  closeDb,
+  completeTask,
+  createAgent,
+  createTaskExtended,
+  getTaskById,
+  initDb,
+  startTask,
+} from "../be/db";
 import { handleTasks } from "../http/tasks";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import { type HttpRequestAuth, setRequestAuth } from "../utils/request-auth-context";
@@ -129,6 +137,21 @@ describe("POST /api/tasks/{id}/progress ownership", () => {
       expect(status, JSON.stringify(caller)).toBe(200);
       expect((await getTaskById(task.id))?.progress).toBe(`step ${i}`);
     }
+  });
+});
+
+describe("POST /api/tasks/{id}/progress on a terminal task", () => {
+  test("late harness progress after completion is a no-op", async () => {
+    const task = await inProgressTask();
+    const caller: Caller = { as: "operator", agentId: ownerId };
+    expect(await post(`/api/tasks/${task.id}/progress`, caller, { progress: "Reading" })).toBe(200);
+    await completeTask(task.id, "done");
+    expect(await post(`/api/tasks/${task.id}/progress`, caller, { progress: "step_end" })).toBe(
+      200,
+    );
+    const after = await getTaskById(task.id);
+    expect(after?.status).toBe("completed");
+    expect(after?.progress).toBe("Reading");
   });
 });
 

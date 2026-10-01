@@ -44,7 +44,7 @@ else {
     emit({ type: "status", phase: "step_end", turn: 1, step: 2, usage: { inputTokens: 200, outputTokens: 30, cacheReadTokens: 10000, cacheWriteTokens: 5, reasoningTokens: 20 } });
   }
   if (mode === "malformed") console.log("bad json");
-  emit({ type: "status", phase: "turn_end", reason: { kind: mode === "failure" ? "error" : "completed" } });
+  emit({ type: "status", phase: "turn_end", turn: 1, reason: { kind: mode === "failure" ? "error" : "completed" } });
   if (mode !== "missing-final") {
     // A split UTF-8 character plus a final line without a newline exercises both decoders.
     const line = Buffer.from(JSON.stringify({ type: "final", text: "Done ✓" }));
@@ -250,7 +250,7 @@ describe("dsh harness", () => {
       cacheReadTokens: 19000,
       cacheWriteTokens: 5,
       reasoningOutputTokens: 20,
-      numTurns: 2,
+      numTurns: 1,
       model: "openrouter/deepseek/deepseek-v4.1-flash",
       isError: false,
       provider: "dsh",

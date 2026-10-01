@@ -1,3 +1,8 @@
+import {
+  addDshStepUsage,
+  type DshStepUsage,
+  normalizeDshStepUsage,
+} from "../../../../src/utils/dsh-usage";
 import { asString, isRecord, makeItem, resultBlockText } from "./helpers";
 import { resultImages } from "./result-images";
 import type { DecodedRecord, LogRole, NormalizedItem } from "./types";
@@ -874,12 +879,6 @@ const DSH_TOOL_NAMES: Record<string, string> = {
   ls: "LS",
 };
 
-interface DshUsage {
-  input: number;
-  cached: number;
-  output: number;
-}
-
 /**
  * dsh (`dsh --json`) prints one flat event per line: `session`, `status`
  * (turn_start / step_start / step_end / turn_end), `text`, `tool_call`,
@@ -887,7 +886,8 @@ interface DshUsage {
  */
 export function normalizeDsh(ordered: DecodedRecord[]): NormalizedItem[] {
   const items: NormalizedItem[] = [];
-  let turnUsage: DshUsage | undefined;
+  let turnUsage: DshStepUsage | undefined;
+  let turnSteps = 0;
   let lastAssistantText: string | undefined;
 
   for (const d of ordered) {
@@ -965,6 +965,7 @@ export function normalizeDsh(ordered: DecodedRecord[]): NormalizedItem[] {
         switch (ev.phase) {
           case "turn_start": {
             turnUsage = undefined;
+            turnSteps = 0;
             items.push(
               makeItem(d, "lifecycle", { role: "system", meta: { ...ev, type: "turn.started" } }),
             );
@@ -974,7 +975,9 @@ export function normalizeDsh(ordered: DecodedRecord[]): NormalizedItem[] {
             // Carries only turn/step counters; step_end holds the usage.
             break;
           case "step_end": {
-            turnUsage = addDshUsage(turnUsage, ev.usage);
+            turnSteps += 1;
+            const step = normalizeDshStepUsage(ev.usage);
+            if (step) turnUsage = addDshStepUsage(turnUsage, step);
             break;
           }
           case "turn_end": {
@@ -986,9 +989,12 @@ export function normalizeDsh(ordered: DecodedRecord[]): NormalizedItem[] {
                   meta: {
                     ...ev,
                     type: "turn.completed",
+                    // dsh steps are model calls; the cost sidebar counts turns.
+                    steps: turnSteps,
                     usage: turnUsage && {
-                      input_tokens: turnUsage.input,
-                      cached_input_tokens: turnUsage.cached,
+                      // Codex-style: input includes the cached share.
+                      input_tokens: turnUsage.input + turnUsage.cacheRead + turnUsage.cacheWrite,
+                      cached_input_tokens: turnUsage.cacheRead,
                       output_tokens: turnUsage.output,
                     },
                   },
@@ -1007,8 +1013,9 @@ export function normalizeDsh(ordered: DecodedRecord[]): NormalizedItem[] {
                     isError: true,
                     output: asString(error?.message) ?? `dsh turn ended: ${kind}`,
                     usage: turnUsage && {
-                      input_tokens: turnUsage.input - turnUsage.cached,
-                      cache_read_input_tokens: turnUsage.cached,
+                      input_tokens: turnUsage.input,
+                      cache_read_input_tokens: turnUsage.cacheRead,
+                      cache_creation_input_tokens: turnUsage.cacheWrite,
                       output_tokens: turnUsage.output,
                     },
                   },
@@ -1016,6 +1023,7 @@ export function normalizeDsh(ordered: DecodedRecord[]): NormalizedItem[] {
               );
             }
             turnUsage = undefined;
+            turnSteps = 0;
             break;
           }
           default: {
@@ -1065,28 +1073,6 @@ export function normalizeDsh(ordered: DecodedRecord[]): NormalizedItem[] {
 function dshText(value: unknown, truncated: unknown): string {
   const text = typeof value === "string" ? value : resultBlockText(value);
   return truncated === true ? `${text}\n… [truncated by dsh]` : text;
-}
-
-/**
- * Sums step usage into turn usage. dsh `inputTokens` excludes cache reads and
- * `cacheReadTokens` is sometimes omitted, so the full prompt size comes from
- * `totalTokens - outputTokens` when present.
- */
-function addDshUsage(acc: DshUsage | undefined, usage: unknown): DshUsage | undefined {
-  if (!isRecord(usage)) return acc;
-  const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : 0);
-  const uncached = num(usage.inputTokens);
-  const output = num(usage.outputTokens);
-  const total = num(usage.totalTokens);
-  const cached =
-    typeof usage.cacheReadTokens === "number"
-      ? num(usage.cacheReadTokens)
-      : Math.max(0, total - uncached - output);
-  return {
-    input: (acc?.input ?? 0) + uncached + cached,
-    cached: (acc?.cached ?? 0) + cached,
-    output: (acc?.output ?? 0) + output,
-  };
 }
 
 function hasPresentInput(input: unknown): boolean {
