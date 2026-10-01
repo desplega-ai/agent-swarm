@@ -1,0 +1,8 @@
+{
+  "$schema": "../manifest.schema.json",
+  "name": "deploy-awareness",
+  "description": "Appends a one-line note to new tasks while a Dokploy compose deploy is in progress",
+  "version": "1.0.0",
+  "runtime": "api",
+  "assets": { "hooks": "hooks.ts" }
+}

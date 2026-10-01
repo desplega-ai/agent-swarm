@@ -12,6 +12,7 @@ Each folder holds exactly one `manifest.yaml`, `manifest.yml`, or `manifest.json
 | `github-sender-allowlist` | `pre.task.create` | Blocks GitHub webhook tasks from senders outside configured allowlists |
 | `require-ticket-ref` | `pre.task.create` | Blocks REST, MCP, and Slack tasks that do not name a ticket |
 | `notify-on-complete` | `post.task.completed`, `post.task.failed` | Posts a summary to a Slack channel |
+| `deploy-awareness` | `pre.task.create` | Appends a one-line note to new tasks while a Dokploy deploy is in progress |
 | `require-verification-note` | `pre.tool.call` | Refuses completion without a `Verified:` line in the output |
 | `task-digest` | `post.task.completed`, `post.task.failed` | Ships the `task-digest-collect` script, the `task-digest-daily` schedule (09:00 UTC), the `task-digest-report` workflow, and the `task-digest-guide` skill |
 
