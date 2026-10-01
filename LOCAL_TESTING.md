@@ -46,6 +46,12 @@ Two RBAC suites spawn the **real** server as a subprocess (exception to the mini
 - `bun run test:root -- src/tests/rbac-wire-e2e.test.ts` — gate matrix over a real MCP handshake + HTTP, plus audit-trail fidelity. Runs in the default root test command (CI).
 - `RBAC_LIFECYCLE_E2E=1 bun run test:root -- src/tests/rbac-lifecycle-e2e.test.ts` — audit lifecycle (burst flush, SIGTERM drain, kill-switch, retention purge, boot-race, stdio). Env-gated, ~20s, multiple server boots; run on demand / pre-release. Skipped without the flag.
 
+`src/tests/claude-routes-e2e.test.ts` runs the **real** Claude Code CLI on each claude default route (gateway, Foundry, Bedrock, Vertex) through the credential gate and `ClaudeAdapter.createSession`, against fake endpoints from `src/tests/fixtures/fake-claude-routes.ts`. It uses the CLI binary that `@anthropic-ai/claude-agent-sdk` installs for the platform, so CI runs it; it skips when that optional package is missing. `CLAUDE_ROUTES_E2E_BINARY=<path>` tests another binary, and `CLAUDE_ROUTES_E2E_LOG=1` prints every request the fake servers received, auth redacted:
+
+```bash
+CLAUDE_ROUTES_E2E_LOG=1 bun run test:root -- src/tests/claude-routes-e2e.test.ts
+```
+
 ## Black-box E2E (bun run e2e)
 
 `bun run e2e` starts the real API on a free port with a fresh SQLite database.
