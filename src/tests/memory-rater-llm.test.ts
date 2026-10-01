@@ -177,6 +177,54 @@ describe("buildRatingsFromLlm", () => {
     const events = buildRatingsFromLlm([], retrievals);
     expect(events).toEqual([]);
   });
+
+  test("stamps the judge model on every event when provided", () => {
+    const events = buildRatingsFromLlm(
+      [
+        { id: "mem-A", score: 0.9, reasoning: "x" },
+        { id: "mem-B", score: 0.1, reasoning: "y" },
+      ],
+      retrievals,
+      "openrouter/deepseek/deepseek-v4.1-flash",
+    );
+    expect(events.map((e) => e.model)).toEqual([
+      "openrouter/deepseek/deepseek-v4.1-flash",
+      "openrouter/deepseek/deepseek-v4.1-flash",
+    ]);
+  });
+
+  test("omits model entirely when unknown", () => {
+    for (const model of [undefined, ""]) {
+      const events = buildRatingsFromLlm(
+        [{ id: "mem-A", score: 0.9, reasoning: "x" }],
+        retrievals,
+        model,
+      );
+      expect("model" in events[0]!).toBe(false);
+    }
+  });
+});
+
+describe("postRatings model forwarding", () => {
+  test("sends model in the POST body only when the event carries one", async () => {
+    let sent: { events: Array<Record<string, unknown>> } | null = null;
+    const fetchImpl = (async (_url: string, init?: RequestInit) => {
+      sent = JSON.parse(String(init?.body));
+      return new Response(JSON.stringify({ applied: 2, rejected: [] }), { status: 200 });
+    }) as unknown as typeof fetch;
+    await postRatings({
+      apiUrl: "http://localhost:3013",
+      apiKey: "k",
+      agentId: "agent-1",
+      events: [
+        { memoryId: "m1", signal: 1, weight: 0.8, source: "llm", model: "p/m" },
+        { memoryId: "m2", signal: 1, weight: 0.8, source: "llm" },
+      ],
+      fetchImpl,
+    });
+    expect(sent!.events[0]).toMatchObject({ memoryId: "m1", model: "p/m" });
+    expect("model" in sent!.events[1]!).toBe(false);
+  });
 });
 
 describe("buildSummaryWithRatingsPrompt", () => {

@@ -24,7 +24,7 @@ import { registerBunOAuthFlows } from "@earendil-works/pi-ai/bun-oauth";
 import { getEnvApiKey } from "@earendil-works/pi-ai/compat";
 import { builtinModels } from "@earendil-works/pi-ai/providers/all";
 import { getValidCodexOAuth, persistCodexOAuth } from "../../providers/codex-oauth/storage.js";
-import { type CredentialKind, DEFAULT_MODEL, resolveModelString } from "./models.js";
+import { type CredentialKind, DEFAULT_MODEL, resolveRaterModelString } from "./models.js";
 
 registerBunOAuthFlows();
 
@@ -69,6 +69,12 @@ const resolveOAuthApiKey: OAuthApiKeyResolver = async (providerId, credentials) 
   };
 };
 
+/**
+ * `modelDefault` is the session-summary / `llm` memory-rater model for the
+ * credential kind (`resolveRaterModelString`: `MEMORY_RATER_MODEL` env, else
+ * the pinned `MEMORY_RATER_DEFAULT_MODEL`). It is not the general
+ * `DEFAULT_MODEL`; callers that want that (workflow LLM nodes) read it directly.
+ */
 export type ResolvedCredential =
   | {
       kind: "openrouter" | "anthropic" | "openai" | "openai-codex";
@@ -128,7 +134,7 @@ export async function resolveCredential(
     return {
       kind: "openrouter",
       apiKey: openrouterKey,
-      modelDefault: resolveModelString("openrouter"),
+      modelDefault: resolveRaterModelString("openrouter"),
     };
   }
 
@@ -138,7 +144,7 @@ export async function resolveCredential(
     return {
       kind: "anthropic",
       apiKey: anthropicKey,
-      modelDefault: resolveModelString("anthropic"),
+      modelDefault: resolveRaterModelString("anthropic"),
     };
   }
 
@@ -148,7 +154,7 @@ export async function resolveCredential(
     return {
       kind: "openai",
       apiKey: openaiKey,
-      modelDefault: resolveModelString("openai"),
+      modelDefault: resolveRaterModelString("openai"),
     };
   }
 
@@ -190,7 +196,7 @@ export async function resolveCredential(
           return {
             kind: "openai-codex",
             apiKey: oauthResult.apiKey,
-            modelDefault: resolveModelString("openai-codex"),
+            modelDefault: resolveRaterModelString("openai-codex"),
           };
         }
       }
@@ -210,7 +216,7 @@ export async function resolveCredential(
   if (env.AGENT_SWARM_CLAUDE_OAUTH_TOKEN || env.CLAUDE_CODE_OAUTH_TOKEN) {
     return {
       kind: "claude-cli",
-      modelDefault: resolveModelString("claude-cli"),
+      modelDefault: resolveRaterModelString("claude-cli"),
     };
   }
 

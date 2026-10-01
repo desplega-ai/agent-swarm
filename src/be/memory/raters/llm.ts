@@ -156,10 +156,13 @@ export class LlmRater implements MemoryRater {
  * Mapping: `signal = 2 * score - 1` (0 → -1, 0.5 → 0, 1 → +1).
  * Weight = {@link LLM_RATER_WEIGHT} (0.8).
  * Source = `"llm"` (the HTTP rate endpoint enums `["llm", "explicit-self"]`).
+ * Model = the judge that produced the batch (from `summarizeSession`), stamped
+ * on every event so `memory_rating.model` records it; omitted when unknown.
  */
 export function buildRatingsFromLlm(
   ratings: LlmRating[],
   retrievals: { id: string }[],
+  model?: string,
 ): RatingEvent[] {
   const allowed = new Set(retrievals.map((r) => r.id));
   const events: RatingEvent[] = [];
@@ -184,6 +187,7 @@ export function buildRatingsFromLlm(
       ...(cleanedReferencesSource !== undefined
         ? { referencesSource: cleanedReferencesSource }
         : {}),
+      ...(model ? { model } : {}),
     });
   }
   return events;
@@ -371,6 +375,7 @@ export async function postRatings(opts: {
     source: e.source,
     ...(e.reasoning !== undefined ? { reasoning: e.reasoning } : {}),
     ...(e.referencesSource !== undefined ? { referencesSource: e.referencesSource } : {}),
+    ...(e.model !== undefined ? { model: e.model } : {}),
     ...(opts.taskId ? { taskId: opts.taskId } : {}),
   }));
   try {

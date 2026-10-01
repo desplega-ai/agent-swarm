@@ -11,7 +11,8 @@ import { type RatingEvent, REFERENCES_SOURCE_MAX_LENGTH, sanitizeReferencesSourc
  *   - alphaDelta = max(0,  signal) * weight   (rewards usefulness)
  *   - betaDelta  = max(0, -signal) * weight   (rewards anti-usefulness)
  *   - UPDATE agent_memory SET alpha = alpha + ?, beta = beta + ? WHERE id = ?
- *   - INSERT INTO memory_rating (...) VALUES (...)
+ *   - INSERT INTO memory_rating (...) VALUES (...) — `model` is recorded for
+ *     `llm` events only; every other source stores NULL.
  *   - When `referencesSource` is present (step-6 §3): UPSERT into
  *     agent_memory_edge with the SAME (alphaDelta, betaDelta) so the edge's
  *     own posterior tracks evidence the same way the memory's does.
@@ -96,8 +97,8 @@ export async function applyRating(
     "UPDATE agent_memory SET alpha = alpha + ?, beta = beta + ? WHERE id = ?";
   const CHECK_EXISTS_SQL = "SELECT id FROM agent_memory WHERE id = ?";
   const INSERT_RATING_SQL = `INSERT INTO memory_rating
-       (id, memoryId, taskId, source, signal, weight, reasoning, createdAt, contextKey)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+       (id, memoryId, taskId, source, signal, weight, reasoning, createdAt, contextKey, model)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
   // Step-6 §3 — UPSERT the edge with the SAME deltas as the memory row.
   // The `- 1.0` corrections in DO UPDATE undo the default-prior offset that
   // the INSERT arm baked into excluded.alpha/excluded.beta. Net effect: on
@@ -135,6 +136,8 @@ export async function applyRating(
           event.reasoning ?? null,
           new Date().toISOString(),
           ctx.contextKey ?? null,
+          // Provenance is only meaningful for a model-judged rating.
+          event.source === "llm" ? (event.model ?? null) : null,
         ]);
       } catch (err) {
         // Partial unique index on (taskId, memoryId) WHERE source='explicit-self'

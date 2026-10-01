@@ -493,6 +493,10 @@ describe("summarizeSessionForOpencode", () => {
     expect(postRatingsArgs!.events.length).toBe(2);
     // Task ID is passed for cross-referencing.
     expect(postRatingsArgs!.taskId).toBe("task-oc-1");
+    // Every rating records the judge model that was actually used.
+    for (const event of postRatingsArgs!.events as Array<{ model?: string }>) {
+      expect(event.model).toBe("openrouter/google/gemini-3-flash-preview");
+    }
   });
 });
 

@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { DEFAULT_MODEL } from "../utils/internal-ai/models";
 import { resolveWorkflowLlmConfig } from "../workflows/executors/workflow-llm";
 
 describe("resolveWorkflowLlmConfig", () => {
@@ -38,6 +39,19 @@ describe("resolveWorkflowLlmConfig", () => {
     } finally {
       if (previous === undefined) delete process.env.MEMORY_RATER_MODEL;
       else process.env.MEMORY_RATER_MODEL = previous;
+    }
+  });
+
+  test("still follows DEFAULT_MODEL, which the pinned rater default no longer tracks", async () => {
+    const before = DEFAULT_MODEL.openrouter;
+    try {
+      DEFAULT_MODEL.openrouter = "openrouter/some/bumped-model";
+      const config = await resolveWorkflowLlmConfig(undefined, {
+        OPENROUTER_API_KEY: "sk-or-test",
+      });
+      expect(config.model).toBe("some/bumped-model");
+    } finally {
+      DEFAULT_MODEL.openrouter = before;
     }
   });
 
