@@ -20,8 +20,36 @@ material**: auto keys `<scope>/<source>/<id>` and file-index keys
 (`/workspace/...`) stay untouched and carry no path weight. All chunks of a document
 share the key. The helpers live in `src/be/memory/key-paths.ts`.
 
-Roots: `/longterm/company-story`, `/longterm/entities/...`, `/longterm/facts/...`,
-`/longterm/decisions/...`, `/longterm/workstreams/...`, `/longterm/timeline/...`.
+Roots: `/longterm/company-story`, `/longterm/entities/{people,customers}/...`,
+`/longterm/facts/...`, `/longterm/decisions/...`, `/longterm/workstreams/...`,
+`/longterm/timeline/...`.
+
+The root list is **closed**. A key under `/longterm` whose second segment is not one of
+those roots is refused, and so is a key under `/longterm/entities` whose third segment
+is not `people` or `customers` (agent profiles and `get-repos` own agents and repos).
+The error lists the allowed roots. A typo such as `/longterm/fact/x` would otherwise
+store and silently get no path weight. Leaf slugs stay free-form within the key shape;
+canonical entity slugs belong to the dreaming lane, not the server. Keys outside
+`/longterm` are unchanged. `LONGTERM_ROOTS`, `LONGTERM_ENTITY_TYPES` and
+`longtermKeyError` live in `key-paths.ts`; the check runs in the `memory-store` and
+`memory-edit` tools, next to the shape regex.
+
+**The key is the tier, `source` stays provenance.** There is no `longterm` source. A
+memory whose key is under `/longterm` follows `manual`'s lifecycle whatever its
+`source` (`tierSource` in `key-paths.ts`):
+
+- `expiresAt` is NULL on every chunk: set on store with a `/longterm` key, cleared by a
+  `memory-edit` `newKey` move into `/longterm`. Search filters `expiresAt > now`, so
+  without this a `task_completion` memory moved to `/longterm/facts/x` would vanish 7
+  days after it was created.
+- No recency decay and quality multiplier 1.5, the same as `manual`. The global
+  `MEMORY_RECENCY_HALF_LIFE_DAYS` override applies to it exactly as it does to `manual`.
+- Protected from automated cleanup like `PROTECTED_SOURCES`: `isSourceProtected` takes
+  the key, and `listForCuration` skips every `/longterm` row.
+
+A move **out** of `/longterm` does not restore a TTL. The expiry the memory had is
+gone, so it never expires; decay, quality and protection revert to its `source`
+because they are read from the key on every call.
 
 - **Write:** `memory-store` `key` (shape `^/[a-z0-9-]+(/[a-z0-9._-]+)*$`, ≤200 chars).
   When `key` is absent and `name` starts with `/longterm/`, the name is the key, so an
@@ -179,7 +207,7 @@ bun run test:root -- src/tests/memory-reranker.test.ts
 bun run test:root -- src/tests/memory-store.test.ts
 bun run test:root -- src/tests/memory.test.ts
 bun run test:root -- src/tests/memory-e2e.test.ts
-bun run test:root -- src/tests/memory-key-paths.test.ts   # key / newKey / keyPrefix / lead-only guard
+bun run test:root -- src/tests/memory-key-paths.test.ts   # key / newKey / keyPrefix / lead-only guard / root allowlist / /longterm tier
 ```
 
 Plus the v1.5 rater suites:
@@ -199,7 +227,7 @@ bun run test:root -- src/tests/memory-rater-e2e.test.ts               # step-7: 
 - `src/be/memory/types.ts` — interfaces.
 - `src/be/memory/providers/` — OpenAI embeddings + SQLite/sqlite-vec store.
 - `src/be/memory/reranker.ts` — scoring + `usefulness(α, β)` and `pathWeight` factors.
-- `src/be/memory/key-paths.ts` — logical-path key pattern and the lead-only roots.
+- `src/be/memory/key-paths.ts` — logical-path key pattern, the closed `/longterm` root allowlist, the lead-only roots and `tierSource`.
 - `src/be/memory/constants.ts` — env-overridable tuning.
 - `src/be/memory/index.ts` — singletons.
 - `src/be/memory/index-content.ts` — `indexMemoryContent()`: chunk, re-index by

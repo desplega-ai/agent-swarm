@@ -9,6 +9,7 @@ import {
   PROTECTED_SOURCES,
   TTL_DEFAULTS,
 } from "../constants";
+import { isLongtermKey, LONGTERM_ROOT, tierSource } from "../key-paths";
 import { recencyDecay } from "../reranker";
 import type {
   MemoryCandidate,
@@ -173,8 +174,8 @@ export function applyEditMode(
   );
 }
 
-function computeExpiresAt(source: AgentMemorySource): string | null {
-  const ttlDays = TTL_DEFAULTS[source];
+function computeExpiresAt(source: AgentMemorySource, key: string | null): string | null {
+  const ttlDays = TTL_DEFAULTS[tierSource(source, key)];
   if (ttlDays == null) return null;
   return new Date(Date.now() + ttlDays * 86400000).toISOString();
 }
@@ -434,8 +435,8 @@ export class SqliteMemoryStore implements MemoryStore {
   async store(input: MemoryInput): Promise<AgentMemory> {
     const id = crypto.randomUUID();
     const now = new Date().toISOString();
-    const expiresAt = computeExpiresAt(input.source);
     const key = input.key ?? `${input.scope}/${input.source}/${id}`;
+    const expiresAt = computeExpiresAt(input.source, key);
     const contentHash = contentSha256(input.content);
     const version = 1;
 
@@ -735,7 +736,8 @@ export class SqliteMemoryStore implements MemoryStore {
           return {
             ...rowToCandidate(
               row,
-              rawSimilarity * recencyDecay(row.createdAt, now, row.source as AgentMemorySource),
+              rawSimilarity *
+                recencyDecay(row.createdAt, now, row.source as AgentMemorySource, row.key),
             ),
             rawSimilarity,
             retrievalSource: "fts" as const,
@@ -967,8 +969,8 @@ export class SqliteMemoryStore implements MemoryStore {
     return row?.count ?? 0;
   }
 
-  isSourceProtected(source: AgentMemorySource): boolean {
-    return PROTECTED_SOURCES.has(source);
+  isSourceProtected(source: AgentMemorySource, key?: string | null): boolean {
+    return PROTECTED_SOURCES.has(tierSource(source, key));
   }
 
   async edit(input: MemoryEditInput): Promise<MemoryEditResult> {
@@ -1061,6 +1063,9 @@ export class SqliteMemoryStore implements MemoryStore {
         if (taken) throw new Error(`key "${input.newKey}" is already used in this scope`);
       }
 
+      // Moving into /longterm makes the memory curated, so it stops expiring.
+      // Moving out restores nothing: the TTL it had is gone.
+      const clearExpiry = moving && isLongtermKey(input.newKey);
       const now = new Date().toISOString();
       const versionIntent = moving
         ? `${input.intent} [key ${row.key ?? "(none)"} -> ${input.newKey}]`
@@ -1093,7 +1098,8 @@ export class SqliteMemoryStore implements MemoryStore {
         );
         await tx.run(
           `UPDATE agent_memory
-           SET content = ?, contentHash = ?, version = ?, updatedAt = ?, key = ?
+           SET content = ?, contentHash = ?, version = ?, updatedAt = ?, key = ?,
+               expiresAt = CASE WHEN ? = 1 THEN NULL ELSE expiresAt END
            WHERE id = ?`,
           [
             targetContent,
@@ -1101,6 +1107,7 @@ export class SqliteMemoryStore implements MemoryStore {
             targetVersion,
             now,
             moving ? input.newKey! : target.key,
+            clearExpiry ? 1 : 0,
             target.id,
           ],
         );
@@ -1115,6 +1122,7 @@ export class SqliteMemoryStore implements MemoryStore {
             version: nextVersion,
             updatedAt: now,
             key: moving ? input.newKey! : row.key,
+            expiresAt: clearExpiry ? null : row.expiresAt,
           }),
           changed: true,
           previousVersion,
@@ -1137,16 +1145,18 @@ export class SqliteMemoryStore implements MemoryStore {
   ): Promise<{ id: string; source: string; name: string; createdAt: string }[]> {
     const db = getDbClient();
     const protectedList = [...PROTECTED_SOURCES].map((s) => `'${s}'`).join(",");
+    // A /longterm key is protected whatever its source (see tierSource).
+    const notLongterm = `coalesce(key, '') != '${LONGTERM_ROOT}' AND substr(coalesce(key, ''), 1, ${LONGTERM_ROOT.length + 1}) != '${LONGTERM_ROOT}/'`;
     if (agentId) {
       return db.query<{ id: string; source: string; name: string; createdAt: string }>(
         `SELECT id, source, name, createdAt FROM agent_memory
-         WHERE agentId = ? AND source NOT IN (${protectedList})`,
+         WHERE agentId = ? AND source NOT IN (${protectedList}) AND ${notLongterm}`,
         [agentId],
       );
     }
     return db.query<{ id: string; source: string; name: string; createdAt: string }>(
       `SELECT id, source, name, createdAt FROM agent_memory
-       WHERE source NOT IN (${protectedList})`,
+       WHERE source NOT IN (${protectedList}) AND ${notLongterm}`,
     );
   }
 

@@ -30,7 +30,8 @@ export interface MemoryStore {
   edit(input: MemoryEditInput): Promise<MemoryEditResult>;
   list(agentId: string, options: MemoryListOptions): Promise<AgentMemory[]>;
   count(agentId: string, options: MemoryListOptions): Promise<number>;
-  isSourceProtected(source: AgentMemorySource): boolean;
+  /** True when automated cleanup must skip the memory: a protected source, or any /longterm key. */
+  isSourceProtected(source: AgentMemorySource, key?: string | null): boolean;
   listForCuration(
     agentId?: string,
   ): Promise<{ id: string; source: string; name: string; createdAt: string }[]>;

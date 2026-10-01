@@ -1,3 +1,5 @@
+import type { AgentMemorySource } from "@/types";
+
 /**
  * Logical memory paths. A memory's `key` column may hold a path such as
  * `/longterm/entities/people/taras` instead of the auto key
@@ -5,6 +7,10 @@
  * with any other key (auto keys, file-index paths under `/workspace/...`) is
  * inbox material. Paths start with `/` and a root segment, so they never
  * collide with file-index keys or auto keys.
+ *
+ * The key is the tier, `source` stays provenance: a memory under `/longterm`
+ * gets the lifecycle of a `manual` memory whatever its `source` (see
+ * `tierSource`).
  */
 
 export const LONGTERM_ROOT = "/longterm";
@@ -17,6 +23,19 @@ export const MEMORY_KEY_PATTERN_MESSAGE =
 
 export const MEMORY_KEY_MAX_LENGTH = 200;
 
+/** The only second segments a `/longterm` key may have. A closed list: an unknown root would store but never rank. */
+export const LONGTERM_ROOTS = [
+  "company-story",
+  "entities",
+  "facts",
+  "decisions",
+  "workstreams",
+  "timeline",
+] as const;
+
+/** The only third segments under `/longterm/entities`. Agent profiles and `get-repos` own agents and repos. */
+export const LONGTERM_ENTITY_TYPES = ["people", "customers"] as const;
+
 /** Roots only the lead may write: lane-maintained, consolidated paths. */
 const CONSOLIDATED_KEY_ROOTS: readonly string[] = [
   `${LONGTERM_ROOT}/company-story`,
@@ -27,6 +46,40 @@ const CONSOLIDATED_KEY_ROOTS: readonly string[] = [
 /** True when `key` is `root` itself or sits beneath it (`/longterm/entities-x` is not under `/longterm/entities`). */
 export function isKeyUnderRoot(key: string, root: string): boolean {
   return key === root || key.startsWith(`${root}/`);
+}
+
+/** True when `key` is `/longterm` or sits beneath it: the curated tier. */
+export function isLongtermKey(key: string | null | undefined): boolean {
+  return !!key && isKeyUnderRoot(key, LONGTERM_ROOT);
+}
+
+/**
+ * Why a `/longterm` key is refused, or null when it is allowed (or sits outside
+ * `/longterm`, where keys stay free-form). Only the first segments are checked;
+ * leaf slugs are the caller's, within MEMORY_KEY_PATTERN.
+ */
+export function longtermKeyError(key: string): string | null {
+  if (!isLongtermKey(key)) return null;
+  const [root, entityType] = key.split("/").slice(2);
+  if (!LONGTERM_ROOTS.some((allowed) => allowed === root)) {
+    return `Key "${key}" is not allowed: the segment after ${LONGTERM_ROOT} must be one of ${LONGTERM_ROOTS.join(", ")}, as in ${LONGTERM_ROOT}/facts/<topic>/<slug>.`;
+  }
+  if (root === "entities" && !LONGTERM_ENTITY_TYPES.some((allowed) => allowed === entityType)) {
+    return `Key "${key}" is not allowed: the segment after ${LONGTERM_ROOT}/entities must be one of ${LONGTERM_ENTITY_TYPES.join(", ")}, as in ${LONGTERM_ROOT}/entities/people/<slug>.`;
+  }
+  return null;
+}
+
+/**
+ * The source whose lifecycle a memory follows: a memory under `/longterm` is
+ * `manual` (no TTL, no recency decay, quality 1.5, protected from cleanup),
+ * any other keeps its own. Provenance stays on `source`; the key is the tier.
+ */
+export function tierSource(
+  source: AgentMemorySource,
+  key: string | null | undefined,
+): AgentMemorySource {
+  return isLongtermKey(key) ? "manual" : source;
 }
 
 /** True when `key` is under a root that needs the `memory.write.consolidated` permission. */

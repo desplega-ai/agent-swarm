@@ -6,7 +6,15 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { closeDb, createAgent, getDbClient, initDb } from "../be/db";
 import { expandCandidatesWithGraph } from "../be/memory/graph-expansion";
 import { indexMemoryContent } from "../be/memory/index-content";
+import {
+  isConsolidatedKey,
+  LONGTERM_ENTITY_TYPES,
+  LONGTERM_ROOTS,
+  longtermKeyError,
+} from "../be/memory/key-paths";
 import { SqliteMemoryStore } from "../be/memory/providers/sqlite-store";
+import { computeScore } from "../be/memory/reranker";
+import type { MemoryCandidate } from "../be/memory/types";
 import { handleMemory } from "../http/memory";
 import { registerMemoryEditTool } from "../tools/memory-edit";
 import { registerMemorySearchTool } from "../tools/memory-search";
@@ -14,8 +22,9 @@ import { registerMemoryStoreTool } from "../tools/memory-store";
 import type { AgentMemoryScope } from "../types";
 
 // Logical memory paths: `key` on memory-store, `newKey` on memory-edit,
-// `keyPrefix` on memory-search and POST /api/memory/search, and the lead-only
-// guard on the consolidated roots.
+// `keyPrefix` on memory-search and POST /api/memory/search, the lead-only
+// guard on the consolidated roots, the closed root allowlist under /longterm,
+// and the /longterm tier (a /longterm key gets a manual memory's lifecycle).
 
 const lead = randomUUID();
 const worker = randomUUID();
@@ -144,15 +153,15 @@ describe("memory-store key", () => {
   });
 
   // The lead-only roots are /longterm/company-story, /longterm/entities and
-  // /longterm/timeline. Other /longterm roots, and a root-lookalike such as
-  // /longterm/entities-archive, stay open. A /longterm/ name is used as the
-  // key, so the guard must hold for the name route too.
+  // /longterm/timeline. The other allowed roots stay open. A /longterm/ name is
+  // used as the key, so the guard must hold for the name route too.
   const guardRows = [
     ["worker", worker, "/longterm/company-story", false],
     ["worker", worker, "/longterm/entities/people/taras", false],
     ["worker", worker, "/longterm/timeline/daily/2026-10-01", false],
     ["worker", worker, "/longterm/facts/memory/note", true],
-    ["worker", worker, "/longterm/entities-archive/note", true],
+    ["worker", worker, "/longterm/decisions/2026-10-01-note", true],
+    ["worker", worker, "/longterm/workstreams/active/note", true],
     ["lead", lead, "/longterm/company-story", true],
     ["lead", lead, "/longterm/entities/people/taras", true],
     ["lead", lead, "/longterm/timeline/daily/2026-10-01", true],
@@ -232,7 +241,7 @@ describe("memory-store key", () => {
     const schema = toolFor(registerMemoryStoreTool, "memory-store").inputSchema!;
     const accepts = (key: string) => schema.safeParse({ content: "x", key }).success;
 
-    expect(accepts("/longterm/entities/repos/desplega-ai/agent-swarm")).toBe(true);
+    expect(accepts("/longterm/entities/customers/acme")).toBe(true);
     expect(accepts("/Longterm/entities/people/taras")).toBe(false);
     expect(accepts("/longterm/entities//taras")).toBe(false);
     expect(accepts("/longterm/entities/taras/")).toBe(false);
@@ -392,6 +401,267 @@ describe("memory-edit newKey", () => {
     });
     expect(allowed.structuredContent.success).toBe(true);
     expect((await snapshot(mine!.id))?.key).toBe("/longterm/company-story");
+  });
+});
+
+describe("closed root allowlist under /longterm", () => {
+  const allowedRoots = LONGTERM_ROOTS.join(", ");
+  const rejected = [
+    "/longterm/fact/memory/typo",
+    "/longterm/procedures/hn-briefing",
+    "/longterm/entities-archive/note",
+    "/longterm/entities/agents/jackknife",
+    "/longterm/entities/repos/desplega-ai/agent-swarm",
+    "/longterm/entities/services/zernio",
+    "/longterm/entities",
+    "/longterm",
+  ];
+
+  test.each(
+    rejected,
+  )("memory-store refuses %s by key and by name, and stores nothing", async (path) => {
+    // A name is only a key when it starts with /longterm/.
+    const routes = [
+      { name: "allowlist probe", key: path },
+      ...(path.startsWith("/longterm/") ? [{ name: path }] : []),
+    ];
+    for (const args of routes) {
+      const result = await storeTool(lead, {
+        content: "allowlist probe body",
+        scope: "swarm",
+        ...args,
+      });
+
+      expect(result.isError).toBe(true);
+      expect(result.structuredContent.message).toContain("is not allowed");
+      expect(result.structuredContent.message).toContain(path);
+    }
+    expect(await getDbClient().query("SELECT id FROM agent_memory")).toHaveLength(0);
+  });
+
+  test("the error lists the allowed roots, and the entity types under /longterm/entities", async () => {
+    const root = await storeTool(lead, {
+      content: "body",
+      name: "probe",
+      scope: "swarm",
+      key: "/longterm/fact/memory/typo",
+    });
+    expect(root.structuredContent.message).toContain(allowedRoots);
+
+    const entity = await storeTool(lead, {
+      content: "body",
+      name: "probe",
+      scope: "swarm",
+      key: "/longterm/entities/agents/jackknife",
+    });
+    expect(entity.structuredContent.message).toContain(LONGTERM_ENTITY_TYPES.join(", "));
+  });
+
+  test.each([
+    ["worker", worker, "/longterm/facts/memory/ok"],
+    ["worker", worker, "/longterm/decisions/2026-10-01-ok"],
+    ["worker", worker, "/longterm/workstreams/active/ok"],
+    ["lead", lead, "/longterm/company-story"],
+    ["lead", lead, "/longterm/entities/people/taras"],
+    ["lead", lead, "/longterm/entities/customers/acme"],
+    ["lead", lead, "/longterm/timeline/daily/2026-10-01"],
+  ] as const)("%s can still store %s", async (_who, caller, path) => {
+    const result = await storeTool(caller, {
+      content: "allowed key body",
+      name: "allowed",
+      scope: "swarm",
+      key: path,
+    });
+
+    expect(result.structuredContent.success).toBe(true);
+    expect(await keysOf(result.structuredContent.memoryIds)).toEqual([path]);
+  });
+
+  test("keys outside /longterm are unchanged", async () => {
+    for (const key of ["/inbox/note-1", "/scratch/a/b", "/longtermish/x", "/workspace/x.md"]) {
+      const result = await storeTool(worker, {
+        content: `body for ${key}`,
+        name: `outside ${key}`,
+        scope: "swarm",
+        key,
+      });
+      expect(result.structuredContent.success).toBe(true);
+      expect(await keysOf(result.structuredContent.memoryIds)).toEqual([key]);
+    }
+  });
+
+  test.each(
+    rejected.filter((path) => path !== "/longterm"),
+  )("memory-edit newKey refuses %s and nothing moves", async (path) => {
+    const [memory] = await store.storeBatch([
+      {
+        agentId: lead,
+        scope: "swarm",
+        name: "to move",
+        content: "body of the memory to move",
+        source: "manual",
+        key: "/longterm/facts/memory/stays",
+      },
+    ]);
+
+    const result = await editTool(lead, { memoryId: memory!.id, newKey: path, intent: "bad move" });
+
+    expect(result.isError).toBe(true);
+    expect(result.structuredContent.message).toContain("is not allowed");
+    expect(await keysOf([memory!.id])).toEqual(["/longterm/facts/memory/stays"]);
+  });
+
+  test("a root-lookalike is not lead-only, so the allowlist is what refuses it", () => {
+    expect(isConsolidatedKey("/longterm/entities-archive/note")).toBe(false);
+    expect(longtermKeyError("/longterm/entities-archive/note")).not.toBeNull();
+    expect(longtermKeyError("/inbox/anything")).toBeNull();
+  });
+});
+
+describe("/longterm is the curated tier", () => {
+  const longKey = "/longterm/facts/memory/curated";
+  const expiryOf = (ids: string[]) =>
+    getDbClient().query<{ id: string; expiresAt: string | null }>(
+      `SELECT id, expiresAt FROM agent_memory WHERE id IN (${ids.map(() => "?").join(",")}) ORDER BY chunkIndex`,
+      ids,
+    );
+
+  async function seedTaskCompletion(chunks: number, key?: string) {
+    return store.storeBatch(
+      Array.from({ length: chunks }, (_, chunkIndex) => ({
+        agentId: worker,
+        scope: "swarm" as AgentMemoryScope,
+        name: "task completion note",
+        content: `chunk ${chunkIndex} of a task completion note`,
+        source: "task_completion" as const,
+        key,
+        chunkIndex,
+        totalChunks: chunks,
+      })),
+    );
+  }
+
+  test("a task_completion memory moved into /longterm has expiresAt NULL on every chunk and survives the purge", async () => {
+    const chunks = await seedTaskCompletion(3, "/inbox/task-note");
+    const ids = chunks.map((chunk) => chunk.id);
+    expect((await expiryOf(ids)).every((row) => row.expiresAt !== null)).toBe(true);
+    // Past its 7-day TTL: search would already hide it and the purge would take it.
+    await getDbClient().run(
+      `UPDATE agent_memory SET expiresAt = datetime('now', '-1 day') WHERE id IN (${ids.map(() => "?").join(",")})`,
+      ids,
+    );
+
+    const result = await editTool(worker, {
+      memoryId: ids[0],
+      newKey: longKey,
+      intent: "promote a task note",
+    });
+
+    expect(result.structuredContent.success).toBe(true);
+    expect(result.structuredContent.memory.expiresAt).toBeNull();
+    expect(await expiryOf(ids)).toEqual(ids.map((id) => ({ id, expiresAt: null })));
+    await store.purgeExpired();
+    expect(await keysOf(ids)).toEqual(ids.map(() => longKey));
+  });
+
+  test("control: the same memory left outside /longterm is purged once expired", async () => {
+    const [memory] = await seedTaskCompletion(1, "/inbox/task-note");
+    await getDbClient().run(
+      "UPDATE agent_memory SET expiresAt = datetime('now', '-1 day') WHERE id = ?",
+      [memory!.id],
+    );
+
+    await store.purgeExpired();
+
+    expect(
+      await getDbClient().query("SELECT id FROM agent_memory WHERE id = ?", [memory!.id]),
+    ).toEqual([]);
+  });
+
+  test("moving out of /longterm does not bring a TTL back", async () => {
+    const [memory] = await seedTaskCompletion(1, "/inbox/task-note");
+    await editTool(worker, { memoryId: memory!.id, newKey: longKey, intent: "promote" });
+
+    const result = await editTool(worker, {
+      memoryId: memory!.id,
+      newKey: "/inbox/demoted",
+      intent: "demote",
+    });
+
+    expect(result.structuredContent.success).toBe(true);
+    expect(await keysOf([memory!.id])).toEqual(["/inbox/demoted"]);
+    expect(await expiryOf([memory!.id])).toEqual([{ id: memory!.id, expiresAt: null }]);
+  });
+
+  test("a move between two non-/longterm keys leaves the TTL alone", async () => {
+    const [memory] = await seedTaskCompletion(1, "/inbox/a");
+    const [before] = await expiryOf([memory!.id]);
+
+    await editTool(worker, { memoryId: memory!.id, newKey: "/inbox/b", intent: "rename" });
+
+    expect(await expiryOf([memory!.id])).toEqual([before!]);
+    expect(before!.expiresAt).not.toBeNull();
+  });
+
+  test("a /longterm key on store means no expiry, whatever the source", async () => {
+    const curated = await seedTaskCompletion(2, longKey);
+    const plain = await seedTaskCompletion(1);
+
+    expect((await expiryOf(curated.map((c) => c.id))).map((row) => row.expiresAt)).toEqual([
+      null,
+      null,
+    ]);
+    expect((await expiryOf([plain[0]!.id]))[0]!.expiresAt).not.toBeNull();
+  });
+
+  test("isSourceProtected follows the key, and falls back to the source", () => {
+    expect(store.isSourceProtected("task_completion", longKey)).toBe(true);
+    expect(store.isSourceProtected("task_completion", "/inbox/x")).toBe(false);
+    expect(store.isSourceProtected("task_completion")).toBe(false);
+    expect(store.isSourceProtected("manual")).toBe(true);
+  });
+
+  test("a task_completion memory under /longterm scores like a manual one, 100 days on", () => {
+    const base = {
+      id: "m",
+      agentId: worker,
+      scope: "swarm",
+      name: "n",
+      content: "c",
+      source: "task_completion",
+      createdAt: new Date(Date.now() - 100 * 86_400_000).toISOString(),
+      accessedAt: new Date().toISOString(),
+      accessCount: 0,
+      alpha: 1,
+      beta: 1,
+      similarity: 1,
+      tags: [],
+    } as unknown as MemoryCandidate;
+    const now = new Date();
+
+    const curated = computeScore({ ...base, key: "/longterm/entities/people/taras" }, now);
+    const manual = computeScore(
+      { ...base, source: "manual", key: "/longterm/entities/people/taras" },
+      now,
+    );
+    const inbox = computeScore({ ...base, key: "/inbox/x" }, now);
+
+    expect(curated).toBeCloseTo(manual, 10);
+    expect(curated).toBeGreaterThan(inbox * 100);
+  });
+
+  test("listForCuration skips /longterm memories of any source, and keeps rows with no key", async () => {
+    const [curated] = await seedTaskCompletion(1, longKey);
+    const [inbox] = await seedTaskCompletion(1, "/inbox/task-note");
+    const [keyless] = await seedTaskCompletion(1);
+    await getDbClient().run("UPDATE agent_memory SET key = NULL WHERE id = ?", [keyless!.id]);
+    const [lookalike] = await seedTaskCompletion(1, "/longtermish/x");
+
+    const ids = (await store.listForCuration()).map((row) => row.id);
+
+    expect(ids).not.toContain(curated!.id);
+    expect(ids.sort()).toEqual([inbox!.id, keyless!.id, lookalike!.id].sort());
+    expect((await store.listForCuration(worker)).map((row) => row.id)).not.toContain(curated!.id);
   });
 });
 

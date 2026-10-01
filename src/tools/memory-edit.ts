@@ -5,6 +5,7 @@ import { getEmbeddingProvider, getMemoryStore } from "@/be/memory";
 import {
   consolidatedKeyMessage,
   isConsolidatedKey,
+  longtermKeyError,
   MEMORY_KEY_MAX_LENGTH,
   MEMORY_KEY_PATTERN,
   MEMORY_KEY_PATTERN_MESSAGE,
@@ -45,7 +46,7 @@ export const registerMemoryEditTool = (server: McpServer) => {
     {
       title: "Edit a memory",
       description:
-        "Edit a single memory in place while preserving its ID, usefulness posterior, and audit history. Two modes: 'replace' overwrites the entire content (requires `content`); 'exact' performs a surgical find-and-replace of `oldString` with `newString` within the existing content (fails if `oldString` is missing or ambiguous). Use 'replace' for full rewrites, 'exact' for targeted edits. Pass `newKey` alone to move the memory to another logical path (every chunk, same ID, posterior, access counts and author). Agents can edit their own memories; lead agents can edit any scope.",
+        "Edit a single memory in place while preserving its ID, usefulness posterior, and audit history. Two modes: 'replace' overwrites the entire content (requires `content`); 'exact' performs a surgical find-and-replace of `oldString` with `newString` within the existing content (fails if `oldString` is missing or ambiguous). Use 'replace' for full rewrites, 'exact' for targeted edits. Pass `newKey` alone to move the memory to another logical path (every chunk, same ID, posterior, access counts and author). A move into /longterm also clears the expiry. Agents can edit their own memories; lead agents can edit any scope.",
       annotations: { destructiveHint: true },
 
       inputSchema: z.object({
@@ -84,7 +85,7 @@ export const registerMemoryEditTool = (server: McpServer) => {
           .regex(MEMORY_KEY_PATTERN, MEMORY_KEY_PATTERN_MESSAGE)
           .optional()
           .describe(
-            "Move the memory to this logical path, for example '/longterm/facts/swarm-runtime/slug'. Alone it is a pure move: omit content/oldString/newString. Fails when the key is already used in this scope by the same owner. Paths under /longterm/company-story, /longterm/entities and /longterm/timeline are lead-only.",
+            "Move the memory to this logical path, for example '/longterm/facts/swarm-runtime/slug'. Alone it is a pure move: omit content/oldString/newString. Fails when the key is already used in this scope by the same owner. Moving into /longterm marks the memory as curated on every chunk: it stops expiring and is protected from cleanup, and moving it out later does not bring the expiry back. A key under /longterm must start with /longterm/company-story, /longterm/entities/people, /longterm/entities/customers, /longterm/facts, /longterm/decisions, /longterm/workstreams or /longterm/timeline. Paths under /longterm/company-story, /longterm/entities and /longterm/timeline are lead-only.",
           ),
       }),
       outputSchema: swarmToolOutputSchema({
@@ -119,6 +120,11 @@ export const registerMemoryEditTool = (server: McpServer) => {
         return toolErr("memoryId or key+scope required.", {
           data: { yourAgentId: requestInfo.agentId },
         });
+      }
+
+      const pathError = newKey ? longtermKeyError(newKey) : null;
+      if (pathError) {
+        return toolErr(pathError, { data: { yourAgentId: requestInfo.agentId } });
       }
 
       if (newKey && isConsolidatedKey(newKey)) {

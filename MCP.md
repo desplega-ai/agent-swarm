@@ -1162,7 +1162,7 @@ Store a learning as a searchable memory: a fix, a pattern, a gotcha, a fact abou
 | `tags` | `unknown` | No | - | Free-form tags as an array or a comma-separated string, for example a repo name or a topic. |
 | `taskId` | `uuid` | No | - | The task this learning came from, when there is one. |
 | `intent` | `string` | No | - | Why this is worth remembering. Kept in the audit trail. |
-| `key` | `string` | No | - | Optional logical path for this memory, for example '/longterm/facts/swarm-runtime/sqlite-busy-retry'. Lowercase segments joined by '/', starting with '/'. Search it with memory-search keyPrefix and move it with memory-edit newKey. Fails when you already have a memory with this key in this scope. Paths under /longterm/company-story, /longterm/entities and /longterm/timeline are lead-only. Defaults to an auto key, which makes the memory inbox material. |
+| `key` | `string` | No | - | Optional logical path for this memory, for example '/longterm/facts/swarm-runtime/sqlite-busy-retry'. Lowercase segments joined by '/', starting with '/'. Search it with memory-search keyPrefix and move it with memory-edit newKey. Fails when you already have a memory with this key in this scope. A key under /longterm marks the memory as curated: it never expires and is protected from cleanup. It must start with /longterm/company-story, /longterm/entities/people, /longterm/entities/customers, /longterm/facts, /longterm/decisions, /longterm/workstreams or /longterm/timeline. Paths under /longterm/company-story, /longterm/entities and /longterm/timeline are lead-only. Defaults to an auto key, which makes the memory inbox material. |
 
 ### memory-get
 
@@ -1180,7 +1180,7 @@ Retrieve the full content of a specific memory by its ID. Use memory-search to f
 
 **Edit a memory**
 
-Edit a single memory in place while preserving its ID, usefulness posterior, and audit history. Two modes: 'replace' overwrites the entire content (requires `content`); 'exact' performs a surgical find-and-replace of `oldString` with `newString` within the existing content (fails if `oldString` is missing or ambiguous). Use 'replace' for full rewrites, 'exact' for targeted edits. Pass `newKey` alone to move the memory to another logical path (every chunk, same ID, posterior, access counts and author). Agents can edit their own memories; lead agents can edit any scope.
+Edit a single memory in place while preserving its ID, usefulness posterior, and audit history. Two modes: 'replace' overwrites the entire content (requires `content`); 'exact' performs a surgical find-and-replace of `oldString` with `newString` within the existing content (fails if `oldString` is missing or ambiguous). Use 'replace' for full rewrites, 'exact' for targeted edits. Pass `newKey` alone to move the memory to another logical path (every chunk, same ID, posterior, access counts and author). A move into /longterm also clears the expiry. Agents can edit their own memories; lead agents can edit any scope.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
@@ -1193,7 +1193,7 @@ Edit a single memory in place while preserving its ID, usefulness posterior, and
 | `newString` | `string` | No | - | Replacement for oldString. Required for 'exact' mode. Can be empty to delete. |
 | `intent` | `string` | Yes | - | Why you are editing this memory. |
 | `expectedVersion` | `number` | No | - | - |
-| `newKey` | `string` | No | - | Move the memory to this logical path, for example '/longterm/facts/swarm-runtime/slug'. Alone it is a pure move: omit content/oldString/newString. Fails when the key is already used in this scope by the same owner. Paths under /longterm/company-story, /longterm/entities and /longterm/timeline are lead-only. |
+| `newKey` | `string` | No | - | Move the memory to this logical path, for example '/longterm/facts/swarm-runtime/slug'. Alone it is a pure move: omit content/oldString/newString. Fails when the key is already used in this scope by the same owner. Moving into /longterm marks the memory as curated on every chunk: it stops expiring and is protected from cleanup, and moving it out later does not bring the expiry back. A key under /longterm must start with /longterm/company-story, /longterm/entities/people, /longterm/entities/customers, /longterm/facts, /longterm/decisions, /longterm/workstreams or /longterm/timeline. Paths under /longterm/company-story, /longterm/entities and /longterm/timeline are lead-only. |
 
 ### memory-delete
 

@@ -5,6 +5,7 @@ import { indexMemoryContent } from "@/be/memory/index-content";
 import {
   consolidatedKeyMessage,
   isConsolidatedKey,
+  longtermKeyError,
   MEMORY_KEY_MAX_LENGTH,
   MEMORY_KEY_PATTERN,
   MEMORY_KEY_PATTERN_MESSAGE,
@@ -62,7 +63,7 @@ export const registerMemoryStoreTool = (server: McpServer) => {
           .regex(MEMORY_KEY_PATTERN, MEMORY_KEY_PATTERN_MESSAGE)
           .optional()
           .describe(
-            "Optional logical path for this memory, for example '/longterm/facts/swarm-runtime/sqlite-busy-retry'. Lowercase segments joined by '/', starting with '/'. Search it with memory-search keyPrefix and move it with memory-edit newKey. Fails when you already have a memory with this key in this scope. Paths under /longterm/company-story, /longterm/entities and /longterm/timeline are lead-only. Defaults to an auto key, which makes the memory inbox material.",
+            "Optional logical path for this memory, for example '/longterm/facts/swarm-runtime/sqlite-busy-retry'. Lowercase segments joined by '/', starting with '/'. Search it with memory-search keyPrefix and move it with memory-edit newKey. Fails when you already have a memory with this key in this scope. A key under /longterm marks the memory as curated: it never expires and is protected from cleanup. It must start with /longterm/company-story, /longterm/entities/people, /longterm/entities/customers, /longterm/facts, /longterm/decisions, /longterm/workstreams or /longterm/timeline. Paths under /longterm/company-story, /longterm/entities and /longterm/timeline are lead-only. Defaults to an auto key, which makes the memory inbox material.",
           ),
       }),
       outputSchema: swarmToolOutputSchema({
@@ -105,6 +106,10 @@ export const registerMemoryStoreTool = (server: McpServer) => {
             `Name "${storeKey}" starts with /longterm/, so it is used as the key, but it is not a valid key. ${MEMORY_KEY_PATTERN_MESSAGE}`,
             { data: { yourAgentId: requestInfo.agentId } },
           );
+        }
+        const pathError = longtermKeyError(storeKey);
+        if (pathError) {
+          return toolErr(pathError, { data: { yourAgentId: requestInfo.agentId } });
         }
         if (isConsolidatedKey(storeKey)) {
           const agent = await getAgentById(requestInfo.agentId);
