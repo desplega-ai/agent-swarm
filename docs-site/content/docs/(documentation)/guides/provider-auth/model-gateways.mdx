@@ -105,7 +105,7 @@ The claude harness passes its environment straight to Claude Code, so any endpoi
 1. `CLAUDE_CODE_USE_FOUNDRY` (Microsoft Foundry)
 2. `CLAUDE_CODE_USE_BEDROCK` (Amazon Bedrock)
 3. `CLAUDE_CODE_USE_VERTEX` (Google Vertex AI)
-4. `ANTHROPIC_BASE_URL` pointing anywhere except `api.anthropic.com`, with `ANTHROPIC_AUTH_TOKEN` or `ANTHROPIC_API_KEY` (a gateway)
+4. `ANTHROPIC_BASE_URL` pointing anywhere except `api.anthropic.com` (a gateway; it needs `ANTHROPIC_AUTH_TOKEN` or `ANTHROPIC_API_KEY`)
 5. `CLAUDE_CODE_OAUTH_TOKEN` (Claude subscription)
 6. `ANTHROPIC_API_KEY` (Anthropic API)
 
@@ -193,7 +193,7 @@ Any proxy that speaks the Anthropic Messages API is a gateway: set `ANTHROPIC_BA
   the supported path.
 </Callout>
 
-If `ANTHROPIC_BASE_URL` is set with only `CLAUDE_CODE_OAUTH_TOKEN`, Claude Code sends the subscription token to that URL. Use this only for a pass-through proxy you control.
+A custom `ANTHROPIC_BASE_URL` requires a gateway key (`ANTHROPIC_AUTH_TOKEN` or `ANTHROPIC_API_KEY`). With only `CLAUDE_CODE_OAUTH_TOKEN` set, the worker stays in `waiting_for_credentials` and names the missing gateway key, because Claude Code would otherwise send the subscription token to that URL. To send subscription traffic through an egress proxy, leave `ANTHROPIC_BASE_URL` unset and use Claude Code's `HTTPS_PROXY` setting ([network configuration](https://code.claude.com/docs/en/network-config)).
 
 ## OpenAI-compatible gateways
 

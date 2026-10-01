@@ -16,9 +16,11 @@ import {
   withClaudeRouteEnv,
 } from "../providers/claude-adapter";
 import type { ProviderSessionConfig } from "../providers/types";
+import { resolveCredentialPools, validateClaudeCredentials } from "../utils/credentials";
 import { resolveCredential } from "../utils/internal-ai/credentials";
 
 const GATEWAY_URL = "http://litellm.internal:4000";
+const UNTRUSTED_URL = { ANTHROPIC_BASE_URL: "https://untrusted.example" };
 const LITELLM_BEARER = { ANTHROPIC_BASE_URL: GATEWAY_URL, ANTHROPIC_AUTH_TOKEN: "sk-litellm" };
 const LITELLM_API_KEY = { ANTHROPIC_BASE_URL: GATEWAY_URL, ANTHROPIC_API_KEY: "sk-litellm" };
 const FOUNDRY = {
@@ -137,6 +139,13 @@ describe("claude spawn env", () => {
       apiUrl: "http://fixture.invalid",
       apiKey: "example-fixture-swarm-key",
     }) as ProviderSessionConfig;
+  const spawnEnv = (env: Record<string, string>) =>
+    buildClaudeSessionEnvironment(config(env), "sonnet", "/tmp/fixture-task").env;
+  /** The spawned env carries the token under no key, and OAuth is explicitly blank. */
+  const expectNoSubscriptionToken = (env: Record<string, string>, token: string) => {
+    expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBe("");
+    expect(Object.values(env).filter((value) => value?.includes(token))).toEqual([]);
+  };
 
   test("a gateway route blanks the OAuth token so it cannot reach the gateway", () => {
     const { env } = buildClaudeSessionEnvironment(
@@ -158,6 +167,64 @@ describe("claude spawn env", () => {
   test("the subscription route keeps the OAuth token", () => {
     const { env } = buildClaudeSessionEnvironment(config(OAUTH), "sonnet", "/tmp/fixture-task");
     expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBe(OAUTH.CLAUDE_CODE_OAUTH_TOKEN);
+  });
+
+  test("arbitrary URL + OAuth + no gateway key parks and spawns without the token", async () => {
+    const env = { ...UNTRUSTED_URL, ...OAUTH };
+    expect(checkClaudeCredentials(env)).toMatchObject({
+      ready: false,
+      missing: ["ANTHROPIC_AUTH_TOKEN"],
+    });
+    expect(() => validateClaudeCredentials(env)).toThrow("ANTHROPIC_AUTH_TOKEN");
+    expect((await validateProviderCredentials("claude", env)).ok).toBe(false);
+    expect((await buildCredStatusReport("claude", env, {}, "boot")).liveTest).toBeNull();
+    expect(requests).toEqual([]);
+    expectNoSubscriptionToken(spawnEnv(env), OAUTH.CLAUDE_CODE_OAUTH_TOKEN);
+  });
+
+  test("an OAuth token picked from the pool never reaches a keyless gateway", async () => {
+    const env: Record<string, string> = {
+      ...UNTRUSTED_URL,
+      CLAUDE_CODE_OAUTH_TOKEN: "sk-ant-oat01-pool-a,sk-ant-oat01-pool-b",
+    };
+    await resolveCredentialPools(env, { provider: "claude" });
+    expect(env.CLAUDE_CODE_OAUTH_TOKEN).toMatch(/^sk-ant-oat01-pool-[ab]$/);
+    expect(checkClaudeCredentials(env).ready).toBe(false);
+    expectNoSubscriptionToken(spawnEnv(env), "sk-ant-oat01-pool");
+  });
+
+  test("an OAuth token inherited from process.env is blanked, not revived", () => {
+    const previous = process.env.CLAUDE_CODE_OAUTH_TOKEN;
+    process.env.CLAUDE_CODE_OAUTH_TOKEN = OAUTH.CLAUDE_CODE_OAUTH_TOKEN;
+    try {
+      const env = withClaudeRouteEnv({ ...UNTRUSTED_URL, SWARM_USE_CLAUDE_BRIDGE: "true" });
+      expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBe("");
+      expect(resolveClaudeBinaryArgv(env).useClaudeBridge).toBe(false);
+      expectNoSubscriptionToken(
+        spawnEnv({ ...UNTRUSTED_URL, SWARM_USE_CLAUDE_BRIDGE: "true" }),
+        OAUTH.CLAUDE_CODE_OAUTH_TOKEN,
+      );
+    } finally {
+      if (previous === undefined) delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
+      else process.env.CLAUDE_CODE_OAUTH_TOKEN = previous;
+    }
+  });
+
+  test("a gateway key cleared after being set does not fall back to OAuth", () => {
+    const env: Record<string, string> = { ...UNTRUSTED_URL, ...OAUTH, ANTHROPIC_AUTH_TOKEN: "k" };
+    expect(checkClaudeCredentials(env).ready).toBe(true);
+    expectNoSubscriptionToken(spawnEnv(env), OAUTH.CLAUDE_CODE_OAUTH_TOKEN);
+
+    for (const cleared of [
+      { ...env, ANTHROPIC_AUTH_TOKEN: "" },
+      Object.fromEntries(Object.entries(env).filter(([key]) => key !== "ANTHROPIC_AUTH_TOKEN")),
+    ]) {
+      expect(checkClaudeCredentials(cleared)).toMatchObject({
+        ready: false,
+        missing: ["ANTHROPIC_AUTH_TOKEN"],
+      });
+      expectNoSubscriptionToken(spawnEnv(cleared), OAUTH.CLAUDE_CODE_OAUTH_TOKEN);
+    }
   });
 
   test("claude-bridge stays off on a gateway route even when process.env has OAuth", () => {

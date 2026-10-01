@@ -69,15 +69,19 @@ export function checkClaudeCredentials(env: Record<string, string | undefined>):
  * whenever no gateway key outranks it, and claude-bridge authenticates from it.
  *
  * Dropped keys are blanked, not deleted, so the `?? process.env` fallbacks in
- * the binary/transport resolvers cannot bring them back. Claude Code treats a
- * blank token as unset (verified on 2.1.286).
+ * the binary/transport resolvers cannot bring them back. On routes that leave
+ * api.anthropic.com they are blanked even when `env` lacks them. Claude Code
+ * treats a blank token as unset (verified on 2.1.286).
  */
 export function withClaudeRouteEnv(
   env: Record<string, string | undefined>,
 ): Record<string, string | undefined> {
   const route = deriveDefaultRoute("claude", env);
   if (!route) return env;
-  const unset = routeUnsetEnv("claude", route).filter((key) => env[key]);
+  const firstParty = route.provider === "anthropic";
+  const unset = routeUnsetEnv("claude", route).filter((key) =>
+    firstParty ? env[key] : env[key] !== "",
+  );
   if (unset.length === 0) return env;
   const next = { ...env };
   for (const key of unset) next[key] = "";

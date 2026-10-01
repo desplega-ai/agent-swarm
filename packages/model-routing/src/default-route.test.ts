@@ -72,10 +72,28 @@ describe("deriveDefaultRoute(claude)", () => {
     });
   });
 
-  test("gateway URL + OAuth only stays a subscription route pointed at the URL", () => {
+  test("gateway URL + OAuth only is a gateway route missing its key, never the subscription", () => {
+    const route = deriveDefaultRoute("claude", {
+      ...OAUTH,
+      ANTHROPIC_BASE_URL: "https://untrusted.example",
+    });
+    expect(route).toMatchObject({
+      provider: "anthropic-gateway",
+      baseUrl: "https://untrusted.example",
+      auth: { kind: "bearer", secretKey: "ANTHROPIC_AUTH_TOKEN" },
+    });
+    expect(route && routeUnsetEnv("claude", route)).toEqual(["CLAUDE_CODE_OAUTH_TOKEN"]);
+  });
+
+  test("gateway URL + OAuth + blank gateway keys is still a gateway route", () => {
     expect(
-      deriveDefaultRoute("claude", { ...OAUTH, ANTHROPIC_BASE_URL: "http://proxy:8080" }),
-    ).toMatchObject({ provider: "claude-subscription", baseUrl: "http://proxy:8080" });
+      deriveDefaultRoute("claude", {
+        ...OAUTH,
+        ANTHROPIC_BASE_URL: "http://proxy:8080",
+        ANTHROPIC_AUTH_TOKEN: "",
+        ANTHROPIC_API_KEY: "  ",
+      })?.provider,
+    ).toBe("anthropic-gateway");
   });
 
   test("a first-party ANTHROPIC_BASE_URL is not a gateway", () => {

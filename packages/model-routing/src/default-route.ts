@@ -73,19 +73,11 @@ function deriveClaudeDefaultRoute(env: Env): ModelRoute | null {
   if (baseUrl && !isFirstPartyAnthropicUrl(baseUrl)) {
     const authToken = envValue(env, "ANTHROPIC_AUTH_TOKEN");
     const apiKey = envValue(env, "ANTHROPIC_API_KEY");
-    if (!authToken && !apiKey && oauthToken) {
-      // Gateway URL + subscription token only: Claude Code sends the OAuth
-      // token to ANTHROPIC_BASE_URL (verified on 2.1.286). Kept working for
-      // pass-through proxies; the route records where the token goes.
-      return defaultRoute("claude", {
-        provider: "claude-subscription",
-        protocol: "anthropic-messages",
-        baseUrl,
-        auth: { kind: "subscription", plan: "claude" },
-      });
-    }
-    // With no key at all this still names the gateway, so the gate reports
-    // the gateway's missing key instead of a first-party one.
+    // With no gateway key this still names the gateway, so the gate reports
+    // the gateway's missing key. Never a subscription route, even when
+    // CLAUDE_CODE_OAUTH_TOKEN is set: Claude Code would send that token as
+    // Bearer to ANTHROPIC_BASE_URL (verified on 2.1.286), and Anthropic's
+    // terms do not allow routing Pro/Max credentials through a third party.
     return defaultRoute("claude", {
       provider: "anthropic-gateway",
       protocol: "anthropic-messages",
@@ -123,7 +115,9 @@ function deriveClaudeDefaultRoute(env: Env): ModelRoute | null {
  * exactly as the harness CLI reads it. Claude precedence:
  * `CLAUDE_CODE_USE_FOUNDRY` > `CLAUDE_CODE_USE_BEDROCK` > `CLAUDE_CODE_USE_VERTEX`
  * > `ANTHROPIC_BASE_URL` (non-Anthropic) + `ANTHROPIC_AUTH_TOKEN` | `ANTHROPIC_API_KEY`
- * > `CLAUDE_CODE_OAUTH_TOKEN` > `ANTHROPIC_API_KEY`.
+ * > `CLAUDE_CODE_OAUTH_TOKEN` > `ANTHROPIC_API_KEY`. A non-Anthropic
+ * `ANTHROPIC_BASE_URL` always yields a gateway route; without a gateway key
+ * that route is not ready, whatever `CLAUDE_CODE_OAUTH_TOKEN` holds.
  *
  * Returns null when no route can be derived, and for harnesses whose default
  * routes have not moved here yet (callers keep their current checks).
