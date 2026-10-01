@@ -177,6 +177,31 @@ describe("buildRatingsFromLlm", () => {
     const events = buildRatingsFromLlm([], retrievals);
     expect(events).toEqual([]);
   });
+
+  test("empty or whitespace-only referencesSource keeps the rating and writes no edge source", () => {
+    for (const blank of ["", " ", "   ", "\t \n", "\u00a0"]) {
+      const events = buildRatingsFromLlm(
+        [{ id: "mem-A", score: 0.9, reasoning: "useful", referencesSource: blank }],
+        retrievals,
+      );
+      expect(events).toHaveLength(1);
+      expect(events[0]!.memoryId).toBe("mem-A");
+      expect(events[0]!.signal).toBeCloseTo(0.8, 6);
+      expect("referencesSource" in events[0]!).toBe(false);
+    }
+  });
+
+  test("non-blank referencesSource passes through exactly as before", () => {
+    const events = buildRatingsFromLlm(
+      [
+        { id: "mem-A", score: 0.9, reasoning: "x", referencesSource: "github:foo/bar#1" },
+        { id: "mem-B", score: 0.9, reasoning: "x", referencesSource: " padded " },
+        { id: "mem-C", score: 0.9, reasoning: "x", referencesSource: "a\u0001b" },
+      ],
+      retrievals,
+    );
+    expect(events.map((e) => e.referencesSource)).toEqual(["github:foo/bar#1", " padded ", "ab"]);
+  });
 });
 
 describe("buildSummaryWithRatingsPrompt", () => {

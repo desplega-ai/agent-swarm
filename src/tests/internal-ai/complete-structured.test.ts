@@ -1,11 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import { Type } from "typebox";
 import { z } from "zod";
+import { SummaryWithRatingsSchema } from "../../be/memory/raters/llm.js";
 import {
   completeStructured,
   defaultSpawnClaudeCli,
 } from "../../utils/internal-ai/complete-structured.js";
 import type { ResolvedCredential } from "../../utils/internal-ai/credentials.js";
+import { summaryToolSchema } from "../../utils/internal-ai/summarize-session.js";
 
 const ResultZodSchema = z.object({
   summary: z.string(),
@@ -67,6 +69,39 @@ describe("completeStructured", () => {
     });
     expect(invocations).toBe(1);
     expect(result).toEqual({ summary: "ok", count: 7 });
+  });
+
+  test("session summary with a blank referencesSource is accepted on the first call", async () => {
+    let invocations = 0;
+    const args = {
+      summary: "learned things",
+      ratings: [
+        { id: "m1", score: 0.9, reasoning: "useful", referencesSource: "linear:DES-1" },
+        { id: "m2", score: 0.1, reasoning: "not used", referencesSource: "" },
+        { id: "m3", score: 0.5, reasoning: "neutral", referencesSource: "   " },
+      ],
+    };
+    const result = await completeStructured({
+      zodSchema: SummaryWithRatingsSchema,
+      toolSchema: summaryToolSchema,
+      toolName: "record_session_summary",
+      toolDescription: "Record the session summary.",
+      systemPrompt: "sys",
+      userPrompt: "user",
+      _credentialOverride: {
+        kind: "openrouter",
+        apiKey: "test",
+        modelDefault: "openrouter/deepseek/deepseek-v4.1-flash",
+      },
+      _complete: async () => {
+        invocations++;
+        return makeMsg([
+          { type: "toolCall", id: "call_1", name: "record_session_summary", arguments: args },
+        ]);
+      },
+    });
+    expect(invocations).toBe(1);
+    expect(result?.ratings).toHaveLength(3);
   });
 
   for (const { label, text, expected } of [
