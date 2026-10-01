@@ -36,6 +36,7 @@ import {
 import type { SteerDeliveryResult } from "../providers/types.ts";
 import { initTelemetry, telemetry } from "../telemetry.ts";
 import {
+  isTerminalTaskStatus,
   type ModelTierOverrides,
   type ProviderName,
   parseWorkerModelTierOverrides,
@@ -2451,6 +2452,16 @@ export interface RunningTask {
    * adapter's `ProviderResult.output` is empty (see `trackAssistantText`).
    */
   assistantText?: { value?: string };
+  /** Last time `reconcileActiveTasks` read this task's server-side status. */
+  lastReconcileAt?: number;
+  /** When the runner asked the session to abort (cancel or reconcile). */
+  abortRequestedAt?: number;
+  /**
+   * Terminal status the server already holds for this task, found by
+   * `reconcileActiveTasks`. Completion then only frees the slot and leaves
+   * the server's output and failureReason alone.
+   */
+  serverTerminalStatus?: string;
 }
 
 /** Runner state for tracking concurrent tasks */
@@ -4640,16 +4651,135 @@ async function spawnProviderProcess(
     runningTask.harnessVariantMeta = pendingHarnessVariantMeta;
   }
 
-  // Non-blocking completion tracking
+  // Non-blocking completion tracking. `reconcileActiveTasks` may have settled
+  // the task already when the session never did; keep that result.
   promise
     .then((r) => {
-      runningTask.result = r;
+      runningTask.result ??= r;
     })
     .catch(() => {
-      runningTask.result = { exitCode: 1, isError: true };
+      runningTask.result ??= { exitCode: 1, isError: true };
     });
 
   return runningTask;
+}
+
+/** Default cadence for checking active tasks against their server-side status. */
+export const DEFAULT_TASK_RECONCILE_INTERVAL_MS = 30_000;
+/** How long an aborted session gets to settle before the runner settles it. */
+export const ABORT_SETTLE_GRACE_MS = 10_000;
+
+/** `RUNNER_TASK_RECONCILE_INTERVAL_MS`, or the default when unset or invalid. */
+export function resolveTaskReconcileIntervalMs(
+  env: Record<string, string | undefined> = process.env,
+): number {
+  const raw = Number(env.RUNNER_TASK_RECONCILE_INTERVAL_MS);
+  return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_TASK_RECONCILE_INTERVAL_MS;
+}
+
+export interface ReconcileActiveTasksOptions {
+  /** Tasks already aborted because the server cancelled them. */
+  cancelledSignaled: Set<string>;
+  /** True when the server reports the task cancelled. Checked every call. */
+  isCancelled: (taskId: string) => Promise<boolean>;
+  /** The task's server-side status, or null when it could not be read. */
+  fetchStatus: (taskId: string) => Promise<string | null>;
+  intervalMs: number;
+  abortGraceMs?: number;
+  now?: () => number;
+}
+
+function requestSessionAbort(task: RunningTask, reason: string, at: number): void {
+  task.abortRequestedAt = at;
+  Promise.resolve()
+    .then(() => task.session.abort(reason))
+    .catch(() => {});
+}
+
+/**
+ * Keep `state.activeTasks` in line with the server, so a session whose promise
+ * never settles cannot hold an execution slot forever:
+ * - a task the server cancelled gets its session aborted (every call);
+ * - every `intervalMs`, a task the server already holds as terminal (for
+ *   example failed by the heartbeat sweep) gets its session aborted too;
+ * - a session that has not settled `abortGraceMs` after an abort is settled
+ *   here, and `checkCompletedProcesses` frees the slot on its next pass.
+ * Exported for tests.
+ */
+export async function reconcileActiveTasks(
+  state: RunnerState,
+  role: string,
+  opts: ReconcileActiveTasksOptions,
+): Promise<void> {
+  const now = opts.now ?? Date.now;
+  const graceMs = opts.abortGraceMs ?? ABORT_SETTLE_GRACE_MS;
+
+  for (const [taskId, task] of state.activeTasks) {
+    if (task.result !== null) continue;
+
+    if (!opts.cancelledSignaled.has(taskId)) {
+      try {
+        if (await opts.isCancelled(taskId)) {
+          console.log(
+            `[${role}] Task ${taskId.slice(0, 8)} was cancelled — sending SIGTERM to subprocess`,
+          );
+          requestSessionAbort(task, "cancelled", now());
+          opts.cancelledSignaled.add(taskId);
+        }
+      } catch {
+        // Non-blocking — cancellation check is best-effort
+      }
+    }
+
+    if (task.abortRequestedAt === undefined) {
+      const lastCheck = task.lastReconcileAt ?? task.startTime.getTime();
+      if (now() - lastCheck >= opts.intervalMs) {
+        task.lastReconcileAt = now();
+        const status = await opts.fetchStatus(taskId).catch(() => null);
+        if (status && isTerminalTaskStatus(status)) {
+          console.warn(
+            `[${role}] Task ${taskId.slice(0, 8)} is ${status} server-side but its session is still running — aborting it`,
+          );
+          task.serverTerminalStatus = status;
+          requestSessionAbort(task, `server task ${status}`, now());
+        }
+      }
+    }
+
+    if (
+      task.abortRequestedAt !== undefined &&
+      task.result === null &&
+      now() - task.abortRequestedAt >= graceMs
+    ) {
+      console.warn(
+        `[${role}] Task ${taskId.slice(0, 8)} session did not settle ${graceMs}ms after abort — releasing its slot`,
+      );
+      task.result = {
+        exitCode: 1,
+        isError: true,
+        sessionId: task.session.sessionId,
+        failureReason: "runner exited without result: provider session did not settle after abort",
+      };
+    }
+  }
+}
+
+/** Fetch whether the server holds a task as cancelled. Throws on network failure. */
+async function fetchTaskCancelled(
+  apiUrl: string,
+  apiKey: string,
+  agentId: string,
+  taskId: string,
+): Promise<boolean> {
+  const resp = await fetch(`${apiUrl}/cancelled-tasks?taskId=${encodeURIComponent(taskId)}`, {
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "X-Agent-ID": agentId,
+    },
+  });
+  if (!resp.ok) return false;
+  const data = (await resp.json()) as { cancelled: Array<{ id: string }> };
+  return data.cancelled?.some((t) => t.id === taskId) ?? false;
 }
 
 /** Check for completed processes and remove them from active tasks. Exported for tests. */
@@ -4673,6 +4803,7 @@ export async function checkCompletedProcesses(
     model?: string;
     durationMs: number;
     assistantText?: RunningTask["assistantText"];
+    serverTerminalStatus?: string;
   }> = [];
 
   for (const [taskId, task] of state.activeTasks) {
@@ -4695,6 +4826,7 @@ export async function checkCompletedProcesses(
         model: task.model,
         durationMs: Date.now() - task.startTime.getTime(),
         assistantText: task.assistantText,
+        serverTerminalStatus: task.serverTerminalStatus,
       });
     }
   }
@@ -4712,6 +4844,7 @@ export async function checkCompletedProcesses(
     model,
     durationMs,
     assistantText,
+    serverTerminalStatus,
   } of completedTasks) {
     state.activeTasks.delete(taskId);
     vcsDetectedTasks.delete(taskId);
@@ -4725,6 +4858,17 @@ export async function checkCompletedProcesses(
           scrubSecrets(err instanceof Error ? err.message : String(err)),
         ),
       );
+    }
+
+    // The server finished this task without the session (heartbeat sweep,
+    // another writer). Its result stands: no finish call, and no credential
+    // or model outcome built from the abort this runner forced.
+    if (serverTerminalStatus) {
+      console.log(
+        `[${role}] Task ${taskId.slice(0, 8)} was already ${serverTerminalStatus} server-side — slot released, server result kept`,
+      );
+      state.tasksProcessed += 1;
+      continue;
     }
 
     // Detect VCS before finishing — last chance to link a PR
@@ -6159,6 +6303,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   // Throttle orphan recovery so it runs periodically while the worker is idle or under capacity.
   let lastOrphanRecoveryAt = 0;
   const ORPHAN_RECOVERY_INTERVAL_MS = 60_000;
+  const taskReconcileIntervalMs = resolveTaskReconcileIntervalMs();
 
   while (true) {
     // Ping server on each iteration to keep status updated
@@ -6238,38 +6383,18 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
       );
     }
 
-    // Check for cancelled tasks and signal their subprocesses. Deliberately
-    // NOT gated on steeringDispatchState — cancellation abort must keep
-    // working when steering dispatch is off (STEERING_ENABLED=false).
+    // Check for cancelled tasks and signal their subprocesses, and reconcile
+    // active tasks with server-side status so a session that never settles
+    // cannot hold its slot. Deliberately NOT gated on steeringDispatchState —
+    // cancellation abort must keep working when steering dispatch is off
+    // (STEERING_ENABLED=false).
     if (state.activeTasks.size > 0) {
-      for (const [taskId, task] of state.activeTasks) {
-        if (cancelledSignaled.has(taskId)) continue; // Already sent SIGTERM
-        try {
-          const cancelResp = await fetch(
-            `${apiUrl}/cancelled-tasks?taskId=${encodeURIComponent(taskId)}`,
-            {
-              headers: {
-                Authorization: `Bearer ${apiKey}`,
-                "X-Agent-ID": agentId,
-              },
-            },
-          );
-          if (cancelResp.ok) {
-            const cancelData = (await cancelResp.json()) as {
-              cancelled: Array<{ id: string }>;
-            };
-            if (cancelData.cancelled?.some((t) => t.id === taskId)) {
-              console.log(
-                `[${role}] Task ${taskId.slice(0, 8)} was cancelled — sending SIGTERM to subprocess`,
-              );
-              task.session.abort("cancelled").catch(() => {});
-              cancelledSignaled.add(taskId);
-            }
-          }
-        } catch {
-          // Non-blocking — cancellation check is best-effort
-        }
-      }
+      await reconcileActiveTasks(state, role, {
+        cancelledSignaled,
+        isCancelled: (taskId) => fetchTaskCancelled(apiUrl, apiKey, agentId, taskId),
+        fetchStatus: (taskId) => fetchTaskStatus(apiUrl, apiKey, taskId),
+        intervalMs: taskReconcileIntervalMs,
+      });
     }
 
     // Deliver pending steering to live provider sessions and report the actual outcome.
