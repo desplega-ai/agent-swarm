@@ -768,7 +768,7 @@ GITHUB_APP_PRIVATE_KEY=base64-encoded-key
 
 ### Bot Reactions
 
-If GitHub App credentials are provided, the bot can react to comments/issues to acknowledge receipt. Additionally, a 👀 reaction is automatically added to the originating GitHub entity (comment, issue, PR, or review) when an agent picks up a GitHub-sourced task.
+If GitHub App credentials are provided, the bot reacts with 👀 to the comment, issue, PR, or review that pinged it. Without an App, it uses `GITHUB_TOKEN` (a PAT with write access to issues and pull requests) and the reaction appears as that user. Additionally, a 👀 reaction is automatically added to the originating GitHub entity (comment, issue, PR, or review) when an agent picks up a GitHub-sourced task.
 
 ---
 
