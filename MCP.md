@@ -726,7 +726,9 @@ Activate a stored extension version, reloading it if enabled. Requires a lead, o
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `template` | `string` | Yes | - | Name of a predefined extension from extension-catalog. |
+| `template` | `string` | No | - | Name of a predefined extension from extension-catalog. Mutually exclusive with manifest and files. |
+| `manifest` | `unknown` | No | - | Inline bundle manifest. Requires files. Needs EXTENSION_ALLOW_INLINE_INSTALL and a lead, operator, or dashboard-user caller. |
+| `files` | `object` | No | - | Inline bundle files keyed by relative path. Requires manifest. |
 | `priority` | `number` | No | - | Handler priority. Lower values run first. |
 | `config` | `object` | No | - | Extension configuration. |
 

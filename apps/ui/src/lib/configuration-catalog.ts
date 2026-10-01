@@ -969,6 +969,15 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         defaultValue: "false",
       },
       {
+        key: "EXTENSION_ALLOW_INLINE_INSTALL",
+        label: "Allow inline extension install",
+        description:
+          "Let lead agents, the operator, and dashboard users install an extension from a manifest and files sent in the request instead of the predefined catalog. Workers stay catalog-only. An enabled extension runs as trusted code in the API process, so leave this off unless you accept that. New installs arrive disabled and still need an explicit enable.",
+        kind: "boolean",
+        defaultValue: "false",
+        docsUrl: `${DOCS}guides/extensions`,
+      },
+      {
         key: "CORS_ALLOWED_ORIGINS",
         label: "Credentialed CORS allowlist",
         description:

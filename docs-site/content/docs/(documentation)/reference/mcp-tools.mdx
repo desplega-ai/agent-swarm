@@ -1213,17 +1213,23 @@ installed state. The catalog (also `GET /api/extensions/catalog`) is the only in
 
 ### extension-install
 
-Install a predefined extension from the catalog by name. Inline bundles are rejected.
+Install an extension from the catalog by `template` name, or from an inline bundle
+(`manifest` plus `files`). The two forms are mutually exclusive. Inline bundles need
+`EXTENSION_ALLOW_INLINE_INSTALL=true` and a lead, operator, or dashboard-user caller;
+with the flag off the call fails with `inline_install_disabled`, and workers get 403.
 Install creates the extension, its `ext:<name>` agent, and every asset it declares
-(scripts, and disabled schedules). Any authenticated agent can install; the installing
-agent becomes its owner (`createdByAgentId`), and workers may install subsequent versions
-only for their own extensions, without activating them. A trusted lead can enable the new
-extension with `extension-enable`; operators and dashboard users can also activate it.
-Installation itself never enables an extension.
+(scripts, and disabled schedules, workflows and skills). Any authenticated agent can
+install from the catalog; the installing agent becomes its owner (`createdByAgentId`),
+and workers may install subsequent versions only for their own extensions, without
+activating them. A trusted lead can enable the new extension with `extension-enable`;
+operators and dashboard users can also activate it. Installation itself never enables
+an extension.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `template` | string | Yes | Name of a predefined extension from `extension-catalog` |
+| `template` | string | No | Name of a predefined extension from `extension-catalog`. Exclusive with `manifest`/`files` |
+| `manifest` | object | No | Inline bundle manifest. Requires `files` |
+| `files` | object | No | Inline bundle files keyed by relative path. Requires `manifest` |
 | `priority` | integer | No | Handler priority; lower values run first |
 | `config` | object | No | Extension configuration |
 

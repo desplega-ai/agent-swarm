@@ -1691,8 +1691,9 @@ export interface ExtensionBundle {
 }
 
 /**
- * `POST /api/extensions/install` body. Only catalog templates install; an
- * inline `manifest`/`files` bundle is rejected with `inline_install_disabled`.
+ * `POST /api/extensions/install` body as the dashboard sends it: a catalog template.
+ * The API also takes an inline `manifest` + `files` bundle when
+ * `EXTENSION_ALLOW_INLINE_INSTALL` is on; the dashboard does not send one.
  */
 export interface ExtensionInstallInput {
   /** Catalog name from `GET /api/extensions/catalog`. */

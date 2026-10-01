@@ -318,4 +318,5 @@ export const LEGACY_POLICY = {
   "script.api.delete": leadOnly,
   "extension.write": extensionWrite,
   "extension.activate": extensionActivation,
+  "extension.install.inline": leadOrOperatorOrUser,
 } as const satisfies Record<PermissionVerb, LegacyRule>;

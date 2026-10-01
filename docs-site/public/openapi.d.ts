@@ -6179,8 +6179,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Install a predefined extension from the catalog
-         * @description Installs the named template from `GET /api/extensions/catalog`. Inline bundles (`manifest`/`files`) are rejected with `inline_install_disabled`. Any authenticated agent can install a disabled draft owned by its agent ID. Workers can update only their own bundles; activation remains lead/operator-only.
+         * Install an extension from the catalog or an inline bundle
+         * @description Installs the named `template` from `GET /api/extensions/catalog`, or an inline `manifest` plus `files`. Inline bundles are rejected with `inline_install_disabled` unless `EXTENSION_ALLOW_INLINE_INSTALL` is on, and then only lead, operator, and dashboard-user callers may send them (workers get 403). Any authenticated agent can install a catalog draft owned by its agent ID. Workers can update only their own bundles. A new extension is always disabled; activation remains lead/operator-only.
          */
         post: operations["extensions_install"];
         delete?: never;
@@ -22983,9 +22983,16 @@ export interface components {
             author?: string;
         };
         ExtensionInstallBody: {
-            /** @description Name of a predefined extension in the catalog (`GET /api/extensions/catalog`). */
-            template: string;
+            /** @description Name of a predefined extension in the catalog (`GET /api/extensions/catalog`). Mutually exclusive with `manifest` and `files`. */
+            template?: string;
+            manifest?: components["schemas"]["ExtensionManifest"] & unknown;
+            /** @description Inline bundle files keyed by relative path. Requires `manifest`. */
+            files?: {
+                [key: string]: string;
+            };
+            /** @description Handler priority. Lower values run first. */
             priority?: number;
+            /** @description Extension configuration. */
             config?: {
                 [key: string]: unknown;
             };
@@ -24114,7 +24121,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Inline bundle rejected or bundle validation failed */
+            /** @description Inline install disabled, invalid body (template and manifest/files are mutually exclusive), or bundle validation failed */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -24123,7 +24130,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Permission denied */
+            /** @description Permission denied, including inline bundles from workers */
             403: {
                 headers: {
                     [name: string]: unknown;

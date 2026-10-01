@@ -83,7 +83,11 @@ const LEAD_ONLY_VERBS: PermissionVerb[] = [
 ];
 
 const OPERATOR_ONLY_VERBS: PermissionVerb[] = [];
-const LEAD_OR_OPERATOR_OR_USER_VERBS: PermissionVerb[] = ["extension.write", "extension.activate"];
+const LEAD_OR_OPERATOR_OR_USER_VERBS: PermissionVerb[] = [
+  "extension.write",
+  "extension.activate",
+  "extension.install.inline",
+];
 
 const LEAD_OR_OPERATOR_VERBS: PermissionVerb[] = ["models.catalog.write"];
 

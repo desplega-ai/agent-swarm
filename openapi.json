@@ -1844,19 +1844,35 @@
             "type": "string",
             "minLength": 1,
             "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
-            "description": "Name of a predefined extension in the catalog (`GET /api/extensions/catalog`)."
+            "description": "Name of a predefined extension in the catalog (`GET /api/extensions/catalog`). Mutually exclusive with `manifest` and `files`."
+          },
+          "manifest": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ExtensionManifest"
+              },
+              {
+                "description": "Inline bundle manifest. Requires `files`. Accepted only when `EXTENSION_ALLOW_INLINE_INSTALL` is on and the caller is a lead, operator, or dashboard user."
+              }
+            ]
+          },
+          "files": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Inline bundle files keyed by relative path. Requires `manifest`."
           },
           "priority": {
-            "type": "integer"
+            "type": "integer",
+            "description": "Handler priority. Lower values run first."
           },
           "config": {
             "type": "object",
-            "additionalProperties": {}
+            "additionalProperties": {},
+            "description": "Extension configuration."
           }
         },
-        "required": [
-          "template"
-        ],
         "additionalProperties": false
       },
       "ExtensionCatalogItem": {
@@ -17549,8 +17565,8 @@
     "/api/extensions/install": {
       "post": {
         "operationId": "extensions_install",
-        "summary": "Install a predefined extension from the catalog",
-        "description": "Installs the named template from `GET /api/extensions/catalog`. Inline bundles (`manifest`/`files`) are rejected with `inline_install_disabled`. Any authenticated agent can install a disabled draft owned by its agent ID. Workers can update only their own bundles; activation remains lead/operator-only.",
+        "summary": "Install an extension from the catalog or an inline bundle",
+        "description": "Installs the named `template` from `GET /api/extensions/catalog`, or an inline `manifest` plus `files`. Inline bundles are rejected with `inline_install_disabled` unless `EXTENSION_ALLOW_INLINE_INSTALL` is on, and then only lead, operator, and dashboard-user callers may send them (workers get 403). Any authenticated agent can install a catalog draft owned by its agent ID. Workers can update only their own bundles. A new extension is always disabled; activation remains lead/operator-only.",
         "tags": [
           "Extensions"
         ],
@@ -17733,7 +17749,7 @@
             }
           },
           "400": {
-            "description": "Inline bundle rejected or bundle validation failed",
+            "description": "Inline install disabled, invalid body (template and manifest/files are mutually exclusive), or bundle validation failed",
             "content": {
               "application/json": {
                 "schema": {
@@ -17743,7 +17759,7 @@
             }
           },
           "403": {
-            "description": "Permission denied",
+            "description": "Permission denied, including inline bundles from workers",
             "content": {
               "application/json": {
                 "schema": {

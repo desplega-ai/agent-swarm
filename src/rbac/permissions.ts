@@ -289,6 +289,11 @@ export const PERMISSIONS = {
     description: "Enable, disable, or activate a version of a swarm extension.",
     namespace: "extension",
   },
+  "extension.install.inline": {
+    description:
+      "Install a swarm extension from an inline manifest and files instead of the catalog.",
+    namespace: "extension",
+  },
 } as const satisfies Record<string, { description: string; namespace: string }>;
 
 export type PermissionVerb = keyof typeof PERMISSIONS;

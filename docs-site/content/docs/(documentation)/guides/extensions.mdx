@@ -5,7 +5,7 @@ description: Install trusted TypeScript hooks that change swarm orchestration at
 
 Extensions let operators change swarm behavior without changing the API server source.
 Each extension is a bundle with a YAML or JSON manifest and the files it references.
-You install extensions by name from a predefined catalog.
+You install extensions by name from a predefined catalog. An operator can also allow [inline installs](#inline-install), where the request carries the manifest and files.
 
 A bundle has one `hooks` file and can also ship scripts, schedules, workflows, and skills.
 
@@ -286,7 +286,7 @@ curl -X POST "$API/api/extensions/<id>/activate-version" \
   -d '{"version":1}'
 ```
 
-A body with `manifest` or `files` returns 400 `inline_install_disabled`.
+A body with `manifest` or `files` returns 400 `inline_install_disabled` unless [inline install](#inline-install) is on.
 An unknown template returns 404 `extension_template_not_found`.
 The install response includes `assets` with the `created`, `updated`, `skipped`, `deleted`, and `detached` assets.
 `assets` is `null` when the installed version is staged, not active.
@@ -298,11 +298,45 @@ Agents can use the `extension-catalog`, `extension-install`, `extension-list`, `
 The script SDK exposes the same names with underscores, such as `ctx.swarm.extension_enable({ id })`.
 Enable, disable, and activate-version require a lead, operator, or dashboard user. Workers can create extensions and update or delete only their own disabled drafts. Delete refuses enabled extensions; an authorized caller must disable them first.
 The MCP install tool never activates a version.
-Its input is `{ template, priority?, config? }`.
+Its input is `{ template, priority?, config? }`, or `{ manifest, files, priority?, config? }` for an inline bundle.
 
 Extensions installed from inline bundles before the catalog keep loading, enabling, disabling, and uninstalling.
-They have no bundled assets and cannot receive new inline versions.
+They have no bundled assets. They can receive new inline versions while inline install is on.
 Installing a catalog template with the same name adds a version to the existing extension.
+
+## Inline install
+
+By default an extension installs only from the catalog, which needs a pull request and a deploy.
+Set `EXTENSION_ALLOW_INLINE_INSTALL=true` to also accept an inline bundle, so a lead can create an extension directly.
+The key is off by default.
+Set it under **Settings > Configuration > Security & access** or in the API environment.
+It is read on every request, so a change needs no restart.
+
+```bash
+curl -X POST "$API/api/extensions/install" \
+  -H "Authorization: Bearer $KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "manifest": {
+      "name": "require-ticket-ref",
+      "description": "Blocks tasks that do not name a ticket",
+      "version": "1.0.0",
+      "runtime": "api",
+      "assets": { "hooks": "hooks.ts" }
+    },
+    "files": { "hooks.ts": "import { block, type SwarmExtension } from \"swarm-extension\";\n..." }
+  }'
+```
+
+- `manifest` and `files` go together and exclude `template`. `files` holds every path the manifest references, with no extras.
+- Flag off: every inline body returns 400 `inline_install_disabled`.
+- Flag on: only lead agents, the operator, and dashboard users can send an inline bundle. A worker gets 403 and stays catalog-only. The check is the `extension.install.inline` permission.
+- Validation, asset creation, ownership, and version staging match a catalog install. The extension lands disabled. Enabling it uses the existing enable path and its `extension.activate` check.
+- Agents use the `extension-install` MCP tool with `manifest` and `files`.
+
+The flag is an ordinary configuration key, so a lead can turn it on with `set-config`.
+It is not reserved like `EXTENSION_ALLOW_LEAD_ACTIVATION`.
+To keep a human in the loop, also set `EXTENSION_ALLOW_LEAD_ACTIVATION=false`: a lead can then stage an inline bundle, but only an operator or dashboard user can enable it.
 
 ## Bundled assets
 
@@ -451,7 +485,7 @@ export default extension;
 ## Version 1 limits
 
 - Only API runtime hooks can run.
-- Extensions install only from the catalog. Inline bundles are rejected.
+- Extensions install from the catalog. Inline bundles are rejected unless `EXTENSION_ALLOW_INLINE_INSTALL` is on.
 - Assets are hooks, scripts, schedules, workflows, and skills. Every bundle needs a `hooks` file.
 - Extensions cannot ship connections, config defaults, KV seeds, pages, apps, prompt templates, task templates, or `requires.repos`.
 - Manifests have no `lifecycle.setup`, `lifecycle.teardown`, or `permissions`.

@@ -5,7 +5,7 @@ Operator guide: [docs-site guides/extensions.mdx](../docs-site/content/docs/(doc
 Extensions are trusted TypeScript hooks that run inside the API server.
 Each extension bundle contains a manifest and the files it references.
 A bundle has one API runtime hooks file (`assets.hooks`) and can also ship scripts, schedules, workflows, and skills.
-Extensions install only from the predefined catalog in `templates/extensions/`.
+Extensions install from the predefined catalog in `templates/extensions/`. With `EXTENSION_ALLOW_INLINE_INSTALL` on they can also install from an inline bundle.
 
 ## Lead activation and trust
 
@@ -67,7 +67,7 @@ They can stage code-only versions without replacing the active snapshot.
 
 `POST /api/extensions/install` takes only `{ template, priority?, config? }`.
 `template` names a directory in `templates/extensions/`.
-A body with `manifest` or `files` returns 400 `inline_install_disabled`.
+A body with `manifest` or `files` returns 400 `inline_install_disabled` unless inline install is on (see below).
 An unknown template returns 404 `extension_template_not_found`.
 `GET /api/extensions/catalog` and the `extension-catalog` MCP tool list the templates with asset counts, README, and installed state.
 The dashboard catalog page is `/settings/extensions/new`.
@@ -212,11 +212,22 @@ Writes run in dependency order: scripts, schedules, workflows, skills.
 Removal runs in reverse: skills, workflows, schedules, scripts.
 `DELETE /api/extensions/{id}` returns `{ deleted: true, assets: { deleted, detached } }`.
 
+### Inline install
+
+`EXTENSION_ALLOW_INLINE_INSTALL` (default `false`, Security group in the dashboard, read per request) lets `POST /api/extensions/install` take `{ manifest, files, priority?, config? }` instead of `{ template }`.
+The two forms are mutually exclusive; `manifest` and `files` must both be present.
+The `extension-install` MCP tool exposes the same fields.
+
+- The flag is checked first, while the body is parsed, so a disabled install answers 400 `inline_install_disabled` before any manifest validation.
+- With the flag on, the `extension.install.inline` verb (legacy rule `lead-or-operator-or-user`) gates the call. A worker gets 403. `extension.write` still applies on top, with the same owner rules as a catalog install.
+- After that the path is the catalog path: `validateBundle`, then `installExtensionWithAssets`. The manifest and files come from the request instead of `catalog.generated.json`. A new extension lands disabled; a lead reinstall never activates; an operator or dashboard-user reinstall of an enabled extension activates, as for a catalog install.
+- The key is a normal `swarm_config` key, so a lead can set it. Setting `EXTENSION_ALLOW_LEAD_ACTIVATION=false` keeps enable operator-only.
+
 ### Extensions installed inline
 
 Extensions installed from inline bundles before the catalog keep loading, enabling, disabling, and uninstalling.
 They have no asset rows.
-They cannot receive new inline versions.
+They can receive new inline versions while inline install is on.
 Installing a catalog template with the same name appends a version to the existing extension.
 
 ### Load and reload
@@ -367,7 +378,7 @@ bun run e2e --only extensions
 - Slack route events cover the Slack message handler only.
 - Heartbeat events cover remediation after stall classification only.
 - Worker runtime hooks do not run.
-- Extensions install only from the catalog. Inline bundles are rejected.
+- Extensions install from the catalog. Inline bundles are rejected unless `EXTENSION_ALLOW_INLINE_INSTALL` is on.
 - Asset kinds are scripts, schedules, workflows, and skills. `hooks` is still required.
 - No connections, config defaults, KV seeds, pages, apps, prompt templates, task templates, or `requires.repos`.
 - No `lifecycle.setup` or `lifecycle.teardown`, and no `permissions`.

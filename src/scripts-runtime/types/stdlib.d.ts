@@ -537,11 +537,16 @@ declare module "swarm-sdk" {
 
     // --- write: extensions ---
     extension_catalog(args?: Record<string, never>): Promise<unknown>;
-    extension_install(args: {
-      template: string;
-      priority?: number;
-      config?: Record<string, unknown>;
-    }): Promise<unknown>;
+    extension_install(
+      args:
+        | { template: string; priority?: number; config?: Record<string, unknown> }
+        | {
+            manifest: Record<string, unknown>;
+            files: Record<string, string>;
+            priority?: number;
+            config?: Record<string, unknown>;
+          },
+    ): Promise<unknown>;
     extension_list(args?: { enabledOnly?: boolean }): Promise<unknown>;
     extension_delete(args: { id: string }): Promise<unknown>;
     extension_enable(args: { id: string }): Promise<unknown>;
