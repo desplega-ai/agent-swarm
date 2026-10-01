@@ -26,6 +26,7 @@ import {
   markSteeringHandled,
   pauseTask,
   promoteDraftTask,
+  recordTaskProviderIfUnset,
   resumeTask,
   settleSupersededTaskDependents,
   supersedeTask,
@@ -560,6 +561,8 @@ const finishTask = route({
     output: z.string().optional(),
     failureReason: z.string().optional(),
     force: z.boolean().optional(),
+    /** Harness that ran the task. Recorded only when no session reported one (spawn failure). */
+    provider: ProviderNameSchema.optional(),
   }),
   auth: { apiKey: true, agentId: true },
   responses: {
@@ -1515,6 +1518,10 @@ export async function handleTasks(
         }
 
         const wasPaused = task.wasPaused;
+
+        if (parsed.body.provider && !task.provider) {
+          await recordTaskProviderIfUnset(parsed.params.id, parsed.body.provider);
+        }
 
         let updatedTask: typeof task;
         if (parsed.body.status === "completed") {

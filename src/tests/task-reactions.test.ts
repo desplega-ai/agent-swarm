@@ -69,12 +69,21 @@ describe("addEyesReactionOnTaskStart", () => {
     expect(mockAddIssueReaction).not.toHaveBeenCalled();
   });
 
-  test("skips when vcsInstallationId is missing", async () => {
-    await addEyesReactionOnTaskStart(makeTask({ vcsInstallationId: undefined }));
+  test("still reacts when vcsInstallationId is missing (GITHUB_TOKEN deployments)", async () => {
+    // Plain webhook + PAT deployments never record an installation id. The reaction
+    // helpers choose the credential, so the task source must not be skipped here.
+    await addEyesReactionOnTaskStart(
+      makeTask({ vcsInstallationId: undefined, vcsEventType: "issue_comment", vcsCommentId: 42 }),
+    );
+    expect(mockAddReaction).toHaveBeenCalledTimes(1);
+    expect(mockAddReaction).toHaveBeenCalledWith("desplega-ai/agent-swarm", 42, "eyes", undefined);
+  });
+
+  test("skips when vcsRepo is missing", async () => {
+    await addEyesReactionOnTaskStart(
+      makeTask({ vcsRepo: undefined, vcsEventType: "issue_comment", vcsCommentId: 42 }),
+    );
     expect(mockAddReaction).not.toHaveBeenCalled();
-    expect(mockAddPullReviewCommentReaction).not.toHaveBeenCalled();
-    expect(mockAddGraphQLReaction).not.toHaveBeenCalled();
-    expect(mockAddIssueReaction).not.toHaveBeenCalled();
   });
 
   // ── issue_comment ──
@@ -124,11 +133,25 @@ describe("addEyesReactionOnTaskStart", () => {
     expect(mockAddGraphQLReaction).toHaveBeenCalledWith("PRR_abc123", "EYES", 12345);
   });
 
-  test("pull_request_review without vcsNodeId is a no-op", async () => {
+  test("pull_request_review without vcsNodeId or vcsNumber is a no-op", async () => {
     await addEyesReactionOnTaskStart(
       makeTask({ vcsEventType: "pull_request_review", vcsNodeId: undefined }),
     );
     expect(mockAddGraphQLReaction).not.toHaveBeenCalled();
+    expect(mockAddIssueReaction).not.toHaveBeenCalled();
+  });
+
+  test("pull_request_review without vcsNodeId falls back to reacting on the PR", async () => {
+    await addEyesReactionOnTaskStart(
+      makeTask({ vcsEventType: "pull_request_review", vcsNodeId: undefined, vcsNumber: 310 }),
+    );
+    expect(mockAddGraphQLReaction).not.toHaveBeenCalled();
+    expect(mockAddIssueReaction).toHaveBeenCalledWith(
+      "desplega-ai/agent-swarm",
+      310,
+      "eyes",
+      12345,
+    );
   });
 
   // ── pull_request ──

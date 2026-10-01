@@ -528,6 +528,7 @@ value:recordKeyRateLimitWindows
 value:recordKeySeatMismatch
 value:recordKeyUsage
 value:recordSlackMessage
+value:recordTaskProviderIfUnset
 value:recordTaskPullRequestAttachments
 value:refreshDraftTaskLease
 value:rejectTask
@@ -624,6 +625,7 @@ value:getPendingTaskForAgent
 value:getRecentlyCancelledTasksForAgent
 value:overwriteTerminalTaskResultText
 value:pauseTask
+value:recordTaskProviderIfUnset
 value:resetOrphanedInProgressTasksForAgent
 value:resumeTask
 value:settleSupersededTaskDependents

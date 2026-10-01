@@ -303,6 +303,7 @@ export {
   getRecentlyCancelledTasksForAgent,
   overwriteTerminalTaskResultText,
   pauseTask,
+  recordTaskProviderIfUnset,
   resetOrphanedInProgressTasksForAgent,
   resumeTask,
   settleSupersededTaskDependents,

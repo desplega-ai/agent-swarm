@@ -45024,6 +45024,71 @@
                             "batchSize",
                             "slowestStatementMs"
                           ]
+                        },
+                        "contextVersions": {
+                          "type": "object",
+                          "properties": {
+                            "at": {
+                              "type": "string"
+                            },
+                            "rowsDeleted": {
+                              "type": "number"
+                            },
+                            "batches": {
+                              "type": "number"
+                            },
+                            "durationMs": {
+                              "type": "number"
+                            },
+                            "dryRun": {
+                              "type": "boolean"
+                            },
+                            "cumulativeRowsDeleted": {
+                              "type": "number"
+                            },
+                            "outcome": {
+                              "type": "string",
+                              "enum": [
+                                "converged",
+                                "budget_exhausted",
+                                "error"
+                              ]
+                            },
+                            "drained": {
+                              "type": "boolean"
+                            },
+                            "backlogRemaining": {
+                              "type": "number"
+                            },
+                            "batchSize": {
+                              "type": "number"
+                            },
+                            "slowestStatementMs": {
+                              "type": "number"
+                            },
+                            "lastError": {
+                              "type": "string"
+                            },
+                            "lastErrorAt": {
+                              "type": "string"
+                            },
+                            "lastSuccessAt": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "at",
+                            "rowsDeleted",
+                            "batches",
+                            "durationMs",
+                            "dryRun",
+                            "cumulativeRowsDeleted",
+                            "outcome",
+                            "drained",
+                            "backlogRemaining",
+                            "batchSize",
+                            "slowestStatementMs"
+                          ]
                         }
                       }
                     }
@@ -47516,6 +47581,19 @@
                   },
                   "force": {
                     "type": "boolean"
+                  },
+                  "provider": {
+                    "type": "string",
+                    "enum": [
+                      "claude",
+                      "codex",
+                      "pi",
+                      "devin",
+                      "claude-managed",
+                      "opencode",
+                      "acp",
+                      "dsh"
+                    ]
                   }
                 },
                 "required": [

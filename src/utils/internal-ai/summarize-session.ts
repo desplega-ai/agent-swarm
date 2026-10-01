@@ -67,7 +67,10 @@ export type SummarizeSessionResult = z.infer<typeof SummaryWithRatingsSchema> & 
  * Typebox tool schema mirroring `SummaryWithRatingsSchema`.
  *
  * Kept in lockstep with the zod schema via `src/tests/internal-ai/schema-parity.test.ts`
- * which fuzzes both validators with a fixture set.
+ * which fuzzes both validators with a fixture set. `referencesSource` has no
+ * `minLength` on purpose: pi-ai validates this schema before zod sees the
+ * call, so a `minLength: 1` here would reject a blank value the zod side
+ * accepts.
  */
 export const summaryToolSchema = Type.Object({
   summary: Type.String(),
@@ -76,7 +79,7 @@ export const summaryToolSchema = Type.Object({
       id: Type.String({ minLength: 1 }),
       score: Type.Number({ minimum: 0, maximum: 1 }),
       reasoning: Type.String({ minLength: 1, maxLength: 500 }),
-      referencesSource: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })),
+      referencesSource: Type.Optional(Type.String({ maxLength: 512 })),
     }),
   ),
 });

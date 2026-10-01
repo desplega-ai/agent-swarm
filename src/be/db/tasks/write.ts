@@ -318,6 +318,22 @@ export async function updateTaskClaudeSessionId(
 }
 
 /**
+ * Records the harness that ran (or tried to run) a task when no session ever
+ * reported it. `provider` is otherwise written only by the session-init path,
+ * so a task whose harness failed to spawn kept `provider` NULL and looked like
+ * a task that never started. Never overwrites a provider already recorded.
+ */
+export async function recordTaskProviderIfUnset(
+  taskId: string,
+  provider: ProviderName,
+): Promise<void> {
+  await getDbClient().run("UPDATE agent_tasks SET provider = ? WHERE id = ? AND provider IS NULL", [
+    provider,
+    taskId,
+  ]);
+}
+
+/**
  * Sets or clears a task's display title (session rename). Trims the input and
  * normalizes an empty string to NULL (clear). Deliberately does NOT touch
  * `lastUpdatedAt` — a rename is not activity, and the sessions sidebar sorts
