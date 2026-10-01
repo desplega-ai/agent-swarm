@@ -142,7 +142,11 @@ import {
 import { activeModelBlock, type ModelFamily } from "../utils/model-rate-limit-windows";
 import { getCurrentRequestUserId } from "../utils/request-auth-context";
 import { registerVolatileSecret, scrubSecrets } from "../utils/secret-scrubber";
-import { estimateClaudePlan, SUBSCRIPTION_KEY_TYPES } from "../utils/subscription-plans";
+import {
+  estimateClaudePlan,
+  planAllowsModelFamily,
+  SUBSCRIPTION_KEY_TYPES,
+} from "../utils/subscription-plans";
 import { auditAssetKeys } from "./asset-key-audit";
 import { decryptSecret, encryptSecret, getEncryptionKey } from "./crypto";
 import { normalizeDate, normalizeDateRequired } from "./date-utils";
@@ -220,6 +224,7 @@ export {
   updateAgentStatus,
   updateAgentStatusFromCapacity,
 } from "./db/agents";
+export { recordKeySeatMismatch } from "./db/api-keys";
 export { type ApprovalRequestSummary, listApprovalRequestSummaries } from "./db/approvals";
 export {
   computeContentHash,
@@ -11387,6 +11392,10 @@ export interface ApiKeyStatus {
   /** Subscription plan id (`SUBSCRIPTION_PLANS`), when known. */
   plan: string | null;
   planSource: PlanSource | null;
+  /** When the CLI last rejected a model with `credits_required` on this key. */
+  lastSeatMismatchAt: string | null;
+  /** Model family of that rejection (`fable`, `opus`, ...). */
+  lastSeatMismatchModel: string | null;
   /** Auth failures in a row since the last success or clear. */
   consecutiveAuthFailures: number;
   lastAuthFailureAt: string | null;
@@ -11419,6 +11428,8 @@ export interface AvailableKeyIndicesResult {
   modelBlockedIndices: number[];
   /** ISO of the earliest resetsAt among modelBlockedIndices, or null when none. */
   earliestModelResetAt: string | null;
+  /** Indices excluded because the key's subscription plan cannot run the model family. */
+  seatBlockedIndices: number[];
   authFailureFence: number; // highest `authFailureSeq` among these rows
 }
 
@@ -11429,7 +11440,10 @@ export interface AvailableKeyIndicesResult {
  * When `modelFamily` has a weekly window (fable/opus/sonnet), a key whose
  * `rateLimitWindows` carries an active rejected window for that family is
  * excluded from `availableIndices` and reported in `modelBlockedIndices`
- * instead — the key itself stays `available` for every other model.
+ * instead — the key itself stays `available` for every other model. A key
+ * whose `plan` cannot run the family (`planAllowsModelFamily`) is excluded
+ * and reported in `seatBlockedIndices`, also when it is key-wide or
+ * model-window blocked; a seat block has no reset time.
  */
 export async function getAvailableKeyIndices(
   keyType: string,
@@ -11456,9 +11470,10 @@ export async function getAvailableKeyIndices(
     keyIndex: number;
     status: string;
     rateLimitWindows: string | null;
+    plan: string | null;
     authFailureSeq: number;
   }>(
-    `SELECT keyIndex, status, rateLimitWindows, authFailureSeq FROM api_key_status
+    `SELECT keyIndex, status, rateLimitWindows, plan, authFailureSeq FROM api_key_status
        WHERE keyType = ? AND scope = ? AND scopeId = ?`,
     [keyType, scope, effectiveScopeId],
   );
@@ -11489,15 +11504,27 @@ export async function getAvailableKeyIndices(
   }
   const modelBlockedSet = new Set(modelBlockedIndices);
 
+  // A seat block is a plan fact: report it even when the key is also key-wide
+  // or model-window blocked, or the temporary block hides it from admission
+  // and the fallback pick can select a key that cannot run the model.
+  const seatBlockedIndices: number[] = [];
+  if (modelFamily) {
+    for (const row of rows) {
+      if (!planAllowsModelFamily(row.plan, modelFamily)) seatBlockedIndices.push(row.keyIndex);
+    }
+  }
+  const seatBlockedSet = new Set(seatBlockedIndices);
+
   const availableIndices: number[] = [];
   for (let i = 0; i < totalKeys; i++) {
-    if (blockedIndices.has(i) || modelBlockedSet.has(i)) continue;
+    if (blockedIndices.has(i) || modelBlockedSet.has(i) || seatBlockedSet.has(i)) continue;
     availableIndices.push(i);
   }
 
   return {
     availableIndices,
     modelBlockedIndices,
+    seatBlockedIndices,
     earliestModelResetAt:
       earliestModelResetsAtSec !== undefined
         ? new Date(earliestModelResetsAtSec * 1000).toISOString()

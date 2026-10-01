@@ -54,10 +54,7 @@ import {
   ModelWindowExhaustedError,
   resolveCredentialPools,
 } from "../utils/credentials.ts";
-import {
-  type RateLimitWindowTelemetry,
-  resolveCodexCreditsExhaustedCooldownMs,
-} from "../utils/error-tracker.ts";
+import { resolveCodexCreditsExhaustedCooldownMs } from "../utils/error-tracker.ts";
 import { probeHarnessCliVersion, reportHarnessModelOutcome } from "../utils/harness-cli-version.ts";
 import { resolveHarnessProvider } from "../utils/harness-provider.ts";
 import { prettyPrintLine, prettyPrintStderr } from "../utils/pretty-print.ts";
@@ -77,6 +74,7 @@ import {
   buildResumeContextPreamble,
   prependContextPreamble,
 } from "./context-preamble.ts";
+import { reportCredentialOutcomeThenFinish } from "./credential-outcome-report.ts";
 import { type CredentialRefreshState, refreshCredentialStatus } from "./credential-refresh.ts";
 import {
   awaitCredentials,
@@ -101,7 +99,6 @@ import {
   reportLatestModel,
   sendCredStatusReport,
 } from "./provider-credentials.ts";
-import { buildFinalRateLimitWindows, classifyRateLimitOutcome } from "./rate-limit-outcome.ts";
 import {
   type ResumeSessionCandidate,
   type ResumeSessionResolution,
@@ -111,6 +108,7 @@ import {
 import "./templates.ts";
 
 export { buildAttachmentsSection } from "./attachments-section.ts";
+export { reportKeyRateLimitWindows } from "./credential-outcome-report.ts";
 
 /** Throttle interval for progress updates (3 seconds). */
 const PROGRESS_THROTTLE_MS = 3000;
@@ -1907,37 +1905,6 @@ export async function resolveCodexOAuthCredentialInfo(
   }
 }
 
-/** Report a rate-limited key to the API (fire-and-forget) */
-async function reportKeyRateLimit(
-  apiUrl: string,
-  apiKey: string,
-  keyType: string,
-  keySuffix: string,
-  keyIndex: number,
-  rateLimitedUntil: string,
-): Promise<void> {
-  try {
-    await fetch(`${apiUrl}/api/keys/report-rate-limit`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        keyType,
-        keySuffix,
-        keyIndex,
-        rateLimitedUntil,
-      }),
-    });
-    console.log(
-      `[credentials] Reported key ...${keySuffix} as rate-limited until ${rateLimitedUntil}`,
-    );
-  } catch {
-    // Non-blocking
-  }
-}
-
 /** Upper bound on each awaited credential-outcome report, so a slow API never stalls completions. */
 const KEY_OUTCOME_REPORT_TIMEOUT_MS = 5000;
 
@@ -1975,55 +1942,6 @@ async function reportKeyAuthFailure(
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.warn(scrubSecrets(`[credentials] Failed to report auth failure: ${message}`));
-  }
-}
-
-/**
- * Reports rate-limit window telemetry for a key. Returns the underlying
- * fetch promise (does not swallow errors) so a caller that needs the post to
- * complete before the task finishes (a model-scoped block) can await it and
- * decide how to handle a failure; a caller that wants the legacy
- * fire-and-forget behavior appends `.catch(() => {})`.
- *
- * Throws on a non-2xx response so a failed persistence surfaces to the
- * caller instead of logging success while only the in-process guard took
- * effect — otherwise other workers redraw the same exhausted key at once.
- *
- * `logKeySuffix` defaults to true for the legacy full-telemetry call site;
- * the model-scoped call site passes false since it already logs the model
- * family and key index itself (see the `[credential] model window ...`
- * log above the call).
- */
-export async function reportKeyRateLimitWindows(
-  apiUrl: string,
-  apiKey: string,
-  keyType: string,
-  keySuffix: string,
-  keyIndex: number,
-  windows: RateLimitWindowTelemetry,
-  logKeySuffix = true,
-): Promise<void> {
-  if (Object.keys(windows).length === 0) return;
-  const response = await fetch(`${apiUrl}/api/keys/report-rate-limit-windows`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      keyType,
-      keySuffix,
-      keyIndex,
-      windows,
-    }),
-  });
-  if (!response.ok) {
-    throw new Error(
-      `Failed to report rate-limit windows for key #${keyIndex}: HTTP ${response.status}`,
-    );
-  }
-  if (logKeySuffix) {
-    console.log(`[credentials] Reported rate-limit windows for key ...${keySuffix}`);
   }
 }
 
@@ -3084,6 +3002,86 @@ export async function buildRequesterProfilePrompt(
   return result.skipped ? "" : result.text.trim();
 }
 
+/** A non-2xx answer from `POST /api/agents`; carries the status for retry triage. */
+export class AgentRegistrationHttpError extends Error {
+  readonly status: number;
+  readonly body: string;
+  constructor(status: number, body: string) {
+    super(`Failed to register agent: ${status} ${body}`);
+    this.name = "AgentRegistrationHttpError";
+    this.status = status;
+    this.body = body;
+  }
+}
+
+/**
+ * Whether a boot registration failure is worth retrying. A freshly deployed
+ * API can answer `500 {"error":"database is locked"}` for minutes while boot
+ * work holds the SQLite write lock, and is unreachable while it restarts;
+ * both clear on their own. A 4xx (bad key, bad payload) never will.
+ */
+export function isRetryableRegistrationError(err: unknown): boolean {
+  if (err instanceof AgentRegistrationHttpError) {
+    return (
+      err.status >= 500 ||
+      err.status === 408 ||
+      err.status === 429 ||
+      /database is locked/i.test(err.body)
+    );
+  }
+  // Anything else escaped fetch itself: connection refused, reset, DNS, timeout.
+  return true;
+}
+
+export const REGISTRATION_RETRY_BUDGET_MS = 5 * 60_000;
+const REGISTRATION_RETRY_BASE_DELAY_MS = 2_000;
+const REGISTRATION_RETRY_MAX_DELAY_MS = 30_000;
+
+/**
+ * Boot registration with bounded exponential backoff (2s doubling to 30s,
+ * with jitter) inside a total wall-clock budget. Throws the last error on a
+ * non-retryable failure or once the next wait would overrun the budget, so
+ * the caller still exits and a restart policy can take over.
+ */
+export async function registerAgentWithRetry(
+  register: () => Promise<{ serverCapabilities?: string[] }>,
+  opts: {
+    label: string;
+    budgetMs?: number;
+    baseDelayMs?: number;
+    maxDelayMs?: number;
+    sleep?: (ms: number) => Promise<void>;
+    now?: () => number;
+  },
+): Promise<{ serverCapabilities?: string[] }> {
+  const budgetMs = opts.budgetMs ?? REGISTRATION_RETRY_BUDGET_MS;
+  const baseDelayMs = opts.baseDelayMs ?? REGISTRATION_RETRY_BASE_DELAY_MS;
+  const maxDelayMs = opts.maxDelayMs ?? REGISTRATION_RETRY_MAX_DELAY_MS;
+  const sleep = opts.sleep ?? ((ms: number) => Bun.sleep(ms));
+  const now = opts.now ?? Date.now;
+  const startedAt = now();
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await register();
+    } catch (err) {
+      if (!isRetryableRegistrationError(err)) throw err;
+      const backoff = Math.min(maxDelayMs, baseDelayMs * 2 ** (attempt - 1));
+      const delay = Math.round(backoff * (0.8 + Math.random() * 0.4));
+      const elapsed = now() - startedAt;
+      if (elapsed + delay > budgetMs) {
+        console.error(
+          `[${opts.label}] Registration still failing after ${attempt} attempts in ${Math.round(elapsed / 1000)}s; giving up`,
+        );
+        throw err;
+      }
+      console.warn(
+        `[${opts.label}] Registration attempt ${attempt} failed (${err}); retrying in ${Math.round(delay / 1000)}s`,
+      );
+      await sleep(delay);
+    }
+  }
+}
+
 /** Register agent via HTTP API. Exported so tests can exercise the real boot ordering. */
 export async function registerAgent(opts: {
   apiUrl: string;
@@ -3141,7 +3139,7 @@ export async function registerAgent(opts: {
 
   if (!response.ok) {
     const error = await response.text();
-    throw new Error(`Failed to register agent: ${response.status} ${error}`);
+    throw new AgentRegistrationHttpError(response.status, error);
   }
 
   // The register response carries the SERVER's enabled capability flags (which
@@ -3735,8 +3733,7 @@ async function spawnProviderProcess(
     ));
   } catch (err) {
     if (err instanceof ModelWindowExhaustedError && realTaskId) {
-      const modelLabel = err.model.charAt(0).toUpperCase() + err.model.slice(1);
-      const reason = `No ${err.keyType} key has ${modelLabel} capacity until ${err.earliestResetAt ?? "unknown"}. Re-dispatch with another model or modelTier.`;
+      const reason = err.message;
       console.warn(`[${opts.role}] ${reason}`);
       await ensureTaskFinished(
         { apiUrl: opts.apiUrl, apiKey: opts.apiKey, agentId: opts.agentId },
@@ -4727,57 +4724,7 @@ export async function checkCompletedProcesses(
         failureReason,
       });
 
-      // If rate-limited and we know which key was used, report it.
-      // Codex adapter prefixes failure reasons with `[rate-limit]` /
-      // `[usage-limit]` (see codex-adapter.formatTerminalError); Claude
-      // surfaces "rate limit" / "hit your limit" via SessionErrorTracker.
-      //
-      // classifyRateLimitOutcome tests model-scoped windows (Fable/Opus/
-      // Sonnet weekly limits) before the legacy key-wide gate, so a
-      // model-scoped rejection blocks only that model family on this key —
-      // never the whole key — via report-rate-limit-windows instead of
-      // report-rate-limit. A key-wide rejection seen in the same session is
-      // still reported alongside it (windows are independent). The session's
-      // window telemetry and the classified model rejection go out as ONE
-      // payload, so an older `allowed` snapshot never overwrites the terminal
-      // rejection. The post is awaited so it completes before the task
-      // finishes.
       if (credentialInfo) {
-        const outcome = classifyRateLimitOutcome(
-          result,
-          failureReason,
-          Date.now(),
-          state.codexCreditsExhaustedCooldownMs,
-        );
-        const keyRateLimitedUntil =
-          outcome.kind === "key"
-            ? outcome.rateLimitedUntil
-            : outcome.kind === "model"
-              ? outcome.keyRateLimitedUntil
-              : undefined;
-        if (keyRateLimitedUntil) {
-          console.log(`[credentials] Rate limit reset: ${keyRateLimitedUntil}`);
-          reportKeyRateLimit(
-            apiConfig.apiUrl,
-            apiConfig.apiKey,
-            credentialInfo.keyType,
-            credentialInfo.keySuffix,
-            credentialInfo.keyIndex,
-            keyRateLimitedUntil,
-          ).catch(() => {});
-        }
-        if (outcome.kind === "model") {
-          const resetsAtIso = new Date(outcome.resetsAtSec * 1000).toISOString();
-          const blockKey = `${credentialInfo.keyType}:${credentialInfo.keyIndex}:${outcome.window}`;
-          state.modelWindowBlocks.set(blockKey, outcome.resetsAtSec * 1000);
-          console.log(
-            `[credential] ${outcome.model} weekly window exhausted (${outcome.window}) on key #${credentialInfo.keyIndex} until ${resetsAtIso}`,
-          );
-        }
-
-        // Land the success reset or the auth-failure count (and a bench at 2)
-        // before this task finishes and before the next completion, so the API
-        // sees them in order and the next draw already skips a dead login.
         await reportKeyCompletionOutcome({
           apiUrl: apiConfig.apiUrl,
           apiKey: apiConfig.apiKey,
@@ -4786,30 +4733,6 @@ export async function checkCompletedProcesses(
           exitCode: result.exitCode,
           failureReason,
         });
-
-        const finalWindows = buildFinalRateLimitWindows(
-          result.rateLimitWindows,
-          outcome,
-          new Date().toISOString(),
-        );
-        if (finalWindows) {
-          const report = reportKeyRateLimitWindows(
-            apiConfig.apiUrl,
-            apiConfig.apiKey,
-            credentialInfo.keyType,
-            credentialInfo.keySuffix,
-            credentialInfo.keyIndex,
-            finalWindows,
-            outcome.kind !== "model",
-          ).catch((err) => {
-            console.warn(
-              `[credential] Failed to report rate-limit windows: ${err instanceof Error ? err.message : String(err)}`,
-            );
-          });
-          // A model rejection gates admission on other workers: land it before
-          // the task finishes. Plain telemetry stays fire-and-forget.
-          if (outcome.kind === "model") await report;
-        }
       }
       let bridgeDiagnostics: Awaited<ReturnType<typeof getBridgeFailureDiagnostics>> | undefined;
       if (result.exitCode !== 0 && harnessProvider === "claude" && workingDir) {
@@ -4825,19 +4748,34 @@ export async function checkCompletedProcesses(
         bridgeDiagnostics?.paneTail != null
           ? `Claude bridge final tmux pane tail (${bridgeDiagnostics.artifactPath}):\n${bridgeDiagnostics.paneTail}`
           : undefined;
-      await ensureTaskFinished(
-        apiConfig,
-        role,
-        taskId,
-        result.exitCode,
-        failureReason,
-        // Runner-buffered last assistant text is a harness-agnostic fallback
-        // for adapters that never populate `ProviderResult.output` (Codex
-        // today, any future adapter). Empty buffer -> `undefined`, byte
-        // identical to pre-fix behavior.
-        resolveProviderOutput(result, assistantText),
-        harnessProvider,
-        bridgeFailureDiagnostics,
+      // Reports that gate admission on other workers (a seat mismatch, a
+      // model window rejection) land before the task finishes.
+      await reportCredentialOutcomeThenFinish(
+        {
+          apiUrl: apiConfig.apiUrl,
+          apiKey: apiConfig.apiKey,
+          credentialInfo,
+          result,
+          failureReason,
+          model,
+          codexCreditsExhaustedCooldownMs: state.codexCreditsExhaustedCooldownMs,
+          modelWindowBlocks: state.modelWindowBlocks,
+        },
+        () =>
+          ensureTaskFinished(
+            apiConfig,
+            role,
+            taskId,
+            result.exitCode,
+            failureReason,
+            // Runner-buffered last assistant text is a harness-agnostic fallback
+            // for adapters that never populate `ProviderResult.output` (Codex
+            // today, any future adapter). Empty buffer -> `undefined`, byte
+            // identical to pre-fix behavior.
+            resolveProviderOutput(result, assistantText),
+            harnessProvider,
+            bridgeFailureDiagnostics,
+          ),
       );
 
       telemetry.taskEvent("session_completed", {
@@ -5484,18 +5422,22 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
     }
   };
   try {
-    const reg = await registerAgent({
-      apiUrl,
-      apiKey,
-      agentId,
-      name: agentName,
-      role,
-      isLead,
-      capabilities,
-      maxTasks: maxConcurrent,
-      harnessProvider: bootProvider,
-      runtimeInstanceId,
-    });
+    const reg = await registerAgentWithRetry(
+      () =>
+        registerAgent({
+          apiUrl,
+          apiKey,
+          agentId,
+          name: agentName,
+          role,
+          isLead,
+          capabilities,
+          maxTasks: maxConcurrent,
+          harnessProvider: bootProvider,
+          runtimeInstanceId,
+        }),
+      { label: role },
+    );
     lastServerCapsRefreshAt = Date.now();
     // Rebuilds the prompt immediately: the initial build above ran before
     // registration (serverCapabilities unknown), and the later identity

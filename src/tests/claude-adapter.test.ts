@@ -301,6 +301,64 @@ describe("ClaudeSession processStreams — ProviderResult.output capture", () =>
     expect(summaryOpts!.env?.AGENT_SWARM_TASK_ID).toBe("test-task-id");
   });
 
+  test("a credits_required rate_limit_event reaches the log file and raw_log without the seat payload", async () => {
+    const seatEvent = JSON.stringify({
+      type: "rate_limit_event",
+      rate_limit_info: {
+        status: "rejected",
+        resetsAt: 1790812800,
+        overageDisabledReason: "member_zero_credit_limit",
+        isUsingOverage: false,
+        errorCode: "credits_required",
+        canUserPurchaseCredits: false,
+        hasChargeableSavedPaymentMethod: true,
+      },
+      uuid: "bff51e54-9777-458a-aceb-b50aaa4255b5",
+      session_id: "9d326326-0c59-4b00-b819-b9b7dd3bf99f",
+    });
+    spawnSpy.mockImplementation((() =>
+      makeStreamingFakeProc([
+        seatEvent,
+        assistantLine([{ type: "text", text: "done" }]),
+      ])) as typeof Bun.spawn);
+
+    const logDir = await mkdtemp(join(tmpdir(), "claude-seat-egress-"));
+    const logFile = join(logDir, "session.jsonl");
+    try {
+      const adapter = new ClaudeAdapter(async () => {});
+      const session = await adapter.createSession(makeConfig({ env: CLEAN_ENV, logFile }));
+      const rawLogs: string[] = [];
+      session.onEvent((event) => {
+        if (event.type === "raw_log") rawLogs.push(event.content);
+      });
+      const result = await session.waitForCompletion();
+
+      // Error tracking still reads the original event.
+      expect(result.creditsRequired?.overageDisabledReason).toBe("member_zero_credit_limit");
+
+      const fileLog = await Bun.file(logFile).text();
+      const egress = [fileLog, ...rawLogs];
+      for (const content of egress) {
+        expect(content).not.toContain("overageDisabledReason");
+        expect(content).not.toContain("member_zero_credit_limit");
+        expect(content).not.toContain("canUserPurchaseCredits");
+        expect(content).not.toContain("hasChargeableSavedPaymentMethod");
+      }
+      const loggedEvent = rawLogs.find((line) => line.includes('"rate_limit_event"'));
+      expect(loggedEvent).toBeDefined();
+      expect(JSON.parse(loggedEvent!).rate_limit_info).toEqual({
+        status: "rejected",
+        resetsAt: 1790812800,
+        isUsingOverage: false,
+        errorCode: "credits_required",
+      });
+      expect(fileLog).toContain('"errorCode":"credits_required"');
+      expect(fileLog).toContain('"text":"done"');
+    } finally {
+      await rm(logDir, { recursive: true, force: true });
+    }
+  });
+
   test("tool_use-only, thinking-only, and empty-text turns are skipped, not captured", async () => {
     const lines = [
       assistantLine([{ type: "text", text: "Real answer" }]),

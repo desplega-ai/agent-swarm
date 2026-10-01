@@ -519,6 +519,22 @@ The policy applies at task admission only. Worker boot, credential recovery, and
 
 Windows are independent. A model-scoped rejection never clears a key-wide rejection from the same session, and the reverse is also true: the worker reports both. Only a later non-rejected event for the same window clears a rejection. Stored window snapshots merge per window, and a snapshot never replaces one that was observed later (`lastSeenAt`), so an older `allowed` read cannot reopen an exhausted window. A structured rejection keeps the time its event was observed, so a rejection reported late cannot overwrite a recovery that another worker saw after it. Only a text-only rejection, which has no event, takes the report time.
 
+### Subscription seat limits
+
+The subscription plan of a key decides which model families it can run. A Claude Team standard seat (`claude_team_standard`) cannot run Fable. `GET /api/keys/available?model=fable` excludes those keys from the pick and lists them in `seatBlockedIndices`. A key with no plan, or a plan the swarm does not know, stays eligible.
+
+When no key in the pool can run the model, the task fails at once. The failure reason names the cause, for example `No CLAUDE_CODE_OAUTH_TOKEN key can run Fable: 9 keys are on a seat without Fable, 0 keys have the Fable window exhausted. Re-dispatch with another model or modelTier.` The swarm does not queue the task and does not change the model. `MODEL_WINDOW_EXHAUSTED_POLICY=fallback` does not apply to a seat block, because a seat block never resets.
+
+When the CLI rejects a model with `errorCode: "credits_required"` (for example `Fable 5.1 requires usage credits`), the worker records a seat mismatch, not a rate limit. The key `status` stays `available`. The key row gets `lastSeatMismatchAt` and `lastSeatMismatchModel`. For a Fable rejection, when `planSource` is not `manual`, the plan becomes `claude_team_standard` with `planSource: detected`. A rejection for another model changes no plan, because no plan in the map excludes that model. A `manual` plan is never changed; the server logs the contradiction instead.
+
+To correct the plan of a key, use the plan picker on the dashboard API keys page, or:
+
+```bash
+curl -X PATCH "$MCP_BASE_URL/api/keys/plan" \
+  -H "Authorization: Bearer $AGENT_SWARM_API_KEY" -H "Content-Type: application/json" \
+  -d '{"keyType":"CLAUDE_CODE_OAUTH_TOKEN","keySuffix":"TJAAA","plan":"claude_team_standard"}'
+```
+
 ### Codex OAuth Pool
 
 Codex workers support a **database-backed** multi-credential pool stored as `codex_oauth_0`, `codex_oauth_1`, ... in the swarm config store. Unlike the Claude comma-separated approach, Codex slots are provisioned via `codex-login` and persisted centrally so all workers can access them.

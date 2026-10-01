@@ -5,6 +5,7 @@ import {
   buildFinalRateLimitWindows,
   classifyRateLimitOutcome,
 } from "../commands/rate-limit-outcome";
+import { SessionErrorTracker } from "../utils/error-tracker";
 
 describe("classifyRateLimitOutcome", () => {
   test("event source: modelRateLimit set gives kind 'model' with source 'event'", () => {
@@ -321,5 +322,94 @@ describe("buildFinalRateLimitWindows — cross-worker recovery", () => {
     expect(
       (await getAvailableKeyIndices(KEY_TYPE, 1, "agent", scopeId, "fable")).availableIndices,
     ).toEqual([0]);
+  });
+});
+
+describe("classifyRateLimitOutcome — seat mismatch", () => {
+  const nowMs = Date.parse("2026-09-30T12:00:00.000Z");
+  const creditsRequired = {
+    observedAt: "2026-09-30T11:59:00.000Z",
+    overageDisabledReason: "member_zero_credit_limit",
+  };
+  const observedText = "Fable 5.1 requires usage credits. Switch to another model to continue.";
+
+  test("the observed failure text is a seat outcome from text", () => {
+    expect(classifyRateLimitOutcome({}, observedText, nowMs)).toEqual({
+      kind: "seat",
+      model: "fable",
+      source: "text",
+    });
+  });
+
+  test("a credits_required event with the task model family is a seat outcome from event", () => {
+    expect(
+      classifyRateLimitOutcome({ creditsRequired }, undefined, nowMs, undefined, "fable"),
+    ).toEqual({ kind: "seat", model: "fable", source: "event" });
+  });
+
+  test("a credits_required event with no task model family and no text is not a seat outcome", () => {
+    expect(classifyRateLimitOutcome({ creditsRequired }, undefined, nowMs).kind).not.toBe("seat");
+  });
+
+  test("a seat outcome keeps an earlier key-wide rejection from the real tracker", () => {
+    // The tracker reads the real clock and clamps past resets, so use a real "now" here.
+    const nowMs = Date.now();
+    const tracker = new SessionErrorTracker();
+    const fiveHourResetsAtSec = Math.floor(nowMs / 1000) + 2 * 60 * 60;
+    tracker.processRateLimitEvent({
+      type: "rate_limit_event",
+      rate_limit_info: {
+        status: "rejected",
+        resetsAt: fiveHourResetsAtSec,
+        rateLimitType: "five_hour",
+      },
+    });
+    tracker.processRateLimitEvent({
+      type: "rate_limit_event",
+      rate_limit_info: {
+        status: "rejected",
+        resetsAt: 1790812800,
+        overageDisabledReason: "member_zero_credit_limit",
+        isUsingOverage: false,
+        errorCode: "credits_required",
+      },
+    });
+    const rateLimitResetAt = tracker.getRateLimitResetAt();
+    const creditsRequired = tracker.getCreditsRequired();
+    expect(rateLimitResetAt).toBeDefined();
+    expect(creditsRequired).toBeDefined();
+
+    const outcome = classifyRateLimitOutcome(
+      { rateLimitResetAt, creditsRequired },
+      undefined,
+      nowMs,
+      undefined,
+      "fable",
+    );
+    expect(outcome).toEqual({
+      kind: "seat",
+      model: "fable",
+      source: "event",
+      keyRateLimitedUntil: new Date(fiveHourResetsAtSec * 1000).toISOString(),
+    });
+  });
+
+  test("a seat outcome with no key-wide rejection carries no key reset", () => {
+    const outcome = classifyRateLimitOutcome({ creditsRequired }, observedText, nowMs);
+    expect(outcome).not.toHaveProperty("keyRateLimitedUntil");
+    expect(outcome).not.toHaveProperty("rateLimitedUntil");
+  });
+
+  test("buildFinalRateLimitWindows returns the session windows unchanged for a seat outcome", () => {
+    const windows = {
+      five_hour: { status: "allowed", utilization: 0.24, lastSeenAt: "2026-09-30T11:00:00.000Z" },
+    };
+    expect(
+      buildFinalRateLimitWindows(
+        windows,
+        { kind: "seat", model: "fable", source: "event" },
+        "2026-09-30T12:00:00.000Z",
+      ),
+    ).toBe(windows);
   });
 });

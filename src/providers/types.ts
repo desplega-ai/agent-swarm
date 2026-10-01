@@ -204,6 +204,12 @@ export interface ProviderResult {
    */
   modelRateLimit?: { window: string; model: ModelFamily; resetAt: string; observedAt?: string };
   /**
+   * Set when the Claude CLI sent a rejected `rate_limit_event` with
+   * `errorCode: "credits_required"`: the key's seat cannot run the model. Not
+   * a rate limit, so `rateLimitResetAt` is never set from that event.
+   */
+  creditsRequired?: { observedAt: string; overageDisabledReason?: string };
+  /**
    * Reasoning/effort level the adapter actually applied (Phase 4). `null`
    * means `applyReasoningEffort()` returned `noop` (capability rejected the
    * requested level, or no level was requested but a noop was still

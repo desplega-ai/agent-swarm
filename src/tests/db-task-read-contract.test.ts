@@ -502,6 +502,7 @@ value:recordBudgetRefusalNotification
 value:recordInlineScriptRun
 value:recordKeyAuthFailure
 value:recordKeyRateLimitWindows
+value:recordKeySeatMismatch
 value:recordKeyUsage
 value:recordSlackMessage
 value:recordTaskPullRequestAttachments

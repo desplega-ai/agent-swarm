@@ -5359,6 +5359,76 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/keys/report-seat-mismatch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Record that an API key's subscription seat cannot run a model family */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        keyType: string;
+                        keySuffix: string;
+                        keyIndex: number;
+                        /** @enum {string} */
+                        model: "fable" | "opus" | "sonnet" | "haiku";
+                        scope?: string;
+                        scopeId?: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Seat mismatch recorded */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @enum {boolean} */
+                            success: true;
+                            message: string;
+                        };
+                    };
+                };
+                /** @description Validation error */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/keys/available": {
         parameters: {
             query?: never;
@@ -5395,6 +5465,7 @@ export interface paths {
                             totalKeys: number;
                             modelBlockedIndices?: number[];
                             earliestModelResetAt?: string | null;
+                            seatBlockedIndices?: number[];
                             authFailureFence: number;
                         };
                     };
@@ -5486,6 +5557,8 @@ export interface paths {
                                 plan: string | null;
                                 /** @enum {string|null} */
                                 planSource: "manual" | "detected" | "estimated" | null;
+                                lastSeatMismatchAt: string | null;
+                                lastSeatMismatchModel: string | null;
                                 consecutiveAuthFailures: number;
                                 lastAuthFailureAt: string | null;
                                 modelLimits: {

@@ -13,6 +13,7 @@ import type { RunStopHookSessionSummaryOpts } from "../hooks/hook";
 import { getContextWindowSize } from "../utils/context-window";
 import {
   parseStderrForErrors,
+  redactRateLimitEvent,
   SessionErrorTracker,
   trackErrorFromJson,
 } from "../utils/error-tracker";
@@ -495,7 +496,7 @@ class ClaudeSdkSession implements ProviderSession {
       });
 
       for await (const message of this.query) {
-        const scrubbed = scrubSecrets(JSON.stringify(message));
+        const scrubbed = scrubSecrets(JSON.stringify(redactRateLimitEvent(message)));
         log.write(`${scrubbed}\n`);
         this.emit({ type: "raw_log", content: scrubbed });
         const isResult = this.handleMessage(message);
@@ -581,6 +582,7 @@ class ClaudeSdkSession implements ProviderSession {
       rateLimitResetAt: this.errorTracker.getRateLimitResetAt(),
       rateLimitWindows: this.errorTracker.getRateLimitWindows(),
       modelRateLimit: this.errorTracker.getModelRateLimit(),
+      creditsRequired: this.errorTracker.getCreditsRequired(),
       appliedReasoningEffort: sessionEnvironment.appliedReasoningEffort,
     };
   }

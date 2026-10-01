@@ -26,6 +26,20 @@ import type {
 
 const VECTOR_BYTES = EMBEDDING_DIMENSIONS * Float32Array.BYTES_PER_ELEMENT;
 
+// memory_fts.memory_id is UNINDEXED (FTS5 cannot index it), so a CORRELATED
+// lookup against it is a full table scan per outer row. The old backfill used
+// `WHERE NOT EXISTS (SELECT 1 FROM memory_fts f WHERE f.memory_id = m.id)`,
+// which is N x N: at ~18k memories it held the main connection for minutes at
+// boot. Both statements below use a non-correlated `NOT IN (subquery)`, which
+// SQLite evaluates once into an ephemeral index, so each is one pass over each
+// table. `memory_id IS NOT NULL` keeps a stray NULL row from turning every
+// NOT IN into NULL (which would insert nothing).
+export const FTS_DELETE_EXTRA_SQL = `DELETE FROM memory_fts
+  WHERE memory_id NOT IN (SELECT id FROM agent_memory)`;
+export const FTS_MISSING_IDS_SQL = `SELECT m.id FROM agent_memory m
+  WHERE m.id NOT IN (SELECT memory_id FROM memory_fts WHERE memory_id IS NOT NULL)`;
+const FTS_POPULATE_BATCH_SIZE = 500;
+
 export type AgentMemoryRow = {
   id: string;
   agentId: string | null;
@@ -168,6 +182,7 @@ function computeExpiresAt(source: AgentMemorySource): string | null {
 export class SqliteMemoryStore implements MemoryStore {
   private vecInitialized = false;
   private ftsInitialized = false;
+  private ftsPopulate: Promise<void> | null = null;
   private lastPopulate: MemoryVecPopulateStats | null = null;
 
   constructor() {
@@ -187,8 +202,10 @@ export class SqliteMemoryStore implements MemoryStore {
           tokenize='porter unicode61'
         )
       `);
-      this.populateFtsTable();
       this.ftsInitialized = true;
+      this.ftsPopulate = this.populateFtsTable().catch((err) => {
+        console.error("[memory-fts] Failed to populate memory_fts:", (err as Error).message);
+      });
     } catch (err) {
       this.ftsInitialized = false;
       console.error("[memory-fts] Failed to initialize memory_fts:", (err as Error).message);
@@ -206,27 +223,46 @@ export class SqliteMemoryStore implements MemoryStore {
     }
   }
 
-  private populateFtsTable(): void {
-    const db = getDb();
-    const deletedExtra = db
-      .prepare(
-        `DELETE FROM memory_fts
-         WHERE memory_id NOT IN (SELECT id FROM agent_memory)`,
-      )
-      .run();
+  /**
+   * Backfill memory_fts from agent_memory off the constructor's call stack.
+   *
+   * Two things kept this cheap: the diff SQL is linear (see
+   * FTS_MISSING_IDS_SQL), and inserts run in batches that yield the event loop
+   * between them, so a cold rebuild cannot stall the API the way the old
+   * synchronous correlated anti-join did at boot. Rows written by
+   * store()/delete() while this runs go through syncFtsRow/deleteFtsRows,
+   * which delete-then-insert, so a concurrent write cannot leave a duplicate.
+   */
+  private async populateFtsTable(): Promise<void> {
+    const client = getDbClient();
+    const startedAt = performance.now();
+    const deletedExtra = await client.run(FTS_DELETE_EXTRA_SQL);
     if (deletedExtra.changes > 0) {
       console.warn(`[memory-fts] removed_extra_rows count=${deletedExtra.changes}`);
     }
 
-    const inserted = db
-      .prepare(
+    const missing = await client.query<{ id: string }>(FTS_MISSING_IDS_SQL);
+    for (let i = 0; i < missing.length; i += FTS_POPULATE_BATCH_SIZE) {
+      const ids = missing.slice(i, i + FTS_POPULATE_BATCH_SIZE).map((row) => row.id);
+      const placeholders = ids.map(() => "?").join(",");
+      await client.run(
         `INSERT INTO memory_fts(memory_id, name, content)
          SELECT m.id, m.name, m.content
          FROM agent_memory m
-         WHERE NOT EXISTS (SELECT 1 FROM memory_fts f WHERE f.memory_id = m.id)`,
-      )
-      .run();
-    console.log(`[memory-fts] populate inserted=${inserted.changes}`);
+         WHERE m.id IN (${placeholders})
+           AND m.id NOT IN (SELECT memory_id FROM memory_fts WHERE memory_id IS NOT NULL)`,
+        ids,
+      );
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
+    console.log(
+      `[memory-fts] populate missing=${missing.length} ms=${Math.round(performance.now() - startedAt)}`,
+    );
+  }
+
+  /** Resolves once the boot-time FTS backfill has finished (or failed). */
+  whenFtsPopulated(): Promise<void> {
+    return this.ftsPopulate ?? Promise.resolve();
   }
 
   private async syncFtsRow(memoryId: string, name: string, content: string): Promise<void> {

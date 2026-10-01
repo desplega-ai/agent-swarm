@@ -11,6 +11,7 @@ import { getContextWindowSize } from "../utils/context-window";
 import { validateClaudeCredentials } from "../utils/credentials";
 import {
   parseStderrForErrors,
+  redactRateLimitEventLine,
   SessionErrorTracker,
   trackErrorFromJson,
 } from "../utils/error-tracker";
@@ -830,19 +831,21 @@ class ClaudeSession implements ProviderSession {
       for await (const chunk of stdout) {
         stdoutChunks++;
         const text = new TextDecoder().decode(chunk);
-        // Scrub before every log-egress point: file write, listener emit, and
-        // downstream pretty-print / session-logs push (all consume event.content).
-        logFileHandle.write(scrubSecrets(text));
 
         const combined = partialLine + text;
         const parts = combined.split("\n");
         partialLine = parts.pop() || "";
 
         for (const line of parts) {
+          // Scrub and redact before every log-egress point: file write,
+          // listener emit, and downstream pretty-print / session-logs push
+          // (all consume event.content). The file is written per complete
+          // line so a rate_limit_event is redacted as a whole JSON object.
+          logFileHandle.write(`${scrubSecrets(redactRateLimitEventLine(line))}\n`);
           const trimmed = line.trim();
           if (!trimmed) continue;
 
-          this.emit({ type: "raw_log", content: scrubSecrets(trimmed) });
+          this.emit({ type: "raw_log", content: scrubSecrets(redactRateLimitEventLine(trimmed)) });
           this.processJsonLine(trimmed, (cost) => {
             lastCost = cost;
           });
@@ -850,8 +853,12 @@ class ClaudeSession implements ProviderSession {
       }
 
       // Handle remaining partial line
+      if (partialLine) logFileHandle.write(scrubSecrets(redactRateLimitEventLine(partialLine)));
       if (partialLine.trim()) {
-        this.emit({ type: "raw_log", content: scrubSecrets(partialLine.trim()) });
+        this.emit({
+          type: "raw_log",
+          content: scrubSecrets(redactRateLimitEventLine(partialLine.trim())),
+        });
         this.processJsonLine(partialLine.trim(), (cost) => {
           lastCost = cost;
         });
@@ -931,6 +938,7 @@ class ClaudeSession implements ProviderSession {
       rateLimitResetAt: this.errorTracker.getRateLimitResetAt(),
       rateLimitWindows: this.errorTracker.getRateLimitWindows(),
       modelRateLimit: this.errorTracker.getModelRateLimit(),
+      creditsRequired: this.errorTracker.getCreditsRequired(),
       appliedReasoningEffort: this.appliedReasoningEffort,
     };
   }

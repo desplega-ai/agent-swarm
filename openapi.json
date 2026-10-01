@@ -15882,6 +15882,110 @@
         }
       }
     },
+    "/api/keys/report-seat-mismatch": {
+      "post": {
+        "summary": "Record that an API key's subscription seat cannot run a model family",
+        "tags": [
+          "API Keys"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "keyType": {
+                    "type": "string"
+                  },
+                  "keySuffix": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 10
+                  },
+                  "keyIndex": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "model": {
+                    "type": "string",
+                    "enum": [
+                      "fable",
+                      "opus",
+                      "sonnet",
+                      "haiku"
+                    ]
+                  },
+                  "scope": {
+                    "type": "string"
+                  },
+                  "scopeId": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "keyType",
+                  "keySuffix",
+                  "keyIndex",
+                  "model"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Seat mismatch recorded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/keys/available": {
       "get": {
         "summary": "Get available (non-rate-limited) key indices for a credential type",
@@ -15976,6 +16080,12 @@
                         "string",
                         "null"
                       ]
+                    },
+                    "seatBlockedIndices": {
+                      "type": "array",
+                      "items": {
+                        "type": "integer"
+                      }
                     },
                     "authFailureFence": {
                       "type": "integer"
@@ -16176,6 +16286,18 @@
                               null
                             ]
                           },
+                          "lastSeatMismatchAt": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "lastSeatMismatchModel": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
                           "consecutiveAuthFailures": {
                             "type": "integer"
                           },
@@ -16240,6 +16362,8 @@
                           "rateLimitWindows",
                           "plan",
                           "planSource",
+                          "lastSeatMismatchAt",
+                          "lastSeatMismatchModel",
                           "consecutiveAuthFailures",
                           "lastAuthFailureAt",
                           "modelLimits",
