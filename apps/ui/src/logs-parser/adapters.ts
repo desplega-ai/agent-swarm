@@ -1015,7 +1015,9 @@ export function normalizeDsh(ordered: DecodedRecord[]): NormalizedItem[] {
                     usage: turnUsage && {
                       input_tokens: turnUsage.input,
                       cache_read_input_tokens: turnUsage.cacheRead,
-                      cache_creation_input_tokens: turnUsage.cacheWrite,
+                      ...(turnUsage.cacheWrite > 0
+                        ? { cache_creation_input_tokens: turnUsage.cacheWrite }
+                        : {}),
                       output_tokens: turnUsage.output,
                     },
                   },
