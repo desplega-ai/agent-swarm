@@ -1,0 +1,262 @@
+[
+  {
+    "id": "dsh-01",
+    "taskId": "task-dsh",
+    "sessionId": "session-a",
+    "iteration": 1,
+    "cli": "dsh",
+    "content": "{\"type\":\"session\",\"sessionId\":\"session-dsh-a\",\"cwd\":\"/workspace/repo\"}",
+    "lineNumber": 0,
+    "createdAt": "2026-10-01T12:59:02.930Z"
+  },
+  {
+    "id": "dsh-02",
+    "taskId": "task-dsh",
+    "sessionId": "session-a",
+    "iteration": 1,
+    "cli": "dsh",
+    "content": "{\"type\":\"status\",\"phase\":\"turn_start\",\"turn\":1}",
+    "lineNumber": 1,
+    "createdAt": "2026-10-01T12:59:02.930Z"
+  },
+  {
+    "id": "dsh-03",
+    "taskId": "task-dsh",
+    "sessionId": "session-a",
+    "iteration": 1,
+    "cli": "dsh",
+    "content": "{\"type\":\"status\",\"phase\":\"step_start\",\"turn\":1,\"step\":1}",
+    "lineNumber": 2,
+    "createdAt": "2026-10-01T12:59:02.930Z"
+  },
+  {
+    "id": "dsh-04",
+    "taskId": "task-dsh",
+    "sessionId": "session-a",
+    "iteration": 1,
+    "cli": "dsh",
+    "content": "{\"type\":\"text\",\"text\":\"I'll read the file as instructed and report what happens.\"}",
+    "lineNumber": 3,
+    "createdAt": "2026-10-01T12:59:02.930Z"
+  },
+  {
+    "id": "dsh-05",
+    "taskId": "task-dsh",
+    "sessionId": "session-a",
+    "iteration": 1,
+    "cli": "dsh",
+    "content": "{\"type\":\"tool_call\",\"callId\":\"call_01a0f78bf99e72eb8fdafbfe\",\"tool\":\"read\",\"input\":{\"file_path\":\"/nonexistent/dsh-qa/secret-token.txt\"}}",
+    "lineNumber": 4,
+    "createdAt": "2026-10-01T12:59:02.930Z"
+  },
+  {
+    "id": "dsh-06",
+    "taskId": "task-dsh",
+    "sessionId": "session-a",
+    "iteration": 1,
+    "cli": "dsh",
+    "content": "{\"type\":\"tool_result\",\"callId\":\"call_01a0f78bf99e72eb8fdafbfe\",\"status\":\"error\",\"result\":\"Error: cannot read \\\"/nonexistent/dsh-qa/secret-token.txt\\\": not found\"}",
+    "lineNumber": 5,
+    "createdAt": "2026-10-01T12:59:02.930Z"
+  },
+  {
+    "id": "dsh-07",
+    "taskId": "task-dsh",
+    "sessionId": "session-a",
+    "iteration": 1,
+    "cli": "dsh",
+    "content": "{\"type\":\"status\",\"phase\":\"step_end\",\"turn\":1,\"step\":1,\"usage\":{\"inputTokens\":22118,\"outputTokens\":61,\"totalTokens\":33699,\"cacheReadTokens\":11520}}",
+    "lineNumber": 6,
+    "createdAt": "2026-10-01T12:59:02.931Z"
+  },
+  {
+    "id": "dsh-08",
+    "taskId": "task-dsh",
+    "sessionId": "session-a",
+    "iteration": 1,
+    "cli": "dsh",
+    "content": "{\"type\":\"status\",\"phase\":\"step_start\",\"turn\":1,\"step\":2}",
+    "lineNumber": 7,
+    "createdAt": "2026-10-01T12:59:02.931Z"
+  },
+  {
+    "id": "dsh-09",
+    "taskId": "task-dsh",
+    "sessionId": "session-a",
+    "iteration": 1,
+    "cli": "dsh",
+    "content": "{\"type\":\"tool_call\",\"callId\":\"call_01a0f78bfc0e729d99b84c93\",\"tool\":\"bash\",\"input\":{\"command\":\"cat /nonexistent/dsh-qa/secret-token.txt; echo \\\"EXIT:$?\\\"\",\"description\":\"Confirm file absence via shell\"}}",
+    "lineNumber": 8,
+    "createdAt": "2026-10-01T12:59:02.931Z"
+  },
+  {
+    "id": "dsh-10",
+    "taskId": "task-dsh",
+    "sessionId": "session-a",
+    "iteration": 1,
+    "cli": "dsh",
+    "content": "{\"type\":\"tool_result\",\"callId\":\"call_01a0f78bfc0e729d99b84c93\",\"status\":\"completed\",\"result\":\"EXIT:1\\n[stderr]\\nlandlock-run: partial enforcement (older Landlock ABI)\\ncat: /nonexistent/dsh-qa/secret-token.txt: No such file or directory\\n\"}",
+    "lineNumber": 9,
+    "createdAt": "2026-10-01T12:59:02.931Z"
+  },
+  {
+    "id": "dsh-11",
+    "taskId": "task-dsh",
+    "sessionId": "session-a",
+    "iteration": 1,
+    "cli": "dsh",
+    "content": "{\"type\":\"status\",\"phase\":\"step_end\",\"turn\":1,\"step\":2,\"usage\":{\"inputTokens\":66,\"outputTokens\":77,\"totalTokens\":33807,\"cacheReadTokens\":33664}}",
+    "lineNumber": 10,
+    "createdAt": "2026-10-01T12:59:02.931Z"
+  },
+  {
+    "id": "dsh-12",
+    "taskId": "task-dsh",
+    "sessionId": "session-a",
+    "iteration": 1,
+    "cli": "dsh",
+    "content": "{\"type\":\"status\",\"phase\":\"step_start\",\"turn\":1,\"step\":3}",
+    "lineNumber": 11,
+    "createdAt": "2026-10-01T12:59:02.931Z"
+  },
+  {
+    "id": "dsh-13",
+    "taskId": "task-dsh",
+    "sessionId": "session-a",
+    "iteration": 1,
+    "cli": "dsh",
+    "content": "{\"type\":\"text\",\"text\":\"**FAILED: file does not exist. No contents reported.**\\n\\n`/nonexistent/dsh-qa/secret-token.txt` is not present. Confirmed two ways:\\n- `read` tool: `not found`\\n- `bash`: `No such file or directory`, exit 1\\n\\nI did not invent contents. Nothing was posted anywhere. Task failed as instructed.\\n\\nHarness note: the file sandbox surfaced a stderr line on the bash path (`landlock-run: partial enforcement (older Landlock ABI)`) — cosmetic, exit code was still correct.\"}",
+    "lineNumber": 12,
+    "createdAt": "2026-10-01T12:59:02.931Z"
+  },
+  {
+    "id": "dsh-14",
+    "taskId": "task-dsh",
+    "sessionId": "session-a",
+    "iteration": 1,
+    "cli": "dsh",
+    "content": "{\"type\":\"status\",\"phase\":\"step_end\",\"turn\":1,\"step\":3,\"usage\":{\"inputTokens\":70,\"outputTokens\":120,\"totalTokens\":33982,\"cacheReadTokens\":33792}}",
+    "lineNumber": 13,
+    "createdAt": "2026-10-01T12:59:02.931Z"
+  },
+  {
+    "id": "dsh-15",
+    "taskId": "task-dsh",
+    "sessionId": "session-a",
+    "iteration": 1,
+    "cli": "dsh",
+    "content": "{\"type\":\"status\",\"phase\":\"turn_end\",\"turn\":1,\"reason\":{\"kind\":\"completed\"}}",
+    "lineNumber": 14,
+    "createdAt": "2026-10-01T12:59:02.931Z"
+  },
+  {
+    "id": "dsh-16",
+    "taskId": "task-dsh",
+    "sessionId": "session-a",
+    "iteration": 1,
+    "cli": "dsh",
+    "content": "{\"type\":\"final\",\"text\":\"**FAILED: file does not exist. No contents reported.**\\n\\n`/nonexistent/dsh-qa/secret-token.txt` is not present. Confirmed two ways:\\n- `read` tool: `not found`\\n- `bash`: `No such file or directory`, exit 1\\n\\nI did not invent contents. Nothing was posted anywhere. Task failed as instructed.\\n\\nHarness note: the file sandbox surfaced a stderr line on the bash path (`landlock-run: partial enforcement (older Landlock ABI)`) — cosmetic, exit code was still correct.\"}",
+    "lineNumber": 15,
+    "createdAt": "2026-10-01T12:59:02.932Z"
+  },
+  {
+    "id": "dsh-17",
+    "taskId": "task-dsh",
+    "sessionId": "session-b",
+    "iteration": 2,
+    "cli": "dsh",
+    "content": "{\"type\":\"session\",\"sessionId\":\"session-dsh-b\",\"cwd\":\"/workspace/repo\"}",
+    "lineNumber": 0,
+    "createdAt": "2026-10-01T12:56:49.654Z"
+  },
+  {
+    "id": "dsh-18",
+    "taskId": "task-dsh",
+    "sessionId": "session-b",
+    "iteration": 2,
+    "cli": "dsh",
+    "content": "{\"type\":\"status\",\"phase\":\"turn_end\",\"turn\":1,\"reason\":{\"kind\":\"error\",\"error\":{\"message\":\"429: {\\\"message\\\":\\\"Provider returned error\\\",\\\"code\\\":429,\\\"metadata\\\":{\\\"raw\\\":\\\"qwen/qwen3.8-flash is temporarily rate-limited upstream. Please retry shortly, or add your own key to accumulate your rate limits: https://openrouter.ai/settings/integrations\\\",\\\"provider_name\\\":\\\"Alibaba\\\",\\\"is_byok\\\":false,\\\"limit_source\\\":\\\"upstream_provider_shared_pool\\\",\\\"remedy_hint\\\":\\\"Retry shortly, add your own provider key (https://openrouter.ai/settings/integrations), or route to another provider with provider routing: https://openrouter.ai/docs/features/provider-routing\\\"}}\",\"code\":\"RATE_LIMIT\"}}}",
+    "lineNumber": 0,
+    "createdAt": "2026-10-01T12:58:41.297Z"
+  },
+  {
+    "id": "dsh-19",
+    "taskId": "task-dsh",
+    "sessionId": "session-b",
+    "iteration": 2,
+    "cli": "dsh",
+    "content": "{\"type\":\"status\",\"phase\":\"turn_start\",\"turn\":1}",
+    "lineNumber": 1,
+    "createdAt": "2026-10-01T12:56:49.655Z"
+  },
+  {
+    "id": "dsh-20",
+    "taskId": "task-dsh",
+    "sessionId": "session-b",
+    "iteration": 2,
+    "cli": "dsh",
+    "content": "{\"type\":\"status\",\"phase\":\"step_end\",\"turn\":1,\"step\":1,\"usage\":{\"inputTokens\":33309,\"outputTokens\":94,\"totalTokens\":33403}}",
+    "lineNumber": 1,
+    "createdAt": "2026-10-01T12:57:14.738Z"
+  },
+  {
+    "id": "dsh-21",
+    "taskId": "task-dsh",
+    "sessionId": "session-b",
+    "iteration": 2,
+    "cli": "dsh",
+    "content": "{\"type\":\"status\",\"phase\":\"step_end\",\"turn\":1,\"step\":2,\"usage\":{\"inputTokens\":279,\"outputTokens\":97,\"totalTokens\":33656}}",
+    "lineNumber": 1,
+    "createdAt": "2026-10-01T12:57:49.439Z"
+  },
+  {
+    "id": "dsh-22",
+    "taskId": "task-dsh",
+    "sessionId": "session-b",
+    "iteration": 2,
+    "cli": "dsh",
+    "content": "{\"type\":\"final\",\"text\":\"\"}",
+    "lineNumber": 1,
+    "createdAt": "2026-10-01T12:58:41.297Z"
+  },
+  {
+    "id": "dsh-23",
+    "taskId": "task-dsh",
+    "sessionId": "session-b",
+    "iteration": 2,
+    "cli": "dsh",
+    "content": "{\"type\":\"status\",\"phase\":\"step_start\",\"turn\":1,\"step\":1}",
+    "lineNumber": 2,
+    "createdAt": "2026-10-01T12:56:49.655Z"
+  },
+  {
+    "id": "dsh-24",
+    "taskId": "task-dsh",
+    "sessionId": "session-b",
+    "iteration": 2,
+    "cli": "dsh",
+    "content": "{\"type\":\"status\",\"phase\":\"step_start\",\"turn\":1,\"step\":2}",
+    "lineNumber": 2,
+    "createdAt": "2026-10-01T12:57:14.738Z"
+  },
+  {
+    "id": "dsh-25",
+    "taskId": "task-dsh",
+    "sessionId": "session-b",
+    "iteration": 2,
+    "cli": "dsh",
+    "content": "{\"type\":\"status\",\"phase\":\"step_start\",\"turn\":1,\"step\":3}",
+    "lineNumber": 2,
+    "createdAt": "2026-10-01T12:57:49.439Z"
+  },
+  {
+    "id": "dsh-26",
+    "taskId": "task-dsh",
+    "sessionId": "session-b",
+    "iteration": 2,
+    "cli": "dsh",
+    "content": "{\"type\":\"stderr\",\"content\":\"dsh: RATE_LIMIT: 429: {\\\"message\\\":\\\"Provider returned error\\\",\\\"code\\\":429,\\\"metadata\\\":{\\\"raw\\\":\\\"qwen/qwen3.8-flash is temporarily rate-limited upstream. Please retry shortly, or add your own key to accumulate your rate limits: https://openrouter.ai/settings/integrations\\\",\\\"provider_name\\\":\\\"Alibaba\\\",\\\"is_byok\\\":false,\\\"limit_source\\\":\\\"upstream_provider_shared_pool\\\",\\\"remedy_hint\\\":\\\"Retry shortly, add your own provider key (https://openrouter.ai/settings/integrations), or route to another provider with provider routing: https://openrouter.ai/docs/features/provider-routing\\\"}}\\n\",\"timestamp\":\"2026-10-01T12:58:40.016Z\"}",
+    "lineNumber": 2,
+    "createdAt": "2026-10-01T12:58:41.297Z"
+  }
+]

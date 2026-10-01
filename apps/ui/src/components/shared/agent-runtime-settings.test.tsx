@@ -134,6 +134,21 @@ describe("AgentRuntimeSettings", () => {
     expect(html).toContain("future Claude sessions");
   });
 
+  test("shows a dsh agent read-only instead of as an editable Claude runtime", () => {
+    resolvedConfigs = [{ key: "MODEL_OVERRIDE", value: "openrouter/deepseek/deepseek-v4.1-flash" }];
+    const html = renderToStaticMarkup(
+      <TooltipProvider>
+        <AgentRuntimeSettings agent={{ ...acpAgent, harnessProvider: "dsh" }} />
+      </TooltipProvider>,
+    );
+
+    expect(html).toContain("Runtime editor unavailable");
+    expect(html).toContain("DeepSeek (dsh)");
+    expect(html).toContain("openrouter/deepseek/deepseek-v4.1-flash");
+    expect(html).not.toContain("Save");
+    expect(html).not.toContain("Claude");
+  });
+
   test("shows the configured Bridge conflict for an effective SDK selection", () => {
     runtimeMetadata = {
       claude: {

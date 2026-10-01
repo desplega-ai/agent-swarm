@@ -863,6 +863,214 @@ function emitOpencodeEvent(
   }
 }
 
+// dsh names its file tools in lowercase; map them to the names the viewer
+// renders as file tools (icon + path detail).
+const DSH_TOOL_NAMES: Record<string, string> = {
+  read: "Read",
+  write: "Write",
+  edit: "Edit",
+  glob: "Glob",
+  grep: "Grep",
+  ls: "LS",
+};
+
+interface DshUsage {
+  input: number;
+  cached: number;
+  output: number;
+}
+
+/**
+ * dsh (`dsh --json`) prints one flat event per line: `session`, `status`
+ * (turn_start / step_start / step_end / turn_end), `text`, `tool_call`,
+ * `tool_result`, `final`, `error`. The runner stores each line verbatim.
+ */
+export function normalizeDsh(ordered: DecodedRecord[]): NormalizedItem[] {
+  const items: NormalizedItem[] = [];
+  let turnUsage: DshUsage | undefined;
+  let lastAssistantText: string | undefined;
+
+  for (const d of ordered) {
+    const ev = d.event;
+    if (isParseError(ev)) {
+      items.push(makeItem(d, "parse_error", { role: "system", raw: ev.raw }));
+      continue;
+    }
+    if (!isRecord(ev)) {
+      items.push(makeItem(d, "unknown", { role: "system", raw: ev }));
+      continue;
+    }
+
+    if (emitStderr(items, d, ev)) continue;
+
+    switch (ev.type) {
+      case "session": {
+        items.push(
+          makeItem(d, "lifecycle", { role: "system", meta: { ...ev, type: "session.started" } }),
+        );
+        break;
+      }
+      case "text": {
+        const text = dshText(ev.text, ev.truncated);
+        lastAssistantText = text;
+        items.push(makeItem(d, "text", { role: "assistant", text }));
+        break;
+      }
+      case "tool_call": {
+        const tool = asString(ev.tool) ?? "tool";
+        items.push(
+          makeItem(d, "tool_call", {
+            role: "assistant",
+            tool: {
+              id: String(ev.callId ?? ""),
+              name: DSH_TOOL_NAMES[tool] ?? tool,
+              input: ev.input ?? {},
+            },
+          }),
+        );
+        break;
+      }
+      case "tool_result": {
+        items.push(
+          makeItem(d, "tool_result", {
+            role: "user",
+            result: {
+              id: String(ev.callId ?? ""),
+              payload: dshText(ev.result, ev.truncated),
+              isError: ev.status === "error",
+            },
+          }),
+        );
+        break;
+      }
+      case "status": {
+        switch (ev.phase) {
+          case "turn_start": {
+            turnUsage = undefined;
+            items.push(
+              makeItem(d, "lifecycle", { role: "system", meta: { ...ev, type: "turn.started" } }),
+            );
+            break;
+          }
+          case "step_start":
+            // Carries only turn/step counters; step_end holds the usage.
+            break;
+          case "step_end": {
+            turnUsage = addDshUsage(turnUsage, ev.usage);
+            break;
+          }
+          case "turn_end": {
+            const reason = isRecord(ev.reason) ? ev.reason : {};
+            if (reason.kind === "completed") {
+              items.push(
+                makeItem(d, "lifecycle", {
+                  role: "system",
+                  meta: {
+                    ...ev,
+                    type: "turn.completed",
+                    usage: turnUsage && {
+                      input_tokens: turnUsage.input,
+                      cached_input_tokens: turnUsage.cached,
+                      output_tokens: turnUsage.output,
+                    },
+                  },
+                }),
+              );
+            } else {
+              const error = isRecord(reason.error) ? reason.error : undefined;
+              const kind = asString(reason.kind) ?? "unknown";
+              items.push(
+                makeItem(d, "result", {
+                  role: "system",
+                  meta: {
+                    ...ev,
+                    type: "dsh_turn_error",
+                    subtype: kind,
+                    isError: true,
+                    output: asString(error?.message) ?? `dsh turn ended: ${kind}`,
+                    usage: turnUsage && {
+                      input_tokens: turnUsage.input - turnUsage.cached,
+                      cache_read_input_tokens: turnUsage.cached,
+                      output_tokens: turnUsage.output,
+                    },
+                  },
+                }),
+              );
+            }
+            turnUsage = undefined;
+            break;
+          }
+          default: {
+            items.push(makeItem(d, "unknown", { role: "system", raw: ev }));
+          }
+        }
+        break;
+      }
+      case "final": {
+        const text = asString(ev.text) ?? "";
+        // An errored turn ends with an empty final (the error row already says
+        // why), and a normal one repeats the last assistant text. Only a final
+        // that adds something gets its own row.
+        if (!text || text === lastAssistantText) break;
+        items.push(
+          makeItem(d, "result", {
+            role: "system",
+            meta: { ...ev, type: "dsh_final", subtype: "success", output: text },
+          }),
+        );
+        break;
+      }
+      case "error": {
+        items.push(
+          makeItem(d, "result", {
+            role: "system",
+            meta: {
+              ...ev,
+              type: "dsh_error",
+              subtype: "error",
+              isError: true,
+              output: asString(ev.message) ?? "dsh error",
+            },
+          }),
+        );
+        break;
+      }
+      default: {
+        items.push(makeItem(d, "unknown", { role: "system", raw: ev }));
+      }
+    }
+  }
+
+  return items;
+}
+
+function dshText(value: unknown, truncated: unknown): string {
+  const text = typeof value === "string" ? value : resultBlockText(value);
+  return truncated === true ? `${text}\n… [truncated by dsh]` : text;
+}
+
+/**
+ * Sums step usage into turn usage. dsh `inputTokens` excludes cache reads and
+ * `cacheReadTokens` is sometimes omitted, so the full prompt size comes from
+ * `totalTokens - outputTokens` when present.
+ */
+function addDshUsage(acc: DshUsage | undefined, usage: unknown): DshUsage | undefined {
+  if (!isRecord(usage)) return acc;
+  const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : 0);
+  const uncached = num(usage.inputTokens);
+  const output = num(usage.outputTokens);
+  const total = num(usage.totalTokens);
+  const cached =
+    typeof usage.cacheReadTokens === "number"
+      ? num(usage.cacheReadTokens)
+      : Math.max(0, total - uncached - output);
+  return {
+    input: (acc?.input ?? 0) + uncached + cached,
+    cached: (acc?.cached ?? 0) + cached,
+    output: (acc?.output ?? 0) + output,
+  };
+}
+
 function hasPresentInput(input: unknown): boolean {
   if (input === undefined || input === null) return false;
   if (typeof input === "string") return input.trim().length > 0;
