@@ -651,7 +651,7 @@ const updateTaskVcsRoute = route({
   tags: ["Tasks"],
   params: z.object({ id: z.string() }),
   body: z.object({
-    vcsProvider: z.enum(["github", "gitlab"]),
+    vcsProvider: z.enum(["github", "gitlab", "azure-devops"]),
     vcsRepo: z.string(),
     vcsNumber: z.number().int().positive(),
     vcsUrl: z.string().url(),

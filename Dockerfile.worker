@@ -8,7 +8,7 @@
 #   worker-slim  (target)        — worker-base + repo artifacts. For CI + E2E.
 #   worker-full-base             — worker-base + dev toolchain, Playwright
 #                                  Chromium + agent-browser, postgres/redis,
-#                                  glab, context-mode plugins
+#                                  glab, az (azure-devops), context-mode plugins
 #   worker-full  (target, LAST)  — worker-full-base + repo artifacts. Default
 #                                  build; published as :latest.
 #
@@ -475,6 +475,27 @@ ARG TARGETARCH
 RUN curl -fsSL "https://gitlab.com/api/v4/projects/gitlab-org%2Fcli/packages/generic/glab/${GLAB_VERSION}/glab_${GLAB_VERSION}_linux_${TARGETARCH}.deb" -o /tmp/glab.deb \
     && dpkg -i /tmp/glab.deb \
     && rm /tmp/glab.deb
+
+# Install the Azure CLI (az) + azure-devops extension for Azure Repos.
+# ~650 MB uncompressed (the .deb bundles its own Python under /opt/az), so it
+# lives here and not in worker-base. The extension goes to a system path so
+# the worker user finds it at runtime without a root-owned ~/.azure; HOME and
+# AZURE_CONFIG_DIR are redirected so the build leaves nothing in /home/worker.
+# Auth is env-only (AZURE_DEVOPS_EXT_PAT, exported by docker-entrypoint.sh).
+ARG AZURE_CLI_VERSION=2.90.0
+ARG AZURE_DEVOPS_EXTENSION_VERSION=1.0.8
+ENV AZURE_EXTENSION_DIR=/opt/az/azcliextensions \
+    AZURE_CORE_COLLECT_TELEMETRY=false
+RUN curl -fsSL https://packages.microsoft.com/keys/microsoft.asc \
+      -o /usr/share/keyrings/microsoft.asc \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/microsoft.asc] https://packages.microsoft.com/repos/azure-cli/ $(. /etc/os-release && echo "$VERSION_CODENAME") main" \
+      > /etc/apt/sources.list.d/azure-cli.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends "azure-cli=${AZURE_CLI_VERSION}-1~$(. /etc/os-release && echo "$VERSION_CODENAME")" \
+    && export HOME=/root AZURE_CONFIG_DIR=/tmp/azure-config \
+    && az extension add --name azure-devops --version "${AZURE_DEVOPS_EXTENSION_VERSION}" --yes \
+    && az extension show --name azure-devops --query version --output tsv \
+    && rm -rf /var/lib/apt/lists/* /tmp/azure-config /root/.azure
 
 # Playwright browsers live in a system path so they're shared across users at
 # runtime AND so the install doesn't pollute /home/worker (which would force a

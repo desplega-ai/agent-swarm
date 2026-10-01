@@ -165,6 +165,7 @@
               "ui",
               "github",
               "gitlab",
+              "azure-devops",
               "agentmail",
               "system",
               "schedule",
@@ -285,7 +286,8 @@
             "type": "string",
             "enum": [
               "github",
-              "gitlab"
+              "gitlab",
+              "azure-devops"
             ]
           },
           "vcsRepo": {
@@ -40747,6 +40749,7 @@
                                       "ui",
                                       "github",
                                       "gitlab",
+                                      "azure-devops",
                                       "agentmail",
                                       "system",
                                       "schedule",
@@ -46017,6 +46020,7 @@
                                   "ui",
                                   "github",
                                   "gitlab",
+                                  "azure-devops",
                                   "agentmail",
                                   "system",
                                   "schedule",
@@ -46326,6 +46330,7 @@
                       "ui",
                       "github",
                       "gitlab",
+                      "azure-devops",
                       "agentmail",
                       "system",
                       "schedule",
@@ -48027,7 +48032,8 @@
                     "type": "string",
                     "enum": [
                       "github",
-                      "gitlab"
+                      "gitlab",
+                      "azure-devops"
                     ]
                   },
                   "vcsRepo": {
@@ -51673,6 +51679,78 @@
           },
           "503": {
             "description": "GitLab integration not configured",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/azure-devops/webhook": {
+      "post": {
+        "summary": "Handle Azure DevOps service-hook events",
+        "tags": [
+          "Webhooks"
+        ],
+        "responses": {
+          "200": {
+            "description": "Event processed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "created": {
+                      "type": "boolean"
+                    },
+                    "taskId": {
+                      "type": "string"
+                    },
+                    "skipped": {
+                      "type": "boolean"
+                    },
+                    "reason": {
+                      "type": "string"
+                    },
+                    "extension": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "name"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "created"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid Basic auth credentials",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Azure DevOps integration not configured",
             "content": {
               "application/json": {
                 "schema": {

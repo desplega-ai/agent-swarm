@@ -66,7 +66,12 @@ import { refreshSkillsIfChanged } from "../utils/skills-refresh.ts";
 import { guardSpawnModel } from "../utils/spawn-model-guard.ts";
 import { isSteeringEnabled } from "../utils/steering-enabled.ts";
 import { interpolate } from "../utils/template.ts";
-import { detectVcsProvider } from "../vcs/index.ts";
+import {
+  canonicalAzureDevOpsRepoUrl,
+  isAzureDevOpsUrl,
+  parseAzureDevOpsRepoUrl,
+} from "../vcs/azure-devops.ts";
+import { detectVcsProvider, type VcsProvider } from "../vcs/index.ts";
 import { validateJsonSchema } from "../workflows/json-schema-validator.ts";
 import { buildAttachmentsSection } from "./attachments-section.ts";
 import {
@@ -267,7 +272,8 @@ async function listSwarmAutostashes(clonePath: string, role: string): Promise<Sw
  *    (src/agentmail/handlers.ts) — always carries `parentTaskId` pointing at
  *    the task it's continuing (as opposed to "agentmail-message", which fires
  *    only when no existing task was found for the thread).
- *  - "github-comment" / "github-review" / "gitlab-comment" / "gitlab-ci":
+ *  - "github-comment" / "github-review" / "gitlab-comment" / "gitlab-ci" /
+ *    "azure-devops-comment":
  *    tracker feedback on an ALREADY-OPEN PR/MR (review comments, review
  *    verdicts, CI failures) — the point is to keep working on the existing
  *    feature branch, not reset back to the default branch.
@@ -285,6 +291,7 @@ const CONTINUATION_TASK_TYPES = new Set([
   "github-review",
   "gitlab-comment",
   "gitlab-ci",
+  "azure-devops-comment",
 ]);
 
 /**
@@ -2675,10 +2682,27 @@ async function detectVcsForTask(
     ).trim();
 
     // 4. Detect provider and check for PR/MR
-    let vcsProvider: "github" | "gitlab";
+    let vcsProvider: VcsProvider;
     let prJson: string;
+    let azureRepo: string | null = null;
 
-    if (remoteUrl.includes("github.com") || remoteUrl.includes("github")) {
+    if (isAzureDevOpsUrl(remoteUrl)) {
+      const parsed = parseAzureDevOpsRepoUrl(remoteUrl);
+      if (!parsed) return;
+      vcsProvider = "azure-devops";
+      azureRepo = canonicalAzureDevOpsRepoUrl(remoteUrl);
+      const prs = JSON.parse(
+        await Bun.$`az repos pr list --organization ${parsed.orgUrl} --project ${parsed.project} --repository ${parsed.repository} --source-branch ${branch} --status active --top 1 --output json`
+          .quiet()
+          .text(),
+      ) as Array<{ pullRequestId: number }>;
+      prJson = JSON.stringify(
+        prs.map((pr) => ({
+          number: pr.pullRequestId,
+          url: `${azureRepo}/pullrequest/${pr.pullRequestId}`,
+        })),
+      );
+    } else if (remoteUrl.includes("github.com") || remoteUrl.includes("github")) {
       vcsProvider = "github";
       prJson = (
         await Bun.$`gh pr list --head ${branch} --json number,url --limit 1`.quiet().text()
@@ -2703,10 +2727,11 @@ async function detectVcsForTask(
     const vcsUrl = pr.url ?? pr.web_url;
     if (!vcsNumber || !vcsUrl) return;
 
-    // 6. Extract repo from remote URL
+    // 6. Extract repo from remote URL (Azure Repos keep the canonical clone URL,
+    // matching the vcsRepo their webhook tasks carry)
     const repoMatch = remoteUrl.match(/[:/]([^/]+\/[^/.]+?)(?:\.git)?$/);
-    if (!repoMatch) return;
-    const vcsRepo = repoMatch[1];
+    const vcsRepo = azureRepo ?? repoMatch?.[1];
+    if (!vcsRepo) return;
 
     // 7. Report to API
     const headers: Record<string, string> = { "Content-Type": "application/json" };

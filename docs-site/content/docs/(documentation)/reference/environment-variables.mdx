@@ -303,6 +303,19 @@ Run the one-time `bunx @desplega.ai/agent-swarm claude-managed-setup` from your 
 | `GITLAB_NAME` | Git commit name for GitLab repos |
 | `GITLAB_DISABLE` | Set to `true` to disable GitLab integration |
 
+## Azure DevOps Integration
+
+| Variable | Description |
+|----------|-------------|
+| `AZURE_DEVOPS_TOKEN` | Personal Access Token (scope: Code, Read & write) for git, `az repos`, and API calls |
+| `AZURE_DEVOPS_ORG_URL` | Organization URL, e.g. `https://dev.azure.com/your-org` |
+| `AZURE_DEVOPS_WEBHOOK_SECRET` | Basic auth password the service-hook subscriptions send; enables the webhook endpoint |
+| `AZURE_DEVOPS_BOT_ID` | Identity GUID of the bot user for `@<GUID>` mentions (default: the PAT owner) |
+| `AZURE_DEVOPS_BOT_NAME` | Name for plain-text `@name` mentions (default: `agent-swarm-bot`) |
+| `AZURE_DEVOPS_EMAIL` | Git commit email for Azure Repos commits |
+| `AZURE_DEVOPS_NAME` | Git commit name for Azure Repos commits |
+| `AZURE_DEVOPS_DISABLE` | Set to `true` to disable the Azure DevOps integration |
+
 ## AgentMail Integration
 
 | Variable | Description |

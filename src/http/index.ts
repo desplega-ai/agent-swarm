@@ -8,6 +8,7 @@ import { ensure, initialize } from "@desplega.ai/business-use";
 import type { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { getEnabledCapabilities, hasCapability } from "@/server";
 import { initAgentMail } from "../agentmail";
+import { initAzureDevOps } from "../azure-devops";
 import {
   closeDb,
   emitBuiltInIntegrationConnectedOnce,
@@ -715,6 +716,9 @@ httpServer
 
     // Initialize GitLab webhook handler (if configured)
     initGitLab();
+
+    // Initialize Azure DevOps service-hook handler (if configured)
+    initAzureDevOps();
 
     // Initialize AgentMail webhook handler (if configured)
     initAgentMail();

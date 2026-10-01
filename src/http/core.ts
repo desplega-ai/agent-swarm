@@ -1,6 +1,12 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { initAgentMail, resetAgentMail } from "../agentmail";
 import {
+  initAzureDevOps,
+  isAzureDevOpsEnabled,
+  resetAzureDevOps,
+  resetAzureDevOpsBotIdCache,
+} from "../azure-devops";
+import {
   getAgentById,
   getDbClient,
   getInboxSummary,
@@ -203,6 +209,12 @@ async function reloadGlobalConfigsAndIntegrationsInner(): Promise<ReloadConfigRe
   resetGitLab();
   initGitLab();
   if (isGitLabEnabled()) integrations.push("gitlab");
+
+  // Same reset-then-init as GitLab: the webhook secret is cached at init.
+  resetAzureDevOps();
+  resetAzureDevOpsBotIdCache();
+  initAzureDevOps();
+  if (isAzureDevOpsEnabled()) integrations.push("azure-devops");
 
   resetLinear();
   if (await initLinear()) integrations.push("linear");
