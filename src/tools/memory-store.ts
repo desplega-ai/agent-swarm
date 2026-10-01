@@ -2,16 +2,13 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { getAgentById } from "@/be/db";
 import { indexMemoryContent } from "@/be/memory/index-content";
+import { MemoryKeyError } from "@/be/memory/key-guard";
 import {
-  consolidatedKeyMessage,
-  isConsolidatedKey,
-  longtermKeyError,
   MEMORY_KEY_MAX_LENGTH,
   MEMORY_KEY_PATTERN,
   MEMORY_KEY_PATTERN_MESSAGE,
   resolveStoreKey,
 } from "@/be/memory/key-paths";
-import { can } from "@/rbac";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 import { AgentMemoryScopeSchema } from "@/types";
 
@@ -98,40 +95,19 @@ export const registerMemoryStoreTool = (server: McpServer) => {
       }
 
       const storeKey = resolveStoreKey(key, requestedName);
-      if (storeKey) {
-        // A /longterm/ name becomes the key, so it must hold up as one. Falling
-        // back to an auto key would leave the agent believing it wrote a path.
-        if (!key && !MEMORY_KEY_PATTERN.test(storeKey)) {
-          return toolErr(
-            `Name "${storeKey}" starts with /longterm/, so it is used as the key, but it is not a valid key. ${MEMORY_KEY_PATTERN_MESSAGE}`,
-            { data: { yourAgentId: requestInfo.agentId } },
-          );
-        }
-        const pathError = longtermKeyError(storeKey);
-        if (pathError) {
-          return toolErr(pathError, { data: { yourAgentId: requestInfo.agentId } });
-        }
-        if (isConsolidatedKey(storeKey)) {
-          const agent = await getAgentById(requestInfo.agentId);
-          const decision = can({
-            principal: {
-              kind: "agent",
-              agentId: requestInfo.agentId,
-              isLead: agent?.isLead ?? false,
-            },
-            verb: "memory.write.consolidated",
-            resource: { kind: "none" },
-            source: "mcp",
-          });
-          if (!decision.allow) {
-            return toolErr(consolidatedKeyMessage(storeKey), {
-              data: { yourAgentId: requestInfo.agentId },
-            });
-          }
-        }
+      // A /longterm/ name becomes the key, so it must hold up as one. Falling
+      // back to an auto key would leave the agent believing it wrote a path.
+      if (storeKey && !key && !MEMORY_KEY_PATTERN.test(storeKey)) {
+        return toolErr(
+          `Name "${storeKey}" starts with /longterm/, so it is used as the key, but it is not a valid key. ${MEMORY_KEY_PATTERN_MESSAGE}`,
+          { data: { yourAgentId: requestInfo.agentId } },
+        );
       }
 
       try {
+        // The key checks (shape, allowed roots, lead-only roots) run inside
+        // indexMemoryContent, the same gate POST /api/memory/index passes.
+        const agent = storeKey ? await getAgentById(requestInfo.agentId) : undefined;
         // The caller always owns the row, for both scopes: a swarm memory still
         // records who wrote it (mirrors inject-learning).
         const result = await indexMemoryContent({
@@ -144,6 +120,14 @@ export const registerMemoryStoreTool = (server: McpServer) => {
           tags: normalizedTags,
           intent,
           key: storeKey,
+          writer: {
+            principal: {
+              kind: "agent",
+              agentId: requestInfo.agentId,
+              isLead: agent?.isLead ?? false,
+            },
+            source: "mcp",
+          },
         });
 
         return toolOk(
@@ -158,6 +142,9 @@ export const registerMemoryStoreTool = (server: McpServer) => {
           },
         );
       } catch (err) {
+        if (err instanceof MemoryKeyError) {
+          return toolErr(err.message, { data: { yourAgentId: requestInfo.agentId } });
+        }
         const message = (err as Error).message;
         if (storeKey && /UNIQUE constraint failed/i.test(message)) {
           return toolErr(

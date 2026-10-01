@@ -7958,8 +7958,17 @@ export interface paths {
                         };
                     };
                 };
-                /** @description Validation error */
+                /** @description Validation error, or a sourcePath under /longterm that is not an allowed memory key */
                 400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description sourcePath is under a lead-only /longterm root and the caller is not the lead */
+                403: {
                     headers: {
                         [name: string]: unknown;
                     };

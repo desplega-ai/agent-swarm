@@ -2,10 +2,8 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { getAgentById } from "@/be/db";
 import { getEmbeddingProvider, getMemoryStore } from "@/be/memory";
+import { assertKeyWritable, MemoryKeyError } from "@/be/memory/key-guard";
 import {
-  consolidatedKeyMessage,
-  isConsolidatedKey,
-  longtermKeyError,
   MEMORY_KEY_MAX_LENGTH,
   MEMORY_KEY_PATTERN,
   MEMORY_KEY_PATTERN_MESSAGE,
@@ -122,31 +120,19 @@ export const registerMemoryEditTool = (server: McpServer) => {
         });
       }
 
-      const pathError = newKey ? longtermKeyError(newKey) : null;
-      if (pathError) {
-        return toolErr(pathError, { data: { yourAgentId: requestInfo.agentId } });
-      }
-
-      if (newKey && isConsolidatedKey(newKey)) {
-        const agent = await getAgentById(requestInfo.agentId);
-        const decision = can({
-          principal: {
-            kind: "agent",
-            agentId: requestInfo.agentId,
-            isLead: agent?.isLead ?? false,
-          },
-          verb: "memory.write.consolidated",
-          resource: { kind: "none" },
-          source: "mcp",
-        });
-        if (!decision.allow) {
-          return toolErr(consolidatedKeyMessage(newKey), {
-            data: { yourAgentId: requestInfo.agentId },
+      try {
+        if (newKey) {
+          const agent = await getAgentById(requestInfo.agentId);
+          assertKeyWritable(newKey, "key", {
+            principal: {
+              kind: "agent",
+              agentId: requestInfo.agentId,
+              isLead: agent?.isLead ?? false,
+            },
+            source: "mcp",
           });
         }
-      }
 
-      try {
         const store = getMemoryStore();
         // Key+scope edits already constrain the owner in store.edit(). IDs do not.
         // Keep this boundary gate out of the internal indexer/store write path.
@@ -229,6 +215,9 @@ export const registerMemoryEditTool = (server: McpServer) => {
           },
         );
       } catch (err) {
+        if (err instanceof MemoryKeyError) {
+          return toolErr(err.message, { data: { yourAgentId: requestInfo.agentId } });
+        }
         return toolErr(`Memory edit failed: ${(err as Error).message}`, {
           data: { yourAgentId: requestInfo.agentId },
         });

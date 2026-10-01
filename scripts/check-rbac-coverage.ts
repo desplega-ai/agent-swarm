@@ -48,6 +48,7 @@ const GATE_HELPER_SPECIFIERS = [
   "kv-write-auth", // kv-set / kv-delete / kv-incr shared write guard
   "task-tool-ctx", // assertOwnsTask → task.read.own / task.cancel.own / task.action.own
   "workflows/approval-cancel", // cancelApprovalRequest → approval.cancel.any
+  "memory/key-guard", // assertKeyWritable → memory.write.consolidated (memory-store, memory-edit)
 ];
 
 /**
@@ -291,7 +292,6 @@ const ROUTE_RBAC_BACKLOG: Record<string, string> = {
   "POST /api/mcp-bridge": BACKLOG_REASON,
   "POST /api/mcp-oauth/{mcpServerId}/manual-client": BACKLOG_REASON,
   "POST /api/mcp-oauth/{mcpServerId}/refresh": BACKLOG_REASON,
-  "POST /api/memory/index": BACKLOG_REASON,
   "POST /api/memory/list": BACKLOG_REASON,
   "POST /api/memory/rate": BACKLOG_REASON,
   "POST /api/memory/re-embed": BACKLOG_REASON,

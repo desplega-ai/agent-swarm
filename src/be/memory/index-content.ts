@@ -7,6 +7,7 @@
  */
 import { chunkContent } from "@/be/chunking";
 import { getEmbeddingProvider, getMemoryStore } from "@/be/memory";
+import { assertKeyWritable, type MemoryKeyWriter } from "@/be/memory/key-guard";
 import { refreshLinks, storeLinks } from "@/be/memory/link-resolver";
 import type { AgentMemoryScope, AgentMemorySource } from "@/types";
 import { scrubSecrets } from "@/utils/secret-scrubber";
@@ -29,6 +30,13 @@ export interface IndexMemoryContentParams {
    * `/longterm/facts/swarm-runtime/x`). Defaults to `sourcePath`, then the auto key.
    */
   key?: string | null;
+  /**
+   * Who is writing. The key that lands on the rows (`key`, else `sourcePath`)
+   * is checked against it before anything is stored: a lead-only `/longterm`
+   * root is refused unless the writer holds `memory.write.consolidated`. Left
+   * out, the writer has no authority. Throws `MemoryKeyError`.
+   */
+  writer?: MemoryKeyWriter;
 }
 
 export interface IndexMemoryContentResult {
@@ -44,6 +52,12 @@ export async function indexMemoryContent(
   params: IndexMemoryContentParams,
 ): Promise<IndexMemoryContentResult> {
   const { agentId, content, name, scope, source, sourceTaskId, sourcePath, tags } = params;
+
+  // The key every chunk will carry. Gate it here, before any read or write, so
+  // both callers (memory-store and POST /api/memory/index) pass the same check
+  // and a `sourcePath` cannot stand in for a key that would be refused.
+  const rowKey = params.key ?? (sourcePath || null);
+  if (rowKey) assertKeyWritable(rowKey, params.key != null ? "key" : "sourcePath", params.writer);
 
   // Chunk content and create memories
   const contentChunks = chunkContent(content);
@@ -111,7 +125,7 @@ export async function indexMemoryContent(
       tags: tags || [],
       contextKey: params.contextKey ?? null,
       intent: params.intent ?? "index memory content",
-      key: params.key ?? (sourcePath || null),
+      key: rowKey,
     })),
   );
 

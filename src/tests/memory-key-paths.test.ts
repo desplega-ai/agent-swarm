@@ -6,6 +6,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { closeDb, createAgent, getDbClient, initDb } from "../be/db";
 import { expandCandidatesWithGraph } from "../be/memory/graph-expansion";
 import { indexMemoryContent } from "../be/memory/index-content";
+import { MemoryKeyError } from "../be/memory/key-guard";
 import {
   isConsolidatedKey,
   LONGTERM_ENTITY_TYPES,
@@ -20,6 +21,7 @@ import { registerMemoryEditTool } from "../tools/memory-edit";
 import { registerMemorySearchTool } from "../tools/memory-search";
 import { registerMemoryStoreTool } from "../tools/memory-store";
 import type { AgentMemoryScope } from "../types";
+import { setRequestAuth } from "../utils/request-auth-context";
 
 // Logical memory paths: `key` on memory-store, `newKey` on memory-edit,
 // `keyPrefix` on memory-search and POST /api/memory/search, the lead-only
@@ -916,5 +918,138 @@ describe("keyPrefix search", () => {
     const listed = await store.list(worker, { scope: "all", limit: 50, keyPrefix: prefix });
 
     expect(listed.map((row) => row.id).sort()).toEqual([...targetIds].sort());
+  });
+});
+
+describe("POST /api/memory/index: sourcePath cannot confer a /longterm tier", () => {
+  type Caller = { agentId?: string; operator?: boolean };
+
+  async function index(body: Record<string, unknown>, caller: Caller) {
+    const payload = {
+      content: "a memory body that is long enough to stay in one chunk",
+      name: "ingested",
+      scope: "swarm",
+      source: "task_completion",
+      ...body,
+    };
+    const req = Readable.from([Buffer.from(JSON.stringify(payload))]) as IncomingMessage;
+    req.method = "POST";
+    req.url = "/api/memory/index";
+    req.headers = caller.agentId ? { "x-agent-id": caller.agentId } : {};
+    if (caller.operator) setRequestAuth(req, { kind: "operator", fingerprint: "test" });
+    const captured = { status: 0, body: {} as Record<string, any> };
+    const res = {
+      writeHead(status: number) {
+        captured.status = status;
+        return this;
+      },
+      end(chunk: string) {
+        captured.body = JSON.parse(chunk);
+        return this;
+      },
+    } as ServerResponse;
+    expect(await handleMemory(req, res, ["api", "memory", "index"], caller.agentId)).toBe(true);
+    return captured;
+  }
+
+  const rowsAt = (sourcePath: string) =>
+    getDbClient().query<{ key: string; source: string; expiresAt: string | null }>(
+      "SELECT key, source, expiresAt FROM agent_memory WHERE sourcePath = ?",
+      [sourcePath],
+    );
+
+  test.each([
+    "/longterm/company-story/origin",
+    "/longterm/entities/people/mallory",
+    "/longterm/entities/customers/acme",
+    "/longterm/timeline/weekly/2026-w40",
+  ])("a non-lead is refused on lead-only %s and nothing is stored; the lead is allowed", async (path) => {
+    const refused = await index({ sourcePath: path }, { agentId: worker });
+    expect(refused.status).toBe(403);
+    expect(refused.body.error).toContain("lead-only");
+    expect(await rowsAt(path)).toEqual([]);
+
+    const allowed = await index({ sourcePath: path }, { agentId: lead });
+    expect(allowed.status).toBe(202);
+    // The lead's row is a curated one: the key is the path and the TTL is gone.
+    expect(await rowsAt(path)).toEqual([{ key: path, source: "task_completion", expiresAt: null }]);
+  });
+
+  test("the caller is the writer, not the owner named in the body", async () => {
+    const path = "/longterm/entities/people/forged-owner";
+    const refused = await index({ sourcePath: path, agentId: lead }, { agentId: worker });
+
+    expect(refused.status).toBe(403);
+    expect(await rowsAt(path)).toEqual([]);
+  });
+
+  test("a request with no agent identity, or only the shared key, is not the lead", async () => {
+    const path = "/longterm/company-story/no-identity";
+
+    expect((await index({ sourcePath: path }, {})).status).toBe(403);
+    expect((await index({ sourcePath: path }, { operator: true })).status).toBe(403);
+    expect(await rowsAt(path)).toEqual([]);
+  });
+
+  test("an open root is open to a non-lead, the same as memory-store with a key", async () => {
+    const path = "/longterm/facts/swarm-runtime/http-ingest";
+
+    expect((await index({ sourcePath: path }, { agentId: worker })).status).toBe(202);
+    expect(await rowsAt(path)).toEqual([{ key: path, source: "task_completion", expiresAt: null }]);
+
+    const viaTool = await storeTool(worker, {
+      content: "the same root through the tool",
+      key: "/longterm/facts/swarm-runtime/tool-ingest",
+      scope: "swarm",
+    });
+    expect(viaTool.structuredContent.success).toBe(true);
+  });
+
+  test("a /longterm sourcePath that is not an allowed key is a 400, and stores nothing", async () => {
+    for (const path of [
+      "/longterm/scratch/x",
+      "/longterm/entities/agents/jackknife",
+      "/longterm/Facts/Upper",
+      "/longterm",
+      "/longterm/",
+    ]) {
+      const refused = await index({ sourcePath: path }, { agentId: lead });
+      expect({ path, status: refused.status }).toEqual({ path, status: 400 });
+      expect(await rowsAt(path)).toEqual([]);
+    }
+  });
+
+  test("a sourcePath outside /longterm is unchanged: free-form, no tier, no gate", async () => {
+    const files = [
+      "/workspace/personal/memory/Notes With Spaces.md",
+      "/workspace/shared/memory/agent/entities/people/x.md",
+      "/Longterm/entities/people/case-lookalike",
+      "/longterm-archive/entities/x",
+    ];
+    for (const path of files) {
+      const result = await index({ sourcePath: path, source: "file_index" }, { agentId: worker });
+      expect({ path, status: result.status }).toEqual({ path, status: 202 });
+      const [row] = await rowsAt(path);
+      expect(row?.key).toBe(path);
+      // Not curated: the file_index TTL still applies.
+      expect(row?.expiresAt).not.toBeNull();
+    }
+  });
+
+  test("indexMemoryContent without a writer has no authority over a lead-only root", async () => {
+    const path = "/longterm/entities/people/no-writer";
+    const attempt = (over: Record<string, unknown>) =>
+      indexMemoryContent({
+        agentId: worker,
+        content: "body of a memory that has no writer attached to it",
+        name: "no-writer",
+        scope: "swarm",
+        source: "manual",
+        ...over,
+      });
+
+    await expect(attempt({ sourcePath: path })).rejects.toBeInstanceOf(MemoryKeyError);
+    await expect(attempt({ key: path })).rejects.toThrow(/lead-only/);
+    expect(await rowsAt(path)).toEqual([]);
   });
 });

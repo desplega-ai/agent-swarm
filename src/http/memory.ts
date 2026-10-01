@@ -7,6 +7,7 @@ import { CANDIDATE_SET_MULTIPLIER } from "../be/memory/constants";
 import { listEdgesForAgent } from "../be/memory/edges-store";
 import { expandCandidatesWithGraph } from "../be/memory/graph-expansion";
 import { indexMemoryContent } from "../be/memory/index-content";
+import { MemoryKeyError } from "../be/memory/key-guard";
 import { MEMORY_KEY_MAX_LENGTH } from "../be/memory/key-paths";
 import { refreshLinks } from "../be/memory/link-resolver";
 import { getLinksForMemory, type MemoryLinksResult } from "../be/memory/links-store";
@@ -28,7 +29,7 @@ import { getUsefulnessStats } from "../be/memory/usefulness-stats";
 import { shouldPersistAutomaticTaskMemory } from "../memory/automatic-task-gate";
 import { buildRecallQuery } from "../memory/recall-query";
 import { memoryRelevance, SIMILARITY_THRESHOLD } from "../prompts/memories";
-import { can } from "../rbac";
+import { can, type RbacPrincipal } from "../rbac";
 import { AgentMemorySchema, AgentMemoryScopeSchema, AgentMemorySourceSchema } from "../types";
 import { getRequestAuth } from "../utils/request-auth-context";
 import { scrubSecrets } from "../utils/secret-scrubber";
@@ -58,6 +59,9 @@ const indexMemory = route({
   pattern: ["api", "memory", "index"],
   summary: "Ingest content into memory system (async embedding)",
   tags: ["Memory"],
+  // The gate only bites when the key that lands on the rows (here, `sourcePath`) sits under a
+  // lead-only /longterm root; every other ingest passes straight through.
+  rbac: { permission: "memory.write.consolidated" },
   body: z.object({
     agentId: z.string().optional(),
     content: z.string().min(1),
@@ -72,7 +76,13 @@ const indexMemory = route({
   }),
   responses: {
     202: { description: "Content queued for embedding", schema: IndexMemoryResponseSchema },
-    400: { description: "Validation error" },
+    400: {
+      description:
+        "Validation error, or a sourcePath under /longterm that is not an allowed memory key",
+    },
+    403: {
+      description: "sourcePath is under a lead-only /longterm root and the caller is not the lead",
+    },
   },
 });
 
@@ -612,6 +622,27 @@ const getMemoryEdges = route({
 
 // ─── Handler ─────────────────────────────────────────────────────────────────
 
+/**
+ * Who is calling, in the terms `can()` takes, for the key gate on ingestion. A bound identity (an
+ * `aseph_` session token) is honoured as is; otherwise the self-declared X-Agent-ID, the trust model
+ * `ensureCatalogWriter` and `ensureConfigAdmin` use. A request with neither is the shared key alone
+ * (operator), and `memory.write.consolidated` is lead-only, so it cannot reach the lead-only roots.
+ */
+async function ingestPrincipal(
+  req: IncomingMessage,
+  agentIdHeader: string | undefined,
+): Promise<RbacPrincipal> {
+  const auth = getRequestAuth(req);
+  if (auth?.kind === "user") return { kind: "user", userId: auth.userId };
+  const agentId = auth?.kind === "agent" ? auth.agentId : agentIdHeader;
+  if (agentId) {
+    const agent = await getAgentById(agentId);
+    return { kind: "agent", agentId, isLead: agent?.isLead ?? false };
+  }
+  if (auth?.kind === "operator") return { kind: "operator" };
+  return { kind: "agent", agentId: "", isLead: false };
+}
+
 export async function handleMemory(
   req: IncomingMessage,
   res: ServerResponse,
@@ -657,18 +688,31 @@ export async function handleMemory(
       (Array.isArray(headerContextKey) ? headerContextKey[0] : headerContextKey) ??
       undefined;
 
-    const { queued, memoryIds, edited } = await indexMemoryContent({
-      agentId: memoryAgentId,
-      content,
-      name,
-      scope,
-      source,
-      sourceTaskId,
-      sourcePath,
-      tags,
-      contextKey: resolvedContextKey,
-    });
+    let result: Awaited<ReturnType<typeof indexMemoryContent>>;
+    try {
+      result = await indexMemoryContent({
+        agentId: memoryAgentId,
+        content,
+        name,
+        scope,
+        source,
+        sourceTaskId,
+        sourcePath,
+        tags,
+        contextKey: resolvedContextKey,
+        // The caller, not the memory's owner (`agentId` in the body can name another agent).
+        writer: { principal: await ingestPrincipal(req, myAgentId), source: "http" },
+      });
+    } catch (err) {
+      // sourcePath doubles as the key, so it is held to the same checks as memory-store's `key`.
+      if (err instanceof MemoryKeyError) {
+        jsonError(res, err.message, err.reason === "forbidden" ? 403 : 400);
+        return true;
+      }
+      throw err;
+    }
 
+    const { queued, memoryIds, edited } = result;
     indexMemory.respond(res, 202, {
       queued,
       memoryIds,

@@ -67,10 +67,20 @@ because they are read from the key on every call.
   `/longterm/timeline` 0.8). A `/longterm/decisions` doc tagged `superseded` weighs 0.3.
   Keys under no listed root weigh 1.0.
 - **Guard:** only the lead may write or move a key under `/longterm/company-story`,
-  `/longterm/entities` or `/longterm/timeline`, by `key`, `newKey` or a `/longterm/`
-  name. The decision is `can()` with the lead-only verb `memory.write.consolidated`;
-  `isConsolidatedKey` only says whether a key is under those roots. It runs in the
-  `memory-store` and `memory-edit` tools, not in the store layer.
+  `/longterm/entities` or `/longterm/timeline`, by `key`, `newKey`, a `/longterm/`
+  name, or a `sourcePath` sent to `POST /api/memory/index`. The decision is `can()` with
+  the lead-only verb `memory.write.consolidated`; `isConsolidatedKey` only says whether
+  a key is under those roots. One function, `assertKeyWritable` in
+  `src/be/memory/key-guard.ts`, checks the key shape, the closed root list and that
+  permission, and throws `MemoryKeyError` (`invalid` → 400, `forbidden` → 403). Every
+  route that can put a key on a row passes through it: `indexMemoryContent` runs it on
+  the key every chunk will carry (`key`, else `sourcePath`) before it reads or writes
+  anything, so `memory-store` and `POST /api/memory/index` share one gate; `memory-edit`
+  runs it on `newKey`. It is not in the store layer. The caller's writer comes from the
+  route (MCP: the calling agent; HTTP: the session token, else `X-Agent-ID`, else the
+  shared key alone). A call with no writer has no authority, and an operator or user
+  principal is not the lead, so neither reaches a lead-only root. A `sourcePath` outside
+  `/longterm` stays a free-form file path and confers no tier.
 - **File-index re-sync:** it matches and deletes by the `sourcePath` column
   (`deleteBySourcePath`, the single-chunk `list` match), never by `key` or `name`. A
   `/longterm/` doc written through `memory-store` has no `sourcePath`, so a re-sync
@@ -207,7 +217,7 @@ bun run test:root -- src/tests/memory-reranker.test.ts
 bun run test:root -- src/tests/memory-store.test.ts
 bun run test:root -- src/tests/memory.test.ts
 bun run test:root -- src/tests/memory-e2e.test.ts
-bun run test:root -- src/tests/memory-key-paths.test.ts   # key / newKey / keyPrefix / lead-only guard / root allowlist / /longterm tier
+bun run test:root -- src/tests/memory-key-paths.test.ts   # key / newKey / keyPrefix / lead-only guard (MCP and POST /api/memory/index) / root allowlist / /longterm tier
 ```
 
 Plus the v1.5 rater suites:
@@ -228,11 +238,12 @@ bun run test:root -- src/tests/memory-rater-e2e.test.ts               # step-7: 
 - `src/be/memory/providers/` — OpenAI embeddings + SQLite/sqlite-vec store.
 - `src/be/memory/reranker.ts` — scoring + `usefulness(α, β)` and `pathWeight` factors.
 - `src/be/memory/key-paths.ts` — logical-path key pattern, the closed `/longterm` root allowlist, the lead-only roots and `tierSource`.
+- `src/be/memory/key-guard.ts` — `assertKeyWritable`: the shared key gate for MCP and HTTP writes.
 - `src/be/memory/constants.ts` — env-overridable tuning.
 - `src/be/memory/index.ts` — singletons.
 - `src/be/memory/index-content.ts` — `indexMemoryContent()`: chunk, re-index by
   `sourcePath`, batch store, link resolution, background embed. Shared by
-  `POST /api/memory/index` and the `memory-store` tool.
+  `POST /api/memory/index` and the `memory-store` tool; it gates the row key first.
 - `src/tools/memory-store.ts` — the agent-facing write path (`memory_store` in
   the scripts SDK goes through the MCP bridge to the same tool).
 - `src/be/memory/raters/` — rater framework (registry, store, retrieval bridge,
