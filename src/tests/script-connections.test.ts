@@ -594,6 +594,8 @@ describe("script connections", () => {
       markMigrationApplied(database, "186_api_key_seat_mismatch.sql");
       // 185 alters api_key_status, which this migration-112-only fixture does not create.
       markMigrationApplied(database, "185_api_key_auth_failures.sql");
+      // 190 alters memory_rating, which this migration-112-only fixture does not create.
+      markMigrationApplied(database, "190_memory_rating_model.sql");
 
       const id = crypto.randomUUID();
       const now = new Date().toISOString();
