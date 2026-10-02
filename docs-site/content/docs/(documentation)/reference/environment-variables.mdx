@@ -55,8 +55,8 @@ Complete reference for all environment variables used by Agent Swarm.
 | `WORKFLOW_MAX_STEPS_PER_RUN` | `500` | Max total steps (across all nodes) allowed in a single workflow run before the engine's circuit breaker aborts it. |
 | `OPENAI_API_KEY` | — | Fallback key for memory embeddings (used when `EMBEDDING_API_KEY` is unset). |
 | `EMBEDDING_API_KEY` | — | API key for the embedding provider. Takes precedence over `OPENAI_API_KEY`. |
-| `EMBEDDING_API_BASE_URL` | — | Optional custom OpenAI-compatible base URL (e.g. Azure OpenAI, Together, vLLM, Ollama). Leave unset to hit `api.openai.com`. |
-| `EMBEDDING_MODEL` | `text-embedding-3-small` | Embedding model slug sent to the provider. |
+| `EMBEDDING_API_BASE_URL` | — | Optional custom OpenAI-compatible base URL (e.g. Azure OpenAI, Together, vLLM, Ollama). Leave unset to hit `api.openai.com`. Azure / Microsoft Foundry: `https://<resource>.services.ai.azure.com/openai/v1` (see [Embedding endpoints](/docs/architecture/memory#embedding-endpoints)). |
+| `EMBEDDING_MODEL` | `text-embedding-3-small` | Embedding model slug sent to the provider. On Azure, the embedding deployment name. |
 | `EMBEDDING_DIMENSIONS` | `512` | Vector dimensions requested from the model. Must match what the model supports. |
 | `MEMORY_RECENCY_HALF_LIFE_DAYS` | `14` | Optional global override for memory recency decay. When unset, recency defaults are source-aware: manual memories do not decay, `file_index` uses 180 days, `task_completion` uses 14 days, and `session_summary` uses 7 days. |
 | `MEMORY_HYBRID_SEARCH` | `1` (on) | Hybrid memory retrieval blends vector similarity with a full-text pass before reranking. Set to `0` or `false` to use vector-only search. |

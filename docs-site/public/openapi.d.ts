@@ -10557,7 +10557,7 @@ export interface paths {
                                         /** @enum {string|null} */
                                         method: "api_key" | null;
                                         /** @enum {string|null} */
-                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "not_enabled" | "expired" | "unknown" | null;
+                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "endpoint" | "not_enabled" | "expired" | "unknown" | null;
                                     };
                                     name: {
                                         /** @enum {string} */
@@ -10567,7 +10567,7 @@ export interface paths {
                                         /** @enum {string|null} */
                                         method: "custom_name" | "default_name" | null;
                                         /** @enum {string|null} */
-                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "not_enabled" | "expired" | "unknown" | null;
+                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "endpoint" | "not_enabled" | "expired" | "unknown" | null;
                                     };
                                     ai: {
                                         /** @enum {string} */
@@ -10577,7 +10577,7 @@ export interface paths {
                                         /** @enum {string|null} */
                                         method: "claude_setup_token" | "claude_api_key" | "codex_device" | "codex_cli" | "openrouter" | "openai_gateway" | "deepseek" | "devin" | null;
                                         /** @enum {string|null} */
-                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "not_enabled" | "expired" | "unknown" | null;
+                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "endpoint" | "not_enabled" | "expired" | "unknown" | null;
                                     };
                                     agents: {
                                         /** @enum {string} */
@@ -10587,7 +10587,7 @@ export interface paths {
                                         /** @enum {string|null} */
                                         method: "cheap" | "optimal" | "max" | "mixed" | null;
                                         /** @enum {string|null} */
-                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "not_enabled" | "expired" | "unknown" | null;
+                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "endpoint" | "not_enabled" | "expired" | "unknown" | null;
                                     };
                                     memory: {
                                         /** @enum {string} */
@@ -10595,9 +10595,9 @@ export interface paths {
                                         /** Format: date-time */
                                         at: string | null;
                                         /** @enum {string|null} */
-                                        method: "openai" | "openrouter" | "vercel" | "custom" | "existing" | null;
+                                        method: "openai" | "openrouter" | "vercel" | "azure" | "custom" | "existing" | null;
                                         /** @enum {string|null} */
-                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "not_enabled" | "expired" | "unknown" | null;
+                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "endpoint" | "not_enabled" | "expired" | "unknown" | null;
                                     };
                                     integrations: {
                                         /** @enum {string} */
@@ -10607,7 +10607,7 @@ export interface paths {
                                         /** @enum {string|null} */
                                         method: "slack" | "github" | "gitlab" | "linear_oauth" | "jira_oauth" | null;
                                         /** @enum {string|null} */
-                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "not_enabled" | "expired" | "unknown" | null;
+                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "endpoint" | "not_enabled" | "expired" | "unknown" | null;
                                     };
                                     first_task: {
                                         /** @enum {string} */
@@ -10617,7 +10617,7 @@ export interface paths {
                                         /** @enum {string|null} */
                                         method: "suggestion" | "free_form" | null;
                                         /** @enum {string|null} */
-                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "not_enabled" | "expired" | "unknown" | null;
+                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "endpoint" | "not_enabled" | "expired" | "unknown" | null;
                                     };
                                 };
                             };
@@ -10716,7 +10716,7 @@ export interface paths {
                         /** @enum {string} */
                         step: "connect" | "name" | "ai" | "agents" | "memory" | "integrations" | "first_task";
                         /** @enum {string} */
-                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "not_enabled" | "expired" | "unknown";
+                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "endpoint" | "not_enabled" | "expired" | "unknown";
                     } | {
                         /** @enum {string} */
                         action: "first_task";
@@ -10767,7 +10767,7 @@ export interface paths {
                                         /** @enum {string|null} */
                                         method: "api_key" | null;
                                         /** @enum {string|null} */
-                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "not_enabled" | "expired" | "unknown" | null;
+                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "endpoint" | "not_enabled" | "expired" | "unknown" | null;
                                     };
                                     name: {
                                         /** @enum {string} */
@@ -10777,7 +10777,7 @@ export interface paths {
                                         /** @enum {string|null} */
                                         method: "custom_name" | "default_name" | null;
                                         /** @enum {string|null} */
-                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "not_enabled" | "expired" | "unknown" | null;
+                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "endpoint" | "not_enabled" | "expired" | "unknown" | null;
                                     };
                                     ai: {
                                         /** @enum {string} */
@@ -10787,7 +10787,7 @@ export interface paths {
                                         /** @enum {string|null} */
                                         method: "claude_setup_token" | "claude_api_key" | "codex_device" | "codex_cli" | "openrouter" | "openai_gateway" | "deepseek" | "devin" | null;
                                         /** @enum {string|null} */
-                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "not_enabled" | "expired" | "unknown" | null;
+                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "endpoint" | "not_enabled" | "expired" | "unknown" | null;
                                     };
                                     agents: {
                                         /** @enum {string} */
@@ -10797,7 +10797,7 @@ export interface paths {
                                         /** @enum {string|null} */
                                         method: "cheap" | "optimal" | "max" | "mixed" | null;
                                         /** @enum {string|null} */
-                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "not_enabled" | "expired" | "unknown" | null;
+                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "endpoint" | "not_enabled" | "expired" | "unknown" | null;
                                     };
                                     memory: {
                                         /** @enum {string} */
@@ -10805,9 +10805,9 @@ export interface paths {
                                         /** Format: date-time */
                                         at: string | null;
                                         /** @enum {string|null} */
-                                        method: "openai" | "openrouter" | "vercel" | "custom" | "existing" | null;
+                                        method: "openai" | "openrouter" | "vercel" | "azure" | "custom" | "existing" | null;
                                         /** @enum {string|null} */
-                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "not_enabled" | "expired" | "unknown" | null;
+                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "endpoint" | "not_enabled" | "expired" | "unknown" | null;
                                     };
                                     integrations: {
                                         /** @enum {string} */
@@ -10817,7 +10817,7 @@ export interface paths {
                                         /** @enum {string|null} */
                                         method: "slack" | "github" | "gitlab" | "linear_oauth" | "jira_oauth" | null;
                                         /** @enum {string|null} */
-                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "not_enabled" | "expired" | "unknown" | null;
+                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "endpoint" | "not_enabled" | "expired" | "unknown" | null;
                                     };
                                     first_task: {
                                         /** @enum {string} */
@@ -10827,7 +10827,7 @@ export interface paths {
                                         /** @enum {string|null} */
                                         method: "suggestion" | "free_form" | null;
                                         /** @enum {string|null} */
-                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "not_enabled" | "expired" | "unknown" | null;
+                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "endpoint" | "not_enabled" | "expired" | "unknown" | null;
                                     };
                                 };
                             };
@@ -10911,7 +10911,7 @@ export interface paths {
                 content: {
                     "application/json": {
                         /** @enum {string} */
-                        preset: "openai" | "openrouter" | "vercel" | "custom" | "existing";
+                        preset: "openai" | "openrouter" | "vercel" | "azure" | "custom" | "existing";
                         /** Format: uri */
                         baseUrl?: string;
                         model?: string;
@@ -10934,7 +10934,7 @@ export interface paths {
                             latencyMs: number;
                             error?: string;
                             /** @enum {string} */
-                            errorClass?: "auth" | "network" | "timeout" | "dimension" | "model" | "not_enabled" | "expired" | "unknown";
+                            errorClass?: "auth" | "network" | "timeout" | "dimension" | "model" | "endpoint" | "not_enabled" | "expired" | "unknown";
                         };
                     };
                 };

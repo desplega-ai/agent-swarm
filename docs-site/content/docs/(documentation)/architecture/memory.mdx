@@ -16,6 +16,20 @@ Every agent has a searchable memory backed by embeddings and stored in SQLite. T
 - **`EmbeddingProvider`** — Converts text to vectors. Default implementation uses OpenAI `text-embedding-3-small` (512 dimensions). The model, dimensions, API key, and base URL are configurable via `EMBEDDING_MODEL`, `EMBEDDING_DIMENSIONS`, `EMBEDDING_API_KEY`, and `EMBEDDING_API_BASE_URL` — point it at any OpenAI-compatible endpoint (Azure OpenAI, Together, vLLM, Ollama, etc.). Swappable for other providers in code.
 - **`MemoryStore`** — Persists and retrieves memories. Default implementation uses SQLite with [sqlite-vec](https://alexgarcia.xyz/sqlite-vec/) for KNN vector search. Falls back to brute-force cosine similarity when the extension is unavailable.
 
+### Embedding endpoints
+
+Set the endpoint in the `/setup` memory step or in **Settings → Integrations → Memory (embeddings)**. Both offer presets for OpenAI, OpenRouter, Vercel AI Gateway, Azure / Microsoft Foundry, and a custom URL. They send one test embedding and save the settings only when it works.
+
+**Azure / Microsoft Foundry.** Azure serves its OpenAI-compatible v1 API under `/openai/v1`, and the model is the name of your embedding deployment:
+
+```bash
+EMBEDDING_API_BASE_URL=https://<resource>.services.ai.azure.com/openai/v1
+EMBEDDING_MODEL=<embedding-deployment-name>
+EMBEDDING_API_KEY=<resource-api-key>
+```
+
+The Azure preset takes the resource name or URL and appends `/openai/v1`. The deployment must honor the `dimensions` parameter (`text-embedding-3-*` does, `text-embedding-ada-002` does not). A base URL without `/openai/v1` fails with "endpoint path not found". The legacy `/openai/deployments/<name>?api-version=` form is not supported.
+
 ### Memory Sources
 
 Memories are automatically created from:

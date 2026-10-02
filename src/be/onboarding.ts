@@ -23,6 +23,7 @@ export const OnboardingErrorClassSchema = z.enum([
   "timeout",
   "dimension",
   "model",
+  "endpoint",
   "not_enabled",
   "expired",
   "unknown",
@@ -48,6 +49,7 @@ export const OnboardingMemoryPresetSchema = z.enum([
   "openai",
   "openrouter",
   "vercel",
+  "azure",
   "custom",
   "existing",
 ]);

@@ -43,6 +43,7 @@ import { FieldRenderer } from "@/components/integrations/field-renderer";
 import { IntegrationStatusBadge } from "@/components/integrations/integration-status-badge";
 import { JiraOAuthSection } from "@/components/integrations/jira-oauth-section";
 import { LinearOAuthSection } from "@/components/integrations/linear-oauth-section";
+import { MemoryEmbeddingsSection } from "@/components/integrations/memory-embeddings-section";
 import { RecommendedSkillsSection } from "@/components/integrations/required-skills-section";
 import { BrandLogo } from "@/components/shared/brand-logo";
 import { EmptyState } from "@/components/shared/empty-state";
@@ -390,6 +391,7 @@ function IntegrationDetailInner({
   const isJiraOAuth = def.specialFlow === "jira-oauth";
   const isCodexCli = def.specialFlow === "codex-cli";
   const isClaudeManagedCli = def.specialFlow === "claude-managed-cli";
+  const isMemoryEmbeddings = def.specialFlow === "memory-embeddings";
   const isGithub = def.id === "github";
 
   return (
@@ -468,6 +470,9 @@ function IntegrationDetailInner({
             {isClaudeManagedCli && (
               <ClaudeManagedSection def={def} configs={configs} envPresence={envPresence} />
             )}
+
+            {/* Memory — the /setup embeddings form (presets + test-and-save probe). */}
+            {isMemoryEmbeddings && <MemoryEmbeddingsSection />}
 
             {/* Body */}
             {isCodexCli ? (
