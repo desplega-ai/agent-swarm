@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import { z } from "zod";
 import * as db from "../be/db";
@@ -278,5 +278,86 @@ describe("agent-task node.retry on task failure", () => {
     startRetryPoller(registry, 10);
     const second = await waitForRedrive(step.id, first);
     expect(second.id).not.toBe(first.id);
+  });
+});
+
+describe("recovery sweep holding a stale failed-task snapshot", () => {
+  /**
+   * Recovery snapshots task A as failed, then pauses. Meanwhile the live
+   * task.failed handler queues A's retry and the poller binds task B to the
+   * same step, back in `waiting`. When recovery resumes on its stale A row it
+   * must leave the step bound to B alone.
+   */
+  async function raceStaleRecovery(maxRetries: number) {
+    const runId = await startRun({ retry: { ...RETRY_ONCE, maxRetries } });
+    const step = await synthesizeStep(runId);
+    const first = (await getTaskByWorkflowRunStepId(step.id))!;
+
+    let releaseSnapshot!: () => void;
+    const snapshotHeld = new Promise<void>((r) => {
+      releaseSnapshot = r;
+    });
+    let snapshotTaken!: () => void;
+    const snapshotReady = new Promise<void>((r) => {
+      snapshotTaken = r;
+    });
+    const realGetStuck = db.getStuckWorkflowRuns;
+    const spy = spyOn(db, "getStuckWorkflowRuns").mockImplementation(async () => {
+      const rows = await realGetStuck();
+      snapshotTaken();
+      await snapshotHeld;
+      return rows;
+    });
+
+    let recovery: Promise<unknown> | undefined;
+    try {
+      // Fail A with the listener detached so the sweep's snapshot sees it.
+      teardownResumeListener?.();
+      try {
+        await failTask(first.id, "superseded_workflow_task");
+        recovery = recoverIncompleteRuns(registry);
+        await snapshotReady;
+      } finally {
+        teardownResumeListener = setupWorkflowResumeListener(workflowEventBus, registry);
+      }
+
+      // The live event for A arrives late: retry queued, B dispatched.
+      workflowEventBus.emit("task.failed", {
+        taskId: first.id,
+        failureReason: "superseded_workflow_task",
+        workflowRunId: runId,
+        workflowRunStepId: step.id,
+      });
+      startRetryPoller(registry, 10);
+      const second = await waitForRedrive(step.id, first);
+      await waitFor(async () => {
+        const s = await synthesizeStep(runId);
+        return s.status === "waiting" ? s : null;
+      }, "step waiting on redriven task");
+      stopRetryPoller();
+
+      releaseSnapshot();
+      await recovery;
+      recovery = undefined;
+
+      const after = await synthesizeStep(runId);
+      expect(after.status).toBe("waiting");
+      expect(after.retryCount).toBe(1);
+      expect(after.nextRetryAt).toBeFalsy();
+      expect((await getWorkflowRun(runId))!.status).toBe("waiting");
+      expect((await getTaskByWorkflowRunStepId(step.id))!.id).toBe(second.id);
+    } finally {
+      releaseSnapshot();
+      await recovery;
+      spy.mockRestore();
+    }
+  }
+
+  test("with retries left, the stale snapshot does not consume another retry", async () => {
+    await raceStaleRecovery(3);
+  });
+
+  test("with retries exhausted, the stale snapshot does not route onNodeFailure", async () => {
+    await raceStaleRecovery(1);
   });
 });

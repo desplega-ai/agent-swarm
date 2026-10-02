@@ -175,6 +175,9 @@ async function recoverWaitingRuns(registry: ExecutorRegistry): Promise<number> {
       if (stuck.taskStatus === "failed") {
         // Same retry policy as the live task.failed handler: this sweep can
         // reach a failed task first, and must not bypass the node's retry.
+        // `stuck` is a snapshot: the live handler and retry poller may have
+        // redriven the step to a new task since, so every claim below is
+        // fenced on `stuck.taskId` still being the task bound to the step.
         const failedStep = await getWorkflowRunStep(stuck.stepId);
         if (!failedStep) continue;
         const retry = await scheduleTaskStepRetry(
@@ -194,7 +197,12 @@ async function recoverWaitingRuns(registry: ExecutorRegistry): Promise<number> {
         // would kill a run that is already advancing.
         const reason =
           stuck.taskStatus === "failed" ? "Task failed (recovered)" : "Task cancelled (recovered)";
-        const claimed = await failStepAndRunIfWaiting(stuck.stepId, stuck.runId, reason);
+        const claimed = await failStepAndRunIfWaiting(
+          stuck.stepId,
+          stuck.runId,
+          reason,
+          stuck.taskId,
+        );
         if (!claimed) continue;
         recovered++;
         continue;
@@ -218,6 +226,7 @@ async function recoverWaitingRuns(registry: ExecutorRegistry): Promise<number> {
         stepOutput,
         ctx,
         taskCompleted ? undefined : reason,
+        stuck.taskId,
       );
       if (!routing.claimed) continue;
       if (routing.foreachChild && !routing.joined) {
