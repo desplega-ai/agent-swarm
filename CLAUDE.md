@@ -338,6 +338,7 @@ Drift checks — run only if you touched the trigger files, MUST commit any rege
 - Edited `content.md` or `config.json` under `templates/skills/` in a directory with a `SKILL.md`? → `bun run build:skill-md` and commit the generated file
 - Added/edited a file under `templates/skills/*/files/`? → `bun run build:seed-skill-files` and commit `src/be/seed-skills/bundled-files.generated.json` (NEVER hand-edit that JSON)
 - Edited `src/be/scripts/typecheck.ts` or `src/scripts-runtime/sdk-allowlist.ts`? → `bun run build:script-types` and commit `src/scripts-runtime/types/*.d.ts` (NEVER edit those `.d.ts` files directly — they're generated from `typecheck.ts`)
+- Edited `apps/ui/src/logs-parser/**` or `src/utils/dsh-usage.ts`? → `bun run build:claude-mod` and commit `claude-mod/vendor/logs-parser.js` (the Claude Code mod's bundle of the parser)
 - Edited an HTTP route OR bumped `package.json` `version`? → `bun run docs:openapi` (regenerates `openapi.json` AND `docs-site/content/docs/api-reference/**`)
 - Edited `templates/extensions/` or `ExtensionManifestSchema`? → `bun run build:extension-catalog && bun run build:extension-schema` and commit both generated files
 - Touched `apps/ui/` — or root `bun.lock`/`package.json`/`bunfig.toml` (ui deps resolve from the root lock)? → `cd apps/ui && bun install --frozen-lockfile && bun run lint && bunx tsc -b` (CI uses `tsc -b`, not `--noEmit`)

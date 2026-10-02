@@ -1139,6 +1139,9 @@ jobs:
       - name: Check harness plugin descriptor versions
         run: bun run check:plugin-versions
 
+      - name: Check Claude Code mod parser bundle
+        run: bun run check:claude-mod
+
   # Run on every PR and merge queue group, even when no migration files changed.
   # Use the event's exact base commit so the checker cannot skip checks if main moves.
   migration-conflict-check:

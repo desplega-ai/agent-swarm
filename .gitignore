@@ -101,3 +101,6 @@ packages/ui-e2e/artifacts.json
 # Python bytecode
 __pycache__/
 *.pyc
+
+# Claude Code lays the mod API types here when it loads this checkout as a plugin
+.claude-plugin/types/
