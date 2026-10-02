@@ -35,6 +35,9 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { type TSchema, Type } from "typebox";
 import "./pi-codemode-runtime";
+// Registers the reprompt template in the code registry (the runner loads it too).
+import "../commands/templates";
+import { resolveTemplateAsync } from "../prompts/resolver";
 import { CORE_TOOLS } from "../tools/tool-config";
 import { classifyAwsSdkError } from "../utils/aws-error-classifier";
 import { parseEnvFlag } from "../utils/env-flag";
@@ -747,6 +750,40 @@ export function extractPiAssistantText(message: unknown): string {
   return extractTextContent(msg.content);
 }
 
+/** What one assistant `message_end` carried, by block type only (never content). */
+interface AssistantTurnShape {
+  stopReason?: string;
+  blockTypes: string[];
+  outputTokens?: number;
+  hasText: boolean;
+  hasToolCall: boolean;
+}
+
+/** Keep log labels to short identifier-like tokens so a log line can never carry content. */
+function safeLabel(value: unknown): string {
+  return typeof value === "string" && /^[A-Za-z0-9_-]{1,32}$/.test(value) ? value : "other";
+}
+
+function describeAssistantTurn(message: unknown): AssistantTurnShape {
+  const msg = (message ?? {}) as {
+    content?: unknown;
+    stopReason?: unknown;
+    usage?: { output?: unknown };
+  };
+  const blocks = Array.isArray(msg.content) ? msg.content : [];
+  const blockTypes = blocks.map((b) => safeLabel((b as { type?: unknown } | null)?.type));
+  const output = msg.usage?.output;
+  return {
+    stopReason: typeof msg.stopReason === "string" ? safeLabel(msg.stopReason) : undefined,
+    blockTypes: typeof msg.content === "string" && msg.content.trim() ? ["text"] : blockTypes,
+    outputTokens: typeof output === "number" ? output : undefined,
+    hasText: extractTextContent(msg.content) !== "",
+    hasToolCall: blockTypes.includes("toolCall"),
+  };
+}
+
+const TERMINAL_STORE_PROGRESS_STATUSES = new Set(["completed", "failed"]);
+
 export class PiMonoSession implements ProviderSession {
   private listeners: Array<(event: ProviderEvent) => void> = [];
   private eventQueue: ProviderEvent[] = [];
@@ -791,6 +828,16 @@ export class PiMonoSession implements ProviderSession {
    * task. Checked by `deliverSteering()`.
    */
   private sessionEnded = false;
+  /** Shape of the most recent assistant turn; the last one before idle is the final turn. */
+  private lastAssistantTurn: AssistantTurnShape | null = null;
+  /** `store-progress` calls with a terminal status that are still running, by tool call id. */
+  private pendingTerminalStoreProgress = new Set<string>();
+  /** A terminal `store-progress` call (completed or failed) finished without error. */
+  private terminalStoreProgressDone = false;
+  /** The one-per-session empty-final-turn reprompt has been spent (or skipped for good). */
+  private emptyTurnReprompted = false;
+  /** `abort()` was called: never prompt a session someone is trying to stop. */
+  private abortRequested = false;
 
   constructor(
     agentSession: AgentSession,
@@ -871,6 +918,8 @@ export class PiMonoSession implements ProviderSession {
           errorMessage?: string;
         };
         if (endMsg.role === "assistant") {
+          const turn = describeAssistantTurn(event.message);
+          this.lastAssistantTurn = turn;
           if (endMsg.stopReason === "error") {
             // Candidate terminal failure. May still be cleared by a successful
             // retry (auto_retry_end success / a later good message_end).
@@ -879,6 +928,16 @@ export class PiMonoSession implements ProviderSession {
           }
           // A successful assistant turn means any prior error has recovered.
           this.terminalError = null;
+          if (!turn.hasText && !turn.hasToolCall) {
+            // Nothing else records these turns: no text and no tool call leaves
+            // no trace in session logs. Block types only, never content.
+            const tokens =
+              turn.outputTokens === undefined ? "" : `, outputTokens=${turn.outputTokens}`;
+            this.emit({
+              type: "raw_stderr",
+              content: `[pi-mono] assistant turn ended with no text and no tool call (stopReason=${turn.stopReason ?? "none"}, content=[${turn.blockTypes.join(",")}]${tokens})\n`,
+            });
+          }
         }
         // Only assistant text should be printed or used as fallback output.
         const text = extractPiAssistantText(event.message);
@@ -924,6 +983,14 @@ export class PiMonoSession implements ProviderSession {
         break;
       }
       case "tool_execution_start": {
+        const status = (event.args as { status?: unknown } | null)?.status;
+        if (
+          event.toolName.endsWith("store-progress") &&
+          typeof status === "string" &&
+          TERMINAL_STORE_PROGRESS_STATUSES.has(status)
+        ) {
+          this.pendingTerminalStoreProgress.add(event.toolCallId);
+        }
         const model = this.reportedModel();
         this.emit({
           type: "raw_log",
@@ -948,6 +1015,9 @@ export class PiMonoSession implements ProviderSession {
         break;
       }
       case "tool_execution_end":
+        if (this.pendingTerminalStoreProgress.delete(event.toolCallId) && !event.isError) {
+          this.terminalStoreProgressDone = true;
+        }
         this.emit({
           type: "raw_log",
           content: JSON.stringify({
@@ -997,6 +1067,8 @@ export class PiMonoSession implements ProviderSession {
 
       // Wait for the agent to finish (poll until not streaming)
       await this.waitForIdle();
+
+      await this.repromptAfterEmptyFinalTurn();
 
       // Gather cost data
       const stats = this.agentSession.getSessionStats();
@@ -1071,6 +1143,51 @@ export class PiMonoSession implements ProviderSession {
     }
   }
 
+  /**
+   * Some models end a session on an assistant turn with no text block and no
+   * tool call (thinking only, or empty content). pi treats that as a clean end,
+   * so a task that needed `store-progress` finishes without a result. Send one
+   * reprompt through the normal prompt path, then wait for idle again.
+   *
+   * Skipped when the final turn has text or a tool call, when it errored or was
+   * aborted, when a terminal `store-progress` call already succeeded, and after
+   * the first reprompt (a second empty turn is not retried).
+   */
+  private async repromptAfterEmptyFinalTurn(): Promise<void> {
+    const turn = this.lastAssistantTurn;
+    if (
+      this.emptyTurnReprompted ||
+      this.abortRequested ||
+      this.terminalError ||
+      this.terminalStoreProgressDone ||
+      !turn ||
+      turn.hasText ||
+      turn.hasToolCall ||
+      turn.stopReason === "aborted"
+    ) {
+      return;
+    }
+    this.emptyTurnReprompted = true;
+    try {
+      const reprompt = await resolveTemplateAsync("task.nudge.empty_final_turn", {});
+      if (reprompt.skipped || !reprompt.text.trim()) return;
+      this.emit({
+        type: "raw_stderr",
+        content: "[pi-mono] final turn had no text and no tool call; sending one reprompt\n",
+      });
+      await this.agentSession.prompt(reprompt.text, { source: "rpc" });
+      await this.waitForIdle();
+    } catch (err) {
+      // The original outcome stands: a failed nudge must not turn a finished
+      // session into a failed one.
+      const message = err instanceof Error ? err.message : String(err);
+      this.emit({
+        type: "raw_stderr",
+        content: `[pi-mono] empty-turn reprompt failed: ${message}\n`,
+      });
+    }
+  }
+
   private waitForIdle(): Promise<void> {
     return new Promise<void>((resolve) => {
       // Check if already idle
@@ -1127,6 +1244,7 @@ export class PiMonoSession implements ProviderSession {
   }
 
   async abort(): Promise<void> {
+    this.abortRequested = true;
     await this.agentSession.abort();
   }
 

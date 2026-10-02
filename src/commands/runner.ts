@@ -1658,7 +1658,7 @@ export async function ensureTaskFinished(
   // the no-providerOutput path and the providerOutput-failed-schema-validation
   // path below, so a schema'd task ending in free-form prose falls through to
   // the same extraction fallback instead of hard-failing.
-  const applyFallback = (fallback: FallbackResult) => {
+  const applyFallback = (fallback: FallbackResult, rejectedOutputReason?: string) => {
     console.log(`[${role}] Task ${taskId.slice(0, 8)} fallback result: ${fallback.kind}`);
     switch (fallback.kind) {
       case "extracted":
@@ -1677,7 +1677,11 @@ export async function ensureTaskFinished(
       case "schema-fail":
         status = "failed";
         body.status = "failed";
-        body.failureReason = fallback.failReason;
+        // Keep why the provider's final message was rejected; the fallback's
+        // own reason alone ("not provided via store-progress") hides it.
+        body.failureReason = rejectedOutputReason
+          ? `${fallback.failReason}. Final message rejected: ${rejectedOutputReason}`
+          : fallback.failReason;
         break;
       case "fetch-error":
         body.output = `Process completed (could not verify task state: ${fallback.error})`;
@@ -1707,7 +1711,7 @@ export async function ensureTaskFinished(
         adapterType,
         providerOutput,
       );
-      applyFallback(fallback);
+      applyFallback(fallback, validation.failReason);
     }
   } else {
     // Try structured output fallback if the task has an outputSchema

@@ -560,6 +560,67 @@ describe("ensureTaskFinished", () => {
     expect(lastFinishBody!.failureReason).toContain("outputSchema");
   });
 
+  test.each([
+    ["JSON that misses a required property", '{"other":1}', 'missing required property "result"'],
+    ["a final message that is not JSON", "plain text", "not valid JSON"],
+  ])("keeps the validation error in failureReason when pi output is %s", async (_, output, expected) => {
+    resetMocks();
+    mockGetTask = {
+      id: "task-provider-schema-reason-kept",
+      task: "Do work",
+      status: "in_progress",
+      output: null,
+      outputSchema: {
+        type: "object",
+        required: ["result"],
+        properties: { result: { type: "string" } },
+      },
+      logs: [],
+    };
+
+    await ensureTaskFinished(
+      makeConfig(),
+      "worker",
+      "task-provider-schema-reason-kept",
+      0,
+      undefined,
+      output,
+      "pi",
+    );
+
+    expect(lastFinishBody!.status).toBe("failed");
+    expect(lastFinishBody!.failureReason).toContain(
+      "Structured output required by outputSchema but not provided via store-progress",
+    );
+    expect(lastFinishBody!.failureReason).toContain(expected);
+  });
+
+  test("a task with no provider output keeps the bare schema-fail reason", async () => {
+    resetMocks();
+    mockGetTask = {
+      id: "task-no-provider-output-bare-reason",
+      task: "Do work",
+      status: "in_progress",
+      output: null,
+      outputSchema: { type: "object" },
+      logs: [],
+    };
+
+    await ensureTaskFinished(
+      makeConfig(),
+      "worker",
+      "task-no-provider-output-bare-reason",
+      0,
+      undefined,
+      undefined,
+      "pi",
+    );
+
+    expect(lastFinishBody!.failureReason).toBe(
+      "Structured output required by outputSchema but not provided via store-progress",
+    );
+  });
+
   test("falls through to extraction instead of failing when the claude adapter's free-text output violates outputSchema", async () => {
     resetMocks();
     mockGetTask = {
