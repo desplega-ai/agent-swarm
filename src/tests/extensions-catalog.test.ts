@@ -37,6 +37,7 @@ describe("predefined extension catalog", () => {
     async () => {
       const catalog = getExtensionCatalog();
       expect(Object.keys(catalog).sort()).toEqual([
+        "deploy-awareness",
         "github-sender-allowlist",
         "notify-on-complete",
         "require-ticket-ref",

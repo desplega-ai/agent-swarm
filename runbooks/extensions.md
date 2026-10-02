@@ -341,6 +341,13 @@ This rule prevents tool-hook recursion.
 Task creation also maps the creator agent back to its extension.
 The boundary skips that extension during its own task creation.
 
+A handler that calls an external API reads its credential from `process.env`, not from `ctx.swarm.config_get`.
+The script SDK scrubs every response, so `config_get` with `includeSecrets` returns `[REDACTED:<name>]`, and a plain `fetch` has no egress substitution.
+The API process loads global `swarm_config` rows into `process.env` at boot and on config reload.
+Read it under a fixed variable name, and take the target host from a fixed variable too.
+Do not put the variable name or the host in extension config: config is lead-writable, so either field lets a lead make the API process read any env secret and send it to any host.
+Refuse a non-https host (see `templates/extensions/deploy-awareness`).
+
 ## Configuration and read safety
 
 The database stores the raw `configJson` value.
