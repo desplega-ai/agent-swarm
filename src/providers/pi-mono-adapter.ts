@@ -342,6 +342,18 @@ export function isPiCodemodeEnabled(env: NodeJS.ProcessEnv = process.env): boole
 }
 
 /**
+ * `PI_CODEMODE_MODELS`: expose pi's `models` API (`classify()`,
+ * `generateImages()`, the model catalog) to codemode scripts. Off by default
+ * and only effective while `PI_CODEMODE` is on, so a stray `true` never turns
+ * model calls on by itself. pi adds a script's `models.*` usage to the
+ * `codemode` tool result and `getSessionStats()` sums it into the session
+ * cost the adapter reports (see `src/tests/providers/pi-cost.test.ts`).
+ */
+export function isPiCodemodeModelsEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return isPiCodemodeEnabled(env) && parseEnvFlag(env.PI_CODEMODE_MODELS, false);
+}
+
+/**
  * Tools that stay declared to the model when deferral is on: the lifecycle
  * set Claude also keeps out of ToolSearch, plus any tool the server preloads
  * for this task through `_meta["anthropic/alwaysLoad"]` (task tool manifests).
@@ -1141,6 +1153,8 @@ export interface PiSessionFeatures {
   installedMcp?: boolean;
   /** PI_CODEMODE is on. */
   codemode?: boolean;
+  /** PI_CODEMODE_MODELS is on, with codemode: scripts get the `models` API. */
+  codemodeModels?: boolean;
 }
 
 /**
@@ -1162,7 +1176,13 @@ export function piExtensionFactories(
   const factories: ExtensionFactory[] = [swarmExtension];
   if (features.toolDeferral) factories.push(createToolSearchExtension());
   if (features.installedMcp) factories.push(createSwarmMcpExtension());
-  if (features.codemode) factories.push(createBoundedCodemodeExtension());
+  if (features.codemode) {
+    factories.push(
+      createBoundedCodemodeExtension(DEFAULT_CODEMODE_LIMITS, {
+        models: features.codemodeModels === true,
+      }),
+    );
+  }
   return factories;
 }
 
@@ -1192,13 +1212,16 @@ const DEFAULT_CODEMODE_LIMITS: CodemodeLimits = {
  * the sandbox, which interrupts the QuickJS worker and fails the codemode call.
  *
  * "on" keeps declared tools declared; "only" would hide the lifecycle tools
- * behind scripts. `models: false` keeps model calls out of scripts, where
- * they would bypass the session's cost accounting.
+ * behind scripts. `models` stays off unless `PI_CODEMODE_MODELS` asks for it.
+ * pi 1.0 puts a script's `models.*` usage on the `codemode` tool result and
+ * `getSessionStats()` sums it, so model calls from scripts do not bypass the
+ * session's cost accounting.
  */
 export function createBoundedCodemodeExtension(
   limits: CodemodeLimits = DEFAULT_CODEMODE_LIMITS,
+  options: { models?: boolean } = {},
 ): ExtensionFactory {
-  const codemode = createCodemodeExtension({ mode: "on", models: false });
+  const codemode = createCodemodeExtension({ mode: "on", models: options.models === true });
   return (pi) =>
     codemode(
       new Proxy(pi, {
@@ -1482,9 +1505,12 @@ export class PiMonoAdapter implements ProviderAdapter {
       toolDeferral: deferTools,
       installedMcp: Object.keys(piMcpServers).length > 0,
       codemode: isPiCodemodeEnabled(),
+      codemodeModels: isPiCodemodeModelsEnabled(),
     };
     if (features.codemode) {
-      console.log(`\x1b[2m[${config.role}]\x1b[0m codemode on`);
+      console.log(
+        `\x1b[2m[${config.role}]\x1b[0m codemode on${features.codemodeModels ? " (models)" : ""}`,
+      );
     }
 
     // 5. Create resource loader with system prompt + extensions. SDK sessions

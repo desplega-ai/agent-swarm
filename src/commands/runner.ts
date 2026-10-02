@@ -1099,6 +1099,7 @@ export const RELOADABLE_ENV_KEYS: ReadonlySet<string> = new Set([
   // pi reads these from process.env for its traits and its session.
   "PI_TOOL_DEFERRAL",
   "PI_CODEMODE",
+  "PI_CODEMODE_MODELS",
 ]);
 
 /**

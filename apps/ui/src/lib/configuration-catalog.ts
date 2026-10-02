@@ -431,6 +431,15 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         docsUrl: `${DOCS}guides/harness-providers`,
       },
       {
+        key: "PI_CODEMODE_MODELS",
+        label: "pi codemode model access (pilot)",
+        description:
+          "pi workers only. Let codemode scripts call pi's models API: classifiers and image generation. Does nothing unless pi codemode is on. Model usage from scripts counts toward the session cost. Off by default. Takes effect on the worker's next task.",
+        kind: "boolean",
+        defaultValue: "false",
+        docsUrl: `${DOCS}guides/harness-providers`,
+      },
+      {
         key: "SCRIPTS_ONLY_MCP",
         label: "Scripts-only MCP",
         description:

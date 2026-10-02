@@ -698,10 +698,10 @@ The flag defaults to `false`. Loading a deferred tool changes the tool set mid-s
 
 ### pi codemode
 
-`PI_CODEMODE=true` adds pi's codemode tool: a QuickJS sandbox inside the worker process in which the model's JavaScript calls tools (`await tools.get_task_details({ taskId })`) in any order or in parallel and returns only the result. The adapter uses `createCodemodeExtension({ mode: "on", models: false })` and `+codemode`:
+`PI_CODEMODE=true` adds pi's codemode tool: a QuickJS sandbox inside the worker process in which the model's JavaScript calls tools (`await tools.get_task_details({ taskId })`) in any order or in parallel and returns only the result. The adapter uses `createCodemodeExtension({ mode: "on", models })` and `+codemode`:
 
 - `mode: "on"` keeps every declared tool declared, so lifecycle tools (`store-progress`, `send-task`, …) are still called directly. `mode: "only"` is never used.
-- `models: false` keeps model calls out of scripts, where they would bypass the session's cost accounting.
+- `models` is `false` unless `PI_CODEMODE_MODELS=true` (default off, ignored while `PI_CODEMODE` is off). When on, scripts get pi's `models` API: `models.classify()` for classifier models and `models.generateImages()` for image models, plus the model catalog. Their usage counts toward the session cost: pi 1.0 puts a script's `models.*` usage on the `codemode` tool result and `getSessionStats()` sums it, which the adapter reports as the session's cost. `src/tests/providers/pi-cost.test.ts` proves that chain.
 - Scripts receive a tool's `structuredContent` when the tool declares an `outputSchema`, which every swarm tool does.
 - Nested calls go through pi's tool pipeline, so the swarm `tool_call` hooks (cancellation, loop detection) still see them.
 - `createBoundedCodemodeExtension` caps each script: a 120 s deadline (pi's default is none, and it also overrides a longer `timeout_ms` in the script's `// @options` line), 32 nested tool calls, and 4 running at once. Hitting a limit, or cancelling the task, aborts the sandbox signal, which interrupts the QuickJS worker and fails the codemode call.

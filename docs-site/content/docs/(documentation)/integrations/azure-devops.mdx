@@ -63,6 +63,7 @@ On the action page of each subscription:
 - **Basic authentication username**: any value, for example `agent-swarm`
 - **Basic authentication password**: the value of `AZURE_DEVOPS_WEBHOOK_SECRET`
 - **Resource details to send**: **All**
+- **Resource version**: for **Pull request commented on**, pick **2.0**. Version 1.0 sends only the comment, without the pull request. The swarm answers it with `{"created":false}`, logs a warning, and creates no task. For **Pull request created**, keep the default, **1.0**.
 
 Use **Test** on the subscription to check the connection. The test payload has no bot mention, so the swarm answers `{"created":false}`.
 
@@ -74,6 +75,10 @@ Use **Test** on the subscription to check the connection. The test payload has n
 | New PR comment with a bot mention | Creates a task with the comment as context, linked to any active task for the same PR, and likes the comment as an acknowledgement |
 
 Mentions work in two forms. A mention picked from the identity picker is stored as `@<GUID>` and matches the bot's identity. A typed `@agent-swarm-bot` matches `AZURE_DEVOPS_BOT_NAME`. The swarm ignores comments written by the bot itself, system comments, and edits to existing comments, so fixing a typo does not create a second task.
+
+<Callout type="warn">
+The bot is the identity that owns `AZURE_DEVOPS_TOKEN`, unless you set `AZURE_DEVOPS_BOT_ID`. The swarm ignores PRs and comments from that identity. If you mint the PAT under your own account, as is common in a test setup, your own mentions never trigger the swarm. Test from another account.
+</Callout>
 
 ## Workers
 
@@ -101,6 +106,16 @@ Azure DevOps events can trigger [workflows](/docs/concepts/workflows):
 
 - `azure-devops.pull_request.created`
 - `azure-devops.pull_request.commented`
+
+## Troubleshooting
+
+| Symptom | Cause |
+|---------|-------|
+| **Test** on a subscription returns `{"created":false}` | Expected. The test payload has no bot mention. |
+| Deliveries fail with `401 {"error":"Invalid credentials"}` | The Basic authentication password does not match `AZURE_DEVOPS_WEBHOOK_SECRET`. |
+| Deliveries fail with `503` | `AZURE_DEVOPS_WEBHOOK_SECRET` is not set on the API server, or `AZURE_DEVOPS_DISABLE=true`. |
+| A mention returns `{"created":false}` and no task appears | The author is the bot identity, usually the PAT owner. Mention from another account. |
+| Every comment returns `{"created":false}` and the API logs `required resource fields are missing` | The comment subscription uses resource version 1.0. Edit it and pick 2.0. |
 
 ## Related
 
