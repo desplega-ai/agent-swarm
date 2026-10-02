@@ -22,6 +22,14 @@ import { startHangWatchdog } from "./hang-watchdog";
 
 startHangWatchdog();
 
+// The API drain (src/be/api-drain.ts) is off unless API_DRAIN_MAX_MS is set,
+// but a shell can inherit it (a swarm worker container gets the deploy's value).
+// Test servers are stopped with SIGTERM and their fixtures leave in_progress rows
+// on fresh agents, so an inherited cap would make every teardown wait it out.
+// Force it off here; spawned servers inherit this, and suites that exercise the
+// drain set API_DRAIN_MAX_MS for their own server.
+process.env.API_DRAIN_MAX_MS = "0";
+
 // @hono/node-server (pulled in transitively by @modelcontextprotocol/sdk's
 // streamableHttp transport) replaces globalThis.Response/Request with its own
 // lightweight Node-adapter classes the first time getRequestListener() runs.

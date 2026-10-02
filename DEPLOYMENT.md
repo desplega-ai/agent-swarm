@@ -499,6 +499,21 @@ When a worker starts, it:
    - Previous progress (if any was saved)
    - Notification that this is a resumed task
 
+### API drain
+
+Off by default. Set `API_DRAIN_MAX_MS` (for example `30000`) to turn it on. With it on, the API does not close the moment it gets SIGTERM. It first drains:
+
+1. It keeps serving, but dispatches no new work: HTTP `/api/poll`, MCP `poll-task`, and `task-action` claim and accept all refuse. Creating tasks still works.
+2. It adds `X-Swarm-Draining: 1` to every response.
+3. A worker that sees the header supersedes each in-flight task right away (reason `graceful_shutdown`, the same resume follow-up as the worker's SIGTERM handoff) and takes no new work. It still exits on its own SIGTERM.
+4. The API closes when every task it saw in flight on a live worker has left `in_progress`, or after `API_DRAIN_MAX_MS` (default `0`, which means no drain; max `120000`). With nothing in flight it closes at once.
+
+Orchestrators such as Docker Compose stop the API and the workers together, so a worker's SIGTERM handoff can run after the API is gone and the task falls through to the heartbeat sweep. The drain makes the handoff happen while the API is still up.
+
+Enable it where the API and the workers are stopped together. It also applies to an API-only restart: while it is on, every live worker supersedes its in-flight tasks when the API gets SIGTERM, tasks that would otherwise have kept running. Leave it off for local dev and for API-only rolls.
+
+Keep the API's `stop_grace_period` above `API_DRAIN_MAX_MS` plus the time the API needs to close (a few seconds). Workers older than this feature do not hand off on the header, so the API waits the full cap when they hold tasks.
+
 ### Best Practices
 
 - **Use stable Agent IDs** - Set explicit `AGENT_ID` for each worker to enable resume after restarts
@@ -564,6 +579,7 @@ The bundled agent-fs service uses version 0.15.0. Provisioning seeds agent displ
 | `APP_URL` | Dashboard URL for Slack message links | - |
 | `ENV` | Environment mode (`development` adds prefix to Slack agent names) | - |
 | `SCHEDULER_INTERVAL_MS` | Polling interval for scheduled tasks | `10000` |
+| `API_DRAIN_MAX_MS` | Max wait (ms) for workers to hand off in-flight tasks when the API stops. Off by default; set it (e.g. `30000`, max `120000`) to turn the drain on. See [API drain](#api-drain) | `0` |
 | `MULTI_RUNTIME_ENABLED` | Track multiple worker runtime instances independently for one logical agent. Set consistently on the API server and every worker. | `true` |
 | `RUNTIME_STALE_THRESHOLD_MIN` | Minutes without runtime traffic before an active runtime stops counting and the heartbeat sweep retires it. | `5` |
 | `DATABASE_PATH` | SQLite database file path | `./agent-swarm-db.sqlite` |

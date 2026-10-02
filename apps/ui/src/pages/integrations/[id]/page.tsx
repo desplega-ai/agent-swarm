@@ -25,7 +25,6 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { toast } from "sonner";
 import {
-  type UpsertConfigEntry,
   useConfigs,
   useDeleteConfigsBatch,
   useUpsertConfigsBatch,
@@ -37,13 +36,10 @@ import {
 } from "@/api/hooks/use-integrations-meta";
 import { useInstallRemoteSkill } from "@/api/hooks/use-skills";
 import type { SwarmConfig } from "@/api/types";
-import { ClaudeManagedSection } from "@/components/integrations/claude-managed-section";
-import { CodexOAuthSection } from "@/components/integrations/codex-oauth-section";
 import { FieldRenderer } from "@/components/integrations/field-renderer";
 import { IntegrationStatusBadge } from "@/components/integrations/integration-status-badge";
-import { JiraOAuthSection } from "@/components/integrations/jira-oauth-section";
-import { LinearOAuthSection } from "@/components/integrations/linear-oauth-section";
 import { RecommendedSkillsSection } from "@/components/integrations/required-skills-section";
+import { SPECIAL_FLOWS } from "@/components/integrations/special-flows";
 import { BrandLogo } from "@/components/shared/brand-logo";
 import { EmptyState } from "@/components/shared/empty-state";
 import { PageSkeleton } from "@/components/shared/page-skeleton";
@@ -68,6 +64,14 @@ import {
   Relationships,
 } from "@/components/ui/detail-page-layout";
 import { PageHeader } from "@/components/ui/page-header";
+import {
+  buildInitialState,
+  computeDirtyEntries,
+  type DirtyField,
+  type DirtyState,
+  reconcileWithStored,
+  SECRET_MASK_SENTINEL,
+} from "@/lib/integration-form-state";
 import {
   getIntegrationFields,
   INTEGRATIONS,
@@ -101,36 +105,6 @@ const ICON_MAP: Record<string, LucideIcon> = {
 
 function resolveIcon(iconKey: string): LucideIcon {
   return ICON_MAP[iconKey] ?? Plug;
-}
-
-// Server returns "********" for secret values unless ?includeSecrets=true.
-const SECRET_MASK_SENTINEL = "********";
-
-interface DirtyField {
-  value: string;
-  markedForReplace?: boolean;
-}
-
-type DirtyState = Record<string, DirtyField>;
-
-// Build the initial form state:
-//  - Non-secret fields: pre-fill with the existing plaintext value (these are
-//    harmless — channel names, emails, flags, etc.).
-//  - Secret fields with an existing row: store the "********" sentinel so the
-//    renderer shows masked read-only + Replace.
-function buildInitialState(def: IntegrationDef, configs: SwarmConfig[]): DirtyState {
-  const state: DirtyState = {};
-  for (const f of getIntegrationFields(def)) {
-    const existing = findConfigForKey(configs, f.key);
-    if (!existing) {
-      state[f.key] = { value: f.default ?? "" };
-      continue;
-    }
-    state[f.key] = {
-      value: f.isSecret ? SECRET_MASK_SENTINEL : existing.value,
-    };
-  }
-  return state;
 }
 
 export default function IntegrationDetailPage() {
@@ -220,6 +194,13 @@ function IntegrationDetailInner({
   const allFields = useMemo(() => getIntegrationFields(def), [def]);
 
   const [state, setState] = useState<DirtyState>(initialState);
+  // Stored values change under the form when another editor saves the same
+  // keys (the Memory probe). Untouched fields follow them; edits are kept.
+  const [baseline, setBaseline] = useState<DirtyState>(initialState);
+  if (baseline !== initialState) {
+    setBaseline(initialState);
+    setState((prev) => reconcileWithStored(prev, baseline, initialState));
+  }
   const [confirmResetOpen, setConfirmResetOpen] = useState(false);
   const installRemoteSkill = useInstallRemoteSkill();
 
@@ -230,39 +211,7 @@ function IntegrationDetailInner({
     }));
   }
 
-  // A field is dirty when:
-  //   - Secret + existing row + Replace clicked + non-mask value typed → send.
-  //   - Secret + no existing row + non-empty value typed → send.
-  //   - Non-secret + value differs from the stored value → send.
-  function computeDirtyEntries(): UpsertConfigEntry[] {
-    const entries: UpsertConfigEntry[] = [];
-    for (const f of allFields) {
-      const current = state[f.key];
-      if (!current) continue;
-      const existing = findConfigForKey(configs, f.key);
-
-      if (f.isSecret) {
-        if (existing && !current.markedForReplace) continue;
-        if (!current.value) continue;
-        if (current.value === SECRET_MASK_SENTINEL) continue;
-      } else {
-        const prevValue = existing?.value ?? "";
-        if (current.value === prevValue) continue;
-      }
-
-      entries.push({
-        key: f.key,
-        value: current.value,
-        isSecret: f.isSecret === true,
-        description: null,
-        envPath: null,
-        scope: "global",
-      });
-    }
-    return entries;
-  }
-
-  const dirtyEntries = computeDirtyEntries();
+  const dirtyEntries = computeDirtyEntries(allFields, state, configs);
   const hasDirty = dirtyEntries.length > 0;
 
   const handleSave = useCallback(async () => {
@@ -379,17 +328,18 @@ function IntegrationDetailInner({
   const isDisabled =
     !!disableCfg && ["true", "1", "yes"].includes(disableCfg.value.trim().toLowerCase());
 
-  const requiredFields = allFields.filter(
-    (f) => f.required === true || (f.advanced !== true && !f.required),
-  );
-  const advancedFields = allFields.filter((f) => f.advanced === true);
+  const specialFlow = def.specialFlow ? SPECIAL_FLOWS[def.specialFlow] : undefined;
+  const genericFields = specialFlow?.genericFields ?? "shown";
+  const isReplaced = genericFields === "replaced";
+  const allAdvanced = genericFields === "advanced";
+
+  const requiredFields = allAdvanced
+    ? []
+    : allFields.filter((f) => f.required === true || (f.advanced !== true && !f.required));
+  const advancedFields = allAdvanced ? allFields : allFields.filter((f) => f.advanced === true);
   const strictRequiredFields = allFields.filter((f) => f.required === true);
   const hasConfigGroups = (def.configGroups?.length ?? 0) > 0;
 
-  const isLinearOAuth = def.specialFlow === "linear-oauth";
-  const isJiraOAuth = def.specialFlow === "jira-oauth";
-  const isCodexCli = def.specialFlow === "codex-cli";
-  const isClaudeManagedCli = def.specialFlow === "claude-managed-cli";
   const isGithub = def.id === "github";
 
   return (
@@ -416,8 +366,8 @@ function IntegrationDetailInner({
       <DetailPageBody
         main={
           <div className="space-y-6">
-            {/* Action bar — hidden for codex-cli (no catalog fields to save/reset via the generic flow). */}
-            {!isCodexCli && (
+            {/* Action bar — hidden when a special flow replaces the generic form. */}
+            {!isReplaced && (
               <div className="flex flex-wrap items-center gap-2 border border-border rounded-md p-3 bg-muted/20">
                 <Button
                   onClick={handleSave}
@@ -458,22 +408,13 @@ function IntegrationDetailInner({
               </div>
             )}
 
-            {/* Linear OAuth connection card — shown ABOVE the generic form. */}
-            {isLinearOAuth && <LinearOAuthSection />}
-
-            {/* Jira OAuth connection card — shown ABOVE the generic form. */}
-            {isJiraOAuth && <JiraOAuthSection />}
-
-            {/* Claude Managed Agents — CLI explainer + Test connection. */}
-            {isClaudeManagedCli && (
-              <ClaudeManagedSection def={def} configs={configs} envPresence={envPresence} />
+            {/* Special flow (OAuth card, CLI explainer, embeddings form) — ABOVE the generic form. */}
+            {specialFlow && (
+              <specialFlow.Section def={def} configs={configs} envPresence={envPresence} />
             )}
 
             {/* Body */}
-            {isCodexCli ? (
-              // Codex has zero catalog fields; swap the generic form entirely.
-              <CodexOAuthSection />
-            ) : allFields.length === 0 ? (
+            {isReplaced ? null : allFields.length === 0 ? (
               <EmptyState
                 icon={Plug}
                 title="No configurable fields"

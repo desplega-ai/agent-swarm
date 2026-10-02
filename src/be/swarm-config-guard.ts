@@ -1,5 +1,6 @@
 import { normalizeSlackReactionShortcode } from "../slack/reaction-shortcode";
 import { ProviderNameSchema } from "../types";
+import { API_DRAIN_MAX_MS_LIMIT } from "../utils/api-drain";
 import { parseTaskToolManifest } from "../utils/task-tool-manifest";
 import { isTierConfigKey, validateTierConfigValue } from "./model-tier-keys";
 
@@ -378,6 +379,8 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
   ...integerValidators(["MODEL_LATEST_SOAK_DAYS"], 0),
   // 0 turns approval auto-cancellation off.
   ...integerValidators(["APPROVAL_REQUEST_AUTO_CANCELLATION_DAYS"], 0),
+  // 0 turns the shutdown drain off; the shutdown path clamps to the same limit.
+  ...boundedIntegerValidators(["API_DRAIN_MAX_MS"], 0, API_DRAIN_MAX_MS_LIMIT),
   // Below ~100 tokens the preamble can't fit a useful summary; above 20000
   // (~80k chars) it risks the SIGTERM-143 context-saturation failure mode
   // the cap exists to prevent (see context-preamble.ts).

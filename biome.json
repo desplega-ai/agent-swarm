@@ -18,6 +18,7 @@
       "!templates/extensions/manifest.schema.json",
       "!packages/ui-e2e/reporter/ui-e2e-ingest.v1.schema.json",
       "!mockups",
+      "!claude-mod/vendor/logs-parser.js",
       "!talks",
       "!templates/community/open-prompt-showreel/example/tla-races/reel.html",
       "!!docs-site/public/openapi.d.ts"
@@ -73,7 +74,7 @@
   },
   "overrides": [
     {
-      "includes": ["**/*.test.ts", "**/*.test.tsx", "src/tests/**"],
+      "includes": ["**/*.test.ts", "**/*.test.tsx", "src/tests/**", "claude-mod/tests/**"],
       "linter": {
         "rules": {
           "suspicious": {

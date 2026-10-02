@@ -433,7 +433,7 @@ export interface paths {
         put?: never;
         /**
          * Report agent liveness
-         * @description Refreshes the calling agent's status. Workers may send `X-Runtime-Instance-ID`, the per-boot identifier of the calling process. It is ignored unless MULTI_RUNTIME_ENABLED is set. With multi-runtime mode on, the header must identify a live runtime of this agent; an absent, unknown, offline, or foreign identifier makes the call a no-op instead of an error, so workers predating the flag keep running.
+         * @description Refreshes the calling agent's status. Workers may send `X-Runtime-Instance-ID`, the per-boot identifier of the calling process. It is ignored unless MULTI_RUNTIME_ENABLED is set. With multi-runtime mode on, the header must identify a live runtime of this agent; an absent, unknown, offline, or foreign identifier makes the call a no-op instead of an error, so workers predating the flag keep running. While the API is draining after SIGTERM, every response (this one included) carries `X-Swarm-Draining: 1`: workers hand off in-flight tasks and take no new work.
          */
         post: {
             parameters: {
@@ -10557,7 +10557,7 @@ export interface paths {
                                         /** @enum {string|null} */
                                         method: "api_key" | null;
                                         /** @enum {string|null} */
-                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "not_enabled" | "expired" | "unknown" | null;
+                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "endpoint" | "not_enabled" | "expired" | "unknown" | null;
                                     };
                                     name: {
                                         /** @enum {string} */
@@ -10567,7 +10567,7 @@ export interface paths {
                                         /** @enum {string|null} */
                                         method: "custom_name" | "default_name" | null;
                                         /** @enum {string|null} */
-                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "not_enabled" | "expired" | "unknown" | null;
+                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "endpoint" | "not_enabled" | "expired" | "unknown" | null;
                                     };
                                     ai: {
                                         /** @enum {string} */
@@ -10577,7 +10577,7 @@ export interface paths {
                                         /** @enum {string|null} */
                                         method: "claude_setup_token" | "claude_api_key" | "codex_device" | "codex_cli" | "openrouter" | "openai_gateway" | "deepseek" | "devin" | null;
                                         /** @enum {string|null} */
-                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "not_enabled" | "expired" | "unknown" | null;
+                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "endpoint" | "not_enabled" | "expired" | "unknown" | null;
                                     };
                                     agents: {
                                         /** @enum {string} */
@@ -10587,7 +10587,7 @@ export interface paths {
                                         /** @enum {string|null} */
                                         method: "cheap" | "optimal" | "max" | "mixed" | null;
                                         /** @enum {string|null} */
-                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "not_enabled" | "expired" | "unknown" | null;
+                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "endpoint" | "not_enabled" | "expired" | "unknown" | null;
                                     };
                                     memory: {
                                         /** @enum {string} */
@@ -10595,9 +10595,9 @@ export interface paths {
                                         /** Format: date-time */
                                         at: string | null;
                                         /** @enum {string|null} */
-                                        method: "openai" | "openrouter" | "vercel" | "custom" | "existing" | null;
+                                        method: "openai" | "openrouter" | "vercel" | "azure" | "custom" | "existing" | null;
                                         /** @enum {string|null} */
-                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "not_enabled" | "expired" | "unknown" | null;
+                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "endpoint" | "not_enabled" | "expired" | "unknown" | null;
                                     };
                                     integrations: {
                                         /** @enum {string} */
@@ -10607,7 +10607,7 @@ export interface paths {
                                         /** @enum {string|null} */
                                         method: "slack" | "github" | "gitlab" | "linear_oauth" | "jira_oauth" | null;
                                         /** @enum {string|null} */
-                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "not_enabled" | "expired" | "unknown" | null;
+                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "endpoint" | "not_enabled" | "expired" | "unknown" | null;
                                     };
                                     first_task: {
                                         /** @enum {string} */
@@ -10617,7 +10617,7 @@ export interface paths {
                                         /** @enum {string|null} */
                                         method: "suggestion" | "free_form" | null;
                                         /** @enum {string|null} */
-                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "not_enabled" | "expired" | "unknown" | null;
+                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "endpoint" | "not_enabled" | "expired" | "unknown" | null;
                                     };
                                 };
                             };
@@ -10716,7 +10716,7 @@ export interface paths {
                         /** @enum {string} */
                         step: "connect" | "name" | "ai" | "agents" | "memory" | "integrations" | "first_task";
                         /** @enum {string} */
-                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "not_enabled" | "expired" | "unknown";
+                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "endpoint" | "not_enabled" | "expired" | "unknown";
                     } | {
                         /** @enum {string} */
                         action: "first_task";
@@ -10767,7 +10767,7 @@ export interface paths {
                                         /** @enum {string|null} */
                                         method: "api_key" | null;
                                         /** @enum {string|null} */
-                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "not_enabled" | "expired" | "unknown" | null;
+                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "endpoint" | "not_enabled" | "expired" | "unknown" | null;
                                     };
                                     name: {
                                         /** @enum {string} */
@@ -10777,7 +10777,7 @@ export interface paths {
                                         /** @enum {string|null} */
                                         method: "custom_name" | "default_name" | null;
                                         /** @enum {string|null} */
-                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "not_enabled" | "expired" | "unknown" | null;
+                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "endpoint" | "not_enabled" | "expired" | "unknown" | null;
                                     };
                                     ai: {
                                         /** @enum {string} */
@@ -10787,7 +10787,7 @@ export interface paths {
                                         /** @enum {string|null} */
                                         method: "claude_setup_token" | "claude_api_key" | "codex_device" | "codex_cli" | "openrouter" | "openai_gateway" | "deepseek" | "devin" | null;
                                         /** @enum {string|null} */
-                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "not_enabled" | "expired" | "unknown" | null;
+                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "endpoint" | "not_enabled" | "expired" | "unknown" | null;
                                     };
                                     agents: {
                                         /** @enum {string} */
@@ -10797,7 +10797,7 @@ export interface paths {
                                         /** @enum {string|null} */
                                         method: "cheap" | "optimal" | "max" | "mixed" | null;
                                         /** @enum {string|null} */
-                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "not_enabled" | "expired" | "unknown" | null;
+                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "endpoint" | "not_enabled" | "expired" | "unknown" | null;
                                     };
                                     memory: {
                                         /** @enum {string} */
@@ -10805,9 +10805,9 @@ export interface paths {
                                         /** Format: date-time */
                                         at: string | null;
                                         /** @enum {string|null} */
-                                        method: "openai" | "openrouter" | "vercel" | "custom" | "existing" | null;
+                                        method: "openai" | "openrouter" | "vercel" | "azure" | "custom" | "existing" | null;
                                         /** @enum {string|null} */
-                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "not_enabled" | "expired" | "unknown" | null;
+                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "endpoint" | "not_enabled" | "expired" | "unknown" | null;
                                     };
                                     integrations: {
                                         /** @enum {string} */
@@ -10817,7 +10817,7 @@ export interface paths {
                                         /** @enum {string|null} */
                                         method: "slack" | "github" | "gitlab" | "linear_oauth" | "jira_oauth" | null;
                                         /** @enum {string|null} */
-                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "not_enabled" | "expired" | "unknown" | null;
+                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "endpoint" | "not_enabled" | "expired" | "unknown" | null;
                                     };
                                     first_task: {
                                         /** @enum {string} */
@@ -10827,7 +10827,7 @@ export interface paths {
                                         /** @enum {string|null} */
                                         method: "suggestion" | "free_form" | null;
                                         /** @enum {string|null} */
-                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "not_enabled" | "expired" | "unknown" | null;
+                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "endpoint" | "not_enabled" | "expired" | "unknown" | null;
                                     };
                                 };
                             };
@@ -10911,7 +10911,7 @@ export interface paths {
                 content: {
                     "application/json": {
                         /** @enum {string} */
-                        preset: "openai" | "openrouter" | "vercel" | "custom" | "existing";
+                        preset: "openai" | "openrouter" | "vercel" | "azure" | "custom" | "existing";
                         /** Format: uri */
                         baseUrl?: string;
                         model?: string;
@@ -10934,7 +10934,7 @@ export interface paths {
                             latencyMs: number;
                             error?: string;
                             /** @enum {string} */
-                            errorClass?: "auth" | "network" | "timeout" | "dimension" | "model" | "not_enabled" | "expired" | "unknown";
+                            errorClass?: "auth" | "network" | "timeout" | "dimension" | "model" | "endpoint" | "not_enabled" | "expired" | "unknown";
                         };
                     };
                 };
@@ -12334,7 +12334,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Poll for triggers (tasks, mentions) */
+        /**
+         * Poll for triggers (tasks, mentions)
+         * @description While the API is draining after SIGTERM it dispatches nothing: the answer is `{ trigger: null }` and carries `X-Swarm-Draining: 1`, the signal for a worker to hand off in-flight tasks.
+         */
         get: {
             parameters: {
                 query?: never;

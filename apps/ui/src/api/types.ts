@@ -3239,6 +3239,7 @@ export type OnboardingErrorClass =
   | "timeout"
   | "dimension"
   | "model"
+  | "endpoint"
   | "not_enabled"
   | "expired"
   | "unknown";
@@ -3256,7 +3257,13 @@ export type OnboardingAiMethod =
 /** The dial level every agent got, or `mixed` (different levels or a custom model). */
 export type OnboardingAgentsMethod = "cheap" | "optimal" | "max" | "mixed";
 
-export type OnboardingMemoryPreset = "openai" | "openrouter" | "vercel" | "custom" | "existing";
+export type OnboardingMemoryPreset =
+  | "openai"
+  | "openrouter"
+  | "vercel"
+  | "azure"
+  | "custom"
+  | "existing";
 
 export type OnboardingIntegrationMethod =
   | "slack"

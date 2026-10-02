@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { addMinutes } from "date-fns";
 import * as z from "zod";
+import { isApiDraining } from "@/be/api-drain";
 import {
   getActiveTaskCount,
   getAgentById,
@@ -132,7 +133,9 @@ export const registerPollTaskTool = (server: McpServer) => {
       while (new Date() < maxTime) {
         // Fetch and update in a single transaction to avoid race conditions
         const outcome = await getDbClient().transaction(
-          async (): Promise<AgentTask | "at-capacity" | "runtime-unavailable" | null> => {
+          async (): Promise<
+            AgentTask | "at-capacity" | "runtime-unavailable" | "draining" | null
+          > => {
             // The entry gate only proves liveness when the long poll began;
             // the runtime must be live at the exact moment work is acquired,
             // so revalidate in the same transaction that can start the task.
@@ -146,6 +149,9 @@ export const registerPollTaskTool = (server: McpServer) => {
             ) {
               return "runtime-unavailable";
             }
+
+            // A draining API dispatches nothing; see src/be/api-drain.ts.
+            if (isApiDraining()) return "draining";
 
             const agentNow = (await getAgentById(agentId))!;
 
@@ -179,6 +185,19 @@ export const registerPollTaskTool = (server: McpServer) => {
           // is a refusal, not an empty poll.
           return toolOk("No task available.", {
             details: "No task available for this runtime.",
+            data: {
+              yourAgentId: requestInfo.agentId,
+              offeredTasks: [],
+              availableCount: 0,
+              waitedForSeconds: Math.round((Date.now() - now.getTime()) / 1000),
+            },
+          });
+        }
+
+        if (outcome === "draining") {
+          // Like a runtime refusal, this is not an empty poll: skip the exit counter.
+          return toolOk("No task available.", {
+            details: "The API is draining for a restart and dispatches no new work. Retry shortly.",
             data: {
               yourAgentId: requestInfo.agentId,
               offeredTasks: [],

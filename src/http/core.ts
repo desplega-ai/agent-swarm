@@ -360,7 +360,8 @@ const pingRoute = route({
     `Refreshes the calling agent's status. ${RUNTIME_HEADER_DOC} With multi-runtime mode on, ` +
     "the header must identify a live runtime of this agent; an absent, unknown, offline, or " +
     "foreign identifier makes the call a no-op instead of an error, so workers predating the " +
-    "flag keep running.",
+    "flag keep running. While the API is draining after SIGTERM, every response (this one " +
+    "included) carries `X-Swarm-Draining: 1`: workers hand off in-flight tasks and take no new work.",
   tags: ["Core"],
   auth: { apiKey: true, agentId: true },
   headers: runtimeInstanceHeader("refresh a runtime's liveness"),

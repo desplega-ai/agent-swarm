@@ -56,7 +56,8 @@ export type IntegrationSpecialFlow =
   | "linear-oauth"
   | "jira-oauth"
   | "codex-cli"
-  | "claude-managed-cli";
+  | "claude-managed-cli"
+  | "memory-embeddings";
 
 /** Which agent role(s) the swarm needs to have a given skill installed on. */
 export type AgentRole = "lead" | "worker";
@@ -121,7 +122,11 @@ export interface IntegrationDef {
   disableKey?: string;
   /** Changes require API server restart to take effect. */
   restartRequired?: boolean;
-  /** Custom flow that overrides the generic field form. */
+  /**
+   * Custom section rendered above the generic field form. Its component, and
+   * whether the generic form stays shown, moves under Advanced, or is replaced,
+   * live in `SPECIAL_FLOWS` (components/integrations/special-flows.tsx).
+   */
   specialFlow?: IntegrationSpecialFlow;
   /**
    * Skills recommended alongside this integration. Env-var configuration is
@@ -843,6 +848,43 @@ export const INTEGRATIONS: IntegrationDef[] = [
         placeholder: "sk-...",
         helpText: "OpenAI API key. Used by the codex provider when no ChatGPT OAuth is stored.",
         affectsRestart: true,
+      },
+    ],
+  },
+
+  // ------------------------------------------------------ Memory (embeddings)
+  {
+    id: "memory",
+    name: "Memory (embeddings)",
+    description:
+      "Embed agent memories for semantic recall through any OpenAI-compatible embeddings endpoint.",
+    category: "llm",
+    iconKey: "brain",
+    docsUrl: "https://docs.agent-swarm.dev/docs/architecture/memory",
+    specialFlow: "memory-embeddings",
+    fields: [
+      {
+        key: "EMBEDDING_API_KEY",
+        label: "API key",
+        type: "password",
+        required: true,
+        isSecret: true,
+        helpText: "Key for the embeddings endpoint. Falls back to OPENAI_API_KEY when unset.",
+      },
+      {
+        key: "EMBEDDING_API_BASE_URL",
+        label: "Base URL",
+        type: "text",
+        placeholder: "https://api.openai.com/v1",
+        helpText:
+          "OpenAI-compatible base URL. Azure / Microsoft Foundry: https://<resource>.services.ai.azure.com/openai/v1.",
+      },
+      {
+        key: "EMBEDDING_MODEL",
+        label: "Model",
+        type: "text",
+        placeholder: "text-embedding-3-small",
+        helpText: "Embedding model id. On Azure, the embedding deployment name.",
       },
     ],
   },
