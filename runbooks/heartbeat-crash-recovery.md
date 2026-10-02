@@ -466,6 +466,65 @@ A task's `followUpConfig` (its creator's `onCompleted` / `onFailed` / `disabled`
 
 ---
 
+## 5a. API drain: handoff before the API stops
+
+On a deploy the orchestrator stops the API and the workers together. A worker's SIGTERM handoff (`POST /api/tasks/{id}/supersede`, reason `graceful_shutdown`) then runs after the API is gone, fails, and leaves the task `in_progress` for the heartbeat sweep (`crash_recovery`) or the reboot sweep. The drain moves the handoff earlier, while the API still serves. Owner code: `src/be/api-drain.ts`, `src/utils/api-drain.ts`, `shutdown()` in `src/http/index.ts`, and the drain handling in `src/commands/runner.ts`.
+
+```mermaid
+sequenceDiagram
+  participant O as Orchestrator
+  participant A as API
+  participant W as Worker (task in flight)
+  O->>A: SIGTERM
+  A->>A: stop scheduler, heartbeat, queue alarm<br/>draining = true, snapshot live in_progress tasks
+  W->>A: POST /ping (every loop iteration)
+  A-->>W: 204 + X-Swarm-Draining: 1
+  W->>A: POST /api/tasks/{id}/supersede (graceful_shutdown)
+  A-->>W: 200 resumed (resume follow-up pinned to the agent)
+  W->>W: abort session, mark task server-terminal, take no new work
+  A->>A: snapshot tasks all left in_progress (or API_DRAIN_MAX_MS passed)
+  A->>A: close as before (transports, HTTP server, DB), exit 0
+  O->>W: SIGTERM (no in-flight tasks: exits at once)
+```
+
+Pseudocode (current):
+
+```
+# API, on SIGTERM / SIGINT, after stopping scheduler / heartbeat / queue alarm:
+cap = API_DRAIN_MAX_MS (default 30000, max 120000, 0 = skip the whole drain)
+draining = true                                # process-local; a new API process starts false
+ids = in_progress tasks whose agent is not offline and whose agents.lastUpdatedAt is < 30s old
+loop until count(ids still in_progress) == 0 or cap passed: sleep 500ms
+# then the existing shutdown sequence
+
+# While draining:
+#   /api/poll          -> {trigger: null}  (no offer, assignment, pool claim, channel_activity)
+#   poll-task (MCP)    -> "draining", not an empty poll
+#   task-action claim / accept -> refused
+#   every HTTP response carries X-Swarm-Draining: 1
+#   creating tasks, supersede, store-progress and the rest keep working
+
+# Worker main loop, every iteration:
+draining = ping answered with X-Swarm-Draining: 1      # 5xx or no answer keeps the last state
+if draining:
+  for each active task whose session has not settled, up to 3 calls per task:
+    supersede(task, graceful_shutdown)
+    resumed | workflow-failed -> task.serverTerminalStatus = ..., abort session  # slot freed, no finish call
+    alreadyFinished | rejected -> leave the session on its normal path; never retried
+    call failed (5xx, network) -> task keeps running; the SIGTERM handler is still the fallback
+  skip polling                                            # takes no new work
+else: poll as usual                                       # also the path against an API that never drains
+# SIGTERM handler is unchanged except it skips tasks already server-terminal.
+```
+
+Notes:
+
+- The wait only covers tasks held by workers that pinged in the last 30s. A silent worker's tasks belong to the heartbeat sweep.
+- Workers older than this feature ignore the header, so the API waits the full cap when one holds a task.
+- `API_DRAIN_MAX_MS` plus the API's close time must stay under the orchestrator's stop grace period for the API.
+
+---
+
 ## Quick reference: env knobs
 
 All of these are read **dynamically** — `heartbeat.ts` exposes them as getter
@@ -500,6 +559,7 @@ Rollback switches accept `0`/`false` interchangeably (both parse through
 | Same-agent graceful-shutdown pin, rollback (`0` = off) | on | `HEARTBEAT_PIN_GRACEFUL_RESUME` |
 | Routing-affinity pool eligibility gate, rollback (`0` = off) | on | `POOL_AFFINITY_ENFORCEMENT` |
 | Pool-starvation escalation grace | 15 min | `POOL_AFFINITY_ESCALATION_MIN` |
+| API drain cap on SIGTERM (§5a; `0` = off, max 120s) | 30s | `API_DRAIN_MAX_MS` |
 | `autoAssignPoolTasks` pool-scan page size | 50 | `HEARTBEAT_POOL_SCAN_BATCH_SIZE` |
 | `autoAssignPoolTasks` pool-scan hard cap (rows/sweep) | 500 | `HEARTBEAT_POOL_SCAN_CAP` |
 | `getUnassignedTaskIdsForAgent` eligibility-scan page size | 25 | `ELIGIBILITY_SCAN_BATCH_SIZE` |

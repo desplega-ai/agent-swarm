@@ -22,6 +22,13 @@ import { startHangWatchdog } from "./hang-watchdog";
 
 startHangWatchdog();
 
+// The API drain (src/be/api-drain.ts) holds shutdown for up to 30s while a live
+// worker still has an in_progress task. Test servers are stopped with SIGTERM
+// and their fixtures leave in_progress rows on fresh agents, so every teardown
+// would wait out the cap. Spawned servers inherit this; suites that exercise
+// the drain set API_DRAIN_MAX_MS for their own server.
+process.env.API_DRAIN_MAX_MS ??= "0";
+
 // @hono/node-server (pulled in transitively by @modelcontextprotocol/sdk's
 // streamableHttp transport) replaces globalThis.Response/Request with its own
 // lightweight Node-adapter classes the first time getRequestListener() runs.

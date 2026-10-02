@@ -433,7 +433,7 @@ export interface paths {
         put?: never;
         /**
          * Report agent liveness
-         * @description Refreshes the calling agent's status. Workers may send `X-Runtime-Instance-ID`, the per-boot identifier of the calling process. It is ignored unless MULTI_RUNTIME_ENABLED is set. With multi-runtime mode on, the header must identify a live runtime of this agent; an absent, unknown, offline, or foreign identifier makes the call a no-op instead of an error, so workers predating the flag keep running.
+         * @description Refreshes the calling agent's status. Workers may send `X-Runtime-Instance-ID`, the per-boot identifier of the calling process. It is ignored unless MULTI_RUNTIME_ENABLED is set. With multi-runtime mode on, the header must identify a live runtime of this agent; an absent, unknown, offline, or foreign identifier makes the call a no-op instead of an error, so workers predating the flag keep running. While the API is draining after SIGTERM, every response (this one included) carries `X-Swarm-Draining: 1`: workers hand off in-flight tasks and take no new work.
          */
         post: {
             parameters: {
@@ -12334,7 +12334,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Poll for triggers (tasks, mentions) */
+        /**
+         * Poll for triggers (tasks, mentions)
+         * @description While the API is draining after SIGTERM it dispatches nothing: the answer is `{ trigger: null }` and carries `X-Swarm-Draining: 1`, the signal for a worker to hand off in-flight tasks.
+         */
         get: {
             parameters: {
                 query?: never;

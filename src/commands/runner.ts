@@ -45,6 +45,7 @@ import {
   resolveTaskModelSelection,
   type SteeringMessage,
 } from "../types.ts";
+import { isApiDrainingResponse } from "../utils/api-drain.ts";
 import { getApiKey } from "../utils/api-key.ts";
 import { computeBudgetBackoffMs } from "../utils/budget-backoff.ts";
 import { isCodexAuthFailureReason } from "../utils/codex-auth-failure.ts";
@@ -716,8 +717,12 @@ export function scheduleSteeringDispatch(
   return true;
 }
 
-/** Ping the server to indicate activity and update status */
-async function pingServer(config: ApiConfig, _role: string): Promise<void> {
+/**
+ * Ping the server to indicate activity and update status. Resolves to whether
+ * the API is draining, or undefined when it did not answer (down, or a 5xx
+ * from a proxy), so a gap in service never reads as "stopped draining".
+ */
+export async function pingServer(config: ApiConfig, _role: string): Promise<boolean | undefined> {
   const headers: Record<string, string> = {
     "X-Agent-ID": config.agentId,
   };
@@ -729,12 +734,15 @@ async function pingServer(config: ApiConfig, _role: string): Promise<void> {
   }
 
   try {
-    await fetch(`${config.apiUrl}/ping`, {
+    const response = await fetch(`${config.apiUrl}/ping`, {
       method: "POST",
       headers,
     });
+    if (response.status >= 500) return undefined;
+    return isApiDrainingResponse(response);
   } catch {
     // Silently fail - server might not be running
+    return undefined;
   }
 }
 
@@ -2310,6 +2318,8 @@ function setupShutdownHandlers(
           `[${role}] Superseding ${state.activeTasks.size} remaining task(s) for resume after restart...`,
         );
         for (const [taskId, task] of state.activeTasks) {
+          // Already superseded (or terminal) server-side, e.g. by the API-drain handoff.
+          if (task.serverTerminalStatus) continue;
           console.log(`[${role}] Superseding task ${taskId.slice(0, 8)}`);
           task.session.abort("graceful_shutdown").catch(() => {});
           if (apiConfig) {
@@ -2459,10 +2469,14 @@ export interface RunningTask {
   abortRequestedAt?: number;
   /**
    * Terminal status the server already holds for this task, found by
-   * `reconcileActiveTasks`. Completion then only frees the slot and leaves
-   * the server's output and failureReason alone.
+   * `reconcileActiveTasks` or set by an API-drain handoff. Completion then only
+   * frees the slot and leaves the server's output and failureReason alone.
    */
   serverTerminalStatus?: string;
+  /** API-drain handoff calls made for this task (see `handOffTasksForApiDrain`). */
+  drainHandoffAttempts?: number;
+  /** The API answered the drain handoff for this task, so it is not retried. */
+  drainHandoffSettled?: boolean;
 }
 
 /** Runner state for tracking concurrent tasks */
@@ -2494,6 +2508,12 @@ export interface RunnerState {
    * value is the reset time in ms. Read by `selectCredential` (T5).
    */
   modelWindowBlocks: Map<string, number>;
+  /**
+   * The API is draining (it sent `X-Swarm-Draining`): in-flight tasks are handed
+   * off and no new work is taken until a response arrives without the header.
+   * Unset against an API that never drains.
+   */
+  apiDraining?: boolean;
 }
 
 /** Buffer for session logs */
@@ -2992,7 +3012,7 @@ interface Trigger {
 }
 
 /** Options for polling */
-interface PollOptions {
+export interface PollOptions {
   apiUrl: string;
   apiKey: string;
   agentId: string;
@@ -3003,6 +3023,8 @@ interface PollOptions {
   since?: string; // Optional: for filtering finished tasks
   /** Live harness provider; keys the MODEL_TIER_* overrides sent with the poll. */
   harnessProvider?: ProviderName;
+  /** Told, on every answered poll, whether the API is draining. */
+  onApiDrainSignal?: (draining: boolean) => void;
 }
 
 /**
@@ -3197,8 +3219,8 @@ export async function registerAgent(opts: {
   return {};
 }
 
-/** Poll for triggers via HTTP API */
-async function pollForTrigger(opts: PollOptions): Promise<Trigger | null> {
+/** Poll for triggers via HTTP API. Exported for tests. */
+export async function pollForTrigger(opts: PollOptions): Promise<Trigger | null> {
   if (!isPollTracingEnabled()) {
     return pollForTriggerOnce(opts);
   }
@@ -3262,10 +3284,15 @@ async function pollForTriggerOnce(opts: PollOptions): Promise<Trigger | null> {
         continue;
       }
 
+      const draining = isApiDrainingResponse(response);
+      opts.onApiDrainSignal?.(draining);
+
       const data = (await response.json()) as { trigger: Trigger | null };
       if (data.trigger) {
         return data.trigger;
       }
+      // A draining API dispatches nothing: end the window so the loop can hand off.
+      if (draining) return null;
     } catch (error) {
       console.warn(`[runner] Poll request error: ${error}`);
     }
@@ -4695,6 +4722,69 @@ function requestSessionAbort(task: RunningTask, reason: string, at: number): voi
   Promise.resolve()
     .then(() => task.session.abort(reason))
     .catch(() => {});
+}
+
+/** Handoff calls per task while the API drains; a call the API answered is never repeated. */
+export const API_DRAIN_HANDOFF_MAX_ATTEMPTS = 3;
+
+/**
+ * Fold the API's drain signal (the `X-Swarm-Draining` header on a ping or poll
+ * answer) into `state`. `undefined` means the API did not answer: keep the last
+ * known state. Exported for tests.
+ */
+export function applyApiDrainSignal(
+  state: RunnerState,
+  role: string,
+  draining: boolean | undefined,
+): void {
+  if (draining === undefined) return;
+  if (draining && !state.apiDraining) {
+    console.log(`[${role}] API is draining: handing off in-flight tasks, taking no new work`);
+  } else if (!draining && state.apiDraining) {
+    console.log(`[${role}] API stopped draining: resuming normal polling`);
+  }
+  state.apiDraining = draining;
+}
+
+/**
+ * The API is draining, so it still serves but will stop soon: supersede each
+ * in-flight task now, while the call can land, instead of in the SIGTERM
+ * handler, which compose runs after the API is gone. Same API call and reason
+ * as the SIGTERM handoff, so the resume follow-up is identical.
+ *
+ * A task the API superseded is marked server-terminal and its session aborted;
+ * completion then frees the slot without a finish call. A failed call leaves
+ * the task running, up to `API_DRAIN_HANDOFF_MAX_ATTEMPTS`, and the SIGTERM
+ * handler stays the fallback. Exported for tests.
+ */
+export async function handOffTasksForApiDrain(
+  state: RunnerState,
+  role: string,
+  apiConfig: ApiConfig,
+): Promise<void> {
+  for (const [taskId, task] of state.activeTasks) {
+    // A settled session reports its own result through `checkCompletedProcesses`.
+    if (task.result !== null || task.drainHandoffSettled) continue;
+    const attempts = task.drainHandoffAttempts ?? 0;
+    if (attempts >= API_DRAIN_HANDOFF_MAX_ATTEMPTS) continue;
+    task.drainHandoffAttempts = attempts + 1;
+
+    const outcome = await supersedeTaskViaAPI(apiConfig, role, taskId, "graceful_shutdown");
+    if (!outcome.ok) {
+      console.warn(
+        `[${role}] Drain handoff for task ${taskId.slice(0, 8)} failed (attempt ${attempts + 1}/${API_DRAIN_HANDOFF_MAX_ATTEMPTS}); the task keeps running`,
+      );
+      continue;
+    }
+    task.drainHandoffSettled = true;
+    if (outcome.kind === "resumed" || outcome.kind === "workflow-failed") {
+      task.serverTerminalStatus = outcome.kind === "resumed" ? "superseded" : "failed";
+      console.log(`[${role}] Handed off task ${taskId.slice(0, 8)} ahead of the API stopping`);
+      requestSessionAbort(task, "graceful_shutdown", Date.now());
+    }
+    // "alreadyFinished": the task ended on its own. "rejected": the API refused
+    // the supersede on purpose. Either way the session follows its normal path.
+  }
 }
 
 /**
@@ -6307,8 +6397,13 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   const taskReconcileIntervalMs = resolveTaskReconcileIntervalMs();
 
   while (true) {
-    // Ping server on each iteration to keep status updated
-    await pingServer(apiConfig, role);
+    // Ping server on each iteration to keep status updated. The answer also
+    // carries the API's drain signal, which reaches workers at capacity that
+    // do not poll.
+    applyApiDrainSignal(state, role, await pingServer(apiConfig, role));
+    if (state.apiDraining) {
+      await handOffTasksForApiDrain(state, role, apiConfig);
+    }
 
     // Check for completed processes first and ensure tasks are marked as finished
     await checkCompletedProcesses(state, role, apiConfig, cancelledSignaled);
@@ -6412,8 +6507,10 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
       }
     }
 
-    // Only poll if we have capacity
-    if (state.activeTasks.size < state.maxConcurrent) {
+    // Only poll if we have capacity and the API is not draining
+    if (state.apiDraining) {
+      await Bun.sleep(1000);
+    } else if (state.activeTasks.size < state.maxConcurrent) {
       if (Date.now() - lastOrphanRecoveryAt > ORPHAN_RECOVERY_INTERVAL_MS) {
         lastOrphanRecoveryAt = Date.now();
         const recoveredOrphans = await recoverOrphanedInProgressTasks(apiConfig);
@@ -6439,6 +6536,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
         runtimeInstanceId,
         pollTimeout: effectiveTimeout,
         harnessProvider: state.harnessProvider,
+        onApiDrainSignal: (draining) => applyApiDrainSignal(state, role, draining),
       });
 
       if (trigger) {

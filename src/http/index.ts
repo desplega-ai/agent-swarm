@@ -9,6 +9,7 @@ import type { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/se
 import { getEnabledCapabilities, hasCapability } from "@/server";
 import { initAgentMail } from "../agentmail";
 import { initAzureDevOps } from "../azure-devops";
+import { drainApi, isApiDraining } from "../be/api-drain";
 import {
   closeDb,
   emitBuiltInIntegrationConnectedOnce,
@@ -53,6 +54,7 @@ import { startScriptRunSupervisor, stopScriptRunSupervisor } from "../script-wor
 import { getServerSessionsProcessed } from "../server-runtime-counters";
 import { startSlackApp, stopSlackApp } from "../slack";
 import { initTelemetry, telemetry } from "../telemetry";
+import { API_DRAINING_HEADER } from "../utils/api-drain";
 import { getApiKey } from "../utils/api-key";
 import { getMcpBaseUrl } from "../utils/constants";
 import { isEnvFlagEnabled } from "../utils/env-flag";
@@ -318,6 +320,8 @@ const httpServer = createHttpServer(async (req, res) => {
     // nest under it instead of attaching to the root with no parent.
     const handleRequest = async () => {
       setCorsHeaders(req, res);
+      // Tells polling workers to hand off in-flight tasks while this API still serves.
+      if (isApiDraining()) res.setHeader(API_DRAINING_HEADER, "1");
 
       const queryParams = parseQueryParams(req.url || "");
       const myAgentId = req.headers["x-agent-id"] as string | undefined;
@@ -468,6 +472,10 @@ async function shutdown() {
 
   // Stop the out-of-band queue alarm before disconnecting its Slack notifier.
   stopQueueStallAlarm();
+
+  // Dispatch has stopped. Keep serving, bounded, while workers hand off their
+  // in-flight tasks; new work waits for the next API (see src/be/api-drain.ts).
+  await drainApi();
 
   // Stop durable script workflow subprocesses
   await stopScriptRunSupervisor();

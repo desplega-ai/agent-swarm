@@ -285,6 +285,16 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         restartRequired: true,
       },
       {
+        key: "API_DRAIN_MAX_MS",
+        label: "Shutdown drain cap",
+        description:
+          "When the API is stopped it keeps serving, dispatches no new work, and waits this long for workers to hand off their in-flight tasks before it closes. 0 turns the drain off. Keep the API's stop grace period above this value.",
+        kind: "number",
+        unit: "ms",
+        defaultValue: "30000",
+        placeholder: "30000",
+      },
+      {
         key: "HEARTBEAT_STALL_THRESHOLD_MIN",
         label: "Stall threshold",
         description: "Minutes without any task update before a task is classified as stalled.",

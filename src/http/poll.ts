@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { ensure } from "@desplega.ai/business-use";
 import { z } from "zod";
+import { isApiDraining } from "../be/api-drain";
 import { canClaim } from "../be/budget-admission";
 import {
   type BudgetRefusalContext,
@@ -172,6 +173,9 @@ const pollTriggers = route({
   path: "/api/poll",
   pattern: ["api", "poll"],
   summary: "Poll for triggers (tasks, mentions)",
+  description:
+    "While the API is draining after SIGTERM it dispatches nothing: the answer is `{ trigger: null }` " +
+    "and carries `X-Swarm-Draining: 1`, the signal for a worker to hand off in-flight tasks.",
   tags: ["Poll"],
   auth: { apiKey: true, agentId: true },
   headers: runtimeInstanceHeader("poll for work").extend({
@@ -366,6 +370,13 @@ export async function handlePoll(
           isMultiRuntimeEnabled() &&
           !(runtimeInstanceId && (await touchRuntimeInstance(runtimeInstanceId, agent.id)))
         ) {
+          return { trigger: null };
+        }
+
+        // A draining API dispatches nothing: offers, assignments and pool claims
+        // wait for the next API. Workers learn to hand off from the
+        // X-Swarm-Draining header the HTTP pipeline adds (src/be/api-drain.ts).
+        if (isApiDraining()) {
           return { trigger: null };
         }
 
@@ -672,6 +683,7 @@ export async function handlePoll(
     // Throttled to avoid Slack API rate limits (~50 calls/min).
     if (
       result.trigger === null &&
+      !isApiDraining() &&
       process.env.LEAD_MONITOR_CHANNELS === "true" &&
       Date.now() - lastChannelActivityCheckAt >= CHANNEL_ACTIVITY_INTERVAL_MS
     ) {

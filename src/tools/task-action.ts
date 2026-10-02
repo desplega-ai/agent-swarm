@@ -1,5 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
+import { isApiDraining } from "@/be/api-drain";
 import { AssetKeyAuthorizationError, authorizeAssetKeyWrite } from "@/be/asset-key-auth";
 import { resolveTaskAuditUserId } from "@/be/audit-user";
 import { canClaim } from "@/be/budget-admission";
@@ -174,6 +175,14 @@ async function staleRuntimeResult(ctx: ToolCtx, agentId: string): Promise<TaskAc
   return {
     success: false,
     message: "This runtime is no longer registered. Re-register before taking work.",
+  };
+}
+
+/** A draining API dispatches nothing (src/be/api-drain.ts); claim and accept wait for the next API. */
+function apiDrainingResult(action: "claim" | "accept"): TaskActionResult {
+  return {
+    success: false,
+    message: `The API is draining for a restart and dispatches no new work, so this ${action} was not made. Retry shortly.`,
   };
 }
 
@@ -353,6 +362,7 @@ export async function taskActionHandler(
         }
         const staleClaimRuntime = await staleRuntimeResult(ctx, agentId);
         if (staleClaimRuntime) return staleClaimRuntime;
+        if (isApiDraining()) return apiDrainingResult("claim");
         // Check capacity before claiming
         if (!(await hasCapacity(agentId))) {
           const activeCount = await getActiveTaskCount(agentId);
@@ -462,6 +472,7 @@ export async function taskActionHandler(
         // budget admission below so a retired process cannot take the offer.
         const staleAcceptRuntime = await staleRuntimeResult(ctx, agentId);
         if (staleAcceptRuntime) return staleAcceptRuntime;
+        if (isApiDraining()) return apiDrainingResult("accept");
         const existingTask = await getTaskById(taskId);
         if (!existingTask) {
           return { success: false, message: `Task "${taskId}" not found.` };
