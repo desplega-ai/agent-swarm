@@ -7,11 +7,11 @@ function noContinueBlocker() {}
 /**
  * Memory integration: the `/setup` embeddings form, with the same presets and
  * the same test-and-save probe (`POST /api/onboarding/memory`). The generic
- * fields below it edit the stored values by hand.
+ * fields, collapsed under Advanced, edit the stored values by hand.
  */
 export function MemoryEmbeddingsSection() {
   const { data } = useOnboarding();
-  // Without the onboarding API (an older server) only the generic fields show.
+  // Without the onboarding API (an older server) only the Advanced fields show.
   if (!data) return null;
   const { configured, dimensions } = data.signals.embeddings;
   return (

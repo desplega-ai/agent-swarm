@@ -122,7 +122,11 @@ export interface IntegrationDef {
   disableKey?: string;
   /** Changes require API server restart to take effect. */
   restartRequired?: boolean;
-  /** Custom flow that overrides the generic field form. */
+  /**
+   * Custom section rendered above the generic field form. Its component, and
+   * whether the generic form stays shown, moves under Advanced, or is replaced,
+   * live in `SPECIAL_FLOWS` (components/integrations/special-flows.tsx).
+   */
   specialFlow?: IntegrationSpecialFlow;
   /**
    * Skills recommended alongside this integration. Env-var configuration is

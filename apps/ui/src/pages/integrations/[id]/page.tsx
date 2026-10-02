@@ -36,14 +36,10 @@ import {
 } from "@/api/hooks/use-integrations-meta";
 import { useInstallRemoteSkill } from "@/api/hooks/use-skills";
 import type { SwarmConfig } from "@/api/types";
-import { ClaudeManagedSection } from "@/components/integrations/claude-managed-section";
-import { CodexOAuthSection } from "@/components/integrations/codex-oauth-section";
 import { FieldRenderer } from "@/components/integrations/field-renderer";
 import { IntegrationStatusBadge } from "@/components/integrations/integration-status-badge";
-import { JiraOAuthSection } from "@/components/integrations/jira-oauth-section";
-import { LinearOAuthSection } from "@/components/integrations/linear-oauth-section";
-import { MemoryEmbeddingsSection } from "@/components/integrations/memory-embeddings-section";
 import { RecommendedSkillsSection } from "@/components/integrations/required-skills-section";
+import { SPECIAL_FLOWS } from "@/components/integrations/special-flows";
 import { BrandLogo } from "@/components/shared/brand-logo";
 import { EmptyState } from "@/components/shared/empty-state";
 import { PageSkeleton } from "@/components/shared/page-skeleton";
@@ -332,18 +328,18 @@ function IntegrationDetailInner({
   const isDisabled =
     !!disableCfg && ["true", "1", "yes"].includes(disableCfg.value.trim().toLowerCase());
 
-  const requiredFields = allFields.filter(
-    (f) => f.required === true || (f.advanced !== true && !f.required),
-  );
-  const advancedFields = allFields.filter((f) => f.advanced === true);
+  const specialFlow = def.specialFlow ? SPECIAL_FLOWS[def.specialFlow] : undefined;
+  const genericFields = specialFlow?.genericFields ?? "shown";
+  const isReplaced = genericFields === "replaced";
+  const allAdvanced = genericFields === "advanced";
+
+  const requiredFields = allAdvanced
+    ? []
+    : allFields.filter((f) => f.required === true || (f.advanced !== true && !f.required));
+  const advancedFields = allAdvanced ? allFields : allFields.filter((f) => f.advanced === true);
   const strictRequiredFields = allFields.filter((f) => f.required === true);
   const hasConfigGroups = (def.configGroups?.length ?? 0) > 0;
 
-  const isLinearOAuth = def.specialFlow === "linear-oauth";
-  const isJiraOAuth = def.specialFlow === "jira-oauth";
-  const isCodexCli = def.specialFlow === "codex-cli";
-  const isClaudeManagedCli = def.specialFlow === "claude-managed-cli";
-  const isMemoryEmbeddings = def.specialFlow === "memory-embeddings";
   const isGithub = def.id === "github";
 
   return (
@@ -370,8 +366,8 @@ function IntegrationDetailInner({
       <DetailPageBody
         main={
           <div className="space-y-6">
-            {/* Action bar — hidden for codex-cli (no catalog fields to save/reset via the generic flow). */}
-            {!isCodexCli && (
+            {/* Action bar — hidden when a special flow replaces the generic form. */}
+            {!isReplaced && (
               <div className="flex flex-wrap items-center gap-2 border border-border rounded-md p-3 bg-muted/20">
                 <Button
                   onClick={handleSave}
@@ -412,25 +408,13 @@ function IntegrationDetailInner({
               </div>
             )}
 
-            {/* Linear OAuth connection card — shown ABOVE the generic form. */}
-            {isLinearOAuth && <LinearOAuthSection />}
-
-            {/* Jira OAuth connection card — shown ABOVE the generic form. */}
-            {isJiraOAuth && <JiraOAuthSection />}
-
-            {/* Claude Managed Agents — CLI explainer + Test connection. */}
-            {isClaudeManagedCli && (
-              <ClaudeManagedSection def={def} configs={configs} envPresence={envPresence} />
+            {/* Special flow (OAuth card, CLI explainer, embeddings form) — ABOVE the generic form. */}
+            {specialFlow && (
+              <specialFlow.Section def={def} configs={configs} envPresence={envPresence} />
             )}
 
-            {/* Memory — the /setup embeddings form (presets + test-and-save probe). */}
-            {isMemoryEmbeddings && <MemoryEmbeddingsSection />}
-
             {/* Body */}
-            {isCodexCli ? (
-              // Codex has zero catalog fields; swap the generic form entirely.
-              <CodexOAuthSection />
-            ) : allFields.length === 0 ? (
+            {isReplaced ? null : allFields.length === 0 ? (
               <EmptyState
                 icon={Plug}
                 title="No configurable fields"
