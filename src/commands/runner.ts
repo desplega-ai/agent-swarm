@@ -1634,16 +1634,20 @@ async function validateProviderOutputIfNeeded(
 
 /**
  * Texts that may hold the JSON in an agent's final message, in the order to
- * try them: the whole message, each fenced code block, then the span from the
- * first `{` (or `[`) to the last `}` (or `]`). Agents often answer a
- * schema-bound task with "Here is the result:" plus a ```json block instead of
- * calling store-progress, and `JSON.parse` on the whole message fails on that.
+ * try them: the whole message, each fenced code block from last to first, then
+ * the span from the first `{` (or `[`) to the last `}` (or `]`). Agents often
+ * answer a schema-bound task with "Here is the result:" plus a ```json block
+ * instead of calling store-progress, and `JSON.parse` on the whole message
+ * fails on that. Fences run last to first because an earlier fence is often an
+ * example or a draft that also matches the schema, and the answer comes last.
  */
 function jsonOutputCandidates(text: string): string[] {
   const candidates = [text];
+  const fenced: string[] = [];
   for (const match of text.matchAll(/```[a-zA-Z]*[ \t]*\r?\n([\s\S]*?)\r?\n[ \t]*```/g)) {
-    if (match[1]?.trim()) candidates.push(match[1].trim());
+    if (match[1]?.trim()) fenced.push(match[1].trim());
   }
+  candidates.push(...fenced.reverse());
   for (const [open, close] of [
     ["{", "}"],
     ["[", "]"],

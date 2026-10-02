@@ -144,6 +144,28 @@ describe("ensureTaskFinished with fenced JSON output", () => {
     expect(lastFinishBody?.output).toBe(finalText);
   });
 
+  test("persists the final fence when an earlier example fence also matches outputSchema", async () => {
+    const example = JSON.stringify({ jobId: "example", clusters: [] });
+    const finalText = `Example:\n\`\`\`json\n${example}\n\`\`\`\n\nFinal answer:\n\`\`\`json\n${JSON.stringify(bigResult(), null, 2)}\n\`\`\``;
+
+    await ensureTaskFinished(config, "worker", "task-fenced", 0, undefined, finalText, "claude");
+
+    expect(extractionCalls).toBe(0);
+    expect(lastFinishBody?.status).toBe("completed");
+    expect(JSON.parse(String(lastFinishBody?.output))).toEqual(bigResult());
+  });
+
+  test("recovers the final fence after an earlier fence that is not valid output", async () => {
+    const draft = `${JSON.stringify({ jobId: "draft" })}\n{"jobId": "draft", "clusters": [`;
+    const finalText = `Draft:\n\`\`\`json\n${draft}\n\`\`\`\n\nFinal answer:\n\`\`\`json\n${JSON.stringify(bigResult())}\n\`\`\``;
+
+    await ensureTaskFinished(config, "worker", "task-fenced", 0, undefined, finalText, "claude");
+
+    expect(extractionCalls).toBe(0);
+    expect(lastFinishBody?.status).toBe("completed");
+    expect(JSON.parse(String(lastFinishBody?.output))).toEqual(bigResult());
+  });
+
   test("still fails when the fenced JSON does not match outputSchema", async () => {
     const finalText = `Done.\n\n\`\`\`json\n${JSON.stringify({ jobId: "job-1" })}\n\`\`\``;
 
