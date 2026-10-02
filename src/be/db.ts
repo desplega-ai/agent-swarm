@@ -281,6 +281,7 @@ export {
   getTasksCount,
   hasNonTerminalRerouteDecisionChild,
   hasNonTerminalResumeChild,
+  isLinearTrackerContextKey,
   markFinalizedSlackRelaysDelivered,
   markSlackRelayAttempted,
   markSlackRelayDelivered,

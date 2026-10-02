@@ -166,7 +166,7 @@ describe("send-task: requestedByUserId inheritance", () => {
     expect(await requesterWasInherited(s.task!.id)).toBe(1);
   });
 
-  test("Linear tracker holder delegates a child", async () => {
+  test("Linear tracker holder delegates two children in a row", async () => {
     for (const variant of ["implicit", "explicit-key", "explicit-parent"]) {
       const parentTask = await createTaskExtended("linear source task", {
         requestedByUserId: userAId,
@@ -189,7 +189,67 @@ describe("send-task: requestedByUserId inheritance", () => {
       expect(s.task?.id).not.toBe(parentTask.id);
       const created = await getTaskById(s.task!.id);
       expect(created?.parentTaskId).toBe(parentTask.id);
+      const second = structuredOf(
+        await callSendTask(
+          server,
+          { task: "second linear child", allowDuplicate: true, ...args },
+          LEAD_ID,
+          parentTask.id,
+        ),
+      );
+      expect(second.success).toBe(true);
+      expect(second.task?.id).not.toBe(s.task?.id);
+      expect((await getTaskById(second.task!.id))?.parentTaskId).toBe(parentTask.id);
     }
+  });
+
+  test("Linear tracker child delegates a grandchild while the holder is active", async () => {
+    const holder = await createTaskExtended("active holder", {
+      contextKey: linearContextKey({ issueIdentifier: "DES-206" }),
+    });
+    const child = structuredOf(
+      await callSendTask(server, { task: "child", allowDuplicate: true }, LEAD_ID, holder.id),
+    );
+    expect(child.success).toBe(true);
+    const grandchild = structuredOf(
+      await callSendTask(
+        server,
+        { task: "grandchild", allowDuplicate: true },
+        LEAD_ID,
+        child.task!.id,
+      ),
+    );
+    expect(grandchild.success).toBe(true);
+    expect((await getTaskById(grandchild.task!.id))?.parentTaskId).toBe(child.task!.id);
+  });
+
+  test("Linear tracker holder delegates after its completed child links an open PR", async () => {
+    const holder = await createTaskExtended("holder awaiting review", {
+      contextKey: linearContextKey({ issueIdentifier: "DES-207" }),
+    });
+    const child = structuredOf(
+      await callSendTask(
+        server,
+        { task: "implementation", allowDuplicate: true },
+        LEAD_ID,
+        holder.id,
+      ),
+    );
+    expect(child.success).toBe(true);
+    await getDbClient().run(
+      "UPDATE agent_tasks SET status = 'completed', vcsProvider = 'github', vcsRepo = 'desplega-ai/agent-swarm', vcsNumber = 875, vcsUrl = 'https://github.com/desplega-ai/agent-swarm/pull/875' WHERE id = ?",
+      [child.task!.id],
+    );
+    const review = structuredOf(
+      await callSendTask(
+        server,
+        { task: "review implementation", allowDuplicate: true },
+        LEAD_ID,
+        holder.id,
+      ),
+    );
+    expect(review.success).toBe(true);
+    expect((await getTaskById(review.task!.id))?.parentTaskId).toBe(holder.id);
   });
 
   test("Linear tracker delegation skips a different active task on the same key", async () => {
@@ -215,7 +275,7 @@ describe("send-task: requestedByUserId inheritance", () => {
     expect(await getDbClient().get("SELECT COUNT(*) AS count FROM agent_tasks")).toEqual(before);
   });
 
-  test("Linear tracker delegation still skips a linked open PR", async () => {
+  test("Linear tracker completed task with an unrelated linked PR blocks delegation", async () => {
     const key = linearContextKey({ issueIdentifier: "DES-205" });
     const parent = await createTaskExtended("linear holder with linked PR", {
       contextKey: key,
@@ -227,6 +287,11 @@ describe("send-task: requestedByUserId inheritance", () => {
     await getDbClient().run("UPDATE agent_tasks SET status = 'completed' WHERE id = ?", [
       parent.id,
     ]);
+    const unrelated = await createTaskExtended("unrelated caller");
+    await getDbClient().run("UPDATE agent_tasks SET contextKey = ? WHERE id = ?", [
+      key,
+      unrelated.id,
+    ]);
     const before = await getDbClient().get<{ count: number }>(
       "SELECT COUNT(*) AS count FROM agent_tasks",
     );
@@ -235,29 +300,12 @@ describe("send-task: requestedByUserId inheritance", () => {
       server,
       { task: "blocked child after PR", allowDuplicate: true },
       LEAD_ID,
-      parent.id,
+      unrelated.id,
     );
     const s = structuredOf(result);
     expect(s.success).toBe(false);
     expect(s.message).toContain("already has linked open PR");
     expect(s.task?.id).toBe(parent.id);
     expect(await getDbClient().get("SELECT COUNT(*) AS count FROM agent_tasks")).toEqual(before);
-
-    const activeParent = await createTaskExtended("active holder beside linked PR");
-    await getDbClient().run("UPDATE agent_tasks SET contextKey = ? WHERE id = ?", [
-      key,
-      activeParent.id,
-    ]);
-    const activeResult = structuredOf(
-      await callSendTask(
-        server,
-        { task: "blocked child from active holder", allowDuplicate: true },
-        LEAD_ID,
-        activeParent.id,
-      ),
-    );
-    expect(activeResult.success).toBe(false);
-    expect(activeResult.message).toContain("already has linked open PR");
-    expect(activeResult.task?.id).toBe(parent.id);
   });
 });

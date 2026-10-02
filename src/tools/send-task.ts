@@ -15,6 +15,7 @@ import {
   getUserById,
   hasCapacity,
   isExtensionAgent,
+  isLinearTrackerContextKey,
 } from "@/be/db";
 import { repointTrackerSyncBySwarmId } from "@/be/db-queries/tracker";
 import { explicitModelErrorForAgent } from "@/be/model-validation";
@@ -560,9 +561,9 @@ export async function sendTaskHandler(
     const raced = await evaluateDedupGuards();
     if (raced) return { success: raced.ok, message: raced.message, task: raced.task };
 
-    // This transaction already checked the tracker key, excluding only the
-    // delegating parent. The creation guard would otherwise match that parent.
-    if (effectiveParentTask?.contextKey?.startsWith("task:trackers:linear:")) {
+    // This transaction already checked the tracker key, excluding the caller's
+    // lineage. The creation guard would otherwise match work in that lineage.
+    if (isLinearTrackerContextKey(effectiveParentTask?.contextKey)) {
       taskOptions.bypassTrackerContextDedup = true;
     }
 

@@ -441,6 +441,7 @@ value:installSkill
 value:installSystemDefaultSkillsForAgent
 value:isAgentEligibleForTask
 value:isExtensionAgent
+value:isLinearTrackerContextKey
 value:isPendingSlackMessage
 value:isPoolAffinityEnforcementEnabled
 value:isSettledSlackMessage
@@ -621,6 +622,7 @@ value:getTasksByStatus
 value:getTasksCount
 value:hasNonTerminalRerouteDecisionChild
 value:hasNonTerminalResumeChild
+value:isLinearTrackerContextKey
 value:markFinalizedSlackRelaysDelivered
 value:markSlackRelayAttempted
 value:markSlackRelayDelivered
