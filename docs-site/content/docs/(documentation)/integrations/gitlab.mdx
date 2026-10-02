@@ -58,6 +58,8 @@ GITLAB_NAME=Worker Agent          # Git commit name for GitLab repos
 
 The runner automatically detects whether a task targets a GitHub or GitLab repository and uses the appropriate CLI tool (`gh` or `glab`).
 
+At boot, `docker-entrypoint.sh` also adds a git credential helper for the GitLab host (`GITLAB_URL`, default `https://gitlab.com`) that reads `GITLAB_TOKEN` from the environment, so the token is never written to disk. Registered GitLab repos that auto-clone at boot use plain `git clone` with it, because `gh repo clone` only speaks GitHub.
+
 ## VCS Provider Detection
 
 Agent Swarm uses a provider adapter pattern to support both GitHub and GitLab. When a task is created from a webhook event, the `vcsProvider` field is set automatically. Workers use this to select the right CLI:

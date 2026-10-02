@@ -236,6 +236,21 @@ export const SCENARIO_CARDS: Readonly<Record<string, ScenarioCard>> = {
     tags: { topology: "single-agent", flow: "sequential", kind: "capability" },
     changelog: [{ version: 1, note: "Baseline of human-in-loop (Phase 8, plan Q6)." }],
   },
+  "real-diff-agent-fs": {
+    summary:
+      "Can one agent ship a real code change: read a bug report, fix a repo it has never seen, and push a branch that passes tests it never saw?",
+    agentDoes:
+      "Gets the whole agent-fs repo (a bun monorepo, installed) at the parent commit of a merged fix, the bug report text, and a git remote on the same machine. The report is a symptom: a file written as `docs/a.md` cannot be read back as `/docs/a.md`. The agent finds every op that takes a path, fixes them, then commits on a branch and pushes.",
+    scoredBy:
+      "The grader clones the pushed branch fresh, drops the tests that shipped with the real fix on top and runs them; none were in the sandbox. A push to the remote and no lookup of the fix on GitHub or npm are gates; changes left in the working tree score 0. Correctness (weight 8): seven groups, each 1 when every test in it is green. Six are families of ops (writes, reads, history, move and copy, comments, prefixes); the seventh holds behavior that already worked and must not break, and earns credit only if op source changed. Delivery (weight 1): the push, and the rest of the core suite still green. Efficiency (weight 1): cost and time against the budget. No judge. Pass at 0.75.",
+    tags: { topology: "single-agent", flow: "sequential", kind: "capability" },
+    changelog: [
+      {
+        version: 1,
+        note: "Added as the first real-diff scenario: desplega-ai/agent-fs PR #73 (op-level path normalization) at its parent commit, hidden tests, push to a sandbox remote.",
+      },
+    ],
+  },
 };
 
 /** The card for a scenario id, or null for one that was never registered (historical runs). */

@@ -441,6 +441,7 @@ value:installSkill
 value:installSystemDefaultSkillsForAgent
 value:isAgentEligibleForTask
 value:isExtensionAgent
+value:isLinearTrackerContextKey
 value:isPendingSlackMessage
 value:isPoolAffinityEnforcementEnabled
 value:isSettledSlackMessage
@@ -502,8 +503,10 @@ value:recordBudgetRefusalNotification
 value:recordInlineScriptRun
 value:recordKeyAuthFailure
 value:recordKeyRateLimitWindows
+value:recordKeySeatMismatch
 value:recordKeyUsage
 value:recordSlackMessage
+value:recordTaskProviderIfUnset
 value:recordTaskPullRequestAttachments
 value:refreshDraftTaskLease
 value:rejectTask
@@ -619,6 +622,7 @@ value:getTasksByStatus
 value:getTasksCount
 value:hasNonTerminalRerouteDecisionChild
 value:hasNonTerminalResumeChild
+value:isLinearTrackerContextKey
 value:markFinalizedSlackRelaysDelivered
 value:markSlackRelayAttempted
 value:markSlackRelayDelivered

@@ -46,7 +46,7 @@ export interface CostData {
    * for every provider with seeded pricing rows, so every adapter should
    * populate this field.
    */
-  provider?: "claude" | "claude-managed" | "codex" | "pi" | "opencode" | "devin" | "acp";
+  provider?: "claude" | "claude-managed" | "codex" | "pi" | "opencode" | "devin" | "acp" | "dsh";
 }
 
 import type { ProviderName, SteerMode } from "../types";
@@ -203,6 +203,12 @@ export interface ProviderResult {
    * rejection event arrived; it orders the report against other workers'.
    */
   modelRateLimit?: { window: string; model: ModelFamily; resetAt: string; observedAt?: string };
+  /**
+   * Set when the Claude CLI sent a rejected `rate_limit_event` with
+   * `errorCode: "credits_required"`: the key's seat cannot run the model. Not
+   * a rate limit, so `rateLimitResetAt` is never set from that event.
+   */
+  creditsRequired?: { observedAt: string; overageDisabledReason?: string };
   /**
    * Reasoning/effort level the adapter actually applied (Phase 4). `null`
    * means `applyReasoningEffort()` returned `noop` (capability rejected the

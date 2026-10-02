@@ -8,7 +8,7 @@
 #   worker-slim  (target)        — worker-base + repo artifacts. For CI + E2E.
 #   worker-full-base             — worker-base + dev toolchain, Playwright
 #                                  Chromium + agent-browser, postgres/redis,
-#                                  glab, context-mode plugins
+#                                  glab, az (azure-devops), context-mode plugins
 #   worker-full  (target, LAST)  — worker-full-base + repo artifacts. Default
 #                                  build; published as :latest.
 #
@@ -37,8 +37,10 @@ COPY apps/ui/package.json ./apps/ui/package.json
 COPY apps/templates-ui/package.json ./apps/templates-ui/package.json
 COPY apps/evals/package.json ./apps/evals/package.json
 COPY packages/model-catalog/package.json ./packages/model-catalog/package.json
+COPY packages/model-routing/package.json ./packages/model-routing/package.json
 RUN bun install --frozen-lockfile
 COPY packages/model-catalog/ ./packages/model-catalog/
+COPY packages/model-routing/ ./packages/model-routing/
 COPY src/ ./src/
 COPY plugin/opencode-plugins/lib/memory-raters.ts ./plugin/opencode-plugins/lib/memory-raters.ts
 COPY templates/ ./templates/
@@ -121,7 +123,7 @@ RUN if ! gh extension install github/gh-stack; then \
     fi
 
 # Install Claude CLI (pinned version — bump ARG to update)
-ARG CLAUDE_CODE_VERSION=2.1.285
+ARG CLAUDE_CODE_VERSION=2.1.287
 USER root
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache \
     npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} \
@@ -135,7 +137,7 @@ ENV PATH="/home/worker/.local/bin:$PATH"
 # Install pi-mono CLI (alternative harness, selected via HARNESS_PROVIDER=pi)
 # PI_PACKAGE_DIR tells pi-mono where to find its package.json at runtime
 # (needed because bun --compile makes process.execPath resolve to the binary location)
-ARG PI_CODING_AGENT_VERSION=0.99.1
+ARG PI_CODING_AGENT_VERSION=1.0.0
 USER root
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache \
     npm install -g @earendil-works/pi-coding-agent@${PI_CODING_AGENT_VERSION} \
@@ -147,7 +149,7 @@ ENV PI_PACKAGE_DIR=/usr/lib/node_modules/@earendil-works/pi-coding-agent
 # Install Codex CLI (alternative harness, selected via HARNESS_PROVIDER=codex)
 # Pinned version must match direct @openai/codex in package.json. Enforced by
 # scripts/check-codex-default-model.sh and the CI merge gate.
-ARG CODEX_VERSION=0.159.2
+ARG CODEX_VERSION=0.160.0
 USER root
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache \
     npm install -g @openai/codex@${CODEX_VERSION} \
@@ -184,10 +186,10 @@ RUN mkdir -p /home/worker/.codex && \
 # The installer drops the binary at ~/.opencode/bin/opencode and only modifies
 # ~/.bashrc — non-interactive shells (entrypoint, gosu drops) miss that PATH
 # update, so we extend ENV PATH explicitly.
-ARG OPENCODE_VERSION=1.18.33
+ARG OPENCODE_VERSION=1.18.34
 RUN curl -fsSL https://opencode.ai/install | VERSION=${OPENCODE_VERSION} bash
 ENV PATH="/home/worker/.opencode/bin:$PATH"
-ARG OPENCODE_SDK_VERSION=1.18.33
+ARG OPENCODE_SDK_VERSION=1.18.34
 USER root
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache \
     npm install -g @opencode-ai/sdk@${OPENCODE_SDK_VERSION} \
@@ -223,7 +225,7 @@ ARG SKILLS_CLI_VERSION
 # agent-fs version pins BOTH the skill source tag (here) and the CLI in
 # /opt/global-deps (below). Bump with `bun run bump:agent-fs` so the chart,
 # Compose, and docs pins move in lockstep with this ARG.
-ARG AGENT_FS_VERSION=0.15.0
+ARG AGENT_FS_VERSION=0.15.1
 RUN npx -y skills@${SKILLS_CLI_VERSION} add desplega-ai/agent-fs@v${AGENT_FS_VERSION} --skill agent-fs -g -a claude-code -y \
     && test -e /home/worker/.claude/skills/agent-fs/SKILL.md \
     && rm -rf /home/worker/.npm
@@ -476,6 +478,28 @@ RUN curl -fsSL "https://gitlab.com/api/v4/projects/gitlab-org%2Fcli/packages/gen
     && dpkg -i /tmp/glab.deb \
     && rm /tmp/glab.deb
 
+# Install the Azure CLI (az) + azure-devops extension for Azure Repos.
+# ~600 MB uncompressed, ~130 MB compressed (the .deb bundles its own Python
+# under /opt/az), so it lives here and not in worker-base. The extension goes
+# to a system path so the worker user finds it at runtime without a
+# root-owned ~/.azure; HOME and
+# AZURE_CONFIG_DIR are redirected so the build leaves nothing in /home/worker.
+# Auth is env-only (AZURE_DEVOPS_EXT_PAT, exported by docker-entrypoint.sh).
+ARG AZURE_CLI_VERSION=2.90.0
+ARG AZURE_DEVOPS_EXTENSION_VERSION=1.0.8
+ENV AZURE_EXTENSION_DIR=/opt/az/azcliextensions \
+    AZURE_CORE_COLLECT_TELEMETRY=false
+RUN curl -fsSL https://packages.microsoft.com/keys/microsoft.asc \
+      -o /usr/share/keyrings/microsoft.asc \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/microsoft.asc] https://packages.microsoft.com/repos/azure-cli/ $(. /etc/os-release && echo "$VERSION_CODENAME") main" \
+      > /etc/apt/sources.list.d/azure-cli.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends "azure-cli=${AZURE_CLI_VERSION}-1~$(. /etc/os-release && echo "$VERSION_CODENAME")" \
+    && export HOME=/root AZURE_CONFIG_DIR=/tmp/azure-config \
+    && az extension add --name azure-devops --version "${AZURE_DEVOPS_EXTENSION_VERSION}" --yes \
+    && az extension show --name azure-devops --query version --output tsv \
+    && rm -rf /var/lib/apt/lists/* /tmp/azure-config /root/.azure
+
 # Playwright browsers live in a system path so they're shared across users at
 # runtime AND so the install doesn't pollute /home/worker (which would force a
 # multi-GB chown layer). The ENV is also read by Playwright at runtime.
@@ -532,8 +556,8 @@ RUN case "$TARGETARCH" in \
 # Keep dsh and its transitive lifecycle scripts out of the shared root install.
 # Verify the pinned npm release tarball before installing without lifecycle hooks.
 # Bump the version and its SHA-512 pin together.
-ARG DSH_VERSION=0.1.7-alpha.2
-ARG DSH_SHA512=b97b96a1bc26a4dcea14e4c53fad6481fd1a1fc23353d2d63c5f5058251fbf90ceb60b659beebecc7bd031ba047b46c26a2b6e97ad724af52a77898c35179dcf
+ARG DSH_VERSION=0.2.0-rc.2
+ARG DSH_SHA512=10027780f35c56dfeebfc5f5f4f326f4d915856813ef15cd324d14282566f88439ae949039cb0c51ad075a59d8615c9b28cb1c723711076d6f555b1a5d0e8874
 RUN curl -fsSL "https://registry.npmjs.org/@deepseek-ai/dsh/-/dsh-${DSH_VERSION}.tgz" -o /tmp/dsh.tgz \
     && echo "${DSH_SHA512}  /tmp/dsh.tgz" | sha512sum -c - \
     && HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
@@ -560,7 +584,7 @@ RUN mkdir -p /opt/global-deps-full && cat > /opt/global-deps-full/package.json <
     "@sentry/cli": "3.3.4",
     "@desplega.ai/localtunnel": "2.2.0",
     "@desplega.ai/claude-bridge": "0.2.2",
-    "agent-browser": "0.38.1",
+    "agent-browser": "0.38.2",
     "playwright": "1.58.0"
   },
   "overrides": {

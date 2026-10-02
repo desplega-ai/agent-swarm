@@ -16,11 +16,25 @@ Every agent has a searchable memory backed by embeddings and stored in SQLite. T
 - **`EmbeddingProvider`** — Converts text to vectors. Default implementation uses OpenAI `text-embedding-3-small` (512 dimensions). The model, dimensions, API key, and base URL are configurable via `EMBEDDING_MODEL`, `EMBEDDING_DIMENSIONS`, `EMBEDDING_API_KEY`, and `EMBEDDING_API_BASE_URL` — point it at any OpenAI-compatible endpoint (Azure OpenAI, Together, vLLM, Ollama, etc.). Swappable for other providers in code.
 - **`MemoryStore`** — Persists and retrieves memories. Default implementation uses SQLite with [sqlite-vec](https://alexgarcia.xyz/sqlite-vec/) for KNN vector search. Falls back to brute-force cosine similarity when the extension is unavailable.
 
+### Embedding endpoints
+
+Set the endpoint in the `/setup` memory step or in **Settings → Integrations → Memory (embeddings)**. Both offer presets for OpenAI, OpenRouter, Vercel AI Gateway, Azure / Microsoft Foundry, and a custom URL. They send one test embedding and save the settings only when it works.
+
+**Azure / Microsoft Foundry.** Azure serves its OpenAI-compatible v1 API under `/openai/v1`, and the model is the name of your embedding deployment:
+
+```bash
+EMBEDDING_API_BASE_URL=https://<resource>.services.ai.azure.com/openai/v1
+EMBEDDING_MODEL=<embedding-deployment-name>
+EMBEDDING_API_KEY=<resource-api-key>
+```
+
+The Azure preset takes the resource name or URL and appends `/openai/v1`. The deployment must honor the `dimensions` parameter (`text-embedding-3-*` does, `text-embedding-ada-002` does not). A base URL without `/openai/v1` fails with "endpoint path not found". The legacy `/openai/deployments/<name>?api-version=` form is not supported.
+
 ### Memory Sources
 
 Memories are automatically created from:
 
-- **Session summaries** — At the end of each session, a lightweight model (default: Gemini 3 Flash via OpenRouter, configurable through `MEMORY_RATER_LLM_MODEL`) extracts key learnings: mistakes made, patterns discovered, failed approaches, and codebase knowledge. These summaries become searchable memories. Requires `OPENROUTER_API_KEY` — without it the Stop hook skips session-summary indexing entirely.
+- **Session summaries** — At the end of each session, a lightweight model (default: DeepSeek v4.1 Flash via OpenRouter, pinned separately from the general default models; configurable through `MEMORY_RATER_MODEL`) extracts key learnings: mistakes made, patterns discovered, failed approaches, and codebase knowledge. These summaries become searchable memories. Requires `OPENROUTER_API_KEY` — without it the Stop hook skips session-summary indexing entirely.
 - **Task completions** — Every completed (or failed) task's output is indexed. Failed tasks include notes about what went wrong, so the agent avoids repeating the same mistake.
 - **Explicit stores** — Agents call the `memory-store` tool (or `ctx.swarm.memory_store` from a script) with a title, content, scope, and tags. This is the write path the system prompt names, and it works on every harness, including remote ones.
 - **File-based notes** — On harnesses with a file hook (claude, pi, opencode), files written to `/workspace/personal/memory/` or `/workspace/shared/memory/<agentId>/` are indexed automatically.
@@ -111,10 +125,10 @@ The same data renders as the **Usefulness panel** on the dashboard's `/memory` p
 
 Agents can search and manage memories using MCP tools:
 
-- **`memory-store`** — Create a memory: `content`, `name`, `scope` (`agent` or `swarm`), optional `tags`, `taskId`, and `intent`. Long content is chunked on headings and embedded in the background. The owner is always the caller, for both scopes.
-- **`memory-search`** — Search with natural language queries. Calls now require an `intent` string so retrievals can be attributed to a concrete task or question, and response payloads may include `rateHint` nudges when a retrieved memory looks worth rating.
+- **`memory-store`** — Create a memory: `content`, `name`, `scope` (`agent` or `swarm`), optional `tags`, `taskId`, `intent`, and `key` (a logical path such as `/longterm/facts/swarm-runtime/slug`; a `name` that starts with `/longterm/` is used as the key; a key under `/longterm` must start with `/longterm/company-story`, `/longterm/entities/people`, `/longterm/entities/customers`, `/longterm/facts`, `/longterm/decisions`, `/longterm/workstreams` or `/longterm/timeline`, and the memory then never expires and is protected from cleanup; `/longterm/company-story`, `/longterm/entities` and `/longterm/timeline` are lead-only). Long content is chunked on headings and embedded in the background. The owner is always the caller, for both scopes.
+- **`memory-search`** — Search with natural language queries. Calls now require an `intent` string so retrievals can be attributed to a concrete task or question, and response payloads may include `rateHint` nudges when a retrieved memory looks worth rating. Pass `keyPrefix` (for example `/longterm/facts/`) to search one logical path only. The filter runs inside each retrieval arm and the graph expansion, before the result cut. Reranking multiplies the score by a path weight: `/longterm/company-story` 1.4, `/longterm/entities` 1.3, `/longterm/facts` 1.2, `/longterm/decisions` 1.1, `/longterm/timeline` 0.8, a `/longterm/decisions` doc tagged `superseded` 0.3. A memory with any key outside `/longterm` (every legacy memory) is inbox material and keeps its score.
 - **`memory-get`** — Retrieve full details of a specific memory by ID (increments access count). Like `memory-search`, it requires an `intent` string and records the retrieval event for downstream recall analysis.
-- **`memory-edit`** — Edit an existing memory in place without changing its ID. Agents may edit their own memories; editing another agent's memory by ID requires a lead, even when that memory is swarm-visible. Use `mode: "replace"` to rewrite the full content or `mode: "exact"` for a surgical single-substring replacement guarded by uniqueness and optional version checks.
+- **`memory-edit`** — Edit an existing memory in place without changing its ID. Agents may edit their own memories; editing another agent's memory by ID requires a lead, even when that memory is swarm-visible. Use `mode: "replace"` to rewrite the full content or `mode: "exact"` for a surgical single-substring replacement guarded by uniqueness and optional version checks. Pass `newKey` alone to move a memory to another logical path on every chunk without changing its ID, rating posterior, access count or author. Moving into `/longterm` also clears the expiry on every chunk; moving out does not bring it back.
 - **`memory-delete`** — Delete a memory. Agents can delete their own; leads can also delete swarm-scoped memories.
 - **`memory_rate`** — Record an explicit usefulness rating (`useful: true | false`) on a retrieved memory so the rater pipeline learns what surfaces well. Optional `referencesSource` (free-form `<source>:<identifier>`, e.g. `github:owner/repo#N`, `linear:KEY-N`) creates an edge from the memory to the external artifact it cites.
 

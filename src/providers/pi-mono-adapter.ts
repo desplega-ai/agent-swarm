@@ -35,6 +35,9 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { type TSchema, Type } from "typebox";
 import "./pi-codemode-runtime";
+// Registers the reprompt template in the code registry (the runner loads it too).
+import "../commands/templates";
+import { resolveTemplateAsync } from "../prompts/resolver";
 import { CORE_TOOLS } from "../tools/tool-config";
 import { classifyAwsSdkError } from "../utils/aws-error-classifier";
 import { parseEnvFlag } from "../utils/env-flag";
@@ -339,6 +342,18 @@ export function isPiToolDeferralEnabled(env: NodeJS.ProcessEnv = process.env): b
  */
 export function isPiCodemodeEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   return parseEnvFlag(env.PI_CODEMODE, false);
+}
+
+/**
+ * `PI_CODEMODE_MODELS`: expose pi's `models` API (`classify()`,
+ * `generateImages()`, the model catalog) to codemode scripts. Off by default
+ * and only effective while `PI_CODEMODE` is on, so a stray `true` never turns
+ * model calls on by itself. pi adds a script's `models.*` usage to the
+ * `codemode` tool result and `getSessionStats()` sums it into the session
+ * cost the adapter reports (see `src/tests/providers/pi-cost.test.ts`).
+ */
+export function isPiCodemodeModelsEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return isPiCodemodeEnabled(env) && parseEnvFlag(env.PI_CODEMODE_MODELS, false);
 }
 
 /**
@@ -735,6 +750,40 @@ export function extractPiAssistantText(message: unknown): string {
   return extractTextContent(msg.content);
 }
 
+/** What one assistant `message_end` carried, by block type only (never content). */
+interface AssistantTurnShape {
+  stopReason?: string;
+  blockTypes: string[];
+  outputTokens?: number;
+  hasText: boolean;
+  hasToolCall: boolean;
+}
+
+/** Keep log labels to short identifier-like tokens so a log line can never carry content. */
+function safeLabel(value: unknown): string {
+  return typeof value === "string" && /^[A-Za-z0-9_-]{1,32}$/.test(value) ? value : "other";
+}
+
+function describeAssistantTurn(message: unknown): AssistantTurnShape {
+  const msg = (message ?? {}) as {
+    content?: unknown;
+    stopReason?: unknown;
+    usage?: { output?: unknown };
+  };
+  const blocks = Array.isArray(msg.content) ? msg.content : [];
+  const blockTypes = blocks.map((b) => safeLabel((b as { type?: unknown } | null)?.type));
+  const output = msg.usage?.output;
+  return {
+    stopReason: typeof msg.stopReason === "string" ? safeLabel(msg.stopReason) : undefined,
+    blockTypes: typeof msg.content === "string" && msg.content.trim() ? ["text"] : blockTypes,
+    outputTokens: typeof output === "number" ? output : undefined,
+    hasText: extractTextContent(msg.content) !== "",
+    hasToolCall: blockTypes.includes("toolCall"),
+  };
+}
+
+const TERMINAL_STORE_PROGRESS_STATUSES = new Set(["completed", "failed"]);
+
 export class PiMonoSession implements ProviderSession {
   private listeners: Array<(event: ProviderEvent) => void> = [];
   private eventQueue: ProviderEvent[] = [];
@@ -779,6 +828,16 @@ export class PiMonoSession implements ProviderSession {
    * task. Checked by `deliverSteering()`.
    */
   private sessionEnded = false;
+  /** Shape of the most recent assistant turn; the last one before idle is the final turn. */
+  private lastAssistantTurn: AssistantTurnShape | null = null;
+  /** `store-progress` calls with a terminal status that are still running, by tool call id. */
+  private pendingTerminalStoreProgress = new Set<string>();
+  /** A terminal `store-progress` call (completed or failed) finished without error. */
+  private terminalStoreProgressDone = false;
+  /** The one-per-session empty-final-turn reprompt has been spent (or skipped for good). */
+  private emptyTurnReprompted = false;
+  /** `abort()` was called: never prompt a session someone is trying to stop. */
+  private abortRequested = false;
 
   constructor(
     agentSession: AgentSession,
@@ -859,6 +918,8 @@ export class PiMonoSession implements ProviderSession {
           errorMessage?: string;
         };
         if (endMsg.role === "assistant") {
+          const turn = describeAssistantTurn(event.message);
+          this.lastAssistantTurn = turn;
           if (endMsg.stopReason === "error") {
             // Candidate terminal failure. May still be cleared by a successful
             // retry (auto_retry_end success / a later good message_end).
@@ -867,6 +928,16 @@ export class PiMonoSession implements ProviderSession {
           }
           // A successful assistant turn means any prior error has recovered.
           this.terminalError = null;
+          if (!turn.hasText && !turn.hasToolCall) {
+            // Nothing else records these turns: no text and no tool call leaves
+            // no trace in session logs. Block types only, never content.
+            const tokens =
+              turn.outputTokens === undefined ? "" : `, outputTokens=${turn.outputTokens}`;
+            this.emit({
+              type: "raw_stderr",
+              content: `[pi-mono] assistant turn ended with no text and no tool call (stopReason=${turn.stopReason ?? "none"}, content=[${turn.blockTypes.join(",")}]${tokens})\n`,
+            });
+          }
         }
         // Only assistant text should be printed or used as fallback output.
         const text = extractPiAssistantText(event.message);
@@ -912,6 +983,14 @@ export class PiMonoSession implements ProviderSession {
         break;
       }
       case "tool_execution_start": {
+        const status = (event.args as { status?: unknown } | null)?.status;
+        if (
+          event.toolName.endsWith("store-progress") &&
+          typeof status === "string" &&
+          TERMINAL_STORE_PROGRESS_STATUSES.has(status)
+        ) {
+          this.pendingTerminalStoreProgress.add(event.toolCallId);
+        }
         const model = this.reportedModel();
         this.emit({
           type: "raw_log",
@@ -936,6 +1015,9 @@ export class PiMonoSession implements ProviderSession {
         break;
       }
       case "tool_execution_end":
+        if (this.pendingTerminalStoreProgress.delete(event.toolCallId) && !event.isError) {
+          this.terminalStoreProgressDone = true;
+        }
         this.emit({
           type: "raw_log",
           content: JSON.stringify({
@@ -985,6 +1067,8 @@ export class PiMonoSession implements ProviderSession {
 
       // Wait for the agent to finish (poll until not streaming)
       await this.waitForIdle();
+
+      await this.repromptAfterEmptyFinalTurn();
 
       // Gather cost data
       const stats = this.agentSession.getSessionStats();
@@ -1059,6 +1143,56 @@ export class PiMonoSession implements ProviderSession {
     }
   }
 
+  /**
+   * Some models end a session on an assistant turn with no text block and no
+   * tool call (thinking only, or empty content). pi treats that as a clean end,
+   * so a task that needed `store-progress` finishes without a result. Send one
+   * reprompt through the normal prompt path, then wait for idle again.
+   *
+   * Skipped when the final turn has text or a tool call, when it errored or was
+   * aborted, when a terminal `store-progress` call already succeeded, and after
+   * the first reprompt (a second empty turn is not retried).
+   */
+  private async repromptAfterEmptyFinalTurn(): Promise<void> {
+    if (this.emptyTurnReprompted || !this.finalTurnNeedsReprompt()) return;
+    this.emptyTurnReprompted = true;
+    try {
+      const reprompt = await resolveTemplateAsync("task.nudge.empty_final_turn", {});
+      if (reprompt.skipped || !reprompt.text.trim()) return;
+      // Workers render templates over HTTP, so abort() or a late event can land
+      // while the render is pending. Re-check before starting a new model turn.
+      if (!this.finalTurnNeedsReprompt()) return;
+      this.emit({
+        type: "raw_stderr",
+        content: "[pi-mono] final turn had no text and no tool call; sending one reprompt\n",
+      });
+      await this.agentSession.prompt(reprompt.text, { source: "rpc" });
+      await this.waitForIdle();
+    } catch (err) {
+      // The original outcome stands: a failed nudge must not turn a finished
+      // session into a failed one.
+      const message = err instanceof Error ? err.message : String(err);
+      this.emit({
+        type: "raw_stderr",
+        content: `[pi-mono] empty-turn reprompt failed: ${message}\n`,
+      });
+    }
+  }
+
+  /** True while the session is still entitled to the one empty-turn reprompt. */
+  private finalTurnNeedsReprompt(): boolean {
+    const turn = this.lastAssistantTurn;
+    return !(
+      this.abortRequested ||
+      this.terminalError ||
+      this.terminalStoreProgressDone ||
+      !turn ||
+      turn.hasText ||
+      turn.hasToolCall ||
+      turn.stopReason === "aborted"
+    );
+  }
+
   private waitForIdle(): Promise<void> {
     return new Promise<void>((resolve) => {
       // Check if already idle
@@ -1115,6 +1249,7 @@ export class PiMonoSession implements ProviderSession {
   }
 
   async abort(): Promise<void> {
+    this.abortRequested = true;
     await this.agentSession.abort();
   }
 
@@ -1141,6 +1276,8 @@ export interface PiSessionFeatures {
   installedMcp?: boolean;
   /** PI_CODEMODE is on. */
   codemode?: boolean;
+  /** PI_CODEMODE_MODELS is on, with codemode: scripts get the `models` API. */
+  codemodeModels?: boolean;
 }
 
 /**
@@ -1162,7 +1299,13 @@ export function piExtensionFactories(
   const factories: ExtensionFactory[] = [swarmExtension];
   if (features.toolDeferral) factories.push(createToolSearchExtension());
   if (features.installedMcp) factories.push(createSwarmMcpExtension());
-  if (features.codemode) factories.push(createBoundedCodemodeExtension());
+  if (features.codemode) {
+    factories.push(
+      createBoundedCodemodeExtension(DEFAULT_CODEMODE_LIMITS, {
+        models: features.codemodeModels === true,
+      }),
+    );
+  }
   return factories;
 }
 
@@ -1192,13 +1335,16 @@ const DEFAULT_CODEMODE_LIMITS: CodemodeLimits = {
  * the sandbox, which interrupts the QuickJS worker and fails the codemode call.
  *
  * "on" keeps declared tools declared; "only" would hide the lifecycle tools
- * behind scripts. `models: false` keeps model calls out of scripts, where
- * they would bypass the session's cost accounting.
+ * behind scripts. `models` stays off unless `PI_CODEMODE_MODELS` asks for it.
+ * pi 1.0 puts a script's `models.*` usage on the `codemode` tool result and
+ * `getSessionStats()` sums it, so model calls from scripts do not bypass the
+ * session's cost accounting.
  */
 export function createBoundedCodemodeExtension(
   limits: CodemodeLimits = DEFAULT_CODEMODE_LIMITS,
+  options: { models?: boolean } = {},
 ): ExtensionFactory {
-  const codemode = createCodemodeExtension({ mode: "on", models: false });
+  const codemode = createCodemodeExtension({ mode: "on", models: options.models === true });
   return (pi) =>
     codemode(
       new Proxy(pi, {
@@ -1482,9 +1628,12 @@ export class PiMonoAdapter implements ProviderAdapter {
       toolDeferral: deferTools,
       installedMcp: Object.keys(piMcpServers).length > 0,
       codemode: isPiCodemodeEnabled(),
+      codemodeModels: isPiCodemodeModelsEnabled(),
     };
     if (features.codemode) {
-      console.log(`\x1b[2m[${config.role}]\x1b[0m codemode on`);
+      console.log(
+        `\x1b[2m[${config.role}]\x1b[0m codemode on${features.codemodeModels ? " (models)" : ""}`,
+      );
     }
 
     // 5. Create resource loader with system prompt + extensions. SDK sessions

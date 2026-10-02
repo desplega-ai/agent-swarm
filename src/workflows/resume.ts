@@ -38,6 +38,7 @@ import {
   checkpointPortStepAndResolveSuccessors,
   completeTaskStepAndResolveSuccessors,
   failStepAndRunIfWaiting,
+  scheduleTaskStepRetry,
 } from "./task-step-routing";
 import { matchesFilter } from "./wait-filter";
 
@@ -87,7 +88,9 @@ export function setupWorkflowResumeListener(
     try {
       const event = data as TaskEvent;
       if (!event.workflowRunId || !event.workflowRunStepId) return;
-      await handleTaskFailure(event, event.failureReason ?? "Task failed", registry);
+      await handleTaskFailure(event, event.failureReason ?? "Task failed", registry, {
+        retryable: true,
+      });
     } catch (err) {
       console.error("[workflows] Handle task failure error:", err);
     }
@@ -98,7 +101,7 @@ export function setupWorkflowResumeListener(
     try {
       const event = data as TaskEvent;
       if (!event.workflowRunId || !event.workflowRunStepId) return;
-      await handleTaskFailure(event, "Task was cancelled", registry);
+      await handleTaskFailure(event, "Task was cancelled", registry, { retryable: false });
     } catch (err) {
       console.error("[workflows] Handle task cancellation error:", err);
     }
@@ -213,7 +216,10 @@ export async function finalizeOrWait(runId: string): Promise<void> {
       if (run?.status === "waiting") await updateWorkflowRun(runId, { status: "running" });
       return;
     }
-    const hasWaiting = steps.some((s) => s.status === "waiting");
+    // A step queued for the retry poller is still live, like a waiting one.
+    const hasWaiting = steps.some(
+      (s) => s.status === "waiting" || (s.status === "failed" && s.nextRetryAt != null),
+    );
     if (hasWaiting) {
       await updateWorkflowRun(runId, { status: "waiting" });
     } else {
@@ -227,7 +233,10 @@ export async function finalizeOrWait(runId: string): Promise<void> {
 }
 
 /**
- * Handle task failure/cancellation — respects workflow's onNodeFailure config.
+ * Handle task failure/cancellation.
+ * A failed (never cancelled) task of an agent-task node with `retry` and
+ * attempts left is re-dispatched through the retry poller first.
+ * Otherwise the workflow's onNodeFailure config applies:
  * 'fail' (default): mark the entire run as failed.
  * 'continue': treat as completed with error output, let convergence proceed.
  */
@@ -235,6 +244,7 @@ async function handleTaskFailure(
   event: TaskEvent,
   reason: string,
   registry: ExecutorRegistry,
+  options: { retryable: boolean },
 ): Promise<void> {
   const run = await getWorkflowRun(event.workflowRunId!);
   if (!run || (run.status !== "waiting" && run.status !== "running")) return;
@@ -245,6 +255,23 @@ async function handleTaskFailure(
 
   const workflow = await getWorkflow(run.workflowId);
   if (!workflow) return;
+
+  if (options.retryable) {
+    const retry = await scheduleTaskStepRetry(
+      workflow.definition,
+      run.id,
+      step,
+      event.taskId,
+      reason,
+    );
+    if (retry === "scheduled") {
+      console.log(
+        `[workflows] Task ${event.taskId} failed; step ${step.nodeId} of run ${run.id} queued for retry ${step.retryCount + 1}`,
+      );
+      return;
+    }
+    if (retry === "not-claimed") return;
+  }
 
   const onFailure = workflow.definition.onNodeFailure ?? "fail";
 

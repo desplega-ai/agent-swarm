@@ -117,7 +117,12 @@ function mainSection(
   intro: string,
   includeSteps: boolean,
 ): string[] {
-  const lines = ["<!-- slack-visuals -->", "", "### Slack rendering preview", "", intro, ""];
+  const lines = [
+    "<!-- slack-visuals -->",
+    "",
+    `<details><summary><strong>Slack rendering preview</strong><br>${intro}</summary>`,
+    "",
+  ];
 
   for (const name of scenarioNames) {
     lines.push(
@@ -222,13 +227,16 @@ const scenarioNames = [
   ),
 ];
 const sha = values.sha ? values.sha.slice(0, 7) : "unknown";
-const run = values["run-url"] ? ` [Workflow run](${values["run-url"]}).` : "";
-const intro = `Rendered by slack-mock from the black-box E2E journal. Commit ${sha}.${run}`;
+const run = values["run-url"]
+  ? ` <a href="${escapeHtml(values["run-url"])}">Workflow run</a>.`
+  : "";
+const intro = `Rendered by slack-mock from the black-box E2E journal. Commit ${escapeHtml(sha)}.${run}`;
 
 function render(includeSteps: boolean, includeDesktop: boolean, note?: string): string {
   const lines = mainSection(profiles, scenarioNames, baseUrl, intro, includeSteps);
   if (includeDesktop) lines.push(...desktopSection(profiles, scenarioNames, baseUrl));
   if (note) lines.push(note, "");
+  lines.push("</details>", "");
   return lines.join("\n");
 }
 
@@ -250,6 +258,7 @@ if (comment.length > 60_000) {
 if (comment.length > 60_000) {
   const note =
     "Additional scenario content omitted because the comment exceeded 60,000 characters.";
-  comment = `${comment.slice(0, 60_000 - note.length - 2)}\n\n${note}\n`;
+  const suffix = `\n\n${note}\n\n</details>\n`;
+  comment = `${comment.slice(0, 60_000 - suffix.length)}${suffix}`;
 }
 await Bun.write(outputPath, comment);

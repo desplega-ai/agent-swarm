@@ -188,6 +188,72 @@ describe("POST /api/memory/rate", () => {
     expect((await readPosterior(m.id)).alpha).toBeCloseTo(2, 5);
   });
 
+  async function readModels(
+    memoryId: string,
+  ): Promise<Array<{ source: string; model: string | null }>> {
+    return getDbClient().query<{ source: string; model: string | null }>(
+      "SELECT source, model FROM memory_rating WHERE memoryId = ? ORDER BY source",
+      [memoryId],
+    );
+  }
+
+  test("source=llm with model → model is stored on the memory_rating row", async () => {
+    const m = await makeMemory("rate-llm-model");
+    const r = await api("POST", "/api/memory/rate", {
+      agentId: agentA,
+      body: {
+        events: [
+          {
+            memoryId: m.id,
+            signal: 0.5,
+            weight: 0.8,
+            source: "llm",
+            taskId: taskA,
+            model: "openrouter/deepseek/deepseek-v4.1-flash",
+          },
+        ],
+      },
+    });
+    expect(r.status).toBe(200);
+    expect(await readModels(m.id)).toEqual([
+      { source: "llm", model: "openrouter/deepseek/deepseek-v4.1-flash" },
+    ]);
+  });
+
+  test("source=explicit-self ignores a supplied model → model is NULL", async () => {
+    const m = await makeMemory("rate-explicit-model");
+    await insertRetrieval(taskA, agentA, m.id);
+    const r = await api("POST", "/api/memory/rate", {
+      agentId: agentA,
+      body: {
+        events: [
+          {
+            memoryId: m.id,
+            signal: 1,
+            weight: 1,
+            source: "explicit-self",
+            taskId: taskA,
+            model: "openrouter/deepseek/deepseek-v4.1-flash",
+          },
+        ],
+      },
+    });
+    expect(r.status).toBe(200);
+    expect(await readModels(m.id)).toEqual([{ source: "explicit-self", model: null }]);
+  });
+
+  test("empty or over-long model → 400", async () => {
+    const m = await makeMemory("rate-bad-model");
+    for (const model of ["", "   ", "x".repeat(201)]) {
+      const r = await api("POST", "/api/memory/rate", {
+        agentId: agentA,
+        body: { events: [{ memoryId: m.id, signal: 1, weight: 1, source: "llm", model }] },
+      });
+      expect(r.status).toBe(400);
+    }
+    expect(await readModels(m.id)).toEqual([]);
+  });
+
   test("source=explicit-self with no retrieval row → 400 (R6 spam guard)", async () => {
     const m = await makeMemory("explicit-no-retr");
     const r = await api("POST", "/api/memory/rate", {

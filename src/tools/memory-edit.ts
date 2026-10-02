@@ -2,6 +2,12 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { getAgentById } from "@/be/db";
 import { getEmbeddingProvider, getMemoryStore } from "@/be/memory";
+import { assertKeyWritable, MemoryKeyError } from "@/be/memory/key-guard";
+import {
+  MEMORY_KEY_MAX_LENGTH,
+  MEMORY_KEY_PATTERN,
+  MEMORY_KEY_PATTERN_MESSAGE,
+} from "@/be/memory/key-paths";
 import { refreshLinks } from "@/be/memory/link-resolver";
 import { can } from "@/rbac";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
@@ -38,7 +44,7 @@ export const registerMemoryEditTool = (server: McpServer) => {
     {
       title: "Edit a memory",
       description:
-        "Edit a single memory in place while preserving its ID, usefulness posterior, and audit history. Two modes: 'replace' overwrites the entire content (requires `content`); 'exact' performs a surgical find-and-replace of `oldString` with `newString` within the existing content (fails if `oldString` is missing or ambiguous). Use 'replace' for full rewrites, 'exact' for targeted edits. Agents can edit their own memories; lead agents can edit any scope.",
+        "Edit a single memory in place while preserving its ID, usefulness posterior, and audit history. Two modes: 'replace' overwrites the entire content (requires `content`); 'exact' performs a surgical find-and-replace of `oldString` with `newString` within the existing content (fails if `oldString` is missing or ambiguous). Use 'replace' for full rewrites, 'exact' for targeted edits. Pass `newKey` alone to move the memory to another logical path (every chunk, same ID, posterior, access counts and author). A move into /longterm also clears the expiry. Agents can edit their own memories; lead agents can edit any scope.",
       annotations: { destructiveHint: true },
 
       inputSchema: z.object({
@@ -71,6 +77,14 @@ export const registerMemoryEditTool = (server: McpServer) => {
           ),
         intent: z.string().min(1).describe("Why you are editing this memory."),
         expectedVersion: z.number().int().min(1).optional(),
+        newKey: z
+          .string()
+          .max(MEMORY_KEY_MAX_LENGTH)
+          .regex(MEMORY_KEY_PATTERN, MEMORY_KEY_PATTERN_MESSAGE)
+          .optional()
+          .describe(
+            "Move the memory to this logical path, for example '/longterm/facts/swarm-runtime/slug'. Alone it is a pure move: omit content/oldString/newString. Fails when the key is already used in this scope by the same owner. Moving into /longterm marks the memory as curated on every chunk: it stops expiring and is protected from cleanup, and moving it out later does not bring the expiry back. A key under /longterm must start with /longterm/company-story, /longterm/entities/people, /longterm/entities/customers, /longterm/facts, /longterm/decisions, /longterm/workstreams or /longterm/timeline. Paths under /longterm/company-story, /longterm/entities and /longterm/timeline are lead-only.",
+          ),
       }),
       outputSchema: swarmToolOutputSchema({
         yourAgentId: z.string().optional(),
@@ -81,7 +95,18 @@ export const registerMemoryEditTool = (server: McpServer) => {
       }),
     },
     async (
-      { memoryId, key, scope, mode, content, oldString, newString, intent, expectedVersion },
+      {
+        memoryId,
+        key,
+        scope,
+        mode,
+        content,
+        oldString,
+        newString,
+        intent,
+        expectedVersion,
+        newKey,
+      },
       requestInfo,
       _meta,
     ) => {
@@ -96,6 +121,18 @@ export const registerMemoryEditTool = (server: McpServer) => {
       }
 
       try {
+        if (newKey) {
+          const agent = await getAgentById(requestInfo.agentId);
+          assertKeyWritable(newKey, "key", {
+            principal: {
+              kind: "agent",
+              agentId: requestInfo.agentId,
+              isLead: agent?.isLead ?? false,
+            },
+            source: "mcp",
+          });
+        }
+
         const store = getMemoryStore();
         // Key+scope edits already constrain the owner in store.edit(). IDs do not.
         // Keep this boundary gate out of the internal indexer/store write path.
@@ -138,9 +175,13 @@ export const registerMemoryEditTool = (server: McpServer) => {
           intent,
           expectedVersion,
           changedByAgentId: requestInfo.agentId,
+          newKey,
         });
 
-        if (result.changed) {
+        // A pure move leaves the content, so the embedding and links stay valid.
+        const contentEdited =
+          content !== undefined || oldString !== undefined || newString !== undefined;
+        if (result.changed && (newKey === undefined || contentEdited)) {
           const provider = getEmbeddingProvider();
           const embedding = await provider.embed(result.memory.content);
           if (embedding) await store.updateEmbedding(result.memory.id, embedding, provider.name);
@@ -174,6 +215,9 @@ export const registerMemoryEditTool = (server: McpServer) => {
           },
         );
       } catch (err) {
+        if (err instanceof MemoryKeyError) {
+          return toolErr(err.message, { data: { yourAgentId: requestInfo.agentId } });
+        }
         return toolErr(`Memory edit failed: ${(err as Error).message}`, {
           data: { yourAgentId: requestInfo.agentId },
         });

@@ -26,6 +26,7 @@ import {
   markSteeringHandled,
   pauseTask,
   promoteDraftTask,
+  recordTaskProviderIfUnset,
   resumeTask,
   settleSupersededTaskDependents,
   supersedeTask,
@@ -542,7 +543,10 @@ const updateTaskProgressRoute = route({
   params: z.object({ id: z.string() }),
   body: z.object({ progress: z.string().min(1) }),
   responses: {
-    200: { description: "Progress updated", schema: z.object({ success: z.literal(true) }) },
+    200: {
+      description: "Progress updated; a no-op once the task is terminal",
+      schema: z.object({ success: z.literal(true) }),
+    },
     403: { description: "Task is assigned to another agent" },
     404: { description: "Task not found" },
   },
@@ -560,6 +564,8 @@ const finishTask = route({
     output: z.string().optional(),
     failureReason: z.string().optional(),
     force: z.boolean().optional(),
+    /** Harness that ran the task. Recorded only when no session reported one (spawn failure). */
+    provider: ProviderNameSchema.optional(),
   }),
   auth: { apiKey: true, agentId: true },
   responses: {
@@ -651,7 +657,7 @@ const updateTaskVcsRoute = route({
   tags: ["Tasks"],
   params: z.object({ id: z.string() }),
   body: z.object({
-    vcsProvider: z.enum(["github", "gitlab"]),
+    vcsProvider: z.enum(["github", "gitlab", "azure-devops"]),
     vcsRepo: z.string(),
     vcsNumber: z.number().int().positive(),
     vcsUrl: z.string().url(),
@@ -1423,7 +1429,11 @@ export async function handleTasks(
         source: "http",
       });
       if (!decision.allow) return 403;
-      await updateTaskProgress(parsed.params.id, parsed.body.progress);
+      // A harness keeps streaming after the agent finishes the task; its
+      // late progress must not overwrite a terminal task's last line.
+      if (!isTerminalTaskStatus(task.status)) {
+        await updateTaskProgress(parsed.params.id, parsed.body.progress);
+      }
       return 200;
     });
 
@@ -1515,6 +1525,10 @@ export async function handleTasks(
         }
 
         const wasPaused = task.wasPaused;
+
+        if (parsed.body.provider && !task.provider) {
+          await recordTaskProviderIfUnset(parsed.params.id, parsed.body.provider);
+        }
 
         let updatedTask: typeof task;
         if (parsed.body.status === "completed") {

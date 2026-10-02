@@ -4,7 +4,7 @@
  * Plan: thoughts/taras/plans/2026-05-10-fix-session-summarization-workers.md
  * → Phase 0 § "summarize-session.ts"
  *
- * Composes `completeStructured` with `SummaryWithRatingsSchema` and the
+ * Composes `completeStructuredWithModel` with `SummaryWithRatingsSchema` and the
  * shared `BASE_SUMMARIZE_PROMPT` extracted from `src/hooks/hook.ts`. API-server
  * callers wanting structured AI completion call `completeStructured` directly
  * with their own schemas — this helper is for session-transcript consumers
@@ -21,7 +21,7 @@ import {
   type RetrievalRow,
   SummaryWithRatingsSchema,
 } from "../../be/memory/raters/llm.js";
-import { completeStructured } from "./complete-structured.js";
+import { completeStructuredWithModel } from "./complete-structured.js";
 import type { ResolvedCredential } from "./credentials.js";
 
 export interface SummarizeSessionOptions {
@@ -50,14 +50,27 @@ export interface SummarizeSessionOptions {
    */
   _credentialOverride?: ResolvedCredential;
   /** Test injection. */
-  _completeStructured?: typeof completeStructured;
+  _completeStructured?: typeof completeStructuredWithModel;
 }
+
+/**
+ * Structured summary plus the model that produced it. Callers forward `model`
+ * to `buildRatingsFromLlm` so each `llm` rating records its judge. Optional so
+ * hand-built results (tests, other harness paths) stay valid; it is absent only
+ * when the model is unknown.
+ */
+export type SummarizeSessionResult = z.infer<typeof SummaryWithRatingsSchema> & {
+  model?: string;
+};
 
 /**
  * Typebox tool schema mirroring `SummaryWithRatingsSchema`.
  *
  * Kept in lockstep with the zod schema via `src/tests/internal-ai/schema-parity.test.ts`
- * which fuzzes both validators with a fixture set.
+ * which fuzzes both validators with a fixture set. `referencesSource` has no
+ * `minLength` on purpose: pi-ai validates this schema before zod sees the
+ * call, so a `minLength: 1` here would reject a blank value the zod side
+ * accepts.
  */
 export const summaryToolSchema = Type.Object({
   summary: Type.String(),
@@ -66,7 +79,7 @@ export const summaryToolSchema = Type.Object({
       id: Type.String({ minLength: 1 }),
       score: Type.Number({ minimum: 0, maximum: 1 }),
       reasoning: Type.String({ minLength: 1, maxLength: 500 }),
-      referencesSource: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })),
+      referencesSource: Type.Optional(Type.String({ maxLength: 512 })),
     }),
   ),
 });
@@ -80,15 +93,15 @@ export const summaryToolSchema = Type.Object({
  */
 export async function summarizeSession(
   opts: SummarizeSessionOptions,
-): Promise<z.infer<typeof SummaryWithRatingsSchema> | null> {
+): Promise<SummarizeSessionResult | null> {
   if (opts.transcript.length <= 100) return null;
 
   const taskLine = opts.taskContext.prompt ? `\nTask: ${opts.taskContext.prompt}` : "";
   const basePrompt = `${BASE_SUMMARIZE_PROMPT}${taskLine}\n\nTranscript:\n${opts.transcript}`;
   const userPrompt = buildSummaryWithRatingsPrompt(basePrompt, opts.retrievals);
 
-  const runner = opts._completeStructured ?? completeStructured;
-  return await runner({
+  const runner = opts._completeStructured ?? completeStructuredWithModel;
+  const result = await runner({
     zodSchema: SummaryWithRatingsSchema,
     toolSchema: summaryToolSchema,
     toolName: "record_session_summary",
@@ -105,4 +118,5 @@ export async function summarizeSession(
     retries: 3,
     ...(opts._credentialOverride ? { _credentialOverride: opts._credentialOverride } : {}),
   });
+  return result ? { ...result.data, model: result.model } : null;
 }

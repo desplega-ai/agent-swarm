@@ -75,6 +75,37 @@ describe("applyRating", () => {
     return row?.n ?? 0;
   }
 
+  test("model is recorded for llm ratings and NULL for every other source", async () => {
+    const m = await makeMemory("model-provenance");
+    await applyRating(
+      [
+        {
+          memoryId: m.id,
+          signal: 1,
+          weight: 0.8,
+          source: "llm",
+          model: "openrouter/deepseek/deepseek-v4.1-flash",
+        },
+        // A model on a non-llm source is dropped: nothing judged it.
+        { memoryId: m.id, signal: 1, weight: 0.5, source: "test", model: "should-not-persist" },
+        { memoryId: m.id, signal: 1, weight: 0.5, source: "llm" },
+      ],
+      { taskId },
+    );
+    const rows = await getDbClient().query<{
+      source: string;
+      weight: number;
+      model: string | null;
+    }>("SELECT source, weight, model FROM memory_rating WHERE memoryId = ? ORDER BY weight", [
+      m.id,
+    ]);
+    expect(rows).toEqual([
+      { source: "test", weight: 0.5, model: null },
+      { source: "llm", weight: 0.5, model: null },
+      { source: "llm", weight: 0.8, model: "openrouter/deepseek/deepseek-v4.1-flash" },
+    ]);
+  });
+
   test("signal=+1, weight=1 → alpha += 1, beta += 0; audit row written", async () => {
     const m = await makeMemory("positive");
     const events: RatingEvent[] = [{ memoryId: m.id, signal: 1, weight: 1, source: "test" }];

@@ -1692,8 +1692,9 @@ export interface ExtensionBundle {
 }
 
 /**
- * `POST /api/extensions/install` body. Only catalog templates install; an
- * inline `manifest`/`files` bundle is rejected with `inline_install_disabled`.
+ * `POST /api/extensions/install` body as the dashboard sends it: a catalog template.
+ * The API also takes an inline `manifest` + `files` bundle when
+ * `EXTENSION_ALLOW_INLINE_INSTALL` is on; the dashboard does not send one.
  */
 export interface ExtensionInstallInput {
   /** Catalog name from `GET /api/extensions/catalog`. */
@@ -3292,6 +3293,7 @@ export type OnboardingErrorClass =
   | "timeout"
   | "dimension"
   | "model"
+  | "endpoint"
   | "not_enabled"
   | "expired"
   | "unknown";
@@ -3309,7 +3311,13 @@ export type OnboardingAiMethod =
 /** The dial level every agent got, or `mixed` (different levels or a custom model). */
 export type OnboardingAgentsMethod = "cheap" | "optimal" | "max" | "mixed";
 
-export type OnboardingMemoryPreset = "openai" | "openrouter" | "vercel" | "custom" | "existing";
+export type OnboardingMemoryPreset =
+  | "openai"
+  | "openrouter"
+  | "vercel"
+  | "azure"
+  | "custom"
+  | "existing";
 
 export type OnboardingIntegrationMethod =
   | "slack"

@@ -34,6 +34,8 @@ export interface GraphExpansionOptions {
   scope?: "agent" | "swarm" | "all";
   /** Source filter the search ran with — expansion must not add off-filter rows. */
   source?: AgentMemorySource;
+  /** Key prefix the search ran with — expansion must not add off-prefix rows. */
+  keyPrefix?: string;
   isLead?: boolean;
 }
 
@@ -75,7 +77,7 @@ export async function expandCandidatesWithGraph(
   options: GraphExpansionOptions = {},
 ): Promise<MemoryCandidate[]> {
   if (!isGraphExpansionEnabled()) return candidates;
-  const { cap = 5, damping = 0.7, scope = "all", source, isLead = false } = options;
+  const { cap = 5, damping = 0.7, scope = "all", source, keyPrefix, isLead = false } = options;
   if (candidates.length === 0 || cap <= 0) return candidates;
 
   const parentById = new Map(candidates.map((c) => [c.id, c]));
@@ -94,6 +96,11 @@ export async function expandCandidatesWithGraph(
   if (source) {
     conditions.push("m.source = ?");
     params.push(source);
+  }
+  if (keyPrefix) {
+    // Literal prefix, not GLOB/LIKE: mirrors SqliteMemoryStore.addKeyPrefixCondition.
+    conditions.push("substr(m.key, 1, length(?)) = ?");
+    params.push(keyPrefix, keyPrefix);
   }
 
   let rows: NeighborRow[];

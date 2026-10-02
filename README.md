@@ -74,7 +74,7 @@ Or install it as a plugin in your harness:
 | Harness | Command |
 |---|---|
 | Claude Code | `/plugin marketplace add desplega-ai/agent-swarm` then `/plugin install agent-swarm@agent-swarm` |
-| Codex | `codex plugin add https://github.com/desplega-ai/agent-swarm` (or use `npx skills` above) |
+| Codex | `codex plugin marketplace add desplega-ai/agent-swarm && codex plugin add agent-swarm@agent-swarm` (or use `npx skills` above) |
 | Cursor | `/add-plugin desplega-ai/agent-swarm` |
 | Gemini CLI | `gemini extensions install https://github.com/desplega-ai/agent-swarm` |
 | Antigravity / Factory Droid | `droid plugin marketplace add https://github.com/desplega-ai/agent-swarm` then `droid plugin install agent-swarm@agent-swarm` |
@@ -99,7 +99,7 @@ Kubernetes: [install the OCI Helm chart](./charts/agent-swarm/README.md).
 
 ## Integrations
 
-Slack · GitHub · GitLab · Linear · Jira · AgentMail · WhatsApp (Kapso) · Composio · Sentry · Devin · [Serply search](https://docs.agent-swarm.dev/docs/integrations/serply). [Integration guides](https://docs.agent-swarm.dev/docs/integrations).
+Slack · GitHub · GitLab · Azure DevOps · Linear · Jira · AgentMail · WhatsApp (Kapso) · Composio · Sentry · Devin · [Serply search](https://docs.agent-swarm.dev/docs/integrations/serply). [Integration guides](https://docs.agent-swarm.dev/docs/integrations).
 
 AgentMail archives verified inbound deliveries before acknowledging them and retains the archive for 30 days, including mail excluded from task routing. See the [contact inbox triage runbook](runbooks/contact-inbox-triage.md) for retention, coverage limits, and rollout instructions.
 

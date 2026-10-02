@@ -590,10 +590,16 @@ describe("script connections", () => {
       // 184 alters agents and agent_tasks, which this migration-112-only fixture
       // does not create.
       markMigrationApplied(database, "184_model_catalog.sql");
+      // 186 alters api_key_status, which this migration-112-only fixture does not create.
+      markMigrationApplied(database, "186_api_key_seat_mismatch.sql");
       // 185 alters api_key_status, which this migration-112-only fixture does not create.
       markMigrationApplied(database, "185_api_key_auth_failures.sql");
-      // 188 rebuilds user_favorites, which this migration-112-only fixture does not create.
-      markMigrationApplied(database, "188_favorites_agent_fs_path.sql");
+      // 190 alters memory_rating, which this migration-112-only fixture does not create.
+      markMigrationApplied(database, "190_memory_rating_model.sql");
+      // 191 indexes context_versions, which this migration-112-only fixture does not create.
+      markMigrationApplied(database, "191_context_versions_previous_index.sql");
+      // 192 rebuilds user_favorites, which this migration-112-only fixture does not create.
+      markMigrationApplied(database, "192_favorites_agent_fs_path.sql");
 
       const id = crypto.randomUUID();
       const now = new Date().toISOString();

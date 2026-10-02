@@ -32,6 +32,14 @@ module.exports = {
       from: { path: WORKER_SIDE },
       to: { path: "^src/be/db", reachable: true },
     },
+    {
+      name: "no-package-imports-src",
+      comment:
+        "packages/model-routing is a pure package shared by the API server, workers, and the UI: no imports from src/, no SQLite, no filesystem. Network goes only through an injected scoped fetch.",
+      severity: "error",
+      from: { path: "^packages/model-routing/" },
+      to: { path: "^src/|^bun:sqlite$|^(node:)?fs(/promises)?$" },
+    },
   ],
   options: {
     doNotFollow: { path: "node_modules" },

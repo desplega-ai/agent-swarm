@@ -202,7 +202,7 @@ docker run --rm -v swarm_api_data:/data -v $(pwd):/backup alpine \
 
 ### Database retention
 
-`SESSION_LOG_RETENTION_DAYS`, `AGENT_LOG_RETENTION_DAYS`, and `EVENTS_RETENTION_DAYS` are disabled until you set them. Each value permanently deletes rows older than its window. Start with `DB_RETENTION_DRY_RUN=true`, confirm the exact would-delete count through the `agentswarm.db.retention.backlog` metric and `GET /api/metrics`, then enable one table at a time.
+`SESSION_LOG_RETENTION_DAYS`, `AGENT_LOG_RETENTION_DAYS`, `EVENTS_RETENTION_DAYS`, and `CONTEXT_VERSIONS_KEEP_LATEST` are disabled until you set them. Each `*_RETENTION_DAYS` value permanently deletes rows older than its window. `CONTEXT_VERSIONS_KEEP_LATEST` is a count, not a window: it keeps that many newest `context_versions` rows per agent and field and deletes older profile history, never the newest version. Start with `DB_RETENTION_DRY_RUN=true`, confirm the exact would-delete count through the `agentswarm.db.retention.backlog` metric and `GET /api/metrics`, then enable one table at a time.
 
 The sweep reads three tuning values on every tick: `DB_RETENTION_TICK_BUDGET_MS` (default `30000`, range `1000`–`300000`), `DB_RETENTION_CATCHUP_INTERVAL_MS` (default `60000`, range `5000`–`3600000`), and `DB_RETENTION_MAX_STATEMENT_MS` (default `250`, range `25`–`5000`). See [runbooks/db-retention.md](./runbooks/db-retention.md) before activation.
 
@@ -499,6 +499,21 @@ When a worker starts, it:
    - Previous progress (if any was saved)
    - Notification that this is a resumed task
 
+### API drain
+
+Off by default. Set `API_DRAIN_MAX_MS` (for example `30000`) to turn it on. With it on, the API does not close the moment it gets SIGTERM. It first drains:
+
+1. It keeps serving, but dispatches no new work: HTTP `/api/poll`, MCP `poll-task`, and `task-action` claim and accept all refuse. Creating tasks still works.
+2. It adds `X-Swarm-Draining: 1` to every response.
+3. A worker that sees the header supersedes each in-flight task right away (reason `graceful_shutdown`, the same resume follow-up as the worker's SIGTERM handoff) and takes no new work. It still exits on its own SIGTERM.
+4. The API closes when every task it saw in flight on a live worker has left `in_progress`, or after `API_DRAIN_MAX_MS` (default `0`, which means no drain; max `120000`). With nothing in flight it closes at once.
+
+Orchestrators such as Docker Compose stop the API and the workers together, so a worker's SIGTERM handoff can run after the API is gone and the task falls through to the heartbeat sweep. The drain makes the handoff happen while the API is still up.
+
+Enable it where the API and the workers are stopped together. It also applies to an API-only restart: while it is on, every live worker supersedes its in-flight tasks when the API gets SIGTERM, tasks that would otherwise have kept running. Leave it off for local dev and for API-only rolls.
+
+Keep the API's `stop_grace_period` above `API_DRAIN_MAX_MS` plus the time the API needs to close (a few seconds). Workers older than this feature do not hand off on the header, so the API waits the full cap when they hold tasks.
+
 ### Best Practices
 
 - **Use stable Agent IDs** - Set explicit `AGENT_ID` for each worker to enable resume after restarts
@@ -511,7 +526,7 @@ When a worker starts, it:
 
 API retrieval defaults enable hybrid search and graph expansion, with `MEMORY_DEMOTION_FLOOR=1.0` disabling rating-based demotion. On the API and workers, unset `MEMORY_RATERS` enables `implicit-citation,explicit-self`; set it explicitly empty to disable all raters. The `llm` rater remains opt-in. Without embedding credentials, search falls back to full-text search, then recency when full-text search is unavailable.
 
-The bundled agent-fs service uses version 0.15.0. Provisioning seeds agent display names for readable file ownership.
+The bundled agent-fs service uses version 0.15.1. Provisioning seeds agent display names for readable file ownership.
 
 ## Environment Variables
 
@@ -564,6 +579,7 @@ The bundled agent-fs service uses version 0.15.0. Provisioning seeds agent displ
 | `APP_URL` | Dashboard URL for Slack message links | - |
 | `ENV` | Environment mode (`development` adds prefix to Slack agent names) | - |
 | `SCHEDULER_INTERVAL_MS` | Polling interval for scheduled tasks | `10000` |
+| `API_DRAIN_MAX_MS` | Max wait (ms) for workers to hand off in-flight tasks when the API stops. Off by default; set it (e.g. `30000`, max `120000`) to turn the drain on. See [API drain](#api-drain) | `0` |
 | `MULTI_RUNTIME_ENABLED` | Track multiple worker runtime instances independently for one logical agent. Set consistently on the API server and every worker. | `true` |
 | `RUNTIME_STALE_THRESHOLD_MIN` | Minutes without runtime traffic before an active runtime stops counting and the heartbeat sweep retires it. | `5` |
 | `DATABASE_PATH` | SQLite database file path | `./agent-swarm-db.sqlite` |
@@ -768,7 +784,7 @@ GITHUB_APP_PRIVATE_KEY=base64-encoded-key
 
 ### Bot Reactions
 
-If GitHub App credentials are provided, the bot can react to comments/issues to acknowledge receipt. Additionally, a 👀 reaction is automatically added to the originating GitHub entity (comment, issue, PR, or review) when an agent picks up a GitHub-sourced task.
+If GitHub App credentials are provided, the bot reacts with 👀 to the comment, issue, PR, or review that pinged it. Without an App, it uses `GITHUB_TOKEN` (a PAT with write access to issues and pull requests) and the reaction appears as that user. Additionally, a 👀 reaction is automatically added to the originating GitHub entity (comment, issue, PR, or review) when an agent picks up a GitHub-sourced task.
 
 ---
 

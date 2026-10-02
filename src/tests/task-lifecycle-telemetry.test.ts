@@ -71,7 +71,8 @@ describe("task lifecycle telemetry", () => {
         event: "created",
         props: {
           taskId: task.id,
-          source: "mcp",
+          task_source: "mcp",
+          trigger_surface: "mcp",
           hasParent: false,
           has_repo: false,
           priority: 60,
@@ -146,7 +147,8 @@ describe("task lifecycle telemetry", () => {
       event: "cancelled",
       props: {
         taskId: cancelledTask.id,
-        source: "api",
+        task_source: "api",
+        trigger_surface: "api",
         agentId: WORKER_ID,
         previousStatus: "pending",
       },
@@ -180,7 +182,8 @@ describe("task lifecycle telemetry", () => {
       event: "completed",
       props: {
         taskId: task.id,
-        source: "mcp",
+        task_source: "mcp",
+        trigger_surface: "mcp",
         agentId: WORKER_ID,
         provider: "codex",
         harnessVariant: "stock",
@@ -188,5 +191,7 @@ describe("task lifecycle telemetry", () => {
       },
     });
     expect(calls[0]?.props.tags).toBeUndefined();
+    // The raw per-task source is `task_source`; no event carries a `source` property.
+    expect("source" in (calls[0]?.props ?? {})).toBe(false);
   });
 });

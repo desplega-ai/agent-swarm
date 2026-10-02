@@ -16,6 +16,7 @@
     "provider-capability-matrix",
     "harness-providers",
     "task-steering",
+    "claude-code-mod",
     "observability-opentelemetry",
     "performance-resource-sizing",
     "cost-and-context-computation",

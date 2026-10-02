@@ -14,6 +14,7 @@ declare module "swarm-extension" {
       | "ui"
       | "github"
       | "gitlab"
+      | "azure-devops"
       | "system"
       | "linear"
       | "jira"
@@ -39,7 +40,7 @@ declare module "swarm-extension" {
     slackTriggerMessageTs?: string | undefined;
     slackUserId?: string | undefined;
     overrideSlackContext?: boolean | undefined;
-    vcsProvider?: "github" | "gitlab" | undefined;
+    vcsProvider?: "github" | "gitlab" | "azure-devops" | undefined;
     vcsRepo?: string | undefined;
     vcsEventType?: string | undefined;
     vcsNumber?: number | undefined;
@@ -124,6 +125,7 @@ declare module "swarm-extension" {
       | "ui"
       | "github"
       | "gitlab"
+      | "azure-devops"
       | "system"
       | "linear"
       | "jira"
@@ -162,7 +164,7 @@ declare module "swarm-extension" {
     slackUserId?: string | undefined;
     slackProgressMessageTs?: string | undefined;
     slackTreeRootMessageTs?: string | undefined;
-    vcsProvider?: "github" | "gitlab" | undefined;
+    vcsProvider?: "github" | "gitlab" | "azure-devops" | undefined;
     vcsRepo?: string | undefined;
     vcsEventType?: string | undefined;
     vcsNumber?: number | undefined;

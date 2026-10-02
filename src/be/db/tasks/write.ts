@@ -1,6 +1,6 @@
 import pkg from "../../../../package.json";
 import { defaultAssetKey } from "../../../assets/key";
-import type { telemetry } from "../../../telemetry";
+import type { TaskTelemetryEvent, TaskTelemetryInput } from "../../../telemetry-trigger";
 import type {
   Agent,
   AgentLog,
@@ -42,10 +42,11 @@ type TaskWriteDependencies = {
     agentId: string | null,
     sourceTexts: Array<string | null | undefined>,
   ) => Promise<TaskAttachment[]>;
-  emitTaskLifecycleTelemetryAfterCommit: (
-    event: string,
-    props: Parameters<typeof telemetry.taskEvent>[1],
+  emitTaskLifecycleTelemetryAfterCommit: <S extends TaskTelemetryEvent>(
+    event: S,
+    props: TaskTelemetryInput<S>,
     verify?: (task: AgentTask | null) => boolean,
+    actorUserId?: string | null,
   ) => void;
   taskContextForTelemetry: (task: AgentTask) => {
     provider?: ProviderName;
@@ -315,6 +316,22 @@ export async function updateTaskClaudeSessionId(
     params,
   );
   return row ? rowToAgentTask(row) : null;
+}
+
+/**
+ * Records the harness that ran (or tried to run) a task when no session ever
+ * reported it. `provider` is otherwise written only by the session-init path,
+ * so a task whose harness failed to spawn kept `provider` NULL and looked like
+ * a task that never started. Never overwrites a provider already recorded.
+ */
+export async function recordTaskProviderIfUnset(
+  taskId: string,
+  provider: ProviderName,
+): Promise<void> {
+  await getDbClient().run("UPDATE agent_tasks SET provider = ? WHERE id = ? AND provider IS NULL", [
+    provider,
+    taskId,
+  ]);
 }
 
 /**

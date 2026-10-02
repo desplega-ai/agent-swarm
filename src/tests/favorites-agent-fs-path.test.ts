@@ -9,7 +9,7 @@ import { handleFavorites } from "../http/favorites";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import { setRequestAuth } from "../utils/request-auth-context";
 
-// Migration 188 adds the Comb pin item type `agent-fs-path` to user_favorites.
+// Migration 192 adds the Comb pin item type `agent-fs-path` to user_favorites.
 
 const TEST_DB_PATH = "./test-favorites-agent-fs-path.sqlite";
 const MIGRATIONS_DIR = join(import.meta.dir, "../be/migrations");
@@ -132,17 +132,17 @@ describe("favorites: agent-fs-path item type (fresh DB)", () => {
   });
 });
 
-describe("migration 188 (existing DB)", () => {
+describe("migration 192 (existing DB)", () => {
   // In memory: the full migration chain on a file DB passed the 10 s test timeout on a loaded CI shard.
   test("keeps every favorite row and the indexes, and widens the CHECK", async () => {
     const db = new Database(":memory:");
     try {
       runMigrations(db);
 
-      // Roll back to the pre-188 shape: re-run 116 on the empty table (it
+      // Roll back to the pre-192 shape: re-run 116 on the empty table (it
       // rebuilds user_favorites with the old CHECK and the same indexes).
       db.exec(await Bun.file(join(MIGRATIONS_DIR, "116_favorite_principal_scope.sql")).text());
-      db.run("DELETE FROM _migrations WHERE version = 188");
+      db.run("DELETE FROM _migrations WHERE version = 192");
       expect(() =>
         db.run(
           "INSERT INTO user_favorites (favoriteScope, itemType, itemId) VALUES ('operator:x', 'agent-fs-path', 'o/d/a.md')",
@@ -182,7 +182,7 @@ describe("migration 188 (existing DB)", () => {
 
       runMigrations(db);
 
-      expect(db.query("SELECT version FROM _migrations WHERE version = 188").get()).not.toBeNull();
+      expect(db.query("SELECT version FROM _migrations WHERE version = 192").get()).not.toBeNull();
       expect(db.query("SELECT * FROM user_favorites ORDER BY id").all()).toEqual(before);
 
       const indexes = db

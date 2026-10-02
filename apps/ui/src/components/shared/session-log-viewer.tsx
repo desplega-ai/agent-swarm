@@ -1485,6 +1485,7 @@ function TurnUsageMeta({ block }: { block: ProviderMetaBlock }) {
             label="Reasoning"
             value={formatMaybeTokens(numberValue(usage.reasoning_output_tokens))}
           />
+          <LowKeyStat label="Steps" value={numberValue(block.data.steps)?.toString()} />
         </>
       }
     />

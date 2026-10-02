@@ -1,7 +1,7 @@
 {
   "name": "agent-swarm",
   "description": "Install, deploy, and operate agent-swarm: Docker Compose, Kubernetes with Helm, HTTPS, agent-fs, integrations, and the API for coding agents",
-  "version": "1.159.0",
+  "version": "1.161.0",
   "author": {
     "name": "desplega.sh",
     "email": "contact@desplega.sh",
@@ -21,5 +21,22 @@
     "mcp",
     "operations"
   ],
-  "skills": "./skills/"
+  "skills": "./skills/",
+  "hooks": "./claude-mod/hooks.json",
+  "types": "./claude-mod/types/index.d.ts",
+  "userConfig": {
+    "swarmUrl": {
+      "type": "string",
+      "title": "Swarm API URL",
+      "description": "Only needed without an agent-swarm-user MCP entry, e.g. https://api.example.com",
+      "required": false
+    },
+    "swarmToken": {
+      "type": "string",
+      "title": "Swarm user token",
+      "description": "An aswt_ user token. Only needed without an agent-swarm-user MCP entry.",
+      "sensitive": true,
+      "required": false
+    }
+  }
 }

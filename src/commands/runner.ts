@@ -35,7 +35,9 @@ import {
 } from "../providers/index.ts";
 import type { SteerDeliveryResult } from "../providers/types.ts";
 import { initTelemetry, telemetry } from "../telemetry.ts";
+import { mapTriggerSurface } from "../telemetry-context.ts";
 import {
+  isTerminalTaskStatus,
   type ModelTierOverrides,
   type ProviderName,
   parseWorkerModelTierOverrides,
@@ -44,6 +46,7 @@ import {
   resolveTaskModelSelection,
   type SteeringMessage,
 } from "../types.ts";
+import { isApiDrainingResponse } from "../utils/api-drain.ts";
 import { getApiKey } from "../utils/api-key.ts";
 import { computeBudgetBackoffMs } from "../utils/budget-backoff.ts";
 import { isCodexAuthFailureReason } from "../utils/codex-auth-failure.ts";
@@ -54,10 +57,7 @@ import {
   ModelWindowExhaustedError,
   resolveCredentialPools,
 } from "../utils/credentials.ts";
-import {
-  type RateLimitWindowTelemetry,
-  resolveCodexCreditsExhaustedCooldownMs,
-} from "../utils/error-tracker.ts";
+import { resolveCodexCreditsExhaustedCooldownMs } from "../utils/error-tracker.ts";
 import { probeHarnessCliVersion, reportHarnessModelOutcome } from "../utils/harness-cli-version.ts";
 import { resolveHarnessProvider } from "../utils/harness-provider.ts";
 import { prettyPrintLine, prettyPrintStderr } from "../utils/pretty-print.ts";
@@ -69,7 +69,12 @@ import { refreshSkillsIfChanged } from "../utils/skills-refresh.ts";
 import { guardSpawnModel } from "../utils/spawn-model-guard.ts";
 import { isSteeringEnabled } from "../utils/steering-enabled.ts";
 import { interpolate } from "../utils/template.ts";
-import { detectVcsProvider } from "../vcs/index.ts";
+import {
+  canonicalAzureDevOpsRepoUrl,
+  isAzureDevOpsUrl,
+  parseAzureDevOpsRepoUrl,
+} from "../vcs/azure-devops.ts";
+import { detectVcsProvider, type VcsProvider } from "../vcs/index.ts";
 import { validateJsonSchema } from "../workflows/json-schema-validator.ts";
 import { buildAttachmentsSection } from "./attachments-section.ts";
 import {
@@ -77,6 +82,7 @@ import {
   buildResumeContextPreamble,
   prependContextPreamble,
 } from "./context-preamble.ts";
+import { reportCredentialOutcomeThenFinish } from "./credential-outcome-report.ts";
 import { type CredentialRefreshState, refreshCredentialStatus } from "./credential-refresh.ts";
 import {
   awaitCredentials,
@@ -101,7 +107,6 @@ import {
   reportLatestModel,
   sendCredStatusReport,
 } from "./provider-credentials.ts";
-import { buildFinalRateLimitWindows, classifyRateLimitOutcome } from "./rate-limit-outcome.ts";
 import {
   type ResumeSessionCandidate,
   type ResumeSessionResolution,
@@ -111,6 +116,7 @@ import {
 import "./templates.ts";
 
 export { buildAttachmentsSection } from "./attachments-section.ts";
+export { reportKeyRateLimitWindows } from "./credential-outcome-report.ts";
 
 /** Throttle interval for progress updates (3 seconds). */
 const PROGRESS_THROTTLE_MS = 3000;
@@ -269,7 +275,8 @@ async function listSwarmAutostashes(clonePath: string, role: string): Promise<Sw
  *    (src/agentmail/handlers.ts) — always carries `parentTaskId` pointing at
  *    the task it's continuing (as opposed to "agentmail-message", which fires
  *    only when no existing task was found for the thread).
- *  - "github-comment" / "github-review" / "gitlab-comment" / "gitlab-ci":
+ *  - "github-comment" / "github-review" / "gitlab-comment" / "gitlab-ci" /
+ *    "azure-devops-comment":
  *    tracker feedback on an ALREADY-OPEN PR/MR (review comments, review
  *    verdicts, CI failures) — the point is to keep working on the existing
  *    feature branch, not reset back to the default branch.
@@ -287,6 +294,7 @@ const CONTINUATION_TASK_TYPES = new Set([
   "github-review",
   "gitlab-comment",
   "gitlab-ci",
+  "azure-devops-comment",
 ]);
 
 /**
@@ -710,8 +718,12 @@ export function scheduleSteeringDispatch(
   return true;
 }
 
-/** Ping the server to indicate activity and update status */
-async function pingServer(config: ApiConfig, _role: string): Promise<void> {
+/**
+ * Ping the server to indicate activity and update status. Resolves to whether
+ * the API is draining, or undefined when it did not answer (down, or a 5xx
+ * from a proxy), so a gap in service never reads as "stopped draining".
+ */
+export async function pingServer(config: ApiConfig, _role: string): Promise<boolean | undefined> {
   const headers: Record<string, string> = {
     "X-Agent-ID": config.agentId,
   };
@@ -723,12 +735,15 @@ async function pingServer(config: ApiConfig, _role: string): Promise<void> {
   }
 
   try {
-    await fetch(`${config.apiUrl}/ping`, {
+    const response = await fetch(`${config.apiUrl}/ping`, {
       method: "POST",
       headers,
     });
+    if (response.status >= 500) return undefined;
+    return isApiDrainingResponse(response);
   } catch {
     // Silently fail - server might not be running
+    return undefined;
   }
 }
 
@@ -1093,6 +1108,7 @@ export const RELOADABLE_ENV_KEYS: ReadonlySet<string> = new Set([
   // pi reads these from process.env for its traits and its session.
   "PI_TOOL_DEFERRAL",
   "PI_CODEMODE",
+  "PI_CODEMODE_MODELS",
 ]);
 
 /**
@@ -1570,7 +1586,7 @@ async function validateProviderOutputIfNeeded(
   config: ApiConfig,
   taskId: string,
   providerOutput: string,
-): Promise<{ ok: true } | { ok: false; failReason: string }> {
+): Promise<{ ok: true; output?: string } | { ok: false; failReason: string }> {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
   };
@@ -1591,29 +1607,65 @@ async function validateProviderOutputIfNeeded(
       return { ok: true };
     }
 
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(providerOutput);
-    } catch {
-      return {
-        ok: false,
-        failReason:
-          "Structured output required by outputSchema but provider output was not valid JSON",
-      };
+    // The first candidate is the raw text, so a final message that is already
+    // bare JSON keeps its exact bytes. Later candidates recover JSON that the
+    // model wrapped in a ```json fence or a line of prose.
+    let firstValidationErrors: string[] | undefined;
+    for (const [index, candidate] of jsonOutputCandidates(providerOutput).entries()) {
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(candidate);
+      } catch {
+        continue;
+      }
+      const validationErrors = validateJsonSchema(taskData.outputSchema, parsed);
+      if (validationErrors.length === 0) {
+        return index === 0 ? { ok: true } : { ok: true, output: candidate };
+      }
+      firstValidationErrors ??= validationErrors;
     }
 
-    const validationErrors = validateJsonSchema(taskData.outputSchema, parsed);
-    if (validationErrors.length > 0) {
+    if (firstValidationErrors) {
       return {
         ok: false,
-        failReason: `Structured output did not match outputSchema: ${validationErrors.join("; ")}`,
+        failReason: `Structured output did not match outputSchema: ${firstValidationErrors.join("; ")}`,
       };
     }
+    return {
+      ok: false,
+      failReason:
+        "Structured output required by outputSchema but provider output was not valid JSON",
+    };
   } catch {
     return { ok: true };
   }
+}
 
-  return { ok: true };
+/**
+ * Texts that may hold the JSON in an agent's final message, in the order to
+ * try them: the whole message, each fenced code block from last to first, then
+ * the span from the first `{` (or `[`) to the last `}` (or `]`). Agents often
+ * answer a schema-bound task with "Here is the result:" plus a ```json block
+ * instead of calling store-progress, and `JSON.parse` on the whole message
+ * fails on that. Fences run last to first because an earlier fence is often an
+ * example or a draft that also matches the schema, and the answer comes last.
+ */
+function jsonOutputCandidates(text: string): string[] {
+  const candidates = [text];
+  const fenced: string[] = [];
+  for (const match of text.matchAll(/```[a-zA-Z]*[ \t]*\r?\n([\s\S]*?)\r?\n[ \t]*```/g)) {
+    if (match[1]?.trim()) fenced.push(match[1].trim());
+  }
+  candidates.push(...fenced.reverse());
+  for (const [open, close] of [
+    ["{", "}"],
+    ["[", "]"],
+  ] as const) {
+    const start = text.indexOf(open);
+    const end = text.lastIndexOf(close);
+    if (start >= 0 && end > start) candidates.push(text.slice(start, end + 1));
+  }
+  return [...new Set(candidates)];
 }
 
 export async function ensureTaskFinished(
@@ -1643,12 +1695,15 @@ export async function ensureTaskFinished(
   // Exit code 0 = success, non-zero = failure
   let status = exitCode === 0 ? "completed" : "failed";
   const body: Record<string, string> = { status };
+  // The server records it only when no session did, so a spawn failure is
+  // attributed to its harness instead of leaving `provider` NULL.
+  if (provider) body.provider = provider;
 
   // Applies a structured-output fallback result to `body`/`status`. Shared by
   // the no-providerOutput path and the providerOutput-failed-schema-validation
   // path below, so a schema'd task ending in free-form prose falls through to
   // the same extraction fallback instead of hard-failing.
-  const applyFallback = (fallback: FallbackResult) => {
+  const applyFallback = (fallback: FallbackResult, rejectedOutputReason?: string) => {
     console.log(`[${role}] Task ${taskId.slice(0, 8)} fallback result: ${fallback.kind}`);
     switch (fallback.kind) {
       case "extracted":
@@ -1667,7 +1722,11 @@ export async function ensureTaskFinished(
       case "schema-fail":
         status = "failed";
         body.status = "failed";
-        body.failureReason = fallback.failReason;
+        // Keep why the provider's final message was rejected; the fallback's
+        // own reason alone ("not provided via store-progress") hides it.
+        body.failureReason = rejectedOutputReason
+          ? `${fallback.failReason}. Final message rejected: ${rejectedOutputReason}`
+          : fallback.failReason;
         break;
       case "fetch-error":
         body.output = `Process completed (could not verify task state: ${fallback.error})`;
@@ -1683,7 +1742,7 @@ export async function ensureTaskFinished(
   } else if (providerOutput) {
     const validation = await validateProviderOutputIfNeeded(config, taskId, providerOutput);
     if (validation.ok) {
-      body.output = providerOutput;
+      body.output = validation.output ?? providerOutput;
     } else {
       // The task declared an outputSchema but the provider's final message
       // is free-form prose that doesn't satisfy it. Don't convert this into
@@ -1697,7 +1756,7 @@ export async function ensureTaskFinished(
         adapterType,
         providerOutput,
       );
-      applyFallback(fallback);
+      applyFallback(fallback, validation.failReason);
     }
   } else {
     // Try structured output fallback if the task has an outputSchema
@@ -1907,37 +1966,6 @@ export async function resolveCodexOAuthCredentialInfo(
   }
 }
 
-/** Report a rate-limited key to the API (fire-and-forget) */
-async function reportKeyRateLimit(
-  apiUrl: string,
-  apiKey: string,
-  keyType: string,
-  keySuffix: string,
-  keyIndex: number,
-  rateLimitedUntil: string,
-): Promise<void> {
-  try {
-    await fetch(`${apiUrl}/api/keys/report-rate-limit`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        keyType,
-        keySuffix,
-        keyIndex,
-        rateLimitedUntil,
-      }),
-    });
-    console.log(
-      `[credentials] Reported key ...${keySuffix} as rate-limited until ${rateLimitedUntil}`,
-    );
-  } catch {
-    // Non-blocking
-  }
-}
-
 /** Upper bound on each awaited credential-outcome report, so a slow API never stalls completions. */
 const KEY_OUTCOME_REPORT_TIMEOUT_MS = 5000;
 
@@ -1975,55 +2003,6 @@ async function reportKeyAuthFailure(
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.warn(scrubSecrets(`[credentials] Failed to report auth failure: ${message}`));
-  }
-}
-
-/**
- * Reports rate-limit window telemetry for a key. Returns the underlying
- * fetch promise (does not swallow errors) so a caller that needs the post to
- * complete before the task finishes (a model-scoped block) can await it and
- * decide how to handle a failure; a caller that wants the legacy
- * fire-and-forget behavior appends `.catch(() => {})`.
- *
- * Throws on a non-2xx response so a failed persistence surfaces to the
- * caller instead of logging success while only the in-process guard took
- * effect — otherwise other workers redraw the same exhausted key at once.
- *
- * `logKeySuffix` defaults to true for the legacy full-telemetry call site;
- * the model-scoped call site passes false since it already logs the model
- * family and key index itself (see the `[credential] model window ...`
- * log above the call).
- */
-export async function reportKeyRateLimitWindows(
-  apiUrl: string,
-  apiKey: string,
-  keyType: string,
-  keySuffix: string,
-  keyIndex: number,
-  windows: RateLimitWindowTelemetry,
-  logKeySuffix = true,
-): Promise<void> {
-  if (Object.keys(windows).length === 0) return;
-  const response = await fetch(`${apiUrl}/api/keys/report-rate-limit-windows`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      keyType,
-      keySuffix,
-      keyIndex,
-      windows,
-    }),
-  });
-  if (!response.ok) {
-    throw new Error(
-      `Failed to report rate-limit windows for key #${keyIndex}: HTTP ${response.status}`,
-    );
-  }
-  if (logKeySuffix) {
-    console.log(`[credentials] Reported rate-limit windows for key ...${keySuffix}`);
   }
 }
 
@@ -2380,6 +2359,8 @@ function setupShutdownHandlers(
           `[${role}] Superseding ${state.activeTasks.size} remaining task(s) for resume after restart...`,
         );
         for (const [taskId, task] of state.activeTasks) {
+          // Already superseded (or terminal) server-side, e.g. by the API-drain handoff.
+          if (task.serverTerminalStatus) continue;
           console.log(`[${role}] Superseding task ${taskId.slice(0, 8)}`);
           task.session.abort("graceful_shutdown").catch(() => {});
           if (apiConfig) {
@@ -2418,6 +2399,9 @@ function setupShutdownHandlers(
     if (apiConfig) {
       telemetry.session("ended", {
         agentId: apiConfig.agentId,
+        // A runner session spans many tasks, so it belongs to none.
+        taskId: null,
+        trigger_surface: null,
         durationMs: state ? Date.now() - state.startedAt : undefined,
         tasksProcessed: state?.tasksProcessed ?? 0,
       });
@@ -2482,6 +2466,10 @@ export interface RunningTask {
   promise: Promise<ProviderResult>;
   /** The trigger type that caused this task to be spawned */
   triggerType?: string;
+  /** Surface that started the task's whole chain (root task source); tags session telemetry */
+  triggerSurface?: string | null;
+  /** `users.id` of the requester; hashed into `user_ref` on session telemetry */
+  requestedByUserId?: string;
   /** Set when the promise resolves, enabling non-blocking completion checks */
   result: ProviderResult | null;
   /** Deferred cursor updates for channel_activity triggers — committed after success */
@@ -2523,6 +2511,20 @@ export interface RunningTask {
    * adapter's `ProviderResult.output` is empty (see `trackAssistantText`).
    */
   assistantText?: { value?: string };
+  /** Last time `reconcileActiveTasks` read this task's server-side status. */
+  lastReconcileAt?: number;
+  /** When the runner asked the session to abort (cancel or reconcile). */
+  abortRequestedAt?: number;
+  /**
+   * Terminal status the server already holds for this task, found by
+   * `reconcileActiveTasks` or set by an API-drain handoff. Completion then only
+   * frees the slot and leaves the server's output and failureReason alone.
+   */
+  serverTerminalStatus?: string;
+  /** API-drain handoff calls made for this task (see `handOffTasksForApiDrain`). */
+  drainHandoffAttempts?: number;
+  /** The API answered the drain handoff for this task, so it is not retried. */
+  drainHandoffSettled?: boolean;
 }
 
 /** Runner state for tracking concurrent tasks */
@@ -2554,6 +2556,12 @@ export interface RunnerState {
    * value is the reset time in ms. Read by `selectCredential` (T5).
    */
   modelWindowBlocks: Map<string, number>;
+  /**
+   * The API is draining (it sent `X-Swarm-Draining`): in-flight tasks are handed
+   * off and no new work is taken until a response arrives without the header.
+   * Unset against an API that never drains.
+   */
+  apiDraining?: boolean;
 }
 
 /** Buffer for session logs */
@@ -2757,10 +2765,27 @@ async function detectVcsForTask(
     ).trim();
 
     // 4. Detect provider and check for PR/MR
-    let vcsProvider: "github" | "gitlab";
+    let vcsProvider: VcsProvider;
     let prJson: string;
+    let azureRepo: string | null = null;
 
-    if (remoteUrl.includes("github.com") || remoteUrl.includes("github")) {
+    if (isAzureDevOpsUrl(remoteUrl)) {
+      const parsed = parseAzureDevOpsRepoUrl(remoteUrl);
+      if (!parsed) return;
+      vcsProvider = "azure-devops";
+      azureRepo = canonicalAzureDevOpsRepoUrl(remoteUrl);
+      const prs = JSON.parse(
+        await Bun.$`az repos pr list --organization ${parsed.orgUrl} --project ${parsed.project} --repository ${parsed.repository} --source-branch ${branch} --status active --top 1 --output json`
+          .quiet()
+          .text(),
+      ) as Array<{ pullRequestId: number }>;
+      prJson = JSON.stringify(
+        prs.map((pr) => ({
+          number: pr.pullRequestId,
+          url: `${azureRepo}/pullrequest/${pr.pullRequestId}`,
+        })),
+      );
+    } else if (remoteUrl.includes("github.com") || remoteUrl.includes("github")) {
       vcsProvider = "github";
       prJson = (
         await Bun.$`gh pr list --head ${branch} --json number,url --limit 1`.quiet().text()
@@ -2785,10 +2810,11 @@ async function detectVcsForTask(
     const vcsUrl = pr.url ?? pr.web_url;
     if (!vcsNumber || !vcsUrl) return;
 
-    // 6. Extract repo from remote URL
+    // 6. Extract repo from remote URL (Azure Repos keep the canonical clone URL,
+    // matching the vcsRepo their webhook tasks carry)
     const repoMatch = remoteUrl.match(/[:/]([^/]+\/[^/.]+?)(?:\.git)?$/);
-    if (!repoMatch) return;
-    const vcsRepo = repoMatch[1];
+    const vcsRepo = azureRepo ?? repoMatch?.[1];
+    if (!vcsRepo) return;
 
     // 7. Report to API
     const headers: Record<string, string> = { "Content-Type": "application/json" };
@@ -2979,6 +3005,15 @@ async function triggerHeartbeatSweep(config: ApiConfig): Promise<boolean> {
   }
 }
 
+/**
+ * `trigger_surface` for a worker event: the server-resolved root surface of the
+ * task, or null when the server did not send one (an older server, or a
+ * session with no task).
+ */
+function workerTriggerSurface(raw: string | null | undefined) {
+  return raw ? mapTriggerSurface(raw) : null;
+}
+
 /** Trigger types returned by the poll API */
 interface Trigger {
   type:
@@ -2989,6 +3024,8 @@ interface Trigger {
     | "channel_activity"
     | "budget_refused";
   taskId?: string;
+  /** Surface that started the task's whole chain (server-resolved); tags session telemetry. */
+  triggerSurface?: string;
   task?: unknown;
   mentionsCount?: number;
   count?: number;
@@ -3034,7 +3071,7 @@ interface Trigger {
 }
 
 /** Options for polling */
-interface PollOptions {
+export interface PollOptions {
   apiUrl: string;
   apiKey: string;
   agentId: string;
@@ -3045,6 +3082,8 @@ interface PollOptions {
   since?: string; // Optional: for filtering finished tasks
   /** Live harness provider; keys the MODEL_TIER_* overrides sent with the poll. */
   harnessProvider?: ProviderName;
+  /** Told, on every answered poll, whether the API is draining. */
+  onApiDrainSignal?: (draining: boolean) => void;
 }
 
 /**
@@ -3082,6 +3121,86 @@ export async function buildRequesterProfilePrompt(
   });
 
   return result.skipped ? "" : result.text.trim();
+}
+
+/** A non-2xx answer from `POST /api/agents`; carries the status for retry triage. */
+export class AgentRegistrationHttpError extends Error {
+  readonly status: number;
+  readonly body: string;
+  constructor(status: number, body: string) {
+    super(`Failed to register agent: ${status} ${body}`);
+    this.name = "AgentRegistrationHttpError";
+    this.status = status;
+    this.body = body;
+  }
+}
+
+/**
+ * Whether a boot registration failure is worth retrying. A freshly deployed
+ * API can answer `500 {"error":"database is locked"}` for minutes while boot
+ * work holds the SQLite write lock, and is unreachable while it restarts;
+ * both clear on their own. A 4xx (bad key, bad payload) never will.
+ */
+export function isRetryableRegistrationError(err: unknown): boolean {
+  if (err instanceof AgentRegistrationHttpError) {
+    return (
+      err.status >= 500 ||
+      err.status === 408 ||
+      err.status === 429 ||
+      /database is locked/i.test(err.body)
+    );
+  }
+  // Anything else escaped fetch itself: connection refused, reset, DNS, timeout.
+  return true;
+}
+
+export const REGISTRATION_RETRY_BUDGET_MS = 5 * 60_000;
+const REGISTRATION_RETRY_BASE_DELAY_MS = 2_000;
+const REGISTRATION_RETRY_MAX_DELAY_MS = 30_000;
+
+/**
+ * Boot registration with bounded exponential backoff (2s doubling to 30s,
+ * with jitter) inside a total wall-clock budget. Throws the last error on a
+ * non-retryable failure or once the next wait would overrun the budget, so
+ * the caller still exits and a restart policy can take over.
+ */
+export async function registerAgentWithRetry(
+  register: () => Promise<{ serverCapabilities?: string[] }>,
+  opts: {
+    label: string;
+    budgetMs?: number;
+    baseDelayMs?: number;
+    maxDelayMs?: number;
+    sleep?: (ms: number) => Promise<void>;
+    now?: () => number;
+  },
+): Promise<{ serverCapabilities?: string[] }> {
+  const budgetMs = opts.budgetMs ?? REGISTRATION_RETRY_BUDGET_MS;
+  const baseDelayMs = opts.baseDelayMs ?? REGISTRATION_RETRY_BASE_DELAY_MS;
+  const maxDelayMs = opts.maxDelayMs ?? REGISTRATION_RETRY_MAX_DELAY_MS;
+  const sleep = opts.sleep ?? ((ms: number) => Bun.sleep(ms));
+  const now = opts.now ?? Date.now;
+  const startedAt = now();
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await register();
+    } catch (err) {
+      if (!isRetryableRegistrationError(err)) throw err;
+      const backoff = Math.min(maxDelayMs, baseDelayMs * 2 ** (attempt - 1));
+      const delay = Math.round(backoff * (0.8 + Math.random() * 0.4));
+      const elapsed = now() - startedAt;
+      if (elapsed + delay > budgetMs) {
+        console.error(
+          `[${opts.label}] Registration still failing after ${attempt} attempts in ${Math.round(elapsed / 1000)}s; giving up`,
+        );
+        throw err;
+      }
+      console.warn(
+        `[${opts.label}] Registration attempt ${attempt} failed (${err}); retrying in ${Math.round(delay / 1000)}s`,
+      );
+      await sleep(delay);
+    }
+  }
 }
 
 /** Register agent via HTTP API. Exported so tests can exercise the real boot ordering. */
@@ -3141,7 +3260,7 @@ export async function registerAgent(opts: {
 
   if (!response.ok) {
     const error = await response.text();
-    throw new Error(`Failed to register agent: ${response.status} ${error}`);
+    throw new AgentRegistrationHttpError(response.status, error);
   }
 
   // The register response carries the SERVER's enabled capability flags (which
@@ -3159,8 +3278,8 @@ export async function registerAgent(opts: {
   return {};
 }
 
-/** Poll for triggers via HTTP API */
-async function pollForTrigger(opts: PollOptions): Promise<Trigger | null> {
+/** Poll for triggers via HTTP API. Exported for tests. */
+export async function pollForTrigger(opts: PollOptions): Promise<Trigger | null> {
   if (!isPollTracingEnabled()) {
     return pollForTriggerOnce(opts);
   }
@@ -3224,10 +3343,15 @@ async function pollForTriggerOnce(opts: PollOptions): Promise<Trigger | null> {
         continue;
       }
 
+      const draining = isApiDrainingResponse(response);
+      opts.onApiDrainSignal?.(draining);
+
       const data = (await response.json()) as { trigger: Trigger | null };
       if (data.trigger) {
         return data.trigger;
       }
+      // A draining API dispatches nothing: end the window so the loop can hand off.
+      if (draining) return null;
     } catch (error) {
       console.warn(`[runner] Poll request error: ${error}`);
     }
@@ -3253,8 +3377,8 @@ async function buildTaskOutputInstructions(
   return result.text;
 }
 
-/** Build prompt based on trigger type */
-async function buildPromptForTrigger(
+/** Build prompt based on trigger type. Exported for unit testing. */
+export async function buildPromptForTrigger(
   trigger: Trigger,
   defaultPrompt: string,
   fmt: (cmd: string) => string = (cmd) => `/${cmd}`,
@@ -3684,6 +3808,10 @@ async function spawnProviderProcess(
     runnerSessionId: string;
     iteration: number;
     taskId?: string;
+    /** Surface that started the task chain, for session telemetry. */
+    triggerSurface?: string | null;
+    /** `users.id` of the requester; hashed into `user_ref` on session telemetry. */
+    requestedByUserId?: string;
     model?: string;
     modelTier?: string;
     /** Server claim-time resolution (task.resolvedModel); wins over the local one. */
@@ -3735,8 +3863,7 @@ async function spawnProviderProcess(
     ));
   } catch (err) {
     if (err instanceof ModelWindowExhaustedError && realTaskId) {
-      const modelLabel = err.model.charAt(0).toUpperCase() + err.model.slice(1);
-      const reason = `No ${err.keyType} key has ${modelLabel} capacity until ${err.earliestResetAt ?? "unknown"}. Re-dispatch with another model or modelTier.`;
+      const reason = err.message;
       console.warn(`[${opts.role}] ${reason}`);
       await ensureTaskFinished(
         { apiUrl: opts.apiUrl, apiKey: opts.apiKey, agentId: opts.agentId },
@@ -4459,21 +4586,28 @@ async function spawnProviderProcess(
             "gen_ai.usage.output_tokens": result.cost.outputTokens ?? 0,
             "agentswarm.cost.total_usd": result.cost.totalCostUsd ?? 0,
           });
-          telemetry.session("cost", {
-            agentId: opts.agentId,
-            model: result.cost.model,
-            provider: result.cost.provider ?? opts.harnessProvider,
-            inputTokens: result.cost.inputTokens ?? 0,
-            outputTokens: result.cost.outputTokens ?? 0,
-            cacheReadTokens: result.cost.cacheReadTokens,
-            cacheWriteTokens: result.cost.cacheWriteTokens,
-            reasoningOutputTokens: result.cost.reasoningOutputTokens,
-            thinkingTokens: result.cost.thinkingTokens,
-            totalCostUsd: result.cost.totalCostUsd,
-            durationMs: result.cost.durationMs,
-            numTurns: result.cost.numTurns,
-            isError: result.cost.isError,
-          });
+          telemetry.session(
+            "cost",
+            {
+              agentId: opts.agentId,
+              // Lets cost be split by the surface that started the work.
+              taskId: realTaskId ?? null,
+              trigger_surface: workerTriggerSurface(opts.triggerSurface),
+              model: result.cost.model,
+              provider: result.cost.provider ?? opts.harnessProvider,
+              inputTokens: result.cost.inputTokens ?? 0,
+              outputTokens: result.cost.outputTokens ?? 0,
+              cacheReadTokens: result.cost.cacheReadTokens,
+              cacheWriteTokens: result.cost.cacheWriteTokens,
+              reasoningOutputTokens: result.cost.reasoningOutputTokens,
+              thinkingTokens: result.cost.thinkingTokens,
+              totalCostUsd: result.cost.totalCostUsd,
+              durationMs: result.cost.durationMs,
+              numTurns: result.cost.numTurns,
+              isError: result.cost.isError,
+            },
+            { userId: opts.requestedByUserId ?? null },
+          );
           try {
             await saveCostData(
               { ...result.cost, taskId: realTaskId, sessionId: opts.runnerSessionId },
@@ -4598,6 +4732,8 @@ async function spawnProviderProcess(
     startTime: new Date(),
     promise,
     result: null,
+    triggerSurface: opts.triggerSurface,
+    requestedByUserId: opts.requestedByUserId,
     credentialInfo,
     // Snapshot the provider + local-env trait of the adapter this session is
     // spawned on, so the session-end sync decision survives a live provider
@@ -4615,16 +4751,198 @@ async function spawnProviderProcess(
     runningTask.harnessVariantMeta = pendingHarnessVariantMeta;
   }
 
-  // Non-blocking completion tracking
+  // Non-blocking completion tracking. `reconcileActiveTasks` may have settled
+  // the task already when the session never did; keep that result.
   promise
     .then((r) => {
-      runningTask.result = r;
+      runningTask.result ??= r;
     })
     .catch(() => {
-      runningTask.result = { exitCode: 1, isError: true };
+      runningTask.result ??= { exitCode: 1, isError: true };
     });
 
   return runningTask;
+}
+
+/** Default cadence for checking active tasks against their server-side status. */
+export const DEFAULT_TASK_RECONCILE_INTERVAL_MS = 30_000;
+/** How long an aborted session gets to settle before the runner settles it. */
+export const ABORT_SETTLE_GRACE_MS = 10_000;
+
+/** `RUNNER_TASK_RECONCILE_INTERVAL_MS`, or the default when unset or invalid. */
+export function resolveTaskReconcileIntervalMs(
+  env: Record<string, string | undefined> = process.env,
+): number {
+  const raw = Number(env.RUNNER_TASK_RECONCILE_INTERVAL_MS);
+  return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_TASK_RECONCILE_INTERVAL_MS;
+}
+
+export interface ReconcileActiveTasksOptions {
+  /** Tasks already aborted because the server cancelled them. */
+  cancelledSignaled: Set<string>;
+  /** True when the server reports the task cancelled. Checked every call. */
+  isCancelled: (taskId: string) => Promise<boolean>;
+  /** The task's server-side status, or null when it could not be read. */
+  fetchStatus: (taskId: string) => Promise<string | null>;
+  intervalMs: number;
+  abortGraceMs?: number;
+  now?: () => number;
+}
+
+function requestSessionAbort(task: RunningTask, reason: string, at: number): void {
+  task.abortRequestedAt = at;
+  Promise.resolve()
+    .then(() => task.session.abort(reason))
+    .catch(() => {});
+}
+
+/** Handoff calls per task while the API drains; a call the API answered is never repeated. */
+export const API_DRAIN_HANDOFF_MAX_ATTEMPTS = 3;
+
+/**
+ * Fold the API's drain signal (the `X-Swarm-Draining` header on a ping or poll
+ * answer) into `state`. `undefined` means the API did not answer: keep the last
+ * known state. Exported for tests.
+ */
+export function applyApiDrainSignal(
+  state: RunnerState,
+  role: string,
+  draining: boolean | undefined,
+): void {
+  if (draining === undefined) return;
+  if (draining && !state.apiDraining) {
+    console.log(`[${role}] API is draining: handing off in-flight tasks, taking no new work`);
+  } else if (!draining && state.apiDraining) {
+    console.log(`[${role}] API stopped draining: resuming normal polling`);
+  }
+  state.apiDraining = draining;
+}
+
+/**
+ * The API is draining, so it still serves but will stop soon: supersede each
+ * in-flight task now, while the call can land, instead of in the SIGTERM
+ * handler, which compose runs after the API is gone. Same API call and reason
+ * as the SIGTERM handoff, so the resume follow-up is identical.
+ *
+ * A task the API superseded is marked server-terminal and its session aborted;
+ * completion then frees the slot without a finish call. A failed call leaves
+ * the task running, up to `API_DRAIN_HANDOFF_MAX_ATTEMPTS`, and the SIGTERM
+ * handler stays the fallback. Exported for tests.
+ */
+export async function handOffTasksForApiDrain(
+  state: RunnerState,
+  role: string,
+  apiConfig: ApiConfig,
+): Promise<void> {
+  for (const [taskId, task] of state.activeTasks) {
+    // A settled session reports its own result through `checkCompletedProcesses`.
+    if (task.result !== null || task.drainHandoffSettled) continue;
+    const attempts = task.drainHandoffAttempts ?? 0;
+    if (attempts >= API_DRAIN_HANDOFF_MAX_ATTEMPTS) continue;
+    task.drainHandoffAttempts = attempts + 1;
+
+    const outcome = await supersedeTaskViaAPI(apiConfig, role, taskId, "graceful_shutdown");
+    if (!outcome.ok) {
+      console.warn(
+        `[${role}] Drain handoff for task ${taskId.slice(0, 8)} failed (attempt ${attempts + 1}/${API_DRAIN_HANDOFF_MAX_ATTEMPTS}); the task keeps running`,
+      );
+      continue;
+    }
+    task.drainHandoffSettled = true;
+    if (outcome.kind === "resumed" || outcome.kind === "workflow-failed") {
+      task.serverTerminalStatus = outcome.kind === "resumed" ? "superseded" : "failed";
+      console.log(`[${role}] Handed off task ${taskId.slice(0, 8)} ahead of the API stopping`);
+      requestSessionAbort(task, "graceful_shutdown", Date.now());
+    }
+    // "alreadyFinished": the task ended on its own. "rejected": the API refused
+    // the supersede on purpose. Either way the session follows its normal path.
+  }
+}
+
+/**
+ * Keep `state.activeTasks` in line with the server, so a session whose promise
+ * never settles cannot hold an execution slot forever:
+ * - a task the server cancelled gets its session aborted (every call);
+ * - every `intervalMs`, a task the server already holds as terminal (for
+ *   example failed by the heartbeat sweep) gets its session aborted too;
+ * - a session that has not settled `abortGraceMs` after an abort is settled
+ *   here, and `checkCompletedProcesses` frees the slot on its next pass.
+ * Exported for tests.
+ */
+export async function reconcileActiveTasks(
+  state: RunnerState,
+  role: string,
+  opts: ReconcileActiveTasksOptions,
+): Promise<void> {
+  const now = opts.now ?? Date.now;
+  const graceMs = opts.abortGraceMs ?? ABORT_SETTLE_GRACE_MS;
+
+  for (const [taskId, task] of state.activeTasks) {
+    if (task.result !== null) continue;
+
+    if (!opts.cancelledSignaled.has(taskId)) {
+      try {
+        if (await opts.isCancelled(taskId)) {
+          console.log(
+            `[${role}] Task ${taskId.slice(0, 8)} was cancelled — sending SIGTERM to subprocess`,
+          );
+          requestSessionAbort(task, "cancelled", now());
+          opts.cancelledSignaled.add(taskId);
+        }
+      } catch {
+        // Non-blocking — cancellation check is best-effort
+      }
+    }
+
+    if (task.abortRequestedAt === undefined) {
+      const lastCheck = task.lastReconcileAt ?? task.startTime.getTime();
+      if (now() - lastCheck >= opts.intervalMs) {
+        task.lastReconcileAt = now();
+        const status = await opts.fetchStatus(taskId).catch(() => null);
+        if (status && isTerminalTaskStatus(status)) {
+          console.warn(
+            `[${role}] Task ${taskId.slice(0, 8)} is ${status} server-side but its session is still running — aborting it`,
+          );
+          task.serverTerminalStatus = status;
+          requestSessionAbort(task, `server task ${status}`, now());
+        }
+      }
+    }
+
+    if (
+      task.abortRequestedAt !== undefined &&
+      task.result === null &&
+      now() - task.abortRequestedAt >= graceMs
+    ) {
+      console.warn(
+        `[${role}] Task ${taskId.slice(0, 8)} session did not settle ${graceMs}ms after abort — releasing its slot`,
+      );
+      task.result = {
+        exitCode: 1,
+        isError: true,
+        sessionId: task.session.sessionId,
+        failureReason: "runner exited without result: provider session did not settle after abort",
+      };
+    }
+  }
+}
+
+/** Fetch whether the server holds a task as cancelled. Throws on network failure. */
+async function fetchTaskCancelled(
+  apiUrl: string,
+  apiKey: string,
+  agentId: string,
+  taskId: string,
+): Promise<boolean> {
+  const resp = await fetch(`${apiUrl}/cancelled-tasks?taskId=${encodeURIComponent(taskId)}`, {
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "X-Agent-ID": agentId,
+    },
+  });
+  if (!resp.ok) return false;
+  const data = (await resp.json()) as { cancelled: Array<{ id: string }> };
+  return data.cancelled?.some((t) => t.id === taskId) ?? false;
 }
 
 /** Check for completed processes and remove them from active tasks. Exported for tests. */
@@ -4638,6 +4956,8 @@ export async function checkCompletedProcesses(
     taskId: string;
     result: ProviderResult;
     triggerType?: string;
+    triggerSurface?: string | null;
+    requestedByUserId?: string;
     cursorUpdates?: Array<{ channelId: string; ts: string }>;
     workingDir?: string;
     credentialInfo?: RunningTask["credentialInfo"];
@@ -4648,6 +4968,7 @@ export async function checkCompletedProcesses(
     model?: string;
     durationMs: number;
     assistantText?: RunningTask["assistantText"];
+    serverTerminalStatus?: string;
   }> = [];
 
   for (const [taskId, task] of state.activeTasks) {
@@ -4660,6 +4981,8 @@ export async function checkCompletedProcesses(
         taskId,
         result: task.result,
         triggerType: task.triggerType,
+        triggerSurface: task.triggerSurface,
+        requestedByUserId: task.requestedByUserId,
         cursorUpdates: task.cursorUpdates,
         workingDir: task.workingDir,
         credentialInfo: task.credentialInfo,
@@ -4670,6 +4993,7 @@ export async function checkCompletedProcesses(
         model: task.model,
         durationMs: Date.now() - task.startTime.getTime(),
         assistantText: task.assistantText,
+        serverTerminalStatus: task.serverTerminalStatus,
       });
     }
   }
@@ -4678,6 +5002,8 @@ export async function checkCompletedProcesses(
   for (const {
     taskId,
     result,
+    triggerSurface,
+    requestedByUserId,
     cursorUpdates,
     workingDir,
     credentialInfo,
@@ -4687,6 +5013,7 @@ export async function checkCompletedProcesses(
     model,
     durationMs,
     assistantText,
+    serverTerminalStatus,
   } of completedTasks) {
     state.activeTasks.delete(taskId);
     vcsDetectedTasks.delete(taskId);
@@ -4700,6 +5027,17 @@ export async function checkCompletedProcesses(
           scrubSecrets(err instanceof Error ? err.message : String(err)),
         ),
       );
+    }
+
+    // The server finished this task without the session (heartbeat sweep,
+    // another writer). Its result stands: no finish call, and no credential
+    // or model outcome built from the abort this runner forced.
+    if (serverTerminalStatus) {
+      console.log(
+        `[${role}] Task ${taskId.slice(0, 8)} was already ${serverTerminalStatus} server-side — slot released, server result kept`,
+      );
+      state.tasksProcessed += 1;
+      continue;
     }
 
     // Detect VCS before finishing — last chance to link a PR
@@ -4727,57 +5065,7 @@ export async function checkCompletedProcesses(
         failureReason,
       });
 
-      // If rate-limited and we know which key was used, report it.
-      // Codex adapter prefixes failure reasons with `[rate-limit]` /
-      // `[usage-limit]` (see codex-adapter.formatTerminalError); Claude
-      // surfaces "rate limit" / "hit your limit" via SessionErrorTracker.
-      //
-      // classifyRateLimitOutcome tests model-scoped windows (Fable/Opus/
-      // Sonnet weekly limits) before the legacy key-wide gate, so a
-      // model-scoped rejection blocks only that model family on this key —
-      // never the whole key — via report-rate-limit-windows instead of
-      // report-rate-limit. A key-wide rejection seen in the same session is
-      // still reported alongside it (windows are independent). The session's
-      // window telemetry and the classified model rejection go out as ONE
-      // payload, so an older `allowed` snapshot never overwrites the terminal
-      // rejection. The post is awaited so it completes before the task
-      // finishes.
       if (credentialInfo) {
-        const outcome = classifyRateLimitOutcome(
-          result,
-          failureReason,
-          Date.now(),
-          state.codexCreditsExhaustedCooldownMs,
-        );
-        const keyRateLimitedUntil =
-          outcome.kind === "key"
-            ? outcome.rateLimitedUntil
-            : outcome.kind === "model"
-              ? outcome.keyRateLimitedUntil
-              : undefined;
-        if (keyRateLimitedUntil) {
-          console.log(`[credentials] Rate limit reset: ${keyRateLimitedUntil}`);
-          reportKeyRateLimit(
-            apiConfig.apiUrl,
-            apiConfig.apiKey,
-            credentialInfo.keyType,
-            credentialInfo.keySuffix,
-            credentialInfo.keyIndex,
-            keyRateLimitedUntil,
-          ).catch(() => {});
-        }
-        if (outcome.kind === "model") {
-          const resetsAtIso = new Date(outcome.resetsAtSec * 1000).toISOString();
-          const blockKey = `${credentialInfo.keyType}:${credentialInfo.keyIndex}:${outcome.window}`;
-          state.modelWindowBlocks.set(blockKey, outcome.resetsAtSec * 1000);
-          console.log(
-            `[credential] ${outcome.model} weekly window exhausted (${outcome.window}) on key #${credentialInfo.keyIndex} until ${resetsAtIso}`,
-          );
-        }
-
-        // Land the success reset or the auth-failure count (and a bench at 2)
-        // before this task finishes and before the next completion, so the API
-        // sees them in order and the next draw already skips a dead login.
         await reportKeyCompletionOutcome({
           apiUrl: apiConfig.apiUrl,
           apiKey: apiConfig.apiKey,
@@ -4786,30 +5074,6 @@ export async function checkCompletedProcesses(
           exitCode: result.exitCode,
           failureReason,
         });
-
-        const finalWindows = buildFinalRateLimitWindows(
-          result.rateLimitWindows,
-          outcome,
-          new Date().toISOString(),
-        );
-        if (finalWindows) {
-          const report = reportKeyRateLimitWindows(
-            apiConfig.apiUrl,
-            apiConfig.apiKey,
-            credentialInfo.keyType,
-            credentialInfo.keySuffix,
-            credentialInfo.keyIndex,
-            finalWindows,
-            outcome.kind !== "model",
-          ).catch((err) => {
-            console.warn(
-              `[credential] Failed to report rate-limit windows: ${err instanceof Error ? err.message : String(err)}`,
-            );
-          });
-          // A model rejection gates admission on other workers: land it before
-          // the task finishes. Plain telemetry stays fire-and-forget.
-          if (outcome.kind === "model") await report;
-        }
       }
       let bridgeDiagnostics: Awaited<ReturnType<typeof getBridgeFailureDiagnostics>> | undefined;
       if (result.exitCode !== 0 && harnessProvider === "claude" && workingDir) {
@@ -4825,46 +5089,74 @@ export async function checkCompletedProcesses(
         bridgeDiagnostics?.paneTail != null
           ? `Claude bridge final tmux pane tail (${bridgeDiagnostics.artifactPath}):\n${bridgeDiagnostics.paneTail}`
           : undefined;
-      await ensureTaskFinished(
-        apiConfig,
-        role,
-        taskId,
-        result.exitCode,
-        failureReason,
-        // Runner-buffered last assistant text is a harness-agnostic fallback
-        // for adapters that never populate `ProviderResult.output` (Codex
-        // today, any future adapter). Empty buffer -> `undefined`, byte
-        // identical to pre-fix behavior.
-        resolveProviderOutput(result, assistantText),
-        harnessProvider,
-        bridgeFailureDiagnostics,
+      // Reports that gate admission on other workers (a seat mismatch, a
+      // model window rejection) land before the task finishes.
+      await reportCredentialOutcomeThenFinish(
+        {
+          apiUrl: apiConfig.apiUrl,
+          apiKey: apiConfig.apiKey,
+          credentialInfo,
+          result,
+          failureReason,
+          model,
+          codexCreditsExhaustedCooldownMs: state.codexCreditsExhaustedCooldownMs,
+          modelWindowBlocks: state.modelWindowBlocks,
+        },
+        () =>
+          ensureTaskFinished(
+            apiConfig,
+            role,
+            taskId,
+            result.exitCode,
+            failureReason,
+            // Runner-buffered last assistant text is a harness-agnostic fallback
+            // for adapters that never populate `ProviderResult.output` (Codex
+            // today, any future adapter). Empty buffer -> `undefined`, byte
+            // identical to pre-fix behavior.
+            resolveProviderOutput(result, assistantText),
+            harnessProvider,
+            bridgeFailureDiagnostics,
+          ),
       );
 
-      telemetry.taskEvent("session_completed", {
-        taskId,
-        agentId: apiConfig.agentId,
-        provider: result.cost?.provider ?? harnessProvider,
-        model: result.cost?.model ?? model,
-        harnessVariant,
-        harnessVersion:
-          typeof harnessVariantMeta?.version === "string" ||
-          typeof harnessVariantMeta?.version === "number"
-            ? String(harnessVariantMeta.version)
-            : undefined,
-        exitCode: result.exitCode,
-        isError: result.exitCode !== 0,
-        durationMs,
-      });
+      const sessionTriggerSurface = workerTriggerSurface(triggerSurface);
+      const sessionActor = { userId: requestedByUserId ?? null };
+      telemetry.taskEvent(
+        "session_completed",
+        {
+          taskId,
+          trigger_surface: sessionTriggerSurface,
+          agentId: apiConfig.agentId,
+          provider: result.cost?.provider ?? harnessProvider,
+          model: result.cost?.model ?? model ?? "unknown",
+          harnessVariant,
+          harnessVersion:
+            typeof harnessVariantMeta?.version === "string" ||
+            typeof harnessVariantMeta?.version === "number"
+              ? String(harnessVariantMeta.version)
+              : undefined,
+          exitCode: result.exitCode,
+          isError: result.exitCode !== 0,
+          durationMs,
+        },
+        sessionActor,
+      );
       const sessionTelemetryEvent = resolveSessionTelemetryEvent(result);
       if (sessionTelemetryEvent) {
-        telemetry.session(sessionTelemetryEvent, {
-          agentId: apiConfig.agentId,
-          errorCategory: normalizeSessionErrorCategory(result.errorCategory),
-          provider: result.cost?.provider ?? harnessProvider,
-          model: result.cost?.model ?? model,
-          durationMs: result.cost?.durationMs ?? durationMs,
-          wasRateLimited: result.rateLimitResetAt != null,
-        });
+        telemetry.session(
+          sessionTelemetryEvent,
+          {
+            agentId: apiConfig.agentId,
+            taskId,
+            trigger_surface: sessionTriggerSurface,
+            errorCategory: normalizeSessionErrorCategory(result.errorCategory),
+            provider: result.cost?.provider ?? harnessProvider,
+            model: result.cost?.model ?? model ?? "unknown",
+            durationMs: result.cost?.durationMs ?? durationMs,
+            wasRateLimited: result.rateLimitResetAt != null,
+          },
+          sessionActor,
+        );
       }
       state.tasksProcessed += 1;
 
@@ -5134,6 +5426,9 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   }
   telemetry.session("started", {
     agentId,
+    // The boot session is not tied to a task.
+    taskId: null,
+    trigger_surface: null,
     harnessProvider: bootProvider,
     model: bootModel || undefined,
     role,
@@ -5484,18 +5779,22 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
     }
   };
   try {
-    const reg = await registerAgent({
-      apiUrl,
-      apiKey,
-      agentId,
-      name: agentName,
-      role,
-      isLead,
-      capabilities,
-      maxTasks: maxConcurrent,
-      harnessProvider: bootProvider,
-      runtimeInstanceId,
-    });
+    const reg = await registerAgentWithRetry(
+      () =>
+        registerAgent({
+          apiUrl,
+          apiKey,
+          agentId,
+          name: agentName,
+          role,
+          isLead,
+          capabilities,
+          maxTasks: maxConcurrent,
+          harnessProvider: bootProvider,
+          runtimeInstanceId,
+        }),
+      { label: role },
+    );
     lastServerCapsRefreshAt = Date.now();
     // Rebuilds the prompt immediately: the initial build above ran before
     // registration (serverCapabilities unknown), and the later identity
@@ -6189,10 +6488,16 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   // Throttle orphan recovery so it runs periodically while the worker is idle or under capacity.
   let lastOrphanRecoveryAt = 0;
   const ORPHAN_RECOVERY_INTERVAL_MS = 60_000;
+  const taskReconcileIntervalMs = resolveTaskReconcileIntervalMs();
 
   while (true) {
-    // Ping server on each iteration to keep status updated
-    await pingServer(apiConfig, role);
+    // Ping server on each iteration to keep status updated. The answer also
+    // carries the API's drain signal, which reaches workers at capacity that
+    // do not poll.
+    applyApiDrainSignal(state, role, await pingServer(apiConfig, role));
+    if (state.apiDraining) {
+      await handOffTasksForApiDrain(state, role, apiConfig);
+    }
 
     // Check for completed processes first and ensure tasks are marked as finished
     await checkCompletedProcesses(state, role, apiConfig, cancelledSignaled);
@@ -6268,38 +6573,18 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
       );
     }
 
-    // Check for cancelled tasks and signal their subprocesses. Deliberately
-    // NOT gated on steeringDispatchState — cancellation abort must keep
-    // working when steering dispatch is off (STEERING_ENABLED=false).
+    // Check for cancelled tasks and signal their subprocesses, and reconcile
+    // active tasks with server-side status so a session that never settles
+    // cannot hold its slot. Deliberately NOT gated on steeringDispatchState —
+    // cancellation abort must keep working when steering dispatch is off
+    // (STEERING_ENABLED=false).
     if (state.activeTasks.size > 0) {
-      for (const [taskId, task] of state.activeTasks) {
-        if (cancelledSignaled.has(taskId)) continue; // Already sent SIGTERM
-        try {
-          const cancelResp = await fetch(
-            `${apiUrl}/cancelled-tasks?taskId=${encodeURIComponent(taskId)}`,
-            {
-              headers: {
-                Authorization: `Bearer ${apiKey}`,
-                "X-Agent-ID": agentId,
-              },
-            },
-          );
-          if (cancelResp.ok) {
-            const cancelData = (await cancelResp.json()) as {
-              cancelled: Array<{ id: string }>;
-            };
-            if (cancelData.cancelled?.some((t) => t.id === taskId)) {
-              console.log(
-                `[${role}] Task ${taskId.slice(0, 8)} was cancelled — sending SIGTERM to subprocess`,
-              );
-              task.session.abort("cancelled").catch(() => {});
-              cancelledSignaled.add(taskId);
-            }
-          }
-        } catch {
-          // Non-blocking — cancellation check is best-effort
-        }
-      }
+      await reconcileActiveTasks(state, role, {
+        cancelledSignaled,
+        isCancelled: (taskId) => fetchTaskCancelled(apiUrl, apiKey, agentId, taskId),
+        fetchStatus: (taskId) => fetchTaskStatus(apiUrl, apiKey, taskId),
+        intervalMs: taskReconcileIntervalMs,
+      });
     }
 
     // Deliver pending steering to live provider sessions and report the actual outcome.
@@ -6316,8 +6601,10 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
       }
     }
 
-    // Only poll if we have capacity
-    if (state.activeTasks.size < state.maxConcurrent) {
+    // Only poll if we have capacity and the API is not draining
+    if (state.apiDraining) {
+      await Bun.sleep(1000);
+    } else if (state.activeTasks.size < state.maxConcurrent) {
       if (Date.now() - lastOrphanRecoveryAt > ORPHAN_RECOVERY_INTERVAL_MS) {
         lastOrphanRecoveryAt = Date.now();
         const recoveredOrphans = await recoverOrphanedInProgressTasks(apiConfig);
@@ -6343,6 +6630,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
         runtimeInstanceId,
         pollTimeout: effectiveTimeout,
         harnessProvider: state.harnessProvider,
+        onApiDrainSignal: (draining) => applyApiDrainSignal(state, role, draining),
       });
 
       if (trigger) {
@@ -6696,6 +6984,8 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
               runnerSessionId: taskRunnerSessionId,
               iteration,
               taskId: trigger.taskId,
+              triggerSurface: trigger.triggerSurface,
+              requestedByUserId: trigger.requestedBy?.id,
               model: taskModel,
               modelTier: taskModelTier,
               resolvedModel: (trigger.task as { resolvedModel?: string } | undefined)

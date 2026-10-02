@@ -1,0 +1,384 @@
+---
+title: Open-Prompt Showreel Videos
+description: Make design-led motion-graphics videos with an agent swarm from one open prompt. One Claude Code worker on Opus at max effort designs, codes, renders and critiques the video; every number on screen is read live from a named source. Includes the full toolchain setup and a worked example, the TLA+ races showreel.
+---
+
+<JsonLd
+  data={{
+    "@context": "https://schema.org",
+    "@type": "HowTo",
+    name: "Make open-prompt motion-graphics videos with an agent swarm",
+    description:
+      "How to set up a worker with the video toolchain, brief it with one open prompt, ground every on-screen number in a live source, run a contact-sheet critique loop, and deliver the video through agent-fs.",
+    step: [
+      { "@type": "HowToStep", name: "Install the toolchain on a worker", text: "Copy templates/community/open-prompt-showreel to /workspace/personal/showreel-toolkit on a Claude Code harness worker and run setup.sh. It checks ffmpeg, Playwright and Chromium, then adds ffprobe, a numpy venv, three pinned fonts and the real logo." },
+      { "@type": "HowToStep", name: "Install the skills and set model and effort", text: "Create the open-prompt-showreel, video-generation, motion-design-video-analysis and motion-design-replication skills, and send each maker task with model claude-opus-5-5 and effort max." },
+      { "@type": "HowToStep", name: "Brief the maker with one open prompt", text: "Use the brief template in lead-prompt.md. Give hard content rules (every number from a named source, the real logo, CC0 or CC BY music) and no storyboard." },
+      { "@type": "HowToStep", name: "Let the maker read facts, build, and critique", text: "The maker writes facts.ts, builds a frame-addressable canvas reel, and looks at a contact sheet at least three times, fixing what looks weak each round." },
+      { "@type": "HowToStep", name: "Review and relay", text: "The Lead checks the contact sheet, the end card, every number against facts.json and the ffprobe line, then relays the agent-fs share link and the music attribution (source link, license link and the changes made to the track)." }
+    ]
+  }}
+/>
+
+This playbook documents how we make the motion-graphics videos for Agent Swarm posts. The approach is one open prompt to one strong model, not a template pipeline: a Claude Code worker on `claude-opus-5-5` at `max` effort designs, codes, renders and critiques the whole video in a scratch directory. The Lead briefs it, looks at the frames, and relays the result.
+
+<video
+  controls
+  preload="metadata"
+  poster="/playbooks/open-prompt-showreel/tla-races-showreel-v3-poster.jpg"
+  style={{ width: "100%", borderRadius: "8px" }}
+>
+  <source src="/playbooks/open-prompt-showreel/tla-races-showreel-v3.mp4" type="video/mp4" />
+</video>
+
+*The worked example: the TLA+ races showreel, 24 seconds, made by a worker with this playbook. [Jump to how it was made](#example-tla-races-showreel).*
+
+Music: ["Mist City"](https://opengameart.org/content/mist-city) by Section7, licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). Changes: trimmed to 24 seconds, time-stretched from about 129 to 120 BPM so the beats sit on the frame grid, faded in and out, and loudness-normalized.
+
+<Mermaid title="Open-prompt video flow: the Lead brief goes to a Claude Code maker worker that reads facts from named sources, builds a canvas reel, renders stills into a contact sheet, fixes what looks weak for at least three rounds, cuts the music, renders, delivers to agent-fs, and the Lead reviews before relaying." chart={`flowchart LR
+  LB["Lead brief<br/>one open prompt + hard rules"] --> MK["Maker worker<br/>claude-opus-5-5, max effort"]
+  SRC["Named sources<br/>origin/main, PRs, eval writeup"] --> FC["facts.ts<br/>facts.json"]
+  MK --> FC
+  FC --> RL["reel.html<br/>canvas, frame-addressable"]
+  RL --> SH["Contact sheet<br/>look, fix, repeat x3"]
+  SH --> RL
+  SH --> RN["render.mjs + music cut<br/>mp4 16:9 + 4:5"]
+  RN --> FS["agent-fs<br/>mp4, sheets, facts.json"]
+  FS --> LR["Lead review<br/>frames, end card, numbers"]
+  LR --> RY["Relay<br/>share link + credit"]
+`} />
+
+## What it does
+
+- **A designed video, not a template fill.** The maker chooses the layout, motion and pacing. The brief gives rules, not a storyboard.
+- **Every on-screen number is live.** A `facts.ts` script reads each fact from its source right before render and writes `facts.json`. The reel reads that file.
+- **The real brand.** The end card uses the real Agent Swarm logo, never a redrawn mark.
+- **Music you may use.** CC0 or CC BY only, cut to the beat, credited on the end card, and in the post with the source link, the license link and the changes made.
+- **A visible critique loop.** At least three contact-sheet rounds, each one looked at, with the sheets kept.
+- **Delivery through agent-fs**, with a share link per mp4, and a Lead review before anything is relayed.
+
+## Agents
+
+- **[Lead](https://templates.agent-swarm.dev/official/lead)** — writes the brief from the requester's words, sets `model` and `effort`, reviews the frames, and relays the share links. The maker never posts.
+- **Maker** — a Claude Code harness worker (`provider: claude`) on the full worker image, cloned from the [Coder](https://templates.agent-swarm.dev/official/coder) template. It needs Playwright with Chromium, ffmpeg, python3 with numpy, and write access to agent-fs. Codex, pi and other harnesses were not tried for this workflow.
+
+## Tools & Skills
+
+### Built-in (ships with agent-swarm)
+
+- **`[Built-in]` `send-task`** — carries `model: claude-opus-5-5` and `effort: max` per task, plus `agentId` to pin the maker.
+- **`[Built-in]` `store-progress`** — the maker records its scratch directory in the first minute and the final artifacts at the end.
+- **`[Built-in]` `defer-task`** with `wakeOn:{event:"settled",taskIds:[...]}` — waits for a source that is not ready (PRs still merging, an eval still running) so no draft number ships.
+- **[agent-fs](https://github.com/desplega-ai/agent-fs)** — the shared drive: deliveries, `share-create` links, `download` for byte-exact copies.
+- **`skill-create` / `skill-install`** — put the four skills below into the swarm.
+
+### Custom (swarm-managed skills, shipped as copies in the template)
+
+- **`[Custom]` `open-prompt-showreel`** — the Lead brief template, the maker procedure, render specs, music rules, the critique loop, delivery, feedback rounds.
+- **`[Custom]` `video-generation`** — Remotion projects for repo-committed videos (README heroes, landing demos).
+- **`[Custom]` `motion-design-video-analysis`** — reverse-engineer a reference clip into a rebuild spec, with a mandatory by-eye check of every model claim.
+- **`[Custom]` `motion-design-replication`** — rebuild the feel of a reference clip with side-by-side frame critique.
+
+No `[ai-toolbox]` skill is required.
+
+### Community template
+
+- **[`templates/community/open-prompt-showreel`](https://github.com/desplega-ai/agent-swarm/tree/main/templates/community/open-prompt-showreel)** — `PLAYBOOK.md`, `lead-prompt.md`, `setup.sh`, `tools/`, `skills/` and `example/tla-races/`.
+
+### Third-party tools
+
+- **[ffmpeg](https://ffmpeg.org/)** — static 7.0.2 in the worker image: libx264, AAC, `xstack`, `atempo`, `loudnorm`. No `ffprobe`, no `drawtext`.
+- **[Playwright](https://playwright.dev/)** 1.58.0 and Chromium — run the reel and grab frames.
+- **[numpy](https://numpy.org/)** — beat and drop analysis for the music cut.
+- **[Remotion](https://www.remotion.dev/)** — only for the `video-generation` path.
+- **Fonts** — Space Grotesk, JetBrains Mono and Instrument Serif Italic, from [google/fonts](https://github.com/google/fonts) under the SIL Open Font License.
+- **Music** — [incompetech](https://incompetech.com) (Kevin MacLeod, CC BY 4.0) and [OpenGameArt](https://opengameart.org), filtered by license.
+
+## Workflows / Schedules
+
+None. This playbook runs on demand: a person asks for a video, the Lead sends one task. If you want a video per release, trigger the same brief from a release workflow and keep the Lead review step.
+
+## Setup, start to finish
+
+Everything below was run in a worker container (x86_64, node 22.23.3, bun 1.4.0, python 3.12.3) unless marked **not run**. The full verification log is at the end of this page.
+
+### 1. What the worker image already has
+
+| Tool | In the stock full worker image |
+|---|---|
+| node, npm, bun, git, gh, curl, tar | yes |
+| python3 with venv and pip | yes (system `pip install` is blocked by PEP 668) |
+| numpy | **no**, `setup.sh` installs it in a venv |
+| ffmpeg 7.0.2 (static) | yes, without `drawtext` and without `ffprobe` |
+| playwright 1.58.0 | yes, in `/opt/global-deps-full/node_modules` |
+| Chromium 145 | yes, in `/opt/playwright` |
+| agent-fs CLI 0.15.0 | yes |
+
+### 2. Install the template on the maker
+
+```bash
+git clone --depth 1 --filter=blob:none --sparse https://github.com/desplega-ai/agent-swarm.git /tmp/agent-swarm-tpl
+git -C /tmp/agent-swarm-tpl sparse-checkout set templates/community/open-prompt-showreel
+mkdir -p /workspace/personal/showreel-toolkit
+cp -r /tmp/agent-swarm-tpl/templates/community/open-prompt-showreel/. /workspace/personal/showreel-toolkit/
+bash /workspace/personal/showreel-toolkit/setup.sh
+```
+
+`/workspace/personal` survives a container restart. `$HOME` is not a safe place for anything you need again.
+
+`setup.sh` skips whatever is already installed. In order, it:
+
+1. Checks node, npm, bun, python3, curl and tar.
+2. Checks ffmpeg has libx264, otherwise installs the pinned static build (same version and sha256 as `Dockerfile.worker`).
+3. Installs `ffprobe` from the same tarball. Set `INSTALL_FFPROBE=0` to skip.
+4. Launches Chromium once through Playwright. If that fails, it runs `npm install playwright@1.58.0` and `playwright install chromium`.
+5. Creates a venv and installs numpy.
+6. Downloads the three fonts and checks each against a pinned sha256.
+7. Downloads the logo from agent-swarm.dev and from `apps/ui/public/logo.png` on main, and warns if they differ.
+8. Copies `tools/`, `example/` and itself, and writes `env.sh`.
+
+On a clean directory this took 17.6 s. The second run took 0.9 s and installed nothing. With `FORCE_LOCAL_FFMPEG=1 FORCE_LOCAL_PLAYWRIGHT=1` it ignores the image and installs its own ffmpeg, Playwright and a 622 MB Chromium; that path was run too.
+
+### 3. Re-run setup at every container start
+
+Append to the maker's `setupScript` with the `update-profile` tool. Keep what is already there.
+
+```bash
+# Showreel toolchain: idempotent, no-ops when already installed.
+[ -f /workspace/personal/showreel-toolkit/setup.sh ] && bash /workspace/personal/showreel-toolkit/setup.sh >> /workspace/personal/showreel-toolkit/setup.log 2>&1 || true
+```
+
+**Not run**: changing a live profile.
+
+### 4. Smoke test
+
+```bash
+. /workspace/personal/showreel-toolkit/env.sh
+cd /workspace/personal/showreel-toolkit/example/tla-races && bash smoke.sh
+```
+
+It renders the example reel to a 16-frame contact sheet and a 2-second mp4 at 960x540 with a generated tone as the audio track. It checks the pixel format and the AAC stream, then renders once more with a broken audio file and checks that `render.mjs` exits non-zero and leaves no mp4. It needs no network, no `gh` and no agent-fs. Expect `OK: yuv420p 960x540`, `OK: aac audio` and `OK: failed encode exits non-zero` (8.8 s).
+
+### 5. Install the skills
+
+For each `skills/<name>/SKILL.md` in the template, a Lead calls `skill-create` with the file content and `scope: "swarm"`, then `skill-install` on the maker. Install `open-prompt-showreel` on the Lead too.
+
+**Not run**: `skill-create` writes to a live swarm. The four files do parse with the `parseSkillContent` function that `skill-create` calls.
+
+The original skill also points at `swarm-studio` and `studio-api` for fixed-template creatives. They depend on a private repository and a hosted renderer, so they are not shipped. Send fixed-template asks to your own template toolkit.
+
+### 6. Model and effort
+
+Set both on every maker task:
+
+```text
+model:   claude-opus-5-5
+effort:  max
+agentId: <maker>
+```
+
+Every brief ends with: "If you are not on claude-opus-5-5, stop and say so instead of rendering."
+
+### 7. agent-fs delivery
+
+The maker uploads to `thoughts/<maker-agent-id>/videos/<slug>/` and never overwrites an earlier version (`<slug>-v2`, `<slug>-v3`). After each non-trivial write, check the size: `agent-fs stat <path> --json | jq '.size'`.
+
+```bash
+agent-fs --org <ORG_ID> --drive <DRIVE_ID> write thoughts/<maker-agent-id>/videos/<slug>/<file>.mp4 --file ./out/<file>.mp4
+agent-fs --org <ORG_ID> --drive <DRIVE_ID> share-create thoughts/<maker-agent-id>/videos/<slug>/<file>.mp4 --expires-in 604800 --json
+```
+
+A share link opens a player with no login and lasts 7 days at most. Report the URL, the share id and the expiry. A raw signed URL downloads instead of playing, and a raw `.mp4` is served as `application/octet-stream`. Use `agent-fs download <path> -o <file>` for a byte-exact copy (`cat` is paginated and truncates).
+
+**Not run**: `write` to a real drive and `share-create`, which publishes a link. The flags were checked against the CLI's `--help`, and `download` was run on the example master.
+
+## Making one video
+
+### The brief
+
+One task, one open prompt. The full template is in `lead-prompt.md`; the core is:
+
+```text
+Your prompt: make a dynamic <15 | 15-30> second motion graphics video about <SUBJECT>.
+Make it your showreel: show what an incredible motion designer you are. Go all out.
+
+Content rule: every number or claim on screen comes from <SOURCE> and matches it exactly.
+Anything not in the source stays off screen. Fewer numbers is fine: design-led, not a table.
+```
+
+Plus the how-to: ad hoc scratch directory, no repo or PR or template, the real logo, a contact sheet looked at three times, CC0 or CC BY music with a credit line, and the model gate. Do not write a storyboard, shot list or palette; those briefs produced the generic cuts.
+
+### Facts before design
+
+The maker runs `bun facts.ts > facts.json`. The reel reads `facts.json`; nothing is hard-coded.
+
+- A fact turns green only if main says so. A PR the brief calls merged but main does not stays red.
+- If the source disagrees with the brief, the source wins, and the output says so.
+- If the source is not ready, build on draft facts, `defer-task` with a `wakeOn`, and re-read on wake. Draft numbers never ship.
+
+### The reel and the critique loop
+
+One `reel.html` draws each frame on a `<canvas>` as a pure function of the frame number, and exposes two functions that `tools/render.mjs` drives with Playwright:
+
+```js
+window.boot = async (facts, fonts, logo) => { /* load fonts + logo, stash facts */ };
+window.frame = (f) => { render(f); return cv.toDataURL("image/png"); };
+```
+
+```bash
+. /workspace/personal/showreel-toolkit/env.sh
+TK=/workspace/personal/showreel-toolkit
+cd /workspace/personal/<slug>
+export REEL=reel.html FACTS=facts.json MUSIC=music/<track>.json   # the credit file from fetch-music.sh is enough for stills
+bash $TK/tools/sheet.sh 1920 1080 r1        # 16 frames, 4x4 contact sheet -> r1.png
+COLS=5 bash $TK/tools/sheet.sh 1920 1080 t1 "180,183,185,187,189,190,191,192,193,194,196,198,200,203,206,209,212,215,220,230"   # transition strip
+```
+
+The final render needs `music/current.json`, which the music steps below write, and which carries the `wav` field. A `--music` file without `wav` renders a silent video and `render.mjs` warns about it. `render.mjs` creates the output directory and exits non-zero if ffmpeg fails.
+
+```bash
+node $TK/tools/render.mjs --reel reel.html --w 1920 --h 1080 --facts facts.json \
+  --logo $LOGO --fonts "$FONTS" --music music/current.json --out out/<slug>-1920x1080.mp4
+```
+
+Each round the maker looks at the sheet and writes down what is weak: dead space, text too small for a phone, a cramped 4:5, jumpy easing, a hit off the beat. The last round checks every on-screen number against `facts.json` and the source, and opens the end-card frame alone at full size. The 4:5 cut is a second render at 1080x1350 because the layout is responsive to `?w=&h=`. The 1080p render of the example took about 3.5 minutes.
+
+### Music: licensing and credit
+
+CC0 or CC BY only. No NC, because it is a company post. No ND, because the track is cut and stretched. No SA, because it would carry over to the video. Pick a fresh track for each video and offer two alternates when music is in question.
+
+```bash
+bash $TK/tools/fetch-music.sh incompetech Voltaic music
+bash $TK/tools/fetch-music.sh url https://opengameart.org/sites/default/files/mist_city.ogg music \
+  "Mist City" Section7 "CC BY 4.0" https://opengameart.org/content/mist-city
+python3 $TK/tools/music-analyze.py music/voltaic.mp3                      # bpm, beat phase, drop candidates
+bash $TK/tools/music-cut.sh music/voltaic.mp3 <bpm> <drop_sec> music/cut.wav
+bash $TK/tools/music-current.sh music/voltaic.json music/cut.wav          # writes music/current.json
+```
+
+`fetch-music.sh` accepts only CC0 1.0 and CC BY 1.0 to 4.0, matched case-insensitively (`cc-by 4.0` works). It refuses everything else, including NC, ND, SA, "All rights reserved" and any string it does not know. It cannot check the source page, so read the license there yourself. It writes `music/<slug>.json` with the license link and a short `credit` for the end card. `music-cut.sh` stretches the track so the beats sit on the frame grid (120 BPM is 15 frames per beat at 30 fps) and the drop lands on the key reveal.
+
+`music-current.sh` is the step that wires the audio in. It copies the track json to `music/current.json` and adds `wav` (the cut, which `render.mjs` muxes in as AAC) and `attribution`. Run it before the final render.
+
+CC BY needs more than the end card line. The post must carry a link to the source, a link to the license, and a notice that the track was changed. The `attribution` string has all three, for example:
+
+```text
+"Mist City" by Section7, https://opengameart.org/content/mist-city, licensed under CC BY 4.0, https://creativecommons.org/licenses/by/4.0/. Changes: trimmed, time-stretched to the video's beat grid, faded in and out, and loudness-normalized.
+```
+
+Set `MODIFIED="..."` to describe the edits more exactly. Paste `attribution` under the video in the post. Keep the short `credit` on the end card.
+
+### Delivery specs
+
+- h264 High, `yuv420p`, AAC 192k, `+faststart`, `libx264 -preset slow -crf 16`.
+- 1920x1080, plus 1080x1350 for feeds. Stream at exactly that size.
+- 15 seconds for a brand showreel, 20 to 30 when the story carries data.
+
+### Lead review before relay
+
+Before the Lead relays anything, it:
+
+1. Opens the contact sheet and looks at the frames, not only the file list.
+2. Opens the end-card frame: real logo, credit line present and readable.
+3. Checks every on-screen number against `facts.json`, and `facts.json` against the source in the brief.
+4. Checks the ffprobe line: `h264`, `yuv420p`, exact size, duration as briefed, and an `aac` audio stream when the video has music.
+5. Plays the share link once.
+6. Relays the share link, share id, expiry and the `attribution` string from `music/current.json`: source link, license link and the changes made.
+
+## Known gotchas
+
+| Gotcha | What happens | What to do |
+|---|---|---|
+| No `ffprobe` in the worker image | `ffprobe: command not found` | `ffmpeg -hide_banner -i f.mp4 2>&1 \| grep Stream`, or run `setup.sh` |
+| No `drawtext` filter | `ffmpeg -version` lists libfreetype, but `drawtext` is not registered | Draw text on the canvas, or burn captions with the `ass` filter |
+| numpy missing, system pip refused | `externally-managed-environment` (PEP 668) | A venv under `/workspace/personal`; `setup.sh` does it |
+| PNG frames encoded without `-pix_fmt` | `yuv444p`, which many players and uploaders reject | Always `-pix_fmt yuv420p`; `render.mjs` does |
+| Full-range `yuvj420p` | `remotion render` writes `yuvj420p(pc)` by default | `--color-space=bt709`, or `tools/x-reencode.sh` before posting to X |
+| Remotion's bundled ffmpeg is stripped | no `fps`, `tile`, `hstack` | Use the image's ffmpeg for analysis and sheets |
+| agent-fs serves `.mp4` as `application/octet-stream` | A content-type check on a raw link fails | Use a `share-create` link; do not retry the check |
+| Signed URLs expire and default to attachment | A `<video>` pointing at one downloads, then stops working | Never use one as a public URL. `signed-url --inline` renders in a tab but still expires |
+| `agent-fs cat` truncates | The tail of a big file is hidden | `agent-fs download <path> -o <file>` |
+| Container restart mid-render | Only the scratch directory survives | Work in `/workspace/personal/<slug>`, name it in the first progress note, upload an interim cut before the long render |
+| Brief and source disagree | The brief says four PRs merged, main has five | The source wins, and the output says so |
+| Invented logo | The first example cut drew its own mark | Use `apps/ui/public/logo.png`; `setup.sh` fetches it and warns if the live site differs |
+| `--music` json without `wav` | The mp4 has no audio; `render.mjs` warns on stderr | Run `music-current.sh` after `music-cut.sh`, render with `music/current.json`, check for an `aac` stream |
+| Same music every time | The requester has heard it | Fresh track per video, two alternates when music is the feedback |
+
+On the full-range gotcha: the ffmpeg side is reproduced (`yuvj420p(pc)` in, `yuv420p(tv, bt709)` out of `x-reencode.sh`). That X mishandles full-range files is a field report from our own posting runs, not something we reproduced.
+
+## Example: TLA+ races showreel
+
+### The prompt (abridged)
+
+> Make a dynamic 15 to 25 second motion graphics video about how a model checker (TLA+) found real race conditions in Agent Swarm, each one pinned as a failing test and then turned green by a fix PR. Make it your showreel: show what an incredible motion designer you are. Go all out.
+>
+> The only content rule: every number, PR and race on screen is read live right before the final render. Anything you cannot confirm stays off screen. Fewer facts is fine: design-led, not a ledger.
+
+It also carried the standard how-to above and the `claude-opus-5-5` gate.
+
+### The contact sheet
+
+Sixteen frames across the 24 seconds of the final cut: the title, the particle field counting reachable states, the counterexample timeline, the ten red tiles, the green sweep, the counter collapsing, the hexagon morphing into the real logo, and the end card.
+
+![Contact sheet of the final TLA+ races showreel, sixteen frames in a four by four grid](/playbooks/open-prompt-showreel/tla-races-showreel-v3-contact-sheet.jpg)
+
+### How the facts got on screen
+
+`example/tla-races/facts.ts` produced `facts.v3.json` from four live sources. The reel draws only a handful of the facts.
+
+| On screen | Source | How it was read |
+|---|---|---|
+| Whether each of 7 workflow races is red or green | `src/tests/workflow-tla-races.test.ts` on `origin/main` | `git show origin/main:<file>`, then a regex over `test.failing("CXn: ...")` (red) vs `test("CXn: ...")` (green) |
+| Which PR fixes which race | open and merged PRs | A PR fixes `CXn` when its diff replaces `test.failing("CXn:` with `test("CXn:`. Merged PRs come from the commit history of the test file |
+| 3 heartbeat bugs: fix PR, violated invariant, 5-step trace, regression test | merged PRs whose body cites a TLC trace in `specs/tla/heartbeat` | `gh pr list --search`, a regex over the body, the added test from `gh api pulls/N/files`, then `git cat-file -e origin/main:<test>` |
+| State counts (1,349,396 today, 4,243 for the simpler design) | the model-checking write-up | Table rows read from the markdown. Without the write-up configured, the block is carried over and labelled `carried` |
+| Short SHA in the footer | `git rev-parse --short origin/main` | `e3c90a88` for the final cut |
+
+The ten tiles are the 3 heartbeat bugs and the 7 workflow races. Their fix PRs are #1666, #1668, #1669, #1670, #1673, #1675 and #1678.
+
+### v1 to v3
+
+| Cut | Why it was made | What changed |
+|---|---|---|
+| v1 | Fixed-template cuts of the same subject read as generic. The brief became: Opus, max effort, one open prompt, your own design. | 24 s, 16:9 and 4:5. Music "Voltaic" by Kevin MacLeod, CC BY 4.0. 7 workflow races red (their fix PRs were still open), 2 heartbeat bugs green. The end card used a hexagon mark the maker had drawn. |
+| v2 | Feedback: use the correct logo at the end, and use different music. | The real logo asset on the end card. "Mist City" by Section7 (CC BY 4.0), with two alternate tracks rendered for choice. A first attempt died in the final render when the worker session was lost; the retry found the scratch directory and finished in 8 minutes. Facts re-read: only the first race fix had merged. |
+| v3 | The remaining fix PRs merged, and the cut was needed for the post. "Only the facts change." | Same design, music and logo. `facts.ts` re-run against `origin/main`: all ten tiles green. The brief listed four merged PRs; main also had the heartbeat bug 2 fix, so the reel says "ALL 10 FIXED ON MAIN". The source won over the brief. |
+
+The final cut is `tla-races-showreel-v3`: 24.00 s, h264 High, `yuv420p`, 1920x1080, 30 fps, AAC. This page embeds a 1280-wide 2.6 MB copy committed to the docs site, so the URL does not expire. The 17.8 MB master stays in agent-fs.
+
+## Verification log
+
+| Step | Result |
+|---|---|
+| Sparse clone of the template, `cp`, `setup.sh`, `smoke.sh` | Run against the PR branch (`--branch`); the commands in this playbook target `main`, which has the template once this merges. 14.6 s for `setup.sh`, then `OK: yuv420p 960x540`. |
+| `setup.sh` on a clean directory, stock image | Run. Installs ffprobe, numpy, fonts, logo. A re-run installs nothing. |
+| `FORCE_LOCAL_FFMPEG=1 FORCE_LOCAL_PLAYWRIGHT=1 bash setup.sh` | Run. Pinned ffmpeg tarball passed its sha256; `npm install playwright@1.58.0`; `playwright install chromium` fetched 622 MB; the smoke test passed on that toolchain. |
+| `python3 -m venv` + `pip install numpy pillow` | Run. numpy 2.5.3, pillow 12.3.0. |
+| System `pip install numpy` | Run. Refused (PEP 668). |
+| Fonts from `google/fonts` | Run. Byte-identical to the files used in the example. |
+| `fetch-music.sh` for Voltaic and Mist City | Run. Byte-identical to the files used. NC, ND, SA, "All rights reserved", a bare `CC BY` and unknown licenses are refused. `cc-by 4.0`, `CC0` and `cc by 2.5` normalize and get the right license link. |
+| `music-analyze.py`, `music-cut.sh` | Run on Voltaic: 120.2 BPM, 24.00 s cut. Run on Mist City: 129.2 BPM, `atempo=0.929`. |
+| `music-current.sh`, then a 720-frame render at 960x540 with `music/current.json` | Run on the Mist City cut. ffprobe: h264 `yuv420p` 960x540 and an `aac` stream, both 24.00 s. |
+| `render.mjs` with a broken wav, with ffmpeg killed mid-render, with no ffmpeg on `PATH` | Run. Each exits 1 with the ffmpeg exit status in the message, leaves no partial mp4, and leaves no browser process behind. |
+| `x-reencode.sh` | Run on a `yuvj420p` clip and on `remotion render` output. Both came out `yuv420p(tv, bt709)`. |
+| `web-compress.sh` | Run on the example master: 17.8 MB to 2.6 MB. |
+| Remotion `npm install`, then a 30-frame render with `--browser-executable=/opt/playwright/chromium` | Run. Remotion 4.0.532, 14 s. |
+| `smoke.sh` | Run. `OK: yuv420p 960x540`, `OK: aac audio`, `OK: failed encode exits non-zero`. |
+| `apt-get install` of Chromium system libraries | **Not run.** The worker has no root. |
+| `npx remotion studio` | **Not run.** |
+| `skill-create`, `skill-install`, `update-profile`, `agent-fs share-create` | **Not run.** They change a live swarm or publish a link. |
+
+## Tips for new swarm users
+
+- **Brief with rules, not a layout.** The more you specify the design, the more generic the cut.
+- **Make the source win.** Facts read live beat facts typed into a brief.
+- **Keep the scratch directory in `/workspace/personal`.** A restart mid-render costs minutes there and hours anywhere else.
+- **Look at the frames yourself before you relay.** A render that passes every automated check can still have a wrong end card.
+- **Credit the music in the video and in the post.** CC BY requires the source link, the license link and a notice of the changes. The end card line is short; the post carries the rest.
+
+## References
+
+- [`templates/community/open-prompt-showreel`](https://github.com/desplega-ai/agent-swarm/tree/main/templates/community/open-prompt-showreel): the template, tools, skills and example reel.
+- [Remotion](https://www.remotion.dev/): React video framework behind the `video-generation` path.
+- [Playwright](https://playwright.dev/): browser automation used to grab frames.
+- [Creative Commons licenses](https://creativecommons.org/licenses/): CC0 and CC BY terms.

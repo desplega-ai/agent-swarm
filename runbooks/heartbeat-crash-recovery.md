@@ -30,6 +30,7 @@ flowchart TD
   3. If `__runId` is missing/unparseable, both checks fall back to the legacy behavior (session exists → skip, no claim-time check). Never more aggressive than before.
 - **Reboot sweep dependents.** `failTask` normally cascade-fails every non-terminal task whose `dependsOn` names the failed task (`cascadeFailDependents`, reason `Blocked dependency <id8> was failed`). The reboot sweep calls it with `cascadeDependents: false` and settles the dependents itself once the retry decision is made: each never-started dependent (`draft`/`backlog`/`unassigned`/`offered`/`reviewing`/`pending`) has the swept id in `dependsOn` replaced by the retry child's id and waits on the retry (`task_dependency_repointed` log row). The dependent keeps its row, so agent, Slack fields, `followUpConfig`, priority and parent are unchanged. Anything still depending on the swept task afterwards — no retry was created (skip-type task, invalid affinity, a non-terminal child already existed, retry creation threw), or a dependent that already started — cascade-fails exactly as before. Already-terminal dependents are never touched. Every other `failTask` caller cascades as today.
 - **Worker side** (`src/commands/runner.ts`): the worker registers its active session (POST `/api/active-sessions`, keyed on the per-task runner session id) *before* it starts the provider spawn, and fills in the provider session id on `session_init`. So the window in which an `in_progress` task has no session row is one HTTP round trip, not the whole spawn. On spawn failure the worker fails the task and then removes the row.
+- **Worker slot reconciliation** (`reconcileActiveTasks` in `src/commands/runner.ts`, every main-loop iteration): a task the server holds as `cancelled` gets its session aborted. Every `RUNNER_TASK_RECONCILE_INTERVAL_MS` (default 30s) the worker also reads each active task's status; a task already terminal server-side (for example failed by the stalled-task sweep) gets its session aborted. A session that has not settled 10s after any abort is settled by the runner (`runner exited without result: ...`), so `checkCompletedProcesses` frees the slot. For a task that was terminal server-side the worker sends no `/finish` and no credential or model outcome, so the server's output and failureReason stand. The slot frees at most interval + grace after the server marks the task terminal.
 - The **boot-triage seed script** (`src/be/seed-scripts/catalog/boot-triage.ts`) mirrors this logic: it flags `in_progress` tasks that are on an offline agent OR whose session's `lastHeartbeatAt` is older than `stuckMinutes` ago (no fresh session heartbeat).
 - `autoAssignPoolTasks` and `claimTask`/`assignUnassignedTaskPending` are gated by the **routing-affinity eligibility check** (§4, `isAgentEligibleForTask`) — a pooled task tagged with a `routingAffinity` snapshot (from a resume/retry, or an explicit `requiredCapabilities` on a fresh `send-task`) can only go to a role/capability-matching agent. Untagged tasks are unaffected — assignment stays open to any idle (non-lead) worker, exactly as before. The pool paths (`autoAssignPoolTasks` and the poll auto-claim scan) also apply `poolTaskRunsOnHarness(task, harness)` (`src/be/model-validation.ts`): a task that pins a `model` the worker's harness cannot run is skipped for that worker and waits for a compatible one ([model-tiers.md § Harness compatibility](./model-tiers.md)). `autoAssignPoolTasks` **does** skip idle workers whose `emptyPollCount >= MAX_EMPTY_POLLS` (the poll gate) — assigning to them would just have them exit on their next poll. The filter reads `emptyPollCount` off the rows `getIdleWorkersWithCapacity()` already returns (no per-worker re-query). Note the poll gate is cleared on a genuine `waiting_for_credentials -> ready` recovery (`updateAgentCredentialState`) and on re-register, but **not** by routine post-task `ready:true` credential reports.
 - `checkWorkerHealth` only flips `busy↔idle` (it pre-filters `offline`) and never sets `offline`. A successful `/api/poll` dispatch updates the agent to `busy` in the same transaction that starts a pre-assigned task or claims a pool task; the worker-only `poll-task` tool does the same for its direct pending-task path. The heartbeat sweep remains the reconciliation backstop for any other task-state transition that leaves `agents.status` stale. Leads can become `busy` while running a directly assigned task, but remain structurally excluded from pool assignment (`getIdleWorkersWithCapacity` and the pool dispatch query filter `isLead=0`). `offline` has two writers: the graceful `POST /close` handler (`src/http/core.ts`), and — only when `MULTI_RUNTIME_ENABLED` is enabled — the stale-runtime expiry in §1a. With the flag explicitly off, a hard-crashed (SIGKILL) worker is still never auto-offlined.
@@ -465,6 +466,66 @@ A task's `followUpConfig` (its creator's `onCompleted` / `onFailed` / `disabled`
 
 ---
 
+## 5a. API drain: handoff before the API stops
+
+On a deploy the orchestrator stops the API and the workers together. A worker's SIGTERM handoff (`POST /api/tasks/{id}/supersede`, reason `graceful_shutdown`) then runs after the API is gone, fails, and leaves the task `in_progress` for the heartbeat sweep (`crash_recovery`) or the reboot sweep. The drain moves the handoff earlier, while the API still serves. Owner code: `src/be/api-drain.ts`, `src/utils/api-drain.ts`, `shutdown()` in `src/http/index.ts`, and the drain handling in `src/commands/runner.ts`.
+
+```mermaid
+sequenceDiagram
+  participant O as Orchestrator
+  participant A as API
+  participant W as Worker (task in flight)
+  O->>A: SIGTERM
+  A->>A: stop scheduler, heartbeat, queue alarm<br/>draining = true, snapshot live in_progress tasks
+  W->>A: POST /ping (every loop iteration)
+  A-->>W: 204 + X-Swarm-Draining: 1
+  W->>A: POST /api/tasks/{id}/supersede (graceful_shutdown)
+  A-->>W: 200 resumed (resume follow-up pinned to the agent)
+  W->>W: abort session, mark task server-terminal, take no new work
+  A->>A: snapshot tasks all left in_progress (or API_DRAIN_MAX_MS passed)
+  A->>A: close as before (transports, HTTP server, DB), exit 0
+  O->>W: SIGTERM (no in-flight tasks: exits at once)
+```
+
+Pseudocode (current):
+
+```
+# API, on SIGTERM / SIGINT, after stopping scheduler / heartbeat / queue alarm:
+cap = API_DRAIN_MAX_MS (default 0 = skip the whole drain; unset, empty, or invalid also means 0; max 120000)
+draining = true                                # process-local; a new API process starts false
+ids = in_progress tasks whose agent is not offline and whose agents.lastUpdatedAt is < 30s old
+loop until count(ids still in_progress) == 0 or cap passed: sleep 500ms
+# then the existing shutdown sequence
+
+# While draining:
+#   /api/poll          -> {trigger: null}  (no offer, assignment, pool claim, channel_activity)
+#   poll-task (MCP)    -> "draining", not an empty poll
+#   task-action claim / accept -> refused
+#   every HTTP response carries X-Swarm-Draining: 1
+#   creating tasks, supersede, store-progress and the rest keep working
+
+# Worker main loop, every iteration:
+draining = ping answered with X-Swarm-Draining: 1      # 5xx or no answer keeps the last state
+if draining:
+  for each active task whose session has not settled, up to 3 calls per task:
+    supersede(task, graceful_shutdown)
+    resumed | workflow-failed -> task.serverTerminalStatus = ..., abort session  # slot freed, no finish call
+    alreadyFinished | rejected -> leave the session on its normal path; never retried
+    call failed (5xx, network) -> task keeps running; the SIGTERM handler is still the fallback
+  skip polling                                            # takes no new work
+else: poll as usual                                       # also the path against an API that never drains
+# SIGTERM handler is unchanged except it skips tasks already server-terminal.
+```
+
+Notes:
+
+- The wait only covers tasks held by workers that pinged in the last 30s. A silent worker's tasks belong to the heartbeat sweep.
+- Workers older than this feature ignore the header, so the API waits the full cap when one holds a task.
+- The drain is opt-in. Enabled, it also fires on an API-only restart (pm2, a Helm roll of the API Deployment, `docker restart`): live workers supersede their in-flight tasks, which would otherwise keep running. Set it only where the API and the workers stop together.
+- `API_DRAIN_MAX_MS` plus the API's close time must stay under the orchestrator's stop grace period for the API.
+
+---
+
 ## Quick reference: env knobs
 
 All of these are read **dynamically** — `heartbeat.ts` exposes them as getter
@@ -492,12 +553,14 @@ Rollback switches accept `0`/`false` interchangeably (both parse through
 | Stale-resource cleanup | 30 min | `HEARTBEAT_STALE_CLEANUP_MIN` |
 | Runtime liveness window (§1a) | 5 min | `RUNTIME_STALE_THRESHOLD_MIN` |
 | Same-agent liveness window | 30s | `WORKER_LIVENESS_WINDOW_SECONDS` |
+| Worker active-task reconcile cadence (worker env, read at worker start) | 30s | `RUNNER_TASK_RECONCILE_INTERVAL_MS` |
 | Resume-generation cap | 3 | `HEARTBEAT_MAX_RESUME_GENERATIONS` |
 | Resume-pin grace, reaper (`0` = off) | 10 min | `HEARTBEAT_RESUME_PIN_GRACE_MIN` |
 | Same-agent crash pin, rollback (`0` = off) | on | `HEARTBEAT_PIN_CRASH_RESUME` |
 | Same-agent graceful-shutdown pin, rollback (`0` = off) | on | `HEARTBEAT_PIN_GRACEFUL_RESUME` |
 | Routing-affinity pool eligibility gate, rollback (`0` = off) | on | `POOL_AFFINITY_ENFORCEMENT` |
 | Pool-starvation escalation grace | 15 min | `POOL_AFFINITY_ESCALATION_MIN` |
+| API drain cap on SIGTERM (§5a; opt-in, `0` = off, max 120s) | off (`0`) | `API_DRAIN_MAX_MS` |
 | `autoAssignPoolTasks` pool-scan page size | 50 | `HEARTBEAT_POOL_SCAN_BATCH_SIZE` |
 | `autoAssignPoolTasks` pool-scan hard cap (rows/sweep) | 500 | `HEARTBEAT_POOL_SCAN_CAP` |
 | `getUnassignedTaskIdsForAgent` eligibility-scan page size | 25 | `ELIGIBILITY_SCAN_BATCH_SIZE` |

@@ -1,11 +1,18 @@
 import {
+  detachTaskFromWorkflowRunStep,
   getDbClient,
+  getTaskById,
   getWorkflowRunStep,
   updateWorkflowRun,
   updateWorkflowRunStep,
 } from "../be/db";
-import type { WorkflowDefinition, WorkflowNode, WorkflowRunStep } from "../types";
-import { checkpointStep } from "./checkpoint";
+import {
+  RetryPolicySchema,
+  type WorkflowDefinition,
+  type WorkflowNode,
+  type WorkflowRunStep,
+} from "../types";
+import { checkpointStep, checkpointStepFailure } from "./checkpoint";
 import { getSuccessors } from "./definition";
 import { joinForeach, resolveForeachParent } from "./foreach-join";
 
@@ -16,20 +23,35 @@ export interface PortStepRoutingResult {
 }
 
 /**
+ * True while `taskId` is still the task bound to `stepId`. A retry detaches
+ * the failed task and the poller binds a fresh one to the same step, so a
+ * caller holding an older snapshot (the recovery sweep) can find the step
+ * `waiting` again on a task it never saw. Call inside the claim transaction.
+ */
+async function isTaskBoundToStep(taskId: string, stepId: string): Promise<boolean> {
+  const task = await getTaskById(taskId);
+  return task?.workflowRunStepId === stepId;
+}
+
+/**
  * Atomically fail a waiting step and its run. Returns false when another
  * handler already moved the step out of `waiting` — the same task terminal
  * event can reach both the live bus listener and a recovery sweep, and a
  * blind write here would stomp a run another handler is already advancing.
+ * With `ownerTaskId`, also returns false when that task is no longer the one
+ * bound to the step (a stale snapshot of a step that was since redriven).
  */
 export async function failStepAndRunIfWaiting(
   stepId: string,
   runId: string,
   reason: string,
+  ownerTaskId?: string,
 ): Promise<boolean> {
   const now = new Date().toISOString();
   return await getDbClient().transaction(async () => {
     const current = await getWorkflowRunStep(stepId);
     if (!current || current.status !== "waiting") return false;
+    if (ownerTaskId && !(await isTaskBoundToStep(ownerTaskId, stepId))) return false;
     await updateWorkflowRunStep(stepId, {
       status: "failed",
       error: reason,
@@ -69,6 +91,54 @@ export async function checkpointPortStepAndResolveSuccessors(
   });
 }
 
+/**
+ * Outcome of `scheduleTaskStepRetry`:
+ * - `scheduled`: the step is queued for the retry poller; the caller stops.
+ * - `not-claimed`: another handler already moved the step out of `waiting`,
+ *   or the failed task is no longer the one bound to the step (it was
+ *   already retried and a fresh task now owns it); the caller stops.
+ * - `not-eligible`: no retry applies (no `node.retry`, not an agent-task node,
+ *   or retries exhausted); the caller applies `onNodeFailure` as before.
+ */
+export type TaskStepRetryOutcome = "scheduled" | "not-claimed" | "not-eligible";
+
+/**
+ * Apply a node's `retry` policy to a FAILED agent-task step task. The sync
+ * executor path does this in `executeStep`; an async agent-task step only
+ * learns about the failure here, from `task.failed` or the recovery sweep.
+ *
+ * In one transaction: re-claim the step while it is still `waiting` AND still
+ * bound to the failed task, detach that task (the executor reuses any task
+ * bound to the step, so a bound failed task would park the retry forever), and
+ * record the failure with `nextRetryAt` so the retry poller re-dispatches a new
+ * task. Bounded by `maxRetries` via the step's persisted `retryCount`, read
+ * only after ownership is confirmed: a stale caller's step snapshot may carry
+ * the counter of a newer attempt.
+ */
+export async function scheduleTaskStepRetry(
+  def: WorkflowDefinition,
+  runId: string,
+  step: WorkflowRunStep,
+  taskId: string,
+  reason: string,
+): Promise<TaskStepRetryOutcome> {
+  const node = def.nodes.find((n) => n.id === step.nodeId);
+  if (!node || node.type !== "agent-task" || !node.retry) return "not-eligible";
+  const parsed = RetryPolicySchema.safeParse(node.retry);
+  if (!parsed.success) return "not-eligible";
+  const policy = parsed.data;
+
+  return await getDbClient().transaction(async (): Promise<TaskStepRetryOutcome> => {
+    const current = await getWorkflowRunStep(step.id);
+    if (!current || current.status !== "waiting") return "not-claimed";
+    if (!(await isTaskBoundToStep(taskId, step.id))) return "not-claimed";
+    if (current.retryCount >= policy.maxRetries) return "not-eligible";
+    await detachTaskFromWorkflowRunStep(taskId);
+    await checkpointStepFailure(runId, step.id, reason, current.retryCount, policy);
+    return "scheduled";
+  });
+}
+
 export interface TaskStepRoutingResult {
   /**
    * False when another handler already moved the step out of `waiting` — the
@@ -100,6 +170,7 @@ export async function completeTaskStepAndResolveSuccessors(
   output: unknown,
   ctx: Record<string, unknown>,
   failureReason?: string,
+  ownerTaskId?: string,
 ): Promise<TaskStepRoutingResult> {
   // The task step, optional foreach join checkpoint, workflow context, and
   // running status must commit together. A crash after this transaction is
@@ -109,6 +180,8 @@ export async function completeTaskStepAndResolveSuccessors(
     // own awaits, so the claim is only authoritative here.
     const current = await getWorkflowRunStep(step.id);
     if (!current || current.status !== "waiting") return UNCLAIMED;
+    // A stale snapshot of a step since redriven to a fresh task must not route it.
+    if (ownerTaskId && !(await isTaskBoundToStep(ownerTaskId, step.id))) return UNCLAIMED;
 
     const foreachParent = resolveForeachParent(def, step.nodeId);
     if (foreachParent) {

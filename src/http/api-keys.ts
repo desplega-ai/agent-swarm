@@ -8,6 +8,7 @@ import {
   markKeyRateLimited,
   recordKeyAuthFailure,
   recordKeyRateLimitWindows,
+  recordKeySeatMismatch,
   recordKeyUsage,
   setApiKeyName,
   setApiKeyPlan,
@@ -174,6 +175,32 @@ const reportRateLimitWindows = route({
   auth: { apiKey: true },
 });
 
+const reportSeatMismatch = route({
+  method: "post",
+  path: "/api/keys/report-seat-mismatch",
+  pattern: ["api", "keys", "report-seat-mismatch"],
+  summary: "Record that an API key's subscription seat cannot run a model family",
+  tags: ["API Keys"],
+  body: z.object({
+    keyType: z.string(),
+    keySuffix: z.string().min(1).max(10),
+    keyIndex: z.number().int().min(0),
+    /** Model family the CLI rejected with `errorCode: "credits_required"`. */
+    model: z.enum(["fable", "opus", "sonnet", "haiku"]),
+    scope: z.string().optional(),
+    scopeId: z.string().optional(),
+  }),
+  responses: {
+    200: { description: "Seat mismatch recorded", schema: successMessageSchema },
+    400: { description: "Validation error" },
+    401: { description: "Unauthorized" },
+  },
+  auth: { apiKey: true },
+  rbac: {
+    ungated: "worker credential telemetry, same posture as POST /api/keys/report-rate-limit",
+  },
+});
+
 const getAvailable = route({
   method: "get",
   path: "/api/keys/available",
@@ -199,6 +226,8 @@ const getAvailable = route({
         modelBlockedIndices: z.array(z.number().int()).optional(),
         /** ISO of the earliest reset among modelBlockedIndices. Present only when `model` was passed. */
         earliestModelResetAt: z.string().nullable().optional(),
+        /** Indices excluded because the key's subscription plan cannot run the model. Present only when model was passed. */
+        seatBlockedIndices: z.array(z.number().int()).optional(),
         /**
          * Server-side order of the newest auth failure on these keys. Pass it back as
          * `authFence` on `clear-rate-limit`: failures recorded after it survive the clear.
@@ -235,6 +264,10 @@ const ApiKeyStatusSchema = z.object({
   /** Subscription plan id (see `GET /api/keys/plans`), when known. */
   plan: z.string().nullable(),
   planSource: z.enum(["manual", "detected", "estimated"]).nullable(),
+  /** When the CLI last rejected a model with `credits_required` on this key. */
+  lastSeatMismatchAt: z.string().nullable(),
+  /** Model family of that rejection (`fable`, `opus`, ...). */
+  lastSeatMismatchModel: z.string().nullable(),
   /** Auth failures in a row since the last success or clear. */
   consecutiveAuthFailures: z.number().int(),
   lastAuthFailureAt: z.string().nullable(),
@@ -572,6 +605,32 @@ export async function handleApiKeys(
     return true;
   }
 
+  // POST /api/keys/report-seat-mismatch
+  if (reportSeatMismatch.match(req.method, pathSegments)) {
+    const parsed = await reportSeatMismatch.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+
+    const { keyType, keySuffix, keyIndex, model, scope, scopeId } = parsed.body;
+    try {
+      const { planChanged } = await recordKeySeatMismatch(
+        keyType,
+        keySuffix,
+        keyIndex,
+        model,
+        scope,
+        scopeId ?? null,
+      );
+      if (planChanged) clearUsageCache();
+      reportSeatMismatch.respond(res, 200, {
+        success: true,
+        message: `Seat mismatch recorded for ...${keySuffix} (${model})`,
+      });
+    } catch (err) {
+      jsonError(res, err instanceof Error ? err.message : "Failed to record seat mismatch", 500);
+    }
+    return true;
+  }
+
   // GET /api/keys/available
   if (getAvailable.match(req.method, pathSegments)) {
     const parsed = await getAvailable.parse(req, res, pathSegments, queryParams);
@@ -595,6 +654,7 @@ export async function handleApiKeys(
           ? {
               modelBlockedIndices: result.modelBlockedIndices,
               earliestModelResetAt: result.earliestModelResetAt,
+              seatBlockedIndices: result.seatBlockedIndices,
             }
           : {}),
       });

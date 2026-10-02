@@ -433,7 +433,7 @@ export interface paths {
         put?: never;
         /**
          * Report agent liveness
-         * @description Refreshes the calling agent's status. Workers may send `X-Runtime-Instance-ID`, the per-boot identifier of the calling process. It is ignored unless MULTI_RUNTIME_ENABLED is set. With multi-runtime mode on, the header must identify a live runtime of this agent; an absent, unknown, offline, or foreign identifier makes the call a no-op instead of an error, so workers predating the flag keep running.
+         * @description Refreshes the calling agent's status. Workers may send `X-Runtime-Instance-ID`, the per-boot identifier of the calling process. It is ignored unless MULTI_RUNTIME_ENABLED is set. With multi-runtime mode on, the header must identify a live runtime of this agent; an absent, unknown, offline, or foreign identifier makes the call a no-op instead of an error, so workers predating the flag keep running. While the API is draining after SIGTERM, every response (this one included) carries `X-Swarm-Draining: 1`: workers hand off in-flight tasks and take no new work.
          */
         post: {
             parameters: {
@@ -5521,6 +5521,76 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/keys/report-seat-mismatch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Record that an API key's subscription seat cannot run a model family */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        keyType: string;
+                        keySuffix: string;
+                        keyIndex: number;
+                        /** @enum {string} */
+                        model: "fable" | "opus" | "sonnet" | "haiku";
+                        scope?: string;
+                        scopeId?: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Seat mismatch recorded */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @enum {boolean} */
+                            success: true;
+                            message: string;
+                        };
+                    };
+                };
+                /** @description Validation error */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/keys/available": {
         parameters: {
             query?: never;
@@ -5557,6 +5627,7 @@ export interface paths {
                             totalKeys: number;
                             modelBlockedIndices?: number[];
                             earliestModelResetAt?: string | null;
+                            seatBlockedIndices?: number[];
                             authFailureFence: number;
                         };
                     };
@@ -5648,6 +5719,8 @@ export interface paths {
                                 plan: string | null;
                                 /** @enum {string|null} */
                                 planSource: "manual" | "detected" | "estimated" | null;
+                                lastSeatMismatchAt: string | null;
+                                lastSeatMismatchModel: string | null;
                                 consecutiveAuthFailures: number;
                                 lastAuthFailureAt: string | null;
                                 modelLimits: {
@@ -6268,8 +6341,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Install a predefined extension from the catalog
-         * @description Installs the named template from `GET /api/extensions/catalog`. Inline bundles (`manifest`/`files`) are rejected with `inline_install_disabled`. Any authenticated agent can install a disabled draft owned by its agent ID. Workers can update only their own bundles; activation remains lead/operator-only.
+         * Install an extension from the catalog or an inline bundle
+         * @description Installs the named `template` from `GET /api/extensions/catalog`, or an inline `manifest` plus `files`. Inline bundles are rejected with `inline_install_disabled` unless `EXTENSION_ALLOW_INLINE_INSTALL` is on, and then only lead, operator, and dashboard-user callers may send them (workers get 403). Any authenticated agent can install a catalog draft owned by its agent ID. Workers can update only their own bundles. A new extension is always disabled; activation remains lead/operator-only.
          */
         post: operations["extensions_install"];
         delete?: never;
@@ -8047,8 +8120,17 @@ export interface paths {
                         };
                     };
                 };
-                /** @description Validation error */
+                /** @description Validation error, or a sourcePath under /longterm that is not an allowed memory key */
                 400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description sourcePath is under a lead-only /longterm root and the caller is not the lead */
+                403: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -8096,6 +8178,8 @@ export interface paths {
                         scope?: "agent" | "swarm" | "all";
                         /** @enum {string} */
                         source?: "manual" | "file_index" | "session_summary" | "task_completion";
+                        /** @description Only return memories whose key starts with this text (literal, case-sensitive), for example '/longterm/facts/'. */
+                        keyPrefix?: string;
                     };
                 };
             };
@@ -8699,6 +8783,8 @@ export interface paths {
                             taskId?: string;
                             /** @description Optional external source ID this memory references. Free-form string, convention "<source>:<identifier>" (e.g. "github:owner/repo#N", "linear:KEY-N", "customer:<slug>", "slack:<channel>:<ts>", "agentmail:<thread-id>"). Pick any prefix that fits — no closed enum. When present, an edge from this memory to the external source is created/updated. */
                             referencesSource?: string;
+                            /** @description Optional. Model that produced an `llm` rating, as "<provider>/<model-id>" (e.g. "openrouter/deepseek/deepseek-v4.1-flash"). Stored in memory_rating.model for `llm` events and ignored for `explicit-self`. */
+                            model?: string;
                         }[];
                     };
                 };
@@ -10641,7 +10727,7 @@ export interface paths {
                                         /** @enum {string|null} */
                                         method: "api_key" | null;
                                         /** @enum {string|null} */
-                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "not_enabled" | "expired" | "unknown" | null;
+                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "endpoint" | "not_enabled" | "expired" | "unknown" | null;
                                     };
                                     name: {
                                         /** @enum {string} */
@@ -10651,7 +10737,7 @@ export interface paths {
                                         /** @enum {string|null} */
                                         method: "custom_name" | "default_name" | null;
                                         /** @enum {string|null} */
-                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "not_enabled" | "expired" | "unknown" | null;
+                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "endpoint" | "not_enabled" | "expired" | "unknown" | null;
                                     };
                                     ai: {
                                         /** @enum {string} */
@@ -10661,7 +10747,7 @@ export interface paths {
                                         /** @enum {string|null} */
                                         method: "claude_setup_token" | "claude_api_key" | "codex_device" | "codex_cli" | "openrouter" | "openai_gateway" | "deepseek" | "devin" | null;
                                         /** @enum {string|null} */
-                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "not_enabled" | "expired" | "unknown" | null;
+                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "endpoint" | "not_enabled" | "expired" | "unknown" | null;
                                     };
                                     agents: {
                                         /** @enum {string} */
@@ -10671,7 +10757,7 @@ export interface paths {
                                         /** @enum {string|null} */
                                         method: "cheap" | "optimal" | "max" | "mixed" | null;
                                         /** @enum {string|null} */
-                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "not_enabled" | "expired" | "unknown" | null;
+                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "endpoint" | "not_enabled" | "expired" | "unknown" | null;
                                     };
                                     memory: {
                                         /** @enum {string} */
@@ -10679,9 +10765,9 @@ export interface paths {
                                         /** Format: date-time */
                                         at: string | null;
                                         /** @enum {string|null} */
-                                        method: "openai" | "openrouter" | "vercel" | "custom" | "existing" | null;
+                                        method: "openai" | "openrouter" | "vercel" | "azure" | "custom" | "existing" | null;
                                         /** @enum {string|null} */
-                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "not_enabled" | "expired" | "unknown" | null;
+                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "endpoint" | "not_enabled" | "expired" | "unknown" | null;
                                     };
                                     integrations: {
                                         /** @enum {string} */
@@ -10691,7 +10777,7 @@ export interface paths {
                                         /** @enum {string|null} */
                                         method: "slack" | "github" | "gitlab" | "linear_oauth" | "jira_oauth" | null;
                                         /** @enum {string|null} */
-                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "not_enabled" | "expired" | "unknown" | null;
+                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "endpoint" | "not_enabled" | "expired" | "unknown" | null;
                                     };
                                     first_task: {
                                         /** @enum {string} */
@@ -10701,7 +10787,7 @@ export interface paths {
                                         /** @enum {string|null} */
                                         method: "suggestion" | "free_form" | null;
                                         /** @enum {string|null} */
-                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "not_enabled" | "expired" | "unknown" | null;
+                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "endpoint" | "not_enabled" | "expired" | "unknown" | null;
                                     };
                                 };
                             };
@@ -10800,7 +10886,7 @@ export interface paths {
                         /** @enum {string} */
                         step: "connect" | "name" | "ai" | "agents" | "memory" | "integrations" | "first_task";
                         /** @enum {string} */
-                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "not_enabled" | "expired" | "unknown";
+                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "endpoint" | "not_enabled" | "expired" | "unknown";
                     } | {
                         /** @enum {string} */
                         action: "first_task";
@@ -10851,7 +10937,7 @@ export interface paths {
                                         /** @enum {string|null} */
                                         method: "api_key" | null;
                                         /** @enum {string|null} */
-                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "not_enabled" | "expired" | "unknown" | null;
+                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "endpoint" | "not_enabled" | "expired" | "unknown" | null;
                                     };
                                     name: {
                                         /** @enum {string} */
@@ -10861,7 +10947,7 @@ export interface paths {
                                         /** @enum {string|null} */
                                         method: "custom_name" | "default_name" | null;
                                         /** @enum {string|null} */
-                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "not_enabled" | "expired" | "unknown" | null;
+                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "endpoint" | "not_enabled" | "expired" | "unknown" | null;
                                     };
                                     ai: {
                                         /** @enum {string} */
@@ -10871,7 +10957,7 @@ export interface paths {
                                         /** @enum {string|null} */
                                         method: "claude_setup_token" | "claude_api_key" | "codex_device" | "codex_cli" | "openrouter" | "openai_gateway" | "deepseek" | "devin" | null;
                                         /** @enum {string|null} */
-                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "not_enabled" | "expired" | "unknown" | null;
+                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "endpoint" | "not_enabled" | "expired" | "unknown" | null;
                                     };
                                     agents: {
                                         /** @enum {string} */
@@ -10881,7 +10967,7 @@ export interface paths {
                                         /** @enum {string|null} */
                                         method: "cheap" | "optimal" | "max" | "mixed" | null;
                                         /** @enum {string|null} */
-                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "not_enabled" | "expired" | "unknown" | null;
+                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "endpoint" | "not_enabled" | "expired" | "unknown" | null;
                                     };
                                     memory: {
                                         /** @enum {string} */
@@ -10889,9 +10975,9 @@ export interface paths {
                                         /** Format: date-time */
                                         at: string | null;
                                         /** @enum {string|null} */
-                                        method: "openai" | "openrouter" | "vercel" | "custom" | "existing" | null;
+                                        method: "openai" | "openrouter" | "vercel" | "azure" | "custom" | "existing" | null;
                                         /** @enum {string|null} */
-                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "not_enabled" | "expired" | "unknown" | null;
+                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "endpoint" | "not_enabled" | "expired" | "unknown" | null;
                                     };
                                     integrations: {
                                         /** @enum {string} */
@@ -10901,7 +10987,7 @@ export interface paths {
                                         /** @enum {string|null} */
                                         method: "slack" | "github" | "gitlab" | "linear_oauth" | "jira_oauth" | null;
                                         /** @enum {string|null} */
-                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "not_enabled" | "expired" | "unknown" | null;
+                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "endpoint" | "not_enabled" | "expired" | "unknown" | null;
                                     };
                                     first_task: {
                                         /** @enum {string} */
@@ -10911,7 +10997,7 @@ export interface paths {
                                         /** @enum {string|null} */
                                         method: "suggestion" | "free_form" | null;
                                         /** @enum {string|null} */
-                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "not_enabled" | "expired" | "unknown" | null;
+                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "endpoint" | "not_enabled" | "expired" | "unknown" | null;
                                     };
                                 };
                             };
@@ -10995,7 +11081,7 @@ export interface paths {
                 content: {
                     "application/json": {
                         /** @enum {string} */
-                        preset: "openai" | "openrouter" | "vercel" | "custom" | "existing";
+                        preset: "openai" | "openrouter" | "vercel" | "azure" | "custom" | "existing";
                         /** Format: uri */
                         baseUrl?: string;
                         model?: string;
@@ -11018,7 +11104,7 @@ export interface paths {
                             latencyMs: number;
                             error?: string;
                             /** @enum {string} */
-                            errorClass?: "auth" | "network" | "timeout" | "dimension" | "model" | "not_enabled" | "expired" | "unknown";
+                            errorClass?: "auth" | "network" | "timeout" | "dimension" | "model" | "endpoint" | "not_enabled" | "expired" | "unknown";
                         };
                     };
                 };
@@ -12418,7 +12504,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Poll for triggers (tasks, mentions) */
+        /**
+         * Poll for triggers (tasks, mentions)
+         * @description While the API is draining after SIGTERM it dispatches nothing: the answer is `{ trigger: null }` and carries `X-Swarm-Draining: 1`, the signal for a worker to hand off in-flight tasks.
+         */
         get: {
             parameters: {
                 query?: never;
@@ -12457,6 +12546,7 @@ export interface paths {
                                 /** @enum {string} */
                                 type: "task_assigned";
                                 taskId: string;
+                                triggerSurface?: string;
                                 task: components["schemas"]["AgentTask"] & {
                                     attachments: {
                                         /** Format: uuid */
@@ -15570,7 +15660,7 @@ export interface paths {
                                      * @default mcp
                                      * @enum {string}
                                      */
-                                    source: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira" | "comb";
+                                    source: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "azure-devops" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira" | "comb";
                                     taskType?: string;
                                     /** @default [] */
                                     tags: string[];
@@ -17346,6 +17436,23 @@ export interface paths {
                                     lastErrorAt?: string;
                                     lastSuccessAt?: string;
                                 };
+                                contextVersions?: {
+                                    at: string;
+                                    rowsDeleted: number;
+                                    batches: number;
+                                    durationMs: number;
+                                    dryRun: boolean;
+                                    cumulativeRowsDeleted: number;
+                                    /** @enum {string} */
+                                    outcome: "converged" | "budget_exhausted" | "error";
+                                    drained: boolean;
+                                    backlogRemaining: number;
+                                    batchSize: number;
+                                    slowestStatementMs: number;
+                                    lastError?: string;
+                                    lastErrorAt?: string;
+                                    lastSuccessAt?: string;
+                                };
                             };
                         };
                     };
@@ -17706,7 +17813,7 @@ export interface paths {
                                  * @default mcp
                                  * @enum {string}
                                  */
-                                source: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira" | "comb";
+                                source: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "azure-devops" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira" | "comb";
                                 taskType?: string;
                                 /** @default [] */
                                 tags: string[];
@@ -17799,7 +17906,7 @@ export interface paths {
                         /** @description Non-unique asset directory namespace (for example shared/ or personal/<user-id>/drafts/). Runtime write boundaries normalize and validate the canonical form. */
                         key?: string;
                         /** @enum {string} */
-                        source?: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira" | "comb";
+                        source?: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "azure-devops" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira" | "comb";
                         outputSchema?: {
                             [key: string]: unknown;
                         };
@@ -18574,7 +18681,7 @@ export interface paths {
                 };
             };
             responses: {
-                /** @description Progress updated */
+                /** @description Progress updated; a no-op once the task is terminal */
                 200: {
                     headers: {
                         [name: string]: unknown;
@@ -18639,6 +18746,8 @@ export interface paths {
                         output?: string;
                         failureReason?: string;
                         force?: boolean;
+                        /** @enum {string} */
+                        provider?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh";
                     };
                 };
             };
@@ -19003,7 +19112,7 @@ export interface paths {
                 content: {
                     "application/json": {
                         /** @enum {string} */
-                        vcsProvider: "github" | "gitlab";
+                        vcsProvider: "github" | "gitlab" | "azure-devops";
                         vcsRepo: string;
                         vcsNumber: number;
                         /** Format: uri */
@@ -21147,6 +21256,69 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/azure-devops/webhook": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Handle Azure DevOps service-hook events */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Event processed */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            created: boolean;
+                            taskId?: string;
+                            skipped?: boolean;
+                            reason?: string;
+                            extension?: {
+                                id: string;
+                                name: string;
+                            };
+                        };
+                    };
+                };
+                /** @description Invalid Basic auth credentials */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Azure DevOps integration not configured */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/agentmail/webhook": {
         parameters: {
             query?: never;
@@ -22599,7 +22771,7 @@ export interface components {
              * @default mcp
              * @enum {string}
              */
-            source: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira" | "comb";
+            source: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "azure-devops" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira" | "comb";
             /** @enum {string} */
             routingReason?: "skill" | "continuity" | "overflow" | "human_pinned" | "reroute_fault";
             /**
@@ -22641,7 +22813,7 @@ export interface components {
             slackProgressMessageTs?: string;
             slackTreeRootMessageTs?: string;
             /** @enum {string} */
-            vcsProvider?: "github" | "gitlab";
+            vcsProvider?: "github" | "gitlab" | "azure-devops";
             vcsRepo?: string;
             vcsEventType?: string;
             vcsNumber?: number;
@@ -23033,9 +23205,16 @@ export interface components {
             author?: string;
         };
         ExtensionInstallBody: {
-            /** @description Name of a predefined extension in the catalog (`GET /api/extensions/catalog`). */
-            template: string;
+            /** @description Name of a predefined extension in the catalog (`GET /api/extensions/catalog`). Mutually exclusive with `manifest` and `files`. */
+            template?: string;
+            manifest?: components["schemas"]["ExtensionManifest"] & unknown;
+            /** @description Inline bundle files keyed by relative path. Requires `manifest`. */
+            files?: {
+                [key: string]: string;
+            };
+            /** @description Handler priority. Lower values run first. */
             priority?: number;
+            /** @description Extension configuration. */
             config?: {
                 [key: string]: unknown;
             };
@@ -24164,7 +24343,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Inline bundle rejected or bundle validation failed */
+            /** @description Inline install disabled, invalid body (template and manifest/files are mutually exclusive), or bundle validation failed */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -24173,7 +24352,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Permission denied */
+            /** @description Permission denied, including inline bundles from workers */
             403: {
                 headers: {
                     [name: string]: unknown;

@@ -405,7 +405,7 @@ export async function summarizeSessionForPi(
     }
 
     if (wantRatings && result.ratings && result.ratings.length > 0) {
-      const ratingEvents = _buildRatings(result.ratings, retrievals);
+      const ratingEvents = _buildRatings(result.ratings, retrievals, result.model);
       if (ratingEvents.length > 0) {
         await _postRatings({
           apiUrl: config.apiUrl,

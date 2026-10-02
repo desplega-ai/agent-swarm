@@ -4,6 +4,8 @@ import {
   MAX_RATE_LIMIT_RESET_MS,
   parseRateLimitWindowTelemetry,
   parseStderrForErrors,
+  redactRateLimitEvent,
+  redactRateLimitEventLine,
   SessionErrorTracker,
   trackErrorFromJson,
 } from "../utils/error-tracker";
@@ -446,6 +448,69 @@ describe("SessionErrorTracker — model-scoped rejection (Fable weekly window)",
       },
     });
     expect(tracker.getModelRateLimit()).toBeUndefined();
+  });
+});
+
+// Verbatim fixture from task 91175100-349d-4284-a0c1-c41d17ddf8fa, session_logs line 4,
+// 2026-09-30. Fable on a Claude Team standard seat: rejected, no rateLimitType,
+// errorCode "credits_required".
+const FIXTURE_CREDITS_REQUIRED = {
+  type: "rate_limit_event",
+  rate_limit_info: {
+    status: "rejected",
+    resetsAt: 1790812800,
+    overageDisabledReason: "member_zero_credit_limit",
+    isUsingOverage: false,
+    errorCode: "credits_required",
+    canUserPurchaseCredits: false,
+    hasChargeableSavedPaymentMethod: true,
+  },
+  uuid: "bff51e54-9777-458a-aceb-b50aaa4255b5",
+  session_id: "9d326326-0c59-4b00-b819-b9b7dd3bf99f",
+};
+
+describe("SessionErrorTracker — credits_required rejection", () => {
+  test("credits_required is a seat mismatch, never a key-wide or model-scoped limit", () => {
+    const tracker = new SessionErrorTracker();
+    tracker.processRateLimitEvent(FIXTURE_CREDITS_REQUIRED);
+    expect(tracker.getRateLimitResetAt()).toBeUndefined();
+    expect(tracker.getModelRateLimit()).toBeUndefined();
+    expect(tracker.getCreditsRequired()?.overageDisabledReason).toBe("member_zero_credit_limit");
+  });
+
+  test("a rejected event with no rateLimitType and no errorCode stays key-wide", () => {
+    const tracker = new SessionErrorTracker();
+    const { errorCode: _errorCode, ...info } = FIXTURE_CREDITS_REQUIRED.rate_limit_info;
+    tracker.processRateLimitEvent({ ...FIXTURE_CREDITS_REQUIRED, rate_limit_info: info });
+    expect(tracker.getRateLimitResetAt()).toBeDefined();
+    expect(tracker.getCreditsRequired()).toBeUndefined();
+  });
+});
+
+describe("redactRateLimitEvent — seat payload egress", () => {
+  test("drops the seat billing fields and keeps the rest", () => {
+    const redacted = redactRateLimitEvent(FIXTURE_CREDITS_REQUIRED);
+    expect(redacted.rate_limit_info).toEqual({
+      status: "rejected",
+      resetsAt: FIXTURE_CREDITS_REQUIRED.rate_limit_info.resetsAt,
+      isUsingOverage: false,
+      errorCode: "credits_required",
+    });
+    expect(redacted.uuid).toBe(FIXTURE_CREDITS_REQUIRED.uuid);
+    // The original message is not mutated.
+    expect(FIXTURE_CREDITS_REQUIRED.rate_limit_info.overageDisabledReason).toBe(
+      "member_zero_credit_limit",
+    );
+  });
+
+  test("the line form redacts JSON and returns other lines byte for byte", () => {
+    const line = redactRateLimitEventLine(JSON.stringify(FIXTURE_CREDITS_REQUIRED));
+    expect(line).not.toContain("overageDisabledReason");
+    expect(line).toContain('"errorCode":"credits_required"');
+    const other = '{"type":"assistant",  "message":{}}';
+    expect(redactRateLimitEventLine(other)).toBe(other);
+    const plainEvent = '{"type":"rate_limit_event","rate_limit_info":{"status":"allowed"}}';
+    expect(redactRateLimitEventLine(plainEvent)).toBe(plainEvent);
   });
 });
 

@@ -44,7 +44,18 @@ export type RatingEvent = {
    * write-site only: non-empty, ≤512 chars, control-char strip, no NUL.
    */
   referencesSource?: string;
+  /**
+   * Model that produced this judgement (`provider/model-id`, e.g.
+   * `openrouter/deepseek/deepseek-v4.1-flash`). Persisted to
+   * `memory_rating.model` for `llm` ratings only so score distributions can be
+   * compared across judge changes; `applyRating` ignores it for every other
+   * source.
+   */
+  model?: string;
 };
+
+/** Max length of `RatingEvent.model` accepted at the HTTP boundary. */
+export const RATING_MODEL_MAX_LENGTH = 200;
 
 /**
  * Maximum byte length for `referencesSource` strings (Q2 contract). Encoded
