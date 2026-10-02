@@ -2,6 +2,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, spyOn, test } from "b
 import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import * as piCodingAgent from "@earendil-works/pi-coding-agent";
+import { configureHttpResolver, resetHttpResolver } from "../prompts/resolver";
 import {
   createPiRuntimeAuth,
   extractPiAssistantText,
@@ -973,6 +974,49 @@ describe("PiMonoSession — empty final turn reprompt", () => {
     release();
     await session.waitForCompletion();
     expect(promptCalls).toHaveLength(1);
+  });
+
+  // Workers render the nudge template over HTTP. abort() can land while that
+  // request is pending, after the first guard check and before prompt().
+  test("abort() while the reprompt template is rendering does not start a new turn", async () => {
+    let releaseRender = () => {};
+    const renderGate = new Promise<void>((resolve) => {
+      releaseRender = resolve;
+    });
+    let renderStarted = () => {};
+    const renderRequested = new Promise<void>((resolve) => {
+      renderStarted = resolve;
+    });
+    const realFetch = globalThis.fetch;
+    const fetchSpy = spyOn(globalThis, "fetch").mockImplementation((async (
+      input: Parameters<typeof fetch>[0],
+      init?: Parameters<typeof fetch>[1],
+    ) => {
+      if (!String(input).endsWith("/api/prompt-templates/render")) return realFetch(input, init);
+      renderStarted();
+      await renderGate;
+      return Response.json({ text: "Please call store-progress.", skipped: false, unresolved: [] });
+    }) as unknown as typeof fetch);
+    configureHttpResolver("http://resolver.test", "test-key");
+    try {
+      const promptCalls: string[] = [];
+      const session = new PiMonoSession(
+        makeMockAgentSession({ turns: [[emptyContent()]], promptCalls }),
+        makeSessionConfig(join(tmpLogDir, `reprompt-abort-render-${Date.now()}.log`)),
+        false,
+      );
+      const events: ProviderEvent[] = [];
+      session.onEvent((e) => events.push(e));
+      await renderRequested;
+      await session.abort();
+      releaseRender();
+      await session.waitForCompletion();
+      expect(promptCalls).toHaveLength(1);
+      expect(stderrLines(events).some((l) => l.includes("sending one reprompt"))).toBe(false);
+    } finally {
+      resetHttpResolver();
+      fetchSpy.mockRestore();
+    }
   });
 
   test("a rejected reprompt keeps the original outcome instead of failing the session", async () => {

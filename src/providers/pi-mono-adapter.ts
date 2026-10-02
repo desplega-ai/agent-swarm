@@ -1154,23 +1154,14 @@ export class PiMonoSession implements ProviderSession {
    * the first reprompt (a second empty turn is not retried).
    */
   private async repromptAfterEmptyFinalTurn(): Promise<void> {
-    const turn = this.lastAssistantTurn;
-    if (
-      this.emptyTurnReprompted ||
-      this.abortRequested ||
-      this.terminalError ||
-      this.terminalStoreProgressDone ||
-      !turn ||
-      turn.hasText ||
-      turn.hasToolCall ||
-      turn.stopReason === "aborted"
-    ) {
-      return;
-    }
+    if (this.emptyTurnReprompted || !this.finalTurnNeedsReprompt()) return;
     this.emptyTurnReprompted = true;
     try {
       const reprompt = await resolveTemplateAsync("task.nudge.empty_final_turn", {});
       if (reprompt.skipped || !reprompt.text.trim()) return;
+      // Workers render templates over HTTP, so abort() or a late event can land
+      // while the render is pending. Re-check before starting a new model turn.
+      if (!this.finalTurnNeedsReprompt()) return;
       this.emit({
         type: "raw_stderr",
         content: "[pi-mono] final turn had no text and no tool call; sending one reprompt\n",
@@ -1186,6 +1177,20 @@ export class PiMonoSession implements ProviderSession {
         content: `[pi-mono] empty-turn reprompt failed: ${message}\n`,
       });
     }
+  }
+
+  /** True while the session is still entitled to the one empty-turn reprompt. */
+  private finalTurnNeedsReprompt(): boolean {
+    const turn = this.lastAssistantTurn;
+    return !(
+      this.abortRequested ||
+      this.terminalError ||
+      this.terminalStoreProgressDone ||
+      !turn ||
+      turn.hasText ||
+      turn.hasToolCall ||
+      turn.stopReason === "aborted"
+    );
   }
 
   private waitForIdle(): Promise<void> {
