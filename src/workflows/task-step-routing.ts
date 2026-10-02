@@ -1,11 +1,17 @@
 import {
+  detachTaskFromWorkflowRunStep,
   getDbClient,
   getWorkflowRunStep,
   updateWorkflowRun,
   updateWorkflowRunStep,
 } from "../be/db";
-import type { WorkflowDefinition, WorkflowNode, WorkflowRunStep } from "../types";
-import { checkpointStep } from "./checkpoint";
+import {
+  RetryPolicySchema,
+  type WorkflowDefinition,
+  type WorkflowNode,
+  type WorkflowRunStep,
+} from "../types";
+import { checkpointStep, checkpointStepFailure } from "./checkpoint";
 import { getSuccessors } from "./definition";
 import { joinForeach, resolveForeachParent } from "./foreach-join";
 
@@ -66,6 +72,52 @@ export async function checkpointPortStepAndResolveSuccessors(
     await checkpointStep(runId, stepId, nodeId, { output, nextPort }, ctx);
     await updateWorkflowRun(runId, { status: "running" });
     return { claimed: true, successors: getSuccessors(def, nodeId, nextPort) };
+  });
+}
+
+/**
+ * Outcome of `scheduleTaskStepRetry`:
+ * - `scheduled`: the step is queued for the retry poller; the caller stops.
+ * - `not-claimed`: another handler already moved the step out of `waiting`;
+ *   the caller stops.
+ * - `not-eligible`: no retry applies (no `node.retry`, not an agent-task node,
+ *   or retries exhausted); the caller applies `onNodeFailure` as before.
+ */
+export type TaskStepRetryOutcome = "scheduled" | "not-claimed" | "not-eligible";
+
+/**
+ * Apply a node's `retry` policy to a FAILED agent-task step task. The sync
+ * executor path does this in `executeStep`; an async agent-task step only
+ * learns about the failure here, from `task.failed` or the recovery sweep.
+ *
+ * In one transaction: re-claim the step while it is still `waiting` on the
+ * same attempt, detach the failed task (the executor reuses any task bound to
+ * the step, so a bound failed task would park the retry forever), and record
+ * the failure with `nextRetryAt` so the retry poller re-dispatches a new task.
+ * Bounded by `maxRetries` via the step's persisted `retryCount`.
+ */
+export async function scheduleTaskStepRetry(
+  def: WorkflowDefinition,
+  runId: string,
+  step: WorkflowRunStep,
+  taskId: string,
+  reason: string,
+): Promise<TaskStepRetryOutcome> {
+  const node = def.nodes.find((n) => n.id === step.nodeId);
+  if (!node || node.type !== "agent-task" || !node.retry) return "not-eligible";
+  const parsed = RetryPolicySchema.safeParse(node.retry);
+  if (!parsed.success) return "not-eligible";
+  const policy = parsed.data;
+  if (step.retryCount >= policy.maxRetries) return "not-eligible";
+
+  return await getDbClient().transaction(async (): Promise<TaskStepRetryOutcome> => {
+    const current = await getWorkflowRunStep(step.id);
+    if (!current || current.status !== "waiting") return "not-claimed";
+    // The attempt counter moved under us: the step was already retried.
+    if (current.retryCount !== step.retryCount) return "not-claimed";
+    await detachTaskFromWorkflowRunStep(taskId);
+    await checkpointStepFailure(runId, step.id, reason, current.retryCount, policy);
+    return "scheduled";
   });
 }
 

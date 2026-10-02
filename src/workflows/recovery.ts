@@ -24,6 +24,7 @@ import {
   checkpointPortStepAndResolveSuccessors,
   completeTaskStepAndResolveSuccessors,
   failStepAndRunIfWaiting,
+  scheduleTaskStepRetry,
 } from "./task-step-routing";
 
 /**
@@ -171,6 +172,21 @@ async function recoverWaitingRuns(registry: ExecutorRegistry): Promise<number> {
       if (!run || run.status !== "waiting" || !workflow) continue;
 
       const taskCompleted = stuck.taskStatus === "completed";
+      if (stuck.taskStatus === "failed") {
+        // Same retry policy as the live task.failed handler: this sweep can
+        // reach a failed task first, and must not bypass the node's retry.
+        const failedStep = await getWorkflowRunStep(stuck.stepId);
+        if (!failedStep) continue;
+        const retry = await scheduleTaskStepRetry(
+          workflow.definition,
+          stuck.runId,
+          failedStep,
+          stuck.taskId,
+          "Task failed (recovered)",
+        );
+        if (retry === "scheduled") recovered++;
+        if (retry !== "not-eligible") continue;
+      }
       if (!taskCompleted && (workflow.definition.onNodeFailure ?? "fail") === "fail") {
         // Preserve the fail-fast recovery policy for failed/cancelled tasks.
         // Claimed: this sweep runs on every heartbeat, so the live task.failed
