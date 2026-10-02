@@ -1,4 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import type { IncomingMessage, ServerResponse } from "node:http";
+import { handleRealtimeTicket } from "../http/realtime";
 import {
   issueRealtimeTicket,
   REALTIME_TICKET_CAPACITY,
@@ -42,5 +44,31 @@ describe("realtime tickets", () => {
 
     expect(redeemRealtimeTicket(oldest.ticket, 4_001)).toBeNull();
     expect(redeemRealtimeTicket(newest.ticket, 4_001)).toEqual(auth);
+  });
+
+  test("the ticket route answers 404 while Comb is off", async () => {
+    const previous = process.env.COMB_ENABLED;
+    process.env.COMB_ENABLED = "false";
+    try {
+      let status = 0;
+      const res = {
+        writeHead: (code: number) => {
+          status = code;
+        },
+        end: () => {},
+      } as unknown as ServerResponse;
+      const req = { method: "POST", headers: {} } as IncomingMessage;
+      const handled = await handleRealtimeTicket(
+        req,
+        res,
+        ["api", "realtime", "ticket"],
+        new URLSearchParams(),
+      );
+      expect(handled).toBe(true);
+      expect(status).toBe(404);
+    } finally {
+      if (previous === undefined) delete process.env.COMB_ENABLED;
+      else process.env.COMB_ENABLED = previous;
+    }
   });
 });

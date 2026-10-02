@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
+import { getCombConfig } from "../comb/config";
 import { can } from "../rbac";
 import bundle from "../realtime/browser.generated.txt" with { type: "text" };
 import { issueRealtimeTicket } from "../realtime/tickets";
@@ -20,6 +21,7 @@ const realtimeTicketRoute = route({
       schema: z.object({ ticket: z.string(), expiresAt: z.number().int() }),
     },
     403: { description: "Comb presence is not allowed" },
+    404: { description: "Comb is not enabled" },
   },
 });
 
@@ -43,6 +45,11 @@ export async function handleRealtimeTicket(
   queryParams: URLSearchParams,
 ): Promise<boolean> {
   if (!realtimeTicketRoute.match(req.method, pathSegments)) return false;
+  // Comb presence is the only ticket consumer, so the route is off with Comb.
+  if (!getCombConfig().enabled) {
+    jsonError(res, "Comb is not enabled", 404);
+    return true;
+  }
   const parsed = await realtimeTicketRoute.parse(req, res, pathSegments, queryParams);
   if (!parsed) return true;
   const auth = getRequestAuth(req);

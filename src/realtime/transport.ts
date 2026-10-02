@@ -284,7 +284,13 @@ function connect(ws: WebSocket, auth: Awaited<ReturnType<typeof authenticate>>):
             room = await getRoom(namespace, msg.name, msg.schemaVersion, { create: false });
           } catch (error) {
             if (!(error instanceof Error) || error.message !== "room does not exist") throw error;
-            const creationDenied = await authorizeRoomNamespace(namespace, auth.identity, "join");
+            // Creating a room is a write. Comb presence rooms take only presence
+            // operations, so they check creation as a join.
+            const creationDenied = await authorizeRoomNamespace(
+              namespace,
+              auth.identity,
+              namespace.startsWith("presence:comb:") ? "join" : true,
+            );
             if (creationDenied) throw new Error(creationDenied);
             if (closed) return;
             room = await getRoom(namespace, msg.name, msg.schemaVersion);

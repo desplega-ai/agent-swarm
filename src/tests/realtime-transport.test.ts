@@ -561,6 +561,16 @@ describe("realtime transport", () => {
       const result = await join(client, 1, "agent-room", `task:agent:${agentId}`);
       expect(result.me.userId).toBe(agentId);
       expect(result.me.kind).toBe("agent");
+      // Creating a room in another agent's namespace is a write, so a worker is refused.
+      client.send({
+        id: 2,
+        op: "join",
+        name: "agent-room",
+        namespace: `task:agent:${randomUUID()}`,
+        schemaVersion: 1,
+      });
+      const denied = await client.next((frame) => frame.type === "error" && frame.id === 2);
+      expect(denied.error).toContain("require lead");
     } finally {
       await closeSocket(client);
     }

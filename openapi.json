@@ -30993,6 +30993,16 @@
                 }
               }
             }
+          },
+          "404": {
+            "description": "Comb is not enabled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         }
       }
