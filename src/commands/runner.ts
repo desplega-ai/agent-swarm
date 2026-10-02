@@ -1577,7 +1577,7 @@ async function validateProviderOutputIfNeeded(
   config: ApiConfig,
   taskId: string,
   providerOutput: string,
-): Promise<{ ok: true } | { ok: false; failReason: string }> {
+): Promise<{ ok: true; output?: string } | { ok: false; failReason: string }> {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
   };
@@ -1598,29 +1598,61 @@ async function validateProviderOutputIfNeeded(
       return { ok: true };
     }
 
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(providerOutput);
-    } catch {
-      return {
-        ok: false,
-        failReason:
-          "Structured output required by outputSchema but provider output was not valid JSON",
-      };
+    // The first candidate is the raw text, so a final message that is already
+    // bare JSON keeps its exact bytes. Later candidates recover JSON that the
+    // model wrapped in a ```json fence or a line of prose.
+    let firstValidationErrors: string[] | undefined;
+    for (const [index, candidate] of jsonOutputCandidates(providerOutput).entries()) {
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(candidate);
+      } catch {
+        continue;
+      }
+      const validationErrors = validateJsonSchema(taskData.outputSchema, parsed);
+      if (validationErrors.length === 0) {
+        return index === 0 ? { ok: true } : { ok: true, output: candidate };
+      }
+      firstValidationErrors ??= validationErrors;
     }
 
-    const validationErrors = validateJsonSchema(taskData.outputSchema, parsed);
-    if (validationErrors.length > 0) {
+    if (firstValidationErrors) {
       return {
         ok: false,
-        failReason: `Structured output did not match outputSchema: ${validationErrors.join("; ")}`,
+        failReason: `Structured output did not match outputSchema: ${firstValidationErrors.join("; ")}`,
       };
     }
+    return {
+      ok: false,
+      failReason:
+        "Structured output required by outputSchema but provider output was not valid JSON",
+    };
   } catch {
     return { ok: true };
   }
+}
 
-  return { ok: true };
+/**
+ * Texts that may hold the JSON in an agent's final message, in the order to
+ * try them: the whole message, each fenced code block, then the span from the
+ * first `{` (or `[`) to the last `}` (or `]`). Agents often answer a
+ * schema-bound task with "Here is the result:" plus a ```json block instead of
+ * calling store-progress, and `JSON.parse` on the whole message fails on that.
+ */
+function jsonOutputCandidates(text: string): string[] {
+  const candidates = [text];
+  for (const match of text.matchAll(/```[a-zA-Z]*[ \t]*\r?\n([\s\S]*?)\r?\n[ \t]*```/g)) {
+    if (match[1]?.trim()) candidates.push(match[1].trim());
+  }
+  for (const [open, close] of [
+    ["{", "}"],
+    ["[", "]"],
+  ] as const) {
+    const start = text.indexOf(open);
+    const end = text.lastIndexOf(close);
+    if (start >= 0 && end > start) candidates.push(text.slice(start, end + 1));
+  }
+  return [...new Set(candidates)];
 }
 
 export async function ensureTaskFinished(
@@ -1693,7 +1725,7 @@ export async function ensureTaskFinished(
   } else if (providerOutput) {
     const validation = await validateProviderOutputIfNeeded(config, taskId, providerOutput);
     if (validation.ok) {
-      body.output = providerOutput;
+      body.output = validation.output ?? providerOutput;
     } else {
       // The task declared an outputSchema but the provider's final message
       // is free-form prose that doesn't satisfy it. Don't convert this into
