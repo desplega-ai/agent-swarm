@@ -1170,20 +1170,23 @@ function isLinearTrackerContextKey(contextKey: string | null | undefined): conte
  *
  * Active means any non-terminal task. A completed task with persisted VCS PR/MR
  * metadata is also treated as existing work because the task can be complete
- * while the PR is still awaiting review/merge.
+ * while the PR is still awaiting review/merge. Delegation can exclude its parent
+ * from the active lookup; completed tasks with linked PRs remain blockers.
  */
 export async function findExistingLinearTrackerContextWork(
   contextKey: string | null | undefined,
+  delegatingParentTaskId?: string,
 ): Promise<ExistingTrackerContextWork | null> {
   if (!isLinearTrackerContextKey(contextKey)) return null;
 
   const activeRow = await getDbClient().get<AgentTaskRow>(
     `SELECT * FROM agent_tasks
        WHERE contextKey = ?
+       AND (? IS NULL OR id != ?)
        AND status NOT IN ('completed', 'failed', 'cancelled', 'superseded')
        ORDER BY lastUpdatedAt DESC
        LIMIT 1`,
-    [contextKey],
+    [contextKey, delegatingParentTaskId ?? null, delegatingParentTaskId ?? null],
   );
   if (activeRow) {
     return { task: rowToAgentTask(activeRow), reason: "active_task" };

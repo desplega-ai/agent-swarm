@@ -467,11 +467,12 @@ export async function sendTaskHandler(
   } | null> => {
     const existingTrackerWork = await findExistingLinearTrackerContextWork(
       effectiveParentTask?.contextKey,
+      effectiveParentTask?.id,
     );
     if (existingTrackerWork) {
       const msg = `Skipped: Linear tracker contextKey ${effectiveParentTask?.contextKey} already has ${existingTrackerWork.reason === "active_task" ? "active task" : "linked open PR"} ${existingTrackerWork.task.id.slice(0, 8)}.`;
       console.log(`[send-task] ${msg}`);
-      return { ok: true, message: msg, task: existingTrackerWork.task };
+      return { ok: false, message: msg, task: existingTrackerWork.task };
     }
 
     // Dedup guard: check for similar recent tasks
@@ -558,6 +559,12 @@ export async function sendTaskHandler(
     // concurrent send-task's committed task.
     const raced = await evaluateDedupGuards();
     if (raced) return { success: raced.ok, message: raced.message, task: raced.task };
+
+    // This transaction already checked the tracker key, excluding only the
+    // delegating parent. The creation guard would otherwise match that parent.
+    if (effectiveParentTask?.contextKey?.startsWith("task:trackers:linear:")) {
+      taskOptions.bypassTrackerContextDedup = true;
+    }
 
     // If no agentId (and no auto-routed agentId), create an unassigned task for the pool
     const targetAgentId = taskOptions.offeredTo ?? taskOptions.agentId ?? undefined;
