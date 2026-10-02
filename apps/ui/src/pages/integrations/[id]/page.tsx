@@ -25,7 +25,6 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { toast } from "sonner";
 import {
-  type UpsertConfigEntry,
   useConfigs,
   useDeleteConfigsBatch,
   useUpsertConfigsBatch,
@@ -70,6 +69,14 @@ import {
 } from "@/components/ui/detail-page-layout";
 import { PageHeader } from "@/components/ui/page-header";
 import {
+  buildInitialState,
+  computeDirtyEntries,
+  type DirtyField,
+  type DirtyState,
+  reconcileWithStored,
+  SECRET_MASK_SENTINEL,
+} from "@/lib/integration-form-state";
+import {
   getIntegrationFields,
   INTEGRATIONS,
   type IntegrationConfigGroup,
@@ -102,36 +109,6 @@ const ICON_MAP: Record<string, LucideIcon> = {
 
 function resolveIcon(iconKey: string): LucideIcon {
   return ICON_MAP[iconKey] ?? Plug;
-}
-
-// Server returns "********" for secret values unless ?includeSecrets=true.
-const SECRET_MASK_SENTINEL = "********";
-
-interface DirtyField {
-  value: string;
-  markedForReplace?: boolean;
-}
-
-type DirtyState = Record<string, DirtyField>;
-
-// Build the initial form state:
-//  - Non-secret fields: pre-fill with the existing plaintext value (these are
-//    harmless — channel names, emails, flags, etc.).
-//  - Secret fields with an existing row: store the "********" sentinel so the
-//    renderer shows masked read-only + Replace.
-function buildInitialState(def: IntegrationDef, configs: SwarmConfig[]): DirtyState {
-  const state: DirtyState = {};
-  for (const f of getIntegrationFields(def)) {
-    const existing = findConfigForKey(configs, f.key);
-    if (!existing) {
-      state[f.key] = { value: f.default ?? "" };
-      continue;
-    }
-    state[f.key] = {
-      value: f.isSecret ? SECRET_MASK_SENTINEL : existing.value,
-    };
-  }
-  return state;
 }
 
 export default function IntegrationDetailPage() {
@@ -221,6 +198,13 @@ function IntegrationDetailInner({
   const allFields = useMemo(() => getIntegrationFields(def), [def]);
 
   const [state, setState] = useState<DirtyState>(initialState);
+  // Stored values change under the form when another editor saves the same
+  // keys (the Memory probe). Untouched fields follow them; edits are kept.
+  const [baseline, setBaseline] = useState<DirtyState>(initialState);
+  if (baseline !== initialState) {
+    setBaseline(initialState);
+    setState((prev) => reconcileWithStored(prev, baseline, initialState));
+  }
   const [confirmResetOpen, setConfirmResetOpen] = useState(false);
   const installRemoteSkill = useInstallRemoteSkill();
 
@@ -231,39 +215,7 @@ function IntegrationDetailInner({
     }));
   }
 
-  // A field is dirty when:
-  //   - Secret + existing row + Replace clicked + non-mask value typed → send.
-  //   - Secret + no existing row + non-empty value typed → send.
-  //   - Non-secret + value differs from the stored value → send.
-  function computeDirtyEntries(): UpsertConfigEntry[] {
-    const entries: UpsertConfigEntry[] = [];
-    for (const f of allFields) {
-      const current = state[f.key];
-      if (!current) continue;
-      const existing = findConfigForKey(configs, f.key);
-
-      if (f.isSecret) {
-        if (existing && !current.markedForReplace) continue;
-        if (!current.value) continue;
-        if (current.value === SECRET_MASK_SENTINEL) continue;
-      } else {
-        const prevValue = existing?.value ?? "";
-        if (current.value === prevValue) continue;
-      }
-
-      entries.push({
-        key: f.key,
-        value: current.value,
-        isSecret: f.isSecret === true,
-        description: null,
-        envPath: null,
-        scope: "global",
-      });
-    }
-    return entries;
-  }
-
-  const dirtyEntries = computeDirtyEntries();
+  const dirtyEntries = computeDirtyEntries(allFields, state, configs);
   const hasDirty = dirtyEntries.length > 0;
 
   const handleSave = useCallback(async () => {
