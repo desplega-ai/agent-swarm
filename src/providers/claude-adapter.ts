@@ -1,6 +1,7 @@
 import { readFile, unlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import { deriveDefaultRoute, routeCredentialStatus, routeUnsetEnv } from "@desplega/model-routing";
 import { type Span, trace } from "@opentelemetry/api";
 import {
   type RunStopHookSessionSummaryOpts,
@@ -8,9 +9,10 @@ import {
 } from "../hooks/hook";
 import { isClaudeBridgeEffective, resolveClaudeTransport } from "../utils/claude-transport";
 import { getContextWindowSize } from "../utils/context-window";
-import { validateClaudeCredentials } from "../utils/credentials";
+import { CLAUDE_CREDENTIALS_HINT, validateClaudeCredentials } from "../utils/credentials";
 import {
   parseStderrForErrors,
+  redactRateLimitEventLine,
   SessionErrorTracker,
   trackErrorFromJson,
 } from "../utils/error-tracker";
@@ -23,6 +25,7 @@ import {
 } from "../utils/process-group";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { normalizeClaudeMessage } from "./claude-session-events";
+import { resolveSlashSkillPrompt } from "./codex-skill-resolver";
 import { CTX_MODE_NUDGE_EVERY } from "./ctx-mode-env";
 import { buildOtelTraceparentEnv, isHarnessOtelEnabled } from "./otel-env";
 import { applyReasoningEffort, type ReasoningEffort } from "./reasoning-effort";
@@ -41,18 +44,49 @@ import type {
 
 /**
  * Predicate used by the worker boot loop and the credential-status endpoint.
- * The claude harness needs EITHER `CLAUDE_CODE_OAUTH_TOKEN` (preferred) or
- * `ANTHROPIC_API_KEY` — both are listed as missing when neither is present.
+ * The claude harness is ready when its default route (subscription, API key,
+ * gateway, Foundry, Bedrock, or Vertex; see `deriveDefaultRoute`) has every
+ * env var it needs. With no route at all, the two first-party credentials are
+ * listed as missing.
  */
 export function checkClaudeCredentials(env: Record<string, string | undefined>): CredStatus {
-  if (env.CLAUDE_CODE_OAUTH_TOKEN || env.ANTHROPIC_API_KEY) {
-    return { ready: true, missing: [], satisfiedBy: "env" };
+  const route = deriveDefaultRoute("claude", env);
+  if (!route) {
+    return {
+      ready: false,
+      missing: ["CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"],
+      hint: CLAUDE_CREDENTIALS_HINT,
+    };
   }
-  return {
-    ready: false,
-    missing: ["CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"],
-    hint: "Set either CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY (one is enough).",
-  };
+  const status = routeCredentialStatus(route, env);
+  if (status.ready) return { ready: true, missing: [], satisfiedBy: "env" };
+  return { ready: false, missing: status.missing, hint: status.hint };
+}
+
+/**
+ * `env` without the credentials its claude default route does not use. On a
+ * gateway or cloud route this drops `CLAUDE_CODE_OAUTH_TOKEN`: Claude Code
+ * 2.1.286 sends that token as `Authorization: Bearer` to ANTHROPIC_BASE_URL
+ * whenever no gateway key outranks it, and claude-bridge authenticates from it.
+ *
+ * Dropped keys are blanked, not deleted, so the `?? process.env` fallbacks in
+ * the binary/transport resolvers cannot bring them back. On routes that leave
+ * api.anthropic.com they are blanked even when `env` lacks them. Claude Code
+ * treats a blank token as unset (verified on 2.1.286).
+ */
+export function withClaudeRouteEnv(
+  env: Record<string, string | undefined>,
+): Record<string, string | undefined> {
+  const route = deriveDefaultRoute("claude", env);
+  if (!route) return env;
+  const firstParty = route.provider === "anthropic";
+  const unset = routeUnsetEnv("claude", route).filter((key) =>
+    firstParty ? env[key] : env[key] !== "",
+  );
+  if (unset.length === 0) return env;
+  const next = { ...env };
+  for (const key of unset) next[key] = "";
+  return next;
 }
 
 /** Task file data written to /tmp for hook to read */
@@ -534,7 +568,7 @@ export function buildClaudeSessionEnvironment(
   model: string,
   taskFilePath: string,
 ): { env: Record<string, string>; appliedReasoningEffort: ReasoningEffort | null } {
-  const sourceEnv = { ...(config.env || process.env) };
+  const sourceEnv = { ...withClaudeRouteEnv(config.env || process.env) };
   // Summaries run in the adapter process. Do not bypass Claude's OAuth filtering for hooks.
   delete sourceEnv.AGENT_SWARM_CLAUDE_OAUTH_TOKEN;
   const reasoningApplication = applyReasoningEffort("claude", model, config.reasoningEffort);
@@ -571,8 +605,7 @@ export async function runClaudeSessionSummary(
       agentId: config.agentId,
       transcript: text,
       env: {
-        ...process.env,
-        ...config.env,
+        ...withClaudeRouteEnv({ ...process.env, ...config.env }),
         AGENT_SWARM_TASK_ID: config.taskId,
         MCP_BASE_URL: config.apiUrl,
         AGENT_SWARM_API_KEY: config.apiKey,
@@ -605,6 +638,38 @@ export function getSystemPromptFilePath(taskId: string): string {
   // convention so a janitor sweeping /tmp can find all session-scoped state
   // under the same prefix.
   return `/tmp/agent-swarm-system-prompt-${taskId}.txt`;
+}
+
+/**
+ * Inline the runner's leading `/<skill>` command before the prompt reaches
+ * Claude Code.
+ *
+ * Claude Code expands `/<skill> <args>` into `<command-args>{args}</command-args>`
+ * plus the skill text, and appends `ARGUMENTS: {args}` when the skill has no
+ * `$ARGUMENTS` placeholder (a `$ARGUMENTS` placeholder only moves the second
+ * copy). The runner puts the whole task body — task text, context preamble,
+ * memories — in those args, so every task's first message carried it twice.
+ * Inlining the SKILL.md ourselves, with the resolver codex/opencode/dsh already
+ * use, keeps the skill text and sends the body once.
+ *
+ * Commands with no SKILL.md under `<home>/.claude/skills` pass through for
+ * Claude Code to expand natively. Exported for unit testing.
+ */
+export async function resolveClaudePrompt(prompt: string, home: string): Promise<string> {
+  const resolved = await resolveSlashSkillPrompt(prompt, {
+    providerLabel: "claude",
+    skillsDir: join(home, ".claude", "skills"),
+    // Native expansion drops frontmatter too. It also matters for argv: the
+    // `-p` path passes the prompt as a positional, and a leading `---` is
+    // parsed as an unknown option.
+    stripFrontmatter: true,
+    emit: (event) => {
+      if (event.type === "raw_stderr") console.warn(event.content.trimEnd());
+    },
+  });
+  // Any other leading dash would hit the same argv parse error; keep the
+  // native (duplicated but working) form instead.
+  return resolved.startsWith("-") ? prompt : resolved;
 }
 
 class ClaudeSession implements ProviderSession {
@@ -830,19 +895,21 @@ class ClaudeSession implements ProviderSession {
       for await (const chunk of stdout) {
         stdoutChunks++;
         const text = new TextDecoder().decode(chunk);
-        // Scrub before every log-egress point: file write, listener emit, and
-        // downstream pretty-print / session-logs push (all consume event.content).
-        logFileHandle.write(scrubSecrets(text));
 
         const combined = partialLine + text;
         const parts = combined.split("\n");
         partialLine = parts.pop() || "";
 
         for (const line of parts) {
+          // Scrub and redact before every log-egress point: file write,
+          // listener emit, and downstream pretty-print / session-logs push
+          // (all consume event.content). The file is written per complete
+          // line so a rate_limit_event is redacted as a whole JSON object.
+          logFileHandle.write(`${scrubSecrets(redactRateLimitEventLine(line))}\n`);
           const trimmed = line.trim();
           if (!trimmed) continue;
 
-          this.emit({ type: "raw_log", content: scrubSecrets(trimmed) });
+          this.emit({ type: "raw_log", content: scrubSecrets(redactRateLimitEventLine(trimmed)) });
           this.processJsonLine(trimmed, (cost) => {
             lastCost = cost;
           });
@@ -850,8 +917,12 @@ class ClaudeSession implements ProviderSession {
       }
 
       // Handle remaining partial line
+      if (partialLine) logFileHandle.write(scrubSecrets(redactRateLimitEventLine(partialLine)));
       if (partialLine.trim()) {
-        this.emit({ type: "raw_log", content: scrubSecrets(partialLine.trim()) });
+        this.emit({
+          type: "raw_log",
+          content: scrubSecrets(redactRateLimitEventLine(partialLine.trim())),
+        });
         this.processJsonLine(partialLine.trim(), (cost) => {
           lastCost = cost;
         });
@@ -931,6 +1002,7 @@ class ClaudeSession implements ProviderSession {
       rateLimitResetAt: this.errorTracker.getRateLimitResetAt(),
       rateLimitWindows: this.errorTracker.getRateLimitWindows(),
       modelRateLimit: this.errorTracker.getModelRateLimit(),
+      creditsRequired: this.errorTracker.getCreditsRequired(),
       appliedReasoningEffort: this.appliedReasoningEffort,
     };
   }
@@ -1027,7 +1099,11 @@ export class ClaudeAdapter implements ProviderAdapter {
 
     const model = config.model || "opus";
 
-    const sourceEnv = config.env || process.env;
+    const sourceEnv = withClaudeRouteEnv(config.env || process.env);
+    const sessionConfig: ProviderSessionConfig = {
+      ...config,
+      prompt: await resolveClaudePrompt(config.prompt, process.env.HOME ?? homedir()),
+    };
     const transport = resolveClaudeTransport(sourceEnv);
     const credType = validateClaudeCredentials(sourceEnv);
     console.log(`\x1b[2m[claude]\x1b[0m Using credential: ${credType}`);
@@ -1204,7 +1280,7 @@ export class ClaudeAdapter implements ProviderAdapter {
 
     if (transport === "sdk") {
       return claudeSdk!.createClaudeSdkSession({
-        config,
+        config: sessionConfig,
         model,
         taskFilePath,
         taskFileKey,
@@ -1219,7 +1295,7 @@ export class ClaudeAdapter implements ProviderAdapter {
     }
 
     return new ClaudeSession(
-      config,
+      sessionConfig,
       model,
       taskFilePath,
       taskFileKey,

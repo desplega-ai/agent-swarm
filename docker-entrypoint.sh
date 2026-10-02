@@ -294,8 +294,10 @@ elif [ "$HARNESS_PROVIDER" = "codex" ]; then
     fi
 else
     # Claude auth (default) — soft check; TS-level loop blocks if missing.
-    if [ -z "$CLAUDE_CODE_OAUTH_TOKEN" ] && [ -z "$ANTHROPIC_API_KEY" ]; then
-        echo "Warning: claude provider has no credentials yet (CLAUDE_CODE_OAUTH_TOKEN / ANTHROPIC_API_KEY). Worker will park in credential-wait until creds appear in swarm_config."
+    # Gateway (ANTHROPIC_AUTH_TOKEN) and cloud (CLAUDE_CODE_USE_*) routes count too.
+    if [ -z "$CLAUDE_CODE_OAUTH_TOKEN" ] && [ -z "$ANTHROPIC_API_KEY" ] && [ -z "$ANTHROPIC_AUTH_TOKEN" ] \
+        && [ -z "$CLAUDE_CODE_USE_FOUNDRY" ] && [ -z "$CLAUDE_CODE_USE_BEDROCK" ] && [ -z "$CLAUDE_CODE_USE_VERTEX" ]; then
+        echo "Warning: claude provider has no credentials yet (CLAUDE_CODE_OAUTH_TOKEN / ANTHROPIC_API_KEY / a gateway or cloud route). Worker will park in credential-wait until creds appear in swarm_config."
     fi
 fi
 
@@ -325,7 +327,7 @@ elif [ "$HARNESS_PROVIDER" = "opencode" ]; then
 elif [ "$HARNESS_PROVIDER" = "dsh" ]; then
     DSH_BIN="${DSH_BINARY:-dsh}"
     if ! command -v "$DSH_BIN" >/dev/null 2>&1; then
-        echo "FATAL: dsh CLI not found: '$DSH_BIN'. Use worker-full or install @deepseek-ai/dsh@0.1.7-alpha.2 during image provisioning."
+        echo "FATAL: dsh CLI not found: '$DSH_BIN'. Use worker-full or install @deepseek-ai/dsh@0.2.0-rc.2 during image provisioning."
         exit 1
     fi
     echo "dsh CLI: $(command -v "$DSH_BIN")"
@@ -654,6 +656,13 @@ elif [ -n "$GITLAB_TOKEN" ]; then
     GITLAB_HOST_BARE=$(echo "$GITLAB_HOST" | sed 's|https\?://||')
     echo "$GITLAB_TOKEN" | glab auth login --hostname "$GITLAB_HOST_BARE" --stdin 2>/dev/null || true
 
+    # git: glab auth login stores no git credentials, so a plain git clone/push
+    # over HTTPS to this host would have none. Same env-reading helper as Azure
+    # DevOps below: the token never lands in ~/.gitconfig or a credential store.
+    # GitLab accepts any non-empty username with a PAT as the password.
+    git config --global "credential.${GITLAB_HOST%/}.helper" \
+        '!f() { test "$1" = get || exit 0; echo username=oauth2; echo "password=${GITLAB_TOKEN}"; }; f'
+
     # Set git user config for GitLab commits (use GitLab-specific env vars or fall back to GitHub ones)
     GITLAB_GIT_EMAIL="${GITLAB_EMAIL:-${GITHUB_EMAIL:-worker-agent@desplega.ai}}"
     GITLAB_GIT_NAME="${GITLAB_NAME:-${GITHUB_NAME:-Worker Agent}}"
@@ -670,6 +679,54 @@ elif [ -n "$GITLAB_TOKEN" ]; then
     echo "GitLab authentication configured successfully (host: $GITLAB_HOST_BARE)"
 else
     echo "GITLAB_TOKEN not set - GitLab integration disabled for this worker"
+fi
+echo "=============================="
+
+# Configure Azure DevOps authentication if a PAT is provided
+echo ""
+echo "=== Azure DevOps Authentication ==="
+if [ -n "$AZURE_DEVOPS_TOKEN" ] && [ "${AZURE_DEVOPS_DISABLE:-false}" = "true" ]; then
+    echo "AZURE_DEVOPS_DISABLE=true - Azure DevOps integration disabled for this worker"
+elif [ -n "$AZURE_DEVOPS_TOKEN" ]; then
+    echo "Configuring Azure DevOps authentication..."
+
+    # git: a credential helper that reads the PAT from the environment when git
+    # asks, so the token never lands in ~/.gitconfig or a credential store.
+    # Azure Repos accept any username with a PAT as the password.
+    for AZDO_URL in "https://dev.azure.com" "https://*.visualstudio.com"; do
+        git config --global "credential.${AZDO_URL}.helper" \
+            '!f() { test "$1" = get || exit 0; echo username=azure-devops; echo "password=${AZURE_DEVOPS_TOKEN}"; }; f'
+    done
+
+    # az: the azure-devops extension reads AZURE_DEVOPS_EXT_PAT, so no
+    # `az devops login` (which would persist the PAT under ~/.azure), and the
+    # AZURE_DEVOPS_EXT__DEFAULTS_ORGANIZATION env form of
+    # `az devops configure --defaults organization=...` writes no file.
+    if command -v az > /dev/null 2>&1; then
+        export AZURE_DEVOPS_EXT_PAT="$AZURE_DEVOPS_TOKEN"
+        if [ -n "$AZURE_DEVOPS_ORG_URL" ]; then
+            export AZURE_DEVOPS_EXT__DEFAULTS_ORGANIZATION="$AZURE_DEVOPS_ORG_URL"
+        fi
+    else
+        echo "WARNING: az is not installed (slim image?) - git access to Azure Repos works, az repos does not"
+    fi
+
+    # Set git user config for Azure DevOps commits (fall back like GitLab does)
+    AZDO_GIT_EMAIL="${AZURE_DEVOPS_EMAIL:-${GITHUB_EMAIL:-worker-agent@desplega.ai}}"
+    AZDO_GIT_NAME="${AZURE_DEVOPS_NAME:-${GITHUB_NAME:-Worker Agent}}"
+    # Only override git config if GitHub/GitLab didn't set it already
+    if [ -z "$GITHUB_TOKEN" ] && [ -z "$GITLAB_TOKEN" ]; then
+        git config --global user.email "$AZDO_GIT_EMAIL"
+        git config --global user.name "$AZDO_GIT_NAME"
+        export GIT_AUTHOR_NAME="$AZDO_GIT_NAME"
+        export GIT_AUTHOR_EMAIL="$AZDO_GIT_EMAIL"
+        export GIT_COMMITTER_NAME="$AZDO_GIT_NAME"
+        export GIT_COMMITTER_EMAIL="$AZDO_GIT_EMAIL"
+    fi
+
+    echo "Azure DevOps authentication configured successfully (org: ${AZURE_DEVOPS_ORG_URL:-unset})"
+else
+    echo "AZURE_DEVOPS_TOKEN not set - Azure DevOps integration disabled for this worker"
 fi
 echo "=============================="
 
@@ -723,7 +780,17 @@ if [ -n "$AGENT_ID" ]; then
                         git reset --hard 'origin/$REPO_BRANCH'" || echo "  Warning: Could not sync ${REPO_NAME}"
                 else
                     echo "  Cloning ${REPO_NAME} to ${REPO_DIR} (branch: ${REPO_BRANCH})..."
-                    gosu worker bash -c "gh repo clone '$REPO_URL' '$REPO_DIR' -- --branch '$REPO_BRANCH' --single-branch" || echo "  Warning: Could not clone ${REPO_NAME}"
+                    # gh only speaks GitHub: it cannot parse Azure Repos URLs (…/_git/…)
+                    # and POSTs GitHub GraphQL queries to GitLab hosts. Plain git uses the
+                    # credential helpers configured above. GitLab = gitlab.com / gitlab.*
+                    # (same rule as detectVcsProvider) or a self-hosted GITLAB_URL whose
+                    # hostname has no "gitlab." in it (empty glob when GITLAB_URL is unset).
+                    GITLAB_URL_GLOB="${GITLAB_URL:+${GITLAB_URL%/}/*}"
+                    case "$REPO_URL" in
+                        *dev.azure.com*|*.visualstudio.com*|*gitlab.*|$GITLAB_URL_GLOB) CLONE_CMD="git clone '$REPO_URL' '$REPO_DIR' --branch '$REPO_BRANCH' --single-branch" ;;
+                        *) CLONE_CMD="gh repo clone '$REPO_URL' '$REPO_DIR' -- --branch '$REPO_BRANCH' --single-branch" ;;
+                    esac
+                    gosu worker bash -c "$CLONE_CMD" || echo "  Warning: Could not clone ${REPO_NAME}"
                 fi
 
                 if [ "$REPO_HOOKS_ENABLED" = "true" ] && [ -d "${REPO_DIR}/.git" ]; then

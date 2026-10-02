@@ -428,19 +428,22 @@ This is useful for fan-out patterns where some branches may fail but you still w
 
 ### Per-Step Retry
 
-Each node can define a `retryPolicy`:
+Each node can define a `retry` policy on the node itself (not inside `config`):
 
 ```json
 {
-  "retryPolicy": {
+  "retry": {
     "maxRetries": 3,
-    "backoff": "exponential",
-    "initialDelayMs": 1000
+    "strategy": "exponential",
+    "baseDelayMs": 1000,
+    "maxDelayMs": 60000
   }
 }
 ```
 
-Backoff strategies: `exponential`, `linear`, `static`. The poller detects failed steps and re-executes them according to the policy. Before a retry, the engine restores completed upstream outputs from step checkpoints, so declared inputs resolve to the same values as the original execution. Retrying a failed run also reconstructs the branch selected by each completed step and never revives a branch that was not taken.
+Backoff strategies: `exponential`, `linear`, `static`. The poller detects failed steps and re-executes them according to the policy.
+
+For an `agent-task` node, `retry` also covers a task that fails after dispatch, for example one the heartbeat fails with `superseded_workflow_task` after a worker restart. The engine detaches the failed task and the poller dispatches a fresh task for the same step. `onNodeFailure` applies only once `maxRetries` is spent. A cancelled task is never retried, and a node without `retry` behaves as before. Before a retry, the engine restores completed upstream outputs from step checkpoints, so declared inputs resolve to the same values as the original execution. Retrying a failed run also reconstructs the branch selected by each completed step and never revives a branch that was not taken.
 
 ### Per-Node Timeout
 

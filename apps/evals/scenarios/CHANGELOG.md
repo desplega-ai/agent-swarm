@@ -51,11 +51,23 @@ add scenarios to it without a MAJOR bump. Nothing published depends on it yet.
 | capability-routing | 1 | Lead + 3 workers with declared profiles; each input on one worker only (Phase 8). |
 | human-in-loop | 1 | Ambiguous export, canned reply to request-human-input (Phase 8). |
 | human-in-loop-solo | 1 | Single-agent baseline of human-in-loop (Phase 8, plan Q6). |
+| real-diff-agent-fs | 1 | A real merged fix (agent-fs PR #73), pushed to a sandbox remote, graded by its hidden tests on a fresh clone. |
 
 Versions 1 above are the state of `main` when versioning was introduced
 (Phase 3); earlier fixes (Phases 1-2) predate it and are not versioned.
 
 ## Changes
+
+### real-diff-agent-fs v1
+
+First scenario built from a real merged change instead of a planted bug. The
+agent gets desplega-ai/agent-fs at the parent of PR #73 (`201a2ec`, downloaded
+and pinned by git commit id at seed time) and a symptom-level bug report, commits
+on a branch and pushes to a bare remote in the sandbox. The grader clones the
+pushed ref, overlays the two test files the fix added or changed and runs them,
+plus the rest of the core suite. Fixture files live in
+`scenarios/fixtures/real-diff-agent-fs/` and are hashed with the scenario
+(`src/scenario-hash.ts` now hashes `fixtures/<id>/`).
 
 ### delegation-chain v2
 

@@ -5,6 +5,7 @@
     "slack",
     "github",
     "gitlab",
+    "azure-devops",
     "linear",
     "jira",
     "sentry",

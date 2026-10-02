@@ -5359,6 +5359,76 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/keys/report-seat-mismatch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Record that an API key's subscription seat cannot run a model family */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        keyType: string;
+                        keySuffix: string;
+                        keyIndex: number;
+                        /** @enum {string} */
+                        model: "fable" | "opus" | "sonnet" | "haiku";
+                        scope?: string;
+                        scopeId?: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Seat mismatch recorded */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @enum {boolean} */
+                            success: true;
+                            message: string;
+                        };
+                    };
+                };
+                /** @description Validation error */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/keys/available": {
         parameters: {
             query?: never;
@@ -5395,6 +5465,7 @@ export interface paths {
                             totalKeys: number;
                             modelBlockedIndices?: number[];
                             earliestModelResetAt?: string | null;
+                            seatBlockedIndices?: number[];
                             authFailureFence: number;
                         };
                     };
@@ -5486,6 +5557,8 @@ export interface paths {
                                 plan: string | null;
                                 /** @enum {string|null} */
                                 planSource: "manual" | "detected" | "estimated" | null;
+                                lastSeatMismatchAt: string | null;
+                                lastSeatMismatchModel: string | null;
                                 consecutiveAuthFailures: number;
                                 lastAuthFailureAt: string | null;
                                 modelLimits: {
@@ -6106,8 +6179,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Install a predefined extension from the catalog
-         * @description Installs the named template from `GET /api/extensions/catalog`. Inline bundles (`manifest`/`files`) are rejected with `inline_install_disabled`. Any authenticated agent can install a disabled draft owned by its agent ID. Workers can update only their own bundles; activation remains lead/operator-only.
+         * Install an extension from the catalog or an inline bundle
+         * @description Installs the named `template` from `GET /api/extensions/catalog`, or an inline `manifest` plus `files`. Inline bundles are rejected with `inline_install_disabled` unless `EXTENSION_ALLOW_INLINE_INSTALL` is on, and then only lead, operator, and dashboard-user callers may send them (workers get 403). Any authenticated agent can install a catalog draft owned by its agent ID. Workers can update only their own bundles. A new extension is always disabled; activation remains lead/operator-only.
          */
         post: operations["extensions_install"];
         delete?: never;
@@ -7885,8 +7958,17 @@ export interface paths {
                         };
                     };
                 };
-                /** @description Validation error */
+                /** @description Validation error, or a sourcePath under /longterm that is not an allowed memory key */
                 400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description sourcePath is under a lead-only /longterm root and the caller is not the lead */
+                403: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -7934,6 +8016,8 @@ export interface paths {
                         scope?: "agent" | "swarm" | "all";
                         /** @enum {string} */
                         source?: "manual" | "file_index" | "session_summary" | "task_completion";
+                        /** @description Only return memories whose key starts with this text (literal, case-sensitive), for example '/longterm/facts/'. */
+                        keyPrefix?: string;
                     };
                 };
             };
@@ -8537,6 +8621,8 @@ export interface paths {
                             taskId?: string;
                             /** @description Optional external source ID this memory references. Free-form string, convention "<source>:<identifier>" (e.g. "github:owner/repo#N", "linear:KEY-N", "customer:<slug>", "slack:<channel>:<ts>", "agentmail:<thread-id>"). Pick any prefix that fits — no closed enum. When present, an edge from this memory to the external source is created/updated. */
                             referencesSource?: string;
+                            /** @description Optional. Model that produced an `llm` rating, as "<provider>/<model-id>" (e.g. "openrouter/deepseek/deepseek-v4.1-flash"). Stored in memory_rating.model for `llm` events and ignored for `explicit-self`. */
+                            model?: string;
                         }[];
                     };
                 };
@@ -15353,7 +15439,7 @@ export interface paths {
                                      * @default mcp
                                      * @enum {string}
                                      */
-                                    source: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira";
+                                    source: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "azure-devops" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira";
                                     taskType?: string;
                                     /** @default [] */
                                     tags: string[];
@@ -17129,6 +17215,23 @@ export interface paths {
                                     lastErrorAt?: string;
                                     lastSuccessAt?: string;
                                 };
+                                contextVersions?: {
+                                    at: string;
+                                    rowsDeleted: number;
+                                    batches: number;
+                                    durationMs: number;
+                                    dryRun: boolean;
+                                    cumulativeRowsDeleted: number;
+                                    /** @enum {string} */
+                                    outcome: "converged" | "budget_exhausted" | "error";
+                                    drained: boolean;
+                                    backlogRemaining: number;
+                                    batchSize: number;
+                                    slowestStatementMs: number;
+                                    lastError?: string;
+                                    lastErrorAt?: string;
+                                    lastSuccessAt?: string;
+                                };
                             };
                         };
                     };
@@ -17489,7 +17592,7 @@ export interface paths {
                                  * @default mcp
                                  * @enum {string}
                                  */
-                                source: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira";
+                                source: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "azure-devops" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira";
                                 taskType?: string;
                                 /** @default [] */
                                 tags: string[];
@@ -17582,7 +17685,7 @@ export interface paths {
                         /** @description Non-unique asset directory namespace (for example shared/ or personal/<user-id>/drafts/). Runtime write boundaries normalize and validate the canonical form. */
                         key?: string;
                         /** @enum {string} */
-                        source?: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira";
+                        source?: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "azure-devops" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira";
                         outputSchema?: {
                             [key: string]: unknown;
                         };
@@ -18357,7 +18460,7 @@ export interface paths {
                 };
             };
             responses: {
-                /** @description Progress updated */
+                /** @description Progress updated; a no-op once the task is terminal */
                 200: {
                     headers: {
                         [name: string]: unknown;
@@ -18422,6 +18525,8 @@ export interface paths {
                         output?: string;
                         failureReason?: string;
                         force?: boolean;
+                        /** @enum {string} */
+                        provider?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh";
                     };
                 };
             };
@@ -18786,7 +18891,7 @@ export interface paths {
                 content: {
                     "application/json": {
                         /** @enum {string} */
-                        vcsProvider: "github" | "gitlab";
+                        vcsProvider: "github" | "gitlab" | "azure-devops";
                         vcsRepo: string;
                         vcsNumber: number;
                         /** Format: uri */
@@ -20930,6 +21035,69 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/azure-devops/webhook": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Handle Azure DevOps service-hook events */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Event processed */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            created: boolean;
+                            taskId?: string;
+                            skipped?: boolean;
+                            reason?: string;
+                            extension?: {
+                                id: string;
+                                name: string;
+                            };
+                        };
+                    };
+                };
+                /** @description Invalid Basic auth credentials */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Azure DevOps integration not configured */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/agentmail/webhook": {
         parameters: {
             query?: never;
@@ -22382,7 +22550,7 @@ export interface components {
              * @default mcp
              * @enum {string}
              */
-            source: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira";
+            source: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "azure-devops" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira";
             /** @enum {string} */
             routingReason?: "skill" | "continuity" | "overflow" | "human_pinned" | "reroute_fault";
             /**
@@ -22424,7 +22592,7 @@ export interface components {
             slackProgressMessageTs?: string;
             slackTreeRootMessageTs?: string;
             /** @enum {string} */
-            vcsProvider?: "github" | "gitlab";
+            vcsProvider?: "github" | "gitlab" | "azure-devops";
             vcsRepo?: string;
             vcsEventType?: string;
             vcsNumber?: number;
@@ -22816,9 +22984,16 @@ export interface components {
             author?: string;
         };
         ExtensionInstallBody: {
-            /** @description Name of a predefined extension in the catalog (`GET /api/extensions/catalog`). */
-            template: string;
+            /** @description Name of a predefined extension in the catalog (`GET /api/extensions/catalog`). Mutually exclusive with `manifest` and `files`. */
+            template?: string;
+            manifest?: components["schemas"]["ExtensionManifest"] & unknown;
+            /** @description Inline bundle files keyed by relative path. Requires `manifest`. */
+            files?: {
+                [key: string]: string;
+            };
+            /** @description Handler priority. Lower values run first. */
             priority?: number;
+            /** @description Extension configuration. */
             config?: {
                 [key: string]: unknown;
             };
@@ -23947,7 +24122,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Inline bundle rejected or bundle validation failed */
+            /** @description Inline install disabled, invalid body (template and manifest/files are mutually exclusive), or bundle validation failed */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -23956,7 +24131,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Permission denied */
+            /** @description Permission denied, including inline bundles from workers */
             403: {
                 headers: {
                     [name: string]: unknown;

@@ -1,4 +1,5 @@
 import { existsSync } from "node:fs";
+import { deriveDefaultRoute, routeCredentialStatus } from "@desplega/model-routing";
 import { type ModelFamily, modelFamilyOf, windowForModelFamily } from "./model-rate-limit-windows";
 
 /** Env vars that may contain comma-separated credential pools */
@@ -113,6 +114,8 @@ export interface CredentialSelection {
   modelBlockedIndices?: number[];
   /** ISO of the earliest reset among modelBlockedIndices, or null/undefined when none. */
   earliestModelResetAt?: string | null;
+  /** Indices excluded because the key's subscription plan cannot run the requested model. */
+  seatBlockedIndices?: number[];
   /** Subscription plan id detected on the credential (`SUBSCRIPTION_PLANS`), reported with its usage. */
   plan?: string | null;
   /** `authFailureFence` from `GET /api/keys/available`, read before the task (Codex pool only). */
@@ -128,33 +131,49 @@ const MODEL_LABELS: Record<ModelFamily, string> = {
 
 /**
  * Thrown by `resolveCredentialPools` at task admission (`enforceModelCapacity`)
- * when every key for a pool is either key-wide rate-limited or blocked by the
- * requested model's weekly window, and `MODEL_WINDOW_EXHAUSTED_POLICY` is
- * `fail` (the default). The caller must not spawn the CLI on this error — see
- * `spawnProviderProcess` in `src/commands/runner.ts`. Taskless configuration
- * loads never throw it.
+ * when no key for a pool can run the requested model: every key is key-wide
+ * rate-limited, blocked by the model's weekly window, or on a subscription
+ * seat that cannot run the model (`seatBlockedCount`). A window block throws
+ * only when `MODEL_WINDOW_EXHAUSTED_POLICY` is `fail` (the default); a seat
+ * block never resets, so it throws under every policy. The caller must not
+ * spawn the CLI on this error — see `spawnProviderProcess` in
+ * `src/commands/runner.ts`. Taskless configuration loads never throw it.
  */
 export class ModelWindowExhaustedError extends Error {
   readonly model: ModelFamily;
   readonly window: string;
   readonly earliestResetAt: string | null;
   readonly keyType: string;
+  readonly seatBlockedCount: number;
+  readonly modelBlockedCount: number;
 
   constructor(opts: {
     model: ModelFamily;
     window: string;
     earliestResetAt: string | null;
     keyType: string;
+    seatBlockedCount?: number;
+    modelBlockedCount?: number;
   }) {
     const modelLabel = MODEL_LABELS[opts.model];
+    const seatBlockedCount = opts.seatBlockedCount ?? 0;
+    const modelBlockedCount = opts.modelBlockedCount ?? 0;
+    const windowClause =
+      modelBlockedCount > 0 && opts.earliestResetAt
+        ? `${modelBlockedCount} keys have the ${modelLabel} window exhausted until ${opts.earliestResetAt}`
+        : `${modelBlockedCount} keys have the ${modelLabel} window exhausted`;
     super(
-      `No ${opts.keyType} key has ${modelLabel} capacity until ${opts.earliestResetAt ?? "unknown"}. Re-dispatch with another model or modelTier.`,
+      seatBlockedCount > 0
+        ? `No ${opts.keyType} key can run ${modelLabel}: ${seatBlockedCount} keys are on a seat without ${modelLabel}, ${windowClause}. Re-dispatch with another model or modelTier.`
+        : `No ${opts.keyType} key has ${modelLabel} capacity until ${opts.earliestResetAt ?? "unknown"}. Re-dispatch with another model or modelTier.`,
     );
     this.name = "ModelWindowExhaustedError";
     this.model = opts.model;
     this.window = opts.window;
     this.earliestResetAt = opts.earliestResetAt;
     this.keyType = opts.keyType;
+    this.seatBlockedCount = seatBlockedCount;
+    this.modelBlockedCount = modelBlockedCount;
   }
 }
 
@@ -175,6 +194,15 @@ function isJsonObject(value: string): boolean {
  * Falls back to random selection from all credentials if no available indices match.
  * A JSON object value (the CODEX_OAUTH blob) is always one credential.
  */
+function splitCredentialPool(value: string): string[] {
+  return isJsonObject(value)
+    ? [value.trim()]
+    : value
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
+}
+
 export function selectCredential(
   value: string,
   availableIndices?: number[],
@@ -185,12 +213,7 @@ export function selectCredential(
   // handed out fragments such as `"accountId":"..."}` as the selected credential
   // and stamped `965"}` as the key suffix on task records. Codex pools live in
   // config-store slots (codex_oauth_<n>), resolved by the runner instead.
-  const credentials = isJsonObject(value)
-    ? [value.trim()]
-    : value
-        .split(",")
-        .map((s) => s.trim())
-        .filter(Boolean);
+  const credentials = splitCredentialPool(value);
   if (credentials.length <= 1) {
     const selected = value.trim();
     const isRateLimitFallback = availableIndices !== undefined && availableIndices.length === 0;
@@ -249,17 +272,27 @@ export function selectRandomCredential(value: string): {
   return { selected: result.selected, index: result.index, total: result.total };
 }
 
+export const CLAUDE_CREDENTIALS_HINT =
+  "Set CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY, or route Claude Code through a gateway (ANTHROPIC_BASE_URL + ANTHROPIC_AUTH_TOKEN or ANTHROPIC_API_KEY), Microsoft Foundry (CLAUDE_CODE_USE_FOUNDRY), Amazon Bedrock (CLAUDE_CODE_USE_BEDROCK), or Google Vertex AI (CLAUDE_CODE_USE_VERTEX).";
+
+const CLAUDE_CREDENTIAL_TYPE_BY_PROVIDER: Record<string, string> = {
+  "claude-subscription": "oauth",
+  anthropic: "api_key",
+  "anthropic-gateway": "gateway",
+};
+
 /**
- * Validate that at least one Claude credential is available.
- * Priority: CLAUDE_CODE_OAUTH_TOKEN > ANTHROPIC_API_KEY.
- * Returns the credential type found, or throws if neither is set.
+ * Validate that the claude harness has a usable default route (see
+ * `deriveDefaultRoute` in @desplega/model-routing for the precedence).
+ * Returns the credential type found ("oauth", "api_key", "gateway", "foundry",
+ * "bedrock", "vertex"), or throws with what is missing.
  */
-export function validateClaudeCredentials(
-  env: Record<string, string | undefined>,
-): "oauth" | "api_key" {
-  if (env.CLAUDE_CODE_OAUTH_TOKEN) return "oauth";
-  if (env.ANTHROPIC_API_KEY) return "api_key";
-  throw new Error("No Claude credentials found. Set CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY.");
+export function validateClaudeCredentials(env: Record<string, string | undefined>): string {
+  const route = deriveDefaultRoute("claude", env);
+  if (!route) throw new Error(`No Claude credentials found. ${CLAUDE_CREDENTIALS_HINT}`);
+  const status = routeCredentialStatus(route, env);
+  if (!status.ready) throw new Error(`No Claude credentials found. ${status.hint}`);
+  return CLAUDE_CREDENTIAL_TYPE_BY_PROVIDER[route.provider] ?? route.provider;
 }
 
 /**
@@ -285,6 +318,8 @@ export interface AvailabilityInfo {
   availableIndices: number[];
   modelBlockedIndices?: number[];
   earliestModelResetAt?: string | null;
+  /** Indices excluded because the key's subscription plan cannot run the model. */
+  seatBlockedIndices?: number[];
 }
 
 /**
@@ -317,11 +352,13 @@ async function fetchAvailableIndices(
             availableIndices: number[];
             modelBlockedIndices?: number[];
             earliestModelResetAt?: string | null;
+            seatBlockedIndices?: number[];
           };
           availableIndicesMap[envVar] = {
             availableIndices: data.availableIndices,
             modelBlockedIndices: data.modelBlockedIndices,
             earliestModelResetAt: data.earliestModelResetAt,
+            seatBlockedIndices: data.seatBlockedIndices,
           };
           if (data.availableIndices.length < totalKeys) {
             console.log(
@@ -376,7 +413,9 @@ export async function resolveCredentialPools(
     localBlocks?: Map<string, number>;
     /**
      * Set only at task admission (`spawnProviderProcess`). When true, an
-     * exhausted model window fails fast with `ModelWindowExhaustedError`.
+     * exhausted model window, or a pool where every remaining key is on a
+     * seat that cannot run the model, fails fast with
+     * `ModelWindowExhaustedError`.
      * Taskless configuration loads (worker boot, credential recovery,
      * periodic reconciliation) leave it unset: they still pick a key, so an
      * exhausted default model never blocks boot or config refresh, and the
@@ -415,32 +454,43 @@ export async function resolveCredentialPools(
         modelBlockedCount += beforeCount - available.length;
       }
 
-      // Every key is either key-wide rate-limited or blocked by this
-      // model's weekly window, and at least one is blocked specifically by
-      // the model (not just legacy key-wide rate limiting) — the picker
-      // can't make progress for this model on this pool. Default policy
-      // fails fast instead of looping the worker through the same
-      // exhausted key every few minutes.
-      if (
-        opts?.enforceModelCapacity &&
-        window &&
-        modelFamily &&
-        available &&
-        available.length === 0 &&
-        modelBlockedCount > 0
-      ) {
+      const seatBlockedIndices = info?.seatBlockedIndices ?? [];
+      const seatBlockedCount = seatBlockedIndices.length;
+      let seatFallbackIndices: number[] | undefined;
+
+      // Every key is key-wide rate-limited, blocked by this model's weekly
+      // window, or on a seat that cannot run the model, and at least one is
+      // blocked specifically for the model (not just legacy key-wide rate
+      // limiting) — the picker can't make progress for this model on this
+      // pool. Default policy fails fast instead of looping the worker
+      // through the same exhausted key every few minutes. A seat block is a
+      // plan fact with no window and no reset, so the fallback pick excludes
+      // seat-blocked keys: a pick from them is a guaranteed failure. It fails
+      // only when every key is seat-blocked.
+      if (opts?.enforceModelCapacity && modelFamily && available && available.length === 0) {
         const policy = (env.MODEL_WINDOW_EXHAUSTED_POLICY ?? "fail").trim().toLowerCase();
-        if (policy !== "fallback") {
+        const windowExhausted =
+          window !== undefined && modelBlockedCount > 0 && policy !== "fallback";
+        if (seatBlockedCount > 0) {
+          seatFallbackIndices = splitCredentialPool(val)
+            .map((_, i) => i)
+            .filter((i) => !seatBlockedIndices.includes(i));
+        }
+        if (windowExhausted || seatFallbackIndices?.length === 0) {
           throw new ModelWindowExhaustedError({
             model: modelFamily,
-            window,
+            window: window ?? "",
             earliestResetAt: info?.earliestModelResetAt ?? null,
             keyType: envVar,
+            seatBlockedCount,
+            modelBlockedCount,
           });
         }
       }
 
-      const result = selectCredential(val, available, envVar);
+      const result = seatFallbackIndices
+        ? { ...selectCredential(val, seatFallbackIndices, envVar), isRateLimitFallback: true }
+        : selectCredential(val, available, envVar);
       env[envVar] = result.selected;
       const availInfo = available ? ` (${available.length} available of ${result.total})` : "";
       console.log(
@@ -450,6 +500,7 @@ export async function resolveCredentialPools(
         ...result,
         modelBlockedIndices: info?.modelBlockedIndices,
         earliestModelResetAt: info?.earliestModelResetAt,
+        seatBlockedIndices: info?.seatBlockedIndices,
       });
     }
   }

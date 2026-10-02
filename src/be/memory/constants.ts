@@ -51,6 +51,22 @@ export const SOURCE_QUALITY_MULTIPLIER: Record<AgentMemorySource, number> = {
   session_summary: 0.5,
 };
 
+// Path-weight multiplier for reranking, keyed by logical memory path (the
+// `key` column; see key-paths.ts). The longest matching root wins. A key under
+// no listed root (auto keys, file paths, anything outside /longterm) is inbox
+// material and weighs 1.0.
+export const PATH_WEIGHT: Readonly<Record<string, number>> = {
+  "/longterm/company-story": 1.4,
+  "/longterm/entities": 1.3,
+  "/longterm/facts": 1.2,
+  "/longterm/decisions": 1.1,
+  "/longterm/timeline": 0.8,
+};
+
+// A decision tagged `superseded` ranks low but stays findable.
+export const DECISIONS_ROOT = "/longterm/decisions";
+export const SUPERSEDED_DECISION_WEIGHT = 0.3;
+
 // Minimum raw cosine similarity to keep a candidate. Below this, the result is noise.
 export function minSimilarity(): number {
   return numEnv("MEMORY_MIN_SIMILARITY", 0.1);

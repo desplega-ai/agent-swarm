@@ -186,6 +186,46 @@ describe("computeScore", () => {
   });
 });
 
+describe("computeScore path weight", () => {
+  const now = new Date("2026-04-12T12:00:00Z");
+  const base = { similarity: 0.8, createdAt: now.toISOString(), accessedAt: now.toISOString() };
+  const unkeyed = computeScore(makeCandidate({ ...base, key: null }), now);
+
+  // Multiplier on the score of an otherwise identical candidate with no key.
+  test.each([
+    ["/longterm/company-story", [], 1.4],
+    ["/longterm/entities/people/taras", [], 1.3],
+    ["/longterm/facts/memory/slug", [], 1.2],
+    ["/longterm/decisions/2026-10-01-pick-x", [], 1.1],
+    ["/longterm/timeline/daily/2026-10-01", [], 0.8],
+    ["/longterm/decisions/2026-10-01-pick-x", ["superseded"], 0.3],
+    // Only a decision is demoted by the tag; other roots keep their own weight.
+    ["/longterm/facts/memory/slug", ["superseded"], 1.2],
+    // Inbox material: keys outside /longterm score as before, even when the
+    // path looks like a taxonomy root.
+    ["swarm/manual/0b6c6d1e", [], 1.0],
+    ["/workspace/shared/memory/lead/note.md", [], 1.0],
+    ["/facts/memory/slug", [], 1.0],
+    // A root-lookalike is not under the root.
+    ["/longterm/entities-archive/old", [], 1.0],
+  ] as const)("key %s with tags %j scales the score by %p", (key, tags, multiplier) => {
+    const score = computeScore(makeCandidate({ ...base, key, tags: [...tags] }), now);
+
+    expect(score / unkeyed).toBeCloseTo(multiplier, 6);
+  });
+
+  test("a path weight lifts a lower-similarity doc over an unkeyed one", () => {
+    const keyed = makeCandidate({
+      ...base,
+      similarity: 0.6,
+      key: "/longterm/entities/people/taras",
+    });
+    const legacy = makeCandidate({ ...base, similarity: 0.7, key: "swarm/manual/abc" });
+
+    expect(rerank([legacy, keyed], { limit: 2, now })[0]?.id).toBe(keyed.id);
+  });
+});
+
 describe("rerank", () => {
   const now = new Date("2026-04-12T12:00:00Z");
 

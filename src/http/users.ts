@@ -460,7 +460,7 @@ const deleteIdentityRoute = route({
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-const UNMAPPED_KINDS = ["slack", "github", "gitlab", "linear", "kapso"] as const;
+const UNMAPPED_KINDS = ["slack", "github", "gitlab", "azure-devops", "linear", "kapso"] as const;
 
 /**
  * Group the two-key-per-identity kv entries (`<externalId>:meta` json +

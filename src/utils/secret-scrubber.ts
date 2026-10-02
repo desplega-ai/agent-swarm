@@ -27,6 +27,9 @@ const SENSITIVE_KEY_EXACT = new Set<string>([
   "SECRETS_ENCRYPTION_KEY",
   "GITHUB_TOKEN",
   "GITLAB_TOKEN",
+  "AZURE_DEVOPS_TOKEN",
+  // Worker-side copy of AZURE_DEVOPS_TOKEN read by the az azure-devops extension
+  "AZURE_DEVOPS_EXT_PAT",
   "CLAUDE_CODE_OAUTH_TOKEN",
   "ANTHROPIC_API_KEY",
   "OPENAI_API_KEY",
@@ -108,6 +111,11 @@ const TOKEN_REGEXES: ReadonlyArray<{ name: string; re: RegExp }> = [
   { name: "acp_session_token", re: new RegExp(String.raw`${TB}aseph_[A-Za-z0-9]{20,}\b`, "g") },
   // GitLab personal access tokens
   { name: "gitlab_pat", re: new RegExp(String.raw`${TB}glpat-[A-Za-z0-9_-]{20,}\b`, "g") },
+  // Azure DevOps personal access tokens (84 chars, "AZDO" signature at offset 76)
+  {
+    name: "azure_devops_pat",
+    re: new RegExp(String.raw`${TB}[A-Za-z0-9]{76}AZDO[A-Za-z0-9]{4}\b`, "g"),
+  },
   // Anthropic API keys (must match before the generic sk- rule below)
   { name: "anthropic_key", re: new RegExp(String.raw`${TB}sk-ant-[A-Za-z0-9_-]{20,}\b`, "g") },
   // OpenAI project keys

@@ -37,6 +37,7 @@ import type { SteerDeliveryResult } from "../providers/types.ts";
 import { initTelemetry, telemetry } from "../telemetry.ts";
 import { mapTriggerSurface } from "../telemetry-context.ts";
 import {
+  isTerminalTaskStatus,
   type ModelTierOverrides,
   type ProviderName,
   parseWorkerModelTierOverrides,
@@ -55,10 +56,7 @@ import {
   ModelWindowExhaustedError,
   resolveCredentialPools,
 } from "../utils/credentials.ts";
-import {
-  type RateLimitWindowTelemetry,
-  resolveCodexCreditsExhaustedCooldownMs,
-} from "../utils/error-tracker.ts";
+import { resolveCodexCreditsExhaustedCooldownMs } from "../utils/error-tracker.ts";
 import { probeHarnessCliVersion, reportHarnessModelOutcome } from "../utils/harness-cli-version.ts";
 import { resolveHarnessProvider } from "../utils/harness-provider.ts";
 import { prettyPrintLine, prettyPrintStderr } from "../utils/pretty-print.ts";
@@ -70,7 +68,12 @@ import { refreshSkillsIfChanged } from "../utils/skills-refresh.ts";
 import { guardSpawnModel } from "../utils/spawn-model-guard.ts";
 import { isSteeringEnabled } from "../utils/steering-enabled.ts";
 import { interpolate } from "../utils/template.ts";
-import { detectVcsProvider } from "../vcs/index.ts";
+import {
+  canonicalAzureDevOpsRepoUrl,
+  isAzureDevOpsUrl,
+  parseAzureDevOpsRepoUrl,
+} from "../vcs/azure-devops.ts";
+import { detectVcsProvider, type VcsProvider } from "../vcs/index.ts";
 import { validateJsonSchema } from "../workflows/json-schema-validator.ts";
 import { buildAttachmentsSection } from "./attachments-section.ts";
 import {
@@ -78,6 +81,7 @@ import {
   buildResumeContextPreamble,
   prependContextPreamble,
 } from "./context-preamble.ts";
+import { reportCredentialOutcomeThenFinish } from "./credential-outcome-report.ts";
 import { type CredentialRefreshState, refreshCredentialStatus } from "./credential-refresh.ts";
 import {
   awaitCredentials,
@@ -102,7 +106,6 @@ import {
   reportLatestModel,
   sendCredStatusReport,
 } from "./provider-credentials.ts";
-import { buildFinalRateLimitWindows, classifyRateLimitOutcome } from "./rate-limit-outcome.ts";
 import {
   type ResumeSessionCandidate,
   type ResumeSessionResolution,
@@ -112,6 +115,7 @@ import {
 import "./templates.ts";
 
 export { buildAttachmentsSection } from "./attachments-section.ts";
+export { reportKeyRateLimitWindows } from "./credential-outcome-report.ts";
 
 /** Throttle interval for progress updates (3 seconds). */
 const PROGRESS_THROTTLE_MS = 3000;
@@ -270,7 +274,8 @@ async function listSwarmAutostashes(clonePath: string, role: string): Promise<Sw
  *    (src/agentmail/handlers.ts) — always carries `parentTaskId` pointing at
  *    the task it's continuing (as opposed to "agentmail-message", which fires
  *    only when no existing task was found for the thread).
- *  - "github-comment" / "github-review" / "gitlab-comment" / "gitlab-ci":
+ *  - "github-comment" / "github-review" / "gitlab-comment" / "gitlab-ci" /
+ *    "azure-devops-comment":
  *    tracker feedback on an ALREADY-OPEN PR/MR (review comments, review
  *    verdicts, CI failures) — the point is to keep working on the existing
  *    feature branch, not reset back to the default branch.
@@ -288,6 +293,7 @@ const CONTINUATION_TASK_TYPES = new Set([
   "github-review",
   "gitlab-comment",
   "gitlab-ci",
+  "azure-devops-comment",
 ]);
 
 /**
@@ -1094,6 +1100,7 @@ export const RELOADABLE_ENV_KEYS: ReadonlySet<string> = new Set([
   // pi reads these from process.env for its traits and its session.
   "PI_TOOL_DEFERRAL",
   "PI_CODEMODE",
+  "PI_CODEMODE_MODELS",
 ]);
 
 /**
@@ -1644,6 +1651,9 @@ export async function ensureTaskFinished(
   // Exit code 0 = success, non-zero = failure
   let status = exitCode === 0 ? "completed" : "failed";
   const body: Record<string, string> = { status };
+  // The server records it only when no session did, so a spawn failure is
+  // attributed to its harness instead of leaving `provider` NULL.
+  if (provider) body.provider = provider;
 
   // Applies a structured-output fallback result to `body`/`status`. Shared by
   // the no-providerOutput path and the providerOutput-failed-schema-validation
@@ -1908,37 +1918,6 @@ export async function resolveCodexOAuthCredentialInfo(
   }
 }
 
-/** Report a rate-limited key to the API (fire-and-forget) */
-async function reportKeyRateLimit(
-  apiUrl: string,
-  apiKey: string,
-  keyType: string,
-  keySuffix: string,
-  keyIndex: number,
-  rateLimitedUntil: string,
-): Promise<void> {
-  try {
-    await fetch(`${apiUrl}/api/keys/report-rate-limit`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        keyType,
-        keySuffix,
-        keyIndex,
-        rateLimitedUntil,
-      }),
-    });
-    console.log(
-      `[credentials] Reported key ...${keySuffix} as rate-limited until ${rateLimitedUntil}`,
-    );
-  } catch {
-    // Non-blocking
-  }
-}
-
 /** Upper bound on each awaited credential-outcome report, so a slow API never stalls completions. */
 const KEY_OUTCOME_REPORT_TIMEOUT_MS = 5000;
 
@@ -1976,55 +1955,6 @@ async function reportKeyAuthFailure(
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.warn(scrubSecrets(`[credentials] Failed to report auth failure: ${message}`));
-  }
-}
-
-/**
- * Reports rate-limit window telemetry for a key. Returns the underlying
- * fetch promise (does not swallow errors) so a caller that needs the post to
- * complete before the task finishes (a model-scoped block) can await it and
- * decide how to handle a failure; a caller that wants the legacy
- * fire-and-forget behavior appends `.catch(() => {})`.
- *
- * Throws on a non-2xx response so a failed persistence surfaces to the
- * caller instead of logging success while only the in-process guard took
- * effect — otherwise other workers redraw the same exhausted key at once.
- *
- * `logKeySuffix` defaults to true for the legacy full-telemetry call site;
- * the model-scoped call site passes false since it already logs the model
- * family and key index itself (see the `[credential] model window ...`
- * log above the call).
- */
-export async function reportKeyRateLimitWindows(
-  apiUrl: string,
-  apiKey: string,
-  keyType: string,
-  keySuffix: string,
-  keyIndex: number,
-  windows: RateLimitWindowTelemetry,
-  logKeySuffix = true,
-): Promise<void> {
-  if (Object.keys(windows).length === 0) return;
-  const response = await fetch(`${apiUrl}/api/keys/report-rate-limit-windows`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      keyType,
-      keySuffix,
-      keyIndex,
-      windows,
-    }),
-  });
-  if (!response.ok) {
-    throw new Error(
-      `Failed to report rate-limit windows for key #${keyIndex}: HTTP ${response.status}`,
-    );
-  }
-  if (logKeySuffix) {
-    console.log(`[credentials] Reported rate-limit windows for key ...${keySuffix}`);
   }
 }
 
@@ -2531,6 +2461,16 @@ export interface RunningTask {
    * adapter's `ProviderResult.output` is empty (see `trackAssistantText`).
    */
   assistantText?: { value?: string };
+  /** Last time `reconcileActiveTasks` read this task's server-side status. */
+  lastReconcileAt?: number;
+  /** When the runner asked the session to abort (cancel or reconcile). */
+  abortRequestedAt?: number;
+  /**
+   * Terminal status the server already holds for this task, found by
+   * `reconcileActiveTasks`. Completion then only frees the slot and leaves
+   * the server's output and failureReason alone.
+   */
+  serverTerminalStatus?: string;
 }
 
 /** Runner state for tracking concurrent tasks */
@@ -2765,10 +2705,27 @@ async function detectVcsForTask(
     ).trim();
 
     // 4. Detect provider and check for PR/MR
-    let vcsProvider: "github" | "gitlab";
+    let vcsProvider: VcsProvider;
     let prJson: string;
+    let azureRepo: string | null = null;
 
-    if (remoteUrl.includes("github.com") || remoteUrl.includes("github")) {
+    if (isAzureDevOpsUrl(remoteUrl)) {
+      const parsed = parseAzureDevOpsRepoUrl(remoteUrl);
+      if (!parsed) return;
+      vcsProvider = "azure-devops";
+      azureRepo = canonicalAzureDevOpsRepoUrl(remoteUrl);
+      const prs = JSON.parse(
+        await Bun.$`az repos pr list --organization ${parsed.orgUrl} --project ${parsed.project} --repository ${parsed.repository} --source-branch ${branch} --status active --top 1 --output json`
+          .quiet()
+          .text(),
+      ) as Array<{ pullRequestId: number }>;
+      prJson = JSON.stringify(
+        prs.map((pr) => ({
+          number: pr.pullRequestId,
+          url: `${azureRepo}/pullrequest/${pr.pullRequestId}`,
+        })),
+      );
+    } else if (remoteUrl.includes("github.com") || remoteUrl.includes("github")) {
       vcsProvider = "github";
       prJson = (
         await Bun.$`gh pr list --head ${branch} --json number,url --limit 1`.quiet().text()
@@ -2793,10 +2750,11 @@ async function detectVcsForTask(
     const vcsUrl = pr.url ?? pr.web_url;
     if (!vcsNumber || !vcsUrl) return;
 
-    // 6. Extract repo from remote URL
+    // 6. Extract repo from remote URL (Azure Repos keep the canonical clone URL,
+    // matching the vcsRepo their webhook tasks carry)
     const repoMatch = remoteUrl.match(/[:/]([^/]+\/[^/.]+?)(?:\.git)?$/);
-    if (!repoMatch) return;
-    const vcsRepo = repoMatch[1];
+    const vcsRepo = azureRepo ?? repoMatch?.[1];
+    if (!vcsRepo) return;
 
     // 7. Report to API
     const headers: Record<string, string> = { "Content-Type": "application/json" };
@@ -3103,6 +3061,86 @@ export async function buildRequesterProfilePrompt(
   return result.skipped ? "" : result.text.trim();
 }
 
+/** A non-2xx answer from `POST /api/agents`; carries the status for retry triage. */
+export class AgentRegistrationHttpError extends Error {
+  readonly status: number;
+  readonly body: string;
+  constructor(status: number, body: string) {
+    super(`Failed to register agent: ${status} ${body}`);
+    this.name = "AgentRegistrationHttpError";
+    this.status = status;
+    this.body = body;
+  }
+}
+
+/**
+ * Whether a boot registration failure is worth retrying. A freshly deployed
+ * API can answer `500 {"error":"database is locked"}` for minutes while boot
+ * work holds the SQLite write lock, and is unreachable while it restarts;
+ * both clear on their own. A 4xx (bad key, bad payload) never will.
+ */
+export function isRetryableRegistrationError(err: unknown): boolean {
+  if (err instanceof AgentRegistrationHttpError) {
+    return (
+      err.status >= 500 ||
+      err.status === 408 ||
+      err.status === 429 ||
+      /database is locked/i.test(err.body)
+    );
+  }
+  // Anything else escaped fetch itself: connection refused, reset, DNS, timeout.
+  return true;
+}
+
+export const REGISTRATION_RETRY_BUDGET_MS = 5 * 60_000;
+const REGISTRATION_RETRY_BASE_DELAY_MS = 2_000;
+const REGISTRATION_RETRY_MAX_DELAY_MS = 30_000;
+
+/**
+ * Boot registration with bounded exponential backoff (2s doubling to 30s,
+ * with jitter) inside a total wall-clock budget. Throws the last error on a
+ * non-retryable failure or once the next wait would overrun the budget, so
+ * the caller still exits and a restart policy can take over.
+ */
+export async function registerAgentWithRetry(
+  register: () => Promise<{ serverCapabilities?: string[] }>,
+  opts: {
+    label: string;
+    budgetMs?: number;
+    baseDelayMs?: number;
+    maxDelayMs?: number;
+    sleep?: (ms: number) => Promise<void>;
+    now?: () => number;
+  },
+): Promise<{ serverCapabilities?: string[] }> {
+  const budgetMs = opts.budgetMs ?? REGISTRATION_RETRY_BUDGET_MS;
+  const baseDelayMs = opts.baseDelayMs ?? REGISTRATION_RETRY_BASE_DELAY_MS;
+  const maxDelayMs = opts.maxDelayMs ?? REGISTRATION_RETRY_MAX_DELAY_MS;
+  const sleep = opts.sleep ?? ((ms: number) => Bun.sleep(ms));
+  const now = opts.now ?? Date.now;
+  const startedAt = now();
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await register();
+    } catch (err) {
+      if (!isRetryableRegistrationError(err)) throw err;
+      const backoff = Math.min(maxDelayMs, baseDelayMs * 2 ** (attempt - 1));
+      const delay = Math.round(backoff * (0.8 + Math.random() * 0.4));
+      const elapsed = now() - startedAt;
+      if (elapsed + delay > budgetMs) {
+        console.error(
+          `[${opts.label}] Registration still failing after ${attempt} attempts in ${Math.round(elapsed / 1000)}s; giving up`,
+        );
+        throw err;
+      }
+      console.warn(
+        `[${opts.label}] Registration attempt ${attempt} failed (${err}); retrying in ${Math.round(delay / 1000)}s`,
+      );
+      await sleep(delay);
+    }
+  }
+}
+
 /** Register agent via HTTP API. Exported so tests can exercise the real boot ordering. */
 export async function registerAgent(opts: {
   apiUrl: string;
@@ -3160,7 +3198,7 @@ export async function registerAgent(opts: {
 
   if (!response.ok) {
     const error = await response.text();
-    throw new Error(`Failed to register agent: ${response.status} ${error}`);
+    throw new AgentRegistrationHttpError(response.status, error);
   }
 
   // The register response carries the SERVER's enabled capability flags (which
@@ -3272,8 +3310,8 @@ async function buildTaskOutputInstructions(
   return result.text;
 }
 
-/** Build prompt based on trigger type */
-async function buildPromptForTrigger(
+/** Build prompt based on trigger type. Exported for unit testing. */
+export async function buildPromptForTrigger(
   trigger: Trigger,
   defaultPrompt: string,
   fmt: (cmd: string) => string = (cmd) => `/${cmd}`,
@@ -3758,8 +3796,7 @@ async function spawnProviderProcess(
     ));
   } catch (err) {
     if (err instanceof ModelWindowExhaustedError && realTaskId) {
-      const modelLabel = err.model.charAt(0).toUpperCase() + err.model.slice(1);
-      const reason = `No ${err.keyType} key has ${modelLabel} capacity until ${err.earliestResetAt ?? "unknown"}. Re-dispatch with another model or modelTier.`;
+      const reason = err.message;
       console.warn(`[${opts.role}] ${reason}`);
       await ensureTaskFinished(
         { apiUrl: opts.apiUrl, apiKey: opts.apiKey, agentId: opts.agentId },
@@ -4647,16 +4684,135 @@ async function spawnProviderProcess(
     runningTask.harnessVariantMeta = pendingHarnessVariantMeta;
   }
 
-  // Non-blocking completion tracking
+  // Non-blocking completion tracking. `reconcileActiveTasks` may have settled
+  // the task already when the session never did; keep that result.
   promise
     .then((r) => {
-      runningTask.result = r;
+      runningTask.result ??= r;
     })
     .catch(() => {
-      runningTask.result = { exitCode: 1, isError: true };
+      runningTask.result ??= { exitCode: 1, isError: true };
     });
 
   return runningTask;
+}
+
+/** Default cadence for checking active tasks against their server-side status. */
+export const DEFAULT_TASK_RECONCILE_INTERVAL_MS = 30_000;
+/** How long an aborted session gets to settle before the runner settles it. */
+export const ABORT_SETTLE_GRACE_MS = 10_000;
+
+/** `RUNNER_TASK_RECONCILE_INTERVAL_MS`, or the default when unset or invalid. */
+export function resolveTaskReconcileIntervalMs(
+  env: Record<string, string | undefined> = process.env,
+): number {
+  const raw = Number(env.RUNNER_TASK_RECONCILE_INTERVAL_MS);
+  return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_TASK_RECONCILE_INTERVAL_MS;
+}
+
+export interface ReconcileActiveTasksOptions {
+  /** Tasks already aborted because the server cancelled them. */
+  cancelledSignaled: Set<string>;
+  /** True when the server reports the task cancelled. Checked every call. */
+  isCancelled: (taskId: string) => Promise<boolean>;
+  /** The task's server-side status, or null when it could not be read. */
+  fetchStatus: (taskId: string) => Promise<string | null>;
+  intervalMs: number;
+  abortGraceMs?: number;
+  now?: () => number;
+}
+
+function requestSessionAbort(task: RunningTask, reason: string, at: number): void {
+  task.abortRequestedAt = at;
+  Promise.resolve()
+    .then(() => task.session.abort(reason))
+    .catch(() => {});
+}
+
+/**
+ * Keep `state.activeTasks` in line with the server, so a session whose promise
+ * never settles cannot hold an execution slot forever:
+ * - a task the server cancelled gets its session aborted (every call);
+ * - every `intervalMs`, a task the server already holds as terminal (for
+ *   example failed by the heartbeat sweep) gets its session aborted too;
+ * - a session that has not settled `abortGraceMs` after an abort is settled
+ *   here, and `checkCompletedProcesses` frees the slot on its next pass.
+ * Exported for tests.
+ */
+export async function reconcileActiveTasks(
+  state: RunnerState,
+  role: string,
+  opts: ReconcileActiveTasksOptions,
+): Promise<void> {
+  const now = opts.now ?? Date.now;
+  const graceMs = opts.abortGraceMs ?? ABORT_SETTLE_GRACE_MS;
+
+  for (const [taskId, task] of state.activeTasks) {
+    if (task.result !== null) continue;
+
+    if (!opts.cancelledSignaled.has(taskId)) {
+      try {
+        if (await opts.isCancelled(taskId)) {
+          console.log(
+            `[${role}] Task ${taskId.slice(0, 8)} was cancelled — sending SIGTERM to subprocess`,
+          );
+          requestSessionAbort(task, "cancelled", now());
+          opts.cancelledSignaled.add(taskId);
+        }
+      } catch {
+        // Non-blocking — cancellation check is best-effort
+      }
+    }
+
+    if (task.abortRequestedAt === undefined) {
+      const lastCheck = task.lastReconcileAt ?? task.startTime.getTime();
+      if (now() - lastCheck >= opts.intervalMs) {
+        task.lastReconcileAt = now();
+        const status = await opts.fetchStatus(taskId).catch(() => null);
+        if (status && isTerminalTaskStatus(status)) {
+          console.warn(
+            `[${role}] Task ${taskId.slice(0, 8)} is ${status} server-side but its session is still running — aborting it`,
+          );
+          task.serverTerminalStatus = status;
+          requestSessionAbort(task, `server task ${status}`, now());
+        }
+      }
+    }
+
+    if (
+      task.abortRequestedAt !== undefined &&
+      task.result === null &&
+      now() - task.abortRequestedAt >= graceMs
+    ) {
+      console.warn(
+        `[${role}] Task ${taskId.slice(0, 8)} session did not settle ${graceMs}ms after abort — releasing its slot`,
+      );
+      task.result = {
+        exitCode: 1,
+        isError: true,
+        sessionId: task.session.sessionId,
+        failureReason: "runner exited without result: provider session did not settle after abort",
+      };
+    }
+  }
+}
+
+/** Fetch whether the server holds a task as cancelled. Throws on network failure. */
+async function fetchTaskCancelled(
+  apiUrl: string,
+  apiKey: string,
+  agentId: string,
+  taskId: string,
+): Promise<boolean> {
+  const resp = await fetch(`${apiUrl}/cancelled-tasks?taskId=${encodeURIComponent(taskId)}`, {
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "X-Agent-ID": agentId,
+    },
+  });
+  if (!resp.ok) return false;
+  const data = (await resp.json()) as { cancelled: Array<{ id: string }> };
+  return data.cancelled?.some((t) => t.id === taskId) ?? false;
 }
 
 /** Check for completed processes and remove them from active tasks. Exported for tests. */
@@ -4682,6 +4838,7 @@ export async function checkCompletedProcesses(
     model?: string;
     durationMs: number;
     assistantText?: RunningTask["assistantText"];
+    serverTerminalStatus?: string;
   }> = [];
 
   for (const [taskId, task] of state.activeTasks) {
@@ -4706,6 +4863,7 @@ export async function checkCompletedProcesses(
         model: task.model,
         durationMs: Date.now() - task.startTime.getTime(),
         assistantText: task.assistantText,
+        serverTerminalStatus: task.serverTerminalStatus,
       });
     }
   }
@@ -4725,6 +4883,7 @@ export async function checkCompletedProcesses(
     model,
     durationMs,
     assistantText,
+    serverTerminalStatus,
   } of completedTasks) {
     state.activeTasks.delete(taskId);
     vcsDetectedTasks.delete(taskId);
@@ -4738,6 +4897,17 @@ export async function checkCompletedProcesses(
           scrubSecrets(err instanceof Error ? err.message : String(err)),
         ),
       );
+    }
+
+    // The server finished this task without the session (heartbeat sweep,
+    // another writer). Its result stands: no finish call, and no credential
+    // or model outcome built from the abort this runner forced.
+    if (serverTerminalStatus) {
+      console.log(
+        `[${role}] Task ${taskId.slice(0, 8)} was already ${serverTerminalStatus} server-side — slot released, server result kept`,
+      );
+      state.tasksProcessed += 1;
+      continue;
     }
 
     // Detect VCS before finishing — last chance to link a PR
@@ -4765,57 +4935,7 @@ export async function checkCompletedProcesses(
         failureReason,
       });
 
-      // If rate-limited and we know which key was used, report it.
-      // Codex adapter prefixes failure reasons with `[rate-limit]` /
-      // `[usage-limit]` (see codex-adapter.formatTerminalError); Claude
-      // surfaces "rate limit" / "hit your limit" via SessionErrorTracker.
-      //
-      // classifyRateLimitOutcome tests model-scoped windows (Fable/Opus/
-      // Sonnet weekly limits) before the legacy key-wide gate, so a
-      // model-scoped rejection blocks only that model family on this key —
-      // never the whole key — via report-rate-limit-windows instead of
-      // report-rate-limit. A key-wide rejection seen in the same session is
-      // still reported alongside it (windows are independent). The session's
-      // window telemetry and the classified model rejection go out as ONE
-      // payload, so an older `allowed` snapshot never overwrites the terminal
-      // rejection. The post is awaited so it completes before the task
-      // finishes.
       if (credentialInfo) {
-        const outcome = classifyRateLimitOutcome(
-          result,
-          failureReason,
-          Date.now(),
-          state.codexCreditsExhaustedCooldownMs,
-        );
-        const keyRateLimitedUntil =
-          outcome.kind === "key"
-            ? outcome.rateLimitedUntil
-            : outcome.kind === "model"
-              ? outcome.keyRateLimitedUntil
-              : undefined;
-        if (keyRateLimitedUntil) {
-          console.log(`[credentials] Rate limit reset: ${keyRateLimitedUntil}`);
-          reportKeyRateLimit(
-            apiConfig.apiUrl,
-            apiConfig.apiKey,
-            credentialInfo.keyType,
-            credentialInfo.keySuffix,
-            credentialInfo.keyIndex,
-            keyRateLimitedUntil,
-          ).catch(() => {});
-        }
-        if (outcome.kind === "model") {
-          const resetsAtIso = new Date(outcome.resetsAtSec * 1000).toISOString();
-          const blockKey = `${credentialInfo.keyType}:${credentialInfo.keyIndex}:${outcome.window}`;
-          state.modelWindowBlocks.set(blockKey, outcome.resetsAtSec * 1000);
-          console.log(
-            `[credential] ${outcome.model} weekly window exhausted (${outcome.window}) on key #${credentialInfo.keyIndex} until ${resetsAtIso}`,
-          );
-        }
-
-        // Land the success reset or the auth-failure count (and a bench at 2)
-        // before this task finishes and before the next completion, so the API
-        // sees them in order and the next draw already skips a dead login.
         await reportKeyCompletionOutcome({
           apiUrl: apiConfig.apiUrl,
           apiKey: apiConfig.apiKey,
@@ -4824,30 +4944,6 @@ export async function checkCompletedProcesses(
           exitCode: result.exitCode,
           failureReason,
         });
-
-        const finalWindows = buildFinalRateLimitWindows(
-          result.rateLimitWindows,
-          outcome,
-          new Date().toISOString(),
-        );
-        if (finalWindows) {
-          const report = reportKeyRateLimitWindows(
-            apiConfig.apiUrl,
-            apiConfig.apiKey,
-            credentialInfo.keyType,
-            credentialInfo.keySuffix,
-            credentialInfo.keyIndex,
-            finalWindows,
-            outcome.kind !== "model",
-          ).catch((err) => {
-            console.warn(
-              `[credential] Failed to report rate-limit windows: ${err instanceof Error ? err.message : String(err)}`,
-            );
-          });
-          // A model rejection gates admission on other workers: land it before
-          // the task finishes. Plain telemetry stays fire-and-forget.
-          if (outcome.kind === "model") await report;
-        }
       }
       let bridgeDiagnostics: Awaited<ReturnType<typeof getBridgeFailureDiagnostics>> | undefined;
       if (result.exitCode !== 0 && harnessProvider === "claude" && workingDir) {
@@ -4863,19 +4959,34 @@ export async function checkCompletedProcesses(
         bridgeDiagnostics?.paneTail != null
           ? `Claude bridge final tmux pane tail (${bridgeDiagnostics.artifactPath}):\n${bridgeDiagnostics.paneTail}`
           : undefined;
-      await ensureTaskFinished(
-        apiConfig,
-        role,
-        taskId,
-        result.exitCode,
-        failureReason,
-        // Runner-buffered last assistant text is a harness-agnostic fallback
-        // for adapters that never populate `ProviderResult.output` (Codex
-        // today, any future adapter). Empty buffer -> `undefined`, byte
-        // identical to pre-fix behavior.
-        resolveProviderOutput(result, assistantText),
-        harnessProvider,
-        bridgeFailureDiagnostics,
+      // Reports that gate admission on other workers (a seat mismatch, a
+      // model window rejection) land before the task finishes.
+      await reportCredentialOutcomeThenFinish(
+        {
+          apiUrl: apiConfig.apiUrl,
+          apiKey: apiConfig.apiKey,
+          credentialInfo,
+          result,
+          failureReason,
+          model,
+          codexCreditsExhaustedCooldownMs: state.codexCreditsExhaustedCooldownMs,
+          modelWindowBlocks: state.modelWindowBlocks,
+        },
+        () =>
+          ensureTaskFinished(
+            apiConfig,
+            role,
+            taskId,
+            result.exitCode,
+            failureReason,
+            // Runner-buffered last assistant text is a harness-agnostic fallback
+            // for adapters that never populate `ProviderResult.output` (Codex
+            // today, any future adapter). Empty buffer -> `undefined`, byte
+            // identical to pre-fix behavior.
+            resolveProviderOutput(result, assistantText),
+            harnessProvider,
+            bridgeFailureDiagnostics,
+          ),
       );
 
       const sessionTriggerSurface = workerTriggerSurface(triggerSurface);
@@ -5538,18 +5649,22 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
     }
   };
   try {
-    const reg = await registerAgent({
-      apiUrl,
-      apiKey,
-      agentId,
-      name: agentName,
-      role,
-      isLead,
-      capabilities,
-      maxTasks: maxConcurrent,
-      harnessProvider: bootProvider,
-      runtimeInstanceId,
-    });
+    const reg = await registerAgentWithRetry(
+      () =>
+        registerAgent({
+          apiUrl,
+          apiKey,
+          agentId,
+          name: agentName,
+          role,
+          isLead,
+          capabilities,
+          maxTasks: maxConcurrent,
+          harnessProvider: bootProvider,
+          runtimeInstanceId,
+        }),
+      { label: role },
+    );
     lastServerCapsRefreshAt = Date.now();
     // Rebuilds the prompt immediately: the initial build above ran before
     // registration (serverCapabilities unknown), and the later identity
@@ -6243,6 +6358,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   // Throttle orphan recovery so it runs periodically while the worker is idle or under capacity.
   let lastOrphanRecoveryAt = 0;
   const ORPHAN_RECOVERY_INTERVAL_MS = 60_000;
+  const taskReconcileIntervalMs = resolveTaskReconcileIntervalMs();
 
   while (true) {
     // Ping server on each iteration to keep status updated
@@ -6322,38 +6438,18 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
       );
     }
 
-    // Check for cancelled tasks and signal their subprocesses. Deliberately
-    // NOT gated on steeringDispatchState — cancellation abort must keep
-    // working when steering dispatch is off (STEERING_ENABLED=false).
+    // Check for cancelled tasks and signal their subprocesses, and reconcile
+    // active tasks with server-side status so a session that never settles
+    // cannot hold its slot. Deliberately NOT gated on steeringDispatchState —
+    // cancellation abort must keep working when steering dispatch is off
+    // (STEERING_ENABLED=false).
     if (state.activeTasks.size > 0) {
-      for (const [taskId, task] of state.activeTasks) {
-        if (cancelledSignaled.has(taskId)) continue; // Already sent SIGTERM
-        try {
-          const cancelResp = await fetch(
-            `${apiUrl}/cancelled-tasks?taskId=${encodeURIComponent(taskId)}`,
-            {
-              headers: {
-                Authorization: `Bearer ${apiKey}`,
-                "X-Agent-ID": agentId,
-              },
-            },
-          );
-          if (cancelResp.ok) {
-            const cancelData = (await cancelResp.json()) as {
-              cancelled: Array<{ id: string }>;
-            };
-            if (cancelData.cancelled?.some((t) => t.id === taskId)) {
-              console.log(
-                `[${role}] Task ${taskId.slice(0, 8)} was cancelled — sending SIGTERM to subprocess`,
-              );
-              task.session.abort("cancelled").catch(() => {});
-              cancelledSignaled.add(taskId);
-            }
-          }
-        } catch {
-          // Non-blocking — cancellation check is best-effort
-        }
-      }
+      await reconcileActiveTasks(state, role, {
+        cancelledSignaled,
+        isCancelled: (taskId) => fetchTaskCancelled(apiUrl, apiKey, agentId, taskId),
+        fetchStatus: (taskId) => fetchTaskStatus(apiUrl, apiKey, taskId),
+        intervalMs: taskReconcileIntervalMs,
+      });
     }
 
     // Deliver pending steering to live provider sessions and report the actual outcome.

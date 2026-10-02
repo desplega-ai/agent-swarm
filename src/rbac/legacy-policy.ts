@@ -267,6 +267,7 @@ export const LEGACY_POLICY = {
   "favorite.write.own": anyAuthenticated,
   "memory.learning.inject": leadOnly,
   "memory.edit.any": leadOrResourceOwner,
+  "memory.write.consolidated": leadOnly,
   "memory.delete.any": memoryOwnerOrLeadSwarm,
   "channel.delete": leadOnly,
   "integration.kapso.manage": leadOnly,
@@ -317,4 +318,5 @@ export const LEGACY_POLICY = {
   "script.api.delete": leadOnly,
   "extension.write": extensionWrite,
   "extension.activate": extensionActivation,
+  "extension.install.inline": leadOrOperatorOrUser,
 } as const satisfies Record<PermissionVerb, LegacyRule>;

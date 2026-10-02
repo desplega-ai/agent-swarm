@@ -64,6 +64,7 @@ export const registerContextDiffTool = (server: McpServer) => {
         fromVersion: z.number().optional(),
         toVersion: z.number().optional(),
         diff: z.string().optional(),
+        predecessorPruned: z.boolean().optional(),
         changeSource: z.string().optional(),
         createdAt: z.string().optional(),
       }),
@@ -117,6 +118,25 @@ export const registerContextDiffTool = (server: McpServer) => {
         }
       } else if (version.previousVersionId) {
         compareVersion = await getContextVersion(version.previousVersionId);
+      }
+
+      // Retention (CONTEXT_VERSIONS_KEEP_LATEST) deletes old versions, and the
+      // FK sets the survivor's previousVersionId to NULL. Diffing against ""
+      // here would present the whole file as newly written, so say what
+      // happened instead.
+      if (!compareToVersionId && !compareVersion && version.version > 1) {
+        const message = `No predecessor for ${version.field} v${version.version}: v${version.version - 1} was removed by context version retention. Pass compareToVersionId with a surviving version from context-history.`;
+        return toolOk(message, {
+          details: message,
+          data: {
+            yourAgentId: requestInfo.agentId,
+            field: version.field,
+            toVersion: version.version,
+            predecessorPruned: true,
+            changeSource: version.changeSource,
+            createdAt: version.createdAt,
+          },
+        });
       }
 
       const oldContent = compareVersion?.content ?? "";

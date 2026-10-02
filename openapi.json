@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Agent Swarm API",
-    "version": "1.159.0",
+    "version": "1.161.0",
     "description": "Multi-agent orchestration API for Claude Code, Codex, and Gemini CLI. Enables task distribution, agent communication, and service discovery.\n\nMCP tools are documented separately in [MCP.md](./MCP.md)."
   },
   "servers": [
@@ -165,6 +165,7 @@
               "ui",
               "github",
               "gitlab",
+              "azure-devops",
               "agentmail",
               "system",
               "schedule",
@@ -285,7 +286,8 @@
             "type": "string",
             "enum": [
               "github",
-              "gitlab"
+              "gitlab",
+              "azure-devops"
             ]
           },
           "vcsRepo": {
@@ -1842,19 +1844,35 @@
             "type": "string",
             "minLength": 1,
             "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
-            "description": "Name of a predefined extension in the catalog (`GET /api/extensions/catalog`)."
+            "description": "Name of a predefined extension in the catalog (`GET /api/extensions/catalog`). Mutually exclusive with `manifest` and `files`."
+          },
+          "manifest": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ExtensionManifest"
+              },
+              {
+                "description": "Inline bundle manifest. Requires `files`. Accepted only when `EXTENSION_ALLOW_INLINE_INSTALL` is on and the caller is a lead, operator, or dashboard user."
+              }
+            ]
+          },
+          "files": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Inline bundle files keyed by relative path. Requires `manifest`."
           },
           "priority": {
-            "type": "integer"
+            "type": "integer",
+            "description": "Handler priority. Lower values run first."
           },
           "config": {
             "type": "object",
-            "additionalProperties": {}
+            "additionalProperties": {},
+            "description": "Extension configuration."
           }
         },
-        "required": [
-          "template"
-        ],
         "additionalProperties": false
       },
       "ExtensionCatalogItem": {
@@ -15882,6 +15900,110 @@
         }
       }
     },
+    "/api/keys/report-seat-mismatch": {
+      "post": {
+        "summary": "Record that an API key's subscription seat cannot run a model family",
+        "tags": [
+          "API Keys"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "keyType": {
+                    "type": "string"
+                  },
+                  "keySuffix": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 10
+                  },
+                  "keyIndex": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "model": {
+                    "type": "string",
+                    "enum": [
+                      "fable",
+                      "opus",
+                      "sonnet",
+                      "haiku"
+                    ]
+                  },
+                  "scope": {
+                    "type": "string"
+                  },
+                  "scopeId": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "keyType",
+                  "keySuffix",
+                  "keyIndex",
+                  "model"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Seat mismatch recorded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/keys/available": {
       "get": {
         "summary": "Get available (non-rate-limited) key indices for a credential type",
@@ -15976,6 +16098,12 @@
                         "string",
                         "null"
                       ]
+                    },
+                    "seatBlockedIndices": {
+                      "type": "array",
+                      "items": {
+                        "type": "integer"
+                      }
                     },
                     "authFailureFence": {
                       "type": "integer"
@@ -16176,6 +16304,18 @@
                               null
                             ]
                           },
+                          "lastSeatMismatchAt": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "lastSeatMismatchModel": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
                           "consecutiveAuthFailures": {
                             "type": "integer"
                           },
@@ -16240,6 +16380,8 @@
                           "rateLimitWindows",
                           "plan",
                           "planSource",
+                          "lastSeatMismatchAt",
+                          "lastSeatMismatchModel",
                           "consecutiveAuthFailures",
                           "lastAuthFailureAt",
                           "modelLimits",
@@ -17423,8 +17565,8 @@
     "/api/extensions/install": {
       "post": {
         "operationId": "extensions_install",
-        "summary": "Install a predefined extension from the catalog",
-        "description": "Installs the named template from `GET /api/extensions/catalog`. Inline bundles (`manifest`/`files`) are rejected with `inline_install_disabled`. Any authenticated agent can install a disabled draft owned by its agent ID. Workers can update only their own bundles; activation remains lead/operator-only.",
+        "summary": "Install an extension from the catalog or an inline bundle",
+        "description": "Installs the named `template` from `GET /api/extensions/catalog`, or an inline `manifest` plus `files`. Inline bundles are rejected with `inline_install_disabled` unless `EXTENSION_ALLOW_INLINE_INSTALL` is on, and then only lead, operator, and dashboard-user callers may send them (workers get 403). Any authenticated agent can install a catalog draft owned by its agent ID. Workers can update only their own bundles. A new extension is always disabled; activation remains lead/operator-only.",
         "tags": [
           "Extensions"
         ],
@@ -17607,7 +17749,7 @@
             }
           },
           "400": {
-            "description": "Inline bundle rejected or bundle validation failed",
+            "description": "Inline install disabled, invalid body (template and manifest/files are mutually exclusive), or bundle validation failed",
             "content": {
               "application/json": {
                 "schema": {
@@ -17617,7 +17759,7 @@
             }
           },
           "403": {
-            "description": "Permission denied",
+            "description": "Permission denied, including inline bundles from workers",
             "content": {
               "application/json": {
                 "schema": {
@@ -20625,7 +20767,17 @@
             }
           },
           "400": {
-            "description": "Validation error",
+            "description": "Validation error, or a sourcePath under /longterm that is not an allowed memory key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "sourcePath is under a lead-only /longterm root and the caller is not the lead",
             "content": {
               "application/json": {
                 "schema": {
@@ -20686,6 +20838,12 @@
                       "session_summary",
                       "task_completion"
                     ]
+                  },
+                  "keyPrefix": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200,
+                    "description": "Only return memories whose key starts with this text (literal, case-sensitive), for example '/longterm/facts/'."
                   }
                 },
                 "required": [
@@ -21961,6 +22119,12 @@
                           "minLength": 1,
                           "maxLength": 512,
                           "description": "Optional external source ID this memory references. Free-form string, convention \"<source>:<identifier>\" (e.g. \"github:owner/repo#N\", \"linear:KEY-N\", \"customer:<slug>\", \"slack:<channel>:<ts>\", \"agentmail:<thread-id>\"). Pick any prefix that fits — no closed enum. When present, an edge from this memory to the external source is created/updated."
+                        },
+                        "model": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 200,
+                          "description": "Optional. Model that produced an `llm` rating, as \"<provider>/<model-id>\" (e.g. \"openrouter/deepseek/deepseek-v4.1-flash\"). Stored in memory_rating.model for `llm` events and ignored for `explicit-self`."
                         }
                       },
                       "required": [
@@ -40620,6 +40784,7 @@
                                       "ui",
                                       "github",
                                       "gitlab",
+                                      "azure-devops",
                                       "agentmail",
                                       "system",
                                       "schedule",
@@ -44894,6 +45059,71 @@
                             "batchSize",
                             "slowestStatementMs"
                           ]
+                        },
+                        "contextVersions": {
+                          "type": "object",
+                          "properties": {
+                            "at": {
+                              "type": "string"
+                            },
+                            "rowsDeleted": {
+                              "type": "number"
+                            },
+                            "batches": {
+                              "type": "number"
+                            },
+                            "durationMs": {
+                              "type": "number"
+                            },
+                            "dryRun": {
+                              "type": "boolean"
+                            },
+                            "cumulativeRowsDeleted": {
+                              "type": "number"
+                            },
+                            "outcome": {
+                              "type": "string",
+                              "enum": [
+                                "converged",
+                                "budget_exhausted",
+                                "error"
+                              ]
+                            },
+                            "drained": {
+                              "type": "boolean"
+                            },
+                            "backlogRemaining": {
+                              "type": "number"
+                            },
+                            "batchSize": {
+                              "type": "number"
+                            },
+                            "slowestStatementMs": {
+                              "type": "number"
+                            },
+                            "lastError": {
+                              "type": "string"
+                            },
+                            "lastErrorAt": {
+                              "type": "string"
+                            },
+                            "lastSuccessAt": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "at",
+                            "rowsDeleted",
+                            "batches",
+                            "durationMs",
+                            "dryRun",
+                            "cumulativeRowsDeleted",
+                            "outcome",
+                            "drained",
+                            "backlogRemaining",
+                            "batchSize",
+                            "slowestStatementMs"
+                          ]
                         }
                       }
                     }
@@ -45890,6 +46120,7 @@
                                   "ui",
                                   "github",
                                   "gitlab",
+                                  "azure-devops",
                                   "agentmail",
                                   "system",
                                   "schedule",
@@ -46199,6 +46430,7 @@
                       "ui",
                       "github",
                       "gitlab",
+                      "azure-devops",
                       "agentmail",
                       "system",
                       "schedule",
@@ -47299,7 +47531,7 @@
         },
         "responses": {
           "200": {
-            "description": "Progress updated",
+            "description": "Progress updated; a no-op once the task is terminal",
             "content": {
               "application/json": {
                 "schema": {
@@ -47384,6 +47616,19 @@
                   },
                   "force": {
                     "type": "boolean"
+                  },
+                  "provider": {
+                    "type": "string",
+                    "enum": [
+                      "claude",
+                      "codex",
+                      "pi",
+                      "devin",
+                      "claude-managed",
+                      "opencode",
+                      "acp",
+                      "dsh"
+                    ]
                   }
                 },
                 "required": [
@@ -47900,7 +48145,8 @@
                     "type": "string",
                     "enum": [
                       "github",
-                      "gitlab"
+                      "gitlab",
+                      "azure-devops"
                     ]
                   },
                   "vcsRepo": {
@@ -51546,6 +51792,78 @@
           },
           "503": {
             "description": "GitLab integration not configured",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/azure-devops/webhook": {
+      "post": {
+        "summary": "Handle Azure DevOps service-hook events",
+        "tags": [
+          "Webhooks"
+        ],
+        "responses": {
+          "200": {
+            "description": "Event processed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "created": {
+                      "type": "boolean"
+                    },
+                    "taskId": {
+                      "type": "string"
+                    },
+                    "skipped": {
+                      "type": "boolean"
+                    },
+                    "reason": {
+                      "type": "string"
+                    },
+                    "extension": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "name"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "created"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid Basic auth credentials",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Azure DevOps integration not configured",
             "content": {
               "application/json": {
                 "schema": {

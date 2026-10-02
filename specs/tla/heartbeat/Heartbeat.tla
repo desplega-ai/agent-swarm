@@ -1,7 +1,7 @@
 ---------------------------- MODULE Heartbeat ----------------------------
 (***************************************************************************)
 (* Server-side heartbeat + the task lifecycle it races with, as the code   *)
-(* behaves on main @ 795526ca. Every action maps to file:line and the SQL  *)
+(* behaves on main @ 415e23d1. Every action maps to file:line and the SQL  *)
 (* guard it models in ACTIONS.md. Time is abstracted: `stale[t]` means     *)
 (* "lastUpdatedAt older than the stall threshold", and `Age` sets it.     *)
 (*                                                                         *)
@@ -204,10 +204,12 @@ Complete(w, t) ==
     /\ UNCHANGED <<own, offTo, par, gen, pin, ver, stale, touched, alive, cl, acc,
                    hb, rb, apiUp, wc, ac, liveKill, badAcc>>
 
-\* A worker only aborts on /cancelled-tasks (status='cancelled', core.ts:562).
-\* A superseded/failed task keeps running until the worker tries to finish.
-AbortCancelled(w, t) ==
-    /\ apiUp /\ alive[w] /\ t \in running[w] /\ st[t] = "cancelled"
+\* The runner aborts any task the server holds as terminal (#1820,
+\* reconcileActiveTasks, runner.ts:4710): cancelled on every poll via
+\* /cancelled-tasks (core.ts:552), failed/superseded on a 30 s status read.
+\* The 30 s interval and the 10 s abort grace are abstracted away.
+AbortTerminal(w, t) ==
+    /\ apiUp /\ alive[w] /\ t \in running[w] /\ st[t] \in Terminal
     /\ running' = [running EXCEPT ![w] = @ \ {t}]
     /\ UNCHANGED <<st, own, offTo, par, gen, pin, ver, stale, sess, touched,
                    alive, cl, acc, hb, rb, apiUp, wc, ac, liveKill, badAcc>>
@@ -378,7 +380,7 @@ RebootRetry ==
 Next ==
     \/ \E w \in Workers, t \in Tasks :
          ClaimRead(w, t) \/ AcceptRead(w, t) \/ PollStart(w, t) \/ RegisterSession(w, t)
-         \/ SessionBeat(w, t) \/ Progress(w, t) \/ Complete(w, t) \/ AbortCancelled(w, t) \/ ReOffer(t, w)
+         \/ SessionBeat(w, t) \/ Progress(w, t) \/ Complete(w, t) \/ AbortTerminal(w, t) \/ ReOffer(t, w)
          \/ AutoAssign(t, w)
     \/ \E w \in Workers : ClaimWrite(w) \/ AcceptWrite(w) \/ WorkerCrash(w) \/ WorkerRestart(w)
     \/ \E t \in Tasks : Reject(t) \/ Age(t) \/ HbRead(t) \/ HbRepair(t) \/ Reaper(t)

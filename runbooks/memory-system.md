@@ -8,9 +8,83 @@ Provider abstractions live in `src/be/memory/`:
 
 - `EmbeddingProvider` — OpenAI embeddings.
 - `MemoryStore` — SQLite + sqlite-vec for vector search.
-- Reranker scores `similarity × recency_decay × access_boost × usefulness(α, β)`.
+- Reranker scores `similarity × recency_decay × access_boost × source_quality × path_weight × usefulness(α, β)`.
 
 Tuning constants are env-overridable in `src/be/memory/constants.ts`.
+
+## Logical paths (`key`)
+
+The curated memory tree lives under `/longterm`. A memory's `key` column holds the
+path, for example `/longterm/facts/swarm-runtime/slug`. Every other key is **inbox
+material**: auto keys `<scope>/<source>/<id>` and file-index keys
+(`/workspace/...`) stay untouched and carry no path weight. All chunks of a document
+share the key. The helpers live in `src/be/memory/key-paths.ts`.
+
+Roots: `/longterm/company-story`, `/longterm/entities/{people,customers}/...`,
+`/longterm/facts/...`, `/longterm/decisions/...`, `/longterm/workstreams/...`,
+`/longterm/timeline/...`.
+
+The root list is **closed**. A key under `/longterm` whose second segment is not one of
+those roots is refused, and so is a key under `/longterm/entities` whose third segment
+is not `people` or `customers` (agent profiles and `get-repos` own agents and repos).
+The error lists the allowed roots. A typo such as `/longterm/fact/x` would otherwise
+store and silently get no path weight. Leaf slugs stay free-form within the key shape;
+canonical entity slugs belong to the dreaming lane, not the server. Keys outside
+`/longterm` are unchanged. `LONGTERM_ROOTS`, `LONGTERM_ENTITY_TYPES` and
+`longtermKeyError` live in `key-paths.ts`; the check runs in the `memory-store` and
+`memory-edit` tools, next to the shape regex.
+
+**The key is the tier, `source` stays provenance.** There is no `longterm` source. A
+memory whose key is under `/longterm` follows `manual`'s lifecycle whatever its
+`source` (`tierSource` in `key-paths.ts`):
+
+- `expiresAt` is NULL on every chunk: set on store with a `/longterm` key, cleared by a
+  `memory-edit` `newKey` move into `/longterm`. Search filters `expiresAt > now`, so
+  without this a `task_completion` memory moved to `/longterm/facts/x` would vanish 7
+  days after it was created.
+- No recency decay and quality multiplier 1.5, the same as `manual`. The global
+  `MEMORY_RECENCY_HALF_LIFE_DAYS` override applies to it exactly as it does to `manual`.
+- Protected from automated cleanup like `PROTECTED_SOURCES`: `isSourceProtected` takes
+  the key, and `listForCuration` skips every `/longterm` row.
+
+A move **out** of `/longterm` does not restore a TTL. The expiry the memory had is
+gone, so it never expires; decay, quality and protection revert to its `source`
+because they are read from the key on every call.
+
+- **Write:** `memory-store` `key` (shape `^/[a-z0-9-]+(/[a-z0-9._-]+)*$`, ≤200 chars).
+  When `key` is absent and `name` starts with `/longterm/`, the name is the key, so an
+  agent sets one field; an invalid name of that form is refused, never stored under an
+  auto key. A key already used by the same owner in the same scope fails.
+- **Move:** `memory-edit` `newKey` rewrites every chunk in one transaction and keeps
+  id, α/β, `accessCount` and author. It bumps `version` and writes a version row per
+  chunk. A legacy multi-chunk doc whose chunks carry a key each is refused, not split.
+- **Filter:** `memory-search` and `POST /api/memory/search` `keyPrefix` is a literal,
+  case-sensitive prefix. It is applied in the SQL of the FTS, vec and fallback arms and
+  in graph expansion, so it narrows candidates before the top-K cut. The vec arm still
+  has its pre-existing 4,096-neighbour KNN ceiling, same as `scope` and `source`.
+- **Rank:** `PATH_WEIGHT` in `constants.ts`, longest root wins (`/longterm/company-story`
+  1.4, `/longterm/entities` 1.3, `/longterm/facts` 1.2, `/longterm/decisions` 1.1,
+  `/longterm/timeline` 0.8). A `/longterm/decisions` doc tagged `superseded` weighs 0.3.
+  Keys under no listed root weigh 1.0.
+- **Guard:** only the lead may write or move a key under `/longterm/company-story`,
+  `/longterm/entities` or `/longterm/timeline`, by `key`, `newKey`, a `/longterm/`
+  name, or a `sourcePath` sent to `POST /api/memory/index`. The decision is `can()` with
+  the lead-only verb `memory.write.consolidated`; `isConsolidatedKey` only says whether
+  a key is under those roots. One function, `assertKeyWritable` in
+  `src/be/memory/key-guard.ts`, checks the key shape, the closed root list and that
+  permission, and throws `MemoryKeyError` (`invalid` → 400, `forbidden` → 403). Every
+  route that can put a key on a row passes through it: `indexMemoryContent` runs it on
+  the key every chunk will carry (`key`, else `sourcePath`) before it reads or writes
+  anything, so `memory-store` and `POST /api/memory/index` share one gate; `memory-edit`
+  runs it on `newKey`. It is not in the store layer. The caller's writer comes from the
+  route (MCP: the calling agent; HTTP: the session token, else `X-Agent-ID`, else the
+  shared key alone). A call with no writer has no authority, and an operator or user
+  principal is not the lead, so neither reaches a lead-only root. A `sourcePath` outside
+  `/longterm` stays a free-form file path and confers no tier.
+- **File-index re-sync:** it matches and deletes by the `sourcePath` column
+  (`deleteBySourcePath`, the single-chunk `list` match), never by `key` or `name`. A
+  `/longterm/` doc written through `memory-store` has no `sourcePath`, so a re-sync
+  cannot delete or overwrite it. `manual` rows carry no TTL, so GC skips them.
 
 ## Edit authorization
 
@@ -70,7 +144,7 @@ server-side `implicit-citation` source.
 
 ```
 usefulness(α, β) = clamp(2 × α / (α + β), MEMORY_DEMOTION_FLOOR, 2.0)
-score             = similarity × recency_decay × access_boost × usefulness(α, β)
+score             = similarity × recency_decay × access_boost × source_quality × path_weight × usefulness(α, β)
 ```
 
 A fresh memory has `(α=1, β=1)` so `usefulness = 1.0` — it ranks identically
@@ -143,6 +217,7 @@ bun run test:root -- src/tests/memory-reranker.test.ts
 bun run test:root -- src/tests/memory-store.test.ts
 bun run test:root -- src/tests/memory.test.ts
 bun run test:root -- src/tests/memory-e2e.test.ts
+bun run test:root -- src/tests/memory-key-paths.test.ts   # key / newKey / keyPrefix / lead-only guard (MCP and POST /api/memory/index) / root allowlist / /longterm tier
 ```
 
 Plus the v1.5 rater suites:
@@ -161,12 +236,14 @@ bun run test:root -- src/tests/memory-rater-e2e.test.ts               # step-7: 
 
 - `src/be/memory/types.ts` — interfaces.
 - `src/be/memory/providers/` — OpenAI embeddings + SQLite/sqlite-vec store.
-- `src/be/memory/reranker.ts` — scoring + `usefulness(α, β)` factor.
+- `src/be/memory/reranker.ts` — scoring + `usefulness(α, β)` and `pathWeight` factors.
+- `src/be/memory/key-paths.ts` — logical-path key pattern, the closed `/longterm` root allowlist, the lead-only roots and `tierSource`.
+- `src/be/memory/key-guard.ts` — `assertKeyWritable`: the shared key gate for MCP and HTTP writes.
 - `src/be/memory/constants.ts` — env-overridable tuning.
 - `src/be/memory/index.ts` — singletons.
 - `src/be/memory/index-content.ts` — `indexMemoryContent()`: chunk, re-index by
   `sourcePath`, batch store, link resolution, background embed. Shared by
-  `POST /api/memory/index` and the `memory-store` tool.
+  `POST /api/memory/index` and the `memory-store` tool; it gates the row key first.
 - `src/tools/memory-store.ts` — the agent-facing write path (`memory_store` in
   the scripts SDK goes through the MCP bridge to the same tool).
 - `src/be/memory/raters/` — rater framework (registry, store, retrieval bridge,

@@ -36,4 +36,5 @@ export const SCENARIO_HASHES: Readonly<Record<string, readonly PinnedScenarioHas
   "capability-routing": [{ version: 1, hash: "07161180e8236cb8" }],
   "human-in-loop": [{ version: 1, hash: "61ac1c21766960da" }],
   "human-in-loop-solo": [{ version: 1, hash: "7cfc7a2d2e3303f3" }],
+  "real-diff-agent-fs": [{ version: 1, hash: "66cd830c80ac1e4b" }],
 };

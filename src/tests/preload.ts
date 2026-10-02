@@ -18,6 +18,9 @@ import { closeDb, getDb, initDb } from "../be/db";
 import "../be/seed-prompt-templates";
 import { getAllTemplateDefinitions } from "../prompts/registry";
 import { clearVolatileSecretsForTesting } from "../utils/secret-scrubber";
+import { startHangWatchdog } from "./hang-watchdog";
+
+startHangWatchdog();
 
 // @hono/node-server (pulled in transitively by @modelcontextprotocol/sdk's
 // streamableHttp transport) replaces globalThis.Response/Request with its own
@@ -72,6 +75,12 @@ const testTemplateGlobals = globalThis as typeof globalThis & {
 // The RawLlmExecutor tests already handle both success and failure paths,
 // so removing the key just forces the fast failure path (~0ms vs ~2s of API calls).
 delete process.env.OPENROUTER_API_KEY;
+
+// Same reason for GitHub: the webhook handlers react 👀 on the triggering item with
+// the App token or, failing that, `GITHUB_TOKEN`. A developer shell that exports
+// GITHUB_TOKEN would otherwise send real reactions to api.github.com from every
+// handler test. Suites that exercise the PAT path set it themselves.
+delete process.env.GITHUB_TOKEN;
 
 // Deployment flags must not change the test suite's default registration and
 // task-admission contracts. Multi-runtime suites opt in by setting this to "true"

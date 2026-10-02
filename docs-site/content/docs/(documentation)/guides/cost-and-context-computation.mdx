@@ -56,7 +56,7 @@ Input counts have provider-specific cache-read semantics:
 
 | Provider family | Meaning of reported `inputTokens` | Uncached-input calculation |
 |---|---|---|
-| `claude`, `claude-managed`, `pi`, `opencode` | Excludes cache reads | `inputTokens` as reported |
+| `claude`, `claude-managed`, `pi`, `opencode`, `dsh` | Excludes cache reads | `inputTokens` as reported |
 | `codex` | Includes cache reads | `max(0, inputTokens - cacheReadTokens)` |
 
 Although OpenCode can route to OpenAI models, the currently shipped recompute
@@ -166,7 +166,8 @@ The same refresh also feeds the runtime model catalog at `GET /api/models-catalo
 - **Projection rules** live in `src/be/seed-pricing.ts`:
   - Anthropic models → rows under both `provider='claude'` AND `provider='claude-managed'`. Shortnames (`opus`/`sonnet`/`haiku`/`fable`/`mythos`) also land under the current default full id; Fable 5.1 and Mythos 5.1 use verified fallback rates until the vendored models.dev snapshot includes them.
   - OpenAI models → `provider='codex'`.
-  - OpenRouter models → `provider='opencode'`; `google/*` models also land under `provider='gemini'`.
+  - OpenRouter models → `provider='opencode'`, `provider='pi'` and `provider='dsh'`; `google/*` models also land under `provider='gemini'`.
+  - DeepSeek direct-API models (the models.dev `deepseek` section, bare ids such as `deepseek-v4-pro`) → `provider='dsh'`.
 - **Manual overrides** (claude-managed `runtime_hour` at $0.08/hr, devin `acu` at $2.25): `MANUAL_PRICING_OVERRIDES` in the same file. Each entry carries its source URL and a `verified` date.
 - **Runtime refresh**: `src/be/pricing-refresh.ts` updates pricing rows in-place after boot and every 12 hours. It only adds newer effective rows and never deletes pinned entries from the committed snapshot.
 - **Snapshot refresh procedure**: run `bun run scripts/refresh-modelsdev-pricing.ts` when the committed fallback/UI catalog needs a source update. Commit it alongside the PR.
@@ -209,6 +210,7 @@ Fallback is 200k. Pre-Phase 4 the dated form fell to 200k unconditionally — wi
 - **codex**: the app-server reports cumulative usage counters. On each terminal turn, including failed and interrupted turns, the adapter converts the latest total to a delta before it updates `CostData` or context usage. This prevents the same usage from being charged again after a later turn. Context uses the reported input total plus output tokens. Cache writes are input details. Codex 0.153.4 reports cache-write tokens separately, and the adapter includes them in `CostData`.
 - **pi-mono**: cost passes through verbatim from pi-ai's `stats.cost`. Context snapshots tag `contextFormula: 'pi-delegated'`. `durationMs` is now real wallclock (was hardcoded 0). Per-turn `outputTokens` are derived from session-stats delta.
 - **opencode**: passthrough through OpenRouter. The unified formula applies; `contextPercent` is clamped to [0, 100].
+- **dsh**: dsh reports tokens, not money. Each `status.step_end.usage` (one model call) becomes a context snapshot with the unified formula; the summed tokens become `CostData` with `totalCostUsd: 0` and `provider: 'dsh'`, and the API prices them from the `dsh` rows (`openrouter/` stripped for OpenRouter models). dsh's own `deepseek-flash` id is not in models.dev, so it stays `unpriced`.
 - **devin**: ACU-based pricing (`token_class='acu'`, $2.25 per ACU). No per-token cost. No context events (the API doesn't report context info) — `peakContextTokens` remains `null` for devin tasks.
 
 ## Gotchas & known limitations

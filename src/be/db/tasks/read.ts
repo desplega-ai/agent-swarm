@@ -288,7 +288,7 @@ export function rowToAgentTask(row: AgentTaskRow): AgentTask {
     slackReplySent: !!row.slackReplySent,
     slackProgressMessageTs: row.slackProgressMessageTs ?? undefined,
     slackTreeRootMessageTs: row.slackTreeRootMessageTs ?? undefined,
-    vcsProvider: (row.vcsProvider as "github" | "gitlab" | null) ?? undefined,
+    vcsProvider: (row.vcsProvider as "github" | "gitlab" | "azure-devops" | null) ?? undefined,
     vcsRepo: row.vcsRepo ?? undefined,
     vcsEventType: row.vcsEventType ?? undefined,
     vcsNumber: row.vcsNumber ?? undefined,

@@ -34,6 +34,7 @@ export const SUITE_SCENARIO_VERSIONS: Readonly<Record<string, number>> = {
   "capability-routing": 1,
   "human-in-loop": 1,
   "human-in-loop-solo": 1,
+  "real-diff-agent-fs": 1,
 };
 
 /**

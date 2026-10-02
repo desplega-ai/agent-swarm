@@ -244,6 +244,53 @@ describe("ClaudeManagedAdapter (Phase 3) — session lifecycle", () => {
     expect(a[1]?.text).not.toBe(b[1]?.text);
   });
 
+  test("agent.message with a redacted block keeps a visible placeholder instead of dropping it", async () => {
+    const events: Array<Record<string, unknown>> = [
+      {
+        type: "agent.message",
+        id: "evt1",
+        processed_at: "2026-01-01T00:00:01Z",
+        content: [
+          { type: "text", text: "before " },
+          { type: "redacted" },
+          { type: "text", text: " after" },
+        ],
+      },
+      {
+        type: "agent.message",
+        id: "evt2",
+        processed_at: "2026-01-01T00:00:02Z",
+        content: [{ type: "redacted" }],
+      },
+      {
+        type: "session.status_idle",
+        id: "evt3",
+        processed_at: "2026-01-01T00:00:03Z",
+        stop_reason: { type: "end_turn" },
+      },
+    ];
+    const spy = makeFakeClient({
+      streamEvents: async function* () {
+        for (const e of events) yield e;
+      },
+    });
+    const adapter = new ClaudeManagedAdapter({ client: spy.client });
+    const session = await adapter.createSession(
+      tConfig({ logFile: join(tmpLogDir, "redacted.log") }),
+    );
+    const emitted: ProviderEvent[] = [];
+    session.onEvent((e) => emitted.push(e));
+    await session.waitForCompletion();
+
+    const messages = emitted.flatMap((e) =>
+      e.type === "message" && e.role === "assistant" ? [e.content] : [],
+    );
+    expect(messages).toEqual([
+      "before [content redacted by Anthropic model policy] after",
+      "[content redacted by Anthropic model policy]",
+    ]);
+  });
+
   test("happy path: agent.message → message ProviderEvent, span.model_request_end → cost + context_usage, status_idle → result", async () => {
     const events: Array<Record<string, unknown>> = [
       { type: "session.status_running", id: "evt1", processed_at: "2026-01-01T00:00:00Z" },

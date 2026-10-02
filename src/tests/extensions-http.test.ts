@@ -28,6 +28,7 @@ import type { User } from "../types";
 import { setRequestAuth } from "../utils/request-auth-context";
 import { refreshSecretScrubberCache } from "../utils/secret-scrubber";
 import {
+  type BundleFixture,
   loadBundleFixture,
   resetFixtureCatalog,
   useFixtureCatalog,
@@ -126,6 +127,19 @@ async function install(
   });
 }
 
+async function installInline(
+  bundle: BundleFixture,
+  agentId?: string,
+  asUser?: string,
+): Promise<TestResponse> {
+  return dispatch("/api/extensions/install", {
+    method: "POST",
+    agentId,
+    asUser,
+    body: JSON.stringify({ manifest: bundle.manifest, files: bundle.files }),
+  });
+}
+
 /** Replace the `minimal` catalog entry with a changed hooks file, as a new template release would. */
 async function useChangedMinimal(suffix: string): Promise<void> {
   const bundle = await loadBundleFixture("minimal");
@@ -176,6 +190,7 @@ beforeEach(async () => {
   await stopExtensionRuntime();
   await getDbClient().run("DELETE FROM extensions");
   await useFixtureCatalog(CATALOG_FIXTURES);
+  delete process.env.EXTENSION_ALLOW_INLINE_INSTALL;
 });
 
 describe("/api/extensions HTTP", () => {
@@ -654,19 +669,131 @@ export default extension;
     expect((await (await dispatch("/api/extensions")).json()).extensions).toEqual([]);
   });
 
-  test("inline bundles are rejected before anything is stored", async () => {
+  test("inline bundles are rejected for every caller while the flag is off", async () => {
     const bundle = await loadBundleFixture("minimal");
-    for (const body of [bundle, { template: "minimal", files: bundle.files }]) {
-      const response = await dispatch("/api/extensions/install", {
-        method: "POST",
-        body: JSON.stringify(body),
-      });
-      expect(response.status).toBe(400);
-      const json = await response.json();
-      expect(json.error).toBe("inline_install_disabled");
-      expect(json.message).toContain("template");
+    const bodies = [bundle, { template: "minimal", files: bundle.files }];
+    for (const flag of [undefined, "false"]) {
+      if (flag === undefined) delete process.env.EXTENSION_ALLOW_INLINE_INSTALL;
+      else process.env.EXTENSION_ALLOW_INLINE_INSTALL = flag;
+      for (const agentId of [undefined, leadId, workerId]) {
+        for (const body of bodies) {
+          const response = await dispatch("/api/extensions/install", {
+            method: "POST",
+            agentId,
+            body: JSON.stringify(body),
+          });
+          expect(response.status).toBe(400);
+          const json = await response.json();
+          expect(json.error).toBe("inline_install_disabled");
+          expect(json.message).toContain("EXTENSION_ALLOW_INLINE_INSTALL");
+          expect(json.message).toContain("template");
+        }
+      }
     }
     expect(await getExtensionByName("minimal")).toBeNull();
+  });
+
+  test("with the flag on, a lead installs an inline bundle that lands disabled and stays staged on update", async () => {
+    process.env.EXTENSION_ALLOW_INLINE_INSTALL = "true";
+    const bundle = await loadBundleFixture("with-assets");
+    const installed = await installInline(bundle, leadId);
+    expect(installed.status).toBe(200);
+    const body = await installed.json();
+    expect(body.extension).toMatchObject({
+      name: "with-assets",
+      enabled: false,
+      status: "disabled",
+      version: 1,
+      createdByAgentId: leadId,
+    });
+    expect(body.assets).toMatchObject({
+      created: expect.arrayContaining([
+        { kind: "script", name: "with-assets-echo" },
+        { kind: "schedule", name: "with-assets-hourly" },
+      ]),
+    });
+    // Not a catalog template: only the fixtures registered in beforeEach are listed.
+    const catalog = (await (await dispatch("/api/extensions/catalog")).json()).extensions as Array<{
+      name: string;
+    }>;
+    expect(catalog.map((item) => item.name)).not.toContain("with-assets");
+
+    // Enabling goes through the existing path: a human enable activates the inline bundle.
+    const id = (body.extension as { id: string }).id;
+    expect((await dispatch(`/api/extensions/${id}/enable`, { method: "POST" })).status).toBe(200);
+    expect(await getExtensionByName("with-assets")).toMatchObject({ enabled: true });
+
+    // A lead's inline update of the enabled extension is stored but never goes live.
+    bundle.files["hooks.ts"] += "\n// updated inline by a lead\n";
+    const updated = await installInline(bundle, leadId);
+    expect(updated.status).toBe(200);
+    expect((await updated.json()).extension).toMatchObject({
+      version: 2,
+      activeVersion: 1,
+      enabled: true,
+    });
+
+    // The script and schedule live outside the extensions table: remove them with the extension.
+    expect((await dispatch(`/api/extensions/${id}/disable`, { method: "POST" })).status).toBe(200);
+    expect((await dispatch(`/api/extensions/${id}`, { method: "DELETE" })).status).toBe(200);
+  });
+
+  test("with the flag on, operators and dashboard users install inline and workers get 403", async () => {
+    process.env.EXTENSION_ALLOW_INLINE_INSTALL = "true";
+    const minimal = await loadBundleFixture("minimal");
+    const postLogger = await loadBundleFixture("post-logger");
+    expect((await installInline(minimal)).status).toBe(200);
+    expect((await installInline(postLogger, undefined, "user-1")).status).toBe(200);
+    expect(await getExtensionByName("minimal")).toMatchObject({ enabled: false });
+    expect(await getExtensionByName("post-logger")).toMatchObject({ enabled: false });
+    await getDbClient().run("DELETE FROM extensions");
+
+    const denied = await installInline(minimal, workerId);
+    expect(denied.status).toBe(403);
+    expect(denied.text).toContain("lead agent, operator, or user");
+    expect(await getExtensionByName("minimal")).toBeNull();
+
+    // A worker may update its own catalog draft, but not by sending code inline.
+    expect((await install("minimal", workerId)).status).toBe(200);
+    minimal.files["hooks.ts"] += "\n// worker inline update\n";
+    expect((await installInline(minimal, workerId)).status).toBe(403);
+    expect(await getExtensionByName("minimal")).toMatchObject({ version: 1 });
+  });
+
+  test("with the flag on, inline installs reject malformed bodies and run the catalog validation", async () => {
+    process.env.EXTENSION_ALLOW_INLINE_INSTALL = "true";
+    const minimal = await loadBundleFixture("minimal");
+    const post = async (body: unknown) =>
+      dispatch("/api/extensions/install", { method: "POST", body: JSON.stringify(body) });
+
+    const both = await post({ template: "minimal", ...minimal });
+    expect(both.status).toBe(400);
+    expect(both.text).toContain("mutually exclusive");
+    const noFiles = await post({ manifest: minimal.manifest });
+    expect(noFiles.status).toBe(400);
+    expect(noFiles.text).toContain("files is required");
+    const empty = await post({});
+    expect(empty.status).toBe(400);
+    expect(empty.text).toContain("provide either template");
+
+    const extra = await installInline({
+      manifest: minimal.manifest,
+      files: { ...minimal.files, "stray.ts": "export {};" },
+    });
+    expect(extra.status).toBe(400);
+    expect(((await extra.json()).diagnostics as string[]).join("\n")).toContain("stray.ts");
+    const badImport = await installInline(await loadBundleFixture("bad-import"));
+    expect(badImport.status).toBe(400);
+    const diagnostics = (await badImport.json()).diagnostics as string[];
+    expect(diagnostics.join("\n")).toContain("node:fs");
+    expect((await dispatch("/api/extensions")).text).not.toContain("bad-import");
+  });
+
+  test("with the flag on, catalog installs behave as before", async () => {
+    process.env.EXTENSION_ALLOW_INLINE_INSTALL = "true";
+    expect((await install("minimal", workerId)).status).toBe(200);
+    expect(await getExtensionByName("minimal")).toMatchObject({ createdByAgentId: workerId });
+    expect((await install("not-in-catalog", leadId)).status).toBe(404);
   });
 
   test("unknown templates return 404", async () => {

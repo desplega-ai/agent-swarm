@@ -14,6 +14,7 @@ Complete reference for all environment variables used by Agent Swarm.
 | `API_KEY` | — | Legacy API key for server authentication (required unless `AGENT_SWARM_API_KEY` is set). See `AGENT_SWARM_API_KEY` above for the preferred, namespaced variable. |
 | `RBAC_ENABLED` | `true` | Gates REST requests authenticated with `aswt_` user tokens against RBAC role grants. Operator API-key requests and agent-authenticated calls are unaffected. Built-in roles and missing user assignments are seeded at boot. Set `false` to opt out. |
 | `EXTENSION_ALLOW_LEAD_ACTIVATION` | `true` | Allows trusted leads to enable, disable, and activate extension versions. Set `false` or `0` in the API deployment environment and restart every replica to reserve these operations for operators/dashboard users. Cannot be changed through swarm configuration APIs. Existing enabled extensions continue to run. See [extension trust and activation](/docs/guides/extensions#lead-activation-and-trust). |
+| `EXTENSION_ALLOW_INLINE_INSTALL` | `false` | Reloadable boolean. Lets lead agents, the operator, and dashboard users install an extension from an inline `manifest` plus `files` instead of only from the catalog. Off keeps installs catalog-only (`inline_install_disabled`). Workers are denied either way. Installs land disabled. See [inline install](/docs/guides/extensions#inline-install) |
 | `SCRIPTS_ONLY_MCP` | `false` (unset/off) | Experimental code-mode. Set to `true` on the API server and agent containers to expose only the eight script tools over MCP while keeping the full swarm SDK available through `script-run`. It can also be configured per agent/repository/global scope through `swarm_config`; see [Scripts-only mode](/docs/guides/scripts-only-mode). |
 | `MCP_BASE_URL` | `https://api.example-swarm.dev` | Internal/worker-facing API base — the URL workers, the UI, and the setup command use to reach the API server. In split deploys this may be an internal/cluster address. |
 | `PUBLIC_MCP_BASE_URL` | Falls back to `MCP_BASE_URL` | Public, browser/externally-reachable API origin used for OAuth redirect URIs and webhook URLs. Defaults to `MCP_BASE_URL` when unset; set it in split deploys where `MCP_BASE_URL` is an internal/cluster address that external providers (Linear, Jira, GitHub) can't reach. |
@@ -31,6 +32,7 @@ Complete reference for all environment variables used by Agent Swarm.
 | `SESSION_LOG_RETENTION_DAYS` | — (disabled) | Permanently delete `session_logs` rows older than this many whole days. Accepted range: 1–1,000,000. Leave unset to disable this table's sweep. Start with `DB_RETENTION_DRY_RUN=true`; deleted session transcripts cannot be restored without a backup. See [Database retention](/docs/guides/deployment#database-retention). |
 | `AGENT_LOG_RETENTION_DAYS` | — (disabled) | Permanently delete `agent_log` rows older than this many whole days. Accepted range: 1–1,000,000. Leave unset to disable this table's sweep. Deleted task and agent history cannot be restored without a backup. See [Database retention](/docs/guides/deployment#database-retention). |
 | `EVENTS_RETENTION_DAYS` | — (disabled) | Permanently delete `events` rows older than this many whole days. Accepted range: 1–1,000,000. Leave unset to disable this table's sweep. Event aggregates become retention-window totals, and deleted telemetry cannot be restored without a backup. See [Database retention](/docs/guides/deployment#database-retention). |
+| `CONTEXT_VERSIONS_KEEP_LATEST` | — (disabled) | Keep only this many newest `context_versions` rows per agent and field, and permanently delete the older ones. Accepted range: 1–1,000,000. The newest version of every field is never deleted, and age plays no part. Leave unset to disable this table's sweep. Deleted profile history cannot be restored without a backup. See [Database retention](/docs/guides/deployment#database-retention). |
 | `DB_RETENTION_DRY_RUN` | `false` | When `true` or `1`, report the exact number of rows each enabled retention policy would delete without deleting or vacuuming data. Only `true`, `false`, `1`, and `0` are accepted through configuration writes. Use dry run before every first production activation. |
 | `DB_RETENTION_TICK_BUDGET_MS` | `30000` | Wall-clock budget for one retention tick, shared across enabled tables. Accepted range: 1,000–300,000 ms. Read on every tick; out-of-range environment values fall back to the default. |
 | `DB_RETENTION_CATCHUP_INTERVAL_MS` | `60000` | Delay before another retention tick when at least one table remains undrained. Accepted range: 5,000–3,600,000 ms. The normal cadence returns to hourly after the backlog drains. |
@@ -67,7 +69,7 @@ Complete reference for all environment variables used by Agent Swarm.
 | `OPENROUTER_API_KEY` | — | Required for the Stop-hook session summarizer + LLM memory rater (calls go through the Vercel AI SDK against OpenRouter). When unset, both session-summary indexing and the `llm` rater are no-ops |
 | `OPENROUTER_BASE_URL` | `https://openrouter.ai/api/v1` | Optional OpenAI-compatible gateway for every OpenRouter consumer, including harness sessions, credential checks, memory/session summarizers, and raw-LLM or validation workflow nodes. The target is not required to be openrouter.ai — any gateway serving OpenRouter-compatible `GET /models` and `POST /chat/completions` works (see [Model Gateways](/docs/guides/provider-auth/model-gateways)). Trailing slashes are removed. Leave unset or blank for direct OpenRouter traffic. Also settable from Settings → Configuration. |
 | `MEMORY_RATERS` | `implicit-citation,explicit-self` | Comma-separated list of memory raters to enable (`noop`, `implicit-citation`, `explicit-self`, `llm`). Gates the server-side rating pass fired after task completion (`implicit-citation`) and worker-side gates: the Stop-hook's LLM-rating piggyback (`llm`) and the explicit self-rating tool hint (`explicit-self`). Unknown names are logged and skipped; unset enables citation ratings and self-rating hints on new and existing deployments. Set `MEMORY_RATERS=` explicitly to disable all raters. Deleting a swarm config override restores the deployment value, or the runtime default when unset. |
-| `MEMORY_RATER_MODEL` | Per credential kind, `openrouter/deepseek/deepseek-v4.1-flash`, `anthropic/claude-haiku-4-5`, `openai/gpt-6-luna`, `openai-codex/gpt-6-luna`, or `haiku` (Claude CLI) | Overrides the resolved model slug for the Stop-hook session-summarizer + LLM memory rater, across whichever credential (OpenRouter/Anthropic/OpenAI/Codex OAuth/Claude CLI) the shared `internal-ai` abstraction resolves. |
+| `MEMORY_RATER_MODEL` | Pinned per credential kind (`MEMORY_RATER_DEFAULT_MODEL`): `openrouter/deepseek/deepseek-v4.1-flash`, `anthropic/claude-haiku-4-5`, `openai/gpt-6-luna`, `openai-codex/gpt-6-luna`, or `haiku` (Claude CLI) | Overrides the resolved model slug for the Stop-hook session-summarizer + LLM memory rater, across whichever credential (OpenRouter/Anthropic/OpenAI/Codex OAuth/Claude CLI) the shared `internal-ai` abstraction resolves. The defaults are pinned for the rater only: they do not follow the general default models (e.g. workflow LLM nodes), so a bump there never swaps the judge. Each `llm` rating records the model that produced it in `memory_rating.model`. On the OpenRouter path `completeStructured` sends `tool_choice: "required"`, so the model must accept forced tool calls: OpenRouter answers 400 for `anthropic/claude-sonnet-5.5` (`tool_choice: type tool and any are not supported`) and for `qwen/qwen3.8-flash`, so neither can be the rater model there. |
 | `MEMORY_RATER_WEIGHTS` | `1.0` per rater | Optional `name:multiplier,...` overrides (e.g. `llm:0.5,implicit-citation:2`) applied to each rater's emitted rating weight before it's persisted. Unlisted raters use `1.0`; the final per-event weight is clamped to `[0, 1]`. |
 | `CAPABILITIES` | `core,task-pool,scripts,config,mcp,profiles,scheduling,memory,workflows,pages,metrics,kv,slack,tracker,skills,repo` | Comma-separated capability flags gating which MCP tool groups the API server registers. Disabled by default: `services`, `prompt-templates`, `messaging`, `swarm-x`, `agentmail`, `kapso`. Setting this **replaces** the default list (not additive) — include every capability you want. Can also be set as a global swarm-config entry, which takes precedence over the env var at server creation. Upgrade note: when an explicit env value is set and no swarm-config `CAPABILITIES` row exists, boot auto-seeds a row backfilling the previously always-registered groups (`core`, `config`, `scripts`, `mcp`, `slack`, `tracker`, `skills`, `repo`) so legacy lists don't silently lose those tools — edit or delete the seeded row to take full control. Note: this shapes the externally exposed MCP tool list only — it is not a feature kill-switch. The scripts SDK bridge always sees the full tool surface (governed by its own allowlist), and HTTP REST routes are generally not gated. See [MCP tools reference](/docs/reference/mcp-tools) for the tool-to-capability mapping. |
 | `SKILL_FILES_MAX_COUNT` | `100` | Max number of files allowed in a single skill file-set upsert. |
@@ -139,6 +141,9 @@ Which credentials you need depends on your selected harness provider:
 | `BEDROCK_AUTH_MODE` | No | inferred from `MODEL_OVERRIDE` | Optional Bedrock mode override. `sdk` uses the AWS SDK credential chain; `bearer` requires `AWS_BEARER_TOKEN_BEDROCK`. Both probe credentials and enumerate models |
 | `AWS_BEARER_TOKEN_BEDROCK` | In Bedrock bearer mode | — | Bedrock API key required when `BEDROCK_AUTH_MODE=bearer` |
 | `AWS_REGION` | In either Bedrock mode | — | Required region for Bedrock credential probing and account-accurate model enumeration in SDK or bearer mode |
+| `PI_TOOL_DEFERRAL` | No | `false` | Reloadable boolean. Hides non-core swarm tools behind pi's `tool_search`. See [pi tool deferral](/docs/guides/harness-providers#pi-tool-deferral) |
+| `PI_CODEMODE` | No | `false` | Reloadable boolean. Adds pi's codemode tool, a bounded QuickJS sandbox in which the model's JavaScript calls swarm tools. See [pi codemode](/docs/guides/harness-providers#pi-codemode) |
+| `PI_CODEMODE_MODELS` | No | `false` | Reloadable boolean, effective only with `PI_CODEMODE`. Lets codemode scripts call pi's `models` API (`classify()`, `generateImages()`); the usage counts toward session cost. See [pi codemode](/docs/guides/harness-providers#pi-codemode) |
 
 \* At least one credential source is required (API key, `~/.pi/agent/auth.json`, or the AWS SDK default chain in Bedrock SDK mode). **Do not** pass `CLAUDE_CODE_OAUTH_TOKEN` when using pi-mono — it will override the configured provider. See [Harness Configuration](/docs/guides/harness-configuration) and [Harness Providers](/docs/guides/harness-providers#pi-mono-amazon-bedrock-auth) for details.
 
@@ -285,7 +290,7 @@ Run the one-time `bunx @desplega.ai/agent-swarm claude-managed-setup` from your 
 | `GITHUB_BOT_NAME` | Bot name for @mentions (default: `agent-swarm-bot`) |
 | `GITHUB_BOT_ALIASES` | Comma-separated additional @mention aliases (e.g. `heysidekick,sidekick`) |
 | `GITHUB_EVENT_LABELS` | Comma-separated labels that trigger agent action on PR/issue label events (default: `swarm-review`) |
-| `GITHUB_APP_ID` | GitHub App ID (for bot reactions) |
+| `GITHUB_APP_ID` | GitHub App ID (for bot reactions; without an App, reactions fall back to `GITHUB_TOKEN`) |
 | `GITHUB_APP_PRIVATE_KEY` | GitHub App private key (base64-encoded) |
 | `GITHUB_DISABLE` | Set to `true` to disable GitHub |
 
@@ -297,9 +302,22 @@ Run the one-time `bunx @desplega.ai/agent-swarm claude-managed-setup` from your 
 | `GITLAB_URL` | GitLab instance URL (default: `https://gitlab.com`) |
 | `GITLAB_WEBHOOK_SECRET` | Shared secret for webhook verification |
 | `GITLAB_BOT_NAME` | Bot username for @mention detection (default: `agent-swarm-bot`) |
-| `GITLAB_EMAIL` | Git commit email for GitLab repos |
-| `GITLAB_NAME` | Git commit name for GitLab repos |
+| `GITLAB_EMAIL` | Git commit email for GitLab repos (default: `GITHUB_EMAIL`, then `worker-agent@desplega.ai`; not applied when `GITHUB_TOKEN` is set) |
+| `GITLAB_NAME` | Git commit name for GitLab repos (default: `GITHUB_NAME`, then `Worker Agent`; not applied when `GITHUB_TOKEN` is set) |
 | `GITLAB_DISABLE` | Set to `true` to disable GitLab integration |
+
+## Azure DevOps Integration
+
+| Variable | Description |
+|----------|-------------|
+| `AZURE_DEVOPS_TOKEN` | Personal Access Token (scope: Code, Read & write) for git, `az repos`, and API calls |
+| `AZURE_DEVOPS_ORG_URL` | Organization URL, e.g. `https://dev.azure.com/your-org` |
+| `AZURE_DEVOPS_WEBHOOK_SECRET` | Basic auth password the service-hook subscriptions send; enables the webhook endpoint |
+| `AZURE_DEVOPS_BOT_ID` | Identity GUID of the bot user for `@<GUID>` mentions (default: the PAT owner) |
+| `AZURE_DEVOPS_BOT_NAME` | Name for plain-text `@name` mentions (default: `agent-swarm-bot`) |
+| `AZURE_DEVOPS_EMAIL` | Git commit email for Azure Repos commits (default: `GITHUB_EMAIL`, then `worker-agent@desplega.ai`; not applied when `GITHUB_TOKEN` or `GITLAB_TOKEN` is set) |
+| `AZURE_DEVOPS_NAME` | Git commit name for Azure Repos commits (default: `GITHUB_NAME`, then `Worker Agent`; not applied when `GITHUB_TOKEN` or `GITLAB_TOKEN` is set) |
+| `AZURE_DEVOPS_DISABLE` | Set to `true` to disable the Azure DevOps integration |
 
 ## AgentMail Integration
 

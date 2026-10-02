@@ -130,6 +130,9 @@ const MODEL_CACHE_REFRESH_TIMEOUT_MS = 15_000;
 // "Timeout waiting for server to start after 5000ms". Override via
 // OPENCODE_SERVER_TIMEOUT_MS.
 const DEFAULT_SERVER_START_TIMEOUT_MS = 30_000;
+// Event-stream reconnects before the session gives up on a dead local server.
+// The SDK backs off 3s, 6s, 12s, 24s between attempts, so ~45s in total.
+export const OPENCODE_SSE_MAX_RETRY_ATTEMPTS = 5;
 
 function serverStartTimeoutMs(): number {
   return Number(process.env.OPENCODE_SERVER_TIMEOUT_MS) || DEFAULT_SERVER_START_TIMEOUT_MS;
@@ -1039,15 +1042,33 @@ export class OpencodeAdapter implements ProviderAdapter {
     const opcVersion = readPkgVersion("@opencode-ai/sdk");
     session.emitSessionInit("opencode", opcVersion ? { version: opcVersion } : undefined);
 
-    // Subscribe to SSE events and drive the session
+    // Subscribe to SSE events and drive the session. The SDK's SSE client
+    // retries a dropped connection forever by default, so a dead `opencode
+    // serve` child would keep the stream (and the session promise) pending
+    // and hold the worker's slot. Cap the retries so the stream ends.
     client.event
-      .subscribe({ query: { directory: config.cwd } })
+      .subscribe({
+        query: { directory: config.cwd },
+        sseMaxRetryAttempts: OPENCODE_SSE_MAX_RETRY_ATTEMPTS,
+      })
       .then(async ({ stream }) => {
         for await (const event of stream) {
           session.handleOpencodeEvent(event as OpencodeEvent);
           if (session.isFinished) break;
         }
-        // Stream ended without session.idle — treat as completion
+        // The stream ended without session.idle: the opencode server closed
+        // or died. Settle the session so the runner releases the slot.
+        if (!session.isFinished) {
+          session.handleOpencodeEvent({
+            type: "session.error",
+            properties: {
+              sessionID: sessionId,
+              error: {
+                message: "runner exited without result: opencode event stream ended",
+              } as never,
+            },
+          });
+        }
       })
       .catch((err: unknown) => {
         session.handleOpencodeEvent({

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  DEFAULT_MODEL,
   type ResolveCredentialOptions,
   resolveCredential,
 } from "../../utils/internal-ai/credentials.js";
@@ -31,6 +32,27 @@ describe("resolveCredential", () => {
     if (cred?.kind === "openrouter") {
       expect(cred.apiKey).toBe("or-1");
       expect(cred.modelDefault).toBe("openrouter/deepseek/deepseek-v4.1-flash");
+    }
+  });
+
+  test("modelDefault follows the pinned rater model, not DEFAULT_MODEL", async () => {
+    const saved = process.env.MEMORY_RATER_MODEL;
+    delete process.env.MEMORY_RATER_MODEL;
+    const before = { ...DEFAULT_MODEL };
+    try {
+      DEFAULT_MODEL.openrouter = "openrouter/some/bumped-model";
+      DEFAULT_MODEL.anthropic = "anthropic/bumped";
+      const viaOpenRouter = await resolveCredential(
+        makeOpts({ env: { OPENROUTER_API_KEY: "or-1" } }),
+      );
+      expect(viaOpenRouter?.modelDefault).toBe("openrouter/deepseek/deepseek-v4.1-flash");
+      const viaAnthropic = await resolveCredential(
+        makeOpts({ env: { ANTHROPIC_API_KEY: "example-sk-ant-1" } }),
+      );
+      expect(viaAnthropic?.modelDefault).toBe("anthropic/claude-haiku-4-5");
+    } finally {
+      Object.assign(DEFAULT_MODEL, before);
+      if (saved !== undefined) process.env.MEMORY_RATER_MODEL = saved;
     }
   });
 

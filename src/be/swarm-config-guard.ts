@@ -287,11 +287,13 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
     "TASK_TOOL_PRELOAD_ENABLED",
     "PI_TOOL_DEFERRAL",
     "PI_CODEMODE",
+    "PI_CODEMODE_MODELS",
     "SLACK_DISABLE",
     "SLACK_RENDER_V2",
     "SLACK_RENDER_V2_DELEGATION",
     "GITHUB_DISABLE",
     "GITLAB_DISABLE",
+    "AZURE_DEVOPS_DISABLE",
     "LINEAR_DISABLE",
     "JIRA_DISABLE",
     "AGENTMAIL_DISABLE",
@@ -300,6 +302,7 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
     "RBAC_ENABLED",
     "SEED_AUTOMATIONS_ENABLED",
     "RBAC_AUDIT_DISABLED",
+    "EXTENSION_ALLOW_INLINE_INSTALL",
     "BUDGET_ADMISSION_DISABLED",
     "MCP_OAUTH_ALLOW_PRIVATE_HOSTS",
     "OTEL_TRACE_POLL",
@@ -358,7 +361,14 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
   // sweep keep running for the default 30000ms.
   ...boundedIntegerValidatorsFor(DB_RETENTION_TUNING_BOUNDS),
   ...boundedIntegerValidators(
-    ["SESSION_LOG_RETENTION_DAYS", "AGENT_LOG_RETENTION_DAYS", "EVENTS_RETENTION_DAYS"],
+    [
+      "SESSION_LOG_RETENTION_DAYS",
+      "AGENT_LOG_RETENTION_DAYS",
+      "EVENTS_RETENTION_DAYS",
+      // A kept-version count, not days. The floor of 1 is what guarantees the
+      // sweep never deletes the newest version of any (agentId, field).
+      "CONTEXT_VERSIONS_KEEP_LATEST",
+    ],
     1,
     MAX_DB_RETENTION_DAYS,
   ),

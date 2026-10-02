@@ -357,6 +357,7 @@ export const AgentTaskSourceSchema = z.enum([
   "ui",
   "github",
   "gitlab",
+  "azure-devops",
   "agentmail",
   "system",
   "schedule",
@@ -591,8 +592,8 @@ export const AgentTaskSchema = z
     slackProgressMessageTs: z.string().optional(),
     slackTreeRootMessageTs: z.string().optional(),
 
-    // VCS metadata (GitHub / GitLab — provider-agnostic)
-    vcsProvider: z.enum(["github", "gitlab"]).optional(),
+    // VCS metadata (GitHub / GitLab / Azure DevOps — provider-agnostic)
+    vcsProvider: z.enum(["github", "gitlab", "azure-devops"]).optional(),
     vcsRepo: z.string().optional(),
     vcsEventType: z.string().optional(),
     vcsNumber: z.number().int().optional(),
@@ -749,7 +750,7 @@ export const CreateTaskOptionsSchema = z.object({
    * this boundary must not let a caller silently persist a mismatch.
    */
   overrideSlackContext: z.boolean().optional(),
-  vcsProvider: z.enum(["github", "gitlab"]).optional(),
+  vcsProvider: z.enum(["github", "gitlab", "azure-devops"]).optional(),
   vcsRepo: z.string().optional(),
   vcsEventType: z.string().optional(),
   vcsNumber: z.number().int().optional(),
@@ -3125,15 +3126,50 @@ export const ExtensionRunSchema = z
   .openapi("ExtensionRun");
 export type ExtensionRun = z.infer<typeof ExtensionRunSchema>;
 
+/**
+ * An extension install names exactly one source: a catalog `template`, or an inline
+ * `manifest` with its `files`. Shared by the HTTP body and the `extension-install` tool input.
+ */
+export function checkExtensionInstallSource(
+  body: { template?: unknown; manifest?: unknown; files?: unknown },
+  ctx: z.RefinementCtx,
+): void {
+  const inline = body.manifest !== undefined || body.files !== undefined;
+  if (body.template !== undefined && inline) {
+    ctx.addIssue({
+      code: "custom",
+      message: "template is mutually exclusive with manifest and files",
+    });
+  } else if (body.template === undefined && !inline) {
+    ctx.addIssue({ code: "custom", message: "provide either template, or manifest with files" });
+  } else if (inline && body.manifest === undefined) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["manifest"],
+      message: "manifest is required with files",
+    });
+  } else if (inline && body.files === undefined) {
+    ctx.addIssue({ code: "custom", path: ["files"], message: "files is required with manifest" });
+  }
+}
+
 export const ExtensionInstallBodySchema = z
   .object({
-    template: ExtensionNameSchema.describe(
-      "Name of a predefined extension in the catalog (`GET /api/extensions/catalog`).",
+    template: ExtensionNameSchema.optional().describe(
+      "Name of a predefined extension in the catalog (`GET /api/extensions/catalog`). Mutually exclusive with `manifest` and `files`.",
     ),
-    priority: z.number().int().optional(),
-    config: z.record(z.string(), z.unknown()).optional(),
+    manifest: ExtensionManifestSchema.optional().describe(
+      "Inline bundle manifest. Requires `files`. Accepted only when `EXTENSION_ALLOW_INLINE_INSTALL` is on and the caller is a lead, operator, or dashboard user.",
+    ),
+    files: z
+      .record(z.string(), z.string())
+      .optional()
+      .describe("Inline bundle files keyed by relative path. Requires `manifest`."),
+    priority: z.number().int().optional().describe("Handler priority. Lower values run first."),
+    config: z.record(z.string(), z.unknown()).optional().describe("Extension configuration."),
   })
   .strict()
+  .superRefine(checkExtensionInstallSource)
   .openapi("ExtensionInstallBody");
 export type ExtensionInstallBody = z.infer<typeof ExtensionInstallBodySchema>;
 

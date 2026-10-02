@@ -1439,3 +1439,60 @@ describe("OpencodeAdapter: session create timeout", () => {
     expect(closeServer).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("OpencodeAdapter: event stream ends without session.idle", () => {
+  beforeEach(() => {
+    mock.restore();
+  });
+
+  afterEach(() => {
+    Bun.$`rm -rf /tmp/opencode-task-stream-end.json /tmp/opencode-data-task-stream-end`
+      .quiet()
+      .nothrow();
+    Bun.$`rm -rf /tmp/test/.opencode`.quiet().nothrow();
+  });
+
+  test("settles the session as failed and caps SSE reconnects so a dead server cannot hold the slot", async () => {
+    let subscribeArgs: { sseMaxRetryAttempts?: number } | undefined;
+    const closeServer = mock(() => {});
+    const fakeClient = {
+      session: {
+        create: async () => ({ data: { id: "sess-stream-end" }, error: undefined }),
+        prompt: async () => ({ data: {}, error: undefined }),
+      },
+      event: {
+        subscribe: async (args: { sseMaxRetryAttempts?: number }) => {
+          subscribeArgs = args;
+          // The server died: the stream closes with no session.idle.
+          return { stream: makeStream([]) };
+        },
+      },
+    };
+    mock.module("@opencode-ai/sdk", () => ({
+      createOpencode: async () => ({
+        client: fakeClient,
+        server: { url: "http://127.0.0.1:12345", close: closeServer },
+      }),
+    }));
+
+    const { OpencodeAdapter, OPENCODE_SSE_MAX_RETRY_ATTEMPTS } = await import(
+      "../providers/opencode-adapter"
+    );
+    const session = await new OpencodeAdapter().createSession(
+      testConfig({ taskId: "task-stream-end" }),
+    );
+    session.onEvent(() => {});
+
+    const settled = await Promise.race([
+      session.waitForCompletion(),
+      Bun.sleep(2_000).then(() => "pending" as const),
+    ]);
+    expect(settled).not.toBe("pending");
+    const result = settled as ProviderResult;
+    expect(result.exitCode).toBe(1);
+    expect(result.isError).toBe(true);
+    expect(result.failureReason).toContain("runner exited without result");
+    expect(subscribeArgs?.sseMaxRetryAttempts).toBe(OPENCODE_SSE_MAX_RETRY_ATTEMPTS);
+    expect(closeServer).toHaveBeenCalledTimes(1);
+  });
+});

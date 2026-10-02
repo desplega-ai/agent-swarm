@@ -82,6 +82,11 @@ export const PERMISSIONS = {
     description: "Edit a memory entry (own entries, or any scope as lead).",
     namespace: "memory",
   },
+  "memory.write.consolidated": {
+    description:
+      "Write or move a memory key under a lead-maintained /longterm root (company-story, entities, timeline).",
+    namespace: "memory",
+  },
   "memory.delete.any": {
     description: "Delete a memory entry (own entries, or swarm-scoped entries as lead).",
     namespace: "memory",
@@ -282,6 +287,11 @@ export const PERMISSIONS = {
   },
   "extension.activate": {
     description: "Enable, disable, or activate a version of a swarm extension.",
+    namespace: "extension",
+  },
+  "extension.install.inline": {
+    description:
+      "Install a swarm extension from an inline manifest and files instead of the catalog.",
     namespace: "extension",
   },
 } as const satisfies Record<string, { description: string; namespace: string }>;

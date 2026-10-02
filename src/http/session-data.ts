@@ -376,13 +376,15 @@ export async function handleSessionData(
         : (parsed.body.cacheWriteTokens ?? 0);
 
       // Keep the adapter's report even when the pricing-table branch replaces
-      // totalCostUsd with the server's canonical recomputation.
-      const harnessCostUsd = parsed.body.totalCostUsd;
+      // totalCostUsd with the server's canonical recomputation. Harnesses that
+      // report tokens but no money (dsh, acp) post 0; storing that as their
+      // cost would make every recomputed row read as a 100% drift.
+      const harnessCostUsd = parsed.body.totalCostUsd > 0 ? parsed.body.totalCostUsd : null;
       const recomputed = await recomputeSessionCost(
         {
           provider: parsed.body.provider,
           model,
-          harnessCostUsd,
+          harnessCostUsd: parsed.body.totalCostUsd,
           inputTokens,
           outputTokens,
           cacheReadTokens: cachedInputTokens,
@@ -423,7 +425,7 @@ export async function handleSessionData(
       });
       recordSessionCost({
         totalCostUsd,
-        harnessCostUsd,
+        harnessCostUsd: harnessCostUsd ?? undefined,
         harness: parsed.body.provider ?? "unknown",
         model,
         costSource,

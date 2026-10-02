@@ -48,10 +48,14 @@ rate by hand should also update this file.
     default full id (e.g. `opus → claude-opus-4-7`). Pi-mono uses the same
     shortname forms, so they're projected under `provider='pi'` as well.
   - OpenAI models → rows under `provider='codex'`.
-  - OpenRouter models → rows under `provider='opencode'`. Any `google/...`
+  - OpenRouter models → rows under `provider='opencode'`, `provider='pi'` and
+    `provider='dsh'` (dsh strips `openrouter/` at lookup). Any `google/...`
     row additionally gets projected under `provider='gemini'` (both the
     stripped name and the full `google/...` id) so internal-ai callers find
     a hit either way.
+  - DeepSeek direct-API models (models.dev `deepseek` section, bare ids) →
+    rows under `provider='dsh'`. dsh's `deepseek-flash` id is not in that
+    section and stays `unpriced`.
 
 - **Snapshot refresh procedure**:
   - Run `bun run scripts/refresh-modelsdev-pricing.ts` (Phase 2 — adds the

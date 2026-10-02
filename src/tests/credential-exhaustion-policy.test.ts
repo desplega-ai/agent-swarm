@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { fetchResolvedEnv } from "../commands/runner";
 import {
   type ModelFamily,
@@ -18,6 +18,9 @@ describe("resolveCredentialPools — model window exhaustion policy", () => {
   let apiUrl: string;
   const earliestResetAt = "2026-09-27T00:00:00.000Z";
   let configResponse: { configs: Array<{ key: string; value: string }> } = { configs: [] };
+  /** Blocked indices returned for `model=fable`. The seat tests below override it. */
+  const windowOnlyFableBlocks = { modelBlockedIndices: [0, 1], seatBlockedIndices: [] as number[] };
+  let fableBlocks = windowOnlyFableBlocks;
 
   beforeAll(() => {
     server = Bun.serve({
@@ -34,8 +37,9 @@ describe("resolveCredentialPools — model window exhaustion policy", () => {
               success: true,
               availableIndices: [],
               totalKeys: 2,
-              modelBlockedIndices: [0, 1],
-              earliestModelResetAt: earliestResetAt,
+              modelBlockedIndices: fableBlocks.modelBlockedIndices,
+              seatBlockedIndices: fableBlocks.seatBlockedIndices,
+              earliestModelResetAt: fableBlocks.modelBlockedIndices.length ? earliestResetAt : null,
             });
           }
           // sonnet (or any other model / no model): pool is fully available.
@@ -174,5 +178,116 @@ describe("resolveCredentialPools — model window exhaustion policy", () => {
     });
     expect(selections.length).toBe(1);
     expect(selections[0]!.isRateLimitFallback).toBe(false);
+  });
+
+  describe("seat blocks", () => {
+    const fableTask = {
+      apiUrl: "",
+      apiKey: "key",
+      provider: "claude",
+      model: "claude-fable-5-1",
+      enforceModelCapacity: true,
+    };
+
+    afterEach(() => {
+      fableBlocks = windowOnlyFableBlocks;
+    });
+
+    test("default policy: throws and names seat blocks and window blocks", async () => {
+      fableBlocks = { modelBlockedIndices: [0], seatBlockedIndices: [1] };
+      const env: Record<string, string | undefined> = { CLAUDE_CODE_OAUTH_TOKEN: "tok-a,tok-b" };
+      const err = await resolveCredentialPools(env, { ...fableTask, apiUrl }).catch((e) => e);
+      expect(err).toBeInstanceOf(ModelWindowExhaustedError);
+      const typed = err as ModelWindowExhaustedError;
+      expect(typed.seatBlockedCount).toBe(1);
+      expect(typed.modelBlockedCount).toBe(1);
+      expect(typed.message).toBe(
+        "No CLAUDE_CODE_OAUTH_TOKEN key can run Fable: 1 keys are on a seat without Fable, 1 keys have the Fable window exhausted until 2026-09-27T00:00:00.000Z. Re-dispatch with another model or modelTier.",
+      );
+    });
+
+    test("MODEL_WINDOW_EXHAUSTED_POLICY=fallback: seat blocks still throw", async () => {
+      fableBlocks = { modelBlockedIndices: [], seatBlockedIndices: [0, 1] };
+      const env: Record<string, string | undefined> = {
+        CLAUDE_CODE_OAUTH_TOKEN: "tok-a,tok-b",
+        MODEL_WINDOW_EXHAUSTED_POLICY: "fallback",
+      };
+      const err = await resolveCredentialPools(env, { ...fableTask, apiUrl }).catch((e) => e);
+      expect(err).toBeInstanceOf(ModelWindowExhaustedError);
+      const typed = err as ModelWindowExhaustedError;
+      expect(typed.earliestResetAt).toBeNull();
+      expect(typed.message).toBe(
+        "No CLAUDE_CODE_OAUTH_TOKEN key can run Fable: 2 keys are on a seat without Fable, 0 keys have the Fable window exhausted. Re-dispatch with another model or modelTier.",
+      );
+    });
+
+    test("MODEL_WINDOW_EXHAUSTED_POLICY=fallback: window blocks alone still pick a key", async () => {
+      const env: Record<string, string | undefined> = {
+        CLAUDE_CODE_OAUTH_TOKEN: "tok-a,tok-b",
+        MODEL_WINDOW_EXHAUSTED_POLICY: "fallback",
+      };
+      const selections = await resolveCredentialPools(env, { ...fableTask, apiUrl });
+      expect(selections).toHaveLength(1);
+      expect(selections[0]!.isRateLimitFallback).toBe(true);
+    });
+
+    test("MODEL_WINDOW_EXHAUSTED_POLICY=fallback: a mixed pool picks the Fable-capable key", async () => {
+      fableBlocks = { modelBlockedIndices: [1], seatBlockedIndices: [0] };
+      const env: Record<string, string | undefined> = {
+        CLAUDE_CODE_OAUTH_TOKEN: "tok-a,tok-b",
+        MODEL_WINDOW_EXHAUSTED_POLICY: "fallback",
+      };
+      const selections = await resolveCredentialPools(env, { ...fableTask, apiUrl });
+      expect(selections).toHaveLength(1);
+      expect(selections[0]!.index).toBe(1);
+      expect(selections[0]!.isRateLimitFallback).toBe(true);
+      expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBe("tok-b");
+    });
+
+    test("MODEL_WINDOW_EXHAUSTED_POLICY=fallback: every key without a seat block stays reachable", async () => {
+      fableBlocks = { modelBlockedIndices: [1, 2], seatBlockedIndices: [0] };
+      const picked = new Set<number>();
+      for (let run = 0; run < 50; run++) {
+        const env: Record<string, string | undefined> = {
+          CLAUDE_CODE_OAUTH_TOKEN: "tok-a,tok-b,tok-c",
+          MODEL_WINDOW_EXHAUSTED_POLICY: "fallback",
+        };
+        const selections = await resolveCredentialPools(env, { ...fableTask, apiUrl });
+        picked.add(selections[0]!.index);
+      }
+      expect([...picked].sort()).toEqual([1, 2]);
+    });
+
+    test("default policy: a key-wide rate limit next to a seat block picks the other key", async () => {
+      fableBlocks = { modelBlockedIndices: [], seatBlockedIndices: [0] };
+      const env: Record<string, string | undefined> = { CLAUDE_CODE_OAUTH_TOKEN: "tok-a,tok-b" };
+      const selections = await resolveCredentialPools(env, { ...fableTask, apiUrl });
+      expect(selections[0]!.index).toBe(1);
+      expect(selections[0]!.isRateLimitFallback).toBe(true);
+    });
+
+    test("a taskless configuration load never throws on seat blocks", async () => {
+      fableBlocks = { modelBlockedIndices: [], seatBlockedIndices: [0, 1] };
+      const env: Record<string, string | undefined> = { CLAUDE_CODE_OAUTH_TOKEN: "tok-a,tok-b" };
+      const selections = await resolveCredentialPools(env, {
+        ...fableTask,
+        apiUrl,
+        enforceModelCapacity: undefined,
+      });
+      expect(selections).toHaveLength(1);
+      expect(selections[0]!.seatBlockedIndices).toEqual([0, 1]);
+    });
+
+    test("a sonnet task on a seat-blocked Fable pool picks a key", async () => {
+      fableBlocks = { modelBlockedIndices: [], seatBlockedIndices: [0, 1] };
+      const env: Record<string, string | undefined> = { CLAUDE_CODE_OAUTH_TOKEN: "tok-a,tok-b" };
+      const selections = await resolveCredentialPools(env, {
+        ...fableTask,
+        apiUrl,
+        model: "claude-sonnet-5",
+      });
+      expect(selections).toHaveLength(1);
+      expect(selections[0]!.isRateLimitFallback).toBe(false);
+    });
   });
 });

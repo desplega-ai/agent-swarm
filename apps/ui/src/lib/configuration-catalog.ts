@@ -431,6 +431,15 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         docsUrl: `${DOCS}guides/harness-providers`,
       },
       {
+        key: "PI_CODEMODE_MODELS",
+        label: "pi codemode model access (pilot)",
+        description:
+          "pi workers only. Let codemode scripts call pi's models API: classifiers and image generation. Does nothing unless pi codemode is on. Model usage from scripts counts toward the session cost. Off by default. Takes effect on the worker's next task.",
+        kind: "boolean",
+        defaultValue: "false",
+        docsUrl: `${DOCS}guides/harness-providers`,
+      },
+      {
         key: "SCRIPTS_ONLY_MCP",
         label: "Scripts-only MCP",
         description:
@@ -557,6 +566,15 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         kind: "number",
         unit: "days",
         placeholder: "30",
+        docsUrl: `${DOCS}guides/deployment#database-retention`,
+      },
+      {
+        key: "CONTEXT_VERSIONS_KEEP_LATEST",
+        label: "Context version retention",
+        description:
+          "Keep only this many newest context_versions rows per agent and field. The newest version is never deleted. Leave unset to disable this table's sweep. Deletion permanently removes older profile history.",
+        kind: "number",
+        placeholder: "100",
         docsUrl: `${DOCS}guides/deployment#database-retention`,
       },
       {
@@ -949,6 +967,15 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
           "Skip budget admission control so tasks are admitted even when their budget is exhausted.",
         kind: "boolean",
         defaultValue: "false",
+      },
+      {
+        key: "EXTENSION_ALLOW_INLINE_INSTALL",
+        label: "Allow inline extension install",
+        description:
+          "Let lead agents, the operator, and dashboard users install an extension from a manifest and files sent in the request instead of the predefined catalog. Workers stay catalog-only. An enabled extension runs as trusted code in the API process, so leave this off unless you accept that. New installs arrive disabled and still need an explicit enable.",
+        kind: "boolean",
+        defaultValue: "false",
+        docsUrl: `${DOCS}guides/extensions`,
       },
       {
         key: "CORS_ALLOWED_ORIGINS",

@@ -8,6 +8,7 @@ import {
 } from "../utils/error-tracker";
 import {
   type ModelFamily,
+  parseCreditsRequiredMessage,
   parseModelLimitMessage,
   windowForModelFamily,
 } from "../utils/model-rate-limit-windows";
@@ -15,6 +16,20 @@ import {
 export type RateLimitOutcome =
   | { kind: "none" }
   | { kind: "key"; rateLimitedUntil: string }
+  /**
+   * The key's seat cannot run the model (`credits_required`). Not a rate
+   * limit: the seat rejection never marks the key by itself.
+   */
+  | {
+      kind: "seat";
+      model: ModelFamily;
+      source: "event" | "text";
+      /**
+       * An independent key-wide rejection observed earlier in the same
+       * session, still to enforce. The seat outcome never erases it.
+       */
+      keyRateLimitedUntil?: string;
+    }
   | {
       kind: "model";
       model: ModelFamily;
@@ -38,6 +53,7 @@ interface ClassifiableResult {
   rateLimitResetAt?: string;
   rateLimitWindows?: RateLimitWindowTelemetry;
   modelRateLimit?: { window: string; model: ModelFamily; resetAt: string; observedAt?: string };
+  creditsRequired?: { observedAt: string; overageDisabledReason?: string };
 }
 
 function clampMs(candidateMs: number, nowMs: number): number {
@@ -48,10 +64,15 @@ function clampMs(candidateMs: number, nowMs: number): number {
 
 /**
  * Classifies a finished provider session's rate-limit signal into one of
- * three outcomes: no rate limit, a key-wide rate limit (legacy path), or a
- * model-scoped weekly-window rejection (Fable/Opus/Sonnet). Model outcomes
- * are tested before key outcomes so a model-scoped event or message never
- * falls into the legacy key-wide gate and marks the whole key.
+ * four outcomes: no rate limit, a key-wide rate limit (legacy path), a
+ * model-scoped weekly-window rejection (Fable/Opus/Sonnet), or a seat
+ * mismatch (`credits_required`: the seat cannot run the model). Seat
+ * outcomes are tested first and model outcomes before key outcomes, so
+ * neither falls into the legacy key-wide gate and marks the whole key.
+ *
+ * `taskModelFamily` is the family of the task's model. A structured
+ * `credits_required` event names no model, so without it (and without the
+ * failure text) the event cannot be attributed and is not a seat outcome.
  *
  * `codexCreditsExhaustedCooldownMs` defaults to the fixed constant so the
  * function stays pure and testable with 3 args; the runner call site passes
@@ -62,11 +83,20 @@ export function classifyRateLimitOutcome(
   failureReason: string | undefined,
   nowMs: number,
   codexCreditsExhaustedCooldownMs: number = CODEX_CREDITS_EXHAUSTED_COOLDOWN_MS,
+  taskModelFamily?: ModelFamily,
 ): RateLimitOutcome {
   const keyRateLimitedUntil = result.rateLimitResetAt
     ? new Date(clampMs(new Date(result.rateLimitResetAt).getTime(), nowMs)).toISOString()
     : undefined;
   const keyExtra = keyRateLimitedUntil ? { keyRateLimitedUntil } : {};
+
+  if (failureReason != null) {
+    const seatFamily = parseCreditsRequiredMessage(failureReason);
+    if (seatFamily) return { kind: "seat", model: seatFamily, source: "text", ...keyExtra };
+  }
+  if (result.creditsRequired && taskModelFamily) {
+    return { kind: "seat", model: taskModelFamily, source: "event", ...keyExtra };
+  }
 
   if (result.modelRateLimit) {
     const resetsAtSec = Math.floor(new Date(result.modelRateLimit.resetAt).getTime() / 1000);

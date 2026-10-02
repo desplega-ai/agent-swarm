@@ -1,12 +1,17 @@
 /**
- * Per-credential default model registry for the internal-ai abstraction.
+ * Per-credential model registries for the internal-ai abstraction.
  *
  * Plan: thoughts/taras/plans/2026-05-10-fix-session-summarization-workers.md
  * → Phase 0 § "models.ts"
  *
  * Model defaults are per credential kind, NOT per harness — every credential
- * kind has exactly one default model. Override via `MEMORY_RATER_MODEL` env
- * (kept for backwards-compat with the claude hook).
+ * kind has exactly one default model. Two registries live here and must stay
+ * independent:
+ *   - {@link DEFAULT_MODEL}: the general default (workflow LLM nodes). Bump it
+ *     freely.
+ *   - {@link MEMORY_RATER_DEFAULT_MODEL}: the pinned judge for session
+ *     summaries and `llm` memory ratings. Override via `MEMORY_RATER_MODEL`
+ *     env (kept for backwards-compat with the claude hook).
  */
 
 export type CredentialKind = "openrouter" | "anthropic" | "openai" | "openai-codex" | "claude-cli";
@@ -25,12 +30,33 @@ export const DEFAULT_MODEL: Record<CredentialKind, string> = {
 };
 
 /**
- * Resolve the effective model string for a credential kind. Honours the
- * `MEMORY_RATER_MODEL` env var so existing claude-hook users keep their
- * override (it pre-dates the per-kind registry).
+ * Per-credential model for the session-summary + `llm` memory rater.
+ *
+ * Pinned on purpose and deliberately NOT derived from {@link DEFAULT_MODEL}.
+ * Every `llm` rating is a judgement by this model, so changing it shifts the
+ * score distribution that memory ranking reads. Bumping `DEFAULT_MODEL` for
+ * another caller once swapped the judge unnoticed (Gemini 3 Flash to DeepSeek
+ * v4.1 Flash, 2026-09-23). Change an entry here only as a deliberate decision
+ * about the judge; each rating records the model that produced it in
+ * `memory_rating.model`.
  */
-export function resolveModelString(kind: CredentialKind): string {
-  return process.env.MEMORY_RATER_MODEL ?? DEFAULT_MODEL[kind];
+export const MEMORY_RATER_DEFAULT_MODEL: Record<CredentialKind, string> = {
+  openrouter: "openrouter/deepseek/deepseek-v4.1-flash",
+  anthropic: "anthropic/claude-haiku-4-5",
+  openai: "openai/gpt-6-luna",
+  "openai-codex": "openai-codex/gpt-6-luna",
+  "claude-cli": "haiku",
+};
+
+/**
+ * Resolve the model string the session-summary + `llm` memory rater uses for
+ * a credential kind. `MEMORY_RATER_MODEL` env wins (it pre-dates the per-kind
+ * registry and applies to every kind); otherwise the pinned
+ * {@link MEMORY_RATER_DEFAULT_MODEL}. Not for other callers: they read
+ * {@link DEFAULT_MODEL}.
+ */
+export function resolveRaterModelString(kind: CredentialKind): string {
+  return process.env.MEMORY_RATER_MODEL ?? MEMORY_RATER_DEFAULT_MODEL[kind];
 }
 
 /**

@@ -1,3 +1,8 @@
+import {
+  addDshStepUsage,
+  type DshStepUsage,
+  normalizeDshStepUsage,
+} from "../../../../src/utils/dsh-usage";
 import { asString, isRecord, makeItem, resultBlockText } from "./helpers";
 import { resultImages } from "./result-images";
 import type { DecodedRecord, LogRole, NormalizedItem } from "./types";
@@ -861,6 +866,215 @@ function emitOpencodeEvent(
       break;
     }
   }
+}
+
+// dsh names its file tools in lowercase; map them to the names the viewer
+// renders as file tools (icon + path detail).
+const DSH_TOOL_NAMES: Record<string, string> = {
+  read: "Read",
+  write: "Write",
+  edit: "Edit",
+  glob: "Glob",
+  grep: "Grep",
+  ls: "LS",
+};
+
+/**
+ * dsh (`dsh --json`) prints one flat event per line: `session`, `status`
+ * (turn_start / step_start / step_end / turn_end), `text`, `tool_call`,
+ * `tool_result`, `final`, `error`. The runner stores each line verbatim.
+ */
+export function normalizeDsh(ordered: DecodedRecord[]): NormalizedItem[] {
+  const items: NormalizedItem[] = [];
+  let turnUsage: DshStepUsage | undefined;
+  let turnSteps = 0;
+  let lastAssistantText: string | undefined;
+
+  for (const d of ordered) {
+    const ev = d.event;
+    if (isParseError(ev)) {
+      items.push(makeItem(d, "parse_error", { role: "system", raw: ev.raw }));
+      continue;
+    }
+    if (!isRecord(ev)) {
+      items.push(makeItem(d, "unknown", { role: "system", raw: ev }));
+      continue;
+    }
+
+    if (emitStderr(items, d, ev)) continue;
+
+    switch (ev.type) {
+      case "session": {
+        items.push(
+          makeItem(d, "lifecycle", { role: "system", meta: { ...ev, type: "session.started" } }),
+        );
+        break;
+      }
+      case "thinking": {
+        // Emitted once a reasoning block is committed, when an effort is set.
+        const text = dshText(ev.text, ev.truncated);
+        if (text) items.push(makeItem(d, "reasoning", { role: "assistant", text }));
+        break;
+      }
+      case "model": {
+        // Written by the swarm adapter, not dsh: the model the patch selected.
+        const effort = asString(ev.reasoningEffort);
+        const subtype = `${asString(ev.provider) ?? "?"} · ${asString(ev.model) ?? "?"}${effort ? ` · effort ${effort}` : ""}`;
+        items.push(
+          makeItem(d, "lifecycle", {
+            role: "system",
+            meta: { ...ev, type: "model.selected", subtype },
+          }),
+        );
+        break;
+      }
+      case "text": {
+        const text = dshText(ev.text, ev.truncated);
+        lastAssistantText = text;
+        items.push(makeItem(d, "text", { role: "assistant", text }));
+        break;
+      }
+      case "tool_call": {
+        const tool = asString(ev.tool) ?? "tool";
+        items.push(
+          makeItem(d, "tool_call", {
+            role: "assistant",
+            tool: {
+              id: String(ev.callId ?? ""),
+              name: DSH_TOOL_NAMES[tool] ?? tool,
+              input: ev.input ?? {},
+            },
+          }),
+        );
+        break;
+      }
+      case "tool_result": {
+        items.push(
+          makeItem(d, "tool_result", {
+            role: "user",
+            result: {
+              id: String(ev.callId ?? ""),
+              payload: dshText(ev.result, ev.truncated),
+              isError: ev.status === "error",
+            },
+          }),
+        );
+        break;
+      }
+      case "status": {
+        switch (ev.phase) {
+          case "turn_start": {
+            turnUsage = undefined;
+            turnSteps = 0;
+            items.push(
+              makeItem(d, "lifecycle", { role: "system", meta: { ...ev, type: "turn.started" } }),
+            );
+            break;
+          }
+          case "step_start":
+            // Carries only turn/step counters; step_end holds the usage.
+            break;
+          case "step_end": {
+            turnSteps += 1;
+            const step = normalizeDshStepUsage(ev.usage);
+            if (step) turnUsage = addDshStepUsage(turnUsage, step);
+            break;
+          }
+          case "turn_end": {
+            const reason = isRecord(ev.reason) ? ev.reason : {};
+            if (reason.kind === "completed") {
+              items.push(
+                makeItem(d, "lifecycle", {
+                  role: "system",
+                  meta: {
+                    ...ev,
+                    type: "turn.completed",
+                    // dsh steps are model calls; the cost sidebar counts turns.
+                    steps: turnSteps,
+                    usage: turnUsage && {
+                      // Codex-style: input includes the cached share.
+                      input_tokens: turnUsage.input + turnUsage.cacheRead + turnUsage.cacheWrite,
+                      cached_input_tokens: turnUsage.cacheRead,
+                      output_tokens: turnUsage.output,
+                    },
+                  },
+                }),
+              );
+            } else {
+              const error = isRecord(reason.error) ? reason.error : undefined;
+              const kind = asString(reason.kind) ?? "unknown";
+              items.push(
+                makeItem(d, "result", {
+                  role: "system",
+                  meta: {
+                    ...ev,
+                    type: "dsh_turn_error",
+                    subtype: kind,
+                    isError: true,
+                    output: asString(error?.message) ?? `dsh turn ended: ${kind}`,
+                    usage: turnUsage && {
+                      input_tokens: turnUsage.input,
+                      cache_read_input_tokens: turnUsage.cacheRead,
+                      ...(turnUsage.cacheWrite > 0
+                        ? { cache_creation_input_tokens: turnUsage.cacheWrite }
+                        : {}),
+                      output_tokens: turnUsage.output,
+                    },
+                  },
+                }),
+              );
+            }
+            turnUsage = undefined;
+            turnSteps = 0;
+            break;
+          }
+          default: {
+            items.push(makeItem(d, "unknown", { role: "system", raw: ev }));
+          }
+        }
+        break;
+      }
+      case "final": {
+        const text = asString(ev.text) ?? "";
+        // An errored turn ends with an empty final (the error row already says
+        // why), and a normal one repeats the last assistant text. Only a final
+        // that adds something gets its own row.
+        if (!text || text === lastAssistantText) break;
+        items.push(
+          makeItem(d, "result", {
+            role: "system",
+            meta: { ...ev, type: "dsh_final", subtype: "success", output: text },
+          }),
+        );
+        break;
+      }
+      case "error": {
+        items.push(
+          makeItem(d, "result", {
+            role: "system",
+            meta: {
+              ...ev,
+              type: "dsh_error",
+              subtype: "error",
+              isError: true,
+              output: asString(ev.message) ?? "dsh error",
+            },
+          }),
+        );
+        break;
+      }
+      default: {
+        items.push(makeItem(d, "unknown", { role: "system", raw: ev }));
+      }
+    }
+  }
+
+  return items;
+}
+
+function dshText(value: unknown, truncated: unknown): string {
+  const text = typeof value === "string" ? value : resultBlockText(value);
+  return truncated === true ? `${text}\n… [truncated by dsh]` : text;
 }
 
 function hasPresentInput(input: unknown): boolean {
