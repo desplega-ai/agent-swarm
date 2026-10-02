@@ -15,8 +15,14 @@ import { API_DRAIN_MAX_MS_LIMIT } from "../utils/api-drain";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { getDbClient } from "./db";
 
-/** Default cap on the wait for worker handoffs. `API_DRAIN_MAX_MS=0` disables the drain. */
-export const DEFAULT_API_DRAIN_MAX_MS = 30_000;
+/**
+ * Default cap on the wait for worker handoffs: `0`, the drain is off. It is
+ * opt-in because it makes every live worker supersede its in-flight tasks on
+ * any API SIGTERM, including an API-only restart where those tasks would
+ * otherwise keep running. A deploy that stops the API and the workers together
+ * sets `API_DRAIN_MAX_MS` (e.g. `30000`) to turn it on.
+ */
+export const DEFAULT_API_DRAIN_MAX_MS = 0;
 const DRAIN_CHECK_INTERVAL_MS = 500;
 /**
  * A worker pings every few seconds. One silent for longer than this is not
@@ -43,8 +49,8 @@ export function resetApiDrainForTesting(): void {
 }
 
 /**
- * `API_DRAIN_MAX_MS`, or the default when unset or invalid, capped at
- * `API_DRAIN_MAX_MS_LIMIT`. `0` disables the drain.
+ * `API_DRAIN_MAX_MS`, capped at `API_DRAIN_MAX_MS_LIMIT`. Unset, empty, or
+ * invalid means `DEFAULT_API_DRAIN_MAX_MS` (`0`, the drain is off).
  */
 export function resolveApiDrainMaxMs(
   env: Record<string, string | undefined> = process.env,
@@ -90,7 +96,7 @@ export interface ApiDrainDeps {
 }
 
 export interface ApiDrainOutcome {
-  /** False when `API_DRAIN_MAX_MS=0`: the API did not enter the draining state. */
+  /** False when the cap is `0` (the default): the API did not enter the draining state. */
   enabled: boolean;
   /** Live in-flight tasks seen when the drain began. */
   inFlight: number;
@@ -115,7 +121,7 @@ export async function drainApi(deps: ApiDrainDeps = {}): Promise<ApiDrainOutcome
   const startedAt = now();
 
   if (maxMs === 0) {
-    log("[drain] API_DRAIN_MAX_MS=0: drain disabled, closing without waiting for handoffs");
+    log("[drain] off (API_DRAIN_MAX_MS is 0 or unset): closing without waiting for handoffs");
     return { enabled: false, inFlight: 0, remaining: 0, waitedMs: 0, timedOut: false };
   }
 

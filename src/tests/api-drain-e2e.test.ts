@@ -4,6 +4,7 @@
  * header, dispatch nothing, and exit as soon as the worker has handed the task
  * off, not at the cap.
  */
+import { Database } from "bun:sqlite";
 import { afterEach, describe, expect, test } from "bun:test";
 import { rm, unlink } from "node:fs/promises";
 import type { Subprocess } from "bun";
@@ -23,28 +24,32 @@ interface Api {
 
 const booted: Api[] = [];
 
-async function bootApi(env: Record<string, string>): Promise<Api> {
+/** An `undefined` value removes the key from the inherited environment. */
+async function bootApi(env: Record<string, string | undefined>): Promise<Api> {
   const port = await getFreePort();
   const stamp = `${Date.now()}-${port}`;
   const dbPath = `/tmp/test-api-drain-${stamp}.sqlite`;
   const fsDir = `/tmp/test-api-drain-fs-${stamp}`;
+  const childEnv: Record<string, string | undefined> = {
+    ...process.env,
+    PORT: String(port),
+    DATABASE_PATH: dbPath,
+    API_KEY,
+    AGENT_FS_LOCAL_DIR: fsDir,
+    AGENT_FS_API_URL: "",
+    API_AGENT_FS_API_KEY: "",
+    AGENT_FS_API_KEY: "",
+    CAPABILITIES: "core,task-pool,messaging,profiles,services,memory",
+    SLACK_BOT_TOKEN: "",
+    GITHUB_WEBHOOK_SECRET: "",
+    AGENTMAIL_API_KEY: "",
+    ...env,
+  };
+  for (const [key, value] of Object.entries(childEnv))
+    if (value === undefined) delete childEnv[key];
   const proc = Bun.spawn(["bun", "src/http.ts"], {
     cwd: `${import.meta.dir}/../..`,
-    env: {
-      ...process.env,
-      PORT: String(port),
-      DATABASE_PATH: dbPath,
-      API_KEY,
-      AGENT_FS_LOCAL_DIR: fsDir,
-      AGENT_FS_API_URL: "",
-      API_AGENT_FS_API_KEY: "",
-      AGENT_FS_API_KEY: "",
-      CAPABILITIES: "core,task-pool,messaging,profiles,services,memory",
-      SLACK_BOT_TOKEN: "",
-      GITHUB_WEBHOOK_SECRET: "",
-      AGENTMAIL_API_KEY: "",
-      ...env,
-    },
+    env: childEnv as Record<string, string>,
     stdout: "pipe",
     stderr: "pipe",
   });
@@ -179,6 +184,36 @@ describe("API drain, real process", () => {
       const log = await api.stdout;
       expect(log).toContain("[drain] draining: waiting up to 30000ms for 1 in-flight task(s)");
       expect(log).toContain("[drain] all 1 in-flight task(s) handed off");
+    },
+    BOOT_TIMEOUT_MS,
+  );
+
+  test(
+    "unset API_DRAIN_MAX_MS: the drain is off, an in-flight task does not hold the API",
+    async () => {
+      const api = await bootApi({ API_DRAIN_MAX_MS: undefined });
+      const { taskId } = await seedInFlight(api);
+
+      const signalledAt = Date.now();
+      api.proc.kill("SIGTERM");
+
+      // It closes on its own, well inside the 30 s a drain would have waited.
+      expect(await exitedWithin(api, 15_000)).toBe(0);
+      expect(Date.now() - signalledAt).toBeLessThan(15_000);
+      const log = await api.stdout;
+      expect(log).toContain("[drain] off (API_DRAIN_MAX_MS is 0 or unset)");
+      expect(log).not.toContain("[drain] draining");
+
+      // The worker's task was not handed off. Read the DB the dead API left behind.
+      const db = new Database(api.dbPath, { readonly: true });
+      try {
+        const row = db.query("SELECT status FROM agent_tasks WHERE id = ?").get(taskId) as {
+          status: string;
+        } | null;
+        expect(row?.status).toBe("in_progress");
+      } finally {
+        db.close();
+      }
     },
     BOOT_TIMEOUT_MS,
   );

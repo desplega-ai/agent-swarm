@@ -491,7 +491,7 @@ Pseudocode (current):
 
 ```
 # API, on SIGTERM / SIGINT, after stopping scheduler / heartbeat / queue alarm:
-cap = API_DRAIN_MAX_MS (default 30000, max 120000, 0 = skip the whole drain)
+cap = API_DRAIN_MAX_MS (default 0 = skip the whole drain; unset, empty, or invalid also means 0; max 120000)
 draining = true                                # process-local; a new API process starts false
 ids = in_progress tasks whose agent is not offline and whose agents.lastUpdatedAt is < 30s old
 loop until count(ids still in_progress) == 0 or cap passed: sleep 500ms
@@ -521,6 +521,7 @@ Notes:
 
 - The wait only covers tasks held by workers that pinged in the last 30s. A silent worker's tasks belong to the heartbeat sweep.
 - Workers older than this feature ignore the header, so the API waits the full cap when one holds a task.
+- The drain is opt-in. Enabled, it also fires on an API-only restart (pm2, a Helm roll of the API Deployment, `docker restart`): live workers supersede their in-flight tasks, which would otherwise keep running. Set it only where the API and the workers stop together.
 - `API_DRAIN_MAX_MS` plus the API's close time must stay under the orchestrator's stop grace period for the API.
 
 ---
@@ -559,7 +560,7 @@ Rollback switches accept `0`/`false` interchangeably (both parse through
 | Same-agent graceful-shutdown pin, rollback (`0` = off) | on | `HEARTBEAT_PIN_GRACEFUL_RESUME` |
 | Routing-affinity pool eligibility gate, rollback (`0` = off) | on | `POOL_AFFINITY_ENFORCEMENT` |
 | Pool-starvation escalation grace | 15 min | `POOL_AFFINITY_ESCALATION_MIN` |
-| API drain cap on SIGTERM (§5a; `0` = off, max 120s) | 30s | `API_DRAIN_MAX_MS` |
+| API drain cap on SIGTERM (§5a; opt-in, `0` = off, max 120s) | off (`0`) | `API_DRAIN_MAX_MS` |
 | `autoAssignPoolTasks` pool-scan page size | 50 | `HEARTBEAT_POOL_SCAN_BATCH_SIZE` |
 | `autoAssignPoolTasks` pool-scan hard cap (rows/sweep) | 500 | `HEARTBEAT_POOL_SCAN_CAP` |
 | `getUnassignedTaskIdsForAgent` eligibility-scan page size | 25 | `ELIGIBILITY_SCAN_BATCH_SIZE` |

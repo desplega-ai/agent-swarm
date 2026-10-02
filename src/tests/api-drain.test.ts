@@ -134,11 +134,13 @@ describe("drain state", () => {
     expect(isApiDraining()).toBe(false);
   });
 
-  test("API_DRAIN_MAX_MS: default when unset or invalid, 0 disables", () => {
-    expect(resolveApiDrainMaxMs({})).toBe(DEFAULT_API_DRAIN_MAX_MS);
-    expect(resolveApiDrainMaxMs({ API_DRAIN_MAX_MS: "" })).toBe(DEFAULT_API_DRAIN_MAX_MS);
-    expect(resolveApiDrainMaxMs({ API_DRAIN_MAX_MS: "abc" })).toBe(DEFAULT_API_DRAIN_MAX_MS);
-    expect(resolveApiDrainMaxMs({ API_DRAIN_MAX_MS: "-5" })).toBe(DEFAULT_API_DRAIN_MAX_MS);
+  test("API_DRAIN_MAX_MS: opt-in, so unset, empty, or invalid means 0 (off)", () => {
+    expect(DEFAULT_API_DRAIN_MAX_MS).toBe(0);
+    expect(resolveApiDrainMaxMs({})).toBe(0);
+    expect(resolveApiDrainMaxMs({ API_DRAIN_MAX_MS: "" })).toBe(0);
+    expect(resolveApiDrainMaxMs({ API_DRAIN_MAX_MS: "  " })).toBe(0);
+    expect(resolveApiDrainMaxMs({ API_DRAIN_MAX_MS: "abc" })).toBe(0);
+    expect(resolveApiDrainMaxMs({ API_DRAIN_MAX_MS: "-5" })).toBe(0);
     expect(resolveApiDrainMaxMs({ API_DRAIN_MAX_MS: "0" })).toBe(0);
     expect(resolveApiDrainMaxMs({ API_DRAIN_MAX_MS: "5000" })).toBe(5000);
   });
@@ -171,26 +173,29 @@ describe("drainApi", () => {
     };
   }
 
-  test("disabled: does not enter the draining state and reads nothing", async () => {
-    let reads = 0;
-    const outcome = await drainApi({
-      env: { API_DRAIN_MAX_MS: "0" },
-      log: () => {},
-      listInFlight: async () => {
-        reads++;
-        return [];
-      },
-    });
-    expect(outcome.enabled).toBe(false);
-    expect(isApiDraining()).toBe(false);
-    expect(reads).toBe(0);
+  test("off: does not enter the draining state and reads nothing", async () => {
+    // Unset is the default and must behave exactly like an explicit 0.
+    for (const env of [{}, { API_DRAIN_MAX_MS: "0" }, { API_DRAIN_MAX_MS: "garbage" }]) {
+      let reads = 0;
+      const outcome = await drainApi({
+        env,
+        log: () => {},
+        listInFlight: async () => {
+          reads++;
+          return ["in-flight"];
+        },
+      });
+      expect(outcome.enabled).toBe(false);
+      expect(isApiDraining()).toBe(false);
+      expect(reads).toBe(0);
+    }
   });
 
   test("no in-flight tasks: drains at once without waiting", async () => {
     const clock = fakeClock();
     const outcome = await drainApi({
       ...clock,
-      env: {},
+      env: { API_DRAIN_MAX_MS: "30000" },
       log: () => {},
       listInFlight: async () => [],
     });
@@ -233,7 +238,7 @@ describe("drainApi", () => {
     const clock = fakeClock();
     const outcome = await drainApi({
       ...clock,
-      env: {},
+      env: { API_DRAIN_MAX_MS: "30000" },
       log: (line) => lines.push(line),
       listInFlight: async () => {
         throw new Error("database is locked");
