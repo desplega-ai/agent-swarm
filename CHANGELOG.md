@@ -6,6 +6,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.161.0] - 2026-10-02
+
+### Added
+- Azure DevOps integration: Azure Repos pull-request service hooks create swarm tasks from bot mentions (#1812).
+- Claude harness accepts gateway, Microsoft Foundry, Amazon Bedrock and Google Vertex routes (#1816).
+- Extensions: opt-in inline install for leads, the operator and dashboard users behind `EXTENSION_ALLOW_INLINE_INSTALL` (#1828), and a deploy-awareness catalog extension (#1826).
+- Memory: logical paths under `/longterm` via `key`, `newKey`, `keyPrefix` and path weight (#1814).
+- DB retention: count-based retention for `context_versions` via `CONTEXT_VERSIONS_KEEP_LATEST` (#1808).
+- pi: `PI_CODEMODE_MODELS` flag lets codemode scripts call pi's `models` API (#1824).
+- E2E: the Slack rendering preview comment collapses into one dropdown (#1817).
+
+### Changed
+- Harnesses bumped: Claude Code 2.1.287 with claude-agent-sdk 0.3.287, pi 1.0.0, codex 0.160.0 (#1825); ACP SDK 1.6.0 (#1811).
+- claude-managed migrated to `@anthropic-ai/sdk` ^0.131.0 (#1805).
+- Docs: open-prompt showreel videos playbook (#1809).
+
+### Fixed
+- Runner frees a worker slot when the provider session never settles (#1820), and reports pi CLI versions while clearing stale harness versions (#1821).
+- Unknown MCP session ids get a 404 so clients reconnect (#1822).
+- Azure DevOps payloads missing resource fields are acknowledged instead of returning 500 (#1823).
+- Claude sends the task body once in the first message (#1815).
+- GitHub pings get a 👀 reaction via `GITHUB_TOKEN` when no GitHub App is installed (#1813).
+- dsh: MCP, failure path, sandbox, cost and context, effort, runtime editing (#1810), readable progress and one usage normalization with no phantom cost drift (#1818).
+- Memory: a blank `referencesSource` is accepted instead of rejecting the whole summary (#1807); the rater model is pinned and recorded per rating (#1806).
+
 ## [1.160.0] - 2026-10-01
 
 ### Added
