@@ -72,9 +72,20 @@ jobs:
             echo "Version unchanged: $NEW_VERSION"
           fi
 
+  # Supersede: the merge queue lands each PR of a group as its own main commit, a
+  # few seconds apart, and each push starts this workflow. All six build jobs sit
+  # in a per-ref concurrency group with cancel-in-progress, so a newer run cancels
+  # an older run's builds, and with them its merge, deploy and notify jobs. Only
+  # the newest run builds and deploys. A run that bumps package.json's version is
+  # the only one that sees the bump (detect-version-change diffs against
+  # github.event.before), so it gets a group of its own and is never cancelled:
+  # its :VERSION images, git tag, npm, E2B and GitHub release all still publish.
   build-and-push-server-amd64:
     runs-on: ubuntu-latest
     needs: [detect-version-change]
+    concurrency:
+      group: ${{ needs.detect-version-change.outputs.version_changed == 'true' && format('docker-release-{0}-server-amd64', github.run_id) || format('docker-build-{0}-server-amd64', github.ref) }}
+      cancel-in-progress: true
     permissions:
       contents: read
       packages: write
@@ -116,6 +127,9 @@ jobs:
   build-and-push-server-arm64:
     runs-on: ubuntu-24.04-arm
     needs: [detect-version-change]
+    concurrency:
+      group: ${{ needs.detect-version-change.outputs.version_changed == 'true' && format('docker-release-{0}-server-arm64', github.run_id) || format('docker-build-{0}-server-arm64', github.ref) }}
+      cancel-in-progress: true
     permissions:
       contents: read
       packages: write
@@ -207,6 +221,9 @@ jobs:
   build-and-push-worker-amd64:
     runs-on: ubuntu-latest
     needs: [detect-version-change]
+    concurrency:
+      group: ${{ needs.detect-version-change.outputs.version_changed == 'true' && format('docker-release-{0}-worker-amd64', github.run_id) || format('docker-build-{0}-worker-amd64', github.ref) }}
+      cancel-in-progress: true
     permissions:
       contents: read
       packages: write
@@ -249,6 +266,9 @@ jobs:
   build-and-push-worker-arm64:
     runs-on: ubuntu-24.04-arm
     needs: [detect-version-change]
+    concurrency:
+      group: ${{ needs.detect-version-change.outputs.version_changed == 'true' && format('docker-release-{0}-worker-arm64', github.run_id) || format('docker-build-{0}-worker-arm64', github.ref) }}
+      cancel-in-progress: true
     permissions:
       contents: read
       packages: write
@@ -344,6 +364,9 @@ jobs:
   build-and-push-worker-slim-amd64:
     runs-on: ubuntu-latest
     needs: [detect-version-change]
+    concurrency:
+      group: ${{ needs.detect-version-change.outputs.version_changed == 'true' && format('docker-release-{0}-worker-slim-amd64', github.run_id) || format('docker-build-{0}-worker-slim-amd64', github.ref) }}
+      cancel-in-progress: true
     permissions:
       contents: read
       packages: write
@@ -389,6 +412,9 @@ jobs:
   build-and-push-worker-slim-arm64:
     runs-on: ubuntu-24.04-arm
     needs: [detect-version-change]
+    concurrency:
+      group: ${{ needs.detect-version-change.outputs.version_changed == 'true' && format('docker-release-{0}-worker-slim-arm64', github.run_id) || format('docker-build-{0}-worker-slim-arm64', github.ref) }}
+      cancel-in-progress: true
     permissions:
       contents: read
       packages: write
@@ -543,6 +569,8 @@ jobs:
     # SHA/version publication stay parallel; stale runs cannot roll these tags back.
     if: github.ref == 'refs/heads/main'
     permissions:
+      # actions: read lets the Slack step read the run start time.
+      actions: read
       contents: read
       packages: write
     concurrency:
@@ -552,11 +580,16 @@ jobs:
       cancel-in-progress: false
 
     needs:
+      - detect-version-change
       - merge-server
       - merge-worker
       - merge-worker-slim
 
     steps:
+      - name: Record start time
+        id: start
+        run: echo "epoch=$(date +%s)" >> "$GITHUB_OUTPUT"
+
       - name: Checkout
         id: checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -591,6 +624,21 @@ jobs:
             echo "::notice::Skipping tag promotion and deploy because a newer main commit is available: ${main_tip}"
           fi
 
+      # Read before promotion: the commit :latest points at now is the previous
+      # deploy, which bounds the change list in the Slack notification.
+      - name: Read previous deployed revision
+        id: prev
+        if: steps.guard.outputs.is_tip == 'true'
+        continue-on-error: true
+        env:
+          API_IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+        run: |
+          set -euo pipefail
+          sha="$(docker buildx imagetools inspect "${API_IMAGE}:latest" --format '{{json .Image}}' \
+            | jq -r '(.["linux/amd64"] // .) | .config.Labels["org.opencontainers.image.revision"] // empty')"
+          echo "Previous :latest revision: ${sha:-unknown}"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
       - name: Promote moving tags
         if: steps.guard.outputs.is_tip == 'true'
         env:
@@ -623,6 +671,74 @@ jobs:
           DOKPLOY_COMPOSE_ID: u-iCRBK0Ta-pOedSaTjqc
           DOKPLOY_TOKEN: ${{ secrets.DOKPLOY_TOKEN }}
         run: bun scripts/dokploy-deploy.ts
+
+      # Posts the deploy outcome to the deploys channel through a Slack incoming
+      # webhook (bound to its channel when the webhook is created). Runs on success,
+      # failure and cancel, but not when the guard skipped the deploy. No secret means
+      # no post, so this never blocks a deploy; a failed post only logs a warning.
+      - name: Notify Slack
+        if: always() && steps.guard.outputs.is_tip != 'false'
+        continue-on-error: true
+        env:
+          WEBHOOK: ${{ secrets.DEPLOY_SLACK_WEBHOOK_URL }}
+          GH_TOKEN: ${{ github.token }}
+          STATUS: ${{ job.status }}
+          VERSION: ${{ needs.detect-version-change.outputs.version }}
+          PREV_SHA: ${{ steps.prev.outputs.sha }}
+          STARTED: ${{ steps.start.outputs.epoch }}
+        run: |
+          set -uo pipefail
+
+          if [ -z "$WEBHOOK" ]; then
+            echo "::notice::DEPLOY_SLACK_WEBHOOK_URL is not set; skipping the Slack deploy notification"
+            exit 0
+          fi
+
+          repo_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}"
+          run_url="${repo_url}/actions/runs/${GITHUB_RUN_ID}"
+          case "$STATUS" in
+            success) headline=":white_check_mark: *agent-swarm deploy succeeded*" ;;
+            cancelled) headline=":heavy_minus_sign: *agent-swarm deploy cancelled*" ;;
+            *) headline=":x: *agent-swarm deploy failed*" ;;
+          esac
+
+          fmt() { if [ "$1" -ge 60 ]; then echo "$(($1 / 60))m $(($1 % 60))s"; else echo "$1s"; fi; }
+          now="$(date +%s)"
+          durations="deploy job $(fmt $((now - ${STARTED:-$now})))"
+          run_started="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" --jq .run_started_at 2>/dev/null || true)"
+          if [ -n "$run_started" ]; then
+            durations="${durations}, whole run $(fmt $((now - $(date -d "$run_started" +%s))))"
+          fi
+
+          # Commits between the image :latest pointed at before this deploy and this
+          # one, newest first, with "(#123)" turned into PR links.
+          changes=""
+          if [[ "$PREV_SHA" =~ ^[0-9a-f]{40}$ ]] && [ "$PREV_SHA" != "$GITHUB_SHA" ]; then
+            changes="$(gh api "repos/${GITHUB_REPOSITORY}/compare/${PREV_SHA}...${GITHUB_SHA}" | jq -r --arg url "$repo_url" '
+              def esc: gsub("&"; "&amp;") | gsub("<"; "&lt;") | gsub(">"; "&gt;");
+              select(.status == "ahead")
+              | "Changes since <\($url)/commit/\(.base_commit.sha)|\(.base_commit.sha[0:7])> (\(.total_commits)):",
+                ((.commits | reverse)[:15][]
+                  | "• <\($url)/commit/\(.sha)|\(.sha[0:7])> "
+                    + (.commit.message | split("\n")[0] | esc
+                       | gsub("\\(#(?<n>[0-9]+)\\)"; "(<\($url)/pull/\(.n)|#\(.n)>)"))),
+                (if .total_commits > 15 then "…and \(.total_commits - 15) more" else empty end)
+            ' 2>/dev/null || true)"
+          fi
+
+          text="${headline}: v${VERSION} <${repo_url}/commit/${GITHUB_SHA}|${GITHUB_SHA:0:7}>"
+          text="${text}"$'\n'"Duration: ${durations} · <${run_url}|workflow run>"
+          if [ -n "$changes" ]; then
+            text="${text}"$'\n'"${changes}"
+          fi
+
+          payload="$(jq -n --arg text "$text" '{text: $text, unfurl_links: false, unfurl_media: false}')"
+          if curl -sS --fail-with-body --max-time 20 -H 'content-type: application/json' --data "$payload" "$WEBHOOK"; then
+            echo
+            echo "::notice::Posted the deploy outcome (${STATUS}) to Slack"
+          else
+            echo "::warning::Slack deploy notification failed; the deploy result is unaffected"
+          fi
 
   notify-image-release:
     name: Notify Swarm Cloud image release
