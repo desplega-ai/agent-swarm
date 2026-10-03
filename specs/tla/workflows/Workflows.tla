@@ -35,7 +35,8 @@ CONSTANTS
   FixConcurrentJoin, \* F3: step insert skips a node already completed, waiting, or running in this process
   FixUserRetryLive,  \* F5: user retry skips a node whose step is running or waiting (resume.ts retryFailedRun)
   FixRecoveryRetry,  \* F4: recovery does not re-walk a node that is pending retry / held by the poller
-  FixJoinWaitsLive   \* F6: join waits for a branch whose latest step is live or not inserted; finalizers leave a run with a running step to its walker
+  FixJoinWaitsLive,  \* F6: join waits for a branch whose latest step is live or not inserted; finalizers leave a run with a running step to its walker
+  FixTaskRetry       \* F7 (#1832): a failed agent task honors node.retry (task.failed handler and recovery sweep), fenced on the task still bound to the step; finalizeOrWait counts retry-pending rows as live
 
 ASSUME MaxRetries >= 1 /\ BranchOutcomes \subseteq {"ok", "fail", "async"}
 
@@ -50,18 +51,22 @@ Edges(S) == {e \in Nodes \X Nodes : e[1] \in S /\ e[2] \in Succ(e[1])}
 RunTerminal == {"completed", "failed", "cancelled"}
 StepTerminal == {"completed", "failed", "cancelled"}
 
-\* Thread ids. Events: one handler thread per step row that owns a task.
+\* Thread ids. Events: one handler thread per (step row, task generation).
+\* F7: a retried agent-task step binds a fresh task to the same row, so a row
+\* dispatches at most 1 + MaxRetries tasks and each gets its own handler.
 TInit == 1
 TPoll == 2
 THb == 3
 TCancel == 4
 TRetry == 5
-Ev(i) == 10 + i
-Threads == {TInit, TPoll, THb, TCancel, TRetry} \cup {Ev(i) : i \in 1..MaxSteps}
+Gens == 1..(MaxRetries + 1)
+Ev(i, g) == 10 + (i - 1) * (MaxRetries + 1) + g
+EvThreads == {Ev(i, g) : i \in 1..MaxSteps, g \in Gens}
+Threads == {TInit, TPoll, THb, TCancel, TRetry} \cup EvThreads
 
 VARIABLES
   run,       \* workflow_runs.status
-  steps,     \* workflow_run_steps rows: [node, st, rc, nra, task]
+  steps,     \* workflow_run_steps rows: [node, st, rc, nra, task, tg]
   thr,       \* per-thread program counter + locals
   active,    \* activeWalks.get(runId) (process-local, engine.ts:203)
   execLive,  \* executor.run calls in flight per node (process-local)
@@ -73,9 +78,15 @@ vars == <<run, steps, thr, active, execLive, okCount, hbLeft, crashes>>
 
 Idle == [pc |-> "idle", ret |-> "idle", pend |-> {}, cur |-> "T", sid |-> 0,
          done |-> {}, edges |-> {}, nxt |-> {}, ex |-> {}, hasW |-> FALSE,
-         R |-> {}, rs |-> "running", rc |-> 0]
+         R |-> {}, rs |-> "running", rc |-> 0, g |-> 0]
 
 StepIds == DOMAIN steps
+\* F7: task generation `g` of row i is still the task bound to it
+\* (task-step-routing.ts isTaskBoundToStep). `tg` counts dispatches; a retry
+\* detaches the failed task (task = "none") and the poller binds a new one.
+Bound(i, g) == steps[i].tg = g /\ steps[i].task # "none"
+\* A task-step retry claim: failed, retryCount+1, nextRetryAt set, task detached.
+RetryRow(i) == [steps[i] EXCEPT !.st = "failed", !.rc = @ + 1, !.nra = TRUE, !.task = "none"]
 NodesWith(s) == {steps[i].node : i \in {j \in StepIds : steps[j].st = s}}
 \* Retry-pending rows: status failed with nextRetryAt set.
 PendingRetry(i) == steps[i].st = "failed" /\ steps[i].nra
@@ -179,7 +190,7 @@ XDedup(t) ==
                        !.hasW = @ \/ n \notin NodesWith("completed")])
           /\ UNCHANGED <<steps, execLive>>
      ELSE /\ steps' = Append(steps, [node |-> n, st |-> "running", rc |-> 0,
-                                      nra |-> FALSE, task |-> "none"])
+                                      nra |-> FALSE, task |-> "none", tg |-> 0])
           /\ execLive' = [execLive EXCEPT ![n] = @ + 1]
           /\ SetT(t, [thr[t] EXCEPT !.pc = "xRun", !.sid = Len(steps) + 1])
   /\ UNCHANGED <<run, active, okCount, hbLeft, crashes>>
@@ -193,7 +204,7 @@ XRun(t) ==
           CASE o = "ok" -> SetT(t, [thr[t] EXCEPT !.pc = "xCkOk"]) /\ UNCHANGED steps
             [] o = "fail" -> SetT(t, [thr[t] EXCEPT !.pc = "xFail"]) /\ UNCHANGED steps
             [] o = "async" ->
-                 /\ steps' = [steps EXCEPT ![thr[t].sid].task = "run"]
+                 /\ steps' = [steps EXCEPT ![thr[t].sid].task = "run", ![thr[t].sid].tg = @ + 1]
                  /\ SetT(t, [thr[t] EXCEPT !.pc = "xCkWait"])
   /\ UNCHANGED <<run, active, okCount, hbLeft, crashes>>
 
@@ -355,7 +366,7 @@ P5 ==
        CASE o = "ok" -> SetT(TPoll, [thr[TPoll] EXCEPT !.pc = "p6"]) /\ UNCHANGED steps
          [] o = "fail" -> SetT(TPoll, [thr[TPoll] EXCEPT !.pc = "p7"]) /\ UNCHANGED steps
          [] o = "async" ->
-              /\ steps' = [steps EXCEPT ![thr[TPoll].sid].task = "run"]
+              /\ steps' = [steps EXCEPT ![thr[TPoll].sid].task = "run", ![thr[TPoll].sid].tg = @ + 1]
               /\ SetT(TPoll, [thr[TPoll] EXCEPT !.pc = "p8"])
   /\ UNCHANGED <<run, active, okCount, hbLeft, crashes>>
 
@@ -483,43 +494,61 @@ H4 ==
   /\ SetT(THb, [thr[THb] EXCEPT !.pc = "h5"])
   /\ UNCHANGED <<steps, active, execLive, okCount, hbLeft, crashes>>
 
-\* H5 recovery.ts:121 getStuckWorkflowRuns — waiting steps whose task is terminal.
+\* H5 recovery.ts:165 getStuckWorkflowRuns — waiting steps whose task is terminal.
+\* Snapshot rows <<step, task generation, task status>>.
 H5 ==
   /\ thr[THb].pc = "h5"
   /\ SetT(THb, [thr[THb] EXCEPT !.pc = "h6",
                  !.R = IF run = "waiting"
-                       THEN {i \in StepIds : steps[i].st = "waiting" /\ steps[i].task \in {"ok", "fail"}}
+                       THEN {<<i, steps[i].tg, steps[i].task>> :
+                               i \in {j \in StepIds : steps[j].st = "waiting" /\ steps[j].task \in {"ok", "fail"}}}
                        ELSE {}])
   /\ UNCHANGED <<run, steps, active, execLive, okCount, hbLeft, crashes>>
 
-\* H6 recovery.ts:124-128 — next stuck row; getWorkflowRun must be waiting.
+\* H6 recovery.ts:169-174 — next stuck row; getWorkflowRun must be waiting.
 H6 ==
   /\ thr[THb].pc = "h6"
   /\ IF thr[THb].R = {}
      THEN SetT(THb, [thr[THb] EXCEPT !.pc = "hIdle"])
-     ELSE \E i \in thr[THb].R :
-            SetT(THb, [thr[THb] EXCEPT !.R = @ \ {i}, !.sid = i, !.cur = steps[i].node,
+     ELSE \E r \in thr[THb].R :
+            SetT(THb, [thr[THb] EXCEPT !.R = @ \ {r}, !.sid = r[1], !.g = r[2], !.cur = steps[r[1]].node,
                         !.pc = IF run # "waiting" THEN "h6"
-                               ELSE IF steps[i].task = "fail" THEN "h7" ELSE "h8"])
+                               ELSE IF r[3] = "fail" THEN (IF FixTaskRetry THEN "h7r" ELSE "h7")
+                               ELSE "h8"])
   /\ UNCHANGED <<run, steps, active, execLive, okCount, hbLeft, crashes>>
 
-\* H7 recovery.ts:138 -> task-step-routing.ts:24-45 failStepAndRunIfWaiting.
+\* H7R F7 recovery.ts:175-192 -> task-step-routing.ts scheduleTaskStepRetry:
+\* one transaction; claim the step while waiting AND bound to the snapshot's
+\* task; retries left -> queue for the poller; exhausted -> fall through to H7.
+H7R ==
+  /\ thr[THb].pc = "h7r"
+  /\ LET i == thr[THb].sid IN
+     IF steps[i].st = "waiting" /\ Bound(i, thr[THb].g)
+     THEN IF steps[i].rc < MaxRetries
+          THEN /\ steps' = [steps EXCEPT ![i] = RetryRow(i)]
+               /\ SetT(THb, [thr[THb] EXCEPT !.pc = "h6"])
+          ELSE SetT(THb, [thr[THb] EXCEPT !.pc = "h7"]) /\ UNCHANGED steps
+     ELSE SetT(THb, [thr[THb] EXCEPT !.pc = "h6"]) /\ UNCHANGED steps
+  /\ UNCHANGED <<run, active, execLive, okCount, hbLeft, crashes>>
+
+\* H7 recovery.ts:200 -> task-step-routing.ts:46-70 failStepAndRunIfWaiting.
+\* F7: fenced on the snapshot's task still being bound (ownerTaskId).
 H7 ==
   /\ thr[THb].pc = "h7"
   /\ LET i == thr[THb].sid IN
-     IF steps[i].st = "waiting"
+     IF steps[i].st = "waiting" /\ (FixTaskRetry => Bound(i, thr[THb].g))
      THEN steps' = [steps EXCEPT ![i].st = "failed"] /\ run' = "failed"
      ELSE UNCHANGED <<steps, run>>
   /\ SetT(THb, [thr[THb] EXCEPT !.pc = "h6"])
   /\ UNCHANGED <<active, execLive, okCount, hbLeft, crashes>>
 
-\* H8 recovery.ts:155-179 — claim (completeTaskStepAndResolveSuccessors),
-\* then always walkGraph(successors), even when empty.
+\* H8 recovery.ts:222-239 — claim (completeTaskStepAndResolveSuccessors),
+\* then always walkGraph(successors), even when empty. F7: ownerTaskId fence.
 H8 ==
   /\ thr[THb].pc = "h8"
   /\ LET i == thr[THb].sid
          n == thr[THb].cur IN
-     IF steps[i].st = "waiting"
+     IF steps[i].st = "waiting" /\ (FixTaskRetry => Bound(i, thr[THb].g))
      THEN /\ steps' = [steps EXCEPT ![i].st = "completed"]
           /\ okCount' = [okCount EXCEPT ![n] = @ + 1]
           /\ run' = "running"
@@ -528,7 +557,7 @@ H8 ==
           /\ UNCHANGED <<steps, okCount, run, active>>
   /\ UNCHANGED <<execLive, hbLeft, crashes>>
 
-Heartbeat == H1 \/ H2 \/ H3 \/ H4 \/ H5 \/ H6 \/ H7 \/ H8 \/ Walk(THb)
+Heartbeat == H1 \/ H2 \/ H3 \/ H4 \/ H5 \/ H6 \/ H7R \/ H7 \/ H8 \/ Walk(THb)
 
 ----------------------------------------------------------------------------
 (* Agent tasks and the task-event handlers (resume.ts)                     *)
@@ -538,16 +567,20 @@ TaskFinish(i) ==
   /\ i \in StepIds
   /\ steps[i].task = "run"
   /\ \E r \in {"ok", "fail"} : steps' = [steps EXCEPT ![i].task = r]
-  /\ SetT(Ev(i), [Idle EXCEPT !.pc = "e1", !.sid = i, !.cur = steps[i].node])
+  /\ SetT(Ev(i, steps[i].tg), [Idle EXCEPT !.pc = "e1", !.sid = i, !.cur = steps[i].node,
+                                            !.g = steps[i].tg])
   /\ UNCHANGED <<run, active, execLive, okCount, hbLeft, crashes>>
 
-\* E1 resume.ts:137-145 / 230-238 — pre-checks outside any transaction.
+\* E1 resume.ts:140-144 / 249-257 — pre-checks outside any transaction,
+\* including isStaleTaskEvent (resume.ts:325): another task is bound now.
 E1(t) ==
   /\ thr[t].pc = "e1"
   /\ LET i == thr[t].sid IN
      SetT(t, [thr[t] EXCEPT !.pc =
-                IF run \notin {"waiting", "running"} \/ steps[i].st # "waiting" THEN "eDone"
-                ELSE IF steps[i].task = "ok" THEN "e2" ELSE "eF"])
+                IF run \notin {"waiting", "running"} \/ steps[i].st # "waiting"
+                   \/ steps[i].tg # thr[t].g THEN "eDone"
+                ELSE IF steps[i].task = "ok" THEN "e2"
+                ELSE IF FixTaskRetry THEN "eR" ELSE "eF"])
   /\ UNCHANGED <<run, steps, active, execLive, okCount, hbLeft, crashes>>
 
 \* E2 resume.ts:164-191 -> task-step-routing.ts:96-143 — claim transaction
@@ -567,19 +600,34 @@ E2(t) ==
           /\ UNCHANGED <<steps, okCount, run, active>>
   /\ UNCHANGED <<execLive, hbLeft, crashes>>
 
-\* E3 resume.ts:201-218 finalizeOrWait — transaction, but no run-status guard.
+\* E3 resume.ts:206-233 finalizeOrWait — transaction, but no run-status guard.
+\* F7: a retry-pending row keeps the run waiting, like a waiting row.
 EFin(t) ==
   /\ thr[t].pc = "eFin"
   /\ run' = IF FixJoinWaitsLive /\ LatestIn({"running"}) # {}
             THEN \* F6: leave it to the live walk, whose finalizer needs `running`
                  IF run = "waiting" THEN "running" ELSE run
             ELSE IF \E j \in StepIds : steps[j].st = "waiting"
+                 \/ (FixTaskRetry /\ PendingRetry(j))
                  \/ (FixPendingRetryGate /\ steps[j].st \in {"running", "pending"})
             THEN "waiting" ELSE "completed"
   /\ SetT(t, [thr[t] EXCEPT !.pc = "eDone"])
   /\ UNCHANGED <<steps, active, execLive, okCount, hbLeft, crashes>>
 
-\* E4 resume.ts:242-244 -> failStepAndRunIfWaiting (onNodeFailure "fail").
+\* ER F7 resume.ts:259-274 -> scheduleTaskStepRetry (task.failed only): the
+\* same claim transaction as H7R. not-claimed stops; not-eligible -> EF.
+ER(t) ==
+  /\ thr[t].pc = "eR"
+  /\ LET i == thr[t].sid IN
+     IF steps[i].st = "waiting" /\ Bound(i, thr[t].g)
+     THEN IF steps[i].rc < MaxRetries
+          THEN /\ steps' = [steps EXCEPT ![i] = RetryRow(i)]
+               /\ SetT(t, [thr[t] EXCEPT !.pc = "eDone"])
+          ELSE SetT(t, [thr[t] EXCEPT !.pc = "eF"]) /\ UNCHANGED steps
+     ELSE SetT(t, [thr[t] EXCEPT !.pc = "eDone"]) /\ UNCHANGED steps
+  /\ UNCHANGED <<run, active, execLive, okCount, hbLeft, crashes>>
+
+\* E4 resume.ts:279 markRunFailed -> failStepAndRunIfWaiting (onNodeFailure "fail").
 EF(t) ==
   /\ thr[t].pc = "eF"
   /\ LET i == thr[t].sid IN
@@ -589,7 +637,7 @@ EF(t) ==
   /\ SetT(t, [thr[t] EXCEPT !.pc = "eDone"])
   /\ UNCHANGED <<active, execLive, okCount, hbLeft, crashes>>
 
-Event(t) == E1(t) \/ E2(t) \/ EFin(t) \/ EF(t) \/ Walk(t)
+Event(t) == E1(t) \/ E2(t) \/ EFin(t) \/ ER(t) \/ EF(t) \/ Walk(t)
 
 ----------------------------------------------------------------------------
 (* User actions (resume.ts)                                                *)
@@ -658,7 +706,7 @@ Next ==
   \/ Poller
   \/ Heartbeat
   \/ \E i \in 1..MaxSteps : TaskFinish(i)
-  \/ \E i \in 1..MaxSteps : Event(Ev(i))
+  \/ \E t \in EvThreads : Event(t)
   \/ User
   \/ Crash
 
@@ -705,6 +753,10 @@ JoinWaitsForAll ==
 JoinWaitsForBranches ==
   [][ Len(steps') > Len(steps) /\ steps'[Len(steps')].node = "M"
         => \A b \in Branches : HasRow(b) /\ LatestSt(b) \notin {"running", "waiting", "pending"} ]_vars
+
+\* Model sanity (F7): a row dispatches at most 1 + MaxRetries tasks, so every
+\* task generation has a handler thread in EvThreads.
+TaskGenBound == \A i \in StepIds : steps[i].tg <= MaxRetries + 1
 
 \* Inv5 (liveness): the run eventually leaves running/waiting.
 EventuallySettles == <>[](run \in RunTerminal)
