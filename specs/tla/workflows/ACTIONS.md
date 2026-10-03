@@ -1,11 +1,11 @@
 # Workflows.tla action map
 
 Every TLA+ action, the code it models, and the SQL guard (or its absence) it encodes.
-Line numbers are against `main` @ `80949f9aa`. A DB transaction is one atomic action. Every
+Line numbers are against `main` @ `80949f9aa`, except the heartbeat stuck-run rows (`H5`-`H8`, `H7R`), the task-event and user-action rows, and `task-step-routing.ts`, which are against `eaf5d0cc1` (#1832). A DB transaction is one atomic action. Every
 `await` outside a transaction is an action boundary: other actors interleave there, and a crash
 can land there.
 
-Where a fix flag is noted (F1..F6), the row describes the code with the fix, which is current
+Where a fix flag is noted (F1..F7), the row describes the code with the fix, which is current
 behavior on `main` for every flag except F2 (see "Fix flags" below). The `.tla` keeps the pre-fix
 branch of each action for the `Ctl-*` and calibration configs.
 
@@ -14,10 +14,11 @@ branch of each action for the `Ctl-*` and calibration configs.
 | Variable | Code |
 |---|---|
 | `run` | `workflow_runs.status` (`none` before the INSERT) |
-| `steps[i]` | one `workflow_run_steps` row: `node`=nodeId, `st`=status, `rc`=retryCount, `nra`=`nextRetryAt IS NOT NULL`, `task`=linked agent task state |
+| `steps[i]` | one `workflow_run_steps` row: `node`=nodeId, `st`=status, `rc`=retryCount, `nra`=`nextRetryAt IS NOT NULL`, `task`=state of the agent task bound to the row (`none` when detached), `tg`=task generation, +1 per dispatch (F7: a retry binds a fresh task to the same row) |
 | `active` | `activeWalks.get(runId)` (`engine.ts:222`, process-local), taken by `walkGraph` and `holdWorkflowRun` (`engine.ts:238`) |
 | `execLive[n]` | `executor.run` calls in flight for node `n` (process-local) |
 | `okCount[n]` | ghost: successful completions of node `n` (for Inv3) |
+| `thr[Ev(i, g)]` | the bus handler for the `g`-th task bound to row `i` (`Bound(i, g)` = that task is still the one bound, `isTaskBoundToStep` `task-step-routing.ts:31`) |
 | `Owned` (derived) | F3: `executingSteps` (`engine.ts:227`, process-local, cleared by a crash) |
 
 Graph: `T` fans out to `Branches`; with `Converge`, every branch has `next: "M"`.
@@ -72,30 +73,32 @@ Not modelled: the readiness preflight (#1715, `findWorkflowReadinessProblems` `e
 | `H2` | re-read run `:73`, completed steps, routing, `findReadyNodes` `:92` | `findReadyNodes` excludes only nodes with a **completed** step. F4: also drops nodes with a retry-pending row (`retryPendingNodeIds` `:91-94`, `:123`) |
 | `H3` | second `isWorkflowRunActive` `:96`, then complete or `walkGraph` `:103` | `GuardActiveWalk` |
 | `H4` | `recovery.ts:97-100` `readyNodes.length === 0` | F4: `completeIfSettled` `recovery.ts:137-157`, one transaction, only while `running` with no retry-pending row and no live latest row |
-| `H5` | `getStuckWorkflowRuns` `recovery.ts:164` (waiting steps whose task is terminal) | `run.status = 'waiting'` |
-| `H6` | per stuck row, re-read run `:169-171` | `run.status = 'waiting'` |
-| `H7` | `failStepAndRunIfWaiting` `recovery.ts:181` -> `task-step-routing.ts:24-46` | CAS on `step.status='waiting'` |
-| `H8` | `completeTaskStepAndResolveSuccessors` `recovery.ts:198` -> `task-step-routing.ts:96-143`, then `walkGraph(successors)` `:214` | CAS on `step.status='waiting'` inside the transaction; sets `run -> running` |
+| `H5` | `getStuckWorkflowRuns` `recovery.ts:165` (waiting steps whose task is terminal); snapshot `<<step, task generation, task status>>` | `run.status = 'waiting'` |
+| `H6` | per stuck row, re-read run `:170-172` | `run.status = 'waiting'` |
+| `H7R` | F7: failed task only, `scheduleTaskStepRetry` `recovery.ts:175-192` -> `task-step-routing.ts:118-140` | one transaction: step `waiting` AND the snapshot's task still bound, else not-claimed (skip the row). `retryCount < maxRetries`: detach the task, `checkpointStepFailure` (failed, retryCount+1, nextRetryAt), skip the row. Exhausted: not-eligible, fall through to `H7` |
+| `H7` | `failStepAndRunIfWaiting` `recovery.ts:200-206` -> `task-step-routing.ts:44-67` | CAS on `step.status='waiting'`; F7: `ownerTaskId` fence, the snapshot's task must still be bound |
+| `H8` | `completeTaskStepAndResolveSuccessors` `recovery.ts:222-230` -> `task-step-routing.ts:166-216`, then `walkGraph(successors)` `:239` | CAS on `step.status='waiting'` inside the transaction (F7: plus the `ownerTaskId` fence); sets `run -> running` |
 
 ## Task events (`src/workflows/resume.ts`)
 
 | Action | Code | Guard |
 |---|---|---|
 | `TaskFinish` | agent task reaches a terminal state; the after-commit bus event is queued | — |
-| `E1` | `resumeFromTaskCompletion` `resume.ts:140-144` / `handleTaskFailure` `:240-244` pre-checks | reads, outside any transaction |
-| `E2` | `completeTaskStepAndResolveSuccessors` `resume.ts:166` (CAS on the step only), then `walkGraph(successors)` `:185` | step CAS; run status is not re-checked |
-| `EFin` | `finalizeOrWait` `resume.ts:203-226` | transaction; no run-status guard. F6: while any node's latest row is `running` (`:211`), only `waiting -> running` and return, leaving the run to the live walk's finalizer |
-| `EF` | `markRunFailed` `resume.ts:310` -> `failStepAndRunIfWaiting` | step CAS |
+| `E1` | `resumeFromTaskCompletion` `resume.ts:142-147` / `handleTaskFailure` `:249-254` pre-checks | reads, outside any transaction: run `waiting`/`running`, step `waiting`, `isStaleTaskEvent` (`:325-329`, another task is bound) |
+| `E2` | `completeTaskStepAndResolveSuccessors` `resume.ts:169` (CAS on the step only), then `walkGraph(successors)` `:188` | step CAS; run status is not re-checked |
+| `EFin` | `finalizeOrWait` `resume.ts:206-233` | transaction; **no run-status guard (open, CX13)**. F6: while any node's latest row is `running` (`:214`), only `waiting -> running` and return, leaving the run to the live walk's finalizer. F7: a retry-pending row (`failed` with `nextRetryAt`) keeps the run `waiting` (`:220-222`) |
+| `ER` | F7: `task.failed` only (`retryable: true`, `resume.ts:92`; `task.cancelled` skips it), `scheduleTaskStepRetry` `resume.ts:259-274` | same transaction as `H7R`. scheduled or not-claimed: stop. not-eligible: `EF` |
+| `EF` | `markRunFailed` `resume.ts:279` -> `:337-339` `failStepAndRunIfWaiting` | step CAS (no `ownerTaskId` on the live path) |
 
 ## User actions (`src/workflows/resume.ts`)
 
 | Action | Code | Guard |
 |---|---|---|
-| `Cancel` | `cancelWorkflowRun` `resume.ts:446` -> `cancelWorkflowRunRows` `:400-439` | one transaction; skips steps whose status is terminal, **including `failed` rows that still carry `nextRetryAt`**. F1 keeps the poller from claiming those rows. |
-| `U1` | `retryFailedRun` reads `resume.ts:317-354` (`findReadyNodes` `:381`) | reads outside the transaction. F5: drops nodes whose step is `running` or `waiting` (`liveNodeIds` `:378-383`). **Retry-pending nodes are not dropped (open, CX9).** |
-| `U2` | claim transaction `resume.ts:362-371`, then `walkGraph(nodesToRun)` `:392` | `run.status = 'failed'`; resets the failed row to `pending` (orphaned: the walk inserts a new row) |
+| `Cancel` | `cancelWorkflowRun` `resume.ts:473` -> `cancelWorkflowRunRows` `:427-466` | one transaction; skips steps whose status is terminal, **including `failed` rows that still carry `nextRetryAt`**. F1 keeps the poller from claiming those rows. |
+| `U1` | `retryFailedRun` reads `resume.ts:344-384` (`findReadyNodes` `:408`) | reads outside the transaction. F5: drops nodes whose step is `running` or `waiting` (`liveNodeIds` `:405-409`). **Retry-pending nodes are not dropped (open, CX9).** |
+| `U2` | claim transaction `resume.ts:389-398`, then `walkGraph(nodesToRun)` `:419` | `run.status = 'failed'`; resets the failed row to `pending` (orphaned: the walk inserts a new row) |
 
-Not modelled: `retryFailedRun` refuses before the claim when a node still to run is not ready (#1715, `resume.ts:334-340`). It is a read with no write, and the model's executors are always ready.
+Not modelled: `retryFailedRun` refuses before the claim when a node still to run is not ready (#1715, `resume.ts:361-367`). It is a read with no write, and the model's executors are always ready.
 
 Port routing (#1706, `resolveValidationPort` at `engine.ts:959` and `retry-poller.ts:181`) is not modelled: the graph has no ports, and every node's successors are fixed.
 
@@ -120,5 +123,10 @@ bus events) and grants one extra heartbeat sweep (boot recovery). DB rows surviv
 
 `Fix*` constants model the fixes in FINDINGS.md. `Workflows.cfg` and `Long.cfg` model current
 `main`: F1 `FixPollerRunGuard` (#1666), F3 `FixConcurrentJoin` and F5 `FixUserRetryLive` (#1675),
-F4 `FixRecoveryRetry` (#1678), and F6 `FixJoinWaitsLive` (#1673) are `TRUE`. F2
+F4 `FixRecoveryRetry` (#1678), F6 `FixJoinWaitsLive` (#1673), and F7 `FixTaskRetry` (#1832) are `TRUE`. F2
 `FixPendingRetryGate` is `FALSE`: no merged PR keeps a retry-pending predecessor's edge active.
+
+F7 `FixTaskRetry` (#1832) adds `ER` and `H7R`, the `ownerTaskId` fence on `H7`/`H8`, the
+retry-pending clause in `EFin`, and per-generation handler threads. With it off, `tg` never
+exceeds 1 and every pre-existing `Fix-*` config gives the same distinct-state count as before.
+`TaskGenBound` is a model-sanity invariant: every task generation has a handler thread.
