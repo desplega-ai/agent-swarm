@@ -27,7 +27,7 @@
  *   - Text has leaks, or `--body-file` is unreadable: look up the repo
  *     visibility. PUBLIC blocks; PRIVATE / INTERNAL allows.
  *   - Visibility lookup fails, a `cd` target cannot be resolved (`cd -`,
- *     unset or unknown variable), a `gh pr edit` target is neither a PR
+ *     unset or unknown variable, a `cd` that may not have run), a `gh pr edit` target is neither a PR
  *     number, a branch nor a PR URL (unset or unknown variable, `$(...)`), or
  *     `GH_REPO` is unknown: block (fail closed). We
  *     already know the body is unsafe or unreadable, and we cannot prove the
@@ -69,9 +69,16 @@ export type PrBodyGuardDeps = {
  * One simple command: its words, plus any heredoc / here-string text fed to its
  * stdin. `depth` counts the open `(` before it (subshells and `$(`); it goes
  * negative on an unmatched `)` (a `case` pattern). `async` marks a pipeline
- * member or a `&` background job, which runs in a subshell.
+ * member or a member of a `&` background list, which runs in a subshell.
+ * `ops` lists the separators between the previous command and this one.
  */
-export type ShellSegment = { words: string[]; stdin: string[]; depth: number; async: boolean };
+export type ShellSegment = {
+  words: string[];
+  stdin: string[];
+  depth: number;
+  async: boolean;
+  ops: string[];
+};
 
 const SEPARATORS = ["&&", "||", ";", "|", "&", "\n", "(", ")"];
 const COMMAND_WRAPPERS = new Set(["env", "command", "exec", "time", "sudo", "nohup"]);
@@ -82,8 +89,12 @@ const COMMAND_WRAPPERS = new Set(["env", "command", "exec", "time", "sudo", "noh
  */
 export function tokenizeShell(command: string): ShellSegment[] {
   let depth = 0;
-  const segments: ShellSegment[] = [{ words: [], stdin: [], depth, async: false }];
+  const segments: ShellSegment[] = [{ words: [], stdin: [], depth, async: false, ops: [] }];
   const current = () => segments[segments.length - 1] as ShellSegment;
+  // First segment of the current list, per `(` level: a `&` backgrounds all of it.
+  const listStarts = [0];
+  // After `&&`, `||` or `|`, a newline continues the list.
+  let continued = false;
   const heredocs: Array<{ delimiter: string; stripTabs: boolean; segment: ShellSegment }> = [];
   let hereString = false;
   let word = "";
@@ -94,6 +105,7 @@ export function tokenizeShell(command: string): ShellSegment[] {
       if (hereString) current().stdin.push(word);
       else current().words.push(word);
       hereString = false;
+      continued = false;
     }
     word = "";
     inWord = false;
@@ -172,17 +184,31 @@ export function tokenizeShell(command: string): ShellSegment[] {
         doc.segment.stdin.push(lines.join("\n"));
       }
       heredocs.length = 0;
-      segments.push({ words: [], stdin: [], depth, async: false });
+      segments.push({ words: [], stdin: [], depth, async: false, ops: ["\n"] });
+      if (!continued) listStarts[listStarts.length - 1] = segments.length - 1;
       i = j - 1;
       continue;
     }
     const sep = SEPARATORS.find((s) => command.startsWith(s, i));
     if (sep) {
       push();
-      if (sep === "|" || sep === "&") current().async = true;
+      if (sep === "|") current().async = true;
+      if (sep === "&") {
+        // `a && b &` runs the whole and-or list in the background.
+        for (let k = listStarts[listStarts.length - 1] as number; k < segments.length; k++) {
+          (segments[k] as ShellSegment).async = true;
+        }
+      }
       if (sep === "(") depth++;
       if (sep === ")") depth--;
-      segments.push({ words: [], stdin: [], depth, async: sep === "|" });
+      segments.push({ words: [], stdin: [], depth, async: sep === "|", ops: [sep] });
+      if (sep === "(") listStarts.push(segments.length - 1);
+      else if (sep === ")") {
+        if (listStarts.length > 1) listStarts.pop();
+      } else if (sep === ";" || sep === "&" || (sep === "\n" && !continued)) {
+        listStarts[listStarts.length - 1] = segments.length - 1;
+      }
+      continued = sep === "&&" || sep === "||" || sep === "|" || (sep === "\n" && continued);
       i += sep.length - 1;
       continue;
     }
@@ -195,7 +221,15 @@ export function tokenizeShell(command: string): ShellSegment[] {
   }
   push();
   for (const doc of heredocs) doc.segment.stdin.push("");
-  return segments.filter((s) => s.words.length > 0);
+  // Drop empty segments; their separators belong to the next command.
+  let ops: string[] = [];
+  return segments.filter((s) => {
+    ops.push(...s.ops);
+    if (s.words.length === 0) return false;
+    s.ops = ops;
+    ops = [];
+    return true;
+  });
 }
 
 /** Expand `~`, `$VAR` and `${VAR}`. Returns null when a variable is unset. */
@@ -333,8 +367,76 @@ function classifyEditTarget(
   return { kind: "unknown" };
 }
 
-/** Reserved words that may precede a simple command (`if gh ...`, `then gh ...`). */
-const RESERVED_PREFIXES = new Set(["!", "{", "if", "then", "elif", "else", "while", "until", "do"]);
+type FrameKind = "top" | "paren" | "if" | "loop" | "case" | "brace";
+/** A variable or the working directory, changed by a command the parser applied. */
+type Write = { name: string } | { dir: true };
+/**
+ * A list context: the whole command, a `( ... )`, or a compound command
+ * (`if`, a loop, `case`, `{ ... }`).
+ */
+type Frame = {
+  kind: FrameKind;
+  /** The operator before the current element of the and-or list. */
+  tail: "none" | "and" | "or";
+  /** Writes applied by `&&` elements of the current and-or list. */
+  list: Write[];
+  /** Writes applied inside this compound command (this branch, for `if` and `case`). */
+  block: Write[];
+};
+const newFrame = (kind: FrameKind): Frame => ({ kind, tail: "none", list: [], block: [] });
+const isCompound = (frame: Frame) => frame.kind !== "top" && frame.kind !== "paren";
+
+type ReservedWords = {
+  /** Index of the first word after the leading reserved words. */
+  start: number;
+  /** Compound commands opened (by kind), branched (`else`, `elif`) or closed, in order. */
+  actions: Array<FrameKind | "branch" | "close">;
+  /** `function NAME`. */
+  functionKeyword: boolean;
+};
+
+/** Read the reserved words that lead a simple command (`if gh ...`, `then X=1`, `fi`). */
+function scanReservedWords(words: string[]): ReservedWords {
+  const actions: ReservedWords["actions"] = [];
+  let functionKeyword = false;
+  let k = 0;
+  for (; k < words.length; k++) {
+    const word = words[k] as string;
+    if (word === "if") actions.push("if");
+    else if (word === "while" || word === "until") actions.push("loop");
+    else if (word === "{") actions.push("brace");
+    else if (word === "else" || word === "elif") actions.push("branch");
+    else if (word === "fi" || word === "done" || word === "esac" || word === "}") {
+      actions.push("close");
+    } else if (word === "function" && k + 1 < words.length) {
+      functionKeyword = true;
+      k++; // the name
+    } else if (word !== "then" && word !== "do" && word !== "!") break;
+  }
+  // `for`, `select` and `case` take a header: the rest of this segment.
+  if (words[k] === "for" || words[k] === "select") actions.push("loop");
+  if (words[k] === "case") actions.push("case");
+  return { start: k, actions, functionKeyword };
+}
+
+/** For each segment that opens a loop, the index of the segment that closes it. */
+function loopEnds(segments: ShellSegment[]): Array<number | undefined> {
+  const ends: Array<number | undefined> = [];
+  const open: Array<{ kind: FrameKind; index: number }> = [];
+  segments.forEach((segment, index) => {
+    for (const action of scanReservedWords(segment.words).actions) {
+      if (action === "close") {
+        const opened = open.pop();
+        if (opened?.kind === "loop") ends[opened.index] = index;
+      } else if (action !== "branch") open.push({ kind: action, index });
+    }
+  });
+  for (const opened of open) {
+    if (opened.kind === "loop") ends[opened.index] = segments.length - 1;
+  }
+  return ends;
+}
+
 /**
  * Commands that change variables in ways the parser does not model. After one,
  * every variable expansion in the command is unknown.
@@ -391,9 +493,17 @@ type ShellState = {
  * file that uses one fails closed:
  *   - `NAME=value` alone or in `export` sets the variable. A value with `$`, a
  *     backtick or `~` makes it unknown, as does `NAME+=` or `NAME[i]=`.
- *   - An assignment, `cd` or `unset` in a pipeline member or `&` job makes the
- *     variable (or directory) unknown. Leaving a `( ... )` subshell restores
- *     the variables and directory from before it.
+ *   - The parser does not know which commands run. A write (assignment,
+ *     `export`, `unset`, `cd`) counts only for the commands that run only if
+ *     it ran: the later `&&` elements of its and-or list, and the rest of its
+ *     compound command branch. After that, the variable (or directory) is
+ *     unknown until a write that always runs. A write after `||` is unknown at
+ *     once. A loop body is read twice: its writes are unknown from its start.
+ *   - A write in a pipeline member or a `&` list makes the variable (or
+ *     directory) unknown. Leaving a `( ... )` subshell restores the variables
+ *     and directory from before it.
+ *   - A function definition makes every later expansion and the directory
+ *     unknown: a call can run its body anywhere after it.
  *   - `read`, `source`, `.`, `eval`, `declare`, `typeset`, `local`,
  *     `readonly`, `mapfile`, `readarray`, `getopts`, `let`, `case`,
  *     `printf -v`, `export` with a flag, or a backtick outside a `gh` call
@@ -413,9 +523,12 @@ export function parseGhPrCommands(
       unknownVars: new Set(),
       dir: cwd,
     },
-    false,
+    { allUnknown: false, dirUnknown: false },
   );
 }
+
+/** Set for the rest of a command: every expansion, or the working directory, is unknown. */
+type UnknownFlags = { allUnknown: boolean; dirUnknown: boolean };
 
 const copyState = (s: ShellState): ShellState => ({
   env: { ...s.env },
@@ -423,18 +536,21 @@ const copyState = (s: ShellState): ShellState => ({
   unknownVars: new Set(s.unknownVars),
   dir: s.dir,
 });
+const copyFrame = (f: Frame): Frame => ({ ...f, list: [...f.list], block: [...f.block] });
 const isGhWord = (word: string | undefined) => word === "gh" || word?.endsWith("/gh") === true;
 const isShellWord = (word: string | undefined) => /(^|\/)(ba|da|k|z)?sh$/.test(word ?? "");
 
 function parseWithState(
   command: string,
   initial: ShellState,
-  initialAllUnknown: boolean,
+  initialFlags: UnknownFlags,
 ): GhPrInvocation[] {
   const found: GhPrInvocation[] = [];
   let state = initial;
-  let allUnknown = initialAllUnknown;
+  let { allUnknown, dirUnknown } = initialFlags;
   const scopes: ShellState[] = [];
+  let frames: Frame[] = [newFrame("top")];
+  const top = () => frames[frames.length - 1] as Frame;
   const copy = copyState;
 
   /** Expand `~`, `$VAR` and `${VAR}`. Null when a variable is unset or unknown, or an expansion is left. */
@@ -450,18 +566,24 @@ function parseWithState(
     const expanded = expandPath(word, state.env);
     return expanded === null || /[$`]/.test(expanded) ? null : expanded;
   };
-  /** Set a shell variable; `value` null means the parser cannot know it. */
-  const assign = (name: string, value: string | null, async: boolean) => {
-    // A pipeline member or `&` job runs in a subshell, except a `lastpipe` last member.
-    if (async || value === null || /[$`]|^~|:~/.test(value)) {
-      state.unknownVars.add(name);
-      return;
+  /** The writes may not have run: make each variable or the directory unknown. */
+  const forget = (writes: Write[]) => {
+    for (const write of writes) {
+      if ("dir" in write) state.dir = null;
+      else state.unknownVars.add(write.name);
     }
-    state.env[name] = value;
-    state.unknownVars.delete(name);
+    writes.length = 0;
+  };
+  /** Remember an applied write, to forget it where the parser cannot tell whether it ran. */
+  const applied = (write: Write) => {
+    const frame = top();
+    if (frame.tail === "and") frame.list.push(write);
+    if (isCompound(frame)) frame.block.push(write);
   };
 
-  for (const { words, stdin, depth, async } of tokenizeShell(command)) {
+  /** Process one segment. `dry` reads it for its writes only, all of them unknown. */
+  const step = (segment: ShellSegment, dry: boolean) => {
+    const { words, stdin, depth, ops } = segment;
     while (scopes.length < depth) scopes.push(copy(state));
     while (scopes.length > Math.max(depth, 0)) {
       // Leaving a subshell restores its state; unknown variables stay unknown.
@@ -474,13 +596,69 @@ function parseWithState(
       allUnknown = true;
       state.dir = null;
     }
+
+    let continued = false;
+    for (const op of ops) {
+      const frame = top();
+      if (op === "&&" || op === "||") {
+        if (op === "||") forget(frame.list);
+        frame.tail = op === "&&" ? "and" : "or";
+        continued = true;
+      } else if (op === "|") {
+        continued = true;
+      } else if (op === "(") {
+        frames.push(newFrame("paren"));
+        continued = false;
+      } else if (op === ")") {
+        // A subshell's writes stay in it. In `case`, `)` starts another arm.
+        if (frame.kind === "paren") frames.pop();
+        else if (frame.kind === "case") {
+          forget(frame.block);
+          forget(frame.list);
+          frame.tail = "none";
+        }
+        continued = false;
+      } else if (!(op === "\n" && continued)) {
+        // `;`, `&` or a newline ends the and-or list.
+        forget(frame.list);
+        frame.tail = "none";
+        continued = false;
+      }
+    }
+    const reserved = scanReservedWords(words);
+    if (reserved.functionKeyword || ops.some((op, k) => op === "(" && ops[k + 1] === ")")) {
+      allUnknown = true;
+      dirUnknown = true;
+    }
+    for (const action of reserved.actions) {
+      const frame = top();
+      if (action === "branch" || action === "close") {
+        forget(frame.block);
+        forget(frame.list);
+        frame.tail = "none";
+        if (action === "close" && isCompound(frame)) frames.pop();
+      } else frames.push(newFrame(action));
+    }
+    // A write here may not run, or may not persist: it makes its target unknown.
+    const uncertain = dry || segment.async || top().tail === "or";
+
+    /** Set a shell variable; `value` null means the parser cannot know it. */
+    const assign = (name: string, value: string | null) => {
+      if (uncertain || value === null || /[$`]|^~|:~/.test(value)) {
+        state.unknownVars.add(name);
+        return;
+      }
+      state.env[name] = value;
+      state.unknownVars.delete(name);
+      applied({ name });
+    };
+
     for (const word of words) {
       for (const match of word.matchAll(/\$\{(\w+):?=/g)) state.unknownVars.add(match[1] as string);
     }
 
-    let i = 0;
-    while (i < words.length && RESERVED_PREFIXES.has(words[i] as string)) i++;
-    const start = i;
+    const start = reserved.start;
+    let i = start;
     while (i < words.length && ASSIGNMENT.test(words[i] as string)) i++;
     const assignments = words.slice(start, i).map((w) => ASSIGNMENT.exec(w) as RegExpExecArray);
     const rest = words.slice(i);
@@ -488,9 +666,9 @@ function parseWithState(
     if (cmd === undefined) {
       // Only assignments: they set shell variables (exported only if already exported).
       for (const [, name, index, append, value] of assignments) {
-        assign(name as string, index || append ? null : (value as string), async);
+        assign(name as string, index || append ? null : (value as string));
       }
-      continue;
+      return;
     }
     if (SPECIAL_BUILTINS.has(cmd)) {
       for (const [, name] of assignments) state.unknownVars.add(name as string);
@@ -500,17 +678,20 @@ function parseWithState(
       const operands = rest.slice(1);
       while (operands[0] !== undefined && /^-[LPe@]+$/.test(operands[0])) operands.shift();
       if (operands[0] === "--") operands.shift();
-      if (operands.length > 1) continue; // bash: too many arguments, cd fails
+      if (operands.length > 1) return; // bash: too many arguments, cd fails
       const operand = operands[0] ?? "~";
       const target = operand === "-" ? null : expand(operand);
       const dir = state.dir;
-      state.dir = async || target === null || dir === null ? null : resolve(dir, target);
-      if (!async && target !== null && isAbsolute(target)) state.dir = target;
-      continue;
+      if (uncertain || target === null) state.dir = null;
+      else {
+        state.dir = isAbsolute(target) ? target : dir === null ? null : resolve(dir, target);
+        applied({ dir: true });
+      }
+      return;
     }
     if (cmd === "popd") {
       state.dir = null;
-      continue;
+      return;
     }
     if (cmd === "export") {
       for (const word of rest.slice(1)) {
@@ -520,42 +701,49 @@ function parseWithState(
         }
         const match = ASSIGNMENT.exec(word);
         const name = match?.[1] ?? word;
-        if (match) assign(name, match[2] || match[3] ? null : (match[4] as string), async);
-        if (async) state.unknownVars.add(name);
-        else state.exported.add(name);
+        if (match) assign(name, match[2] || match[3] ? null : (match[4] as string));
+        if (uncertain) state.unknownVars.add(name);
+        else {
+          state.exported.add(name);
+          applied({ name });
+        }
       }
-      continue;
+      return;
     }
     if (cmd === "unset") {
       const operands = rest.slice(1);
-      if (operands.some((w) => /^-\w*f/.test(w))) continue; // functions, not variables
+      if (operands.some((w) => /^-\w*f/.test(w))) return; // functions, not variables
       for (const name of operands.filter((w) => !w.startsWith("-"))) {
-        if (async) {
+        if (uncertain) {
           state.unknownVars.add(name);
           continue;
         }
         state.env[name] = undefined;
         state.exported.delete(name);
         state.unknownVars.delete(name);
+        applied({ name });
       }
-      continue;
+      return;
     }
     if (cmd === "for" || cmd === "select") {
       const name = rest[1] ?? "";
       if (/^[A-Za-z_]\w*$/.test(name)) state.unknownVars.add(name);
       else allUnknown = true;
-      continue;
+      return;
     }
     if (
       UNMODELED_VARIABLE_COMMANDS.has(cmd) ||
       (cmd === "printf" && rest.some((w) => /^-v/.test(w)))
     ) {
       // `eval` runs its words as a command in this shell.
-      if (cmd === "eval")
-        found.push(...parseWithState(rest.slice(1).join(" "), copy(state), allUnknown));
+      if (cmd === "eval" && !dry) {
+        found.push(
+          ...parseWithState(rest.slice(1).join(" "), copy(state), { allUnknown, dirUnknown }),
+        );
+      }
       allUnknown = true;
       if (cmd === "source" || cmd === "." || cmd === "eval") state.dir = null; // may `cd`
-      continue;
+      return;
     }
 
     // `gh` (or a nested shell) must be the command word: only env assignments
@@ -571,7 +759,7 @@ function parseWithState(
       // `bash -c SCRIPT`: parse SCRIPT in a child shell that sees exported variables.
       const flag = words.findIndex((w, k) => k > gh && /^-\w*c\w*$/.test(w));
       const script = flag === -1 ? undefined : words[flag + 1];
-      if (script !== undefined) {
+      if (script !== undefined && !dry) {
         const child = copy(state);
         for (const name of Object.keys(child.env)) {
           if (!child.exported.has(name)) child.env[name] = undefined;
@@ -586,18 +774,24 @@ function parseWithState(
           else child.env[name] = match[4];
         }
         if (wrapperFlags) child.dir = null;
-        found.push(...parseWithState(script, child, allUnknown || wrapperFlags));
+        found.push(
+          ...parseWithState(script, child, {
+            allUnknown: allUnknown || wrapperFlags,
+            dirUnknown,
+          }),
+        );
       }
-      continue;
+      return;
     }
     if (!isGhWord(words[gh])) {
       // A backtick splits `X=`a b`` into words the parser cannot assign.
       if (words.some((w) => w.includes("`"))) allUnknown = true;
-      continue;
+      return;
     }
+    if (dry) return;
     const args = parseGhArgs(words.slice(gh + 1));
     const [group, action, target] = args.positionals;
-    if (group !== "pr" || (action !== "create" && action !== "edit")) continue;
+    if (group !== "pr" || (action !== "create" && action !== "edit")) return;
 
     const values = (...names: string[]) =>
       args.flags.filter(([name]) => names.includes(name)).map(([, value]) => value);
@@ -632,7 +826,7 @@ function parseWithState(
       else bodyFiles.push(expanded);
     }
     found.push({
-      cwd: wrapperFlags ? null : state.dir,
+      cwd: wrapperFlags || dirUnknown ? null : state.dir,
       repos: [...new Set(repos)],
       alsoCheckout,
       unknownTarget,
@@ -646,7 +840,21 @@ function parseWithState(
         (action === "edit" && target?.endsWith("$") === true) ||
         (fromStdin && stdin.length === 0 && args.stdinFile === undefined),
     });
-  }
+  };
+
+  const segments = tokenizeShell(command);
+  const ends = loopEnds(segments);
+  segments.forEach((segment, index) => {
+    const end = ends[index];
+    if (end !== undefined) {
+      // A loop body can run again after any of its writes: read it once for
+      // its writes, so they are unknown from the top of the body.
+      const saved = frames.map(copyFrame);
+      for (let k = index; k <= end; k++) step(segments[k] as ShellSegment, true);
+      frames = saved;
+    }
+    step(segment, false);
+  });
   return found;
 }
 

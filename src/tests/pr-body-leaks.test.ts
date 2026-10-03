@@ -635,6 +635,125 @@ describe("checkGhPrCommand: resolves the real target and body", () => {
     expect(await checkGhPrCommand(command, "/private", deps)).toContain("could not be resolved");
     expect(seen).toEqual([]);
   });
+
+  // The parser cannot tell whether a conditional write ran. The hook env holds
+  // the public target; each command may or may not move it to a local branch.
+  const publicEnvTarget = () => {
+    const target = publicTarget();
+    target.deps.env = { ...target.deps.env, PR_URL: publicPrUrl };
+    return target;
+  };
+
+  test("a skipped conditional assignment makes the target unknown", async () => {
+    const edit = `gh pr edit "$PR_URL" --body "${flagged()}"`;
+    for (const command of [
+      `if false; then PR_URL=fix/private; fi\n${edit}`,
+      `false && PR_URL=fix/private; ${edit}`,
+      `true || PR_URL=fix/private; ${edit}`,
+      `false &&\n  PR_URL=fix/private; ${edit}`,
+      `false || PR_URL=fix/private && ${edit}`,
+      `if c; then PR_URL=fix/private; else ${edit}; fi`,
+      `if c; then PR_URL=fix/a; PR_URL=fix/private; fi; ${edit}`,
+      `while false; do ${edit}; PR_URL=fix/private; done`,
+      `PR_URL=fix/private && true & ${edit}`,
+      `f() { PR_URL=fix/private; }; f; ${edit}`,
+    ]) {
+      const { deps, seen } = publicEnvTarget();
+      const reason = await checkGhPrCommand(command, "/private", deps);
+      expect({ command, reason }).toEqual({
+        command,
+        reason: expect.stringContaining("could not be resolved"),
+      });
+      expect(seen).toEqual([]);
+    }
+  });
+
+  test("a skipped assignment with an unreadable body file blocks; a clean body allows", async () => {
+    const { deps, seen } = publicEnvTarget();
+    deps.readFile = async () => {
+      throw new Error("missing");
+    };
+    const unreadable = 'false && PR_URL=fix/private; gh pr edit "$PR_URL" --body-file /tmp/x.md';
+    expect(await checkGhPrCommand(unreadable, "/private", deps)).toContain("could not read");
+    expect(seen).toEqual([]);
+
+    const clean = publicEnvTarget();
+    const command = 'false && PR_URL=fix/private; gh pr edit "$PR_URL" --body "Fixes #1."';
+    expect(await checkGhPrCommand(command, "/private", clean.deps)).toBeNull();
+    expect(clean.seen).toEqual([]);
+  });
+
+  test("an assignment in a subshell or pipeline does not persist", async () => {
+    const edit = `gh pr edit "$PR_URL" --body "${flagged()}"`;
+    for (const command of [
+      `{ PR_URL=fix/private; } | cat; ${edit}`,
+      `(false && PR_URL=fix/private; ${edit})`,
+    ]) {
+      const { deps, seen } = publicEnvTarget();
+      const reason = await checkGhPrCommand(command, "/private", deps);
+      expect({ command, reason }).toEqual({
+        command,
+        reason: expect.stringContaining("could not be resolved"),
+      });
+      expect(seen).toEqual([]);
+    }
+    // Leaving `( ... )` restores the env value: the public target.
+    const { deps, seen } = publicEnvTarget();
+    const command = `(PR_URL=fix/private); ${edit}`;
+    expect(await checkGhPrCommand(command, "/private", deps)).toContain("slack-link");
+    expect(seen.map((t) => t.repo)).toEqual(["public/example"]);
+  });
+
+  test("a skipped cd makes the checkout unknown", async () => {
+    for (const command of [
+      `false && cd /private; gh pr create --body "${flagged()}"`,
+      `if false; then cd /private; fi; gh pr create --body "${flagged()}"`,
+      `cd /elsewhere || cd /private; gh pr create --body "${flagged()}"`,
+    ]) {
+      const { deps, seen } = publicTarget();
+      const reason = await checkGhPrCommand(command, "/public", deps);
+      expect({ command, reason }).toEqual({
+        command,
+        reason: expect.stringContaining("could not be confirmed"),
+      });
+      expect(seen).toEqual([]);
+    }
+  });
+
+  test("a write still counts where it must have run", async () => {
+    const { deps, seen } = publicEnvTarget();
+    const inBranch = `if c; then PR_URL=fix/b; gh pr edit "$PR_URL" --body "${flagged()}"; fi`;
+    expect(await checkGhPrCommand(inBranch, "/private", deps)).toBeNull();
+    expect(seen).toEqual([{ cwd: "/private", repo: undefined }]);
+
+    const chain = publicEnvTarget();
+    const andChain = `git fetch && PR_URL=fix/b && gh pr edit "$PR_URL" --body "${flagged()}"`;
+    expect(await checkGhPrCommand(andChain, "/private", chain.deps)).toBeNull();
+
+    const after = publicEnvTarget();
+    const overwritten = `if false; then PR_URL=fix/a; fi; PR_URL=${publicPrUrl}; gh pr edit "$PR_URL" --body "${flagged()}"`;
+    expect(await checkGhPrCommand(overwritten, "/private", after.deps)).toContain("slack-link");
+    expect(after.seen.map((t) => t.repo)).toEqual(["public/example"]);
+
+    const cd = publicTarget();
+    const command = "git fetch && cd /private && gh pr create --body-file b.md";
+    expect(await checkGhPrCommand(command, "/public", cd.deps)).toBeNull();
+    expect(cd.calls.reads).toEqual(["/private/b.md"]);
+  });
+
+  test("clean body files are allowed in public and private checkouts", async () => {
+    for (const command of [
+      "gh pr create --title t --body-file /tmp/pr-body.md",
+      "gh pr edit 1 --body-file f",
+    ]) {
+      for (const cwd of ["/public", "/private"]) {
+        const { deps, seen } = publicTarget();
+        deps.readFile = async () => NORMAL_BODY;
+        expect(await checkGhPrCommand(command, cwd, deps)).toBeNull();
+        expect(seen).toEqual([]);
+      }
+    }
+  });
 });
 
 describe("hook entry points", () => {
