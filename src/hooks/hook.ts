@@ -23,6 +23,7 @@ import { getApiKey } from "../utils/api-key";
 import { getMcpBaseUrl, MAX_PROFILE_FILE_LENGTH } from "../utils/constants";
 import { summarizeSession as runSummarize } from "../utils/internal-ai";
 import { scrubSecrets } from "../utils/secret-scrubber";
+import { guardGhPrBody } from "./pr-body-guard";
 import { checkToolLoop, clearToolHistory } from "./tool-loop-detection";
 
 const SERVER_NAME = pkg.config?.name ?? "agent-swarm";
@@ -1126,6 +1127,18 @@ export async function handleHook(): Promise<void> {
       if (agentInfo && !agentInfo.isLead && agentInfo.status === "busy") {
         if (await checkAndBlockIfCancelled(true)) {
           return; // Exit early - don't process other hooks
+        }
+      }
+
+      // Block `gh pr create|edit` when the body for a public repo leaks internal
+      // identifiers. Exit code 2 blocks the call even though the status line
+      // above already went to stdout, and stderr reaches the model.
+      if (msg.tool_name === "Bash") {
+        const prBodyBlock = await guardGhPrBody(msg.tool_input, msg.cwd ?? process.cwd());
+        if (prBodyBlock) {
+          console.error(prBodyBlock);
+          process.exitCode = 2;
+          return;
         }
       }
 

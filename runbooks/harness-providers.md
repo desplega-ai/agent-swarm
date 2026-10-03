@@ -218,7 +218,7 @@ The adapter creates no shared app-server daemon and never resumes a native Codex
 
 `src/hooks/codex-hook.ts` remains for legacy `codex exec` sessions. The worker image registers it for `SessionStart`, `PostToolUse`, and `Stop` through `/etc/codex/requirements.toml`. It polls pending steering messages, marks each row delivered, then injects the rendered envelope through hook output.
 
-App-server sessions set `SWARM_CODEX_APP_SERVER=1`. The hook exits before polling in that mode. This prevents a hook and the worker from delivering the same message. `PreToolUse` remains unregistered because Codex drops its `additionalContext`.
+App-server sessions set `SWARM_CODEX_APP_SERVER=1`. The hook exits before polling in that mode. This prevents a hook and the worker from delivering the same message. `PreToolUse` carries no steering because Codex drops its `additionalContext`. The image registers it for the PR body leak guard (`src/hooks/pr-body-guard.ts`), which runs in every session mode and blocks `gh pr create|edit` on a public repo with exit code 2.
 
 ## Per-task `outputSchema` support
 

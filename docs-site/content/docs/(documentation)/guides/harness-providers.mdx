@@ -244,7 +244,7 @@ The worker does not use a shared app-server daemon. It does not resume native Co
 
 `src/hooks/codex-hook.ts` still supports legacy `codex exec` sessions. The worker image registers the hook for `SessionStart`, `PostToolUse`, and `Stop` through `/etc/codex/requirements.toml`. It polls pending steering messages, marks each one delivered, and injects the rendered envelope through hook output.
 
-App-server sessions set `SWARM_CODEX_APP_SERVER=1`. The hook returns before it polls in that mode. The worker then remains the only steering transport. `PreToolUse` remains disabled because Codex drops its `additionalContext`.
+App-server sessions set `SWARM_CODEX_APP_SERVER=1`. The hook returns before it polls in that mode. The worker then remains the only steering transport. `PreToolUse` carries no steering because Codex drops its `additionalContext`. The image registers it for the PR body leak guard, which runs in every session mode and blocks `gh pr create|edit` on a public repo with exit code 2.
 
 For user-facing modes, degradation, entry points, and message states, see [Steer a running task](/docs/guides/task-steering).
 
