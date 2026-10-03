@@ -52,6 +52,8 @@ jobs:
           # Pass title and body through env, never inline ${{ }} in the script.
           PR_TITLE: ${{ github.event.pull_request.title }}
           PR_BODY: ${{ github.event.pull_request.body }}
+          # Bot-authored bodies also get the leak check; contributors do not.
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
         run: bun scripts/check-pr-body.ts
 
   route:

@@ -16,7 +16,7 @@ The "PR Body" check enforces this. Local check:
 ## Intent
 
 <!-- Target: 3 sentences or fewer.
-Why this change exists, in the words of the person who asked for it. Link the source: issue (Fixes #<number>), Linear (DES-<number>), Slack thread, or swarm task. Quote the original ask when it is short. Do not rewrite the ask to match what you built.
+Why this change exists, paraphrased. Link only public sources (Fixes #<number>, a public PR or issue). Never paste Slack or DM ids, ts or permalinks, swarm task, run or memory ids, app.agent-swarm.dev or agent-fs links or paths, customer names, or verbatim quotes from private chat. Write 'a maintainer asked for X'. Internal provenance stays in the swarm task. Do not rewrite the ask to match what you built.
 For a bug: what is wrong, what should happen instead, and who it affects. Stay high level. -->
 
 ## Repro <!-- fix -->

@@ -279,7 +279,7 @@ const COMMAND_HELP: Record<
   "codex-hook": {
     usage: `${binName} codex-hook`,
     description:
-      "Handle Codex CLI hook events from stdin (steering delivery).\nUsed internally by the codex hooks registered in the worker image.",
+      "Handle Codex CLI hook events from stdin (steering delivery, PR body leak guard).\nUsed internally by the codex hooks registered in the worker image.",
     options: "  -h, --help             Show this help",
     examples: `  ${binName} codex-hook`,
   },
@@ -745,7 +745,8 @@ if (args.showHelp || args.command === "help" || args.command === undefined) {
 } else if (args.command === "codex-hook") {
   const { handleCodexHook } = await import("./hooks/codex-hook.ts");
   await handleCodexHook();
-  process.exit(0);
+  // Exit code 2 from the PreToolUse guard blocks the tool call.
+  process.exit(process.exitCode ?? 0);
 } else if (args.command === "session-summary-stdin") {
   const { runSessionSummaryFromStdin } = await import("./hooks/hook.ts");
   await runSessionSummaryFromStdin();

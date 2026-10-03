@@ -11,15 +11,21 @@
  * removed, is not blank. Keep template guidance inside HTML comments so an
  * unedited template fails.
  *
+ * Bot-authored bodies also get the leak check (`src/utils/pr-body-leaks.ts`):
+ * no Slack ids or links, swarm task refs, dashboard or agent-fs links, or
+ * private-chat quotes. It runs when the author is desplega-bot, or when no
+ * author is given (a local run). External contributors are never leak-checked.
+ *
  * Usage:
  *   bun scripts/check-pr-body.ts --title "fix(slack): ..." --body-file /tmp/pr-body.md
- *   PR_TITLE="..." PR_BODY="..." bun scripts/check-pr-body.ts
+ *   PR_TITLE="..." PR_BODY="..." PR_AUTHOR="..." bun scripts/check-pr-body.ts
  *
- * CI: `.github/workflows/pr-body.yml` passes PR_TITLE and PR_BODY. On success,
+ * CI: `.github/workflows/pr-body.yml` passes PR_TITLE, PR_BODY and PR_AUTHOR. On success,
  * each picked choice is written to GITHUB_OUTPUT (for example `urgency=asap`).
  */
 
 import { appendFileSync } from "node:fs";
+import { findPrBodyLeaks, isSwarmBotLogin } from "../src/utils/pr-body-leaks";
 
 const TEMPLATE_PATH = ".github/pull_request_template.md";
 
@@ -69,6 +75,15 @@ export function templateSections(template: string): TemplateSection[] {
     choices: s.flags.includes("pick one") ? checkboxes(s.content, false) : [],
   }));
 }
+
+/** One problem per leak category. Names the category, never the matched text (CI logs are public). */
+export function checkPrBodyLeaks(body: string): string[] {
+  return findPrBodyLeaks(body).map((category) => `internal identifier in body: ${category}`);
+}
+
+/** Leak-check unless the author is known and is not the swarm bot. */
+export const shouldCheckLeaks = (author: string | undefined) =>
+  author === undefined || author.trim() === "" || isSwarmBotLogin(author);
 
 /** Returns one problem per missing, empty, or badly filled section. An empty list means the body passes. */
 export function checkPrBody(template: string, body: string, title = ""): string[] {
@@ -126,7 +141,9 @@ if (import.meta.main) {
   if (title === undefined) {
     console.warn("No PR title given (--title or PR_TITLE). Sections for fix PRs were not checked.");
   }
-  const problems = checkPrBody(template, body, title ?? "");
+  const author = arg("--author") ?? process.env.PR_AUTHOR;
+  const leaks = shouldCheckLeaks(author) ? checkPrBodyLeaks(body) : [];
+  const problems = [...checkPrBody(template, body, title ?? ""), ...leaks];
   if (problems.length === 0) {
     console.log("PR body has every required section of the template.");
     // Expose each picked choice (for example urgency=asap) to later workflow jobs.
@@ -146,6 +163,11 @@ if (import.meta.main) {
       s.when
     ];
     console.error(`  ## ${s.heading}${rule}`);
+  }
+  if (leaks.length > 0) {
+    console.error(
+      "\nThis repo is public. Paraphrase the motivation and link only public sources (Fixes #N, a public PR or issue). Internal provenance stays in the swarm task.",
+    );
   }
   console.error(
     "\nEdit the PR title or description to fix this (no push needed). Guidance for each section is in the template.",

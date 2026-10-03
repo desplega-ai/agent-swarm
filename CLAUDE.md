@@ -354,7 +354,7 @@ Most PRs here are written by agents, so the description must carry the intent a 
 
 PR descriptions MUST fill every required section of [.github/pull_request_template.md](./.github/pull_request_template.md). A `fix:` / `fix(scope):` title also requires Repro and Setup.
 
-- **Intent**: link the source (issue, Linear, Slack thread, swarm task) and keep the requester's words. Do not rewrite the ask to match what you built.
+- **Intent**: why this change exists, paraphrased. Link only public sources (Fixes #N, a public PR or issue). Never paste Slack or DM ids, ts or permalinks, swarm task, run or memory ids, app.agent-swarm.dev or agent-fs links or paths, customer names, or verbatim quotes from private chat. Write 'a maintainer asked for X'. Internal provenance stays in the swarm task. Do not rewrite the ask to match what you built. The **PR Body** check and a PreToolUse hook on `gh pr create|edit` reject bot PR bodies that carry these identifiers (`src/utils/pr-body-leaks.ts`).
 - **Decisions & trade-offs**: up to 3 choices the request did not specify, each with its cost. Always list every migration, new config key, and breaking change.
 - **Urgency**: copy it from the request. If the request gives none, check "nice to have". Never pick it yourself. After the check passes, "asap" requests a review from tarasyarema and posts a comment. "this week" requests a review from desplega-bot, which starts a swarm review.
 
