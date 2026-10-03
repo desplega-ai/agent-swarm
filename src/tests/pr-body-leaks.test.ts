@@ -186,9 +186,11 @@ describe("parseGhPrCommands", () => {
       {
         cwd: "/tmp/wt",
         repos: ["o/r"],
+        alsoCheckout: false,
         unknownTarget: false,
         texts: ["t"],
         bodyFiles: ["body.md"],
+        unresolvedBodyFiles: [],
         opaqueBody: false,
       },
     ]);
@@ -460,6 +462,178 @@ describe("checkGhPrCommand: resolves the real target and body", () => {
     const command = `gh pr edit 12 -R public/example --body "${flagged()}"`;
     expect(await checkGhPrCommand(command, "/private", deps)).toContain("slack-link");
     expect(seen.map((t) => t.repo)).toEqual(["public/example"]);
+  });
+
+  // The parser's model of shell variables must not lag the shell. The hook env
+  // holds a stale local target; the command changes it before `gh` runs.
+  const staleLocal = () => {
+    const target = publicTarget();
+    target.deps.env = { ...target.deps.env, PR_URL: "fix/old-branch" };
+    return target;
+  };
+
+  test("a plain assignment overrides a stale env target (flagged inline body)", async () => {
+    const { deps, seen } = staleLocal();
+    const command = `PR_URL=${publicPrUrl}; gh pr edit "$PR_URL" --body "${flagged()}"`;
+    expect(await checkGhPrCommand(command, "/private", deps)).toContain("slack-link");
+    expect(seen.map((t) => t.repo)).toEqual(["public/example"]);
+  });
+
+  test("a plain assignment overrides a stale env target (unreadable body file)", async () => {
+    const { deps, seen } = staleLocal();
+    deps.readFile = async () => {
+      throw new Error("missing");
+    };
+    const command = `PR_URL=${publicPrUrl}; gh pr edit "$PR_URL" --body-file /tmp/missing.md`;
+    expect(await checkGhPrCommand(command, "/private", deps)).toContain("could not read");
+    expect(seen.map((t) => t.repo)).toEqual(["public/example"]);
+  });
+
+  test("a plain assignment to a local target still resolves in the checkout", async () => {
+    const { deps, seen } = publicTarget();
+    deps.env = { ...deps.env, PR_URL: publicPrUrl };
+    const command = `PR_URL=fix/b; gh pr edit "$PR_URL" --body "${flagged()}"`;
+    expect(await checkGhPrCommand(command, "/private", deps)).toBeNull();
+    expect(seen).toEqual([{ cwd: "/private", repo: undefined }]);
+  });
+
+  test("a prefix assignment on gh itself does not change the expanded target", async () => {
+    const { deps, seen } = publicTarget();
+    deps.env = { ...deps.env, PR_URL: publicPrUrl };
+    const command = `PR_URL=fix/b gh pr edit "$PR_URL" --body "${flagged()}"`;
+    expect(await checkGhPrCommand(command, "/private", deps)).toContain("slack-link");
+    expect(seen.map((t) => t.repo)).toEqual(["public/example"]);
+  });
+
+  const expectUnresolved = async (commands: string[]) => {
+    for (const command of commands) {
+      const { deps, seen } = staleLocal();
+      const reason = await checkGhPrCommand(command, "/private", deps);
+      expect({ command, reason }).toEqual({
+        command,
+        reason: expect.stringContaining("could not be resolved"),
+      });
+      expect(seen).toEqual([]);
+    }
+  };
+
+  test("a non-literal assignment makes the target unknown", async () => {
+    const edit = `gh pr edit "$PR_URL" --body "${flagged()}"`;
+    await expectUnresolved([
+      `PR_URL=$(gh pr list --json url -q '.[0].url'); ${edit}`,
+      `PR_URL="$(gh pr list --json url -q '.[0].url')"; ${edit}`,
+      `PR_URL=\`gh pr list --json url -q .[0].url\`; ${edit}`,
+      `PR_URL=$OTHER; ${edit}`,
+      `export PR_URL=$(gh pr list --json url -q '.[0].url') && ${edit}`,
+      `PR_URL+=/x; ${edit}`,
+    ]);
+  });
+
+  test("read, source, eval, declare, for, unset and similar make a later target unknown", async () => {
+    const edit = `gh pr edit "$PR_URL" --body "${flagged()}"`;
+    await expectUnresolved([
+      `read -r PR_URL < /tmp/url; ${edit}`,
+      `source /tmp/env.sh; ${edit}`,
+      `. /tmp/env.sh; ${edit}`,
+      `eval "PR_URL=${publicPrUrl}"; ${edit}`,
+      `declare PR_URL=${publicPrUrl}; ${edit}`,
+      `typeset PR_URL=${publicPrUrl}; ${edit}`,
+      `local PR_URL=${publicPrUrl}; ${edit}`,
+      `readonly PR_URL=${publicPrUrl}; ${edit}`,
+      `mapfile -t PR_URL < /tmp/url; ${edit}`,
+      `readarray -t PR_URL < /tmp/url; ${edit}`,
+      `printf -v PR_URL '%s' ${publicPrUrl}; ${edit}`,
+      `while read -r PR_URL; do ${edit}; done < /tmp/urls`,
+      `for PR_URL in ${publicPrUrl}; do ${edit}; done`,
+      `unset PR_URL; ${edit}`,
+    ]);
+  });
+
+  test("an unknown target with a clean body is allowed without a lookup", async () => {
+    const { deps, seen } = staleLocal();
+    const command = 'read -r PR_URL < /tmp/url; gh pr edit "$PR_URL" --body "Fixes #1."';
+    expect(await checkGhPrCommand(command, "/private", deps)).toBeNull();
+    expect(seen).toEqual([]);
+  });
+
+  test("subshell state does not leak out of ( ... )", async () => {
+    const { deps, seen } = publicTarget();
+    deps.env = { ...deps.env, PR_URL: publicPrUrl };
+    const edit = `(export PR_URL=fix/b); gh pr edit "$PR_URL" --body "${flagged()}"`;
+    expect(await checkGhPrCommand(edit, "/private", deps)).toContain("slack-link");
+    expect(seen.map((t) => t.repo)).toEqual(["public/example"]);
+
+    const create = publicTarget();
+    const command = `(cd /private); gh pr create --body "${flagged()}"`;
+    expect(await checkGhPrCommand(command, "/public", create.deps)).toContain("slack-link");
+    const inside = publicTarget();
+    const nested = `(cd /private && gh pr create --body "${flagged()}")`;
+    expect(await checkGhPrCommand(nested, "/public", inside.deps)).toBeNull();
+  });
+
+  test("a body file path follows variables assigned in the command", async () => {
+    const reads: string[] = [];
+    const { deps } = publicTarget();
+    deps.env = { ...deps.env, F: "/tmp/clean.md" };
+    deps.readFile = async (path) => {
+      reads.push(path);
+      return path === "/tmp/leaky.md" ? flagged() : "Fixes #1.";
+    };
+    const command = 'F=/tmp/leaky.md; gh pr create --body-file "$F"';
+    expect(await checkGhPrCommand(command, "/public", deps)).toContain("slack-link");
+    expect(reads).toEqual(["/tmp/leaky.md"]);
+  });
+
+  test("an unexported GH_REPO assignment also checks the checkout", async () => {
+    const { deps, seen } = publicTarget();
+    const command = `GH_REPO=private/example; gh pr create --body "${flagged()}"`;
+    expect(await checkGhPrCommand(command, "/public", deps)).toContain("slack-link");
+    expect(seen).toEqual([
+      { cwd: "/public", repo: "private/example" },
+      { cwd: "/public", repo: undefined },
+    ]);
+  });
+
+  test("gh after a reserved word (then, do) is still checked", async () => {
+    for (const command of [
+      `if true; then gh pr create --body "${flagged()}"; fi`,
+      `for i in 1; do gh pr create --body "${flagged()}"; done`,
+    ]) {
+      const { deps } = publicTarget();
+      expect(await checkGhPrCommand(command, "/public", deps)).toContain("slack-link");
+    }
+  });
+
+  test("gh inside bash -c or eval is checked", async () => {
+    for (const command of [
+      `bash -c 'gh pr create --body "${flagged()}"'`,
+      `sh -lc 'cd /public && gh pr create --body "${flagged()}"'`,
+      `eval 'gh pr create --body "${flagged()}"'`,
+    ]) {
+      const { deps } = publicTarget();
+      expect({ command, reason: await checkGhPrCommand(command, "/public", deps) }).toEqual({
+        command,
+        reason: expect.stringContaining("slack-link"),
+      });
+    }
+    // The child shell sees exported variables and prefix assignments only.
+    const { deps, seen } = staleLocal();
+    const command = `PR_URL=${publicPrUrl} bash -c 'gh pr edit "$PR_URL" --body "${flagged()}"'`;
+    expect(await checkGhPrCommand(command, "/private", deps)).toContain("slack-link");
+    expect(seen.map((t) => t.repo)).toEqual(["public/example"]);
+    const local = publicTarget();
+    const unexported = `PR_URL=fix/b; bash -c 'gh pr edit "$PR_URL" --body "${flagged()}"'`;
+    expect(await checkGhPrCommand(unexported, "/private", local.deps)).toContain(
+      "could not be resolved",
+    );
+  });
+
+  test("a wrapper with flags makes the cwd and GH_REPO unknown", async () => {
+    const { deps, seen } = publicTarget();
+    deps.env = { ...deps.env, GH_REPO: "private/example" };
+    const command = `env -u GH_REPO gh pr create --body "${flagged()}"`;
+    expect(await checkGhPrCommand(command, "/private", deps)).toContain("could not be resolved");
+    expect(seen).toEqual([]);
   });
 });
 
