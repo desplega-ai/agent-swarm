@@ -1,16 +1,30 @@
 /**
- * PreToolUse guard: block `gh pr create` / `gh pr edit` when the PR body for
- * a PUBLIC repo carries internal identifiers (see `src/utils/pr-body-leaks.ts`).
+ * PreToolUse guard: block `gh pr create` / `gh pr edit` when the PR title or
+ * body for a PUBLIC repo carries internal identifiers (see
+ * `src/utils/pr-body-leaks.ts`).
  *
  * Shared by the Claude hook (`hook.ts`) and the codex hook (`codex-hook.ts`).
  * The block reason names leak categories only, never the matched text.
  *
+ * What gets scanned: the resolved title and body, not the whole command.
+ *   - `--title` / `--body` values (any flag form: `-b"x"`, `--body=x`, ...).
+ *   - `--body-file PATH`, read relative to the `cd` target.
+ *   - `--body-file -` fed by a heredoc, here-string or `< PATH`.
+ *   - `--body-file -` fed by a pipe, or a body the shell builds from an
+ *     unquoted `$(...)`: the guard cannot isolate the text, so it scans the
+ *     whole command instead.
+ *
+ * Which repo: `--repo` / `-R` in any position (also before `pr`), the PR URL
+ * given to `gh pr edit`, `GH_REPO`, else the checkout at the `cd` target.
+ * Every explicit target is checked; any public one blocks.
+ *
  * Failure modes:
- *   - Body scanned clean: allow without a visibility lookup.
- *   - Body has leaks, or `--body-file` is unreadable: look up the repo
+ *   - Text scanned clean: allow without a visibility lookup.
+ *   - Text has leaks, or `--body-file` is unreadable: look up the repo
  *     visibility. PUBLIC blocks; PRIVATE / INTERNAL allows.
- *   - Visibility lookup fails: block (fail closed). We already know the body
- *     is unsafe or unreadable, and we cannot prove the repo is private.
+ *   - Visibility lookup fails, or a `cd` target cannot be resolved (`cd -`,
+ *     unset variable): block (fail closed). We already know the body is
+ *     unsafe or unreadable, and we cannot prove the repo is private.
  *   - Body comes from an unexpanded shell variable (`--body "$BODY"`): the
  *     guard cannot see it and allows (fail open). CI still checks the body.
  */
@@ -19,14 +33,16 @@ import { isAbsolute, resolve } from "node:path";
 import { findPrBodyLeaks, type LeakCategory } from "../utils/pr-body-leaks";
 
 export type GhPrInvocation = {
-  /** Working directory of the `gh` call, after any `cd` earlier in the command. */
-  cwd: string;
-  /** `--repo` / `-R` value, when given. */
-  repo?: string;
-  /** Body text is inline (`--body`, `-b`, or `--body-file -` with a heredoc). */
-  inlineBody: boolean;
-  /** `--body-file` / `-F` path as written, when it is not `-`. */
-  bodyFile?: string;
+  /** Working directory of the `gh` call after any `cd`; null when a `cd` target could not be resolved. */
+  cwd: string | null;
+  /** Explicit target repos: `--repo` / `-R`, a PR URL, or `GH_REPO`. Empty means the checkout at `cwd`. */
+  repos: string[];
+  /** Literal public text: `--title` and `--body` values, heredoc or here-string stdin. */
+  texts: string[];
+  /** Files that become the body: `--body-file PATH`, or `--body-file -` with `< PATH`. */
+  bodyFiles: string[];
+  /** The body text could not be isolated (piped stdin, unquoted `$(...)`); scan the whole command. */
+  opaqueBody: boolean;
 };
 
 export type PrBodyGuardDeps = {
@@ -36,17 +52,30 @@ export type PrBodyGuardDeps = {
   env: Record<string, string | undefined>;
 };
 
+/** One simple command: its words, plus any heredoc / here-string text fed to its stdin. */
+export type ShellSegment = { words: string[]; stdin: string[] };
+
 const SEPARATORS = ["&&", "||", ";", "|", "&", "\n", "(", ")"];
 const COMMAND_WRAPPERS = new Set(["env", "command", "exec", "time", "sudo", "nohup"]);
 
-/** Split a shell command into segments of words. Handles quotes and backslashes, not expansions. */
-export function tokenizeShell(command: string): string[][] {
-  const segments: string[][] = [[]];
+/**
+ * Split a shell command into simple commands. Handles quotes, backslashes,
+ * comments, heredocs and here-strings, not expansions.
+ */
+export function tokenizeShell(command: string): ShellSegment[] {
+  const segments: ShellSegment[] = [{ words: [], stdin: [] }];
+  const current = () => segments[segments.length - 1] as ShellSegment;
+  const heredocs: Array<{ delimiter: string; stripTabs: boolean; segment: ShellSegment }> = [];
+  let hereString = false;
   let word = "";
   let inWord = false;
   let quote: "'" | '"' | null = null;
   const push = () => {
-    if (inWord) segments[segments.length - 1]?.push(word);
+    if (inWord) {
+      if (hereString) current().stdin.push(word);
+      else current().words.push(word);
+      hereString = false;
+    }
     word = "";
     inWord = false;
   };
@@ -81,10 +110,57 @@ export function tokenizeShell(command: string): string[][] {
       i++;
       continue;
     }
+    if (ch === "#" && !inWord) {
+      // Comment: skip to the end of the line, keep the newline.
+      while (i + 1 < command.length && command[i + 1] !== "\n") i++;
+      continue;
+    }
+    if (command.startsWith("<<<", i)) {
+      push();
+      hereString = true;
+      i += 2;
+      continue;
+    }
+    if (command.startsWith("<<", i)) {
+      push();
+      let j = i + 2;
+      const stripTabs = command[j] === "-";
+      if (stripTabs) j++;
+      while (command[j] === " " || command[j] === "\t") j++;
+      let delimiter = "";
+      while (j < command.length && !/[\s;&|()<>]/.test(command[j] as string)) {
+        if (!"'\"\\".includes(command[j] as string)) delimiter += command[j];
+        j++;
+      }
+      if (delimiter) heredocs.push({ delimiter, stripTabs, segment: current() });
+      i = j - 1;
+      continue;
+    }
+    if (ch === "\n" && heredocs.length > 0) {
+      // Heredoc bodies start on the next line, in the order they were opened.
+      push();
+      let j = i + 1;
+      for (const doc of heredocs) {
+        const lines: string[] = [];
+        while (j < command.length) {
+          const newline = command.indexOf("\n", j);
+          const lineEnd = newline === -1 ? command.length : newline;
+          const line = command.slice(j, lineEnd);
+          j = lineEnd + 1;
+          if ((doc.stripTabs ? line.replace(/^\t+/, "") : line) === doc.delimiter) break;
+          lines.push(line);
+        }
+        doc.segment.stdin.push(lines.join("\n"));
+      }
+      heredocs.length = 0;
+      segments.push({ words: [], stdin: [] });
+      i = j - 1;
+      continue;
+    }
     const sep = SEPARATORS.find((s) => command.startsWith(s, i));
     if (sep) {
       push();
-      segments.push([]);
+      segments.push({ words: [], stdin: [] });
       i += sep.length - 1;
       continue;
     }
@@ -96,7 +172,8 @@ export function tokenizeShell(command: string): string[][] {
     inWord = true;
   }
   push();
-  return segments.filter((s) => s.length > 0);
+  for (const doc of heredocs) doc.segment.stdin.push("");
+  return segments.filter((s) => s.words.length > 0);
 }
 
 /** Expand `~`, `$VAR` and `${VAR}`. Returns null when a variable is unset. */
@@ -112,14 +189,101 @@ function expandPath(path: string, env: Record<string, string | undefined>): stri
   return unresolved ? null : expanded;
 }
 
-/** Value of `--name value`, `--name=value` or `-x value` within `args`. */
-function flagValue(args: string[], long: string, short: string): string | undefined {
+/** Value-taking flags of `gh` and `gh pr create|edit`, keyed by long name. Others are boolean. */
+const VALUE_FLAGS = new Set([
+  "repo",
+  "body",
+  "body-file",
+  "title",
+  "base",
+  "head",
+  "assignee",
+  "label",
+  "milestone",
+  "project",
+  "reviewer",
+  "template",
+  "recover",
+  "add-assignee",
+  "add-label",
+  "add-project",
+  "add-reviewer",
+  "remove-assignee",
+  "remove-label",
+  "remove-project",
+  "remove-reviewer",
+]);
+const SHORT_FLAGS: Record<string, string> = {
+  R: "repo",
+  b: "body",
+  F: "body-file",
+  t: "title",
+  B: "base",
+  H: "head",
+  a: "assignee",
+  l: "label",
+  m: "milestone",
+  p: "project",
+  r: "reviewer",
+  T: "template",
+};
+
+type ParsedArgs = {
+  positionals: string[];
+  flags: Array<[name: string, value: string]>;
+  /** `< PATH` stdin redirect. */
+  stdinFile?: string;
+};
+
+/**
+ * Parse `gh` arguments the way pflag does: `--name value`, `--name=value`,
+ * `-x value`, `-xvalue`, `-x=value`, and boolean clusters such as `-dF body.md`.
+ */
+function parseGhArgs(args: string[]): ParsedArgs {
+  const parsed: ParsedArgs = { positionals: [], flags: [] };
   for (let i = 0; i < args.length; i++) {
     const arg = args[i] as string;
-    if (arg === long || arg === short) return args[i + 1];
-    if (arg.startsWith(`${long}=`)) return arg.slice(long.length + 1);
+    const redirect = /^\d*(<|>>?|>\|)(&?)(.*)$/.exec(arg);
+    if (redirect) {
+      const target = redirect[3] || (args[++i] ?? "");
+      if (redirect[1] === "<" && !redirect[2]) parsed.stdinFile = target;
+      continue;
+    }
+    if (arg === "--") {
+      parsed.positionals.push(...args.slice(i + 1));
+      break;
+    }
+    if (arg.startsWith("--")) {
+      const eq = arg.indexOf("=");
+      const name = arg.slice(2, eq === -1 ? undefined : eq);
+      if (eq !== -1) parsed.flags.push([name, arg.slice(eq + 1)]);
+      else parsed.flags.push([name, VALUE_FLAGS.has(name) ? (args[++i] ?? "") : ""]);
+      continue;
+    }
+    if (arg.startsWith("-") && arg.length > 1) {
+      for (let k = 1; k < arg.length; k++) {
+        const name = SHORT_FLAGS[arg[k] as string] ?? (arg[k] as string);
+        if (!VALUE_FLAGS.has(name)) {
+          parsed.flags.push([name, ""]);
+          continue;
+        }
+        const attached = arg.slice(k + 1).replace(/^=/, "");
+        parsed.flags.push([name, k + 1 < arg.length ? attached : (args[++i] ?? "")]);
+        break;
+      }
+      continue;
+    }
+    parsed.positionals.push(arg);
   }
-  return undefined;
+  return parsed;
+}
+
+/** `OWNER/REPO` (or `HOST/OWNER/REPO`) from a PR URL, else undefined. */
+function repoFromPrUrl(target: string | undefined): string | undefined {
+  const match = /^https?:\/\/([^/]+)\/([^/]+)\/([^/]+)\/pull\/\d+/.exec(target ?? "");
+  if (!match) return undefined;
+  const [, host, owner, name] = match;
+  return host === "github.com" ? `${owner}/${name}` : `${host}/${owner}/${name}`;
 }
 
 /** Find every `gh pr create|edit` call in a shell command. */
@@ -129,30 +293,64 @@ export function parseGhPrCommands(
   env: Record<string, string | undefined> = process.env,
 ): GhPrInvocation[] {
   const found: GhPrInvocation[] = [];
-  let dir = cwd;
-  for (const words of tokenizeShell(command)) {
-    if ((words[0] === "cd" || words[0] === "pushd") && words.length <= 2) {
-      const target = expandPath(words[1] ?? env.HOME ?? dir, env);
-      if (target !== null) dir = isAbsolute(target) ? target : resolve(dir, target);
+  const shellEnv = { ...env };
+  let dir: string | null = cwd;
+  for (const { words, stdin } of tokenizeShell(command)) {
+    if (words[0] === "cd" || words[0] === "pushd") {
+      const operands = words.slice(1);
+      while (operands[0] !== undefined && /^-[LPe@]+$/.test(operands[0])) operands.shift();
+      if (operands[0] === "--") operands.shift();
+      if (operands.length > 1) continue; // bash: too many arguments, cd fails
+      const operand = operands[0] ?? shellEnv.HOME ?? "~";
+      const target = operand === "-" ? null : expandPath(operand, shellEnv);
+      dir = target === null || dir === null ? null : resolve(dir, target);
+      if (target !== null && isAbsolute(target)) dir = target;
+      continue;
+    }
+    if (words[0] === "popd") {
+      dir = null;
+      continue;
+    }
+    if (words[0] === "export") {
+      for (const assignment of words.slice(1)) {
+        const eq = assignment.indexOf("=");
+        if (eq > 0) shellEnv[assignment.slice(0, eq)] = assignment.slice(eq + 1);
+      }
       continue;
     }
     // `gh` must be the command word: only env assignments or wrappers may precede it.
     const gh = words.findIndex((w) => !/^\w+=/.test(w) && !COMMAND_WRAPPERS.has(w));
     const word = words[gh] ?? "";
-    if (
-      !(word === "gh" || word.endsWith("/gh")) ||
-      words[gh + 1] !== "pr" ||
-      (words[gh + 2] !== "create" && words[gh + 2] !== "edit")
-    ) {
-      continue;
+    if (!(word === "gh" || word.endsWith("/gh"))) continue;
+    const args = parseGhArgs(words.slice(gh + 1));
+    const [group, action, target] = args.positionals;
+    if (group !== "pr" || (action !== "create" && action !== "edit")) continue;
+
+    const values = (...names: string[]) =>
+      args.flags.filter(([name]) => names.includes(name)).map(([, value]) => value);
+    const prefixRepo = words
+      .slice(0, gh)
+      .find((w) => w.startsWith("GH_REPO="))
+      ?.slice("GH_REPO=".length);
+    const urlRepo = action === "edit" ? repoFromPrUrl(target) : undefined;
+    let repos = [...values("repo"), ...(urlRepo ? [urlRepo] : [])];
+    if (repos.length === 0 && (prefixRepo ?? shellEnv.GH_REPO)) {
+      repos = [(prefixRepo ?? shellEnv.GH_REPO) as string];
     }
-    const args = words.slice(gh + 3);
-    const bodyFile = flagValue(args, "--body-file", "-F");
+
+    const inline = values("title", "body");
+    const bodyFiles = values("body-file").filter((file) => file !== "-");
+    const fromStdin = values("body-file").includes("-");
+    if (fromStdin && args.stdinFile !== undefined) bodyFiles.push(args.stdinFile);
     found.push({
       cwd: dir,
-      repo: flagValue(args, "--repo", "-R"),
-      inlineBody: flagValue(args, "--body", "-b") !== undefined || bodyFile === "-",
-      bodyFile: bodyFile === "-" ? undefined : bodyFile,
+      repos: [...new Set(repos)],
+      texts: [...inline, ...(fromStdin ? stdin : [])],
+      bodyFiles,
+      // An unquoted `$(` splits at the paren, leaving a value that ends in `$`.
+      opaqueBody:
+        inline.some((value) => value.endsWith("$")) ||
+        (fromStdin && stdin.length === 0 && args.stdinFile === undefined),
     });
   }
   return found;
@@ -161,11 +359,7 @@ export function parseGhPrCommands(
 const BLOCK_ADVICE =
   "Paraphrase the motivation ('a maintainer asked for X') and link only public sources (Fixes #N, a public PR or issue). Internal provenance stays in the swarm task.";
 
-/**
- * Check a shell command. Returns a block reason, or null to allow.
- * An inline body is scanned as the whole command text: a heredoc inside
- * `--body "$(cat <<'EOF' ...)"` does not tokenize cleanly, and the title is public too.
- */
+/** Check a shell command. Returns a block reason, or null to allow. */
 export async function checkGhPrCommand(
   command: string,
   cwd: string,
@@ -173,36 +367,47 @@ export async function checkGhPrCommand(
 ): Promise<string | null> {
   if (!/\bgh\b[\s\S]*\bpr\b/.test(command)) return null;
   for (const call of parseGhPrCommands(command, cwd, deps.env)) {
-    const leaks = new Set<LeakCategory>(call.inlineBody ? findPrBodyLeaks(command) : []);
+    const leaks = new Set<LeakCategory>();
+    for (const text of call.opaqueBody ? [...call.texts, command] : call.texts) {
+      for (const leak of findPrBodyLeaks(text)) leaks.add(leak);
+    }
     let unreadable: string | undefined;
-    if (call.bodyFile !== undefined) {
-      const expanded = expandPath(call.bodyFile, deps.env);
+    for (const bodyFile of call.bodyFiles) {
+      const expanded = expandPath(bodyFile, deps.env);
       try {
         if (expanded === null) throw new Error("unset variable");
-        const path = isAbsolute(expanded) ? expanded : resolve(call.cwd, expanded);
-        for (const leak of findPrBodyLeaks(await deps.readFile(path))) leaks.add(leak);
+        const base = isAbsolute(expanded) ? "/" : call.cwd;
+        if (base === null) throw new Error("unknown working directory");
+        for (const leak of findPrBodyLeaks(await deps.readFile(resolve(base, expanded)))) {
+          leaks.add(leak);
+        }
       } catch {
-        unreadable = call.bodyFile;
+        unreadable ??= bodyFile;
       }
     }
     if (leaks.size === 0 && unreadable === undefined) continue;
 
-    let visibility: string;
-    try {
-      visibility = (await deps.repoVisibility({ cwd: call.cwd, repo: call.repo })).trim();
-    } catch {
-      visibility = "UNKNOWN";
-    }
-    if (visibility === "PRIVATE" || visibility === "INTERNAL") continue;
+    const targets = call.repos.length > 0 ? call.repos : [undefined];
+    for (const repo of targets) {
+      let visibility = "UNKNOWN";
+      if (repo !== undefined || call.cwd !== null) {
+        try {
+          visibility = (await deps.repoVisibility({ cwd: call.cwd ?? cwd, repo })).trim();
+        } catch {
+          visibility = "UNKNOWN";
+        }
+      }
+      if (visibility === "PRIVATE" || visibility === "INTERNAL") continue;
 
-    const target =
-      visibility === "PUBLIC"
-        ? "this public repo"
-        : "a repo whose visibility could not be confirmed";
-    if (leaks.size > 0) {
-      return `PR body leak check: the PR body for ${target} contains internal identifiers (${[...leaks].join(", ")}). ${BLOCK_ADVICE}`;
+      const where =
+        visibility === "PUBLIC"
+          ? "this public repo"
+          : "a repo whose visibility could not be confirmed";
+      if (leaks.size > 0) {
+        return `PR body leak check: the PR body for ${where} contains internal identifiers (${[...leaks].join(", ")}). ${BLOCK_ADVICE}`;
+      }
+      return `PR body leak check: could not read --body-file ${unreadable} for ${where}, so the body was not checked. Pass a literal path to a file that exists.`;
     }
-    return `PR body leak check: could not read --body-file ${unreadable} for ${target}, so the body was not checked. Pass a literal path to a file that exists.`;
   }
   return null;
 }

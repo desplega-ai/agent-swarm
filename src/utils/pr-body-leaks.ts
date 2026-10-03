@@ -11,6 +11,16 @@
  *
  * Results name the category only. Never echo the matched text: the report
  * itself may be published (CI logs on a public repo, hook output in a PR).
+ *
+ * Calibration policy for swarm refs (`swarm-task-ref`):
+ *   - Prose and inline code are checked: `task 1a2b3c4d`, `parentTaskId: <id>`.
+ *   - Fenced code blocks are not: a test fixture or example such as
+ *     `const taskId = "<uuid>";` is code, not provenance. Cost: a pasted log
+ *     inside a fence that carries a real task id passes.
+ *   - A bare "run" is not a swarm ref: "CI run 3f2a9c1d" is usually a CI run
+ *     label and a commit SHA. Only "swarm run", "workflow run" or "run id"
+ *     followed by a hex id counts. Cost: "run <id>" alone passes.
+ * Every other category is checked everywhere, fences included.
  */
 
 export type LeakCategory =
@@ -30,7 +40,13 @@ export type LeakCategory =
  */
 export const AGENT_FS_PATH_RULE_ENABLED = false;
 
-type LeakRule = { category: LeakCategory; pattern: RegExp; enabled: boolean };
+type LeakRule = {
+  category: LeakCategory;
+  pattern: RegExp;
+  enabled: boolean;
+  /** Skip fenced code blocks (see the calibration policy above). */
+  proseOnly?: boolean;
+};
 
 const UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
 
@@ -68,17 +84,27 @@ export const LEAK_RULES: readonly LeakRule[] = [
     enabled: true,
   },
   {
-    // "task d80a8d8b", "taskId: `d80a8d8b-...`", "swarm run 1a2b3c4d", "memory id ..."
+    // "task 1a2b3c4d", "taskId: `1a2b3c4d-...`", "memory id ...", "schedule 1a2b3c4d"
     category: "swarm-task-ref",
     pattern:
-      /\b(?:swarm\s+)?(?:task|run|memory|schedule)s?(?:[\s_-]*id)?\s*[:#=]?\s*[`'"]?(?=[0-9]*[a-f])[0-9a-f]{8}\b/i,
+      /\b(?:swarm\s+)?(?:task|memory|schedule)s?(?:[\s_-]*id)?\s*[:#=]?\s*[`'"]?(?=[0-9]*[a-f])[0-9a-f]{8}\b/i,
     enabled: true,
+    proseOnly: true,
+  },
+  {
+    // "swarm run 1a2b3c4d", "workflow run ...", "run_id: ...". Not a bare "run <sha>".
+    category: "swarm-task-ref",
+    pattern:
+      /\b(?:(?:swarm|workflow)\s+runs?(?:[\s_-]*id)?|runs?[\s_-]*id)\s*[:#=]?\s*[`'"]?(?=[0-9]*[a-f])[0-9a-f]{8}\b/i,
+    enabled: true,
+    proseOnly: true,
   },
   {
     // camelCase fields: parentTaskId, sourceRunId, memoryId
     category: "swarm-task-ref",
     pattern: /(?:Task|Run|Memory|Schedule)Ids?\s*[:=]?\s*[`'"]?(?=[0-9]*[a-f])[0-9a-f]{8}\b/,
     enabled: true,
+    proseOnly: true,
   },
   {
     // `Taras in DM: "..."`, `From the Slack thread, he wrote "..."`
@@ -118,15 +144,23 @@ const PLACEHOLDER_UUIDS = new RegExp(
   "gi",
 );
 
+/** Fenced code blocks (``` or ~~~). An unclosed fence runs to the end, as in CommonMark. */
+const FENCED_CODE = /^[ \t]*(`{3,}|~{3,})[^\n]*\n[\s\S]*?(?:^[ \t]*\1[`~]*[ \t]*$|$(?![\s\S]))/gm;
+
 /** Returns the distinct leak categories found in `body`, in rule order. Empty means clean. */
 export function findPrBodyLeaks(body: string): LeakCategory[] {
   const text = body
     .replace(/\r\n/g, "\n")
     .replace(PRESIGNED_URL, "<presigned-url>")
     .replace(PLACEHOLDER_UUIDS, "<placeholder-uuid>");
+  const prose = text.replace(FENCED_CODE, "<code-block>");
   const found: LeakCategory[] = [];
   for (const rule of LEAK_RULES) {
-    if (rule.enabled && !found.includes(rule.category) && rule.pattern.test(text)) {
+    if (
+      rule.enabled &&
+      !found.includes(rule.category) &&
+      rule.pattern.test(rule.proseOnly ? prose : text)
+    ) {
       found.push(rule.category);
     }
   }

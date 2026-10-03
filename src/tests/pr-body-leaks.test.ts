@@ -102,6 +102,24 @@ describe("findPrBodyLeaks: negative controls", () => {
     expect(findPrBodyLeaks(body)).toEqual([]);
   });
 
+  test("a fenced code example with a fresh UUID taskId", () => {
+    const body = `## Proof of work\n\n\`\`\`ts\nconst taskId = "${randomUUID()}";\nawait store({ parentTaskId: "${randomUUID()}" });\n\`\`\`\n`;
+    expect(findPrBodyLeaks(body)).toEqual([]);
+    // The same line outside the fence is still a ref.
+    expect(findPrBodyLeaks(`taskId = "${randomUUID()}"`)).toEqual(["swarm-task-ref"]);
+  });
+
+  test("a fence does not hide Slack or dashboard links", () => {
+    expect(findPrBodyLeaks(`\`\`\`\n${slackLink()}\n\`\`\`\n`)).toContain("slack-link");
+  });
+
+  test("a run label followed by an 8-char SHA", () => {
+    const sha = hexWithLetter();
+    expect(findPrBodyLeaks(`CI run ${sha} passed. Test run: ${sha}.`)).toEqual([]);
+    expect(findPrBodyLeaks(`workflow run ${sha}`)).toEqual(["swarm-task-ref"]);
+    expect(findPrBodyLeaks(`run_id: ${sha}`)).toEqual(["swarm-task-ref"]);
+  });
+
   test("a commit SHA", () => {
     const sha = randomUUID().replace(/-/g, "").slice(0, 40);
     expect(findPrBodyLeaks(`Reverts ${sha} (commit ${sha.slice(0, 7)}), see #12.`)).toEqual([]);
@@ -165,15 +183,24 @@ describe("parseGhPrCommands", () => {
       "/start",
     );
     expect(calls).toEqual([
-      { cwd: "/tmp/wt", repo: "o/r", inlineBody: false, bodyFile: "body.md" },
+      { cwd: "/tmp/wt", repos: ["o/r"], texts: ["t"], bodyFiles: ["body.md"], opaqueBody: false },
     ]);
   });
 
   test("detects inline bodies, edit, and = forms; ignores other gh calls", () => {
-    expect(parseGhPrCommands("gh pr edit 12 -b 'x'", "/w")[0]?.inlineBody).toBe(true);
-    expect(parseGhPrCommands("gh pr edit 12 --body-file=-", "/w")[0]?.inlineBody).toBe(true);
+    expect(parseGhPrCommands("gh pr edit 12 -b 'x'", "/w")[0]?.texts).toEqual(["x"]);
+    expect(parseGhPrCommands("gh pr edit 12 --body-file=-", "/w")[0]?.opaqueBody).toBe(true);
     expect(parseGhPrCommands("gh pr view 12 --json body", "/w")).toEqual([]);
     expect(parseGhPrCommands("echo gh pr create", "/w")).toEqual([]);
+  });
+
+  test("a heredoc, here-string or < file feeds --body-file -", () => {
+    const heredoc = parseGhPrCommands("gh pr create -F - <<'EOF'\nline one\nEOF\necho done", "/w");
+    expect(heredoc).toHaveLength(1);
+    expect(heredoc[0]?.texts).toEqual(["line one"]);
+    expect(parseGhPrCommands("gh pr create -F - <<< 'hi'", "/w")[0]?.texts).toEqual(["hi"]);
+    expect(parseGhPrCommands("gh pr create -F - < b.md", "/w")[0]?.bodyFiles).toEqual(["b.md"]);
+    expect(parseGhPrCommands("cat b.md | gh pr create -F -", "/w")[0]?.opaqueBody).toBe(true);
   });
 });
 
@@ -241,10 +268,124 @@ describe("checkGhPrCommand", () => {
     expect(await checkGhPrCommand(command, "/w", priv.deps)).toBeNull();
   });
 
+  test("an unrelated shell comment does not block a clean body", async () => {
+    const { deps, calls } = fakeDeps();
+    const command = `# follow-up of task ${hexWithLetter()}\ngh pr create -t t --body "Fixes #1."`;
+    expect(await checkGhPrCommand(command, "/w", deps)).toBeNull();
+    expect(calls.visibility).toBe(0);
+  });
+
+  test("an unquoted $(cat <<EOF) body falls back to scanning the whole command", async () => {
+    const { deps } = fakeDeps();
+    const command = `gh pr create -t t --body $(cat <<'EOF'\nSee ${slackLink()}\nEOF\n)`;
+    expect(await checkGhPrCommand(command, "/w", deps)).toContain("slack-link");
+  });
+
   test("an unexpanded shell variable body is allowed (fail open, CI is the backstop)", async () => {
     const { deps, calls } = fakeDeps();
     expect(await checkGhPrCommand('gh pr create -t t --body "$BODY"', "/w", deps)).toBeNull();
     expect(calls.visibility).toBe(0);
+  });
+});
+
+// Review finding 5: valid gh forms that bypassed the guard. The current checkout
+// is PRIVATE; the real target (repo flag, PR URL or cd target) is PUBLIC.
+describe("checkGhPrCommand: resolves the real target and body", () => {
+  const flagged = () => `Context: ${slackLink()}`;
+  const publicTarget = () => {
+    const seen: Array<{ cwd: string; repo?: string }> = [];
+    const { deps, calls } = fakeDeps({
+      readFile: async (path) => {
+        calls.reads.push(path);
+        return flagged();
+      },
+      repoVisibility: async (target) => {
+        seen.push(target);
+        const isPublic = target.repo ? target.repo === "public/example" : target.cwd === "/public";
+        return isPublic ? "PUBLIC" : "PRIVATE";
+      },
+    });
+    return { deps, calls, seen };
+  };
+
+  test("gh -R before pr", async () => {
+    const { deps } = publicTarget();
+    const command = `gh -R public/example pr create --body "${flagged()}"`;
+    expect(await checkGhPrCommand(command, "/private", deps)).toContain("slack-link");
+  });
+
+  test("attached -Rrepo", async () => {
+    const { deps } = publicTarget();
+    const command = `gh pr create -Rpublic/example --body "${flagged()}"`;
+    expect(await checkGhPrCommand(command, "/private", deps)).toContain("slack-link");
+  });
+
+  test("attached -R=repo", async () => {
+    const { deps } = publicTarget();
+    const command = `gh pr create -R=public/example --body "${flagged()}"`;
+    expect(await checkGhPrCommand(command, "/private", deps)).toContain("slack-link");
+  });
+
+  test('attached -b"body"', async () => {
+    const { deps } = publicTarget();
+    const command = `gh pr create -R public/example -b"${flagged()}"`;
+    expect(await checkGhPrCommand(command, "/private", deps)).toContain("slack-link");
+  });
+
+  test("attached -Fbody.md", async () => {
+    const { deps, calls } = publicTarget();
+    const command = "gh pr create -R public/example -Fbody.md";
+    expect(await checkGhPrCommand(command, "/private", deps)).toContain("slack-link");
+    expect(calls.reads).toEqual(["/private/body.md"]);
+  });
+
+  test("cd -- dir", async () => {
+    const { deps } = publicTarget();
+    const command = `cd -- /public && gh pr create --body "${flagged()}"`;
+    expect(await checkGhPrCommand(command, "/private", deps)).toContain("slack-link");
+  });
+
+  test("gh pr edit with a PR URL", async () => {
+    const { deps, seen } = publicTarget();
+    const command = `gh pr edit https://github.com/public/example/pull/1 --body "${flagged()}"`;
+    expect(await checkGhPrCommand(command, "/private", deps)).toContain("slack-link");
+    expect(seen.map((t) => t.repo)).toEqual(["public/example"]);
+  });
+
+  test("GH_REPO, as a prefix or exported", async () => {
+    for (const command of [
+      `GH_REPO=public/example gh pr create --body "${flagged()}"`,
+      `export GH_REPO=public/example && gh pr create --body "${flagged()}"`,
+    ]) {
+      expect(await checkGhPrCommand(command, "/private", publicTarget().deps)).toContain(
+        "slack-link",
+      );
+    }
+  });
+
+  test("an unresolvable cd target fails closed", async () => {
+    const { deps, seen } = publicTarget();
+    const command = `cd - && gh pr create --body "${flagged()}"`;
+    expect(await checkGhPrCommand(command, "/private", deps)).toContain("could not be confirmed");
+    expect(seen).toEqual([]);
+  });
+
+  test("forms that already blocked stay blocked", async () => {
+    for (const command of [
+      `cd /public && gh pr create --body "${flagged()}"`,
+      "cd /public && gh pr create --body-file body.md",
+      `cd /public && gh pr create -F - <<'EOF'\n${flagged()}\nEOF`,
+    ]) {
+      expect(await checkGhPrCommand(command, "/private", publicTarget().deps)).toContain(
+        "slack-link",
+      );
+    }
+  });
+
+  test("the same forms on a private target are allowed", async () => {
+    const { deps } = publicTarget();
+    const command = `gh -R private/example pr create -b"${flagged()}"`;
+    expect(await checkGhPrCommand(command, "/public", deps)).toBeNull();
   });
 });
 
