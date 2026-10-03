@@ -1,7 +1,7 @@
 ---------------------------- MODULE Heartbeat ----------------------------
 (***************************************************************************)
 (* Server-side heartbeat + the task lifecycle it races with, as the code   *)
-(* behaves on main @ 415e23d1. Every action maps to file:line and the SQL  *)
+(* behaves on main @ eaf5d0cc. Every action maps to file:line and the SQL  *)
 (* guard it models in ACTIONS.md. Time is abstracted: `stale[t]` means     *)
 (* "lastUpdatedAt older than the stall threshold", and `Age` sets it.     *)
 (*                                                                         *)
@@ -24,6 +24,7 @@ CONSTANTS
     G_REBOOT_HB_AGE,  \* runRebootSweep: skip sessions younger than 15 min (#1669)
     G_ORPHAN_REPAIR,  \* sweep re-creates a missing resume (#1670)
     FIX_NO_REBOOT,    \* proposed: delete runRebootSweep, rely on the classifier
+    DRAIN_HANDOFF,    \* API drain handoff (#1837), opt-in via API_DRAIN_MAX_MS > 0
     HYPO_REOFFER      \* hypothetical path that re-offers an unassigned task
 
 None == "none"
@@ -205,14 +206,35 @@ Complete(w, t) ==
                    hb, rb, apiUp, wc, ac, liveKill, badAcc>>
 
 \* The runner aborts any task the server holds as terminal (#1820,
-\* reconcileActiveTasks, runner.ts:4710): cancelled on every poll via
-\* /cancelled-tasks (core.ts:552), failed/superseded on a 30 s status read.
+\* reconcileActiveTasks, runner.ts:4872): cancelled on every poll via
+\* /cancelled-tasks (core.ts:553), failed/superseded on a 30 s status read.
 \* The 30 s interval and the 10 s abort grace are abstracted away.
 AbortTerminal(w, t) ==
     /\ apiUp /\ alive[w] /\ t \in running[w] /\ st[t] \in Terminal
     /\ running' = [running EXCEPT ![w] = @ \ {t}]
     /\ UNCHANGED <<st, own, offTo, par, gen, pin, ver, stale, sess, touched,
                    alive, cl, acc, hb, rb, apiUp, wc, ac, liveKill, badAcc>>
+
+\* API drain handoff (#1837): a worker that sees X-Swarm-Draining on /ping or
+\* /api/poll calls POST /api/tasks/:id/supersede for its own in-flight task
+\* (handOffTasksForApiDrain). The API runs supersedeTask (WHERE status NOT IN
+\* terminal, no stall CAS) and then createResumeFollowUp(graceful_shutdown),
+\* pinned to the same agent. The two writes are collapsed into one step: a
+\* hard crash between them is the HbWrite/HbResume gap, which HbRepair closes.
+\* The runner then aborts the session (AbortTerminal frees the slot). Enabled
+\* whenever the API is up, not only while draining (over-approximation); the
+\* drain's refusal to dispatch only removes behaviors and is not modeled.
+DrainHandoff(w, t) ==
+    /\ DRAIN_HANDOFF /\ apiUp /\ alive[w] /\ t \in running[w]
+    /\ st[t] = "in_progress" /\ own[t] = w
+    /\ \E s \in Free :
+         /\ st'  = [st  EXCEPT ![t] = "superseded", ![s] = "pending"]
+         /\ own' = [own EXCEPT ![s] = w]
+         /\ par' = [par EXCEPT ![s] = t]
+         /\ gen' = [gen EXCEPT ![s] = gen[t] + 1]
+         /\ pin' = [pin EXCEPT ![s] = TRUE]
+    /\ UNCHANGED <<offTo, ver, stale, sess, touched, running, alive, cl, acc, hb, rb,
+                   apiUp, wc, ac, liveKill, badAcc>>
 
 WorkerCrash(w) ==
     /\ alive[w] /\ wc < MaxWorkerCrashes
@@ -381,7 +403,7 @@ Next ==
     \/ \E w \in Workers, t \in Tasks :
          ClaimRead(w, t) \/ AcceptRead(w, t) \/ PollStart(w, t) \/ RegisterSession(w, t)
          \/ SessionBeat(w, t) \/ Progress(w, t) \/ Complete(w, t) \/ AbortTerminal(w, t) \/ ReOffer(t, w)
-         \/ AutoAssign(t, w)
+         \/ AutoAssign(t, w) \/ DrainHandoff(w, t)
     \/ \E w \in Workers : ClaimWrite(w) \/ AcceptWrite(w) \/ WorkerCrash(w) \/ WorkerRestart(w)
     \/ \E t \in Tasks : Reject(t) \/ Age(t) \/ HbRead(t) \/ HbRepair(t) \/ Reaper(t)
          \/ CleanupSession(t) \/ RebootFail(t)

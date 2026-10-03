@@ -13,6 +13,8 @@ handlers, user cancel, user retry, crash). Code map: `ACTIONS.md`. Calibration: 
 | Counterexamples found on `main` @ `2180cd401` (CX1-CX7) | **7**, all fixed (#1666, #1675, #1678, #1673) |
 | Confirmed by a bun test that failed on `main` | **7** (all now pass as plain `test`) |
 | Open counterexamples on `main` @ `795526ca3` (CX8-CX10) | **3**, no repro test yet |
+| Closed by #1832 (CX11) | **1** |
+| Open counterexamples on `main` @ `eaf5d0cc1` (CX12 from #1832, CX13 pre-existing) | **2**, no repro test yet |
 | Dropped as model drift | **0** (false-positive rate 0 / 7) |
 
 CX1-CX7 each have a repro in `src/tests/workflow-tla-races.test.ts`. The tests call the
@@ -80,6 +82,49 @@ A fourth trace needs a crash: `Long.cfg` (BFS, 19,342 distinct states, depth 21)
 before `checkpointStepWaiting`. F3 deliberately lets recovery re-run a `running` row nobody owns,
 so the node dispatches a second task. This is at-least-once delivery at a crash, not a race
 between live actors.
+
+## Sync with #1832 (`main` @ `eaf5d0cc1`)
+
+#1832 makes an agent-task step honor `node.retry` when its task fails. The `task.failed` handler
+and the recovery sweep both call `scheduleTaskStepRetry`: one transaction that claims the step
+while it is `waiting` and still bound to the failed task, detaches the task, and queues the row
+for the retry poller. `finalizeOrWait` now counts a retry-pending row as live. The spec models
+this as F7 `FixTaskRetry` (actions `ER`, `H7R`, the `ownerTaskId` fence on `H7`/`H8`, task
+generations per row). F7 is on in `Workflows.cfg` and `Long.cfg`.
+
+### CX11 (closed by #1832): finalizeOrWait completes a run while a sibling is pending retry
+
+Leaf `A` is an agent task, sibling `B` fails in the walk with a retry pending. `A`'s task
+completes; `finalizeOrWait` saw no `waiting` row and marked the run `completed`, stranding `B`'s
+retry. #1832 counts a `failed` row with `nextRetryAt` as live.
+
+- `Ctl-CX11.cfg` (F7 off): `CompletedRunQuiescent` violated. Trace: `… XCkWait (A waiting) → TaskFinish(A ok) → E1 → E2 → XFail (B retry pending) → EFin (run completed)`.
+- `Fix-CX11.cfg` (F7 on, no sweeps): holds, 78,384 distinct states.
+
+### CX12 (opened by #1832): recovery and the poller both execute an agent-task step whose task failed mid-sweep
+
+`A` and `B` are agent tasks (leaves). `B`'s task completes; `E2` sets the run `running` and has
+not finalized yet, and no walk is active. A heartbeat sweep reads the run: `A` is `waiting`, not
+completed and not retry-pending, so `findReadyNodes` returns it. Before the walk dedups `A`,
+`A`'s task fails and `task.failed` queues its retry (step `failed` + `nextRetryAt`).
+`getCurrentStepForNode` memoizes only `running`/`waiting`/`completed` rows, so the recovery walk
+inserts a new `A` row and executes it, and the poller claims the old row: two executions.
+Before #1832 the failure failed the run, and the recovery walk's dedup halted.
+
+- Invariant: `AtMostOneExecuting` (Inv2). `Probe-task-retry.cfg`, 630,500 distinct states, depth 36.
+- Trace: `… XCkWait (A, B waiting) → WRet → TaskFinish(B ok) → TaskFinish(A fail) → E1 → E2 (run running) → H1 → H2 (A ready) → H3 → WStart → E1 → ER (A retry pending) → P1 → P2 → P3 → P4 (old A running) → WPick → XDedup (new A)`
+- The same path reaches CX8 with converging branches: an async branch whose retry is queued by
+  `task.failed` lets the join fire (`Workflows.cfg` with `BranchOutcomes = {"async"}`,
+  `JoinWaitsForBranches`, 142,080 distinct states). Before #1832 only a sync `XFail` reached CX8.
+
+### CX13 (pre-existing, found during this sync): finalizeOrWait completes a cancelled run
+
+`finalizeOrWait` has no run-status guard. A leaf agent task completes, `E2` sets the run
+`running`, the user cancels, then `finalizeOrWait` writes `completed` over `cancelled`. Not
+introduced by #1832; no earlier config combined leaves, async branches, and cancel.
+
+- Property: `TerminalRunStaysQuiet` (Inv1). `Probe-cancel-finalize.cfg`, 954 distinct states, depth 20.
+- Trace: `… XCkWait (B waiting) → TaskFinish(B ok) → E1 → E2 (run running) → Cancel → EFin (run completed)`
 
 ## Counterexamples
 
@@ -237,3 +282,21 @@ one by one; the BFS traces above are the ones mapped to code and tests.
 
 Liveness (`EventuallySettles`, Inv5) is defined but not checked in these configs; the safety
 bugs above make it moot until they are fixed.
+
+Re-run on `main` @ `eaf5d0cc1` (tla2tools 2.19, BFS, `-workers auto`) after syncing with #1832.
+With F7 off, every `Fix-CX1` .. `Fix-CX7` config gives the same distinct-state count as before,
+so the refactor (task generations, per-generation handler threads) is behavior-preserving.
+
+| Config | Result | Distinct states | Trace |
+|---|---|---|---|
+| `Workflows.cfg` | `JoinWaitsForBranches` violated (CX8) | 29,695 | 24 |
+| `Long.cfg` | `AtMostOneExecuting` violated (crash trace) | 9,698 | 19 |
+| `Cal-bf12ab53.cfg` / control | found / holds | 413 / 160 | 18 / - |
+| `Cal-d4753302.cfg` / control | found / found | 4,919 / 3,150 | 33 / 34 |
+| `Fix-CX1` .. `Fix-CX7` | all hold | 4,073 / 471,850 / 308,120 / 113,010 / 26,296 / 3,325 / 3,778 | - |
+| `Ctl-CX2` .. `Ctl-CX7` | all find their CX | 1,562 / 2,883 / 24,936 / 9,033 / 435 / 1,156 | 25 / 22 / 31 / 33 / 20 / 30 |
+| `Fix-CX11` / `Ctl-CX11` | holds / found | 78,384 / 1,311 | - / 21 |
+| `Probe-task-retry.cfg` | CX12 found | 630,500 | 36 |
+| `Probe-cancel-finalize.cfg` | CX13 found | 954 | 20 |
+| `Probe-input-await.cfg` | CX6 found | 458 | 20 |
+
