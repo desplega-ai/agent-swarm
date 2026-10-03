@@ -34,7 +34,7 @@ import type {
 } from "./types";
 
 // npm's `latest` is older and lacks the JSON/stdin contract used here.
-export const DSH_PACKAGE = "@deepseek-ai/dsh@0.2.0-rc.2";
+export const DSH_PACKAGE = "@deepseek-ai/dsh@0.2.1-alpha.1";
 
 export function checkDshCredentials(env: Record<string, string | undefined>): CredStatus {
   return env.DEEPSEEK_API_KEY?.trim() || env.OPENROUTER_API_KEY?.trim()
