@@ -556,8 +556,8 @@ RUN case "$TARGETARCH" in \
 # Keep dsh and its transitive lifecycle scripts out of the shared root install.
 # Verify the pinned npm release tarball before installing without lifecycle hooks.
 # Bump the version and its SHA-512 pin together.
-ARG DSH_VERSION=0.2.0-rc.2
-ARG DSH_SHA512=10027780f35c56dfeebfc5f5f4f326f4d915856813ef15cd324d14282566f88439ae949039cb0c51ad075a59d8615c9b28cb1c723711076d6f555b1a5d0e8874
+ARG DSH_VERSION=0.2.1-alpha.1
+ARG DSH_SHA512=0c9f29c06fd7ab3c03ad84138095ee2206ba92ed79dd9e2f248fc1dccccdb6e7550a40da39fe0eda95108754e8ae82c73cf7b89b186115e349eedb4d72e96a33
 RUN curl -fsSL "https://registry.npmjs.org/@deepseek-ai/dsh/-/dsh-${DSH_VERSION}.tgz" -o /tmp/dsh.tgz \
     && echo "${DSH_SHA512}  /tmp/dsh.tgz" | sha512sum -c - \
     && HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
