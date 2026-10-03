@@ -15,16 +15,19 @@
  *     whole command instead.
  *
  * Which repo: `--repo` / `-R` in any position (also before `pr`), the PR URL
- * given to `gh pr edit`, `GH_REPO`, else the checkout at the `cd` target.
- * Every explicit target is checked; any public one blocks.
+ * given to `gh pr edit` (after expanding `$VAR` / `${VAR}`), `GH_REPO`, else
+ * the checkout at the `cd` target. Every explicit target is checked; any
+ * public one blocks.
  *
  * Failure modes:
  *   - Text scanned clean: allow without a visibility lookup.
  *   - Text has leaks, or `--body-file` is unreadable: look up the repo
  *     visibility. PUBLIC blocks; PRIVATE / INTERNAL allows.
- *   - Visibility lookup fails, or a `cd` target cannot be resolved (`cd -`,
- *     unset variable): block (fail closed). We already know the body is
- *     unsafe or unreadable, and we cannot prove the repo is private.
+ *   - Visibility lookup fails, a `cd` target cannot be resolved (`cd -`,
+ *     unset variable), or a `gh pr edit` target is neither a PR number, a
+ *     branch nor a PR URL (unset variable, `$(...)`): block (fail closed). We
+ *     already know the body is unsafe or unreadable, and we cannot prove the
+ *     repo is private. An unknown edit target never falls back to the checkout.
  *   - Body comes from an unexpanded shell variable (`--body "$BODY"`): the
  *     guard cannot see it and allows (fail open). CI still checks the body.
  */
@@ -37,6 +40,8 @@ export type GhPrInvocation = {
   cwd: string | null;
   /** Explicit target repos: `--repo` / `-R`, a PR URL, or `GH_REPO`. Empty means the checkout at `cwd`. */
   repos: string[];
+  /** The `gh pr edit` target could not be classified (unset variable, `$(...)`, non-PR URL), so the PR's repo is unknown. */
+  unknownTarget: boolean;
   /** Literal public text: `--title` and `--body` values, heredoc or here-string stdin. */
   texts: string[];
   /** Files that become the body: `--body-file PATH`, or `--body-file -` with `< PATH`. */
@@ -286,6 +291,31 @@ function repoFromPrUrl(target: string | undefined): string | undefined {
   return host === "github.com" ? `${owner}/${name}` : `${host}/${owner}/${name}`;
 }
 
+type EditTarget = { kind: "local" } | { kind: "url"; repo: string } | { kind: "unknown" };
+
+/**
+ * Classify the positional target of `gh pr edit` after expanding `$VAR` /
+ * `${VAR}`. No target, a PR number or a branch name resolve in the checkout
+ * (or `-R` repo); a PR URL names its own repo. Anything else (an unset
+ * variable, command substitution, a non-PR URL) is unknown.
+ */
+function classifyEditTarget(
+  target: string | undefined,
+  env: Record<string, string | undefined>,
+): EditTarget {
+  if (target === undefined) return { kind: "local" };
+  if (target.includes("`") || target.includes("$(")) return { kind: "unknown" };
+  const expanded = expandPath(target, env);
+  if (expanded === null) return { kind: "unknown" };
+  const repo = repoFromPrUrl(expanded);
+  if (repo) return { kind: "url", repo };
+  if (/^#?\d+$/.test(expanded)) return { kind: "local" };
+  if (/^[\w.+@:/-]+$/.test(expanded) && !expanded.startsWith("-") && !expanded.includes("://")) {
+    return { kind: "local" };
+  }
+  return { kind: "unknown" };
+}
+
 /** Find every `gh pr create|edit` call in a shell command. */
 export function parseGhPrCommands(
   command: string,
@@ -332,8 +362,9 @@ export function parseGhPrCommands(
       .slice(0, gh)
       .find((w) => w.startsWith("GH_REPO="))
       ?.slice("GH_REPO=".length);
-    const urlRepo = action === "edit" ? repoFromPrUrl(target) : undefined;
-    let repos = [...values("repo"), ...(urlRepo ? [urlRepo] : [])];
+    const editTarget: EditTarget =
+      action === "edit" ? classifyEditTarget(target, shellEnv) : { kind: "local" };
+    let repos = [...values("repo"), ...(editTarget.kind === "url" ? [editTarget.repo] : [])];
     if (repos.length === 0 && (prefixRepo ?? shellEnv.GH_REPO)) {
       repos = [(prefixRepo ?? shellEnv.GH_REPO) as string];
     }
@@ -345,11 +376,14 @@ export function parseGhPrCommands(
     found.push({
       cwd: dir,
       repos: [...new Set(repos)],
+      unknownTarget: editTarget.kind === "unknown",
       texts: [...inline, ...(fromStdin ? stdin : [])],
       bodyFiles,
       // An unquoted `$(` splits at the paren, leaving a value that ends in `$`.
+      // In the edit target, it also cuts every later flag off this segment.
       opaqueBody:
         inline.some((value) => value.endsWith("$")) ||
+        (action === "edit" && target?.endsWith("$") === true) ||
         (fromStdin && stdin.length === 0 && args.stdinFile === undefined),
     });
   }
@@ -387,10 +421,15 @@ export async function checkGhPrCommand(
     }
     if (leaks.size === 0 && unreadable === undefined) continue;
 
-    const targets = call.repos.length > 0 ? call.repos : [undefined];
+    // An unknown edit target never falls back to the checkout: its repo is unknown.
+    const targets: Array<string | undefined | null> = call.unknownTarget
+      ? [null]
+      : call.repos.length > 0
+        ? call.repos
+        : [undefined];
     for (const repo of targets) {
       let visibility = "UNKNOWN";
-      if (repo !== undefined || call.cwd !== null) {
+      if (repo !== null && (repo !== undefined || call.cwd !== null)) {
         try {
           visibility = (await deps.repoVisibility({ cwd: call.cwd ?? cwd, repo })).trim();
         } catch {
@@ -400,9 +439,11 @@ export async function checkGhPrCommand(
       if (visibility === "PRIVATE" || visibility === "INTERNAL") continue;
 
       const where =
-        visibility === "PUBLIC"
-          ? "this public repo"
-          : "a repo whose visibility could not be confirmed";
+        repo === null
+          ? "a gh pr edit target that could not be resolved"
+          : visibility === "PUBLIC"
+            ? "this public repo"
+            : "a repo whose visibility could not be confirmed";
       if (leaks.size > 0) {
         return `PR body leak check: the PR body for ${where} contains internal identifiers (${[...leaks].join(", ")}). ${BLOCK_ADVICE}`;
       }

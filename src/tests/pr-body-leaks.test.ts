@@ -183,7 +183,14 @@ describe("parseGhPrCommands", () => {
       "/start",
     );
     expect(calls).toEqual([
-      { cwd: "/tmp/wt", repos: ["o/r"], texts: ["t"], bodyFiles: ["body.md"], opaqueBody: false },
+      {
+        cwd: "/tmp/wt",
+        repos: ["o/r"],
+        unknownTarget: false,
+        texts: ["t"],
+        bodyFiles: ["body.md"],
+        opaqueBody: false,
+      },
     ]);
   });
 
@@ -386,6 +393,73 @@ describe("checkGhPrCommand: resolves the real target and body", () => {
     const { deps } = publicTarget();
     const command = `gh -R private/example pr create -b"${flagged()}"`;
     expect(await checkGhPrCommand(command, "/public", deps)).toBeNull();
+  });
+
+  // A `gh pr edit` target held in a variable must not fall back to the checkout.
+  const publicPrUrl = "https://github.com/public/example/pull/1";
+
+  test("gh pr edit with a PR URL variable resolved from the env", async () => {
+    for (const command of [
+      `gh pr edit "$PR_URL" --body "${flagged()}"`,
+      `gh pr edit "\${PR_URL}" --body "${flagged()}"`,
+    ]) {
+      const { deps, seen } = publicTarget();
+      deps.env = { ...deps.env, PR_URL: publicPrUrl };
+      expect(await checkGhPrCommand(command, "/private", deps)).toContain("slack-link");
+      expect(seen.map((t) => t.repo)).toEqual(["public/example"]);
+    }
+  });
+
+  test("gh pr edit with a PR URL variable resolved from export", async () => {
+    const { deps, seen } = publicTarget();
+    const command = `export PR_URL=${publicPrUrl} && gh pr edit "$PR_URL" --body "${flagged()}"`;
+    expect(await checkGhPrCommand(command, "/private", deps)).toContain("slack-link");
+    expect(seen.map((t) => t.repo)).toEqual(["public/example"]);
+  });
+
+  test("an unresolvable gh pr edit target fails closed without a checkout lookup", async () => {
+    for (const command of [
+      `gh pr edit "$PR_URL" --body "${flagged()}"`,
+      `gh pr edit "$(gh pr list --json url -q '.[0].url')" --body "${flagged()}"`,
+      `gh pr edit $(gh pr list --json url -q '.[0].url') --body "${flagged()}"`,
+      `gh pr edit https://github.com/public/example/issues/1 --body "${flagged()}"`,
+    ]) {
+      const { deps, seen } = publicTarget();
+      const reason = await checkGhPrCommand(command, "/private", deps);
+      expect(reason).toContain("could not be resolved");
+      expect(reason).toContain("slack-link");
+      expect(seen).toEqual([]);
+    }
+  });
+
+  test("an unresolvable gh pr edit target with a clean body is allowed", async () => {
+    const { deps, seen } = publicTarget();
+    const command = 'gh pr edit "$PR_URL" --body "Fixes #1."';
+    expect(await checkGhPrCommand(command, "/private", deps)).toBeNull();
+    expect(seen).toEqual([]);
+  });
+
+  test("PR number and branch targets still resolve in the checkout or -R repo", async () => {
+    for (const command of [
+      `gh pr edit 12 --body "${flagged()}"`,
+      `gh pr edit "#12" --body "${flagged()}"`,
+      `gh pr edit fix/some-branch --body "${flagged()}"`,
+      `gh pr edit "$BRANCH" --body "${flagged()}"`,
+      `gh pr edit --body "${flagged()}"`,
+    ]) {
+      const priv = publicTarget();
+      priv.deps.env = { ...priv.deps.env, BRANCH: "fix/some-branch" };
+      expect(await checkGhPrCommand(command, "/private", priv.deps)).toBeNull();
+      expect(priv.seen).toEqual([{ cwd: "/private", repo: undefined }]);
+
+      const pub = publicTarget();
+      pub.deps.env = { ...pub.deps.env, BRANCH: "fix/some-branch" };
+      expect(await checkGhPrCommand(command, "/public", pub.deps)).toContain("slack-link");
+    }
+    const { deps, seen } = publicTarget();
+    const command = `gh pr edit 12 -R public/example --body "${flagged()}"`;
+    expect(await checkGhPrCommand(command, "/private", deps)).toContain("slack-link");
+    expect(seen.map((t) => t.repo)).toEqual(["public/example"]);
   });
 });
 
