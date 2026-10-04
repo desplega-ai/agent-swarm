@@ -85,6 +85,7 @@ const LEAD_ONLY_VERBS: PermissionVerb[] = [
 const OPERATOR_ONLY_VERBS: PermissionVerb[] = [];
 const LEAD_OR_OPERATOR_OR_USER_VERBS: PermissionVerb[] = [
   "extension.write",
+  "task.requester.assign",
   "extension.activate",
   "extension.install.inline",
 ];

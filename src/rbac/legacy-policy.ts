@@ -258,6 +258,7 @@ export const LEGACY_POLICY = {
   "approval.cancel.any": humanOrLeadOrResourceOwner,
   "task.steer.any": leadOrTaskCreator,
   "task.create.own": anyAuthenticated,
+  "task.requester.assign": leadOrOperatorOrUser,
   "task.read.own": requesterOwnsTask,
   "task.cancel.own": requesterOwnsTask,
   "task.steer.own": requesterOwnsTask,

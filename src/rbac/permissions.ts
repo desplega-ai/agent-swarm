@@ -45,6 +45,11 @@ export const PERMISSIONS = {
     description: "Create a task the caller owns.",
     namespace: "task",
   },
+  "task.requester.assign": {
+    description:
+      "Attribute a new task to a user other than the requester of the caller's own current task.",
+    namespace: "task",
+  },
   "task.read.own": {
     description: "Read details of a task the principal requested.",
     namespace: "task",
