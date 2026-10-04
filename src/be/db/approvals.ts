@@ -1,6 +1,19 @@
 import { normalizeDate, normalizeDateRequired } from "../date-utils";
 import { getDbClient } from "./runtime";
 
+/**
+ * One accepted answer to an approval request. `responder` comes from the
+ * request's credential (a user id, or "operator" for the shared key);
+ * `claimedRespondedBy` is the client's unverified `respondedBy`, kept for display only.
+ */
+export interface ApprovalVote {
+  responder: string;
+  approved: boolean;
+  responses: Record<string, unknown>;
+  claimedRespondedBy?: string;
+  respondedAt: string;
+}
+
 export interface ApprovalRequestListFilters {
   status?: string;
   workflowRunId?: string;
@@ -75,4 +88,20 @@ export async function listApprovalRequestSummaries(
     createdAt: normalizeDateRequired(row.createdAt),
     updatedAt: normalizeDateRequired(row.updatedAt),
   }));
+}
+
+/**
+ * Records the answers collected so far on a request that stays pending (an
+ * `all` or `{ min: N }` policy still short of its quorum). False when the row
+ * is no longer pending.
+ */
+export async function recordApprovalVotes(id: string, approvals: ApprovalVote[]): Promise<boolean> {
+  const row = await getDbClient().get<{ id: string }>(
+    `UPDATE approval_requests
+       SET approvals = ?, updatedAt = ?
+       WHERE id = ? AND status = 'pending'
+       RETURNING id`,
+    [JSON.stringify(approvals), new Date().toISOString(), id],
+  );
+  return row !== null && row !== undefined;
 }

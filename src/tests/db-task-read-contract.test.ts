@@ -42,6 +42,7 @@ type:ApiKeyStatus
 type:AppVersion
 type:ApprovalRequest
 type:ApprovalRequestSummary
+type:ApprovalVote
 type:AssetSummaryFilters
 type:AttributionByPersonRow
 type:AvailableKeyIndicesResult
@@ -499,6 +500,7 @@ value:postMessage
 value:promoteAbandonedDraftTasks
 value:promoteDraftTask
 value:reassociateSessionLogs
+value:recordApprovalVotes
 value:recordBudgetRefusalNotification
 value:recordInlineScriptRun
 value:recordKeyAuthFailure

@@ -170,7 +170,11 @@ import {
   reservedRoleViolation,
   rowToAgent,
 } from "./db/agents";
-import { type ApprovalRequestListFilters, approvalRequestListClause } from "./db/approvals";
+import {
+  type ApprovalRequestListFilters,
+  type ApprovalVote,
+  approvalRequestListClause,
+} from "./db/approvals";
 import {
   computeContentHash,
   createContextVersion,
@@ -231,7 +235,12 @@ export {
   updateAgentStatusFromCapacity,
 } from "./db/agents";
 export { recordKeySeatMismatch } from "./db/api-keys";
-export { type ApprovalRequestSummary, listApprovalRequestSummaries } from "./db/approvals";
+export {
+  type ApprovalRequestSummary,
+  type ApprovalVote,
+  listApprovalRequestSummaries,
+  recordApprovalVotes,
+} from "./db/approvals";
 export {
   computeContentHash,
   createContextVersion,
@@ -9450,19 +9459,6 @@ export async function upsertChannelActivityCursor(
 // Approval Requests
 // ============================================================================
 
-/**
- * One accepted answer to an approval request. `responder` comes from the
- * request's credential (a user id, or "operator" for the shared key);
- * `claimedRespondedBy` is the client's unverified `respondedBy`, kept for display only.
- */
-export interface ApprovalVote {
-  responder: string;
-  approved: boolean;
-  responses: Record<string, unknown>;
-  claimedRespondedBy?: string;
-  respondedAt: string;
-}
-
 export interface ApprovalRequest {
   id: string;
   title: string;
@@ -9651,23 +9647,6 @@ export async function resolveApprovalRequest(
       now,
       id,
     ],
-  );
-  return row ? rowToApprovalRequest(row) : null;
-}
-
-// Records the answers collected so far on a request that stays pending
-// (an `all` or `{ min: N }` policy still short of its quorum). Null when the
-// row is no longer pending or its workflow step is no longer actionable.
-export async function recordApprovalVotes(
-  id: string,
-  approvals: ApprovalVote[],
-): Promise<ApprovalRequest | null> {
-  const row = await getDbClient().get<ApprovalRequestRow>(
-    `UPDATE approval_requests
-       SET approvals = ?, updatedAt = ?
-       WHERE id = ? AND status = 'pending'
-       RETURNING *`,
-    [JSON.stringify(approvals), new Date().toISOString(), id],
   );
   return row ? rowToApprovalRequest(row) : null;
 }

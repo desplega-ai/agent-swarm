@@ -482,7 +482,9 @@ export async function handleApprovalRequests(
           ? { kind: "resolved" as const, request: resolved }
           : { kind: "unavailable" as const };
       }
-      const recorded = await recordApprovalVotes(parsed.params.id, votes);
+      const recorded = (await recordApprovalVotes(parsed.params.id, votes))
+        ? await getApprovalRequestById(parsed.params.id)
+        : null;
       return recorded
         ? { kind: "recorded" as const, request: recorded }
         : { kind: "unavailable" as const };
