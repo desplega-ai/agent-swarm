@@ -66,6 +66,15 @@ export function publicSuiteScenarioIds(): string[] {
   return Object.keys(SUITE_SCENARIO_VERSIONS).filter((id) => !isHeldOut(id));
 }
 
+/**
+ * The nightly canary's scenarios (Phase 9): the public single-run scenarios. No
+ * held-out scenario (those run in the weekly matrix only) and no `-solo`
+ * baseline (weekly too), so 3 repeats x 2 configs stay inside the $2 run cap.
+ */
+export function canarySuiteScenarioIds(): string[] {
+  return publicSuiteScenarioIds().filter((id) => !id.endsWith(SOLO_SUFFIX));
+}
+
 /** `1.0` when the scenario at that version is in the manifest, else null. */
 export function suiteVersionFor(scenarioId: string, scenarioVersion: number): string | null {
   return SUITE_SCENARIO_VERSIONS[scenarioId] === scenarioVersion ? SUITE_VERSION : null;

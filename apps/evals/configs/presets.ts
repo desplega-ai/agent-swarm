@@ -1,3 +1,4 @@
+import { canarySuiteScenarioIds, SUITE_SCENARIO_VERSIONS } from "../scenarios/suite.ts";
 import type { ConfigPreset } from "../src/types.ts";
 
 /**
@@ -108,15 +109,17 @@ export const CONFIG_PRESETS: ConfigPreset[] = [
   {
     id: "nightly-canary",
     label: "Nightly canary",
-    description: "Opus 5.5 + Codex 6 luna, 3 repeats, $2 metered cap.",
+    description:
+      "Opus 5.5 + Codex 6 luna on the 9 public single-run scenarios, 3 repeats, $2 metered cap.",
     configIds: ["claude-opus-5.5", "codex-6-luna"],
     runDefaults: { attemptsPerCell: 3, maxMeteredUsd: 2 },
+    scenarioSet: "canary",
   },
   {
     id: "weekly-matrix",
     label: "Weekly matrix",
     description:
-      "Canary configs + Codex 6.1 sol + Codex 6 astra + DeepSeek V4.1 Flash, 5 repeats, $37 metered cap.",
+      "Canary configs + Codex 6.1 sol + Codex 6 astra + DeepSeek V4.1 Flash on the whole suite (solo baselines and held-out included), 5 repeats, $37 metered cap.",
     // Claude and Codex run on subscription, so the cap is mostly E2B time:
     // ~375 attempts: E2B ~$19 (measured $0.02-0.10 each) + judge ~$11 (~$0.03
     // each) + DeepSeek tokens ~$1 = ~$31, plus 20%.
@@ -130,6 +133,21 @@ export const CONFIG_PRESETS: ConfigPreset[] = [
     runDefaults: { attemptsPerCell: 5, maxMeteredUsd: 37 },
   },
 ];
+
+/**
+ * Presets whose runs get the regression check and one Slack summary when they
+ * finish (Phase 9). A run started from any other preset is an ordinary run.
+ */
+export const SCHEDULED_PRESET_IDS: readonly string[] = ["nightly-canary", "weekly-matrix"];
+
+/** Scenario ids POST /api/runs runs for a preset when the caller names none. */
+export function presetScenarioIds(presetId: string): string[] {
+  const preset = CONFIG_PRESETS.find((p) => p.id === presetId);
+  if (!preset) throw new Error(`unknown preset "${presetId}"`);
+  return preset.scenarioSet === "canary"
+    ? canarySuiteScenarioIds()
+    : Object.keys(SUITE_SCENARIO_VERSIONS);
+}
 
 /**
  * Run plan implied by the named presets: per field, the first preset (flag
