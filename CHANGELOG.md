@@ -6,6 +6,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.162.0] - 2026-10-03
+
+### Added
+- Comb: an agent-fs review space in the dashboard, off by default behind `COMB_ENABLED`, with `AGENT_FS_PUBLIC_URL` for the browser-facing agent-fs URL (#1728).
+- Claude Code mod: a `/swarm` pane, a delegate tool and live task logs inside the agent-swarm plugin (#1838).
+- Memory: Azure / Microsoft Foundry embeddings preset and a Memory integration card (#1836).
+- Telemetry: `schema_version` 2 identity envelope against the proxy event catalog (#1780).
+
+### Changed
+- CI builds and deploys only the newest main commit, and posts deploy outcomes to Slack through the optional `DEPLOY_SLACK_WEBHOOK_URL` (#1842).
+- Dependencies bumped: ACP SDK 1.7.0 (#1841), agent-fs pins 0.15.1 (#1840), agent-browser 0.38.2 (#1835).
+- Docs: heartbeat spec synced with #1820 (#1834); TLA+ heartbeat and workflow specs synced with main (#1848); README links agent-swarm.dev.
+
+### Fixed
+- Shutdown: the API drains on SIGTERM so workers hand off while it still serves, behind `API_DRAIN_MAX_MS` (#1837).
+- Runner recovers fenced JSON output for schema-bound tasks (#1833).
+- pi reprompts once when the final assistant turn is empty (#1831).
+- Workflows honor `node.retry` when an agent-task step's task fails (#1832).
+- Linear tracker holders can delegate (#1839).
+
 ## [1.161.0] - 2026-10-02
 
 ### Added
