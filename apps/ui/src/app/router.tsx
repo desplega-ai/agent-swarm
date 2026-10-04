@@ -1,84 +1,85 @@
-import { lazy, Suspense } from "react";
+import { Suspense } from "react";
 import { createBrowserRouter, Navigate, type RouteObject } from "react-router-dom";
 import { RootLayout } from "@/components/layout/root-layout";
+import { lazyRoute } from "@/components/shared/app-update-prompt";
 import { HiveLoadingScreen } from "@/components/shared/hive-loading-screen";
 import { SettingsLayout } from "@/pages/settings/settings-layout";
 import { UsageLayout } from "@/pages/usage/usage-layout";
 import { RouteRedirect } from "./route-redirect";
 
-const UnifiedHome = lazy(() => import("@/pages/home/unified-home"));
-const AgentsPage = lazy(() => import("@/pages/agents/page"));
-const AgentDetailPage = lazy(() => import("@/pages/agents/[id]/page"));
-const TasksPage = lazy(() => import("@/pages/tasks/page"));
-const TaskDetailPage = lazy(() => import("@/pages/tasks/[id]/page"));
-const SessionsPage = lazy(() => import("@/pages/sessions/page"));
-const SessionDetailPage = lazy(() => import("@/pages/sessions/[rootTaskId]/page"));
-const ChatPage = lazy(() => import("@/pages/chat/page"));
-const ServicesPage = lazy(() => import("@/pages/services/page"));
-const SchedulesPage = lazy(() => import("@/pages/schedules/page"));
-const ScheduleDetailPage = lazy(() => import("@/pages/schedules/[id]/page"));
-const UsageContent = lazy(() =>
+const UnifiedHome = lazyRoute(() => import("@/pages/home/unified-home"));
+const AgentsPage = lazyRoute(() => import("@/pages/agents/page"));
+const AgentDetailPage = lazyRoute(() => import("@/pages/agents/[id]/page"));
+const TasksPage = lazyRoute(() => import("@/pages/tasks/page"));
+const TaskDetailPage = lazyRoute(() => import("@/pages/tasks/[id]/page"));
+const SessionsPage = lazyRoute(() => import("@/pages/sessions/page"));
+const SessionDetailPage = lazyRoute(() => import("@/pages/sessions/[rootTaskId]/page"));
+const ChatPage = lazyRoute(() => import("@/pages/chat/page"));
+const ServicesPage = lazyRoute(() => import("@/pages/services/page"));
+const SchedulesPage = lazyRoute(() => import("@/pages/schedules/page"));
+const ScheduleDetailPage = lazyRoute(() => import("@/pages/schedules/[id]/page"));
+const UsageContent = lazyRoute(() =>
   import("@/pages/usage/usage-content").then((m) => ({ default: m.UsageContent })),
 );
-const BudgetsPage = lazy(() => import("@/pages/budgets/page"));
-const ConnectionsPage = lazy(() => import("@/pages/settings/connections-page"));
-const AppearancePage = lazy(() => import("@/pages/settings/appearance-page"));
-const SecretsPage = lazy(() => import("@/pages/settings/secrets-page"));
-const ConfigurationPage = lazy(() => import("@/pages/settings/configuration-page"));
-const ExtensionsPage = lazy(() => import("@/pages/settings/extensions-page"));
-const ExtensionDetailPage = lazy(() => import("@/pages/settings/extension-detail-page"));
-const ExtensionCatalogPage = lazy(() => import("@/pages/settings/extension-catalog-page"));
-const IntegrationsPage = lazy(() => import("@/pages/integrations/page"));
-const IntegrationDetailPage = lazy(() => import("@/pages/integrations/[id]/page"));
-const ReposPage = lazy(() => import("@/pages/repos/page"));
-const RepoDetailPage = lazy(() => import("@/pages/repos/[id]/page"));
-const WorkflowsPage = lazy(() => import("@/pages/workflows/page"));
-const WorkflowDetailPage = lazy(() => import("@/pages/workflows/[id]/page"));
-const WorkflowRunDetailPage = lazy(() => import("@/pages/workflow-runs/[id]/page"));
-const ScriptConnectionsPage = lazy(() => import("@/pages/connections/page"));
-const ScriptConnectionDetailPage = lazy(() => import("@/pages/connections/[id]/page"));
-const OAuthAppDetailPage = lazy(() => import("@/pages/connections/oauth-apps/[id]/page"));
-const ScriptsPage = lazy(() => import("@/pages/scripts/page"));
-const ScriptDetailPage = lazy(() => import("@/pages/scripts/[id]/page"));
-const ScriptRunDetailPage = lazy(() => import("@/pages/script-runs/[id]/page"));
-const TemplatesPage = lazy(() => import("@/pages/templates/page"));
-const TemplateDetailPage = lazy(() => import("@/pages/templates/[id]/page"));
-const TemplateVersionDetailPage = lazy(
+const BudgetsPage = lazyRoute(() => import("@/pages/budgets/page"));
+const ConnectionsPage = lazyRoute(() => import("@/pages/settings/connections-page"));
+const AppearancePage = lazyRoute(() => import("@/pages/settings/appearance-page"));
+const SecretsPage = lazyRoute(() => import("@/pages/settings/secrets-page"));
+const ConfigurationPage = lazyRoute(() => import("@/pages/settings/configuration-page"));
+const ExtensionsPage = lazyRoute(() => import("@/pages/settings/extensions-page"));
+const ExtensionDetailPage = lazyRoute(() => import("@/pages/settings/extension-detail-page"));
+const ExtensionCatalogPage = lazyRoute(() => import("@/pages/settings/extension-catalog-page"));
+const IntegrationsPage = lazyRoute(() => import("@/pages/integrations/page"));
+const IntegrationDetailPage = lazyRoute(() => import("@/pages/integrations/[id]/page"));
+const ReposPage = lazyRoute(() => import("@/pages/repos/page"));
+const RepoDetailPage = lazyRoute(() => import("@/pages/repos/[id]/page"));
+const WorkflowsPage = lazyRoute(() => import("@/pages/workflows/page"));
+const WorkflowDetailPage = lazyRoute(() => import("@/pages/workflows/[id]/page"));
+const WorkflowRunDetailPage = lazyRoute(() => import("@/pages/workflow-runs/[id]/page"));
+const ScriptConnectionsPage = lazyRoute(() => import("@/pages/connections/page"));
+const ScriptConnectionDetailPage = lazyRoute(() => import("@/pages/connections/[id]/page"));
+const OAuthAppDetailPage = lazyRoute(() => import("@/pages/connections/oauth-apps/[id]/page"));
+const ScriptsPage = lazyRoute(() => import("@/pages/scripts/page"));
+const ScriptDetailPage = lazyRoute(() => import("@/pages/scripts/[id]/page"));
+const ScriptRunDetailPage = lazyRoute(() => import("@/pages/script-runs/[id]/page"));
+const TemplatesPage = lazyRoute(() => import("@/pages/templates/page"));
+const TemplateDetailPage = lazyRoute(() => import("@/pages/templates/[id]/page"));
+const TemplateVersionDetailPage = lazyRoute(
   () => import("@/pages/templates/[id]/history/[version]/page"),
 );
-const ApprovalRequestsPage = lazy(() => import("@/pages/approval-requests/page"));
-const ApprovalRequestDetailPage = lazy(() => import("@/pages/approval-requests/[id]/page"));
-const McpServersPage = lazy(() => import("@/pages/mcp-servers/page"));
-const McpServerDetailPage = lazy(() => import("@/pages/mcp-servers/[id]/page"));
-const SkillsPage = lazy(() => import("@/pages/skills/page"));
-const SkillDetailPage = lazy(() => import("@/pages/skills/[id]/page"));
-const ApiKeysPage = lazy(() => import("@/pages/api-keys/page"));
-const PeoplePage = lazy(() => import("@/pages/people/page"));
-const PersonDetailPage = lazy(() => import("@/pages/people/[id]/page"));
-const DebugPage = lazy(() => import("@/pages/debug/page"));
-const MemoryPage = lazy(() => import("@/pages/memory/page"));
-const MetricsPage = lazy(() => import("@/pages/metrics/page"));
-const PageDetailPage = lazy(() => import("@/pages/pages/[id]/page"));
-const PagesListingPage = lazy(() => import("@/pages/pages/page"));
-const AppsListingPage = lazy(() => import("@/pages/apps/page"));
-const AppDetailPage = lazy(() => import("@/pages/apps/[id]/page"));
-const CombPage = lazy(() => import("@/pages/comb/page"));
-const NotFoundPage = lazy(() => import("@/pages/not-found/page"));
-const SetupPage = lazy(() => import("@/pages/setup/page"));
+const ApprovalRequestsPage = lazyRoute(() => import("@/pages/approval-requests/page"));
+const ApprovalRequestDetailPage = lazyRoute(() => import("@/pages/approval-requests/[id]/page"));
+const McpServersPage = lazyRoute(() => import("@/pages/mcp-servers/page"));
+const McpServerDetailPage = lazyRoute(() => import("@/pages/mcp-servers/[id]/page"));
+const SkillsPage = lazyRoute(() => import("@/pages/skills/page"));
+const SkillDetailPage = lazyRoute(() => import("@/pages/skills/[id]/page"));
+const ApiKeysPage = lazyRoute(() => import("@/pages/api-keys/page"));
+const PeoplePage = lazyRoute(() => import("@/pages/people/page"));
+const PersonDetailPage = lazyRoute(() => import("@/pages/people/[id]/page"));
+const DebugPage = lazyRoute(() => import("@/pages/debug/page"));
+const MemoryPage = lazyRoute(() => import("@/pages/memory/page"));
+const MetricsPage = lazyRoute(() => import("@/pages/metrics/page"));
+const PageDetailPage = lazyRoute(() => import("@/pages/pages/[id]/page"));
+const PagesListingPage = lazyRoute(() => import("@/pages/pages/page"));
+const AppsListingPage = lazyRoute(() => import("@/pages/apps/page"));
+const AppDetailPage = lazyRoute(() => import("@/pages/apps/[id]/page"));
+const CombPage = lazyRoute(() => import("@/pages/comb/page"));
+const NotFoundPage = lazyRoute(() => import("@/pages/not-found/page"));
+const SetupPage = lazyRoute(() => import("@/pages/setup/page"));
 
 /**
  * Dev-only routes. `/dev/embed-test` mounts an `<AppSurface>` outside the
  * `/apps` tier — the standing proof that the app runtime is embeddable
  * anywhere in the dashboard.
  *
- * The `lazy(() => import(…))` lives INSIDE the `import.meta.env.DEV` branch on
+ * The `lazyRoute(() => import(…))` lives INSIDE the `import.meta.env.DEV` branch on
  * purpose: at module scope it would be an unconditional dynamic import, and
  * the dev page would be emitted as a (dead but shipped) chunk in production
  * builds. Behind the constant-folded flag the whole branch is dropped.
  */
 function devRouteTable(): RouteObject[] {
   if (!import.meta.env.DEV) return [];
-  const DevEmbedTestPage = lazy(() => import("@/pages/dev/embed-test/page"));
+  const DevEmbedTestPage = lazyRoute(() => import("@/pages/dev/embed-test/page"));
   return [{ path: "dev/embed-test", element: <DevEmbedTestPage /> }];
 }
 
