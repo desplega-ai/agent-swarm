@@ -30,7 +30,6 @@ import { shouldPersistAutomaticTaskMemory } from "../memory/automatic-task-gate"
 import { buildRecallQuery } from "../memory/recall-query";
 import { memoryRelevance, SIMILARITY_THRESHOLD } from "../prompts/memories";
 import { can, type RbacPrincipal } from "../rbac";
-import { hasLeadEquivalence } from "../rbac/elevated-agents";
 import { AgentMemorySchema, AgentMemoryScopeSchema, AgentMemorySourceSchema } from "../types";
 import { getRequestAuth } from "../utils/request-auth-context";
 import { scrubSecrets } from "../utils/secret-scrubber";
@@ -654,13 +653,10 @@ async function ingestPrincipal(
   return { kind: "agent", agentId: "", isLead: false };
 }
 
-/** Whose rows a memory list may show. `seesAll` lifts the agent-or-swarm filter. */
+/** Whose rows a memory list may show. `seesAll` lifts the own-or-swarm filter. */
 function memoryListViewer(principal: RbacPrincipal): { agentId: string; seesAll: boolean } {
-  if (principal.kind !== "agent") return { agentId: "", seesAll: true };
-  return {
-    agentId: principal.agentId,
-    seesAll: principal.isLead || hasLeadEquivalence(principal.agentId),
-  };
+  const seesAll = can({ principal, verb: "memory.read.any", source: "http" }).allow;
+  return { agentId: principal.kind === "agent" ? principal.agentId : "", seesAll };
 }
 
 export async function handleMemory(

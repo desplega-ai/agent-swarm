@@ -87,6 +87,11 @@ export const PERMISSIONS = {
       "Write or move a memory key under a lead-maintained /longterm root (company-story, entities, timeline).",
     namespace: "memory",
   },
+  "memory.read.any": {
+    description:
+      "List every agent's memories, beyond the caller's own and swarm-scoped entries (lead, operator, or user).",
+    namespace: "memory",
+  },
   "memory.delete.any": {
     description:
       "Delete a memory entry: own agent-scoped entries; swarm-scoped entries as lead, operator, or user; any entry as operator or user.",

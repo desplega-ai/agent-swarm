@@ -278,6 +278,7 @@ export const LEGACY_POLICY = {
   "memory.learning.inject": leadOnly,
   "memory.edit.any": leadOrResourceOwner,
   "memory.write.consolidated": leadOnly,
+  "memory.read.any": leadOrOperatorOrUser,
   "memory.delete.any": memoryDelete,
   "channel.delete": leadOnly,
   "repo.merge-policy.write": leadOrOperatorOrUser,
