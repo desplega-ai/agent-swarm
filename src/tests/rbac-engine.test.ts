@@ -88,7 +88,7 @@ const LEAD_OR_OPERATOR_OR_USER_VERBS: PermissionVerb[] = [
   "extension.activate",
   "extension.install.inline",
 ];
-const OPERATOR_OR_USER_VERBS: PermissionVerb[] = ["comb.presence"];
+const OPERATOR_OR_USER_VERBS: PermissionVerb[] = ["comb.presence", "approval.respond"];
 
 const LEAD_OR_OPERATOR_VERBS: PermissionVerb[] = ["models.catalog.write"];
 

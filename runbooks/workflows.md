@@ -159,6 +159,20 @@ array built upstream, for example one question per item:
   `{{decision.responses.<questionId>}}`. An optional question the human skipped is absent from
   `responses`, so give the consumer a default (for example the proposed action).
 
+Who may answer (`POST /api/approval-requests/{id}/respond`, permission `approval.respond`):
+
+- Only a person. A user token (`aswt_`) or a page session signed for a user answers as that user's
+  id. The shared key with no agent identity answers as `operator`. An agent is refused: an
+  `aseph_` session token, the shared key with `X-Agent-ID`, or a page session with no signed-in
+  user. The body's `respondedBy` is stored as an unverified `claimedRespondedBy`, never as
+  `resolvedBy`.
+- `approvers.users` entries match a user's id or email; `approvers.roles` entries match the user's
+  `role`. With neither set, any person may answer. The operator may answer any request.
+- `policy`: a rejection resolves the request at once. `any` resolves on the first approval,
+  `{ min: N }` on N distinct responders, `all` when every listed user has approved (one approval
+  when no users are listed). Until then the request stays `pending` and each answer is kept in
+  `approvals`. A responder answers once.
+
 Rendering limits:
 
 - The dashboard approval page lists every question as its own card. No cap beyond the 100-question

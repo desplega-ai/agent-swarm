@@ -11863,11 +11863,48 @@
                           ],
                           "additionalProperties": {}
                         },
+                        "approvals": {
+                          "type": [
+                            "array",
+                            "null"
+                          ],
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "responder": {
+                                "type": "string",
+                                "description": "Who answered, from the credential: a user id, or `operator` for the shared key."
+                              },
+                              "approved": {
+                                "type": "boolean"
+                              },
+                              "responses": {
+                                "type": "object",
+                                "additionalProperties": {}
+                              },
+                              "claimedRespondedBy": {
+                                "type": "string",
+                                "description": "The `respondedBy` the client sent. Unverified; display only."
+                              },
+                              "respondedAt": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "responder",
+                              "approved",
+                              "responses",
+                              "respondedAt"
+                            ]
+                          },
+                          "description": "Every accepted answer, in order. A request with an `all` or `{ min: N }` policy stays pending until enough approve."
+                        },
                         "resolvedBy": {
                           "type": [
                             "string",
                             "null"
-                          ]
+                          ],
+                          "description": "Who resolved the request, from the credential: a user id, `operator` for the shared key, or an agent id for a cancellation."
                         },
                         "resolvedAt": {
                           "type": [
@@ -11941,6 +11978,7 @@
                         "approvers",
                         "status",
                         "responses",
+                        "approvals",
                         "resolvedBy",
                         "resolvedAt",
                         "resolutionReason",
@@ -12200,11 +12238,48 @@
                                 ],
                                 "additionalProperties": {}
                               },
+                              "approvals": {
+                                "type": [
+                                  "array",
+                                  "null"
+                                ],
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "responder": {
+                                      "type": "string",
+                                      "description": "Who answered, from the credential: a user id, or `operator` for the shared key."
+                                    },
+                                    "approved": {
+                                      "type": "boolean"
+                                    },
+                                    "responses": {
+                                      "type": "object",
+                                      "additionalProperties": {}
+                                    },
+                                    "claimedRespondedBy": {
+                                      "type": "string",
+                                      "description": "The `respondedBy` the client sent. Unverified; display only."
+                                    },
+                                    "respondedAt": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "responder",
+                                    "approved",
+                                    "responses",
+                                    "respondedAt"
+                                  ]
+                                },
+                                "description": "Every accepted answer, in order. A request with an `all` or `{ min: N }` policy stays pending until enough approve."
+                              },
                               "resolvedBy": {
                                 "type": [
                                   "string",
                                   "null"
-                                ]
+                                ],
+                                "description": "Who resolved the request, from the credential: a user id, `operator` for the shared key, or an agent id for a cancellation."
                               },
                               "resolvedAt": {
                                 "type": [
@@ -12278,6 +12353,7 @@
                               "approvers",
                               "status",
                               "responses",
+                              "approvals",
                               "resolvedBy",
                               "resolvedAt",
                               "resolutionReason",
@@ -12332,7 +12408,8 @@
                                 "type": [
                                   "string",
                                   "null"
-                                ]
+                                ],
+                                "description": "Who resolved the request, from the credential: a user id, `operator` for the shared key, or an agent id for a cancellation."
                               },
                               "resolvedAt": {
                                 "type": [
@@ -12590,11 +12667,48 @@
                           ],
                           "additionalProperties": {}
                         },
+                        "approvals": {
+                          "type": [
+                            "array",
+                            "null"
+                          ],
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "responder": {
+                                "type": "string",
+                                "description": "Who answered, from the credential: a user id, or `operator` for the shared key."
+                              },
+                              "approved": {
+                                "type": "boolean"
+                              },
+                              "responses": {
+                                "type": "object",
+                                "additionalProperties": {}
+                              },
+                              "claimedRespondedBy": {
+                                "type": "string",
+                                "description": "The `respondedBy` the client sent. Unverified; display only."
+                              },
+                              "respondedAt": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "responder",
+                              "approved",
+                              "responses",
+                              "respondedAt"
+                            ]
+                          },
+                          "description": "Every accepted answer, in order. A request with an `all` or `{ min: N }` policy stays pending until enough approve."
+                        },
                         "resolvedBy": {
                           "type": [
                             "string",
                             "null"
-                          ]
+                          ],
+                          "description": "Who resolved the request, from the credential: a user id, `operator` for the shared key, or an agent id for a cancellation."
                         },
                         "resolvedAt": {
                           "type": [
@@ -12668,6 +12782,7 @@
                         "approvers",
                         "status",
                         "responses",
+                        "approvals",
                         "resolvedBy",
                         "resolvedAt",
                         "resolutionReason",
@@ -12702,6 +12817,7 @@
     "/api/approval-requests/{id}/respond": {
       "post": {
         "summary": "Submit a response to an approval request",
+        "description": "Only a person may answer: a user token, a page session signed for a user, or the shared key with no agent identity (recorded as `operator`). The responder is taken from the credential. When the request lists `approvers.users` or `approvers.roles`, a user must match one of them. A rejection resolves the request at once; approvals resolve it when the `any`, `all` or `{ min: N }` policy is met, and until then it stays pending with the answer recorded in `approvals`.",
         "tags": [
           "ApprovalRequests"
         ],
@@ -12732,7 +12848,8 @@
                     "additionalProperties": {}
                   },
                   "respondedBy": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "Unverified display name. Stored as `claimedRespondedBy` on the answer; never used as the responder."
                   }
                 },
                 "required": [
@@ -12744,7 +12861,7 @@
         },
         "responses": {
           "200": {
-            "description": "Response recorded",
+            "description": "Response recorded. `status` stays `pending` while the policy needs more approvals.",
             "content": {
               "application/json": {
                 "schema": {
@@ -12915,11 +13032,48 @@
                           ],
                           "additionalProperties": {}
                         },
+                        "approvals": {
+                          "type": [
+                            "array",
+                            "null"
+                          ],
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "responder": {
+                                "type": "string",
+                                "description": "Who answered, from the credential: a user id, or `operator` for the shared key."
+                              },
+                              "approved": {
+                                "type": "boolean"
+                              },
+                              "responses": {
+                                "type": "object",
+                                "additionalProperties": {}
+                              },
+                              "claimedRespondedBy": {
+                                "type": "string",
+                                "description": "The `respondedBy` the client sent. Unverified; display only."
+                              },
+                              "respondedAt": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "responder",
+                              "approved",
+                              "responses",
+                              "respondedAt"
+                            ]
+                          },
+                          "description": "Every accepted answer, in order. A request with an `all` or `{ min: N }` policy stays pending until enough approve."
+                        },
                         "resolvedBy": {
                           "type": [
                             "string",
                             "null"
-                          ]
+                          ],
+                          "description": "Who resolved the request, from the credential: a user id, `operator` for the shared key, or an agent id for a cancellation."
                         },
                         "resolvedAt": {
                           "type": [
@@ -12993,6 +13147,7 @@
                         "approvers",
                         "status",
                         "responses",
+                        "approvals",
                         "resolvedBy",
                         "resolvedAt",
                         "resolutionReason",
@@ -13021,6 +13176,16 @@
               }
             }
           },
+          "403": {
+            "description": "Caller is an agent, or is not one of the request's approvers",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "404": {
             "description": "Not found",
             "content": {
@@ -13032,7 +13197,7 @@
             }
           },
           "409": {
-            "description": "Already resolved",
+            "description": "Already resolved, or this responder already answered",
             "content": {
               "application/json": {
                 "schema": {
@@ -13254,11 +13419,48 @@
                           ],
                           "additionalProperties": {}
                         },
+                        "approvals": {
+                          "type": [
+                            "array",
+                            "null"
+                          ],
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "responder": {
+                                "type": "string",
+                                "description": "Who answered, from the credential: a user id, or `operator` for the shared key."
+                              },
+                              "approved": {
+                                "type": "boolean"
+                              },
+                              "responses": {
+                                "type": "object",
+                                "additionalProperties": {}
+                              },
+                              "claimedRespondedBy": {
+                                "type": "string",
+                                "description": "The `respondedBy` the client sent. Unverified; display only."
+                              },
+                              "respondedAt": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "responder",
+                              "approved",
+                              "responses",
+                              "respondedAt"
+                            ]
+                          },
+                          "description": "Every accepted answer, in order. A request with an `all` or `{ min: N }` policy stays pending until enough approve."
+                        },
                         "resolvedBy": {
                           "type": [
                             "string",
                             "null"
-                          ]
+                          ],
+                          "description": "Who resolved the request, from the credential: a user id, `operator` for the shared key, or an agent id for a cancellation."
                         },
                         "resolvedAt": {
                           "type": [
@@ -13332,6 +13534,7 @@
                         "approvers",
                         "status",
                         "responses",
+                        "approvals",
                         "resolvedBy",
                         "resolvedAt",
                         "resolutionReason",

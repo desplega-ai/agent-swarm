@@ -37,6 +37,11 @@ export const PERMISSIONS = {
     description: "Cancel a pending approval request.",
     namespace: "approval",
   },
+  "approval.respond": {
+    description:
+      "Approve or reject a pending approval request as a person. Agents never hold it; the request's approvers list still applies.",
+    namespace: "approval",
+  },
   "task.steer.any": {
     description: "Steer any task (beyond tasks the caller created).",
     namespace: "task",

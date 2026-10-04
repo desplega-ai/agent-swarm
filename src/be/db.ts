@@ -9450,6 +9450,19 @@ export async function upsertChannelActivityCursor(
 // Approval Requests
 // ============================================================================
 
+/**
+ * One accepted answer to an approval request. `responder` comes from the
+ * request's credential (a user id, or "operator" for the shared key);
+ * `claimedRespondedBy` is the client's unverified `respondedBy`, kept for display only.
+ */
+export interface ApprovalVote {
+  responder: string;
+  approved: boolean;
+  responses: Record<string, unknown>;
+  claimedRespondedBy?: string;
+  respondedAt: string;
+}
+
 export interface ApprovalRequest {
   id: string;
   title: string;
@@ -9460,6 +9473,7 @@ export interface ApprovalRequest {
   approvers: unknown;
   status: "pending" | "approved" | "rejected" | "timeout" | "cancelled";
   responses: unknown | null;
+  approvals: ApprovalVote[] | null;
   resolvedBy: string | null;
   resolvedAt: string | null;
   resolutionReason: string | null;
@@ -9481,6 +9495,7 @@ interface ApprovalRequestRow {
   approvers: string;
   status: string;
   responses: string | null;
+  approvals: string | null;
   resolvedBy: string | null;
   resolvedAt: string | null;
   resolutionReason: string | null;
@@ -9504,6 +9519,7 @@ function rowToApprovalRequest(row: ApprovalRequestRow): ApprovalRequest {
     approvers: JSON.parse(row.approvers),
     status: row.status as ApprovalRequest["status"],
     responses: row.responses ? JSON.parse(row.responses) : null,
+    approvals: row.approvals ? JSON.parse(row.approvals) : null,
     resolvedBy: row.resolvedBy,
     resolvedAt: normalizeDate(row.resolvedAt),
     resolutionReason: row.resolutionReason,
@@ -9593,6 +9609,7 @@ export async function resolveApprovalRequest(
   data: {
     status: "approved" | "rejected" | "timeout";
     responses?: unknown;
+    approvals?: ApprovalVote[];
     resolvedBy?: string;
     resolutionReason?: string;
   },
@@ -9619,20 +9636,38 @@ export async function resolveApprovalRequest(
     : "";
   const row = await getDbClient().get<ApprovalRequestRow>(
     `UPDATE approval_requests
-       SET status = ?, responses = ?, resolvedBy = ?, resolutionReason = ?, resolvedAt = ?,
-           updatedAt = ?
+       SET status = ?, responses = ?, approvals = COALESCE(?, approvals), resolvedBy = ?,
+           resolutionReason = ?, resolvedAt = ?, updatedAt = ?
        WHERE id = ? AND status = 'pending'
          ${actionableWorkflowClause}
        RETURNING *`,
     [
       data.status,
       data.responses ? JSON.stringify(data.responses) : null,
+      data.approvals ? JSON.stringify(data.approvals) : null,
       data.resolvedBy ?? null,
       data.resolutionReason ?? null,
       now,
       now,
       id,
     ],
+  );
+  return row ? rowToApprovalRequest(row) : null;
+}
+
+// Records the answers collected so far on a request that stays pending
+// (an `all` or `{ min: N }` policy still short of its quorum). Null when the
+// row is no longer pending or its workflow step is no longer actionable.
+export async function recordApprovalVotes(
+  id: string,
+  approvals: ApprovalVote[],
+): Promise<ApprovalRequest | null> {
+  const row = await getDbClient().get<ApprovalRequestRow>(
+    `UPDATE approval_requests
+       SET approvals = ?, updatedAt = ?
+       WHERE id = ? AND status = 'pending'
+       RETURNING *`,
+    [JSON.stringify(approvals), new Date().toISOString(), id],
   );
   return row ? rowToApprovalRequest(row) : null;
 }

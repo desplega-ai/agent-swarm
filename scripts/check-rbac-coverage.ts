@@ -267,7 +267,6 @@ const ROUTE_RBAC_BACKLOG: Record<string, string> = {
   "POST /api/agentmail/webhook": BACKLOG_REASON,
   "POST /api/agents": BACKLOG_REASON,
   "POST /api/approval-requests": BACKLOG_REASON,
-  "POST /api/approval-requests/{id}/respond": BACKLOG_REASON,
   "POST /api/channel-activity/commit-cursors": BACKLOG_REASON,
   "POST /api/config/reload": BACKLOG_REASON,
   "POST /api/db-query": BACKLOG_REASON,
