@@ -11899,6 +11899,27 @@
                           },
                           "description": "Every accepted answer, in order. A request with an `all` or `{ min: N }` policy stays pending until enough approve."
                         },
+                        "approvalProgress": {
+                          "type": [
+                            "object",
+                            "null"
+                          ],
+                          "properties": {
+                            "approved": {
+                              "type": "integer",
+                              "description": "Approvals that count toward the policy so far."
+                            },
+                            "required": {
+                              "type": "integer",
+                              "description": "Approvals the policy needs before the request resolves."
+                            }
+                          },
+                          "required": [
+                            "approved",
+                            "required"
+                          ],
+                          "description": "Quorum progress while the request is pending; null once it is resolved."
+                        },
                         "resolvedBy": {
                           "type": [
                             "string",
@@ -11979,6 +12000,7 @@
                         "status",
                         "responses",
                         "approvals",
+                        "approvalProgress",
                         "resolvedBy",
                         "resolvedAt",
                         "resolutionReason",
@@ -12274,6 +12296,27 @@
                                 },
                                 "description": "Every accepted answer, in order. A request with an `all` or `{ min: N }` policy stays pending until enough approve."
                               },
+                              "approvalProgress": {
+                                "type": [
+                                  "object",
+                                  "null"
+                                ],
+                                "properties": {
+                                  "approved": {
+                                    "type": "integer",
+                                    "description": "Approvals that count toward the policy so far."
+                                  },
+                                  "required": {
+                                    "type": "integer",
+                                    "description": "Approvals the policy needs before the request resolves."
+                                  }
+                                },
+                                "required": [
+                                  "approved",
+                                  "required"
+                                ],
+                                "description": "Quorum progress while the request is pending; null once it is resolved."
+                              },
                               "resolvedBy": {
                                 "type": [
                                   "string",
@@ -12354,6 +12397,7 @@
                               "status",
                               "responses",
                               "approvals",
+                              "approvalProgress",
                               "resolvedBy",
                               "resolvedAt",
                               "resolutionReason",
@@ -12404,6 +12448,27 @@
                                   "cancelled"
                                 ]
                               },
+                              "approvalProgress": {
+                                "type": [
+                                  "object",
+                                  "null"
+                                ],
+                                "properties": {
+                                  "approved": {
+                                    "type": "integer",
+                                    "description": "Approvals that count toward the policy so far."
+                                  },
+                                  "required": {
+                                    "type": "integer",
+                                    "description": "Approvals the policy needs before the request resolves."
+                                  }
+                                },
+                                "required": [
+                                  "approved",
+                                  "required"
+                                ],
+                                "description": "Quorum progress while the request is pending; null once it is resolved."
+                              },
                               "resolvedBy": {
                                 "type": [
                                   "string",
@@ -12449,6 +12514,7 @@
                               "workflowRunStepId",
                               "sourceTaskId",
                               "status",
+                              "approvalProgress",
                               "resolvedBy",
                               "resolvedAt",
                               "timeoutSeconds",
@@ -12703,6 +12769,27 @@
                           },
                           "description": "Every accepted answer, in order. A request with an `all` or `{ min: N }` policy stays pending until enough approve."
                         },
+                        "approvalProgress": {
+                          "type": [
+                            "object",
+                            "null"
+                          ],
+                          "properties": {
+                            "approved": {
+                              "type": "integer",
+                              "description": "Approvals that count toward the policy so far."
+                            },
+                            "required": {
+                              "type": "integer",
+                              "description": "Approvals the policy needs before the request resolves."
+                            }
+                          },
+                          "required": [
+                            "approved",
+                            "required"
+                          ],
+                          "description": "Quorum progress while the request is pending; null once it is resolved."
+                        },
                         "resolvedBy": {
                           "type": [
                             "string",
@@ -12783,6 +12870,7 @@
                         "status",
                         "responses",
                         "approvals",
+                        "approvalProgress",
                         "resolvedBy",
                         "resolvedAt",
                         "resolutionReason",
@@ -13068,6 +13156,27 @@
                           },
                           "description": "Every accepted answer, in order. A request with an `all` or `{ min: N }` policy stays pending until enough approve."
                         },
+                        "approvalProgress": {
+                          "type": [
+                            "object",
+                            "null"
+                          ],
+                          "properties": {
+                            "approved": {
+                              "type": "integer",
+                              "description": "Approvals that count toward the policy so far."
+                            },
+                            "required": {
+                              "type": "integer",
+                              "description": "Approvals the policy needs before the request resolves."
+                            }
+                          },
+                          "required": [
+                            "approved",
+                            "required"
+                          ],
+                          "description": "Quorum progress while the request is pending; null once it is resolved."
+                        },
                         "resolvedBy": {
                           "type": [
                             "string",
@@ -13148,6 +13257,7 @@
                         "status",
                         "responses",
                         "approvals",
+                        "approvalProgress",
                         "resolvedBy",
                         "resolvedAt",
                         "resolutionReason",
@@ -13455,6 +13565,27 @@
                           },
                           "description": "Every accepted answer, in order. A request with an `all` or `{ min: N }` policy stays pending until enough approve."
                         },
+                        "approvalProgress": {
+                          "type": [
+                            "object",
+                            "null"
+                          ],
+                          "properties": {
+                            "approved": {
+                              "type": "integer",
+                              "description": "Approvals that count toward the policy so far."
+                            },
+                            "required": {
+                              "type": "integer",
+                              "description": "Approvals the policy needs before the request resolves."
+                            }
+                          },
+                          "required": [
+                            "approved",
+                            "required"
+                          ],
+                          "description": "Quorum progress while the request is pending; null once it is resolved."
+                        },
                         "resolvedBy": {
                           "type": [
                             "string",
@@ -13535,6 +13666,7 @@
                         "status",
                         "responses",
                         "approvals",
+                        "approvalProgress",
                         "resolvedBy",
                         "resolvedAt",
                         "resolutionReason",

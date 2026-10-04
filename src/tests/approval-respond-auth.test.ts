@@ -283,6 +283,7 @@ describe("the approvers policy is enforced", () => {
     expect(first.status).toBe(200);
     expect(first.body.approvalRequest.status).toBe("pending");
     expect(first.body.approvalRequest.resolvedBy).toBeNull();
+    expect(first.body.approvalRequest.approvalProgress).toEqual({ approved: 1, required: 2 });
 
     const repeat = await respond(request.id, asUser(alice.token));
     expect(repeat.status).toBe(409);
@@ -291,6 +292,7 @@ describe("the approvers policy is enforced", () => {
     expect(second.status).toBe(200);
     expect(second.body.approvalRequest.status).toBe("approved");
     expect(second.body.approvalRequest.resolvedBy).toBe(bob.id);
+    expect(second.body.approvalRequest.approvalProgress).toBeNull();
     expect(
       (second.body.approvalRequest.approvals as { responder: string }[]).map((a) => a.responder),
     ).toEqual([alice.id, bob.id]);
@@ -323,12 +325,36 @@ describe("the approvers policy is enforced", () => {
   test("all: every listed user must approve; the operator does not stand in for one", async () => {
     const request = await pendingRequest({ users: [alice.id, bob.id], policy: "all" });
 
-    expect((await respond(request.id, operator())).body.approvalRequest.status).toBe("pending");
-    expect((await respond(request.id, asUser(alice.token))).body.approvalRequest.status).toBe(
-      "pending",
-    );
+    const byOperator = (await respond(request.id, operator())).body.approvalRequest;
+    expect(byOperator.status).toBe("pending");
+    expect(byOperator.approvalProgress).toEqual({ approved: 0, required: 2 });
+    const byAlice = (await respond(request.id, asUser(alice.token))).body.approvalRequest;
+    expect(byAlice.status).toBe("pending");
+    expect(byAlice.approvalProgress).toEqual({ approved: 1, required: 2 });
     const last = await respond(request.id, asUser(bob.token));
     expect(last.body.approvalRequest.status).toBe("approved");
+  });
+
+  test("the slim list and the detail read carry quorum progress for pending requests", async () => {
+    const request = await pendingRequest({ policy: { min: 3 } });
+    expect((await respond(request.id, asUser(alice.token))).status).toBe(200);
+
+    const list = await fetch(`${baseUrl}/api/approval-requests?fields=slim&status=pending`, {
+      headers: operator(),
+    });
+    const { approvalRequests } = (await list.json()) as {
+      approvalRequests: { id: string; approvalProgress: unknown; approvals?: unknown }[];
+    };
+    const row = approvalRequests.find((r) => r.id === request.id);
+    expect(row?.approvalProgress).toEqual({ approved: 1, required: 3 });
+    expect(row && "approvals" in row).toBe(false);
+
+    const detail = await fetch(`${baseUrl}/api/approval-requests/${request.id}`, {
+      headers: operator(),
+    });
+    const { approvalRequest } = (await detail.json()) as Record<string, any>;
+    expect(approvalRequest.approvalProgress).toEqual({ approved: 1, required: 3 });
+    expect(approvalRequest.approvals).toHaveLength(1);
   });
 
   test("one rejection from an eligible responder rejects a multi-approver request", async () => {

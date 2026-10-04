@@ -3220,6 +3220,13 @@ export interface paths {
                                     claimedRespondedBy?: string;
                                     respondedAt: string;
                                 }[] | null;
+                                /** @description Quorum progress while the request is pending; null once it is resolved. */
+                                approvalProgress: {
+                                    /** @description Approvals that count toward the policy so far. */
+                                    approved: number;
+                                    /** @description Approvals the policy needs before the request resolves. */
+                                    required: number;
+                                } | null;
                                 /** @description Who resolved the request, from the credential: a user id, `operator` for the shared key, or an agent id for a cancellation. */
                                 resolvedBy: string | null;
                                 resolvedAt: string | null;
@@ -3243,6 +3250,13 @@ export interface paths {
                                 sourceTaskId: string | null;
                                 /** @enum {string} */
                                 status: "pending" | "approved" | "rejected" | "timeout" | "cancelled";
+                                /** @description Quorum progress while the request is pending; null once it is resolved. */
+                                approvalProgress: {
+                                    /** @description Approvals that count toward the policy so far. */
+                                    approved: number;
+                                    /** @description Approvals the policy needs before the request resolves. */
+                                    required: number;
+                                } | null;
                                 /** @description Who resolved the request, from the credential: a user id, `operator` for the shared key, or an agent id for a cancellation. */
                                 resolvedBy: string | null;
                                 resolvedAt: string | null;
@@ -3368,6 +3382,13 @@ export interface paths {
                                     claimedRespondedBy?: string;
                                     respondedAt: string;
                                 }[] | null;
+                                /** @description Quorum progress while the request is pending; null once it is resolved. */
+                                approvalProgress: {
+                                    /** @description Approvals that count toward the policy so far. */
+                                    approved: number;
+                                    /** @description Approvals the policy needs before the request resolves. */
+                                    required: number;
+                                } | null;
                                 /** @description Who resolved the request, from the credential: a user id, `operator` for the shared key, or an agent id for a cancellation. */
                                 resolvedBy: string | null;
                                 resolvedAt: string | null;
@@ -3478,6 +3499,13 @@ export interface paths {
                                     claimedRespondedBy?: string;
                                     respondedAt: string;
                                 }[] | null;
+                                /** @description Quorum progress while the request is pending; null once it is resolved. */
+                                approvalProgress: {
+                                    /** @description Approvals that count toward the policy so far. */
+                                    approved: number;
+                                    /** @description Approvals the policy needs before the request resolves. */
+                                    required: number;
+                                } | null;
                                 /** @description Who resolved the request, from the credential: a user id, `operator` for the shared key, or an agent id for a cancellation. */
                                 resolvedBy: string | null;
                                 resolvedAt: string | null;
@@ -3605,6 +3633,13 @@ export interface paths {
                                     claimedRespondedBy?: string;
                                     respondedAt: string;
                                 }[] | null;
+                                /** @description Quorum progress while the request is pending; null once it is resolved. */
+                                approvalProgress: {
+                                    /** @description Approvals that count toward the policy so far. */
+                                    approved: number;
+                                    /** @description Approvals the policy needs before the request resolves. */
+                                    required: number;
+                                } | null;
                                 /** @description Who resolved the request, from the credential: a user id, `operator` for the shared key, or an agent id for a cancellation. */
                                 resolvedBy: string | null;
                                 resolvedAt: string | null;
@@ -3750,6 +3785,13 @@ export interface paths {
                                     claimedRespondedBy?: string;
                                     respondedAt: string;
                                 }[] | null;
+                                /** @description Quorum progress while the request is pending; null once it is resolved. */
+                                approvalProgress: {
+                                    /** @description Approvals that count toward the policy so far. */
+                                    approved: number;
+                                    /** @description Approvals the policy needs before the request resolves. */
+                                    required: number;
+                                } | null;
                                 /** @description Who resolved the request, from the credential: a user id, `operator` for the shared key, or an agent id for a cancellation. */
                                 resolvedBy: string | null;
                                 resolvedAt: string | null;

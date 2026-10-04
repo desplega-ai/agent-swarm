@@ -8,6 +8,7 @@ import {
   getAgentById,
   getApprovalRequestById,
   getDbClient,
+  getPendingApprovalVoteState,
   getWorkflowRun,
   getWorkflowRunStep,
   listApprovalRequestSummaries,
@@ -89,6 +90,14 @@ const ApprovalVoteSchema = z.object({
   respondedAt: z.string(),
 });
 
+const ApprovalProgressSchema = z
+  .object({
+    approved: z.number().int().describe("Approvals that count toward the policy so far."),
+    required: z.number().int().describe("Approvals the policy needs before the request resolves."),
+  })
+  .nullable()
+  .describe("Quorum progress while the request is pending; null once it is resolved.");
+
 const ApprovalRequestSchema = z.object({
   id: z.string(),
   title: z.string(),
@@ -105,6 +114,7 @@ const ApprovalRequestSchema = z.object({
     .describe(
       "Every accepted answer, in order. A request with an `all` or `{ min: N }` policy stays pending until enough approve.",
     ),
+  approvalProgress: ApprovalProgressSchema,
   resolvedBy: z
     .string()
     .nullable()
@@ -134,20 +144,44 @@ const ApprovalRequestSummarySchema = ApprovalRequestSchema.omit({
 /**
  * Reshapes a DB `ApprovalRequest` row for `respond()` — identical values,
  * narrowed from the DB layer's `unknown` fields to the precise wire shape
- * (see comment above `ApproversSchema`). Not a behavior change: same object
- * contents, serialized the same way.
+ * (see comment above `ApproversSchema`), plus the derived `approvalProgress`.
  */
-function toApprovalRequestResponse(
+async function toApprovalRequestResponse(
   request: ApprovalRequest,
-): z.infer<typeof ApprovalRequestSchema> {
+): Promise<z.infer<typeof ApprovalRequestSchema>> {
+  const approvers = request.approvers as ApproversShape;
+  const approvals = request.approvals ?? null;
   return {
     ...request,
     questions: request.questions as ApprovalQuestion[],
-    approvers: request.approvers as ApproversShape,
+    approvers,
     responses: request.responses as Record<string, unknown> | null,
-    approvals: request.approvals ?? null,
+    approvals,
+    approvalProgress:
+      request.status === "pending" ? await approvalProgress(approvers, approvals ?? []) : null,
     notificationChannels: request.notificationChannels as NotificationChannelShape[] | null,
   };
+}
+
+/** Slim rows plus `approvalProgress` for the pending ones (one extra read). */
+async function withApprovalProgress(
+  rows: Awaited<ReturnType<typeof listApprovalRequestSummaries>>,
+): Promise<z.infer<typeof ApprovalRequestSummarySchema>[]> {
+  const pendingIds = rows.filter((row) => row.status === "pending").map((row) => row.id);
+  const state = new Map(
+    (await getPendingApprovalVoteState(pendingIds)).map((entry) => [entry.id, entry]),
+  );
+  return Promise.all(
+    rows.map(async (row) => {
+      const entry = state.get(row.id);
+      return {
+        ...row,
+        approvalProgress: entry
+          ? await approvalProgress(entry.approvers as ApproversShape, entry.approvals ?? [])
+          : null,
+      };
+    }),
+  );
 }
 
 export async function getWorkflowApprovalUnavailableReason(
@@ -496,7 +530,7 @@ export async function handleApprovalRequests(
     }
     if (outcome.kind === "recorded") {
       respondRoute.respond(res, 200, {
-        approvalRequest: toApprovalRequestResponse(outcome.request),
+        approvalRequest: await toApprovalRequestResponse(outcome.request),
       });
       return true;
     }
@@ -531,7 +565,9 @@ export async function handleApprovalRequests(
     // so the requesting agent is notified of the human's response
     await createApprovalFollowUpTask(updated, "hitl.follow_up");
 
-    respondRoute.respond(res, 200, { approvalRequest: toApprovalRequestResponse(updated) });
+    respondRoute.respond(res, 200, {
+      approvalRequest: await toApprovalRequestResponse(updated),
+    });
     return true;
   }
 
@@ -552,7 +588,7 @@ export async function handleApprovalRequests(
       return true;
     }
     cancelRoute.respond(res, 200, {
-      approvalRequest: toApprovalRequestResponse(result.request),
+      approvalRequest: await toApprovalRequestResponse(result.request),
       alreadyCancelled: result.alreadyCancelled,
       runCancelled: result.runCancelled,
     });
@@ -570,7 +606,9 @@ export async function handleApprovalRequests(
       return true;
     }
 
-    getByIdRoute.respond(res, 200, { approvalRequest: toApprovalRequestResponse(request) });
+    getByIdRoute.respond(res, 200, {
+      approvalRequest: await toApprovalRequestResponse(request),
+    });
     return true;
   }
 
@@ -602,7 +640,9 @@ export async function handleApprovalRequests(
       createdBy,
     });
 
-    createRoute.respond(res, 201, { approvalRequest: toApprovalRequestResponse(request) });
+    createRoute.respond(res, 201, {
+      approvalRequest: await toApprovalRequestResponse(request),
+    });
     return true;
   }
 
@@ -619,14 +659,14 @@ export async function handleApprovalRequests(
     // Opt-in: API, MCP and script callers that don't ask keep the full rows.
     if (parsed.query.fields === "slim") {
       listRoute.respond(res, 200, {
-        approvalRequests: await listApprovalRequestSummaries(filters),
+        approvalRequests: await withApprovalProgress(await listApprovalRequestSummaries(filters)),
       });
       return true;
     }
 
     const requests = await listApprovalRequests(filters);
     listRoute.respond(res, 200, {
-      approvalRequests: requests.map(toApprovalRequestResponse),
+      approvalRequests: await Promise.all(requests.map(toApprovalRequestResponse)),
     });
     return true;
   }
@@ -727,27 +767,40 @@ export function isListedApprover(approvers: ApproversShape, responder: ApprovalR
 }
 
 /**
- * Whether the approving answers satisfy the policy. `any`: one approval.
+ * How far the approving answers are toward the policy. `any`: one approval.
  * `{ min: N }`: N distinct responders. `all`: every user in `approvers.users`
  * (one approval when no users are listed, since roles cannot be enumerated).
  */
-export async function approvalQuorumMet(
+export async function approvalProgress(
   approvers: ApproversShape,
   votes: ApprovalVote[],
-): Promise<boolean> {
+): Promise<{ approved: number; required: number }> {
   const approving = votes.filter((v) => v.approved);
+  const distinct = new Set(approving.map((v) => v.responder)).size;
   const policy = approvers.policy;
-  if (policy === "any") return approving.length >= 1;
+  if (policy === "any") return { approved: Math.min(distinct, 1), required: 1 };
   if (policy === "all") {
     const listed = approvers.users ?? [];
-    if (listed.length === 0) return approving.length >= 1;
+    if (listed.length === 0) return { approved: Math.min(distinct, 1), required: 1 };
     const approvingUsers: Pick<User, "id" | "email">[] = [];
     for (const vote of approving) {
       if (vote.responder === "operator") continue;
       const user = await findUserById(vote.responder);
       approvingUsers.push(user ?? { id: vote.responder });
     }
-    return listed.every((entry) => approvingUsers.some((u) => userMatchesListed(u, entry)));
+    const approved = listed.filter((entry) =>
+      approvingUsers.some((u) => userMatchesListed(u, entry)),
+    ).length;
+    return { approved, required: listed.length };
   }
-  return new Set(approving.map((v) => v.responder)).size >= policy.min;
+  return { approved: Math.min(distinct, policy.min), required: policy.min };
+}
+
+/** Whether the approving answers satisfy the policy (see `approvalProgress`). */
+export async function approvalQuorumMet(
+  approvers: ApproversShape,
+  votes: ApprovalVote[],
+): Promise<boolean> {
+  const { approved, required } = await approvalProgress(approvers, votes);
+  return approved >= required;
 }

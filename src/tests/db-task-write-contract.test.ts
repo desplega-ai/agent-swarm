@@ -350,6 +350,7 @@ value:getPageBySlug
 value:getPageVersion
 value:getPageVersions
 value:getPausedTasksForAgent
+value:getPendingApprovalVoteState
 value:getPendingEventWaitNames
 value:getPendingSlackRelayTasks
 value:getPendingSteeringForAgent

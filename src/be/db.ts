@@ -238,6 +238,7 @@ export { recordKeySeatMismatch } from "./db/api-keys";
 export {
   type ApprovalRequestSummary,
   type ApprovalVote,
+  getPendingApprovalVoteState,
   listApprovalRequestSummaries,
   recordApprovalVotes,
 } from "./db/approvals";
