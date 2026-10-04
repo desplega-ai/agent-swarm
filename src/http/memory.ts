@@ -1164,12 +1164,13 @@ export async function handleMemory(
     );
     if (!parsed) return true;
     const { memoryId, key, scope, agentId } = parsed.query;
-    const doc = memoryId
-      ? await getMemoryChunks({ memoryId })
-      : await getMemoryChunks({ key: key as string, scope, agentId });
-    const viewer = memoryListViewer(await ingestPrincipal(req, myAgentId));
     // Same visibility as the list: a hidden memory reads as not found.
-    if (!doc || (!viewer.seesAll && doc.scope !== "swarm" && doc.agentId !== viewer.agentId)) {
+    const viewer = memoryListViewer(await ingestPrincipal(req, myAgentId));
+    const visibility = { visibleToAgentId: viewer.seesAll ? undefined : viewer.agentId };
+    const doc = memoryId
+      ? await getMemoryChunks({ memoryId }, visibility)
+      : await getMemoryChunks({ key: key as string, scope, agentId }, visibility);
+    if (!doc) {
       jsonError(res, "Memory not found", 404);
       return true;
     }

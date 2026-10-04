@@ -353,6 +353,24 @@ describe("memory browser endpoints", () => {
       );
       expect(swarm.status).toBe(200);
     });
+
+    test("a key-only lookup never returns another owner's rows", async () => {
+      const path = `/api/memory/chunks?key=${encodeURIComponent(PERSON_KEY)}`;
+      const asB = await call("GET", path, undefined, AGENT_B);
+      expect(asB.status).toBe(200);
+      expect(asB.body.chunks.map((c: { id: string }) => c.id)).toEqual([IDS.personB]);
+      const asA = await call("GET", path, undefined, AGENT_A);
+      expect(asA.body.chunks.map((c: { id: string }) => c.id)).toEqual([IDS.personA]);
+    });
+
+    test("an operator key-only lookup returns one document, not every owner's rows", async () => {
+      const { body } = await call(
+        "GET",
+        `/api/memory/chunks?key=${encodeURIComponent(PERSON_KEY)}`,
+      );
+      expect(body.chunks).toHaveLength(1);
+      expect(body.chunks[0].agentId).toBe(body.agentId);
+    });
   });
 
   describe("POST /api/memory/list", () => {

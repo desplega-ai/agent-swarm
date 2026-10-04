@@ -213,10 +213,14 @@ export type MemoryChunkRow = Omit<AgentMemoryRow, "embedding" | "tags"> & { tags
 /**
  * Every chunk row of the document that `memoryId` belongs to, or of the
  * document identified by (key, scope, agentId). A row without a key is a
- * document of its own. Returns null when nothing matches.
+ * document of its own. A key lookup that leaves scope or agentId open returns
+ * only the first matching document, never rows of several owners. With
+ * `visibleToAgentId`, rows outside that agent's own and swarm scope do not
+ * match. Returns null when nothing matches.
  */
 export async function getMemoryChunks(
   target: { memoryId: string } | { key: string; scope?: string; agentId?: string | null },
+  options: { visibleToAgentId?: string } = {},
 ): Promise<{
   key: string | null;
   scope: string;
@@ -229,12 +233,17 @@ export async function getMemoryChunks(
     accessCount, embeddingModel, alpha, beta, contentHash, version`;
   type Row = Omit<AgentMemoryRow, "embedding">;
 
+  const visible = (row: Row) =>
+    options.visibleToAgentId === undefined ||
+    row.scope === "swarm" ||
+    row.agentId === options.visibleToAgentId;
+
   let rows: Row[];
   if ("memoryId" in target) {
     const anchor = await db.get<Row>(`SELECT ${columns} FROM agent_memory WHERE id = ?`, [
       target.memoryId,
     ]);
-    if (!anchor) return null;
+    if (!anchor || !visible(anchor)) return null;
     rows =
       anchor.key === null
         ? [anchor]
@@ -255,11 +264,21 @@ export async function getMemoryChunks(
       conditions.push("COALESCE(agentId, '') = ?");
       params.push(target.agentId ?? "");
     }
-    rows = await db.query<Row>(
+    if (options.visibleToAgentId !== undefined) {
+      conditions.push("(agentId = ? OR scope = 'swarm')");
+      params.push(options.visibleToAgentId);
+    }
+    const matches = await db.query<Row>(
       `SELECT ${columns} FROM agent_memory WHERE ${conditions.join(" AND ")}
-        ORDER BY chunkIndex, createdAt, id`,
+        ORDER BY scope, COALESCE(agentId, ''), chunkIndex, createdAt, id`,
       params,
     );
+    const doc = matches[0];
+    rows = doc
+      ? matches.filter(
+          (row) => row.scope === doc.scope && (row.agentId ?? "") === (doc.agentId ?? ""),
+        )
+      : [];
   }
 
   const first = rows[0];
