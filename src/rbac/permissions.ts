@@ -88,7 +88,8 @@ export const PERMISSIONS = {
     namespace: "memory",
   },
   "memory.delete.any": {
-    description: "Delete a memory entry (own entries, or swarm-scoped entries as lead).",
+    description:
+      "Delete a memory entry: own agent-scoped entries; swarm-scoped entries as lead, operator, or user; any entry as operator or user.",
     namespace: "memory",
   },
   "channel.delete": {

@@ -94,6 +94,20 @@ filtered to the caller's ownership by the store. Lead may edit another agent's
 private (`agent`) scope by ID. This intentionally differs from `memory.delete.any`,
 which permits Lead to delete another agent's memory only in `swarm` scope.
 
+## Delete and list authorization
+
+`memory.delete.any` gates the `memory-delete` MCP tool, `DELETE /api/memory/{id}`,
+and the script SDK's `memory_delete` (which calls that route with `X-Agent-ID`).
+The operator key and users may delete any memory. Lead may delete its own memories
+and any `swarm`-scope memory. Any other agent may delete only its own `agent`-scope
+memories; a `swarm`-scope memory is shared, so a worker cannot delete one, even its own.
+
+`POST /api/memory/list` shows the operator key, users, and Lead every agent's rows.
+Any other agent (an `aseph_` session token, or the shared key with `X-Agent-ID`)
+sees its own rows plus `swarm`-scope rows. A request that carries the shared key
+with no agent identity is the operator: these gates stop an agent that identifies
+itself, not one that sends the bare key.
+
 Authorization stays at these entrypoints. Internal `indexMemoryContent()`
 re-indexing, boot and HTTP re-embedding, and link refresh retain their cross-agent
 store access.

@@ -8388,7 +8388,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** List or semantically search memories across all agents (debug/admin) */
+        /**
+         * List or semantically search memories (debug/admin)
+         * @description The operator key, a user, and the lead see every agent's memories. Any other agent (an `aseph_` session token, or the shared key with `X-Agent-ID`) sees only its own memories and swarm-scope memories.
+         */
         post: {
             parameters: {
                 query?: never;
@@ -8713,7 +8716,10 @@ export interface paths {
         };
         put?: never;
         post?: never;
-        /** Delete a single memory by ID (debug/admin) */
+        /**
+         * Delete a single memory by ID (debug/admin)
+         * @description The operator key and users may delete any memory. The lead may delete its own memories and swarm-scope memories. Any other agent may delete only its own agent-scope memories.
+         */
         delete: {
             parameters: {
                 query?: never;
@@ -8734,6 +8740,15 @@ export interface paths {
                         "application/json": {
                             deleted: boolean;
                         };
+                    };
+                };
+                /** @description Caller may not delete this memory */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
                 /** @description Memory not found */

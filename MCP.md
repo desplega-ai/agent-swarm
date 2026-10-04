@@ -1201,7 +1201,7 @@ Edit a single memory in place while preserving its ID, usefulness posterior, and
 
 **Delete a memory**
 
-Delete a specific memory by its ID. Agents can delete their own memories; lead agents can also delete swarm-scoped memories.
+Delete a specific memory by its ID. Agents can delete their own agent-scoped memories; only the lead can delete swarm-scoped memories.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|

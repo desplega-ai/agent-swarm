@@ -21512,7 +21512,8 @@
     },
     "/api/memory/list": {
       "post": {
-        "summary": "List or semantically search memories across all agents (debug/admin)",
+        "summary": "List or semantically search memories (debug/admin)",
+        "description": "The operator key, a user, and the lead see every agent's memories. Any other agent (an `aseph_` session token, or the shared key with `X-Agent-ID`) sees only its own memories and swarm-scope memories.",
         "tags": [
           "Memory"
         ],
@@ -22155,6 +22156,7 @@
     "/api/memory/{id}": {
       "delete": {
         "summary": "Delete a single memory by ID (debug/admin)",
+        "description": "The operator key and users may delete any memory. The lead may delete its own memories and swarm-scope memories. Any other agent may delete only its own agent-scope memories.",
         "tags": [
           "Memory"
         ],
@@ -22189,6 +22191,16 @@
                   "required": [
                     "deleted"
                   ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Caller may not delete this memory",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
