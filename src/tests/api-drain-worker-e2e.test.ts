@@ -4,6 +4,7 @@
  * SIGTERM, as on a deploy. The worker must hand the task off while the API is
  * still up, and the API must exit on that handoff, not at its cap.
  */
+import { Database } from "bun:sqlite";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
@@ -172,24 +173,34 @@ describe("API drain with a real worker", () => {
       const signalledAt = Date.now();
       sut.process.kill("SIGTERM");
 
-      // Served by the API after its SIGTERM: the handoff landed before it exited.
-      await waitForTask(taskId, (task) => task.status === "superseded");
-      const supersededAfterMs = Date.now() - signalledAt;
-
+      // Wait on the exit, not on an HTTP read of the task. The drain closes the
+      // server within one 500 ms check of the handoff, so a poll can miss the
+      // short window in which the API still serves `superseded`.
       const apiExit = await Promise.race([
         sut.process.exited,
-        Bun.sleep(30_000).then(() => "timeout" as const),
+        Bun.sleep(DRAIN_CAP_MS + 5_000).then(() => "timeout" as const),
       ]);
       const exitedAfterMs = Date.now() - signalledAt;
       expect(apiExit).toBe(0);
       // On the handoff, not at the 60 s cap.
       expect(exitedAfterMs).toBeLessThan(DRAIN_CAP_MS - 10_000);
-      expect(supersededAfterMs).toBeLessThanOrEqual(exitedAfterMs);
 
-      sut.flushLog();
+      // The drain saw the handoff before the server closed.
+      await sut.drains;
       const apiLog = await Bun.file(sut.logPath).text();
       expect(apiLog).toContain("[drain] draining: waiting up to 60000ms for 1 in-flight task(s)");
       expect(apiLog).toContain("[drain] all 1 in-flight task(s) handed off");
+
+      // The handoff is what the API left behind. Read the DB it closed.
+      const db = new Database(sut.dbPath, { readonly: true });
+      try {
+        const row = db.query("SELECT status FROM agent_tasks WHERE id = ?").get(taskId) as {
+          status: string;
+        } | null;
+        expect(row?.status).toBe("superseded");
+      } finally {
+        db.close();
+      }
     } catch (error) {
       worker.kill("SIGKILL");
       const [stdout, stderr] = await Promise.all([stdoutPromise, stderrPromise]);
