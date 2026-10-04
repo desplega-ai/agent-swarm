@@ -17,7 +17,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Changed
 - CI builds and deploys only the newest main commit, and posts deploy outcomes to Slack through the optional `DEPLOY_SLACK_WEBHOOK_URL` (#1842).
 - Dependencies bumped: ACP SDK 1.7.0 (#1841), agent-fs pins 0.15.1 (#1840), agent-browser 0.38.2 (#1835).
-- Docs: heartbeat spec synced with #1820 (#1834); README links agent-swarm.dev.
+- Docs: heartbeat spec synced with #1820 (#1834); TLA+ heartbeat and workflow specs synced with main (#1848); README links agent-swarm.dev.
 
 ### Fixed
 - Shutdown: the API drains on SIGTERM so workers hand off while it still serves, behind `API_DRAIN_MAX_MS` (#1837).
