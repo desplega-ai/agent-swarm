@@ -45,6 +45,11 @@ export const PERMISSIONS = {
     description: "Create a task the caller owns.",
     namespace: "task",
   },
+  "task.requester.assign": {
+    description:
+      "Attribute a new task to a user other than the requester of the caller's own current task.",
+    namespace: "task",
+  },
   "task.read.own": {
     description: "Read details of a task the principal requested.",
     namespace: "task",
@@ -87,13 +92,24 @@ export const PERMISSIONS = {
       "Write or move a memory key under a lead-maintained /longterm root (company-story, entities, timeline).",
     namespace: "memory",
   },
+  "memory.read.any": {
+    description:
+      "List every agent's memories, beyond the caller's own and swarm-scoped entries (lead, operator, or user).",
+    namespace: "memory",
+  },
   "memory.delete.any": {
-    description: "Delete a memory entry (own entries, or swarm-scoped entries as lead).",
+    description:
+      "Delete a memory entry: own agent-scoped entries; swarm-scoped entries as lead, operator, or user; any entry as operator or user.",
     namespace: "memory",
   },
   "channel.delete": {
     description: "Delete a Slack channel.",
     namespace: "channel",
+  },
+  "repo.merge-policy.write": {
+    description:
+      "Change a repo's allowMerge guideline, which tells agents whether they may merge a PR themselves.",
+    namespace: "repo",
   },
   "integration.kapso.manage": {
     description: "Register or unregister a Kapso inbound number.",
@@ -223,6 +239,11 @@ export const PERMISSIONS = {
   },
   "mcp-server.update.any": {
     description: "Update an MCP server the caller does not own.",
+    namespace: "mcp-server",
+  },
+  "mcp-server.stdio.write": {
+    description:
+      "Create an agent-scope stdio MCP server, or change or enable what a stdio server runs. A stdio server runs a command on the worker.",
     namespace: "mcp-server",
   },
   "mcp-server.read.secrets": {

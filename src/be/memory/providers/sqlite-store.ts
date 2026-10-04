@@ -1183,9 +1183,22 @@ export class SqliteMemoryStore implements MemoryStore {
   }
 
   async delete(id: string): Promise<boolean> {
-    await this.purgeByIds([id]);
-    const result = await getDbClient().run("DELETE FROM agent_memory WHERE id = ?", [id]);
-    return result.changes > 0;
+    return getDbClient().transaction(async (tx) => {
+      const row = await tx.get<AgentMemoryRow>("SELECT * FROM agent_memory WHERE id = ?", [id]);
+      if (!row) return false;
+      // Explicit keys identify a document. Legacy generated keys identify only a row.
+      const rows = row.key
+        ? await tx.query<{ id: string }>(
+            "SELECT id FROM agent_memory WHERE key = ? AND scope = ? AND COALESCE(agentId, '') = COALESCE(?, '')",
+            [row.key, row.scope, row.agentId],
+          )
+        : [{ id }];
+      const ids = rows.map((chunk) => chunk.id);
+      await this.purgeByIds(ids);
+      const placeholders = ids.map(() => "?").join(",");
+      await tx.run(`DELETE FROM agent_memory WHERE id IN (${placeholders})`, ids);
+      return true;
+    });
   }
 
   async deleteBySourcePath(sourcePath: string, agentId: string): Promise<number> {

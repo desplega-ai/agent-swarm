@@ -8388,7 +8388,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** List or semantically search memories across all agents (debug/admin) */
+        /**
+         * List or semantically search memories (debug/admin)
+         * @description The operator key, a user, and the lead see every agent's memories. Any other agent (an `aseph_` session token, or the shared key with `X-Agent-ID`) sees only its own memories and swarm-scope memories.
+         */
         post: {
             parameters: {
                 query?: never;
@@ -8488,7 +8491,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** One aggregate row per keyed memory under a key prefix: chunks, usage, rating, estimated tokens (debug/admin) */
+        /**
+         * One aggregate row per keyed memory under a key prefix: chunks, usage, rating, estimated tokens (debug/admin)
+         * @description The operator key, a user, and the lead see every agent's memories. Any other agent sees only its own memories and swarm-scope memories.
+         */
         get: {
             parameters: {
                 query?: {
@@ -8564,7 +8570,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Every chunk row of one memory in chunkIndex order, with a chunk-integrity check (debug/admin). Does not count as an access */
+        /**
+         * Every chunk row of one memory in chunkIndex order, with a chunk-integrity check (debug/admin). Does not count as an access
+         * @description Visibility matches the memory list: an agent other than the lead gets 404 for another agent's agent-scope memory.
+         */
         get: {
             parameters: {
                 query?: {
@@ -8897,7 +8906,10 @@ export interface paths {
         };
         put?: never;
         post?: never;
-        /** Delete a single memory by ID (debug/admin) */
+        /**
+         * Delete a single memory by ID (debug/admin)
+         * @description The operator key and users may delete any memory. The lead may delete its own memories and swarm-scope memories. Any other agent may delete only its own agent-scope memories.
+         */
         delete: {
             parameters: {
                 query?: never;
@@ -8918,6 +8930,15 @@ export interface paths {
                         "application/json": {
                             deleted: boolean;
                         };
+                    };
+                };
+                /** @description Caller may not delete this memory */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
                 /** @description Memory not found */
@@ -13158,6 +13179,17 @@ export interface paths {
                         "application/json": components["schemas"]["SwarmRepo"];
                     };
                 };
+                /** @description Only the lead, the operator or a user can change allowMerge */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                        };
+                    };
+                };
                 /** @description Repo not found */
                 404: {
                     headers: {
@@ -13291,6 +13323,17 @@ export interface paths {
                 };
                 /** @description Validation error */
                 400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                        };
+                    };
+                };
+                /** @description Only the lead, the operator or a user can turn allowMerge on */
+                403: {
                     headers: {
                         [name: string]: unknown;
                     };

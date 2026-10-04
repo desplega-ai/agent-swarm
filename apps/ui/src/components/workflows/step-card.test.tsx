@@ -13,6 +13,7 @@ mock.module("@/components/ui/spinner", () => require("../ui/spinner"));
 
 mock.module("@/components/shared/agent-link", () => require("../shared/agent-link"));
 mock.module("@/components/shared/status-badge", () => require("../shared/status-badge"));
+mock.module("@/components/shared/task-status-icon", () => require("../shared/task-status-icon"));
 mock.module("@/components/ui/alert", () => require("../ui/alert"));
 mock.module("@/components/ui/badge", () => require("../ui/badge"));
 mock.module("@/components/workflows/graph-utils", () => require("./graph-utils"));

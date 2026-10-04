@@ -11,8 +11,10 @@ import {
   installMcpServer,
   listMcpServers,
   uninstallMcpServer,
-  updateMcpServer,
+  type updateMcpServer,
 } from "../be/db";
+import { updateMcpServerChecked } from "../be/mcp-server-checked-update";
+import { updateTouchesStdioExecution } from "../be/mcp-server-stdio-gate";
 import { enqueueAdmissionRow } from "../be/rbac-audit";
 import { getUserGrant } from "../be/rbac-roles";
 import { ensureMcpToken } from "../oauth/ensure-mcp-token";
@@ -253,17 +255,22 @@ async function mcpServerPrincipal(req: IncomingMessage): Promise<RbacPrincipal> 
   return { kind: "agent", agentId: "", isLead: false };
 }
 
-async function ensureMcpServerPermission(
+type McpServerVerb = Extract<
+  PermissionVerb,
+  "mcp-server.create.swarm" | "mcp-server.update.any" | "mcp-server.stdio.write"
+>;
+
+/** The refusal text when the caller may not do this, or null when they may. */
+async function mcpServerPermissionRefusal(
   req: IncomingMessage,
-  res: ServerResponse,
-  verb: Extract<PermissionVerb, "mcp-server.create.swarm" | "mcp-server.update.any">,
+  verb: McpServerVerb,
   resource: RbacResource,
-): Promise<boolean> {
+): Promise<string | null> {
   const principal = await mcpServerPrincipal(req);
   // The shared API key without an agent identity is the HTTP admin context.
   // An X-Agent-ID always takes precedence above, so agents cannot use that key
   // to bypass the permission declared on this route.
-  if (principal.kind === "operator") return true;
+  if (principal.kind === "operator") return null;
 
   const decision = can({
     principal,
@@ -271,8 +278,18 @@ async function ensureMcpServerPermission(
     resource,
     source: "http",
   });
-  if (decision.allow) return true;
-  jsonError(res, `Forbidden: ${decision.reason}`, 403);
+  return decision.allow ? null : `Forbidden: ${decision.reason}`;
+}
+
+async function ensureMcpServerPermission(
+  req: IncomingMessage,
+  res: ServerResponse,
+  verb: McpServerVerb,
+  resource: RbacResource,
+): Promise<boolean> {
+  const refusal = await mcpServerPermissionRefusal(req, verb, resource);
+  if (refusal === null) return true;
+  jsonError(res, refusal, 403);
   return false;
 }
 
@@ -512,54 +529,61 @@ export async function handleMcpServers(
     const parsed = await updateMcpServerRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
 
-    const existing = await getMcpServerById(parsed.params.id);
-    if (!existing) {
-      jsonError(res, "MCP server not found", 404);
-      return true;
-    }
-    if (
-      !(await ensureMcpServerPermission(req, res, "mcp-server.update.any", {
-        kind: "owned",
-        ownerAgentId: existing.ownerAgentId,
-      }))
-    ) {
-      return true;
-    }
-
-    // Transport-specific validation on update (only if transport is being set)
-    const transport = parsed.body.transport as string | undefined;
-    if (transport === "stdio" && parsed.body.command === undefined) {
-      // Check if existing server already has a command
-      if (existing && !existing.command && !parsed.body.command) {
-        jsonError(res, "command is required for stdio transport", 400);
-        return true;
-      }
-    }
-    if ((transport === "http" || transport === "sse") && parsed.body.url === undefined) {
-      if (existing && !existing.url && !parsed.body.url) {
-        jsonError(res, "url is required for http/sse transport", 400);
-        return true;
-      }
-    }
-
-    try {
-      if (typeof parsed.body.url === "string") {
-        assertUrlSafe(parsed.body.url, publicEndpointSsrfOptions());
-      }
-    } catch (err) {
-      jsonError(res, err instanceof Error ? err.message : "Invalid MCP server URL", 400);
-      return true;
-    }
-
-    const server = await updateMcpServer(
+    // The decisions, the validation against the stored server and the write share one
+    // transaction, so a concurrent edit cannot change what the server runs in between.
+    const result = await updateMcpServerChecked(
       parsed.params.id,
       parsed.body as Parameters<typeof updateMcpServer>[1],
+      async (existing): Promise<{ status: number; message: string } | null> => {
+        const ownerRefusal = await mcpServerPermissionRefusal(req, "mcp-server.update.any", {
+          kind: "owned",
+          ownerAgentId: existing.ownerAgentId,
+        });
+        if (ownerRefusal) return { status: 403, message: ownerRefusal };
+
+        // The owner may edit a server, but not change or turn on the command a stdio one runs.
+        if (updateTouchesStdioExecution(existing, parsed.body)) {
+          const stdioRefusal = await mcpServerPermissionRefusal(req, "mcp-server.stdio.write", {
+            kind: "none",
+          });
+          if (stdioRefusal) return { status: 403, message: stdioRefusal };
+        }
+
+        // Transport-specific validation on update (only if transport is being set)
+        const transport = parsed.body.transport as string | undefined;
+        if (transport === "stdio" && parsed.body.command === undefined && !existing.command) {
+          return { status: 400, message: "command is required for stdio transport" };
+        }
+        if (
+          (transport === "http" || transport === "sse") &&
+          parsed.body.url === undefined &&
+          !existing.url
+        ) {
+          return { status: 400, message: "url is required for http/sse transport" };
+        }
+
+        try {
+          if (typeof parsed.body.url === "string") {
+            assertUrlSafe(parsed.body.url, publicEndpointSsrfOptions());
+          }
+        } catch (err) {
+          return {
+            status: 400,
+            message: err instanceof Error ? err.message : "Invalid MCP server URL",
+          };
+        }
+        return null;
+      },
     );
-    if (!server) {
+    if (result.kind === "not-found") {
       jsonError(res, "MCP server not found", 404);
       return true;
     }
-    updateMcpServerRoute.respond(res, 200, { server });
+    if (result.kind === "refused") {
+      jsonError(res, result.refusal.message, result.refusal.status);
+      return true;
+    }
+    updateMcpServerRoute.respond(res, 200, { server: result.server });
     return true;
   }
 

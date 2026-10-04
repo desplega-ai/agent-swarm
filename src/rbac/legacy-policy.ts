@@ -184,14 +184,24 @@ const requesterOwnsTask: LegacyRule = {
 
 // ── Composites (verified against HEAD) ───────────────────────────────────────
 
-/** memory.delete.any — owner OR (lead AND scope=swarm) (src/tools/memory-delete.ts:54-56). */
-const memoryOwnerOrLeadSwarm: LegacyRule = {
-  name: "memory-owner-or-lead-swarm",
-  denyReason: "requires memory owner, or lead agent for swarm-scoped memories",
+/**
+ * memory.delete.any — operator or user; the lead for its own or swarm-scoped
+ * memories; any other agent for its own agent-scoped memories only. Swarm-scoped
+ * memories are shared, so a worker cannot remove one, even one it wrote.
+ */
+const memoryDelete: LegacyRule = {
+  name: "memory-delete",
+  denyReason:
+    "requires operator or user, the lead for swarm-scoped memories, or the owner for agent-scoped memories",
   evaluate: (principal, resource) => {
-    if (principal.kind !== "agent" || resource?.kind !== "owned") return false;
-    if (resource.ownerAgentId != null && resource.ownerAgentId === principal.agentId) return true;
-    return actsAsLead(principal) && resource.scope === "swarm";
+    if (principal.kind === "operator" || principal.kind === "user") return true;
+    if (resource?.kind !== "owned") return false;
+    const isOwner =
+      principal.agentId !== "" &&
+      resource.ownerAgentId != null &&
+      resource.ownerAgentId === principal.agentId;
+    if (actsAsLead(principal)) return isOwner || resource.scope === "swarm";
+    return isOwner && resource.scope === "agent";
   },
 };
 
@@ -258,6 +268,7 @@ export const LEGACY_POLICY = {
   "approval.cancel.any": humanOrLeadOrResourceOwner,
   "task.steer.any": leadOrTaskCreator,
   "task.create.own": anyAuthenticated,
+  "task.requester.assign": leadOrOperatorOrUser,
   "task.read.own": requesterOwnsTask,
   "task.cancel.own": requesterOwnsTask,
   "task.steer.own": requesterOwnsTask,
@@ -268,8 +279,10 @@ export const LEGACY_POLICY = {
   "memory.learning.inject": leadOnly,
   "memory.edit.any": leadOrResourceOwner,
   "memory.write.consolidated": leadOnly,
-  "memory.delete.any": memoryOwnerOrLeadSwarm,
+  "memory.read.any": leadOrOperatorOrUser,
+  "memory.delete.any": memoryDelete,
   "channel.delete": leadOnly,
+  "repo.merge-policy.write": leadOrOperatorOrUser,
   "integration.kapso.manage": leadOnly,
   "integration.slack.post": leadOnly,
   "integration.slack.read": leadOnly,
@@ -302,6 +315,7 @@ export const LEGACY_POLICY = {
   "mcp-server.uninstall.any": leadOnly,
   "mcp-server.delete.any": leadOrResourceOwner,
   "mcp-server.update.any": leadOrResourceOwner,
+  "mcp-server.stdio.write": leadOrOperatorOrUser,
   "mcp-server.read.secrets": leadOnly,
   "mcp-oauth.authorize.any": anyAuthenticated,
   "kv.write.any": leadOrOwnNamespace,

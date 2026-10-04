@@ -596,6 +596,8 @@ describe("script connections", () => {
       markMigrationApplied(database, "185_api_key_auth_failures.sql");
       // 190 alters memory_rating, which this migration-112-only fixture does not create.
       markMigrationApplied(database, "190_memory_rating_model.sql");
+      // 194 cleans agent_memory, which this migration-112-only fixture does not create.
+      markMigrationApplied(database, "194_memory_orphan_chunks.sql");
       // 191 indexes context_versions, which this migration-112-only fixture does not create.
       markMigrationApplied(database, "191_context_versions_previous_index.sql");
       // 192 rebuilds user_favorites, which this migration-112-only fixture does not create.

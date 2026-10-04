@@ -1,6 +1,7 @@
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { useState } from "react";
 import type { WorkflowNode, WorkflowRunStep } from "@/api/types";
+import { ProgressRing } from "@/components/shared/task-status-icon";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { effectiveChildStatus } from "@/components/workflows/graph-utils";
@@ -92,6 +93,12 @@ export function ForeachStepGroup({
           ) : (
             <ChevronRight className="h-3 w-3 shrink-0" />
           )}
+          <ProgressRing
+            done={summary.ok}
+            total={summary.total}
+            label={`${summary.ok} of ${summary.total} items ok`}
+            className="size-3.5"
+          />
           <Badge variant="outline" size="tag">
             {summary.total} item{summary.total !== 1 ? "s" : ""}
           </Badge>

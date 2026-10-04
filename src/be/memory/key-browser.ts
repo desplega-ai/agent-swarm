@@ -73,10 +73,14 @@ type KeySummaryRow = Omit<MemoryKeySummary, "complete" | "estTokens" | "rating">
  * under the same key, and those stay separate.
  */
 export async function listMemoryKeys(
-  options: { prefix?: string; limit?: number } = {},
+  options: { prefix?: string; limit?: number; visibleToAgentId?: string } = {},
 ): Promise<{ keys: MemoryKeySummary[]; truncated: boolean }> {
   const prefix = options.prefix ?? MEMORY_KEYS_DEFAULT_PREFIX;
   const limit = Math.min(options.limit ?? MEMORY_KEYS_MAX_LIMIT, MEMORY_KEYS_MAX_LIMIT);
+  // Set for an agent viewer: only its own rows plus swarm-scope rows.
+  const visibility =
+    options.visibleToAgentId !== undefined ? "AND (m.agentId = ? OR m.scope = 'swarm')" : "";
+  const visibilityParams = options.visibleToAgentId !== undefined ? [options.visibleToAgentId] : [];
 
   // substr/length: literal prefix match, so `%`, `_`, `*` in a key are text.
   const rows = await getDbClient().query<KeySummaryRow>(
@@ -87,7 +91,7 @@ export async function listMemoryKeys(
                 ORDER BY m.chunkIndex, m.createdAt, m.id
               ) AS rn
          FROM agent_memory m
-        WHERE m.key IS NOT NULL AND substr(m.key, 1, length(?)) = ?
+        WHERE m.key IS NOT NULL AND substr(m.key, 1, length(?)) = ? ${visibility}
      ),
      ratings AS (
        SELECT memoryId,
@@ -122,7 +126,7 @@ export async function listMemoryKeys(
       GROUP BY d.key, d.scope, COALESCE(d.agentId, '')
       ORDER BY d.key, d.scope, COALESCE(d.agentId, '')
       LIMIT ?`,
-    [prefix, prefix, limit + 1],
+    [prefix, prefix, ...visibilityParams, limit + 1],
   );
 
   const truncated = rows.length > limit;

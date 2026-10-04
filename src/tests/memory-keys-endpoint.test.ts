@@ -10,6 +10,7 @@ import { closeDb, createAgent, getDbClient, initDb } from "../be/db";
 import { checkChunkIntegrity } from "../be/memory/key-browser";
 import { handleMemory } from "../http/memory";
 import { getPathSegments } from "../http/utils";
+import { setRequestAuth } from "../utils/request-auth-context";
 
 const TEST_DB_PATH = "./test-memory-keys-endpoint.sqlite";
 
@@ -76,6 +77,7 @@ function fakeReqRes(method: string, path: string, body?: unknown) {
   req.method = method;
   req.url = path;
   req.headers = body === undefined ? {} : { "content-type": "application/json" };
+  setRequestAuth(req as IncomingMessage, { kind: "operator", fingerprint: "memory-keys-test" });
 
   const captured = { status: 0, body: "" };
   const res = {
@@ -94,9 +96,9 @@ function fakeReqRes(method: string, path: string, body?: unknown) {
   return { req: req as IncomingMessage, res, captured };
 }
 
-async function call(method: string, path: string, body?: unknown) {
+async function call(method: string, path: string, body?: unknown, agentId?: string) {
   const { req, res, captured } = fakeReqRes(method, path, body);
-  const handled = await handleMemory(req, res, getPathSegments(path), undefined);
+  const handled = await handleMemory(req, res, getPathSegments(path), agentId);
   expect(handled).toBe(true);
   return { status: captured.status, body: captured.body ? JSON.parse(captured.body) : null };
 }
@@ -311,6 +313,45 @@ describe("memory browser endpoints", () => {
       expect(missing.status).toBe(404);
       const bad = await call("GET", "/api/memory/chunks");
       expect(bad.status).toBe(400);
+    });
+  });
+
+  describe("agent viewer", () => {
+    test("keys show only the agent's own rows plus swarm-scope rows", async () => {
+      const { body } = await call("GET", "/api/memory/keys", undefined, AGENT_A);
+      const docs = body.keys.map((k: { key: string; agentId: string | null }) => [
+        k.key,
+        k.agentId,
+      ]);
+      expect(docs).toEqual([
+        [PERSON_KEY, AGENT_A],
+        [LITMUS_KEY, null],
+        [SIGTERM_KEY, null],
+      ]);
+    });
+
+    test("another agent's agent-scope chunks read as not found", async () => {
+      const hidden = await call(
+        "GET",
+        `/api/memory/chunks?memoryId=${IDS.personB}`,
+        undefined,
+        AGENT_A,
+      );
+      expect(hidden.status).toBe(404);
+      const own = await call(
+        "GET",
+        `/api/memory/chunks?memoryId=${IDS.personA}`,
+        undefined,
+        AGENT_A,
+      );
+      expect(own.status).toBe(200);
+      const swarm = await call(
+        "GET",
+        `/api/memory/chunks?memoryId=${IDS.litmus0}`,
+        undefined,
+        AGENT_A,
+      );
+      expect(swarm.status).toBe(200);
     });
   });
 

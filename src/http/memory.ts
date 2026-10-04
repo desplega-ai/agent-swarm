@@ -242,9 +242,15 @@ const listMemory = route({
   method: "post",
   path: "/api/memory/list",
   pattern: ["api", "memory", "list"],
-  summary: "List or semantically search memories across all agents (debug/admin)",
+  summary: "List or semantically search memories (debug/admin)",
+  description:
+    "The operator key, a user, and the lead see every agent's memories. Any other agent (an `aseph_` session token, or the shared key with `X-Agent-ID`) sees only its own memories and swarm-scope memories.",
   tags: ["Memory"],
   auth: { apiKey: true },
+  rbac: {
+    ungated:
+      "read-only listing; the handler narrows an agent principal to its own and swarm-scope rows",
+  },
   body: z.object({
     query: z
       .string()
@@ -309,6 +315,8 @@ const listMemoryKeysRoute = route({
   pattern: ["api", "memory", "keys"],
   summary:
     "One aggregate row per keyed memory under a key prefix: chunks, usage, rating, estimated tokens (debug/admin)",
+  description:
+    "The operator key, a user, and the lead see every agent's memories. Any other agent sees only its own memories and swarm-scope memories.",
   tags: ["Memory"],
   auth: { apiKey: true },
   query: z.object({
@@ -366,6 +374,8 @@ const getMemoryChunksRoute = route({
   pattern: ["api", "memory", "chunks"],
   summary:
     "Every chunk row of one memory in chunkIndex order, with a chunk-integrity check (debug/admin). Does not count as an access",
+  description:
+    "Visibility matches the memory list: an agent other than the lead gets 404 for another agent's agent-scope memory.",
   tags: ["Memory"],
   auth: { apiKey: true },
   query: z
@@ -534,11 +544,15 @@ const deleteMemoryById = route({
   path: "/api/memory/{id}",
   pattern: ["api", "memory", null],
   summary: "Delete a single memory by ID (debug/admin)",
+  description:
+    "The operator key and users may delete any memory. The lead may delete its own memories and swarm-scope memories. Any other agent may delete only its own agent-scope memories.",
   tags: ["Memory"],
   auth: { apiKey: true },
+  rbac: { permission: "memory.delete.any" },
   params: z.object({ id: z.string().uuid() }),
   responses: {
     200: { description: "Memory deleted", schema: z.object({ deleted: z.boolean() }) },
+    403: { description: "Caller may not delete this memory" },
     404: { description: "Memory not found" },
   },
 });
@@ -782,6 +796,12 @@ async function ingestPrincipal(
   return { kind: "agent", agentId: "", isLead: false };
 }
 
+/** Whose rows a memory list may show. `seesAll` lifts the own-or-swarm filter. */
+function memoryListViewer(principal: RbacPrincipal): { agentId: string; seesAll: boolean } {
+  const seesAll = can({ principal, verb: "memory.read.any", source: "http" }).allow;
+  return { agentId: principal.kind === "agent" ? principal.agentId : "", seesAll };
+}
+
 export async function handleMemory(
   req: IncomingMessage,
   res: ServerResponse,
@@ -991,6 +1011,9 @@ export async function handleMemory(
 
     const { query, agentId, scope, source, sourcePath, limit, offset } = parsed.body;
     const store = getMemoryStore();
+    // Humans and the lead see every agent's rows; any other agent sees its own
+    // rows plus swarm-scope rows (the store's non-lead scope conditions).
+    const viewer = memoryListViewer(await ingestPrincipal(req, myAgentId));
     const pageLimit = Math.min(limit, 100);
     const pathNeedle = sourcePath?.trim().toLowerCase();
     const matchesPath = (p: string | null) =>
@@ -1005,10 +1028,10 @@ export async function handleMemory(
           4096,
           Math.max(offset + pageLimit, pageLimit) * CANDIDATE_SET_MULTIPLIER,
         );
-        let candidates = await store.search(queryEmbedding ?? new Float32Array(0), agentId ?? "", {
+        let candidates = await store.search(queryEmbedding ?? new Float32Array(0), viewer.agentId, {
           scope,
           limit: candidateLimit,
-          isLead: true,
+          isLead: viewer.seesAll,
           source,
           queryText: query.trim(),
         });
@@ -1059,13 +1082,13 @@ export async function handleMemory(
         scope,
         limit: pageLimit,
         offset,
-        isLead: true,
+        isLead: viewer.seesAll,
         ownerAgentId: agentId,
         source,
         sourcePath: pathNeedle,
       };
-      const rows = await store.list(agentId ?? "", listOptions);
-      const total = await store.count(agentId ?? "", listOptions);
+      const rows = await store.list(viewer.agentId, listOptions);
+      const total = await store.count(viewer.agentId, listOptions);
       const posteriors = await getPosteriorsByIds(rows.map((r) => r.id));
 
       listMemory.respond(res, 200, {
@@ -1114,7 +1137,12 @@ export async function handleMemory(
     );
     if (!parsed) return true;
     const { prefix, limit } = parsed.query;
-    const { keys, truncated } = await listMemoryKeys({ prefix, limit });
+    const viewer = memoryListViewer(await ingestPrincipal(req, myAgentId));
+    const { keys, truncated } = await listMemoryKeys({
+      prefix,
+      limit,
+      visibleToAgentId: viewer.seesAll ? undefined : viewer.agentId,
+    });
     listMemoryKeysRoute.respond(res, 200, {
       prefix,
       keys: keys.map((k) => ({
@@ -1139,7 +1167,9 @@ export async function handleMemory(
     const doc = memoryId
       ? await getMemoryChunks({ memoryId })
       : await getMemoryChunks({ key: key as string, scope, agentId });
-    if (!doc) {
+    const viewer = memoryListViewer(await ingestPrincipal(req, myAgentId));
+    // Same visibility as the list: a hidden memory reads as not found.
+    if (!doc || (!viewer.seesAll && doc.scope !== "swarm" && doc.agentId !== viewer.agentId)) {
       jsonError(res, "Memory not found", 404);
       return true;
     }
@@ -1285,6 +1315,21 @@ export async function handleMemory(
     if (!parsed) return true;
 
     const store = getMemoryStore();
+    const memory = await store.peek(parsed.params.id);
+    if (!memory) {
+      jsonError(res, "Memory not found", 404);
+      return true;
+    }
+    const decision = can({
+      principal: await ingestPrincipal(req, myAgentId),
+      verb: "memory.delete.any",
+      resource: { kind: "owned", ownerAgentId: memory.agentId, scope: memory.scope },
+      source: "http",
+    });
+    if (!decision.allow) {
+      jsonError(res, `Forbidden: ${decision.reason}`, 403);
+      return true;
+    }
     const deleted = await store.delete(parsed.params.id);
     if (!deleted) {
       jsonError(res, "Memory not found", 404);
