@@ -240,15 +240,20 @@ The `next` field supports three formats:
         "id": "check-type",
         "type": "property-match",
         "label": "Check Event Type",
-        "config": { "property": "event", "match": "pull_request.opened" },
-        "next": { "match": "create-review", "no_match": null }
+        "inputs": { "event": "trigger.event" },
+        "config": {
+          "conditions": [{ "field": "event", "op": "eq", "value": "pull_request.opened" }],
+          "mode": "all"
+        },
+        "next": { "true": "create-review" }
       },
       {
         "id": "create-review",
         "type": "agent-task",
         "label": "Create Review Task",
+        "inputs": { "pr": "trigger.pull_request" },
         "config": {
-          "taskTemplate": "Review PR #{{input.number}}: {{input.title}}",
+          "template": "Review PR #{{pr.number}}: {{pr.title}}",
           "tags": ["review", "automated"],
           "priority": 60
         }
@@ -257,6 +262,8 @@ The `next` field supports three formats:
   }
 }
 ```
+
+The webhook payload supplies `event` and `pull_request`. A nonmatching event ends the branch because no `false` target is declared.
 
 ### Triggers
 
@@ -638,6 +645,12 @@ The engine uses **iteration-aware idempotency keys** to distinguish between loop
   "definition": {
     "nodes": [
       {
+        "id": "start",
+        "type": "agent-task",
+        "config": { "template": "Prepare the draft requirements" },
+        "next": "generate"
+      },
+      {
         "id": "generate",
         "type": "agent-task",
         "config": { "template": "Generate a draft" },
@@ -646,7 +659,12 @@ The engine uses **iteration-aware idempotency keys** to distinguish between loop
       {
         "id": "validate",
         "type": "validate",
-        "next": { "pass": "publish", "retry": "generate" }
+        "inputs": { "draft": "generate" },
+        "config": {
+          "targetNodeId": "draft",
+          "prompt": "Does the draft in taskOutput meet the requirements and read clearly?"
+        },
+        "next": { "pass": "publish", "fail": "generate" }
       },
       {
         "id": "publish",
@@ -658,7 +676,7 @@ The engine uses **iteration-aware idempotency keys** to distinguish between loop
 }
 ```
 
-In this example, the `validate` node routes back to `generate` on failure, creating a loop that continues until validation passes.
+The `start` node provides an entry outside the cycle. The `draft` input maps the generator output into the validator context. In this example, the `validate` node routes back to `generate` on failure, creating a loop that continues until validation passes.
 
 ## Related
 
