@@ -5,6 +5,7 @@ import { useRetryWorkflowRun, useWorkflow, useWorkflowRun } from "@/api/hooks/us
 import type { WorkflowRunStep } from "@/api/types";
 import { CollapsibleSection } from "@/components/shared/collapsible-section";
 import { StatusBadge } from "@/components/shared/status-badge";
+import { ProgressRing, TaskStatusIcon } from "@/components/shared/task-status-icon";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -17,7 +18,7 @@ import { StepCard } from "@/components/workflows/step-card";
 import { WorkflowGraph } from "@/components/workflows/workflow-graph";
 import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
 import { foreachParentIds, parseSyntheticStepId } from "@/lib/synthetic-step-id";
-import { cn, formatElapsed, formatSmartTime } from "@/lib/utils";
+import { formatElapsed, formatSmartTime } from "@/lib/utils";
 
 /** A row in the Steps panel: a plain step, or a `foreach` parent with its fanned-out children. */
 type StepListEntry =
@@ -337,19 +338,14 @@ export default function WorkflowRunDetailPage() {
       {/* Step Summary Bar */}
       {steps.length > 0 && (
         <div className="shrink-0 flex items-center gap-3 text-xs text-muted-foreground">
+          <ProgressRing
+            done={(statusCounts.completed ?? 0) + (statusCounts.skipped ?? 0)}
+            total={steps.length}
+            className="size-4"
+          />
           {Object.entries(statusCounts).map(([status, count]) => (
             <span key={status} className="flex items-center gap-1.5">
-              <span
-                className={cn(
-                  "inline-block h-2 w-2 rounded-full",
-                  status === "completed" && "bg-status-success",
-                  status === "running" && "bg-status-active",
-                  status === "waiting" && "bg-status-pending",
-                  status === "failed" && "bg-status-error",
-                  status === "pending" && "bg-status-neutral",
-                  status === "skipped" && "bg-status-neutral/40",
-                )}
-              />
+              <TaskStatusIcon status={status} className="size-3.5" />
               {count} {status}
             </span>
           ))}
