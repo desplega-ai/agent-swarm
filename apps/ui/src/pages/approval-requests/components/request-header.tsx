@@ -11,12 +11,15 @@ import { useUserLookup } from "@/hooks/use-user-name";
 import {
   approvalRequestSource,
   approverParts,
+  claimedNameFor,
   formatRemaining,
   humanizeSeconds,
+  quorumLabel,
 } from "@/lib/approval-format";
 import { cn, formatSmartTime, parseUTCDate } from "@/lib/utils";
 import { WRAP } from "./answer-view";
 import { KeyHint } from "./keyboard";
+import { ResponderChip } from "./responder-chip";
 
 /** Re-renders every `intervalMs` while `active`. */
 function useNow(active: boolean, intervalMs = 1000): number {
@@ -44,6 +47,7 @@ export function RequestHeader({
   const expiresAt = request.expiresAt ? parseUTCDate(request.expiresAt).getTime() : null;
   const now = useNow(isPending && expiresAt !== null);
   const source = approvalRequestSource(request);
+  const quorum = quorumLabel(request.approvalProgress);
   const lookupUser = useUserLookup();
   const sourceTo = request.workflowRunId
     ? `/workflow-runs/${request.workflowRunId}`
@@ -112,7 +116,7 @@ export function RequestHeader({
       {isPending ? (
         <div className="flex flex-col gap-1 pt-0.5">
           <StatusLine tone="busy">
-            Waiting for an answer
+            {quorum ? `Waiting for more approvals · ${quorum}` : "Waiting for an answer"}
             {expiresAt !== null ? ` · ${formatRemaining(expiresAt - now)}` : null}
           </StatusLine>
           <ApproversLine approvers={request.approvers} lookupUser={lookupUser} />
@@ -122,7 +126,10 @@ export function RequestHeader({
           request={request}
           resolvedBy={
             request.resolvedBy ? (
-              <UserChip userRef={request.resolvedBy} user={lookupUser(request.resolvedBy)} />
+              <ResponderChip
+                responder={request.resolvedBy}
+                claimed={claimedNameFor(request, request.resolvedBy)}
+              />
             ) : null
           }
         />
@@ -196,7 +203,7 @@ export function ResolutionBanner({
   resolvedBy,
 }: {
   request: ApprovalRequest;
-  /** Who answered, as a `UserChip`; null when the request records nobody. */
+  /** Who answered, as a `ResponderChip`; null when the request records nobody. */
   resolvedBy: ReactNode;
 }) {
   if (request.status === "pending") return null;

@@ -14,6 +14,7 @@
 
 import { useMemo } from "react";
 import { useCurrentUser } from "@/contexts/current-user-context";
+import { quorumLabel } from "@/lib/approval-format";
 import type {
   AgentTask,
   ApprovalRequest,
@@ -99,7 +100,14 @@ export function useBlockingInbox(): BlockingInboxResult {
         itemType: "approval",
         itemId: a.id,
         title: a.title || "Approval requested",
-        subtitle: `${a.questions?.length ?? 0} question${(a.questions?.length ?? 0) === 1 ? "" : "s"} · ${a.workflowRunId ? "workflow" : "task"}`,
+        // A pending `all` / `{ min: N }` request can already hold some approvals.
+        subtitle: [
+          `${a.questions?.length ?? 0} question${(a.questions?.length ?? 0) === 1 ? "" : "s"}`,
+          a.workflowRunId ? "workflow" : "task",
+          quorumLabel(a.approvalProgress),
+        ]
+          .filter(Boolean)
+          .join(" · "),
         approval: a,
       });
     }

@@ -200,6 +200,20 @@ export class AppApiError extends Error {
 }
 
 /**
+ * A refused answer to an approval request. `message` is the server's reason;
+ * `status` tells a 403 (this credential may not answer) from a 409 (already
+ * resolved, or this responder already answered).
+ */
+export class ApprovalRespondError extends Error {
+  readonly status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "ApprovalRespondError";
+    this.status = status;
+  }
+}
+
+/**
  * Inspect a non-OK Response. If the body matches the frozen
  * `{ error: "TriggerSchemaError", message, details }` contract, throw a
  * `TriggerSchemaApiError`. Otherwise throw a generic Error using `genericLabel`.
@@ -2149,16 +2163,22 @@ class ApiClient {
     return res.json();
   }
 
+  /**
+   * The server records the responder from the credential (a user token's user,
+   * or `operator` for the shared key). `claimedRespondedBy` travels as the
+   * body's `respondedBy` and is stored only as an unverified display name.
+   * A 200 can leave the request `pending` while its policy needs more approvals.
+   */
   async respondToApprovalRequest(
     id: string,
     responses: Record<string, unknown>,
-    respondedBy?: string,
+    claimedRespondedBy?: string,
   ): Promise<{ approvalRequest: ApprovalRequest }> {
     const url = `${this.getBaseUrl()}/api/approval-requests/${id}/respond`;
     const res = await fetch(url, {
       method: "POST",
       headers: this.getHeaders(),
-      body: JSON.stringify({ responses, respondedBy }),
+      body: JSON.stringify({ responses, respondedBy: claimedRespondedBy }),
     });
     if (!res.ok) {
       const body = await res.json().catch(() => null);
@@ -2168,7 +2188,7 @@ class ApiClient {
         typeof (body as { error?: unknown }).error === "string"
           ? (body as { error: string }).error
           : `Failed to respond to approval request: ${res.status}`;
-      throw new Error(message);
+      throw new ApprovalRespondError(message, res.status);
     }
     return res.json();
   }

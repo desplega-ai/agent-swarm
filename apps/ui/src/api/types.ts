@@ -2226,6 +2226,24 @@ export interface ApprovalQuestion {
   defaultValue?: boolean;
 }
 
+/** One accepted answer. The server takes `responder` from the credential, never from the body. */
+export interface ApprovalVote {
+  /** A user id, or `operator` for the shared key. */
+  responder: string;
+  approved: boolean;
+  responses: Record<string, unknown>;
+  /** The `respondedBy` the client sent. Unverified; display only. */
+  claimedRespondedBy?: string;
+  respondedAt: string;
+}
+
+export interface ApprovalProgress {
+  /** Approvals that count toward the policy so far. */
+  approved: number;
+  /** Approvals the policy needs before the request resolves. */
+  required: number;
+}
+
 export interface ApprovalRequest {
   id: string;
   title: string;
@@ -2237,6 +2255,11 @@ export interface ApprovalRequest {
   };
   status: ApprovalRequestStatus;
   responses: Record<string, unknown> | null;
+  /** Every accepted answer, in order. `all` / `{ min: N }` requests collect several before resolving. */
+  approvals?: ApprovalVote[] | null;
+  /** Quorum progress while pending; null once resolved. */
+  approvalProgress?: ApprovalProgress | null;
+  /** From the credential: a user id, `operator` for the shared key, or an agent id for a cancellation. */
   resolvedBy: string | null;
   resolvedAt: string | null;
   resolutionReason: string | null;
@@ -2261,7 +2284,12 @@ export interface ApprovalRequestsResponse {
  */
 export type ApprovalRequestSummary = Omit<
   ApprovalRequest,
-  "questions" | "approvers" | "responses" | "resolutionReason" | "notificationChannels"
+  | "questions"
+  | "approvers"
+  | "responses"
+  | "approvals"
+  | "resolutionReason"
+  | "notificationChannels"
 > & { questionCount: number };
 
 export interface ApprovalRequestSummariesResponse {

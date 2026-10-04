@@ -303,3 +303,50 @@ export function sortApprovalRequests<
     return (time(b.createdAt) ?? 0) - (time(a.createdAt) ?? 0);
   });
 }
+
+/** The responder the API records for an answer given with the shared operator key. */
+export const OPERATOR_RESPONDER = "operator";
+
+/**
+ * "1 of 2 approved" while a request with an `all` or `{ min: N }` policy
+ * collects answers; null when one approval resolves it or it is no longer
+ * pending.
+ */
+export function quorumLabel(progress: ApprovalRequest["approvalProgress"]): string | null {
+  if (!progress || progress.required <= 1) return null;
+  return `${progress.approved} of ${progress.required} approved`;
+}
+
+/** Whether `responder` (a user id, or `operator`) already answered this request. */
+export function hasAnswered(
+  request: Pick<ApprovalRequest, "approvals">,
+  responder: string | null,
+): boolean {
+  if (!responder) return false;
+  return (request.approvals ?? []).some((vote) => vote.responder === responder);
+}
+
+/**
+ * The submit-bar text for a failed answer. A 403 means this credential may
+ * not answer (an agent identity, or a user who is not a listed approver), so
+ * it says so before the server's reason instead of reading like a retryable
+ * error.
+ */
+export function respondErrorMessage(error: unknown): string {
+  const message = error instanceof Error ? error.message : "Failed to submit response";
+  const status = (error as { status?: unknown } | null)?.status;
+  if (status === 403) return `You can't answer this request. ${message}`;
+  return message;
+}
+
+/** The unverified name sent with `responder`'s latest answer, if any. */
+export function claimedNameFor(
+  request: Pick<ApprovalRequest, "approvals">,
+  responder: string | null,
+): string | undefined {
+  const votes = request.approvals ?? [];
+  for (let i = votes.length - 1; i >= 0; i--) {
+    if (votes[i].responder === responder) return votes[i].claimedRespondedBy;
+  }
+  return undefined;
+}
