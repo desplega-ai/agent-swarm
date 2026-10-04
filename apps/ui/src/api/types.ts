@@ -2632,6 +2632,86 @@ export interface MemoryEntry {
   chunkIndex: number;
   totalChunks: number;
   tags: string[];
+  /** Absent on API servers older than the memory browser. */
+  key?: string | null;
+  updatedAt?: string | null;
+  /** Usefulness posterior mean alpha / (alpha + beta); 0.5 = no signal yet. */
+  rating?: number;
+}
+
+/** One keyed memory from `GET /api/memory/keys`, aggregated over its chunk rows. */
+export interface MemoryKeySummary {
+  key: string;
+  scope: MemoryScope;
+  agentId: string | null;
+  memoryId: string;
+  name: string;
+  source: MemorySource;
+  chunkRows: number;
+  totalChunks: number;
+  complete: boolean;
+  chars: number;
+  estTokens: number;
+  accessCount: number;
+  lastAccessedAt: string | null;
+  rating: number;
+  alpha: number;
+  beta: number;
+  usefulRatings: number;
+  notUsefulRatings: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface MemoryKeysResponse {
+  prefix: string;
+  keys: MemoryKeySummary[];
+  truncated: boolean;
+}
+
+export interface MemoryChunk {
+  id: string;
+  agentId: string | null;
+  scope: MemoryScope;
+  key: string | null;
+  name: string;
+  content: string;
+  source: MemorySource;
+  sourceTaskId: string | null;
+  sourcePath: string | null;
+  chunkIndex: number;
+  totalChunks: number;
+  tags: string[];
+  createdAt: string;
+  updatedAt: string | null;
+  accessedAt: string;
+  expiresAt: string | null;
+  accessCount: number;
+  embeddingModel: string | null;
+  rating: number;
+  alpha: number;
+  beta: number;
+  version: number;
+  estTokens: number;
+}
+
+/** `GET /api/memory/chunks`: every chunk row of one memory, in chunkIndex order. */
+export interface MemoryChunksResponse {
+  key: string | null;
+  scope: MemoryScope;
+  agentId: string | null;
+  chunks: MemoryChunk[];
+  estTokens: number;
+  integrity: {
+    ok: boolean;
+    expectedChunks: number;
+    presentIndexes: number[];
+    missingIndexes: number[];
+    duplicateIndexes: number[];
+    conflictingTotals: number[];
+    outOfRangeIds: string[];
+    issues: string[];
+  };
 }
 
 export interface MemoryListResponse {

@@ -7,6 +7,16 @@ import { CANDIDATE_SET_MULTIPLIER } from "../be/memory/constants";
 import { listEdgesForAgent } from "../be/memory/edges-store";
 import { expandCandidatesWithGraph } from "../be/memory/graph-expansion";
 import { indexMemoryContent } from "../be/memory/index-content";
+import {
+  checkChunkIntegrity,
+  estimateTokens,
+  getMemoryChunks,
+  getPosteriorsByIds,
+  listMemoryKeys,
+  MEMORY_KEYS_DEFAULT_PREFIX,
+  MEMORY_KEYS_MAX_LIMIT,
+  posteriorMean,
+} from "../be/memory/key-browser";
 import { MemoryKeyError } from "../be/memory/key-guard";
 import { MEMORY_KEY_MAX_LENGTH } from "../be/memory/key-paths";
 import { refreshLinks } from "../be/memory/link-resolver";
@@ -223,6 +233,9 @@ const MemoryListResultItemSchema = z.object({
   chunkIndex: z.number(),
   totalChunks: z.number(),
   tags: z.array(z.string()),
+  key: z.string().nullable(),
+  updatedAt: z.string().nullable(),
+  rating: z.number().describe("Usefulness posterior mean alpha / (alpha + beta); 0.5 = no signal"),
 });
 
 const listMemory = route({
@@ -263,6 +276,132 @@ const listMemory = route({
       }),
     },
     400: { description: "Validation error" },
+  },
+});
+
+// Mirrors `MemoryKeySummary` (src/be/memory/key-browser.ts).
+const MemoryKeySummarySchema = z.object({
+  key: z.string(),
+  scope: AgentMemoryScopeSchema,
+  agentId: z.string().nullable(),
+  memoryId: z.string(),
+  name: z.string(),
+  source: AgentMemorySourceSchema,
+  chunkRows: z.number(),
+  totalChunks: z.number(),
+  complete: z.boolean(),
+  chars: z.number(),
+  estTokens: z.number(),
+  accessCount: z.number(),
+  lastAccessedAt: z.string().nullable(),
+  rating: z.number(),
+  alpha: z.number(),
+  beta: z.number(),
+  usefulRatings: z.number(),
+  notUsefulRatings: z.number(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+
+const listMemoryKeysRoute = route({
+  method: "get",
+  path: "/api/memory/keys",
+  pattern: ["api", "memory", "keys"],
+  summary:
+    "One aggregate row per keyed memory under a key prefix: chunks, usage, rating, estimated tokens (debug/admin)",
+  tags: ["Memory"],
+  auth: { apiKey: true },
+  query: z.object({
+    prefix: z
+      .string()
+      .min(1)
+      .max(MEMORY_KEY_MAX_LENGTH)
+      .default(MEMORY_KEYS_DEFAULT_PREFIX)
+      .describe("Literal, case-sensitive key prefix (default '/longterm/')."),
+    limit: z.coerce.number().int().min(1).max(MEMORY_KEYS_MAX_LIMIT).default(MEMORY_KEYS_MAX_LIMIT),
+  }),
+  responses: {
+    200: {
+      description:
+        "Keyed memories grouped by (key, scope, agentId). accessCount is summed over chunk rows; rating pools alpha/beta over chunk rows; estTokens = ceil(chars / 4)",
+      schema: z.object({
+        prefix: z.string(),
+        keys: z.array(MemoryKeySummarySchema),
+        truncated: z.boolean(),
+      }),
+    },
+    400: { description: "Validation error" },
+  },
+});
+
+const MemoryChunkSchema = z.object({
+  id: z.string(),
+  agentId: z.string().nullable(),
+  scope: AgentMemoryScopeSchema,
+  key: z.string().nullable(),
+  name: z.string(),
+  content: z.string(),
+  source: AgentMemorySourceSchema,
+  sourceTaskId: z.string().nullable(),
+  sourcePath: z.string().nullable(),
+  chunkIndex: z.number(),
+  totalChunks: z.number(),
+  tags: z.array(z.string()),
+  createdAt: z.string(),
+  updatedAt: z.string().nullable(),
+  accessedAt: z.string(),
+  expiresAt: z.string().nullable(),
+  accessCount: z.number(),
+  embeddingModel: z.string().nullable(),
+  rating: z.number(),
+  alpha: z.number(),
+  beta: z.number(),
+  version: z.number(),
+  estTokens: z.number(),
+});
+
+const getMemoryChunksRoute = route({
+  method: "get",
+  path: "/api/memory/chunks",
+  pattern: ["api", "memory", "chunks"],
+  summary:
+    "Every chunk row of one memory in chunkIndex order, with a chunk-integrity check (debug/admin). Does not count as an access",
+  tags: ["Memory"],
+  auth: { apiKey: true },
+  query: z
+    .object({
+      memoryId: z.string().uuid().optional().describe("Any chunk row of the memory."),
+      key: z.string().min(1).max(MEMORY_KEY_MAX_LENGTH).optional(),
+      scope: AgentMemoryScopeSchema.optional(),
+      agentId: z
+        .string()
+        .optional()
+        .describe("Owner agent id; pass an empty string for rows without one."),
+    })
+    .refine((q) => q.memoryId || q.key, { message: "memoryId or key required" }),
+  responses: {
+    200: {
+      description: "Chunk rows and integrity findings",
+      schema: z.object({
+        key: z.string().nullable(),
+        scope: AgentMemoryScopeSchema,
+        agentId: z.string().nullable(),
+        chunks: z.array(MemoryChunkSchema),
+        estTokens: z.number(),
+        integrity: z.object({
+          ok: z.boolean(),
+          expectedChunks: z.number(),
+          presentIndexes: z.array(z.number()),
+          missingIndexes: z.array(z.number()),
+          duplicateIndexes: z.array(z.number()),
+          conflictingTotals: z.array(z.number()),
+          outOfRangeIds: z.array(z.string()),
+          issues: z.array(z.string()),
+        }),
+      }),
+    },
+    400: { description: "Validation error" },
+    404: { description: "Memory not found" },
   },
 });
 
@@ -904,6 +1043,9 @@ export async function handleMemory(
             chunkIndex: r.chunkIndex,
             totalChunks: r.totalChunks,
             tags: r.tags,
+            key: r.key ?? null,
+            updatedAt: r.updatedAt ?? null,
+            rating: posteriorMean(r.alpha, r.beta),
           })),
           total: candidates.length,
           limit: pageLimit,
@@ -924,6 +1066,7 @@ export async function handleMemory(
       };
       const rows = await store.list(agentId ?? "", listOptions);
       const total = await store.count(agentId ?? "", listOptions);
+      const posteriors = await getPosteriorsByIds(rows.map((r) => r.id));
 
       listMemory.respond(res, 200, {
         results: rows.map((r) => ({
@@ -943,6 +1086,12 @@ export async function handleMemory(
           chunkIndex: r.chunkIndex,
           totalChunks: r.totalChunks,
           tags: r.tags,
+          key: r.key ?? null,
+          updatedAt: r.updatedAt ?? null,
+          rating: (() => {
+            const p = posteriors.get(r.id);
+            return p ? posteriorMean(p.alpha, p.beta) : 0.5;
+          })(),
         })),
         total,
         limit: pageLimit,
@@ -953,6 +1102,80 @@ export async function handleMemory(
       console.error("[memory-list] Error:", (err as Error).message);
       jsonError(res, "Memory list failed", 500);
     }
+    return true;
+  }
+
+  if (listMemoryKeysRoute.match(req.method, pathSegments)) {
+    const parsed = await listMemoryKeysRoute.parse(
+      req,
+      res,
+      pathSegments,
+      parseQueryParams(req.url || ""),
+    );
+    if (!parsed) return true;
+    const { prefix, limit } = parsed.query;
+    const { keys, truncated } = await listMemoryKeys({ prefix, limit });
+    listMemoryKeysRoute.respond(res, 200, {
+      prefix,
+      keys: keys.map((k) => ({
+        ...k,
+        scope: AgentMemoryScopeSchema.parse(k.scope),
+        source: AgentMemorySourceSchema.parse(k.source),
+      })),
+      truncated,
+    });
+    return true;
+  }
+
+  if (getMemoryChunksRoute.match(req.method, pathSegments)) {
+    const parsed = await getMemoryChunksRoute.parse(
+      req,
+      res,
+      pathSegments,
+      parseQueryParams(req.url || ""),
+    );
+    if (!parsed) return true;
+    const { memoryId, key, scope, agentId } = parsed.query;
+    const doc = memoryId
+      ? await getMemoryChunks({ memoryId })
+      : await getMemoryChunks({ key: key as string, scope, agentId });
+    if (!doc) {
+      jsonError(res, "Memory not found", 404);
+      return true;
+    }
+    const chunks = doc.chunks.map((c) => ({
+      id: c.id,
+      agentId: c.agentId,
+      scope: AgentMemoryScopeSchema.parse(c.scope),
+      key: c.key,
+      name: c.name,
+      content: c.content,
+      source: AgentMemorySourceSchema.parse(c.source),
+      sourceTaskId: c.sourceTaskId,
+      sourcePath: c.sourcePath,
+      chunkIndex: c.chunkIndex,
+      totalChunks: c.totalChunks,
+      tags: c.tags,
+      createdAt: c.createdAt,
+      updatedAt: c.updatedAt ?? null,
+      accessedAt: c.accessedAt,
+      expiresAt: c.expiresAt ?? null,
+      accessCount: c.accessCount ?? 0,
+      embeddingModel: c.embeddingModel ?? null,
+      rating: posteriorMean(c.alpha, c.beta),
+      alpha: c.alpha,
+      beta: c.beta,
+      version: c.version ?? 1,
+      estTokens: estimateTokens(c.content.length),
+    }));
+    getMemoryChunksRoute.respond(res, 200, {
+      key: doc.key,
+      scope: AgentMemoryScopeSchema.parse(doc.scope),
+      agentId: doc.agentId,
+      chunks,
+      estTokens: estimateTokens(chunks.reduce((sum, c) => sum + c.content.length, 0)),
+      integrity: checkChunkIntegrity(chunks),
+    });
     return true;
   }
 
