@@ -225,6 +225,11 @@ export const PERMISSIONS = {
     description: "Update an MCP server the caller does not own.",
     namespace: "mcp-server",
   },
+  "mcp-server.stdio.write": {
+    description:
+      "Create an agent-scope stdio MCP server, or change or enable what a stdio server runs. A stdio server runs a command on the worker.",
+    namespace: "mcp-server",
+  },
   "mcp-server.read.secrets": {
     description: "Read resolved MCP server secret env/header values.",
     namespace: "mcp-server",

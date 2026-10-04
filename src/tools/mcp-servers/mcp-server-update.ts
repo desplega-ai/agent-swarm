@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { getAgentById, getMcpServerById, updateMcpServer } from "@/be/db";
+import { updateTouchesStdioExecution } from "@/be/mcp-server-stdio-gate";
 import { can } from "@/rbac";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 
@@ -10,7 +11,8 @@ export const registerMcpServerUpdateTool = (server: McpServer) => {
     {
       title: "Update MCP Server",
       annotations: { destructiveHint: false },
-      description: "Update an MCP server's configuration. Only the owner or lead can update.",
+      description:
+        "Update an MCP server's configuration. Only the owner or lead can update. Changing or enabling what a stdio server runs requires lead.",
       inputSchema: z.object({
         id: z.string().describe("ID of the MCP server to update"),
         name: z.string().optional().describe("New name"),
@@ -77,6 +79,25 @@ export const registerMcpServerUpdateTool = (server: McpServer) => {
         if (args.extraAuthorizeParams !== undefined)
           updates.extraAuthorizeParams = args.extraAuthorizeParams;
         if (args.isEnabled !== undefined) updates.isEnabled = args.isEnabled;
+
+        // The owner may edit a server, but not change or turn on the command a stdio one runs.
+        if (updateTouchesStdioExecution(existing, updates)) {
+          const stdioDecision = can({
+            principal: {
+              kind: "agent",
+              agentId: requestInfo.agentId,
+              isLead: agent?.isLead ?? false,
+            },
+            verb: "mcp-server.stdio.write",
+            resource: { kind: "none" },
+            source: "mcp",
+          });
+          if (!stdioDecision.allow) {
+            return toolErr("Only lead agents can create or change stdio MCP servers.", {
+              data: { yourAgentId: requestInfo.agentId },
+            });
+          }
+        }
 
         const updated = await updateMcpServer(args.id, updates);
         if (!updated) {

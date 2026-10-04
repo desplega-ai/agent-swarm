@@ -799,7 +799,7 @@ Capability: `mcp` (enabled by default)
 
 **Create MCP Server**
 
-Create a new MCP server definition. Agent-scope servers are auto-installed for the creating agent. Swarm/global scope requires lead.
+Create a new MCP server definition. Agent-scope servers are auto-installed for the creating agent. Swarm/global scope and stdio servers require lead.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
@@ -819,7 +819,7 @@ Create a new MCP server definition. Agent-scope servers are auto-installed for t
 
 **Update MCP Server**
 
-Update an MCP server's configuration. Only the owner or lead can update.
+Update an MCP server's configuration. Only the owner or lead can update. Changing or enabling what a stdio server runs requires lead.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|

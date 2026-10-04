@@ -302,6 +302,7 @@ export const LEGACY_POLICY = {
   "mcp-server.uninstall.any": leadOnly,
   "mcp-server.delete.any": leadOrResourceOwner,
   "mcp-server.update.any": leadOrResourceOwner,
+  "mcp-server.stdio.write": leadOrOperatorOrUser,
   "mcp-server.read.secrets": leadOnly,
   "mcp-oauth.authorize.any": anyAuthenticated,
   "kv.write.any": leadOrOwnNamespace,

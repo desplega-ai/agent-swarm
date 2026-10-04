@@ -13,6 +13,7 @@ import {
   uninstallMcpServer,
   updateMcpServer,
 } from "../be/db";
+import { updateTouchesStdioExecution } from "../be/mcp-server-stdio-gate";
 import { enqueueAdmissionRow } from "../be/rbac-audit";
 import { getUserGrant } from "../be/rbac-roles";
 import { ensureMcpToken } from "../oauth/ensure-mcp-token";
@@ -256,7 +257,10 @@ async function mcpServerPrincipal(req: IncomingMessage): Promise<RbacPrincipal> 
 async function ensureMcpServerPermission(
   req: IncomingMessage,
   res: ServerResponse,
-  verb: Extract<PermissionVerb, "mcp-server.create.swarm" | "mcp-server.update.any">,
+  verb: Extract<
+    PermissionVerb,
+    "mcp-server.create.swarm" | "mcp-server.update.any" | "mcp-server.stdio.write"
+  >,
   resource: RbacResource,
 ): Promise<boolean> {
   const principal = await mcpServerPrincipal(req);
@@ -522,6 +526,14 @@ export async function handleMcpServers(
         kind: "owned",
         ownerAgentId: existing.ownerAgentId,
       }))
+    ) {
+      return true;
+    }
+
+    // The owner may edit a server, but not change or turn on the command a stdio one runs.
+    if (
+      updateTouchesStdioExecution(existing, parsed.body) &&
+      !(await ensureMcpServerPermission(req, res, "mcp-server.stdio.write", { kind: "none" }))
     ) {
       return true;
     }
