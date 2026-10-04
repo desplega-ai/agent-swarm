@@ -12974,6 +12974,17 @@ export interface paths {
                         "application/json": components["schemas"]["SwarmRepo"];
                     };
                 };
+                /** @description Only the lead, the operator or a user can change allowMerge */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                        };
+                    };
+                };
                 /** @description Repo not found */
                 404: {
                     headers: {
@@ -13107,6 +13118,17 @@ export interface paths {
                 };
                 /** @description Validation error */
                 400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                        };
+                    };
+                };
+                /** @description Only the lead, the operator or a user can turn allowMerge on */
+                403: {
                     headers: {
                         [name: string]: unknown;
                     };

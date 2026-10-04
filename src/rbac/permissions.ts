@@ -95,6 +95,11 @@ export const PERMISSIONS = {
     description: "Delete a Slack channel.",
     namespace: "channel",
   },
+  "repo.merge-policy.write": {
+    description:
+      "Change a repo's allowMerge guideline, which tells agents whether they may merge a PR themselves.",
+    namespace: "repo",
+  },
   "integration.kapso.manage": {
     description: "Register or unregister a Kapso inbound number.",
     namespace: "integration",

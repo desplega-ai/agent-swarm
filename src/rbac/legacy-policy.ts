@@ -270,6 +270,7 @@ export const LEGACY_POLICY = {
   "memory.write.consolidated": leadOnly,
   "memory.delete.any": memoryOwnerOrLeadSwarm,
   "channel.delete": leadOnly,
+  "repo.merge-policy.write": leadOrOperatorOrUser,
   "integration.kapso.manage": leadOnly,
   "integration.slack.post": leadOnly,
   "integration.slack.read": leadOnly,

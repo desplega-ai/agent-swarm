@@ -20,3 +20,22 @@ export async function requestPrincipal(
   const agent = await getAgentById(myAgentId);
   return { kind: "agent", agentId: myAgentId, isLead: agent?.isLead ?? false };
 }
+
+/**
+ * The principal of a keyed HTTP request that may act as an agent. Workers share the swarm API
+ * key, so the key alone authenticates as the operator. An X-Agent-ID, or an `aseph_` session
+ * token, names the agent on top of it, and its lead flag is read live. A user token stays the
+ * user. A request with no agent identity is the operator, as for the dashboard and the runner.
+ * Unlike `requestPrincipal`, an agent identity wins over the operator key.
+ */
+export async function agentFirstPrincipal(
+  req: IncomingMessage,
+  myAgentId: string | undefined,
+): Promise<RbacPrincipal> {
+  const auth = getRequestAuth(req);
+  if (auth?.kind === "user") return { kind: "user", userId: auth.userId };
+  const agentId = auth?.kind === "agent" ? auth.agentId : myAgentId;
+  if (!agentId) return { kind: "operator" };
+  const agent = await getAgentById(agentId);
+  return { kind: "agent", agentId, isLead: agent?.isLead === true };
+}

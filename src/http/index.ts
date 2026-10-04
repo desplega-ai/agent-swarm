@@ -364,7 +364,7 @@ const httpServer = createHttpServer(async (req, res) => {
         () => handleDbQuery(req, res, pathSegments, queryParams),
         () => handleMetrics(req, res, pathSegments, queryParams, myAgentId),
         () => handleModelsCatalog(req, res, pathSegments, queryParams),
-        () => handleRepos(req, res, pathSegments, queryParams),
+        () => handleRepos(req, res, pathSegments, queryParams, myAgentId),
         () => handleSkills(req, res, pathSegments, queryParams, myAgentId),
         () => handleScriptConnections(req, res, pathSegments, queryParams, myAgentId),
         () => handleScriptConnectionProxy(req, res, pathSegments, queryParams, myAgentId),

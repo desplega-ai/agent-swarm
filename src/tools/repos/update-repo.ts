@@ -1,6 +1,8 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
-import { updateSwarmRepo } from "@/be/db";
+import { getAgentById, getSwarmRepoById, updateSwarmRepo } from "@/be/db";
+import { changesAllowMerge } from "@/be/repo-merge-policy";
+import { can } from "@/rbac";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 import { RepoGuidelinesInputSchema, RepoHooksSchema } from "@/types";
 
@@ -31,7 +33,7 @@ export const registerUpdateRepoTool = (server: McpServer) => {
     {
       title: "Update Repo",
       description:
-        "Update a repo's configuration including guidelines (PR checks, merge policy, review guidance). The lead uses this to set guidelines after asking the user. Pass null for guidelines to clear them.",
+        "Update a repo's configuration including guidelines (PR checks, merge policy, review guidance). The lead uses this to set guidelines after asking the user. Pass null for guidelines to clear them. Only the lead can change allowMerge: resend its current value to edit other guidelines.",
       annotations: { readOnlyHint: false },
 
       inputSchema: z.object({
@@ -56,7 +58,29 @@ export const registerUpdateRepoTool = (server: McpServer) => {
         repo: swarmRepoOutputShape.nullable().optional(),
       }),
     },
-    async ({ id, ...updates }) => {
+    async ({ id, ...updates }, requestInfo) => {
+      if (updates.guidelines !== undefined) {
+        const existing = await getSwarmRepoById(id);
+        if (existing && changesAllowMerge(existing.guidelines, updates.guidelines)) {
+          const agent = requestInfo.agentId ? await getAgentById(requestInfo.agentId) : null;
+          const decision = can({
+            principal: requestInfo.agentId
+              ? { kind: "agent", agentId: requestInfo.agentId, isLead: agent?.isLead ?? false }
+              : { kind: "operator" },
+            verb: "repo.merge-policy.write",
+            resource: { kind: "none" },
+            source: "mcp",
+          });
+          if (!decision.allow) {
+            const current = existing.guidelines?.allowMerge === true;
+            return toolErr(
+              `Only lead agents can change allowMerge (it is currently ${current}). Resend ${current} to keep it while you edit the other guidelines.`,
+              { data: { repo: null } },
+            );
+          }
+        }
+      }
+
       const updated = await updateSwarmRepo(id, updates);
 
       if (!updated) {

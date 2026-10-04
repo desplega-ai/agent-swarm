@@ -30696,6 +30696,24 @@
               }
             }
           },
+          "403": {
+            "description": "Only the lead, the operator or a user can change allowMerge",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
           "404": {
             "description": "Repo not found",
             "content": {
@@ -30913,6 +30931,24 @@
           },
           "400": {
             "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Only the lead, the operator or a user can turn allowMerge on",
             "content": {
               "application/json": {
                 "schema": {

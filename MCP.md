@@ -962,7 +962,7 @@ List registered repos with their guidelines (PR checks, merge policy, review gui
 
 **Update Repo**
 
-Update a repo's configuration including guidelines (PR checks, merge policy, review guidance). The lead uses this to set guidelines after asking the user. Pass null for guidelines to clear them.
+Update a repo's configuration including guidelines (PR checks, merge policy, review guidance). The lead uses this to set guidelines after asking the user. Pass null for guidelines to clear them. Only the lead can change allowMerge: resend its current value to edit other guidelines.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
