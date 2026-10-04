@@ -206,6 +206,7 @@ describe("Claude stream-json event parsing", () => {
 // stdout) rather than asserting on hand-built fixtures, so a message-shape
 // regression here is caught instead of silently shipping the wrong text.
 describe("ClaudeSession processStreams — ProviderResult.output capture", () => {
+  let originalClaudeTransport: string | undefined;
   let spawnSpy: ReturnType<typeof spyOn>;
   const CLEAN_ENV: Record<string, string> = { CLAUDE_CODE_OAUTH_TOKEN: "example-test-oauth-token" };
 
@@ -244,11 +245,18 @@ describe("ClaudeSession processStreams — ProviderResult.output capture", () =>
   }
 
   beforeEach(() => {
+    originalClaudeTransport = process.env.CLAUDE_TRANSPORT;
+    delete process.env.CLAUDE_TRANSPORT;
     spawnSpy = spyOn(Bun, "spawn");
   });
 
   afterEach(() => {
     spawnSpy.mockRestore();
+    if (originalClaudeTransport === undefined) {
+      delete process.env.CLAUDE_TRANSPORT;
+    } else {
+      process.env.CLAUDE_TRANSPORT = originalClaudeTransport;
+    }
   });
 
   test("multiple assistant turns: the last non-empty text wins", async () => {
