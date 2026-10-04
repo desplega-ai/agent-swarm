@@ -51,6 +51,172 @@ describe("SqliteMemoryStore", () => {
     }
   });
 
+  test("deleting either keyed chunk removes the document before a shorter replacement", async () => {
+    for (const deletedIndex of [0, 1]) {
+      const key = `/test/delete-chunks/${deletedIndex}`;
+      const inputs = [0, 1].map((chunkIndex) => ({
+        agentId: agentA,
+        scope: "agent" as const,
+        source: "manual" as const,
+        name: "old document",
+        content: `chunk ${chunkIndex}`,
+        key,
+        chunkIndex,
+        totalChunks: 2,
+      }));
+      const chunks = await store.storeBatch(inputs);
+      const otherOwner = await store.store({ ...inputs[0]!, agentId: agentB });
+      const otherScope = await store.store({ ...inputs[0]!, scope: "swarm" });
+      await store.whenFtsPopulated();
+      for (const chunk of chunks) await store.updateEmbedding(chunk.id, vector({ 0: 1 }), "test");
+      expect(await store.delete(chunks[deletedIndex]!.id)).toBe(true);
+      for (const chunk of chunks) {
+        expect(await store.peek(chunk.id)).toBeNull();
+        expect(
+          await getDbClient().get("SELECT memory_id FROM memory_fts WHERE memory_id = ?", [
+            chunk.id,
+          ]),
+        ).toBeNull();
+        if (isSqliteVecAvailable()) {
+          expect(
+            await getDbClient().get("SELECT memory_id FROM memory_vec WHERE memory_id = ?", [
+              chunk.id,
+            ]),
+          ).toBeNull();
+        }
+      }
+      expect(await store.peek(otherOwner.id)).not.toBeNull();
+      expect(await store.peek(otherScope.id)).not.toBeNull();
+      await store.store({ ...inputs[0]!, name: "replacement", totalChunks: 1 });
+      const rows = await getDbClient().query<{ chunkIndex: number }>(
+        "SELECT chunkIndex FROM agent_memory WHERE key = ? AND scope = 'agent' AND agentId = ?",
+        [key, agentA],
+      );
+      expect(rows).toEqual([{ chunkIndex: 0 }]);
+      expect(await store.delete(chunks[deletedIndex]!.id)).toBe(false);
+    }
+  });
+
+  test("deletion groups unowned swarm chunks without touching another owner", async () => {
+    const input = {
+      agentId: null,
+      scope: "swarm" as const,
+      source: "manual" as const,
+      name: "unowned",
+      content: "chunk",
+      key: "/test/delete-unowned",
+    };
+    const chunks = await store.storeBatch(
+      [0, 1].map((chunkIndex) => ({
+        ...input,
+        chunkIndex,
+        totalChunks: 2,
+      })),
+    );
+    const owned = await store.store({ ...input, agentId: agentA });
+    expect(await store.delete(chunks[1]!.id)).toBe(true);
+    for (const chunk of chunks) expect(await store.peek(chunk.id)).toBeNull();
+    expect(await store.peek(owned.id)).not.toBeNull();
+  });
+
+  test("source-path rewrite removes old chunks and duplicate-key writes roll back", async () => {
+    const key = "/test/rewrite-chunks";
+    const input = {
+      agentId: agentA,
+      scope: "agent" as const,
+      source: "manual" as const,
+      name: "rewrite",
+      content: "old",
+      key,
+      sourcePath: key,
+    };
+    const chunks = await store.storeBatch(
+      [0, 1].map((chunkIndex) => ({
+        ...input,
+        chunkIndex,
+        totalChunks: 2,
+      })),
+    );
+    await expect(store.storeBatch([{ ...input, content: "new" }])).rejects.toThrow();
+    for (const chunk of chunks) expect(await store.peek(chunk.id)).not.toBeNull();
+    expect(await store.deleteBySourcePath(key, agentA)).toBe(2);
+    const replacement = await store.storeBatch([{ ...input, content: "new" }]);
+    expect(replacement).toHaveLength(1);
+    for (const chunk of chunks) expect(await store.peek(chunk.id)).toBeNull();
+  });
+
+  test("orphan migration preserves valid and legacy chunks and is idempotent", async () => {
+    const input = {
+      agentId: agentA,
+      scope: "agent" as const,
+      source: "manual" as const,
+      name: "migration",
+      content: "chunk",
+    };
+    const valid = await store.storeBatch(
+      [0, 1].map((chunkIndex) => ({
+        ...input,
+        key: "/test/migration-valid",
+        chunkIndex,
+        totalChunks: 2,
+      })),
+    );
+    const head = await store.store({ ...input, key: "/test/migration-short" });
+    const tail = await store.store({ ...input, key: head.key, chunkIndex: 1, totalChunks: 2 });
+    const missingHead = await store.store({
+      ...input,
+      key: "/test/migration-missing",
+      chunkIndex: 1,
+      totalChunks: 2,
+    });
+    const legacy = await store.store({ ...input, chunkIndex: 1, totalChunks: 2 });
+    const nullOwnerHead = await store.store({
+      ...input,
+      agentId: null,
+      scope: "swarm",
+      key: "/test/migration-null-owner",
+      totalChunks: 2,
+    });
+    const nullOwnerTail = await store.store({
+      ...input,
+      agentId: null,
+      scope: "swarm",
+      key: nullOwnerHead.key,
+      chunkIndex: 1,
+      totalChunks: 2,
+    });
+    const isolatedOwner = await store.store({
+      ...input,
+      agentId: agentB,
+      key: valid[0]!.key,
+      chunkIndex: 1,
+      totalChunks: 2,
+    });
+    const isolatedScope = await store.store({
+      ...input,
+      scope: "swarm",
+      key: valid[0]!.key,
+      chunkIndex: 1,
+      totalChunks: 2,
+    });
+    const sql = await Bun.file(
+      new URL("../be/migrations/194_memory_orphan_chunks.sql", import.meta.url),
+    ).text();
+    await getDbClient().run(sql);
+    for (const row of [tail, missingHead, isolatedOwner, isolatedScope]) {
+      expect(await store.peek(row.id)).toBeNull();
+      expect(
+        await getDbClient().get("SELECT id FROM agent_memory_version WHERE memory_id = ?", [
+          row.id,
+        ]),
+      ).toBeNull();
+    }
+    for (const row of [...valid, head, legacy, nullOwnerHead, nullOwnerTail]) {
+      expect(await store.peek(row.id)).not.toBeNull();
+    }
+    expect((await getDbClient().run(sql)).changes).toBe(0);
+  });
+
   describe("store()", () => {
     test("creates memory with correct fields", async () => {
       const memory = await store.store({
