@@ -11,6 +11,7 @@ import { closeDb, createAgent, createSwarmRepo, getSwarmRepoById, initDb } from 
 import { handleRepos } from "../http/repos";
 import { registerUpdateRepoTool } from "../tools/repos";
 import { type HttpRequestAuth, setRequestAuth } from "../utils/request-auth-context";
+import { interleave } from "./write-gate";
 
 const TEST_DB_PATH = "./test-repo-allow-merge-gate.sqlite";
 
@@ -314,5 +315,68 @@ describe("repo routes with an X-Agent-ID on the swarm key", () => {
       },
     );
     expect(lead.status).toBe(201);
+  });
+});
+
+/**
+ * An update compares the incoming allowMerge with the stored one, so a worker that resends the
+ * value it read must not overwrite a lead's newer change. Each case holds one request just
+ * before its write and commits the other meanwhile. The assertions hold for either serial order:
+ * the lead's later write, or the worker's refusal after it, both leave the lead's value.
+ */
+describe("concurrent updates keep the allowMerge gate", () => {
+  const UPDATE = /^UPDATE swarm_repos/;
+  const workerEdit = guidelines(false, ["bun run lint"]);
+  const leadEdit = guidelines(true);
+
+  test("update-repo: a worker's resend of the value it read cannot overwrite a lead's change", async () => {
+    const repo = await newRepo(false);
+    const { second } = await interleave(
+      UPDATE,
+      () => callUpdateRepo(WORKER_ID, { id: repo.id, guidelines: workerEdit }),
+      () => callUpdateRepo(LEAD_ID, { id: repo.id, guidelines: leadEdit }),
+    );
+
+    expect(second.isError).toBe(false);
+    expect((await getSwarmRepoById(repo.id))?.guidelines?.allowMerge).toBe(true);
+  });
+
+  test("update-repo: a worker update queued behind a lead's change is refused, not applied", async () => {
+    const repo = await newRepo(false);
+    const { first, second } = await interleave(
+      UPDATE,
+      () => callUpdateRepo(LEAD_ID, { id: repo.id, guidelines: leadEdit }),
+      () => callUpdateRepo(WORKER_ID, { id: repo.id, guidelines: workerEdit }),
+    );
+
+    expect(first.isError).toBe(false);
+    expect(second.isError).toBe(true);
+    expect(second.structuredContent.message).toContain("currently true");
+    expect((await getSwarmRepoById(repo.id))?.guidelines?.allowMerge).toBe(true);
+  });
+
+  test("PUT /api/repos/:id: a worker's resend of the value it read cannot overwrite a lead's change", async () => {
+    const repo = await newRepo(false);
+    const { second } = await interleave(
+      UPDATE,
+      () => api("PUT", `/api/repos/${repo.id}`, { agentId: WORKER_ID }, { guidelines: workerEdit }),
+      () => api("PUT", `/api/repos/${repo.id}`, { agentId: LEAD_ID }, { guidelines: leadEdit }),
+    );
+
+    expect(second.status).toBe(200);
+    expect((await getSwarmRepoById(repo.id))?.guidelines?.allowMerge).toBe(true);
+  });
+
+  test("PUT /api/repos/:id: a worker update queued behind a lead's change is refused, not applied", async () => {
+    const repo = await newRepo(false);
+    const { first, second } = await interleave(
+      UPDATE,
+      () => api("PUT", `/api/repos/${repo.id}`, { agentId: LEAD_ID }, { guidelines: leadEdit }),
+      () => api("PUT", `/api/repos/${repo.id}`, { agentId: WORKER_ID }, { guidelines: workerEdit }),
+    );
+
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(403);
+    expect((await getSwarmRepoById(repo.id))?.guidelines?.allowMerge).toBe(true);
   });
 });

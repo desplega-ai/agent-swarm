@@ -18,6 +18,7 @@ import {
 } from "../be/db";
 import { handleMcpServers } from "../http/mcp-servers";
 import { registerMcpServerCreateTool, registerMcpServerUpdateTool } from "../tools/mcp-servers";
+import { interleave } from "./write-gate";
 
 const TEST_DB_PATH = "./test-mcp-server-stdio-gate.sqlite";
 
@@ -354,5 +355,84 @@ describe("HTTP routes with an X-Agent-ID", () => {
     });
     const result = await putServer(created.id, WORKER_ID, { description: "edited by owner" });
     expect(result.status).toBe(200);
+  });
+});
+
+/**
+ * An update authorizes against the server as stored, so a concurrent edit that turns the server
+ * into a stdio one must not let a decision taken before it land after it. Each case holds one
+ * request just before its write and commits the other meanwhile. The assertions hold for either
+ * serial order: an http server's command is inert until a lead makes it stdio, and the lead's
+ * own command then wins.
+ */
+describe("concurrent updates keep the stdio gate", () => {
+  const UPDATE = /^UPDATE mcp_servers/;
+  const leadMakesStdio = { transport: "stdio", command: "vetted-command" };
+  const ownerSetsCommand = { command: "owner-command" };
+
+  const newHttpServer = (name: string) =>
+    createMcpServer({
+      name,
+      transport: "http",
+      url: "https://mcp.example.com/endpoint",
+      scope: "agent",
+      ownerAgentId: WORKER_ID,
+    });
+
+  async function expectLeadCommandOnly(id: string) {
+    const after = await getMcpServerById(id);
+    expect(after?.transport).toBe("stdio");
+    expect(after?.command).toBe("vetted-command");
+  }
+
+  test("mcp-server-update: an owner decision taken before a lead's switch to stdio cannot write after it", async () => {
+    const server = await newHttpServer("race-tool-stale-owner");
+    const { second } = await interleave(
+      UPDATE,
+      () => callTool("mcp-server-update", WORKER_ID, { id: server.id, ...ownerSetsCommand }),
+      () => callTool("mcp-server-update", LEAD_ID, { id: server.id, ...leadMakesStdio }),
+    );
+
+    expect(second.isError).toBe(false);
+    await expectLeadCommandOnly(server.id);
+  });
+
+  test("mcp-server-update: an owner update queued behind a lead's switch to stdio is refused", async () => {
+    const server = await newHttpServer("race-tool-queued-owner");
+    const { first, second } = await interleave(
+      UPDATE,
+      () => callTool("mcp-server-update", LEAD_ID, { id: server.id, ...leadMakesStdio }),
+      () => callTool("mcp-server-update", WORKER_ID, { id: server.id, ...ownerSetsCommand }),
+    );
+
+    expect(first.isError).toBe(false);
+    expect(second.isError).toBe(true);
+    expect(second.structuredContent.message).toBe(DENIED);
+    await expectLeadCommandOnly(server.id);
+  });
+
+  test("PUT /api/mcp-servers/:id: an owner decision taken before a lead's switch to stdio cannot write after it", async () => {
+    const server = await newHttpServer("race-http-stale-owner");
+    const { second } = await interleave(
+      UPDATE,
+      () => putServer(server.id, WORKER_ID, ownerSetsCommand),
+      () => putServer(server.id, LEAD_ID, leadMakesStdio),
+    );
+
+    expect(second.status).toBe(200);
+    await expectLeadCommandOnly(server.id);
+  });
+
+  test("PUT /api/mcp-servers/:id: an owner update queued behind a lead's switch to stdio is refused", async () => {
+    const server = await newHttpServer("race-http-queued-owner");
+    const { first, second } = await interleave(
+      UPDATE,
+      () => putServer(server.id, LEAD_ID, leadMakesStdio),
+      () => putServer(server.id, WORKER_ID, ownerSetsCommand),
+    );
+
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(403);
+    await expectLeadCommandOnly(server.id);
   });
 });

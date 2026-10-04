@@ -1,21 +1,11 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
-import {
-  createSwarmRepo,
-  deleteSwarmRepo,
-  getSwarmRepoById,
-  getSwarmRepos,
-  updateSwarmRepo,
-} from "../be/db";
+import { createSwarmRepo, deleteSwarmRepo, getSwarmRepoById, getSwarmRepos } from "../be/db";
+import { updateSwarmRepoChecked } from "../be/repo-checked-update";
 import { changesAllowMerge } from "../be/repo-merge-policy";
 import { can } from "../rbac";
 import { emitIntegrationConnected } from "../telemetry";
-import {
-  type RepoGuidelines,
-  RepoGuidelinesInputSchema,
-  RepoHooksSchema,
-  SwarmRepoSchema,
-} from "../types";
+import { RepoGuidelinesInputSchema, RepoHooksSchema, SwarmRepoSchema } from "../types";
 import { agentFirstPrincipal } from "./request-principal";
 import { route } from "./route-def";
 import { json, jsonError } from "./utils";
@@ -123,24 +113,18 @@ const deleteRepo = route({
 
 // ─── Handler ─────────────────────────────────────────────────────────────────
 
-/** Sends the 403 and returns false when the caller may not make this allowMerge change. */
-async function allowMergeChangePermitted(
+/** The refusal text when the caller may not change allowMerge, or null when they may. */
+async function allowMergeRefusal(
   req: IncomingMessage,
-  res: ServerResponse,
   myAgentId: string | undefined,
-  current: RepoGuidelines | null | undefined,
-  incoming: RepoGuidelines | null | undefined,
-): Promise<boolean> {
-  if (!changesAllowMerge(current, incoming)) return true;
+): Promise<string | null> {
   const decision = can({
     principal: await agentFirstPrincipal(req, myAgentId),
     verb: "repo.merge-policy.write",
     resource: { kind: "none" },
     source: "http",
   });
-  if (decision.allow) return true;
-  jsonError(res, `Forbidden: ${decision.reason}`, 403);
-  return false;
+  return decision.allow ? null : `Forbidden: ${decision.reason}`;
 }
 
 export async function handleRepos(
@@ -176,8 +160,12 @@ export async function handleRepos(
   if (createRepo.match(req.method, pathSegments)) {
     const parsed = await createRepo.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    if (!(await allowMergeChangePermitted(req, res, myAgentId, null, parsed.body.guidelines))) {
-      return true;
+    if (changesAllowMerge(null, parsed.body.guidelines)) {
+      const refusal = await allowMergeRefusal(req, myAgentId);
+      if (refusal) {
+        jsonError(res, refusal, 403);
+        return true;
+      }
     }
     try {
       const repo = await createSwarmRepo({
@@ -209,36 +197,31 @@ export async function handleRepos(
   if (updateRepo.match(req.method, pathSegments)) {
     const parsed = await updateRepo.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    if (parsed.body.guidelines !== undefined) {
-      const existing = await getSwarmRepoById(parsed.params.id);
-      if (
-        existing &&
-        !(await allowMergeChangePermitted(
-          req,
-          res,
-          myAgentId,
-          existing.guidelines,
-          parsed.body.guidelines,
-        ))
-      ) {
+    try {
+      // The comparison with the stored allowMerge, the decision and the write share one
+      // transaction, so a stale edit cannot overwrite a merge-policy change committed after it.
+      const result = await updateSwarmRepoChecked(
+        parsed.params.id,
+        {
+          url: parsed.body.url,
+          name: parsed.body.name,
+          clonePath: parsed.body.clonePath,
+          defaultBranch: parsed.body.defaultBranch,
+          autoClone: parsed.body.autoClone,
+          hooks: parsed.body.hooks,
+          guidelines: parsed.body.guidelines,
+        },
+        () => allowMergeRefusal(req, myAgentId),
+      );
+      if (result.kind === "refused") {
+        jsonError(res, result.refusal, 403);
         return true;
       }
-    }
-    try {
-      const updated = await updateSwarmRepo(parsed.params.id, {
-        url: parsed.body.url,
-        name: parsed.body.name,
-        clonePath: parsed.body.clonePath,
-        defaultBranch: parsed.body.defaultBranch,
-        autoClone: parsed.body.autoClone,
-        hooks: parsed.body.hooks,
-        guidelines: parsed.body.guidelines,
-      });
-      if (!updated) {
+      if (result.kind === "not-found") {
         jsonError(res, "Repo not found", 404);
         return true;
       }
-      json(res, updated);
+      json(res, result.repo);
     } catch (error) {
       const msg = (error as Error).message;
       if (msg.includes("UNIQUE constraint")) {
