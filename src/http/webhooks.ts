@@ -44,7 +44,6 @@ import type {
   NoteEvent,
   PipelineEvent,
 } from "../gitlab";
-import { gitlabWorkflowActionName } from "../gitlab/workflow-action-name";
 import {
   handleIssue as handleGitLabIssue,
   handleMergeRequest,
@@ -53,6 +52,7 @@ import {
   isGitLabEnabled,
   verifyGitLabWebhook,
 } from "../gitlab";
+import { gitlabWorkflowActionName } from "../gitlab/workflow-action-name";
 import {
   type KapsoMessageActionResult,
   markKapsoMessageRead,
