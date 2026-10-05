@@ -20,6 +20,7 @@ import {
 import { repointTrackerSyncBySwarmId } from "@/be/db-queries/tracker";
 import { explicitModelErrorForAgent } from "@/be/model-validation";
 import { applyPreTaskCreate } from "@/extensions/apply-task-create";
+import { can } from "@/rbac";
 import { checkSlackRoutingCoherence } from "@/tasks/slack-routing";
 import { findDuplicateTask } from "@/tools/task-dedup";
 import { ownerCtx, type ToolCtx } from "@/tools/task-tool-ctx";
@@ -175,7 +176,7 @@ export const sendTaskInputSchema = z
       .regex(/^[a-f0-9]{32}$/, "Expected a registry user ID (32 lowercase hexadecimal characters).")
       .optional()
       .describe(
-        "Registered requester ID (32 lowercase hexadecimal characters). When omitted, inherited from the caller's current task so the attribution flows through multi-hop delegation automatically.",
+        "Registered requester ID (32 lowercase hexadecimal characters). When omitted, inherited from the caller's current task so the attribution flows through multi-hop delegation automatically. Only lead agents can name a user other than the requester of their current task.",
       ),
     followUpConfig: FollowUpConfigSchema.optional().describe(
       "Control the lead follow-up created when this task finishes. When to use `followUpConfig`: set `disabled: true` when you'll wait for this task to complete inline and no follow-up is needed; set `onCompleted` / `onFailed` with specific instructions when you need to follow up effectively on a particular outcome of a long-running flow; for normal one-shot tasks, leave it unset because defaults are fine. It is most valuable for long-running / complex flows.",
@@ -307,6 +308,28 @@ export async function sendTaskHandler(
   const sourceTaskId = ctx.kind === "owner" ? ctx.sourceTaskId : undefined;
   const requestedByUserId =
     ctx.kind === "user" ? ctx.userId : (inputRequestedByUserId ?? undefined);
+
+  // An agent may pass the requester of its own current task, which is what omitting the field
+  // inherits. Naming anyone else is the lead's call: workers share one swarm key, so a
+  // self-declared requester would let any worker attribute work, and its cost, to another user.
+  if (ctx.kind === "owner" && creatorAgentId && requestedByUserId) {
+    const ownRequester = await resolveTaskAuditUserId(sourceTaskId, creatorAgentId);
+    if (requestedByUserId !== ownRequester) {
+      const caller = await getAgentById(creatorAgentId);
+      const decision = can({
+        principal: { kind: "agent", agentId: creatorAgentId, isLead: caller?.isLead ?? false },
+        verb: "task.requester.assign",
+        resource: { kind: "none" },
+        source: "mcp",
+      });
+      if (!decision.allow) {
+        return toolErr(
+          "Only lead agents can set requestedByUserId to anyone but the requester of your current task. Omit it to inherit that requester.",
+          { data: { yourAgentId: creatorAgentId } },
+        );
+      }
+    }
+  }
 
   if (ctx.kind === "owner" && requestedByUserId && !(await getUserById(requestedByUserId))) {
     return toolErr("requestedByUserId must identify an existing registered user.", {

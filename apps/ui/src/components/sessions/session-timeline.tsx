@@ -310,7 +310,11 @@ function ChildrenChain({ task, childrenByParent, acksByWorker }: SubtreeProps) {
 
   return (
     <>
-      <ParallelGroup count={children.length} parentAgentId={parentAgentId}>
+      <ParallelGroup
+        count={children.length}
+        doneCount={children.filter((child) => child.status === "completed").length}
+        parentAgentId={parentAgentId}
+      >
         {children.map((child) => {
           const childDefers = parentClosedAfterDirectChildren(child, childrenByParent);
           return (

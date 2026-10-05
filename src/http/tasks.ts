@@ -888,7 +888,15 @@ export async function handleTasks(
     let requestedByUserId = trustedUserId ?? undefined;
     const trustBodyRequestedByUserId = process.env.TRUST_BODY_REQUESTED_BY_USER_ID !== "false";
     if (trustBodyRequestedByUserId && !requestedByUserId && parsed.body.requestedByUserId) {
-      const candidate = await findUserById(parsed.body.requestedByUserId);
+      // A worker on the shared key is not the operator: its X-Agent-ID names it, so the body
+      // hint is dropped like it is when the worker has a requester of its own.
+      const mayAssign = can({
+        principal: await resolveTaskWritePrincipal(req, myAgentId),
+        verb: "task.requester.assign",
+        resource: { kind: "none" },
+        source: "http",
+      }).allow;
+      const candidate = mayAssign ? await findUserById(parsed.body.requestedByUserId) : null;
       if (candidate) requestedByUserId = candidate.id;
     }
 

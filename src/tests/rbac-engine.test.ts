@@ -84,9 +84,13 @@ const LEAD_ONLY_VERBS: PermissionVerb[] = [
 
 const OPERATOR_ONLY_VERBS: PermissionVerb[] = [];
 const LEAD_OR_OPERATOR_OR_USER_VERBS: PermissionVerb[] = [
+  "mcp-server.stdio.write",
+  "memory.read.any",
   "extension.write",
+  "task.requester.assign",
   "extension.activate",
   "extension.install.inline",
+  "repo.merge-policy.write",
 ];
 const OPERATOR_OR_USER_VERBS: PermissionVerb[] = ["comb.presence", "approval.respond"];
 
@@ -533,28 +537,28 @@ describe("any-authenticated verbs", () => {
   }
 });
 
-describe("memory.delete.any composite (owner OR (lead AND scope=swarm))", () => {
-  test("swarm-scoped memory: owner or lead allowed", () => {
+describe("memory.delete.any composite (human, lead for swarm, owner for agent scope)", () => {
+  test("swarm-scoped memory: lead and humans allowed, owner worker denied", () => {
     expectDecisions("memory.delete.any", SWARM_MEMORY_RESOURCE, {
       lead: true,
       worker: false,
-      ownerWorker: true,
+      ownerWorker: false,
       creatorWorker: false,
-      userRequester: false,
-      foreignUser: false,
-      operator: false,
+      userRequester: true,
+      foreignUser: true,
+      operator: true,
     });
   });
 
-  test("agent-scoped memory: only owner allowed — lead is denied (deny edge)", () => {
+  test("agent-scoped memory: owner and humans allowed — lead is denied (deny edge)", () => {
     expectDecisions("memory.delete.any", AGENT_MEMORY_RESOURCE, {
       lead: false,
       worker: false,
       ownerWorker: true,
       creatorWorker: false,
-      userRequester: false,
-      foreignUser: false,
-      operator: false,
+      userRequester: true,
+      foreignUser: true,
+      operator: true,
     });
   });
 });

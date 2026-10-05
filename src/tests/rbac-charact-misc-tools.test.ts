@@ -281,7 +281,7 @@ describe("context-history / context-diff gates (characterization)", () => {
 });
 
 describe("memory-delete gate (characterization)", () => {
-  // memory-delete.ts:54,56 — owner OR (lead AND scope=swarm)
+  // memory.delete.any for agents: owner of an agent-scoped memory, or lead for own/swarm-scoped
   test("worker cannot delete another agent's memory", async () => {
     const memory = await getMemoryStore().store({
       agentId: LEAD_ID,
@@ -295,7 +295,7 @@ describe("memory-delete gate (characterization)", () => {
 
     expect(result.structuredContent.success).toBe(false);
     expect(result.structuredContent.message).toBe(
-      "Permission denied. You can only delete your own memories, or swarm memories if you are the lead.",
+      "Permission denied. You can only delete your own agent-scoped memories; only the lead can delete swarm memories.",
     );
     // DB not mutated
     expect(await getMemoryStore().peek(memory.id)).not.toBeNull();
@@ -314,6 +314,21 @@ describe("memory-delete gate (characterization)", () => {
 
     expect(result.structuredContent.success).toBe(true);
     expect(await getMemoryStore().peek(memory.id)).toBeNull();
+  });
+
+  test("owner worker cannot delete its own swarm-scoped memory", async () => {
+    const memory = await getMemoryStore().store({
+      agentId: WORKER_ID,
+      scope: "swarm",
+      name: "charact worker swarm memory",
+      content: "shared by worker",
+      source: "manual",
+    });
+
+    const result = await callTool("memory-delete", WORKER_ID, { memoryId: memory.id });
+
+    expect(result.structuredContent.success).toBe(false);
+    expect(await getMemoryStore().peek(memory.id)).not.toBeNull();
   });
 
   test("lead can delete another agent's swarm-scoped memory", async () => {
@@ -345,7 +360,7 @@ describe("memory-delete gate (characterization)", () => {
 
     expect(result.structuredContent.success).toBe(false);
     expect(result.structuredContent.message).toBe(
-      "Permission denied. You can only delete your own memories, or swarm memories if you are the lead.",
+      "Permission denied. You can only delete your own agent-scoped memories; only the lead can delete swarm memories.",
     );
     expect(await getMemoryStore().peek(memory.id)).not.toBeNull();
   });

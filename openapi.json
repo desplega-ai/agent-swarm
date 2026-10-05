@@ -21847,7 +21847,8 @@
     },
     "/api/memory/list": {
       "post": {
-        "summary": "List or semantically search memories across all agents (debug/admin)",
+        "summary": "List or semantically search memories (debug/admin)",
+        "description": "The operator key, a user, and the lead see every agent's memories. Any other agent (an `aseph_` session token, or the shared key with `X-Agent-ID`) sees only its own memories and swarm-scope memories.",
         "tags": [
           "Memory"
         ],
@@ -22015,6 +22016,22 @@
                             "items": {
                               "type": "string"
                             }
+                          },
+                          "key": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "updatedAt": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "rating": {
+                            "type": "number",
+                            "description": "Usefulness posterior mean alpha / (alpha + beta); 0.5 = no signal"
                           }
                         },
                         "required": [
@@ -22033,7 +22050,10 @@
                           "sourcePath",
                           "chunkIndex",
                           "totalChunks",
-                          "tags"
+                          "tags",
+                          "key",
+                          "updatedAt",
+                          "rating"
                         ]
                       }
                     },
@@ -22067,6 +22087,503 @@
           },
           "400": {
             "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/memory/keys": {
+      "get": {
+        "summary": "One aggregate row per keyed memory under a key prefix: chunks, usage, rating, estimated tokens (debug/admin)",
+        "description": "The operator key, a user, and the lead see every agent's memories. Any other agent sees only its own memories and swarm-scope memories.",
+        "tags": [
+          "Memory"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200,
+              "default": "/longterm/",
+              "description": "Literal, case-sensitive key prefix (default '/longterm/')."
+            },
+            "required": false,
+            "description": "Literal, case-sensitive key prefix (default '/longterm/').",
+            "name": "prefix",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2000,
+              "default": 2000
+            },
+            "required": false,
+            "name": "limit",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Keyed memories grouped by (key, scope, agentId). accessCount is summed over chunk rows; rating pools alpha/beta over chunk rows; estTokens = ceil(chars / 4)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "prefix": {
+                      "type": "string"
+                    },
+                    "keys": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "key": {
+                            "type": "string"
+                          },
+                          "scope": {
+                            "type": "string",
+                            "enum": [
+                              "agent",
+                              "swarm"
+                            ]
+                          },
+                          "agentId": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "memoryId": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "source": {
+                            "type": "string",
+                            "enum": [
+                              "manual",
+                              "file_index",
+                              "session_summary",
+                              "task_completion"
+                            ]
+                          },
+                          "chunkRows": {
+                            "type": "number"
+                          },
+                          "totalChunks": {
+                            "type": "number"
+                          },
+                          "complete": {
+                            "type": "boolean"
+                          },
+                          "chars": {
+                            "type": "number"
+                          },
+                          "estTokens": {
+                            "type": "number"
+                          },
+                          "accessCount": {
+                            "type": "number"
+                          },
+                          "lastAccessedAt": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "rating": {
+                            "type": "number"
+                          },
+                          "alpha": {
+                            "type": "number"
+                          },
+                          "beta": {
+                            "type": "number"
+                          },
+                          "usefulRatings": {
+                            "type": "number"
+                          },
+                          "notUsefulRatings": {
+                            "type": "number"
+                          },
+                          "createdAt": {
+                            "type": "string"
+                          },
+                          "updatedAt": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "key",
+                          "scope",
+                          "agentId",
+                          "memoryId",
+                          "name",
+                          "source",
+                          "chunkRows",
+                          "totalChunks",
+                          "complete",
+                          "chars",
+                          "estTokens",
+                          "accessCount",
+                          "lastAccessedAt",
+                          "rating",
+                          "alpha",
+                          "beta",
+                          "usefulRatings",
+                          "notUsefulRatings",
+                          "createdAt",
+                          "updatedAt"
+                        ]
+                      }
+                    },
+                    "truncated": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "prefix",
+                    "keys",
+                    "truncated"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/memory/chunks": {
+      "get": {
+        "summary": "Every chunk row of one memory in chunkIndex order, with a chunk-integrity check (debug/admin). Does not count as an access",
+        "description": "Visibility matches the memory list: an agent other than the lead gets 404 for another agent's agent-scope memory.",
+        "tags": [
+          "Memory"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Any chunk row of the memory."
+            },
+            "required": false,
+            "description": "Any chunk row of the memory.",
+            "name": "memoryId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "required": false,
+            "name": "key",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "agent",
+                "swarm"
+              ]
+            },
+            "required": false,
+            "name": "scope",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Owner agent id; pass an empty string for rows without one."
+            },
+            "required": false,
+            "description": "Owner agent id; pass an empty string for rows without one.",
+            "name": "agentId",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Chunk rows and integrity findings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "key": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "scope": {
+                      "type": "string",
+                      "enum": [
+                        "agent",
+                        "swarm"
+                      ]
+                    },
+                    "agentId": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "chunks": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "agentId": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "scope": {
+                            "type": "string",
+                            "enum": [
+                              "agent",
+                              "swarm"
+                            ]
+                          },
+                          "key": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "content": {
+                            "type": "string"
+                          },
+                          "source": {
+                            "type": "string",
+                            "enum": [
+                              "manual",
+                              "file_index",
+                              "session_summary",
+                              "task_completion"
+                            ]
+                          },
+                          "sourceTaskId": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "sourcePath": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "chunkIndex": {
+                            "type": "number"
+                          },
+                          "totalChunks": {
+                            "type": "number"
+                          },
+                          "tags": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "createdAt": {
+                            "type": "string"
+                          },
+                          "updatedAt": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "accessedAt": {
+                            "type": "string"
+                          },
+                          "expiresAt": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "accessCount": {
+                            "type": "number"
+                          },
+                          "embeddingModel": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "rating": {
+                            "type": "number"
+                          },
+                          "alpha": {
+                            "type": "number"
+                          },
+                          "beta": {
+                            "type": "number"
+                          },
+                          "version": {
+                            "type": "number"
+                          },
+                          "estTokens": {
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "agentId",
+                          "scope",
+                          "key",
+                          "name",
+                          "content",
+                          "source",
+                          "sourceTaskId",
+                          "sourcePath",
+                          "chunkIndex",
+                          "totalChunks",
+                          "tags",
+                          "createdAt",
+                          "updatedAt",
+                          "accessedAt",
+                          "expiresAt",
+                          "accessCount",
+                          "embeddingModel",
+                          "rating",
+                          "alpha",
+                          "beta",
+                          "version",
+                          "estTokens"
+                        ]
+                      }
+                    },
+                    "estTokens": {
+                      "type": "number"
+                    },
+                    "integrity": {
+                      "type": "object",
+                      "properties": {
+                        "ok": {
+                          "type": "boolean"
+                        },
+                        "expectedChunks": {
+                          "type": "number"
+                        },
+                        "presentIndexes": {
+                          "type": "array",
+                          "items": {
+                            "type": "number"
+                          }
+                        },
+                        "missingIndexes": {
+                          "type": "array",
+                          "items": {
+                            "type": "number"
+                          }
+                        },
+                        "duplicateIndexes": {
+                          "type": "array",
+                          "items": {
+                            "type": "number"
+                          }
+                        },
+                        "conflictingTotals": {
+                          "type": "array",
+                          "items": {
+                            "type": "number"
+                          }
+                        },
+                        "outOfRangeIds": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "issues": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      },
+                      "required": [
+                        "ok",
+                        "expectedChunks",
+                        "presentIndexes",
+                        "missingIndexes",
+                        "duplicateIndexes",
+                        "conflictingTotals",
+                        "outOfRangeIds",
+                        "issues"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "key",
+                    "scope",
+                    "agentId",
+                    "chunks",
+                    "estTokens",
+                    "integrity"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Memory not found",
             "content": {
               "application/json": {
                 "schema": {
@@ -22490,6 +23007,7 @@
     "/api/memory/{id}": {
       "delete": {
         "summary": "Delete a single memory by ID (debug/admin)",
+        "description": "The operator key and users may delete any memory. The lead may delete its own memories and swarm-scope memories. Any other agent may delete only its own agent-scope memories.",
         "tags": [
           "Memory"
         ],
@@ -22524,6 +23042,16 @@
                   "required": [
                     "deleted"
                   ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Caller may not delete this memory",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -31031,6 +31559,24 @@
               }
             }
           },
+          "403": {
+            "description": "Only the lead, the operator or a user can change allowMerge",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
           "404": {
             "description": "Repo not found",
             "content": {
@@ -31248,6 +31794,24 @@
           },
           "400": {
             "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Only the lead, the operator or a user can turn allowMerge on",
             "content": {
               "application/json": {
                 "schema": {

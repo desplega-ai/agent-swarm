@@ -2747,6 +2747,26 @@ class ApiClient {
     return res.json();
   }
 
+  async listMemoryKeys(prefix: string): Promise<import("./types").MemoryKeysResponse> {
+    const url = `${this.getBaseUrl()}/api/memory/keys?prefix=${encodeURIComponent(prefix)}`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: "Failed to list memory keys" }));
+      throw new Error(err.error || `Failed to list memory keys: ${res.status}`);
+    }
+    return res.json();
+  }
+
+  async getMemoryChunks(memoryId: string): Promise<import("./types").MemoryChunksResponse> {
+    const url = `${this.getBaseUrl()}/api/memory/chunks?memoryId=${encodeURIComponent(memoryId)}`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: "Failed to load memory" }));
+      throw new Error(err.error || `Failed to load memory: ${res.status}`);
+    }
+    return res.json();
+  }
+
   async deleteMemory(id: string): Promise<{ deleted: boolean }> {
     const url = `${this.getBaseUrl()}/api/memory/${id}`;
     const res = await fetch(url, { method: "DELETE", headers: this.getHeaders() });

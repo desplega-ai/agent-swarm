@@ -107,6 +107,7 @@ AgentMail archives verified inbound deliveries before acknowledging them and ret
 ## Learn more
 
 - [Getting started](https://docs.agent-swarm.dev/docs/getting-started) · [Architecture](https://docs.agent-swarm.dev/docs/architecture/overview) · [Playbooks](https://docs.agent-swarm.dev/docs/playbooks) · [CLI](https://docs.agent-swarm.dev/docs/reference/cli) · [API reference](https://docs.agent-swarm.dev/docs/api-reference)
+- [Orchestration patterns](./docs/orchestration-patterns.md) — Five patterns for delegating, fanning out, gating on humans, retrying, and persisting multi-step agent work
 - [Agent templates](https://templates.agent-swarm.dev)
 - Help: [contact@desplega.sh](mailto:contact@desplega.sh) · [Discord](https://discord.gg/KZgfyyDVZa)
 

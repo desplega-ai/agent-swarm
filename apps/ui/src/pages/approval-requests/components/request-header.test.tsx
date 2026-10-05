@@ -9,6 +9,9 @@ import type { ApprovalRequest } from "../../../api/types";
 mock.module("@/components/shared/status-badge", () =>
   require("../../../components/shared/status-badge"),
 );
+mock.module("@/components/shared/task-status-icon", () =>
+  require("../../../components/shared/task-status-icon"),
+);
 mock.module("@/components/shared/status-icon", () =>
   require("../../../components/shared/status-icon"),
 );

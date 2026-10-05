@@ -8509,7 +8509,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** List or semantically search memories across all agents (debug/admin) */
+        /**
+         * List or semantically search memories (debug/admin)
+         * @description The operator key, a user, and the lead see every agent's memories. Any other agent (an `aseph_` session token, or the shared key with `X-Agent-ID`) sees only its own memories and swarm-scope memories.
+         */
         post: {
             parameters: {
                 query?: never;
@@ -8572,6 +8575,10 @@ export interface paths {
                                 chunkIndex: number;
                                 totalChunks: number;
                                 tags: string[];
+                                key: string | null;
+                                updatedAt: string | null;
+                                /** @description Usefulness posterior mean alpha / (alpha + beta); 0.5 = no signal */
+                                rating: number;
                             }[];
                             total: number;
                             limit: number;
@@ -8592,6 +8599,192 @@ export interface paths {
                 };
             };
         };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/memory/keys": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * One aggregate row per keyed memory under a key prefix: chunks, usage, rating, estimated tokens (debug/admin)
+         * @description The operator key, a user, and the lead see every agent's memories. Any other agent sees only its own memories and swarm-scope memories.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Literal, case-sensitive key prefix (default '/longterm/'). */
+                    prefix?: string;
+                    limit?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Keyed memories grouped by (key, scope, agentId). accessCount is summed over chunk rows; rating pools alpha/beta over chunk rows; estTokens = ceil(chars / 4) */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            prefix: string;
+                            keys: {
+                                key: string;
+                                /** @enum {string} */
+                                scope: "agent" | "swarm";
+                                agentId: string | null;
+                                memoryId: string;
+                                name: string;
+                                /** @enum {string} */
+                                source: "manual" | "file_index" | "session_summary" | "task_completion";
+                                chunkRows: number;
+                                totalChunks: number;
+                                complete: boolean;
+                                chars: number;
+                                estTokens: number;
+                                accessCount: number;
+                                lastAccessedAt: string | null;
+                                rating: number;
+                                alpha: number;
+                                beta: number;
+                                usefulRatings: number;
+                                notUsefulRatings: number;
+                                createdAt: string;
+                                updatedAt: string;
+                            }[];
+                            truncated: boolean;
+                        };
+                    };
+                };
+                /** @description Validation error */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/memory/chunks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Every chunk row of one memory in chunkIndex order, with a chunk-integrity check (debug/admin). Does not count as an access
+         * @description Visibility matches the memory list: an agent other than the lead gets 404 for another agent's agent-scope memory.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Any chunk row of the memory. */
+                    memoryId?: string;
+                    key?: string;
+                    scope?: "agent" | "swarm";
+                    /** @description Owner agent id; pass an empty string for rows without one. */
+                    agentId?: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Chunk rows and integrity findings */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            key: string | null;
+                            /** @enum {string} */
+                            scope: "agent" | "swarm";
+                            agentId: string | null;
+                            chunks: {
+                                id: string;
+                                agentId: string | null;
+                                /** @enum {string} */
+                                scope: "agent" | "swarm";
+                                key: string | null;
+                                name: string;
+                                content: string;
+                                /** @enum {string} */
+                                source: "manual" | "file_index" | "session_summary" | "task_completion";
+                                sourceTaskId: string | null;
+                                sourcePath: string | null;
+                                chunkIndex: number;
+                                totalChunks: number;
+                                tags: string[];
+                                createdAt: string;
+                                updatedAt: string | null;
+                                accessedAt: string;
+                                expiresAt: string | null;
+                                accessCount: number;
+                                embeddingModel: string | null;
+                                rating: number;
+                                alpha: number;
+                                beta: number;
+                                version: number;
+                                estTokens: number;
+                            }[];
+                            estTokens: number;
+                            integrity: {
+                                ok: boolean;
+                                expectedChunks: number;
+                                presentIndexes: number[];
+                                missingIndexes: number[];
+                                duplicateIndexes: number[];
+                                conflictingTotals: number[];
+                                outOfRangeIds: string[];
+                                issues: string[];
+                            };
+                        };
+                    };
+                };
+                /** @description Validation error */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Memory not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -8834,7 +9027,10 @@ export interface paths {
         };
         put?: never;
         post?: never;
-        /** Delete a single memory by ID (debug/admin) */
+        /**
+         * Delete a single memory by ID (debug/admin)
+         * @description The operator key and users may delete any memory. The lead may delete its own memories and swarm-scope memories. Any other agent may delete only its own agent-scope memories.
+         */
         delete: {
             parameters: {
                 query?: never;
@@ -8855,6 +9051,15 @@ export interface paths {
                         "application/json": {
                             deleted: boolean;
                         };
+                    };
+                };
+                /** @description Caller may not delete this memory */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
                 /** @description Memory not found */
@@ -13095,6 +13300,17 @@ export interface paths {
                         "application/json": components["schemas"]["SwarmRepo"];
                     };
                 };
+                /** @description Only the lead, the operator or a user can change allowMerge */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                        };
+                    };
+                };
                 /** @description Repo not found */
                 404: {
                     headers: {
@@ -13228,6 +13444,17 @@ export interface paths {
                 };
                 /** @description Validation error */
                 400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                        };
+                    };
+                };
+                /** @description Only the lead, the operator or a user can turn allowMerge on */
+                403: {
                     headers: {
                         [name: string]: unknown;
                     };

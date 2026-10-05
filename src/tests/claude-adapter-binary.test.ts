@@ -367,6 +367,7 @@ describe("preseedClaudeTrustDialog", () => {
 
 describe("CLAUDE_BINARY env override", () => {
   // Cache the originals and restore after each test so the suite stays clean.
+  let originalClaudeTransport: string | undefined;
   let originalClaudeBinary: string | undefined;
   let originalUseClaudeBridge: string | undefined;
   let originalOauthToken: string | undefined;
@@ -378,6 +379,8 @@ describe("CLAUDE_BINARY env override", () => {
   let spawnedEnvs: Array<Record<string, string> | undefined>;
 
   beforeEach(async () => {
+    originalClaudeTransport = process.env.CLAUDE_TRANSPORT;
+    delete process.env.CLAUDE_TRANSPORT;
     originalClaudeBinary = process.env.CLAUDE_BINARY;
     originalUseClaudeBridge = process.env.SWARM_USE_CLAUDE_BRIDGE;
     originalOauthToken = process.env.CLAUDE_CODE_OAUTH_TOKEN;
@@ -415,6 +418,11 @@ describe("CLAUDE_BINARY env override", () => {
       delete process.env.HOME;
     } else {
       process.env.HOME = originalHome;
+    }
+    if (originalClaudeTransport === undefined) {
+      delete process.env.CLAUDE_TRANSPORT;
+    } else {
+      process.env.CLAUDE_TRANSPORT = originalClaudeTransport;
     }
     if (originalClaudeBinary === undefined) {
       delete process.env.CLAUDE_BINARY;
@@ -677,6 +685,7 @@ describe("CLAUDE_BINARY env override", () => {
 });
 
 describe("Claude Bridge tmux fail-fast gate", () => {
+  let originalClaudeTransport: string | undefined;
   let originalClaudeBinary: string | undefined;
   let originalUseClaudeBridge: string | undefined;
   let originalOauthToken: string | undefined;
@@ -686,6 +695,8 @@ describe("Claude Bridge tmux fail-fast gate", () => {
   let whichSpy: ReturnType<typeof spyOn>;
 
   beforeEach(async () => {
+    originalClaudeTransport = process.env.CLAUDE_TRANSPORT;
+    delete process.env.CLAUDE_TRANSPORT;
     originalClaudeBinary = process.env.CLAUDE_BINARY;
     originalUseClaudeBridge = process.env.SWARM_USE_CLAUDE_BRIDGE;
     originalOauthToken = process.env.CLAUDE_CODE_OAUTH_TOKEN;
@@ -707,6 +718,11 @@ describe("Claude Bridge tmux fail-fast gate", () => {
       delete process.env.HOME;
     } else {
       process.env.HOME = originalHome;
+    }
+    if (originalClaudeTransport === undefined) {
+      delete process.env.CLAUDE_TRANSPORT;
+    } else {
+      process.env.CLAUDE_TRANSPORT = originalClaudeTransport;
     }
     if (originalClaudeBinary === undefined) {
       delete process.env.CLAUDE_BINARY;
@@ -794,6 +810,7 @@ describe("Claude Bridge tmux fail-fast gate", () => {
 });
 
 describe("Trust pre-seed via ClaudeAdapter.createSession", () => {
+  let originalClaudeTransport: string | undefined;
   let originalClaudeBinary: string | undefined;
   let originalUseClaudeBridge: string | undefined;
   let originalOauthToken: string | undefined;
@@ -803,6 +820,8 @@ describe("Trust pre-seed via ClaudeAdapter.createSession", () => {
   let whichSpy: ReturnType<typeof spyOn>;
 
   beforeEach(async () => {
+    originalClaudeTransport = process.env.CLAUDE_TRANSPORT;
+    delete process.env.CLAUDE_TRANSPORT;
     originalClaudeBinary = process.env.CLAUDE_BINARY;
     originalUseClaudeBridge = process.env.SWARM_USE_CLAUDE_BRIDGE;
     originalOauthToken = process.env.CLAUDE_CODE_OAUTH_TOKEN;
@@ -827,6 +846,11 @@ describe("Trust pre-seed via ClaudeAdapter.createSession", () => {
       delete process.env.HOME;
     } else {
       process.env.HOME = originalHome;
+    }
+    if (originalClaudeTransport === undefined) {
+      delete process.env.CLAUDE_TRANSPORT;
+    } else {
+      process.env.CLAUDE_TRANSPORT = originalClaudeTransport;
     }
     if (originalClaudeBinary === undefined) {
       delete process.env.CLAUDE_BINARY;

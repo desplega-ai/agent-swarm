@@ -20,6 +20,7 @@ import { useCancelTask, usePauseTask, useResumeTask } from "@/api/hooks/use-task
 import type { AgentTask, SessionLog } from "@/api/types";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
 import { StatusBadge } from "@/components/shared/status-badge";
+import { ProgressRing } from "@/components/shared/task-status-icon";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -348,6 +349,8 @@ function TaskBrief({ text }: { text: string }) {
 
 export interface ParallelGroupProps {
   count: number;
+  /** Children that completed; draws the progress ring in place of the split glyph. */
+  doneCount?: number;
   /** Agent that spawned the parallel children — used to render
    *  "{count} in parallel · via {Agent}" so the per-child "↳ via X"
    *  delegation hint can be suppressed. */
@@ -365,7 +368,13 @@ export interface ParallelGroupProps {
  * Default expanded for ≤3 children; collapsed for 4+ so a large fan-out
  * doesn't bury the rest of the timeline.
  */
-export function ParallelGroup({ count, parentAgentId, children, className }: ParallelGroupProps) {
+export function ParallelGroup({
+  count,
+  doneCount,
+  parentAgentId,
+  children,
+  className,
+}: ParallelGroupProps) {
   const [expanded, setExpanded] = useState<boolean>(count <= 3);
   const { data: parentAgent } = useAgent(parentAgentId ?? "");
   const parentName = parentAgent?.name ?? null;
@@ -387,7 +396,11 @@ export function ParallelGroup({ count, parentAgentId, children, className }: Par
         ) : (
           <ChevronRight className="h-3 w-3 shrink-0" />
         )}
-        <Split className="h-3 w-3 shrink-0 text-primary/70" aria-hidden="true" />
+        {doneCount === undefined ? (
+          <Split className="h-3 w-3 shrink-0 text-primary/70" aria-hidden="true" />
+        ) : (
+          <ProgressRing done={doneCount} total={count} className="size-3.5" />
+        )}
         <span>
           {count} in parallel
           {parentName ? (

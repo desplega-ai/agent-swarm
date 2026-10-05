@@ -8,6 +8,11 @@ import type {
   WorkflowRunStepStatus,
 } from "@/api/types";
 import { Spinner } from "@/components/kibo-ui/spinner";
+import {
+  TASK_STATUS_TEXT,
+  TaskStatusIcon,
+  taskStatusVariant,
+} from "@/components/shared/task-status-icon";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 
@@ -20,102 +25,70 @@ type Status =
   | WorkflowRunStatus
   | WorkflowRunStepStatus;
 
-interface StatusConfig {
-  label: string;
+/** Labels for every status; lifecycle ones are drawn by `TaskStatusIcon`, the rest by `HEALTH`. */
+const LABELS: Record<string, string> = {
+  // Agent statuses
+  idle: "IDLE",
+  busy: "BUSY",
+  offline: "OFFLINE",
+  waiting_for_credentials: "WAITING FOR CREDS",
+
+  // Task statuses
+  draft: "UPLOADING",
+  backlog: "BACKLOG",
+  unassigned: "UNASSIGNED",
+  offered: "OFFERED",
+  reviewing: "REVIEWING",
+  pending: "PENDING",
+  in_progress: "IN PROGRESS",
+  paused: "PAUSED",
+  completed: "COMPLETED",
+  failed: "FAILED",
+  cancelled: "CANCELLED",
+  superseded: "SUPERSEDED",
+  aborted_limit: "ABORTED LIMIT",
+
+  // Service statuses
+  starting: "STARTING",
+  healthy: "HEALTHY",
+  unhealthy: "UNHEALTHY",
+  stopped: "STOPPED",
+
+  // Workflow run statuses
+  running: "RUNNING",
+  waiting: "WAITING",
+
+  // Workflow step statuses
+  skipped: "SKIPPED",
+
+  // Approval request statuses
+  approved: "APPROVED",
+  rejected: "REJECTED",
+  timeout: "TIMEOUT",
+};
+
+interface HealthConfig {
   dot: string;
   text: string;
   spinner?: boolean;
 }
 
-const statusConfig: Record<string, StatusConfig> = {
-  // Agent statuses
-  idle: { label: "IDLE", dot: "bg-status-success", text: "text-status-success-strong" },
-  busy: {
-    label: "BUSY",
-    dot: "bg-status-active",
-    text: "text-status-active-strong",
-    spinner: true,
-  },
-  offline: { label: "OFFLINE", dot: "bg-status-neutral", text: "text-status-neutral-strong" },
-  waiting_for_credentials: {
-    label: "WAITING FOR CREDS",
-    dot: "bg-status-warning",
-    text: "text-status-warning-strong",
-  },
+/** Agent and service health: a dot (or the busy spinner), not a lifecycle icon. */
+const HEALTH: Record<string, HealthConfig> = {
+  idle: { dot: "bg-status-success", text: "text-status-success-strong" },
+  busy: { dot: "bg-status-active", text: "text-status-active-strong", spinner: true },
+  offline: { dot: "bg-status-neutral", text: "text-status-neutral-strong" },
+  waiting_for_credentials: { dot: "bg-status-warning", text: "text-status-warning-strong" },
+  starting: { dot: "bg-status-pending", text: "text-status-pending-strong" },
+  healthy: { dot: "bg-status-success", text: "text-status-success-strong" },
+  unhealthy: { dot: "bg-status-error", text: "text-status-error-strong" },
+  stopped: { dot: "bg-status-neutral", text: "text-status-neutral-strong" },
+};
 
-  // Task statuses
-  draft: {
-    label: "UPLOADING",
-    dot: "bg-status-pending",
-    text: "text-status-pending-strong",
-    spinner: true,
-  },
-  backlog: { label: "BACKLOG", dot: "bg-status-neutral", text: "text-status-neutral-strong" },
-  unassigned: { label: "UNASSIGNED", dot: "bg-status-neutral", text: "text-status-neutral-strong" },
-  offered: {
-    label: "OFFERED",
-    dot: "bg-status-active",
-    text: "text-status-active-strong",
-    spinner: true,
-  },
-  reviewing: { label: "REVIEWING", dot: "bg-status-paused", text: "text-status-paused-strong" },
-  pending: { label: "PENDING", dot: "bg-status-pending", text: "text-status-pending-strong" },
-  in_progress: {
-    label: "IN PROGRESS",
-    dot: "bg-status-active",
-    text: "text-status-active-strong",
-    spinner: true,
-  },
-  paused: { label: "PAUSED", dot: "bg-status-paused", text: "text-status-paused-strong" },
-  completed: {
-    label: "COMPLETED",
-    dot: "bg-status-success",
-    text: "text-status-success-strong",
-  },
-  failed: { label: "FAILED", dot: "bg-status-error", text: "text-status-error-strong" },
-  cancelled: { label: "CANCELLED", dot: "bg-status-neutral", text: "text-status-neutral-strong" },
-  superseded: { label: "SUPERSEDED", dot: "bg-status-neutral", text: "text-status-neutral-strong" },
-  aborted_limit: {
-    label: "ABORTED LIMIT",
-    dot: "bg-status-warning",
-    text: "text-status-warning-strong",
-  },
-
-  // Service statuses
-  starting: {
-    label: "STARTING",
-    dot: "bg-status-pending",
-    text: "text-status-pending-strong",
-  },
-  healthy: {
-    label: "HEALTHY",
-    dot: "bg-status-success",
-    text: "text-status-success-strong",
-  },
-  unhealthy: { label: "UNHEALTHY", dot: "bg-status-error", text: "text-status-error-strong" },
-  stopped: { label: "STOPPED", dot: "bg-status-neutral", text: "text-status-neutral-strong" },
-
-  // Workflow run statuses
-  running: {
-    label: "RUNNING",
-    dot: "bg-status-active",
-    text: "text-status-active-strong",
-    spinner: true,
-  },
-  waiting: { label: "WAITING", dot: "bg-status-pending", text: "text-status-pending-strong" },
-
-  // Workflow step statuses
-  skipped: { label: "SKIPPED", dot: "bg-status-neutral", text: "text-status-neutral-strong" },
-
-  // Approval request statuses
-  approved: {
-    label: "APPROVED",
-    dot: "bg-status-success",
-    text: "text-status-success-strong",
-  },
-  rejected: { label: "REJECTED", dot: "bg-status-error", text: "text-status-error-strong" },
-  timeout: { label: "TIMEOUT", dot: "bg-status-warning", text: "text-status-warning-strong" },
-} satisfies Record<string, StatusConfig>;
+const FALLBACK_HEALTH: HealthConfig = {
+  dot: "bg-status-neutral",
+  text: "text-status-neutral-strong",
+};
 
 interface StatusBadgeProps {
   status: Status;
@@ -124,11 +97,11 @@ interface StatusBadgeProps {
 }
 
 export function StatusBadge({ status, size = "sm", className }: StatusBadgeProps) {
-  const config = statusConfig[status] ?? {
-    label: status,
-    dot: "bg-status-neutral",
-    text: "text-status-neutral-strong",
-  };
+  // Lifecycle statuses (tasks, runs, steps, approvals) get the status icon family;
+  // agent and service health keep the dot (an idle agent is not a "done" task).
+  const variant = taskStatusVariant(status);
+  const health = HEALTH[status] ?? FALLBACK_HEALTH;
+  const textClass = variant ? TASK_STATUS_TEXT[variant] : health.text;
 
   return (
     <Badge
@@ -139,12 +112,17 @@ export function StatusBadge({ status, size = "sm", className }: StatusBadgeProps
         className,
       )}
     >
-      {config.spinner ? (
-        <Spinner className={cn("size-3 shrink-0", config.text)} />
+      {variant ? (
+        // Wrapped so the badge's `[&>svg]:size-3` rule does not shrink the icon.
+        <span className={cn("inline-flex shrink-0", size === "sm" ? "size-3.5" : "size-4")}>
+          <TaskStatusIcon variant={variant} className="size-full" />
+        </span>
+      ) : health.spinner ? (
+        <Spinner className={cn("size-3 shrink-0", health.text)} />
       ) : (
-        <span className={cn("h-1.5 w-1.5 rounded-full shrink-0", config.dot)} />
+        <span className={cn("h-1.5 w-1.5 rounded-full shrink-0", health.dot)} />
       )}
-      <span className={config.text}>{config.label}</span>
+      <span className={textClass}>{LABELS[status] ?? status}</span>
     </Badge>
   );
 }
