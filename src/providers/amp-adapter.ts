@@ -46,6 +46,7 @@ const AMP_PLUGIN_MODE_KEY = "agent-swarm";
 const AMP_LIVE_TEST_TIMEOUT_MS = 5_000;
 const AMP_EXPORT_TIMEOUT_MS = 20_000;
 const AMP_EXPORT_RETRY_MS = 3_000;
+const AMP_EXPORT_RETRIES = 1;
 /** After stdin closes, `result` follows at once; this only guards a wedged process. */
 const AMP_EXIT_AFTER_INPUT_MS = 60_000;
 /** A queued steering message is echoed back as a `user` event when its turn starts. */
@@ -578,14 +579,18 @@ class AmpSession implements ProviderSession {
 
   /**
    * `amp threads export`: the only place Amp names the model it ran. A thread
-   * killed mid-run (cancel) can lag behind on the server, so one retry follows
-   * an empty export.
+   * killed mid-run (cancel) can lag behind on the server, or never reach it
+   * (about one cancel in three was still empty after three retries), so one retry
+   * follows an empty export and the cost then falls back to stream tokens,
+   * unpriced. A finished session is not retried.
    */
   private async exportUsage(): Promise<AmpThreadUsage | undefined> {
-    const first = await this.exportUsageOnce();
-    if (first || this.result) return first;
-    await Bun.sleep(AMP_EXPORT_RETRY_MS);
-    return this.exportUsageOnce();
+    let usage = await this.exportUsageOnce();
+    for (let retry = 0; !usage && !this.result && retry < AMP_EXPORT_RETRIES; retry++) {
+      await Bun.sleep(AMP_EXPORT_RETRY_MS);
+      usage = await this.exportUsageOnce();
+    }
+    return usage;
   }
 
   private async exportUsageOnce(): Promise<AmpThreadUsage | undefined> {
