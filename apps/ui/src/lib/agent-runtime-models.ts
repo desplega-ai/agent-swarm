@@ -47,7 +47,7 @@ export interface ModelOption {
   reasoningLevels?: ReadonlyArray<ReasoningEffortLevel>;
 }
 
-export type ProviderIconKey = "anthropic" | "openai" | "openrouter" | "amazon-bedrock";
+export type ProviderIconKey = "anthropic" | "openai" | "openrouter" | "amazon-bedrock" | "amp";
 
 export interface ModelGroup {
   provider: string;
@@ -536,7 +536,7 @@ function ampModelGroups(
         id: mode.id,
         label: mode.label,
         provider: "Amp modes",
-        providerId: null,
+        providerId: "amp",
         requiredKey: "AMP_API_KEY",
         reasoningLevels: [],
       })),

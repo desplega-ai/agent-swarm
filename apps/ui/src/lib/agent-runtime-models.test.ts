@@ -7,6 +7,8 @@ import {
   modelGroupsForHarness,
   modelGroupsForSchedule,
 } from "./agent-runtime-models";
+import { getAgentModelPresentation } from "./agents-list-model-display";
+import { modelVendor } from "./model-vendor";
 
 /** A live catalog holding only the given sections. */
 function live(sections: Record<string, Record<string, object>>): LiveModelsCatalog {
@@ -245,5 +247,21 @@ describe("modelGroupsForHarness: amp", () => {
     const opus = groups.flatMap((g) => g.models).find((m) => m.id === "anthropic/claude-opus-5-5");
     expect(opus?.reasoningLevels).toEqual(effortLevelsFor("amp", "anthropic/claude-opus-5-5"));
     expect(groups[0]?.models.every((m) => m.reasoningLevels?.length === 0)).toBe(true);
+  });
+
+  test("a mode carries Amp's mark everywhere a model is shown", () => {
+    const groups = modelGroupsForHarness("amp", keyed, undefined);
+    expect(groups[0]?.models.every((m) => m.providerId === "amp")).toBe(true);
+    expect(getAgentModelPresentation("medium")).toMatchObject({
+      label: "Medium",
+      provider: "Amp modes",
+      providerId: "amp",
+    });
+    expect(modelVendor("ultra")).toBe("amp");
+    // A pin keeps its maker's mark, and a word that only contains a mode name is not a mode.
+    expect(getAgentModelPresentation("anthropic/claude-opus-5-5")?.providerId).toBe("anthropic");
+    expect(modelVendor("anthropic/claude-opus-5-5")).toBe("anthropic");
+    expect(modelVendor("gemini-high")).toBe("google");
+    expect(modelVendor("highway")).toBeNull();
   });
 });
