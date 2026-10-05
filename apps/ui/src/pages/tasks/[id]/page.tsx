@@ -1,7 +1,8 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, Ban, CheckCircle2, Pause, Play, Tag, Terminal } from "lucide-react";
+import { CheckCircle2, Tag, Terminal } from "lucide-react";
 import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
+import { toast } from "sonner";
 import {
   renderTaskCitationSources,
   renderTaskCitations,
@@ -11,18 +12,16 @@ import "streamdown/styles.css";
 import { useAgents } from "@/api/hooks/use-agents";
 import { useSessionCosts } from "@/api/hooks/use-costs";
 import { useFeatureGate } from "@/api/hooks/use-feature-gate";
+import { useSession } from "@/api/hooks/use-sessions";
 import { useSteeringEnabled } from "@/api/hooks/use-stats";
 import {
-  useCancelTask,
-  usePauseTask,
-  useResumeTask,
   useTask,
   useTaskContext,
   useTaskSessionLogs,
   useTaskSteeringMessages,
 } from "@/api/hooks/use-tasks";
 import { useUsers } from "@/api/hooks/use-users";
-import type { AgentLog, AgentTaskStatus } from "@/api/types";
+import type { AgentLog, AgentTask, AgentTaskStatus } from "@/api/types";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
 import { CollapsibleSection } from "@/components/shared/collapsible-section";
 import { MarkdownView } from "@/components/shared/markdown-view";
@@ -32,34 +31,32 @@ import { SessionLogViewer } from "@/components/shared/session-log-viewer";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { TaskAttachmentsSection } from "@/components/shared/task-attachments-section";
 import { TaskCitationsSection } from "@/components/shared/task-citations-section";
+import { TaskComposer } from "@/components/shared/task-composer";
 import { TaskStatusIcon } from "@/components/shared/task-status-icon";
 import { CollapsibleComposerDock } from "@/components/steering/collapsible-composer-dock";
-import { SteerComposer } from "@/components/steering/steer-composer";
 import { TaskFailureHelpDialog } from "@/components/support/task-failure-help-dialog";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useLocalToggle } from "@/hooks/use-local-toggle";
 import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
+import { formatDurationMs } from "@/lib/format-duration-ms";
 import { modelTierLabel } from "@/lib/model-tiers";
 import { TERMINAL_STATUSES, taskIsRunning } from "@/lib/task-activity";
+import { linkTaskIds } from "@/lib/task-links";
 import { describeModelResolution, taskDisplayModel } from "@/lib/task-model-resolution";
 import { taskListTitle } from "@/lib/task-title";
-import { cn, formatRelativeTime } from "@/lib/utils";
+import { cn, formatRelativeTime, parseUTCDate } from "@/lib/utils";
+import { directChildren, SpawnedTasks } from "./spawned-tasks";
+import {
+  parseStructuredOutput,
+  TaskActions,
+  TaskFailureCallout,
+  TaskPrimaryAction,
+  useTaskActions,
+} from "./task-actions";
 import { TaskDetailsRail } from "./task-details-rail";
 import { TaskSourceLine } from "./task-source-line";
 import {
@@ -115,34 +112,6 @@ function TaskHeading({ title }: { title: string }) {
   );
 }
 
-/** Cancel, behind a confirm step. */
-function CancelTaskButton({ onConfirm }: { onConfirm: () => void }) {
-  return (
-    <AlertDialog>
-      <AlertDialogTrigger asChild>
-        <Button variant="destructive-outline" size="sm">
-          <Ban className="h-3 w-3 mr-1" />
-          Cancel
-        </Button>
-      </AlertDialogTrigger>
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>Cancel Task</AlertDialogTitle>
-          <AlertDialogDescription>
-            Are you sure you want to cancel this task? This action cannot be undone.
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel>Keep Task</AlertDialogCancel>
-          <AlertDialogAction variant="destructive" onClick={onConfirm}>
-            Cancel Task
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
-  );
-}
-
 /**
  * What a task with no session log waits for, in one line. The hero owns the
  * actions (Cancel, Resume). `draft` is the transient "attachments still
@@ -172,36 +141,37 @@ function describeWaiting(
   }
 }
 
-/** Try to parse structured output JSON ({status, output, summary}). */
-function parseStructuredOutput(raw: string): { output?: string; summary?: string } | null {
-  try {
-    const parsed = JSON.parse(raw);
-    if (
-      typeof parsed === "object" &&
-      parsed !== null &&
-      ("output" in parsed || "summary" in parsed)
-    )
-      return parsed as { output?: string; summary?: string };
-  } catch {
-    // Not JSON, fall through.
+/**
+ * How long a failed task ran: created to finished, or the harness run time
+ * when the task has no finish time.
+ */
+function failedAfter(task: AgentTask, costDurationMs: number): string | null {
+  if (task.finishedAt) {
+    const ms = parseUTCDate(task.finishedAt).getTime() - parseUTCDate(task.createdAt).getTime();
+    if (ms > 0) return formatDurationMs(ms);
   }
-  return null;
+  return costDurationMs > 0 ? formatDurationMs(costDurationMs) : null;
 }
 
+/** Task ids in the answer link to their pages. `taskIds` are the ids the page knows. */
 function StructuredOutputContent({
   raw,
   maxH,
   citations = [],
+  taskIds,
 }: {
   raw: string;
   maxH: string;
   citations?: TaskCitation[];
+  taskIds: readonly string[];
 }) {
   const structured = parseStructuredOutput(raw);
   if (!structured) {
     return (
       <div className={`text-sm leading-relaxed overflow-auto text-foreground/80 ${maxH}`}>
-        <MarkdownView text={renderTaskCitations(raw, citations, "markdown")} />
+        <MarkdownView
+          text={linkTaskIds(renderTaskCitations(raw, citations, "markdown"), taskIds)}
+        />
       </div>
     );
   }
@@ -214,7 +184,10 @@ function StructuredOutputContent({
           </span>
           <div className="mt-1 text-sm leading-relaxed text-foreground/80">
             <MarkdownView
-              text={renderTaskCitations(structured.summary, citations, "markdown", false)}
+              text={linkTaskIds(
+                renderTaskCitations(structured.summary, citations, "markdown", false),
+                taskIds,
+              )}
             />
           </div>
         </div>
@@ -226,7 +199,10 @@ function StructuredOutputContent({
           </span>
           <div className="mt-1 text-sm leading-relaxed text-foreground/80">
             <MarkdownView
-              text={renderTaskCitations(structured.output, citations, "markdown", false)}
+              text={linkTaskIds(
+                renderTaskCitations(structured.output, citations, "markdown", false),
+                taskIds,
+              )}
             />
           </div>
         </div>
@@ -238,8 +214,20 @@ function StructuredOutputContent({
   );
 }
 
+/** The follow-up box in view and focused: the wide or the narrow one, whichever shows. */
+function focusVisibleComposer(boxes: (HTMLElement | null)[]): boolean {
+  const box = boxes.find((element) => element && element.getClientRects().length > 0);
+  const textarea = box?.querySelector("textarea");
+  if (!box || !textarea) return false;
+  const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+  box.scrollIntoView({ block: "center", behavior: reduce ? "auto" : "smooth" });
+  textarea.focus({ preventScroll: true });
+  return true;
+}
+
 export default function TaskDetailPage() {
   const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
   const { data: task, isLoading } = useTask(id!);
   // A finished task's log, context and steering rows are frozen history: read
   // them once and never poll. Until the task itself loads, hold the poll too,
@@ -264,6 +252,11 @@ export default function TaskDetailPage() {
     enabled: steerGate.supported && steeringEnabled,
     refetchInterval: livePoll,
   });
+  // The tasks this one started (≥1.76.0): `GET /api/sessions/{id}` returns
+  // every descendant for any task id. Children can join late (a follow-up, a
+  // retry), so it keeps its slow poll after the task finishes.
+  const sessionsGate = useFeatureGate("1.76.0");
+  const { data: session } = useSession(sessionsGate.supported ? id : undefined);
   // A task that finishes while the page is open gets one last read: the final
   // log lines and context snapshot can land after the previous poll.
   const queryClient = useQueryClient();
@@ -282,15 +275,21 @@ export default function TaskDetailPage() {
     "tasks:steer-composer-collapsed",
     false,
   );
-  // Draft is owned by the page, not the composer. Two reasons: the narrow and
-  // wide layouts each mount their own <SteerComposer>, and the composer
-  // itself unmounts whenever the task leaves a steerable status. Holding the
-  // text here means crossing the 64rem layout switch, or a status flip that
-  // hides and later restores the dock, doesn't eat what the user typed.
-  const [steerDraft, setSteerDraft] = useState("");
-  const cancelTask = useCancelTask();
-  const pauseTask = usePauseTask();
-  const resumeTask = useResumeTask();
+  // The draft is owned by the page, not the composer. The narrow and wide
+  // layouts each mount their own <TaskComposer>, and the box moves when the
+  // task finishes (the steer box under the log, the follow-up box under the
+  // outcome). Holding the text here means crossing the 64rem layout switch,
+  // or a status flip, does not eat what the user typed.
+  const [draft, setDraft] = useState("");
+  // The support dialog opens only from "Get help".
+  const [helpOpen, setHelpOpen] = useState(false);
+  // A draft and an open dialog belong to one task: Retry and the spawned task
+  // links move this page to another task id.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reset on a new task id only.
+  useEffect(() => {
+    setDraft("");
+    setHelpOpen(false);
+  }, [id]);
   const { searchParams, setParam } = useUrlSearchState();
   // A finished task is opened for its result, so its mobile default tab is
   // Outcome; a live one opens on Details.
@@ -311,6 +310,37 @@ export default function TaskDetailPage() {
   // The wide layout's live message box sticks to the bottom of the column. Its
   // height goes to the log as `--log-sticky-bottom`.
   const [composerHeight, composerRef] = useElementHeight();
+  // "Follow up" scrolls to the follow-up box and focuses it. In the narrow
+  // layout the box is on the Outcome tab, which mounts a render or two after
+  // the tab switch: the boxes are state, so their arrival runs the effect.
+  const [wideFollowUpBox, setWideFollowUpBox] = useState<HTMLDivElement | null>(null);
+  const [narrowFollowUpBox, setNarrowFollowUpBox] = useState<HTMLDivElement | null>(null);
+  const followUpPendingRef = useRef(false);
+  const [followUpRequest, setFollowUpRequest] = useState(0);
+  const requestFollowUp = useCallback(() => {
+    followUpPendingRef.current = true;
+    setActiveTab("outcome");
+    setFollowUpRequest((n) => n + 1);
+  }, [setActiveTab]);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a new request re-runs it.
+  useEffect(() => {
+    if (!followUpPendingRef.current) return;
+    if (focusVisibleComposer([wideFollowUpBox, narrowFollowUpBox])) {
+      followUpPendingRef.current = false;
+    }
+  }, [followUpRequest, wideFollowUpBox, narrowFollowUpBox]);
+  const actions = useTaskActions(task, {
+    onFollowUp: requestFollowUp,
+    onGetHelp: () => setHelpOpen(true),
+  });
+  const announceFollowUp = useCallback(
+    (created: AgentTask) => {
+      toast.success("Follow-up task created.", {
+        action: { label: "Open", onClick: () => void navigate(`/tasks/${created.id}`) },
+      });
+    },
+    [navigate],
+  );
   const agentNames = useMemo(
     () => new Map((agents ?? []).map((agent) => [agent.id, agent.name])),
     [agents],
@@ -333,22 +363,19 @@ export default function TaskDetailPage() {
     );
   }
 
-  if (!task) {
+  if (!task || !actions) {
     return <p className="text-muted-foreground">Task not found.</p>;
   }
 
   const isTerminal = TERMINAL_STATUSES.has(task.status);
-  const canCancel = !isTerminal && task.status !== "paused";
-  const canPause = task.status === "in_progress";
-  const canResume = task.status === "paused";
 
-  // Steering reaches a running task directly, and a `pending` one by queueing:
-  // the server holds the message and delivers it when the session starts.
-  // Everything else falls back to the existing follow-up-task paths.
+  // Steering reaches any assignee: a running task directly, a `pending` one by
+  // queueing until its session starts, and a `paused` one by resuming it.
+  // A finished task gets the follow-up box instead.
   const canSteer =
     steerGate.supported &&
     steeringEnabled &&
-    (task.status === "in_progress" || task.status === "pending");
+    (task.status === "in_progress" || task.status === "pending" || task.status === "paused");
 
   const isFailed = task.status === "failed";
   const isCompleted = task.status === "completed";
@@ -363,6 +390,16 @@ export default function TaskDetailPage() {
   };
   const offeredToName = task.offeredTo ? (agentNames.get(task.offeredTo) ?? null) : null;
   const waiting = describeWaiting(task, { agent: agentName, offeredTo: offeredToName });
+
+  // The tasks this task started, and the ids the answer may mention.
+  const chain = session?.chain ?? [];
+  const spawned = directChildren(task.id, chain);
+  const knownTaskIds = [...chain.map((t) => t.id), task.parentTaskId].filter(
+    (taskId): taskId is string => !!taskId && taskId !== task.id,
+  );
+  const spawnedTasks = (
+    <SpawnedTasks tasks={spawned} agentNameFor={(agentId) => agentNames.get(agentId) ?? null} />
+  );
 
   // Who, where from, when, cost, context, Activity and the technical ids. The
   // wide layout shows it as the right rail, the narrow one in its Details tab.
@@ -379,23 +416,37 @@ export default function TaskDetailPage() {
     />
   );
 
+  // A failed task's error, always open, with Retry and Get help.
+  const failureCallout = isFailed ? (
+    <TaskFailureCallout
+      model={actions}
+      duration={failedAfter(task, costs?.reduce((sum, cost) => sum + cost.durationMs, 0) ?? 0)}
+    />
+  ) : null;
+
+  // FOLLOW UP: a finished task gets the shared message box right under its
+  // outcome. It creates a child task for the same agent; a Slack task answers
+  // in the same thread. Each layout tree mounts its own box on the one draft.
+  const renderFollowUp = (ref: (box: HTMLDivElement | null) => void) =>
+    isTerminal ? (
+      <div ref={ref} className="shrink-0">
+        <TaskComposer
+          targetTask={task}
+          canSteer={false}
+          followUpAgentId={task.agentId ?? undefined}
+          routeLabel={task.agentId ? `Routes to ${agentName ?? "the same agent"}` : undefined}
+          value={draft}
+          onValueChange={setDraft}
+          onCreated={announceFollowUp}
+          fullWidth
+          className="px-0 pt-0 pb-0"
+        />
+      </div>
+    ) : null;
+
   const outcomeContent = (
     <div className="space-y-2">
-      {isFailed && task.failureReason && (
-        <CollapsibleSection
-          variant="card"
-          title="Failure Reason"
-          icon={AlertTriangle}
-          iconColor="text-status-error-strong"
-          borderColor="border-status-error/30"
-          bgColor="bg-status-error/5"
-          defaultOpen
-        >
-          <div className="text-sm text-status-error-strong/80 leading-relaxed max-h-64 overflow-auto">
-            <MarkdownView text={task.failureReason ?? ""} />
-          </div>
-        </CollapsibleSection>
-      )}
+      {failureCallout}
 
       {hasOutput && (
         <CollapsibleSection
@@ -411,6 +462,7 @@ export default function TaskDetailPage() {
             citations={task.citations}
             raw={task.output ?? ""}
             maxH="max-h-[60vh]"
+            taskIds={knownTaskIds}
           />
         </CollapsibleSection>
       )}
@@ -423,6 +475,9 @@ export default function TaskDetailPage() {
           <p className="text-xs">No output available</p>
         </div>
       )}
+
+      {spawnedTasks}
+      {renderFollowUp(setNarrowFollowUpBox)}
     </div>
   );
 
@@ -470,6 +525,8 @@ export default function TaskDetailPage() {
       </div>
     );
 
+  // The live message box: it steers the task, as before. It sits under the
+  // log, folded or open.
   const steerComposer = canSteer ? (
     <CollapsibleComposerDock
       collapsed={composerCollapsed}
@@ -479,16 +536,17 @@ export default function TaskDetailPage() {
           ? "Add a follow-up for this task"
           : task.status === "pending"
             ? "Send a message to the queued task"
-            : "Send a message to the running task"
+            : task.status === "paused"
+              ? "Send a message to the paused task"
+              : "Send a message to the running task"
       }
     >
-      <SteerComposer
-        taskId={task.id}
-        supportedSteerModes={task.supportedSteerModes}
-        providerLabel={task.provider}
-        taskStatus={task.status}
-        value={steerDraft}
-        onValueChange={setSteerDraft}
+      <TaskComposer
+        targetTask={task}
+        canSteer
+        followUpAgentId={task.agentId ?? undefined}
+        value={draft}
+        onValueChange={setDraft}
         fullWidth
         className="px-0 pt-0 pb-0"
       />
@@ -554,16 +612,22 @@ export default function TaskDetailPage() {
         <span className="min-w-0 truncate">{task.tags.join(", ")}</span>
       </span>
     ) : null;
-  const hasHeroActions = canCancel || canPause || canResume;
 
   // HERO: the title, where the task came from, the chips, and the actions.
   // Rendered at the top of the center column in the wide layout and above the
-  // Tabs in the narrow one. Each layout tree pads the hero itself.
+  // Tabs in the narrow one. Each layout tree pads the hero itself. Wide: the
+  // actions sit right of the title. Narrow: they come last, under the chips.
   const heroBlock = (
-    <div className="flex shrink-0 flex-col gap-2.5">
+    <div className="grid shrink-0 grid-cols-1 gap-2.5 @min-[64rem]:grid-cols-[minmax(0,1fr)_auto] @min-[64rem]:gap-x-6">
       {/* The page's one heading. The breadcrumb truncates the title (and
           collapses to a few characters on a phone), so it cannot carry it. */}
-      <TaskHeading title={headerTitle} />
+      <div className="min-w-0">
+        <TaskHeading title={headerTitle} />
+      </div>
+      <TaskActions
+        model={actions}
+        className="order-last pt-1 @min-[64rem]:order-none @min-[64rem]:row-span-3 @min-[64rem]:self-start @min-[64rem]:justify-end @min-[64rem]:pt-0"
+      />
       <TaskSourceLine task={task} requestedByName={requestedByUserName} creatorName={creatorName} />
       <div className="flex flex-wrap items-center gap-2">
         <StatusBadge status={task.status} size="md" />
@@ -571,39 +635,6 @@ export default function TaskDetailPage() {
         {agentChip}
         {tagsLine}
       </div>
-      {hasHeroActions ? (
-        <div className="flex shrink-0 items-center gap-1.5 pt-1">
-          {canPause && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => pauseTask.mutate(task.id)}
-              disabled={pauseTask.isPending}
-            >
-              <Pause className="h-3 w-3 mr-1" />
-              Pause
-            </Button>
-          )}
-          {canResume && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => resumeTask.mutate(task.id)}
-              disabled={resumeTask.isPending}
-            >
-              <Play className="h-3 w-3 mr-1" />
-              Resume
-            </Button>
-          )}
-          {canCancel && (
-            <CancelTaskButton
-              onConfirm={() =>
-                cancelTask.mutate({ id: task.id, reason: "Cancelled from dashboard" })
-              }
-            />
-          )}
-        </div>
-      ) : null}
     </div>
   );
 
@@ -612,7 +643,9 @@ export default function TaskDetailPage() {
     // context panel or an open sidebar can leave a wide window with a narrow
     // page.
     <div className="@container flex flex-col flex-1 min-h-0">
-      <TaskFailureHelpDialog task={task} />
+      {isFailed ? (
+        <TaskFailureHelpDialog task={task} open={helpOpen} onOpenChange={setHelpOpen} />
+      ) : null}
 
       {/* Narrow (under 64rem of page width): the hero above three tabs. */}
       <div className="@min-[64rem]:hidden flex flex-col flex-1 min-h-0 overflow-hidden">
@@ -665,6 +698,7 @@ export default function TaskDetailPage() {
             status={task.status}
             model={displayModel}
             effort={task.effort}
+            action={<TaskPrimaryAction model={actions} />}
             onTitleClick={() => scrollToTop(centerScroller)}
           />
           <div className="flex flex-col gap-3 pt-6 pr-6 pb-3">
@@ -673,20 +707,7 @@ export default function TaskDetailPage() {
               <div ref={heroEndRef} aria-hidden className="h-px" />
             </div>
             <Separator />
-            {isFailed && task.failureReason && (
-              <CollapsibleSection
-                variant="card"
-                title="Failure Reason"
-                icon={AlertTriangle}
-                iconColor="text-status-error-strong"
-                borderColor="border-status-error/30"
-                bgColor="bg-status-error/5"
-              >
-                <div className="text-sm text-status-error-strong/80 leading-relaxed max-h-48 overflow-auto">
-                  <MarkdownView text={task.failureReason ?? ""} />
-                </div>
-              </CollapsibleSection>
-            )}
+            {failureCallout}
 
             {hasOutput && (
               <CollapsibleSection
@@ -705,12 +726,15 @@ export default function TaskDetailPage() {
                   citations={task.citations}
                   raw={task.output ?? ""}
                   maxH=""
+                  taskIds={knownTaskIds}
                 />
               </CollapsibleSection>
             )}
 
             <TaskAttachmentsSection taskId={task.id} attachments={task.attachments} />
             <TaskCitationsSection output={task.output ?? ""} citations={task.citations ?? []} />
+            {spawnedTasks}
+            {renderFollowUp(setWideFollowUpBox)}
 
             {renderSessionLogs(centerScroller)}
             {steerComposer ? (

@@ -1,5 +1,5 @@
 /**
- * Sessions surface — chronological timeline of a session's task chain.
+ * Sessions surface: chronological timeline of a session's task chain.
  *
  * Visual model:
  *   1. Tasks created by a human (root prompt + composer follow-ups carry
@@ -10,9 +10,9 @@
  *      with the task text as the body.
  *   3. Sibling tasks sharing a `parentTaskId` collapse into a
  *      <ParallelGroup> with a single muted "N in parallel · via {parent}"
- *      caption — no chrome, just a click-to-collapse header.
+ *      caption: no chrome, just a click-to-collapse header.
  *   4. Auto-spawned "review needed" follow-ups (`source === "system"` and
- *      `taskType === "follow-up"`) are hidden by default — the system
+ *      `taskType === "follow-up"`) are hidden by default. The system
  *      generates these to nudge the Lead after a worker finishes, but they
  *      add no conversational value. They collapse into a `<ReviewAck>` chip
  *      attached to the worker row they reviewed. Use the page-level
@@ -26,25 +26,17 @@ import type { AgentTask } from "@/api/types";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
 import { EmptyState } from "@/components/shared/empty-state";
 import { TERMINAL_STATUSES } from "@/lib/task-activity";
+import { isAutoReview } from "@/lib/task-links";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import { ParallelGroup, TaskCard } from "./task-card";
 import { TaskOutcome } from "./task-outcome";
 import { UserPromptBubble } from "./user-prompt-bubble";
 
 /**
- * `true` for the orchestrator's auto-spawned review follow-ups —
- * "Worker task completed — review needed." rows. Identified structurally
- * by the wire fields, not by sniffing task text.
- */
-function isAutoReview(task: AgentTask): boolean {
-  return task.source === "system" && task.taskType === "follow-up";
-}
-
-/**
  * Quiet closing block rendered after a parent task's direct children when
  * the parent itself reached a terminal state and finished AFTER its
  * children. The block has two parts:
- *   1. A small chip header — "↩ Lead closed this fork · finished Xm ago"
+ *   1. A small chip header: "↩ Lead closed this fork · finished Xm ago"
  *   2. The parent's actual outcome (`<TaskOutcome>`) directly under the
  *      chip. Since the parent rendered its row at the top of the fork
  *      WITHOUT its outcome (`deferOutput`), the outcome lands here in its
@@ -83,7 +75,7 @@ function ParentClosingChip({ parent }: { parent: AgentTask }) {
           </span>
         </span>
       </div>
-      {/* Parent's actual outcome — rendered here instead of inside the
+      {/* Parent's actual outcome, rendered here instead of inside the
           parent's TaskCard so it shows up in chronological position. */}
       <div className="pl-5 min-w-0">
         <TaskOutcome task={parent} />
@@ -99,7 +91,7 @@ function ParentClosingChip({ parent }: { parent: AgentTask }) {
  *
  * We deliberately ONLY check direct children. Indirect descendants don't
  * count because in this codebase every follow-up turn chains under the
- * previous task via `parentTaskId` — so a 30-minutes-later "Nice" reply
+ * previous task via `parentTaskId`, so a 30-minutes-later "Nice" reply
  * becomes a descendant of the original Lead task and would otherwise
  * suppress the chip. The semantics we want is "parent closed *its own*
  * wait loop after its direct children", which matches direct fan-in only.
@@ -192,7 +184,7 @@ function buildTimelineTree(
     }
     const visibleParent = resolveVisibleParent(task.parentTaskId);
     if (visibleParent == null) {
-      // Parent chain dissolves into hidden nodes all the way up — extremely
+      // Parent chain dissolves into hidden nodes all the way up. Extremely
       // unlikely (the root is `source: "ui"`, never hidden) but route to
       // orphan rather than dropping silently.
       if (task.id === rootTaskId) root = task;
@@ -217,7 +209,7 @@ function buildTimelineTree(
 /**
  * Renders a single task as either:
  *   - A user-bubble + agent-row pair (when the task originated from a human
- *     typing into the UI composer — `source === "ui"`), or
+ *     typing into the UI composer: `source === "ui"`), or
  *   - A single agent-row showing the task text as the body (everything
  *     else: Lead-spawned children, slack threads, scheduled jobs, etc.).
  *
@@ -232,13 +224,13 @@ function TaskTurn({
   reviewAcks,
 }: {
   task: AgentTask;
-  /** Agent who owned the parent task — used to render "via X" delegation hint. */
+  /** Agent who owned the parent task, used to render "via X" delegation hint. */
   parentAgentId?: string | null;
   insideParallelGroup?: boolean;
-  /** When true, the task's `<TaskOutcome>` is suppressed in this row — it
+  /** When true, the task's `<TaskOutcome>` is suppressed in this row: it
    *  will be re-rendered later inside the closing chip. */
   deferOutput?: boolean;
-  /** Hidden auto-review tasks attached to this worker — collapsed into a
+  /** Hidden auto-review tasks attached to this worker, collapsed into a
    *  single `<ReviewAck>` chip under the outcome. */
   reviewAcks?: AgentTask[];
 }) {
@@ -258,7 +250,7 @@ function TaskTurn({
         task={task}
         hideTaskText={isUserTyped}
         insideParallelGroup={insideParallelGroup}
-        // Suppress the "↳ via X" delegation hint on user-typed turns —
+        // Suppress the "↳ via X" delegation hint on user-typed turns:
         // it would (mis)imply the previous agent delegated TO the agent
         // replying to the user, which is conceptually backwards.
         parentAgentId={isUserTyped ? null : parentAgentId}
@@ -280,7 +272,7 @@ function ChildrenChain({ task, childrenByParent, acksByWorker }: SubtreeProps) {
   if (children.length === 0) return null;
   const parentAgentId = task.agentId;
 
-  // Closer renders RIGHT AFTER the direct children — before recursing into
+  // Closer renders RIGHT AFTER the direct children, before recursing into
   // their downstream chains. That way "↩ Lead closed this fork" lands
   // immediately under the child(ren) the parent was waiting on. Whenever
   // the closer fires we also defer the parent's TaskOutcome to render
@@ -321,7 +313,7 @@ function ChildrenChain({ task, childrenByParent, acksByWorker }: SubtreeProps) {
             <TaskTurn
               key={child.id}
               task={child}
-              // Suppress the per-child "↳ via X" hint — the parallel group's
+              // Suppress the per-child "↳ via X" hint: the parallel group's
               // caption already says "N in parallel · via {parent}".
               parentAgentId={null}
               insideParallelGroup
@@ -379,7 +371,7 @@ export function SessionTimeline({
 
   return (
     <div className={cn("max-w-3xl mx-auto w-full", className)}>
-      {/* Single timeline column — no spine. Each row's `pb-*` provides the
+      {/* Single timeline column, no spine. Each row's `pb-*` provides the
           rhythm between turns; grouping comes from indentation + the
           parallel-group caption. */}
       <div className="flex flex-col">
@@ -409,8 +401,8 @@ export function SessionTimeline({
               Orphan tasks ({tree.orphans.length})
             </h4>
             <p className="text-xs text-muted-foreground mb-3">
-              These tasks have no parent and don't match the session root — likely a chain-fetch
-              bug. Rendering for visibility.
+              These tasks have no parent and don't match the session root. This is likely a
+              chain-fetch bug. Rendering for visibility.
             </p>
             {tree.orphans.map((o) => (
               <TaskCard key={o.id} task={o} />

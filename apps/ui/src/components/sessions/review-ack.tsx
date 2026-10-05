@@ -1,10 +1,10 @@
 /**
- * Sessions surface — status-aware summary shown beneath a worker's row when
- * the orchestrator auto-spawned one or more "Worker task completed — review
+ * Sessions surface: status-aware summary shown beneath a worker's row when
+ * the orchestrator auto-spawned one or more "Worker task completed, review
  * needed." follow-ups against it.
  *
  * The review row itself is hidden from the timeline (operational, not
- * conversational — see `isAutoReview` in `session-timeline.tsx`), but the
+ * conversational, see `isAutoReview` in `lib/task-links.ts`), but the
  * *outcome* of the most recent review is not: this chip mirrors the same
  * live-activity / final-outcome split a normal `<TaskCard>` uses, because a
  * hidden review is frequently where the agent's actual human-facing answer
@@ -36,13 +36,13 @@ function Name({ children }: { children: ReactNode }) {
 }
 
 export function ReviewAck({ reviews, className }: { reviews: AgentTask[]; className?: string }) {
-  // Most recent review carries the "final" prose — that's the entry point.
+  // Most recent review carries the "final" prose: that's the entry point.
   const lastReview = reviews[reviews.length - 1];
   const status = lastReview.status;
   const isActive = !TERMINAL_STATUSES.has(status);
   const isRunning = status === "in_progress";
   const [expanded, setExpanded] = useState(false);
-  // Sheet open-state lives in the URL (`?task=<id>`) for shareable links —
+  // Sheet open-state lives in the URL (`?task=<id>`) for shareable links,
   // mirrors TaskCard so a session URL pinning a review is reproducible.
   const [searchParams, setSearchParams] = useSearchParams();
   const open = searchParams.get("task") === lastReview.id;

@@ -1,5 +1,5 @@
 /**
- * Sessions surface — the conversation of one session: the live timeline, a
+ * Sessions surface: the conversation of one session: the live timeline, a
  * "Latest" jump button, and the composer (follow-up, steering, attachments).
  * The `/sessions/:rootTaskId` page and the contextual session panel both
  * render this, so they behave the same.
@@ -10,11 +10,11 @@ import { useMemo, useState } from "react";
 import { useFeatureGate } from "@/api/hooks/use-feature-gate";
 import { useSession } from "@/api/hooks/use-sessions";
 import { useSteeringEnabled } from "@/api/hooks/use-stats";
+import { TaskComposer, type TaskComposerProps } from "@/components/shared/task-composer";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAutoScroll } from "@/hooks/use-auto-scroll";
 import { cn } from "@/lib/utils";
-import { SessionComposer, type SessionComposerProps } from "./session-composer";
 import { SessionTimeline } from "./session-timeline";
 
 export interface SessionConversationProps {
@@ -23,8 +23,8 @@ export interface SessionConversationProps {
   showInternalHandoffs?: boolean;
   /** Classes for the scrolling timeline area (padding). */
   scrollClassName?: string;
-  /** Extra composer action-row buttons; see `SessionComposerProps.renderActions`. */
-  renderComposerActions?: SessionComposerProps["renderActions"];
+  /** Extra composer action-row buttons; see `TaskComposerProps.renderActions`. */
+  renderComposerActions?: TaskComposerProps["renderActions"];
 }
 
 export function SessionConversation({
@@ -33,7 +33,7 @@ export function SessionConversation({
   scrollClassName,
   renderComposerActions,
 }: SessionConversationProps) {
-  // Steering (≥1.122.1) — older servers 404 `/api/tasks/:id/steer`, so the
+  // Steering (≥1.122.1). Older servers 404 `/api/tasks/:id/steer`, so the
   // composer falls back to its pre-steering chained-task behaviour.
   const steerGate = useFeatureGate("1.122.1");
   const { data: steeringEnabled = true } = useSteeringEnabled();
@@ -56,12 +56,22 @@ export function SessionConversation({
     [detail?.chain],
   );
 
+  // Sessions steers only the latest *lead* task (decision 6). `pending`
+  // counts: the server holds the message and delivers it once the session
+  // starts. Anything else sends a follow-up task, which the server routes to
+  // the Lead.
+  const canSteer =
+    steerGate.supported &&
+    steeringEnabled &&
+    !!latestLeafTask?.isLeadTask &&
+    (latestLeafTask.status === "in_progress" || latestLeafTask.status === "pending");
+
   const [scrollEl, setScrollEl] = useState<HTMLDivElement | null>(null);
   const { isFollowing, scrollToBottom } = useAutoScroll(scrollEl, [chainSignature]);
 
   return (
     <>
-      {/* Timeline (scrollable) — wrapped in a relative container so the
+      {/* Timeline (scrollable), wrapped in a relative container so the
           "Jump to latest" button can sit on its bottom edge, where the
           composer starts, when the user has scrolled away from the tail. */}
       <div className="relative flex-1 min-h-0">
@@ -107,10 +117,11 @@ export function SessionConversation({
       </div>
 
       {/* Composer dock pinned to bottom */}
-      <SessionComposer
+      <TaskComposer
         rootTaskId={rootTaskId}
-        latestLeafTask={latestLeafTask}
-        steeringSupported={steerGate.supported && steeringEnabled}
+        targetTask={latestLeafTask}
+        canSteer={canSteer}
+        placeholder="Continue the session…"
         renderActions={renderComposerActions}
       />
     </>

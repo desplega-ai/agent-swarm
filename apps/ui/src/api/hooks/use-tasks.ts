@@ -5,7 +5,9 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
+import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
+import { buildRetryInput } from "../../lib/task-retry";
 import { api } from "../client";
 import type {
   AgentTask,
@@ -334,6 +336,29 @@ export function useCreateTask() {
     },
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ["tasks"] });
+    },
+  });
+}
+
+/**
+ * Retry: a copy of the task as a new child (`buildRetryInput`), created with
+ * `POST /api/tasks`. Nothing is destroyed, so there is no confirm step. On
+ * success the page moves to the new task.
+ */
+export function useRetryTask() {
+  const queryClient = useQueryClient();
+  const navigate = useNavigate();
+  return useMutation<TaskWithLogs, Error, { task: AgentTask; userId: string | null }>({
+    mutationFn: ({ task, userId }) => api.createTask(buildRetryInput(task, userId)),
+    onSuccess: (created, { task }) => {
+      queryClient.setQueryData(["task", created.id], created);
+      queryClient.invalidateQueries({ queryKey: ["tasks"] });
+      queryClient.invalidateQueries({ queryKey: ["session", task.id] });
+      toast.success("Retry created. It runs as a new task.");
+      void navigate(`/tasks/${created.id}`);
+    },
+    onError: (err) => {
+      toast.error(err.message || "Failed to retry task");
     },
   });
 }

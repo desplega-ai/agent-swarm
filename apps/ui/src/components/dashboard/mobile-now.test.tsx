@@ -21,6 +21,7 @@ mock.module("@/components/ui/skeleton", () => require("../ui/skeleton"));
 mock.module("@/components/ui/spinner", () => require("../ui/spinner"));
 mock.module("@/lib/config", () => require("../../lib/config"));
 mock.module("@/lib/recent-failures", () => require("../../lib/recent-failures"));
+mock.module("@/lib/status-labels", () => require("../../lib/status-labels"));
 mock.module("@/lib/task-title", () => require("../../lib/task-title"));
 mock.module("@/lib/utils", () => require("../../lib/utils"));
 

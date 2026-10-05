@@ -3,7 +3,7 @@ date: 2026-10-05
 status: in-progress
 autonomy: critical
 last_updated: 2026-10-05
-last_updated_by: claude (phase 3 agent, hero implemented)
+last_updated_by: claude (phase 4 agent, next actions implemented)
 commit_per_phase: true
 ---
 
@@ -454,6 +454,7 @@ Every status gets its actions:
   - `in_progress`: Pause, Cancel (the existing `AlertDialog`), and a "..." menu with Copy task id.
   - `pending`, `unassigned`, `offered`, `backlog`: Cancel, and a "..." menu.
   - `paused`: Resume and Cancel.
+  - As built (phase 4, pending review): the failed hero shows only the "..." menu (Retry, Copy task id, Get help), as in the P4 wireframe. The open error callout right under the hero holds the Retry, Copy diagnostics and Get help buttons, so the hero does not repeat them. Every status gets the "..." menu (Copy task id).
 - On finished tasks, the `TaskComposer` renders right under the outcome block. On live tasks it renders under the log, inside the existing `CollapsibleComposerDock`.
 
 #### 3. Retry
@@ -484,25 +485,27 @@ Every status gets its actions:
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Unit tests pass: `bun run test:root -- apps/ui/src/lib/task-retry.test.ts apps/ui/src/lib/task-links.test.ts apps/ui/src/lib/task-support.test.tsx apps/ui/src/components/shared/task-composer.test.tsx`
-- [ ] Typecheck passes: `cd apps/ui && bunx tsc -b`
-- [ ] Lint and token gate pass: `cd apps/ui && bun run lint && bun run check:tokens`
-- [ ] Sessions composer specs still pass: `bun run e2e:ui -- specs/composer-enter-key.spec.ts specs/prompt-attachments.spec.ts specs/tasks.spec.ts`
+- [x] Unit tests pass: `bun run test:root -- apps/ui/src/lib/task-retry.test.ts apps/ui/src/lib/task-links.test.ts apps/ui/src/lib/task-support.test.tsx apps/ui/src/components/shared/task-composer.test.tsx` (21 pass. All of `apps/ui/src` with `--parallel=4`: 1016 pass, after a `@/lib/status-labels` mock was added to 3 tests that phase 1 broke.)
+- [x] Typecheck passes: `cd apps/ui && bunx tsc -b`
+- [x] Lint and token gate pass: `cd apps/ui && bun run lint && bun run check:tokens` ("Checked 768 files", no errors. Root `bun run lint`: "Checked 1940 files", no errors.)
+- [x] Sessions composer specs still pass: `bun run e2e:ui -- specs/composer-enter-key.spec.ts specs/prompt-attachments.spec.ts specs/tasks.spec.ts` (6 passed, 3 skipped by project. `codex-logs` and `smoke` also pass: 38 passed, 17 skipped.)
 
 #### Automated QA:
-- [ ] QA stack, with `STEERING_ENABLED` turned on for the throwaway API (see the QA doc):
+- [x] QA stack, with `STEERING_ENABLED` turned on for the throwaway API (see the QA doc):
   - Completed route: type a follow-up, attach a small text file, and Send.
   - `GET /api/tasks/{newId}` shows `parentTaskId` = the completed id, `agentId` = the completed task's agent, and the attachment.
   - The toast's Open link navigates to the new task.
   - The spawned list shows the new task within 10 s.
-- [ ] Failed route: no dialog opens on load. The reason is visible. Get help opens the dialog.
+  - Measured (2026-10-05): 3 follow-ups (`a1c2ae98`, `4f816b62`, `7d6f9bd1`). Each has `parentTaskId` = the completed id, `agentId` = e2e-worker-a (the completed task's agent), `routingReason: "continuity"` (declared), `source: "ui"`, and `follow-up-notes.txt` (`user-upload`). The spawned list showed the new row 2.5 s after Send. The toast's Open went to `/tasks/4f816b62…` and `/tasks/7d6f9bd1…`. "Follow up" (hero and sticky bar) scrolls to the box and focuses it, also from the narrow layout's Details tab.
+- [x] Failed route: no dialog opens on load. The reason is visible. Get help opens the dialog.
   - Retry creates a task with the same prompt, agent, model and `parentTaskId` = the failed id, then navigates to it.
-- [ ] In-progress route: a queued steer message still appears in the log as a steering row.
-- [ ] Sessions page: start a session, send a follow-up. The new task has no `agentId` override (it routes to the Lead), the same as before.
-- [ ] Screenshots of completed (actions and composer), failed, and in-progress at 1440 in `/tmp/task-detail-qa/phase-4/`, plus a recording of the follow-up flow (`agent-browser record start ... --cursor`, sped up 1.5x per LOCAL_TESTING.md).
+  - Measured: 0 dialogs on load, an open callout "Failed after 21ms" (seed timestamps) with the reason. Get help (callout and "..." menu) opens "Need help?". Escape returns focus to the opener ("Get help", or the "More actions" trigger). Retry created `ee657012` (same prompt, agent, `gpt-5.6-terra`, `parentTaskId` = failed id, `routingReason: "continuity"`) and navigated to it.
+- [x] In-progress route: a queued steer message still appears in the log as a steering row. Measured: the queued message shows in the log's queued box ("1 queued · e2e-user (user): …") above "Agent is working…", and `GET …/steering-messages` lists it `pending`. The sticky bar's Pause node survived 12 s of polls.
+- [x] Sessions page: start a session, send a follow-up. The new task has no `agentId` override (it routes to the Lead), the same as before. Measured: on a pending lead root, Sessions still shows the steer box (lead-only rule). After the root was cancelled, the follow-up `POST /api/tasks` body had no `agentId` or `routingReason`. The server routed `2cbc14b7` to e2e-lead (`routingSource: "engine_default"`).
+- [x] Screenshots of completed (actions and composer), failed, and in-progress at 1440 in `/tmp/task-detail-qa/phase-4/`, plus a recording of the follow-up flow (`agent-browser record start ... --cursor`, sped up 1.5x per LOCAL_TESTING.md). Dark and light at 1440, plus 1280 (tabs) and 390. Recording: `follow-up-1.5x.mp4` (6 s).
 
 #### Manual Verification:
-- [ ] Taras, in the real dev swarm: a follow-up on a Slack-sourced task answers in the same Slack thread (see Manual E2E).
+- [ ] Taras, in the real dev swarm: a follow-up on a Slack-sourced task answers in the same Slack thread (see Manual E2E). Deferred to the final Manual E2E by Taras on 2026-10-05.
 
 **Implementation Note**: After this phase, pause for manual confirmation. Then commit `[phase 4] task page actions, shared composer follow-up, retry, spawned tasks, failed state`.
 

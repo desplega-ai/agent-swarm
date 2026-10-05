@@ -7,6 +7,7 @@ import type { WorkflowRunStep } from "../../api/types";
 // this component's graph maps to its real file.
 // Factories use require, not `() => import()`: Bun hangs when a later test
 // file in the same run re-registers an alias with an async factory.
+mock.module("@/lib/status-labels", () => require("../../lib/status-labels"));
 mock.module("@/lib/utils", () => require("../../lib/utils"));
 mock.module("@/components/kibo-ui/spinner", () => require("../kibo-ui/spinner"));
 mock.module("@/components/ui/spinner", () => require("../ui/spinner"));

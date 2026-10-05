@@ -77,11 +77,11 @@ describe("getLeadCredentialIssue", () => {
 });
 
 describe("shouldShowTaskFailureHelp", () => {
-  test("shows for a failed task after confirming lead credentials are not the cause", () => {
+  test("offers Get help on a failed task once lead credentials are ruled out", () => {
     expect(shouldShowTaskFailureHelp("failed", true, null)).toBe(true);
   });
 
-  test("waits for the credential check and defers to the credential popup", () => {
+  test("no Get help before the credential check, with a credential issue, or on other statuses", () => {
     const issue = getLeadCredentialIssue(
       [{ ...baseLead, credentialMissing: ["ANTHROPIC_API_KEY"] }],
       true,
@@ -90,5 +90,6 @@ describe("shouldShowTaskFailureHelp", () => {
     expect(shouldShowTaskFailureHelp("failed", false, null)).toBe(false);
     expect(shouldShowTaskFailureHelp("failed", true, issue)).toBe(false);
     expect(shouldShowTaskFailureHelp("completed", true, null)).toBe(false);
+    expect(shouldShowTaskFailureHelp("cancelled", true, null)).toBe(false);
   });
 });
