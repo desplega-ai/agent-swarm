@@ -22,6 +22,7 @@ import { DEFAULT_MODEL_TIER_MAP } from "../types";
 import { ampModelError, resolveAmpModel } from "../utils/amp-models";
 import { getModelAwareCredentialVars } from "../utils/credentials";
 import { resolveHarnessProvider } from "../utils/harness-provider";
+import { clearVolatileSecretsForTesting } from "../utils/secret-scrubber";
 
 const KEY = "sgamp_test_credential_value";
 const directories: string[] = [];
@@ -509,6 +510,18 @@ describe("amp live test", () => {
       ok: false,
       error: "Invalid or missing API key. Run 'amp login' to authenticate.",
     });
+  });
+
+  test("a key the probe sees only in its env is redacted from the error", async () => {
+    // No session has registered this key, and it is not in process.env.
+    clearVolatileSecretsForTesting();
+    const key = `sgamp_probe_only_${crypto.randomUUID()}`;
+    expect(Object.values(process.env)).not.toContain(key);
+    const result = await liveTestAmpCredentials({
+      ...(await env("usage-echo-key")),
+      AMP_API_KEY: key,
+    });
+    expect(result).toEqual({ ok: false, error: "Rejected key [REDACTED:AMP_API_KEY]" });
   });
 
   test("a hung amp usage times out instead of hanging the worker", async () => {

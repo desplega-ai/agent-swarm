@@ -25,6 +25,10 @@ if (args[0] === "usage") {
     console.error("Error: Invalid or missing API key. Run 'amp login' to authenticate.");
     process.exit(1);
   }
+  if (mode === "usage-echo-key") {
+    console.error(`Error: Rejected key ${process.env.AMP_API_KEY}`);
+    process.exit(1);
+  }
   if (mode === "usage-hang") setInterval(() => {}, 1000);
   else {
     console.log("Signed in as someone@example.com\n**Individual credits:** $10 remaining");

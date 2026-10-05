@@ -171,6 +171,10 @@ export async function liveTestAmpCredentials(
       error: `amp CLI not found. Install ${AMP_PACKAGE} during image provisioning or set AMP_BINARY to a trusted executable.`,
     };
   }
+  // The key may exist only in this env, where the scrubber cannot see it, and
+  // `amp usage` can echo it in an error.
+  const apiKey = env.AMP_API_KEY?.trim();
+  if (apiKey) registerVolatileSecret(apiKey, "AMP_API_KEY");
   // A clean config dir keeps a stored `amp login` from masking a bad AMP_API_KEY.
   const configHome = await mkdtemp(join(tmpdir(), "swarm-amp-live-"));
   try {
