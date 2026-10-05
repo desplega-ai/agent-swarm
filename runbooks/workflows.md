@@ -185,7 +185,7 @@ Both executors emit the `success` port. To branch on a check, add a `validation`
 - `cwd`: optional working directory.
 - `timeout`: optional wall-clock timeout in milliseconds, from `1000` through `300000`; defaults to `30000`. This value applies to both the inline script executor and the workflow step watchdog.
 
-Inline executable source may interpolate only `input`, `workflow`, `swarm`, and `run` values. It may not splice `trigger` data or declared upstream aliases directly into source. Pass those dynamic values through `config.args`, which the script receives as argv. A disallowed or unresolved source token fails the node before execution instead of running partially blanked code.
+Inline executable source may interpolate only `input`, `workflow`, `swarm`, and `run` values. It may not splice `trigger` data or declared upstream aliases directly into source. Pass those dynamic values through `config.args`, which the script receives as argv. For `runtime: "bash"`, the engine runs `bash -c <script> ...args`, so `args: ["a", "b"]` gives `$0=a` and `$1=b`; for `runtime: "ts"`, it runs `bun -e <script> -- ...args`, so the same args give `Bun.argv[1]="a"` and `Bun.argv[2]="b"`. A disallowed or unresolved source token fails the node before execution instead of running partially blanked code.
 
 ### `swarm-script` config
 
