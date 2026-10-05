@@ -216,11 +216,12 @@ export async function handleActiveSessions(
     if (parsed.body?.agentId) {
       // Multi-runtime: several processes share this agent id, and a booting
       // worker has no evidence distinguishing a crashed predecessor's session
-      // from a live-but-quiet sibling's — sessions heartbeat on tool activity
-      // only, and during the activation window a live worker's runtime may
-      // have no row at all. Reclamation stays with the heartbeat's
-      // stalled-task classifier (stale session AND stale task), backstopped
-      // by the sweep's stale-session cleanup; boot cleanup deletes nothing.
+      // from a live-but-quiet sibling's — a session's heartbeat only moves on
+      // tool activity or provider output, and during the activation window a
+      // live worker's runtime may have no row at all. Reclamation stays with
+      // the heartbeat's stalled-task classifier (stale session AND stale
+      // task), backstopped by the sweep's stale-session cleanup; boot cleanup
+      // deletes nothing.
       cleaned = isMultiRuntimeEnabled() ? 0 : await cleanupAgentSessions(parsed.body.agentId);
     } else {
       cleaned = await cleanupStaleSessions(parsed.body?.maxAgeMinutes ?? 30);

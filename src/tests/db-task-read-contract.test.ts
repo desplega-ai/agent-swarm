@@ -107,6 +107,7 @@ value:KvTypeCollisionError
 value:MAX_EMPTY_POLLS
 value:NOT_EXTENSION_AGENT_SQL
 value:ReservedAgentRoleError
+value:SESSION_ACTIVITY_REFRESH_MIN_INTERVAL_MS
 value:SKILL_FILE_LIMITS
 value:UNATTRIBUTED_USER_ID
 value:__resetSqliteVecExtensionPathCacheForTests
@@ -511,6 +512,7 @@ value:recordKeyUsage
 value:recordSlackMessage
 value:recordTaskProviderIfUnset
 value:recordTaskPullRequestAttachments
+value:refreshActiveSessionOnActivity
 value:refreshDraftTaskLease
 value:rejectTask
 value:releaseApprovalCancellationNotificationClaim

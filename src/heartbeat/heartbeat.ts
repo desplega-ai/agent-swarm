@@ -831,9 +831,10 @@ export async function runRebootSweep(): Promise<void> {
           continue;
         }
         // Workers run in their own containers and outlive an API restart, and
-        // sessions heartbeat on tool calls only. A pre-boot heartbeat is
-        // therefore not evidence of a dead worker: a live one inside a long
-        // model call has none in the first seconds after boot. Only a session
+        // a session's heartbeat only moves on tool calls or provider output.
+        // A pre-boot heartbeat is therefore not evidence of a dead worker: a
+        // live one inside a long model call has none in the first seconds
+        // after boot. Only a session
         // stale by the classifier's own threshold counts as dead; anything
         // fresher is left to the regular stalled-task sweep.
         if (Date.now() - sessionLastSeen < stallThresholdStaleHeartbeatMin() * 60 * 1000) {

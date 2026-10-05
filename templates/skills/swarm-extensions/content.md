@@ -51,6 +51,10 @@ curl -s "$MCP_BASE_URL/api/extensions/type-defs" \
 | `pre.tool.call` | before an agent MCP tool call runs | `block(reason)` or `modify({ args })` |
 | `post.task.created`, `post.task.completed`, `post.task.failed`, `post.task.cancelled`, `post.task.superseded`, `post.task.progress` | after the change is committed | none |
 | `post.slack.message`, `post.tool.call` | after the message or tool call finished | none |
+| `post.approval.resolved` | after a person answers an approval request, workflow or standalone (not on timeout or cancel) | none |
+| `post.task.budgetRefused` | after a task is refused by a daily spend budget | none |
+| `post.email.received`, `post.kapso.message` | after an inbound AgentMail or Kapso message is received | none |
+| `post.vcs.event` | after a GitHub, GitLab, or Azure DevOps webhook event; `{ provider, kind, action, repo, number?, ... }` | none |
 
 `event.origin` on `pre.task.create` tells where the task comes from: `rest`, `app`, `mcp`, `slack`, `schedule`, `workflow`, `webhook`, `followUp`, or `extension:<name>`.
 
