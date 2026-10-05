@@ -115,10 +115,23 @@ export async function createX402Client(
   // Create spending tracker
   const spendingTracker = new SpendingTracker(config.maxAutoApprove, config.dailyLimit);
 
-  // Register a spending-limit hook that blocks over-budget payments.
-  // NOTE: This check has a TOCTOU race — concurrent requests could both pass the
-  // limit check before either records its payment. Acceptable for agent workloads
-  // (typically sequential), but not suitable for high-concurrency scenarios.
+  // Spending limits: reserve before the payment is created, then confirm it once
+  // created or release it if creation fails. `reserve()` checks the limits and
+  // holds the amount synchronously, so concurrent payments in this process can't
+  // all pass the daily check against the same remaining budget.
+  // NOTE: totals are still in memory, so they reset on restart and are not shared
+  // across processes.
+  //
+  // The same `selectedRequirements` object is passed to the before, after and
+  // failure hooks of one payment, so it keys the reservation for that payment.
+  const pendingReservations = new WeakMap<object, string[]>();
+  const takeReservation = (key: object): string | undefined => {
+    const ids = pendingReservations.get(key);
+    const id = ids?.shift();
+    if (ids && ids.length === 0) pendingReservations.delete(key);
+    return id;
+  };
+
   client.onBeforePaymentCreation(async (context) => {
     const { selectedRequirements } = context;
 
@@ -127,19 +140,26 @@ export async function createX402Client(
     const amountUsd = usdcToUsd(rawValue);
 
     const url = context.paymentRequired.resource?.url || "unknown";
-    const blockReason = spendingTracker.checkSpendingLimit(amountUsd, url);
+    const result = spendingTracker.reserve(amountUsd, url);
 
-    if (blockReason) {
-      return { abort: true, reason: blockReason };
+    if (!result.ok) {
+      return { abort: true, reason: result.reason };
     }
+    const ids = pendingReservations.get(selectedRequirements) ?? [];
+    ids.push(result.id);
+    pendingReservations.set(selectedRequirements, ids);
   });
 
-  // Track successful payments
+  // Count the payment once it has been created (signed)
   client.onAfterPaymentCreation(async (context) => {
-    const rawValue = context.selectedRequirements.amount;
-    const amountUsd = usdcToUsd(rawValue);
-    const url = context.paymentRequired.resource?.url || "unknown";
-    spendingTracker.recordPayment(amountUsd, url);
+    const id = takeReservation(context.selectedRequirements);
+    if (id !== undefined) spendingTracker.confirm(id);
+  });
+
+  // Free the held amount if payment creation failed
+  client.onPaymentCreationFailure(async (context) => {
+    const id = takeReservation(context.selectedRequirements);
+    if (id !== undefined) spendingTracker.release(id);
   });
 
   // Wrap fetch with payment handling
