@@ -13,6 +13,7 @@ import {
   getSessionCostsFiltered,
   getSessionLogsByTaskId,
   getTaskById,
+  refreshActiveSessionOnActivity,
 } from "../be/db";
 import { recordSessionCost } from "../otel";
 import { incrementServerSessionsProcessed } from "../server-runtime-counters";
@@ -319,6 +320,16 @@ export async function handleSessionData(
         cli: parsed.body.cli || "claude",
         lines: parsed.body.lines,
       });
+      // Every harness streams its output through this endpoint, so a task that
+      // is producing output keeps its session alive here instead of per
+      // provider. Best-effort: a liveness write must never fail log storage.
+      if (parsed.body.taskId) {
+        try {
+          await refreshActiveSessionOnActivity(parsed.body.taskId);
+        } catch (error) {
+          console.warn("[HTTP] Failed to refresh session liveness from session logs:", error);
+        }
+      }
       createSessionLogsRoute.respond(res, 201, {
         success: true,
         count: parsed.body.lines.length,

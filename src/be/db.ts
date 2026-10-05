@@ -198,6 +198,10 @@ import { isInternalConfigKey, isReservedConfigKey, reservedKeyError } from "./sw
 import { emitTaskStarted } from "./task-lifecycle-events";
 
 export {
+  refreshActiveSessionOnActivity,
+  SESSION_ACTIVITY_REFRESH_MIN_INTERVAL_MS,
+} from "./db/active-sessions";
+export {
   buildRoutingAffinityFromAgent,
   createAgent,
   deleteAgent,
