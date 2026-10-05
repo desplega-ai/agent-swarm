@@ -6,6 +6,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.163.0] - 2026-10-05
+
+### Added
+- Dashboard: a longterm key tree and whole-memory view on `/memory` (#1856).
+- Dashboard: task status dots and spinners replaced with the reference icon set (#1860).
+- Docs: multi-agent orchestration patterns guide (#1864) and a features section with a team collaboration page (#1865).
+
+### Changed
+- Memory: `DELETE /api/memory/{id}` (and the script SDK's `memory_delete`) follows the `memory-delete` rule, so only the lead deletes swarm-scoped memories; `POST /api/memory/list` returns an agent caller only its own rows plus swarm-scoped ones (#1855).
+- RBAC: only a lead, the operator or a user can create or change stdio MCP servers at agent scope (#1851), change a repo's `allowMerge` (#1852), or attribute a task to a user other than the current task's requester (#1853). The stdio and `allowMerge` checks run inside the write transaction (#1859).
+- Docs: workflow example configs and routing corrected (#1862); SSO RBAC note, Sentry summary and compose service table aligned with code (#1863).
+
+### Fixed
+- Memory: deleting a keyed document removes its stale chunks (#1857), and a key-only chunk lookup resolves to one visible document (#1861).
+- Dashboard: offers a reload instead of crashing when a deploy removes a lazy-loaded chunk (#1866).
+- Tests: adapter tests isolate the inherited Claude transport (#1858).
+
 ## [1.162.0] - 2026-10-03
 
 ### Added
