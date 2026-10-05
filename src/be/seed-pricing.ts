@@ -104,6 +104,23 @@ const ANTHROPIC_SHORTNAME_PRICING_FALLBACKS: Record<string, ModelsDevCostBlock> 
   "claude-mythos-5-1": { input: 10, output: 50, cache_read: 0.25, cache_write: 12.5 },
 };
 
+/**
+ * Cursor's own models, which models.dev does not list. Rates are Cursor's
+ * published per-token prices (verified 2026-10-05):
+ * https://cursor.com/docs/models-and-pricing and https://cursor.com/blog/composer-2-5.
+ *
+ * Fast is Composer's default variant ("fast is the default option") and the
+ * adapter never sets the `fast` param, so these are the Composer 2.5 (Fast)
+ * rates. Cursor publishes no cache-write rate. `composer-2` is retired and
+ * Cursor reroutes it to Composer 2.5 (https://cursor.com/docs/sdk/typescript).
+ * `default` (Auto) has no rate of its own: it bills at the list price of the
+ * model each request is routed to, so it stays unpriced.
+ */
+const CURSOR_FIRST_PARTY_PRICING: Record<string, ModelsDevCostBlock> = {
+  "composer-2.5": { input: 3, output: 15, cache_read: 0.5 },
+  "composer-2": { input: 3, output: 15, cache_read: 0.5 },
+};
+
 export interface PricingSeedRow {
   provider: PricingProvider;
   model: string;
@@ -232,8 +249,8 @@ export function buildModelsDevSeedRows(cache: ModelsDevCache): PricingSeedRow[] 
   // ---- Cursor (bare vendor ids through Cursor's hosted inference) --------
   // Cursor bills the vendor's API rates for the models it hosts and names
   // them by the vendor's own id (`gpt-5.4-nano`, `claude-sonnet-5-5`), so the
-  // vendor sections project as-is. Cursor-only models (`composer-*`, `default`)
-  // have no models.dev row and settle as `costSource: 'unpriced'`.
+  // vendor sections project as-is. Cursor's own models have no models.dev row;
+  // {@link CURSOR_FIRST_PARTY_PRICING} covers them in `buildPricingSeedRows`.
   for (const vendor of ["openai", "anthropic", "google", "xai"] as const) {
     for (const [id, model] of Object.entries(cache[vendor]?.models ?? {})) {
       if (!model?.cost) continue;
@@ -298,13 +315,16 @@ export function buildModelsDevSeedRows(cache: ModelsDevCache): PricingSeedRow[] 
 /** Build the exact provider rows inserted by the boot-time pricing seeder. */
 export function buildPricingSeedRows(cache: ModelsDevCache | null): PricingSeedRow[] {
   const modelsdevRows = cache ? buildModelsDevSeedRows(cache) : [];
+  const cursorRows = Object.entries(CURSOR_FIRST_PARTY_PRICING).flatMap(([model, cost]) =>
+    projectCostBlock("cursor", model, cost, { anthropicBilled: false }),
+  );
   const manualRows = MANUAL_PRICING_OVERRIDES.map((override) => ({
     provider: override.provider,
     model: override.model,
     tokenClass: override.tokenClass,
     pricePerMillionUsd: override.pricePerMillionUsd,
   }));
-  return [...modelsdevRows, ...manualRows];
+  return [...modelsdevRows, ...cursorRows, ...manualRows];
 }
 
 /**
