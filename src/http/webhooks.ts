@@ -44,6 +44,7 @@ import type {
   NoteEvent,
   PipelineEvent,
 } from "../gitlab";
+import { gitlabWorkflowActionName } from "../gitlab/workflow-action-name";
 import {
   handleIssue as handleGitLabIssue,
   handleMergeRequest,
@@ -450,7 +451,8 @@ export async function handleWebhooks(
         case "merge_request": {
           const mr = body as unknown as MergeRequestEvent;
           const action = mr.object_attributes.action;
-          workflowEventBus.emit(`gitlab.merge_request.${action}`, {
+          const workflowAction = gitlabWorkflowActionName(action);
+          const eventPayload = {
             repo: mr.project.path_with_namespace,
             number: mr.object_attributes.iid,
             title: mr.object_attributes.title,
@@ -459,17 +461,27 @@ export async function handleWebhooks(
             merged: mr.object_attributes.state === "merged",
             html_url: mr.object_attributes.url,
             user_login: mr.user.username,
-          });
+          };
+          workflowEventBus.emit(`gitlab.merge_request.${workflowAction}`, eventPayload);
+          if (workflowAction !== action) {
+            workflowEventBus.emit(`gitlab.merge_request.${action}`, eventPayload);
+          }
           break;
         }
         case "issue": {
           const iss = body as unknown as GitLabIssueEvent;
-          workflowEventBus.emit(`gitlab.issue.${iss.object_attributes.action}`, {
+          const action = iss.object_attributes.action;
+          const workflowAction = gitlabWorkflowActionName(action);
+          const eventPayload = {
             repo: iss.project.path_with_namespace,
             number: iss.object_attributes.iid,
             title: iss.object_attributes.title,
-            action: iss.object_attributes.action,
-          });
+            action,
+          };
+          workflowEventBus.emit(`gitlab.issue.${workflowAction}`, eventPayload);
+          if (workflowAction !== action) {
+            workflowEventBus.emit(`gitlab.issue.${action}`, eventPayload);
+          }
           break;
         }
         case "note": {
