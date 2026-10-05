@@ -128,12 +128,15 @@ function DshIcon(props: IconProps) {
   );
 }
 
+// Cursor logo mark: Simple Icons `cursor` (simple-icons@16.34.0), sourced from https://cursor.com/brand.
+const CURSOR_PATH =
+  "M11.503.131 1.891 5.678a.84.84 0 0 0-.42.726v11.188c0 .3.162.575.42.724l9.609 5.55a1 1 0 0 0 .998 0l9.61-5.55a.84.84 0 0 0 .42-.724V6.404a.84.84 0 0 0-.42-.726L12.497.131a1.01 1.01 0 0 0-.996 0M2.657 6.338h18.55c.263 0 .43.287.297.515L12.23 22.918c-.062.107-.229.064-.229-.06V12.335a.59.59 0 0 0-.295-.51l-9.11-5.257c-.109-.063-.064-.23.061-.23";
+
 function CursorIcon(props: IconProps) {
-  // Simplified Cursor cube: hexagon outline with one shaded face.
   return (
     // biome-ignore lint/a11y/noSvgWithoutTitle: decorative icon, harness label provides accessible name
     <svg aria-hidden {...ICON_BASE_24} {...props}>
-      <path d="M12 1.5 21.5 7v10L12 22.5 2.5 17V7L12 1.5zm0 2.3L4.5 8.1v7.8l7.5 4.3 7.5-4.3V8.1L12 3.8zM12 12l7.5-3.9L12 3.8V12z" />
+      <path d={CURSOR_PATH} />
     </svg>
   );
 }
