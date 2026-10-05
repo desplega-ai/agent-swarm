@@ -35,6 +35,7 @@ import { CollapsibleSection } from "@/components/shared/collapsible-section";
 import { MarkdownView } from "@/components/shared/markdown-view";
 import { ModelLabel } from "@/components/shared/model-logo";
 import { REASONING_EFFORT_LABEL } from "@/components/shared/reasoning-effort-icon";
+import type { SessionLogView } from "@/components/shared/session-log-messages";
 import { SessionLogViewer } from "@/components/shared/session-log-viewer";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { TaskAttachmentsSection } from "@/components/shared/task-attachments-section";
@@ -94,6 +95,18 @@ function defaultTaskTab(status: AgentTaskStatus | undefined): string {
   if (status && TERMINAL_STATUSES.has(status)) return "outcome";
   if (status === "in_progress" || status === "paused") return "logs";
   return "details";
+}
+
+/**
+ * The log's first view: a finished task opens on its messages, any other on
+ * every event. `?logView=` keeps the reader's pick.
+ */
+function defaultLogView(status: AgentTaskStatus | undefined): SessionLogView {
+  return status && TERMINAL_STATUSES.has(status) ? "messages" : "everything";
+}
+
+function coerceLogView(value: string, fallback: SessionLogView): SessionLogView {
+  return value === "messages" || value === "everything" ? value : fallback;
 }
 
 /**
@@ -320,18 +333,17 @@ export default function TaskDetailPage() {
     setHelpOpen(false);
   }, [id]);
   const { searchParams, setParam } = useUrlSearchState();
-  // The narrow layout's first tab follows the status the page opened with.
-  // A status change while the page is open (the task finishes) does not move
-  // the reader to another tab.
+  // The narrow layout's first tab and the log's first view follow the status
+  // the page opened with. A status change while the page is open (the task
+  // finishes) does not move the reader to another tab or view.
   const [openedWith, setOpenedWith] = useState<{ id: string; status: AgentTaskStatus } | null>(
     null,
   );
   useEffect(() => {
     if (task && openedWith?.id !== task.id) setOpenedWith({ id: task.id, status: task.status });
   }, [task, openedWith]);
-  const defaultTab = defaultTaskTab(
-    task && openedWith?.id === task.id ? openedWith.status : task?.status,
-  );
+  const openedStatus = task && openedWith?.id === task.id ? openedWith.status : task?.status;
+  const defaultTab = defaultTaskTab(openedStatus);
   const activeTab = coerceTaskDetailTab(
     readStringParam(searchParams, "tab", defaultTab),
     defaultTab,
@@ -340,6 +352,16 @@ export default function TaskDetailPage() {
     (tab: string) =>
       setParam("tab", coerceTaskDetailTab(tab, defaultTab), { defaultValue: defaultTab }),
     [setParam, defaultTab],
+  );
+  // Messages or Everything, shared by both layouts' logs.
+  const logViewFallback = defaultLogView(openedStatus);
+  const logView = coerceLogView(
+    readStringParam(searchParams, "logView", logViewFallback),
+    logViewFallback,
+  );
+  const setLogView = useCallback(
+    (view: SessionLogView) => setParam("logView", view, { defaultValue: logViewFallback }),
+    [setParam, logViewFallback],
   );
   // The wide layout's compact bar shows once the hero scrolls out of the
   // center column. The column is the page's one scroller: the log flows in it.
@@ -564,6 +586,9 @@ export default function TaskDetailPage() {
         steeringMessages={steeringForViewer}
         scrollElement={scrollElement}
         touchTargets={touchTargets}
+        view={logView}
+        onViewChange={setLogView}
+        status={task.status}
       />
     ) : sessionLogsLoading ? (
       // Do not claim "no session log" before the read answers.

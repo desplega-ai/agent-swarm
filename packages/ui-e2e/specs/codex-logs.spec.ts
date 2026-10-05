@@ -203,6 +203,39 @@ test("Codex app-server logs render messages, deltas, and MCP results", async ({
   await clean.assertClean();
 });
 
+test("a finished task's log opens on Messages, with the tool call folded", async ({
+  page,
+  api,
+  seed,
+  clean,
+}, testInfo) => {
+  test.skip(!seed, "remote run without seed");
+  const logs = await seedCodexLogs(api, seed!.tasks.completed, testInfo.testId);
+  await page.goto(`/tasks/${seed!.tasks.completed}`);
+
+  const visible = { visible: true } as const;
+  await expect(page.getByRole("radio", { name: "Messages" }).filter(visible)).toBeChecked();
+  await expect(page.getByText(logs.secondMessage, { exact: true }).filter(visible)).toHaveCount(1);
+  // The MCP call is folded into one activity line until the line opens.
+  const toolButton = page.getByRole("button", { name: /e2e-mcp\.inspect/ }).filter(visible);
+  await expect(toolButton).toHaveCount(0);
+  await page
+    .getByRole("button", { name: /^Ran 1 tool/ })
+    .filter(visible)
+    .click();
+  await toolButton.click();
+  await expect(page.getByText(logs.mcpResult, { exact: true }).filter(visible)).toBeVisible();
+
+  // Everything shows every event, and the pick survives a reload.
+  await page.getByRole("radio", { name: "Everything" }).filter(visible).click();
+  await expect(page).toHaveURL(/[?&]logView=everything/);
+  await page.reload();
+  await expect(page.getByRole("radio", { name: "Everything" }).filter(visible)).toBeChecked();
+  await expect(toolButton).toBeVisible();
+
+  await clean.assertClean();
+});
+
 test("context usage keeps the latest complete measurement", async ({
   page,
   seed,

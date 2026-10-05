@@ -19,6 +19,7 @@ import {
 import { Highlight, themes } from "prism-react-renderer";
 import {
   type CSSProperties,
+  Fragment,
   memo,
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
@@ -33,14 +34,27 @@ import { Streamdown } from "streamdown";
 import { Spinner } from "@/components/kibo-ui/spinner";
 import "streamdown/styles.css";
 
-import type { ContextSnapshot, SessionLog, SteeringMessage } from "@/api/types";
+import type { AgentTaskStatus, ContextSnapshot, SessionLog, SteeringMessage } from "@/api/types";
 import { AnimatedReveal } from "@/components/shared/animated-reveal";
+import {
+  formatDur,
+  matchingRowIndex,
+  type SessionLogView,
+  type StreamRow,
+  summarizeActivity,
+  summarizeEnd,
+  summaryText,
+  type ToolEntry,
+  type ToolKind,
+  toMessageRows,
+} from "@/components/shared/session-log-messages";
 import {
   SubagentDetails,
   SubagentDot,
   SubagentStatus,
   SubagentWaterfall,
 } from "@/components/shared/subagent-waterfall";
+import { TaskStatusIcon } from "@/components/shared/task-status-icon";
 import { ToolResultImage } from "@/components/shared/tool-result-image";
 import { QueuedSteeringBox } from "@/components/steering/queued-steering-box";
 import {
@@ -48,12 +62,14 @@ import {
   steeringMessageTimestamp,
 } from "@/components/steering/steering-message-chips";
 import { Input } from "@/components/ui/input";
+import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { JsonTree } from "@/components/workflows/json-tree";
 import { useTheme } from "@/hooks/use-theme";
 import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
 import { formatTokens } from "@/lib/format-tokens";
+import { statusLabel } from "@/lib/status-labels";
 import { cn, normalizeNewlines } from "@/lib/utils";
 import {
   extractSubagentRuns,
@@ -64,72 +80,7 @@ import {
 } from "@/logs-parser";
 import { imageResultPreview } from "@/logs-parser/result-images";
 
-// --- Stream model ---
-
-type ToolKind = "mcp" | "bash" | "file" | "web" | "task" | "skill" | "other";
-
-interface ToolEntry {
-  id: string;
-  kind: ToolKind;
-  name: string;
-  server: string;
-  title: string;
-  detail: string;
-  input: string;
-  preview: string;
-  body: string;
-  ok: boolean;
-  hasResult: boolean;
-  durMs: number;
-}
-
-type StreamRow =
-  | { type: "compaction"; id: string; snapshot: ContextSnapshot }
-  | {
-      type: "steering";
-      id: string;
-      time: string;
-      iso: string;
-      message: SteeringMessage;
-      isNew: boolean;
-    }
-  | {
-      type: "agent";
-      id: string;
-      role: "assistant" | "user" | "system";
-      time: string;
-      iso: string;
-      md: string;
-      isNew: boolean;
-    }
-  | { type: "thinking"; id: string; time: string; iso: string; text: string; isNew: boolean }
-  | {
-      type: "meta";
-      id: string;
-      time: string;
-      iso: string;
-      block: ProviderMetaBlock;
-      isNew: boolean;
-    }
-  | {
-      type: "subagent";
-      id: string;
-      time: string;
-      iso: string;
-      run: SubagentRun;
-      isNew: boolean;
-    }
-  | {
-      type: "toolgroup";
-      id: string;
-      time: string;
-      iso: string;
-      tools: ToolEntry[];
-      names: string[];
-      durMs: number;
-      defaultOpen: boolean;
-      isNew: boolean;
-    };
+// --- Stream model (types and the Messages view: session-log-messages.ts) ---
 
 const FILE_TOOLS = new Set([
   "Read",
@@ -163,19 +114,6 @@ function fmtFull(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "";
   return d.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "medium" });
-}
-
-/** Human-friendly elapsed duration. 0/invalid → "" (renders nothing). */
-function formatDur(ms: number): string {
-  if (!ms || ms < 0) return "";
-  if (ms < 1000) return `${ms}ms`;
-  if (ms < 60000) {
-    const s = ms / 1000;
-    return `${s < 10 ? s.toFixed(1) : Math.round(s)}s`;
-  }
-  const m = Math.floor(ms / 60000);
-  const s = Math.round((ms % 60000) / 1000);
-  return `${m}m${s ? ` ${s}s` : ""}`;
 }
 
 // Providers without native skill/slash-command support (codex, opencode: see
@@ -865,6 +803,11 @@ function rowSearchText(row: StreamRow): string {
       return `steering ${row.message.mode} ${row.message.status} ${row.message.body}`;
     case "compaction":
       return "compaction";
+    case "activity":
+      // The filter finds a folded line by anything in the rows it holds.
+      return [summaryText(summarizeActivity(row)), ...row.rows.map(rowSearchText)].join(" ");
+    case "end":
+      return summaryText(summarizeEnd(row));
   }
 }
 
@@ -887,6 +830,10 @@ function outlineLabel(row: StreamRow): string {
       return `Steering · ${truncate(row.message.body.replace(/\s+/g, " ").trim(), 56)}`;
     case "compaction":
       return "Compaction";
+    case "activity":
+      return summaryText(summarizeActivity(row));
+    case "end":
+      return summaryText(summarizeEnd(row));
   }
 }
 
@@ -938,7 +885,7 @@ type TickTone = "agent" | "tool" | "user" | "muted";
 
 function rowTone(row: StreamRow): TickTone {
   if (row.type === "subagent") return "agent";
-  if (row.type === "toolgroup") return "tool";
+  if (row.type === "toolgroup" || row.type === "activity") return "tool";
   if (row.type === "agent") return row.role === "user" ? "user" : "agent";
   if (row.type === "steering") return "user";
   if (row.type === "thinking") return "agent";
@@ -2155,6 +2102,11 @@ const MinimapRail = memo(function MinimapRail({
 
 const VIRTUALIZE_THRESHOLD = 120;
 
+const LOG_VIEW_OPTIONS = [
+  { value: "messages", label: "Messages" },
+  { value: "everything", label: "Everything" },
+] as const satisfies readonly { value: SessionLogView; label: string }[];
+
 // Staggered-reveal tuning: when a poll appends a small batch of new rows while
 // following, each row after the first is delayed by STAGGER_STEP_MS so they
 // cascade in one-by-one. Batches larger than STAGGER_MAX_ROWS (catch-up /
@@ -2226,6 +2178,22 @@ interface SessionLogViewerProps {
    * page's narrow layout). Row controls get a touch hit area either way.
    */
   touchTargets?: boolean;
+  /**
+   * Which rows show. "everything" (the default) is one row per event.
+   * "messages" keeps the messages and folds each run of tool and thinking
+   * rows into one line (`toMessageRows`).
+   */
+  view?: SessionLogView;
+  /**
+   * Shows the Messages / Everything switch in the toolbar. The caller owns
+   * the view. Without it, the toolbar keeps its "Logs" tab.
+   */
+  onViewChange?: (view: SessionLogView) => void;
+  /**
+   * The task status. When the session has ended, the footer names a failed
+   * or a cancelled end instead of "Session complete".
+   */
+  status?: AgentTaskStatus;
 }
 
 export function SessionLogViewer({
@@ -2236,6 +2204,9 @@ export function SessionLogViewer({
   steeringMessages,
   scrollElement,
   touchTargets = false,
+  view = "everything",
+  onViewChange,
+  status,
 }: SessionLogViewerProps) {
   // Fixed for the viewer's lifetime: callers pass `scrollElement` from the
   // first render (as `null` until the element mounts) or never.
@@ -2295,22 +2266,33 @@ export function SessionLogViewer({
     [messages, subagents, compactionSnapshots, newIds, isRunning, streamSteering],
   );
 
+  // Messages folds the rows before the filter, so a folded line matches by
+  // anything it holds.
+  const viewRows = useMemo(() => (view === "messages" ? toMessageRows(rows) : rows), [rows, view]);
+
   const { searchParams, setParam } = useUrlSearchState();
   const query = readStringParam(searchParams, "logSearch");
   const setQuery = useCallback((value: string) => setParam("logSearch", value), [setParam]);
   const visibleRows = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return rows;
-    return rows.filter(
+    if (!q) return viewRows;
+    return viewRows.filter(
       (r) => r.type !== "compaction" && rowSearchText(r).toLowerCase().includes(q),
     );
-  }, [rows, query]);
+  }, [viewRows, query]);
 
   const virtualize = visibleRows.length > VIRTUALIZE_THRESHOLD;
+  // The footer counts events: a folded activity line holds several.
+  const eventCount = useMemo(
+    () => visibleRows.reduce((n, r) => n + (r.type === "activity" ? r.rows.length : 1), 0),
+    [visibleRows],
+  );
 
   // Per-id collapse state, keyed by stable id so it survives refetch + recycling.
   const [groupToggle, setGroupToggle] = useState<Map<string, boolean>>(new Map());
   const [openSubagents, setOpenSubagents] = useState<Set<string>>(new Set());
+  // Messages view: open activity lines (closed by default).
+  const [openActivities, setOpenActivities] = useState<Set<string>>(new Set());
   const [openTools, setOpenTools] = useState<Set<string>>(new Set());
   const [openOutputs, setOpenOutputs] = useState<Set<string>>(new Set());
   const [flashId, setFlashId] = useState<string | null>(null);
@@ -2340,6 +2322,14 @@ export function SessionLogViewer({
 
   const toggleSubagent = useCallback((id: string) => {
     setOpenSubagents((previous) => {
+      const next = new Set(previous);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }, []);
+
+  const toggleActivity = useCallback((id: string) => {
+    setOpenActivities((previous) => {
       const next = new Set(previous);
       next.has(id) ? next.delete(id) : next.add(id);
       return next;
@@ -2438,11 +2428,15 @@ export function SessionLogViewer({
           return openSubagents.has(r.id) ? 148 : 42;
         case "compaction":
           return 40;
+        case "activity":
+          return openActivities.has(r.id) ? 36 + 40 * r.rows.length : 36;
+        case "end":
+          return 36;
         default:
           return 64;
       }
     },
-    [visibleRows, openSubagents],
+    [visibleRows, openSubagents, openActivities],
   );
 
   const virtualizer = useVirtualizer({
@@ -2599,19 +2593,123 @@ export function SessionLogViewer({
     return () => ro.disconnect();
   }, [stickToBottom]);
 
-  // Track newly-appended events for the "N new" pill when scrolled up.
+  // Track newly-appended events for the "N new" pill when scrolled up. A view
+  // switch or a new filter changes the row count with no new event: it only
+  // sets a new baseline.
+  const rowSetKey = `${view}\n${query}`;
+  const prevRowSetKey = useRef(rowSetKey);
   useEffect(() => {
     const cur = visibleRows.length;
-    if (!didInit.current) {
+    if (!didInit.current || prevRowSetKey.current !== rowSetKey) {
+      if (didInit.current) setPending(0);
       didInit.current = true;
+      prevRowSetKey.current = rowSetKey;
       prevCount.current = cur;
       return;
     }
-    if (cur > prevCount.current && !atBottomRef.current) {
-      setPending((p) => p + (cur - prevCount.current));
-    }
+    // Read the count now: React can run the updater after the ref below moves.
+    const added = cur - prevCount.current;
+    if (added > 0 && !atBottomRef.current) setPending((p) => p + added);
     prevCount.current = cur;
-  }, [visibleRows.length]);
+  }, [visibleRows.length, rowSetKey]);
+
+  // A view switch keeps the reader's place:
+  // - The start of the log in view: nothing moves. An end that showed only
+  //   because the log is short does not pin the new view to its end.
+  // - Scrolled to the end of the log: the keep-pinned effect above keeps the
+  //   end in view.
+  // - Scrolled into the log: the first row that shows (the anchor) is found
+  //   in the new view (the same message, or the line that folds it) and kept
+  //   at the same height. A row the new view does not have (a filter hides
+  //   it) shows the new view from its first row.
+  // The browser's own scroll anchoring is off for the switch: rows are not
+  // anchor candidates, so it anchors on a node under the log and scrolls
+  // the page by the change in the log's height.
+  const switchPlan = useRef<
+    | { kind: "keep"; scrollTop: number }
+    | { kind: "anchor"; id: string | null; top: number; edge: number }
+    | null
+  >(null);
+  const changeView = useCallback(
+    (next: SessionLogView) => {
+      // The switch fires again on the selected option.
+      if (next === view || !onViewChange) return;
+      switchPlan.current = null;
+      const el = getScroller();
+      const content = contentRef.current;
+      if (el && content && content.getClientRects().length > 0) {
+        el.style.overflowAnchor = "none";
+        // Page mode: the rows show under the toolbar. Own scroller: under its top.
+        const edge = pageMode
+          ? (toolbarRef.current?.getBoundingClientRect().bottom ?? 0)
+          : el.getBoundingClientRect().top + el.clientTop;
+        if (content.getBoundingClientRect().top >= edge) {
+          atBottomRef.current = false;
+          switchPlan.current = { kind: "keep", scrollTop: el.scrollTop };
+        } else if (!atBottomRef.current) {
+          const anchor = [...content.querySelectorAll<HTMLElement>("[data-row-id]")].find(
+            (row) => row.getBoundingClientRect().bottom > edge + 1,
+          );
+          switchPlan.current = {
+            kind: "anchor",
+            id: anchor?.dataset.rowId ?? null,
+            top: anchor?.getBoundingClientRect().top ?? edge,
+            edge,
+          };
+        }
+      }
+      onViewChange(next);
+    },
+    [view, onViewChange, getScroller, pageMode],
+  );
+  const shownView = useRef(view);
+  useLayoutEffect(() => {
+    if (shownView.current === view) return;
+    shownView.current = view;
+    const plan = switchPlan.current;
+    switchPlan.current = null;
+    const el = getScroller();
+    const content = contentRef.current;
+    if (!el) return;
+    // Back on after the next frame: the browser applies its anchoring at the
+    // frame's layout, after this frame's callbacks. Later height changes
+    // above the log keep the browser's anchoring.
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() => {
+        el.style.overflowAnchor = "";
+      }),
+    );
+    if (plan?.kind === "keep") {
+      el.scrollTop = plan.scrollTop;
+      return;
+    }
+    if (!content || !plan) return;
+    const index = plan.id ? matchingRowIndex(visibleRows, plan.id) : -1;
+    const row = visibleRows[index];
+    // The same row keeps its exact height. A folding line or another row
+    // starts at the edge at the lowest, so it does not hide under the toolbar.
+    const targetTop = !row
+      ? plan.edge
+      : row.id === plan.id
+        ? plan.top
+        : Math.max(plan.top, plan.edge);
+    let rowTop: number | undefined;
+    if (!row) {
+      rowTop = content.getBoundingClientRect().top;
+    } else if (virtualize) {
+      // Not rendered yet: its place comes from the virtualizer. The rows
+      // that rendered at the old offset measured on commit, which moved the
+      // starts: `getTotalSize` refreshes them before the read.
+      virtualizer.getTotalSize();
+      const item = virtualizer.measurementsCache[index];
+      if (item) rowTop = el.getBoundingClientRect().top + el.clientTop + item.start - el.scrollTop;
+    } else {
+      rowTop = content
+        .querySelector(`[data-row-id="${CSS.escape(row.id)}"]`)
+        ?.getBoundingClientRect().top;
+    }
+    if (rowTop !== undefined) el.scrollTop = Math.max(0, el.scrollTop + rowTop - targetTop);
+  }, [view, getScroller, visibleRows, virtualize, virtualizer]);
 
   const jumpTo = useCallback(
     (index: number, row: StreamRow) => {
@@ -2802,6 +2900,108 @@ export function SessionLogViewer({
           </RowShell>
         );
       }
+      if (row.type === "activity") {
+        // Messages view: one muted line for a run of tool and thinking rows.
+        // Open, it shows them with their own renderers, tools first-level
+        // (the line already counts them).
+        const open = openActivities.has(row.id);
+        const summary = summarizeActivity(row);
+        return (
+          <RowShell
+            time={row.time}
+            iso={row.iso}
+            flash={flash}
+            isNew={row.isNew}
+            highlight={row.isNew && atBottomRef.current}
+            streamDelayMs={streamDelayMs}
+          >
+            <button
+              type="button"
+              onClick={() => toggleActivity(row.id)}
+              aria-expanded={open}
+              className="hit-area flex w-full min-w-0 cursor-pointer items-center gap-2 py-0.5 text-left text-xs text-muted-foreground hover:text-foreground"
+            >
+              <ChevronRight
+                className={cn(
+                  "size-3 shrink-0 transition-transform duration-200",
+                  open && "rotate-90",
+                )}
+              />
+              <span className="shrink-0 font-medium">{summary.title}</span>
+              {summary.stats.map((stat) => (
+                <Fragment key={stat}>
+                  <span aria-hidden>·</span>
+                  <span className="shrink-0 font-mono tabular-nums">{stat}</span>
+                </Fragment>
+              ))}
+              {summary.names.length > 0 && (
+                <span className="ml-1 min-w-0 flex-1 truncate font-mono">
+                  {groupHeader(summary.names)}
+                </span>
+              )}
+            </button>
+            <AnimatedReveal open={open} speed="fast">
+              <div className="mt-1.5 flex flex-col gap-1.5 pl-0.5">
+                {row.rows.map((child) => (
+                  <Fragment key={child.id}>
+                    {child.type === "thinking" ? (
+                      <ThinkingRow text={child.text} />
+                    ) : child.type === "meta" ? (
+                      <ProviderMetaBubble block={child.block} />
+                    ) : child.type === "toolgroup" ? (
+                      child.tools.map((t) => (
+                        <ToolRow
+                          key={t.id}
+                          tool={t}
+                          open={openTools.has(t.id)}
+                          onToggle={() => toggleTool(t.id)}
+                          outputOpen={openOutputs.has(t.id)}
+                          onToggleOutput={() => toggleOutput(t.id)}
+                        />
+                      ))
+                    ) : null}
+                  </Fragment>
+                ))}
+              </div>
+            </AnimatedReveal>
+          </RowShell>
+        );
+      }
+      if (row.type === "end") {
+        // Messages view: the run result as one line. The answer itself is
+        // in the messages above it (and on the page's outcome card).
+        const summary = summarizeEnd(row);
+        return (
+          <RowShell
+            time={row.time}
+            iso={row.iso}
+            flash={flash}
+            isNew={row.isNew}
+            highlight={row.isNew && atBottomRef.current}
+            streamDelayMs={streamDelayMs}
+          >
+            <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 py-0.5 text-xs">
+              <TaskStatusIcon status={row.isError ? "failed" : "completed"} className="size-3.5" />
+              <span
+                className={cn(
+                  "font-medium",
+                  row.isError ? "text-status-error-strong" : "text-foreground",
+                )}
+              >
+                {summary.title}
+              </span>
+              {summary.stats.map((stat) => (
+                <Fragment key={stat}>
+                  <span aria-hidden className="text-muted-foreground">
+                    ·
+                  </span>
+                  <span className="font-mono tabular-nums text-muted-foreground">{stat}</span>
+                </Fragment>
+              ))}
+            </div>
+          </RowShell>
+        );
+      }
       const open = isGroupOpen(row);
       const dur = formatDur(row.durMs);
       return (
@@ -2853,9 +3053,11 @@ export function SessionLogViewer({
     [
       flashId,
       isGroupOpen,
+      openActivities,
       openOutputs,
       openSubagents,
       openTools,
+      toggleActivity,
       toggleGroup,
       toggleOutput,
       toggleSubagent,
@@ -2879,6 +3081,10 @@ export function SessionLogViewer({
   const minimapStickyHeight = pageMode
     ? `calc(${pageBox.viewportH}px - var(--log-sticky-top, 0px) - var(--log-toolbar-h, 0px) - var(--log-sticky-bottom, 0px) - var(--log-tail-h, 0px))`
     : undefined;
+  // The view switch replaces the lone "Logs" tab. The tabs stay for the
+  // Agents view, and without a switch (other callers).
+  const showTabList = !onViewChange || subagents.length > 0;
+
   // Page mode shows the pill only while the rows are in view.
   const showJumpPill = !atBottom && (!pageMode || logInView);
   const jumpPill = (
@@ -2927,30 +3133,53 @@ export function SessionLogViewer({
                 "sticky top-[var(--log-sticky-top,0px)] z-10 bg-card bg-linear-to-b from-muted/30 to-muted/30",
             )}
           >
-            <TabsList
-              variant="line"
-              className={cn("shrink-0 rounded-none p-0", touchTargets ? "h-11" : "h-[30px]")}
-            >
-              <TabsTrigger
-                value="logs"
-                className={cn("flex-none rounded-none px-2 text-xs", touchTargets ? "h-11" : "h-7")}
+            {showTabList && (
+              <TabsList
+                variant="line"
+                className={cn("shrink-0 rounded-none p-0", touchTargets ? "h-11" : "h-[30px]")}
               >
-                Logs
-              </TabsTrigger>
-              {subagents.length > 0 && (
                 <TabsTrigger
-                  value="agents"
+                  value="logs"
                   className={cn(
                     "flex-none rounded-none px-2 text-xs",
                     touchTargets ? "h-11" : "h-7",
                   )}
                 >
-                  Agents <span className="font-mono text-[10px]">({subagents.length})</span>
+                  Logs
                 </TabsTrigger>
-              )}
-            </TabsList>
+                {subagents.length > 0 && (
+                  <TabsTrigger
+                    value="agents"
+                    className={cn(
+                      "flex-none rounded-none px-2 text-xs",
+                      touchTargets ? "h-11" : "h-7",
+                    )}
+                  >
+                    Agents <span className="font-mono text-[10px]">({subagents.length})</span>
+                  </TabsTrigger>
+                )}
+              </TabsList>
+            )}
+            {onViewChange && activeView === "logs" && (
+              <SegmentedControl
+                size="sm"
+                aria-label="Log view"
+                value={view}
+                onValueChange={changeView}
+                options={LOG_VIEW_OPTIONS}
+                // Touch: 44 px options inside the control's border and padding.
+                className={cn(touchTargets && "h-12.5")}
+              />
+            )}
             {activeView === "logs" && (
-              <div className="relative ml-auto">
+              <div
+                className={cn(
+                  "relative ml-auto",
+                  // With the view switch, a phone gives the filter the rest of
+                  // the row, so the toolbar stays one row.
+                  onViewChange && "min-w-24 flex-1 sm:flex-none",
+                )}
+              >
                 <Search className="pointer-events-none absolute left-2 top-1/2 size-3 -translate-y-1/2 text-muted-foreground" />
                 <Input
                   value={query}
@@ -2959,7 +3188,8 @@ export function SessionLogViewer({
                   aria-label="Filter session log"
                   // Touch: 16 px text, or iOS Safari zooms the page on focus.
                   className={cn(
-                    "w-40 pl-7 sm:w-52",
+                    "pl-7 sm:w-52",
+                    onViewChange ? "w-full" : "w-40",
                     touchTargets ? "h-11 text-base" : "h-[30px] text-xs",
                   )}
                 />
@@ -2971,6 +3201,11 @@ export function SessionLogViewer({
             value="logs"
             forceMount
             className="flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden"
+            // No tab list: a labelled region, not a tab panel named by a
+            // trigger that is not there.
+            {...(showTabList
+              ? {}
+              : { role: "region", "aria-label": "Session log", "aria-labelledby": undefined })}
           >
             {/* Body */}
             <div className="relative flex min-h-0 flex-1">
@@ -3065,7 +3300,7 @@ export function SessionLogViewer({
               <QueuedSteeringBox messages={pendingSteering} touchTargets={touchTargets} />
 
               {/* Footer */}
-              <RunningFooter count={visibleRows.length} isRunning={isRunning} />
+              <RunningFooter count={eventCount} isRunning={isRunning} status={status} />
             </div>
           </TabsContent>
           {subagents.length > 0 && (
@@ -3167,7 +3402,18 @@ function SkillPromptRow({ prompt }: { prompt: SkillPrompt }) {
   );
 }
 
-function RunningFooter({ count, isRunning }: { count: number; isRunning?: boolean }) {
+function RunningFooter({
+  count,
+  isRunning,
+  status,
+}: {
+  count: number;
+  isRunning?: boolean;
+  status?: AgentTaskStatus;
+}) {
+  // A session that ended without completing says how, in the status tone:
+  // error for failed, neutral for cancelled and superseded.
+  const endedWith = isRunning === false && status && status !== "completed" ? status : null;
   return (
     <div className="flex items-center gap-2.5 border-t border-border bg-muted/20 px-3 py-2.5 text-[12.5px]">
       {isRunning === true ? (
@@ -3177,6 +3423,17 @@ function RunningFooter({ count, isRunning }: { count: number; isRunning?: boolea
               footer is the one always-visible "agent is live" line per open
               task, so it carries the treatment. */}
           <span className="shimmer-text font-medium">Agent is working…</span>
+        </>
+      ) : endedWith ? (
+        <>
+          <TaskStatusIcon status={endedWith} />
+          <span
+            className={
+              endedWith === "failed" ? "text-status-error-strong" : "text-muted-foreground"
+            }
+          >
+            Session ended · {statusLabel(endedWith).toLowerCase()}
+          </span>
         </>
       ) : isRunning === false ? (
         <>

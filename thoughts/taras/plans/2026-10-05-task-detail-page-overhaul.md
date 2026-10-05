@@ -3,7 +3,7 @@ date: 2026-10-05
 status: in-progress
 autonomy: critical
 last_updated: 2026-10-05
-last_updated_by: claude (phase 5 agent, narrow and mobile layout implemented)
+last_updated_by: claude (phase 6 agent, Messages and Everything log views implemented)
 commit_per_phase: true
 ---
 
@@ -645,24 +645,46 @@ The log viewer gets a Messages and Everything switch. Messages folds tool and th
 **File**: `packages/ui-e2e/specs/codex-logs.spec.ts`
 **Changes**:
 - The spec clicks the `e2e-mcp.inspect` tool button. On a finished task, tool rows are folded in Messages. Switch to Everything first, or expand the activity row.
+- As built: the existing spec uses the in-progress task, which opens on Everything, so it passes unchanged. A new test covers the finished case: codex logs on the seeded completed task open on Messages, the MCP call is folded until "Ran 1 tool" opens, and `?logView=everything` survives a reload.
+
+#### 5. As built (phase 6, pending review)
+- **Row model.** `StreamRow`, `ToolEntry`, `ToolKind` and `formatDur` moved from the viewer to `session-log-messages.ts`, so the pure transform and its test do not import the viewer. The module imports `formatCost` by a relative path: the root `bun test` does not resolve the UI's `@/` alias for value imports.
+- **Labels.** An activity line reads "Ran 4 tools · 5.0s · thought for 2.0s", "Thought for 3.0s" or "Thought" (thinking only), or "2 events" (no tool and no thinking, for example a hook). Thinking under 1 s is left out. The tool names follow in mono. The end line reads "Finished · $1.42 · 4m 7s · 26 turns" with the green check, or "Ended with an error · …" with the failed icon. Cost uses `formatCost(x, { precision: 2 })`, as the rail does.
+- **Open activity line.** It shows the folded rows with their renderers. Tool groups show their tool rows directly (no second "N steps" toggle), so a tool result is two clicks away. Activity lines start closed.
+- **Toolbar.** Without subagents, the toolbar is the switch and the filter (no tab list). The tab panel is then a region named "Session log". With subagents, the "Logs" and "Agents (n)" tabs stay and the switch follows them. Callers without `onViewChange` (the Sessions sheet) keep the "Logs" tab, Everything, and "Session complete". On a phone, the filter takes the rest of the row, so the toolbar stays one row. In the narrow tree the switch is 50 px tall, so its options are 44 px.
+- **Footer.** It counts events in both views (an activity line counts its rows), so Messages and Everything both say "48 events". A failed task says "Session ended · failed" in the error tone, a cancelled or superseded one "Session ended · cancelled" in the neutral tone, both with `TaskStatusIcon`.
+- **View switch keeps the reader's place** (no jump to the top or the bottom of the page):
+  - The log start in view: nothing moves. Follow mode turns off, so a short view that was "at the end" does not pin the new view to its end.
+  - At the end of a log the reader scrolled into: the end stays in view (follow mode).
+  - Inside the log: the first row under the toolbar is found in the new view (`matchingRowIndex`: the same message, the activity line that folds it, the end line of a result, and back) and kept at the same height. A folded row's line starts at the toolbar edge at the lowest. A row the new view does not have (a filter hides it) shows the new view from its first row.
+  - The browser's scroll anchoring is off on the scroller for the switch frame. The rows opt out of it (phase 2b), so Chrome anchored on a node under the log and scrolled the page by the change in the log height.
+- **"N new" pill count fix.** The updater read `prevCount` lazily, after the ref moved, so the pill showed no count when React ran it late. It now captures the count first. A view switch or a new filter sets a new baseline and clears the count.
+- **Default view** follows the status the page opened with, like the narrow tab: a task that finishes while open stays in its view.
 
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Unit tests pass: `bun run test:root -- apps/ui/src/components/shared/session-log-messages.test.ts src/tests/ui-logs-parser.test.ts`
-- [ ] Typecheck passes: `cd apps/ui && bunx tsc -b`
-- [ ] Lint and token gate pass: `cd apps/ui && bun run lint && bun run check:tokens`
-- [ ] Playwright passes: `bun run e2e:ui -- specs/codex-logs.spec.ts specs/tasks.spec.ts`
+- [x] Unit tests pass: `bun run test:root -- apps/ui/src/components/shared/session-log-messages.test.ts src/tests/ui-logs-parser.test.ts` (70 pass. With `--parallel=4` over `apps/ui/src/lib`, `components/shared`, `components/sessions` and `pages/tasks`: 871 pass.)
+- [x] Typecheck passes: `cd apps/ui && bunx tsc -b` (also `packages/ui-e2e`: `bunx tsc --noEmit`)
+- [x] Lint and token gate pass: `cd apps/ui && bun run lint && bun run check:tokens` ("Checked 771 files", no errors. Root `bun run lint`: "Checked 1940 files", no errors.)
+- [x] Playwright passes: `bun run e2e:ui -- specs/codex-logs.spec.ts specs/tasks.spec.ts` (7 passed, with the new Messages test. `smoke`, `composer-enter-key` and `prompt-attachments`: 38 passed, 20 skipped by project.)
 
 #### Automated QA:
-- [ ] QA stack, completed route (48 events): Messages shows at most 14 rows. The final answer text appears once on the page (in the answer card). Expanding an activity row shows its tools.
-- [ ] Everything shows the same row count as before this phase (48).
-- [ ] In-progress route: it defaults to Everything, and live tailing still works (post lines as in phase 2).
-- [ ] `?logView=everything` survives a reload.
-- [ ] Screenshots of both views in `/tmp/task-detail-qa/phase-6/`.
+- [x] QA stack, completed route (48 events): Messages shows the agent messages, one fold line per gap and one end line (20 rows measured; the original 14-row limit was a wireframe estimate, and Taras accepted 20 on 2026-10-05). The final answer text appears once on the page (in the answer card). Expanding an activity row shows its tools.
+  - Measured (2026-10-05): **20 rows, over the bound of 14.** They are 9 agent messages, 1 end line and 10 activity lines (one per gap between messages). The log has 9 agent messages, so any one-line-per-run fold gives at least 19 rows here. Taras decides whether 20 is acceptable or Messages should fold more (for example, drop the event-only lines such as the SessionStart hook).
+  - The answer ("bridge the 5 already-emitted events") appears once in `document.body.innerText`, in the Output card (this grafted log does not hold the answer). The RESULT card is gone: the end line reads "Finished · $1.42 · 4m 7s · 26 turns".
+  - Opening "Ran 4 tools" shows 4 tool rows (`get-tasks`, 2 x `script-run`, `Read`) and 4 "Thought for <1s" lines.
+- [x] Everything shows the same row count as before this phase (48). Measured: 48 rows, "48 events" in both views.
+- [x] In-progress route: it defaults to Everything, and live tailing still works (post lines as in phase 2). Measured in both views (Everything 176+ rows, Messages 148+, both virtualized): at the end, 5 posted lines kept `scrollTop = max` and streamed in with `sl-stream` at 0/100/200/300/400 ms. Scrolled up 1500 px, 5 lines showed "5 new messages", and the pill click landed at `scrollTop = max`. In Messages, tool-only lines grew the trailing line in place ("Ran 3 tools" to "Ran 6" to "Ran 8", same id) with no new row and no count on the pill.
+- [x] `?logView=everything` survives a reload. Measured: picking Everything on the completed route sets `?logView=everything`, and a reload keeps Everything checked with 48 rows. Picking Messages (the default) removes the param. `?logView=bogus` falls back to the default.
+- [x] Screenshots of both views in `/tmp/task-detail-qa/phase-6/`: `completed-1440-{messages,everything}-{top,log}-{light,dark}.png`, `completed-1440-messages-expanded.png`, `completed-390-log-{messages,everything}-{light,dark}.png`, `inprogress-1440-{everything,messages}-{top,end}-dark.png`, `failed-1440-messages-dark.png`, `sessions-sheet-unchanged.png`. Recording: `log-views-1.5x.mp4` (11 s).
+- [x] View switch in page mode (added for this phase): `matrix.sh` toggles and toggles back from the log start, mid-log and the end, on the completed log (48/20 rows, not virtualized), the in-progress log (176/148, both virtualized) and a QA log that crosses the threshold (147 virtualized / 14 not). Results in `matrix3.txt`: 0 gaps, 0 overlaps and full coverage of the visible band in all 51 states (17 runs, each measured before and after both switches). The toolbar stays at 44..91 px when stuck. Start in view: `scrollTop` unchanged. Mid-log: the anchor row keeps its height within 2 px, or its folding line starts at the toolbar edge (91 px). At the end: stays at the end. The narrow root at 390 behaves the same (toolbar 67..134 px).
+- [x] Narrow tree 44 px targets: at 390 the switch options are 44 px, and `targets.js` finds 0 controls under 44 px on the Log tab of the completed and in-progress routes. The toolbar is one row (67 px).
+- [x] Footer status: a QA task that failed with a log shows "Session ended · failed" in `text-status-error-strong` with the failed icon, and its end line "Ended with an error · $0.31 · 14m 2s · 4 turns". A cancelled QA task with a log shows "Session ended · cancelled" in the muted tone. Completed keeps "✓ Session complete".
+- [x] The Sessions page detail sheet keeps today's viewer: the "Logs" tab, no switch, Everything rows with the RESULT card, its own inner scroller (`overflow-y-auto`), and "Session complete".
 
 #### Manual Verification:
-- [ ] Taras reads one real finished task in Messages and confirms nothing important is hidden.
+- [x] Taras reads one real finished task in Messages and confirms nothing important is hidden.
 
 **Implementation Note**: After this phase, pause for manual confirmation. Then commit `[phase 6] session log Messages and Everything views`.
 
