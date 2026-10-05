@@ -11,7 +11,8 @@
  *                                     `result` only once stdin closes.
  *
  * The steering modes load the generated plugin and run its `tool.result` hook
- * on each tool result, as Amp does; `steer-crash` exits right after that hook.
+ * on each tool result, as Amp does; `steer-crash` exits right after that hook,
+ * and `steer-crash-subagent` first emits an answer from an unrelated subagent.
  *
  * `AMP_TEST_MODE` picks the behaviour, `AMP_TEST_DIR` is where it records what
  * it was given (the adapter deletes its own temp dir when the session ends).
@@ -216,7 +217,7 @@ async function main() {
       session_id: sessionId,
     });
     turns += 1;
-    const steerTool = mode === "steer" || mode === "steer-crash";
+    const steerTool = mode === "steer" || mode.startsWith("steer-crash");
     if (mode === "tool" || (steerTool && index === 0)) {
       assistant(
         [{ type: "tool_use", id: "TU-1", name: "code_exec", input: { code: "1+1" } }],
@@ -239,8 +240,22 @@ async function main() {
         parent_tool_use_id: null,
         session_id: sessionId,
       });
+      if (mode === "steer-crash-subagent") {
+        // A concurrent subagent answers; the model that got the steer has not.
+        emit({
+          type: "assistant",
+          parent_tool_use_id: "OTHER-SUBAGENT",
+          session_id: "OTHER-THREAD",
+          message: {
+            role: "assistant",
+            content: [{ type: "text", text: "Unrelated subagent answered" }],
+            stop_reason: "end_turn",
+          },
+        });
+        await Bun.sleep(100);
+      }
       // Dies after the hook handed the steer to Amp, before the model answers.
-      if (mode === "steer-crash") process.exit(1);
+      if (mode.startsWith("steer-crash")) process.exit(1);
     }
     // A shell command the turn left running, then a clean finish.
     if (mode === "success-child") await startDetachedChild();

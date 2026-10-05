@@ -685,27 +685,29 @@ describe("amp session", () => {
     expect(await session.waitForCompletion()).toMatchObject({ output: "DONE1" });
   });
 
-  test("a steer handed to Amp is reported undeliverable when Amp dies before the model reads it", async () => {
-    const { config } = await fixture("steer-crash");
-    const session = await new AmpAdapter().createSession(config);
-    const events: ProviderEvent[] = [];
-    session.onEvent((event) => events.push(event));
-    await Bun.sleep(250);
-    const delivery = session.deliverSteering?.({
-      mode: "queue",
-      text: "[steering s1] append ACK-1",
+  for (const mode of ["steer-crash", "steer-crash-subagent"]) {
+    test(`a steer handed to Amp is reported undeliverable when Amp dies before the model reads it (${mode})`, async () => {
+      const { config } = await fixture(mode);
+      const session = await new AmpAdapter().createSession(config);
+      const events: ProviderEvent[] = [];
+      session.onEvent((event) => events.push(event));
+      await Bun.sleep(250);
+      const delivery = session.deliverSteering?.({
+        mode: "queue",
+        text: "[steering s1] append ACK-1",
+      });
+      const result = await session.waitForCompletion();
+      // The hook did claim it into the tool result; the model never answered.
+      expect(events.find((e) => e.type === "tool_end")).toMatchObject({
+        result: "2\n\n[steering s1] append ACK-1",
+      });
+      expect(result.isError).toBe(true);
+      expect(await delivery).toEqual({
+        delivered: false,
+        reason: "Amp exited before the steering message reached the model",
+      });
     });
-    const result = await session.waitForCompletion();
-    // The hook did claim it into the tool result; the model never answered.
-    expect(events.find((e) => e.type === "tool_end")).toMatchObject({
-      result: "2\n\n[steering s1] append ACK-1",
-    });
-    expect(result.isError).toBe(true);
-    expect(await delivery).toEqual({
-      delivered: false,
-      reason: "Amp exited before the steering message reached the model",
-    });
-  });
+  }
 
   test("abort stops amp and a command it started in its own session", async () => {
     if (process.platform !== "linux") return;
