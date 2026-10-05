@@ -54,8 +54,12 @@ What the adapter does, and why:
   plugin agent's `reasoningEffort` carries it, only for a pinned model whose
   catalog entry lists levels (`off` -> `none`).
 - **Swarm MCP.** Per-task `--mcp-config` (`0600`) with the five identity headers.
-  The session fails when Amp does not report the server `connected` (`reconnecting`
-  was seen live when the agent id was unknown to the API).
+  The session fails when Amp's `init` event does not list the server, or lists it
+  as anything but `connected`, `connecting` or `pending`. `init` can precede the
+  connection: a server that answered after 3 s was still `connecting`, so that
+  passes, and a connection that never settles is not caught at startup. A refused
+  connection already reads `reconnecting` (also seen live when the agent id was
+  unknown to the API) and fails.
 - **Tool search.** `hasToolSearch: true`, with the `system.agent.tool_discovery.amp`
   text: Amp reaches MCP tools through its own `tool_search` and `code_exec`, names
   underscored (`store_progress`). Direct exposure of the 131 swarm tools (excluding

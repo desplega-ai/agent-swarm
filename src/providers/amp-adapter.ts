@@ -492,7 +492,12 @@ class AmpSession implements ProviderSession {
     }
   }
 
-  /** Never run a worker without the swarm tools: it could not report progress. */
+  /**
+   * Never run a worker without the swarm tools: it could not report progress.
+   * Amp can emit `init` before the connection settles (measured: a server that
+   * answered after 3s was still `connecting`), so an unsettled status passes;
+   * a refused connection already reads `reconnecting` and fails.
+   */
   private checkMcp(event: AmpStreamEvent): void {
     const server = event.mcp_servers?.find((s) => s.name === AMP_MCP_SERVER_NAME);
     const status = server?.status;

@@ -438,7 +438,11 @@ private`, but there is no local-only mode.
   else is rejected at send-task, agent runtime and session start.
 - **Swarm MCP.** The per-task `--mcp-config` file (mode `0600`, removed with the
   temporary directory) carries the swarm URL and the five per-task headers. The
-  session fails if Amp reports the server as anything but connected.
+  session fails when Amp's `init` event does not list the server, or lists it as
+  anything but `connected`, `connecting` or `pending`. Amp can emit `init` before
+  the connection settles (a server that answered after 3 seconds was still
+  `connecting`), so a connection that never settles is not caught at startup; a
+  refused connection reads `reconnecting` and fails.
 - **Tool search.** `hasToolSearch` is `true`. Amp reaches MCP tools through its
   own `tool_search` and `code_exec`, with underscored names. Exposing all 131 swarm tools
   directly (excluding both) raised the first request from about 37k to about 98k input
