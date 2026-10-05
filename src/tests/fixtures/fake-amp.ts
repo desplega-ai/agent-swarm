@@ -99,13 +99,27 @@ async function main() {
     cache_creation_input_tokens: 1000,
     cache_read_input_tokens: 200,
   };
+  // Amp runs shell commands in a session of its own, outside the process group.
+  // Return only once the child has left: a group kill that lands before its
+  // setsid() would take it down and hide a leak.
+  const startDetachedChild = async () => {
+    const child = Bun.spawn(["setsid", "sleep", "300"], { stdout: "ignore", stderr: "ignore" });
+    const session = () => {
+      const stat = readFileSync(`/proc/${child.pid}/stat`, "utf8");
+      return Number(stat.slice(stat.lastIndexOf(")") + 2).split(" ")[3]);
+    };
+    for (let i = 0; i < 100 && session() !== child.pid; i++) await Bun.sleep(20);
+    writeFileSync(`${dir}/child.pid`, String(child.pid));
+  };
+  if (mode === "mcp-fail-child") await startDetachedChild();
+  const mcpFailed = mode === "mcp-fail" || mode === "mcp-fail-child";
   emit({
     type: "system",
     subtype: "init",
     cwd: process.cwd(),
     session_id: sessionId,
     tools: ["code_exec", "tool_search"],
-    mcp_servers: [{ name: "agent-swarm", status: mode === "mcp-fail" ? "failed" : "connected" }],
+    mcp_servers: [{ name: "agent-swarm", status: mcpFailed ? "failed" : "connected" }],
     agent_mode: "medium",
   });
   if (mode === "stderr-split-key") {
@@ -127,14 +141,12 @@ async function main() {
     console.error("Error: Invalid or missing API key. Run 'amp login' to authenticate.");
     process.exit(1);
   }
-  if (mode === "mcp-fail" || mode === "hang") {
+  if (mcpFailed || mode === "hang") {
     setInterval(() => {}, 1000);
     return new Promise(() => {});
   }
   if (mode === "abort") {
-    // Amp runs shell commands in a session of its own, outside the process group.
-    const child = Bun.spawn(["setsid", "sleep", "300"], { stdout: "ignore", stderr: "ignore" });
-    writeFileSync(`${dir}/child.pid`, String(child.pid));
+    await startDetachedChild();
     setInterval(() => {}, 1000);
     return new Promise(() => {});
   }
@@ -196,6 +208,12 @@ async function main() {
     }
   }
   await queue;
+  if (mode === "linger") {
+    // Input closed, but amp never emits `result` or exits: the exit watchdog's case.
+    await startDetachedChild();
+    setInterval(() => {}, 1000);
+    return new Promise(() => {});
+  }
   const failed = mode === "error-result";
   emit({
     type: "result",

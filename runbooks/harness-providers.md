@@ -70,9 +70,11 @@ What the adapter does, and why:
 - **Steering.** `steerModes: ["queue"]`. Amp emits `result` only on stdin EOF, so
   input ends at the first top-level assistant message with no tool call and no
   unechoed queued message. A later steer returns `delivered: false`.
-- **Cancel.** SIGTERM then SIGKILL, plus every descendant: Amp runs shell commands in
+- **Cancel and failure.** Every stop (cancel, MCP failure, stdin failure, the exit
+  watchdog) is SIGTERM then SIGKILL, plus every descendant: Amp runs shell commands in
   their own session (`setsid`), so a group kill alone leaves them as orphans of PID 1
-  (`terminateProcessTree` in `src/utils/process-group.ts`).
+  (`terminateProcessTree` in `src/utils/process-group.ts`). The session settles only
+  after the stop finishes.
 - **Credentials.** Readiness is the presence of `AMP_API_KEY`. The worker live test is
   `amp usage` (no inference, 5 second limit, clean config dir so a stored login
   cannot mask a bad key). A missing key parks the worker in the credential wait.

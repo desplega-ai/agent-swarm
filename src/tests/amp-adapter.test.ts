@@ -491,6 +491,30 @@ describe("amp session", () => {
     }
     throw new Error(`the setsid child ${childPid} survived the abort`);
   }, 20_000);
+
+  test("an MCP failure stops amp and its detached command before the session settles", async () => {
+    if (process.platform !== "linux") return;
+    const { config, dir } = await fixture("mcp-fail-child");
+    const { result } = await runToCompletion(config);
+    expect(result.failureReason).toBe("amp could not connect to the swarm MCP server (failed)");
+    const childPid = Number(await Bun.file(join(dir, "child.pid")).text());
+    expect(childPid).toBeGreaterThan(0);
+    expect(isRunning(childPid)).toBe(false);
+  }, 20_000);
+
+  test("the exit watchdog stops a lingering amp and its detached command", async () => {
+    if (process.platform !== "linux") return;
+    const { config, dir } = await fixture("linger");
+    const session = await new AmpAdapter({ exitAfterInputMs: 1_000 }).createSession(config);
+    const result = await session.waitForCompletion();
+    expect(result).toMatchObject({
+      isError: true,
+      failureReason: "amp did not exit after its turn ended",
+    });
+    const childPid = Number(await Bun.file(join(dir, "child.pid")).text());
+    expect(childPid).toBeGreaterThan(0);
+    expect(isRunning(childPid)).toBe(false);
+  }, 20_000);
 });
 
 describe("amp live test", () => {

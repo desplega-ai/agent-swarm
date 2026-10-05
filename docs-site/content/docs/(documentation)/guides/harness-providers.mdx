@@ -457,8 +457,10 @@ private`, but there is no local-only mode.
   closes, so the adapter ends input at the first top-level assistant message
   with no tool call and nothing queued; a steer after that is refused and the
   runner promotes it to a follow-up task.
-- **Cancel.** Process-tree termination: Amp runs shell commands in a session of
-  its own, so the group kill alone left `sleep` running. The adapter lists the descendants first, then kills them.
+- **Cancel and failure.** Process-tree termination on every stop (cancel, MCP
+  failure, stdin failure, the exit watchdog): Amp runs shell commands in a session of
+  its own, so the group kill alone left `sleep` running. The adapter lists the
+  descendants first, then kills them, and the session settles only after that.
 - **Credentials.** The worker live test runs `amp usage` (credit balance, no
   inference, 5 second limit). A bogus key fails with `Invalid or missing API
   key`; no key parks the worker in the credential wait.

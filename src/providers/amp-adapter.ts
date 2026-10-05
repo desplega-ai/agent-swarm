@@ -339,6 +339,7 @@ interface AmpRun {
   binary: string;
   cwd: string;
   env: Record<string, string>;
+  exitAfterInputMs: number;
 }
 
 class AmpSession implements ProviderSession {
@@ -362,6 +363,7 @@ class AmpSession implements ProviderSession {
   private inputClosed = false;
   private echoWatchdog: ReturnType<typeof setTimeout> | undefined;
   private exitWatchdog: ReturnType<typeof setTimeout> | undefined;
+  private termination: Promise<void> | undefined;
 
   constructor(
     private proc: Bun.Subprocess<"pipe", "pipe", "pipe">,
@@ -432,8 +434,19 @@ class AmpSession implements ProviderSession {
     }
     this.exitWatchdog = setTimeout(() => {
       if (!this.failure) this.failure = "amp did not exit after its turn ended";
-      void terminateProcessGroup(this.proc.pid);
-    }, AMP_EXIT_AFTER_INPUT_MS);
+      void this.terminate();
+    }, this.run.exitAfterInputMs);
+  }
+
+  /**
+   * Stop amp and every descendant. Amp's shell tool starts commands in their
+   * own session, so a group kill misses them, and once amp is gone they are
+   * reparented and unfindable: every stop goes through here while amp is alive,
+   * and the session settles only after it finishes.
+   */
+  private terminate(): Promise<void> {
+    this.termination ??= terminateProcessTree(this.proc.pid);
+    return this.termination;
   }
 
   /** A top-level assistant message with no tool call ends the turn. */
@@ -485,7 +498,7 @@ class AmpSession implements ProviderSession {
     const status = server?.status;
     if (status === "connected" || status === "connecting" || status === "pending") return;
     this.failure = `amp could not connect to the swarm MCP server (${status ?? "not listed"})`;
-    void terminateProcessGroup(this.proc.pid);
+    void this.terminate();
   }
 
   private onAssistant(event: AmpStreamEvent): void {
@@ -682,11 +695,12 @@ class AmpSession implements ProviderSession {
         this.writeInput(prompt).catch((error) => {
           this.failure = `Amp stdin write failed: ${scrubSecrets(String(error))}`;
           this.endInput();
-          void terminateProcessGroup(this.proc.pid);
+          void this.terminate();
         }),
       ]);
       clearTimeout(this.exitWatchdog);
       clearTimeout(this.echoWatchdog);
+      await this.termination;
       const resultFailed =
         this.result !== undefined && (this.result.is_error || this.result.subtype !== "success");
       const output = this.output ?? (this.lastAssistantText || undefined);
@@ -733,7 +747,7 @@ class AmpSession implements ProviderSession {
         appliedReasoningEffort: this.run.reasoningEffort,
       };
     } catch (error) {
-      await terminateProcessGroup(this.proc.pid);
+      await this.terminate();
       const failureReason = scrubSecrets(String(error));
       this.emit({ type: "error", message: failureReason });
       return {
@@ -755,8 +769,7 @@ class AmpSession implements ProviderSession {
   async abort(): Promise<void> {
     this.aborted = true;
     this.endInput();
-    // Amp's shell tool starts commands in their own session; a group kill misses them.
-    await terminateProcessTree(this.proc.pid);
+    await this.terminate();
   }
 }
 
@@ -776,6 +789,8 @@ export class AmpAdapter implements ProviderAdapter {
     // `--stream-json-input` queues a message until the running turn ends.
     steerModes: ["queue"],
   };
+
+  constructor(private readonly options: { exitAfterInputMs?: number } = {}) {}
 
   async createSession(config: ProviderSessionConfig): Promise<ProviderSession> {
     const env = { ...process.env, ...config.env } as Record<string, string>;
@@ -870,6 +885,7 @@ export class AmpAdapter implements ProviderAdapter {
         binary,
         cwd: config.cwd,
         env: childEnv,
+        exitAfterInputMs: this.options.exitAfterInputMs ?? AMP_EXIT_AFTER_INPUT_MS,
       });
     } catch (error) {
       await rm(directory, { recursive: true, force: true });
