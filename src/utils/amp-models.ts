@@ -14,14 +14,16 @@ export type AmpMode = (typeof AMP_MODES)[number];
 /**
  * The model a session's cost is estimated at when `amp threads export` returns
  * nothing (a cancelled thread can lag behind on the server or never reach it).
- * Measured 2026-10-05: `low` ran GLM-5.3 Flash and `medium` ran Claude Opus 5.5.
- * `high` and `ultra` were not measured and are assumed no cheaper than `medium`.
+ * Each is the agent model Amp ran for that mode, read from
+ * `amp threads usage --details` on 2026-10-05 and matching ampcode.com/modes:
+ * low GLM-5.3 Flash, medium Claude Opus 5.5, high GPT-6 Astra, ultra Claude
+ * Fable 5.1. Amp re-routes modes as models change; re-measure on a CLI bump.
  */
 export const AMP_ESTIMATE_MODELS: Readonly<Record<AmpMode, string>> = {
   low: "accounts/fireworks/models/glm-5p3-flash",
   medium: "claude-opus-5-5",
-  high: "claude-opus-5-5",
-  ultra: "claude-opus-5-5",
+  high: "gpt-6-astra",
+  ultra: "claude-fable-5-1",
 };
 
 /** Anthropic bills prompt-cache writes; every other vendor's cache-creation count is plain input. */
