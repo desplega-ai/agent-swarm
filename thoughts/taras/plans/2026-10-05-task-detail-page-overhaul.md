@@ -3,7 +3,7 @@ date: 2026-10-05
 status: in-progress
 autonomy: critical
 last_updated: 2026-10-05
-last_updated_by: claude (phase 2 runner)
+last_updated_by: claude (orchestrator, added phase 2b)
 commit_per_phase: true
 ---
 
@@ -74,7 +74,7 @@ All UI paths are under `apps/ui/src/`. Line numbers are from `main` at `0b93a949
 All of the following hold on the QA stack (`thoughts/taras/qa/2026-10-05-task-detail-qa-stack.md`) in light and dark:
 
 - **Layout follows content width, not viewport width.** At 64rem (1024 px) of content width or more, the page has two columns: a scrolling center column and a 300 px details rail. Below that, it uses the tabs layout.
-- **Desktop log height.** After you scroll the center column down to the log, the log fills the window under a compact sticky bar. It is at least 70% of the window height at 1440x900 and 1366x768. A compact sticky bar (title, status, model, primary action) appears once the hero leaves the view.
+- **Desktop log.** The center column is the only scroller. The log flows inside it with no inner scroller, and its toolbar sticks under a compact sticky bar. The sticky bar (title, status, model, primary action) appears once the hero leaves the view. (Phase 2b, after the phase 2 review.)
 - **Readable heading.**
   - The heading, the breadcrumb and the task lists show the Slack question with mentions turned into names. No `<@`, `(that's you)` or `<thread_context>` text appears anywhere.
   - A source line shows where the task came from.
@@ -115,7 +115,7 @@ All of the following hold on the QA stack (`thoughts/taras/qa/2026-10-05-task-de
   - The "Reassign" action on offered tasks: the UI has no reassign path, so it gets Cancel.
 - **No change to `draft` status semantics.** In this product, `draft` means "attachments still uploading", so its label stays "UPLOADING" and its waiting text says so. The wireframe's "Draft. Not sent yet." is wrong for this product.
 - **No change to the Sessions page behavior.** Follow-ups there still route to the Lead.
-- **No "true single scroll" rewrite of the log viewer.** The viewer keeps its own scroller (Taras chose "log fills the view").
+- ~~No "true single scroll" rewrite of the log viewer.~~ Reversed 2026-10-05 after the phase 2 review: Taras chose a single scroll (phase 2b). Only the task page uses it. Other viewer callers keep their own scroller.
 - **No app-wide type changes.** Badge `size="tag"` stays 9 px, and other pages keep their sizes.
 - **No keyboard shortcuts or draft persistence across reloads.**
 
@@ -124,7 +124,7 @@ All of the following hold on the QA stack (`thoughts/taras/qa/2026-10-05-task-de
 - **One branch and one PR, with a commit per phase** (`[phase N] <description>`). Taras chose this. Each phase leaves the page working and green.
 - **Order is foundations first, then layout, then content:** helpers and data (1), desktop frame (2), hero (3), actions and composer (4), narrow and mobile (5), log views (6), accessibility and type (7).
 - **Layout switches by container width.** The page root gets a Tailwind v4 `@container`. The `lg:hidden` and `hidden lg:grid` pair becomes `@min-[64rem]:hidden` and `hidden @min-[64rem]:grid`. This handles the docked context panel, which a viewport breakpoint cannot.
-- **The log viewer keeps its own scroller.** The page only sizes the log card so that, once scrolled into view, it fills the scroll container under the sticky bar. Virtualization, stick-to-bottom and the "N new" pill keep working unchanged.
+- **One scroller on the task page (phase 2b).** The viewer takes an external `scrollElement`. The virtualizer, stick-to-bottom, the "N new" pill and the minimap use it. Other callers keep the viewer's own scroller. (Phase 2 first shipped a fixed-height log card with its own scroller. The review found the double scroll, so phase 2b replaces it.)
 - **One composer component.** Generalize `SessionComposer` in place into a shared `TaskComposer`, with two callers: Sessions and the task page. The caller decides the steer gate (lead-only versus any assignee) and the follow-up target (the Lead versus the same agent). No wrapper layers.
 - **Pure helpers get unit tests.** These are Slack text parsing, retry input, task-id linkify, and the messages-view row transform. Visual behavior is proven by agent-browser measurements on the QA stack, with screenshots under `/tmp/task-detail-qa/phase-N/`.
 - **Implementation routing** (per `desplega:delegate-work`): Opus sub-agents for UI phases, and Claude reviews every phase with screenshots. Codex is not used, because this is taste-heavy UI work.
@@ -305,9 +305,70 @@ The page switches layout by container width. The wide layout is a scrolling cent
 - [x] Screenshots of completed, in-progress and failed at 1440 and 1366, light and dark, in `/tmp/task-detail-qa/phase-2/`.
 
 #### Manual Verification:
-- [ ] Taras reviews the 1440 light and dark screenshots for feel: rail density, sticky bar, scroll handoff from the column to the log.
+- [ ] Taras reviews the 1440 light and dark screenshots for feel: rail density, sticky bar, scroll handoff from the column to the log. (2026-10-05: the review found a double scroll, column plus log card. Phase 2b replaces the nested scroll.)
 
 **Implementation Note**: After this phase, pause for manual confirmation. Then commit `[phase 2] task page two-column frame, log fills the view, details rail`.
+
+---
+
+## Phase 2b: Single scroll: the log flows in the page scroller
+
+### Overview
+
+Added 2026-10-05 after the phase 2 review. Taras saw two scrollers on the desktop page: the center column and the log card. Wheeling over the log moved the log first, so getting back to the hero meant scrolling the whole log. Taras chose a true single scroll. This reverses the original "the viewer keeps its own scroller" decision.
+
+The center column (wide) and the narrow root (phase 5) are the only scrollers. The log card has no inner scroller on the task page. Other viewer callers keep their own scroller.
+
+### Changes Required:
+
+#### 1. External scroller mode in the viewer
+**File**: `apps/ui/src/components/shared/session-log-viewer.tsx`
+**Changes**:
+- New optional prop `scrollElement?: HTMLElement | null`. Without it, the viewer behaves exactly as today (`components/sessions/task-detail-sheet.tsx` and any other caller).
+- With it ("page mode"):
+  - The body has no `overflow-y-auto` and no fixed height. Rows flow at their natural height inside the page scroller.
+  - The card uses `overflow-clip`, not `overflow-hidden`. `overflow-hidden` makes the card the containing block for `sticky` children, so the sticky toolbar would not stick.
+  - The virtualizer uses `getScrollElement: () => scrollElement` and a `scrollMargin` equal to the content top's offset inside the scroller. Re-measure the offset with a `ResizeObserver` on the scroller content, because the hero and the outcome block change height. Rows translate by `vi.start - scrollMargin`.
+  - "At the end" means the bottom of the log content is within 72 px of the scroller's visible bottom. Compute it from bounding rects on the scroller's `scroll` event. The pill, the follow mode and the stagger all read this.
+  - No initial pin. The page opens at the top, with the hero and the answer in view. Follow mode starts only when the user reaches the end of the log.
+  - `stickToBottom` scrolls the page scroller to its bottom. The virtualized path keeps its `scrollToIndex` step first.
+  - `jumpTo` (minimap) keeps `scrollToIndex` and `scrollIntoView`. Both work with the external scroller.
+  - The toolbar (view tabs and filter) is `sticky` under the page's sticky bar. The page passes the offset as a CSS variable (`--log-sticky-top`).
+  - The minimap rail is `sticky` at the same offset, with a height of the scroller's visible height minus that offset.
+  - The "N new" pill is `sticky bottom-4` and shows only while the log is in view and not at the end.
+  - The footer ("Agent is working…") is `sticky bottom-0` while the task runs.
+
+#### 2. Task page wiring
+**File**: `apps/ui/src/pages/tasks/[id]/page.tsx`, `apps/ui/src/pages/tasks/[id]/task-sticky-bar.tsx`
+**Changes**:
+- Pass the center column element (wide tree) to the viewer as `scrollElement`. Use a callback ref held in state, so the viewer re-renders once the element exists.
+- Remove the phase 2 log sizing: the `[container-type:size]` / `100cqh` card height and the fixed-height log region.
+- The live steer composer sits after the log, `sticky bottom-0` in the column.
+- The sticky bar publishes its height as `--log-sticky-top` on the column.
+- Clicking the sticky bar title scrolls the column to the top.
+- The narrow tree keeps its phase 2 behavior until phase 5 wires it to the narrow root scroller.
+
+### Success Criteria:
+
+#### Automated Verification:
+- [ ] Typecheck passes: `cd apps/ui && bunx tsc -b`
+- [ ] Lint and token gate pass: `cd apps/ui && bun run lint && bun run check:tokens`
+- [ ] Unit tests pass: `bun run test:root -- --parallel=4 apps/ui/src/lib apps/ui/src/components/shared apps/ui/src/components/sessions`
+- [ ] Playwright passes: `bun run e2e:ui -- specs/tasks.spec.ts specs/codex-logs.spec.ts specs/smoke.spec.ts`
+
+#### Automated QA:
+- [ ] Completed and in-progress routes at 1440x900 and 1366x768: inside `main`, the center column is the only element with `scrollHeight > clientHeight` and `overflow-y: auto|scroll`. The log card has no inner scroller.
+- [ ] Completed route at 1440x900: at scroll 0, the answer card is fully above the fold. After scrolling to the end of the column, the last log row and the footer are visible. Wheel events over the log scroll the column (dispatch `agent-browser scroll` with the pointer over the log, then compare `scrollTop` on the column).
+- [ ] The log toolbar stays under the sticky bar while the log scrolls past. Typing in the filter keeps the toolbar in place.
+- [ ] Virtualized path: post 100 lines to the in-progress task, so it passes `VIRTUALIZE_THRESHOLD` (120 rows). Scroll the column through the whole log: no blank gaps and no overlapping rows. A minimap jump lands on the row and flashes it.
+- [ ] Live tail on the in-progress route: at the end of the column, 5 new lines keep the view at the end. Scrolled up, 5 new lines show the "5 new messages" pill, and clicking it lands at the end.
+- [ ] The Sessions page detail sheet (`task-detail-sheet.tsx`) still uses its own inner log scroller.
+- [ ] Screenshots and a short recording of scrolling from the hero through the log and back in `/tmp/task-detail-qa/phase-2b/`.
+
+#### Manual Verification:
+- [ ] Taras scrolls the completed and in-progress routes at 1440: one scroll, the toolbar sticks, and the way back to the hero is easy.
+
+**Implementation Note**: After this phase, pause for manual confirmation. Then commit `[phase 2b] task page single scroll: the log flows in the page scroller`.
 
 ---
 
@@ -469,7 +530,7 @@ Below 64rem of content width:
   - The source line.
   - A "..." `DropdownMenu` (44 px trigger) with Pause, Cancel, Retry and Copy task id, by status.
 - `TabsList` is `sticky top-0` with a background.
-- Panels flow with no inner overflow, except the Log tab: its card height is the scroll container height minus the tabs and the bottom bar, so it fills the view.
+- All panels flow with no inner overflow. The Log tab passes the narrow root scroller to the viewer as `scrollElement` (phase 2b), so the log has no inner scroller. The log toolbar sticks under the sticky tabs.
 
 #### 2. Tabs
 **File**: `apps/ui/src/pages/tasks/[id]/page.tsx`, `packages/ui-e2e/specs/tasks.spec.ts`, `packages/ui-e2e/specs/codex-logs.spec.ts`
@@ -503,7 +564,7 @@ Below 64rem of content width:
 #### Automated QA:
 - [ ] QA stack at 390x844, 768x1024 and 1280x800:
   - Completed route: the tab list top is at most 260 px at scroll 0 (audit baseline: 410). After scrolling, the tabs stay at the top.
-  - Log tab: the log viewport is at least 55% of the window height (baseline: 30%).
+  - Log tab: the narrow root is the only scroller, and the log rows start right under the sticky tabs (baseline: the log viewport was 30% of the window).
   - In-progress route: it opens on Log, and the bottom-bar composer is visible on all three tabs.
   - A draft typed on Log survives a switch to Details and back.
 - [ ] Every interactive element in the page content outside log rows is at least 44 px tall at 390 (eval `getBoundingClientRect`).
