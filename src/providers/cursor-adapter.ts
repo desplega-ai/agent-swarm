@@ -35,7 +35,7 @@ import type {
 } from "./types";
 
 /** Pinned in package.json and Dockerfile.worker; bump all three together. */
-export const CURSOR_SDK_VERSION = "1.0.35";
+export const CURSOR_SDK_VERSION = "1.0.36";
 
 /** MCP server name; Cursor reports its tools as `mcp` calls with this `providerIdentifier`. */
 const CURSOR_MCP_SERVER_NAME = "agent-swarm";

@@ -172,7 +172,7 @@ and the installed CLI's top-level and headless help.
 
 Set `HARNESS_PROVIDER=cursor` and `CURSOR_API_KEY` (a Cursor user or
 service-account key; Team Admin keys do not work). The adapter runs
-`@cursor/sdk` (pinned `1.0.35`) in-process: `Agent.create` with the local
+`@cursor/sdk` (pinned `1.0.36`) in-process: `Agent.create` with the local
 runtime on the task's cwd, then one `agent.send` per run. The agent loop and
 its file and shell tools run in the worker; inference always runs on Cursor's
 hosted models and bills the key's Cursor plan.
