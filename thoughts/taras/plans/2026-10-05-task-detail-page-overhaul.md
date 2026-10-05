@@ -3,7 +3,7 @@ date: 2026-10-05
 status: in-progress
 autonomy: critical
 last_updated: 2026-10-05
-last_updated_by: claude (phase 1 runner)
+last_updated_by: claude (phase 2 runner)
 commit_per_phase: true
 ---
 
@@ -290,19 +290,19 @@ The page switches layout by container width. The wide layout is a scrolling cent
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Typecheck passes: `cd apps/ui && bunx tsc -b`
-- [ ] Lint and token gate pass: `cd apps/ui && bun run lint && bun run check:tokens`
-- [ ] Unit tests pass: `bun run test:root -- apps/ui/src/lib apps/ui/src/components/shared`
-- [ ] Playwright passes: `bun run e2e:ui -- specs/tasks.spec.ts specs/codex-logs.spec.ts specs/smoke.spec.ts`
+- [x] Typecheck passes: `cd apps/ui && bunx tsc -b`
+- [x] Lint and token gate pass: `cd apps/ui && bun run lint && bun run check:tokens`
+- [x] Unit tests pass: `bun run test:root -- apps/ui/src/lib apps/ui/src/components/shared`
+- [x] Playwright passes: `bun run e2e:ui -- specs/tasks.spec.ts specs/codex-logs.spec.ts specs/smoke.spec.ts`
 
 #### Automated QA:
-- [ ] QA stack, completed route, 1440x900 and 1366x768: after the center column is scrolled to the log card, the log scroll viewport is at least 70% of the window height. Record the numbers next to the audit baseline (301 px and 169 px).
-- [ ] At scroll 0 the answer card is fully above the fold at 1440x900. The sticky bar is hidden at scroll 0 and visible after scrolling past the hero.
-- [ ] 1280x800 (content under 64rem) renders the tabs layout. 1440x900 renders two columns.
-- [ ] No document horizontal overflow at 1024, 1280, 1366, 1440 and 1920 widths.
-- [ ] In-progress route: the log still sticks to the bottom when new rows arrive. Post 5 lines with `POST /api/session-logs` (see `graft.ts`) while the page is open. Then scroll up and confirm the "N new" pill appears.
-- [ ] The rail shows "Requested by" in full. Technical details starts collapsed and contains Session, Version and API key.
-- [ ] Screenshots of completed, in-progress and failed at 1440 and 1366, light and dark, in `/tmp/task-detail-qa/phase-2/`.
+- [x] QA stack, completed route, 1440x900 and 1366x768: after the center column is scrolled to the log card, the log scroll viewport is at least 70% of the window height. Record the numbers next to the audit baseline (301 px and 169 px). Measured: 681 px (75.7%) at 1440x900, 549 px (71.5%) at 1366x768.
+- [x] At scroll 0 the answer card is fully above the fold at 1440x900. The sticky bar is hidden at scroll 0 and visible after scrolling past the hero.
+- [x] 1280x800 (content under 64rem) renders the tabs layout. 1440x900 renders two columns.
+- [x] No document horizontal overflow at 1024, 1280, 1366, 1440 and 1920 widths.
+- [x] In-progress route: the log still sticks to the bottom when new rows arrive. Post 5 lines with `POST /api/session-logs` (see `graft.ts`) while the page is open. Then scroll up and confirm the "N new" pill appears.
+- [x] The rail shows "Requested by" in full. Technical details starts collapsed and contains Session, Version and API key.
+- [x] Screenshots of completed, in-progress and failed at 1440 and 1366, light and dark, in `/tmp/task-detail-qa/phase-2/`.
 
 #### Manual Verification:
 - [ ] Taras reviews the 1440 light and dark screenshots for feel: rail density, sticky bar, scroll handoff from the column to the log.

@@ -1,38 +1,7 @@
 import { useQueryClient } from "@tanstack/react-query";
-import {
-  Activity,
-  AlertTriangle,
-  ArrowLeft,
-  Ban,
-  Box,
-  Calendar,
-  CheckCircle2,
-  ChevronLeft,
-  ChevronRight,
-  Clock,
-  Cpu,
-  DollarSign,
-  ExternalLink,
-  FolderOpen,
-  GitBranch,
-  Github,
-  Gitlab,
-  GitPullRequest,
-  Hash,
-  Key,
-  Link2,
-  Pause,
-  Play,
-  Scissors,
-  Tag,
-  Terminal,
-  Timer,
-  User,
-  Zap,
-} from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { AlertTriangle, Ban, CheckCircle2, Pause, Play, Terminal, Zap } from "lucide-react";
+import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useParams } from "react-router-dom";
 import {
   renderTaskCitationSources,
   renderTaskCitations,
@@ -53,21 +22,10 @@ import {
   useTaskSteeringMessages,
 } from "@/api/hooks/use-tasks";
 import { useUsers } from "@/api/hooks/use-users";
-import type {
-  AgentLog,
-  AgentTaskStatus,
-  ClaudeProviderMeta,
-  DevinProviderMeta,
-  ProviderName,
-  SessionCost,
-  TaskContextResponse,
-} from "@/api/types";
-import { AgentLink } from "@/components/shared/agent-link";
+import type { AgentLog, AgentTaskStatus } from "@/api/types";
 import { CollapsibleDescription } from "@/components/shared/collapsible-description";
 import { CollapsibleSection } from "@/components/shared/collapsible-section";
-import { CostSourceBadge, costDriftPercent } from "@/components/shared/cost-source-badge";
 import { MarkdownView } from "@/components/shared/markdown-view";
-import { SessionId } from "@/components/shared/session-id";
 import { SessionLogViewer } from "@/components/shared/session-log-viewer";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { TaskAttachmentsSection } from "@/components/shared/task-attachments-section";
@@ -89,126 +47,26 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { DetailPageSection } from "@/components/ui/detail-page-layout";
-import { MiddleTruncation } from "@/components/ui/middle-truncation";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useLocalToggle } from "@/hooks/use-local-toggle";
 import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
-import { findLatestUsableContextSnapshot } from "@/lib/context-display";
-import { formatCost } from "@/lib/cost-format";
-import { formatDurationMs } from "@/lib/format-duration-ms";
-import { formatTokens } from "@/lib/format-tokens";
 import { modelTierLabel } from "@/lib/model-tiers";
-import { progressBarTone } from "@/lib/percent-progress-tone";
 import { formatSlackMentions } from "@/lib/slack-text";
 import { TERMINAL_STATUSES, taskIsRunning } from "@/lib/task-activity";
-import { describeTaskEvent, TASK_EVENT_DOT, TASK_EVENT_TEXT } from "@/lib/task-events";
 import { describeModelResolution, taskDisplayModel } from "@/lib/task-model-resolution";
 import { taskListTitle } from "@/lib/task-title";
-import { cn, formatRelativeTime, formatSmartTime } from "@/lib/utils";
+import { cn, formatRelativeTime } from "@/lib/utils";
+import { TaskDetailsRail } from "./task-details-rail";
+import { STICKY_BAR_HEIGHT, TaskStickyBar, useHeroScrolledPast } from "./task-sticky-bar";
 
 const TASK_DETAIL_TABS = new Set(["details", "outcome", "logs"]);
 
 function coerceTaskDetailTab(value: string): string {
   return TASK_DETAIL_TABS.has(value) ? value : "details";
-}
-
-function readStoredRailCollapsed(): boolean {
-  if (typeof window === "undefined") return true;
-  const stored = window.localStorage.getItem("agent-swarm-task-rail-collapsed-v2");
-  return stored === null ? true : stored === "1";
-}
-
-/**
- * Task events in words ("Started by Lead", never `pending → in_progress`).
- * `agentNameFor` names the agent an event is about.
- */
-function LogTimeline({
-  logs,
-  agentNameFor,
-}: {
-  logs: AgentLog[];
-  agentNameFor: (log: AgentLog) => string | null;
-}) {
-  return (
-    <div className="space-y-0">
-      {logs.map((log, i) => {
-        const event = describeTaskEvent(log, agentNameFor(log));
-        return (
-          <div key={log.id} className="flex gap-3 text-sm">
-            {/* Rail column, vertical 1px line connecting status-colored dots; mirrors brand-kit `.tl-rail` (preview/task-detail.html). */}
-            <div className="flex flex-col items-center">
-              <div
-                className={cn("h-2 w-2 rounded-full mt-[5px] shrink-0", TASK_EVENT_DOT[event.tone])}
-              />
-              {i < logs.length - 1 && <div className="flex-1 w-px bg-border mt-[2px]" />}
-            </div>
-            <div className="pb-3 min-w-0">
-              <p
-                className={cn(
-                  "text-xs",
-                  TASK_EVENT_TEXT[event.tone],
-                  event.tone === "muted" ? "line-clamp-2" : "font-medium",
-                )}
-              >
-                {event.label}
-              </p>
-              {event.detail ? (
-                <p className="text-xs text-muted-foreground truncate">{event.detail}</p>
-              ) : null}
-              <p className="text-[10px] text-muted-foreground/60 mt-0.5">
-                {formatRelativeTime(log.createdAt)}
-              </p>
-            </div>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-function MetaRow({
-  icon: Icon,
-  label,
-  children,
-}: {
-  icon: React.ElementType;
-  label: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="flex items-start gap-3 py-1.5">
-      {/* The label box and the value share a 20px line, so a label sits on the
-          same baseline as the value's first line even when the value wraps. */}
-      <div className="flex h-5 items-center gap-2 w-24 shrink-0">
-        <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-        <span className="text-xs text-muted-foreground truncate">{label}</span>
-      </div>
-      {/* flex-1 gives middle-truncated values a definite width to fit. */}
-      <div className="text-sm leading-5 min-w-0 flex-1 break-words">{children}</div>
-    </div>
-  );
-}
-
-/** Section label for the meta rail; same type ramp as <DetailPageSection>. */
-function RailHeading({
-  icon: Icon,
-  children,
-}: {
-  icon?: React.ElementType;
-  children: React.ReactNode;
-}) {
-  return (
-    <h4 className="flex items-center gap-1.5 font-mono font-bold text-[10px] uppercase tracking-[0.08em] text-muted-foreground">
-      {Icon ? <Icon className="h-3 w-3" /> : null}
-      {children}
-    </h4>
-  );
 }
 
 /** Task title as the page heading; a long one clamps with a toggle. */
@@ -361,261 +219,8 @@ function StructuredOutputContent({
   );
 }
 
-// Below this, harness-vs-recomputed divergence is rounding noise; above it,
-// worth a visible warning next to the cost.
-const DRIFT_HINT_THRESHOLD_PCT = 2;
-
-function TaskCostSection({
-  costs,
-  isLoading,
-  provider,
-  providerMeta,
-}: {
-  costs: SessionCost[] | undefined;
-  isLoading: boolean;
-  provider?: ProviderName;
-  providerMeta?: DevinProviderMeta | ClaudeProviderMeta | Record<string, never>;
-}) {
-  const isDevin = provider === "devin";
-  const devinMeta = isDevin ? (providerMeta as DevinProviderMeta | undefined) : undefined;
-
-  const stats = useMemo(() => {
-    if (!costs || costs.length === 0) return null;
-    const totalCost = costs.reduce((sum, c) => sum + c.totalCostUsd, 0);
-    const hasHarnessCosts = costs.every((c) => c.harnessCostUsd != null);
-    const harnessCost = hasHarnessCosts
-      ? costs.reduce((sum, c) => sum + (c.harnessCostUsd ?? 0), 0)
-      : null;
-    const inputTokens = costs.reduce((sum, c) => sum + c.inputTokens, 0);
-    const outputTokens = costs.reduce((sum, c) => sum + c.outputTokens, 0);
-    const cacheReadTokens = costs.reduce((sum, c) => sum + c.cacheReadTokens, 0);
-    const cacheWriteTokens = costs.reduce((sum, c) => sum + (c.cacheWriteTokens ?? 0), 0);
-    const totalDurationMs = costs.reduce((sum, c) => sum + c.durationMs, 0);
-    const totalTurns = costs.reduce((sum, c) => sum + (c.numTurns ?? 0), 0);
-    const models = [...new Set(costs.map((c) => c.model))];
-    // Phase 12b, collapse the per-row costSource into a single badge for
-    // the aggregate. If every row agrees, show that. If they differ, show
-    // 'harness' (the weakest claim) so we don't over-state precision.
-    const sources = new Set(costs.map((c) => c.costSource));
-    const aggregateCostSource = sources.size === 1 ? Array.from(sources)[0] : ("harness" as const);
-    return {
-      totalCost,
-      harnessCost,
-      inputTokens,
-      outputTokens,
-      cacheReadTokens,
-      cacheWriteTokens,
-      totalDurationMs,
-      totalTurns,
-      models,
-      sessions: costs.length,
-      costSource: aggregateCostSource,
-    };
-  }, [costs]);
-
-  if (isLoading) {
-    return (
-      <DetailPageSection title="Session Cost">
-        <div className="space-y-2">
-          <Skeleton className="h-3 w-20" />
-          <Skeleton className="h-3 w-28" />
-          <Skeleton className="h-3 w-24" />
-        </div>
-      </DetailPageSection>
-    );
-  }
-
-  if (!stats) return null;
-
-  const acuCostUsd = devinMeta?.acuCostUsd ?? 2.25;
-  const acusConsumed = isDevin ? stats.totalCost / acuCostUsd : 0;
-  const driftPercent = costDriftPercent(stats.harnessCost, stats.totalCost) ?? 0;
-
-  return (
-    <DetailPageSection title="Session Cost">
-      <div className="space-y-1">
-        <MetaRow icon={DollarSign} label="Cost">
-          <span className="text-xs font-semibold inline-flex items-center gap-1.5">
-            {formatCost(stats.totalCost, { precision: 4 })}
-            <CostSourceBadge
-              source={stats.costSource}
-              harnessCostUsd={stats.harnessCost}
-              totalCostUsd={stats.totalCost}
-            />
-            {driftPercent > DRIFT_HINT_THRESHOLD_PCT ? (
-              <span className="text-[10px] font-medium text-status-warning-strong">
-                Δ {driftPercent.toFixed(1)}%
-              </span>
-            ) : null}
-          </span>
-        </MetaRow>
-        {isDevin ? (
-          <MetaRow icon={Zap} label="ACUs">
-            <span className="text-xs font-mono">{acusConsumed.toFixed(2)}</span>
-          </MetaRow>
-        ) : (
-          <>
-            <MetaRow icon={Zap} label="Tokens">
-              <span className="text-xs font-mono">
-                {formatTokens(stats.inputTokens)} in / {formatTokens(stats.outputTokens)} out
-              </span>
-            </MetaRow>
-            {(stats.cacheReadTokens > 0 || stats.cacheWriteTokens > 0) && (
-              <MetaRow icon={Zap} label="Cache">
-                <span className="text-xs font-mono">
-                  {formatTokens(stats.cacheReadTokens)} read /{" "}
-                  {formatTokens(stats.cacheWriteTokens)} write
-                </span>
-              </MetaRow>
-            )}
-          </>
-        )}
-        <MetaRow icon={Timer} label="Duration">
-          <span className="text-xs">{formatDurationMs(stats.totalDurationMs)}</span>
-        </MetaRow>
-        {!isDevin && (
-          <MetaRow icon={Hash} label="Turns">
-            <span className="text-xs">
-              {stats.totalTurns.toLocaleString()}
-              {stats.sessions > 1 ? ` (${stats.sessions} sessions)` : ""}
-            </span>
-          </MetaRow>
-        )}
-        <MetaRow icon={Cpu} label="Model">
-          <span className="text-xs font-mono">{stats.models.join(", ")}</span>
-        </MetaRow>
-      </div>
-    </DetailPageSection>
-  );
-}
-
-function TaskContextSection({
-  context,
-  isLoading,
-  provider,
-  providerMeta,
-  costs,
-}: {
-  context: TaskContextResponse | undefined;
-  isLoading: boolean;
-  provider?: ProviderName;
-  providerMeta?: DevinProviderMeta | ClaudeProviderMeta | Record<string, never>;
-  costs?: SessionCost[];
-}) {
-  const isDevin = provider === "devin";
-  const devinMeta = isDevin ? (providerMeta as DevinProviderMeta | undefined) : undefined;
-
-  if (isDevin) {
-    const maxAcuLimit = devinMeta?.maxAcuLimit;
-    const acuCostUsd = devinMeta?.acuCostUsd ?? 2.25;
-    const totalCost = costs?.reduce((sum, c) => sum + c.totalCostUsd, 0) ?? 0;
-    const acusConsumed = totalCost / acuCostUsd;
-
-    if (!maxAcuLimit) return null;
-
-    const percent = Math.min((acusConsumed / maxAcuLimit) * 100, 100);
-
-    return (
-      <>
-        <Separator className="my-2" />
-        <div className="space-y-1">
-          <RailHeading>ACU Budget</RailHeading>
-          <div className="flex items-center gap-2 py-1">
-            <Progress value={percent} className={cn("h-1.5 flex-1", progressBarTone(percent))} />
-            <span className="text-[10px] font-mono text-muted-foreground shrink-0">
-              {percent.toFixed(0)}%
-            </span>
-          </div>
-          <MetaRow icon={Zap} label="Used">
-            <span className="text-xs font-mono">
-              {acusConsumed.toFixed(2)} / {maxAcuLimit} ACUs
-            </span>
-          </MetaRow>
-        </div>
-      </>
-    );
-  }
-
-  if (isLoading) {
-    return (
-      <>
-        <Separator className="my-2" />
-        <div className="space-y-1.5">
-          <RailHeading>Context Usage</RailHeading>
-          <div className="space-y-2">
-            <Skeleton className="h-2 w-full rounded-full" />
-            <Skeleton className="h-3 w-24" />
-            <Skeleton className="h-3 w-20" />
-          </div>
-        </div>
-      </>
-    );
-  }
-
-  if (!context || context.summary.snapshotCount === 0) return null;
-
-  const { summary } = context;
-  const latestUsageSnapshot = findLatestUsableContextSnapshot(context.snapshots);
-
-  return (
-    <>
-      <Separator className="my-2" />
-      <div className="space-y-1">
-        <RailHeading>Context Usage</RailHeading>
-        {latestUsageSnapshot ? (
-          <>
-            <div className="flex items-center gap-2 py-1">
-              <Progress
-                value={latestUsageSnapshot.contextPercent}
-                className={cn("h-1.5 flex-1", progressBarTone(latestUsageSnapshot.contextPercent))}
-              />
-              <span className="text-[10px] font-mono text-muted-foreground shrink-0">
-                {latestUsageSnapshot.contextPercent.toFixed(0)}%
-              </span>
-            </div>
-            <MetaRow icon={Cpu} label="Used">
-              <span className="flex flex-col items-start gap-1 font-mono text-xs">
-                <span className="whitespace-nowrap">
-                  {formatTokens(latestUsageSnapshot.contextUsedTokens)} /{" "}
-                  {formatTokens(latestUsageSnapshot.contextTotalTokens)}
-                </span>
-                {latestUsageSnapshot.contextFormula &&
-                  latestUsageSnapshot.contextFormula !== "unknown" && (
-                    <Badge
-                      variant="outline"
-                      size="tag"
-                      className="text-muted-foreground"
-                      title={`Computed via formula: ${latestUsageSnapshot.contextFormula}`}
-                    >
-                      {latestUsageSnapshot.contextFormula}
-                    </Badge>
-                  )}
-              </span>
-            </MetaRow>
-          </>
-        ) : (
-          <MetaRow icon={Cpu} label="Current">
-            <span className="text-xs text-muted-foreground">Unavailable</span>
-          </MetaRow>
-        )}
-        {summary.peakContextPercent != null && (
-          <MetaRow icon={Activity} label="Peak">
-            <span className="text-xs font-mono">{summary.peakContextPercent.toFixed(0)}%</span>
-          </MetaRow>
-        )}
-        {summary.compactionCount > 0 && (
-          <MetaRow icon={Scissors} label="Compactions">
-            <span className="text-xs font-mono">{summary.compactionCount}</span>
-          </MetaRow>
-        )}
-      </div>
-    </>
-  );
-}
-
 export default function TaskDetailPage() {
   const { id } = useParams<{ id: string }>();
-  const navigate = useNavigate();
   const { data: task, isLoading } = useTask(id!);
   // A finished task's log, context and steering rows are frozen history: read
   // them once and never poll. Until the task itself loads, hold the poll too,
@@ -658,10 +263,10 @@ export default function TaskDetailPage() {
     "tasks:steer-composer-collapsed",
     false,
   );
-  // Draft is owned by the page, not the composer. Two reasons: the mobile and
-  // desktop layouts each mount their own <SteerComposer>, and the composer
+  // Draft is owned by the page, not the composer. Two reasons: the narrow and
+  // wide layouts each mount their own <SteerComposer>, and the composer
   // itself unmounts whenever the task leaves a steerable status. Holding the
-  // text here means crossing the `lg` breakpoint, or a status flip that
+  // text here means crossing the 64rem layout switch, or a status flip that
   // hides and later restores the dock, doesn't eat what the user typed.
   const [steerDraft, setSteerDraft] = useState("");
   const cancelTask = useCancelTask();
@@ -672,21 +277,17 @@ export default function TaskDetailPage() {
   // Outcome; a live one opens on Details.
   const defaultTab = task && TERMINAL_STATUSES.has(task.status) ? "outcome" : "details";
   const activeTab = coerceTaskDetailTab(readStringParam(searchParams, "tab", defaultTab));
-  const railParam = readStringParam(searchParams, "rail");
-  const railCollapsed =
-    railParam === "expanded" ? false : railParam === "collapsed" ? true : readStoredRailCollapsed();
   const setActiveTab = useCallback(
     (tab: string) => setParam("tab", coerceTaskDetailTab(tab), { defaultValue: defaultTab }),
     [setParam, defaultTab],
   );
-  const setRailCollapsed = useCallback(
-    (collapsed: boolean) => setParam("rail", collapsed ? "collapsed" : "expanded"),
-    [setParam],
-  );
-  const toggleRailCollapsed = useCallback(
-    () => setRailCollapsed(!railCollapsed),
-    [railCollapsed, setRailCollapsed],
-  );
+  // The wide layout's compact bar shows once the hero scrolls out of the
+  // center column.
+  const {
+    past: heroScrolledPast,
+    scrollerRef: centerScrollerRef,
+    sentinelRef: heroEndRef,
+  } = useHeroScrolledPast();
   const agentNames = useMemo(
     () => new Map((agents ?? []).map((agent) => [agent.id, agent.name])),
     [agents],
@@ -698,14 +299,6 @@ export default function TaskDetailPage() {
     if (!task?.requestedByUserId || !users) return null;
     return users.find((u) => u.id === task.requestedByUserId)?.name ?? null;
   }, [task, users]);
-
-  // Phase 17, collapsible right rail (Activity feed). The URL is the primary
-  // source for shareable state; localStorage remains the fallback preference
-  // when the `rail` query param is absent.
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    window.localStorage.setItem("agent-swarm-task-rail-collapsed-v2", railCollapsed ? "1" : "0");
-  }, [railCollapsed]);
 
   if (isLoading) {
     return (
@@ -738,7 +331,6 @@ export default function TaskDetailPage() {
   const isCompleted = task.status === "completed";
   const hasSessionLogs = sessionLogs && sessionLogs.length > 0;
   const hasOutput = !!task.output;
-  const hasEvents = task.logs && task.logs.length > 0;
   const hasAttachments = !!(task.attachments && task.attachments.length > 0);
   // The agent an Activity event is about. An offer's log row carries the
   // creator, so the offer names its target from the task instead.
@@ -749,251 +341,20 @@ export default function TaskDetailPage() {
   const offeredToName = task.offeredTo ? (agentNames.get(task.offeredTo) ?? null) : null;
   const waiting = describeWaiting(task, { agent: agentName, offeredTo: offeredToName });
 
-  // LEFT RAIL, meta info + SCM card + Dependencies + Progress + Context budget +
-  // Session Cost. Mirrors brand-kit `preview/task-detail.html` left column
-  // (meta-row + .scm-card + .csec-deps + .csec-ctx). Phase 17 moved Session Cost
-  // here from the right rail so the user sees cost stats without scrolling the
-  // Activity feed; right rail now hosts only the Activity timeline.
-  const leftRailContent = (
-    <div className="space-y-1">
-      {task.agentId && (
-        <MetaRow icon={User} label="Agent">
-          <Link to={`/agents/${task.agentId}`} className="text-primary hover:underline text-xs">
-            {agentName ?? `${task.agentId.slice(0, 8)}...`}
-          </Link>
-        </MetaRow>
-      )}
-      {task.creatorAgentId && task.creatorAgentId !== task.agentId && (
-        <MetaRow icon={User} label="Created by">
-          <AgentLink agentId={task.creatorAgentId} />
-        </MetaRow>
-      )}
-      {task.requestedByUserId && (
-        <MetaRow icon={User} label="Requested by">
-          <span className="text-xs">
-            {requestedByUserName ?? `${task.requestedByUserId.slice(0, 8)}…`}
-          </span>
-        </MetaRow>
-      )}
-      <MetaRow icon={Calendar} label="Created">
-        <span className="text-xs">{formatSmartTime(task.createdAt)}</span>
-      </MetaRow>
-      {task.finishedAt && (
-        <MetaRow icon={Clock} label="Finished">
-          <span className="text-xs">{formatSmartTime(task.finishedAt)}</span>
-        </MetaRow>
-      )}
-      {task.swarmVersion && (
-        <MetaRow icon={Tag} label="Version">
-          <span
-            className="text-xs font-mono text-muted-foreground"
-            title={`agent-swarm ${task.swarmVersion} at task creation`}
-          >
-            v{task.swarmVersion}
-          </span>
-        </MetaRow>
-      )}
-      {task.parentTaskId && (
-        <MetaRow icon={Link2} label="Parent">
-          <Link
-            to={`/tasks/${task.parentTaskId}`}
-            className="text-primary hover:underline font-mono text-xs"
-          >
-            #{task.parentTaskId.slice(0, 8)}
-          </Link>
-        </MetaRow>
-      )}
-      {task.dir && (
-        <MetaRow icon={FolderOpen} label="Dir">
-          <MiddleTruncation className="text-xs font-mono">{task.dir}</MiddleTruncation>
-        </MetaRow>
-      )}
-      {task.claudeSessionId && (
-        <MetaRow icon={Terminal} label="Session">
-          <SessionId
-            sessionId={task.claudeSessionId}
-            provider={task.provider}
-            providerMeta={task.providerMeta}
-          />
-        </MetaRow>
-      )}
-      {task.credentialKeySuffix && (
-        <MetaRow icon={Key} label="API Key">
-          <Link to="/settings/api-keys" className="text-primary hover:underline font-mono text-xs">
-            {task.credentialKeyType === "CLAUDE_CODE_OAUTH_TOKEN"
-              ? "OAuth"
-              : task.credentialKeyType === "ANTHROPIC_API_KEY"
-                ? "Anthropic"
-                : task.credentialKeyType === "OPENROUTER_API_KEY"
-                  ? "OpenRouter"
-                  : (task.credentialKeyType ?? "Key")}{" "}
-            ...{task.credentialKeySuffix}
-          </Link>
-        </MetaRow>
-      )}
-      {task.workflowRunId && (
-        <MetaRow icon={Box} label="Workflow">
-          <Link
-            to={`/workflow-runs/${task.workflowRunId}`}
-            className="text-primary hover:underline font-mono text-xs"
-          >
-            #{task.workflowRunId.slice(0, 8)}
-          </Link>
-        </MetaRow>
-      )}
-
-      {(task.vcsProvider || task.vcsRepo || task.vcsUrl || task.vcsEventType || task.vcsAuthor) && (
-        <>
-          <Separator className="my-2" />
-          <div className="space-y-1.5">
-            <RailHeading>Source Control</RailHeading>
-            <div className="rounded-md border border-border/50 px-3 py-2.5 space-y-2">
-              {/* Row 1: provider icon + repo name. The author moved to row 2
-                  so a long repo name is not truncated to "desplega-ai/ag…". */}
-              <div className="flex items-center gap-2 min-w-0">
-                {task.vcsProvider === "github" ? (
-                  <Github className="h-4 w-4 shrink-0" />
-                ) : task.vcsProvider === "gitlab" ? (
-                  <Gitlab className="h-4 w-4 shrink-0" />
-                ) : task.vcsProvider ? (
-                  <Link2 className="h-4 w-4 shrink-0" />
-                ) : null}
-                {task.vcsRepo && (
-                  <span className="text-xs font-mono text-foreground truncate" title={task.vcsRepo}>
-                    {task.vcsRepo}
-                  </span>
-                )}
-              </div>
-              {/* Row 2: PR/MR link + author */}
-              {(task.vcsUrl || task.vcsAuthor) && (
-                <div className="flex items-center gap-3 min-w-0">
-                  {task.vcsUrl && task.vcsNumber && (
-                    <a
-                      href={task.vcsUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="flex items-center gap-1.5 text-xs text-primary hover:underline shrink-0"
-                    >
-                      <GitPullRequest className="h-3.5 w-3.5 shrink-0" />
-                      <span className="font-mono">#{task.vcsNumber}</span>
-                      <ExternalLink className="h-3 w-3 shrink-0 text-muted-foreground" />
-                    </a>
-                  )}
-                  {task.vcsUrl && !task.vcsNumber && (
-                    <a
-                      href={task.vcsUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="flex min-w-0 flex-1 items-center gap-1.5 text-xs text-primary hover:underline font-mono"
-                    >
-                      <Link2 className="h-3.5 w-3.5 shrink-0" />
-                      <MiddleTruncation>{task.vcsUrl}</MiddleTruncation>
-                      <ExternalLink className="h-3 w-3 shrink-0 text-muted-foreground" />
-                    </a>
-                  )}
-                  {task.vcsAuthor && (
-                    <span className="ml-auto flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
-                      <User className="h-3 w-3 shrink-0" />
-                      <span className="truncate">{task.vcsAuthor}</span>
-                    </span>
-                  )}
-                </div>
-              )}
-            </div>
-          </div>
-        </>
-      )}
-
-      {task.dependsOn && task.dependsOn.length > 0 && (
-        <>
-          <Separator className="my-2" />
-          <div className="space-y-1.5">
-            <RailHeading icon={GitBranch}>Dependencies ({task.dependsOn.length})</RailHeading>
-            {task.dependsOn.map((depId) => (
-              <Link
-                key={depId}
-                to={`/tasks/${depId}`}
-                className="flex items-center gap-1.5 text-xs text-primary hover:underline font-mono"
-              >
-                #{depId.slice(0, 8)}
-              </Link>
-            ))}
-          </div>
-        </>
-      )}
-
-      {/* The last progress line ("Running script") is stale once the task
-          ends; the outcome carries the result. */}
-      {task.progress && !isTerminal && (
-        <>
-          <Separator className="my-2" />
-          <div className="space-y-1">
-            <RailHeading>Progress</RailHeading>
-            <p className="text-xs text-muted-foreground whitespace-pre-wrap leading-relaxed max-h-32 overflow-auto">
-              {task.progress}
-            </p>
-          </div>
-        </>
-      )}
-
-      <TaskContextSection
-        context={contextData}
-        isLoading={contextLoading}
-        provider={task.provider}
-        providerMeta={task.providerMeta}
-        costs={costs}
-      />
-
-      {/* Phase 17, Session Cost moved from right rail to left rail. The right
-          rail now hosts only the Activity timeline (which gets a sticky header
-          + scrollable body), while cost stats live alongside the other static
-          meta rows on the left so the user sees them without scrolling the
-          activity feed. */}
-      <TaskCostSection
-        costs={costs}
-        isLoading={costsLoading}
-        provider={task.provider}
-        providerMeta={task.providerMeta}
-      />
-    </div>
+  // Who, where from, when, cost, context, Activity and the technical ids. The
+  // wide layout shows it as the right rail, the narrow one in its Details tab.
+  const detailsRail = (
+    <TaskDetailsRail
+      task={task}
+      agentName={agentName}
+      requestedByName={requestedByUserName}
+      agentNameFor={eventAgentName}
+      costs={costs}
+      costsLoading={costsLoading}
+      context={contextData}
+      contextLoading={contextLoading}
+    />
   );
-
-  // RIGHT RAIL, Activity timeline only (Phase 17 moved Session Cost to the
-  // left rail). Phase 18, restructured the sticky-heading pattern:
-  //
-  // The aside is the scroll container (overflow-y-auto). The Activity heading
-  // is a `position: sticky top-0` direct child of a bare wrapper div (no
-  // <DetailPageRail>/<section> in between). Two changes from Phase 17 fix the
-  // coverage bug where timeline rows showed above the pinned heading:
-  //
-  //   1. Removed the `<DetailPageRail>` (`flex flex-col`) and `<section>`
-  //      wrappers around the sticky h4. Sticky inside `flex` items can mis-
-  //      pin in some scroll-with-padding configurations; the bare div gives
-  //      the h4 an unambiguous block-flow containing block whose bounds match
-  //      the aside content area exactly.
-  //   2. The aside's vertical padding (`py-3`) was moved off the top, the
-  //      h4 owns its own `pt-3 pb-3` padding instead, with `-mx-3` extending
-  //      its bg-background to the aside edges. This removes the transparent
-  //      `mb-2.5` gap between heading and timeline that previously let rows
-  //      scroll into view immediately under the heading. `pr-10` reserves
-  //      room for the collapse chevron.
-  //
-  // bg-background is the rail's actual surface (no `bg-card` on the aside,
-  // it inherits from the page <body>'s background, which is bg-background).
-  // z-30 keeps the heading above both the timeline rows (no z) and the
-  // chevron toggle (z-20), so the heading visually covers everything that
-  // scrolls past it.
-  const rightRailContent = hasEvents ? (
-    <div>
-      <h4 className="sticky top-0 z-30 bg-background -mx-3 px-3 pt-3 pb-3 pr-10 font-mono font-bold text-[10px] uppercase tracking-[0.08em] text-muted-foreground border-b border-border">
-        <Activity className="h-3 w-3 inline-block mr-1 -mt-0.5 text-muted-foreground" />
-        Activity ({task.logs!.length})
-      </h4>
-      <div className="pt-3">
-        <LogTimeline logs={task.logs!} agentNameFor={eventAgentName} />
-      </div>
-    </div>
-  ) : null;
 
   const outcomeContent = (
     <div className="space-y-2">
@@ -1108,9 +469,9 @@ export default function TaskDetailPage() {
   ) : null;
 
   // HERO, status badge + tags / priority / source / provider / model badges +
-  // collapsible description + action buttons. Rendered inside the center column
-  // on desktop (lg+) and above the Tabs on mobile/tablet (<lg). Same JSX in both
-  // places, single-use; not extractable per the "appears in 2+ places" rule.
+  // collapsible description + action buttons. Rendered at the top of the center
+  // column in the wide layout and above the Tabs in the narrow one. Same JSX in
+  // both places, single-use; not extractable per the "appears in 2+ places" rule.
   const secondaryChips = [
     task.taskType ? (
       <Badge key="type" variant="outline" size="tag">
@@ -1151,13 +512,14 @@ export default function TaskDetailPage() {
   const headerTitle = taskListTitle(task);
   // Slack mention tokens read as names here too (`@Taras`, not `<@U…|Taras>`).
   const promptText = formatSlackMentions(task.task).trim();
+  // The server records the model it resolved when the task was claimed
+  // (`resolvedModel`, with the layer in `modelSource`). Older tasks and
+  // unclaimed ones fall back to the requested `model`, then to whatever the
+  // session_costs entries report.
+  const displayModel = taskDisplayModel(task) ?? costs?.[0]?.model;
+  // Each layout tree pads the hero itself.
   const heroBlock = (
-    // Phase 17, generous padding around the badges/description/actions block
-    // ("the task details part on top of the logs"). Brand kit's
-    // `preview/task-detail.html` `.header { padding: 14px 18px 12px }` informs
-    // the new px-4/py-4 values; the `space-y-3` opens up vertical breathing
-    // between badge row → description → action row.
-    <div className="space-y-3 px-1 pt-2 pb-4 lg:px-4 lg:pt-4 lg:pb-5 shrink-0">
+    <div className="space-y-3 shrink-0">
       {/* The page's one heading. The breadcrumb truncates the title (and
           collapses to a few characters on a phone), so it cannot carry it. */}
       <TaskHeading title={headerTitle} />
@@ -1193,11 +555,6 @@ export default function TaskDetailPage() {
           </Badge>
         )}
         {(() => {
-          // The server records the model it resolved when the task was claimed
-          // (`resolvedModel`, with the layer in `modelSource`). Older tasks and
-          // unclaimed ones fall back to the requested `model`, then to whatever
-          // the session_costs entries report.
-          const displayModel = taskDisplayModel(task) ?? costs?.[0]?.model;
           if (displayModel) {
             const badge = (
               <Badge
@@ -1298,27 +655,20 @@ export default function TaskDetailPage() {
     </div>
   );
 
-  return (
-    <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
-      <TaskFailureHelpDialog task={task} />
-      {/* Breadcrumb, fixed at top across all breakpoints */}
-      <div className="px-1 pb-2 shrink-0">
-        <button
-          type="button"
-          onClick={() => navigate("/tasks")}
-          className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
-        >
-          <ArrowLeft className="h-3 w-3" /> Back to Tasks
-        </button>
-      </div>
+  // The wide layout sizes the log card to fill the view. A running task keeps
+  // that height before its first log line, so nothing jumps when logs arrive.
+  const logFillsView = showLogViewer || taskIsRunning(task.status);
 
-      {/* Mobile / tablet (<lg): hero above tabs. Tabs hold left-rail meta in
-          Details (with right-rail Activity + Cost merged in so nothing is lost),
-          Outcome card, and Session Logs. Below lg the 3-column grid does not
-          fit; we fall back to the previous tabbed layout, extended to include
-          the right-rail content. */}
-      <div className="lg:hidden flex flex-col flex-1 min-h-0">
-        {heroBlock}
+  return (
+    // The layout follows the page's own width, not the window's: a docked
+    // context panel or an open sidebar can leave a wide window with a narrow
+    // page.
+    <div className="@container flex flex-col flex-1 min-h-0">
+      <TaskFailureHelpDialog task={task} />
+
+      {/* Narrow (under 64rem of page width): the hero above three tabs. */}
+      <div className="@min-[64rem]:hidden flex flex-col flex-1 min-h-0 overflow-hidden">
+        <div className="px-1 pt-2 pb-4">{heroBlock}</div>
         <Separator className="shrink-0" />
         <Tabs
           value={activeTab}
@@ -1330,9 +680,8 @@ export default function TaskDetailPage() {
             <TabsTrigger value="outcome">Outcome</TabsTrigger>
             <TabsTrigger value="logs">Session Logs</TabsTrigger>
           </TabsList>
-          <TabsContent value="details" className="flex-1 overflow-y-auto px-1 py-3 space-y-4">
-            {leftRailContent}
-            {rightRailContent}
+          <TabsContent value="details" className="flex-1 overflow-y-auto px-1 py-3">
+            {detailsRail}
           </TabsContent>
           <TabsContent value="outcome" className="flex-1 overflow-y-auto px-1 py-3">
             {outcomeContent}
@@ -1344,36 +693,31 @@ export default function TaskDetailPage() {
         </Tabs>
       </div>
 
-      {/* Desktop (lg+): 3-column meta-rail layout per
-          ~/Downloads/swarm-design-system/preview/task-detail.html and
-          preview/detail-page-template.html. Both rails at 280px (canonical
-          brand-kit width). The left meta-sidebar remains page-specific (no
-          other detail page has dense meta data); the right rail comes from
-          the <DetailPageBody> contract. Phase 17, the right rail collapses
-          to a 36px gutter (just the toggle button) so the center column can
-          take the freed width. State persists in localStorage. */}
-      <div
-        className={cn(
-          // The rail collapse animates the grid track itself (browsers tween
-          // grid-template-columns), swift, like every rail (DESIGN.md § Motion).
-          "hidden lg:grid flex-1 min-h-0 overflow-hidden",
-          "transition-[grid-template-columns] duration-200 ease-swift motion-reduce:transition-none",
-          railCollapsed ? "lg:grid-cols-[280px_1fr_36px]" : "lg:grid-cols-[280px_1fr_280px]",
-        )}
-      >
-        {/* Left rail, meta info + SCM card + Dependencies + Progress + Context budget + Session Cost */}
-        <aside className="border-r border-border py-3 px-1 pr-3 overflow-y-auto min-h-0">
-          {leftRailContent}
-        </aside>
-
-        {/* Center, hero (badges + description + actions) + Failure / Output cards + SessionLogViewer */}
-        <section className="flex flex-col min-h-0 overflow-hidden">
-          {heroBlock}
-          <Separator className="shrink-0" />
-          {/* Phase 17, bumped padding from py-3 px-3 gap-2 to py-4 px-4 gap-3
-              to match brand-kit `.body { padding: 14px 18px }` and give the
-              SessionLogViewer + Failure / Output cards more breathing room. */}
-          <div className="flex flex-col flex-1 min-h-0 overflow-hidden py-4 px-4 gap-3">
+      {/* Wide: a scrolling center column and the details rail. The grid
+          bleeds into <main>'s vertical padding, so the column scrolls from
+          under the app header down to the window edge and the log gets those
+          pixels. */}
+      <div className="hidden @min-[64rem]:grid flex-1 min-h-0 grid-cols-[minmax(0,1fr)_300px] -my-4 md:-my-6">
+        {/* The column is a size container: the log card reads its height
+            (100cqh). The log viewer keeps its own scroller, so its
+            virtualization, stick-to-bottom and "N new" pill work unchanged. */}
+        <section
+          ref={centerScrollerRef}
+          style={{ "--task-bar-h": STICKY_BAR_HEIGHT } as CSSProperties}
+          className="relative min-h-0 overflow-y-auto [scrollbar-gutter:stable] [container-type:size]"
+        >
+          <TaskStickyBar
+            visible={heroScrolledPast}
+            title={headerTitle}
+            status={task.status}
+            model={displayModel}
+          />
+          <div className="flex flex-col gap-3 pt-6 pr-6 pb-3">
+            <div className="pb-2">
+              {heroBlock}
+              <div ref={heroEndRef} aria-hidden className="h-px" />
+            </div>
+            <Separator />
             {isFailed && task.failureReason && (
               <CollapsibleSection
                 variant="card"
@@ -1398,13 +742,14 @@ export default function TaskDetailPage() {
                 borderColor={isCompleted ? "border-status-success/30" : "border-border"}
                 bgColor={isCompleted ? "bg-status-success/5" : "bg-muted/20"}
                 // A finished task is opened for its result; keep it collapsed
-                // while the task runs so the live log keeps the height.
+                // while the task runs so the live log stays in view.
                 defaultOpen={isTerminal}
               >
+                {/* No height cap: the column scrolls. */}
                 <StructuredOutputContent
                   citations={task.citations}
                   raw={task.output ?? ""}
-                  maxH={showLogViewer ? "max-h-48" : "max-h-[50vh]"}
+                  maxH=""
                 />
               </CollapsibleSection>
             )}
@@ -1412,64 +757,28 @@ export default function TaskDetailPage() {
             <TaskAttachmentsSection taskId={task.id} attachments={task.attachments} />
             <TaskCitationsSection output={task.output ?? ""} citations={task.citations ?? []} />
 
-            {sessionLogsContent}
-
-            {steerComposer}
+            {logFillsView ? (
+              // Scrolled into view, the log card (and the live composer under
+              // it) fills the column under the sticky bar: the column height
+              // minus the bar, the gap under the bar, and the bottom padding.
+              <div className="flex shrink-0 flex-col gap-3 h-[max(20rem,calc(100cqh_-_var(--task-bar-h)_-_1.5rem))]">
+                {sessionLogsContent}
+                {steerComposer}
+              </div>
+            ) : (
+              <>
+                {sessionLogsContent}
+                {steerComposer}
+              </>
+            )}
           </div>
         </section>
 
-        {/* Right rail, Activity timeline (sticky header). Collapsible: when
-            collapsed, only the toggle chevron shows; click to re-expand.
-            Phase 18, moved `py-3` off the aside (the sticky h4 now owns the
-            top zone via its own `pt-3 -mx-3 px-3 bg-background`); kept `pb-3`
-            so the timeline still gets bottom breathing room. */}
         <aside
-          className={cn(
-            "border-l border-border min-h-0 relative",
-            railCollapsed ? "overflow-hidden" : "overflow-y-auto pb-3 px-3",
-          )}
+          aria-label="Task details"
+          className="min-h-0 overflow-y-auto border-l border-border py-6 pl-5"
         >
-          {/* Phase 19, chevron must paint above the sticky Activity heading
-              (z-30 from Phase 18). Bumped to z-40 so the toggle stays visible
-              while the heading still covers timeline rows scrolling past it.
-              The h4's `pr-10` reserves visual room for the chevron so they
-              don't overlap horizontally even with the higher z-index. */}
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                type="button"
-                onClick={toggleRailCollapsed}
-                aria-label={railCollapsed ? "Expand activity rail" : "Collapse activity rail"}
-                className={cn(
-                  "absolute z-40 top-2 h-6 w-6 inline-flex cursor-pointer items-center justify-center rounded-md border border-border bg-background text-muted-foreground hover:bg-accent hover:text-foreground transition-colors",
-                  railCollapsed ? "left-1/2 -translate-x-1/2" : "right-2",
-                )}
-              >
-                {railCollapsed ? (
-                  <ChevronLeft className="h-3.5 w-3.5" />
-                ) : (
-                  <ChevronRight className="h-3.5 w-3.5" />
-                )}
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="left">
-              {railCollapsed ? "Activity" : "Collapse activity"}
-            </TooltipContent>
-          </Tooltip>
-          {/* Fade the timeline while the grid track tweens, without this the
-              content pops out a frame before the column starts shrinking. */}
-          <AnimatePresence initial={false}>
-            {!railCollapsed && (
-              <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0, transition: { duration: 0.12 } }}
-                transition={{ duration: 0.15 }}
-              >
-                {rightRailContent}
-              </motion.div>
-            )}
-          </AnimatePresence>
+          {detailsRail}
         </aside>
       </div>
     </div>

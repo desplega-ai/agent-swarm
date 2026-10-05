@@ -1,6 +1,11 @@
 import type { Page } from "@playwright/test";
 import { expect, test } from "../fixtures";
 
+// The task page shows two columns only from 64rem of page width. The chromium
+// project's Desktop Chrome device (1280x720) leaves the page narrower than
+// that once the sidebar takes its share, so the wide tests pin a wide window.
+test.use({ viewport: { width: 1440, height: 900 } });
+
 type SessionLogsResponse = { success: true; count: number };
 
 interface CodexLogSeed {
@@ -209,10 +214,15 @@ test("context usage keeps the latest complete measurement", async ({
   await page.goto(`/tasks/${seed!.tasks.inProgress}`);
 
   await expect(
-    page.getByText("191.5K / 1.1M", { exact: true }).filter({ visible: true }),
+    page.getByText("191.5K of 1.1M tokens", { exact: true }).filter({ visible: true }),
   ).toBeVisible();
-  await expect(page.getByText("18%", { exact: true }).filter({ visible: true })).toHaveCount(2);
-  await expect(page.getByText("191.5K / 200.0K", { exact: true })).toHaveCount(0);
+  // The rail draws the percent once, next to the bar, and the peak on the
+  // tokens line.
+  await expect(page.getByText("18%", { exact: true }).filter({ visible: true })).toHaveCount(1);
+  await expect(page.getByText("peak 18%", { exact: true }).filter({ visible: true })).toHaveCount(
+    1,
+  );
+  await expect(page.getByText("191.5K of 200K tokens", { exact: true })).toHaveCount(0);
 
   await clean.assertClean();
 });
@@ -236,8 +246,12 @@ test("context usage does not combine incomplete measurements", async ({
   await expect(
     page.getByText("Unavailable", { exact: true }).filter({ visible: true }),
   ).toBeVisible();
-  await expect(page.getByText("191.5K / 200.0K", { exact: true })).toHaveCount(0);
-  await expect(page.getByText("18%", { exact: true }).filter({ visible: true })).toHaveCount(1);
+  await expect(page.getByText("191.5K of 200K tokens", { exact: true })).toHaveCount(0);
+  // No usable measurement: no bar and no current percent, only the peak.
+  await expect(page.getByText("18%", { exact: true }).filter({ visible: true })).toHaveCount(0);
+  await expect(page.getByText("peak 18%", { exact: true }).filter({ visible: true })).toHaveCount(
+    1,
+  );
   await clean.assertClean();
 });
 
