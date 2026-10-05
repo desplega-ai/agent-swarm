@@ -1,3 +1,4 @@
+import { useQueryClient } from "@tanstack/react-query";
 import {
   Activity,
   AlertTriangle,
@@ -30,7 +31,7 @@ import {
   Zap,
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   renderTaskCitationSources,
@@ -54,6 +55,7 @@ import {
 import { useUsers } from "@/api/hooks/use-users";
 import type {
   AgentLog,
+  AgentTaskStatus,
   ClaudeProviderMeta,
   DevinProviderMeta,
   ProviderName,
@@ -70,6 +72,7 @@ import { SessionLogViewer } from "@/components/shared/session-log-viewer";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { TaskAttachmentsSection } from "@/components/shared/task-attachments-section";
 import { TaskCitationsSection } from "@/components/shared/task-citations-section";
+import { TaskStatusIcon } from "@/components/shared/task-status-icon";
 import { CollapsibleComposerDock } from "@/components/steering/collapsible-composer-dock";
 import { SteerComposer } from "@/components/steering/steer-composer";
 import { TaskFailureHelpDialog } from "@/components/support/task-failure-help-dialog";
@@ -102,14 +105,14 @@ import { formatDurationMs } from "@/lib/format-duration-ms";
 import { formatTokens } from "@/lib/format-tokens";
 import { modelTierLabel } from "@/lib/model-tiers";
 import { progressBarTone } from "@/lib/percent-progress-tone";
-import { statusTextClass } from "@/lib/status-tone";
-import { taskIsRunning } from "@/lib/task-activity";
+import { formatSlackMentions } from "@/lib/slack-text";
+import { TERMINAL_STATUSES, taskIsRunning } from "@/lib/task-activity";
+import { describeTaskEvent, TASK_EVENT_DOT, TASK_EVENT_TEXT } from "@/lib/task-events";
 import { describeModelResolution, taskDisplayModel } from "@/lib/task-model-resolution";
 import { taskListTitle } from "@/lib/task-title";
 import { cn, formatRelativeTime, formatSmartTime } from "@/lib/utils";
 
 const TASK_DETAIL_TABS = new Set(["details", "outcome", "logs"]);
-const TERMINAL_TASK_STATUSES = new Set(["completed", "failed", "cancelled", "superseded"]);
 
 function coerceTaskDetailTab(value: string): string {
   return TASK_DETAIL_TABS.has(value) ? value : "details";
@@ -121,90 +124,50 @@ function readStoredRailCollapsed(): boolean {
   return stored === null ? true : stored === "1";
 }
 
-function logDotColor(eventType: string, newValue?: string): string {
-  if (eventType === "task_status_change") {
-    switch (newValue) {
-      case "completed":
-        return "bg-status-success";
-      case "failed":
-      case "cancelled":
-        return "bg-status-error";
-      case "superseded":
-        return "bg-status-neutral";
-      case "in_progress":
-        return "bg-status-active";
-      default:
-        return "bg-primary/60";
-    }
-  }
-  if (eventType === "task_created") return "bg-status-paused";
-  if (eventType === "task_progress") return "bg-muted-foreground/40";
-  return "bg-primary/60";
-}
-
-function renderLogContent(log: AgentLog): React.ReactNode {
-  switch (log.eventType) {
-    case "task_created":
-      return <span className="text-xs font-medium">Task created</span>;
-    case "task_status_change":
-      return (
-        <span className="text-xs">
-          {log.oldValue && (
-            <span className={cn("font-medium", statusTextClass(log.oldValue))}>{log.oldValue}</span>
-          )}
-          {log.oldValue && <span className="text-muted-foreground"> → </span>}
-          <span className={cn("font-semibold", statusTextClass(log.newValue))}>{log.newValue}</span>
-        </span>
-      );
-    case "task_progress":
-      return (
-        <p className="text-xs text-muted-foreground italic line-clamp-2">
-          {log.newValue ?? "Progress update"}
-        </p>
-      );
-    case "task_offered":
-      return <span className="text-xs font-medium">Offered to agent</span>;
-    case "task_accepted":
-      return <span className="text-xs font-medium text-status-success-strong">Accepted</span>;
-    case "task_rejected":
-      return <span className="text-xs font-medium text-status-error-strong">Rejected</span>;
-    case "task_claimed":
-      return <span className="text-xs font-medium text-status-success-strong">Claimed</span>;
-    case "task_released":
-      return <span className="text-xs font-medium">Released</span>;
-    default:
-      return (
-        <>
-          <span className="text-xs font-medium">{log.eventType.replace(/_/g, " ")}</span>
-          {log.newValue && <p className="text-xs text-muted-foreground truncate">{log.newValue}</p>}
-        </>
-      );
-  }
-}
-
-function LogTimeline({ logs }: { logs: AgentLog[] }) {
+/**
+ * Task events in words ("Started by Lead", never `pending → in_progress`).
+ * `agentNameFor` names the agent an event is about.
+ */
+function LogTimeline({
+  logs,
+  agentNameFor,
+}: {
+  logs: AgentLog[];
+  agentNameFor: (log: AgentLog) => string | null;
+}) {
   return (
     <div className="space-y-0">
-      {logs.map((log, i) => (
-        <div key={log.id} className="flex gap-3 text-sm">
-          {/* Rail column — vertical 1px line connecting status-colored dots; mirrors brand-kit `.tl-rail` (preview/task-detail.html). */}
-          <div className="flex flex-col items-center">
-            <div
-              className={cn(
-                "h-2 w-2 rounded-full mt-[5px] shrink-0",
-                logDotColor(log.eventType, log.newValue ?? undefined),
-              )}
-            />
-            {i < logs.length - 1 && <div className="flex-1 w-px bg-border mt-[2px]" />}
+      {logs.map((log, i) => {
+        const event = describeTaskEvent(log, agentNameFor(log));
+        return (
+          <div key={log.id} className="flex gap-3 text-sm">
+            {/* Rail column, vertical 1px line connecting status-colored dots; mirrors brand-kit `.tl-rail` (preview/task-detail.html). */}
+            <div className="flex flex-col items-center">
+              <div
+                className={cn("h-2 w-2 rounded-full mt-[5px] shrink-0", TASK_EVENT_DOT[event.tone])}
+              />
+              {i < logs.length - 1 && <div className="flex-1 w-px bg-border mt-[2px]" />}
+            </div>
+            <div className="pb-3 min-w-0">
+              <p
+                className={cn(
+                  "text-xs",
+                  TASK_EVENT_TEXT[event.tone],
+                  event.tone === "muted" ? "line-clamp-2" : "font-medium",
+                )}
+              >
+                {event.label}
+              </p>
+              {event.detail ? (
+                <p className="text-xs text-muted-foreground truncate">{event.detail}</p>
+              ) : null}
+              <p className="text-[10px] text-muted-foreground/60 mt-0.5">
+                {formatRelativeTime(log.createdAt)}
+              </p>
+            </div>
           </div>
-          <div className="pb-3 min-w-0">
-            {renderLogContent(log)}
-            <p className="text-[10px] text-muted-foreground/60 mt-0.5">
-              {formatRelativeTime(log.createdAt)}
-            </p>
-          </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
@@ -275,6 +238,63 @@ function TaskHeading({ title }: { title: string }) {
   );
 }
 
+/** Cancel, behind a confirm step. */
+function CancelTaskButton({ onConfirm }: { onConfirm: () => void }) {
+  return (
+    <AlertDialog>
+      <AlertDialogTrigger asChild>
+        <Button variant="destructive-outline" size="sm">
+          <Ban className="h-3 w-3 mr-1" />
+          Cancel
+        </Button>
+      </AlertDialogTrigger>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Cancel Task</AlertDialogTitle>
+          <AlertDialogDescription>
+            Are you sure you want to cancel this task? This action cannot be undone.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Keep Task</AlertDialogCancel>
+          <AlertDialogAction variant="destructive" onClick={onConfirm}>
+            Cancel Task
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+}
+
+/**
+ * What a task with no session log waits for, in one line. The hero owns the
+ * actions (Cancel, Resume). `draft` is the transient "attachments still
+ * uploading" state.
+ */
+function describeWaiting(
+  task: { status: AgentTaskStatus; createdAt: string },
+  names: { agent: string | null; offeredTo: string | null },
+): string {
+  switch (task.status) {
+    case "pending":
+    case "unassigned":
+      return `Waiting for ${names.agent ?? "an agent"} to pick this up. Queued ${formatRelativeTime(task.createdAt)}.`;
+    case "offered":
+    case "reviewing":
+      return `Offered to ${names.offeredTo ?? "an agent"}. Waiting for an answer.`;
+    case "backlog":
+      return "In the backlog.";
+    case "paused":
+      return "Paused.";
+    case "draft":
+      return "Uploading attachments…";
+    case "in_progress":
+      return "Waiting for the first session log.";
+    default:
+      return "This task finished without a session log.";
+  }
+}
+
 /** Try to parse structured output JSON ({status, output, summary}). */
 function parseStructuredOutput(raw: string): { output?: string; summary?: string } | null {
   try {
@@ -286,7 +306,7 @@ function parseStructuredOutput(raw: string): { output?: string; summary?: string
     )
       return parsed as { output?: string; summary?: string };
   } catch {
-    // Not JSON — fall through.
+    // Not JSON, fall through.
   }
   return null;
 }
@@ -373,7 +393,7 @@ function TaskCostSection({
     const totalDurationMs = costs.reduce((sum, c) => sum + c.durationMs, 0);
     const totalTurns = costs.reduce((sum, c) => sum + (c.numTurns ?? 0), 0);
     const models = [...new Set(costs.map((c) => c.model))];
-    // Phase 12b — collapse the per-row costSource into a single badge for
+    // Phase 12b, collapse the per-row costSource into a single badge for
     // the aggregate. If every row agrees, show that. If they differ, show
     // 'harness' (the weakest claim) so we don't over-state precision.
     const sources = new Set(costs.map((c) => c.costSource));
@@ -597,20 +617,43 @@ export default function TaskDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { data: task, isLoading } = useTask(id!);
-  const { data: sessionLogs } = useTaskSessionLogs(id!);
+  // A finished task's log, context and steering rows are frozen history: read
+  // them once and never poll. Until the task itself loads, hold the poll too,
+  // so a finished task never gets a second read. `undefined` keeps each
+  // hook's live cadence.
+  const taskLive = !!task && !TERMINAL_STATUSES.has(task.status);
+  const livePoll = taskLive ? undefined : false;
+  const { data: sessionLogs, isLoading: sessionLogsLoading } = useTaskSessionLogs(id!, {
+    refetchInterval: livePoll,
+  });
   const { data: agents } = useAgents();
   const { data: users } = useUsers();
   const { data: costs, isLoading: costsLoading } = useSessionCosts({ taskId: id });
-  const { data: contextData, isLoading: contextLoading } = useTaskContext(id!);
-  // Steering (≥1.122.1) — soft-degrade against older API servers, which 404
+  const { data: contextData, isLoading: contextLoading } = useTaskContext(id!, {
+    refetchInterval: livePoll,
+  });
+  // Steering (≥1.122.1), soft-degrade against older API servers, which 404
   // both `/steer` and `/steering-messages`.
   const steerGate = useFeatureGate("1.122.1");
   const { data: steeringEnabled = true } = useSteeringEnabled();
   const { data: steeringMessages } = useTaskSteeringMessages(id!, {
     enabled: steerGate.supported && steeringEnabled,
+    refetchInterval: livePoll,
   });
+  // A task that finishes while the page is open gets one last read: the final
+  // log lines and context snapshot can land after the previous poll.
+  const queryClient = useQueryClient();
+  const wasLiveRef = useRef(false);
+  useEffect(() => {
+    const wasLive = wasLiveRef.current;
+    wasLiveRef.current = taskLive;
+    if (!wasLive || taskLive || !task) return;
+    for (const part of ["session-logs", "context", "steering-messages"]) {
+      void queryClient.invalidateQueries({ queryKey: ["task", task.id, part] });
+    }
+  }, [taskLive, task, queryClient]);
   // Composer dock is collapsible on this page only (the sessions surface is a
-  // chat — its composer always stays put). Default expanded.
+  // chat, its composer always stays put). Default expanded.
   const [composerCollapsed, setComposerCollapsed] = useLocalToggle(
     "tasks:steer-composer-collapsed",
     false,
@@ -618,8 +661,8 @@ export default function TaskDetailPage() {
   // Draft is owned by the page, not the composer. Two reasons: the mobile and
   // desktop layouts each mount their own <SteerComposer>, and the composer
   // itself unmounts whenever the task leaves a steerable status. Holding the
-  // text here means crossing the `lg` breakpoint — or a status flip that
-  // hides and later restores the dock — doesn't eat what the user typed.
+  // text here means crossing the `lg` breakpoint, or a status flip that
+  // hides and later restores the dock, doesn't eat what the user typed.
   const [steerDraft, setSteerDraft] = useState("");
   const cancelTask = useCancelTask();
   const pauseTask = usePauseTask();
@@ -627,7 +670,7 @@ export default function TaskDetailPage() {
   const { searchParams, setParam } = useUrlSearchState();
   // A finished task is opened for its result, so its mobile default tab is
   // Outcome; a live one opens on Details.
-  const defaultTab = task && TERMINAL_TASK_STATUSES.has(task.status) ? "outcome" : "details";
+  const defaultTab = task && TERMINAL_STATUSES.has(task.status) ? "outcome" : "details";
   const activeTab = coerceTaskDetailTab(readStringParam(searchParams, "tab", defaultTab));
   const railParam = readStringParam(searchParams, "rail");
   const railCollapsed =
@@ -644,18 +687,19 @@ export default function TaskDetailPage() {
     () => setRailCollapsed(!railCollapsed),
     [railCollapsed, setRailCollapsed],
   );
-  const agentName = useMemo(() => {
-    if (!task?.agentId || !agents) return null;
-    return agents.find((a) => a.id === task.agentId)?.name ?? null;
-  }, [task, agents]);
-  // Phase 3: read-only "Requested by" lookup. `useUsers()` is shared cache —
+  const agentNames = useMemo(
+    () => new Map((agents ?? []).map((agent) => [agent.id, agent.name])),
+    [agents],
+  );
+  const agentName = task?.agentId ? (agentNames.get(task.agentId) ?? null) : null;
+  // Phase 3: read-only "Requested by" lookup. `useUsers()` is shared cache,
   // the identity boot modal already populated it.
   const requestedByUserName = useMemo(() => {
     if (!task?.requestedByUserId || !users) return null;
     return users.find((u) => u.id === task.requestedByUserId)?.name ?? null;
   }, [task, users]);
 
-  // Phase 17 — collapsible right rail (Activity feed). The URL is the primary
+  // Phase 17, collapsible right rail (Activity feed). The URL is the primary
   // source for shareable state; localStorage remains the fallback preference
   // when the `rail` query param is absent.
   useEffect(() => {
@@ -677,7 +721,7 @@ export default function TaskDetailPage() {
     return <p className="text-muted-foreground">Task not found.</p>;
   }
 
-  const isTerminal = TERMINAL_TASK_STATUSES.has(task.status);
+  const isTerminal = TERMINAL_STATUSES.has(task.status);
   const canCancel = !isTerminal && task.status !== "paused";
   const canPause = task.status === "in_progress";
   const canResume = task.status === "paused";
@@ -696,8 +740,16 @@ export default function TaskDetailPage() {
   const hasOutput = !!task.output;
   const hasEvents = task.logs && task.logs.length > 0;
   const hasAttachments = !!(task.attachments && task.attachments.length > 0);
+  // The agent an Activity event is about. An offer's log row carries the
+  // creator, so the offer names its target from the task instead.
+  const eventAgentName = (log: AgentLog): string | null => {
+    const agentId = log.eventType === "task_offered" ? task.offeredTo : log.agentId;
+    return agentId ? (agentNames.get(agentId) ?? null) : null;
+  };
+  const offeredToName = task.offeredTo ? (agentNames.get(task.offeredTo) ?? null) : null;
+  const waiting = describeWaiting(task, { agent: agentName, offeredTo: offeredToName });
 
-  // LEFT RAIL — meta info + SCM card + Dependencies + Progress + Context budget +
+  // LEFT RAIL, meta info + SCM card + Dependencies + Progress + Context budget +
   // Session Cost. Mirrors brand-kit `preview/task-detail.html` left column
   // (meta-row + .scm-card + .csec-deps + .csec-ctx). Phase 17 moved Session Cost
   // here from the right rail so the user sees cost stats without scrolling the
@@ -892,7 +944,7 @@ export default function TaskDetailPage() {
         costs={costs}
       />
 
-      {/* Phase 17 — Session Cost moved from right rail to left rail. The right
+      {/* Phase 17, Session Cost moved from right rail to left rail. The right
           rail now hosts only the Activity timeline (which gets a sticky header
           + scrollable body), while cost stats live alongside the other static
           meta rows on the left so the user sees them without scrolling the
@@ -906,8 +958,8 @@ export default function TaskDetailPage() {
     </div>
   );
 
-  // RIGHT RAIL — Activity timeline only (Phase 17 moved Session Cost to the
-  // left rail). Phase 18 — restructured the sticky-heading pattern:
+  // RIGHT RAIL, Activity timeline only (Phase 17 moved Session Cost to the
+  // left rail). Phase 18, restructured the sticky-heading pattern:
   //
   // The aside is the scroll container (overflow-y-auto). The Activity heading
   // is a `position: sticky top-0` direct child of a bare wrapper div (no
@@ -919,14 +971,14 @@ export default function TaskDetailPage() {
   //      pin in some scroll-with-padding configurations; the bare div gives
   //      the h4 an unambiguous block-flow containing block whose bounds match
   //      the aside content area exactly.
-  //   2. The aside's vertical padding (`py-3`) was moved off the top — the
+  //   2. The aside's vertical padding (`py-3`) was moved off the top, the
   //      h4 owns its own `pt-3 pb-3` padding instead, with `-mx-3` extending
   //      its bg-background to the aside edges. This removes the transparent
   //      `mb-2.5` gap between heading and timeline that previously let rows
   //      scroll into view immediately under the heading. `pr-10` reserves
   //      room for the collapse chevron.
   //
-  // bg-background is the rail's actual surface (no `bg-card` on the aside —
+  // bg-background is the rail's actual surface (no `bg-card` on the aside,
   // it inherits from the page <body>'s background, which is bg-background).
   // z-30 keeps the heading above both the timeline rows (no z) and the
   // chevron toggle (z-20), so the heading visually covers everything that
@@ -938,7 +990,7 @@ export default function TaskDetailPage() {
         Activity ({task.logs!.length})
       </h4>
       <div className="pt-3">
-        <LogTimeline logs={task.logs!} />
+        <LogTimeline logs={task.logs!} agentNameFor={eventAgentName} />
       </div>
     </div>
   ) : null;
@@ -990,7 +1042,7 @@ export default function TaskDetailPage() {
     </div>
   );
 
-  // STEERING — no longer its own box above the logs. Delivered/handled rows
+  // STEERING, no longer its own box above the logs. Delivered/handled rows
   // interleave into the SESSION LOGS stream at `deliveredAt`, promoted/
   // cancelled at `createdAt`, and still-pending ones pin to the tail box above
   // the "Agent is working…" footer. `undefined` when gated off, which makes
@@ -999,7 +1051,7 @@ export default function TaskDetailPage() {
     steerGate.supported && steeringEnabled ? (steeringMessages ?? []) : undefined;
   const hasSteering = (steeringForViewer?.length ?? 0) > 0;
 
-  // Render the viewer whenever there's anything to show — steering-only is a
+  // Render the viewer whenever there's anything to show, steering-only is a
   // real state right after the first message is queued but before the harness
   // has written any session log lines.
   const showLogViewer = hasSessionLogs || hasSteering;
@@ -1012,23 +1064,21 @@ export default function TaskDetailPage() {
       steeringMessages={steeringForViewer}
       className="flex-1 min-h-0"
     />
+  ) : sessionLogsLoading ? (
+    // Do not claim "no session log" before the read answers.
+    <Skeleton className="h-12 w-full shrink-0 rounded-lg" />
   ) : (
-    // Only a live task keeps the full height free for logs that are coming; a
-    // finished one gives it to the Output card above.
+    // One line that says what the task waits for. Only a running task keeps
+    // the full height free for logs that are coming; any other gives it to
+    // the cards above.
     <div
       className={cn(
-        "flex items-center justify-center rounded-lg border border-dashed border-border px-4 py-8",
-        taskIsRunning(task.status) ? "flex-1 min-h-40" : "shrink-0",
+        "flex items-center gap-3 rounded-lg border border-dashed border-border px-4 py-3",
+        taskIsRunning(task.status) ? "flex-1 min-h-40 justify-center" : "shrink-0",
       )}
     >
-      <div className="text-center text-muted-foreground">
-        <Terminal className="h-6 w-6 mx-auto mb-2 opacity-40" />
-        <p className="text-xs">
-          {taskIsRunning(task.status)
-            ? "Waiting for the first session log"
-            : "No session logs were recorded for this task"}
-        </p>
-      </div>
+      <TaskStatusIcon status={task.status} />
+      <p className="text-sm text-muted-foreground">{waiting}</p>
     </div>
   );
 
@@ -1057,10 +1107,10 @@ export default function TaskDetailPage() {
     </CollapsibleComposerDock>
   ) : null;
 
-  // HERO — status badge + tags / priority / source / provider / model badges +
+  // HERO, status badge + tags / priority / source / provider / model badges +
   // collapsible description + action buttons. Rendered inside the center column
   // on desktop (lg+) and above the Tabs on mobile/tablet (<lg). Same JSX in both
-  // places — single-use; not extractable per the "appears in 2+ places" rule.
+  // places, single-use; not extractable per the "appears in 2+ places" rule.
   const secondaryChips = [
     task.taskType ? (
       <Badge key="type" variant="outline" size="tag">
@@ -1099,8 +1149,10 @@ export default function TaskDetailPage() {
   ].filter((chip) => chip !== null);
 
   const headerTitle = taskListTitle(task);
+  // Slack mention tokens read as names here too (`@Taras`, not `<@U…|Taras>`).
+  const promptText = formatSlackMentions(task.task).trim();
   const heroBlock = (
-    // Phase 17 — generous padding around the badges/description/actions block
+    // Phase 17, generous padding around the badges/description/actions block
     // ("the task details part on top of the logs"). Brand kit's
     // `preview/task-detail.html` `.header { padding: 14px 18px 12px }` informs
     // the new px-4/py-4 values; the `space-y-3` opens up vertical breathing
@@ -1200,10 +1252,11 @@ export default function TaskDetailPage() {
         ) : null}
       </div>
       {/* A one-line prompt is already the heading; repeating it below read
-          as the same sentence twice. */}
-      {task.task.trim() !== headerTitle && (
+          as the same sentence twice. The heading capitalizes the first word,
+          so compare without case. */}
+      {promptText.toLowerCase() !== headerTitle.toLowerCase() && (
         <CollapsibleDescription
-          text={task.task}
+          text={promptText}
           collapsedClassName="line-clamp-3 lg:line-clamp-2"
         />
       )}
@@ -1233,33 +1286,11 @@ export default function TaskDetailPage() {
               </Button>
             )}
             {canCancel && (
-              <AlertDialog>
-                <AlertDialogTrigger asChild>
-                  <Button variant="destructive-outline" size="sm">
-                    <Ban className="h-3 w-3 mr-1" />
-                    Cancel
-                  </Button>
-                </AlertDialogTrigger>
-                <AlertDialogContent>
-                  <AlertDialogHeader>
-                    <AlertDialogTitle>Cancel Task</AlertDialogTitle>
-                    <AlertDialogDescription>
-                      Are you sure you want to cancel this task? This action cannot be undone.
-                    </AlertDialogDescription>
-                  </AlertDialogHeader>
-                  <AlertDialogFooter>
-                    <AlertDialogCancel>Keep Task</AlertDialogCancel>
-                    <AlertDialogAction
-                      variant="destructive"
-                      onClick={() =>
-                        cancelTask.mutate({ id: task.id, reason: "Cancelled from dashboard" })
-                      }
-                    >
-                      Cancel Task
-                    </AlertDialogAction>
-                  </AlertDialogFooter>
-                </AlertDialogContent>
-              </AlertDialog>
+              <CancelTaskButton
+                onConfirm={() =>
+                  cancelTask.mutate({ id: task.id, reason: "Cancelled from dashboard" })
+                }
+              />
             )}
           </div>
         )}
@@ -1270,7 +1301,7 @@ export default function TaskDetailPage() {
   return (
     <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
       <TaskFailureHelpDialog task={task} />
-      {/* Breadcrumb — fixed at top across all breakpoints */}
+      {/* Breadcrumb, fixed at top across all breakpoints */}
       <div className="px-1 pb-2 shrink-0">
         <button
           type="button"
@@ -1318,28 +1349,28 @@ export default function TaskDetailPage() {
           preview/detail-page-template.html. Both rails at 280px (canonical
           brand-kit width). The left meta-sidebar remains page-specific (no
           other detail page has dense meta data); the right rail comes from
-          the <DetailPageBody> contract. Phase 17 — the right rail collapses
+          the <DetailPageBody> contract. Phase 17, the right rail collapses
           to a 36px gutter (just the toggle button) so the center column can
           take the freed width. State persists in localStorage. */}
       <div
         className={cn(
           // The rail collapse animates the grid track itself (browsers tween
-          // grid-template-columns) — swift, like every rail (DESIGN.md § Motion).
+          // grid-template-columns), swift, like every rail (DESIGN.md § Motion).
           "hidden lg:grid flex-1 min-h-0 overflow-hidden",
           "transition-[grid-template-columns] duration-200 ease-swift motion-reduce:transition-none",
           railCollapsed ? "lg:grid-cols-[280px_1fr_36px]" : "lg:grid-cols-[280px_1fr_280px]",
         )}
       >
-        {/* Left rail — meta info + SCM card + Dependencies + Progress + Context budget + Session Cost */}
+        {/* Left rail, meta info + SCM card + Dependencies + Progress + Context budget + Session Cost */}
         <aside className="border-r border-border py-3 px-1 pr-3 overflow-y-auto min-h-0">
           {leftRailContent}
         </aside>
 
-        {/* Center — hero (badges + description + actions) + Failure / Output cards + SessionLogViewer */}
+        {/* Center, hero (badges + description + actions) + Failure / Output cards + SessionLogViewer */}
         <section className="flex flex-col min-h-0 overflow-hidden">
           {heroBlock}
           <Separator className="shrink-0" />
-          {/* Phase 17 — bumped padding from py-3 px-3 gap-2 to py-4 px-4 gap-3
+          {/* Phase 17, bumped padding from py-3 px-3 gap-2 to py-4 px-4 gap-3
               to match brand-kit `.body { padding: 14px 18px }` and give the
               SessionLogViewer + Failure / Output cards more breathing room. */}
           <div className="flex flex-col flex-1 min-h-0 overflow-hidden py-4 px-4 gap-3">
@@ -1387,9 +1418,9 @@ export default function TaskDetailPage() {
           </div>
         </section>
 
-        {/* Right rail — Activity timeline (sticky header). Collapsible: when
+        {/* Right rail, Activity timeline (sticky header). Collapsible: when
             collapsed, only the toggle chevron shows; click to re-expand.
-            Phase 18 — moved `py-3` off the aside (the sticky h4 now owns the
+            Phase 18, moved `py-3` off the aside (the sticky h4 now owns the
             top zone via its own `pt-3 -mx-3 px-3 bg-background`); kept `pb-3`
             so the timeline still gets bottom breathing room. */}
         <aside
@@ -1398,7 +1429,7 @@ export default function TaskDetailPage() {
             railCollapsed ? "overflow-hidden" : "overflow-y-auto pb-3 px-3",
           )}
         >
-          {/* Phase 19 — chevron must paint above the sticky Activity heading
+          {/* Phase 19, chevron must paint above the sticky Activity heading
               (z-30 from Phase 18). Bumped to z-40 so the toggle stays visible
               while the heading still covers timeline rows scrolling past it.
               The h4's `pr-10` reserves visual room for the chevron so they
@@ -1425,7 +1456,7 @@ export default function TaskDetailPage() {
               {railCollapsed ? "Activity" : "Collapse activity"}
             </TooltipContent>
           </Tooltip>
-          {/* Fade the timeline while the grid track tweens — without this the
+          {/* Fade the timeline while the grid track tweens, without this the
               content pops out a frame before the column starts shrinking. */}
           <AnimatePresence initial={false}>
             {!railCollapsed && (

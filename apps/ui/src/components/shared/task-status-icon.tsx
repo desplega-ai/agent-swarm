@@ -5,8 +5,8 @@ import { cn } from "@/lib/utils";
  * no shadows, all on the same 16x16 grid so they line up in a column.
  *
  * - `pending`: plain gray ring, not started.
- * - `active`: dashed blue ring that fades and turns slowly (static under
- *   reduced motion).
+ * - `active`: dashed amber ring that fades and turns slowly (static under
+ *   reduced motion). Amber is the live color (DESIGN.md).
  * - `done`: solid green disc with a check.
  * - the rest reuse the ring and add a glyph (x, dash, bars, dot, !) in the
  *   tone of the state: failed, cancelled, skipped, paused, review, waiting,
@@ -73,7 +73,7 @@ const RING_TONE: Record<Surface, Record<TaskStatusVariant, string>> = {
   default: {
     pending: "text-status-neutral/40",
     backlog: "text-status-neutral/40",
-    active: "text-status-info-solid",
+    active: "text-status-active-solid",
     done: "text-status-success-solid",
     failed: "text-status-error-strong",
     cancelled: "text-status-neutral/50",
@@ -86,7 +86,7 @@ const RING_TONE: Record<Surface, Record<TaskStatusVariant, string>> = {
   inverse: {
     pending: "text-status-neutral/60",
     backlog: "text-status-neutral/60",
-    active: "text-status-info-solid",
+    active: "text-status-active-solid",
     done: "text-status-success-solid",
     failed: "text-status-error",
     cancelled: "text-status-neutral/70",
@@ -102,7 +102,7 @@ const RING_TONE: Record<Surface, Record<TaskStatusVariant, string>> = {
 export const TASK_STATUS_TEXT: Record<TaskStatusVariant, string> = {
   pending: "text-status-neutral-strong",
   backlog: "text-status-neutral-strong",
-  active: "text-status-info-strong",
+  active: "text-status-active-strong",
   done: "text-status-success-strong",
   failed: "text-status-error-strong",
   cancelled: "text-status-neutral-strong",

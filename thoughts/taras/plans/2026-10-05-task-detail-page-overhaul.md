@@ -1,7 +1,9 @@
 ---
 date: 2026-10-05
-status: ready
+status: in-progress
 autonomy: critical
+last_updated: 2026-10-05
+last_updated_by: claude (phase 1 runner)
 commit_per_phase: true
 ---
 
@@ -203,7 +205,7 @@ Shared pure helpers and data fixes land without any layout change:
   - `draft`: "Uploading attachments…"
   - Running with no logs yet: "Waiting for the first session log."
   - Terminal with no logs: "This task finished without a session log."
-- Reuse the existing cancel and resume mutations.
+- Text only. The hero owns Cancel and Resume (Taras, 2026-10-05: no duplicate action in the waiting line).
 
 #### 6. Stop polling finished tasks
 **File**: `apps/ui/src/api/hooks/use-tasks.ts`, `apps/ui/src/pages/tasks/[id]/page.tsx`
@@ -215,19 +217,19 @@ Shared pure helpers and data fixes land without any layout change:
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Unit tests pass: `bun run test:root -- apps/ui/src/lib/slack-text.test.ts apps/ui/src/lib/task-title.test.tsx apps/ui/src/lib/task-events.test.ts apps/ui/src/components/shared/task-status-icon.test.tsx apps/ui/src/components/shared/status-badge.test.tsx`
-- [ ] Typecheck passes: `cd apps/ui && bunx tsc -b`
-- [ ] Lint and token gate pass: `cd apps/ui && bun run lint && bun run check:tokens`
-- [ ] Playwright task specs pass: `bun run e2e:ui -- specs/tasks.spec.ts specs/smoke.spec.ts`
+- [x] Unit tests pass: `bun run test:root -- apps/ui/src/lib/slack-text.test.ts apps/ui/src/lib/task-title.test.tsx apps/ui/src/lib/task-events.test.ts apps/ui/src/components/shared/task-status-icon.test.tsx apps/ui/src/components/shared/status-badge.test.tsx`
+- [x] Typecheck passes: `cd apps/ui && bunx tsc -b`
+- [x] Lint and token gate pass: `cd apps/ui && bun run lint && bun run check:tokens`
+- [x] Playwright task specs pass: `bun run e2e:ui -- specs/tasks.spec.ts specs/smoke.spec.ts`
 
 #### Automated QA:
-- [ ] QA stack, completed route, 1440x900: the h1 and breadcrumb read "What are the events we support via the extensions of the swarm?". `document.body.innerText` contains no `<@` and no `that's you`.
-- [ ] QA stack, in-progress route: the computed color of the status badge label equals the computed color of an element with `text-status-active-strong`, in light and dark.
-- [ ] QA stack, pending and offered routes: the waiting line and its single action render. Screenshot both to `/tmp/task-detail-qa/phase-1/`.
-- [ ] QA stack, completed route: over 15 s after load, `agent-browser network requests` shows 0 requests to `/session-logs` and `/context`.
+- [x] QA stack, completed route, 1440x900: the h1 and breadcrumb read "What are the events we support via the extensions of the swarm?". `document.body.innerText` contains no `<@` and no `that's you`.
+- [x] QA stack, in-progress route: the computed color of the status badge label equals the computed color of an element with `text-status-active-strong`, in light and dark.
+- [x] QA stack, pending and offered routes: the waiting line and its single action render. Screenshot both to `/tmp/task-detail-qa/phase-1/`.
+- [x] QA stack, completed route: over 15 s after load, `agent-browser network requests` shows 0 requests to `/session-logs` and `/context`.
 
 #### Manual Verification:
-- [ ] Taras glances at the Tasks list and kanban: in-progress chips are amber and nothing else changed color.
+- [x] Taras glances at the Tasks list and kanban: in-progress chips are amber and nothing else changed color.
 
 **Implementation Note**: After this phase, pause for manual confirmation. Then commit `[phase 1] task page helpers, amber status, waiting states, no polling when finished`.
 

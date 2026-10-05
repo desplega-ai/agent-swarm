@@ -14,7 +14,9 @@ test("tasks list opens the seeded task and its session logs", async ({ page, see
   await row.getByText(TASK_PROMPT).click();
   await expect(page).toHaveURL(`/tasks/${seed!.tasks.inProgress}`);
 
-  await expect(page.getByText(TASK_PROMPT).filter({ visible: true })).toBeVisible();
+  // The breadcrumb shows the same title, so match the heading role: plain text
+  // matches two elements once both have rendered (a strict-mode violation).
+  await expect(page.getByRole("heading", { level: 1, name: TASK_PROMPT })).toBeVisible();
   // The detail page renders both the `lg:hidden` tab layout and the `lg:grid` rail
   // layout, so text assertions filter to the visible copy. At 1440px the rail shows
   // the session logs inline; the "Session Logs" tab only exists below lg.
@@ -30,7 +32,7 @@ test.describe("below the lg breakpoint", () => {
     test.skip(!seed, "remote run without seed");
     await page.goto(`/tasks/${seed!.tasks.inProgress}`);
 
-    await expect(page.getByText(TASK_PROMPT).filter({ visible: true })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1, name: TASK_PROMPT })).toBeVisible();
     await page.getByRole("tab", { name: "Session Logs" }).click();
     await expect(page.getByText(SEEDED_LOG_LINE).filter({ visible: true })).toBeVisible();
 

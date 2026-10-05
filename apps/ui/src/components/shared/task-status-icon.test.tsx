@@ -74,6 +74,16 @@ describe("TaskStatusIcon", () => {
     expect(html).toContain("motion-reduce:animate-none");
   });
 
+  test("in progress is amber, the live color, on both surfaces", () => {
+    expect(TASK_STATUS_TEXT.active).toBe("text-status-active-strong");
+    const html = renderToStaticMarkup(<TaskStatusIcon status="in_progress" />);
+    expect(html).toContain("text-status-active-solid");
+    expect(html).not.toContain("status-info");
+    expect(
+      renderToStaticMarkup(<TaskStatusIcon status="in_progress" surface="inverse" />),
+    ).toContain("text-status-active-solid");
+  });
+
   test("only the active icon animates", () => {
     for (const status of LIFECYCLE_STATUSES.filter((s) => taskStatusVariant(s) !== "active")) {
       expect(renderToStaticMarkup(<TaskStatusIcon status={status} />)).not.toContain("animate-");

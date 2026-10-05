@@ -45,7 +45,7 @@ export interface UseTasksOptions {
   /**
    * Keep serving the previous key's data while a new key resolves, instead of
    * dropping to `undefined`. Callers whose filters are time-derived (and so
-   * mint a fresh query key on a timer) need this — otherwise every key change
+   * mint a fresh query key on a timer) need this, otherwise every key change
    * flashes their whole view back to its loading state.
    */
   keepPreviousData?: boolean;
@@ -77,18 +77,23 @@ export function useTask(id: string, opts?: { refetchInterval?: number | false })
   });
 }
 
-export function useTaskSessionLogs(taskId: string) {
+/**
+ * Session log lines, polled every 5 s. A caller that knows the task is
+ * finished passes `refetchInterval: false`: its log is frozen, and one read is
+ * about 300 KB. An omitted (or `undefined`) value keeps the 5 s default.
+ */
+export function useTaskSessionLogs(taskId: string, opts?: { refetchInterval?: number | false }) {
   return useQuery({
     queryKey: ["task", taskId, "session-logs"],
     queryFn: () => api.fetchTaskSessionLogs(taskId),
     enabled: !!taskId,
-    refetchInterval: 5000,
+    refetchInterval: opts?.refetchInterval ?? 5000,
   });
 }
 
 /**
  * Steering lifecycle readout (≥1.122.1). Polls on the same 5s cadence as
- * `useTaskSessionLogs` — steering status moves `pending → delivered → handled`
+ * `useTaskSessionLogs`, steering status moves `pending → delivered → handled`
  * on the worker, and there is no websocket/SSE channel for it by design.
  */
 export function useTaskSteeringMessages(
@@ -100,18 +105,22 @@ export function useTaskSteeringMessages(
     queryFn: () => api.fetchTaskSteeringMessages(taskId),
     enabled: !!taskId && (opts?.enabled ?? true),
     // Callers rendering many tasks at once (the sessions timeline) pass
-    // `false` for finished tasks — their steering rows are frozen history, so
+    // `false` for finished tasks, their steering rows are frozen history, so
     // there is nothing to poll for.
     refetchInterval: opts?.refetchInterval ?? 5000,
   });
 }
 
-export function useTaskContext(taskId: string) {
+/**
+ * Context-window snapshots, polled every 10 s. Pass `refetchInterval: false`
+ * for a finished task. An omitted (or `undefined`) value keeps the default.
+ */
+export function useTaskContext(taskId: string, opts?: { refetchInterval?: number | false }) {
   return useQuery({
     queryKey: ["task", taskId, "context"],
     queryFn: () => api.fetchTaskContext(taskId),
     enabled: !!taskId,
-    refetchInterval: 10000,
+    refetchInterval: opts?.refetchInterval ?? 10000,
   });
 }
 
@@ -439,7 +448,7 @@ export function useSteerTask() {
     },
     onSuccess: (result, { id }) => {
       if (result.outcome === "promoted") {
-        // The message became a follow-up task — the chain/list views changed.
+        // The message became a follow-up task, the chain/list views changed.
         queryClient.invalidateQueries({ queryKey: ["tasks"] });
         queryClient.invalidateQueries({ queryKey: ["sessions"] });
         queryClient.invalidateQueries({ queryKey: ["session"] });

@@ -14,6 +14,7 @@ import {
   taskStatusVariant,
 } from "@/components/shared/task-status-icon";
 import { Badge } from "@/components/ui/badge";
+import { STATUS_LABELS } from "@/lib/status-labels";
 import { cn } from "@/lib/utils";
 
 type Status =
@@ -25,55 +26,17 @@ type Status =
   | WorkflowRunStatus
   | WorkflowRunStepStatus;
 
-/** Labels for every status; lifecycle ones are drawn by `TaskStatusIcon`, the rest by `HEALTH`. */
-const LABELS: Record<string, string> = {
-  // Agent statuses
-  idle: "IDLE",
-  busy: "BUSY",
-  offline: "OFFLINE",
-  waiting_for_credentials: "WAITING FOR CREDS",
-
-  // Task statuses
-  draft: "UPLOADING",
-  backlog: "BACKLOG",
-  unassigned: "UNASSIGNED",
-  offered: "OFFERED",
-  reviewing: "REVIEWING",
-  pending: "PENDING",
-  in_progress: "IN PROGRESS",
-  paused: "PAUSED",
-  completed: "COMPLETED",
-  failed: "FAILED",
-  cancelled: "CANCELLED",
-  superseded: "SUPERSEDED",
-  aborted_limit: "ABORTED LIMIT",
-
-  // Service statuses
-  starting: "STARTING",
-  healthy: "HEALTHY",
-  unhealthy: "UNHEALTHY",
-  stopped: "STOPPED",
-
-  // Workflow run statuses
-  running: "RUNNING",
-  waiting: "WAITING",
-
-  // Workflow step statuses
-  skipped: "SKIPPED",
-
-  // Approval request statuses
-  approved: "APPROVED",
-  rejected: "REJECTED",
-  timeout: "TIMEOUT",
-};
-
 interface HealthConfig {
   dot: string;
   text: string;
   spinner?: boolean;
 }
 
-/** Agent and service health: a dot (or the busy spinner), not a lifecycle icon. */
+/**
+ * Agent and service health: a dot (or the busy spinner), not a lifecycle icon.
+ * Labels for every status live in `STATUS_LABELS`. `TaskStatusIcon` draws the
+ * lifecycle statuses.
+ */
 const HEALTH: Record<string, HealthConfig> = {
   idle: { dot: "bg-status-success", text: "text-status-success-strong" },
   busy: { dot: "bg-status-active", text: "text-status-active-strong", spinner: true },
@@ -122,7 +85,7 @@ export function StatusBadge({ status, size = "sm", className }: StatusBadgeProps
       ) : (
         <span className={cn("h-1.5 w-1.5 rounded-full shrink-0", health.dot)} />
       )}
-      <span className={textClass}>{LABELS[status] ?? status}</span>
+      <span className={textClass}>{STATUS_LABELS[status] ?? status}</span>
     </Badge>
   );
 }
