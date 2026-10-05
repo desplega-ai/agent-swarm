@@ -415,8 +415,9 @@ See [`thoughts/taras/research/2026-05-26-agent-reasoning-effort-runtime-control.
 
 ### Amp (`amp`)
 
-Set `HARNESS_PROVIDER=amp` and `AMP_API_KEY` (an access token from ampcode.com
-settings) in the worker environment or agent-scoped config. The adapter runs
+Set `HARNESS_PROVIDER=amp` and `AMP_API_KEY` (an `sgamp_` access token from
+ampcode.com Settings → Security; see [Provider Auth: Amp](/docs/guides/provider-auth/amp))
+in the worker environment or agent-scoped config. The adapter runs
 Amp's CLI in execute mode, `amp -x --stream-json --stream-json-input`, with the
 prompt as the first stdin message. The full worker image pins the CLI
 (`@ampcode/cli@0.0.1791187719-g319a37`, SHA-512 verified, auto-update off); the
@@ -431,8 +432,8 @@ private`, but there is no local-only mode.
 
 - **Models.** Amp has no model flag. `modelTier` maps onto its four built-in
   modes: smol `low`, regular `medium`, smart `high`, ultra `ultra`. Amp chooses the model per
-  mode on its server; measured 2026-10-05, `low` ran GLM-5.3 Flash (the cheapest) and `medium`
-  ran Claude Opus 5.5. A concrete `model` is a `provider/model` id
+  mode on its server; measured 2026-10-05, `low` ran GLM-5.3 Flash, `medium` Claude Opus 5.5,
+  `high` GPT-6 Astra and `ultra` Claude Fable 5.1. A concrete `model` is a `provider/model` id
   (`openai/gpt-5-nano`, `anthropic/claude-haiku-4-5-20251001`), pinned through the
   per-task plugin agent on top of the `medium` mode's prompt and tools. Anything
   else is rejected at send-task, agent runtime and session start.
@@ -448,15 +449,21 @@ private`, but there is no local-only mode.
   directly (excluding both) raised the first request from about 37k to about 98k input
   tokens, so the default is kept and the prompt names the call shape.
 - **Tokens and cost.** The stream carries per-request usage but no model and no
-  USD. After the session the adapter reads `amp threads export <id>` (no
-  inference) for the model of each request and Amp's context window, and the API
-  prices the tokens from the `amp` rows (Anthropic, OpenAI, Google and Fireworks
-  models.dev sections). Amp reports uncached prompt tokens as
-  `cache_creation_input_tokens` for every vendor; the adapter keeps them as cache
-  writes for Anthropic models and moves them to input for the rest. Tokens of
-  subagent threads (Task, oracle, finder) are separate Amp threads and are not counted.
-  A model missing from the table settles `unpriced`, and so does a session whose
-  export failed, pinned or not.
+  USD. After the session the adapter reads two things, neither of which runs
+  inference. `amp threads usage <id> --details` gives what Amp billed for the
+  whole thread, subagent threads included; it is posted as the harness cost
+  (`costSource: 'harness'`, like Devin's ACUs) when every request was billed
+  through Amp. `amp threads export <id>` gives the model of each request and
+  Amp's context window; the API prices those tokens from the `amp` rows
+  (Anthropic, OpenAI, Google and Fireworks models.dev sections) for the
+  per-model breakdown, and as the total when Amp's cost is missing or a
+  request went through a linked provider (a ChatGPT subscription records $0
+  in Amp). Amp reports uncached prompt tokens as
+  `cache_creation_input_tokens` for every vendor; the adapter keeps them as
+  cache writes for Anthropic models and moves them to input for the rest.
+  When the export is empty too, the stream totals are priced at the mode's
+  model and tagged `estimated`, never $0. A model missing from the table
+  settles `unpriced`.
 - **Steering.** `steerModes: ["queue"]`. A stdin message sent during a turn
   waits for the turn to end (verified live). Amp emits `result` only when stdin
   closes, so the adapter ends input at the first top-level assistant message

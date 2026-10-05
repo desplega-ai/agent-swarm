@@ -162,6 +162,15 @@ Which credentials you need depends on your selected harness provider:
 
 Codex can also authenticate through `~/.codex/auth.json`, including ChatGPT OAuth restored from the swarm config store. See [Provider Auth: Codex OAuth](/docs/guides/provider-auth/codex-oauth).
 
+**Amp** (`HARNESS_PROVIDER=amp`):
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `AMP_API_KEY` | Yes | — | Amp access token (`sgamp_...`) from ampcode.com Settings → Security. The short-lived `amp login` session token is rejected |
+| `AMP_BINARY` | No | `amp` on `PATH` | Path to another trusted Amp CLI executable |
+
+See [Provider Auth: Amp](/docs/guides/provider-auth/amp) for the token, modes and cost tracking.
+
 **opencode** (`HARNESS_PROVIDER=opencode`):
 
 | Variable | Required | Default | Description |
