@@ -1,5 +1,5 @@
 /**
- * Sessions surface — shared floating composer dock.
+ * Sessions surface: the shared floating composer dock.
  *
  * A rounded card-shaped input area inset from the panel edges with a slim
  * action row at the bottom: routing hint on the left, keyboard hints + circular
@@ -8,7 +8,7 @@
  * regardless of state.
  * Enter sends, Shift+Enter inserts a new line, and Cmd/Ctrl+Enter also sends.
  * On a touch device with a soft keyboard (no hardware Enter key), plain
- * Enter inserts a newline instead — the send button submits there.
+ * Enter inserts a newline instead, and the send button submits there.
  */
 
 import { ArrowUp, FileText, Paperclip, X } from "lucide-react";
@@ -34,7 +34,7 @@ function formatFileSize(bytes: number): string {
   return `${(kb / 1024).toFixed(1)} MB`;
 }
 
-// Matches MAX_UPLOAD_BYTES in src/http/fs.ts — reject client-side before a
+// Matches MAX_UPLOAD_BYTES in src/http/fs.ts: reject client-side before a
 // doomed upload round trip instead of after a 413.
 const MAX_ATTACHMENT_BYTES = 50 * 1024 * 1024;
 
@@ -64,7 +64,7 @@ function fileExtension(name: string): string {
 }
 
 /** Splits a dropped/selected/pasted file batch into what's safe to attach and a
- * human-readable reason for anything rejected. Returns at most one message —
+ * human-readable reason for anything rejected. Returns at most one message:
  * multiple bad files still name only the first, to keep the row short. */
 function partitionAttachmentFiles(files: File[]): { valid: File[]; error: string | null } {
   const valid: File[] = [];
@@ -142,7 +142,44 @@ export interface ComposerDockProps {
    * events. The sessions surfaces pass nothing.
    */
   decoration?: React.ReactNode;
+  /**
+   * A bottom bar (the task page's narrow layout). The box is one line until
+   * it gets focus, or while it holds a draft or files. Its buttons are 44 px
+   * touch targets.
+   */
+  bar?: boolean;
   className?: string;
+}
+
+/**
+ * Whether the user is working in a bar-mode box. Focus inside starts it. A
+ * tap outside, or focus that moves to another control, ends it.
+ * - It starts on focus, not on pointerdown: a touch device fires its mouse
+ *   events after pointerup, so a box that grew on pointerdown would move the
+ *   action row under the finger before the tap lands.
+ * - A blur with no new focus target does not end it: Safari does not focus a
+ *   button on a tap, so a tap on Attach would fold the row away.
+ */
+function useBoxEngaged(enabled: boolean, box: React.RefObject<HTMLFormElement | null>) {
+  const [engaged, setEngaged] = useState(false);
+  useEffect(() => {
+    if (!enabled || !engaged) return;
+    const onPointerDown = (event: PointerEvent) => {
+      if (!box.current?.contains(event.target as Node)) setEngaged(false);
+    };
+    document.addEventListener("pointerdown", onPointerDown, true);
+    return () => document.removeEventListener("pointerdown", onPointerDown, true);
+  }, [enabled, engaged, box]);
+  const handlers = enabled
+    ? {
+        onFocus: () => setEngaged(true),
+        onBlur: (event: React.FocusEvent<HTMLFormElement>) => {
+          const next = event.relatedTarget as Node | null;
+          if (next && !event.currentTarget.contains(next)) setEngaged(false);
+        },
+      }
+    : {};
+  return { engaged, handlers };
 }
 
 export function ComposerDock({
@@ -165,10 +202,15 @@ export function ComposerDock({
   autoFocus,
   fullWidth,
   decoration,
+  bar = false,
   className,
 }: ComposerDockProps) {
   const ref = useRef<HTMLTextAreaElement | null>(null);
+  const formRef = useRef<HTMLFormElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const { engaged, handlers: engageHandlers } = useBoxEngaged(bar, formRef);
+  // A bar folds to one line while the user is elsewhere and the box is empty.
+  const folded = bar && !engaged && value.length === 0 && attachments.length === 0 && !isPending;
   const dragCounterRef = useRef(0);
   const [isDragActive, setIsDragActive] = useState(false);
   const [dropErrorMessage, setDropErrorMessage] = useState<string | null>(null);
@@ -253,6 +295,7 @@ export function ComposerDock({
 
   return (
     <form
+      ref={formRef}
       // `@container`: the keyboard hint below hides by the dock's own width, so
       // a narrow side panel drops it even on a wide screen.
       className={cn("@container shrink-0 px-4 pt-2 pb-4 bg-background w-full", className)}
@@ -260,6 +303,7 @@ export function ComposerDock({
         e.preventDefault();
         if (canSubmit) onSubmit();
       }}
+      {...engageHandlers}
     >
       <div
         className={cn(
@@ -297,7 +341,8 @@ export function ComposerDock({
           className={cn(
             "field-sizing-content border-0 shadow-none bg-transparent",
             "focus-visible:ring-0 focus-visible:border-0",
-            "min-h-14 max-h-[220px] resize-none px-4 pt-3.5 pb-1.5 text-base md:text-[15px]",
+            "max-h-[220px] resize-none px-4 text-base md:text-[15px]",
+            folded ? "min-h-11 py-2.5" : "min-h-14 pt-3.5 pb-1.5",
             "leading-snug",
           )}
         />
@@ -333,7 +378,7 @@ export function ComposerDock({
                   onClick={() => removeAttachment(index)}
                   disabled={isPending}
                   className={cn(
-                    "ml-0.5 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-sm",
+                    "hit-area ml-0.5 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-sm",
                     "text-muted-foreground hover:bg-background hover:text-foreground",
                     "disabled:pointer-events-none disabled:opacity-50",
                   )}
@@ -345,7 +390,13 @@ export function ComposerDock({
             ))}
           </div>
         ) : null}
-        <div className="flex items-center justify-between gap-2 px-2.5 pb-2 pt-0.5">
+        <div
+          className={cn(
+            "flex items-center justify-between gap-2 px-2.5 pb-2 pt-0.5",
+            // A folded bar is one line: the action row shows once it is used.
+            folded && "hidden",
+          )}
+        >
           <div className="flex items-center gap-2 min-w-0">
             {modeControl}
             <div
@@ -375,7 +426,10 @@ export function ComposerDock({
                     variant="ghost"
                     disabled={!canAttach}
                     aria-label="Attach files"
-                    className="h-8 w-8 rounded-full text-muted-foreground hover:text-foreground"
+                    className={cn(
+                      "rounded-full text-muted-foreground hover:text-foreground",
+                      bar ? "size-11" : "h-8 w-8",
+                    )}
                     onClick={() => fileInputRef.current?.click()}
                   >
                     <Paperclip className="h-4 w-4" />
@@ -394,7 +448,7 @@ export function ComposerDock({
                   size="icon"
                   disabled={!canSubmit}
                   aria-label={sendLabel}
-                  className="h-8 w-8 rounded-full shadow-sm"
+                  className={cn("rounded-full shadow-sm", bar ? "size-11" : "h-8 w-8")}
                 >
                   <ArrowUp className="h-4 w-4" />
                 </Button>

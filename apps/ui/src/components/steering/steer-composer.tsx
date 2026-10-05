@@ -62,6 +62,8 @@ export interface SteerComposerProps {
   fullWidth?: boolean;
   /** Extra action-row buttons, passed to `ComposerDock`. */
   extraActions?: React.ReactNode;
+  /** A bottom bar: one line until used, 44 px controls. See `ComposerDock`. */
+  bar?: boolean;
   className?: string;
 }
 
@@ -98,6 +100,7 @@ export function SteerComposer({
   autoFocus,
   fullWidth,
   extraActions,
+  bar,
   className,
 }: SteerComposerProps) {
   const { userId } = useCurrentUser();
@@ -196,6 +199,7 @@ export function SteerComposer({
       sendLabel={hasLiveDelivery ? "Send" : "Create follow-up task"}
       autoFocus={autoFocus}
       extraActions={extraActions}
+      bar={bar}
       modeControl={
         hasLiveDelivery ? (
           <SteerModeToggle
@@ -208,6 +212,8 @@ export function SteerComposer({
                 : `Interrupt isn't supported on ${harness}. Messages queue at the next turn boundary.`
             }
             disabled={!userId || steerTask.isPending}
+            // 44 px options: the control's 2 px padding and border sit outside them.
+            className={bar ? "h-12.5" : undefined}
           />
         ) : null
       }

@@ -29,7 +29,9 @@ import {
 } from "@/components/ui/dialog";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
 import { formatSlackMentions, parseSlackPrompt, type SlackPrompt } from "@/lib/slack-text";
+import { cn } from "@/lib/utils";
 import { taskSourceLabel } from "./task-details-rail";
+import { NARROW_INLINE_TARGET, NARROW_TARGET } from "./touch-targets";
 
 type SourceTask = Pick<
   AgentTask,
@@ -66,10 +68,15 @@ const SOURCE_ICONS: Record<string, LucideIcon> = {
 };
 
 const LINK_CLASS = "text-primary hover:underline";
+/** A short link in the line: 44 px tall in the narrow layout. */
+const TARGET_LINK_CLASS = cn(LINK_CLASS, NARROW_INLINE_TARGET);
 
-/** A name in the source line ("Taras"), one step stronger than the line. */
+/**
+ * A name in the source line ("Taras"), one step stronger than the line. It
+ * truncates when the narrow layout's one-row line runs out of room.
+ */
 function Who({ children }: { children: ReactNode }) {
-  return <span className="font-medium text-foreground">{children}</span>;
+  return <span className="min-w-0 truncate font-medium text-foreground">{children}</span>;
 }
 
 function SourceMark({ source }: { source: string }) {
@@ -97,6 +104,11 @@ interface SourceView {
    * decorative.
    */
   named: boolean;
+  /**
+   * Whether `lead` can shorten (a name or a repo truncates). A short link or
+   * label keeps its width.
+   */
+  shrinks: boolean;
   /** Further parts, separated by dots. */
   extras: { key: string; node: ReactNode }[];
 }
@@ -114,11 +126,20 @@ function describeSource(
       const count = prompt.thread.length;
       const extras =
         count > 0
-          ? [{ key: "thread", node: `${count} earlier ${count === 1 ? "message" : "messages"}` }]
+          ? [
+              {
+                key: "thread",
+                node: (
+                  <span className="shrink-0 whitespace-nowrap">
+                    {count} earlier {count === 1 ? "message" : "messages"}
+                  </span>
+                ),
+              },
+            ]
           : [];
       return speaker
-        ? { lead: <Who>{speaker}</Who>, named: false, extras }
-        : { lead: label, named: true, extras };
+        ? { lead: <Who>{speaker}</Who>, named: false, shrinks: true, extras }
+        : { lead: label, named: true, shrinks: false, extras };
     }
     case "github":
     case "gitlab": {
@@ -135,12 +156,13 @@ function describeSource(
               href={task.vcsUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className={`font-medium ${LINK_CLASS}`}
+              className={cn("font-medium", TARGET_LINK_CLASS)}
             >
               {kind ? `${kind} ` : ""}#{task.vcsNumber}
             </a>
           ),
           named: false,
+          shrinks: false,
           extras: repo ? [{ key: "repo", node: repo }] : [],
         };
       }
@@ -151,86 +173,101 @@ function describeSource(
               href={task.vcsUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className={`min-w-0 truncate ${LINK_CLASS}`}
+              className={cn(
+                "min-w-0 truncate",
+                LINK_CLASS,
+                NARROW_TARGET,
+                "@max-[64rem]:leading-11",
+              )}
             >
               {task.vcsRepo}
             </a>
           ),
           named: false,
+          shrinks: true,
           extras: [],
         };
       }
       return repo
-        ? { lead: repo, named: false, extras: [] }
-        : { lead: label, named: true, extras: [] };
+        ? { lead: repo, named: false, shrinks: true, extras: [] }
+        : { lead: label, named: true, shrinks: false, extras: [] };
     }
     case "ui":
       return {
         lead: names.requestedBy ? (
-          <span>
+          <span className="min-w-0 truncate">
             <Who>{names.requestedBy}</Who> in the dashboard
           </span>
         ) : (
           label
         ),
         named: true,
+        shrinks: !!names.requestedBy,
         extras: [],
       };
     case "api":
       return {
         lead: names.requestedBy ? (
-          <span>
+          <span className="min-w-0 truncate">
             <Who>{names.requestedBy}</Who> via the API
           </span>
         ) : (
           label
         ),
         named: true,
+        shrinks: !!names.requestedBy,
         extras: [],
       };
     case "mcp":
       return {
         lead: names.creator ? (
-          <span>
+          <span className="min-w-0 truncate">
             Delegated by <Who>{names.creator}</Who>
           </span>
         ) : (
           label
         ),
         named: true,
+        shrinks: !!names.creator,
         extras: [],
       };
     case "schedule":
       return {
         lead: task.scheduleId ? (
-          <Link to={`/schedules/${task.scheduleId}`} className={LINK_CLASS}>
+          <Link to={`/schedules/${task.scheduleId}`} className={TARGET_LINK_CLASS}>
             {label}
           </Link>
         ) : (
           label
         ),
         named: true,
+        shrinks: false,
         extras: [],
       };
     case "workflow":
       return {
         lead: task.workflowRunId ? (
-          <Link to={`/workflow-runs/${task.workflowRunId}`} className={LINK_CLASS}>
+          <Link to={`/workflow-runs/${task.workflowRunId}`} className={TARGET_LINK_CLASS}>
             Workflow run
           </Link>
         ) : (
           label
         ),
         named: true,
+        shrinks: false,
         extras: [],
       };
     default:
-      return { lead: label, named: true, extras: [] };
+      return { lead: label, named: true, shrinks: false, extras: [] };
   }
 }
 
 function Dot() {
-  return <span aria-hidden>·</span>;
+  return (
+    <span aria-hidden className="shrink-0">
+      ·
+    </span>
+  );
 }
 
 /**
@@ -259,7 +296,10 @@ function TaskPromptDialog({
         <Button
           variant="ghost"
           size="xs"
-          className="-mx-1.5 text-[13px] text-primary hover:text-primary"
+          className={cn(
+            "hit-area -mx-1.5 text-[13px] text-primary hover:text-primary",
+            NARROW_TARGET,
+          )}
         >
           View full prompt
         </Button>
@@ -360,8 +400,12 @@ export function TaskSourceLine({
       : "The prompt this task was created with.";
 
   return (
-    <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[13px] leading-6 text-muted-foreground">
-      <span className="inline-flex min-w-0 items-center gap-1.5">
+    // Wide: the line wraps. Narrow: one row, 44 px tall for "View full
+    // prompt", where a name or a repo truncates instead.
+    <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[13px] leading-6 text-muted-foreground @max-[64rem]:flex-nowrap">
+      <span
+        className={cn("inline-flex items-center gap-1.5", view.shrinks ? "min-w-0" : "shrink-0")}
+      >
         <SourceMark source={source} />
         {view.named ? null : <span className="sr-only">{label}: </span>}
         {view.lead}

@@ -36,6 +36,7 @@ import { progressBarTone } from "@/lib/percent-progress-tone";
 import { TERMINAL_STATUSES } from "@/lib/task-activity";
 import { describeTaskEvent, TASK_EVENT_DOT, TASK_EVENT_TEXT } from "@/lib/task-events";
 import { cn, formatElapsed, formatRelativeTime, formatSmartTime, parseUTCDate } from "@/lib/utils";
+import { NARROW_ICON_TARGET, NARROW_INLINE_TARGET, NARROW_TARGET } from "./touch-targets";
 
 // Below this, harness-vs-recomputed divergence is rounding noise; above it,
 // worth a visible warning next to the cost.
@@ -192,7 +193,7 @@ function CopyValueButton({ value, label }: { value: string; label: string }) {
       type="button"
       variant="ghost"
       size="icon-xs"
-      className="shrink-0 text-muted-foreground hover:text-foreground"
+      className={cn("shrink-0 text-muted-foreground hover:text-foreground", NARROW_ICON_TARGET)}
       onClick={() => void copy(value)}
       aria-label={copied ? "Copied" : label}
     >
@@ -383,7 +384,10 @@ function SourceControlSection({ task }: { task: TaskWithLogs }) {
                 href={task.vcsUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="flex shrink-0 items-center gap-1.5 text-xs text-primary hover:underline"
+                className={cn(
+                  "flex shrink-0 items-center gap-1.5 text-xs text-primary hover:underline",
+                  NARROW_TARGET,
+                )}
               >
                 <GitPullRequest className="size-3.5 shrink-0" />
                 <span className="font-mono">#{task.vcsNumber}</span>
@@ -395,7 +399,10 @@ function SourceControlSection({ task }: { task: TaskWithLogs }) {
                 href={task.vcsUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="flex min-w-0 flex-1 items-center gap-1.5 font-mono text-xs text-primary hover:underline"
+                className={cn(
+                  "flex min-w-0 flex-1 items-center gap-1.5 font-mono text-xs text-primary hover:underline",
+                  NARROW_TARGET,
+                )}
               >
                 <Link2 className="size-3.5 shrink-0" />
                 <MiddleTruncation>{task.vcsUrl}</MiddleTruncation>
@@ -480,7 +487,10 @@ export function TaskDetailsRail({
         <dl>
           <RailRow label="Agent">
             {task.agentId ? (
-              <Link to={`/agents/${task.agentId}`} className="text-primary hover:underline">
+              <Link
+                to={`/agents/${task.agentId}`}
+                className={cn("text-primary hover:underline", NARROW_INLINE_TARGET)}
+              >
                 {agentName ?? `${task.agentId.slice(0, 8)}…`}
               </Link>
             ) : (
@@ -489,7 +499,7 @@ export function TaskDetailsRail({
           </RailRow>
           {task.creatorAgentId && task.creatorAgentId !== task.agentId ? (
             <RailRow label="Created by">
-              <AgentLink agentId={task.creatorAgentId} />
+              <AgentLink agentId={task.creatorAgentId} className={NARROW_INLINE_TARGET} />
             </RailRow>
           ) : null}
           {task.requestedByUserId ? (
@@ -517,7 +527,10 @@ export function TaskDetailsRail({
                   <span
                     // biome-ignore lint/a11y/noNoninteractiveTabindex: focus opens the tooltip, so keyboard users can read the exact cost
                     tabIndex={0}
-                    className="rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+                    className={cn(
+                      "rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring/60",
+                      NARROW_INLINE_TARGET,
+                    )}
                   >
                     {formatCost(stats.totalCost, { precision: 2 })}
                   </span>
@@ -553,7 +566,10 @@ export function TaskDetailsRail({
               <li key={depId}>
                 <Link
                   to={`/tasks/${depId}`}
-                  className="font-mono text-[13px] text-primary hover:underline"
+                  className={cn(
+                    "font-mono text-[13px] text-primary hover:underline",
+                    NARROW_INLINE_TARGET,
+                  )}
                 >
                   #{depId.slice(0, 8)}
                 </Link>
@@ -581,7 +597,11 @@ export function TaskDetailsRail({
         </RailSection>
       ) : null}
 
-      <CollapsibleSection title="Technical details" persistKey="tasks:technical-details-open">
+      <CollapsibleSection
+        title="Technical details"
+        persistKey="tasks:technical-details-open"
+        headerClassName={NARROW_TARGET}
+      >
         <dl className="pt-1">
           <RailRow label="Task id">
             <CopyableId value={task.id} label="Copy task id" />
@@ -606,7 +626,10 @@ export function TaskDetailsRail({
           ) : null}
           {task.credentialKeySuffix ? (
             <RailRow label="API key" mono>
-              <Link to="/settings/api-keys" className="text-primary hover:underline">
+              <Link
+                to="/settings/api-keys"
+                className={cn("text-primary hover:underline", NARROW_INLINE_TARGET)}
+              >
                 {API_KEY_LABELS[task.credentialKeyType ?? ""] ?? task.credentialKeyType ?? "Key"} …
                 {task.credentialKeySuffix}
               </Link>
@@ -664,7 +687,10 @@ export function TaskDetailsRail({
           ) : null}
           {task.parentTaskId ? (
             <RailRow label="Parent" mono>
-              <Link to={`/tasks/${task.parentTaskId}`} className="text-primary hover:underline">
+              <Link
+                to={`/tasks/${task.parentTaskId}`}
+                className={cn("text-primary hover:underline", NARROW_INLINE_TARGET)}
+              >
                 #{task.parentTaskId.slice(0, 8)}
               </Link>
             </RailRow>
@@ -678,7 +704,7 @@ export function TaskDetailsRail({
             <RailRow label="Workflow" mono>
               <Link
                 to={`/workflow-runs/${task.workflowRunId}`}
-                className="text-primary hover:underline"
+                className={cn("text-primary hover:underline", NARROW_INLINE_TARGET)}
               >
                 #{task.workflowRunId.slice(0, 8)}
               </Link>

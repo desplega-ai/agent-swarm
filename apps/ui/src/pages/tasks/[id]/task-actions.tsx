@@ -11,6 +11,7 @@ import {
   Reply,
   RotateCcw,
 } from "lucide-react";
+import { type ReactNode, type RefObject, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useCancelTask, usePauseTask, useResumeTask, useRetryTask } from "@/api/hooks/use-tasks";
 import type { AgentTask } from "@/api/types";
@@ -42,6 +43,7 @@ import { useLeadCredentialIssue } from "@/hooks/use-lead-credential-issue";
 import { TERMINAL_STATUSES } from "@/lib/task-activity";
 import { shouldShowTaskFailureHelp } from "@/lib/task-support";
 import { cn } from "@/lib/utils";
+import { NARROW_TARGET } from "./touch-targets";
 
 /** Structured output JSON (`{ status, output, summary }`), or null for plain text. */
 export function parseStructuredOutput(raw: string): { output?: string; summary?: string } | null {
@@ -127,17 +129,37 @@ async function copyWithToast(value: string, message: string) {
   }
 }
 
-/** Cancel, behind a confirm step. */
-function CancelTaskButton({ onConfirm }: { onConfirm: () => void }) {
+/**
+ * The confirm step before Cancel. With a `trigger` it opens itself. Without
+ * one, the caller controls it (the narrow layout's menu item opens it).
+ */
+function CancelTaskDialog({
+  open,
+  onOpenChange,
+  onConfirm,
+  trigger,
+  returnFocus,
+}: {
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  onConfirm: () => void;
+  trigger?: ReactNode;
+  /** Gets focus when the dialog closes. A trigger gets it on its own. */
+  returnFocus?: RefObject<HTMLElement | null>;
+}) {
   return (
-    <AlertDialog>
-      <AlertDialogTrigger asChild>
-        <Button variant="destructive-outline" size="sm">
-          <Ban />
-          Cancel
-        </Button>
-      </AlertDialogTrigger>
-      <AlertDialogContent>
+    <AlertDialog open={open} onOpenChange={onOpenChange}>
+      {trigger ? <AlertDialogTrigger asChild>{trigger}</AlertDialogTrigger> : null}
+      <AlertDialogContent
+        onCloseAutoFocus={
+          returnFocus
+            ? (event) => {
+                event.preventDefault();
+                returnFocus.current?.focus();
+              }
+            : undefined
+        }
+      >
         <AlertDialogHeader>
           <AlertDialogTitle>Cancel Task</AlertDialogTitle>
           <AlertDialogDescription>
@@ -155,8 +177,31 @@ function CancelTaskButton({ onConfirm }: { onConfirm: () => void }) {
   );
 }
 
+/** Cancel, behind a confirm step. */
+function CancelTaskButton({ onConfirm }: { onConfirm: () => void }) {
+  return (
+    <CancelTaskDialog
+      onConfirm={onConfirm}
+      trigger={
+        <Button variant="destructive-outline" size="sm">
+          <Ban />
+          Cancel
+        </Button>
+      }
+    />
+  );
+}
+
 /** A text button that copies. Only the icon changes, so the width stays. */
-function CopyTextButton({ text, label }: { text: string; label: string }) {
+function CopyTextButton({
+  text,
+  label,
+  className,
+}: {
+  text: string;
+  label: string;
+  className?: string;
+}) {
   const { copied, copy } = useCopyToClipboard();
   return (
     <Button
@@ -164,6 +209,7 @@ function CopyTextButton({ text, label }: { text: string; label: string }) {
       size="sm"
       onClick={() => void copy(text)}
       aria-label={copied ? `${label}: copied` : undefined}
+      className={className}
     >
       {copied ? <Check /> : <Copy />}
       {label}
@@ -180,9 +226,9 @@ function FollowUpButton({ model }: { model: TaskActionModel }) {
   );
 }
 
-function RetryButton({ model }: { model: TaskActionModel }) {
+function RetryButton({ model, className }: { model: TaskActionModel; className?: string }) {
   return (
-    <Button size="sm" onClick={model.retry} disabled={model.retrying}>
+    <Button size="sm" onClick={model.retry} disabled={model.retrying} className={className}>
       <RotateCcw />
       Retry
     </Button>
@@ -207,11 +253,11 @@ function ResumeButton({ model }: { model: TaskActionModel }) {
   );
 }
 
-/** The "..." menu: Retry where it is not a button, Copy task id, Get help. */
+/** The wide hero's "..." menu: Retry where it is not a button, Copy task id, Get help. */
 function MoreActionsMenu({ model }: { model: TaskActionModel }) {
   const { status } = model.task;
-  // Failed tasks keep Retry in the menu too: the callout that holds the
-  // button is on the Outcome tab in the narrow layout.
+  // Failed tasks keep Retry in the menu too, next to Get help: the hero has
+  // no Retry button, the error callout under it does.
   const retryInMenu = status === "completed" || status === "failed";
   return (
     <DropdownMenu>
@@ -246,7 +292,111 @@ function MoreActionsMenu({ model }: { model: TaskActionModel }) {
 }
 
 /**
- * The hero's actions, by status:
+ * The narrow layout's "..." menu. The narrow hero has no action buttons and
+ * the bottom bar holds the message box, so this menu holds every other
+ * action for the status:
+ * - completed: Copy answer, Retry. Failed, cancelled, superseded: Retry.
+ * - in progress: Pause. Paused: Resume.
+ * - not finished: Cancel task, behind the confirm step.
+ * - always: Copy task id, and Get help for a failed task.
+ * The trigger and the items are 44 px tall.
+ */
+export function TaskActionsMenu({ model }: { model: TaskActionModel }) {
+  const { status } = model.task;
+  const terminal = TERMINAL_STATUSES.has(status);
+  const [confirmingCancel, setConfirmingCancel] = useState(false);
+  // The menu item that opens the confirm step is gone when it closes, so
+  // focus goes back to the "..." trigger.
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const answer = status === "completed" ? model.answer : null;
+  return (
+    <>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button
+            ref={triggerRef}
+            variant="ghost"
+            size="icon"
+            aria-label="More actions"
+            className="size-11"
+          >
+            <Ellipsis />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-52">
+          {answer ? (
+            <DropdownMenuItem
+              className="min-h-11"
+              onSelect={() => void copyWithToast(answer, "Answer copied.")}
+            >
+              <Copy />
+              Copy answer
+            </DropdownMenuItem>
+          ) : null}
+          {terminal ? (
+            <DropdownMenuItem className="min-h-11" onSelect={model.retry} disabled={model.retrying}>
+              <RotateCcw />
+              Retry
+            </DropdownMenuItem>
+          ) : null}
+          {status === "in_progress" ? (
+            <DropdownMenuItem className="min-h-11" onSelect={model.pause} disabled={model.pausing}>
+              <Pause />
+              Pause
+            </DropdownMenuItem>
+          ) : null}
+          {status === "paused" ? (
+            <DropdownMenuItem
+              className="min-h-11"
+              onSelect={model.resume}
+              disabled={model.resuming}
+            >
+              <Play />
+              Resume
+            </DropdownMenuItem>
+          ) : null}
+          {terminal ? null : (
+            <DropdownMenuItem
+              variant="destructive"
+              className="min-h-11"
+              onSelect={() => setConfirmingCancel(true)}
+            >
+              <Ban />
+              Cancel task
+            </DropdownMenuItem>
+          )}
+          <DropdownMenuItem
+            className="min-h-11"
+            onSelect={() => void copyWithToast(model.task.id, "Task id copied.")}
+          >
+            <Hash />
+            Copy task id
+          </DropdownMenuItem>
+          {model.getHelp ? (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem className="min-h-11" onSelect={model.getHelp}>
+                <LifeBuoy />
+                Get help
+              </DropdownMenuItem>
+            </>
+          ) : null}
+        </DropdownMenuContent>
+      </DropdownMenu>
+      {terminal ? null : (
+        <CancelTaskDialog
+          open={confirmingCancel}
+          onOpenChange={setConfirmingCancel}
+          onConfirm={model.cancel}
+          returnFocus={triggerRef}
+        />
+      )}
+    </>
+  );
+}
+
+/**
+ * The wide hero's actions, by status:
  * - completed: Follow up, Copy answer, and "..." (Retry, Copy task id).
  * - failed: "..." only. The error callout under the hero holds Retry, Copy
  *   diagnostics and Get help.
@@ -312,16 +462,20 @@ export function TaskFailureCallout({
       <div className="mt-1 space-y-3 text-sm leading-relaxed text-foreground">
         <MarkdownView text={model.task.failureReason || "No failure reason was recorded."} />
         <div className="flex flex-wrap items-center gap-1.5">
-          <RetryButton model={model} />
+          <RetryButton model={model} className={NARROW_TARGET} />
           {model.diagnostics ? (
-            <CopyTextButton text={model.diagnostics} label="Copy diagnostics" />
+            <CopyTextButton
+              text={model.diagnostics}
+              label="Copy diagnostics"
+              className={NARROW_TARGET}
+            />
           ) : null}
           {model.getHelp ? (
             <Button
               variant="ghost"
               size="sm"
               onClick={model.getHelp}
-              className="ml-auto text-muted-foreground hover:text-foreground"
+              className={cn("ml-auto text-muted-foreground hover:text-foreground", NARROW_TARGET)}
             >
               <LifeBuoy />
               Get help

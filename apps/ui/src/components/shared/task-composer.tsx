@@ -73,6 +73,11 @@ export interface TaskComposerProps {
   renderActions?: (addAttachment: (file: File) => void) => React.ReactNode;
   /** Span the full width (task page). Sessions keeps the centered chat column. */
   fullWidth?: boolean;
+  /**
+   * The task page's narrow-layout bottom bar: one line until used, 44 px
+   * controls. See `ComposerDock`.
+   */
+  bar?: boolean;
   className?: string;
 }
 
@@ -88,6 +93,7 @@ export function TaskComposer({
   onValueChange,
   renderActions,
   fullWidth,
+  bar,
   className,
 }: TaskComposerProps) {
   const queryClient = useQueryClient();
@@ -193,6 +199,7 @@ export function TaskComposer({
         onValueChange={setDraft}
         extraActions={extraActions}
         fullWidth={fullWidth}
+        bar={bar}
         className={className}
       />
     );
@@ -219,6 +226,7 @@ export function TaskComposer({
       attachmentErrorMessage={attachmentError}
       extraActions={extraActions}
       fullWidth={fullWidth}
+      bar={bar}
       className={className}
     />
   );

@@ -76,9 +76,13 @@ export function useHeroScrolledPast() {
 /**
  * The border-box height of an element, in px, kept current by a
  * ResizeObserver. Attach the returned callback ref. It is 0 while nothing is
- * attached.
+ * attached. The third item is the attached element.
  */
-export function useElementHeight(): [number, (element: HTMLElement | null) => void] {
+export function useElementHeight(): [
+  number,
+  (element: HTMLElement | null) => void,
+  HTMLElement | null,
+] {
   const [element, setElement] = useState<HTMLElement | null>(null);
   const [height, setHeight] = useState(0);
 
@@ -94,7 +98,7 @@ export function useElementHeight(): [number, (element: HTMLElement | null) => vo
     return () => observer.disconnect();
   }, [element]);
 
-  return [height, setElement];
+  return [height, setElement, element];
 }
 
 /** Scrolls an element to its top: a glide, or a jump under reduced motion. */

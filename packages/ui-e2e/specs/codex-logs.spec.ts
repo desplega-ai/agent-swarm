@@ -127,7 +127,7 @@ async function completeLiveMessage(
 
 async function openSessionLogs(page: Page, taskId: string, mobile = false) {
   await page.goto(`/tasks/${taskId}`);
-  if (mobile) await page.getByRole("tab", { name: "Session Logs" }).click();
+  if (mobile) await page.getByRole("tab", { name: "Log", exact: true }).click();
 }
 
 async function seedContextSnapshots(
@@ -258,7 +258,7 @@ test("context usage does not combine incomplete measurements", async ({
 test.describe("below the lg breakpoint", () => {
   test.use({ viewport: { width: 900, height: 900 } });
 
-  test("Codex app-server messages render in the Session Logs tab", async ({
+  test("Codex app-server messages render in the Log tab", async ({
     page,
     api,
     seed,

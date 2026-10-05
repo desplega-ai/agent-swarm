@@ -5,7 +5,8 @@ import { TaskStatusIcon } from "@/components/shared/task-status-icon";
 import { statusLabel } from "@/lib/status-labels";
 import { isAutoReview } from "@/lib/task-links";
 import { taskListTitle } from "@/lib/task-title";
-import { formatRelativeTime } from "@/lib/utils";
+import { cn, formatRelativeTime } from "@/lib/utils";
+import { NARROW_TARGET } from "./touch-targets";
 
 /** The tasks `parentId` started directly, oldest first, without auto-review follow-ups. */
 export function directChildren(parentId: string, chain: readonly AgentTask[]): AgentTask[] {
@@ -44,7 +45,10 @@ export function SpawnedTasks({
             <li key={child.id}>
               <Link
                 to={`/tasks/${child.id}`}
-                className="hover-linger flex min-w-0 items-center gap-3 px-3 py-2 text-sm outline-none transition-colors hover:bg-accent/40 focus-visible:ring-2 focus-visible:ring-ring/60 focus-visible:ring-inset"
+                className={cn(
+                  "hover-linger flex min-w-0 items-center gap-3 px-3 py-2 text-sm outline-none transition-colors hover:bg-accent/40 focus-visible:ring-2 focus-visible:ring-ring/60 focus-visible:ring-inset",
+                  NARROW_TARGET,
+                )}
               >
                 <TaskStatusIcon status={child.status} label={statusLabel(child.status)} />
                 <span className="shrink-0 font-mono text-xs text-primary">

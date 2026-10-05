@@ -1040,7 +1040,7 @@ const LogCodeBlock = memo(function LogCodeBlock({
           <span className="select-none font-mono text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
             {lang}
           </span>
-          <CopyIconButton text={value} label="Copy code" className="size-6" />
+          <CopyIconButton text={value} label="Copy code" className="hit-area size-6" />
         </div>
       ) : (
         <CopyIconButton
@@ -1318,14 +1318,14 @@ function RawDetails({ data }: { data: unknown }) {
         <button
           type="button"
           onClick={() => setOpen((value) => !value)}
-          className="inline-flex cursor-pointer items-center gap-1 rounded-md px-1 py-0.5 font-mono text-[10px] uppercase tracking-wider text-muted-foreground hover:bg-background/60 hover:text-foreground"
+          className="hit-area inline-flex cursor-pointer items-center gap-1 rounded-md px-1 py-0.5 font-mono text-[10px] uppercase tracking-wider text-muted-foreground hover:bg-background/60 hover:text-foreground"
         >
           <ChevronRight
             className={cn("size-3 transition-transform duration-200", open && "rotate-90")}
           />
           Raw
         </button>
-        <CopyIconButton text={text} label="Copy raw event" className="size-5" />
+        <CopyIconButton text={text} label="Copy raw event" className="hit-area size-5" />
       </div>
       <AnimatedReveal open={open} speed="fast">
         <JsonTree
@@ -1369,14 +1369,14 @@ function LowKeyMetaLine({
           <button
             type="button"
             onClick={() => setOpen((value) => !value)}
-            className="inline-flex cursor-pointer items-center gap-0.5 rounded px-1 py-0.5 font-mono text-[9.5px] uppercase tracking-wider text-muted-foreground/80 hover:bg-muted hover:text-foreground"
+            className="hit-area inline-flex cursor-pointer items-center gap-0.5 rounded px-1 py-0.5 font-mono text-[9.5px] uppercase tracking-wider text-muted-foreground/80 hover:bg-muted hover:text-foreground"
           >
             <ChevronRight
               className={cn("size-2.5 transition-transform duration-200", open && "rotate-90")}
             />
             Raw
           </button>
-          <CopyIconButton text={text} label="Copy raw event" className="size-5" />
+          <CopyIconButton text={text} label="Copy raw event" className="hit-area size-5" />
         </span>
       </div>
       {children && <div className="ml-6 mt-1 space-y-1">{children}</div>}
@@ -1940,7 +1940,7 @@ function ResultSection({
         <button
           type="button"
           onClick={onToggle}
-          className="mx-2.5 mb-2 cursor-pointer text-[11px] font-semibold text-status-info-strong"
+          className="hit-area mx-2.5 mb-2 cursor-pointer text-[11px] font-semibold text-status-info-strong"
         >
           {open ? "Show less" : "Show full output"}
         </button>
@@ -2014,7 +2014,7 @@ function ToolRow({
             <>
               <div className="flex items-center gap-1.5 px-2.5 pt-1.5 font-mono text-[9.5px] uppercase tracking-[0.1em] text-muted-foreground">
                 <span>Input</span>
-                <CopyIconButton text={tool.input} className="ml-auto" label="Copy input" />
+                <CopyIconButton text={tool.input} className="hit-area ml-auto" label="Copy input" />
               </div>
               <pre className="m-0 whitespace-pre-wrap break-words px-2.5 pb-2 pt-1 font-mono text-[11.5px] leading-[1.6] text-foreground/85">
                 {tool.input}
@@ -2023,7 +2023,7 @@ function ToolRow({
           )}
           <div className="flex items-center gap-1.5 px-2.5 pt-1.5 font-mono text-[9.5px] uppercase tracking-[0.1em] text-muted-foreground">
             <span>Result</span>
-            <CopyIconButton text={tool.body} className="ml-auto" label="Copy result" />
+            <CopyIconButton text={tool.body} className="hit-area ml-auto" label="Copy result" />
           </div>
           <ResultSection body={tool.body} open={outputOpen} onToggle={onToggleOutput} />
         </div>
@@ -2221,6 +2221,11 @@ interface SessionLogViewerProps {
    * bars.
    */
   scrollElement?: HTMLElement | null;
+  /**
+   * The toolbar controls and the jump pill are 44 px touch targets (the task
+   * page's narrow layout). Row controls get a touch hit area either way.
+   */
+  touchTargets?: boolean;
 }
 
 export function SessionLogViewer({
@@ -2230,6 +2235,7 @@ export function SessionLogViewer({
   isRunning,
   steeringMessages,
   scrollElement,
+  touchTargets = false,
 }: SessionLogViewerProps) {
   // Fixed for the viewer's lifetime: callers pass `scrollElement` from the
   // first render (as `null` until the element mounts) or never.
@@ -2765,7 +2771,7 @@ export function SessionLogViewer({
             <button
               type="button"
               onClick={() => toggleSubagent(row.id)}
-              className="flex min-h-6 w-full min-w-0 cursor-pointer items-center gap-2 text-left"
+              className="hit-area flex min-h-6 w-full min-w-0 cursor-pointer items-center gap-2 text-left"
               aria-expanded={open}
             >
               <ChevronRight
@@ -2809,7 +2815,7 @@ export function SessionLogViewer({
           <button
             type="button"
             onClick={() => toggleGroup(row.id, open)}
-            className="flex w-full min-w-0 cursor-pointer items-center gap-2 py-0.5 text-left"
+            className="hit-area flex w-full min-w-0 cursor-pointer items-center gap-2 py-0.5 text-left"
           >
             <ChevronRight
               className={cn(
@@ -2883,6 +2889,7 @@ export function SessionLogViewer({
       className={cn(
         "absolute bottom-4 left-1/2 z-10 inline-flex -translate-x-1/2 cursor-pointer items-center gap-2 rounded-full bg-primary px-3.5 py-[7px] text-[12.5px] font-semibold text-primary-foreground shadow-lg transition-[translate,opacity]",
         pageMode && "bottom-0",
+        touchTargets && "min-h-11 px-4",
         showJumpPill ? "translate-y-0 opacity-100" : "pointer-events-none translate-y-3 opacity-0",
       )}
     >
@@ -2920,12 +2927,24 @@ export function SessionLogViewer({
                 "sticky top-[var(--log-sticky-top,0px)] z-10 bg-card bg-linear-to-b from-muted/30 to-muted/30",
             )}
           >
-            <TabsList variant="line" className="h-[30px] shrink-0 rounded-none p-0">
-              <TabsTrigger value="logs" className="h-7 flex-none rounded-none px-2 text-xs">
+            <TabsList
+              variant="line"
+              className={cn("shrink-0 rounded-none p-0", touchTargets ? "h-11" : "h-[30px]")}
+            >
+              <TabsTrigger
+                value="logs"
+                className={cn("flex-none rounded-none px-2 text-xs", touchTargets ? "h-11" : "h-7")}
+              >
                 Logs
               </TabsTrigger>
               {subagents.length > 0 && (
-                <TabsTrigger value="agents" className="h-7 flex-none rounded-none px-2 text-xs">
+                <TabsTrigger
+                  value="agents"
+                  className={cn(
+                    "flex-none rounded-none px-2 text-xs",
+                    touchTargets ? "h-11" : "h-7",
+                  )}
+                >
                   Agents <span className="font-mono text-[10px]">({subagents.length})</span>
                 </TabsTrigger>
               )}
@@ -2938,7 +2957,11 @@ export function SessionLogViewer({
                   onChange={(e) => setQuery(e.target.value)}
                   placeholder="Filter…"
                   aria-label="Filter session log"
-                  className="h-[30px] w-40 pl-7 text-xs sm:w-52"
+                  // Touch: 16 px text, or iOS Safari zooms the page on focus.
+                  className={cn(
+                    "w-40 pl-7 sm:w-52",
+                    touchTargets ? "h-11 text-base" : "h-[30px] text-xs",
+                  )}
                 />
               </div>
             )}
@@ -3039,7 +3062,7 @@ export function SessionLogViewer({
             >
               {/* Queued steering, pinned between the stream and the footer. Rows
                   leave this box on their own as soon as the worker delivers them. */}
-              <QueuedSteeringBox messages={pendingSteering} />
+              <QueuedSteeringBox messages={pendingSteering} touchTargets={touchTargets} />
 
               {/* Footer */}
               <RunningFooter count={visibleRows.length} isRunning={isRunning} />

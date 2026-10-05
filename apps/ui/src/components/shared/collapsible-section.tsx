@@ -36,6 +36,7 @@ export function CollapsibleSection({
   defaultOpen = false,
   variant = "plain",
   className,
+  headerClassName,
   badge,
   persistKey,
 }: {
@@ -48,6 +49,8 @@ export function CollapsibleSection({
   defaultOpen?: boolean;
   variant?: "plain" | "card";
   className?: string;
+  /** Extra classes for the toggle button (a taller touch target, for example). */
+  headerClassName?: string;
   badge?: React.ReactNode;
   /**
    * When set, the open/closed state is persisted to `localStorage` under this
@@ -64,7 +67,7 @@ export function CollapsibleSection({
       try {
         localStorage.setItem(persistKey, String(next));
       } catch {
-        // Ignore — private mode / quota. State still toggles in-memory.
+        // Ignore (private mode / quota). State still toggles in-memory.
       }
     }
   };
@@ -86,7 +89,10 @@ export function CollapsibleSection({
           type="button"
           onClick={toggle}
           aria-expanded={open}
-          className="flex items-center gap-2 w-full px-3 py-2 text-left rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+          className={cn(
+            "flex items-center gap-2 w-full px-3 py-2 text-left rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring/60",
+            headerClassName,
+          )}
         >
           {chevron}
           {Icon && <Icon className={cn("h-3.5 w-3.5 shrink-0", iconColor)} />}
@@ -106,7 +112,10 @@ export function CollapsibleSection({
         type="button"
         onClick={toggle}
         aria-expanded={open}
-        className="flex items-center gap-1.5 text-left group rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+        className={cn(
+          "flex items-center gap-1.5 text-left group rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring/60",
+          headerClassName,
+        )}
       >
         {chevron}
         {Icon && <Icon className={cn("h-3 w-3 text-muted-foreground", iconColor)} />}

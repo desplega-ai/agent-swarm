@@ -1,6 +1,14 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2, Tag, Terminal } from "lucide-react";
-import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ArrowLeft, CheckCircle2, Tag, Terminal } from "lucide-react";
+import {
+  type CSSProperties,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
 import {
@@ -36,6 +44,7 @@ import { TaskStatusIcon } from "@/components/shared/task-status-icon";
 import { CollapsibleComposerDock } from "@/components/steering/collapsible-composer-dock";
 import { TaskFailureHelpDialog } from "@/components/support/task-failure-help-dialog";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -53,6 +62,7 @@ import { directChildren, SpawnedTasks } from "./spawned-tasks";
 import {
   parseStructuredOutput,
   TaskActions,
+  TaskActionsMenu,
   TaskFailureCallout,
   TaskPrimaryAction,
   useTaskActions,
@@ -68,10 +78,22 @@ import {
   useHeroScrolledPast,
 } from "./task-sticky-bar";
 
-const TASK_DETAIL_TABS = new Set(["details", "outcome", "logs"]);
+/** The narrow layout's tabs. The `?tab=` values predate the labels: Log is `logs`. */
+const TASK_DETAIL_TABS = new Set(["outcome", "logs", "details"]);
 
-function coerceTaskDetailTab(value: string): string {
-  return TASK_DETAIL_TABS.has(value) ? value : "details";
+function coerceTaskDetailTab(value: string, fallback: string): string {
+  return TASK_DETAIL_TABS.has(value) ? value : fallback;
+}
+
+/**
+ * The narrow layout's first tab: a finished task opens on its outcome, a
+ * running or paused one on its log, and one that has not started on its
+ * details.
+ */
+function defaultTaskTab(status: AgentTaskStatus | undefined): string {
+  if (status && TERMINAL_STATUSES.has(status)) return "outcome";
+  if (status === "in_progress" || status === "paused") return "logs";
+  return "details";
 }
 
 /**
@@ -214,15 +236,21 @@ function StructuredOutputContent({
   );
 }
 
-/** The follow-up box in view and focused: the wide or the narrow one, whichever shows. */
-function focusVisibleComposer(boxes: (HTMLElement | null)[]): boolean {
-  const box = boxes.find((element) => element && element.getClientRects().length > 0);
+/**
+ * Focuses the message box that shows. The wide layout's box is in the column,
+ * so it scrolls into view first. The narrow layout's box is in the bottom
+ * bar, which is always in view.
+ */
+function focusVisibleComposer(wideBox: HTMLElement | null, narrowBar: HTMLElement | null) {
+  const shown = (element: HTMLElement | null) => !!element && element.getClientRects().length > 0;
+  const box = shown(wideBox) ? wideBox : shown(narrowBar) ? narrowBar : null;
   const textarea = box?.querySelector("textarea");
-  if (!box || !textarea) return false;
-  const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
-  box.scrollIntoView({ block: "center", behavior: reduce ? "auto" : "smooth" });
+  if (!box || !textarea) return;
+  if (box === wideBox) {
+    const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    box.scrollIntoView({ block: "center", behavior: reduce ? "auto" : "smooth" });
+  }
   textarea.focus({ preventScroll: true });
-  return true;
 }
 
 export default function TaskDetailPage() {
@@ -276,10 +304,11 @@ export default function TaskDetailPage() {
     false,
   );
   // The draft is owned by the page, not the composer. The narrow and wide
-  // layouts each mount their own <TaskComposer>, and the box moves when the
-  // task finishes (the steer box under the log, the follow-up box under the
-  // outcome). Holding the text here means crossing the 64rem layout switch,
-  // or a status flip, does not eat what the user typed.
+  // layouts each mount their own <TaskComposer>, and the wide box moves when
+  // the task finishes (the steer box under the log, the follow-up box under
+  // the outcome). Holding the text here means crossing the 64rem layout
+  // switch, a status flip, or a narrow tab switch does not eat what the user
+  // typed.
   const [draft, setDraft] = useState("");
   // The support dialog opens only from "Get help".
   const [helpOpen, setHelpOpen] = useState(false);
@@ -291,12 +320,25 @@ export default function TaskDetailPage() {
     setHelpOpen(false);
   }, [id]);
   const { searchParams, setParam } = useUrlSearchState();
-  // A finished task is opened for its result, so its mobile default tab is
-  // Outcome; a live one opens on Details.
-  const defaultTab = task && TERMINAL_STATUSES.has(task.status) ? "outcome" : "details";
-  const activeTab = coerceTaskDetailTab(readStringParam(searchParams, "tab", defaultTab));
+  // The narrow layout's first tab follows the status the page opened with.
+  // A status change while the page is open (the task finishes) does not move
+  // the reader to another tab.
+  const [openedWith, setOpenedWith] = useState<{ id: string; status: AgentTaskStatus } | null>(
+    null,
+  );
+  useEffect(() => {
+    if (task && openedWith?.id !== task.id) setOpenedWith({ id: task.id, status: task.status });
+  }, [task, openedWith]);
+  const defaultTab = defaultTaskTab(
+    task && openedWith?.id === task.id ? openedWith.status : task?.status,
+  );
+  const activeTab = coerceTaskDetailTab(
+    readStringParam(searchParams, "tab", defaultTab),
+    defaultTab,
+  );
   const setActiveTab = useCallback(
-    (tab: string) => setParam("tab", coerceTaskDetailTab(tab), { defaultValue: defaultTab }),
+    (tab: string) =>
+      setParam("tab", coerceTaskDetailTab(tab, defaultTab), { defaultValue: defaultTab }),
     [setParam, defaultTab],
   );
   // The wide layout's compact bar shows once the hero scrolls out of the
@@ -310,25 +352,30 @@ export default function TaskDetailPage() {
   // The wide layout's live message box sticks to the bottom of the column. Its
   // height goes to the log as `--log-sticky-bottom`.
   const [composerHeight, composerRef] = useElementHeight();
-  // "Follow up" scrolls to the follow-up box and focuses it. In the narrow
-  // layout the box is on the Outcome tab, which mounts a render or two after
-  // the tab switch: the boxes are state, so their arrival runs the effect.
-  const [wideFollowUpBox, setWideFollowUpBox] = useState<HTMLDivElement | null>(null);
-  const [narrowFollowUpBox, setNarrowFollowUpBox] = useState<HTMLDivElement | null>(null);
-  const followUpPendingRef = useRef(false);
-  const [followUpRequest, setFollowUpRequest] = useState(0);
-  const requestFollowUp = useCallback(() => {
-    followUpPendingRef.current = true;
-    setActiveTab("outcome");
-    setFollowUpRequest((n) => n + 1);
-  }, [setActiveTab]);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: a new request re-runs it.
-  useEffect(() => {
-    if (!followUpPendingRef.current) return;
-    if (focusVisibleComposer([wideFollowUpBox, narrowFollowUpBox])) {
-      followUpPendingRef.current = false;
+  // The narrow layout scrolls as one: the hero scrolls away, and the tabs
+  // and the bottom bar stick. Their heights go to the log as
+  // `--log-sticky-top` and `--log-sticky-bottom`.
+  const [narrowScroller, setNarrowScroller] = useState<HTMLElement | null>(null);
+  const [narrowHeroHeight, narrowHeroRef] = useElementHeight();
+  const [narrowTabsHeight, narrowTabsRef] = useElementHeight();
+  const [narrowBarHeight, narrowBarRef, narrowBar] = useElementHeight();
+  // A tab switch while the tabs are stuck shows the new tab from its top,
+  // right under the tabs. With the hero still in view, nothing moves.
+  const shownTabRef = useRef(activeTab);
+  useLayoutEffect(() => {
+    if (shownTabRef.current === activeTab) return;
+    shownTabRef.current = activeTab;
+    if (narrowScroller && narrowScroller.scrollTop > narrowHeroHeight) {
+      narrowScroller.scrollTop = narrowHeroHeight;
     }
-  }, [followUpRequest, wideFollowUpBox, narrowFollowUpBox]);
+  }, [activeTab, narrowScroller, narrowHeroHeight]);
+  // "Follow up" focuses the message box: the wide layout's box under the
+  // outcome, or the narrow layout's bottom bar, which every tab shows.
+  const wideFollowUpBoxRef = useRef<HTMLDivElement | null>(null);
+  const requestFollowUp = useCallback(
+    () => focusVisibleComposer(wideFollowUpBoxRef.current, narrowBar),
+    [narrowBar],
+  );
   const actions = useTaskActions(task, {
     onFollowUp: requestFollowUp,
     onGetHelp: () => setHelpOpen(true),
@@ -424,26 +471,35 @@ export default function TaskDetailPage() {
     />
   ) : null;
 
-  // FOLLOW UP: a finished task gets the shared message box right under its
-  // outcome. It creates a child task for the same agent; a Slack task answers
-  // in the same thread. Each layout tree mounts its own box on the one draft.
-  const renderFollowUp = (ref: (box: HTMLDivElement | null) => void) =>
-    isTerminal ? (
-      <div ref={ref} className="shrink-0">
-        <TaskComposer
-          targetTask={task}
-          canSteer={false}
-          followUpAgentId={task.agentId ?? undefined}
-          routeLabel={task.agentId ? `Routes to ${agentName ?? "the same agent"}` : undefined}
-          value={draft}
-          onValueChange={setDraft}
-          onCreated={announceFollowUp}
-          fullWidth
-          className="px-0 pt-0 pb-0"
-        />
-      </div>
-    ) : null;
+  // THE MESSAGE BOX, one per layout tree, on the one draft. A finished task
+  // follows up: a child task for the same agent (a Slack task answers in the
+  // same thread). A live task steers. Any other task has no box.
+  const composerProps = isTerminal
+    ? {
+        targetTask: task,
+        canSteer: false,
+        followUpAgentId: task.agentId ?? undefined,
+        routeLabel: task.agentId ? `Routes to ${agentName ?? "the same agent"}` : undefined,
+        value: draft,
+        onValueChange: setDraft,
+        onCreated: announceFollowUp,
+        fullWidth: true,
+        className: "px-0 pt-0 pb-0",
+      }
+    : canSteer
+      ? {
+          targetTask: task,
+          canSteer: true,
+          followUpAgentId: task.agentId ?? undefined,
+          value: draft,
+          onValueChange: setDraft,
+          fullWidth: true,
+          className: "px-0 pt-0 pb-0",
+        }
+      : null;
 
+  // Narrow: the Outcome tab. The bottom bar holds the message box, so the
+  // tab has none.
   const outcomeContent = (
     <div className="space-y-2">
       {failureCallout}
@@ -456,6 +512,7 @@ export default function TaskDetailPage() {
           iconColor={isCompleted ? "text-status-success-strong" : "text-muted-foreground"}
           borderColor={isCompleted ? "border-status-success/30" : "border-border"}
           bgColor={isCompleted ? "bg-status-success/5" : "bg-muted/20"}
+          headerClassName="min-h-11"
           defaultOpen
         >
           <StructuredOutputContent
@@ -477,7 +534,6 @@ export default function TaskDetailPage() {
       )}
 
       {spawnedTasks}
-      {renderFollowUp(setNarrowFollowUpBox)}
     </div>
   );
 
@@ -495,9 +551,11 @@ export default function TaskDetailPage() {
   // has written any session log lines.
   const showLogViewer = hasSessionLogs || hasSteering;
 
-  // The wide layout passes its column as `scrollElement`, so the log flows in
-  // the page scroller. The narrow one keeps the viewer's own scroller.
-  const renderSessionLogs = (scrollElement?: HTMLElement | null) =>
+  // Each layout passes its scroller as `scrollElement` (the wide column, the
+  // narrow root), so the log flows in the page scroller with no scroller of
+  // its own. `null` until the scroller mounts. The narrow layout asks for
+  // 44 px toolbar controls.
+  const renderSessionLogs = (scrollElement: HTMLElement | null, touchTargets = false) =>
     showLogViewer ? (
       <SessionLogViewer
         logs={sessionLogs ?? []}
@@ -505,7 +563,7 @@ export default function TaskDetailPage() {
         isRunning={taskIsRunning(task.status)}
         steeringMessages={steeringForViewer}
         scrollElement={scrollElement}
-        className={scrollElement === undefined ? "flex-1 min-h-0" : undefined}
+        touchTargets={touchTargets}
       />
     ) : sessionLogsLoading ? (
       // Do not claim "no session log" before the read answers.
@@ -525,33 +583,26 @@ export default function TaskDetailPage() {
       </div>
     );
 
-  // The live message box: it steers the task, as before. It sits under the
-  // log, folded or open.
-  const steerComposer = canSteer ? (
-    <CollapsibleComposerDock
-      collapsed={composerCollapsed}
-      onCollapsedChange={setComposerCollapsed}
-      collapsedLabel={
-        task.supportedSteerModes && task.supportedSteerModes.length === 0
-          ? "Add a follow-up for this task"
-          : task.status === "pending"
-            ? "Send a message to the queued task"
-            : task.status === "paused"
-              ? "Send a message to the paused task"
-              : "Send a message to the running task"
-      }
-    >
-      <TaskComposer
-        targetTask={task}
-        canSteer
-        followUpAgentId={task.agentId ?? undefined}
-        value={draft}
-        onValueChange={setDraft}
-        fullWidth
-        className="px-0 pt-0 pb-0"
-      />
-    </CollapsibleComposerDock>
-  ) : null;
+  // The wide layout's live message box: it steers the task, as before. It
+  // sits under the log, folded or open.
+  const steerComposer =
+    composerProps && !isTerminal ? (
+      <CollapsibleComposerDock
+        collapsed={composerCollapsed}
+        onCollapsedChange={setComposerCollapsed}
+        collapsedLabel={
+          task.supportedSteerModes && task.supportedSteerModes.length === 0
+            ? "Add a follow-up for this task"
+            : task.status === "pending"
+              ? "Send a message to the queued task"
+              : task.status === "paused"
+                ? "Send a message to the paused task"
+                : "Send a message to the running task"
+        }
+      >
+        <TaskComposer {...composerProps} />
+      </CollapsibleComposerDock>
+    ) : null;
 
   const headerTitle = taskListTitle(task);
   // The server records the model it resolved when the task was claimed
@@ -566,14 +617,27 @@ export default function TaskDetailPage() {
 
   // HERO CHIPS: status, model (with the effort icon when the task sets one)
   // and agent, then the tags as plain text. The harness, type, priority and
-  // source are in Technical details. The model chip takes focus, so keyboard
-  // users get the exact model id.
-  const modelChip = displayModel ? (
+  // source are in Technical details. In the wide layout the model chip takes
+  // focus and its tooltip has the exact model id. The narrow layout shows the
+  // plain chip: a 44 px focus target would not fit the chip row, a hover
+  // tooltip would cover the tabs under it, and Details lists the model id.
+  const modelBadge = displayModel ? (
+    <>
+      <ModelLabel model={displayModel} />
+      <TaskEffortMark effort={task.effort} className="text-muted-foreground" />
+    </>
+  ) : task.modelTier ? (
+    <>
+      {modelTierLabel(task.modelTier)} tier
+      <TaskEffortMark effort={task.effort} className="text-muted-foreground" />
+    </>
+  ) : null;
+  const modelChipClass = "h-6 max-w-full min-w-0 gap-1.5 px-2";
+  const wideModelChip = displayModel ? (
     <Tooltip>
       <TooltipTrigger asChild>
-        <Badge variant="outline" tabIndex={0} className="h-6 max-w-full gap-1.5 px-2">
-          <ModelLabel model={displayModel} />
-          <TaskEffortMark effort={task.effort} className="text-muted-foreground" />
+        <Badge variant="outline" tabIndex={0} className={modelChipClass}>
+          {modelBadge}
         </Badge>
       </TooltipTrigger>
       <TooltipContent side="bottom" align="start" className="text-left">
@@ -584,10 +648,14 @@ export default function TaskDetailPage() {
         {task.effort ? <div>Effort: {REASONING_EFFORT_LABEL[task.effort]}</div> : null}
       </TooltipContent>
     </Tooltip>
-  ) : task.modelTier ? (
-    <Badge variant="outline" className="h-6 gap-1.5 px-2">
-      {modelTierLabel(task.modelTier)} tier
-      <TaskEffortMark effort={task.effort} className="text-muted-foreground" />
+  ) : modelBadge ? (
+    <Badge variant="outline" className={modelChipClass}>
+      {modelBadge}
+    </Badge>
+  ) : null;
+  const narrowModelChip = modelBadge ? (
+    <Badge variant="outline" className={modelChipClass}>
+      {modelBadge}
     </Badge>
   ) : null;
   const agentChip = task.agentId ? (
@@ -604,36 +672,68 @@ export default function TaskDetailPage() {
       </Link>
     </Badge>
   ) : null;
-  const tagsLine =
+  const renderTagsLine = (className?: string) =>
     task.tags && task.tags.length > 0 ? (
-      <span className="ml-1 inline-flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+      <span
+        className={cn(
+          "ml-1 inline-flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground",
+          className,
+        )}
+      >
         <Tag aria-hidden className="size-3.5 shrink-0" />
         <span className="sr-only">Tags: </span>
         <span className="min-w-0 truncate">{task.tags.join(", ")}</span>
       </span>
     ) : null;
+  const sourceLine = (
+    <TaskSourceLine task={task} requestedByName={requestedByUserName} creatorName={creatorName} />
+  );
 
-  // HERO: the title, where the task came from, the chips, and the actions.
-  // Rendered at the top of the center column in the wide layout and above the
-  // Tabs in the narrow one. Each layout tree pads the hero itself. Wide: the
-  // actions sit right of the title. Narrow: they come last, under the chips.
-  const heroBlock = (
-    <div className="grid shrink-0 grid-cols-1 gap-2.5 @min-[64rem]:grid-cols-[minmax(0,1fr)_auto] @min-[64rem]:gap-x-6">
+  // WIDE HERO: the title, where the task came from, and the chips, with the
+  // actions right of the title.
+  const wideHero = (
+    <div className="grid shrink-0 grid-cols-[minmax(0,1fr)_auto] gap-x-6 gap-y-2.5">
       {/* The page's one heading. The breadcrumb truncates the title (and
           collapses to a few characters on a phone), so it cannot carry it. */}
       <div className="min-w-0">
         <TaskHeading title={headerTitle} />
       </div>
-      <TaskActions
-        model={actions}
-        className="order-last pt-1 @min-[64rem]:order-none @min-[64rem]:row-span-3 @min-[64rem]:self-start @min-[64rem]:justify-end @min-[64rem]:pt-0"
-      />
-      <TaskSourceLine task={task} requestedByName={requestedByUserName} creatorName={creatorName} />
+      <TaskActions model={actions} className="row-span-3 self-start justify-end" />
+      {sourceLine}
       <div className="flex flex-wrap items-center gap-2">
         <StatusBadge status={task.status} size="md" />
-        {modelChip}
+        {wideModelChip}
         {agentChip}
-        {tagsLine}
+        {renderTagsLine()}
+      </div>
+    </div>
+  );
+
+  // NARROW HERO: compact, and it scrolls away. A back arrow and the "..."
+  // menu (every action but the message box), then the title, the source
+  // line, status and model. The agent is in Details. The tags truncate on the
+  // chip row instead of wrapping to a second one.
+  const narrowHero = (
+    <div className="flex flex-col gap-1 pb-3">
+      <div className="-mx-2 flex items-center justify-between gap-2">
+        <Button
+          variant="ghost"
+          asChild
+          className="h-11 gap-1.5 px-2 text-muted-foreground hover:text-foreground"
+        >
+          <Link to="/tasks">
+            <ArrowLeft />
+            Tasks
+          </Link>
+        </Button>
+        <TaskActionsMenu model={actions} />
+      </div>
+      <TaskHeading title={headerTitle} />
+      {sourceLine}
+      <div className="flex min-w-0 items-center gap-2">
+        <StatusBadge status={task.status} size="md" />
+        {narrowModelChip}
+        {renderTagsLine("min-w-16 flex-1 basis-0")}
       </div>
     </div>
   );
@@ -647,31 +747,62 @@ export default function TaskDetailPage() {
         <TaskFailureHelpDialog task={task} open={helpOpen} onOpenChange={setHelpOpen} />
       ) : null}
 
-      {/* Narrow (under 64rem of page width): the hero above three tabs. */}
-      <div className="@min-[64rem]:hidden flex flex-col flex-1 min-h-0 overflow-hidden">
-        <div className="px-1 pt-2 pb-4">{heroBlock}</div>
-        <Separator className="shrink-0" />
-        <Tabs
-          value={activeTab}
-          onValueChange={setActiveTab}
-          className="flex flex-col flex-1 min-h-0"
-        >
-          <TabsList className="shrink-0 mx-1 mt-3 w-auto self-stretch">
-            <TabsTrigger value="details">Details</TabsTrigger>
-            <TabsTrigger value="outcome">Outcome</TabsTrigger>
-            <TabsTrigger value="logs">Session Logs</TabsTrigger>
-          </TabsList>
-          <TabsContent value="details" className="flex-1 overflow-y-auto px-1 py-3">
-            {detailsRail}
-          </TabsContent>
-          <TabsContent value="outcome" className="flex-1 overflow-y-auto px-1 py-3">
+      {/* Narrow (under 64rem of page width): one scroller from under the app
+          header to the window bottom (it bleeds into <main>'s padding). The
+          hero scrolls away. The tabs stick to the top and the message box to
+          the bottom, on every tab. The log flows in this scroller: the tabs
+          and bar heights go to it as CSS variables, so its toolbar sticks
+          under the tabs. */}
+      <div
+        ref={setNarrowScroller}
+        style={
+          {
+            "--log-sticky-top": `${narrowTabsHeight}px`,
+            "--log-sticky-bottom": `${narrowBarHeight}px`,
+          } as CSSProperties
+        }
+        className="@min-[64rem]:hidden -m-4 flex min-h-0 flex-1 flex-col overflow-y-auto [scrollbar-gutter:stable] md:-m-6"
+      >
+        <div ref={narrowHeroRef} className="px-4 md:px-6">
+          {narrowHero}
+        </div>
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 gap-0">
+          <div
+            ref={narrowTabsRef}
+            className="sticky top-0 z-20 border-b border-border-subtle bg-background px-4 py-2 md:px-6"
+          >
+            <TabsList className="w-full group-data-[orientation=horizontal]/tabs:h-auto">
+              <TabsTrigger value="outcome" className="h-11">
+                Outcome
+              </TabsTrigger>
+              <TabsTrigger value="logs" className="h-11">
+                Log
+              </TabsTrigger>
+              <TabsTrigger value="details" className="h-11">
+                Details
+              </TabsTrigger>
+            </TabsList>
+          </div>
+          <TabsContent value="outcome" className="px-4 py-3 md:px-6">
             {outcomeContent}
           </TabsContent>
-          <TabsContent value="logs" className="flex flex-col flex-1 min-h-0 px-1 py-3 gap-3">
-            {renderSessionLogs()}
-            {steerComposer}
+          <TabsContent value="logs" className="flex flex-col px-4 py-3 md:px-6">
+            {renderSessionLogs(narrowScroller, true)}
+          </TabsContent>
+          <TabsContent value="details" className="px-4 py-3 md:px-6">
+            {detailsRail}
           </TabsContent>
         </Tabs>
+        {composerProps ? (
+          // `env(safe-area-inset-bottom)` keeps the box above the home
+          // indicator when the page runs edge to edge.
+          <div
+            ref={narrowBarRef}
+            className="sticky bottom-0 z-20 border-t border-border bg-background px-4 pt-2 pb-[calc(env(safe-area-inset-bottom)+0.5rem)] md:px-6"
+          >
+            <TaskComposer {...composerProps} bar />
+          </div>
+        ) : null}
       </div>
 
       {/* Wide: a scrolling center column and the details rail. The grid
@@ -703,7 +834,7 @@ export default function TaskDetailPage() {
           />
           <div className="flex flex-col gap-3 pt-6 pr-6 pb-3">
             <div className="pb-2">
-              {heroBlock}
+              {wideHero}
               <div ref={heroEndRef} aria-hidden className="h-px" />
             </div>
             <Separator />
@@ -734,7 +865,13 @@ export default function TaskDetailPage() {
             <TaskAttachmentsSection taskId={task.id} attachments={task.attachments} />
             <TaskCitationsSection output={task.output ?? ""} citations={task.citations ?? []} />
             {spawnedTasks}
-            {renderFollowUp(setWideFollowUpBox)}
+            {/* FOLLOW UP: a finished task gets the message box right under
+                its outcome. */}
+            {composerProps && isTerminal ? (
+              <div ref={wideFollowUpBoxRef} className="shrink-0">
+                <TaskComposer {...composerProps} />
+              </div>
+            ) : null}
 
             {renderSessionLogs(centerScroller)}
             {steerComposer ? (

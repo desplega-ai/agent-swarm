@@ -3,7 +3,7 @@ date: 2026-10-05
 status: in-progress
 autonomy: critical
 last_updated: 2026-10-05
-last_updated_by: claude (phase 4 agent, next actions implemented)
+last_updated_by: claude (phase 5 agent, narrow and mobile layout implemented)
 commit_per_phase: true
 ---
 
@@ -535,6 +535,14 @@ Below 64rem of content width:
   - A "..." `DropdownMenu` (44 px trigger) with Pause, Cancel, Retry and Copy task id, by status.
 - `TabsList` is `sticky top-0` with a background.
 - All panels flow with no inner overflow. The Log tab passes the narrow root scroller to the viewer as `scrollElement` (phase 2b), so the log has no inner scroller. The log toolbar sticks under the sticky tabs.
+- As built (phase 5, pending review):
+  - The narrow root bleeds into `<main>`'s padding (`-m-4 md:-m-6`), so it scrolls from under the app header to the window bottom. It publishes the tabs and bar heights as `--log-sticky-top` and `--log-sticky-bottom`.
+  - Hero order stays as approved in phase 3: a row with "← Tasks" and "...", then the title, the source line, and the chips. The chips are status and model. The agent is in Details, and the tags truncate on the same row.
+  - The narrow model chip has no tooltip and takes no focus. A 44 px focus target does not fit the chip row, and a hover tooltip covered the tabs. Details lists the model id.
+  - The narrow source line is one row: a name or a repo truncates ("desplega-ai/agent-…") instead of wrapping to a second 44 px row.
+  - The "..." menu (`TaskActionsMenu`) holds every action except the message box: Copy answer, Retry, Pause, Resume, Cancel task (with the confirm step), Copy task id, Get help, by status. Focus goes back to "..." when the confirm step closes.
+  - A tab switch while the tabs are stuck shows the new tab from its top, right under the tabs.
+  - The first tab follows the status the page opened with. A task that finishes while the page is open does not move the reader from Log to Outcome.
 
 #### 2. Tabs
 **File**: `apps/ui/src/pages/tasks/[id]/page.tsx`, `packages/ui-e2e/specs/tasks.spec.ts`, `packages/ui-e2e/specs/codex-logs.spec.ts`
@@ -551,32 +559,52 @@ Below 64rem of content width:
   - Live: the steer `TaskComposer`.
   - Pre-start: hidden when there is no action.
 - It uses the page-owned draft (phase 4), so switching tabs keeps the text.
+- As built (phase 5, pending review):
+  - The bar replaces the narrow tree's in-flow composer. The narrow tree has one `TaskComposer`. The wide tree keeps its follow-up box under the outcome and its steer dock under the log.
+  - The live box is also one line until it gets focus, as in wireframe P5 (b) ("Message the agent..."). Both use the new `bar` prop (`TaskComposer` > `SteerComposer` / `ComposerDock`). It folds again on a tap outside or when focus leaves, if the box has no draft and no files.
+  - The box expands on focus, not on pointerdown: on a touch device the mouse events come after pointerup, so a box that grew on pointerdown would move the action row under the finger.
+  - "Follow up" focuses the bar's box and does not switch tabs. The narrow layout has no separate Follow up button: the bar is the box.
+  - `env(safe-area-inset-bottom)` is 0 today: `index.html` has no `viewport-fit=cover`. Safari keeps the page above the home indicator itself. The manual phone check confirms it.
 
 #### 4. Touch targets
 **File**: `apps/ui/src/pages/tasks/[id]/*.tsx`, `apps/ui/src/components/shared/session-log-viewer.tsx`
 **Changes**:
 - On the narrow layout, tab triggers, bottom-bar buttons, the "..." trigger and the hero actions are `min-h-11`.
 - Add `hit-area` to the small log controls (Raw, Copy, row toggles, "View full prompt"). Check that `hit-area`'s `position: relative` does not fight `absolute` or `sticky` elements (`globals.css:263-276`).
+- As built (phase 5, pending review):
+  - Page-local parts use container-query classes from `pages/tasks/[id]/touch-targets.ts` (`@max-[64rem]:min-h-11`). They apply in the narrow tree only, so the rail and the source line keep their desktop size in the wide tree.
+  - Shared parts take explicit props: `touchTargets` on `SessionLogViewer` (toolbar, filter with 16 px text so iOS does not zoom, jump pill) and `QueuedSteeringBox`, `headerClassName` on `CollapsibleSection`, and `className` on `AgentLink`.
+  - `hit-area` went on static controls only: Raw (both kinds), the inline copy buttons, "Show full output", the "N steps" and subagent toggles, "View full prompt", and the attachment remove button. Under an emulated coarse pointer they get a 40 px hit box (the utility's default).
+  - No `hit-area` on the hover-revealed `absolute` copy buttons: the utility's `position: relative` would override `absolute`, and the buttons are invisible on touch. No `hit-area` on the thinking, skill and tool row toggles: their cards clip overflow, so the slop would not apply.
 
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Typecheck passes: `cd apps/ui && bunx tsc -b`
-- [ ] Lint and token gate pass: `cd apps/ui && bun run lint && bun run check:tokens`
-- [ ] Playwright passes: `bun run e2e:ui -- specs/tasks.spec.ts specs/codex-logs.spec.ts specs/smoke.spec.ts`
+- [x] Typecheck passes: `cd apps/ui && bunx tsc -b`
+- [x] Lint and token gate pass: `cd apps/ui && bun run lint && bun run check:tokens` ("Checked 769 files", no errors. Root `bun run lint`: "Checked 1940 files", no errors.)
+- [x] Playwright passes: `bun run e2e:ui -- specs/tasks.spec.ts specs/codex-logs.spec.ts specs/smoke.spec.ts` (with `composer-enter-key` and `prompt-attachments` added: 44 passed, 20 skipped by project. Both updated specs select `getByRole("tab", { name: "Log", exact: true })`.)
 
 #### Automated QA:
-- [ ] QA stack at 390x844, 768x1024 and 1280x800:
+- [x] QA stack at 390x844, 768x1024 and 1280x800:
   - Completed route: the tab list top is at most 260 px at scroll 0 (audit baseline: 410). After scrolling, the tabs stay at the top.
   - Log tab: the narrow root is the only scroller, and the log rows start right under the sticky tabs (baseline: the log viewport was 30% of the window).
   - In-progress route: it opens on Log, and the bottom-bar composer is visible on all three tabs.
   - A draft typed on Log survives a switch to Details and back.
-- [ ] Every interactive element in the page content outside log rows is at least 44 px tall at 390 (eval `getBoundingClientRect`).
-- [ ] No horizontal overflow at 390, including the Details tab (audit found 8 px from the sticky Activity heading).
-- [ ] Screenshots and a recording of tab switching and the bottom bar at 390 in `/tmp/task-detail-qa/phase-5/`.
+  - Measured (2026-10-05):
+    - Tab list top at scroll 0: 250 px at 390 and 768, 225 px at 1280 (one-line title). The in-progress route is also 250 px at all three.
+    - After a 600 px scroll of the narrow root, the tab list is at 64 px (the root starts at 56). The log toolbar sticks at 123 px, right under the tabs (`--log-sticky-top` 67 px).
+    - Log tab: `<main>` and the document do not scroll (788/788, 844/844). The narrow root is the only scroller on every Log tab.
+    - Rows start under the toolbar: 383 px at scroll 0. Stuck, the rows get 184..781 px at 390 (597 px, 71% of 844), 76% at 768 and 69% at 1280.
+    - Completed opens on Outcome and in-progress on Log at all three sizes. Pending, offered and draft open on Details.
+    - The bar sits at the window bottom on all three tabs (781..844 at 390, 961..1024 at 768, 737..800 at 1280). Offered and draft have no bar.
+    - A draft typed on Log ("draft kept across tabs") was still in the box on Details, Log and Outcome. With a draft, the bar stays open.
+    - Live tail at 390: the jump pill lands at the end (scrollTop = max), and 3 posted lines kept the view at the end.
+- [x] Every interactive element in the page content outside log rows is at least 44 px tall at 390 (eval `getBoundingClientRect`). Measured with `/tmp/task-detail-qa/phase-5/targets.js`: 0 under 44 px on every tab of the completed, in-progress and failed routes, and on pending, offered and draft. Also 0 with Technical details open, with the bar open (Queue and Interrupt are 44 px), and the same at 768 and 1280. The "..." menu items are 44 px. The wide tree is unchanged at 1440.
+- [x] No horizontal overflow at 390, including the Details tab (audit found 8 px from the sticky Activity heading). Measured: 0 px for the document, `<main>` and the narrow root on every tab and route.
+- [x] Screenshots and a recording of tab switching and the bottom bar at 390 in `/tmp/task-detail-qa/phase-5/`. Light and dark: `completed-390-{outcome,log,details}`, `inprogress-390-{log,outcome,details}`, `failed-390-outcome`. Also 768 and 1280, the menu and the cancel confirm, the open bar, and 1440 regression shots. Recording: `tabs-bottom-bar-1.5x.mp4` (14 s).
 
 #### Manual Verification:
-- [ ] Taras on a real phone (iOS Safari): the bottom bar clears the home indicator, and the keyboard does not hide the composer.
+- [ ] Taras on a real phone (iOS Safari): the bottom bar clears the home indicator, and the keyboard does not hide the composer. Deferred to the final Manual E2E (Taras, 2026-10-05). `index.html` has no `viewport-fit=cover`, so `env(safe-area-inset-bottom)` is 0 today. If the bar sits under the home indicator, add it then and audit the other bottom-fixed UI.
 
 **Implementation Note**: After this phase, pause for manual confirmation. Then commit `[phase 5] task page narrow layout: sticky tabs, bottom composer, 44px targets`.
 
