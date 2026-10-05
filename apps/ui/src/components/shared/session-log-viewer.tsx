@@ -178,7 +178,7 @@ function formatDur(ms: number): string {
   return `${m}m${s ? ` ${s}s` : ""}`;
 }
 
-// Providers without native skill/slash-command support (codex, opencode — see
+// Providers without native skill/slash-command support (codex, opencode: see
 // resolveSlashSkillPrompt in src/providers/codex-skill-resolver.ts) inline the
 // full SKILL.md body ahead of the turn's actual ask, joined by this literal
 // delimiter, before the prompt ever reaches the model. That's the text the
@@ -186,7 +186,7 @@ function formatDur(ms: number): string {
 // is dominated by skill boilerplate with the real task buried at the bottom.
 const SKILL_EXPANSION_DELIMITER = "\n\n---\n\nUser request: ";
 const SKILL_TITLE_RE = /^#\s+(.+)$/m;
-// Providers with native skill support (claude, pi) never rewrite the prompt —
+// Providers with native skill support (claude, pi) never rewrite the prompt:
 // the model receives the literal slash line and is expected to invoke the
 // Skill tool itself. Recognize that line so it can be labeled distinctly too.
 const SLASH_COMMAND_LINE_RE = /^\/([a-z0-9:_-]+)(?:\s+(.*))?$/;
@@ -362,7 +362,7 @@ function previewOf(body: string): string {
 }
 
 /** Normalize Unicode bullets at line-start to markdown lists, then paragraph-fix.
- * Fenced code blocks are split out and passed through verbatim — running the
+ * Fenced code blocks are split out and passed through verbatim: running the
  * single→double newline paragraph fix inside a ``` fence would double-space
  * every code line. Handles unclosed fences (streaming) by matching to EOL. */
 function tidyMarkdown(text: string): string {
@@ -598,7 +598,7 @@ function buildStream(
   isRunning?: boolean,
   /**
    * Steering messages to interleave. `pending` rows are filtered out by the
-   * caller — they live in the pinned tail box instead, since nothing has
+   * caller: they live in the pinned tail box instead, since nothing has
    * entered the session yet to timestamp them against.
    */
   steering: SteeringMessage[] = [],
@@ -677,7 +677,7 @@ function buildStream(
     }
 
     if (item.kind === "steer") {
-      // A user message landing mid-run always terminates the open tool group —
+      // A user message landing mid-run always terminates the open tool group:
       // it's a turn boundary in the reader's mental model, not another step.
       closeGroup();
       const id = `steer-${item.sm.id}`;
@@ -763,7 +763,7 @@ function buildStream(
           preview: res
             ? previewOf(body)
             : progress
-              ? `${progress.toolName ?? c.title} — still running${progressDuration ? `, ${progressDuration}` : ""}`
+              ? `${progress.toolName ?? c.title} · still running${progressDuration ? `, ${progressDuration}` : ""}`
               : "running…",
           body,
           ok: res ? !res.isError : true,
@@ -835,7 +835,7 @@ function buildStream(
   closeGroup();
   markLiveThinkingGroup(rows, isRunning);
 
-  // The trailing tool group (if the stream ends on one) stays open by default —
+  // The trailing tool group (if the stream ends on one) stays open by default:
   // this is committed here, not derived from a moving "last index", so a group
   // doesn't spontaneously collapse mid-read when the next event streams in.
   const last = rows[rows.length - 1];
@@ -1003,10 +1003,10 @@ function CopyIconButton({
 // Agent output frequently embeds fenced code (```bash, ```json, …). Streamdown's
 // built-in CodeBlock renders a heavy, double-bordered box whose copy/download
 // controls fight the surrounding .prose-* styles (and didn't reliably work). We
-// override `code`/`pre` — the same pattern as markdown-view.tsx's Monaco
-// override, but lightweight (no editor instances, safe inside the virtualized
-// log) — to render one clean terminal-style block with a single working Copy
-// button and no download.
+// override `code`/`pre` to render one clean terminal-style block with a single
+// working Copy button and no download. Same pattern as markdown-view.tsx's
+// Monaco override, but lightweight: no editor instances, safe inside the
+// virtualized log.
 // Markdown fence label → Prism language id (Prism's bundled grammars use a few
 // different names; unknowns fall through and render as plain, uncolored code).
 const PRISM_LANG_ALIASES: Record<string, string> = {
@@ -1099,7 +1099,7 @@ const LOG_MD_COMPONENTS = {
     }
     return <LogCodeBlock language={m?.[1] ?? ""} value={raw.replace(/\n$/, "")} />;
   },
-  // Our block brings its own container — unwrap Streamdown's <pre> so we don't
+  // Our block brings its own container: unwrap Streamdown's <pre> so we don't
   // nest a styled block inside a styled <pre>.
   pre({ children }: { children?: ReactNode }) {
     return <>{children}</>;
@@ -1769,7 +1769,7 @@ function GenericMetaBubble({ block }: { block: ProviderMetaBlock }) {
     failed: "error",
   };
   const tone = block.kind === "parse_error" ? "error" : (status && statusTone[status]) || "muted";
-  // A resolved item type drops the generic "Unknown" prefix — that literal word is
+  // A resolved item type drops the generic "Unknown" prefix: that literal word is
   // what reads as still-broken to a user even after the type/detail are correct.
   const title =
     block.kind === "unknown" && itemType
@@ -1863,9 +1863,9 @@ function RowShell({
   iso: string;
   flash?: boolean;
   isNew?: boolean;
-  /** Row streamed in while the viewer was following — slide in + light highlight. */
+  /** Row streamed in while the viewer was following: slide in + light highlight. */
   highlight?: boolean;
-  /** Delay (ms) before the entrance plays — drives the one-by-one staggered reveal. */
+  /** Delay (ms) before the entrance plays. Drives the one-by-one staggered reveal. */
   streamDelayMs?: number;
   children: ReactNode;
 }) {
@@ -1907,7 +1907,7 @@ function ResultSection({
   const [overflow, setOverflow] = useState(false);
   const preview = useMemo(() => imageResultPreview(body), [body]);
 
-  // Re-measure when the body changes (streaming results grow on refetch) — `body`
+  // Re-measure when the body changes (streaming results grow on refetch). `body`
   // is the intentional trigger even though the measurement reads the DOM, not it.
   // biome-ignore lint/correctness/useExhaustiveDependencies: re-measure on body change
   useLayoutEffect(() => {
@@ -2064,9 +2064,15 @@ function CompactionDivider({ snapshot }: { snapshot: ContextSnapshot }) {
 const MinimapRail = memo(function MinimapRail({
   rows,
   onJump,
+  stickyHeight,
 }: {
   rows: StreamRow[];
   onJump: (index: number, row: StreamRow) => void;
+  /**
+   * Page mode: the rail sticks under the page's sticky bars and the log
+   * toolbar, at this CSS height, while the log scrolls past.
+   */
+  stickyHeight?: string;
 }) {
   const railRef = useRef<HTMLDivElement | null>(null);
   const [railH, setRailH] = useState(0);
@@ -2083,10 +2089,16 @@ const MinimapRail = memo(function MinimapRail({
 
   const gap = rows.length > 1 ? Math.max(0, Math.min(8, (railH - 12) / (rows.length - 1))) : 0;
 
-  return (
+  const rail = (
     <div
       ref={railRef}
-      className="relative hidden w-3 shrink-0 sm:block"
+      className={cn(
+        "relative w-3 shrink-0",
+        stickyHeight
+          ? "sticky top-[calc(var(--log-sticky-top,0px)+var(--log-toolbar-h,0px))] max-h-full"
+          : "hidden sm:block",
+      )}
+      style={stickyHeight ? { height: stickyHeight } : undefined}
       onMouseEnter={() => setOpen(true)}
       onMouseLeave={() => setOpen(false)}
       onFocus={() => setOpen(true)}
@@ -2129,6 +2141,14 @@ const MinimapRail = memo(function MinimapRail({
       )}
     </div>
   );
+  if (!stickyHeight) return rail;
+  // Page mode: an absolute column spans the log body without adding to its
+  // height, and the rail sticks inside it.
+  return (
+    <div className="relative hidden w-3 shrink-0 sm:block">
+      <div className="absolute inset-0">{rail}</div>
+    </div>
+  );
 });
 
 // --- Main component ---
@@ -2142,13 +2162,39 @@ const VIRTUALIZE_THRESHOLD = 120;
 const STAGGER_MAX_ROWS = 6;
 const STAGGER_STEP_MS = 100;
 
+/** How close (px) the last row must be to the visible bottom to count as "at the end". */
+const AT_END_PX = 72;
+
+/**
+ * Page mode: where the log sits in the caller's scroller, in px. `listTop` is
+ * the rows' offset inside the scroll content (the virtualizer's
+ * `scrollMargin`). The sticky parts read the other heights.
+ */
+interface PageBox {
+  listTop: number;
+  viewportH: number;
+  toolbarH: number;
+  tailH: number;
+}
+
+const EMPTY_PAGE_BOX: PageBox = { listTop: 0, viewportH: 0, toolbarH: 0, tailH: 0 };
+
+function samePageBox(a: PageBox, b: PageBox): boolean {
+  return (
+    a.listTop === b.listTop &&
+    a.viewportH === b.viewportH &&
+    a.toolbarH === b.toolbarH &&
+    a.tailH === b.tailH
+  );
+}
+
 interface SessionLogViewerProps {
   logs: SessionLog[];
   compactionSnapshots?: ContextSnapshot[];
   className?: string;
   /**
    * Whether the underlying agent is still working. Drives the footer indicator.
-   * Omit when unknown — the footer shows a neutral event count rather than
+   * Omit when unknown: the footer shows a neutral event count rather than
    * claiming the session is complete.
    */
   isRunning?: boolean;
@@ -2156,10 +2202,25 @@ interface SessionLogViewerProps {
    * Steering messages for this task (≥1.122.1). Delivered / handled rows
    * interleave into the stream at `deliveredAt`; promoted / cancelled at
    * `createdAt`; still-`pending` ones pin to the tail box above the footer.
-   * Omit entirely when the feature is gated off — the viewer then behaves
+   * Omit entirely when the feature is gated off: the viewer then behaves
    * exactly as before.
    */
   steeringMessages?: SteeringMessage[];
+  /**
+   * Page mode. The caller's scroll container (the task page column) scrolls
+   * the log, so the viewer has no scroller of its own:
+   * - Rows flow at their natural height.
+   * - The toolbar, the minimap, the jump pill and the live footer stick
+   *   inside the caller's scroller.
+   * - The viewer never pins itself to the bottom on open. Follow mode starts
+   *   when the user scrolls to the end of the log.
+   *
+   * Pass `null` while the element mounts. Omit the prop to keep the viewer's
+   * own scroller. The caller sets `--log-sticky-top` and, if it has a bottom
+   * bar, `--log-sticky-bottom` on the scroller: the heights of its own sticky
+   * bars.
+   */
+  scrollElement?: HTMLElement | null;
 }
 
 export function SessionLogViewer({
@@ -2168,7 +2229,11 @@ export function SessionLogViewer({
   className,
   isRunning,
   steeringMessages,
+  scrollElement,
 }: SessionLogViewerProps) {
+  // Fixed for the viewer's lifetime: callers pass `scrollElement` from the
+  // first render (as `null` until the element mounts) or never.
+  const pageMode = scrollElement !== undefined;
   const safeLogs = logs ?? [];
   const messages = useMemo(() => parseSessionLogs(safeLogs), [safeLogs]);
   const subagents = useMemo(() => extractSubagentRuns(safeLogs), [safeLogs]);
@@ -2302,11 +2367,52 @@ export function SessionLogViewer({
   // --- Scroll plumbing (virtualizer + stick-to-bottom + jump pill) ---
   const parentRef = useRef<HTMLDivElement | null>(null);
   const contentRef = useRef<HTMLDivElement | null>(null);
-  const [atBottom, setAtBottom] = useState(true);
-  const atBottomRef = useRef(true);
+  const toolbarRef = useRef<HTMLDivElement | null>(null);
+  const tailRef = useRef<HTMLDivElement | null>(null);
+  // `atBottomRef` is follow mode; `atBottom` hides the jump pill. Page mode
+  // starts away from the end: the page opens at its top.
+  const [atBottom, setAtBottom] = useState(!pageMode);
+  const atBottomRef = useRef(!pageMode);
   const [pending, setPending] = useState(0);
   const prevCount = useRef(0);
   const didInit = useRef(false);
+  // Page mode only: whether the rows are inside the scroller's view, and
+  // where the log sits in the scroller.
+  const [logInView, setLogInView] = useState(false);
+  const [pageBox, setPageBox] = useState<PageBox>(EMPTY_PAGE_BOX);
+  // Page mode, live task: the queued steering and the footer stick to the
+  // bottom of the view.
+  const stickyTail = pageMode && isRunning === true;
+
+  const getScroller = useCallback(
+    () => (pageMode ? (scrollElement ?? null) : parentRef.current),
+    [pageMode, scrollElement],
+  );
+
+  // Page mode: "at the end" means the last row is within AT_END_PX of the
+  // visible bottom, which is the scroller's bottom edge or the top of the
+  // stuck footer. `null` while the log is not laid out (a hidden layout tree,
+  // the Agents view).
+  const readPageGeometry = useCallback(() => {
+    const content = contentRef.current;
+    if (!scrollElement || !content || content.getClientRects().length === 0) return null;
+    const view = scrollElement.getBoundingClientRect();
+    const rows = content.getBoundingClientRect();
+    const tailTop = tailRef.current?.getBoundingClientRect().top ?? view.bottom;
+    const visibleBottom = Math.min(view.bottom, tailTop);
+    return {
+      atEnd: rows.bottom - visibleBottom < AT_END_PX,
+      inView: rows.top < visibleBottom,
+      box: {
+        listTop: Math.round(
+          rows.top - view.top - scrollElement.clientTop + scrollElement.scrollTop,
+        ),
+        viewportH: scrollElement.clientHeight,
+        toolbarH: toolbarRef.current?.offsetHeight ?? 0,
+        tailH: tailRef.current?.offsetHeight ?? 0,
+      },
+    };
+  }, [scrollElement]);
 
   const estimateSize = useCallback(
     (index: number) => {
@@ -2335,17 +2441,25 @@ export function SessionLogViewer({
 
   const virtualizer = useVirtualizer({
     count: virtualize ? visibleRows.length : 0,
-    getScrollElement: () => parentRef.current,
+    getScrollElement: getScroller,
     estimateSize,
     overscan: 14,
     getItemKey: (i) => visibleRows[i]?.id ?? i,
+    // Page mode: the rows start below the hero and the outcome. Rows
+    // translate by `start - scrollMargin`.
+    scrollMargin: pageMode ? pageBox.listTop : 0,
   });
 
   useEffect(() => {
-    const el = parentRef.current;
+    const el = getScroller();
     if (!el) return;
     const onScroll = () => {
-      const ab = el.scrollHeight - el.scrollTop - el.clientHeight < 72;
+      const geometry = pageMode ? readPageGeometry() : null;
+      if (pageMode && !geometry) return;
+      if (geometry) setLogInView(geometry.inView);
+      const ab = geometry
+        ? geometry.atEnd
+        : el.scrollHeight - el.scrollTop - el.clientHeight < AT_END_PX;
       atBottomRef.current = ab;
       setAtBottom(ab);
       if (ab) setPending(0);
@@ -2356,14 +2470,39 @@ export function SessionLogViewer({
     // initial pin below. The pin establishes the at-bottom state; real scroll
     // events take over from there.
     return () => el.removeEventListener("scroll", onScroll);
-  }, []);
+  }, [getScroller, pageMode, readPageGeometry]);
+
+  // Page mode: measure where the log sits whenever the scroller or anything
+  // in it resizes. Content above the log (hero, outcome, attachments) changes
+  // height, so observe the scroller's children, not only the log.
+  useLayoutEffect(() => {
+    if (!pageMode || !scrollElement || typeof ResizeObserver === "undefined") return;
+    const measure = () => {
+      const geometry = readPageGeometry();
+      if (!geometry) return;
+      setPageBox((prev) => (samePageBox(prev, geometry.box) ? prev : geometry.box));
+      setLogInView(geometry.inView);
+      // A resize can bring the end into view and hide the pill. Only a scroll
+      // starts or stops follow mode, so content that settles after the page
+      // opens never pins it to the bottom.
+      setAtBottom(atBottomRef.current || geometry.atEnd);
+      if (geometry.atEnd) setPending(0);
+    };
+    const ro = new ResizeObserver(measure);
+    ro.observe(scrollElement);
+    for (const child of scrollElement.children) ro.observe(child);
+    if (toolbarRef.current) ro.observe(toolbarRef.current);
+    if (tailRef.current) ro.observe(tailRef.current);
+    measure();
+    return () => ro.disconnect();
+  }, [pageMode, scrollElement, readPageGeometry]);
 
   const stickToBottom = useCallback(
     (behavior: ScrollBehavior = "auto") => {
-      const el = parentRef.current;
+      const el = getScroller();
       if (!el) return;
       // User-initiated jumps glide; the auto-follow callers stay instant (they
-      // fire per content-growth frame — animating those would fight the
+      // fire per content-growth frame, and animating those would fight the
       // stream). Reduced motion keeps everything instant.
       if (
         behavior === "smooth" &&
@@ -2372,11 +2511,18 @@ export function SessionLogViewer({
           window.matchMedia?.("(prefers-reduced-motion: reduce)").matches
         )
       ) {
-        // No scrollToIndex first — it snaps instantly and defeats the glide.
-        // The estimate can undershoot in virtualized mode; once the scroll
-        // lands, the keep-pinned effect snaps the last few px after the tail
-        // rows measure.
-        el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+        if (pageMode && virtualize && visibleRows.length > 0) {
+          // Page mode opens at the top, so the rows on the way down were
+          // never measured, and their size fixes stop a plain glide short.
+          // The virtualizer's own glide aims again as those rows measure.
+          virtualizer.scrollToIndex(visibleRows.length - 1, { align: "end", behavior: "smooth" });
+        } else {
+          // No instant scrollToIndex first: it snaps and defeats the glide.
+          // The estimate can undershoot in virtualized mode; once the scroll
+          // lands, the keep-pinned effect snaps the last few px after the
+          // tail rows measure.
+          el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+        }
         setPending(0);
         return;
       }
@@ -2389,12 +2535,12 @@ export function SessionLogViewer({
       el.scrollTop = el.scrollHeight;
       setPending(0);
     },
-    [virtualize, virtualizer, visibleRows.length],
+    [getScroller, pageMode, virtualize, virtualizer, visibleRows.length],
   );
 
   // Keep pinned to the bottom as content grows/measures (only when already there).
   const totalSize = virtualize ? virtualizer.getTotalSize() : 0;
-  // biome-ignore lint/correctness/useExhaustiveDependencies: totalSize + visibleRows.length are intentional re-stick triggers — the effect reacts to content growth without reading them in the body.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: totalSize + visibleRows.length are intentional re-stick triggers: the effect reacts to content growth without reading them in the body.
   useEffect(() => {
     if (atBottomRef.current) requestAnimationFrame(() => stickToBottom());
   }, [totalSize, visibleRows.length, stickToBottom]);
@@ -2402,13 +2548,15 @@ export function SessionLogViewer({
   // Land at the newest event when the viewer first populates, and re-pin across
   // a few frames while async content (virtualizer measurement, Streamdown,
   // fonts) settles. Conventional log/chat behavior: opening a task drops you at
-  // the bottom whether the agent is still streaming or already finished — fixes
+  // the bottom whether the agent is still streaming or already finished. This fixes
   // both "doesn't auto-follow on open" and "completed task opens at the top".
+  // Page mode skips it: the page opens at its top, with the hero and the
+  // answer in view.
   const didInitialPin = useRef(false);
   const hasRows = visibleRows.length > 0;
   // biome-ignore lint/correctness/useExhaustiveDependencies: one-shot on first content; intentionally re-pins across frames without re-subscribing.
   useLayoutEffect(() => {
-    if (didInitialPin.current || !hasRows) return;
+    if (pageMode || didInitialPin.current || !hasRows) return;
     didInitialPin.current = true;
     atBottomRef.current = true;
     setAtBottom(true);
@@ -2434,7 +2582,7 @@ export function SessionLogViewer({
   // The growth-stick effect above only reacts to row-count / virtualizer-total
   // changes; it misses a row whose own height grows after it's added (streaming
   // text, async markdown + Prism layout). Observing the content box catches all
-  // of those — this is what actually keeps the log auto-following.
+  // of those, and this is what actually keeps the log auto-following.
   useEffect(() => {
     const content = contentRef.current;
     if (!content || typeof ResizeObserver === "undefined") return;
@@ -2477,7 +2625,7 @@ export function SessionLogViewer({
     [virtualize, virtualizer, flashRow, openGroup],
   );
 
-  // Staggered reveal — when a poll appends a small batch of new rows while we're
+  // Staggered reveal: when a poll appends a small batch of new rows while we're
   // following the tail, give each row after the first an incremental
   // animation-delay so they cascade in one-by-one instead of popping in all at
   // once. Excluded: scrolled-up state and large/initial batches (appear at
@@ -2712,13 +2860,49 @@ export function SessionLogViewer({
 
   const virtualItems = virtualizer.getVirtualItems();
 
+  // Page mode: the card is at least as tall as the view under the caller's
+  // sticky bars, so a filter that empties the log does not move the toolbar.
+  // The minimap and the jump pill read the toolbar and stuck-footer heights.
+  const pageStyle = pageMode
+    ? ({
+        minHeight: `calc(${pageBox.viewportH}px - var(--log-sticky-top, 0px) - var(--log-sticky-bottom, 0px))`,
+        "--log-toolbar-h": `${pageBox.toolbarH}px`,
+        "--log-tail-h": stickyTail ? `${pageBox.tailH}px` : "0px",
+      } as CSSProperties)
+    : undefined;
+  const minimapStickyHeight = pageMode
+    ? `calc(${pageBox.viewportH}px - var(--log-sticky-top, 0px) - var(--log-toolbar-h, 0px) - var(--log-sticky-bottom, 0px) - var(--log-tail-h, 0px))`
+    : undefined;
+  // Page mode shows the pill only while the rows are in view.
+  const showJumpPill = !atBottom && (!pageMode || logInView);
+  const jumpPill = (
+    <button
+      type="button"
+      onClick={() => stickToBottom("smooth")}
+      aria-label="Scroll to latest"
+      className={cn(
+        "absolute bottom-4 left-1/2 z-10 inline-flex -translate-x-1/2 cursor-pointer items-center gap-2 rounded-full bg-primary px-3.5 py-[7px] text-[12.5px] font-semibold text-primary-foreground shadow-lg transition-[translate,opacity]",
+        pageMode && "bottom-0",
+        showJumpPill ? "translate-y-0 opacity-100" : "pointer-events-none translate-y-3 opacity-0",
+      )}
+    >
+      <ArrowDown className="size-3.5" />
+      {pending > 0 ? `${pending} new message${pending === 1 ? "" : "s"}` : null}
+    </button>
+  );
+
   return (
     <TooltipProvider delayDuration={250}>
       <div
         className={cn(
-          "flex min-h-0 flex-col overflow-hidden rounded-lg border border-border bg-card",
+          "flex min-h-0 flex-col rounded-lg border border-border bg-card",
+          // Page mode: `overflow-clip` keeps the rounded corners without making
+          // the card a scroll container, which would stop the toolbar and the
+          // footer from sticking in the caller's scroller.
+          pageMode ? "overflow-clip" : "overflow-hidden",
           className,
         )}
+        style={pageStyle}
       >
         <Tabs
           value={activeView}
@@ -2726,7 +2910,16 @@ export function SessionLogViewer({
           className="min-h-0 flex-1 gap-0"
         >
           {/* Toolbar */}
-          <div className="flex flex-wrap items-center gap-2 border-b border-border bg-muted/30 px-3 py-2">
+          <div
+            ref={toolbarRef}
+            className={cn(
+              "flex flex-wrap items-center gap-2 border-b border-border bg-muted/30 px-3 py-2",
+              // Page mode: stick under the caller's sticky bar. The opaque card
+              // color under the same tint keeps rows from showing through.
+              pageMode &&
+                "sticky top-[var(--log-sticky-top,0px)] z-10 bg-card bg-linear-to-b from-muted/30 to-muted/30",
+            )}
+          >
             <TabsList variant="line" className="h-[30px] shrink-0 rounded-none p-0">
               <TabsTrigger value="logs" className="h-7 flex-none rounded-none px-2 text-xs">
                 Logs
@@ -2760,9 +2953,20 @@ export function SessionLogViewer({
             <div className="relative flex min-h-0 flex-1">
               <div
                 ref={parentRef}
-                className="min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden px-3 [overflow-anchor:none]"
+                className={cn(
+                  "min-h-0 min-w-0 flex-1 px-3",
+                  // Page mode: no scroller here. `overflow-x-clip` (not
+                  // `hidden`) leaves the y axis visible, so the body stays out
+                  // of the scroll chain.
+                  pageMode
+                    ? "overflow-x-clip"
+                    : "overflow-y-auto overflow-x-hidden [overflow-anchor:none]",
+                )}
               >
-                <div ref={contentRef}>
+                {/* Page mode: keep the browser's scroll anchoring off the rows,
+                    as the own scroller does. The virtualizer corrects the
+                    scroll position itself when rows measure. */}
+                <div ref={contentRef} className={cn(pageMode && "[overflow-anchor:none]")}>
                   {visibleRows.length === 0 ? (
                     <div className="flex h-full items-center justify-center py-12 text-sm text-muted-foreground">
                       {rows.length === 0 ? "No session data" : "No matching events"}
@@ -2777,7 +2981,9 @@ export function SessionLogViewer({
                           top: 0,
                           left: 0,
                           width: "100%",
-                          transform: `translateY(${vi.start}px)`,
+                          // `start` counts from the scroller's top, the list
+                          // from its own (page mode offsets it by the margin).
+                          transform: `translateY(${vi.start - virtualizer.options.scrollMargin}px)`,
                         };
                         return (
                           <div
@@ -2802,34 +3008,42 @@ export function SessionLogViewer({
                     </div>
                   )}
                 </div>
+                {pageMode && (
+                  // Page mode: a zero-height anchor sticks the pill above the
+                  // stuck footer and the caller's bottom bar.
+                  <div className="sticky bottom-[calc(var(--log-sticky-bottom,0px)+var(--log-tail-h,0px)+1rem)] z-10 h-0">
+                    {jumpPill}
+                  </div>
+                )}
               </div>
 
               {/* Minimap rail */}
-              {visibleRows.length > 0 && <MinimapRail rows={visibleRows} onJump={jumpTo} />}
+              {visibleRows.length > 0 && (
+                <MinimapRail
+                  rows={visibleRows}
+                  onJump={jumpTo}
+                  stickyHeight={minimapStickyHeight}
+                />
+              )}
 
               {/* Jump-to-latest pill */}
-              <button
-                type="button"
-                onClick={() => stickToBottom("smooth")}
-                aria-label="Scroll to latest"
-                className={cn(
-                  "absolute bottom-4 left-1/2 z-10 inline-flex -translate-x-1/2 cursor-pointer items-center gap-2 rounded-full bg-primary px-3.5 py-[7px] text-[12.5px] font-semibold text-primary-foreground shadow-lg transition-[translate,opacity]",
-                  atBottom
-                    ? "pointer-events-none translate-y-3 opacity-0"
-                    : "translate-y-0 opacity-100",
-                )}
-              >
-                <ArrowDown className="size-3.5" />
-                {pending > 0 ? `${pending} new message${pending === 1 ? "" : "s"}` : null}
-              </button>
+              {!pageMode && jumpPill}
             </div>
 
-            {/* Queued steering — pinned between the stream and the footer. Rows
+            <div
+              ref={tailRef}
+              className={cn(
+                "shrink-0",
+                stickyTail && "sticky bottom-[var(--log-sticky-bottom,0px)] z-10 bg-card",
+              )}
+            >
+              {/* Queued steering, pinned between the stream and the footer. Rows
                   leave this box on their own as soon as the worker delivers them. */}
-            <QueuedSteeringBox messages={pendingSteering} />
+              <QueuedSteeringBox messages={pendingSteering} />
 
-            {/* Footer */}
-            <RunningFooter count={visibleRows.length} isRunning={isRunning} />
+              {/* Footer */}
+              <RunningFooter count={visibleRows.length} isRunning={isRunning} />
+            </div>
           </TabsContent>
           {subagents.length > 0 && (
             <TabsContent value="agents" className="min-h-0 flex-1">
@@ -2844,7 +3058,7 @@ export function SessionLogViewer({
 
 // Reasoning block. Same collapsible-card shape as ToolRow (chevron · label ·
 // inline one-line preview, body behind a border-t) so thinking reads as part of
-// the same visual family — just recessed (muted surface, no accent color) to
+// the same visual family, just recessed (muted surface, no accent color) to
 // signal it's internal reasoning rather than output.
 function ThinkingRow({ text }: { text: string }) {
   const [open, setOpen] = useState(false);
@@ -2885,7 +3099,7 @@ function ThinkingRow({ text }: { text: string }) {
 
 /**
  * Renders a turn prompt whose harness inlined a full SKILL.md body ahead of
- * the actual ask (codex, opencode — see resolveSlashSkillPrompt). The skill
+ * the actual ask (codex, opencode: see resolveSlashSkillPrompt). The skill
  * body is collapsed by default so it doesn't bury the task brief the way the
  * raw "You" bubble did; the brief itself is always shown, unindented.
  */

@@ -61,7 +61,13 @@ import { describeModelResolution, taskDisplayModel } from "@/lib/task-model-reso
 import { taskListTitle } from "@/lib/task-title";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import { TaskDetailsRail } from "./task-details-rail";
-import { STICKY_BAR_HEIGHT, TaskStickyBar, useHeroScrolledPast } from "./task-sticky-bar";
+import {
+  STICKY_BAR_HEIGHT,
+  scrollToTop,
+  TaskStickyBar,
+  useElementHeight,
+  useHeroScrolledPast,
+} from "./task-sticky-bar";
 
 const TASK_DETAIL_TABS = new Set(["details", "outcome", "logs"]);
 
@@ -282,12 +288,16 @@ export default function TaskDetailPage() {
     [setParam, defaultTab],
   );
   // The wide layout's compact bar shows once the hero scrolls out of the
-  // center column.
+  // center column. The column is the page's one scroller: the log flows in it.
   const {
     past: heroScrolledPast,
+    scroller: centerScroller,
     scrollerRef: centerScrollerRef,
     sentinelRef: heroEndRef,
   } = useHeroScrolledPast();
+  // The wide layout's live message box sticks to the bottom of the column. Its
+  // height goes to the log as `--log-sticky-bottom`.
+  const [composerHeight, composerRef] = useElementHeight();
   const agentNames = useMemo(
     () => new Map((agents ?? []).map((agent) => [agent.id, agent.name])),
     [agents],
@@ -417,31 +427,35 @@ export default function TaskDetailPage() {
   // has written any session log lines.
   const showLogViewer = hasSessionLogs || hasSteering;
 
-  const sessionLogsContent = showLogViewer ? (
-    <SessionLogViewer
-      logs={sessionLogs ?? []}
-      compactionSnapshots={contextData?.snapshots}
-      isRunning={taskIsRunning(task.status)}
-      steeringMessages={steeringForViewer}
-      className="flex-1 min-h-0"
-    />
-  ) : sessionLogsLoading ? (
-    // Do not claim "no session log" before the read answers.
-    <Skeleton className="h-12 w-full shrink-0 rounded-lg" />
-  ) : (
-    // One line that says what the task waits for. Only a running task keeps
-    // the full height free for logs that are coming; any other gives it to
-    // the cards above.
-    <div
-      className={cn(
-        "flex items-center gap-3 rounded-lg border border-dashed border-border px-4 py-3",
-        taskIsRunning(task.status) ? "flex-1 min-h-40 justify-center" : "shrink-0",
-      )}
-    >
-      <TaskStatusIcon status={task.status} />
-      <p className="text-sm text-muted-foreground">{waiting}</p>
-    </div>
-  );
+  // The wide layout passes its column as `scrollElement`, so the log flows in
+  // the page scroller. The narrow one keeps the viewer's own scroller.
+  const renderSessionLogs = (scrollElement?: HTMLElement | null) =>
+    showLogViewer ? (
+      <SessionLogViewer
+        logs={sessionLogs ?? []}
+        compactionSnapshots={contextData?.snapshots}
+        isRunning={taskIsRunning(task.status)}
+        steeringMessages={steeringForViewer}
+        scrollElement={scrollElement}
+        className={scrollElement === undefined ? "flex-1 min-h-0" : undefined}
+      />
+    ) : sessionLogsLoading ? (
+      // Do not claim "no session log" before the read answers.
+      <Skeleton className="h-12 w-full shrink-0 rounded-lg" />
+    ) : (
+      // One line that says what the task waits for. Only a running task keeps
+      // the full height free for logs that are coming; any other gives it to
+      // the cards above.
+      <div
+        className={cn(
+          "flex items-center gap-3 rounded-lg border border-dashed border-border px-4 py-3",
+          taskIsRunning(task.status) ? "flex-1 min-h-40 justify-center" : "shrink-0",
+        )}
+      >
+        <TaskStatusIcon status={task.status} />
+        <p className="text-sm text-muted-foreground">{waiting}</p>
+      </div>
+    );
 
   const steerComposer = canSteer ? (
     <CollapsibleComposerDock
@@ -655,10 +669,6 @@ export default function TaskDetailPage() {
     </div>
   );
 
-  // The wide layout sizes the log card to fill the view. A running task keeps
-  // that height before its first log line, so nothing jumps when logs arrive.
-  const logFillsView = showLogViewer || taskIsRunning(task.status);
-
   return (
     // The layout follows the page's own width, not the window's: a docked
     // context panel or an open sidebar can leave a wide window with a narrow
@@ -687,7 +697,7 @@ export default function TaskDetailPage() {
             {outcomeContent}
           </TabsContent>
           <TabsContent value="logs" className="flex flex-col flex-1 min-h-0 px-1 py-3 gap-3">
-            {sessionLogsContent}
+            {renderSessionLogs()}
             {steerComposer}
           </TabsContent>
         </Tabs>
@@ -698,19 +708,25 @@ export default function TaskDetailPage() {
           under the app header down to the window edge and the log gets those
           pixels. */}
       <div className="hidden @min-[64rem]:grid flex-1 min-h-0 grid-cols-[minmax(0,1fr)_300px] -my-4 md:-my-6">
-        {/* The column is a size container: the log card reads its height
-            (100cqh). The log viewer keeps its own scroller, so its
-            virtualization, stick-to-bottom and "N new" pill work unchanged. */}
+        {/* The column is the only scroller. The log flows in it, and its
+            toolbar, minimap and live footer stick under the bar and above the
+            message box: both heights go to the log as CSS variables. */}
         <section
           ref={centerScrollerRef}
-          style={{ "--task-bar-h": STICKY_BAR_HEIGHT } as CSSProperties}
-          className="relative min-h-0 overflow-y-auto [scrollbar-gutter:stable] [container-type:size]"
+          style={
+            {
+              "--log-sticky-top": STICKY_BAR_HEIGHT,
+              "--log-sticky-bottom": `${composerHeight}px`,
+            } as CSSProperties
+          }
+          className="relative min-h-0 overflow-y-auto [scrollbar-gutter:stable]"
         >
           <TaskStickyBar
             visible={heroScrolledPast}
             title={headerTitle}
             status={task.status}
             model={displayModel}
+            onTitleClick={() => scrollToTop(centerScroller)}
           />
           <div className="flex flex-col gap-3 pt-6 pr-6 pb-3">
             <div className="pb-2">
@@ -757,20 +773,16 @@ export default function TaskDetailPage() {
             <TaskAttachmentsSection taskId={task.id} attachments={task.attachments} />
             <TaskCitationsSection output={task.output ?? ""} citations={task.citations ?? []} />
 
-            {logFillsView ? (
-              // Scrolled into view, the log card (and the live composer under
-              // it) fills the column under the sticky bar: the column height
-              // minus the bar, the gap under the bar, and the bottom padding.
-              <div className="flex shrink-0 flex-col gap-3 h-[max(20rem,calc(100cqh_-_var(--task-bar-h)_-_1.5rem))]">
-                {sessionLogsContent}
+            {renderSessionLogs(centerScroller)}
+            {steerComposer ? (
+              // The message box sticks to the bottom of the column. `-my-3
+              // py-3` moves the column gap and the bottom padding into the
+              // sticky box: the stuck box keeps both, and the scroll height
+              // does not change.
+              <div ref={composerRef} className="sticky bottom-0 z-10 -my-3 bg-background py-3">
                 {steerComposer}
               </div>
-            ) : (
-              <>
-                {sessionLogsContent}
-                {steerComposer}
-              </>
-            )}
+            ) : null}
           </div>
         </section>
 

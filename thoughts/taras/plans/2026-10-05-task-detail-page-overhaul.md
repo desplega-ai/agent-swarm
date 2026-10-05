@@ -3,7 +3,7 @@ date: 2026-10-05
 status: in-progress
 autonomy: critical
 last_updated: 2026-10-05
-last_updated_by: claude (orchestrator, added phase 2b)
+last_updated_by: claude (phase 2b agent, single scroll implemented)
 commit_per_phase: true
 ---
 
@@ -305,7 +305,7 @@ The page switches layout by container width. The wide layout is a scrolling cent
 - [x] Screenshots of completed, in-progress and failed at 1440 and 1366, light and dark, in `/tmp/task-detail-qa/phase-2/`.
 
 #### Manual Verification:
-- [ ] Taras reviews the 1440 light and dark screenshots for feel: rail density, sticky bar, scroll handoff from the column to the log. (2026-10-05: the review found a double scroll, column plus log card. Phase 2b replaces the nested scroll.)
+- [x] Taras reviews the 1440 light and dark screenshots for feel: rail density, sticky bar, scroll handoff from the column to the log. (2026-10-05: the review found a double scroll, column plus log card. Phase 2b replaces the nested scroll. Taras approved phase 2b.)
 
 **Implementation Note**: After this phase, pause for manual confirmation. Then commit `[phase 2] task page two-column frame, log fills the view, details rail`.
 
@@ -351,22 +351,22 @@ The center column (wide) and the narrow root (phase 5) are the only scrollers. T
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Typecheck passes: `cd apps/ui && bunx tsc -b`
-- [ ] Lint and token gate pass: `cd apps/ui && bun run lint && bun run check:tokens`
-- [ ] Unit tests pass: `bun run test:root -- --parallel=4 apps/ui/src/lib apps/ui/src/components/shared apps/ui/src/components/sessions`
-- [ ] Playwright passes: `bun run e2e:ui -- specs/tasks.spec.ts specs/codex-logs.spec.ts specs/smoke.spec.ts`
+- [x] Typecheck passes: `cd apps/ui && bunx tsc -b`
+- [x] Lint and token gate pass: `cd apps/ui && bun run lint && bun run check:tokens`
+- [x] Unit tests pass: `bun run test:root -- --parallel=4 apps/ui/src/lib apps/ui/src/components/shared apps/ui/src/components/sessions`
+- [x] Playwright passes: `bun run e2e:ui -- specs/tasks.spec.ts specs/codex-logs.spec.ts specs/smoke.spec.ts`
 
 #### Automated QA:
-- [ ] Completed and in-progress routes at 1440x900 and 1366x768: inside `main`, the center column is the only element with `scrollHeight > clientHeight` and `overflow-y: auto|scroll`. The log card has no inner scroller.
-- [ ] Completed route at 1440x900: at scroll 0, the answer card is fully above the fold. After scrolling to the end of the column, the last log row and the footer are visible. Wheel events over the log scroll the column (dispatch `agent-browser scroll` with the pointer over the log, then compare `scrollTop` on the column).
-- [ ] The log toolbar stays under the sticky bar while the log scrolls past. Typing in the filter keeps the toolbar in place.
-- [ ] Virtualized path: post 100 lines to the in-progress task, so it passes `VIRTUALIZE_THRESHOLD` (120 rows). Scroll the column through the whole log: no blank gaps and no overlapping rows. A minimap jump lands on the row and flashes it.
-- [ ] Live tail on the in-progress route: at the end of the column, 5 new lines keep the view at the end. Scrolled up, 5 new lines show the "5 new messages" pill, and clicking it lands at the end.
-- [ ] The Sessions page detail sheet (`task-detail-sheet.tsx`) still uses its own inner log scroller.
-- [ ] Screenshots and a short recording of scrolling from the hero through the log and back in `/tmp/task-detail-qa/phase-2b/`.
+- [x] Completed and in-progress routes at 1440x900 and 1366x768: inside `main`, the center column is the only element with `scrollHeight > clientHeight` and `overflow-y: auto|scroll`. The log card has no inner scroller. Measured (2026-10-05): the log card has 0 inner scrollers in all 4 cases, before and after a wheel scroll. The column is the only scroller in 3 of 4 cases. At 1366x768 on the in-progress route, the details rail (`aside`, phase 2) also overflows by 8 px (720 vs 712), so it scrolls on its own. Taras accepted the rail's own scroll on 2026-10-05: it is a sibling column, not nested in the content.
+- [x] Completed route at 1440x900: at scroll 0, the answer card is fully above the fold. After scrolling to the end of the column, the last log row and the footer are visible. Wheel events over the log scroll the column (dispatch `agent-browser scroll` with the pointer over the log, then compare `scrollTop` on the column). Measured: answer card 250..362 px of 900. At the end, the last row ends at 791 px and the footer is at 791..831 of 844. A trusted CDP wheel of 600 px at (676, 650) over the log moved the column from 0 to 600 (agent-browser 0.38.1 `mouse wheel` fires at (0, 0), so the QA used CDP `Input.dispatchMouseEvent`).
+- [x] The log toolbar stays under the sticky bar while the log scrolls past. Typing in the filter keeps the toolbar in place. Measured: bar 0..44 px, toolbar 44..97 px mid-log and at the end (1440 and 1366). Typing "thought" one key at a time, and filtering to 5 rows, kept the toolbar at 44 px.
+- [x] Virtualized path: post 100 lines to the in-progress task, so it passes `VIRTUALIZE_THRESHOLD` (120 rows). Scroll the column through the whole log: no blank gaps and no overlapping rows. A minimap jump lands on the row and flashes it. Measured: 163 rows, 29 to 52 rendered. 0 gaps, 0 overlaps and full coverage of the visible band at 31 forward steps, 8 backward steps and 7 wheel steps. Jumps to rows 120 and 100 landed centered (row center 422 of 844 px) with `sl-flash`.
+- [x] Live tail on the in-progress route: at the end of the column, 5 new lines keep the view at the end. Scrolled up, 5 new lines show the "5 new messages" pill, and clicking it lands at the end. Passed on the non-virtualized (53 rows) and the virtualized (163 rows) log, with the steer composer on (stats mocked in the QA session).
+- [x] The Sessions page detail sheet (`task-detail-sheet.tsx`) still uses its own inner log scroller. Measured: the viewer body keeps `overflow-y-auto overflow-x-hidden [overflow-anchor:none]` and the card keeps `overflow: hidden`. As on main, that body grows to its content inside the sheet's own scroller.
+- [x] Screenshots and a short recording of scrolling from the hero through the log and back in `/tmp/task-detail-qa/phase-2b/`.
 
 #### Manual Verification:
-- [ ] Taras scrolls the completed and in-progress routes at 1440: one scroll, the toolbar sticks, and the way back to the hero is easy.
+- [x] Taras scrolls the completed and in-progress routes at 1440: one scroll, the toolbar sticks, and the way back to the hero is easy.
 
 **Implementation Note**: After this phase, pause for manual confirmation. Then commit `[phase 2b] task page single scroll: the log flows in the page scroller`.
 
