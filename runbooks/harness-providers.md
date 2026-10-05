@@ -213,7 +213,8 @@ hosted models and bills the key's Cursor plan.
   answers `feature_unavailable` for local agents. `CostData` carries the
   tokens (`provider: "cursor"`, `totalCostUsd: 0`) and the API prices them from
   the `cursor` rows, projected from the vendor sections. Cursor's
-  `inputTokens` includes cache reads, so the adapter subtracts them. The
+  `inputTokens` includes cache reads and writes, so the adapter subtracts both
+  (clamped to zero) to report fresh input separately. The
   context snapshot is the run's per-call average, tagged `peak-proxy`.
 - **State.** Each session uses a throwaway `JsonlLocalAgentStore` under a temp
   dir; no conversation outlives the task (`canResume` is false).

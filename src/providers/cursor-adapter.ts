@@ -143,12 +143,11 @@ function contextWindowFor(model: string): number | null {
 }
 
 /**
- * Cursor's `inputTokens` includes cache reads (OpenAI semantics: two model
- * calls of ~7.9k prompt each report 15.8k input with 7.7k cache read). The
- * swarm's CostData counts input exclusive of cache reads, so subtract.
+ * Cursor's `inputTokens` includes cache reads and writes. CostData counts
+ * fresh input separately from both cache counters, so subtract both.
  */
 function uncachedInput(usage: TokenUsage): number {
-  return Math.max(0, usage.inputTokens - usage.cacheReadTokens);
+  return Math.max(0, usage.inputTokens - usage.cacheReadTokens - usage.cacheWriteTokens);
 }
 
 /** Folds one SDK message into the swarm's normalized events. Pure. */

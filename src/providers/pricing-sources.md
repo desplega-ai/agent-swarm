@@ -71,7 +71,9 @@ rate by hand should also update this file.
     rows above only fill the per-model breakdown.
   - OpenAI, Anthropic, Google and xAI models (bare vendor ids) → rows under
     `provider='cursor'`. Cursor bills the vendor's API rates and reports the
-    vendor's own id. Cursor's own models are not in models.dev: see
+    vendor's own id. The adapter subtracts cache reads and writes from SDK
+    `inputTokens`, clamped to zero, so fresh input is priced separately.
+    Cursor's own models are not in models.dev: see
     `CURSOR_FIRST_PARTY_PRICING` below.
 
 - **Snapshot refresh procedure**:

@@ -421,6 +421,21 @@ describe("CursorAdapter sessions", () => {
     expect(sdk.closed).toBe(1);
   });
 
+  test.each([
+    [95_129, 47_376, 47_747, 6],
+    [10, 8, 7, 0],
+  ])("separates cache reads and writes from %i input tokens", async (input, read, write, fresh) => {
+    sdk.script = [{ messages: [], usage: { ...usage(input, read, 100), cacheWriteTokens: write } }];
+    const session = await new CursorAdapter().createSession(await sessionConfig());
+    const result = await session.waitForCompletion();
+    expect(result.cost).toMatchObject({
+      inputTokens: fresh,
+      cacheReadTokens: read,
+      cacheWriteTokens: write,
+      outputTokens: 100,
+    });
+  });
+
   test("falls back to the first message when systemPrompt is not enabled", async () => {
     sdk.script = [
       {
