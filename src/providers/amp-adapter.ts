@@ -223,6 +223,33 @@ export async function liveTestAmpCredentials(
   }
 }
 
+// ─── Thread cost (what Amp billed) ───────────────────────────────────────────
+
+/**
+ * The dollars Amp recorded for a thread, from `amp threads usage <id> --details`
+ * (markdown; the CLI has no JSON form). It covers the whole thread, subagent
+ * threads included, at what Amp billed, so it is the harness cost, like
+ * Devin's ACUs. Returns undefined when usage is not available yet, or when any
+ * request was routed through a linked provider (a ChatGPT subscription records
+ * $0 in Amp and bills outside it): the API then prices the tokens instead.
+ */
+export function parseAmpThreadCost(text: string): number | undefined {
+  const cost = /^Cost: \$([\d,]+(?:\.\d+)?)\s*$/m.exec(text);
+  if (!cost?.[1]) return undefined;
+  const routing = text.split(/^## Model Routing\s*$/m)[1];
+  if (routing === undefined) return undefined;
+  const rows = routing
+    .split(/^## /m)[0]
+    ?.split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith("|") && !/^\|\s*(Model ID|-)/.test(line));
+  for (const row of rows ?? []) {
+    if (row.split("|")[3]?.trim() !== "Via Amp") return undefined;
+  }
+  const usd = Number(cost[1].replaceAll(",", ""));
+  return Number.isFinite(usd) ? usd : undefined;
+}
+
 // ─── Thread export (model, tokens, context window) ───────────────────────────
 
 export interface AmpThreadUsage {
@@ -665,10 +692,37 @@ class AmpSession implements ProviderSession {
   }
 
   private async exportUsageOnce(): Promise<AmpThreadUsage | undefined> {
+    const text = await this.threadCommand(["export"]);
+    if (text === undefined) return undefined;
+    try {
+      return parseAmpThreadUsage(JSON.parse(text));
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
+   * `amp threads usage`: what Amp billed for the thread. Usage can lag the
+   * end of a turn ("currently unavailable"), so an empty read is retried once.
+   */
+  private async threadCost(): Promise<number | undefined> {
+    for (let attempt = 0; ; attempt++) {
+      const text = await this.threadCommand(["usage", "--details"]);
+      if (text === undefined) return undefined;
+      const cost = parseAmpThreadCost(text);
+      if (cost !== undefined || attempt >= AMP_EXPORT_RETRIES) return cost;
+      if (!/currently unavailable/i.test(text)) return undefined;
+      await Bun.sleep(AMP_EXPORT_RETRY_MS);
+    }
+  }
+
+  /** Stdout of `amp threads <command> <id>`, or undefined when it fails. */
+  private async threadCommand(command: string[]): Promise<string | undefined> {
     if (!this.sessionId) return undefined;
+    const [subcommand, ...flags] = command;
     try {
       const proc = registerProcessGroup(
-        Bun.spawn([this.run.binary, "threads", "export", this.sessionId], {
+        Bun.spawn([this.run.binary, "threads", subcommand ?? "", this.sessionId, ...flags], {
           cwd: this.run.cwd,
           env: this.run.env,
           stdin: "ignore",
@@ -680,8 +734,7 @@ class AmpSession implements ProviderSession {
       const timer = setTimeout(() => void terminateProcessGroup(proc.pid), AMP_EXPORT_TIMEOUT_MS);
       try {
         const [exitCode, text] = await Promise.all([proc.exited, new Response(proc.stdout).text()]);
-        if (exitCode !== 0) return undefined;
-        return parseAmpThreadUsage(JSON.parse(text));
+        return exitCode === 0 ? text : undefined;
       } finally {
         clearTimeout(timer);
       }
@@ -690,22 +743,27 @@ class AmpSession implements ProviderSession {
     }
   }
 
-  private buildCost(isError: boolean, thread: AmpThreadUsage | undefined): CostData | undefined {
+  private buildCost(
+    isError: boolean,
+    thread: AmpThreadUsage | undefined,
+    billedUsd?: number,
+  ): CostData | undefined {
     if (!this.sessionId) return undefined;
     const t = this.tokens;
     const models = thread?.models;
     const sum = (pick: (m: CostModelUsage) => number) =>
       (models ?? []).reduce((total, m) => total + pick(m), 0);
     const hasStreamTokens = t.input + t.output + t.cacheRead + t.cacheCreation > 0;
-    if (!models && !hasStreamTokens) return undefined;
+    if (!models && !hasStreamTokens && !billedUsd) return undefined;
     // Without the export the stream's raw counts go out under the requested
     // mode or pin, with no `models`, and the API prices them as an estimate.
     return {
       sessionId: this.sessionId,
       taskId: this.run.taskId,
       agentId: this.run.agentId,
-      // Amp reports tokens, not money; the API prices them from the `amp` rows.
-      totalCostUsd: 0,
+      // What Amp billed, when it reports it; otherwise 0 and the API prices
+      // the tokens from the `amp` rows.
+      totalCostUsd: billedUsd ?? 0,
       inputTokens: models ? sum((m) => m.inputTokens) : t.input,
       outputTokens: models ? sum((m) => m.outputTokens) : t.output,
       cacheReadTokens: models ? sum((m) => m.cacheReadTokens) : t.cacheRead,
@@ -752,7 +810,7 @@ class AmpSession implements ProviderSession {
             `amp exited ${exitCode} without a result`
         : undefined;
       if (failureReason) this.emit({ type: "error", message: failureReason });
-      const thread = await this.exportUsage();
+      const [thread, billedUsd] = await Promise.all([this.exportUsage(), this.threadCost()]);
       if (thread?.contextUsedTokens && thread.contextWindow) {
         this.emitContext(
           thread.contextUsedTokens,
@@ -772,7 +830,7 @@ class AmpSession implements ProviderSession {
           }),
         });
       }
-      const cost = this.buildCost(isError, thread);
+      const cost = this.buildCost(isError, thread, billedUsd);
       if (cost) this.emit({ type: "result", cost, output, isError });
       return {
         exitCode: isError ? exitCode || 1 : 0,

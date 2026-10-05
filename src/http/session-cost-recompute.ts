@@ -182,6 +182,19 @@ export async function recomputeSessionCost(
     };
   }
 
+  // Amp's own recorded cost (`amp threads usage`) is what it billed, including
+  // subagent threads the token counts miss. The adapter sends it only when
+  // every request was billed through Amp, so it wins over the token price,
+  // which still fills the per-model breakdown.
+  if (input.provider === "amp" && input.harnessCostUsd > 0) {
+    const priced = await recomputeSessionCost({ ...input, harnessCostUsd: 0 }, lookupRate);
+    return {
+      totalCostUsd: input.harnessCostUsd,
+      costSource: "harness",
+      modelBreakdown: priced.modelBreakdown,
+    };
+  }
+
   // amp's top-level model is the mode or pin it was asked for; only the thread
   // export's per-model usage says what ran and how its cache tokens bill.
   if (input.provider === "amp" && !modelUsageEntries) return estimateAmpCost(input, lookupRate);

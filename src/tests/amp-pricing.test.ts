@@ -169,11 +169,50 @@ describe("amp cost when the thread export failed", () => {
     expect(medium.costSource).toBe("estimated");
     expect(medium.totalCostUsd).toBeCloseTo(await priced("claude-opus-5-5", stream), 12);
     expect(medium.totalCostUsd).toBeGreaterThan(low.totalCostUsd);
+    // Measured live: high runs GPT-6 Astra, ultra runs Claude Fable 5.1.
+    expect((await estimate("high")).totalCostUsd).toBeCloseTo(
+      await priced("gpt-6-astra", {
+        ...stream,
+        inputTokens: stream.inputTokens + stream.cacheWriteTokens,
+        cacheWriteTokens: 0,
+      }),
+      12,
+    );
+    const ultra = await estimate("ultra");
+    expect(ultra.totalCostUsd).toBeCloseTo(await priced("claude-fable-5-1", stream), 12);
+    expect(ultra.totalCostUsd).toBeGreaterThan(medium.totalCostUsd);
   });
 
   test("a pin the table does not know falls back to the medium model, never $0", async () => {
     const result = await estimate("openai/not-in-the-table");
     expect(result.costSource).toBe("estimated");
     expect(result.totalCostUsd).toBeCloseTo(await priced("claude-opus-5-5", stream), 12);
+  });
+});
+
+describe("amp cost Amp reports itself", () => {
+  test("Amp's billed dollars win over the token price and the estimate", async () => {
+    const usage = { inputTokens: 4, outputTokens: 4, cacheReadTokens: 0, cacheWriteTokens: 57568 };
+    const withExport = await recomputeSessionCost(
+      {
+        provider: "amp",
+        model: "medium",
+        harnessCostUsd: 0.47,
+        ...usage,
+        models: [{ model: "claude-opus-5-5", ...usage }],
+        atEpochMs: Date.now(),
+      },
+      lookupFromSeed(),
+    );
+    expect(withExport.costSource).toBe("harness");
+    expect(withExport.totalCostUsd).toBe(0.47);
+    // The breakdown is still the token price, below what Amp billed.
+    expect(withExport.modelBreakdown?.[0]?.costUsd).toBeLessThan(0.47);
+
+    const noExport = await recomputeSessionCost(
+      { provider: "amp", model: "medium", harnessCostUsd: 0.47, ...usage, atEpochMs: Date.now() },
+      lookupFromSeed(),
+    );
+    expect(noExport).toMatchObject({ costSource: "harness", totalCostUsd: 0.47 });
   });
 });

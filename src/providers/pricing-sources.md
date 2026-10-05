@@ -66,6 +66,9 @@ rate by hand should also update this file.
     breakdown (the thread export failed) is `estimated`: its stream totals are
     priced at the pin, else the model its mode is known to run
     (`AMP_ESTIMATE_MODELS`), else the `medium` model, never recorded as $0.
+    When the adapter reports what Amp billed (`amp threads usage`, only when
+    every request was billed through Amp), that harness cost wins and the
+    rows above only fill the per-model breakdown.
 
 - **Snapshot refresh procedure**:
   - Run `bun run scripts/refresh-modelsdev-pricing.ts` (Phase 2 — adds the

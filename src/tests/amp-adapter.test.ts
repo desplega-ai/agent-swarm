@@ -15,6 +15,7 @@ import {
   buildAmpPlugin,
   checkAmpCredentials,
   liveTestAmpCredentials,
+  parseAmpThreadCost,
   parseAmpThreadUsage,
 } from "../providers/amp-adapter";
 import { applyReasoningEffort } from "../providers/reasoning-effort";
@@ -27,6 +28,33 @@ import { clearVolatileSecretsForTesting } from "../utils/secret-scrubber";
 import { ampPricingLookup } from "./amp-pricing-helpers";
 
 const KEY = "sgamp_test_credential_value";
+
+/** `amp threads usage <id> --details` for a live `low` thread (0.0.1791187719-g319a37). */
+const THREAD_USAGE_VIA_AMP = `# Thread Usage
+
+## OK
+
+Scope: Entire lifetime of this thread, including 0 subagent threads.
+
+Cost: $0.02
+Total tokens: 38,176
+Input tokens: 38,131 (0 cache reads)
+Output tokens: 45
+Requests: 3
+
+## Credits
+
+| Type | Cost |
+| --- | ---: |
+| Personal granted credits (covered) | $0.02 |
+
+## Model Routing
+
+| Model ID | Purpose | Routing | Requests | Cost |
+| --- | --- | --- | ---: | ---: |
+| accounts/fireworks/models/glm-5p3-flash | Thread Title | Via Amp | 2 | $0.002 |
+| accounts/fireworks/models/glm-5p3-flash | Agent | Via Amp | 1 | $0.01 |
+`;
 const directories: string[] = [];
 afterEach(async () => {
   await Promise.all(
@@ -186,6 +214,29 @@ describe("amp plugin", () => {
       reasoningEffort: null,
     });
     expect(source.split("\n").filter((line) => line.includes("process.exit"))).toHaveLength(1);
+  });
+});
+
+describe("amp thread cost", () => {
+  test("reads what Amp billed when every request went through Amp", () => {
+    expect(parseAmpThreadCost(THREAD_USAGE_VIA_AMP)).toBe(0.02);
+    expect(parseAmpThreadCost(THREAD_USAGE_VIA_AMP.replace("$0.02\n", "$1,234.56\n"))).toBe(
+      1234.56,
+    );
+  });
+
+  test("gives up when a linked provider served a request, or usage is not ready", () => {
+    // A linked ChatGPT subscription records $0 in Amp and bills outside it (live `high` thread).
+    const linked = THREAD_USAGE_VIA_AMP.replace(
+      "| Agent | Via Amp |",
+      "| Agent | Via [ChatGPT](https://ampcode.com/settings/model-routing#x) |",
+    );
+    expect(parseAmpThreadCost(linked)).toBeUndefined();
+    expect(
+      parseAmpThreadCost("OK\nUsage information is currently unavailable for this thread.\n"),
+    ).toBeUndefined();
+    // Without the routing table there is no proof the cost is complete.
+    expect(parseAmpThreadCost("Cost: $0.47\n")).toBeUndefined();
   });
 });
 
@@ -401,6 +452,32 @@ describe("amp session", () => {
       subtype: "model.resolved",
       model: "accounts/fireworks/models/glm-5p3-flash",
     });
+  });
+
+  test("reports what Amp billed as the harness cost, which the API keeps", async () => {
+    const { config } = await fixture("success", {}, { AMP_TEST_USAGE: THREAD_USAGE_VIA_AMP });
+    const { result } = await runToCompletion(config);
+    const cost = result.cost;
+    if (!cost) throw new Error("expected a cost");
+    expect(cost).toMatchObject({ provider: "amp", totalCostUsd: 0.02 });
+    // Amp's own number counts the title requests the export leaves out.
+    const recomputed = await recomputeSessionCost(
+      {
+        provider: "amp",
+        model: cost.model,
+        harnessCostUsd: cost.totalCostUsd,
+        inputTokens: cost.inputTokens,
+        outputTokens: cost.outputTokens,
+        cacheReadTokens: cost.cacheReadTokens ?? 0,
+        cacheWriteTokens: cost.cacheWriteTokens ?? 0,
+        models: cost.models,
+        atEpochMs: Date.now(),
+      },
+      ampPricingLookup(),
+    );
+    expect(recomputed.costSource).toBe("harness");
+    expect(recomputed.totalCostUsd).toBe(0.02);
+    expect(recomputed.modelBreakdown?.[0]?.costUsd).toBeGreaterThan(0);
   });
 
   test("falls back to stream tokens and the configured model when the export fails", async () => {

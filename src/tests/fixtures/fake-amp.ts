@@ -5,6 +5,7 @@
  *
  *   amp usage                      -> exit 0, or 1 with "Invalid or missing API key"
  *   amp threads export <id>        -> thread JSON with per-request usage and model
+ *   amp threads usage <id> --details -> `AMP_TEST_USAGE` (markdown), else exit 1
  *   amp -x --stream-json [...]     -> JSONL events; with --stream-json-input it
  *                                     reads user messages from stdin and emits
  *                                     `result` only once stdin closes.
@@ -59,6 +60,12 @@ if (args[0] === "threads" && args[1] === "export") {
         ],
       }),
   );
+  process.exit(0);
+}
+
+if (args[0] === "threads" && args[1] === "usage") {
+  if (process.env.AMP_TEST_USAGE === undefined) process.exit(1);
+  console.log(process.env.AMP_TEST_USAGE);
   process.exit(0);
 }
 
