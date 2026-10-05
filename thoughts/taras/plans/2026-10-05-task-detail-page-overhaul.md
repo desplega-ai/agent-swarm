@@ -396,6 +396,7 @@ The hero shows the question, where it came from, and three chips. The raw prompt
 **Changes**:
 - Chips: `StatusBadge`, then `ModelLabel` in an outline chip, then an agent chip (initial avatar and name, linked to `/agents/{id}`).
 - The model chip is focusable. Its tooltip shows `describeModelResolution` lines plus the exact model id.
+- The model chip and the sticky bar show the effort signal icon (`ReasoningEffortIcon`) when the task sets an effort other than "off". The tooltip names the level. (Taras, 2026-10-05.)
 - Tags render as plain muted text with a tag icon, not chips.
 - Remove the provider badge and the `+N` popover. Their fields are already in Technical details (phase 2).
 

@@ -1,8 +1,33 @@
 import { type ReactNode, useEffect, useState } from "react";
+import type { ReasoningEffortLevel } from "@/api/types";
 import { ModelLabel } from "@/components/shared/model-logo";
+import {
+  REASONING_EFFORT_LABEL,
+  ReasoningEffortIcon,
+} from "@/components/shared/reasoning-effort-icon";
 import { TaskStatusIcon } from "@/components/shared/task-status-icon";
 import { statusLabel } from "@/lib/status-labels";
 import { cn } from "@/lib/utils";
+
+/**
+ * The effort level's signal icon, shown next to the model when the task sets
+ * one. "off" gets no icon, the same as the agents list (`agent-model-cell`).
+ */
+export function TaskEffortMark({
+  effort,
+  className,
+}: {
+  effort?: ReasoningEffortLevel | null;
+  className?: string;
+}) {
+  if (!effort || effort === "off") return null;
+  return (
+    <>
+      <ReasoningEffortIcon level={effort} className={cn("h-3 w-3 shrink-0", className)} />
+      <span className="sr-only">, {REASONING_EFFORT_LABEL[effort]} effort</span>
+    </>
+  );
+}
 
 /**
  * Height of the compact bar, in rem. The page publishes it as
@@ -90,6 +115,7 @@ export function TaskStickyBar({
   title,
   status,
   model,
+  effort,
   action,
   onTitleClick,
 }: {
@@ -97,6 +123,7 @@ export function TaskStickyBar({
   title: string;
   status: string;
   model?: string;
+  effort?: ReasoningEffortLevel | null;
   /** The primary action for the task's status. */
   action?: ReactNode;
   onTitleClick: () => void;
@@ -123,7 +150,10 @@ export function TaskStickyBar({
           {title}
         </button>
         {model ? (
-          <ModelLabel model={model} className="shrink-0 text-xs text-muted-foreground" />
+          <span className="inline-flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground">
+            <ModelLabel model={model} />
+            <TaskEffortMark effort={effort} />
+          </span>
         ) : null}
         {action ? <div className="flex shrink-0 items-center gap-1.5">{action}</div> : null}
       </div>

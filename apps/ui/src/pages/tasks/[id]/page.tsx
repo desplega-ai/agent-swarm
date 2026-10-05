@@ -27,6 +27,7 @@ import { AgentAvatar } from "@/components/shared/agent-avatar";
 import { CollapsibleSection } from "@/components/shared/collapsible-section";
 import { MarkdownView } from "@/components/shared/markdown-view";
 import { ModelLabel } from "@/components/shared/model-logo";
+import { REASONING_EFFORT_LABEL } from "@/components/shared/reasoning-effort-icon";
 import { SessionLogViewer } from "@/components/shared/session-log-viewer";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { TaskAttachmentsSection } from "@/components/shared/task-attachments-section";
@@ -64,6 +65,7 @@ import { TaskSourceLine } from "./task-source-line";
 import {
   STICKY_BAR_HEIGHT,
   scrollToTop,
+  TaskEffortMark,
   TaskStickyBar,
   useElementHeight,
   useHeroScrolledPast,
@@ -504,14 +506,16 @@ export default function TaskDetailPage() {
       ? (agentNames.get(task.creatorAgentId) ?? null)
       : null;
 
-  // HERO CHIPS: status, model and agent, then the tags as plain text. The
-  // harness, type, priority, source and effort are in Technical details.
-  // The model chip takes focus, so keyboard users get the exact model id.
+  // HERO CHIPS: status, model (with the effort icon when the task sets one)
+  // and agent, then the tags as plain text. The harness, type, priority and
+  // source are in Technical details. The model chip takes focus, so keyboard
+  // users get the exact model id.
   const modelChip = displayModel ? (
     <Tooltip>
       <TooltipTrigger asChild>
         <Badge variant="outline" tabIndex={0} className="h-6 max-w-full gap-1.5 px-2">
           <ModelLabel model={displayModel} />
+          <TaskEffortMark effort={task.effort} className="text-muted-foreground" />
         </Badge>
       </TooltipTrigger>
       <TooltipContent side="bottom" align="start" className="text-left">
@@ -519,11 +523,13 @@ export default function TaskDetailPage() {
         {describeModelResolution(task).map((line) => (
           <div key={line}>{line}</div>
         ))}
+        {task.effort ? <div>Effort: {REASONING_EFFORT_LABEL[task.effort]}</div> : null}
       </TooltipContent>
     </Tooltip>
   ) : task.modelTier ? (
-    <Badge variant="outline" className="h-6 px-2">
+    <Badge variant="outline" className="h-6 gap-1.5 px-2">
       {modelTierLabel(task.modelTier)} tier
+      <TaskEffortMark effort={task.effort} className="text-muted-foreground" />
     </Badge>
   ) : null;
   const agentChip = task.agentId ? (
@@ -658,6 +664,7 @@ export default function TaskDetailPage() {
             title={headerTitle}
             status={task.status}
             model={displayModel}
+            effort={task.effort}
             onTitleClick={() => scrollToTop(centerScroller)}
           />
           <div className="flex flex-col gap-3 pt-6 pr-6 pb-3">
