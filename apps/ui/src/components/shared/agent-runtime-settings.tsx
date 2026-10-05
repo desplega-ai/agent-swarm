@@ -79,6 +79,7 @@ const CREDENTIAL_KEYS = [
   "OPENROUTER_API_KEY",
   "CODEX_OAUTH",
   "DEEPSEEK_API_KEY",
+  "CURSOR_API_KEY",
 ];
 
 function configuredModel(configs: { key: string; value: string }[] | undefined): string {

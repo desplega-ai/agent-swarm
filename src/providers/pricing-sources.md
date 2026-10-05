@@ -56,6 +56,10 @@ rate by hand should also update this file.
   - DeepSeek direct-API models (models.dev `deepseek` section, bare ids) →
     rows under `provider='dsh'`. dsh's `deepseek-flash` id is not in that
     section and stays `unpriced`.
+  - OpenAI, Anthropic, Google and xAI models (bare vendor ids) → rows under
+    `provider='cursor'`. Cursor bills the vendor's API rates and reports the
+    vendor's own id. Cursor-only models (`composer-*`, `default`) have no row
+    and stay `unpriced`.
 
 - **Snapshot refresh procedure**:
   - Run `bun run scripts/refresh-modelsdev-pricing.ts` (Phase 2 — adds the

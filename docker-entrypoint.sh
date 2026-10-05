@@ -95,6 +95,10 @@ elif [ "$HARNESS_PROVIDER" = "dsh" ]; then
     if [ -z "$DEEPSEEK_API_KEY" ] && [ -z "$OPENROUTER_API_KEY" ]; then
         echo "Warning: dsh provider has no credentials yet (DEEPSEEK_API_KEY / OPENROUTER_API_KEY). Worker will park in credential-wait until creds appear in swarm_config."
     fi
+elif [ "$HARNESS_PROVIDER" = "cursor" ]; then
+    if [ -z "$CURSOR_API_KEY" ]; then
+        echo "Warning: cursor provider has no credentials yet (CURSOR_API_KEY). Worker will park in credential-wait until creds appear in swarm_config."
+    fi
 elif [ "$HARNESS_PROVIDER" = "opencode" ]; then
     # opencode auth: OPENROUTER_API_KEY, ANTHROPIC_API_KEY, OPENAI_API_KEY, or auth.json must exist
     OPENCODE_AUTH_FILE="${HOME}/.local/share/opencode/auth.json"
@@ -331,6 +335,14 @@ elif [ "$HARNESS_PROVIDER" = "dsh" ]; then
         exit 1
     fi
     echo "dsh CLI: $(command -v "$DSH_BIN")"
+elif [ "$HARNESS_PROVIDER" = "cursor" ]; then
+    # @cursor/sdk runs in-process inside the worker binary; its ripgrep comes
+    # from the platform package installed in worker-full (CURSOR_RIPGREP_PATH).
+    if [ -n "${CURSOR_RIPGREP_PATH:-}" ] && [ ! -x "$CURSOR_RIPGREP_PATH" ]; then
+        echo "FATAL: CURSOR_RIPGREP_PATH is not executable: '$CURSOR_RIPGREP_PATH'"
+        exit 1
+    fi
+    echo "Cursor SDK: in-process (no CLI binary required)"
 elif [ "$HARNESS_PROVIDER" = "acp" ]; then
     # ACP spawns its own target, not the claude CLI, so resolve the same
     # command ACPAdapter.createSession would spawn and check THAT binary.

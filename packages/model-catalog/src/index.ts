@@ -15,6 +15,7 @@ export { type ModelsDevOverlay, mergeCatalog } from "./merge.ts";
 export { type AliasSourceModel, buildClaudeAliasMap, resolveClaudeAlias } from "./model-alias.ts";
 export {
   claudeCatalogModelId,
+  cursorCatalogRef,
   dshCatalogRef,
   isReasoningHarness,
   nearestReasoningLevel,

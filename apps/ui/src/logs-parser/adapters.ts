@@ -3,7 +3,7 @@ import {
   type DshStepUsage,
   normalizeDshStepUsage,
 } from "../../../../src/utils/dsh-usage";
-import { asString, isRecord, makeItem, resultBlockText } from "./helpers";
+import { asString, isRecord, makeItem, resultBlockText, stringifyForDisplay } from "./helpers";
 import { resultImages } from "./result-images";
 import type { DecodedRecord, LogRole, NormalizedItem } from "./types";
 
@@ -1066,6 +1066,196 @@ export function normalizeDsh(ordered: DecodedRecord[]): NormalizedItem[] {
       default: {
         items.push(makeItem(d, "unknown", { role: "system", raw: ev }));
       }
+    }
+  }
+
+  return items;
+}
+
+// Cursor's local tools, mapped to the names the viewer renders as file and
+// shell tools.
+const CURSOR_TOOL_NAMES: Record<string, string> = {
+  shell: "Bash",
+  read: "Read",
+  write: "Write",
+  edit: "Edit",
+  glob: "Glob",
+  grep: "Grep",
+  ls: "LS",
+};
+
+/** Cursor reports MCP calls as tool `mcp`; name them like claude's `mcp__<server>__<tool>`. */
+function cursorTool(name: string, args: unknown): { name: string; input: unknown } {
+  if (name === "mcp" && isRecord(args) && typeof args.toolName === "string") {
+    const server = asString(args.providerIdentifier) ?? "agent-swarm";
+    return { name: `mcp__${server}__${args.toolName}`, input: args.args ?? {} };
+  }
+  return { name: CURSOR_TOOL_NAMES[name] ?? name, input: args ?? {} };
+}
+
+/** A Cursor tool result: `{status, value}`, MCP values carry `content[].text.text`. */
+function cursorResultText(result: unknown): string {
+  const value = isRecord(result) && "value" in result ? result.value : result;
+  if (isRecord(value) && Array.isArray(value.content)) {
+    return value.content
+      .map((c) => {
+        if (!isRecord(c)) return stringifyForDisplay(c);
+        const text = isRecord(c.text) ? c.text.text : c.text;
+        return typeof text === "string" ? text : stringifyForDisplay(c);
+      })
+      .join("\n");
+  }
+  if (isRecord(value) && typeof value.stdout === "string") {
+    return [value.stdout, asString(value.stderr)].filter(Boolean).join("\n");
+  }
+  return resultBlockText(value);
+}
+
+/**
+ * The cursor adapter (`@cursor/sdk`) stores each `SDKMessage` verbatim:
+ * `status` (RUNNING / FINISHED / ERROR / CANCELLED), `assistant` text chunks,
+ * `tool_call` (running, then completed or error, same `call_id`), `thinking`,
+ * `usage` (once per run), plus the adapter's own `model` line.
+ */
+export function normalizeCursor(ordered: DecodedRecord[]): NormalizedItem[] {
+  const items: NormalizedItem[] = [];
+  let usage: Record<string, unknown> | undefined;
+  // Cursor streams assistant text in small chunks: one row per text run.
+  let text: NormalizedItem | undefined;
+
+  for (const d of ordered) {
+    const ev = d.event;
+    if (isParseError(ev)) {
+      items.push(makeItem(d, "parse_error", { role: "system", raw: ev.raw }));
+      text = undefined;
+      continue;
+    }
+    if (!isRecord(ev)) {
+      items.push(makeItem(d, "unknown", { role: "system", raw: ev }));
+      text = undefined;
+      continue;
+    }
+    if (emitStderr(items, d, ev)) {
+      text = undefined;
+      continue;
+    }
+
+    if (ev.type === "assistant") {
+      const message = isRecord(ev.message) ? ev.message : {};
+      const chunk = (Array.isArray(message.content) ? message.content : [])
+        .filter((b) => isRecord(b) && b.type === "text")
+        .map((b) => String((b as Record<string, unknown>).text ?? ""))
+        .join("");
+      if (!chunk) continue;
+      if (text) {
+        text.text = `${text.text ?? ""}${chunk}`;
+        text.coveredRecIds = [...(text.coveredRecIds ?? []), d.rec.id];
+      } else {
+        text = makeItem(d, "text", { role: "assistant", text: chunk });
+        items.push(text);
+      }
+      continue;
+    }
+    text = undefined;
+
+    switch (ev.type) {
+      case "model": {
+        // Written by the swarm adapter: the model selection it sent.
+        const model = isRecord(ev.model) ? ev.model : {};
+        const params = Array.isArray(model.params)
+          ? model.params
+              .filter(isRecord)
+              .map((p) => `${asString(p.id)}=${asString(p.value)}`)
+              .join(", ")
+          : "";
+        const subtype = `cursor · ${asString(model.id) ?? "?"}${params ? ` · ${params}` : ""}`;
+        items.push(
+          makeItem(d, "lifecycle", {
+            role: "system",
+            meta: { ...ev, type: "model.selected", subtype },
+          }),
+        );
+        break;
+      }
+      case "thinking": {
+        const thought = asString(ev.text);
+        if (thought) items.push(makeItem(d, "reasoning", { role: "assistant", text: thought }));
+        break;
+      }
+      case "user": {
+        const message = isRecord(ev.message) ? ev.message : {};
+        items.push(makeItem(d, "text", { role: "user", text: resultBlockText(message.content) }));
+        break;
+      }
+      case "tool_call": {
+        const id = String(ev.call_id ?? "");
+        if (ev.status === "running") {
+          const tool = cursorTool(asString(ev.name) ?? "tool", ev.args);
+          items.push(makeItem(d, "tool_call", { role: "assistant", tool: { id, ...tool } }));
+        } else {
+          items.push(
+            makeItem(d, "tool_result", {
+              role: "user",
+              result: {
+                id,
+                payload: cursorResultText(ev.result),
+                isError:
+                  ev.status === "error" || (isRecord(ev.result) && ev.result.status === "error"),
+              },
+            }),
+          );
+        }
+        break;
+      }
+      case "usage": {
+        usage = isRecord(ev.usage) ? ev.usage : undefined;
+        break;
+      }
+      case "status": {
+        if (ev.status === "RUNNING") {
+          usage = undefined;
+          items.push(
+            makeItem(d, "lifecycle", { role: "system", meta: { ...ev, type: "turn.started" } }),
+          );
+        } else if (ev.status === "FINISHED") {
+          items.push(
+            makeItem(d, "lifecycle", {
+              role: "system",
+              meta: {
+                ...ev,
+                type: "turn.completed",
+                usage: usage && {
+                  // Codex-style: Cursor's input already includes the cached share.
+                  input_tokens: usage.inputTokens,
+                  cached_input_tokens: usage.cacheReadTokens,
+                  output_tokens: usage.outputTokens,
+                },
+              },
+            }),
+          );
+        } else if (ev.status === "ERROR" || ev.status === "CANCELLED" || ev.status === "EXPIRED") {
+          const status = String(ev.status).toLowerCase();
+          items.push(
+            makeItem(d, "result", {
+              role: "system",
+              meta: {
+                ...ev,
+                type: "cursor_run_error",
+                subtype: status,
+                isError: true,
+                output: asString(ev.message) ?? `cursor run ${status}`,
+              },
+            }),
+          );
+        }
+        break;
+      }
+      case "request":
+      case "task":
+        items.push(makeItem(d, "lifecycle", { role: "system", meta: ev }));
+        break;
+      default:
+        items.push(makeItem(d, "unknown", { role: "system", raw: ev }));
     }
   }
 

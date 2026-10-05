@@ -59,6 +59,8 @@ const ROUTING_PREFIXES_BY_PROVIDER: Record<PricingProvider, readonly string[]> =
   // DeepSeek id (`deepseek-v4-pro`) for the direct API. Stripping `openrouter/`
   // lands the former on the openrouter rows; the latter is already canonical.
   dsh: ["openrouter/"],
+  // cursor reports a bare Cursor model id, already the vendor's own id.
+  cursor: [],
 };
 
 /**

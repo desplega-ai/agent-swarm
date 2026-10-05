@@ -200,6 +200,7 @@
     "@anthropic-ai/sdk": "^0.131.0",
     "@asteasolutions/zod-to-openapi": "^8.0.0",
     "@aws-sdk/client-bedrock": "3.1048.0",
+    "@cursor/sdk": "1.0.35",
     "@desplega.ai/business-use": "^0.4.2",
     "@desplega.ai/localtunnel": "^2.2.0",
     "@earendil-works/pi-agent-core": "^1.0.3",

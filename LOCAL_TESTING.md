@@ -168,11 +168,12 @@ Then render both profiles:
 bun run e2e:visuals /tmp/vis/legacy && bun run e2e:visuals /tmp/vis/v2
 ```
 
-Use `--harness claude,codex,pi,opencode,dsh` to add real worker legs after the contract layer.
+Use `--harness claude,codex,pi,opencode,dsh,cursor` to add real worker legs after the contract layer.
 Claude needs `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY`.
 Codex needs `CODEX_OAUTH` or `OPENAI_API_KEY`. Pi needs `OPENROUTER_API_KEY` or `ANTHROPIC_API_KEY`.
 Opencode needs `OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY`, or `OPENAI_API_KEY`.
-Override models with `E2E_MODEL_CLAUDE`, `E2E_MODEL_CODEX`, `E2E_MODEL_PI`, `E2E_MODEL_OPENCODE`, or `E2E_MODEL_DSH`.
+Override models with `E2E_MODEL_CLAUDE`, `E2E_MODEL_CODEX`, `E2E_MODEL_PI`, `E2E_MODEL_OPENCODE`, `E2E_MODEL_DSH`, or `E2E_MODEL_CURSOR`.
+Cursor needs `CURSOR_API_KEY` and defaults to `gpt-5.4-nano`, the cheapest model `Cursor.models.list()` offers.
 Dsh defaults to `openrouter/deepseek/deepseek-v4.1-flash` and needs `OPENROUTER_API_KEY`.
 Provision `npm install --global @deepseek-ai/dsh@0.2.1-alpha.1` first, then run
 `DSH_BINARY=$(command -v dsh) bun run e2e --only health --harness dsh`.

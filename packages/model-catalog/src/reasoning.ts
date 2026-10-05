@@ -16,7 +16,7 @@ export const REASONING_EFFORT_LEVELS = ["off", "low", "medium", "high", "xhigh",
 export type ReasoningEffortLevel = (typeof REASONING_EFFORT_LEVELS)[number];
 
 /** The local harnesses with an effort control (Devin, claude-managed and ACP have none). */
-export const REASONING_HARNESSES = ["claude", "codex", "pi", "opencode", "dsh"] as const;
+export const REASONING_HARNESSES = ["claude", "codex", "pi", "opencode", "dsh", "cursor"] as const;
 export type ReasoningHarnessName = (typeof REASONING_HARNESSES)[number];
 
 /**
@@ -30,6 +30,22 @@ export function dshCatalogRef(model: string): { providerId: string; modelId: str
     return { providerId: "openrouter", modelId: model.slice("openrouter/".length) };
   }
   return { providerId: "deepseek", modelId: model };
+}
+
+/**
+ * A cursor model string is a bare Cursor model id (`gpt-5.4-nano`,
+ * `claude-sonnet-5-5`, `composer-2.5`). Cursor names the vendor models it
+ * hosts by their vendor ids, so the vendor follows from the id prefix. Ids
+ * with no catalog vendor (Cursor's own `composer-*`, `default`) map to the
+ * `cursor` section, which the catalog does not carry.
+ */
+export function cursorCatalogRef(model: string): { providerId: string; modelId: string } {
+  const id = model.trim().toLowerCase();
+  if (/^(gpt-|o\d)/.test(id)) return { providerId: "openai", modelId: id };
+  if (id.startsWith("claude-")) return { providerId: "anthropic", modelId: id };
+  if (id.startsWith("gemini-")) return { providerId: "google", modelId: id };
+  if (id.startsWith("grok-")) return { providerId: "xai", modelId: id };
+  return { providerId: "cursor", modelId: id };
 }
 
 /** Direct DeepSeek API ids carry no vendor slash; OpenRouter ids always do. */
@@ -108,7 +124,9 @@ function applyHarnessOverrides(
     const hasToggle = facts.reasoning_options?.some((o) => o.type === "toggle") ?? false;
     if (direct && hasToggle && !result.includes("off")) result = ["off", ...result];
     if (!direct) result = result.filter((l) => l !== "off");
-  } else if (harness !== "codex") {
+  } else if (harness !== "codex" && harness !== "cursor") {
+    // cursor passes the model's own effort values through (`max` included),
+    // see `src/providers/cursor-adapter.ts`.
     result = result.filter((l) => l !== "max");
   }
 
@@ -194,6 +212,8 @@ export function reasoningLevelsForModel(
     catalogId = model;
   } else if (harness === "dsh") {
     ({ providerId, modelId: catalogId } = dshCatalogRef(model));
+  } else if (harness === "cursor") {
+    ({ providerId, modelId: catalogId } = cursorCatalogRef(model));
   } else {
     const slash = model.indexOf("/");
     if (slash <= 0) return [];

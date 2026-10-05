@@ -197,3 +197,47 @@ describe('model labels drop models.dev\'s "(latest)" suffix', () => {
     expect(findKnownModel("claude-plain-1", plain)?.label).toBe("Claude Plain (beta)");
   });
 });
+
+describe("cursor harness models", () => {
+  const catalog = live({
+    openai: {
+      "gpt-5.4-nano": {
+        name: "GPT-5.4 nano",
+        reasoning: true,
+        reasoning_options: effort(["none", "low", "high"]),
+      },
+    },
+    anthropic: {
+      "claude-opus-5-5": {
+        name: "Claude Opus 5.5",
+        reasoning: true,
+        reasoning_options: effort(["low", "max"]),
+      },
+    },
+  });
+
+  test("one Cursor group behind CURSOR_API_KEY, labelled from the vendor catalog", () => {
+    const [group, ...rest] = modelGroupsForHarness(
+      "cursor",
+      [],
+      { CURSOR_API_KEY: true },
+      null,
+      catalog,
+    );
+    expect(rest).toEqual([]);
+    expect(group?.provider).toBe("Cursor");
+    expect(group?.requiredKey).toBe("CURSOR_API_KEY");
+    expect(group?.enabled).toBe(true);
+    const nano = group?.models.find((m) => m.id === "gpt-5.4-nano");
+    expect(nano?.label).toBe("GPT-5.4 nano");
+    expect(nano?.reasoningLevels).toEqual(["off", "low", "high"]);
+    // Cursor-only models have no catalog row and take no effort.
+    expect(group?.models.find((m) => m.id === "composer-2.5")?.reasoningLevels).toEqual([]);
+    expect(modelGroupsForHarness("cursor", [], {}, null, catalog)[0]?.enabled).toBe(false);
+  });
+
+  test("effort reads the vendor section; cursor keeps max", () => {
+    expect(effortLevelsFor("cursor", "claude-opus-5-5", catalog)).toEqual(["low", "max"]);
+    expect(effortLevelsFor("cursor", "composer-2.5", catalog)).toEqual([]);
+  });
+});

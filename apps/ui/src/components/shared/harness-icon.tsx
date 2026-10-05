@@ -128,6 +128,16 @@ function DshIcon(props: IconProps) {
   );
 }
 
+function CursorIcon(props: IconProps) {
+  // Simplified Cursor cube: hexagon outline with one shaded face.
+  return (
+    // biome-ignore lint/a11y/noSvgWithoutTitle: decorative icon, harness label provides accessible name
+    <svg aria-hidden {...ICON_BASE_24} {...props}>
+      <path d="M12 1.5 21.5 7v10L12 22.5 2.5 17V7L12 1.5zm0 2.3L4.5 8.1v7.8l7.5 4.3 7.5-4.3V8.1L12 3.8zM12 12l7.5-3.9L12 3.8V12z" />
+    </svg>
+  );
+}
+
 const ICON_BY_HARNESS: Record<ProviderName, (p: IconProps) => ReactElement> = {
   claude: ClaudeIcon,
   "claude-managed": ClaudeManagedIcon,
@@ -137,6 +147,7 @@ const ICON_BY_HARNESS: Record<ProviderName, (p: IconProps) => ReactElement> = {
   devin: DevinIcon,
   acp: AcpIcon,
   dsh: DshIcon,
+  cursor: CursorIcon,
 };
 
 export interface HarnessIconProps extends IconProps {

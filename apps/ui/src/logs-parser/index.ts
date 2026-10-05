@@ -3,6 +3,7 @@ import {
   normalizeAnthropic,
   normalizeClaudeManaged,
   normalizeCodex,
+  normalizeCursor,
   normalizeDsh,
   normalizeOpencode,
 } from "./adapters";
@@ -49,6 +50,7 @@ const ADAPTERS: Record<string, Adapter> = {
   codex: normalizeCodex,
   opencode: normalizeOpencode,
   dsh: normalizeDsh,
+  cursor: normalizeCursor,
 };
 
 export function normalizeSessionLogs(logs: SessionLogRecord[]): TranscriptParseResult {

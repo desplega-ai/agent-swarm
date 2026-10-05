@@ -11,6 +11,8 @@ const DEFAULT_MODELS: Record<string, string> = {
   pi: "openrouter/deepseek/deepseek-v4-flash",
   opencode: "openrouter/deepseek/deepseek-v4-flash",
   dsh: "openrouter/deepseek/deepseek-v4.1-flash",
+  // The cheapest model Cursor.models.list() offers our account.
+  cursor: "gpt-5.4-nano",
 };
 const PROVIDER_CREDENTIAL_KEYS = {
   claude: { keys: ["CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"], fallbackKeys: [] },
@@ -27,6 +29,7 @@ const PROVIDER_CREDENTIAL_KEYS = {
     keys: ["OPENROUTER_API_KEY", "OPENROUTER_BASE_URL", "DEEPSEEK_API_KEY", "DSH_BINARY"],
     fallbackKeys: [],
   },
+  cursor: { keys: ["CURSOR_API_KEY"], fallbackKeys: [] },
 } as const;
 type HarnessChild = Bun.Subprocess<"ignore", "pipe", "pipe">;
 
@@ -139,6 +142,8 @@ function requireCredential(provider: string): void {
       : "DEEPSEEK_API_KEY";
     expect(process.env[key], `Dsh requires ${key} for the selected model`);
     expect(Bun.which(process.env.DSH_BINARY || "dsh"), "Dsh requires a preinstalled dsh executable");
+  } else if (provider === "cursor") {
+    expect(process.env.CURSOR_API_KEY, "Cursor requires CURSOR_API_KEY");
   } else if (provider === "opencode") {
     expect(
       process.env.OPENROUTER_API_KEY || process.env.ANTHROPIC_API_KEY || process.env.OPENAI_API_KEY,
@@ -340,7 +345,7 @@ async function runHarnessAttempt(
   let cost: HarnessCost | undefined;
   try {
     expect(
-      ["claude", "codex", "pi", "opencode", "dsh"].includes(provider),
+      ["claude", "codex", "pi", "opencode", "dsh", "cursor"].includes(provider),
       `Unsupported harness provider: ${provider}`,
     );
     requireCredential(provider);

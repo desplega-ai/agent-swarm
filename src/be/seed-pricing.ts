@@ -229,6 +229,20 @@ export function buildModelsDevSeedRows(cache: ModelsDevCache): PricingSeedRow[] 
     }
   }
 
+  // ---- Cursor (bare vendor ids through Cursor's hosted inference) --------
+  // Cursor bills the vendor's API rates for the models it hosts and names
+  // them by the vendor's own id (`gpt-5.4-nano`, `claude-sonnet-5-5`), so the
+  // vendor sections project as-is. Cursor-only models (`composer-*`, `default`)
+  // have no models.dev row and settle as `costSource: 'unpriced'`.
+  for (const vendor of ["openai", "anthropic", "google", "xai"] as const) {
+    for (const [id, model] of Object.entries(cache[vendor]?.models ?? {})) {
+      if (!model?.cost) continue;
+      for (const row of projectCostBlock("cursor", id, model.cost, { anthropicBilled: false })) {
+        rows.push(row);
+      }
+    }
+  }
+
   // ---- DeepSeek direct API (dsh with DEEPSEEK_API_KEY, bare ids) ---------
   const deepseek = cache.deepseek?.models ?? {};
   for (const [id, model] of Object.entries(deepseek)) {

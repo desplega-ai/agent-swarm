@@ -1,6 +1,7 @@
 import {
   buildClaudeShortnameMap,
   claudeCatalogModelId,
+  cursorCatalogRef,
   dshCatalogRef,
   harnessModelIds,
   isReasoningHarness,
@@ -16,7 +17,14 @@ import modelsCache from "./modelsdev-cache.json";
 // `src/tests/bedrock-model-groups.test.ts`), and a runtime `@/` import cannot
 // resolve there.
 
-export type LocalHarnessProvider = "claude" | "codex" | "pi" | "opencode" | "acp" | "dsh";
+export type LocalHarnessProvider =
+  | "claude"
+  | "codex"
+  | "pi"
+  | "opencode"
+  | "acp"
+  | "dsh"
+  | "cursor";
 
 /** USD per 1M tokens, as models.dev names the rates. Cache rates are absent for models without prompt caching. */
 export interface ModelCost {
@@ -147,7 +155,7 @@ function runtimeSectionModels(
  * `modelId` is the string the harness stores: a bare id for claude and codex
  * (a Claude CLI shortname such as `opus` resolves to the newest model of its
  * family), `<provider>/<id>` for pi and opencode, `openrouter/<id>` or a bare
- * DeepSeek API id for dsh.
+ * DeepSeek API id for dsh, a bare Cursor model id for cursor.
  */
 export function effortLevelsFor(
   harness: string,
@@ -165,6 +173,8 @@ export function effortLevelsFor(
     catalogId = modelId;
   } else if (harness === "dsh") {
     ({ providerId, modelId: catalogId } = dshCatalogRef(modelId));
+  } else if (harness === "cursor") {
+    ({ providerId, modelId: catalogId } = cursorCatalogRef(modelId));
   } else {
     // The id may hold more slashes (`openrouter/google/gemini-3-flash-preview`).
     const slash = modelId.indexOf("/");
@@ -219,8 +229,30 @@ export const LOCAL_HARNESSES: LocalHarnessProvider[] = [
   "pi",
   "opencode",
   "dsh",
+  "cursor",
   "acp",
 ];
+
+/**
+ * The Cursor models the picker offers: a curated subset of what
+ * `Cursor.models.list()` returns. The real list is per account, so a custom
+ * id still goes through; labels and rates come from the vendor's catalog row.
+ */
+export const CURSOR_MODELS = [
+  "composer-2.5",
+  "claude-opus-5-5",
+  "claude-sonnet-5-5",
+  "claude-fable-5-1",
+  "claude-haiku-4-5",
+  "gpt-5.6-sol",
+  "gpt-5.6-terra",
+  "gpt-5.6-luna",
+  "gpt-5.4-mini",
+  "gpt-5.4-nano",
+  "gemini-3.5-flash",
+  "gemini-3.8-flash",
+  "grok-4.6",
+] as const;
 
 /**
  * The models dsh's DeepSeek-direct route serves out of the box (its bundled
@@ -238,6 +270,7 @@ export const HARNESS_LABEL: Record<ProviderName | string, string> = {
   pi: "Pi-Mono",
   acp: "ACP",
   dsh: "DeepSeek (dsh)",
+  cursor: "Cursor",
 } satisfies Record<ProviderName, string>;
 
 export function harnessSupportsModelSelection(harness: LocalHarnessProvider): boolean {
@@ -333,6 +366,8 @@ const FALLBACK_MODEL: Record<LocalHarnessProvider, string> = {
   opencode: "openrouter/qwen/qwen3-coder-flash",
   // The dsh regular-tier default (DEFAULT_MODEL_TIER_MAP.dsh in src/types.ts).
   dsh: "openrouter/deepseek/deepseek-v4.1-flash",
+  // The cursor regular-tier default (DEFAULT_MODEL_TIER_MAP.cursor in src/types.ts).
+  cursor: "claude-sonnet-5-5",
   acp: "",
 };
 
@@ -401,6 +436,7 @@ export function modelGroupsForHarness(
   }
 
   if (harness === "dsh") return dshModelGroups(configs, envPresence, liveCatalog);
+  if (harness === "cursor") return cursorModelGroups(configs, envPresence, liveCatalog);
 
   const snapshotGroups = SNAPSHOT_ORDER.map((providerId) => {
     const meta = SNAPSHOT_META[providerId];
@@ -530,6 +566,35 @@ function dshModelGroups(
       models: direct,
       requiredKey: "DEEPSEEK_API_KEY",
       enabled: hasRuntimeCredential("DEEPSEEK_API_KEY", configs, envPresence),
+    },
+  ];
+}
+
+/** Cursor serves every model through one key; see `src/providers/cursor-adapter.ts`. */
+function cursorModelGroups(
+  configs: SwarmConfig[] | undefined,
+  envPresence: Record<string, boolean> | undefined,
+  liveCatalog?: LiveModelsCatalog | null,
+): ModelGroup[] {
+  const models: ModelOption[] = CURSOR_MODELS.map((id) => {
+    const { providerId, modelId } = cursorCatalogRef(id);
+    const m = runtimeSectionModels(providerId, liveCatalog)[modelId];
+    return {
+      id,
+      label: m ? (modelDisplayName(m.name) ?? id) : id,
+      provider: "Cursor",
+      providerId: null,
+      requiredKey: "CURSOR_API_KEY",
+      ...(m ? catalogFacts(m) : {}),
+      reasoningLevels: m ? reasoningLevelsFor("cursor", modelId, m) : [],
+    };
+  });
+  return [
+    {
+      provider: "Cursor",
+      models,
+      requiredKey: "CURSOR_API_KEY",
+      enabled: hasRuntimeCredential("CURSOR_API_KEY", configs, envPresence),
     },
   ];
 }
@@ -833,6 +898,7 @@ export function isLocalHarness(
     value === "pi" ||
     value === "opencode" ||
     value === "dsh" ||
+    value === "cursor" ||
     value === "acp"
   );
 }

@@ -101,13 +101,14 @@ describe("models.dev runtime pricing refresh", () => {
        VALUES ('codex', 'gpt-refresh-test', 'input', 0, 1, 0, 0)`,
     );
 
+    // codex, pi and cursor each project the OpenAI rows: 3 providers x 2 token classes.
     const first = await refreshPricingFromModelsDev({
       now: 1_000,
       fetchImpl: async () => responseFor(openAiCache(2, 8), '"etag-1"'),
     });
     expect(first.status).toBe("refreshed");
-    expect(first.candidateRows).toBe(4);
-    expect(first.inserted).toBe(4);
+    expect(first.candidateRows).toBe(6);
+    expect(first.inserted).toBe(6);
     expect(first.unchanged).toBe(0);
 
     const activeChanged = await getActivePricingRow("codex", "gpt-refresh-test", "input", 1_000);
@@ -119,7 +120,7 @@ describe("models.dev runtime pricing refresh", () => {
       fetchImpl: async () => responseFor(openAiCache(2, 8), '"etag-2"'),
     });
     expect(second.inserted).toBe(0);
-    expect(second.unchanged).toBe(4);
+    expect(second.unchanged).toBe(6);
 
     const rows = await getDbClient().query<{ effective_from: number }>(
       `SELECT effective_from FROM pricing
@@ -208,7 +209,7 @@ describe("models.dev runtime pricing refresh", () => {
 
     const logs = await getLogsByEventType("pricing.refresh");
     expect(logs).toHaveLength(1);
-    expect(logs[0]?.newValue).toContain("inserted=4");
+    expect(logs[0]?.newValue).toContain("inserted=6");
     expect(logs[0]?.metadata).toContain('"etag":"\\"etag-log\\""');
   });
 });
