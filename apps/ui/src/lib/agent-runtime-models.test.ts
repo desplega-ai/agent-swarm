@@ -105,6 +105,22 @@ describe("effortLevelsFor: what a harness and model accept", () => {
     expect(effortLevelsFor("dsh", "deepseek-flash")).toEqual([]);
   });
 
+  test("amp: a mode names no model, so only a pinned provider/model takes effort", () => {
+    for (const mode of ["low", "medium", "high", "ultra"]) {
+      expect(effortLevelsFor("amp", mode)).toEqual([]);
+    }
+    // Same catalog rule as pi and opencode: a provider/model pin, `max` dropped.
+    expect(effortLevelsFor("amp", "anthropic/claude-opus-5-5")).toEqual([
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+    ]);
+    expect(effortLevelsFor("amp", "openai/gpt-5-nano")).toEqual(
+      effortLevelsFor("pi", "openai/gpt-5-nano"),
+    );
+  });
+
   test("a model that does not reason takes none", () => {
     const catalog = live({ anthropic: { "claude-plain-1": { reasoning: false } } });
     expect(effortLevelsFor("claude", "claude-plain-1", catalog)).toEqual([]);
@@ -195,5 +211,39 @@ describe('model labels drop models.dev\'s "(latest)" suffix', () => {
   test("a name without the suffix is untouched", () => {
     const plain = live({ anthropic: { "claude-plain-1": { name: "Claude Plain (beta)" } } });
     expect(findKnownModel("claude-plain-1", plain)?.label).toBe("Claude Plain (beta)");
+  });
+});
+
+describe("modelGroupsForHarness: amp", () => {
+  const keyed = [{ key: "AMP_API_KEY", value: "set" }] as never;
+
+  test("offers the four modes first, then pinnable Anthropic and OpenAI models", () => {
+    const groups = modelGroupsForHarness("amp", keyed, undefined);
+    expect(groups.map((g) => g.provider)).toEqual([
+      "Amp modes",
+      "Anthropic (pinned)",
+      "OpenAI (pinned)",
+    ]);
+    expect(groups[0]?.models.map((m) => m.id)).toEqual(["low", "medium", "high", "ultra"]);
+    expect(groups[0]?.models[0]?.label).toBe("Low (cheapest)");
+    expect(groups.every((g) => g.requiredKey === "AMP_API_KEY")).toBe(true);
+    const pins = groups.slice(1).flatMap((g) => g.models.map((m) => m.id));
+    expect(pins.length).toBeGreaterThan(10);
+    expect(pins.every((id) => /^(anthropic|openai)\//.test(id))).toBe(true);
+  });
+
+  test("every group is disabled until AMP_API_KEY is configured", () => {
+    expect(modelGroupsForHarness("amp", [], undefined).some((g) => g.enabled)).toBe(false);
+    expect(modelGroupsForHarness("amp", keyed, undefined).every((g) => g.enabled)).toBe(true);
+    expect(modelGroupsForHarness("amp", [], { AMP_API_KEY: true }).every((g) => g.enabled)).toBe(
+      true,
+    );
+  });
+
+  test("a pinned model lists the effort levels the API would accept", () => {
+    const groups = modelGroupsForHarness("amp", keyed, undefined);
+    const opus = groups.flatMap((g) => g.models).find((m) => m.id === "anthropic/claude-opus-5-5");
+    expect(opus?.reasoningLevels).toEqual(effortLevelsFor("amp", "anthropic/claude-opus-5-5"));
+    expect(groups[0]?.models.every((m) => m.reasoningLevels?.length === 0)).toBe(true);
   });
 });

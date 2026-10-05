@@ -29,6 +29,7 @@ import {
   type ModelsDevCatalog,
   parseAlias,
 } from "@desplega/model-catalog";
+import { ampModelError } from "../utils/amp-models";
 import { getAgentById, getAllAgents } from "./db";
 import { loadModelsCatalog } from "./model-catalog-store";
 import { resolveLatestAlias } from "./model-tier-resolution";
@@ -114,6 +115,8 @@ export async function explicitModelError(check: ExplicitModelCheck): Promise<str
   const model = check.model?.trim();
   if (!model) return null;
   if (check.harnessProvider && FREE_FORM_HARNESSES.has(check.harnessProvider)) return null;
+  // Amp runs a mode or a provider/model pin, nothing else; the catalog does not describe either.
+  if (check.harnessProvider === "amp") return ampModelError(model);
 
   const { providers } = await loadModelsCatalog();
   const catalog = providers as CatalogSections;

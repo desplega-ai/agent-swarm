@@ -355,6 +355,15 @@ registerTemplate({
 });
 
 registerTemplate({
+  eventType: "system.agent.tool_discovery.amp",
+  header: "",
+  defaultBody:
+    'Swarm tools are not in your tool list. Reach them through `tool_search` and `code_exec`. Their names use underscores, so `store-progress` is `store_progress`. Find one with `tool_search`, then call it from `code_exec`: `import { store_progress } from "agent-swarm"; text(JSON.stringify(await store_progress({ ... })));`. Pass the tool\'s arguments as one object.',
+  variables: [],
+  category: "system",
+});
+
+registerTemplate({
   eventType: "system.agent.tool_discovery.direct",
   header: "",
   defaultBody: "Swarm tools are already in your tool list.",

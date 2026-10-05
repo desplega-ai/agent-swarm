@@ -231,6 +231,7 @@ if (isolatedBootstrapBlock === bootstrapBlock) {
 const BOOTSTRAP: Record<ProviderName, { expect: string } | { exempt: string }> = {
   claude: { expect: "Warning: claude provider has no credentials yet" },
   dsh: { expect: "Warning: dsh provider has no credentials yet" },
+  amp: { expect: "Warning: amp provider has no credentials yet" },
   pi: { expect: "Warning: pi provider has no credentials yet" },
   opencode: { expect: "Warning: opencode provider has no credentials yet" },
   "claude-managed": { expect: "Warning: claude-managed provider missing:" },
@@ -280,7 +281,7 @@ function extractMarkedBlock(name: string): string {
 /** Resolvable no-op stubs for every binary the verify chain may look up. */
 function makeBinaryStubDir(): string {
   const dir = mkdtempSync(join(tmpdir(), "provider-registration-bin-"));
-  for (const name of ["claude", "codex", "opencode", "dsh"]) {
+  for (const name of ["claude", "codex", "opencode", "dsh", "amp"]) {
     const file = join(dir, name);
     writeFileSync(file, "#!/bin/sh\nexit 0\n");
     chmodSync(file, 0o755);

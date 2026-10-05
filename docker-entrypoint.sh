@@ -95,6 +95,10 @@ elif [ "$HARNESS_PROVIDER" = "dsh" ]; then
     if [ -z "$DEEPSEEK_API_KEY" ] && [ -z "$OPENROUTER_API_KEY" ]; then
         echo "Warning: dsh provider has no credentials yet (DEEPSEEK_API_KEY / OPENROUTER_API_KEY). Worker will park in credential-wait until creds appear in swarm_config."
     fi
+elif [ "$HARNESS_PROVIDER" = "amp" ]; then
+    if [ -z "$AMP_API_KEY" ]; then
+        echo "Warning: amp provider has no credentials yet (AMP_API_KEY). Worker will park in credential-wait until creds appear in swarm_config."
+    fi
 elif [ "$HARNESS_PROVIDER" = "opencode" ]; then
     # opencode auth: OPENROUTER_API_KEY, ANTHROPIC_API_KEY, OPENAI_API_KEY, or auth.json must exist
     OPENCODE_AUTH_FILE="${HOME}/.local/share/opencode/auth.json"
@@ -331,6 +335,13 @@ elif [ "$HARNESS_PROVIDER" = "dsh" ]; then
         exit 1
     fi
     echo "dsh CLI: $(command -v "$DSH_BIN")"
+elif [ "$HARNESS_PROVIDER" = "amp" ]; then
+    AMP_BIN="${AMP_BINARY:-amp}"
+    if ! command -v "$AMP_BIN" >/dev/null 2>&1; then
+        echo "FATAL: amp CLI not found: '$AMP_BIN'. Use worker-full or install @ampcode/cli during image provisioning."
+        exit 1
+    fi
+    echo "amp CLI: $(command -v "$AMP_BIN")"
 elif [ "$HARNESS_PROVIDER" = "acp" ]; then
     # ACP spawns its own target, not the claude CLI, so resolve the same
     # command ACPAdapter.createSession would spawn and check THAT binary.

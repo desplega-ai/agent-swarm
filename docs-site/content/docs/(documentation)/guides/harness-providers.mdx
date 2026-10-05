@@ -183,6 +183,7 @@ The runner consumes these events (not the provider's native ones) to post progre
 | [`src/providers/opencode-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/opencode-adapter.ts) | In-process `@opencode-ai/sdk` server with SSE event mapping | Provider-specific API key, commonly `OPENROUTER_API_KEY` |
 | [`src/providers/acp-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/acp-adapter.ts) | `Bun.spawn` of the selected OpenCode preset or custom target, driven over stdio with `@agentclientprotocol/sdk`'s ndjson `ClientSideConnection` | The ACP target owns its model auth and receives a session-scoped `aseph_` token as the swarm MCP bearer |
 | [`src/providers/dsh-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/dsh-adapter.ts) | Preinstalled DeepSeek Harness CLI, headless JSON over stdin/stdout | `OPENROUTER_API_KEY` for `openrouter/` models; `DEEPSEEK_API_KEY` for native IDs. Swarm MCP via an inserted `dsh-mcp-client`, cost/context from step usage, reasoning effort; no steering or native resume |
+| [`src/providers/amp-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/amp-adapter.ts) | Preinstalled Amp CLI (`amp -x --stream-json --stream-json-input`), Claude-compatible JSONL over stdin/stdout | `AMP_API_KEY` (an access token from ampcode.com). Swarm MCP via a per-task `--mcp-config`, system prompt via a per-task plugin mode, queued steering, tokens priced from the `amp` rows; every thread is stored on ampcode.com |
 
 ACP session tokens identify the session's agent and task. On the HTTP config routes, non-lead session tokens receive masked secrets and cannot write or delete config; changing `X-Agent-ID` cannot grant lead permissions. The secret scrubber redacts `aseph_` tokens in logs. Session completion starts revocation without waiting for its response. Each revoke request has a five-second timeout and logs HTTP, network, or timeout failures. If revocation fails, the token remains valid until its 24-hour expiry.
 
@@ -406,10 +407,70 @@ The primary enforcement point is the MCP `store-progress` tool: a non-conforming
 | `codex` | `model_reasoning_effort` config field | `off` maps to `'none'`; `max` passes through for capability-advertising models such as GPT-5.6. `show_raw_agent_reasoning` stays pinned `false` regardless of the effort level — higher effort costs reasoning tokens (visible via `reasoning_output_tokens` cost telemetry) but produces no visible reasoning trace in the dashboard. `*-codex` (non-`max`) models reject `xhigh`; `*-codex-max` models accept it. |
 | `pi` | `thinkingLevel` session option | Top-level sibling of `model` on `CreateAgentSessionOptions`; pi's native vocabulary already includes `off`. |
 | `opencode` | Provider-keyed `options` in the per-task `opencode.json` | `anthropic/*` models: `thinking.budgetTokens` (an internal numeric translation, not a user-facing knob). `openrouter/*` models: `reasoning.effort`. OpenAI-compatible models: `reasoningEffort`. `off` omits reasoning keys entirely (a noop application) — Opencode has no explicit off switch. |
+| `amp` | `reasoningEffort` on the per-task plugin agent (`off` maps to `none`) | Amp's CLI has no effort flag (`--effort` is rejected). Effort applies only to a pinned `provider/model` (for example `openai/gpt-5-nano`), judged by the catalog like pi and opencode; a mode (`low`..`ultra`) names no model in advance, so it takes none. |
 
 Each adapter reports the level it actually applied via `ProviderResult.appliedReasoningEffort` (`null` when `applyReasoningEffort()` returned a capability-rejected noop). The runner forwards that into `agents.cred_status.latestModel.reasoningEffort`, which the dashboard surfaces in the agent runtime editor, the harness credential-status tooltip, and the agents-list Model column (a compact `[|||]`-style badge — more bars mean higher effort).
 
 See [`thoughts/taras/research/2026-05-26-agent-reasoning-effort-runtime-control.md`](https://github.com/desplega-ai/agent-swarm/blob/main/thoughts/taras/research/2026-05-26-agent-reasoning-effort-runtime-control.md) for the full cross-harness normalization derivation.
+
+### Amp (`amp`)
+
+Set `HARNESS_PROVIDER=amp` and `AMP_API_KEY` (an access token from ampcode.com
+settings) in the worker environment or agent-scoped config. The adapter runs
+Amp's CLI in execute mode, `amp -x --stream-json --stream-json-input`, with the
+prompt as the first stdin message. The full worker image pins the CLI
+(`@ampcode/cli@0.0.1791187719-g319a37`, SHA-512 verified, auto-update off); the
+slim image does not include it. `AMP_BINARY` selects another trusted executable.
+Amp's licence is proprietary ([terms](https://ampcode.com/terms)): confirm it
+before publishing an image that contains the binary.
+
+**Every Amp thread is stored on ampcode.com.** Prompts, tool calls and tool
+output leave your infrastructure, and Amp's own storage is outside any model
+vendor's retention setting. The adapter starts threads with `--visibility
+private`, but there is no local-only mode.
+
+- **Models.** Amp has no model flag. `modelTier` maps onto its four built-in
+  modes: smol `low`, regular `medium`, smart `high`, ultra `ultra`. Amp chooses the model per
+  mode on its server; measured 2026-10-05, `low` ran GLM-5.3 Flash (the cheapest) and `medium`
+  ran Claude Opus 5.5. A concrete `model` is a `provider/model` id
+  (`openai/gpt-5-nano`, `anthropic/claude-haiku-4-5-20251001`), pinned through the
+  per-task plugin agent on top of the `medium` mode's prompt and tools. Anything
+  else is rejected at send-task, agent runtime and session start.
+- **Swarm MCP.** The per-task `--mcp-config` file (mode `0600`, removed with the
+  temporary directory) carries the swarm URL and the five per-task headers. The
+  session fails if Amp reports the server as anything but connected.
+- **Tool search.** `hasToolSearch` is `true`. Amp reaches MCP tools through its
+  own `tool_search` and `code_exec`, with underscored names. Exposing all 131 swarm tools
+  directly (excluding both) raised the first request from about 37k to about 98k input
+  tokens, so the default is kept and the prompt names the call shape.
+- **Tokens and cost.** The stream carries per-request usage but no model and no
+  USD. After the session the adapter reads `amp threads export <id>` (no
+  inference) for the model of each request and Amp's context window, and the API
+  prices the tokens from the `amp` rows (Anthropic, OpenAI, Google and Fireworks
+  models.dev sections). Amp reports uncached prompt tokens as
+  `cache_creation_input_tokens` for every vendor; the adapter keeps them as cache
+  writes for Anthropic models and moves them to input for the rest. Tokens of
+  subagent threads (Task, oracle, finder) are separate Amp threads and are not counted.
+  A model missing from the table settles `unpriced`.
+- **Steering.** `steerModes: ["queue"]`. A stdin message sent during a turn
+  waits for the turn to end (verified live). Amp emits `result` only when stdin
+  closes, so the adapter ends input at the first top-level assistant message
+  with no tool call and nothing queued; a steer after that is refused and the
+  runner promotes it to a follow-up task.
+- **Cancel.** Process-tree termination: Amp runs shell commands in a session of
+  its own, so the group kill alone left `sleep` running. The adapter lists the descendants first, then kills them.
+- **Credentials.** The worker live test runs `amp usage` (credit balance, no
+  inference, 5 second limit). A bogus key fails with `Invalid or missing API
+  key`; no key parks the worker in the credential wait.
+- **Skills and notes.** Amp reads `~/.claude/skills`, `~/.agents/skills` and
+  every `CLAUDE.md` from the working directory upward, so `nativeSkillDiscovery`
+  is true and the agent notes need no injection.
+- **Settings.** Per task: `amp.updates.mode: "disabled"`, no Amp co-author or
+  thread trailer on commits (`amp.git.commit.*`), notifications off, and
+  `amp.dangerouslyAllowAll` (the worker container is the sandbox).
+
+Not covered: installed MCP servers from the `mcp-servers` catalog are not
+forwarded, and there is no native resume (follow-ups use the context preamble).
 
 ---
 
@@ -684,7 +745,7 @@ If the runner reuses an existing repo clone that has local changes, `ensureRepoF
   Template resolution goes over HTTP (`configureHttpResolver(apiUrl, apiKey)` at `runner.ts:2206`) to obey the API/worker DB boundary. Prompt files under `src/prompts/` must remain pure — no `bun:sqlite` or `src/be/db` imports. Enforced by `scripts/check-db-boundary.sh`.
 </Callout>
 
-Swarm tool-discovery guidance follows the adapter's `hasToolSearch` trait (false when omitted). Claude Code sets it to true for native ToolSearch. Codex, OpenCode, ACP, Claude Managed, Devin, and dsh set it to false. pi sets it to the value of `PI_TOOL_DEFERRAL` (below); MCP-enabled sessions receive guidance that swarm tools are already in the tool list. This trait changes prompt text only, not tool registration.
+Swarm tool-discovery guidance follows the adapter's `hasToolSearch` trait (false when omitted). Claude Code sets it to true for native ToolSearch. Codex, OpenCode, ACP, Claude Managed, Devin, and dsh set it to false. Amp sets it to true and gets its own text (`system.agent.tool_discovery.amp`): its MCP tools sit behind its own `tool_search` and `code_exec`, with dashes turned into underscores (`store-progress` is `store_progress`). pi sets it to the value of `PI_TOOL_DEFERRAL` (below); MCP-enabled sessions receive guidance that swarm tools are already in the tool list. This trait changes prompt text only, not tool registration.
 
 ### pi tool deferral
 
@@ -715,6 +776,7 @@ The flag is the only switch: when it is on, every pi session gets codemode, what
 - **Claude** — CLI flag: `cmd.push("--append-system-prompt", this.config.systemPrompt)` at [`claude-adapter.ts:245–247`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/claude-adapter.ts).
 - **Codex** — written into `AGENTS.md` in `cwd` inside a `<swarm_system_prompt>` block. The Codex SDK has no `--append-system-prompt` equivalent; this file is the only channel. Entry: `writeCodexAgentsMd(config.cwd, config.systemPrompt)` at [`codex-adapter.ts:761`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/codex-adapter.ts); implementation at [`codex-agents-md.ts:56–119`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/codex-agents-md.ts). If an `AGENTS.md` exists, the block is prepended; otherwise stacked atop any `CLAUDE.md`. Cleanup in the session `finally` at `codex-adapter.ts:738`.
 - **Pi** — SDK parameter: `new DefaultResourceLoader({ appendSystemPrompt: [config.systemPrompt], extensionFactories, ... })` passed via `CreateAgentSessionOptions` in [`pi-mono-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/pi-mono-adapter.ts). The adapter must `await resourceLoader.reload()` first: `createAgentSession` only reloads a loader it builds itself, and an unloaded loader contributes no appended prompt and no extensions. The adapter's `SettingsManager` sets `projectTrusted: false`, because the cwd is a task repo clone: the repo's `.pi/extensions`, packages, settings and `SYSTEM.md` never load into the worker process.
+- **Amp** — Amp has no system-prompt flag. The adapter writes a per-task plugin (`$XDG_CONFIG_HOME/amp/plugins/agent-swarm.ts`, in a temporary directory) that registers one agent mode extending the selected built-in mode, with the swarm prompt as its `instructions` (appended to Amp's own prompt). The prompt is embedded as a JSON literal, never as code. Spawned with `-m agent-swarm`. Live verified; nothing is written to the repository or baked into the image.
 
 ### What this means for a new provider
 

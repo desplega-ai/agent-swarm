@@ -128,6 +128,16 @@ function DshIcon(props: IconProps) {
   );
 }
 
+function AmpIcon(props: IconProps) {
+  // Lightning bolt: Amp's own mark is not vendored, so use a neutral stand-in.
+  return (
+    // biome-ignore lint/a11y/noSvgWithoutTitle: decorative icon, harness label provides accessible name
+    <svg aria-hidden {...ICON_BASE_24} {...props}>
+      <path d="M13.5 2 4 13.5h6.2L9 22l10-12.2h-6.4L13.5 2z" />
+    </svg>
+  );
+}
+
 const ICON_BY_HARNESS: Record<ProviderName, (p: IconProps) => ReactElement> = {
   claude: ClaudeIcon,
   "claude-managed": ClaudeManagedIcon,
@@ -137,6 +147,7 @@ const ICON_BY_HARNESS: Record<ProviderName, (p: IconProps) => ReactElement> = {
   devin: DevinIcon,
   acp: AcpIcon,
   dsh: DshIcon,
+  amp: AmpIcon,
 };
 
 export interface HarnessIconProps extends IconProps {

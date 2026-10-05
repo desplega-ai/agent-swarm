@@ -26,6 +26,7 @@ Each harness/provider maps the same tier to its own concrete model:
 | `codex` | `gpt-5.6-luna` | `gpt-5.6-terra` | `gpt-5.6-sol` | `gpt-5.6-sol` |
 | `pi` | `openrouter/deepseek/deepseek-v4.1-flash` | `openrouter/deepseek/deepseek-v4.1-flash` | `openrouter/deepseek/deepseek-v4-pro-0813` | `openrouter/anthropic/claude-opus-5.5` |
 | `dsh` | `openrouter/deepseek/deepseek-v4.1-flash` | `openrouter/deepseek/deepseek-v4.1-flash` | `openrouter/deepseek/deepseek-v4-pro-0813` | `openrouter/anthropic/claude-opus-5.5` |
+| `amp` | `low` | `medium` | `high` | `ultra` |
 | `opencode` | `openrouter/deepseek/deepseek-v4.1-flash` | `openrouter/deepseek/deepseek-v4.1-flash` | `openrouter/deepseek/deepseek-v4-pro-0813` | `openrouter/anthropic/claude-opus-5.5` |
 | `devin` | `devin` | `devin` | `devin` | `devin` |
 
@@ -114,6 +115,7 @@ A concrete `model` or `latest:` alias must also run on the harness that will run
 | `codex` | `openai` | an `openai` id that passes `isHarnessCatalogModel("codex", id)` | `latest:openai/...` |
 | `pi`, `opencode` | none pinned | any catalog model, bare or provider-qualified | any |
 | `dsh`, `devin`, `acp` | free-form | any string | any |
+| `amp` | none (`src/utils/amp-models.ts`) | a mode (`low`, `medium`, `high`, `ultra`) or a `provider/model` pin (for example `openai/gpt-5-nano`) | none |
 
 A provider-qualified id on a pinned harness must name the harness section: `anthropic/claude-opus-5-5` runs on `claude`, `openrouter/anthropic/claude-opus-5.5` does not. An id the catalog does not know in any section passes this check (the catalog membership check above decides it). This includes an uncatalogued id in the harness's own namespace: `openai/private-deployment-1` on `codex` passes with `allowCustomModel` and fails without it. A known id that the harness does not run (`openai/gpt-4o` on `codex`) fails even with the flag. A bare shortname such as `opus` on `codex` therefore passes; legacy shortnames become `modelTier` before any create-time check anyway, and `modelTier` is never rejected.
 

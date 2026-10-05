@@ -19,6 +19,7 @@
  */
 
 import { deriveDefaultRoute, validateRoute } from "@desplega/model-routing";
+import { checkAmpCredentials, liveTestAmpCredentials } from "../providers/amp-adapter";
 import { checkClaudeCredentials } from "../providers/claude-adapter";
 import { checkClaudeManagedCredentials } from "../providers/claude-managed-adapter";
 import { checkCodexCredentials } from "../providers/codex-adapter";
@@ -45,7 +46,8 @@ export type SupportedProvider =
   | "opencode"
   | "pi"
   | "acp"
-  | "dsh";
+  | "dsh"
+  | "amp";
 
 /**
  * True when the pi harness authenticates against Bedrock rather than a provider
@@ -110,6 +112,7 @@ export const REQUIRED_CRED_VARS_BY_PROVIDER: Record<SupportedProvider, readonly 
   // The ACP target process owns its own auth, so the swarm requires nothing.
   acp: [],
   dsh: ["DEEPSEEK_API_KEY", "OPENROUTER_API_KEY"],
+  amp: ["AMP_API_KEY"],
 };
 
 type CredentialChecker = (
@@ -120,6 +123,7 @@ type CredentialChecker = (
 /** The handlers used by the credential-readiness dispatcher. */
 export const CREDENTIAL_PROVIDER_CHECKERS: Record<SupportedProvider, CredentialChecker> = {
   dsh: (env) => checkDshCredentials(env),
+  amp: (env) => checkAmpCredentials(env),
   claude: (env) => checkClaudeCredentials(env),
   "claude-managed": (env) => checkClaudeManagedCredentials(env),
   codex: (env, opts) => checkCodexCredentials(env, opts),
@@ -320,6 +324,7 @@ function parseCodexOAuthAccess(blob: string | undefined): string | null {
  * | `acp`            | target-specific (the ACP target process owns its own auth)              | presence-only (validated by the target process) |
  * | `pi` (bedrock)   | `MODEL_OVERRIDE=amazon-bedrock/*` → AWS SDK default credential chain    | presence-only (real check is the worker-side Bedrock enumeration) |
  * | `devin`          | `DEVIN_API_KEY` (+ `DEVIN_API_BASE_URL` override)                       | `${baseUrl}/v3/self`            |
+ * | `amp`            | `AMP_API_KEY`                                                           | `amp usage` (credit balance, no inference; 5s timeout) |
  *
  * Returns `{ok: true, latency_ms}` on 2xx, `{ok: false, error, latency_ms}`
  * otherwise. Errors are scrubbed via `scrubSecrets` before being returned.
@@ -450,12 +455,30 @@ export async function validateProviderCredentials(
               error: "Set DEEPSEEK_API_KEY or OPENROUTER_API_KEY for dsh.",
               latency_ms: Date.now() - startedAt,
             };
+      case "amp": {
+        if (!checkAmpCredentials(env).ready) {
+          return {
+            ok: false,
+            error: "AMP_API_KEY is not set.",
+            latency_ms: Date.now() - startedAt,
+          };
+        }
+        // `amp usage` reads the credit balance and runs no inference.
+        const live = await liveTestAmpCredentials(env as Record<string, string | undefined>);
+        return live.ok
+          ? { ok: true, latency_ms: Date.now() - startedAt }
+          : {
+              ok: false,
+              error: live.error ?? "amp usage failed",
+              latency_ms: Date.now() - startedAt,
+            };
+      }
       case "acp":
         return presenceCheckOk();
       default:
         return {
           ok: false,
-          error: `Unknown provider "${provider}". Supported: claude, claude-managed, codex, devin, opencode, pi, acp, dsh.`,
+          error: `Unknown provider "${provider}". Supported: claude, claude-managed, codex, devin, opencode, pi, acp, dsh, amp.`,
           latency_ms: Date.now() - startedAt,
         };
     }

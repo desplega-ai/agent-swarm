@@ -1,6 +1,6 @@
 # Harness providers runbook
 
-Operational rules for editing or adding harness providers (claude, codex, opencode, pi, devin, acp, dsh, future).
+Operational rules for editing or adding harness providers (claude, codex, opencode, pi, devin, acp, dsh, amp, future).
 
 ## Supported providers
 
@@ -14,6 +14,74 @@ Operational rules for editing or adding harness providers (claude, codex, openco
 | Claude Managed | `claude-managed` | `ClaudeManagedAdapter` | Anthropic managed sandbox; SSE relay |
 | ACP | `acp` | `ACPAdapter` | Curated `opencode` preset or a custom [Agent Client Protocol](https://agentclientprotocol.com) command. Session knobs such as model use `session/set_config_option` when advertised, with target-specific startup fallbacks. No swarm-side *model-provider* credential — the target owns its own model auth. The target receives the worker's swarm API key as the swarm MCP bearer, so point custom targets only at binaries you trust |
 | DeepSeek Harness | `dsh` | `DshAdapter` | Spawns `dsh --profile headless --json` per task; OpenRouter or direct DeepSeek API. See [DeepSeek Harness](#deepseek-harness-dsh) below |
+| Amp | `amp` | `AmpAdapter` | Spawns `amp -x --stream-json --stream-json-input` per task; `AMP_API_KEY`; every thread is stored on ampcode.com. See [Amp](#amp-amp) below |
+
+## Amp (`amp`)
+
+Set `HARNESS_PROVIDER=amp` and `AMP_API_KEY`. Amp is a proprietary CLI and a hosted
+service: every thread (prompts, tool calls, tool output) is stored on ampcode.com.
+The adapter passes `--visibility private`; there is no local-only mode, and Amp's
+own storage is outside any model vendor's retention setting. Accept that data
+flow before using it, and read [the terms](https://ampcode.com/terms) before
+publishing an image that contains the binary.
+
+The full worker image installs the pinned `@ampcode/cli` platform binary
+(`AMP_VERSION` in `Dockerfile.worker`, SHA-512 verified, equal to `AMP_PACKAGE` in
+`src/providers/amp-adapter.ts`; a test fails when they drift). The slim image has no
+amp: the entrypoint and adapter fail when the executable is absent. `AMP_BINARY`
+selects a trusted preinstalled executable. Amp releases several times a day and
+auto-updates by default; the per-task settings turn that off. Bump the version
+with a live run (`bun run e2e --only health --harness amp`).
+
+What the adapter does, and why:
+
+- **Spawn.** `amp -x --stream-json --stream-json-input -m agent-swarm --title
+  "swarm task <id>" --settings-file <f> --mcp-config <f> --plugin-ready-timeout 30
+  --visibility private --no-notifications --no-ide --no-color`. `XDG_CONFIG_HOME`
+  points at a per-task temporary tree, so the plugin and settings live there and are
+  removed at session end. The prompt is the first JSONL stdin message. `--title`
+  skips Amp's own title-generation requests.
+- **Model selection.** No model flag exists. `modelTier` maps to Amp's modes
+  (`DEFAULT_MODEL_TIER_MAP.amp`: `low`, `medium`, `high`, `ultra`). A concrete model
+  is a mode or a `provider/model` pin (`src/utils/amp-models.ts`; validated at
+  send-task, agent runtime and session start). A pin runs on the `medium` mode's
+  prompt and tools. Measured 2026-10-05: `low` is GLM-5.3 Flash (cheapest), `medium` is
+  Claude Opus 5.5, so the regular tier is not cheap. The Runtime editor defaults to `low`.
+- **System prompt.** The plugin route: a generated plugin registers one agent mode
+  that `extends` the base mode and appends the swarm prompt as `instructions`
+  (live verified). The prompt is a JSON literal. AGENTS.md was not needed.
+- **Reasoning effort.** The CLI has no effort flag (`--effort` is rejected). The
+  plugin agent's `reasoningEffort` carries it, only for a pinned model whose
+  catalog entry lists levels (`off` -> `none`).
+- **Swarm MCP.** Per-task `--mcp-config` (`0600`) with the five identity headers.
+  The session fails when Amp does not report the server `connected` (`reconnecting`
+  was seen live when the agent id was unknown to the API).
+- **Tool search.** `hasToolSearch: true`, with the `system.agent.tool_discovery.amp`
+  text: Amp reaches MCP tools through its own `tool_search` and `code_exec`, names
+  underscored (`store_progress`). Direct exposure of the 131 swarm tools (excluding
+  both) measured about 98k input tokens against about 37k, so it is not used.
+- **Tokens, context and cost.** Stream usage drives `context_usage` (window unknown
+  until the end). After exit, `amp threads export <id>` names the model per request
+  and Amp's window; `CostData` carries `provider: "amp"`, `totalCostUsd: 0` and a
+  per-model breakdown, priced from the `amp` rows (models.dev `anthropic`, `openai`,
+  `google`, `fireworks-ai`). Cache-creation tokens are cache writes for Anthropic
+  models and input for the rest. Subagent threads are not counted. One retry covers a
+  thread killed mid-run.
+- **Steering.** `steerModes: ["queue"]`. Amp emits `result` only on stdin EOF, so
+  input ends at the first top-level assistant message with no tool call and no
+  unechoed queued message. A later steer returns `delivered: false`.
+- **Cancel.** SIGTERM then SIGKILL, plus every descendant: Amp runs shell commands in
+  their own session (`setsid`), so a group kill alone leaves them as orphans of PID 1
+  (`terminateProcessTree` in `src/utils/process-group.ts`).
+- **Credentials.** Readiness is the presence of `AMP_API_KEY`. The worker live test is
+  `amp usage` (no inference, 5 second limit, clean config dir so a stored login
+  cannot mask a bad key). A missing key parks the worker in the credential wait.
+- **Failure path.** With MCP, an agent ends a task `failed` through `store-progress`.
+  A result other than `success`, a non-zero exit or a missing result fails the task.
+
+Not covered: installed MCP servers are not forwarded; no native resume; subagent
+tokens are not in the cost; Amp's billed credits can differ from the list-price
+estimate.
 
 ## DeepSeek Harness (`dsh`)
 

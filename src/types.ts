@@ -159,6 +159,14 @@ export const DEFAULT_MODEL_TIER_MAP: Record<ProviderName, Record<ModelTier, stri
     smart: "devin",
     ultra: "devin",
   },
+  // Amp picks the model server-side per mode, so the tiers map onto its four
+  // built-in modes. `low` is the cheapest (GLM-5.3 Flash when verified live).
+  amp: {
+    smol: "low",
+    regular: "medium",
+    smart: "high",
+    ultra: "ultra",
+  },
   // ACP has no portable tier-to-model mapping. Operators may set an explicit
   // MODEL_OVERRIDE, which the adapter applies through an advertised `model`
   // config option with a target-specific startup fallback.
@@ -395,6 +403,7 @@ export const ProviderNameSchema = z.enum([
   "opencode",
   "acp",
   "dsh",
+  "amp",
 ]);
 export type ProviderName = z.infer<typeof ProviderNameSchema>;
 
@@ -486,6 +495,9 @@ export const PROVIDER_STEER_CAPABILITIES: Record<ProviderName, SteerMode[]> = {
   // Advertise nothing rather than promise semantics we can't honor.
   acp: [],
   dsh: [],
+  // `--stream-json-input` queues a stdin message until the running turn ends
+  // (verified live); there is no interrupt primitive, so queue only.
+  amp: ["queue"],
 };
 
 export type DevinProviderMeta = {
@@ -506,6 +518,7 @@ export type ProviderMetaMap = {
   opencode: NoProviderMeta;
   acp: NoProviderMeta;
   dsh: NoProviderMeta;
+  amp: NoProviderMeta;
 };
 
 export const FollowUpConfigSchema = z
@@ -3436,6 +3449,7 @@ export const PricingProviderSchema = z.enum([
   // `costSource: 'unpriced'`. Accepted here so the row is recorded at all.
   "acp",
   "dsh",
+  "amp",
 ]);
 export type PricingProvider = z.infer<typeof PricingProviderSchema>;
 

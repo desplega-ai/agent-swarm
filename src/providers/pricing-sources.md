@@ -56,6 +56,13 @@ rate by hand should also update this file.
   - DeepSeek direct-API models (models.dev `deepseek` section, bare ids) →
     rows under `provider='dsh'`. dsh's `deepseek-flash` id is not in that
     section and stays `unpriced`.
+  - Anthropic, OpenAI, Google and Fireworks models (models.dev `anthropic`,
+    `openai`, `google`, `fireworks-ai` sections, the vendor's own ids) → rows
+    under `provider='amp'`. Amp reports the model it routed a mode to
+    (`claude-opus-5-5`, `gpt-5-nano-2025-08-07`,
+    `accounts/fireworks/models/glm-5p3-flash`); the lookup strips a
+    `provider/` pin prefix and an OpenAI `-YYYY-MM-DD` snapshot date. A model
+    outside these sections stays `unpriced`.
 
 - **Snapshot refresh procedure**:
   - Run `bun run scripts/refresh-modelsdev-pricing.ts` (Phase 2 — adds the

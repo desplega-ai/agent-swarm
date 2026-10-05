@@ -16,7 +16,7 @@ import modelsCache from "./modelsdev-cache.json";
 // `src/tests/bedrock-model-groups.test.ts`), and a runtime `@/` import cannot
 // resolve there.
 
-export type LocalHarnessProvider = "claude" | "codex" | "pi" | "opencode" | "acp" | "dsh";
+export type LocalHarnessProvider = "claude" | "codex" | "pi" | "opencode" | "acp" | "dsh" | "amp";
 
 /** USD per 1M tokens, as models.dev names the rates. Cache rates are absent for models without prompt caching. */
 export interface ModelCost {
@@ -219,6 +219,7 @@ export const LOCAL_HARNESSES: LocalHarnessProvider[] = [
   "pi",
   "opencode",
   "dsh",
+  "amp",
   "acp",
 ];
 
@@ -238,6 +239,7 @@ export const HARNESS_LABEL: Record<ProviderName | string, string> = {
   pi: "Pi-Mono",
   acp: "ACP",
   dsh: "DeepSeek (dsh)",
+  amp: "Amp",
 } satisfies Record<ProviderName, string>;
 
 export function harnessSupportsModelSelection(harness: LocalHarnessProvider): boolean {
@@ -333,6 +335,8 @@ const FALLBACK_MODEL: Record<LocalHarnessProvider, string> = {
   opencode: "openrouter/qwen/qwen3-coder-flash",
   // The dsh regular-tier default (DEFAULT_MODEL_TIER_MAP.dsh in src/types.ts).
   dsh: "openrouter/deepseek/deepseek-v4.1-flash",
+  // `low` is Amp's cheapest mode; the regular tier (`medium`) runs an Opus-class model.
+  amp: "low",
   acp: "",
 };
 
@@ -401,6 +405,7 @@ export function modelGroupsForHarness(
   }
 
   if (harness === "dsh") return dshModelGroups(configs, envPresence, liveCatalog);
+  if (harness === "amp") return ampModelGroups(configs, envPresence, liveCatalog);
 
   const snapshotGroups = SNAPSHOT_ORDER.map((providerId) => {
     const meta = SNAPSHOT_META[providerId];
@@ -482,6 +487,64 @@ export function modelGroupsForHarness(
   }
 
   return snapshotGroups;
+}
+
+/**
+ * Amp has no model flag. A mode (`low`..`ultra`) lets Amp choose the model, and
+ * a `provider/model` id pins one (`src/providers/amp-adapter.ts`). Both need
+ * AMP_API_KEY: the vendor bills the usage.
+ */
+export const AMP_MODES: ReadonlyArray<{ id: string; label: string }> = [
+  { id: "low", label: "Low (cheapest)" },
+  { id: "medium", label: "Medium" },
+  { id: "high", label: "High" },
+  { id: "ultra", label: "Ultra" },
+];
+
+function ampModelGroups(
+  configs: SwarmConfig[] | undefined,
+  envPresence: Record<string, boolean> | undefined,
+  liveCatalog?: LiveModelsCatalog | null,
+): ModelGroup[] {
+  const enabled = hasRuntimeCredential("AMP_API_KEY", configs, envPresence);
+  const pins = (["anthropic", "openai"] as const).map((providerId) => {
+    const meta = SNAPSHOT_META[providerId];
+    const models: ModelOption[] = Object.values(
+      (liveCatalog?.[providerId] ?? CACHE[providerId])?.models ?? {},
+    )
+      .map((m) => ({
+        id: `${providerId}/${m.id}`,
+        label: modelDisplayName(m.name) ?? m.id,
+        provider: `${meta.label} (pinned)`,
+        providerId: meta.iconKey,
+        requiredKey: "AMP_API_KEY",
+        ...catalogFacts(m),
+        reasoningLevels: reasoningLevelsFor("amp", m.id, m),
+      }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+    return {
+      provider: `${meta.label} (pinned)`,
+      models,
+      requiredKey: "AMP_API_KEY",
+      enabled,
+    };
+  });
+  return [
+    {
+      provider: "Amp modes",
+      models: AMP_MODES.map((mode) => ({
+        id: mode.id,
+        label: mode.label,
+        provider: "Amp modes",
+        providerId: null,
+        requiredKey: "AMP_API_KEY",
+        reasoningLevels: [],
+      })),
+      requiredKey: "AMP_API_KEY",
+      enabled,
+    },
+    ...pins,
+  ];
 }
 
 /**
@@ -833,6 +896,7 @@ export function isLocalHarness(
     value === "pi" ||
     value === "opencode" ||
     value === "dsh" ||
+    value === "amp" ||
     value === "acp"
   );
 }

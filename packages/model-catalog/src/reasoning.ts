@@ -16,7 +16,7 @@ export const REASONING_EFFORT_LEVELS = ["off", "low", "medium", "high", "xhigh",
 export type ReasoningEffortLevel = (typeof REASONING_EFFORT_LEVELS)[number];
 
 /** The local harnesses with an effort control (Devin, claude-managed and ACP have none). */
-export const REASONING_HARNESSES = ["claude", "codex", "pi", "opencode", "dsh"] as const;
+export const REASONING_HARNESSES = ["claude", "codex", "pi", "opencode", "dsh", "amp"] as const;
 export type ReasoningHarnessName = (typeof REASONING_HARNESSES)[number];
 
 /**

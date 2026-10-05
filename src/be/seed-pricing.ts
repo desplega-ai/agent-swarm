@@ -213,6 +213,19 @@ export function buildModelsDevSeedRows(cache: ModelsDevCache): PricingSeedRow[] 
     }
   }
 
+  // ---- Amp (Anthropic, OpenAI, Google and Fireworks models by id) ---------
+  // Amp reports the model it routed a mode to, in the vendor's own id. Its
+  // cache-creation tokens are billed as input everywhere but Anthropic (the
+  // adapter moves them), so only Anthropic's `cache_write` rate is used.
+  for (const section of ["anthropic", "openai", "google", "fireworks-ai"]) {
+    for (const [id, model] of Object.entries(cache[section]?.models ?? {})) {
+      if (!model?.cost) continue;
+      for (const row of projectCostBlock("amp", id, model.cost)) {
+        rows.push(row);
+      }
+    }
+  }
+
   // ---- OpenAI / codex family --------------------------------------------
   const openai = cache.openai?.models ?? {};
   for (const [id, model] of Object.entries(openai)) {
