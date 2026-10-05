@@ -21,6 +21,7 @@
  *   console.log(client.getSpendingSummary());
  */
 
+import { AsyncLocalStorage } from "node:async_hooks";
 import { x402Client } from "@x402/core/client";
 import type { ClientEvmSigner } from "@x402/evm";
 import { toClientEvmSigner } from "@x402/evm";
@@ -122,15 +123,11 @@ export async function createX402Client(
   // NOTE: totals are still in memory, so they reset on restart and are not shared
   // across processes.
   //
-  // The same `selectedRequirements` object is passed to the before, after and
-  // failure hooks of one payment, so it keys the reservation for that payment.
-  const pendingReservations = new WeakMap<object, string[]>();
-  const takeReservation = (key: object): string | undefined => {
-    const ids = pendingReservations.get(key);
-    const id = ids?.shift();
-    if (ids && ids.length === 0) pendingReservations.delete(key);
-    return id;
-  };
+  // Each createPaymentPayload() call gets its own reservation slot. Settling the
+  // reservation around the whole call (rather than in the after/failure hooks)
+  // means a later before-hook that aborts or throws still releases it, and one
+  // call can never confirm or release another concurrent call's reservation.
+  const invocation = new AsyncLocalStorage<{ reservationId?: string }>();
 
   client.onBeforePaymentCreation(async (context) => {
     const { selectedRequirements } = context;
@@ -145,22 +142,27 @@ export async function createX402Client(
     if (!result.ok) {
       return { abort: true, reason: result.reason };
     }
-    const ids = pendingReservations.get(selectedRequirements) ?? [];
-    ids.push(result.id);
-    pendingReservations.set(selectedRequirements, ids);
+    const slot = invocation.getStore();
+    if (slot) {
+      slot.reservationId = result.id;
+    } else {
+      // Not reached through createPaymentPayload below; count it rather than leak a hold
+      spendingTracker.confirm(result.id);
+    }
   });
 
-  // Count the payment once it has been created (signed)
-  client.onAfterPaymentCreation(async (context) => {
-    const id = takeReservation(context.selectedRequirements);
-    if (id !== undefined) spendingTracker.confirm(id);
-  });
-
-  // Free the held amount if payment creation failed
-  client.onPaymentCreationFailure(async (context) => {
-    const id = takeReservation(context.selectedRequirements);
-    if (id !== undefined) spendingTracker.release(id);
-  });
+  const createPaymentPayload = client.createPaymentPayload.bind(client);
+  client.createPaymentPayload = async (paymentRequired) => {
+    const slot: { reservationId?: string } = {};
+    try {
+      const payload = await invocation.run(slot, () => createPaymentPayload(paymentRequired));
+      if (slot.reservationId !== undefined) spendingTracker.confirm(slot.reservationId);
+      return payload;
+    } catch (error) {
+      if (slot.reservationId !== undefined) spendingTracker.release(slot.reservationId);
+      throw error;
+    }
+  };
 
   // Wrap fetch with payment handling
   const paidFetch = wrapFetchWithPayment(globalThis.fetch, client);
