@@ -434,6 +434,21 @@ describe("amp session", () => {
     expect(badKey.result.failureReason).toContain("Invalid or missing API key");
   });
 
+  test("a key split across stderr chunks is redacted in every event and the failure reason", async () => {
+    const { config } = await fixture("stderr-split-key");
+    const { events, result } = await runToCompletion(config);
+    const stderr = events.flatMap((e) => (e.type === "raw_stderr" ? [e.content] : []));
+    // The runner prints each raw_stderr and stores it as a session-log row; the
+    // rows joined must not rebuild the key either.
+    expect(stderr.join("")).toBe(
+      "warning: key [REDACTED:AMP_API_KEY] rejected\nfatal: [REDACTED:AMP_API_KEY]",
+    );
+    expect(JSON.stringify(events)).not.toContain(KEY);
+    expect(result.isError).toBe(true);
+    expect(result.failureReason).toContain("[REDACTED:AMP_API_KEY]");
+    expect(result.failureReason).not.toContain(KEY);
+  });
+
   test("queued steering runs after the turn, then input closes and late steering is refused", async () => {
     const { config } = await fixture("steer");
     const session = await new AmpAdapter().createSession(config);

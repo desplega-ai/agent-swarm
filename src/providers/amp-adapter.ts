@@ -49,6 +49,8 @@ const AMP_EXPORT_RETRY_MS = 3_000;
 const AMP_EXPORT_RETRIES = 1;
 /** After stdin closes, `result` follows at once; this only guards a wedged process. */
 const AMP_EXIT_AFTER_INPUT_MS = 60_000;
+/** An unterminated stderr run longer than this is cut at a space, so a token is never split. */
+const AMP_STDERR_RECORD_MAX = 16_384;
 /** A queued steering message is echoed back as a `user` event when its turn starts. */
 const AMP_QUEUED_ECHO_MS = 30_000;
 
@@ -568,13 +570,34 @@ class AmpSession implements ProviderSession {
     this.consumeLine(buffer + decoder.decode());
   }
 
+  /**
+   * Stderr is scrubbed per complete record, never per pipe chunk: a chunk can
+   * end inside a secret, and each half would pass the scrubber on its own.
+   */
   private async readStderr(): Promise<void> {
     const decoder = new TextDecoder();
+    let pending = "";
     for await (const chunk of this.proc.stderr) {
-      const content = scrubSecrets(decoder.decode(chunk, { stream: true }));
-      this.stderr = (this.stderr + content).slice(-8000);
-      this.emit({ type: "raw_stderr", content });
+      pending += decoder.decode(chunk, { stream: true });
+      const end = Math.max(pending.lastIndexOf("\n"), pending.lastIndexOf("\r"));
+      if (end >= 0) {
+        this.emitStderr(pending.slice(0, end + 1));
+        pending = pending.slice(end + 1);
+      }
+      if (pending.length > AMP_STDERR_RECORD_MAX) {
+        const cut = pending.lastIndexOf(" ") + 1 || pending.length;
+        this.emitStderr(pending.slice(0, cut));
+        pending = pending.slice(cut);
+      }
     }
+    this.emitStderr(pending + decoder.decode());
+  }
+
+  private emitStderr(text: string): void {
+    if (!text) return;
+    const content = scrubSecrets(text);
+    this.stderr = (this.stderr + content).slice(-8000);
+    this.emit({ type: "raw_stderr", content });
   }
 
   /**

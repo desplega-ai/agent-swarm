@@ -104,6 +104,21 @@ async function main() {
     mcp_servers: [{ name: "agent-swarm", status: mode === "mcp-fail" ? "failed" : "connected" }],
     agent_mode: "medium",
   });
+  if (mode === "stderr-split-key") {
+    // Two pipe chunks, each holding half of the key and neither a secret on its own.
+    const key = process.env.AMP_API_KEY ?? "";
+    const half = Math.floor(key.length / 2);
+    process.stderr.write(`warning: key ${key.slice(0, half)}`);
+    await Bun.sleep(150);
+    process.stderr.write(`${key.slice(half)} rejected\n`);
+    await Bun.sleep(150);
+    process.stderr.write(`fatal: ${key.slice(0, half)}`);
+    await Bun.sleep(150);
+    // The last record has no newline: it reaches the adapter only at EOF.
+    process.stderr.write(key.slice(half));
+    await Bun.sleep(50);
+    process.exit(1);
+  }
   if (mode === "bad-key") {
     console.error("Error: Invalid or missing API key. Run 'amp login' to authenticate.");
     process.exit(1);
