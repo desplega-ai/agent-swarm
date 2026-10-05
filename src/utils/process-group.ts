@@ -123,6 +123,11 @@ export async function listDescendantPids(rootPid: number): Promise<number[]> {
 export async function terminateProcessTree(pid: number): Promise<void> {
   const descendants = await listDescendantPids(pid);
   await terminateProcessGroup(pid);
+  await terminatePids(descendants);
+}
+
+/** SIGTERM each pid still alive, give it a short grace period, then SIGKILL survivors. */
+export async function terminatePids(pids: Iterable<number>): Promise<void> {
   const signal = (target: number, sig: NodeJS.Signals | 0): boolean => {
     try {
       process.kill(target, sig);
@@ -131,7 +136,7 @@ export async function terminateProcessTree(pid: number): Promise<void> {
       return false;
     }
   };
-  const live = descendants.filter((target) => signal(target, "SIGTERM"));
+  const live = [...pids].filter((target) => signal(target, "SIGTERM"));
   if (live.length === 0) return;
   await Bun.sleep(PROCESS_GROUP_GRACE_MS);
   for (const target of live) if (signal(target, 0)) signal(target, "SIGKILL");

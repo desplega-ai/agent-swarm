@@ -520,6 +520,20 @@ describe("amp session", () => {
     throw new Error(`the setsid child ${childPid} survived the abort`);
   }, 20_000);
 
+  test("a successful session stops a command amp left running in its own session", async () => {
+    if (process.platform !== "linux") return;
+    const { config, dir } = await fixture("success-child");
+    const { result } = await runToCompletion(config);
+    expect(result).toMatchObject({ isError: false, exitCode: 0, output: "Done ✓" });
+    const childPid = Number(await Bun.file(join(dir, "child.pid")).text());
+    expect(childPid).toBeGreaterThan(0);
+    for (let i = 0; i < 100; i++) {
+      if (!isRunning(childPid)) return;
+      await Bun.sleep(50);
+    }
+    throw new Error(`the setsid child ${childPid} survived a successful session`);
+  }, 20_000);
+
   test("an MCP failure stops amp and its detached command before the session settles", async () => {
     if (process.platform !== "linux") return;
     const { config, dir } = await fixture("mcp-fail-child");

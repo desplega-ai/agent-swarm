@@ -10,7 +10,9 @@ import {
 import { swarmRuntimeInstanceId } from "../utils/multi-runtime";
 import {
   detachedProcessGroup,
+  listDescendantPids,
   registerProcessGroup,
+  terminatePids,
   terminateProcessGroup,
   terminateProcessTree,
 } from "../utils/process-group";
@@ -364,6 +366,9 @@ class AmpSession implements ProviderSession {
   private echoWatchdog: ReturnType<typeof setTimeout> | undefined;
   private exitWatchdog: ReturnType<typeof setTimeout> | undefined;
   private termination: Promise<void> | undefined;
+  /** Descendants seen while amp was alive, swept after a clean exit (see `captureDescendants`). */
+  private descendants = new Set<number>();
+  private captures: Promise<void>[] = [];
 
   constructor(
     private proc: Bun.Subprocess<"pipe", "pipe", "pipe">,
@@ -427,11 +432,14 @@ class AmpSession implements ProviderSession {
     if (this.inputClosed) return;
     this.inputClosed = true;
     clearTimeout(this.echoWatchdog);
-    try {
-      void Promise.resolve(this.stdin.end()).catch(() => {});
-    } catch {
-      // The child may already have exited.
-    }
+    // EOF makes amp finish and exit, so the tree is read first.
+    void this.captureDescendants().finally(() => {
+      try {
+        void Promise.resolve(this.stdin.end()).catch(() => {});
+      } catch {
+        // The child may already have exited.
+      }
+    });
     this.exitWatchdog = setTimeout(() => {
       if (!this.failure) this.failure = "amp did not exit after its turn ended";
       void this.terminate();
@@ -447,6 +455,23 @@ class AmpSession implements ProviderSession {
   private terminate(): Promise<void> {
     this.termination ??= terminateProcessTree(this.proc.pid);
     return this.termination;
+  }
+
+  /**
+   * A successful amp exits on its own, and a command its shell tool left
+   * running sits in a session of its own: the group cleanup misses it, and
+   * once amp is gone it is reparented and unfindable. So the tree is read
+   * while amp is alive (at end of input and again at `result`) and the
+   * survivors are stopped after amp exits.
+   */
+  private captureDescendants(): Promise<void> {
+    const capture = listDescendantPids(this.proc.pid)
+      .then((pids) => {
+        for (const pid of pids) this.descendants.add(pid);
+      })
+      .catch(() => {});
+    this.captures.push(capture);
+    return capture;
   }
 
   /** A top-level assistant message with no tool call ends the turn. */
@@ -487,6 +512,7 @@ class AmpSession implements ProviderSession {
         break;
       case "result":
         this.result = event;
+        void this.captureDescendants();
         if (typeof event.result === "string") this.output = event.result;
         break;
     }
@@ -708,6 +734,10 @@ class AmpSession implements ProviderSession {
       clearTimeout(this.exitWatchdog);
       clearTimeout(this.echoWatchdog);
       await this.termination;
+      if (!this.termination) {
+        await Promise.all(this.captures);
+        await terminatePids(this.descendants);
+      }
       const resultFailed =
         this.result !== undefined && (this.result.is_error || this.result.subtype !== "success");
       const output = this.output ?? (this.lastAssistantText || undefined);

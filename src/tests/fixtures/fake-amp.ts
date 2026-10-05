@@ -185,6 +185,8 @@ async function main() {
         session_id: sessionId,
       });
     }
+    // A shell command the turn left running, then a clean finish.
+    if (mode === "success-child") await startDetachedChild();
     lastText = mode === "steer" ? `DONE${index + 1}` : "Done ✓";
     assistant([{ type: "text", text: lastText }], "end_turn");
   };
