@@ -1,7 +1,7 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, Ban, CheckCircle2, Pause, Play, Terminal, Zap } from "lucide-react";
+import { AlertTriangle, Ban, CheckCircle2, Pause, Play, Tag, Terminal } from "lucide-react";
 import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useParams } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import {
   renderTaskCitationSources,
   renderTaskCitations,
@@ -23,9 +23,10 @@ import {
 } from "@/api/hooks/use-tasks";
 import { useUsers } from "@/api/hooks/use-users";
 import type { AgentLog, AgentTaskStatus } from "@/api/types";
-import { CollapsibleDescription } from "@/components/shared/collapsible-description";
+import { AgentAvatar } from "@/components/shared/agent-avatar";
 import { CollapsibleSection } from "@/components/shared/collapsible-section";
 import { MarkdownView } from "@/components/shared/markdown-view";
+import { ModelLabel } from "@/components/shared/model-logo";
 import { SessionLogViewer } from "@/components/shared/session-log-viewer";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { TaskAttachmentsSection } from "@/components/shared/task-attachments-section";
@@ -47,7 +48,6 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -55,12 +55,12 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { useLocalToggle } from "@/hooks/use-local-toggle";
 import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
 import { modelTierLabel } from "@/lib/model-tiers";
-import { formatSlackMentions } from "@/lib/slack-text";
 import { TERMINAL_STATUSES, taskIsRunning } from "@/lib/task-activity";
 import { describeModelResolution, taskDisplayModel } from "@/lib/task-model-resolution";
 import { taskListTitle } from "@/lib/task-title";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import { TaskDetailsRail } from "./task-details-rail";
+import { TaskSourceLine } from "./task-source-line";
 import {
   STICKY_BAR_HEIGHT,
   scrollToTop,
@@ -75,30 +75,41 @@ function coerceTaskDetailTab(value: string): string {
   return TASK_DETAIL_TABS.has(value) ? value : "details";
 }
 
-/** Task title as the page heading; a long one clamps with a toggle. */
+/**
+ * Task title as the page heading, at most two lines. A clamped title shows
+ * in full in a tooltip. "View full prompt" (the source line) has the whole
+ * prompt for keyboard users.
+ */
 function TaskHeading({ title }: { title: string }) {
-  const [expanded, setExpanded] = useState(false);
-  const isLong = title.length > 120;
+  const [heading, setHeading] = useState<HTMLHeadingElement | null>(null);
+  const [clamped, setClamped] = useState(false);
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    if (!heading) return;
+    const measure = () => setClamped(heading.scrollHeight > heading.clientHeight + 1);
+    const observer = new ResizeObserver(measure);
+    observer.observe(heading);
+    measure();
+    return () => observer.disconnect();
+  }, [heading]);
   return (
-    <div className="space-y-1">
-      <h1
-        className={cn(
-          "text-base lg:text-lg font-semibold leading-snug text-pretty break-words",
-          isLong && !expanded && "line-clamp-3 lg:line-clamp-2",
-        )}
-      >
-        {title}
-      </h1>
-      {isLong ? (
-        <button
-          type="button"
-          onClick={() => setExpanded((v) => !v)}
-          className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+    // Stays mounted: only `open` follows the clamp.
+    <Tooltip open={clamped && open} onOpenChange={setOpen}>
+      <TooltipTrigger asChild>
+        <h1
+          // A new title is a new heading, measured again: a 2-line and a
+          // 3-line title clamp to the same height, so no resize fires.
+          key={title}
+          ref={setHeading}
+          className="line-clamp-2 text-lg font-semibold leading-snug text-balance break-words"
         >
-          {expanded ? "Show less" : "Show more"}
-        </button>
-      ) : null}
-    </div>
+          {title}
+        </h1>
+      </TooltipTrigger>
+      <TooltipContent side="bottom" align="start" className="max-w-lg text-left text-pretty">
+        {title}
+      </TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -482,190 +493,111 @@ export default function TaskDetailPage() {
     </CollapsibleComposerDock>
   ) : null;
 
-  // HERO, status badge + tags / priority / source / provider / model badges +
-  // collapsible description + action buttons. Rendered at the top of the center
-  // column in the wide layout and above the Tabs in the narrow one. Same JSX in
-  // both places, single-use; not extractable per the "appears in 2+ places" rule.
-  const secondaryChips = [
-    task.taskType ? (
-      <Badge key="type" variant="outline" size="tag">
-        {task.taskType}
-      </Badge>
-    ) : null,
-    task.priority !== undefined ? (
-      <Badge
-        key="priority"
-        variant="outline"
-        className="text-[9px] px-1.5 py-0 h-5 font-mono leading-none items-center"
-      >
-        P{task.priority}
-      </Badge>
-    ) : null,
-    ...(task.tags ?? []).map((tag) => (
-      <Badge key={`tag-${tag}`} variant="outline" size="tag">
-        {tag}
-      </Badge>
-    )),
-    task.source ? (
-      <Badge key="source" variant="outline" size="tag">
-        {task.source}
-      </Badge>
-    ) : null,
-    task.effort ? (
-      <Badge
-        key="effort"
-        variant="outline"
-        className="text-[9px] px-1.5 py-0 h-5 font-mono leading-none items-center gap-1"
-      >
-        <Zap className="h-2.5 w-2.5" />
-        effort: {task.effort}
-      </Badge>
-    ) : null,
-  ].filter((chip) => chip !== null);
-
   const headerTitle = taskListTitle(task);
-  // Slack mention tokens read as names here too (`@Taras`, not `<@U…|Taras>`).
-  const promptText = formatSlackMentions(task.task).trim();
   // The server records the model it resolved when the task was claimed
   // (`resolvedModel`, with the layer in `modelSource`). Older tasks and
   // unclaimed ones fall back to the requested `model`, then to whatever the
   // session_costs entries report.
   const displayModel = taskDisplayModel(task) ?? costs?.[0]?.model;
-  // Each layout tree pads the hero itself.
+  const creatorName =
+    task.creatorAgentId && task.creatorAgentId !== task.agentId
+      ? (agentNames.get(task.creatorAgentId) ?? null)
+      : null;
+
+  // HERO CHIPS: status, model and agent, then the tags as plain text. The
+  // harness, type, priority, source and effort are in Technical details.
+  // The model chip takes focus, so keyboard users get the exact model id.
+  const modelChip = displayModel ? (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Badge variant="outline" tabIndex={0} className="h-6 max-w-full gap-1.5 px-2">
+          <ModelLabel model={displayModel} />
+        </Badge>
+      </TooltipTrigger>
+      <TooltipContent side="bottom" align="start" className="text-left">
+        <div className="font-mono">{displayModel}</div>
+        {describeModelResolution(task).map((line) => (
+          <div key={line}>{line}</div>
+        ))}
+      </TooltipContent>
+    </Tooltip>
+  ) : task.modelTier ? (
+    <Badge variant="outline" className="h-6 px-2">
+      {modelTierLabel(task.modelTier)} tier
+    </Badge>
+  ) : null;
+  const agentChip = task.agentId ? (
+    <Badge variant="outline" asChild className="h-6 max-w-full gap-1.5 pr-2 pl-0.5">
+      <Link to={`/agents/${task.agentId}`}>
+        <AgentAvatar
+          agentId={task.agentId}
+          agentName={agentName}
+          size="xs"
+          className="h-4.5 w-4.5 shadow-none"
+        />
+        <span className="sr-only">Agent: </span>
+        <span className="min-w-0 truncate">{agentName ?? `${task.agentId.slice(0, 8)}…`}</span>
+      </Link>
+    </Badge>
+  ) : null;
+  const tagsLine =
+    task.tags && task.tags.length > 0 ? (
+      <span className="ml-1 inline-flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+        <Tag aria-hidden className="size-3.5 shrink-0" />
+        <span className="sr-only">Tags: </span>
+        <span className="min-w-0 truncate">{task.tags.join(", ")}</span>
+      </span>
+    ) : null;
+  const hasHeroActions = canCancel || canPause || canResume;
+
+  // HERO: the title, where the task came from, the chips, and the actions.
+  // Rendered at the top of the center column in the wide layout and above the
+  // Tabs in the narrow one. Each layout tree pads the hero itself.
   const heroBlock = (
-    <div className="space-y-3 shrink-0">
+    <div className="flex shrink-0 flex-col gap-2.5">
       {/* The page's one heading. The breadcrumb truncates the title (and
           collapses to a few characters on a phone), so it cannot carry it. */}
       <TaskHeading title={headerTitle} />
-      <div className="flex items-center gap-2 flex-wrap">
+      <TaskSourceLine task={task} requestedByName={requestedByUserName} creatorName={creatorName} />
+      <div className="flex flex-wrap items-center gap-2">
         <StatusBadge status={task.status} size="md" />
-        {task.provider && (
-          <Badge
-            variant="outline"
-            className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase"
-          >
-            {task.provider}
-            {task.harnessVariant ? (
-              <span className="opacity-60">
-                {" · "}
-                {task.harnessVariant === "bridge"
-                  ? `bridge${task.harnessVariantMeta?.version ? ` ${task.harnessVariantMeta.version}` : ""}`
-                  : `stock${task.harnessVariantMeta?.version ? ` ${task.harnessVariantMeta.version}` : ""}`}
-              </span>
-            ) : task.harnessVariantMeta?.version ? (
-              <span className="opacity-60">
-                {" · "}
-                {task.harnessVariantMeta.version}
-              </span>
-            ) : null}
-            {task.providerMeta &&
-            "transport" in task.providerMeta &&
-            task.providerMeta.transport === "sdk" ? (
-              <span className="opacity-60" title="Ran through the Claude Agent SDK transport">
-                {" · "}
-                sdk
-              </span>
-            ) : null}
-          </Badge>
-        )}
-        {(() => {
-          if (displayModel) {
-            const badge = (
-              <Badge
-                variant="outline"
-                className="text-[9px] px-1.5 py-0 h-5 font-mono leading-none items-center"
-              >
-                {displayModel}
-              </Badge>
-            );
-            const lines = describeModelResolution(task);
-            if (lines.length === 0) return badge;
-            return (
-              <Tooltip>
-                <TooltipTrigger asChild>{badge}</TooltipTrigger>
-                <TooltipContent side="bottom" align="start">
-                  {lines.map((line) => (
-                    <div key={line}>{line}</div>
-                  ))}
-                </TooltipContent>
-              </Tooltip>
-            );
-          }
-          return task.modelTier ? (
-            <Badge
+        {modelChip}
+        {agentChip}
+        {tagsLine}
+      </div>
+      {hasHeroActions ? (
+        <div className="flex shrink-0 items-center gap-1.5 pt-1">
+          {canPause && (
+            <Button
               variant="outline"
-              className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center"
+              size="sm"
+              onClick={() => pauseTask.mutate(task.id)}
+              disabled={pauseTask.isPending}
             >
-              tier: {modelTierLabel(task.modelTier)}
-            </Badge>
-          ) : null;
-        })()}
-        {/* Routing metadata (type, priority, tags, source, effort) sits
-            behind one "+N" chip: eight equal-weight chips pushed the task
-            text to the fourth row on a phone. */}
-        {secondaryChips.length > 0 ? (
-          <Popover>
-            <PopoverTrigger asChild>
-              <button
-                type="button"
-                className="rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
-                aria-label={`Show ${secondaryChips.length} more task labels`}
-              >
-                <Badge variant="outline" size="tag" className="hover:bg-accent">
-                  +{secondaryChips.length}
-                </Badge>
-              </button>
-            </PopoverTrigger>
-            <PopoverContent align="start" className="w-auto max-w-xs p-2">
-              <div className="flex flex-wrap gap-1.5">{secondaryChips}</div>
-            </PopoverContent>
-          </Popover>
-        ) : null}
-      </div>
-      {/* A one-line prompt is already the heading; repeating it below read
-          as the same sentence twice. The heading capitalizes the first word,
-          so compare without case. */}
-      {promptText.toLowerCase() !== headerTitle.toLowerCase() && (
-        <CollapsibleDescription
-          text={promptText}
-          collapsedClassName="line-clamp-3 lg:line-clamp-2"
-        />
-      )}
-      <div className="flex items-center gap-2">
-        {(canCancel || canPause || canResume) && (
-          <div className="flex items-center gap-1.5 shrink-0">
-            {canPause && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => pauseTask.mutate(task.id)}
-                disabled={pauseTask.isPending}
-              >
-                <Pause className="h-3 w-3 mr-1" />
-                Pause
-              </Button>
-            )}
-            {canResume && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => resumeTask.mutate(task.id)}
-                disabled={resumeTask.isPending}
-              >
-                <Play className="h-3 w-3 mr-1" />
-                Resume
-              </Button>
-            )}
-            {canCancel && (
-              <CancelTaskButton
-                onConfirm={() =>
-                  cancelTask.mutate({ id: task.id, reason: "Cancelled from dashboard" })
-                }
-              />
-            )}
-          </div>
-        )}
-      </div>
+              <Pause className="h-3 w-3 mr-1" />
+              Pause
+            </Button>
+          )}
+          {canResume && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => resumeTask.mutate(task.id)}
+              disabled={resumeTask.isPending}
+            >
+              <Play className="h-3 w-3 mr-1" />
+              Resume
+            </Button>
+          )}
+          {canCancel && (
+            <CancelTaskButton
+              onConfirm={() =>
+                cancelTask.mutate({ id: task.id, reason: "Cancelled from dashboard" })
+              }
+            />
+          )}
+        </div>
+      ) : null}
     </div>
   );
 

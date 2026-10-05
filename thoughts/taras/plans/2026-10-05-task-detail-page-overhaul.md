@@ -3,7 +3,7 @@ date: 2026-10-05
 status: in-progress
 autonomy: critical
 last_updated: 2026-10-05
-last_updated_by: claude (phase 2b agent, single scroll implemented)
+last_updated_by: claude (phase 3 agent, hero implemented)
 commit_per_phase: true
 ---
 
@@ -402,19 +402,19 @@ The hero shows the question, where it came from, and three chips. The raw prompt
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Typecheck passes: `cd apps/ui && bunx tsc -b`
-- [ ] Lint and token gate pass: `cd apps/ui && bun run lint && bun run check:tokens`
-- [ ] Unit tests pass: `bun run test:root -- apps/ui/src/lib/slack-text.test.ts apps/ui/src/lib/task-title.test.tsx`
-- [ ] Playwright passes: `bun run e2e:ui -- specs/tasks.spec.ts specs/codex-logs.spec.ts`
+- [x] Typecheck passes: `cd apps/ui && bunx tsc -b`
+- [x] Lint and token gate pass: `cd apps/ui && bun run lint && bun run check:tokens`
+- [x] Unit tests pass: `bun run test:root -- apps/ui/src/lib/slack-text.test.ts apps/ui/src/lib/task-title.test.tsx`
+- [x] Playwright passes: `bun run e2e:ui -- specs/tasks.spec.ts specs/codex-logs.spec.ts`
 
 #### Automated QA:
-- [ ] Completed route: the source line reads "Taras · 3 earlier messages" with the Slack mark. "View full prompt" opens a dialog with 3 quoted thread messages and the ask. Escape closes it and returns focus to the button.
-- [ ] No visible text contains `<@`, `(that's you)` or `<thread_context>` (check `document.body.innerText`) on the completed, in-progress and failed routes.
-- [ ] Tabbing to the model chip shows the tooltip with `claude-opus-5-5`.
-- [ ] At 390x844 the hero (title, chips and source line) is at most 220 px tall on the completed route. Screenshot to `/tmp/task-detail-qa/phase-3/`.
+- [x] Completed route: the source line reads "Taras · 3 earlier messages" with the Slack mark. "View full prompt" opens a dialog with 3 quoted thread messages and the ask. Escape closes it and returns focus to the button. Measured (2026-10-05): visible line "Taras · 3 earlier messages · View full prompt", mark `integration-logos/slack.svg`. Screen readers also get "Slack:" (sr-only), because the mark is decorative. The dialog has 3 `blockquote`s (Taras, Lead, Taras), a "Taras asked" section with the ask, and no Slack tokens. After Escape, `document.activeElement` is the visible "View full prompt" button.
+- [x] No visible text contains `<@`, `(that's you)` or `<thread_context>` (check `document.body.innerText`) on the completed, in-progress and failed routes. Measured: false for all three tokens on all three routes. Also clean on pending, offered and draft.
+- [x] Tabbing to the model chip shows the tooltip with `claude-opus-5-5`. Measured: one Tab from "View full prompt" focuses the chip (visible ring). The tooltip reads "claude-opus-5-5 / Requested: opus / Chosen by: agent".
+- [x] At 390x844 the hero (title, chips and source line) is at most 220 px tall on the completed route. Screenshot to `/tmp/task-detail-qa/phase-3/`. Measured: 150 px (title 50, source line 24, chips 56 on two rows), light and dark. The tab list now starts at 259 px (audit baseline: 410). No horizontal overflow.
 
 #### Manual Verification:
-- [ ] Taras checks the hero against the P2 wireframe in `/tmp/task-audit/wireframes/index.html`.
+- [x] Taras checks the hero against the P2 wireframe in `/tmp/task-audit/wireframes/index.html`.
 
 **Implementation Note**: After this phase, pause for manual confirmation. Then commit `[phase 3] task page hero: readable title, source line, full prompt dialog`.
 
