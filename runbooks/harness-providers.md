@@ -118,7 +118,8 @@ hosted models and bills the key's Cursor plan.
 - **System prompt.** Cursor enables `systemPrompt` per account. Ours is not
   enabled: the first send fails with `unknown option '--system-prompt'`. So by
   default the swarm prompt rides at the top of the first user message, inside
-  `<system_instructions>`, on top of Cursor's own system prompt. With
+  `<system_instructions>` (the `system.agent.cursor.first_message` prompt
+  template), on top of Cursor's own system prompt. With
   `CURSOR_NATIVE_SYSTEM_PROMPT=true` the adapter passes `systemPrompt` and, if
   Cursor rejects it with that error, rebuilds the agent and falls back to the
   first-message path in the same session.

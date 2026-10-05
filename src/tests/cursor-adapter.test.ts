@@ -3,6 +3,8 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ModelListItem, SDKMessage, TokenUsage } from "@cursor/sdk";
+import { validateConfigValue } from "../be/swarm-config-guard";
+import { configureDbResolver, resetDbResolver } from "../prompts/resolver";
 import type { ProviderEvent, ProviderSessionConfig } from "../providers/types";
 
 /**
@@ -166,6 +168,7 @@ afterEach(async () => {
   sdk.closed = 0;
   sdk.models = [];
   sdk.meError = undefined;
+  resetDbResolver();
   if (savedKey === undefined) delete process.env.CURSOR_API_KEY;
   else process.env.CURSOR_API_KEY = savedKey;
   await Promise.all(directories.splice(0).map((d) => rm(d, { recursive: true, force: true })));
@@ -200,6 +203,16 @@ function collect(session: { onEvent(l: (e: ProviderEvent) => void): void }): Pro
 }
 
 const base = { agent_id: "a", run_id: "r" };
+
+describe("CURSOR_NATIVE_SYSTEM_PROMPT config validation", () => {
+  test("accepts boolean literals and rejects anything else", () => {
+    const key = "CURSOR_NATIVE_SYSTEM_PROMPT";
+    for (const value of ["true", "false", "1", "0", "TRUE"]) {
+      expect(validateConfigValue(key, value)).toBeNull();
+    }
+    expect(validateConfigValue(key, "yes")).toContain(`Invalid ${key}`);
+  });
+});
 
 describe("checkCursorCredentials", () => {
   test("needs CURSOR_API_KEY", () => {
@@ -307,11 +320,35 @@ describe("translateCursorMessage", () => {
     expect(translateCursorMessage({ ...base, type: "status", status: "RUNNING" })).toEqual([]);
   });
 
-  test("composeFirstMessage wraps the system prompt", () => {
-    expect(composeFirstMessage("", "task")).toBe("task");
-    expect(composeFirstMessage("sys", "task")).toBe(
+  test("composeFirstMessage wraps the system prompt", async () => {
+    expect(await composeFirstMessage("", "task")).toBe("task");
+    expect(await composeFirstMessage("sys", "task")).toBe(
       "<system_instructions>\nsys\n</system_instructions>\n\ntask",
     );
+  });
+
+  test("composeFirstMessage renders the registered template", async () => {
+    configureDbResolver((eventType) =>
+      eventType === "system.agent.cursor.first_message"
+        ? { template: { id: "custom", scope: "global", body: "[{{systemPrompt}}] {{prompt}}" } }
+        : null,
+    );
+    expect(await composeFirstMessage("sys", "task")).toBe("[sys] task");
+  });
+
+  test("composeFirstMessage keeps the system prompt on skipped, blank, and failing templates", async () => {
+    for (const resolver of [
+      () => ({ skip: true as const }),
+      () => ({ template: { id: "blank", scope: "global", body: "  " } }),
+      () => {
+        throw new Error("db down");
+      },
+    ]) {
+      configureDbResolver(resolver);
+      expect(await composeFirstMessage("sys", "task")).toBe(
+        "<system_instructions>\nsys\n</system_instructions>\n\ntask",
+      );
+    }
   });
 });
 
@@ -373,7 +410,7 @@ describe("CursorAdapter sessions", () => {
         "X-Context-Key": "task:test",
       },
     });
-    expect(sdk.sent[0]).toBe(composeFirstMessage("You are a swarm worker.", "do the task"));
+    expect(sdk.sent[0]).toBe(await composeFirstMessage("You are a swarm worker.", "do the task"));
     expect(events.filter((e) => e.type === "message")).toEqual([
       { type: "message", role: "assistant", content: "Done" },
     ]);
@@ -404,7 +441,7 @@ describe("CursorAdapter sessions", () => {
     expect(sdk.created.map((c) => c.systemPrompt)).toEqual(["You are a swarm worker.", undefined]);
     expect(sdk.sent).toEqual([
       "do the task",
-      composeFirstMessage("You are a swarm worker.", "do the task"),
+      await composeFirstMessage("You are a swarm worker.", "do the task"),
     ]);
     // The recreated agent is announced as the session, with its prompt mode.
     const inits = events.flatMap((e) => (e.type === "session_init" ? [e.sessionId] : []));
@@ -416,6 +453,21 @@ describe("CursorAdapter sessions", () => {
       .filter((e) => e.type === "raw_log" && e.content.includes('"type":"model"'))
       .map((e) => JSON.parse((e as { content: string }).content).systemPrompt);
     expect(modes).toEqual(["native", "first-message"]);
+  });
+
+  test.each([
+    ["1", "You are a swarm worker."],
+    ["TRUE", "You are a swarm worker."],
+    ["0", undefined],
+    ["yes", undefined],
+  ])("CURSOR_NATIVE_SYSTEM_PROMPT=%p parses like the config guard", async (flag, expected) => {
+    sdk.script = [{ messages: [], result: "ok", usage: usage(10, 0, 1) }];
+    const config = await sessionConfig({
+      env: { CURSOR_API_KEY: "k", CURSOR_NATIVE_SYSTEM_PROMPT: flag },
+    });
+    const session = await new CursorAdapter().createSession(config);
+    await session.waitForCompletion();
+    expect(sdk.created.map((c) => c.systemPrompt)).toEqual([expected]);
   });
 
   test("queued steering is undeliverable when the active run fails", async () => {

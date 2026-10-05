@@ -11,8 +11,12 @@ import type {
   TokenUsage,
 } from "@cursor/sdk";
 import { cursorCatalogRef } from "@desplega/model-catalog";
+// Registers the code default of the first-message template.
+import "../prompts/session-templates";
+import { resolveTemplateAsync, resolveTemplateFromCode } from "../prompts/resolver";
 import { DEFAULT_MODEL_TIER_MAP } from "../types";
 import { clampContextPercent, getContextWindowSize } from "../utils/context-window";
+import { parseEnvFlag } from "../utils/env-flag";
 import { swarmRuntimeInstanceId } from "../utils/multi-runtime";
 import { registerVolatileSecret, scrubSecrets } from "../utils/secret-scrubber";
 import { resolveSlashSkillPrompt } from "./codex-skill-resolver";
@@ -42,6 +46,8 @@ const CURSOR_MCP_SERVER_NAME = "agent-swarm";
  * `--system-prompt`, and the session falls back to the first-message path.
  */
 const NATIVE_SYSTEM_PROMPT_ENV = "CURSOR_NATIVE_SYSTEM_PROMPT";
+
+const FIRST_MESSAGE_TEMPLATE = "system.agent.cursor.first_message";
 
 export function checkCursorCredentials(env: Record<string, string | undefined>): CredStatus {
   return env.CURSOR_API_KEY?.trim()
@@ -207,9 +213,17 @@ interface CursorRunInfo {
 }
 
 /** The first-message path: Cursor keeps its own system prompt, the swarm's rides on top. */
-export function composeFirstMessage(systemPrompt: string, prompt: string): string {
+export async function composeFirstMessage(systemPrompt: string, prompt: string): Promise<string> {
   if (!systemPrompt.trim()) return prompt;
-  return `<system_instructions>\n${systemPrompt}\n</system_instructions>\n\n${prompt}`;
+  const variables = { systemPrompt, prompt };
+  try {
+    const result = await resolveTemplateAsync(FIRST_MESSAGE_TEMPLATE, variables);
+    if (!result.skipped && result.text.trim()) return result.text;
+  } catch {
+    // Fall through to the code default.
+  }
+  // A skipped, blank, or failing override must not drop the system prompt.
+  return resolveTemplateFromCode(FIRST_MESSAGE_TEMPLATE, variables).text;
 }
 
 /** Cursor's error when the account has no access to `systemPrompt`. */
@@ -428,7 +442,7 @@ class CursorSession implements ProviderSession {
           this.output = undefined;
           this.runs = 0;
           status = await this.sendAndDrain(
-            composeFirstMessage(this.info.systemPrompt, firstMessage),
+            await composeFirstMessage(this.info.systemPrompt, firstMessage),
           );
         }
       }
@@ -579,7 +593,7 @@ export class CursorAdapter implements ProviderAdapter {
     };
     // Per-session JSONL store: no conversation state outlives the task.
     const directory = await mkdtemp(join(tmpdir(), "swarm-cursor-"));
-    const nativeSystemPrompt = env[NATIVE_SYSTEM_PROMPT_ENV] === "true";
+    const nativeSystemPrompt = parseEnvFlag(env[NATIVE_SYSTEM_PROMPT_ENV], false);
     const create = (withSystemPrompt: boolean) =>
       Agent.create({
         apiKey,
@@ -598,7 +612,7 @@ export class CursorAdapter implements ProviderAdapter {
       const agent = await create(nativeSystemPrompt);
       return new CursorSession(
         agent,
-        nativeSystemPrompt ? prompt : composeFirstMessage(config.systemPrompt, prompt),
+        nativeSystemPrompt ? prompt : await composeFirstMessage(config.systemPrompt, prompt),
         {
           model: selection,
           appliedEffort,

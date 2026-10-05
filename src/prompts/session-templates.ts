@@ -331,6 +331,25 @@ registerTemplate({
   category: "system",
 });
 
+/**
+ * First message of a cursor session on the first-message path. Cursor keeps
+ * its own system prompt there, so the swarm's rides on top of the task prompt.
+ */
+registerTemplate({
+  eventType: "system.agent.cursor.first_message",
+  header: "",
+  defaultBody: `<system_instructions>
+{{systemPrompt}}
+</system_instructions>
+
+{{prompt}}`,
+  variables: [
+    { name: "systemPrompt", description: "The swarm system prompt for the session" },
+    { name: "prompt", description: "The task prompt" },
+  ],
+  category: "system",
+});
+
 // ============================================================================
 // I. Tools and skills, K. Repository (appended by base-prompt; the dynamic
 // lists are rendered at the call site and interpolated into the static text)
