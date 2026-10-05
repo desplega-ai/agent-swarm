@@ -19,6 +19,8 @@ interface ScriptedRun {
   toolRounds?: number;
   gate?: Promise<void>;
   steerOutcome?: "complete_delivered" | "revert_to_followup";
+  /** Holds `send()` itself open, before the run exists. */
+  sendGate?: Promise<void>;
 }
 
 const sdk = {
@@ -88,6 +90,7 @@ mock.module("@cursor/sdk", () => {
       sdk.sent.push(text);
       const spec = sdk.script.shift();
       if (!spec) throw new Error("no scripted run left");
+      if (spec.sendGate) await spec.sendGate;
       return new FakeRun(`run-${sdk.sent.length}`, spec, options?.onDelta);
     }
     close() {
@@ -394,6 +397,7 @@ describe("CursorAdapter sessions", () => {
       env: { CURSOR_API_KEY: "k", CURSOR_NATIVE_SYSTEM_PROMPT: "true" },
     });
     const session = await new CursorAdapter().createSession(config);
+    const events = collect(session);
     const result = await session.waitForCompletion();
 
     expect(result.isError).toBe(false);
@@ -402,6 +406,129 @@ describe("CursorAdapter sessions", () => {
       "do the task",
       composeFirstMessage("You are a swarm worker.", "do the task"),
     ]);
+    // The recreated agent is announced as the session, with its prompt mode.
+    const inits = events.flatMap((e) => (e.type === "session_init" ? [e.sessionId] : []));
+    expect(inits).toHaveLength(2);
+    expect(inits[0]).not.toBe(inits[1]);
+    expect(inits[1]).toBe(session.sessionId);
+    expect(result.sessionId).toBe(inits[1]);
+    const modes = events
+      .filter((e) => e.type === "raw_log" && e.content.includes('"type":"model"'))
+      .map((e) => JSON.parse((e as { content: string }).content).systemPrompt);
+    expect(modes).toEqual(["native", "first-message"]);
+  });
+
+  test("queued steering is undeliverable when the active run fails", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    sdk.script = [
+      {
+        messages: [],
+        gate,
+        status: "error",
+        error: "[resource_exhausted] usage limit",
+        steerOutcome: "revert_to_followup",
+      },
+    ];
+    const session = await new CursorAdapter().createSession(await sessionConfig());
+    await Bun.sleep(5);
+    const queued = session.deliverSteering!({ mode: "queue", text: "queued" });
+    const reverted = session.deliverSteering!({ mode: "steer", text: "reverted" });
+    release();
+    const result = await session.waitForCompletion();
+
+    expect(result.isError).toBe(true);
+    for (const outcome of [await queued, await reverted]) {
+      expect(outcome).toEqual({
+        delivered: false,
+        reason: "cursor session ended before the queued message was sent",
+      });
+    }
+    expect(sdk.sent).toHaveLength(1);
+  });
+
+  test("queued steering is undeliverable when the session is cancelled", async () => {
+    sdk.script = [
+      { messages: [], gate: new Promise(() => {}), steerOutcome: "revert_to_followup" },
+    ];
+    const session = await new CursorAdapter().createSession(await sessionConfig());
+    await Bun.sleep(5);
+    const queued = session.deliverSteering!({ mode: "queue", text: "queued" });
+    const reverted = session.deliverSteering!({ mode: "steer", text: "reverted" });
+    await Bun.sleep(5);
+    await session.abort("cancelled");
+    const result = await session.waitForCompletion();
+
+    expect(result.failureReason).toBe("cursor session aborted");
+    for (const outcome of [await queued, await reverted]) {
+      expect(outcome).toMatchObject({ delivered: false });
+    }
+    expect(sdk.sent).toHaveLength(1);
+  });
+
+  test("abort while send() is pending cancels the run once it arrives", async () => {
+    let releaseSend!: () => void;
+    const sendGate = new Promise<void>((resolve) => {
+      releaseSend = resolve;
+    });
+    sdk.script = [
+      {
+        messages: [
+          {
+            ...base,
+            type: "assistant",
+            message: { role: "assistant", content: [{ type: "text", text: "late" }] },
+          } as SDKMessage,
+        ],
+        sendGate,
+        gate: new Promise(() => {}),
+        result: "should not stream",
+      },
+    ];
+    const session = await new CursorAdapter().createSession(await sessionConfig());
+    const events = collect(session);
+    await Bun.sleep(5);
+    await session.abort("cancelled");
+    releaseSend();
+    const result = await session.waitForCompletion();
+
+    expect(sdk.cancelled).toBe(1);
+    expect(result.isError).toBe(true);
+    expect(result.failureReason).toBe("cursor session aborted");
+    expect(events.some((e) => e.type === "message")).toBe(false);
+  });
+
+  test("abort while a queued send is pending cancels it and reports it undeliverable", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let releaseSend!: () => void;
+    const sendGate = new Promise<void>((resolve) => {
+      releaseSend = resolve;
+    });
+    sdk.script = [
+      { messages: [], gate, result: "first", usage: usage(10, 0, 1) },
+      { messages: [], sendGate, gate: new Promise(() => {}), result: "second" },
+    ];
+    const session = await new CursorAdapter().createSession(await sessionConfig());
+    await Bun.sleep(5);
+    const queued = session.deliverSteering!({ mode: "queue", text: "queued" });
+    release();
+    await Bun.sleep(5);
+    expect(sdk.sent).toHaveLength(2);
+    await session.abort("cancelled");
+    releaseSend();
+    const result = await session.waitForCompletion();
+
+    expect(sdk.cancelled).toBe(1);
+    expect(result.failureReason).toBe("cursor session aborted");
+    expect(await queued).toEqual({
+      delivered: false,
+      reason: "cursor session ended before the queued message was sent",
+    });
   });
 
   test("steers the live run and queues reverted or queued messages as follow-up runs", async () => {
@@ -416,15 +543,19 @@ describe("CursorAdapter sessions", () => {
     ];
     const session = await new CursorAdapter().createSession(await sessionConfig());
     await Bun.sleep(5);
-    expect(await session.deliverSteering!({ mode: "steer", text: "steer me" })).toEqual({
-      delivered: true,
-      mode: "queue",
+    const steered = session.deliverSteering!({ mode: "steer", text: "steer me" });
+    await Bun.sleep(5);
+    const queued = session.deliverSteering!({ mode: "queue", text: "then this" });
+    let settledEarly = false;
+    void Promise.race([steered, queued]).then(() => {
+      settledEarly = true;
     });
-    expect(await session.deliverSteering!({ mode: "queue", text: "then this" })).toEqual({
-      delivered: true,
-      mode: "queue",
-    });
+    await Bun.sleep(5);
+    // Nothing is delivered until a run carrying it is accepted.
+    expect(settledEarly).toBe(false);
     release();
+    expect(await steered).toEqual({ delivered: true, mode: "queue" });
+    expect(await queued).toEqual({ delivered: true, mode: "queue" });
     const result = await session.waitForCompletion();
 
     expect(sdk.steered).toEqual(["steer me"]);

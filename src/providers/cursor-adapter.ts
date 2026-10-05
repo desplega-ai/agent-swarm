@@ -217,6 +217,18 @@ function isSystemPromptUnavailable(message: string | undefined): boolean {
   return Boolean(message?.includes("--system-prompt"));
 }
 
+const QUEUE_NOT_SENT = "cursor session ended before the queued message was sent";
+
+/**
+ * A message waiting for the next run. `settle` resolves its
+ * `deliverSteering()` call: delivered once Cursor accepts the run carrying
+ * it, undeliverable when the session ends first.
+ */
+interface QueuedDelivery {
+  text: string;
+  settle: (result: SteerDeliveryResult) => void;
+}
+
 class CursorSession implements ProviderSession {
   sessionId: string | undefined;
   private listeners: ((event: ProviderEvent) => void)[] = [];
@@ -224,7 +236,7 @@ class CursorSession implements ProviderSession {
   private readonly startedAt = Date.now();
   private readonly contextWindow: number | null;
   private currentRun: Run | undefined;
-  private queue: string[] = [];
+  private queue: QueuedDelivery[] = [];
   private ended = false;
   private aborted = false;
   private usage: TokenUsage | undefined;
@@ -241,18 +253,23 @@ class CursorSession implements ProviderSession {
     private readonly directory: string,
   ) {
     this.contextWindow = contextWindowFor(info.model.id);
-    this.sessionId = agent.agentId;
-    this.emit({ type: "session_init", sessionId: agent.agentId, provider: "cursor" });
+    this.announce(info.recreateWithoutSystemPrompt ? "native" : "first-message");
+    this.completion = this.run(firstMessage);
+  }
+
+  /** Reports the agent in use: its session id and how the swarm prompt reaches it. */
+  private announce(systemPrompt: "native" | "first-message"): void {
+    this.sessionId = this.agent.agentId;
+    this.emit({ type: "session_init", sessionId: this.agent.agentId, provider: "cursor" });
     this.emit({
       type: "raw_log",
       content: JSON.stringify({
         type: "model",
         provider: "cursor",
-        model: info.model,
-        systemPrompt: info.recreateWithoutSystemPrompt ? "native" : "first-message",
+        model: this.info.model,
+        systemPrompt,
       }),
     });
-    this.completion = this.run(firstMessage);
   }
 
   onEvent(listener: (event: ProviderEvent) => void): void {
@@ -348,8 +365,17 @@ class CursorSession implements ProviderSession {
     };
   }
 
-  /** Sends one message as a run and drains it. Returns the run's terminal status. */
-  private async sendAndDrain(text: string): Promise<"finished" | "error" | "cancelled"> {
+  /**
+   * Sends one message as a run and drains it. Returns the run's terminal
+   * status. `onAccepted` fires once Cursor has accepted the run and the
+   * session is still live. An abort before or during `send()` cancels the
+   * run instead of streaming it, since `abort()` had no run to cancel yet.
+   */
+  private async sendAndDrain(
+    text: string,
+    onAccepted?: () => void,
+  ): Promise<"finished" | "error" | "cancelled"> {
+    if (this.aborted) return "cancelled";
     let toolRounds = 0;
     const run = await this.agent.send(text, {
       // One `tool-requests-listed` per model call that asked for tools.
@@ -359,6 +385,13 @@ class CursorSession implements ProviderSession {
     });
     this.currentRun = run;
     this.runs += 1;
+    if (this.aborted) {
+      await run.cancel().catch(() => {});
+      const result = await run.wait().catch(() => undefined);
+      this.addUsage(result?.usage);
+      return "cancelled";
+    }
+    onAccepted?.();
     for await (const message of run.stream()) this.handle(message);
     this.flushText();
     const result = await run.wait();
@@ -374,7 +407,12 @@ class CursorSession implements ProviderSession {
   private async run(firstMessage: string): Promise<ProviderResult> {
     try {
       let status = await this.sendAndDrain(firstMessage);
-      if (status === "error" && this.runs === 1 && isSystemPromptUnavailable(this.failure)) {
+      if (
+        status === "error" &&
+        this.runs === 1 &&
+        !this.aborted &&
+        isSystemPromptUnavailable(this.failure)
+      ) {
         // The account has no `systemPrompt` access: rebuild the agent without
         // it and carry the swarm prompt in the first message instead.
         const recreate = this.info.recreateWithoutSystemPrompt;
@@ -385,7 +423,7 @@ class CursorSession implements ProviderSession {
           });
           this.agent.close();
           this.agent = await recreate();
-          this.sessionId = this.agent.agentId;
+          this.announce("first-message");
           this.failure = undefined;
           this.output = undefined;
           this.runs = 0;
@@ -397,7 +435,13 @@ class CursorSession implements ProviderSession {
       while (status === "finished" && !this.aborted) {
         const next = this.queue.shift();
         if (next === undefined) break;
-        status = await this.sendAndDrain(next);
+        try {
+          status = await this.sendAndDrain(next.text, () =>
+            next.settle({ delivered: true, mode: "queue" }),
+          );
+        } finally {
+          next.settle({ delivered: false, reason: QUEUE_NOT_SENT });
+        }
       }
       this.ended = true;
       const isError = this.aborted || status !== "finished";
@@ -431,9 +475,16 @@ class CursorSession implements ProviderSession {
         appliedReasoningEffort: this.info.appliedEffort,
       };
     } finally {
+      this.ended = true;
+      this.settleQueued(QUEUE_NOT_SENT);
       this.agent.close();
       await rm(this.directory, { recursive: true, force: true });
     }
+  }
+
+  /** Reports every unsent queued message undeliverable, so the server promotes it to a follow-up. */
+  private settleQueued(reason: string): void {
+    for (const item of this.queue.splice(0)) item.settle({ delivered: false, reason });
   }
 
   waitForCompletion(): Promise<ProviderResult> {
@@ -442,7 +493,7 @@ class CursorSession implements ProviderSession {
 
   async abort(): Promise<void> {
     this.aborted = true;
-    this.queue = [];
+    this.settleQueued("cursor session aborted before the queued message was sent");
     const run = this.currentRun;
     if (run && run.status === "running") await run.cancel().catch(() => {});
   }
@@ -461,9 +512,22 @@ class CursorSession implements ProviderSession {
       }
       // `revert_to_followup`: the run could not take it mid-turn.
     }
-    if (this.ended) return { delivered: false, reason: "cursor session already completed" };
-    this.queue.push(text);
-    return { delivered: true, mode: "queue" };
+    if (this.ended || this.aborted) {
+      return { delivered: false, reason: "cursor session already completed" };
+    }
+    // Resolves when the next run carrying `text` is accepted, or as
+    // undeliverable if the session ends first.
+    return new Promise((resolve) => {
+      let settled = false;
+      this.queue.push({
+        text,
+        settle: (result) => {
+          if (settled) return;
+          settled = true;
+          resolve(result);
+        },
+      });
+    });
   }
 }
 
