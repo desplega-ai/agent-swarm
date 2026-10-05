@@ -417,14 +417,13 @@ describe("amp session", () => {
     expect(result.cost?.models).toBeUndefined();
   });
 
-  test("a pinned model whose export fails settles unpriced, not priced as the pin", async () => {
+  test("a pinned model whose export fails is estimated from stream tokens at the pin", async () => {
     const { config } = await fixture("export-fail", { model: "openai/gpt-5-nano" });
     const { result } = await runToCompletion(config);
     const cost = result.cost;
     if (!cost) throw new Error("expected a cost report");
-    // The stream's raw counts under the pin. For OpenAI those 1000 cache-creation
-    // tokens are input, and the table has no cache-write rate: priced, they bill $0.
     expect(cost).toMatchObject({ model: "openai/gpt-5-nano", cacheWriteTokens: 1000 });
+    const lookup = ampPricingLookup();
     const recomputed = await recomputeSessionCost(
       {
         provider: cost.provider,
@@ -438,9 +437,19 @@ describe("amp session", () => {
         durationMs: cost.durationMs,
         atEpochMs: Date.now(),
       },
-      ampPricingLookup(),
+      lookup,
     );
-    expect(recomputed).toMatchObject({ costSource: "unpriced", totalCostUsd: 0 });
+    // For OpenAI the 1000 cache-creation tokens bill as input, never as free cache writes.
+    const rate = async (cls: "input" | "output" | "cached_input") =>
+      (await lookup("amp", "gpt-5-nano", cls)) ?? Number.NaN;
+    const expected =
+      ((4 + 1000) * (await rate("input")) +
+        200 * (await rate("cached_input")) +
+        5 * (await rate("output"))) /
+      1_000_000;
+    expect(recomputed.costSource).toBe("estimated");
+    expect(recomputed.totalCostUsd).toBeGreaterThan(0);
+    expect(recomputed.totalCostUsd).toBeCloseTo(expected, 12);
   });
 
   test("fails the session when Amp starts without the swarm MCP server", async () => {

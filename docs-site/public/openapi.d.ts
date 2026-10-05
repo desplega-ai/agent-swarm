@@ -24011,7 +24011,7 @@ export interface components {
              * @default harness
              * @enum {string}
              */
-            costSource: "harness" | "pricing-table" | "unpriced";
+            costSource: "harness" | "pricing-table" | "unpriced" | "estimated";
             harnessCostUsd?: number | null;
             cacheWrite5mTokens?: number | null;
             cacheWrite1hTokens?: number | null;

@@ -1545,7 +1545,12 @@ export type SessionLog = z.infer<typeof SessionLogSchema>;
 // Session Cost Types (aggregated cost data per session)
 // Migration 063 widened the set to include 'unpriced' for cases where the API
 // recompute path couldn't find pricing rows for the (provider, model, token_class).
-export const SessionCostSourceSchema = z.enum(["harness", "pricing-table", "unpriced"]);
+export const SessionCostSourceSchema = z.enum([
+  "harness",
+  "pricing-table",
+  "unpriced",
+  "estimated",
+]);
 export type SessionCostSource = z.infer<typeof SessionCostSourceSchema>;
 
 export const SessionCostModelBreakdownSchema = z
@@ -1589,6 +1594,8 @@ export const SessionCostSchema = z
     //   'unpriced'       — the API tried to recompute but the (provider, model)
     //                      had no matching pricing rows; totalCostUsd is whatever
     //                      the worker submitted (often 0).
+    //   'estimated'      — the API priced fallback token counts at an assumed
+    //                      model (amp with a failed thread export).
     costSource: SessionCostSourceSchema.default("harness"),
     // Migration 128: adapter-reported amount retained for reconciliation only.
     harnessCostUsd: z.number().nullable().optional(),

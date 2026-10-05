@@ -12,6 +12,8 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
  *   'unpriced'      — yellow warning; we tried to recompute but the
  *                     (provider, model) pair had no pricing rows — the
  *                     stored USD is whatever the worker submitted.
+ *   'estimated'     — yellow; fallback token counts priced at an assumed
+ *                     model (amp when its thread export failed).
  *
  * Returns `null` for legacy rows with no `costSource` so older tasks don't
  * sprout an awkward "unknown" badge.
@@ -51,6 +53,15 @@ export function CostSourceBadge({
         title="No pricing row matched this provider/model; USD is the worker-reported value and token counts are shown below"
       >
         NO RATE
+      </Badge>
+    ) : source === "estimated" ? (
+      <Badge
+        variant="outline"
+        size="tag"
+        className="border-status-warning/40 text-status-warning-strong"
+        title="Estimated: the harness could not report the models it ran, so its token counts were priced at an assumed model"
+      >
+        ESTIMATED
       </Badge>
     ) : (
       <Badge

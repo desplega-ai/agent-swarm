@@ -4758,6 +4758,8 @@ export interface CreateSessionCostInput {
    *  - 'pricing-table'  — value recomputed by the API from `pricing` rows.
    *  - 'unpriced'       — recompute attempted but no matching pricing rows;
    *                       `totalCostUsd` is whatever the worker submitted.
+   *  - 'estimated'      — fallback token counts priced at an assumed model
+   *                       (amp with a failed thread export).
    */
   costSource?: SessionCostSource;
   harnessCostUsd?: number | null;

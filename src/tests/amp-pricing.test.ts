@@ -124,3 +124,56 @@ describe("amp pricing", () => {
     expect(result.costSource).toBe("unpriced");
   });
 });
+
+describe("amp cost when the thread export failed", () => {
+  // The stream's totals, as the adapter sends them with no `models`.
+  const stream = {
+    inputTokens: 1000,
+    outputTokens: 200,
+    cacheReadTokens: 5000,
+    cacheWriteTokens: 3000,
+  };
+  const estimate = (model: string) =>
+    recomputeSessionCost(
+      { provider: "amp", model, harnessCostUsd: 0, ...stream, atEpochMs: Date.now() },
+      lookupFromSeed(),
+    );
+  const priced = async (model: string, usage: typeof stream) =>
+    (
+      await recomputeSessionCost(
+        {
+          provider: "amp",
+          model,
+          harnessCostUsd: 0,
+          ...usage,
+          models: [{ model, ...usage }],
+          atEpochMs: Date.now(),
+        },
+        lookupFromSeed(),
+      )
+    ).totalCostUsd;
+
+  test("a mode is priced at the model it is known to run, tagged estimated", async () => {
+    const low = await estimate("low");
+    expect(low.costSource).toBe("estimated");
+    // GLM bills cache creation as input, like the export parser.
+    expect(low.totalCostUsd).toBeCloseTo(
+      await priced("accounts/fireworks/models/glm-5p3-flash", {
+        ...stream,
+        inputTokens: stream.inputTokens + stream.cacheWriteTokens,
+        cacheWriteTokens: 0,
+      }),
+      12,
+    );
+    const medium = await estimate("medium");
+    expect(medium.costSource).toBe("estimated");
+    expect(medium.totalCostUsd).toBeCloseTo(await priced("claude-opus-5-5", stream), 12);
+    expect(medium.totalCostUsd).toBeGreaterThan(low.totalCostUsd);
+  });
+
+  test("a pin the table does not know falls back to the medium model, never $0", async () => {
+    const result = await estimate("openai/not-in-the-table");
+    expect(result.costSource).toBe("estimated");
+    expect(result.totalCostUsd).toBeCloseTo(await priced("claude-opus-5-5", stream), 12);
+  });
+});

@@ -1,7 +1,12 @@
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type AmpMode, type AmpModelSelection, resolveAmpModel } from "../utils/amp-models";
+import {
+  type AmpMode,
+  type AmpModelSelection,
+  ampBillsCacheWrites,
+  resolveAmpModel,
+} from "../utils/amp-models";
 import {
   CONTEXT_FORMULA,
   clampContextPercent,
@@ -234,11 +239,6 @@ function count(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 0;
 }
 
-/** Anthropic bills prompt-cache writes; every other vendor's cache-creation count is plain input. */
-function billsCacheWrites(model: string): boolean {
-  return /^(anthropic\/)?claude/i.test(model);
-}
-
 /**
  * The stream names no model, so the model and the per-request usage come from
  * `amp threads export <id>`. Per model, cache-creation tokens stay cache writes
@@ -270,7 +270,7 @@ export function parseAmpThreadUsage(thread: unknown): AmpThreadUsage | undefined
     entry.inputTokens += count(usage.inputTokens);
     entry.outputTokens += count(usage.outputTokens);
     entry.cacheReadTokens += count(usage.cacheReadInputTokens);
-    if (billsCacheWrites(model)) entry.cacheWriteTokens += cacheCreation;
+    if (ampBillsCacheWrites(model)) entry.cacheWriteTokens += cacheCreation;
     else entry.inputTokens += cacheCreation;
     byModel.set(model, entry);
     last = usage;
@@ -653,7 +653,7 @@ class AmpSession implements ProviderSession {
    * killed mid-run (cancel) can lag behind on the server, or never reach it
    * (about one cancel in three was still empty after three retries), so one retry
    * follows an empty export and the cost then falls back to stream tokens,
-   * unpriced. A finished session is not retried.
+   * which the API prices as an estimate. A finished session is not retried.
    */
   private async exportUsage(): Promise<AmpThreadUsage | undefined> {
     let usage = await this.exportUsageOnce();
@@ -699,7 +699,7 @@ class AmpSession implements ProviderSession {
     const hasStreamTokens = t.input + t.output + t.cacheRead + t.cacheCreation > 0;
     if (!models && !hasStreamTokens) return undefined;
     // Without the export the stream's raw counts go out under the requested
-    // mode or pin, with no `models`, and the API settles the row unpriced.
+    // mode or pin, with no `models`, and the API prices them as an estimate.
     return {
       sessionId: this.sessionId,
       taskId: this.run.taskId,

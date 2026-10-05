@@ -939,8 +939,9 @@ export interface ServicesResponse {
  *  - 'harness'        — value reported by the harness as-is.
  *  - 'pricing-table'  — value recomputed by the API from `pricing` rows.
  *  - 'unpriced'       — recompute attempted but no matching pricing rows.
+ *  - 'estimated'      — fallback token counts priced at an assumed model.
  */
-export type SessionCostSource = "harness" | "pricing-table" | "unpriced";
+export type SessionCostSource = "harness" | "pricing-table" | "unpriced" | "estimated";
 
 export interface SessionCostModelBreakdown {
   model: string;

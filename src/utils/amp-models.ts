@@ -11,6 +11,24 @@ import { DEFAULT_MODEL_TIER_MAP } from "../types";
 export const AMP_MODES = ["low", "medium", "high", "ultra"] as const;
 export type AmpMode = (typeof AMP_MODES)[number];
 
+/**
+ * The model a session's cost is estimated at when `amp threads export` returns
+ * nothing (a cancelled thread can lag behind on the server or never reach it).
+ * Measured 2026-10-05: `low` ran GLM-5.3 Flash and `medium` ran Claude Opus 5.5.
+ * `high` and `ultra` were not measured and are assumed no cheaper than `medium`.
+ */
+export const AMP_ESTIMATE_MODELS: Readonly<Record<AmpMode, string>> = {
+  low: "accounts/fireworks/models/glm-5p3-flash",
+  medium: "claude-opus-5-5",
+  high: "claude-opus-5-5",
+  ultra: "claude-opus-5-5",
+};
+
+/** Anthropic bills prompt-cache writes; every other vendor's cache-creation count is plain input. */
+export function ampBillsCacheWrites(model: string): boolean {
+  return /^(anthropic\/)?claude/i.test(model);
+}
+
 /** A pinned model runs on top of this built-in mode's prompt and tools. */
 export const AMP_PIN_BASE_MODE: AmpMode = "medium";
 

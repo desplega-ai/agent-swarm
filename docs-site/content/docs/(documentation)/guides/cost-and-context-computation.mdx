@@ -31,13 +31,14 @@ The adapter writes via `POST /api/session-costs` with the `provider` field set.
 
 ### 2. API recompute
 
-When the API receives a `POST /api/session-costs` with a `provider` tag, it does a synchronous lookup against the `pricing` table for `(provider, model, token_class)` at the row's `createdAt`. Three outcomes:
+When the API receives a `POST /api/session-costs` with a `provider` tag, it does a synchronous lookup against the `pricing` table for `(provider, model, token_class)` at the row's `createdAt`. Four outcomes:
 
 | Outcome | `costSource` | Stored `totalCostUsd` |
 |---|---|---|
 | A tagged provider/model has the required pricing rows | `'pricing-table'` | Canonical server recompute |
 | No `provider` tag supplied (legacy caller) | `'harness'` | Adapter report |
 | A tag was supplied but pricing cannot be completed | `'unpriced'` | Adapter report |
+| `amp` without a per-model breakdown (the thread export failed) | `'estimated'` | Stream token totals priced at an assumed model |
 
 `harnessCostUsd` always preserves the adapter's submitted `totalCostUsd`, even
 when the server replaces `totalCostUsd` with the recomputed value.
@@ -87,7 +88,7 @@ pricing row.
 
 ### 3. UI badge
 
-The task-detail and task-detail-sheet views render the `costSource` next to every cost via `<CostSourceBadge>`. Mixed sources within a task aggregate render as `HARNESS` (the weakest claim).
+The task-detail and task-detail-sheet views render the `costSource` next to every cost via `<CostSourceBadge>` (`PRICED`, `HARNESS`, `NO RATE`, `ESTIMATED`). Mixed sources within a task aggregate render as `HARNESS` (the weakest claim).
 
 When both USD values are available and differ, the badge tooltip shows harness
 and recomputed numbers. The task cost view adds a visible `Δ` hint above 2%.
@@ -212,7 +213,7 @@ Fallback is 200k. Pre-Phase 4 the dated form fell to 200k unconditionally — wi
 - **pi-mono**: cost passes through verbatim from pi-ai's `stats.cost`. Context snapshots tag `contextFormula: 'pi-delegated'`. `durationMs` is now real wallclock (was hardcoded 0). Per-turn `outputTokens` are derived from session-stats delta.
 - **opencode**: passthrough through OpenRouter. The unified formula applies; `contextPercent` is clamped to [0, 100].
 - **dsh**: dsh reports tokens, not money. Each `status.step_end.usage` (one model call) becomes a context snapshot with the unified formula; the summed tokens become `CostData` with `totalCostUsd: 0` and `provider: 'dsh'`, and the API prices them from the `dsh` rows (`openrouter/` stripped for OpenRouter models). dsh's own `deepseek-flash` id is not in models.dev, so it stays `unpriced`.
-- **amp**: Amp reports tokens, not money, and its stream names no model. Each assistant message's usage becomes a context snapshot with the unified formula (window unknown until the session ends); at the end the adapter reads `amp threads export <id>` for the model of every request and Amp's context window, then posts `CostData` with `totalCostUsd: 0`, `provider: 'amp'` and a per-model breakdown. Amp's `cache_creation_input_tokens` is billed as cache writes for Anthropic models and as plain input for every other vendor. Subagent threads (Task, oracle, finder) are not in the export, so their tokens are not counted. When the export fails, the adapter posts the stream's raw counts under the requested mode or pin with no breakdown, and the API settles the row `unpriced` even for a priceable pin: nothing confirms the model that ran or how its cache-creation tokens bill. The priced USD is the vendor list price; Amp's billed credits can differ slightly.
+- **amp**: Amp reports tokens, not money, and its stream names no model. Each assistant message's usage becomes a context snapshot with the unified formula (window unknown until the session ends); at the end the adapter reads `amp threads export <id>` for the model of every request and Amp's context window, then posts `CostData` with `totalCostUsd: 0`, `provider: 'amp'` and a per-model breakdown. Amp's `cache_creation_input_tokens` is billed as cache writes for Anthropic models and as plain input for every other vendor. Subagent threads (Task, oracle, finder) are not in the export, so their tokens are not counted. When the export fails, the adapter posts the stream's raw counts under the requested mode or pin with no breakdown. The API never records $0 for it, because budget admission sums `totalCostUsd` and a zero row would let repeated sessions spend unchecked. It prices the stream totals at an assumed model and tags the row `estimated`: the pin when the table has its rates, otherwise the model the mode is known to run (`AMP_ESTIMATE_MODELS` in `src/utils/amp-models.ts`: `low` → GLM-5.3 Flash, `medium`/`high`/`ultra` → Claude Opus 5.5, measured for `low` and `medium` only), otherwise the `medium` model. Cache-creation tokens follow the same Anthropic-only cache-write rule. Only a broken pricing seed (no rates for the fallback model) leaves the row `unpriced`. The priced USD is the vendor list price; Amp's billed credits can differ slightly.
 - **devin**: ACU-based pricing (`token_class='acu'`, $2.25 per ACU). No per-token cost. No context events (the API doesn't report context info) — `peakContextTokens` remains `null` for devin tasks.
 
 ## Gotchas & known limitations
