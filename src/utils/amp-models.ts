@@ -46,6 +46,52 @@ export interface AmpModelSelection {
   pin?: string;
 }
 
+/**
+ * Providers Amp accepts in a pin, measured against the pinned CLI on
+ * 2026-10-05. Any other provider fails inside Amp ("Unknown model provider:
+ * google", "No actor inference facet for provider: deepseek"), but only after
+ * the task has started, so send-task rejects it first. Re-measure on a CLI bump.
+ */
+export const AMP_PIN_PROVIDERS = [
+  "anthropic",
+  "openai",
+  "vertexai",
+  "xai",
+  "fireworks",
+  "baseten",
+] as const;
+
+/** Pin providers whose model ids are the catalog section of the same name. */
+const AMP_CATALOG_CHECKED_PROVIDERS = new Set(["anthropic", "openai"]);
+
+type CatalogSections = Record<string, { models?: Record<string, unknown> } | undefined>;
+
+function splitPin(model: string): { value: string; provider: string; id: string } | null {
+  const value = model.trim();
+  const slash = value.indexOf("/");
+  return slash < 0 ? null : { value, provider: value.slice(0, slash), id: value.slice(slash + 1) };
+}
+
+/** Null for a mode or a pin whose provider Amp runs, else the reason. Pure. */
+export function ampPinProviderError(model: string): string | null {
+  const pin = splitPin(model);
+  if (!pin || (AMP_PIN_PROVIDERS as readonly string[]).includes(pin.provider)) return null;
+  return `Unknown amp model provider "${pin.provider}" in "${pin.value}". Amp runs pins from ${AMP_PIN_PROVIDERS.join(", ")}, or use a mode (${AMP_MODES.join(", ")}). If Amp has added this provider, set allowCustomModel: true.`;
+}
+
+/**
+ * Null unless an anthropic or openai pin names a model the catalog lacks (Amp
+ * answers "Model is not supported" for it once the task runs). An empty
+ * catalog section passes. Pure.
+ */
+export function ampPinCatalogError(model: string, catalog: CatalogSections): string | null {
+  const pin = splitPin(model);
+  if (!pin || !AMP_CATALOG_CHECKED_PROVIDERS.has(pin.provider)) return null;
+  const models = catalog[pin.provider]?.models;
+  if (!models || Object.hasOwn(models, pin.id)) return null;
+  return `Unknown amp model "${pin.value}": ${pin.provider} has no model "${pin.id}" in the model catalog. To run it anyway, set allowCustomModel: true.`;
+}
+
 /** The reason `model` is not an amp model, or null when it is one. */
 export function ampModelError(model: string): string | null {
   const value = model.trim();

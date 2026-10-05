@@ -29,7 +29,7 @@ import {
   type ModelsDevCatalog,
   parseAlias,
 } from "@desplega/model-catalog";
-import { ampModelError } from "../utils/amp-models";
+import { ampModelError, ampPinCatalogError, ampPinProviderError } from "../utils/amp-models";
 import { getAgentById, getAllAgents } from "./db";
 import { loadModelsCatalog } from "./model-catalog-store";
 import { resolveLatestAlias } from "./model-tier-resolution";
@@ -115,8 +115,15 @@ export async function explicitModelError(check: ExplicitModelCheck): Promise<str
   const model = check.model?.trim();
   if (!model) return null;
   if (check.harnessProvider && FREE_FORM_HARNESSES.has(check.harnessProvider)) return null;
-  // Amp runs a mode or a provider/model pin, nothing else; the catalog does not describe either.
-  if (check.harnessProvider === "amp") return ampModelError(model);
+  // Amp runs a mode or a provider/model pin, nothing else. A pin must name a
+  // provider Amp runs and, for anthropic/openai, a catalog model, unless the
+  // caller vouches for it (the provider list is measured, so Amp can outgrow it).
+  if (check.harnessProvider === "amp") {
+    const shapeError = ampModelError(model);
+    if (shapeError || check.allowCustomModel) return shapeError;
+    const { providers } = await loadModelsCatalog();
+    return ampPinProviderError(model) ?? ampPinCatalogError(model, providers as CatalogSections);
+  }
 
   const { providers } = await loadModelsCatalog();
   const catalog = providers as CatalogSections;

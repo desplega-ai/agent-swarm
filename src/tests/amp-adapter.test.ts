@@ -21,7 +21,12 @@ import {
 import { applyReasoningEffort } from "../providers/reasoning-effort";
 import type { ProviderEvent, ProviderSessionConfig } from "../providers/types";
 import { DEFAULT_MODEL_TIER_MAP } from "../types";
-import { ampModelError, resolveAmpModel } from "../utils/amp-models";
+import {
+  ampModelError,
+  ampPinCatalogError,
+  ampPinProviderError,
+  resolveAmpModel,
+} from "../utils/amp-models";
 import { getModelAwareCredentialVars } from "../utils/credentials";
 import { resolveHarnessProvider } from "../utils/harness-provider";
 import { clearVolatileSecretsForTesting } from "../utils/secret-scrubber";
@@ -179,6 +184,28 @@ describe("amp registration and model selection", () => {
     );
   });
 
+  test("a pin Amp cannot run is rejected at send-task, before the task starts", async () => {
+    const { explicitModelError } = await import("../be/model-validation");
+    const check = (model: string, allowCustomModel?: boolean) =>
+      explicitModelError({ model, harnessProvider: "amp", allowCustomModel });
+    // Live: Amp fails these with "Unknown model provider" / "Model is not supported".
+    expect(await check("qa-bogus/model-xyz")).toContain('Unknown amp model provider "qa-bogus"');
+    expect(await check("google/gemini-3-flash-preview")).toContain("Amp runs pins from");
+    expect(await check("anthropic/bogus-model-x")).toContain(
+      'anthropic has no model "bogus-model-x"',
+    );
+    // Pins Amp ran live, and a mode.
+    expect(await check("openai/gpt-5-nano")).toBeNull();
+    expect(await check("anthropic/claude-haiku-4-5-20251001")).toBeNull();
+    expect(await check("vertexai/gemini-3-flash-preview")).toBeNull();
+    expect(await check("low")).toBeNull();
+    // The escape hatch covers a provider or model Amp added after the measurement, never a bad shape.
+    expect(await check("qa-bogus/model-xyz", true)).toBeNull();
+    expect(await check("sonnet", true)).toContain("Unsupported amp model");
+    expect(ampPinProviderError("medium")).toBeNull();
+    expect(ampPinCatalogError("anthropic/x", {})).toBeNull();
+  });
+
   test("effort is offered for a pinned provider/model, never for a mode", () => {
     expect(applyReasoningEffort("amp", "low", "high")).toEqual({ kind: "noop" });
     expect(applyReasoningEffort("amp", "openai/gpt-5-nano", undefined)).toEqual({ kind: "noop" });
@@ -212,6 +239,7 @@ describe("amp plugin", () => {
       instructions: hostile,
       model: null,
       reasoningEffort: null,
+      steeringInbox: null,
     });
     expect(source.split("\n").filter((line) => line.includes("process.exit"))).toHaveLength(1);
   });
@@ -361,6 +389,8 @@ describe("amp session", () => {
       instructions: config.systemPrompt,
       model: null,
       reasoningEffort: null,
+      // Steering queues inside the per-task tree, next to the config.
+      steeringInbox: join(dirname(run.env.XDG_CONFIG_HOME), "steering"),
     });
     // The per-task tree (config, plugin and the MCP file with the bearer) is gone.
     expect(existsSync(dirname(run.env.XDG_CONFIG_HOME))).toBe(false);
@@ -549,6 +579,19 @@ describe("amp session", () => {
     expect(badKey.result.failureReason).toContain("Invalid or missing API key");
   });
 
+  test("Amp's own error ends the run at once and becomes the failure reason", async () => {
+    const { config } = await fixture("unknown-provider");
+    const session = await new AmpAdapter({ exitAfterInputMs: 30_000 }).createSession(config);
+    const started = Date.now();
+    const result = await session.waitForCompletion();
+    // Input closes on the result, so no watchdog runs out first.
+    expect(Date.now() - started).toBeLessThan(10_000);
+    expect(result).toMatchObject({
+      isError: true,
+      failureReason: "Unknown model provider: qa-bogus",
+    });
+  });
+
   test("a key split across stderr chunks is redacted in every event and the failure reason", async () => {
     const { config } = await fixture("stderr-split-key");
     const { events, result } = await runToCompletion(config);
@@ -564,12 +607,30 @@ describe("amp session", () => {
     expect(result.failureReason).not.toContain(KEY);
   });
 
-  test("queued steering runs after the turn, then input closes and late steering is refused", async () => {
+  test("queued steering during a tool call lands in that tool's result, inside the turn", async () => {
     const { config } = await fixture("steer");
     const session = await new AmpAdapter().createSession(config);
     const events: ProviderEvent[] = [];
     session.onEvent((event) => events.push(event));
-    // First turn is inside its 600ms tool call.
+    // The turn is inside its 600ms tool call.
+    await Bun.sleep(250);
+    expect(
+      await session.deliverSteering?.({ mode: "queue", text: "[steering s1] append ACK-1" }),
+    ).toEqual({ delivered: true, mode: "queue" });
+    const result = await session.waitForCompletion();
+    const toolEnd = events.find((e) => e.type === "tool_end");
+    expect(toolEnd).toMatchObject({ result: "2\n\n[steering s1] append ACK-1" });
+    // Delivered once: no second turn replays it.
+    expect(result).toMatchObject({ isError: false, output: "DONE1" });
+    expect(result.cost?.numTurns).toBe(1);
+  });
+
+  test("steering after the last tool result starts the next turn, then late steering is refused", async () => {
+    const { config } = await fixture("steer-no-tool");
+    const session = await new AmpAdapter().createSession(config);
+    const events: ProviderEvent[] = [];
+    session.onEvent((event) => events.push(event));
+    // The turn is thinking for 600ms with no tool call left to carry the message.
     await Bun.sleep(250);
     expect(await session.deliverSteering?.({ mode: "queue", text: "also say DONE2" })).toEqual({
       delivered: true,

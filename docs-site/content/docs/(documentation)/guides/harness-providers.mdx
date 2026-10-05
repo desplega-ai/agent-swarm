@@ -437,7 +437,12 @@ private`, but there is no local-only mode.
   `high` GPT-6 Astra and `ultra` Claude Fable 5.1. A concrete `model` is a `provider/model` id
   (`openai/gpt-5-nano`, `anthropic/claude-haiku-4-5-20251001`), pinned through the
   per-task plugin agent on top of the `medium` mode's prompt and tools. Anything
-  else is rejected at send-task, agent runtime and session start.
+  else is rejected at send-task, agent runtime and session start. Send-task and
+  the agent runtime also reject a pin whose provider Amp does not run (measured
+  2026-10-05: `anthropic`, `openai`, `vertexai`, `xai`, `fireworks`, `baseten`)
+  and an `anthropic`/`openai` model missing from the catalog;
+  `allowCustomModel: true` skips both checks for a provider or model Amp added
+  later.
 - **Swarm MCP.** The per-task `--mcp-config` file (mode `0600`, removed with the
   temporary directory) carries the swarm URL and the five per-task headers. The
   session fails when Amp's `init` event does not list the server, or lists it as
@@ -465,11 +470,19 @@ private`, but there is no local-only mode.
   When the export is empty too, the stream totals are priced at the mode's
   model and tagged `estimated`, never $0. A model missing from the table
   settles `unpriced`.
-- **Steering.** `steerModes: ["queue"]`. A stdin message sent during a turn
-  waits for the turn to end (verified live). Amp emits `result` only when stdin
-  closes, so the adapter ends input at the first top-level assistant message
-  with no tool call and nothing queued; a steer after that is refused and the
-  runner promotes it to a follow-up task.
+- **Steering.** `steerModes: ["queue"]`. A queued steer goes to a per-task
+  inbox directory, and the plugin's `tool.result` hook appends it to the next
+  tool result, so the model reads it mid-turn (verified live during a
+  `sleep 25` shell call). Amp's own stdin queue would hold it until the turn
+  ends, usually after the task has finished. A steer that no tool result
+  carries goes to stdin at the turn end and starts another turn; each message is
+  claimed by an atomic rename, so it is delivered once. Amp emits `result` only
+  when stdin closes, so the adapter ends input at the first top-level assistant
+  message with no tool call and nothing queued; a steer after that is refused
+  and the runner promotes it to a follow-up task.
+- **Failed results.** A `result` event ends input at once, so an early
+  failure (an unknown pin fails within seconds) does not wait on a watchdog.
+  Amp's `error` text (`Unknown model provider: x`) becomes the failure reason.
 - **Cancel and failure.** Process-tree termination on every stop (cancel, MCP
   failure, stdin failure, the exit watchdog): Amp runs shell commands in a session of
   its own, so the group kill alone left `sleep` running. The adapter lists the

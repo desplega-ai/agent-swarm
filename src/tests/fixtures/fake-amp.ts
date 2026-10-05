@@ -10,6 +10,9 @@
  *                                     reads user messages from stdin and emits
  *                                     `result` only once stdin closes.
  *
+ * The steering modes load the generated plugin and run its `tool.result` hook
+ * on each tool result, as Amp does.
+ *
  * `AMP_TEST_MODE` picks the behaviour, `AMP_TEST_DIR` is where it records what
  * it was given (the adapter deletes its own temp dir when the session ends).
  */
@@ -144,6 +147,22 @@ async function main() {
     await Bun.sleep(50);
     process.exit(1);
   }
+  if (mode === "unknown-provider") {
+    // Amp fails the pin at once but, like the real CLI, waits for input to end before exiting.
+    emit({
+      type: "result",
+      subtype: "error_during_execution",
+      duration_ms: 2027,
+      is_error: true,
+      num_turns: 0,
+      error: "Unknown model provider: qa-bogus",
+      session_id: sessionId,
+    });
+    for await (const _ of Bun.stdin.stream()) {
+      // Drain until EOF.
+    }
+    process.exit(0);
+  }
   if (mode === "bad-key") {
     console.error("Error: Invalid or missing API key. Run 'amp login' to authenticate.");
     process.exit(1);
@@ -166,6 +185,27 @@ async function main() {
       session_id: sessionId,
     });
 
+  const hooks = new Map<string, (event: unknown) => unknown>();
+  if (mode.startsWith("steer")) {
+    const plugin = await import(`${xdg}/amp/plugins/agent-swarm.ts`);
+    plugin.default({
+      on: (name: string, handler: (event: unknown) => unknown) => hooks.set(name, handler),
+      registerAgentMode: () => {},
+      createAgent: () => ({ definition: {} }),
+    });
+  }
+  const toolResult = async (output: unknown) => {
+    const hooked = (await hooks.get("tool.result")?.({
+      toolUseID: "TU-1",
+      tool: "code_exec",
+      input: {},
+      status: "done",
+      output,
+      thread: { id: sessionId },
+    })) as { output?: unknown } | undefined;
+    return hooked?.output ?? output;
+  };
+
   let turns = 0;
   let lastText = "";
   const handle = async (text: string, index: number) => {
@@ -186,7 +226,14 @@ async function main() {
         type: "user",
         message: {
           role: "user",
-          content: [{ type: "tool_result", tool_use_id: "TU-1", content: "2", is_error: false }],
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: "TU-1",
+              content: await toolResult("2"),
+              is_error: false,
+            },
+          ],
         },
         parent_tool_use_id: null,
         session_id: sessionId,
@@ -194,7 +241,9 @@ async function main() {
     }
     // A shell command the turn left running, then a clean finish.
     if (mode === "success-child") await startDetachedChild();
-    lastText = mode === "steer" ? `DONE${index + 1}` : "Done ✓";
+    // A turn that thinks for a while with no tool call.
+    if (mode === "steer-no-tool") await Bun.sleep(600);
+    lastText = mode.startsWith("steer") ? `DONE${index + 1}` : "Done ✓";
     assistant([{ type: "text", text: lastText }], "end_turn");
   };
 
