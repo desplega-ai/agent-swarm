@@ -78,3 +78,8 @@ agent-fs signed-url thoughts/<agent-id>/qa/<topic>-screenshots/<name>.png --json
 - If `agent-fs auth whoami` fails, report the local path, say the upload was skipped, and continue.
 
 The `artifacts` skill holds the full agent-fs recipe and the naming conventions.
+
+## Gotchas
+
+- `wait <selector>` waits for a VISIBLE match. When the first match is hidden it times out (about 25 s) even though the element exists. Wait on rendered text instead: `wait --text "<rendered text>"`.
+- Never run `pkill -f <pattern>` inside a Bash call: the pattern also matches the calling shell's command line and kills it. Record the PID when you start a background server (`echo $!`) and `kill <pid>`.

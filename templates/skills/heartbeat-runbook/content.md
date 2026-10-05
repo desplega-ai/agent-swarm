@@ -27,6 +27,7 @@ Two kinds of sections:
 
 ## Handle a heartbeat-checklist task
 
+0. Quiet check. Take the fast path when three things hold: the system status shows no failed, stalled or reboot-interrupted task; no mention has gone unanswered since the last heartbeat; and no tracked item in the task's runbook snapshot is at or past its date. On the fast path, run the two step 3 scripts. If both are clean, complete with one line that names the zero counts and skip steps 1, 2 and 4-7. Anything non-zero means continue at step 1.
 1. Read the latest runbook. The snapshot in the task may be stale.
 2. Prune first. Check every tracked item against its lift trigger. Remove resolved, stale, and past-date items.
 3. Run the seeded scripts: `script-run` with name `schedule-health`, then `task-failure-audit`, both with `args: { days: 1, publishPage: false }`. They report failing schedules and failure clusters. Check any other standing order in the runbook yourself.
