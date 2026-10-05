@@ -201,6 +201,7 @@ describe("amp registration and model selection", () => {
     expect(await check("low")).toBeNull();
     // The escape hatch covers a provider or model Amp added after the measurement, never a bad shape.
     expect(await check("qa-bogus/model-xyz", true)).toBeNull();
+    expect(await check("anthropic/bogus-model-x", true)).toBeNull();
     expect(await check("sonnet", true)).toContain("Unsupported amp model");
     expect(ampPinProviderError("medium")).toBeNull();
     expect(ampPinCatalogError("anthropic/x", {})).toBeNull();
@@ -644,6 +645,65 @@ describe("amp session", () => {
     expect(await session.deliverSteering?.({ mode: "queue", text: "too late" })).toEqual({
       delivered: false,
       reason: "Amp is no longer reading input (the turn has ended)",
+    });
+  });
+
+  test("steering accepted at the turn-end boundary is carried by the next turn, never lost", async () => {
+    const { config } = await fixture("steer-no-tool");
+    const session = await new AmpAdapter().createSession(config);
+    let delivery: Promise<unknown> | undefined;
+    // The raw line of the final assistant message is emitted before the adapter
+    // handles that message as the turn end: the narrowest window there is.
+    session.onEvent((event) => {
+      if (
+        !delivery &&
+        event.type === "raw_log" &&
+        event.content.includes('"type":"assistant"') &&
+        event.content.includes("DONE1")
+      ) {
+        delivery = session.deliverSteering?.({ mode: "queue", text: "also say DONE2" });
+      }
+    });
+    const result = await session.waitForCompletion();
+    expect(await delivery).toEqual({ delivered: true, mode: "queue" });
+    expect(result).toMatchObject({ isError: false, output: "DONE2" });
+    expect(result.cost?.numTurns).toBe(2);
+  });
+
+  test("a steer whose stdin write fails is reported undeliverable", async () => {
+    const { config } = await fixture("steer-no-tool");
+    const session = await new AmpAdapter().createSession(config);
+    await Bun.sleep(250);
+    // The prompt is written; every later write fails, as on a broken pipe.
+    const real = (session as unknown as { proc: { stdin: { end(): unknown } } }).proc.stdin;
+    Object.defineProperty(session, "stdin", {
+      get: () => ({ write: () => Promise.reject(new Error("EPIPE")), end: () => real.end() }),
+    });
+    const delivery = await session.deliverSteering?.({ mode: "queue", text: "also say DONE2" });
+    expect(delivery).toMatchObject({ delivered: false });
+    expect((delivery as { reason: string }).reason).toContain("Amp stdin write failed");
+    expect(await session.waitForCompletion()).toMatchObject({ output: "DONE1" });
+  });
+
+  test("a steer handed to Amp is reported undeliverable when Amp dies before the model reads it", async () => {
+    const { config } = await fixture("steer-crash");
+    const session = await new AmpAdapter().createSession(config);
+    const events: ProviderEvent[] = [];
+    session.onEvent((event) => events.push(event));
+    await Bun.sleep(250);
+    const delivery = session.deliverSteering?.({
+      mode: "queue",
+      text: "[steering s1] append ACK-1",
+    });
+    const result = await session.waitForCompletion();
+    // The hook did claim it into the tool result; the model never answered.
+    expect(events.find((e) => e.type === "tool_end")).toMatchObject({
+      result: "2\n\n[steering s1] append ACK-1",
+    });
+    expect(result.isError).toBe(true);
+    expect(await delivery).toEqual({
+      delivered: false,
+      reason: "Amp exited before the steering message reached the model",
     });
   });
 

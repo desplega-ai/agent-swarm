@@ -476,10 +476,14 @@ private`, but there is no local-only mode.
   `sleep 25` shell call). Amp's own stdin queue would hold it until the turn
   ends, usually after the task has finished. A steer that no tool result
   carries goes to stdin at the turn end and starts another turn; each message is
-  claimed by an atomic rename, so it is delivered once. Amp emits `result` only
-  when stdin closes, so the adapter ends input at the first top-level assistant
-  message with no tool call and nothing queued; a steer after that is refused
-  and the runner promotes it to a follow-up task.
+  claimed by an atomic rename, so only one path carries it. A steer reports
+  `delivered` only on a consumption receipt: the next assistant message after
+  the hook handed it to Amp, or Amp's echo of the stdin message. If Amp exits,
+  a stdin write fails or input closes first, it reports `undeliverable` and the
+  runner promotes it to a follow-up task (at-least-once: a crash right after the
+  model read it can repeat it). Amp emits `result` only when stdin closes, so
+  the adapter ends input at the first top-level assistant message with no tool
+  call and nothing queued; a steer after that is refused and promoted too.
 - **Failed results.** A `result` event ends input at once, so an early
   failure (an unknown pin fails within seconds) does not wait on a watchdog.
   Amp's `error` text (`Unknown model provider: x`) becomes the failure reason.

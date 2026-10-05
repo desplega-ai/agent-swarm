@@ -1,5 +1,5 @@
-import { readdirSync, readFileSync, renameSync, rmSync } from "node:fs";
-import { mkdir, mkdtemp, rename, rm, writeFile } from "node:fs/promises";
+import { existsSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -116,7 +116,12 @@ export const description = "Agent Swarm worker mode generated for one task.";
 
 const CONFIG = ${config};
 
-/** Claim each queued message by renaming it, so the worker and this hook never both deliver one. */
+/**
+ * Claim each queued message by renaming it (.json -> .taken), so the worker and
+ * this hook never both deliver one. A message handed to Amp becomes .read and
+ * stays until the worker sees the model answer: a crash before that leaves it
+ * for the worker to report as undelivered.
+ */
 function takeSteering(): string[] {
 	if (!CONFIG.steeringInbox) return [];
 	let names: string[];
@@ -134,12 +139,19 @@ function takeSteering(): string[] {
 		} catch {
 			continue;
 		}
+		let text: string;
 		try {
-			texts.push(JSON.parse(readFileSync(claimed, "utf8")));
+			text = JSON.parse(readFileSync(claimed, "utf8"));
 		} catch {
-			// A message that cannot be read is dropped, never retried forever.
-		} finally {
+			// Unreadable: dropped, and the worker reports it undelivered.
 			rmSync(claimed, { force: true });
+			continue;
+		}
+		texts.push(text);
+		try {
+			renameSync(claimed, path + ".read");
+		} catch {
+			// The worker treats a claim left as .taken as unconsumed.
 		}
 	}
 	return texts;
@@ -417,6 +429,13 @@ function userMessage(text: string): string {
   })}\n`;
 }
 
+/** An accepted steer: queued in the inbox for the hook, or claimed for stdin at turn end. */
+interface QueuedSteer {
+  text: string;
+  via: "inbox" | "stdin";
+  resolve: (result: SteerDeliveryResult) => void;
+}
+
 interface AmpRun {
   selection: AmpModelSelection;
   reasoningEffort: ReasoningEffort | null;
@@ -456,6 +475,8 @@ class AmpSession implements ProviderSession {
   private descendants = new Set<number>();
   private captures: Promise<void>[] = [];
   private steeringSeq = 0;
+  /** Accepted steering not yet consumed, by inbox file name. Each settles exactly once. */
+  private steers = new Map<string, QueuedSteer>();
 
   constructor(
     private proc: Bun.Subprocess<"pipe", "pipe", "pipe">,
@@ -475,15 +496,22 @@ class AmpSession implements ProviderSession {
         ...(run.reasoningEffort ? { reasoningEffort: run.reasoningEffort } : {}),
       }),
     });
-    this.deliverSteering = async ({ text }) => {
+    // Resolves once the model has the message, or undeliverable when the run
+    // ends first, so the runner promotes every steer Amp never consumed.
+    this.deliverSteering = ({ text }) => {
       if (this.inputClosed || this.aborted) {
-        return { delivered: false, reason: "Amp is no longer reading input (the turn has ended)" };
+        return Promise.resolve({
+          delivered: false,
+          reason: "Amp is no longer reading input (the turn has ended)",
+        });
       }
       try {
-        await this.queueSteering(text);
-        return { delivered: true, mode: "queue" };
+        return this.queueSteering(text);
       } catch (error) {
-        return { delivered: false, reason: `Amp steering inbox write failed: ${String(error)}` };
+        return Promise.resolve({
+          delivered: false,
+          reason: `Amp steering inbox write failed: ${String(error)}`,
+        });
       }
     };
     this.completion = this.runSession(prompt);
@@ -512,42 +540,79 @@ class AmpSession implements ProviderSession {
   /**
    * Queue a message for the plugin's `tool.result` hook (see `buildAmpPlugin`).
    * The file appears whole (write, then rename), and names sort in arrival order.
+   * Publication is synchronous on purpose: between the caller's `inputClosed`
+   * check and the rename, no turn end can drain the inbox and close input, so
+   * a message is either visible to the next drain or refused.
    */
-  private async queueSteering(text: string): Promise<void> {
+  private queueSteering(text: string): Promise<SteerDeliveryResult> {
     const name = `${String(++this.steeringSeq).padStart(6, "0")}.json`;
     const temp = join(this.run.steeringInbox, `.${name}.tmp`);
-    await writeFile(temp, JSON.stringify(text), { mode: 0o600 });
-    await rename(temp, join(this.run.steeringInbox, name));
+    writeFileSync(temp, JSON.stringify(text), { mode: 0o600 });
+    renameSync(temp, join(this.run.steeringInbox, name));
+    return new Promise((resolve) => {
+      this.steers.set(name, { text, via: "inbox", resolve });
+    });
   }
 
-  /** Claim the messages no tool result carried, with the plugin's rename protocol. */
-  private takeSteering(): string[] {
-    let names: string[];
-    try {
-      names = readdirSync(this.run.steeringInbox)
-        .filter((name) => name.endsWith(".json"))
-        .sort();
-    } catch {
-      return [];
+  private inboxPath(name: string, suffix = ""): string {
+    return join(this.run.steeringInbox, name + suffix);
+  }
+
+  private settleSteer(name: string, result: SteerDeliveryResult): void {
+    const steer = this.steers.get(name);
+    if (!steer) return;
+    this.steers.delete(name);
+    for (const suffix of ["", ".taken", ".read", ".stdin"]) {
+      rmSync(this.inboxPath(name, suffix), { force: true });
     }
-    const texts: string[] = [];
-    for (const name of names) {
-      const path = join(this.run.steeringInbox, name);
-      const claimed = `${path}.taken`;
+    steer.resolve(result);
+  }
+
+  /** Every steer still open when the run can take no more input was never consumed. */
+  private settleOpenSteers(reason: string): void {
+    for (const name of [...this.steers.keys()]) {
+      this.settleSteer(name, { delivered: false, reason });
+    }
+  }
+
+  /**
+   * The consumption receipt for the hook path. A message the plugin handed to
+   * Amp (`.read`) reached the model once Amp answers after that tool result.
+   * A message no file holds any more was unreadable and dropped by the plugin.
+   * A `.taken` file is a claim still in progress, or one whose claimant died:
+   * it stays open and the end of the run reports it undelivered.
+   */
+  private acknowledgeHookSteering(): void {
+    for (const [name, steer] of [...this.steers]) {
+      if (steer.via !== "inbox") continue;
+      if (existsSync(this.inboxPath(name, ".read"))) {
+        this.settleSteer(name, { delivered: true, mode: "queue" });
+      } else if (!existsSync(this.inboxPath(name)) && !existsSync(this.inboxPath(name, ".taken"))) {
+        this.settleSteer(name, {
+          delivered: false,
+          reason: "Amp could not read the queued steering message",
+        });
+      }
+    }
+  }
+
+  /**
+   * Claim the messages no tool result carried, with the plugin's rename
+   * protocol (`.json -> .stdin`). They stay open until Amp echoes them.
+   */
+  private takeSteering(): { name: string; text: string }[] {
+    const taken: { name: string; text: string }[] = [];
+    for (const [name, steer] of [...this.steers].sort(([a], [b]) => a.localeCompare(b))) {
+      if (steer.via !== "inbox") continue;
       try {
-        renameSync(path, claimed);
+        renameSync(this.inboxPath(name), this.inboxPath(name, ".stdin"));
       } catch {
         continue; // The plugin took it.
       }
-      try {
-        texts.push(JSON.parse(readFileSync(claimed, "utf8")));
-      } catch {
-        // Unreadable: dropped, as the plugin does.
-      } finally {
-        rmSync(claimed, { force: true });
-      }
+      steer.via = "stdin";
+      taken.push({ name, text: steer.text });
     }
-    return texts;
+    return taken;
   }
 
   /**
@@ -559,6 +624,10 @@ class AmpSession implements ProviderSession {
     if (this.inputClosed) return;
     this.inputClosed = true;
     clearTimeout(this.echoWatchdog);
+    // No turn is left to carry or echo an open steer, so the runner promotes it.
+    this.settleOpenSteers(
+      "Amp stopped reading input before the steering message reached the model",
+    );
     // EOF makes amp finish and exit, so the tree is read first.
     void this.captureDescendants().finally(() => {
       try {
@@ -608,8 +677,14 @@ class AmpSession implements ProviderSession {
    */
   private onTurnEnd(): void {
     if (this.inputClosed) return;
-    for (const text of this.takeSteering()) {
-      this.writeInput(text).catch(() => this.endInput());
+    for (const { name, text } of this.takeSteering()) {
+      this.writeInput(text).catch((error) => {
+        this.settleSteer(name, {
+          delivered: false,
+          reason: `Amp stdin write failed: ${scrubSecrets(String(error))}`,
+        });
+        this.endInput();
+      });
     }
     if (this.unechoed.length === 0) {
       this.endInput();
@@ -672,6 +747,9 @@ class AmpSession implements ProviderSession {
   private onAssistant(event: AmpStreamEvent): void {
     const message = event.message;
     if (!message) return;
+    // Amp answering proves the model read the tool results before it, so this
+    // runs before a turn end can drain or close anything.
+    this.acknowledgeHookSteering();
     const blocks = Array.isArray(message.content) ? message.content : [];
     const topLevel = !event.parent_tool_use_id;
     const text = blocks
@@ -722,8 +800,16 @@ class AmpSession implements ProviderSession {
         this.emit({ type: "tool_end", toolCallId, toolName, result: block.content });
       } else if (block.type === "text" && !event.parent_tool_use_id) {
         // Amp echoes each user message as its turn starts.
-        const index = this.unechoed.indexOf((block.text ?? "").trim());
+        const echoed = (block.text ?? "").trim();
+        const index = this.unechoed.indexOf(echoed);
         if (index >= 0) this.unechoed.splice(index, 1);
+        // The echo is the consumption receipt for a steer sent over stdin.
+        for (const [name, steer] of this.steers) {
+          if (steer.via === "stdin" && steer.text.trim() === echoed) {
+            this.settleSteer(name, { delivered: true, mode: "queue" });
+            break;
+          }
+        }
         clearTimeout(this.echoWatchdog);
       }
     }
@@ -901,6 +987,7 @@ class AmpSession implements ProviderSession {
       ]);
       clearTimeout(this.exitWatchdog);
       clearTimeout(this.echoWatchdog);
+      this.settleOpenSteers("Amp exited before the steering message reached the model");
       await this.termination;
       if (!this.termination) {
         await Promise.all(this.captures);
@@ -963,6 +1050,7 @@ class AmpSession implements ProviderSession {
         failureReason,
       };
     } finally {
+      this.settleOpenSteers("Amp exited before the steering message reached the model");
       await rm(this.directory, { recursive: true, force: true });
     }
   }
