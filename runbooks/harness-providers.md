@@ -1,6 +1,6 @@
 # Harness providers runbook
 
-Operational rules for editing or adding harness providers (claude, codex, opencode, pi, devin, acp, dsh, amp, future).
+Operational rules for editing or adding harness providers (claude, codex, opencode, pi, devin, acp, dsh, cursor, amp, future).
 
 ## Supported providers
 
@@ -15,6 +15,7 @@ Operational rules for editing or adding harness providers (claude, codex, openco
 | ACP | `acp` | `ACPAdapter` | Curated `opencode` preset or a custom [Agent Client Protocol](https://agentclientprotocol.com) command. Session knobs such as model use `session/set_config_option` when advertised, with target-specific startup fallbacks. No swarm-side *model-provider* credential — the target owns its own model auth. The target receives the worker's swarm API key as the swarm MCP bearer, so point custom targets only at binaries you trust |
 | DeepSeek Harness | `dsh` | `DshAdapter` | Spawns `dsh --profile headless --json` per task; OpenRouter or direct DeepSeek API. See [DeepSeek Harness](#deepseek-harness-dsh) below |
 | Amp | `amp` | `AmpAdapter` | Spawns `amp -x --stream-json --stream-json-input` per task; `AMP_API_KEY`; every thread is stored on ampcode.com. See [Amp](#amp-amp) below |
+| Cursor | `cursor` | `CursorAdapter` | In-process `@cursor/sdk` local runtime; inference on Cursor's hosted models with `CURSOR_API_KEY`. See [Cursor](#cursor-cursor) below |
 
 ## Amp (`amp`)
 
@@ -166,6 +167,64 @@ the context preamble). Developer-preview compatibility can change.
 
 Verified against the [upstream headless documentation](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.2.1-alpha.1/packages/bundle/headless/README.md)
 and the installed CLI's top-level and headless help.
+
+## Cursor (`cursor`)
+
+Set `HARNESS_PROVIDER=cursor` and `CURSOR_API_KEY` (a Cursor user or
+service-account key; Team Admin keys do not work). The adapter runs
+`@cursor/sdk` (pinned `1.0.35`) in-process: `Agent.create` with the local
+runtime on the task's cwd, then one `agent.send` per run. The agent loop and
+its file and shell tools run in the worker; inference always runs on Cursor's
+hosted models and bills the key's Cursor plan.
+
+- **Models.** `model` is a bare Cursor model id from `Cursor.models.list()`
+  (account-specific, so the swarm does not validate it against the catalog).
+  Tiers: smol `gpt-5.4-mini`, regular `claude-sonnet-5-5`, smart
+  `claude-opus-5-5`, ultra `claude-fable-5-1`. Aliases (`sonnet-4.6`) resolve
+  through the live model list.
+- **Reasoning effort.** Each Cursor model names its own effort parameter
+  (`reasoning`, `reasoning_effort` or `effort`) and values. The adapter writes
+  the level into that parameter of `model.params` (`off` becomes `none`, or
+  `thinking=false` on models with only a thinking toggle; `xhigh` becomes
+  `extra-high` where the model spells it so). A level the model does not list
+  is not sent, and `appliedReasoningEffort` reports `null`. The offered levels
+  come from the vendor's catalog row (`cursorCatalogRef`).
+- **System prompt.** Cursor enables `systemPrompt` per account. Ours is not
+  enabled: the first send fails with `unknown option '--system-prompt'`. So by
+  default the swarm prompt rides at the top of the first user message, inside
+  `<system_instructions>` (the `system.agent.cursor.first_message` prompt
+  template), on top of Cursor's own system prompt. With
+  `CURSOR_NATIVE_SYSTEM_PROMPT=true` the adapter passes `systemPrompt` and, if
+  Cursor rejects it with that error, rebuilds the agent and falls back to the
+  first-message path in the same session.
+- **Swarm MCP.** `mcpServers["agent-swarm"]` over `http` to
+  `${MCP_BASE_URL}/mcp` with the per-task headers (`Authorization`,
+  `X-Agent-ID`, `X-Source-Task-Id`, `X-Context-Key`, `X-Runtime-Instance-ID`).
+  Cursor reports every MCP call as tool `mcp`; the adapter and the dashboard
+  name it `mcp__agent-swarm__<tool>`.
+- **Steering.** `steer` calls `run.steer()` on the live run. When the SDK
+  answers `revert_to_followup`, or the mode is `queue`, the message starts the
+  next run on the same agent once the current run finishes.
+- **Cancel.** `abort()` calls `run.cancel()`, which stops in-flight tools.
+- **Sandbox.** `sandboxOptions.enabled: false`: the worker container is the
+  sandbox, as for codex and dsh.
+- **Cost and context.** Usage arrives once per run, summed over its model
+  calls; there is no per-call figure, and `agent.getUsage()` (billed cents)
+  answers `feature_unavailable` for local agents. `CostData` carries the
+  tokens (`provider: "cursor"`, `totalCostUsd: 0`) and the API prices them from
+  the `cursor` rows, projected from the vendor sections. Cursor's
+  `inputTokens` includes cache reads, so the adapter subtracts them. The
+  context snapshot is the run's per-call average, tagged `peak-proxy`.
+- **State.** Each session uses a throwaway `JsonlLocalAgentStore` under a temp
+  dir; no conversation outlives the task (`canResume` is false).
+- **Image.** The compiled worker binary carries the SDK's JS. `worker-full`
+  installs the SDK's platform package in `/opt/cursor-sdk` and points
+  `CURSOR_RIPGREP_PATH` and `CURSOR_TREE_SITTER_VENDOR_DIR` at it. Without
+  them shell-command analysis degrades (a warning, not a failure).
+
+Verified against a real key on 2026-10-05: a task that completes through
+`store-progress`, a tier and a concrete-model override, a mid-run steer, a
+mid-run cancel, and a bogus-key negative control.
 
 ## Claude transport selection
 

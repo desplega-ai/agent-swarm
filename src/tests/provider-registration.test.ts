@@ -232,6 +232,7 @@ const BOOTSTRAP: Record<ProviderName, { expect: string } | { exempt: string }> =
   claude: { expect: "Warning: claude provider has no credentials yet" },
   dsh: { expect: "Warning: dsh provider has no credentials yet" },
   amp: { expect: "Warning: amp provider has no credentials yet" },
+  cursor: { expect: "Warning: cursor provider has no credentials yet" },
   pi: { expect: "Warning: pi provider has no credentials yet" },
   opencode: { expect: "Warning: opencode provider has no credentials yet" },
   "claude-managed": { expect: "Warning: claude-managed provider missing:" },

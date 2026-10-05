@@ -55,13 +55,17 @@ export async function createProviderAdapter(provider: string): Promise<ProviderA
       const { AmpAdapter } = await import("./amp-adapter");
       return new AmpAdapter();
     }
+    case "cursor": {
+      const { CursorAdapter } = await import("./cursor-adapter");
+      return new CursorAdapter();
+    }
     case "acp": {
       const { ACPAdapter } = await import("./acp-adapter");
       return new ACPAdapter();
     }
     default:
       throw new Error(
-        `Unknown HARNESS_PROVIDER: "${provider}". Supported: claude, pi, codex, devin, claude-managed, opencode, acp, dsh, amp`,
+        `Unknown HARNESS_PROVIDER: "${provider}". Supported: claude, pi, codex, devin, claude-managed, opencode, acp, dsh, cursor, amp`,
       );
   }
 }

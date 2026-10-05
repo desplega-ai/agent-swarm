@@ -92,6 +92,7 @@ declare module "swarm-extension" {
             | "acp"
             | "dsh"
             | "amp"
+            | "cursor"
             | undefined;
           leadOnly?: boolean | undefined;
         }
@@ -219,6 +220,7 @@ declare module "swarm-extension" {
       | "acp"
       | "dsh"
       | "amp"
+      | "cursor"
       | undefined;
     providerMeta?: Record<string, unknown> | undefined;
     harnessVariant?: string | undefined;
@@ -239,6 +241,7 @@ declare module "swarm-extension" {
             | "acp"
             | "dsh"
             | "amp"
+            | "cursor"
             | undefined;
           leadOnly?: boolean | undefined;
         }

@@ -21,6 +21,7 @@ const EM_DASH = "\u2014";
 const SYSTEM_TEMPLATES = [
   "system.agent.communication",
   "system.agent.communication.remote",
+  "system.agent.cursor.first_message",
   "system.agent.lead",
   "system.agent.memory",
   "system.agent.memory.remote",

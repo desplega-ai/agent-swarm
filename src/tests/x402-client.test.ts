@@ -115,3 +115,127 @@ describe("createX402Client", () => {
     expect(client.config.signerType).toBe("viem");
   });
 });
+
+describe("createX402Client spending reservations (real x402 core client)", () => {
+  const originalEnv = { ...process.env };
+
+  // $5 USDC on Base Sepolia, signed locally by the viem signer (no network calls)
+  const paymentRequired = {
+    x402Version: 2,
+    resource: { url: "https://paid.example/resource" },
+    accepts: [
+      {
+        scheme: "exact",
+        network: "eip155:84532",
+        amount: "5000000",
+        asset: "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+        payTo: "0x4f27DC247a55EA5920F8311A25672Ed1B590792d",
+        maxTimeoutSeconds: 60,
+        extra: { name: "USDC", version: "2" },
+      },
+    ],
+  } as unknown as Parameters<
+    Awaited<ReturnType<typeof createX402Client>>["x402Client"]["createPaymentPayload"]
+  >[0];
+
+  beforeEach(() => {
+    process.env.EVM_PRIVATE_KEY = TEST_PRIVATE_KEY;
+    process.env.X402_SIGNER_TYPE = "viem";
+    delete process.env.X402_NETWORK;
+  });
+
+  afterEach(() => {
+    process.env = { ...originalEnv };
+  });
+
+  test("confirms the reservation once the payment is created", async () => {
+    const client = await createX402Client({ maxAutoApprove: 5, dailyLimit: 10 });
+
+    await client.x402Client.createPaymentPayload(paymentRequired);
+
+    const summary = client.getSpendingSummary();
+    expect(summary.todaySpent).toBe(5);
+    expect(summary.reserved).toBe(0);
+    expect(summary.todayCount).toBe(1);
+  });
+
+  test("releases the reservation when a later before-hook aborts", async () => {
+    const client = await createX402Client({ maxAutoApprove: 5, dailyLimit: 5 });
+    client.x402Client.onBeforePaymentCreation(async () => ({ abort: true, reason: "policy" }));
+
+    await expect(client.x402Client.createPaymentPayload(paymentRequired)).rejects.toThrow("policy");
+
+    const summary = client.getSpendingSummary();
+    expect(summary.todaySpent).toBe(0);
+    expect(summary.reserved).toBe(0);
+    expect(summary.dailyRemaining).toBe(5);
+  });
+
+  test("releases the reservation when a later before-hook throws", async () => {
+    const client = await createX402Client({ maxAutoApprove: 5, dailyLimit: 5 });
+    client.x402Client.onBeforePaymentCreation(async () => {
+      throw new Error("hook failed");
+    });
+
+    await expect(client.x402Client.createPaymentPayload(paymentRequired)).rejects.toThrow(
+      "hook failed",
+    );
+
+    const summary = client.getSpendingSummary();
+    expect(summary.reserved).toBe(0);
+    expect(summary.dailyRemaining).toBe(5);
+  });
+
+  test("a failing call never settles another concurrent call's reservation", async () => {
+    const client = await createX402Client({ maxAutoApprove: 5, dailyLimit: 10 });
+
+    // Hold the second call before signing until the first has finished
+    let releaseSecond!: () => void;
+    const secondGate = new Promise<void>((resolve) => {
+      releaseSecond = resolve;
+    });
+    let beforeCalls = 0;
+    client.x402Client.onBeforePaymentCreation(async () => {
+      beforeCalls++;
+      if (beforeCalls === 2) await secondGate;
+    });
+    // The first call to finish signing fails in a later after-hook
+    let afterCalls = 0;
+    client.x402Client.onAfterPaymentCreation(async () => {
+      afterCalls++;
+      if (afterCalls === 1) throw new Error("after-hook failed");
+    });
+
+    const first = client.x402Client.createPaymentPayload(paymentRequired);
+    const second = client.x402Client.createPaymentPayload(paymentRequired);
+
+    await expect(first).rejects.toThrow("after-hook failed");
+
+    // The second call is still in flight: its $5 must still be held, nothing spent
+    let summary = client.getSpendingSummary();
+    expect(summary.todaySpent).toBe(0);
+    expect(summary.reserved).toBe(5);
+
+    releaseSecond();
+    await second;
+
+    summary = client.getSpendingSummary();
+    expect(summary.todaySpent).toBe(5);
+    expect(summary.reserved).toBe(0);
+    expect(summary.todayCount).toBe(1);
+  });
+
+  test("concurrent calls cannot both pass the daily limit", async () => {
+    const client = await createX402Client({ maxAutoApprove: 5, dailyLimit: 5 });
+
+    const results = await Promise.allSettled([
+      client.x402Client.createPaymentPayload(paymentRequired),
+      client.x402Client.createPaymentPayload(paymentRequired),
+    ]);
+
+    expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+    const summary = client.getSpendingSummary();
+    expect(summary.todaySpent).toBe(5);
+    expect(summary.reserved).toBe(0);
+  });
+});

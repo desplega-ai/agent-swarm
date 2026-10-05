@@ -13,7 +13,7 @@
  * config, the agent runtime PATCH). Custom ids skip the check and are stored as given, for
  * models the catalog cannot list yet (a fresh launch not in models.dev, a private
  * deployment, an ACP-only model). Harnesses whose model namespace the catalog does not
- * describe (`acp`, `devin`, `dsh`) skip the check when the caller names the harness.
+ * describe (`acp`, `devin`, `dsh`, `cursor`: its catalog is per account) skip the check when the caller names the harness.
  *
  * Harness compatibility: when the harness is known, a concrete id or `latest:` alias must
  * belong to the catalog section that harness's CLI talks to (`harnessModelError`). The
@@ -35,7 +35,7 @@ import { loadModelsCatalog } from "./model-catalog-store";
 import { resolveLatestAlias } from "./model-tier-resolution";
 
 /** Harnesses whose model ids the catalog does not describe. */
-const FREE_FORM_HARNESSES = new Set(["acp", "devin", "dsh"]);
+const FREE_FORM_HARNESSES = new Set(["acp", "devin", "dsh", "cursor"]);
 
 /** Claude CLI context-window suffix (`sonnet[1m]`): the CLI reads it, the catalog does not list it. */
 const CONTEXT_SUFFIX_RE = /\[1m\]$/i;

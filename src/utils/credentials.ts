@@ -12,6 +12,7 @@ export const CREDENTIAL_POOL_VARS = [
   "DEVIN_API_KEY",
   "DEEPSEEK_API_KEY",
   "AMP_API_KEY",
+  "CURSOR_API_KEY",
 ] as const;
 
 /**
@@ -32,6 +33,7 @@ export const PROVIDER_CREDENTIAL_VARS: Record<string, readonly string[]> = {
   devin: ["DEVIN_API_KEY"],
   dsh: ["OPENROUTER_API_KEY", "DEEPSEEK_API_KEY"],
   amp: ["AMP_API_KEY"],
+  cursor: ["CURSOR_API_KEY"],
   opencode: ["OPENROUTER_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY"],
 };
 
@@ -96,6 +98,8 @@ export function deriveProviderFromKeyType(keyType: string): string {
       return "dsh";
     case "AMP_API_KEY":
       return "amp";
+    case "CURSOR_API_KEY":
+      return "cursor";
     case "DEVIN_API_KEY":
       return "devin";
     default:

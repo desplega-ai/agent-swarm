@@ -182,4 +182,70 @@ describe("SpendingTracker", () => {
       expect(tracker.records).toHaveLength(2);
     });
   });
+
+  describe("reserve / confirm / release", () => {
+    test("concurrent reservations cannot exceed the daily limit", () => {
+      const tracker = new SpendingTracker(10.0, 5.0);
+      // Ten $1 payments arrive at once against a $5 daily limit.
+      const results = Array.from({ length: 10 }, (_, i) =>
+        tracker.reserve(1.0, `https://api.example.com/${i}`),
+      );
+      expect(results.filter((r) => r.ok).length).toBe(5);
+      expect(results.filter((r) => !r.ok).length).toBe(5);
+      expect(tracker.getReservedAmount()).toBe(5.0);
+    });
+
+    test("a blocked reservation reports the in-flight reserved amount", () => {
+      const tracker = new SpendingTracker(10.0, 5.0);
+      tracker.reserve(4.0, "https://api.example.com/first");
+      const result = tracker.reserve(2.0, "https://api.example.com/second");
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.reason).toContain("would exceed daily limit");
+        expect(result.reason).toContain("$4.00 reserved in flight");
+      }
+    });
+
+    test("confirm records the payment and clears the reservation", () => {
+      const tracker = new SpendingTracker(10.0, 5.0);
+      const result = tracker.reserve(3.0, "https://api.example.com");
+      expect(result.ok).toBe(true);
+      if (result.ok) tracker.confirm(result.id);
+      expect(tracker.getTodaySpending()).toBe(3.0);
+      expect(tracker.getReservedAmount()).toBe(0);
+    });
+
+    test("release frees the held amount without recording a payment", () => {
+      const tracker = new SpendingTracker(10.0, 5.0);
+      const first = tracker.reserve(5.0, "https://api.example.com/first");
+      expect(tracker.reserve(1.0, "https://api.example.com/second").ok).toBe(false);
+      if (first.ok) tracker.release(first.id);
+      expect(tracker.getTodaySpending()).toBe(0);
+      expect(tracker.reserve(1.0, "https://api.example.com/second").ok).toBe(true);
+    });
+
+    test("checkSpendingLimit counts pending reservations", () => {
+      const tracker = new SpendingTracker(10.0, 5.0);
+      tracker.reserve(4.0, "https://api.example.com/first");
+      expect(tracker.checkSpendingLimit(2.0, "https://api.example.com/second")).not.toBeNull();
+      expect(tracker.checkSpendingLimit(1.0, "https://api.example.com/second")).toBeNull();
+    });
+
+    test("summary subtracts reserved amounts from dailyRemaining", () => {
+      const tracker = new SpendingTracker(10.0, 5.0);
+      tracker.recordPayment(1.0, "https://api.example.com/paid");
+      tracker.reserve(2.0, "https://api.example.com/pending");
+      const summary = tracker.getSummary();
+      expect(summary.reserved).toBe(2.0);
+      expect(summary.dailyRemaining).toBe(2.0);
+    });
+
+    test("confirm and release ignore unknown ids", () => {
+      const tracker = new SpendingTracker(10.0, 5.0);
+      tracker.confirm("missing");
+      tracker.release("missing");
+      expect(tracker.getTodaySpending()).toBe(0);
+      expect(tracker.getReservedAmount()).toBe(0);
+    });
+  });
 });

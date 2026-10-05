@@ -64,6 +64,8 @@ const ROUTING_PREFIXES_BY_PROVIDER: Record<PricingProvider, readonly string[]> =
   // is `provider/model`, so strip the vendor. OpenAI also reports dated
   // snapshots (`gpt-5-nano-2025-08-07`); see `AMP_DATED_SUFFIX`.
   amp: ["anthropic/", "openai/", "google-vertex/", "google/"],
+  // cursor reports a bare Cursor model id, already the vendor's own id.
+  cursor: [],
 };
 
 /** `gpt-5-nano-2025-08-07` -> `gpt-5-nano`. Anthropic's 8-digit dates (`-20251001`) are real catalog ids and are left alone. */

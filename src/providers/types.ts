@@ -55,6 +55,7 @@ export interface CostData {
     | "devin"
     | "acp"
     | "dsh"
+    | "cursor"
     | "amp";
 }
 

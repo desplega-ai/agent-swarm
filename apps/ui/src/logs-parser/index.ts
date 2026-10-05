@@ -3,6 +3,7 @@ import {
   normalizeAnthropic,
   normalizeClaudeManaged,
   normalizeCodex,
+  normalizeCursor,
   normalizeDsh,
   normalizeOpencode,
 } from "./adapters";
@@ -51,6 +52,7 @@ const ADAPTERS: Record<string, Adapter> = {
   dsh: normalizeDsh,
   // Amp's `--stream-json` is Claude Code-compatible: assistant, user, system and result events.
   amp: normalizeAnthropic,
+  cursor: normalizeCursor,
 };
 
 export function normalizeSessionLogs(logs: SessionLogRecord[]): TranscriptParseResult {

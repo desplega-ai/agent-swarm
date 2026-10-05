@@ -153,6 +153,14 @@ export const DEFAULT_MODEL_TIER_MAP: Record<ProviderName, Record<ModelTier, stri
     smart: "openrouter/deepseek/deepseek-v4-pro-0813",
     ultra: "openrouter/anthropic/claude-opus-5.5",
   },
+  // Bare Cursor model ids (`Cursor.models.list()`); reasoning effort rides in
+  // the model's own params (see src/providers/cursor-adapter.ts).
+  cursor: {
+    smol: "gpt-5.4-mini",
+    regular: "claude-sonnet-5-5",
+    smart: "claude-opus-5-5",
+    ultra: "claude-fable-5-1",
+  },
   devin: {
     smol: "devin",
     regular: "devin",
@@ -404,6 +412,7 @@ export const ProviderNameSchema = z.enum([
   "acp",
   "dsh",
   "amp",
+  "cursor",
 ]);
 export type ProviderName = z.infer<typeof ProviderNameSchema>;
 
@@ -498,6 +507,9 @@ export const PROVIDER_STEER_CAPABILITIES: Record<ProviderName, SteerMode[]> = {
   // `--stream-json-input` queues a stdin message until the running turn ends
   // (verified live); there is no interrupt primitive, so queue only.
   amp: ["queue"],
+  // `run.steer()` reaches the in-flight run; a message the SDK reverts to a
+  // follow-up, and every queued one, starts the next run on the same agent.
+  cursor: ["steer", "queue"],
 };
 
 export type DevinProviderMeta = {
@@ -519,6 +531,7 @@ export type ProviderMetaMap = {
   acp: NoProviderMeta;
   dsh: NoProviderMeta;
   amp: NoProviderMeta;
+  cursor: NoProviderMeta;
 };
 
 export const FollowUpConfigSchema = z
@@ -3457,6 +3470,7 @@ export const PricingProviderSchema = z.enum([
   "acp",
   "dsh",
   "amp",
+  "cursor",
 ]);
 export type PricingProvider = z.infer<typeof PricingProviderSchema>;
 

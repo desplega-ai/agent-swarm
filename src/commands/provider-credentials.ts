@@ -23,6 +23,7 @@ import { checkAmpCredentials, liveTestAmpCredentials } from "../providers/amp-ad
 import { checkClaudeCredentials } from "../providers/claude-adapter";
 import { checkClaudeManagedCredentials } from "../providers/claude-managed-adapter";
 import { checkCodexCredentials } from "../providers/codex-adapter";
+import { checkCursorCredentials } from "../providers/cursor-adapter";
 import { checkDevinCredentials } from "../providers/devin-adapter";
 import { checkDshCredentials } from "../providers/dsh-adapter";
 import { checkOpencodeCredentials } from "../providers/opencode-adapter";
@@ -47,6 +48,7 @@ export type SupportedProvider =
   | "pi"
   | "acp"
   | "dsh"
+  | "cursor"
   | "amp";
 
 /**
@@ -113,6 +115,7 @@ export const REQUIRED_CRED_VARS_BY_PROVIDER: Record<SupportedProvider, readonly 
   acp: [],
   dsh: ["DEEPSEEK_API_KEY", "OPENROUTER_API_KEY"],
   amp: ["AMP_API_KEY"],
+  cursor: ["CURSOR_API_KEY"],
 };
 
 type CredentialChecker = (
@@ -124,6 +127,7 @@ type CredentialChecker = (
 export const CREDENTIAL_PROVIDER_CHECKERS: Record<SupportedProvider, CredentialChecker> = {
   dsh: (env) => checkDshCredentials(env),
   amp: (env) => checkAmpCredentials(env),
+  cursor: (env) => checkCursorCredentials(env),
   claude: (env) => checkClaudeCredentials(env),
   "claude-managed": (env) => checkClaudeManagedCredentials(env),
   codex: (env, opts) => checkCodexCredentials(env, opts),
@@ -473,12 +477,27 @@ export async function validateProviderCredentials(
               latency_ms: Date.now() - startedAt,
             };
       }
+      case "cursor": {
+        const apiKey = env.CURSOR_API_KEY?.trim();
+        if (!apiKey) {
+          return {
+            ok: false,
+            error: "CURSOR_API_KEY is not set.",
+            latency_ms: Date.now() - startedAt,
+          };
+        }
+        const { liveTestCursorKey } = await import("../providers/cursor-adapter");
+        const result = await liveTestCursorKey(apiKey);
+        return result.ok
+          ? { ok: true, latency_ms: Date.now() - startedAt }
+          : { ok: false, error: result.error, latency_ms: Date.now() - startedAt };
+      }
       case "acp":
         return presenceCheckOk();
       default:
         return {
           ok: false,
-          error: `Unknown provider "${provider}". Supported: claude, claude-managed, codex, devin, opencode, pi, acp, dsh, amp.`,
+          error: `Unknown provider "${provider}". Supported: claude, claude-managed, codex, devin, opencode, pi, acp, dsh, cursor, amp.`,
           latency_ms: Date.now() - startedAt,
         };
     }
