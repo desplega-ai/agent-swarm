@@ -1,7 +1,12 @@
 import { type ClassValue, clsx } from "clsx";
-import { twMerge } from "tailwind-merge";
+import { extendTailwindMerge } from "tailwind-merge";
 import { stripContextFooter } from "../components/session-panel/model";
 import { formatCost } from "./cost-format";
+
+// The theme's own type steps (`--text-data`, `--text-meta` in globals.css).
+// Unregistered, tailwind-merge reads `text-meta` as a color and drops the
+// real color class next to it.
+const twMerge = extendTailwindMerge({ extend: { theme: { text: ["data", "meta"] } } });
 
 /**
  * Merge Tailwind CSS classes with clsx
@@ -12,8 +17,8 @@ export function cn(...inputs: ClassValue[]) {
 
 /**
  * Parse a date string as UTC, handling both ISO 8601 (with T/Z) and bare
- * SQLite format (YYYY-MM-DD HH:MM:SS). The bare format is ambiguous —
- * browsers parse it as local time — so we append 'Z' to force UTC.
+ * SQLite format (YYYY-MM-DD HH:MM:SS). The bare format is ambiguous:
+ * browsers parse it as local time, so we append 'Z' to force UTC.
  */
 export function parseUTCDate(dateStr: string): Date {
   if (dateStr.includes("T") || dateStr.endsWith("Z")) {
@@ -144,7 +149,7 @@ export function formatCompactNumber(num: number): string {
 }
 
 /**
- * Phase 12a — `formatCurrency` is now a thin wrapper around the shared
+ * Phase 12a: `formatCurrency` is now a thin wrapper around the shared
  * `formatCost` utility with `precision: 'compact'`. Prefer the new
  * `formatCost` directly when writing new code (or pick a different
  * precision preset); this export stays for legacy callers.
@@ -174,7 +179,8 @@ export function formatElapsed(start: string, end?: string | null): string {
   const startMs = parseUTCDate(start).getTime();
   const endMs = end ? parseUTCDate(end).getTime() : Date.now();
   const diffMs = endMs - startMs;
-  if (diffMs < 0) return "—";
+  // The app-wide "no value" placeholder (an em dash), as an escape.
+  if (diffMs < 0) return "\u2014";
 
   const seconds = Math.floor(diffMs / 1000);
   const minutes = Math.floor(seconds / 60);

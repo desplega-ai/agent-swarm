@@ -102,8 +102,22 @@ export type StreamRow =
       costUsd?: number;
       durationMs?: number;
       turns?: number;
+      /** The caller's totals (`toMessageRows`). They replace the result's numbers. */
+      summary?: EndSummary;
       isNew: boolean;
     };
+
+/**
+ * A run's totals, as text ("$1.21", "2m 56s", "26 turns"). The task page
+ * passes the numbers that its details rail shows (the server's priced
+ * `session_costs`), so the end line and the rail agree. A field that is not
+ * set does not show.
+ */
+export interface EndSummary {
+  cost: string;
+  duration?: string;
+  turns?: string;
+}
 
 type FoldedRow = Extract<StreamRow, { type: "thinking" | "meta" | "toolgroup" }>;
 type MetaRow = Extract<StreamRow, { type: "meta" }>;
@@ -156,8 +170,11 @@ function toEndRow(row: MetaRow): StreamRow {
  * - Each run of other rows (tool groups, thinking, helper and runtime rows)
  *   becomes one `activity` row, `activity-<first row id>`.
  * - A `result` row becomes one `end` row, `end-<result row id>`.
+ * - With `endSummary`, the last `end` row gets it: the task's totals end the
+ *   log. An earlier `end` row (from an earlier session of a resumed task)
+ *   keeps the numbers of its own result.
  */
-export function toMessageRows(rows: readonly StreamRow[]): StreamRow[] {
+export function toMessageRows(rows: readonly StreamRow[], endSummary?: EndSummary): StreamRow[] {
   const out: StreamRow[] = [];
   let run: FoldedRow[] = [];
   const closeRun = () => {
@@ -186,6 +203,15 @@ export function toMessageRows(rows: readonly StreamRow[]): StreamRow[] {
     }
   }
   closeRun();
+  if (endSummary) {
+    for (let i = out.length - 1; i >= 0; i--) {
+      const row = out[i];
+      if (row?.type === "end") {
+        out[i] = { ...row, summary: endSummary };
+        break;
+      }
+    }
+  }
   return out;
 }
 
@@ -257,11 +283,20 @@ export function summarizeActivity(
   return { title: `${events} ${events === 1 ? "event" : "events"}`, stats: [], names };
 }
 
-/** An end line: "Finished · $1.21 · 2m 56s · 26 turns", or "Ended with an error · …". */
+/**
+ * An end line: "Finished · $1.21 · 2m 56s · 26 turns", or "Ended with an
+ * error · …". The row's `summary` (the caller's totals) replaces the
+ * result's own numbers.
+ */
 export function summarizeEnd(row: Extract<StreamRow, { type: "end" }>): RowSummary {
+  const title = row.isError ? "Ended with an error" : "Finished";
+  if (row.summary) {
+    const { cost, duration, turns } = row.summary;
+    return { title, stats: [cost, duration, turns].filter((stat): stat is string => !!stat) };
+  }
   const stats: string[] = [];
   if (row.costUsd !== undefined) stats.push(formatCost(row.costUsd, { precision: 2 }));
   if (row.durationMs) stats.push(formatDur(row.durationMs));
   if (row.turns !== undefined) stats.push(`${row.turns} ${row.turns === 1 ? "turn" : "turns"}`);
-  return { title: row.isError ? "Ended with an error" : "Finished", stats };
+  return { title, stats };
 }

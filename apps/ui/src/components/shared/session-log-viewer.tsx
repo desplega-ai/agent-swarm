@@ -37,6 +37,7 @@ import "streamdown/styles.css";
 import type { AgentTaskStatus, ContextSnapshot, SessionLog, SteeringMessage } from "@/api/types";
 import { AnimatedReveal } from "@/components/shared/animated-reveal";
 import {
+  type EndSummary,
   formatDur,
   matchingRowIndex,
   type SessionLogView,
@@ -984,7 +985,7 @@ const LogCodeBlock = memo(function LogCodeBlock({
     <div className="sl-code group/code relative my-2 overflow-hidden rounded-lg border border-border/70 bg-muted/40">
       {lang ? (
         <div className="flex items-center justify-between gap-2 border-b border-border/50 bg-muted/50 py-1 pl-3 pr-1">
-          <span className="select-none font-mono text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+          <span className="select-none font-mono text-meta font-medium uppercase tracking-wider text-muted-foreground">
             {lang}
           </span>
           <CopyIconButton text={value} label="Copy code" className="hit-area size-6" />
@@ -1105,7 +1106,7 @@ function ProviderStatusPill({ value }: { value: string }) {
   return (
     <span
       className={cn(
-        "rounded-full px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide",
+        "rounded-full px-1.5 py-0.5 text-meta font-medium uppercase tracking-wide",
         style.bg,
         style.text,
       )}
@@ -1162,10 +1163,10 @@ function ProviderStructuredOutputMeta({ block }: { block: ProviderMetaBlock }) {
       stats={taskStatus ? <ProviderStatusPill value={taskStatus} /> : undefined}
     >
       {summary && output && (
-        <p className="max-w-4xl text-[11.5px] leading-snug text-muted-foreground">{summary}</p>
+        <p className="max-w-4xl text-xs leading-snug text-muted-foreground">{summary}</p>
       )}
       {output && (
-        <div className="prose-chat prose-session-log max-w-4xl text-xs text-foreground/90">
+        <div className="prose-chat prose-session-log max-w-4xl text-xs text-foreground">
           <LogMarkdown>{output}</LogMarkdown>
         </div>
       )}
@@ -1233,7 +1234,7 @@ function MetaPanel({
         <span className="grid size-5 shrink-0 place-items-center rounded-md bg-background/60 text-muted-foreground">
           {icon}
         </span>
-        <span className="min-w-0 flex-1 truncate font-mono text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+        <span className="min-w-0 flex-1 truncate font-mono text-meta font-semibold uppercase tracking-wider text-muted-foreground">
           {title}
         </span>
         {badge}
@@ -1248,10 +1249,10 @@ function MetaStat({ label, value }: { label: string; value?: string }) {
   if (!value) return null;
   return (
     <span className="inline-flex min-w-0 items-baseline gap-1 rounded-md border border-border/60 bg-background/60 px-1.5 py-1">
-      <span className="font-mono text-[9px] uppercase tracking-wider text-muted-foreground">
+      <span className="font-mono text-meta uppercase tracking-wider text-muted-foreground">
         {label}
       </span>
-      <span className="truncate font-mono text-[11px] text-foreground">{value}</span>
+      <span className="truncate font-mono text-xs tabular-nums text-foreground">{value}</span>
     </span>
   );
 }
@@ -1265,7 +1266,7 @@ function RawDetails({ data }: { data: unknown }) {
         <button
           type="button"
           onClick={() => setOpen((value) => !value)}
-          className="hit-area inline-flex cursor-pointer items-center gap-1 rounded-md px-1 py-0.5 font-mono text-[10px] uppercase tracking-wider text-muted-foreground hover:bg-background/60 hover:text-foreground"
+          className="hit-area inline-flex cursor-pointer items-center gap-1 rounded-md px-1 py-0.5 font-mono text-meta uppercase tracking-wider text-muted-foreground hover:bg-background/60 hover:text-foreground"
         >
           <ChevronRight
             className={cn("size-3 transition-transform duration-200", open && "rotate-90")}
@@ -1305,8 +1306,8 @@ function LowKeyMetaLine({
   const text = useMemo(() => safeJson(raw), [raw]);
   return (
     <div className="py-0.5">
-      <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
-        <span className="inline-flex size-4 shrink-0 items-center justify-center text-muted-foreground/75">
+      <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-meta text-muted-foreground">
+        <span className="inline-flex size-4 shrink-0 items-center justify-center text-muted-foreground">
           {icon}
         </span>
         {title && <span className="font-mono uppercase tracking-wider">{title}</span>}
@@ -1316,7 +1317,7 @@ function LowKeyMetaLine({
           <button
             type="button"
             onClick={() => setOpen((value) => !value)}
-            className="hit-area inline-flex cursor-pointer items-center gap-0.5 rounded px-1 py-0.5 font-mono text-[9.5px] uppercase tracking-wider text-muted-foreground/80 hover:bg-muted hover:text-foreground"
+            className="hit-area inline-flex cursor-pointer items-center gap-0.5 rounded px-1 py-0.5 font-mono text-meta uppercase tracking-wider text-muted-foreground hover:bg-muted hover:text-foreground"
           >
             <ChevronRight
               className={cn("size-2.5 transition-transform duration-200", open && "rotate-90")}
@@ -1342,9 +1343,9 @@ function LowKeyMetaLine({
 function LowKeyStat({ label, value }: { label: string; value?: string }) {
   if (!value) return null;
   return (
-    <span className="inline-flex items-baseline gap-1 font-mono text-[10.5px] text-muted-foreground">
-      <span className="uppercase tracking-wider text-muted-foreground/75">{label}</span>
-      <span className="text-foreground/80">{value}</span>
+    <span className="inline-flex items-baseline gap-1 font-mono text-meta text-muted-foreground">
+      <span className="uppercase tracking-wider text-muted-foreground">{label}</span>
+      <span className="tabular-nums text-foreground">{value}</span>
     </span>
   );
 }
@@ -1385,7 +1386,7 @@ function ThinkingTokenGroupMeta({ block }: { block: ProviderMetaBlock }) {
       raw={block.data}
       stats={
         active ? (
-          <span className="shimmer-text font-mono text-[11px] font-medium">{text}</span>
+          <span className="shimmer-text font-mono text-meta font-medium">{text}</span>
         ) : undefined
       }
     />
@@ -1494,17 +1495,17 @@ function HookRunRow({ hook }: { hook: HookRun }) {
   const output = stringValue(response?.output ?? response?.stdout);
   const ok = !response || outcome === "success" || exit === 0;
   return (
-    <div className="text-[11px] text-muted-foreground">
+    <div className="text-meta text-muted-foreground">
       <div className="flex min-w-0 items-center gap-2">
-        <span className="min-w-0 flex-1 truncate font-mono text-foreground/80">
+        <span className="min-w-0 flex-1 truncate font-mono text-foreground">
           {hook.hookName ?? stringValue(started?.hook_name) ?? "hook"}
         </span>
-        <span className="shrink-0 font-mono text-[10px]">{shortId(hook.hookId)}</span>
+        <span className="shrink-0 font-mono text-meta">{shortId(hook.hookId)}</span>
         {response && (
           <span
             className={cn(
-              "shrink-0 font-mono text-[10px] uppercase tracking-wide",
-              ok ? "text-status-success-strong/85" : "text-status-error-strong/85",
+              "shrink-0 font-mono text-meta uppercase tracking-wide",
+              ok ? "text-status-success-strong" : "text-status-error-strong",
             )}
           >
             {outcome ?? (ok ? "ok" : "error")}
@@ -1512,7 +1513,7 @@ function HookRunRow({ hook }: { hook: HookRun }) {
         )}
       </div>
       {output && (
-        <p className="mt-1 truncate text-[11px] leading-snug text-muted-foreground">
+        <p className="mt-1 truncate text-meta leading-snug text-muted-foreground">
           {output.replace(/\s+/g, " ")}
         </p>
       )}
@@ -1631,7 +1632,7 @@ function FileChangeMeta({ block }: { block: ProviderMetaBlock }) {
       raw={block.data}
       tone="muted"
       badge={
-        <span className="rounded-full bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+        <span className="rounded-full bg-muted px-1.5 py-0.5 font-mono text-meta tabular-nums text-muted-foreground">
           {changes.length || 1} {changes.length === 1 ? "file" : "files"}
         </span>
       }
@@ -1643,16 +1644,16 @@ function FileChangeMeta({ block }: { block: ProviderMetaBlock }) {
               key={`${change.path}-${index}`}
               className="flex min-w-0 items-center gap-2 rounded-md border border-border/60 bg-background/55 px-2 py-1"
             >
-              <span className="shrink-0 rounded bg-muted px-1 font-mono text-[9px] uppercase tracking-wide text-muted-foreground">
+              <span className="shrink-0 rounded bg-muted px-1 font-mono text-meta uppercase tracking-wide text-muted-foreground">
                 {change.kind ?? "change"}
               </span>
-              <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-foreground">
+              <span className="min-w-0 flex-1 truncate font-mono text-meta text-foreground">
                 {change.path}
               </span>
             </div>
           ))}
           {changes.length > 8 && (
-            <div className="px-1 font-mono text-[10px] text-muted-foreground">
+            <div className="px-1 font-mono text-meta tabular-nums text-muted-foreground">
               +{changes.length - 8} more files
             </div>
           )}
@@ -1739,7 +1740,7 @@ function GenericMetaBubble({ block }: { block: ProviderMetaBlock }) {
         status ? (
           <span className="inline-flex items-center gap-1.5">
             {durationMs ? (
-              <span className="font-mono text-[11px] text-muted-foreground">
+              <span className="font-mono text-meta tabular-nums text-muted-foreground">
                 {formatDur(durationMs)}
               </span>
             ) : null}
@@ -1830,7 +1831,7 @@ function RowShell({
     >
       <Tooltip>
         <TooltipTrigger asChild>
-          <span className="cursor-help select-none pt-[3px] text-left font-mono text-[11px] tabular-nums text-muted-foreground">
+          <span className="cursor-help select-none pt-[3px] text-left font-mono text-meta tabular-nums text-muted-foreground">
             {time}
           </span>
         </TooltipTrigger>
@@ -1876,7 +1877,7 @@ function ResultSection({
         ref={wrapRef}
         className={cn("relative overflow-hidden", open ? "max-h-none" : "max-h-[11.5em]")}
       >
-        <pre className="m-0 whitespace-pre-wrap break-words px-2.5 pb-2 pt-1 font-mono text-[11.5px] leading-[1.6] text-foreground/85">
+        <pre className="m-0 whitespace-pre-wrap break-words px-2.5 pb-2 pt-1 font-mono text-xs leading-[1.6] text-foreground">
           {(preview && !open ? preview.text : body) || "(no output)"}
         </pre>
         {overflow && !open && (
@@ -1887,7 +1888,7 @@ function ResultSection({
         <button
           type="button"
           onClick={onToggle}
-          className="hit-area mx-2.5 mb-2 cursor-pointer text-[11px] font-semibold text-status-info-strong"
+          className="hit-area mx-2.5 mb-2 cursor-pointer text-meta font-semibold text-status-info-strong"
         >
           {open ? "Show less" : "Show full output"}
         </button>
@@ -1941,10 +1942,10 @@ function ToolRow({
             tool.title
           )}
         </span>
-        <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-muted-foreground">
+        <span className="min-w-0 flex-1 truncate font-mono text-meta text-muted-foreground">
           {tool.detail}
         </span>
-        <span className="shrink-0 font-mono text-[10.5px] text-muted-foreground">
+        <span className="shrink-0 font-mono text-meta text-muted-foreground">
           {tool.hasResult && (
             <span className={tool.ok ? "text-status-success-strong" : "text-status-error-strong"}>
               {tool.ok ? "✓ " : "✕ "}
@@ -1952,23 +1953,27 @@ function ToolRow({
           )}
           {tool.preview}
         </span>
-        {dur && <span className="shrink-0 font-mono text-[10px] text-muted-foreground">{dur}</span>}
+        {dur && (
+          <span className="shrink-0 font-mono text-meta tabular-nums text-muted-foreground">
+            {dur}
+          </span>
+        )}
       </button>
 
       <AnimatedReveal open={open} speed="fast">
         <div className="border-t border-border">
           {hasInput && (
             <>
-              <div className="flex items-center gap-1.5 px-2.5 pt-1.5 font-mono text-[9.5px] uppercase tracking-[0.1em] text-muted-foreground">
+              <div className="flex items-center gap-1.5 px-2.5 pt-1.5 font-mono text-meta uppercase tracking-[0.1em] text-muted-foreground">
                 <span>Input</span>
                 <CopyIconButton text={tool.input} className="hit-area ml-auto" label="Copy input" />
               </div>
-              <pre className="m-0 whitespace-pre-wrap break-words px-2.5 pb-2 pt-1 font-mono text-[11.5px] leading-[1.6] text-foreground/85">
+              <pre className="m-0 whitespace-pre-wrap break-words px-2.5 pb-2 pt-1 font-mono text-xs leading-[1.6] text-foreground">
                 {tool.input}
               </pre>
             </>
           )}
-          <div className="flex items-center gap-1.5 px-2.5 pt-1.5 font-mono text-[9.5px] uppercase tracking-[0.1em] text-muted-foreground">
+          <div className="flex items-center gap-1.5 px-2.5 pt-1.5 font-mono text-meta uppercase tracking-[0.1em] text-muted-foreground">
             <span>Result</span>
             <CopyIconButton text={tool.body} className="hit-area ml-auto" label="Copy result" />
           </div>
@@ -1988,16 +1993,18 @@ function CompactionDivider({ snapshot }: { snapshot: ContextSnapshot }) {
   return (
     <div className="flex items-center gap-2 border-y border-status-active/20 bg-status-active/5 px-1 py-2">
       <Scissors className="size-3 shrink-0 text-status-active-strong" />
-      <span className="whitespace-nowrap font-mono text-[10px] font-semibold uppercase tracking-wider text-status-active-strong">
+      <span className="whitespace-nowrap font-mono text-meta font-semibold uppercase tracking-wider text-status-active-strong">
         {isAuto ? "Auto" : "Manual"} compaction
       </span>
       {preTokens != null && postTokens != null && (
-        <span className="font-mono text-[10px] text-muted-foreground">
+        <span className="font-mono text-meta tabular-nums text-muted-foreground">
           {formatTokens(preTokens)} → {formatTokens(postTokens)}
         </span>
       )}
       {percent != null && (
-        <span className="font-mono text-[10px] text-muted-foreground">({percent.toFixed(0)}%)</span>
+        <span className="font-mono text-meta tabular-nums text-muted-foreground">
+          ({percent.toFixed(0)}%)
+        </span>
       )}
       <div className="h-px flex-1 bg-status-active/20" />
     </div>
@@ -2067,7 +2074,7 @@ const MinimapRail = memo(function MinimapRail({
       </div>
       {open && (
         <div className="absolute right-0 top-0 z-20 max-h-full w-64 overflow-y-auto rounded-l-md border-l border-border bg-card shadow-xl">
-          <div className="sticky top-0 border-b border-border bg-card px-3 py-2 font-mono text-[9.5px] uppercase tracking-[0.1em] text-muted-foreground">
+          <div className="sticky top-0 border-b border-border bg-card px-3 py-2 font-mono text-meta uppercase tracking-[0.1em] text-muted-foreground">
             {rows.length} events · click to jump
           </div>
           {rows.map((row, i) => (
@@ -2077,7 +2084,7 @@ const MinimapRail = memo(function MinimapRail({
               onClick={() => onJump(i, row)}
               className="flex w-full cursor-pointer items-center gap-2 border-b border-border/40 px-3 py-1.5 text-left hover:bg-muted/50"
             >
-              <span className="shrink-0 font-mono text-[10px] text-muted-foreground">
+              <span className="shrink-0 font-mono text-meta tabular-nums text-muted-foreground">
                 {"time" in row ? row.time : ""}
               </span>
               <span className={cn("size-[7px] shrink-0 rounded-full", TONE_DOT[rowTone(row)])} />
@@ -2116,6 +2123,10 @@ const STAGGER_STEP_MS = 100;
 
 /** How close (px) the last row must be to the visible bottom to count as "at the end". */
 const AT_END_PX = 72;
+
+/** The focus ring of the log's keyboard stop (the panel or the scroller). */
+const LOG_FOCUS_RING =
+  "outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/60";
 
 /**
  * Page mode: where the log sits in the caller's scroller, in px. `listTop` is
@@ -2194,6 +2205,13 @@ interface SessionLogViewerProps {
    * or a cancelled end instead of "Session complete".
    */
   status?: AgentTaskStatus;
+  /**
+   * The run's cost, run time and turns, as text, for the Messages view's
+   * last end line. The task page passes its details rail's numbers, so the
+   * page shows one set. Without it, the end line shows the harness result's
+   * numbers.
+   */
+  endSummary?: EndSummary;
 }
 
 export function SessionLogViewer({
@@ -2207,6 +2225,7 @@ export function SessionLogViewer({
   view = "everything",
   onViewChange,
   status,
+  endSummary,
 }: SessionLogViewerProps) {
   // Fixed for the viewer's lifetime: callers pass `scrollElement` from the
   // first render (as `null` until the element mounts) or never.
@@ -2268,7 +2287,10 @@ export function SessionLogViewer({
 
   // Messages folds the rows before the filter, so a folded line matches by
   // anything it holds.
-  const viewRows = useMemo(() => (view === "messages" ? toMessageRows(rows) : rows), [rows, view]);
+  const viewRows = useMemo(
+    () => (view === "messages" ? toMessageRows(rows, endSummary) : rows),
+    [rows, view, endSummary],
+  );
 
   const { searchParams, setParam } = useUrlSearchState();
   const query = readStringParam(searchParams, "logSearch");
@@ -2783,7 +2805,7 @@ export function SessionLogViewer({
             streamDelayMs={streamDelayMs}
           >
             {(isUser || isSystem) && (
-              <span className="mb-0.5 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.04em] text-muted-foreground">
+              <span className="mb-0.5 flex items-center gap-1.5 text-meta font-semibold uppercase tracking-[0.04em] text-muted-foreground">
                 {isUser
                   ? slashCommand
                     ? `Task prompt · /${slashCommand.command}`
@@ -2844,9 +2866,9 @@ export function SessionLogViewer({
                 lifecycle, RowShell's gutter already owns the timestamp. */}
             <SteeringLine
               message={row.message}
-              className="text-[12.5px]"
+              className="text-xs"
               marker={
-                <span className="shrink-0 text-[10px] font-semibold uppercase tracking-[0.04em] text-primary">
+                <span className="shrink-0 text-meta font-semibold uppercase tracking-[0.04em] text-primary">
                   Steering
                 </span>
               }
@@ -2882,12 +2904,12 @@ export function SessionLogViewer({
               <span className="min-w-0 shrink truncate text-xs font-medium text-foreground">
                 {row.run.label}
               </span>
-              <span className="min-w-0 flex-1 truncate font-mono text-[10.5px] text-muted-foreground max-sm:hidden">
+              <span className="min-w-0 flex-1 truncate font-mono text-meta text-muted-foreground max-sm:hidden">
                 {row.run.agentType}
               </span>
               <SubagentStatus run={row.run} />
               {duration && (
-                <span className="shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground">
+                <span className="shrink-0 font-mono text-meta tabular-nums text-muted-foreground">
                   {duration}
                 </span>
               )}
@@ -3023,13 +3045,15 @@ export function SessionLogViewer({
                 open && "rotate-90",
               )}
             />
-            <span className="shrink-0 text-[12.5px] font-semibold">
+            <span className="shrink-0 text-xs font-semibold">
               {row.tools.length} {row.tools.length === 1 ? "step" : "steps"}
             </span>
             {dur && (
-              <span className="shrink-0 font-mono text-[11px] text-muted-foreground">{dur}</span>
+              <span className="shrink-0 font-mono text-meta tabular-nums text-muted-foreground">
+                {dur}
+              </span>
             )}
-            <span className="min-w-0 flex-1 truncate font-mono text-[11.5px] text-muted-foreground">
+            <span className="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground">
               {groupHeader(row.names)}
             </span>
           </button>
@@ -3084,6 +3108,18 @@ export function SessionLogViewer({
   // The view switch replaces the lone "Logs" tab. The tabs stay for the
   // Agents view, and without a switch (other callers).
   const showTabList = !onViewChange || subagents.length > 0;
+  // The log has one keyboard stop, with a visible ring. Page mode: the panel.
+  // The caller's scroller scrolls the log, and arrow keys on the panel
+  // scroll it. Own scroller: the scroller (a "Session log" region), and the
+  // panel leaves the Tab order. Without a tab list, the panel is not a tab
+  // panel: no trigger names it.
+  const logPanelProps = pageMode
+    ? showTabList
+      ? {}
+      : { role: "region", "aria-label": "Session log", "aria-labelledby": undefined }
+    : showTabList
+      ? { tabIndex: -1 }
+      : { role: undefined, "aria-labelledby": undefined, tabIndex: -1 };
 
   // Page mode shows the pill only while the rows are in view.
   const showJumpPill = !atBottom && (!pageMode || logInView);
@@ -3093,7 +3129,7 @@ export function SessionLogViewer({
       onClick={() => stickToBottom("smooth")}
       aria-label="Scroll to latest"
       className={cn(
-        "absolute bottom-4 left-1/2 z-10 inline-flex -translate-x-1/2 cursor-pointer items-center gap-2 rounded-full bg-primary px-3.5 py-[7px] text-[12.5px] font-semibold text-primary-foreground shadow-lg transition-[translate,opacity]",
+        "absolute bottom-4 left-1/2 z-10 inline-flex -translate-x-1/2 cursor-pointer items-center gap-2 rounded-full bg-primary px-3.5 py-[7px] text-xs font-semibold text-primary-foreground shadow-lg transition-[translate,opacity]",
         pageMode && "bottom-0",
         touchTargets && "min-h-11 px-4",
         showJumpPill ? "translate-y-0 opacity-100" : "pointer-events-none translate-y-3 opacity-0",
@@ -3155,7 +3191,8 @@ export function SessionLogViewer({
                       touchTargets ? "h-11" : "h-7",
                     )}
                   >
-                    Agents <span className="font-mono text-[10px]">({subagents.length})</span>
+                    Agents{" "}
+                    <span className="font-mono text-meta tabular-nums">({subagents.length})</span>
                   </TabsTrigger>
                 )}
               </TabsList>
@@ -3200,12 +3237,11 @@ export function SessionLogViewer({
           <TabsContent
             value="logs"
             forceMount
-            className="flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden"
-            // No tab list: a labelled region, not a tab panel named by a
-            // trigger that is not there.
-            {...(showTabList
-              ? {}
-              : { role: "region", "aria-label": "Session log", "aria-labelledby": undefined })}
+            className={cn(
+              "flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden",
+              pageMode && LOG_FOCUS_RING,
+            )}
+            {...logPanelProps}
           >
             {/* Body */}
             <div className="relative flex min-h-0 flex-1">
@@ -3218,8 +3254,12 @@ export function SessionLogViewer({
                   // of the scroll chain.
                   pageMode
                     ? "overflow-x-clip"
-                    : "overflow-y-auto overflow-x-hidden [overflow-anchor:none]",
+                    : cn(
+                        "overflow-y-auto overflow-x-hidden [overflow-anchor:none]",
+                        LOG_FOCUS_RING,
+                      ),
                 )}
+                {...(pageMode ? {} : { tabIndex: 0, role: "region", "aria-label": "Session log" })}
               >
                 {/* Page mode: keep the browser's scroll anchoring off the rows,
                     as the own scroller does. The virtualizer corrects the
@@ -3335,13 +3375,9 @@ function ThinkingRow({ text }: { text: string }) {
           )}
         />
         <Brain className="size-3 shrink-0 text-muted-foreground" />
-        <span className="shrink-0 text-[12px] font-medium italic text-muted-foreground">
-          Thinking
-        </span>
+        <span className="shrink-0 text-xs font-medium italic text-muted-foreground">Thinking</span>
         {!open && (
-          <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground/80">
-            {preview}
-          </span>
+          <span className="min-w-0 flex-1 truncate text-meta text-muted-foreground">{preview}</span>
         )}
       </button>
       <AnimatedReveal open={open} speed="fast">
@@ -3378,7 +3414,7 @@ function SkillPromptRow({ prompt }: { prompt: SkillPrompt }) {
             )}
           />
           <Sparkles className="size-3 shrink-0 text-status-info-strong" />
-          <span className="shrink-0 text-[12px] font-medium text-status-info-strong">
+          <span className="shrink-0 text-xs font-medium text-status-info-strong">
             Skill invoked · {prompt.skillTitle}
           </span>
         </button>
@@ -3391,7 +3427,7 @@ function SkillPromptRow({ prompt }: { prompt: SkillPrompt }) {
         </AnimatedReveal>
       </div>
       <div>
-        <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-[0.04em] text-muted-foreground">
+        <span className="mb-0.5 block text-meta font-semibold uppercase tracking-[0.04em] text-muted-foreground">
           Task prompt
         </span>
         <div className="prose-chat prose-session-log mt-[3px] break-words text-foreground">
@@ -3415,40 +3451,48 @@ function RunningFooter({
   // error for failed, neutral for cancelled and superseded.
   const endedWith = isRunning === false && status && status !== "completed" ? status : null;
   return (
-    <div className="flex items-center gap-2.5 border-t border-border bg-muted/20 px-3 py-2.5 text-[12.5px]">
-      {isRunning === true ? (
-        <>
-          <span className="sl-orb size-[9px] shrink-0 rounded-full bg-status-active" aria-hidden />
-          {/* Shimmer = the semantic liveness signal (DESIGN.md § Motion): this
-              footer is the one always-visible "agent is live" line per open
-              task, so it carries the treatment. */}
-          <span className="shimmer-text font-medium">Agent is working…</span>
-        </>
-      ) : endedWith ? (
-        <>
-          <TaskStatusIcon status={endedWith} />
-          <span
-            className={
-              endedWith === "failed" ? "text-status-error-strong" : "text-muted-foreground"
-            }
-          >
-            Session ended · {statusLabel(endedWith).toLowerCase()}
-          </span>
-        </>
-      ) : isRunning === false ? (
-        <>
-          <span
-            className="grid size-4 shrink-0 place-items-center rounded-full bg-status-success/20 text-[10px] font-bold text-status-success-strong"
-            aria-hidden
-          >
-            ✓
-          </span>
-          <span className="text-muted-foreground">Session complete</span>
-        </>
-      ) : (
-        <span className="text-muted-foreground">Session log</span>
-      )}
-      <span className="ml-auto font-mono text-[11px] tabular-nums text-muted-foreground">
+    <div className="flex items-center gap-2.5 border-t border-border bg-muted/20 px-3 py-2.5 text-xs">
+      {/* A status region (`output` has the status role): the state is
+          announced when it changes (the agent finishes). The event count is
+          not: it changes on every poll. */}
+      <output aria-live="polite" className="flex min-w-0 items-center gap-2.5">
+        {isRunning === true ? (
+          <>
+            <span
+              className="sl-orb size-[9px] shrink-0 rounded-full bg-status-active"
+              aria-hidden
+            />
+            {/* Shimmer = the semantic liveness signal (DESIGN.md § Motion): this
+                footer is the one always-visible "agent is live" line per open
+                task, so it carries the treatment. */}
+            <span className="shimmer-text font-medium">Agent is working…</span>
+          </>
+        ) : endedWith ? (
+          <>
+            <TaskStatusIcon status={endedWith} />
+            <span
+              className={
+                endedWith === "failed" ? "text-status-error-strong" : "text-muted-foreground"
+              }
+            >
+              Session ended · {statusLabel(endedWith).toLowerCase()}
+            </span>
+          </>
+        ) : isRunning === false ? (
+          <>
+            <span
+              className="grid size-4 shrink-0 place-items-center rounded-full bg-status-success/20 text-meta font-bold text-status-success-strong"
+              aria-hidden
+            >
+              ✓
+            </span>
+            <span className="text-muted-foreground">Session complete</span>
+          </>
+        ) : (
+          <span className="text-muted-foreground">Session log</span>
+        )}
+      </output>
+      <span className="ml-auto font-mono text-meta tabular-nums text-muted-foreground">
         {count} {count === 1 ? "event" : "events"}
       </span>
     </div>

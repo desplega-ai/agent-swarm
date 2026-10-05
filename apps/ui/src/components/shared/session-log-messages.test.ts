@@ -192,6 +192,26 @@ describe("toMessageRows", () => {
   test("no rows give no rows", () => {
     expect(toMessageRows([])).toEqual([]);
   });
+
+  test("the caller's totals go on the last end row only", () => {
+    const totals = { cost: "$1.21", duration: "2m 56s", turns: "26 turns" };
+    const rows = [
+      result("r1", { total_cost_usd: 0.4 }),
+      agent("a1"),
+      result("r2", { total_cost_usd: 1.42 }),
+    ];
+    const out = toMessageRows(rows, totals);
+    expect(out.map((row) => row.id)).toEqual(["end-r1", "a1", "end-r2"]);
+    expect(endOf(out, 0).summary).toBeUndefined();
+    expect(endOf(out, 2).summary).toEqual(totals);
+    // The result's own numbers stay on the row.
+    expect(endOf(out, 2).costUsd).toBe(1.42);
+  });
+
+  test("totals with no end row change nothing", () => {
+    const rows = [agent("a1"), toolgroup("g1", ["Read"], 100)];
+    expect(toMessageRows(rows, { cost: "$1.21" })).toEqual(toMessageRows(rows));
+  });
 });
 
 describe("matchingRowIndex", () => {
@@ -295,6 +315,27 @@ describe("summarizeEnd", () => {
   test("a result with no numbers is one word", () => {
     const [end] = toMessageRows([result("r1", {})]);
     expect(summaryText(summarizeEnd(end as Extract<StreamRow, { type: "end" }>))).toBe("Finished");
+  });
+
+  test("the caller's totals replace the result's numbers", () => {
+    // The harness result says $1.42, 4m 7s and 30 turns. The rail says otherwise.
+    const [end] = toMessageRows(
+      [result("r1", { total_cost_usd: 1.4213, duration_ms: 247_000, num_turns: 30 })],
+      { cost: "$1.21", duration: "2m 56s", turns: "26 turns" },
+    );
+    expect(summaryText(summarizeEnd(end as Extract<StreamRow, { type: "end" }>))).toBe(
+      "Finished · $1.21 · 2m 56s · 26 turns",
+    );
+  });
+
+  test("totals keep the error title, and a field that is not set does not show", () => {
+    const [end] = toMessageRows(
+      [result("r1", { is_error: true, total_cost_usd: 0.5, duration_ms: 9800, num_turns: 4 })],
+      { cost: "$0.31", duration: "14m 2s" },
+    );
+    expect(summaryText(summarizeEnd(end as Extract<StreamRow, { type: "end" }>))).toBe(
+      "Ended with an error · $0.31 · 14m 2s",
+    );
   });
 });
 

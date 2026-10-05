@@ -3,7 +3,7 @@ date: 2026-10-05
 status: in-progress
 autonomy: critical
 last_updated: 2026-10-05
-last_updated_by: claude (phase 6 agent, Messages and Everything log views implemented)
+last_updated_by: claude (phase 7 follow-up agent, composer text at 11 px, one set of cost and run-time numbers, 60rem layout switch; PR section left to the orchestrator)
 commit_per_phase: true
 ---
 
@@ -73,7 +73,7 @@ All UI paths are under `apps/ui/src/`. Line numbers are from `main` at `0b93a949
 
 All of the following hold on the QA stack (`thoughts/taras/qa/2026-10-05-task-detail-qa-stack.md`) in light and dark:
 
-- **Layout follows content width, not viewport width.** At 64rem (1024 px) of content width or more, the page has two columns: a scrolling center column and a 300 px details rail. Below that, it uses the tabs layout.
+- **Layout follows content width, not viewport width.** At 60rem (960 px) of content width or more, the page has two columns: a scrolling center column and a 300 px details rail. Below that, it uses the tabs layout. (Changed to 60rem on 2026-10-05 after the phase 7 critique (Taras). It was 64rem (1024 px), so a 1280x800 window with the sidebar open (976 px) got the tabs.)
 - **Desktop log.** The center column is the only scroller. The log flows inside it with no inner scroller, and its toolbar sticks under a compact sticky bar. The sticky bar (title, status, model, primary action) appears once the hero leaves the view. (Phase 2b, after the phase 2 review.)
 - **Readable heading.**
   - The heading, the breadcrumb and the task lists show the Slack question with mentions turned into names. No `<@`, `(that's you)` or `<thread_context>` text appears anywhere.
@@ -123,7 +123,7 @@ All of the following hold on the QA stack (`thoughts/taras/qa/2026-10-05-task-de
 
 - **One branch and one PR, with a commit per phase** (`[phase N] <description>`). Taras chose this. Each phase leaves the page working and green.
 - **Order is foundations first, then layout, then content:** helpers and data (1), desktop frame (2), hero (3), actions and composer (4), narrow and mobile (5), log views (6), accessibility and type (7).
-- **Layout switches by container width.** The page root gets a Tailwind v4 `@container`. The `lg:hidden` and `hidden lg:grid` pair becomes `@min-[64rem]:hidden` and `hidden @min-[64rem]:grid`. This handles the docked context panel, which a viewport breakpoint cannot.
+- **Layout switches by container width.** The page root gets a Tailwind v4 `@container`. The `lg:hidden` and `hidden lg:grid` pair becomes `@min-[64rem]:hidden` and `hidden @min-[64rem]:grid`. This handles the docked context panel, which a viewport breakpoint cannot. (Changed to 60rem on 2026-10-05 after the phase 7 critique (Taras): `@min-[60rem]` / `@max-[60rem]` in `page.tsx`, `touch-targets.ts` and `task-source-line.tsx`.)
 - **One scroller on the task page (phase 2b).** The viewer takes an external `scrollElement`. The virtualizer, stick-to-bottom, the "N new" pill and the minimap use it. Other callers keep the viewer's own scroller. (Phase 2 first shipped a fixed-height log card with its own scroller. The review found the double scroll, so phase 2b replaces it.)
 - **One composer component.** Generalize `SessionComposer` in place into a shared `TaskComposer`, with two callers: Sessions and the task page. The caller decides the steer gate (lead-only versus any assignee) and the follow-up target (the Lead versus the same agent). No wrapper layers.
 - **Pure helpers get unit tests.** These are Slack text parsing, retry input, task-id linkify, and the messages-view row transform. Visual behavior is proven by agent-browser measurements on the QA stack, with screenshots under `/tmp/task-detail-qa/phase-N/`.
@@ -246,7 +246,7 @@ The page switches layout by container width. The wide layout is a scrolling cent
 #### 1. Container-width layout switch
 **File**: `apps/ui/src/pages/tasks/[id]/page.tsx`
 **Changes**:
-- The page root gets `@container`. Replace `lg:hidden` and `hidden lg:grid` (1289, 1328) with `@min-[64rem]:hidden` and `hidden @min-[64rem]:grid`.
+- The page root gets `@container`. Replace `lg:hidden` and `hidden lg:grid` (1289, 1328) with `@min-[64rem]:hidden` and `hidden @min-[64rem]:grid`. (Changed to 60rem on 2026-10-05 after the phase 7 critique (Taras).)
 - Remove the 3-column grid, the Activity rail collapse toggle, the `?rail=` param and its localStorage key (118-122, 632-664, 1390-1442).
 - Remove the "Back to Tasks" button (1273-1282). The breadcrumb links to Tasks.
 
@@ -298,7 +298,7 @@ The page switches layout by container width. The wide layout is a scrolling cent
 #### Automated QA:
 - [x] QA stack, completed route, 1440x900 and 1366x768: after the center column is scrolled to the log card, the log scroll viewport is at least 70% of the window height. Record the numbers next to the audit baseline (301 px and 169 px). Measured: 681 px (75.7%) at 1440x900, 549 px (71.5%) at 1366x768.
 - [x] At scroll 0 the answer card is fully above the fold at 1440x900. The sticky bar is hidden at scroll 0 and visible after scrolling past the hero.
-- [x] 1280x800 (content under 64rem) renders the tabs layout. 1440x900 renders two columns.
+- [x] 1280x800 (content under 64rem) renders the tabs layout. 1440x900 renders two columns. (Changed to 60rem on 2026-10-05 after the phase 7 critique (Taras). Now 1280x800 with the sidebar open (976 px) renders two columns, and 1024x768 (720 px) and 1440x900 with the context panel docked (756 px) render the tabs. See the follow-up fixes under phase 7.)
 - [x] No document horizontal overflow at 1024, 1280, 1366, 1440 and 1920 widths.
 - [x] In-progress route: the log still sticks to the bottom when new rows arrive. Post 5 lines with `POST /api/session-logs` (see `graft.ts`) while the page is open. Then scroll up and confirm the "N new" pill appears.
 - [x] The rail shows "Requested by" in full. Technical details starts collapsed and contains Session, Version and API key.
@@ -502,7 +502,7 @@ Every status gets its actions:
   - Measured: 0 dialogs on load, an open callout "Failed after 21ms" (seed timestamps) with the reason. Get help (callout and "..." menu) opens "Need help?". Escape returns focus to the opener ("Get help", or the "More actions" trigger). Retry created `ee657012` (same prompt, agent, `gpt-5.6-terra`, `parentTaskId` = failed id, `routingReason: "continuity"`) and navigated to it.
 - [x] In-progress route: a queued steer message still appears in the log as a steering row. Measured: the queued message shows in the log's queued box ("1 queued · e2e-user (user): …") above "Agent is working…", and `GET …/steering-messages` lists it `pending`. The sticky bar's Pause node survived 12 s of polls.
 - [x] Sessions page: start a session, send a follow-up. The new task has no `agentId` override (it routes to the Lead), the same as before. Measured: on a pending lead root, Sessions still shows the steer box (lead-only rule). After the root was cancelled, the follow-up `POST /api/tasks` body had no `agentId` or `routingReason`. The server routed `2cbc14b7` to e2e-lead (`routingSource: "engine_default"`).
-- [x] Screenshots of completed (actions and composer), failed, and in-progress at 1440 in `/tmp/task-detail-qa/phase-4/`, plus a recording of the follow-up flow (`agent-browser record start ... --cursor`, sped up 1.5x per LOCAL_TESTING.md). Dark and light at 1440, plus 1280 (tabs) and 390. Recording: `follow-up-1.5x.mp4` (6 s).
+- [x] Screenshots of completed (actions and composer), failed, and in-progress at 1440 in `/tmp/task-detail-qa/phase-4/`, plus a recording of the follow-up flow (`agent-browser record start ... --cursor`, sped up 1.5x per LOCAL_TESTING.md). Dark and light at 1440, plus 1280 (tabs) and 390. Recording: `follow-up-1.5x.mp4` (6 s). (Changed to 60rem on 2026-10-05 after the phase 7 critique (Taras): 1280 with the sidebar open is now two columns.)
 
 #### Manual Verification:
 - [ ] Taras, in the real dev swarm: a follow-up on a Slack-sourced task answers in the same Slack thread (see Manual E2E). Deferred to the final Manual E2E by Taras on 2026-10-05.
@@ -515,7 +515,7 @@ Every status gets its actions:
 
 ### Overview
 
-Below 64rem of content width:
+Below 64rem of content width (changed to 60rem on 2026-10-05 after the phase 7 critique (Taras)):
 - The hero scrolls away and the tabs stay sticky.
 - Running tasks open on Log and finished tasks on Outcome.
 - A bottom bar on every tab holds the composer or Follow up.
@@ -572,7 +572,7 @@ Below 64rem of content width:
 - On the narrow layout, tab triggers, bottom-bar buttons, the "..." trigger and the hero actions are `min-h-11`.
 - Add `hit-area` to the small log controls (Raw, Copy, row toggles, "View full prompt"). Check that `hit-area`'s `position: relative` does not fight `absolute` or `sticky` elements (`globals.css:263-276`).
 - As built (phase 5, pending review):
-  - Page-local parts use container-query classes from `pages/tasks/[id]/touch-targets.ts` (`@max-[64rem]:min-h-11`). They apply in the narrow tree only, so the rail and the source line keep their desktop size in the wide tree.
+  - Page-local parts use container-query classes from `pages/tasks/[id]/touch-targets.ts` (`@max-[64rem]:min-h-11`, changed to `@max-[60rem]` on 2026-10-05 after the phase 7 critique (Taras)). They apply in the narrow tree only, so the rail and the source line keep their desktop size in the wide tree.
   - Shared parts take explicit props: `touchTargets` on `SessionLogViewer` (toolbar, filter with 16 px text so iOS does not zoom, jump pill) and `QueuedSteeringBox`, `headerClassName` on `CollapsibleSection`, and `className` on `AgentLink`.
   - `hit-area` went on static controls only: Raw (both kinds), the inline copy buttons, "Show full output", the "N steps" and subagent toggles, "View full prompt", and the attachment remove button. Under an emulated coarse pointer they get a 40 px hit box (the utility's default).
   - No `hit-area` on the hover-revealed `absolute` copy buttons: the utility's `position: relative` would override `absolute`, and the buttons are invisible on touch. No `hit-area` on the thinking, skill and tool row toggles: their cards clip overflow, so the slop would not apply.
@@ -585,7 +585,7 @@ Below 64rem of content width:
 - [x] Playwright passes: `bun run e2e:ui -- specs/tasks.spec.ts specs/codex-logs.spec.ts specs/smoke.spec.ts` (with `composer-enter-key` and `prompt-attachments` added: 44 passed, 20 skipped by project. Both updated specs select `getByRole("tab", { name: "Log", exact: true })`.)
 
 #### Automated QA:
-- [x] QA stack at 390x844, 768x1024 and 1280x800:
+- [x] QA stack at 390x844, 768x1024 and 1280x800 (changed to 60rem on 2026-10-05 after the phase 7 critique (Taras): 1280x800 with the sidebar open now gets two columns, so the 1280 numbers below are history. At 1024x768 (720 px), the narrow tree shows on every route, and `targets.js` finds 0 controls under 44 px on every tab of the completed, in-progress and failed routes):
   - Completed route: the tab list top is at most 260 px at scroll 0 (audit baseline: 410). After scrolling, the tabs stay at the top.
   - Log tab: the narrow root is the only scroller, and the log rows start right under the sticky tabs (baseline: the log viewport was 30% of the window).
   - In-progress route: it opens on Log, and the bottom-bar composer is visible on all three tabs.
@@ -649,7 +649,7 @@ The log viewer gets a Messages and Everything switch. Messages folds tool and th
 
 #### 5. As built (phase 6, pending review)
 - **Row model.** `StreamRow`, `ToolEntry`, `ToolKind` and `formatDur` moved from the viewer to `session-log-messages.ts`, so the pure transform and its test do not import the viewer. The module imports `formatCost` by a relative path: the root `bun test` does not resolve the UI's `@/` alias for value imports.
-- **Labels.** An activity line reads "Ran 4 tools · 5.0s · thought for 2.0s", "Thought for 3.0s" or "Thought" (thinking only), or "2 events" (no tool and no thinking, for example a hook). Thinking under 1 s is left out. The tool names follow in mono. The end line reads "Finished · $1.42 · 4m 7s · 26 turns" with the green check, or "Ended with an error · …" with the failed icon. Cost uses `formatCost(x, { precision: 2 })`, as the rail does.
+- **Labels.** An activity line reads "Ran 4 tools · 5.0s · thought for 2.0s", "Thought for 3.0s" or "Thought" (thinking only), or "2 events" (no tool and no thinking, for example a hook). Thinking under 1 s is left out. The tool names follow in mono. The end line reads "Finished · $1.42 · 4m 7s · 26 turns" with the green check, or "Ended with an error · …" with the failed icon. Cost uses `formatCost(x, { precision: 2 })`, as the rail does. (Changed on 2026-10-05 after the phase 7 critique (Taras): on the task page the end line shows the rail's numbers. See the follow-up fixes under phase 7.)
 - **Open activity line.** It shows the folded rows with their renderers. Tool groups show their tool rows directly (no second "N steps" toggle), so a tool result is two clicks away. Activity lines start closed.
 - **Toolbar.** Without subagents, the toolbar is the switch and the filter (no tab list). The tab panel is then a region named "Session log". With subagents, the "Logs" and "Agents (n)" tabs stay and the switch follows them. Callers without `onViewChange` (the Sessions sheet) keep the "Logs" tab, Everything, and "Session complete". On a phone, the filter takes the rest of the row, so the toolbar stays one row. In the narrow tree the switch is 50 px tall, so its options are 44 px.
 - **Footer.** It counts events in both views (an activity line counts its rows), so Messages and Everything both say "48 events". A failed task says "Session ended · failed" in the error tone, a cancelled or superseded one "Session ended · cancelled" in the neutral tone, both with `TaskStatusIcon`.
@@ -728,6 +728,45 @@ Then the PR goes up with screenshots and a recording.
 - Numbers use `font-mono tabular-nums`.
 - Document the named scale in DESIGN.md §3 Typography.
 
+#### As built (phase 7, pending review)
+- **Landmarks.** `SidebarInset` is a `div`, so every page has one `main` (`#main-content`). "Skip to content" is the first element in the shell: off screen, it slides in on focus. It is a plain fragment link: Biome's `useValidAnchor` rejects an `onClick` on an anchor, and the browser focuses the target (`tabIndex={-1}`) by itself. The URL gets `#main-content`.
+- **Headings.** The Output card and Technical details use new opt-in `CollapsibleSection` props: `heading="h2"` (the accordion pattern: the toggle button inside an h2, no style of its own) and `titleClassName`. Other callers are unchanged. The log gets a screen-reader-only h2 "Session log" in both trees.
+- **Log focus.** On the task page the log has no scroller (phase 2b), so its keyboard stop is the log panel (the "Session log" region), with an inset amber ring. Arrow keys on it scroll the page column. Callers with their own scroller (the Sessions sheet) focus the scroller (a "Session log" region), and the panel leaves the Tab order. The narrow layout's Outcome, Log and Details panels are Tab stops (Radix), so they also show the ring. The model and agent chips drop the browser outline (`outline-none`): the critique found it drawn on top of the Badge's amber ring.
+- **Live status.** The footer state is an `<output aria-live="polite">` (the status role; Biome prefers the element to `role="status"`). The event count is outside it, so polls are not announced.
+- **Type scale.** `--text-data` (13 px) and `--text-meta` (11 px) are in `@theme`, each with a line height. Mapping: 13 to `text-data`; 11.5, 12 and 12.5 to `text-xs`; 9 to 11 to `text-meta`. `cn()` registers both with tailwind-merge (`lib/utils.ts`): unregistered, it reads `text-meta` as a color and drops the real color class. Inline code in the log prose has an 11 px floor (`.prose-session-log code` in `globals.css`): 0.8em of the 0.8rem prose was 10.24 px.
+- **No faded text.** The answer body was `text-foreground/80`: it is `text-foreground`, not muted, because it is the page's main content. Log values and tool output are `text-foreground`, labels `text-muted-foreground`.
+- **DESIGN.md.** §3 has the named scale table, the Floor, No-Fade and Tabular rules, and the task page's h1 exception. The file had 54 em dashes: all are gone (the branch rule covers whole changed files). `lib/utils.ts` writes its "no value" placeholder as `"\u2014"` for the same reason. The UI output is unchanged.
+- **Not changed** (outside the listed files):
+  - The shared composer's key hint "↵ send · ⇧↵ newline" stays 10 px (`components/sessions/composer-dock.tsx`, also on the Sessions page). It is the one text style under 11 px left on the page. (Changed on 2026-10-05 after the phase 7 critique (Taras): it is `text-meta` now. See the follow-up fixes below.)
+  - The cost-source chip in Technical details stays 9 px (`Badge size="tag"`).
+  - Markdown headings inside log messages keep their levels (a message with `# Title` adds an h1).
+- **Evidence for the PR** (`/tmp/task-detail-qa/phase-7/`): `pr/{completed,in-progress,failed}-{1440,390}-{light,dark}.png` (12 screenshots, default tab at 390), `follow-up-1.5x.mp4` (8 s, wide: Follow up, type, attach, Send, toast Open, the new task), `tabs-bottom-bar-1.5x.mp4` (10 s, 390: hero scrolls away, sticky tabs, Log, Everything, Details, a draft in the bar kept across tabs). The phase 4 and 5 recordings predate the phase 6 log toolbar, so these replace them. The recorded follow-up created `bf330ab1` (parent = the completed task, same agent, `source: "ui"`, `follow-up-notes.txt` attached).
+
+#### Follow-up fixes (2026-10-05, after the phase 7 critique, approved by Taras)
+- **Composer text at 11 px.** In `components/sessions/composer-dock.tsx`, the key hint ("↵ send · ⇧↵ newline") and the attachment chip's file size are `text-meta` (11 px), not 10 px. The Sessions page gets the same 1 px change (Taras accepted it).
+- **One set of numbers for cost and run time.**
+  - `SessionLogViewer` takes an optional `endSummary` (cost, run time and turns, as text). `toMessageRows(rows, endSummary)` puts it on the last end row, and `summarizeEnd` uses it in place of the harness result's numbers. Earlier end rows (an earlier session of a resumed task) keep their own result's numbers.
+  - The task page builds it with `taskRunSummary` (`task-details-rail.tsx`), from the same helpers that the rail's Summary rows use (`formatCost(x, { precision: 2 })`, `runTime`, `turnsText`). The rail now writes "1 turn", not "1 turns".
+  - A task with no cost rows gets no `endSummary`, so its end line keeps the result's numbers. The Sessions sheet passes nothing and is unchanged.
+  - Measured on the completed route: the rail reads "14:01 · ran 2m 56s" and "$1.21 · 26 turns", and the end line reads "Finished · $1.21 · 2m 56s · 26 turns" (before: "$1.42 · 4m 7s"). On a failed QA task with no cost rows, the end line keeps "Ended with an error · $0.31 · 14m 2s · 4 turns".
+  - Not changed: the Everything view's RESULT card shows the raw harness event (for example "US$1.4247 · 4m 7s" on the in-progress route, where the rail says $0.01). The failure callout's "Failed after {duration}" now uses the rail's run time (`taskRunTime`), so both read the same (the failed QA route shows "Failed after 1ms" and "ran 1ms", seed timestamps).
+- **60rem layout switch.** The wide and narrow switch is 60rem (960 px of page width), not 64rem. Measured on the completed route:
+
+  | Window | Page width | Layout | Horizontal overflow |
+  |---|---|---|---|
+  | 1280x800, sidebar open | 976 px | two columns (column 676, rail 300) | 0 |
+  | 1264x800, sidebar open | 960 px | two columns (column 660) | 0 |
+  | 1263x800, sidebar open | 959 px | tabs | 0 |
+  | 1024x768 | 720 px | tabs | 0 |
+  | 1440x900, context panel docked | 756 px | tabs | 0 |
+  | 1366x768 | 1062 px | two columns | 0 |
+  | 1440x900 | 1136 px | two columns | 0 |
+  | 1920x1080 | 1616 px | two columns | 0 |
+
+  - At 1280x800, the column is the only scroller on the completed route. The sticky bar is at 0..44 px and the log toolbar sticks at 44..91 px. At the end of the column, the last row ends at 694 px and the footer is at 694..731 of 744. On the in-progress route, the details rail also scrolls on its own (46 px over), the same case Taras accepted in phase 2b.
+  - `packages/ui-e2e` specs pin 1440x900 and 900x900, so no spec changed. Only their comments that name 64rem changed.
+- **Evidence** (`/tmp/task-detail-qa/phase-7/pr/`): the 12 PR screenshots again, plus `completed-1280-{light,dark}.png` and `completed-1440-log-{light,dark}.png` (the column scrolled to the log, so the end line and the rail show together). The 4th spawned task (`bf330ab1`, from the phase 7 recording) moves the end line below the fold at 1440x900 in the top view.
+
 #### 4. PR
 **Changes**:
 - Push the branch.
@@ -737,19 +776,19 @@ Then the PR goes up with screenshots and a recording.
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] No arbitrary font sizes remain: `grep -n "text-\[[0-9.]*px\]" apps/ui/src/pages/tasks/\[id\]/*.tsx apps/ui/src/components/shared/session-log-viewer.tsx apps/ui/src/components/steering/collapsible-composer-dock.tsx` prints nothing.
-- [ ] Typecheck passes: `cd apps/ui && bunx tsc -b`
-- [ ] Lint and token gate pass: `cd apps/ui && bun run lint && bun run check:tokens`
-- [ ] All unit tests pass: `bun run test:root -- --parallel=4`
-- [ ] Full Playwright suite passes: `bun run e2e:ui`
+- [x] No arbitrary font sizes remain: `grep -n "text-\[[0-9.]*px\]" apps/ui/src/pages/tasks/\[id\]/*.tsx apps/ui/src/components/shared/session-log-viewer.tsx apps/ui/src/components/steering/collapsible-composer-dock.tsx` prints nothing. (Before: 64.)
+- [x] Typecheck passes: `cd apps/ui && bunx tsc -b`
+- [x] Lint and token gate pass: `cd apps/ui && bun run lint && bun run check:tokens` ("Checked 771 files", no errors.)
+- [ ] All unit tests pass: `bun run test:root -- --parallel=4` (2026-10-05: 12387 pass, 23 fail, none in the UI. 18 fail the same way on `main` at `0b93a949a` when the 7 files run alone: `claude-adapter-binary`, `claude-adapter`, `claude-sdk-transport`, `credential-wait`, `status` and `workflow-llm` tests read credentials from the shell env. The other 5 are `realtime-transport` tests that timed out under load and pass when the file runs alone on this branch. The UI subset passes: 923 pass.)
+- [x] Full Playwright suite passes: `bun run e2e:ui` (62 passed, 21 skipped by project. After the last focus-ring edits, `tasks`, `codex-logs` and `smoke`: 41 passed, 17 skipped.)
 - [ ] The PR body check passes: `bun scripts/check-pr-body.ts --title "<title>" --body-file /tmp/pr-body.md`
 
 #### Automated QA:
-- [ ] Contrast sweep (the method from audit B) over the page in light and dark, on the completed, in-progress and failed routes: no text style is under 4.5:1.
-- [ ] No visible page text is under 11 px, except status chips at 10 px.
-- [ ] Keyboard from page load: the first Tab focuses "Skip to content", and Enter moves focus to `#main-content`. The log scroller shows a visible ring on focus.
-- [ ] The heading list in DOM order starts with the h1 title, with no level skip. The page has exactly one `main` landmark.
-- [ ] Re-run `/impeccable critique apps/ui/src/pages/tasks/[id]/page.tsx` and `/impeccable audit` and record the scores. Baseline: 20/40 and 12/20.
+- [x] Contrast sweep (the method from audit B) over the page in light and dark, on the completed, in-progress and failed routes: no text style is under 4.5:1. Measured (2026-10-05, `/tmp/task-detail-qa/phase-7/sweep.sh`): 24 states (3 routes, 1440x900 and each 390x844 tab, light and dark), 0 failures. Minimum 4.59:1 light (the inactive Messages/Everything option on the tinted log toolbar; screenshot pixels give the same 4.59:1) and 5.68:1 dark. Also 0 with Technical details, tool rows and raw panels open, and 0 on pending, offered and draft. The sweep now composites an absolutely positioned layer under the text (the segmented control's amber pill: audit B read it as 1.01:1) and one-color gradient tints (the sticky log toolbar). Exempt: the unavailable "Interrupt" option (`aria-disabled`, 1.95:1 light), as WCAG 1.4.3 exempts inactive controls. Before: Raw 3.28, LowKeyStat labels 2.99, hook outcome 4.2 (light), all faded with `/75` to `/85`.
+- [x] No visible page text is under 11 px, except status chips at 10 px. Measured: 0 in the listed files. One style is left: the shared composer's key hint "↵ send · ⇧↵ newline" at 10 px (`components/sessions/composer-dock.tsx`, not in this phase's files, also on the Sessions page), on 6 of 24 states. With Technical details open, the cost-source chip (`Badge size="tag"`, 9 px) shows too. Before: 320 text elements under 11 px, 52 styles. (Follow-up fixes, 2026-10-05: the key hint and the attachment size are 11 px now. `small-text.js` over completed, in-progress and failed at 1440x900, 1280x800 and 390x844, light and dark (18 states): 1 element under 11 px in each, the 10 px status chip. The 9 px cost-source chip with Technical details open is unchanged, as "What We're NOT Doing" says.)
+- [x] Keyboard from page load: the first Tab focuses "Skip to content", and Enter moves focus to `#main-content`. The log scroller shows a visible ring on focus. Measured at 1440 (completed): the link shows at (12, 12), 131x38 px, with the amber ring. Enter focuses `MAIN#main-content`, and the next Tab is "Follow up". The log panel ("Session log" region) is 15 Tabs later: `:focus-visible` with a 2 px inset amber ring, and ArrowDown on it scrolls the column (630 to 750 px). At 390 the Log tab panel shows the same ring.
+- [x] The heading list in DOM order starts with the h1 title, with no level skip. The page has exactly one `main` landmark. Measured on completed, in-progress and failed at 1440 and on each 390 tab: one h1 (the title), then h2 only (Output, Spawned tasks, Session log, the rail sections and Technical details). Markdown h2s inside log messages are also h2. `main` count is 1 on the task page and on `/`, `/tasks`, `/sessions`, `/agents`, `/settings`, `/workflows` (was 2).
+- [x] Re-run `/impeccable critique apps/ui/src/pages/tasks/[id]/page.tsx` and `/impeccable audit` and record the scores. Baseline: 20/40 and 12/20. Result (2026-10-05, dual-agent: Opus design review, Sonnet detector and overlay): **27/40** Nielsen (Acceptable, top of the band) and **16/20** technical (Good: accessibility 3, performance 3, responsive 3, theming 4, anti-patterns 3). Detector CLI: 0 findings. 0 P0, 2 P1: the rail and the log end line show different cost and run time (`session_costs` vs the harness result event, and created-to-finished vs started-to-finished), and a 1280x800 window with the sidebar open gets the narrow layout. Snapshot: `.impeccable/critique/2026-10-05T18-02-35Z__apps-ui-src-pages-tasks-id-page-tsx.md`. (Both P1s have a fix in the follow-up fixes above, 2026-10-05. The failure callout's created-to-finished time is still open.)
 
 #### Manual Verification:
 - [ ] Taras reviews the PR screenshots and recordings, then merges.

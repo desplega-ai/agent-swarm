@@ -3,9 +3,10 @@ import { expect, test } from "../fixtures";
 const TASK_PROMPT = "e2e in-progress task";
 const SEEDED_LOG_LINE = "Hello from the e2e seed";
 
-// The task page shows two columns only from 64rem of page width. The chromium
-// project's Desktop Chrome device (1280x720) leaves the page narrower than
-// that once the sidebar takes its share, so the wide tests pin a wide window.
+// The task page shows two columns from 60rem of page width. The chromium
+// project's Desktop Chrome device (1280x720) leaves 976 px once the sidebar
+// takes its share, just over that. The wide tests pin a wide window, so they
+// do not depend on that margin.
 test.use({ viewport: { width: 1440, height: 900 } });
 
 test("tasks list opens the seeded task and its session logs", async ({ page, seed, clean }) => {

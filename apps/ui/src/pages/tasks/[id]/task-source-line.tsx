@@ -177,7 +177,7 @@ function describeSource(
                 "min-w-0 truncate",
                 LINK_CLASS,
                 NARROW_TARGET,
-                "@max-[64rem]:leading-11",
+                "@max-[60rem]:leading-11",
               )}
             >
               {task.vcsRepo}
@@ -297,7 +297,7 @@ function TaskPromptDialog({
           variant="ghost"
           size="xs"
           className={cn(
-            "hit-area -mx-1.5 text-[13px] text-primary hover:text-primary",
+            "hit-area -mx-1.5 text-data text-primary hover:text-primary",
             NARROW_TARGET,
           )}
         >
@@ -402,7 +402,7 @@ export function TaskSourceLine({
   return (
     // Wide: the line wraps. Narrow: one row, 44 px tall for "View full
     // prompt", where a name or a repo truncates instead.
-    <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[13px] leading-6 text-muted-foreground @max-[64rem]:flex-nowrap">
+    <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-data leading-6 text-muted-foreground @max-[60rem]:flex-nowrap">
       <span
         className={cn("inline-flex items-center gap-1.5", view.shrinks ? "min-w-0" : "shrink-0")}
       >

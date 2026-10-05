@@ -52,13 +52,12 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useLocalToggle } from "@/hooks/use-local-toggle";
 import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
-import { formatDurationMs } from "@/lib/format-duration-ms";
 import { modelTierLabel } from "@/lib/model-tiers";
 import { TERMINAL_STATUSES, taskIsRunning } from "@/lib/task-activity";
 import { linkTaskIds } from "@/lib/task-links";
 import { describeModelResolution, taskDisplayModel } from "@/lib/task-model-resolution";
 import { taskListTitle } from "@/lib/task-title";
-import { cn, formatRelativeTime, parseUTCDate } from "@/lib/utils";
+import { cn, formatRelativeTime } from "@/lib/utils";
 import { directChildren, SpawnedTasks } from "./spawned-tasks";
 import {
   parseStructuredOutput,
@@ -68,7 +67,7 @@ import {
   TaskPrimaryAction,
   useTaskActions,
 } from "./task-actions";
-import { TaskDetailsRail } from "./task-details-rail";
+import { TaskDetailsRail, taskRunSummary, taskRunTime } from "./task-details-rail";
 import { TaskSourceLine } from "./task-source-line";
 import {
   STICKY_BAR_HEIGHT,
@@ -81,6 +80,9 @@ import {
 
 /** The narrow layout's tabs. The `?tab=` values predate the labels: Log is `logs`. */
 const TASK_DETAIL_TABS = new Set(["outcome", "logs", "details"]);
+
+/** The focus ring of a narrow tab panel (the panel itself is a Tab stop). */
+const PANEL_FOCUS_RING = "focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/60";
 
 function coerceTaskDetailTab(value: string, fallback: string): string {
   return TASK_DETAIL_TABS.has(value) ? value : fallback;
@@ -176,18 +178,6 @@ function describeWaiting(
   }
 }
 
-/**
- * How long a failed task ran: created to finished, or the harness run time
- * when the task has no finish time.
- */
-function failedAfter(task: AgentTask, costDurationMs: number): string | null {
-  if (task.finishedAt) {
-    const ms = parseUTCDate(task.finishedAt).getTime() - parseUTCDate(task.createdAt).getTime();
-    if (ms > 0) return formatDurationMs(ms);
-  }
-  return costDurationMs > 0 ? formatDurationMs(costDurationMs) : null;
-}
-
 /** Task ids in the answer link to their pages. `taskIds` are the ids the page knows. */
 function StructuredOutputContent({
   raw,
@@ -203,7 +193,7 @@ function StructuredOutputContent({
   const structured = parseStructuredOutput(raw);
   if (!structured) {
     return (
-      <div className={`text-sm leading-relaxed overflow-auto text-foreground/80 ${maxH}`}>
+      <div className={`text-sm leading-relaxed overflow-auto text-foreground ${maxH}`}>
         <MarkdownView
           text={linkTaskIds(renderTaskCitations(raw, citations, "markdown"), taskIds)}
         />
@@ -214,10 +204,10 @@ function StructuredOutputContent({
     <div className={`space-y-3 overflow-auto ${maxH}`}>
       {structured.summary && (
         <div>
-          <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+          <span className="text-meta font-semibold text-muted-foreground uppercase tracking-wider">
             Summary
           </span>
-          <div className="mt-1 text-sm leading-relaxed text-foreground/80">
+          <div className="mt-1 text-sm leading-relaxed text-foreground">
             <MarkdownView
               text={linkTaskIds(
                 renderTaskCitations(structured.summary, citations, "markdown", false),
@@ -229,10 +219,10 @@ function StructuredOutputContent({
       )}
       {structured.output && (
         <div>
-          <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+          <span className="text-meta font-semibold text-muted-foreground uppercase tracking-wider">
             Output
           </span>
-          <div className="mt-1 text-sm leading-relaxed text-foreground/80">
+          <div className="mt-1 text-sm leading-relaxed text-foreground">
             <MarkdownView
               text={linkTaskIds(
                 renderTaskCitations(structured.output, citations, "markdown", false),
@@ -319,7 +309,7 @@ export default function TaskDetailPage() {
   // The draft is owned by the page, not the composer. The narrow and wide
   // layouts each mount their own <TaskComposer>, and the wide box moves when
   // the task finishes (the steer box under the log, the follow-up box under
-  // the outcome). Holding the text here means crossing the 64rem layout
+  // the outcome). Holding the text here means crossing the 60rem layout
   // switch, a status flip, or a narrow tab switch does not eat what the user
   // typed.
   const [draft, setDraft] = useState("");
@@ -421,6 +411,13 @@ export default function TaskDetailPage() {
     if (!task?.requestedByUserId || !users) return null;
     return users.find((u) => u.id === task.requestedByUserId)?.name ?? null;
   }, [task, users]);
+  // The log's end line shows the rail's cost, run time and turns, so the page
+  // has one set of numbers. With no cost rows, the end line keeps the
+  // harness result's numbers.
+  const endSummary = useMemo(
+    () => (task ? (taskRunSummary(task, costs) ?? undefined) : undefined),
+    [task, costs],
+  );
 
   if (isLoading) {
     return (
@@ -485,12 +482,10 @@ export default function TaskDetailPage() {
     />
   );
 
-  // A failed task's error, always open, with Retry and Get help.
+  // A failed task's error, always open, with Retry and Get help. "Failed
+  // after" names the rail's run time, so the two never disagree.
   const failureCallout = isFailed ? (
-    <TaskFailureCallout
-      model={actions}
-      duration={failedAfter(task, costs?.reduce((sum, cost) => sum + cost.durationMs, 0) ?? 0)}
-    />
+    <TaskFailureCallout model={actions} duration={taskRunTime(task, costs)} />
   ) : null;
 
   // THE MESSAGE BOX, one per layout tree, on the one draft. A finished task
@@ -535,6 +530,7 @@ export default function TaskDetailPage() {
           borderColor={isCompleted ? "border-status-success/30" : "border-border"}
           bgColor={isCompleted ? "bg-status-success/5" : "bg-muted/20"}
           headerClassName="min-h-11"
+          heading="h2"
           defaultOpen
         >
           <StructuredOutputContent
@@ -576,8 +572,15 @@ export default function TaskDetailPage() {
   // Each layout passes its scroller as `scrollElement` (the wide column, the
   // narrow root), so the log flows in the page scroller with no scroller of
   // its own. `null` until the scroller mounts. The narrow layout asks for
-  // 44 px toolbar controls.
-  const renderSessionLogs = (scrollElement: HTMLElement | null, touchTargets = false) =>
+  // 44 px toolbar controls. The log has no visible title, so its h2 is for
+  // screen readers only.
+  const renderSessionLogs = (scrollElement: HTMLElement | null, touchTargets = false) => (
+    <>
+      <h2 className="sr-only">Session log</h2>
+      {renderSessionLogBody(scrollElement, touchTargets)}
+    </>
+  );
+  const renderSessionLogBody = (scrollElement: HTMLElement | null, touchTargets: boolean) =>
     showLogViewer ? (
       <SessionLogViewer
         logs={sessionLogs ?? []}
@@ -589,6 +592,7 @@ export default function TaskDetailPage() {
         view={logView}
         onViewChange={setLogView}
         status={task.status}
+        endSummary={endSummary}
       />
     ) : sessionLogsLoading ? (
       // Do not claim "no session log" before the read answers.
@@ -657,7 +661,9 @@ export default function TaskDetailPage() {
       <TaskEffortMark effort={task.effort} className="text-muted-foreground" />
     </>
   ) : null;
-  const modelChipClass = "h-6 max-w-full min-w-0 gap-1.5 px-2";
+  // `outline-none`: the chips show the Badge's amber focus ring only, not the
+  // browser outline on top of it.
+  const modelChipClass = "h-6 max-w-full min-w-0 gap-1.5 px-2 outline-none";
   const wideModelChip = displayModel ? (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -684,7 +690,7 @@ export default function TaskDetailPage() {
     </Badge>
   ) : null;
   const agentChip = task.agentId ? (
-    <Badge variant="outline" asChild className="h-6 max-w-full gap-1.5 pr-2 pl-0.5">
+    <Badge variant="outline" asChild className="h-6 max-w-full gap-1.5 pr-2 pl-0.5 outline-none">
       <Link to={`/agents/${task.agentId}`}>
         <AgentAvatar
           agentId={task.agentId}
@@ -772,7 +778,7 @@ export default function TaskDetailPage() {
         <TaskFailureHelpDialog task={task} open={helpOpen} onOpenChange={setHelpOpen} />
       ) : null}
 
-      {/* Narrow (under 64rem of page width): one scroller from under the app
+      {/* Narrow (under 60rem of page width): one scroller from under the app
           header to the window bottom (it bleeds into <main>'s padding). The
           hero scrolls away. The tabs stick to the top and the message box to
           the bottom, on every tab. The log flows in this scroller: the tabs
@@ -786,7 +792,7 @@ export default function TaskDetailPage() {
             "--log-sticky-bottom": `${narrowBarHeight}px`,
           } as CSSProperties
         }
-        className="@min-[64rem]:hidden -m-4 flex min-h-0 flex-1 flex-col overflow-y-auto [scrollbar-gutter:stable] md:-m-6"
+        className="@min-[60rem]:hidden -m-4 flex min-h-0 flex-1 flex-col overflow-y-auto [scrollbar-gutter:stable] md:-m-6"
       >
         <div ref={narrowHeroRef} className="px-4 md:px-6">
           {narrowHero}
@@ -808,13 +814,17 @@ export default function TaskDetailPage() {
               </TabsTrigger>
             </TabsList>
           </div>
-          <TabsContent value="outcome" className="px-4 py-3 md:px-6">
+          {/* Each panel is a Tab stop (Radix), so it shows the focus ring. */}
+          <TabsContent value="outcome" className={cn("px-4 py-3 md:px-6", PANEL_FOCUS_RING)}>
             {outcomeContent}
           </TabsContent>
-          <TabsContent value="logs" className="flex flex-col px-4 py-3 md:px-6">
+          <TabsContent
+            value="logs"
+            className={cn("flex flex-col px-4 py-3 md:px-6", PANEL_FOCUS_RING)}
+          >
             {renderSessionLogs(narrowScroller, true)}
           </TabsContent>
-          <TabsContent value="details" className="px-4 py-3 md:px-6">
+          <TabsContent value="details" className={cn("px-4 py-3 md:px-6", PANEL_FOCUS_RING)}>
             {detailsRail}
           </TabsContent>
         </Tabs>
@@ -834,7 +844,7 @@ export default function TaskDetailPage() {
           bleeds into <main>'s vertical padding, so the column scrolls from
           under the app header down to the window edge and the log gets those
           pixels. */}
-      <div className="hidden @min-[64rem]:grid flex-1 min-h-0 grid-cols-[minmax(0,1fr)_300px] -my-4 md:-my-6">
+      <div className="hidden @min-[60rem]:grid flex-1 min-h-0 grid-cols-[minmax(0,1fr)_300px] -my-4 md:-my-6">
         {/* The column is the only scroller. The log flows in it, and its
             toolbar, minimap and live footer stick under the bar and above the
             message box: both heights go to the log as CSS variables. */}
@@ -873,6 +883,7 @@ export default function TaskDetailPage() {
                 iconColor={isCompleted ? "text-status-success-strong" : "text-muted-foreground"}
                 borderColor={isCompleted ? "border-status-success/30" : "border-border"}
                 bgColor={isCompleted ? "bg-status-success/5" : "bg-muted/20"}
+                heading="h2"
                 // A finished task is opened for its result; keep it collapsed
                 // while the task runs so the live log stays in view.
                 defaultOpen={isTerminal}

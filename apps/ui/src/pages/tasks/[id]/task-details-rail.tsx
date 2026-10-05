@@ -22,6 +22,7 @@ import { AgentLink } from "@/components/shared/agent-link";
 import { CollapsibleSection } from "@/components/shared/collapsible-section";
 import { CostSourceBadge, costDriftPercent } from "@/components/shared/cost-source-badge";
 import { SessionId } from "@/components/shared/session-id";
+import type { EndSummary } from "@/components/shared/session-log-messages";
 import { Button } from "@/components/ui/button";
 import { MiddleTruncation } from "@/components/ui/middle-truncation";
 import { Progress } from "@/components/ui/progress";
@@ -139,6 +140,46 @@ function summarizeCosts(costs: SessionCost[] | undefined): CostStats | null {
   };
 }
 
+/**
+ * Run time: the harness's own measure when cost rows exist, otherwise the
+ * wall clock from start to finish.
+ */
+function runTime(task: TaskWithLogs, stats: CostStats | null): string | null {
+  if (stats && stats.durationMs > 0) return formatDurationMs(stats.durationMs);
+  if (!task.finishedAt) return null;
+  return formatElapsed(firstStartedAt(task.logs) ?? task.createdAt, task.finishedAt);
+}
+
+/** The rail's run time, for other places on the page that name it. */
+export function taskRunTime(task: TaskWithLogs, costs: SessionCost[] | undefined): string | null {
+  return runTime(task, summarizeCosts(costs));
+}
+
+/** "26 turns". Devin bills in ACUs and has no turn count. */
+function turnsText(task: TaskWithLogs, stats: CostStats): string | null {
+  if (task.provider === "devin" || stats.turns <= 0) return null;
+  return `${stats.turns.toLocaleString()} ${stats.turns === 1 ? "turn" : "turns"}`;
+}
+
+/**
+ * The cost, run time and turns of the Summary section, as text. The log's end
+ * line shows the same text, so the page has one source for these numbers.
+ * `null` when the task has no cost rows: the end line then shows the harness
+ * result's numbers.
+ */
+export function taskRunSummary(
+  task: TaskWithLogs,
+  costs: SessionCost[] | undefined,
+): EndSummary | null {
+  const stats = summarizeCosts(costs);
+  if (!stats) return null;
+  return {
+    cost: formatCost(stats.totalCost, { precision: 2 }),
+    duration: runTime(task, stats) ?? undefined,
+    turns: turnsText(task, stats) ?? undefined,
+  };
+}
+
 /** A rail section: a quiet uppercase heading over its rows. */
 function RailSection({
   title,
@@ -151,7 +192,7 @@ function RailSection({
 }) {
   return (
     <section className={cn("space-y-2", className)}>
-      <h2 className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+      <h2 className="text-meta font-semibold uppercase tracking-wider text-muted-foreground">
         {title}
       </h2>
       {children}
@@ -174,10 +215,7 @@ function RailRow({
     <div className="grid grid-cols-[6.5rem_minmax(0,1fr)] items-baseline gap-x-3 py-1">
       <dt className="text-xs text-muted-foreground">{label}</dt>
       <dd
-        className={cn(
-          "min-w-0 break-words text-[13px] leading-5",
-          mono && "font-mono tabular-nums",
-        )}
+        className={cn("min-w-0 break-words text-data leading-5", mono && "font-mono tabular-nums")}
       >
         {children}
       </dd>
@@ -249,7 +287,7 @@ function ActivityTimeline({
             <div className="min-w-0 pb-3">
               <p
                 className={cn(
-                  "text-[13px] leading-5",
+                  "text-data leading-5",
                   TASK_EVENT_TEXT[event.tone],
                   event.tone === "muted" ? "line-clamp-2" : "font-medium",
                 )}
@@ -290,7 +328,7 @@ function ContextSection({
     return (
       <RailSection title="ACU budget">
         <ContextBar percent={percent} label="ACU budget used" />
-        <p className="font-mono text-[13px] tabular-nums">
+        <p className="font-mono text-data tabular-nums">
           {acus.toFixed(2)} of {maxAcuLimit} ACUs
         </p>
       </RailSection>
@@ -316,7 +354,7 @@ function ContextSection({
   return (
     <RailSection title="Context">
       {latest ? <ContextBar percent={latest.contextPercent} label="Context used" /> : null}
-      <p className="flex items-baseline justify-between gap-3 font-mono text-[13px] tabular-nums">
+      <p className="flex items-baseline justify-between gap-3 font-mono text-data tabular-nums">
         {latest ? (
           <span>
             {shortTokens(latest.contextUsedTokens)} of {shortTokens(latest.contextTotalTokens)}{" "}
@@ -460,14 +498,10 @@ export function TaskDetailsRail({
   const startedAt = firstStartedAt(task.logs);
   const timeLabel = startedAt ? "Started" : "Created";
   const timeValue = startedAt ?? task.createdAt;
-  // Run time: the harness's own measure when cost rows exist, otherwise the
-  // wall clock from start to finish.
-  const ranMs = stats && stats.durationMs > 0 ? stats.durationMs : null;
-  const ran = ranMs
-    ? formatDurationMs(ranMs)
-    : task.finishedAt
-      ? formatElapsed(timeValue, task.finishedAt)
-      : null;
+  // The run time, cost and turns use the same helpers as `taskRunSummary`
+  // (the log's end line).
+  const ran = runTime(task, stats);
+  const turns = stats ? turnsText(task, stats) : null;
 
   const acuCostUsd =
     (task.providerMeta as DevinProviderMeta | undefined)?.acuCostUsd ?? DEFAULT_ACU_COST_USD;
@@ -539,11 +573,7 @@ export function TaskDetailsRail({
                   {formatCost(stats.totalCost, { precision: 4 })}
                 </TooltipContent>
               </Tooltip>
-              {acus != null
-                ? ` · ${acus.toFixed(2)} ACUs`
-                : stats.turns > 0
-                  ? ` · ${stats.turns.toLocaleString()} turns`
-                  : null}
+              {acus != null ? ` · ${acus.toFixed(2)} ACUs` : turns ? ` · ${turns}` : null}
               {stats.sessions > 1 ? ` · ${stats.sessions} sessions` : null}
             </RailRow>
           ) : null}
@@ -567,7 +597,7 @@ export function TaskDetailsRail({
                 <Link
                   to={`/tasks/${depId}`}
                   className={cn(
-                    "font-mono text-[13px] text-primary hover:underline",
+                    "font-mono text-data text-primary hover:underline",
                     NARROW_INLINE_TARGET,
                   )}
                 >
@@ -583,7 +613,7 @@ export function TaskDetailsRail({
           ends; the outcome carries the result. */}
       {task.progress && !isTerminal ? (
         <RailSection title="Progress">
-          <p className="max-h-32 overflow-auto whitespace-pre-wrap text-[13px] leading-5 text-muted-foreground">
+          <p className="max-h-32 overflow-auto whitespace-pre-wrap text-data leading-5 text-muted-foreground">
             {task.progress}
           </p>
         </RailSection>
@@ -597,10 +627,13 @@ export function TaskDetailsRail({
         </RailSection>
       ) : null}
 
+      {/* A rail section like the others: an h2 at the meta size. */}
       <CollapsibleSection
         title="Technical details"
         persistKey="tasks:technical-details-open"
         headerClassName={NARROW_TARGET}
+        heading="h2"
+        titleClassName="text-meta"
       >
         <dl className="pt-1">
           <RailRow label="Task id">

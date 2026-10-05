@@ -370,7 +370,7 @@ export function ComposerDock({
               >
                 <AttachmentIcon file={file} />
                 <span className="truncate max-w-[12rem] sm:max-w-[18rem]">{file.name}</span>
-                <span className="shrink-0 text-[10px] text-muted-foreground">
+                <span className="shrink-0 text-meta text-muted-foreground">
                   {formatFileSize(file.size)}
                 </span>
                 <button
@@ -438,7 +438,7 @@ export function ComposerDock({
                 <TooltipContent>Attach files</TooltipContent>
               </Tooltip>
             ) : null}
-            <span className="text-[10px] font-mono text-muted-foreground tracking-wider whitespace-nowrap hidden @lg:inline">
+            <span className="text-meta font-mono text-muted-foreground tracking-wider whitespace-nowrap hidden @lg:inline">
               ↵ send · ⇧↵ newline
             </span>
             <Tooltip>
