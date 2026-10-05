@@ -26,7 +26,7 @@ flowchart TD
 
 - **Reboot sweep liveness predicate** (`runRebootSweep`, boot epoch parsed from `globalThis.__runId` = `run_<epochMs>`), evaluated per `in_progress` task in this order:
   1. **Claimed after boot → skip.** A task with `lastUpdatedAt >= bootEpoch - 5s` is skipped before any session lookup. `claimTask` / `startTask` stamp `lastUpdatedAt` at the `in_progress` transition and the API is the sole DB writer, so a post-boot value proves the claim (or a live worker's write) happened after this process started. It cannot be a pre-boot orphan. This is what keeps a task alive when its worker is still inside a slow provider spawn (opencode cold start exceeds the 5s sweep delay). If the task later goes quiet, the regular stalled-task sweep still covers it.
-  2. **Session live → skip.** A session is "live, skip" if `lastHeartbeatAt >= bootEpoch - 5s`, **or** if its heartbeat is younger than `STALL_THRESHOLD_STALE_HEARTBEAT_MIN` (15 min). Workers run in their own containers and outlive an API restart, and sessions heartbeat on tool calls only, so a live worker inside a long model call has no post-boot heartbeat in the first 5s. Only a session stale by the classifier's own threshold is treated as dead → auto-fail + retry child; fresher ones are left to the stalled-task sweep.
+  2. **Session live → skip.** A session is "live, skip" if `lastHeartbeatAt >= bootEpoch - 5s`, **or** if its heartbeat is younger than `STALL_THRESHOLD_STALE_HEARTBEAT_MIN` (15 min). Workers run in their own containers and outlive an API restart, and a session's heartbeat only moves on tool activity or provider output (§2 note), so a live worker inside a long model call that has not streamed yet has no post-boot heartbeat in the first 5s. Only a session stale by the classifier's own threshold is treated as dead → auto-fail + retry child; fresher ones are left to the stalled-task sweep.
   3. If `__runId` is missing/unparseable, both checks fall back to the legacy behavior (session exists → skip, no claim-time check). Never more aggressive than before.
 - **Reboot sweep dependents.** `failTask` normally cascade-fails every non-terminal task whose `dependsOn` names the failed task (`cascadeFailDependents`, reason `Blocked dependency <id8> was failed`). The reboot sweep calls it with `cascadeDependents: false` and settles the dependents itself once the retry decision is made: each never-started dependent (`draft`/`backlog`/`unassigned`/`offered`/`reviewing`/`pending`) has the swept id in `dependsOn` replaced by the retry child's id and waits on the retry (`task_dependency_repointed` log row). The dependent keeps its row, so agent, Slack fields, `followUpConfig`, priority and parent are unchanged. Anything still depending on the swept task afterwards — no retry was created (skip-type task, invalid affinity, a non-terminal child already existed, retry creation threw), or a dependent that already started — cascade-fails exactly as before. Already-terminal dependents are never touched. Every other `failTask` caller cascades as today.
 - **Worker side** (`src/commands/runner.ts`): the worker registers its active session (POST `/api/active-sessions`, keyed on the per-task runner session id) *before* it starts the provider spawn, and fills in the provider session id on `session_init`. So the window in which an `in_progress` task has no session row is one HTTP round trip, not the whole spawn. On spawn failure the worker fails the task and then removes the row.
@@ -127,9 +127,9 @@ is never expired):
 - Expiry retires stale runtimes and marks any agent with no live runtime left
   `offline`. It deliberately does **not** delete active sessions: runtime
   liveness answers "may this process acquire NEW work?", not "is its current
-  work dead?". Sessions are heartbeated by tool activity only (§2 note), so a
-  healthy worker inside a long model call or shell command can be quiet past
-  the runtime cutoff — and runtime rows freeze entirely while the flag is off,
+  work dead?". A session's heartbeat only moves on tool activity or provider output (§2 note), so a
+  healthy worker inside a long shell command or a model call that is not
+  streaming can be quiet past the runtime cutoff — and runtime rows freeze entirely while the flag is off,
   so re-enabling it must not read every healthy worker as crashed. Crash
   classification stays owned by the stalled-task classifier (§2 Case B:
   session heartbeat **and** task both past its stronger threshold), which
@@ -148,9 +148,9 @@ delayed ping from a retired or unknown runtime cannot resurrect it.
 
 Startup session cleanup is disabled in this mode: several processes share one
 agent id, and a booting worker has no evidence that distinguishes its crashed
-predecessor's session from a live-but-quiet sibling's (sessions heartbeat on
-tool activity only, and a live worker's runtime may have no row at all during
-the activation window). A crashed boot's task is reclaimed by the stalled-task
+predecessor's session from a live-but-quiet sibling's (a session's heartbeat
+only moves on tool activity or provider output, and a live worker's runtime may
+have no row at all during the activation window). A crashed boot's task is reclaimed by the stalled-task
 classifier (§2 Case B) once both its session heartbeat and the task go stale;
 the sweep's stale-session cleanup backstops leftover rows. With the flag off,
 boot cleanup keeps its legacy behavior (one process per agent, so every
@@ -180,7 +180,7 @@ flowchart TD
 ```
 
 - Candidate set = `getStalledInProgressTasks(STALL_THRESHOLD_NO_SESSION_MIN)` → `status='in_progress' AND lastUpdatedAt > 5m`. Tasks in `pending`/`offered` are **not** seen by this sweep. A candidate with a pending steering message newer than `STEERING_STALL_GRACE_MIN` is deferred for that sweep; once the bounded grace expires, normal classification and remediation resume.
-- An **active_session** = one worker-*run* process for a task (`active_sessions`, `UNIQUE(taskId)`), created lazily *after* the provider process spawns, heartbeated by **tool activity** (throttled ~5s; no wall-clock ping between tool calls). "No active session" is AND-gated with `lastUpdatedAt > 5m`, so it means *"no live run **and** no task progress in 5 min."* It can false-positive on a long-but-quiet live worker; the resume-generation budget (`MAX_RESUME_GENERATIONS`) bounds the blast radius.
+- An **active_session** = one worker-*run* process for a task (`active_sessions`, `UNIQUE(taskId)`), created lazily *after* the provider process spawns, kept alive by two inputs to `active_sessions.lastHeartbeatAt`: **tool activity** (`PUT /api/active-sessions/heartbeat/{taskId}`, throttled ~5s worker-side) and **provider output** (`POST /api/session-logs` with a `taskId`: `refreshActiveSessionOnActivity` refreshes that task's own session row, at most once per 30s, via a `lastHeartbeatAt < cutoff` guard on the UPDATE). Provider output covers every harness and a long reasoning stream with no tool calls; it is task-scoped, so it never refreshes another task's session. There is no wall-clock ping: a worker that is silent (no tool call and no output) still goes stale. "No active session" is AND-gated with `lastUpdatedAt > 5m`, so it means *"no live run **and** no task progress in 5 min."* It can false-positive on a long-but-quiet live worker; the resume-generation budget (`MAX_RESUME_GENERATIONS`) bounds the blast radius.
 - The classifier emits `no-session`, `stale-session`, or `fresh-stalled` only after a task crosses its existing threshold. Extensions cannot change thresholds or classify a healthy task as stalled.
 - `decideRemediation` keeps the default recovery policy. It selects `fail` for workflow steps, excluded task types, existing resume children, and exhausted resume budgets. It otherwise selects `supersede-resume`. A fresh-session stall defaults to `record`.
 - `pre.heartbeat.remediate` receives the task, optional session, classification, proposed action, reason, and age values before any remediation write. An extension can select `supersede-resume`, `fail`, or `record`. A block records the stalled task and an `extensionSkipped` finding, then performs no remediation during that sweep. An invalid action logs a scrubbed warning and keeps the original proposal.
@@ -209,6 +209,12 @@ A pin **never reclaimed within `HEARTBEAT_RESUME_PIN_GRACE_MIN`** (the agent tha
 ### Pseudocode (current)
 
 ```text
+# session.lastHeartbeatAt (the only session-liveness input) is written by:
+#   PUT  /api/active-sessions/heartbeat/{taskId}   tool activity
+#   POST /api/session-logs {taskId}                provider output, any harness;
+#        UPDATE active_sessions SET lastHeartbeatAt = now
+#        WHERE taskId = {taskId} AND lastHeartbeatAt < now - 30s   # task-scoped, throttled
+
 # stalled-task detector, after pending-steering grace:
 if task has pending steering newer than STEERING_STALL_GRACE_MIN:
     defer this sweep

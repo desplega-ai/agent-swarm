@@ -550,16 +550,17 @@ export async function handleApprovalRequests(
       return true;
     }
 
-    // Emit event for workflow resume
-    if (updated.workflowRunId && updated.workflowRunStepId) {
-      workflowEventBus.emit("approval.resolved", {
-        requestId: updated.id,
-        status: updated.status,
-        responses: updated.responses,
-        workflowRunId: updated.workflowRunId,
-        workflowRunStepId: updated.workflowRunStepId,
-      });
-    }
+    // Emit for every answered request, workflow or standalone. Workflow resume
+    // ignores a payload without a run and step id, and the extension bridge
+    // (`post.approval.resolved`) needs the standalone ones.
+    workflowEventBus.emit("approval.resolved", {
+      requestId: updated.id,
+      status: updated.status,
+      responses: updated.responses,
+      workflowRunId: updated.workflowRunId ?? undefined,
+      workflowRunStepId: updated.workflowRunStepId ?? undefined,
+      sourceTaskId: updated.sourceTaskId ?? undefined,
+    });
 
     // For standalone (non-workflow) requests, create a follow-up task
     // so the requesting agent is notified of the human's response
