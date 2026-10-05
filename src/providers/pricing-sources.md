@@ -62,7 +62,9 @@ rate by hand should also update this file.
     (`claude-opus-5-5`, `gpt-5-nano-2025-08-07`,
     `accounts/fireworks/models/glm-5p3-flash`); the lookup strips a
     `provider/` pin prefix and an OpenAI `-YYYY-MM-DD` snapshot date. A model
-    outside these sections stays `unpriced`.
+    outside these sections stays `unpriced`, and so does an `amp` row without a
+    per-model breakdown (the thread export failed): its top-level model is the
+    requested mode or pin, not a billing model, even when it is priceable.
 
 - **Snapshot refresh procedure**:
   - Run `bun run scripts/refresh-modelsdev-pricing.ts` (Phase 2 — adds the

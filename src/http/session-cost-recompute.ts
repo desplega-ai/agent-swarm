@@ -135,6 +135,10 @@ export async function recomputeSessionCost(
     };
   }
 
+  // amp's top-level model is the mode or pin it was asked for; only the thread
+  // export's per-model usage says what ran and how its cache tokens bill.
+  if (input.provider === "amp" && !modelUsageEntries) return unpricedResult(input, modelBreakdown);
+
   const split = cacheWriteSplit(input);
   const usages: SessionCostModelUsageInput[] = modelUsageEntries
     ? modelUsageEntries

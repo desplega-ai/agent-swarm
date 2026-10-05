@@ -7,6 +7,7 @@ import {
   checkProviderCredentials,
   validateProviderCredentials,
 } from "../commands/provider-credentials";
+import { recomputeSessionCost } from "../http/session-cost-recompute";
 import { createProviderAdapter } from "../providers";
 import {
   AMP_PACKAGE,
@@ -23,6 +24,7 @@ import { ampModelError, resolveAmpModel } from "../utils/amp-models";
 import { getModelAwareCredentialVars } from "../utils/credentials";
 import { resolveHarnessProvider } from "../utils/harness-provider";
 import { clearVolatileSecretsForTesting } from "../utils/secret-scrubber";
+import { ampPricingLookup } from "./amp-pricing-helpers";
 
 const KEY = "sgamp_test_credential_value";
 const directories: string[] = [];
@@ -413,6 +415,32 @@ describe("amp session", () => {
       cacheWriteTokens: 1000,
     });
     expect(result.cost?.models).toBeUndefined();
+  });
+
+  test("a pinned model whose export fails settles unpriced, not priced as the pin", async () => {
+    const { config } = await fixture("export-fail", { model: "openai/gpt-5-nano" });
+    const { result } = await runToCompletion(config);
+    const cost = result.cost;
+    if (!cost) throw new Error("expected a cost report");
+    // The stream's raw counts under the pin. For OpenAI those 1000 cache-creation
+    // tokens are input, and the table has no cache-write rate: priced, they bill $0.
+    expect(cost).toMatchObject({ model: "openai/gpt-5-nano", cacheWriteTokens: 1000 });
+    const recomputed = await recomputeSessionCost(
+      {
+        provider: cost.provider,
+        model: cost.model,
+        harnessCostUsd: cost.totalCostUsd,
+        inputTokens: cost.inputTokens ?? 0,
+        outputTokens: cost.outputTokens ?? 0,
+        cacheReadTokens: cost.cacheReadTokens ?? 0,
+        cacheWriteTokens: cost.cacheWriteTokens ?? 0,
+        models: cost.models,
+        durationMs: cost.durationMs,
+        atEpochMs: Date.now(),
+      },
+      ampPricingLookup(),
+    );
+    expect(recomputed).toMatchObject({ costSource: "unpriced", totalCostUsd: 0 });
   });
 
   test("fails the session when Amp starts without the swarm MCP server", async () => {

@@ -667,6 +667,8 @@ class AmpSession implements ProviderSession {
       (models ?? []).reduce((total, m) => total + pick(m), 0);
     const hasStreamTokens = t.input + t.output + t.cacheRead + t.cacheCreation > 0;
     if (!models && !hasStreamTokens) return undefined;
+    // Without the export the stream's raw counts go out under the requested
+    // mode or pin, with no `models`, and the API settles the row unpriced.
     return {
       sessionId: this.sessionId,
       taskId: this.run.taskId,

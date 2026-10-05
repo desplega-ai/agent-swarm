@@ -66,7 +66,7 @@ What the adapter does, and why:
   per-model breakdown, priced from the `amp` rows (models.dev `anthropic`, `openai`,
   `google`, `fireworks-ai`). Cache-creation tokens are cache writes for Anthropic
   models and input for the rest. Subagent threads are not counted. One retry covers a
-  thread killed mid-run.
+  thread killed mid-run. A failed export settles the row `unpriced`, pinned or not.
 - **Steering.** `steerModes: ["queue"]`. Amp emits `result` only on stdin EOF, so
   input ends at the first top-level assistant message with no tool call and no
   unechoed queued message. A later steer returns `delivered: false`.

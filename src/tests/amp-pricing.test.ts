@@ -1,23 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { loadModelsDevCache } from "../be/modelsdev-cache";
 import { normalizeModelKey } from "../be/pricing-normalize";
-import { buildPricingSeedRows } from "../be/seed-pricing";
 import { recomputeSessionCost } from "../http/session-cost-recompute";
 import { parseAmpThreadUsage } from "../providers/amp-adapter";
-import type { PricingTokenClass } from "../types";
-
-/** The rows the boot seeder inserts, as a lookup the recompute path can use. */
-function lookupFromSeed() {
-  const cache = loadModelsDevCache();
-  if (!cache) throw new Error("the vendored models.dev snapshot is missing");
-  const rows = new Map(
-    buildPricingSeedRows(cache)
-      .filter((row) => row.provider === "amp")
-      .map((row) => [`${row.model}|${row.tokenClass}`, row.pricePerMillionUsd]),
-  );
-  return async (_provider: string, model: string, tokenClass: PricingTokenClass) =>
-    rows.get(`${model}|${tokenClass}`) ?? null;
-}
+import { ampPricingLookup as lookupFromSeed } from "./amp-pricing-helpers";
 
 describe("amp pricing", () => {
   test("model keys: vendor prefixes and OpenAI snapshot dates collapse, Fireworks paths and Anthropic dates stay", () => {
@@ -119,15 +104,19 @@ describe("amp pricing", () => {
   });
 
   test("a model the table does not know settles unpriced instead of free", async () => {
+    const usage = {
+      inputTokens: 100,
+      outputTokens: 10,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+    };
     const result = await recomputeSessionCost(
       {
         provider: "amp",
-        model: "low",
+        model: "accounts/fireworks/models/not-in-the-table",
         harnessCostUsd: 0,
-        inputTokens: 100,
-        outputTokens: 10,
-        cacheReadTokens: 0,
-        cacheWriteTokens: 0,
+        ...usage,
+        models: [{ model: "accounts/fireworks/models/not-in-the-table", ...usage }],
         atEpochMs: Date.now(),
       },
       lookupFromSeed(),

@@ -451,7 +451,8 @@ private`, but there is no local-only mode.
   `cache_creation_input_tokens` for every vendor; the adapter keeps them as cache
   writes for Anthropic models and moves them to input for the rest. Tokens of
   subagent threads (Task, oracle, finder) are separate Amp threads and are not counted.
-  A model missing from the table settles `unpriced`.
+  A model missing from the table settles `unpriced`, and so does a session whose
+  export failed, pinned or not.
 - **Steering.** `steerModes: ["queue"]`. A stdin message sent during a turn
   waits for the turn to end (verified live). Amp emits `result` only when stdin
   closes, so the adapter ends input at the first top-level assistant message
