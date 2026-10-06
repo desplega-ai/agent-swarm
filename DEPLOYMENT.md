@@ -536,7 +536,7 @@ The bundled agent-fs service uses version 0.15.1. Provisioning seeds agent displ
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `HARNESS_PROVIDER` | No | Fleet harness: `claude` (default), `codex` for OpenAI, or `pi` for OpenRouter and AWS Bedrock (alpha). |
+| `HARNESS_PROVIDER` | No | Fleet harness: `claude`, `codex` for OpenAI, or `pi` for OpenRouter and AWS Bedrock (alpha). Defaults to `pi` when `OPENROUTER_API_KEY` is set and neither `ANTHROPIC_API_KEY` nor `CLAUDE_CODE_OAUTH_TOKEN` is set; otherwise `claude`. |
 | `CLAUDE_CODE_OAUTH_TOKEN` | One of four | Claude Code OAuth token (run `claude setup-token`). Supports comma-separated values for [multi-credential load balancing](./docs/ENVS.md#multi-credential-support). `ANTHROPIC_API_KEY` is also accepted for Claude. |
 | `OPENAI_API_KEY` | One of four | OpenAI credential for the `codex` harness. Also enables workflow LLM nodes and optional memory embeddings. |
 | `OPENROUTER_API_KEY` | One of four | OpenRouter credential for the `pi` harness and workflow LLM nodes. Use `OPENROUTER_BASE_URL` for a compatible gateway. |
