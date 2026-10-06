@@ -331,6 +331,25 @@ registerTemplate({
   category: "system",
 });
 
+/**
+ * First message of a cursor session on the first-message path. Cursor keeps
+ * its own system prompt there, so the swarm's rides on top of the task prompt.
+ */
+registerTemplate({
+  eventType: "system.agent.cursor.first_message",
+  header: "",
+  defaultBody: `<system_instructions>
+{{systemPrompt}}
+</system_instructions>
+
+{{prompt}}`,
+  variables: [
+    { name: "systemPrompt", description: "The swarm system prompt for the session" },
+    { name: "prompt", description: "The task prompt" },
+  ],
+  category: "system",
+});
+
 // ============================================================================
 // I. Tools and skills, K. Repository (appended by base-prompt; the dynamic
 // lists are rendered at the call site and interpolated into the static text)
@@ -350,6 +369,15 @@ registerTemplate({
   header: "",
   defaultBody:
     "Most swarm tools are deferred. Load one with your harness tool search before the first call.",
+  variables: [],
+  category: "system",
+});
+
+registerTemplate({
+  eventType: "system.agent.tool_discovery.amp",
+  header: "",
+  defaultBody:
+    'Swarm tools are not in your tool list. Reach them through `tool_search` and `code_exec`. Their names use underscores, so `store-progress` is `store_progress`. Find one with `tool_search`, then call it from `code_exec`: `import { store_progress } from "agent-swarm"; text(JSON.stringify(await store_progress({ ... })));`. Pass the tool\'s arguments as one object.',
   variables: [],
   category: "system",
 });

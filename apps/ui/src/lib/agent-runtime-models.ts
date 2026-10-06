@@ -1,6 +1,7 @@
 import {
   buildClaudeShortnameMap,
   claudeCatalogModelId,
+  cursorCatalogRef,
   dshCatalogRef,
   harnessModelIds,
   isReasoningHarness,
@@ -16,7 +17,15 @@ import modelsCache from "./modelsdev-cache.json";
 // `src/tests/bedrock-model-groups.test.ts`), and a runtime `@/` import cannot
 // resolve there.
 
-export type LocalHarnessProvider = "claude" | "codex" | "pi" | "opencode" | "acp" | "dsh";
+export type LocalHarnessProvider =
+  | "claude"
+  | "codex"
+  | "pi"
+  | "opencode"
+  | "acp"
+  | "dsh"
+  | "cursor"
+  | "amp";
 
 /** USD per 1M tokens, as models.dev names the rates. Cache rates are absent for models without prompt caching. */
 export interface ModelCost {
@@ -47,7 +56,7 @@ export interface ModelOption {
   reasoningLevels?: ReadonlyArray<ReasoningEffortLevel>;
 }
 
-export type ProviderIconKey = "anthropic" | "openai" | "openrouter" | "amazon-bedrock";
+export type ProviderIconKey = "anthropic" | "openai" | "openrouter" | "amazon-bedrock" | "amp";
 
 export interface ModelGroup {
   provider: string;
@@ -147,7 +156,7 @@ function runtimeSectionModels(
  * `modelId` is the string the harness stores: a bare id for claude and codex
  * (a Claude CLI shortname such as `opus` resolves to the newest model of its
  * family), `<provider>/<id>` for pi and opencode, `openrouter/<id>` or a bare
- * DeepSeek API id for dsh.
+ * DeepSeek API id for dsh, a bare Cursor model id for cursor.
  */
 export function effortLevelsFor(
   harness: string,
@@ -165,6 +174,8 @@ export function effortLevelsFor(
     catalogId = modelId;
   } else if (harness === "dsh") {
     ({ providerId, modelId: catalogId } = dshCatalogRef(modelId));
+  } else if (harness === "cursor") {
+    ({ providerId, modelId: catalogId } = cursorCatalogRef(modelId));
   } else {
     // The id may hold more slashes (`openrouter/google/gemini-3-flash-preview`).
     const slash = modelId.indexOf("/");
@@ -219,8 +230,31 @@ export const LOCAL_HARNESSES: LocalHarnessProvider[] = [
   "pi",
   "opencode",
   "dsh",
+  "amp",
+  "cursor",
   "acp",
 ];
+
+/**
+ * The Cursor models the picker offers: a curated subset of what
+ * `Cursor.models.list()` returns. The real list is per account, so a custom
+ * id still goes through; labels and rates come from the vendor's catalog row.
+ */
+export const CURSOR_MODELS = [
+  "composer-2.5",
+  "claude-opus-5-5",
+  "claude-sonnet-5-5",
+  "claude-fable-5-1",
+  "claude-haiku-4-5",
+  "gpt-5.6-sol",
+  "gpt-5.6-terra",
+  "gpt-5.6-luna",
+  "gpt-5.4-mini",
+  "gpt-5.4-nano",
+  "gemini-3.5-flash",
+  "gemini-3.8-flash",
+  "grok-4.6",
+] as const;
 
 /**
  * The models dsh's DeepSeek-direct route serves out of the box (its bundled
@@ -238,6 +272,8 @@ export const HARNESS_LABEL: Record<ProviderName | string, string> = {
   pi: "Pi-Mono",
   acp: "ACP",
   dsh: "DeepSeek (dsh)",
+  amp: "Amp",
+  cursor: "Cursor",
 } satisfies Record<ProviderName, string>;
 
 export function harnessSupportsModelSelection(harness: LocalHarnessProvider): boolean {
@@ -333,6 +369,10 @@ const FALLBACK_MODEL: Record<LocalHarnessProvider, string> = {
   opencode: "openrouter/qwen/qwen3-coder-flash",
   // The dsh regular-tier default (DEFAULT_MODEL_TIER_MAP.dsh in src/types.ts).
   dsh: "openrouter/deepseek/deepseek-v4.1-flash",
+  // The cursor regular-tier default (DEFAULT_MODEL_TIER_MAP.cursor in src/types.ts).
+  cursor: "claude-sonnet-5-5",
+  // `low` is Amp's cheapest mode; the regular tier (`medium`) runs an Opus-class model.
+  amp: "low",
   acp: "",
 };
 
@@ -401,6 +441,8 @@ export function modelGroupsForHarness(
   }
 
   if (harness === "dsh") return dshModelGroups(configs, envPresence, liveCatalog);
+  if (harness === "amp") return ampModelGroups(configs, envPresence, liveCatalog);
+  if (harness === "cursor") return cursorModelGroups(configs, envPresence, liveCatalog);
 
   const snapshotGroups = SNAPSHOT_ORDER.map((providerId) => {
     const meta = SNAPSHOT_META[providerId];
@@ -485,6 +527,64 @@ export function modelGroupsForHarness(
 }
 
 /**
+ * Amp has no model flag. A mode (`low`..`ultra`) lets Amp choose the model, and
+ * a `provider/model` id pins one (`src/providers/amp-adapter.ts`). Both need
+ * AMP_API_KEY: the vendor bills the usage.
+ */
+export const AMP_MODES: ReadonlyArray<{ id: string; label: string }> = [
+  { id: "low", label: "Low (cheapest)" },
+  { id: "medium", label: "Medium" },
+  { id: "high", label: "High" },
+  { id: "ultra", label: "Ultra" },
+];
+
+function ampModelGroups(
+  configs: SwarmConfig[] | undefined,
+  envPresence: Record<string, boolean> | undefined,
+  liveCatalog?: LiveModelsCatalog | null,
+): ModelGroup[] {
+  const enabled = hasRuntimeCredential("AMP_API_KEY", configs, envPresence);
+  const pins = (["anthropic", "openai"] as const).map((providerId) => {
+    const meta = SNAPSHOT_META[providerId];
+    const models: ModelOption[] = Object.values(
+      (liveCatalog?.[providerId] ?? CACHE[providerId])?.models ?? {},
+    )
+      .map((m) => ({
+        id: `${providerId}/${m.id}`,
+        label: modelDisplayName(m.name) ?? m.id,
+        provider: `${meta.label} (pinned)`,
+        providerId: meta.iconKey,
+        requiredKey: "AMP_API_KEY",
+        ...catalogFacts(m),
+        reasoningLevels: reasoningLevelsFor("amp", m.id, m),
+      }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+    return {
+      provider: `${meta.label} (pinned)`,
+      models,
+      requiredKey: "AMP_API_KEY",
+      enabled,
+    };
+  });
+  return [
+    {
+      provider: "Amp modes",
+      models: AMP_MODES.map((mode) => ({
+        id: mode.id,
+        label: mode.label,
+        provider: "Amp modes",
+        providerId: "amp",
+        requiredKey: "AMP_API_KEY",
+        reasoningLevels: [],
+      })),
+      requiredKey: "AMP_API_KEY",
+      enabled,
+    },
+    ...pins,
+  ];
+}
+
+/**
  * dsh reaches models two ways: `openrouter/<id>` with OPENROUTER_API_KEY, or a
  * bare DeepSeek API id with DEEPSEEK_API_KEY (see `src/providers/dsh-adapter.ts`).
  */
@@ -530,6 +630,35 @@ function dshModelGroups(
       models: direct,
       requiredKey: "DEEPSEEK_API_KEY",
       enabled: hasRuntimeCredential("DEEPSEEK_API_KEY", configs, envPresence),
+    },
+  ];
+}
+
+/** Cursor serves every model through one key; see `src/providers/cursor-adapter.ts`. */
+function cursorModelGroups(
+  configs: SwarmConfig[] | undefined,
+  envPresence: Record<string, boolean> | undefined,
+  liveCatalog?: LiveModelsCatalog | null,
+): ModelGroup[] {
+  const models: ModelOption[] = CURSOR_MODELS.map((id) => {
+    const { providerId, modelId } = cursorCatalogRef(id);
+    const m = runtimeSectionModels(providerId, liveCatalog)[modelId];
+    return {
+      id,
+      label: m ? (modelDisplayName(m.name) ?? id) : id,
+      provider: "Cursor",
+      providerId: null,
+      requiredKey: "CURSOR_API_KEY",
+      ...(m ? catalogFacts(m) : {}),
+      reasoningLevels: m ? reasoningLevelsFor("cursor", modelId, m) : [],
+    };
+  });
+  return [
+    {
+      provider: "Cursor",
+      models,
+      requiredKey: "CURSOR_API_KEY",
+      enabled: hasRuntimeCredential("CURSOR_API_KEY", configs, envPresence),
     },
   ];
 }
@@ -833,6 +962,8 @@ export function isLocalHarness(
     value === "pi" ||
     value === "opencode" ||
     value === "dsh" ||
+    value === "amp" ||
+    value === "cursor" ||
     value === "acp"
   );
 }

@@ -216,7 +216,16 @@ The Slack post event fires after authorization and before routing.
 | `post.task.progress` | Task event bus after commit | `{ task, progress }` | None | None |
 | `post.slack.message` | Slack message handler after authorization, before routing | `{ channelId, userId, text, threadTs?, taskId? }` | None | None |
 | `post.tool.call` | Agent-facing MCP call after finalization | `{ tool, args, result, requestInfo, durationMs }` | None | None |
+| `post.approval.resolved` | Approval respond route, after the answer commits | `{ requestId, status, responses, workflowRunId?, workflowRunStepId?, sourceTaskId? }` | None | None |
+| `post.task.budgetRefused` | A task refused by a daily spend budget | `{ task, agentId, cause, agentSpendUsd?, agentBudgetUsd?, globalSpendUsd?, globalBudgetUsd?, userSpendUsd?, userBudgetUsd?, resetAt }` | None | None |
+| `post.email.received` | AgentMail webhook, before routing | `{ inboxId, from, subject, body, threadId, messageId }` | None | None |
+| `post.kapso.message` | Kapso inbound webhook, before routing | `{ phoneNumberId, conversationId?, messageId, from?, type?, text }` | None | None |
+| `post.vcs.event` | GitHub, GitLab, and Azure DevOps webhooks | `{ provider, kind, action, repo, number?, title?, body?, author?, url?, merged?, changedFiles?, reviewState? }` | None | None |
 
+`post.approval.resolved` fires when a person answers an approval request, for workflow and standalone requests alike. `workflowRunId` and `workflowRunStepId` are absent for a standalone request. A request that times out or is cancelled does not fire it.
+`post.task.budgetRefused` carries the refused `task`. `cause` is `agent`, `global`, or `user`, and the spend and budget fields for that cause are set. Like the other `post.task.*` events, it skips the extension that created the task.
+`post.email.received` carries the first 500 characters of the body. `post.kapso.message` carries the text, or a placeholder naming the type for a non-text message.
+`post.vcs.event` fires once per webhook event. `kind` is the provider's own object: `pull_request`, `merge_request`, `issue`, `issue_comment`, `note`, `pull_request_review`, or `pipeline`. `action` is the provider's own value, such as `opened`, `synchronize`, `merge`, or `created`; for a pipeline it is the status, such as `success` or `failed`. The event carries parsed fields, not the raw webhook body, and a field a kind does not have is absent.
 `pre.task.create` origins include REST, apps, MCP, Slack, schedules, workflows, webhooks, follow-ups, and extensions.
 Heartbeat classification values are `no-session`, `stale-session`, and `fresh-stalled`.
 Heartbeat actions are `supersede-resume`, `fail`, and `record`.

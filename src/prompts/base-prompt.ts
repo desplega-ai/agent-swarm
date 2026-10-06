@@ -222,10 +222,15 @@ export const getBasePrompt = async (args: BasePromptArgs): Promise<string> => {
 
   // I. Tools and skills. Skipped without MCP: the discovery tools are MCP tools.
   if (hasMcp) {
-    const discoveryResult = await resolveTemplateAsync(
-      hasToolSearch ? "system.agent.tool_discovery.search" : "system.agent.tool_discovery.direct",
-      {},
-    );
+    // Amp's MCP tools sit behind its own `tool_search` + `code_exec` with
+    // underscored names, so the generic "load with your tool search" line is not enough.
+    const discoveryEvent =
+      provider === "amp"
+        ? "system.agent.tool_discovery.amp"
+        : hasToolSearch
+          ? "system.agent.tool_discovery.search"
+          : "system.agent.tool_discovery.direct";
+    const discoveryResult = await resolveTemplateAsync(discoveryEvent, {});
     const toolsResult = await resolveTemplateAsync(
       "system.agent.tools_skills",
       renderToolsAndSkillsVars({

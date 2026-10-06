@@ -336,6 +336,8 @@ export const PROVIDER_NAMES = [
   "opencode",
   "acp",
   "dsh",
+  "amp",
+  "cursor",
 ] as const;
 export type ProviderName = (typeof PROVIDER_NAMES)[number];
 export function isProviderName(value: string | null | undefined): value is ProviderName {
@@ -938,8 +940,9 @@ export interface ServicesResponse {
  *  - 'harness'        — value reported by the harness as-is.
  *  - 'pricing-table'  — value recomputed by the API from `pricing` rows.
  *  - 'unpriced'       — recompute attempted but no matching pricing rows.
+ *  - 'estimated'      — fallback token counts priced at an assumed model.
  */
-export type SessionCostSource = "harness" | "pricing-table" | "unpriced";
+export type SessionCostSource = "harness" | "pricing-table" | "unpriced" | "estimated";
 
 export interface SessionCostModelBreakdown {
   model: string;

@@ -13,7 +13,7 @@
  * config, the agent runtime PATCH). Custom ids skip the check and are stored as given, for
  * models the catalog cannot list yet (a fresh launch not in models.dev, a private
  * deployment, an ACP-only model). Harnesses whose model namespace the catalog does not
- * describe (`acp`, `devin`, `dsh`) skip the check when the caller names the harness.
+ * describe (`acp`, `devin`, `dsh`, `cursor`: its catalog is per account) skip the check when the caller names the harness.
  *
  * Harness compatibility: when the harness is known, a concrete id or `latest:` alias must
  * belong to the catalog section that harness's CLI talks to (`harnessModelError`). The
@@ -29,12 +29,13 @@ import {
   type ModelsDevCatalog,
   parseAlias,
 } from "@desplega/model-catalog";
+import { ampModelError, ampPinCatalogError, ampPinProviderError } from "../utils/amp-models";
 import { getAgentById, getAllAgents } from "./db";
 import { loadModelsCatalog } from "./model-catalog-store";
 import { resolveLatestAlias } from "./model-tier-resolution";
 
 /** Harnesses whose model ids the catalog does not describe. */
-const FREE_FORM_HARNESSES = new Set(["acp", "devin", "dsh"]);
+const FREE_FORM_HARNESSES = new Set(["acp", "devin", "dsh", "cursor"]);
 
 /** Claude CLI context-window suffix (`sonnet[1m]`): the CLI reads it, the catalog does not list it. */
 const CONTEXT_SUFFIX_RE = /\[1m\]$/i;
@@ -114,6 +115,15 @@ export async function explicitModelError(check: ExplicitModelCheck): Promise<str
   const model = check.model?.trim();
   if (!model) return null;
   if (check.harnessProvider && FREE_FORM_HARNESSES.has(check.harnessProvider)) return null;
+  // Amp runs a mode or a provider/model pin, nothing else. A pin must name a
+  // provider Amp runs and, for anthropic/openai, a catalog model, unless the
+  // caller vouches for it (the provider list is measured, so Amp can outgrow it).
+  if (check.harnessProvider === "amp") {
+    const shapeError = ampModelError(model);
+    if (shapeError || check.allowCustomModel) return shapeError;
+    const { providers } = await loadModelsCatalog();
+    return ampPinProviderError(model) ?? ampPinCatalogError(model, providers as CatalogSections);
+  }
 
   const { providers } = await loadModelsCatalog();
   const catalog = providers as CatalogSections;

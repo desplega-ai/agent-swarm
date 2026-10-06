@@ -56,6 +56,25 @@ rate by hand should also update this file.
   - DeepSeek direct-API models (models.dev `deepseek` section, bare ids) →
     rows under `provider='dsh'`. dsh's `deepseek-flash` id is not in that
     section and stays `unpriced`.
+  - Anthropic, OpenAI, Google and Fireworks models (models.dev `anthropic`,
+    `openai`, `google`, `fireworks-ai` sections, the vendor's own ids) → rows
+    under `provider='amp'`. Amp reports the model it routed a mode to
+    (`claude-opus-5-5`, `gpt-5-nano-2025-08-07`,
+    `accounts/fireworks/models/glm-5p3-flash`); the lookup strips a
+    `provider/` pin prefix and an OpenAI `-YYYY-MM-DD` snapshot date. A model
+    outside these sections stays `unpriced`. An `amp` row without a per-model
+    breakdown (the thread export failed) is `estimated`: its stream totals are
+    priced at the pin, else the model its mode is known to run
+    (`AMP_ESTIMATE_MODELS`), else the `medium` model, never recorded as $0.
+    When the adapter reports what Amp billed (`amp threads usage`, only when
+    every request was billed through Amp), that harness cost wins and the
+    rows above only fill the per-model breakdown.
+  - OpenAI, Anthropic, Google and xAI models (bare vendor ids) → rows under
+    `provider='cursor'`. Cursor bills the vendor's API rates and reports the
+    vendor's own id. The adapter subtracts cache reads and writes from SDK
+    `inputTokens`, clamped to zero, so fresh input is priced separately.
+    Cursor's own models are not in models.dev: see
+    `CURSOR_FIRST_PARTY_PRICING` below.
 
 - **Snapshot refresh procedure**:
   - Run `bun run scripts/refresh-modelsdev-pricing.ts` (Phase 2 — adds the
@@ -64,6 +83,26 @@ rate by hand should also update this file.
   - Commit the regenerated `src/be/modelsdev-cache.json` together with a bump
     note in the PR description. This is no longer the pricing freshness path;
     use it when the fallback/UI catalog needs new labels or context-window data.
+
+## Cursor first-party rates
+
+`CURSOR_FIRST_PARTY_PRICING` in `src/be/seed-pricing.ts` seeds the Composer
+models from Cursor's published per-token prices
+(https://cursor.com/docs/models-and-pricing, verified 2026-10-05):
+
+| Model | Input | Cache read | Output | Note |
+|---|---|---|---|---|
+| `composer-2.5` | $3.00 | $0.50 | $15.00 | Composer 2.5 (Fast). Fast is the default variant and the adapter never sets the `fast` param |
+| `composer-2` | $3.00 | $0.50 | $15.00 | Retired; Cursor reroutes it to Composer 2.5 (https://cursor.com/docs/sdk/typescript) |
+
+Cursor publishes no cache-write rate for Composer. `default` (Auto) has no rate
+of its own: Cursor bills it at the list price of the model each request is
+routed to, so it stays `unpriced`. `agent.getUsage()` (Cursor's billed cents)
+would be the exact figure, but it answers `feature_unavailable` for local agents
+on our account (re-checked 2026-10-05), so these rows are an estimate from
+list prices. They do not include plan discounts, included usage, or the $0.25
+per million Cursor Token Rate that Teams and Enterprise plans add to
+third-party (not Composer) requests.
 
 ## Manual overrides
 

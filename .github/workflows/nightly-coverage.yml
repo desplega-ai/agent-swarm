@@ -47,21 +47,22 @@ jobs:
         env:
           SWARM_API_BASE_URL: ${{ vars.SWARM_API_BASE_URL || 'https://api.desplega.agent-swarm.dev' }}
           SWARM_COVERAGE_API_KEY: ${{ secrets.SWARM_COVERAGE_API_KEY }}
-          SWARM_COVERAGE_AGENT_ID: e33fa717-b8d3-406d-a861-0e0e1272639f
         shell: bash
         run: |
           set -euo pipefail
           test -n "$SWARM_API_BASE_URL" || { echo "Swarm API base URL is required."; exit 1; }
           test -n "$SWARM_COVERAGE_API_KEY" || { echo "Repository secret SWARM_COVERAGE_API_KEY is required."; exit 1; }
           jq -n --slurpfile summary coverage-summary.json \
-            '{name:"coverage-store", scope:"global", args:{mode:"store", summary:$summary[0]}, intent:"Store nightly root src coverage baseline"}' \
+            '{mode:"store", summary:$summary[0]}' \
             > coverage-store-request.json
           base_url="${SWARM_API_BASE_URL%/}"
           curl --fail-with-body --silent --show-error --retry 2 \
             -H "Authorization: Bearer ${SWARM_COVERAGE_API_KEY}" \
-            -H "X-Agent-ID: ${SWARM_COVERAGE_AGENT_ID}" \
             -H "Content-Type: application/json" \
             --data-binary @coverage-store-request.json \
-            "${base_url}/api/scripts/run" \
+            "${base_url}/api/x/script/AjBmsoYSihOU" \
             > coverage-store-response.json
-          jq -e '.exitCode == 0 and .result.stored == true' coverage-store-response.json > /dev/null
+          if ! jq -e '.ok == true and .result.stored == true' coverage-store-response.json > /dev/null; then
+            jq '.error' coverage-store-response.json >&2
+            exit 1
+          fi

@@ -1,0 +1,82 @@
+[
+  {
+    "id": "amp-01",
+    "taskId": "task-amp",
+    "sessionId": "session-amp-a",
+    "iteration": 1,
+    "cli": "amp",
+    "content": "{\"type\":\"system\",\"subtype\":\"model.selected\",\"provider\":\"amp\",\"model\":\"low\",\"mode\":\"low\"}",
+    "lineNumber": 0,
+    "createdAt": "2026-10-05T12:02:44.696Z"
+  },
+  {
+    "id": "amp-02",
+    "taskId": "task-amp",
+    "sessionId": "session-amp-a",
+    "iteration": 1,
+    "cli": "amp",
+    "content": "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"---\\nname: work-on-task\\ndescription: \\\"Turn prompt for an assigned swarm task: find the task, gather context when the message lacks it, use the skill the task names, finish with one of the four endings.\\\"\\n---\\n\\n# Working on a task\\n\\nThe taskId follows the command. Without one, call `get-tasks` with `mineOnly: true` and take your `pending` or `in_progress` task. If there is none, say so and stop.\\n\\nThis message carries the task text, its attachments, its output format, and memories from past sessions. If it does not (you invoked this command yourself, or the context was compacted), run the `task-context-gathering` script with the taskId.\\n\\nWhen the task names a skill (`researching`, `planning`, `implementing`), use it. Otherwise work directly.\\n\\nFinish the task with one of the four endings in your operating contract: `completed`, `defer-task`, `request-human-input`, or `failed`. Then stop.\\n\\nIf the user interrupts, follow their instructions. To resume, call `/work-on-task <taskId>` again.\\n\\n\\n---\\n\\nUser request: cbd9dafb-3140-4570-8615-e20edf3c9c68\\n\\nTask: \\\"This is a swarm e2e. Do not edit any files. Your only job: call the swarm tool store-progress with status \\\"completed\\\" and output exactly \\\"MCP-44jlv7-via-tool\\\". Then reply with exactly: FINAL-REPLY-NOT-THE-OUTPUT\\\"\\n\\nWhen done, use `store-progress` with status: \\\"completed\\\" and include your output.\\n\\n---\\n**Working Directory**: You are starting in `/workspace/repo`. This was explicitly set on the task. You can still access any path on the filesystem — this is just your starting directory.\"}]},\"parent_tool_use_id\":null,\"session_id\":\"T-fixture-thread\"}",
+    "lineNumber": 0,
+    "createdAt": "2026-10-05T12:02:49.928Z"
+  },
+  {
+    "id": "amp-03",
+    "taskId": "task-amp",
+    "sessionId": "session-amp-a",
+    "iteration": 1,
+    "cli": "amp",
+    "content": "{\"type\":\"assistant\",\"message\":{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"FINAL-REPLY-NOT-THE-OUTPUT\"}],\"stop_reason\":\"end_turn\",\"usage\":{\"input_tokens\":0,\"cache_creation_input_tokens\":1328,\"cache_read_input_tokens\":32768,\"output_tokens\":12,\"service_tier\":\"standard\"}},\"parent_tool_use_id\":null,\"session_id\":\"T-fixture-thread\"}",
+    "lineNumber": 0,
+    "createdAt": "2026-10-05T12:02:56.253Z"
+  },
+  {
+    "id": "amp-04",
+    "taskId": "task-amp",
+    "sessionId": "session-amp-a",
+    "iteration": 1,
+    "cli": "amp",
+    "content": "{\"type\":\"system\",\"subtype\":\"init\",\"cwd\":\"/workspace/repo\",\"session_id\":\"T-fixture-thread\",\"tools\":[\"ask_user_choice\",\"clear_schedule\",\"code_exec\",\"create_file\",\"create_thread\",\"download_thread_changes\",\"download_thread_file\",\"edit_file\",\"find_shared_plugins_and_skills\",\"find_thread\",\"finder\",\"get_current_user_identity\",\"get_schedule\",\"get_thread_status\",\"librarian\",\"list_agent_modes\",\"list_runners\",\"list_workspace_members\",\"load_plugin\",\"manage_amp\",\"oracle\",\"painter\",\"public_artifact_url\",\"read_thread\",\"read_web_page\",\"reload_mcp\",\"reload_plugins\",\"reload_skills\",\"send_thread_message\",\"set_schedule\",\"shell_command\",\"shell_command_kill\",\"shell_command_status\",\"ship_thread_changes\",\"skill\",\"Task\",\"thread_file_url\",\"thread_portal_login_url\",\"tool_search\",\"update_schedule\",\"update_thread\",\"upload_thread_file\",\"view_media\",\"wait_for_threads\",\"web_search\"],\"mcp_servers\":[{\"name\":\"agent-swarm\",\"status\":\"connected\"}],\"agent_mode\":\"medium\"}",
+    "lineNumber": 1,
+    "createdAt": "2026-10-05T12:02:44.696Z"
+  },
+  {
+    "id": "amp-05",
+    "taskId": "task-amp",
+    "sessionId": "session-amp-a",
+    "iteration": 1,
+    "cli": "amp",
+    "content": "{\"type\":\"assistant\",\"message\":{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"TU-034adFeIdYXIDtdCq0NepW\",\"name\":\"code_exec\",\"input\":{\"code\":\"import { store_progress } from \\\"agent-swarm\\\";\\nconst result = await store_progress({ taskId: \\\"cbd9dafb-3140-4570-8615-e20edf3c9c68\\\", status: \\\"completed\\\", output: \\\"MCP-44jlv7-via-tool\\\" });\\ntext(JSON.stringify(result));\"}}],\"stop_reason\":\"tool_use\",\"usage\":{\"input_tokens\":0,\"cache_creation_input_tokens\":33862,\"cache_read_input_tokens\":0,\"output_tokens\":83,\"service_tier\":\"standard\"}},\"parent_tool_use_id\":null,\"session_id\":\"T-fixture-thread\"}",
+    "lineNumber": 1,
+    "createdAt": "2026-10-05T12:02:49.928Z"
+  },
+  {
+    "id": "amp-06",
+    "taskId": "task-amp",
+    "sessionId": "session-amp-a",
+    "iteration": 1,
+    "cli": "amp",
+    "content": "{\"type\":\"result\",\"subtype\":\"success\",\"duration_ms\":11154,\"is_error\":false,\"num_turns\":2,\"result\":\"FINAL-REPLY-NOT-THE-OUTPUT\",\"session_id\":\"T-fixture-thread\"}",
+    "lineNumber": 1,
+    "createdAt": "2026-10-05T12:02:56.253Z"
+  },
+  {
+    "id": "amp-07",
+    "taskId": "task-amp",
+    "sessionId": "session-amp-a",
+    "iteration": 1,
+    "cli": "amp",
+    "content": "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"TU-034adFeIdYXIDtdCq0NepW\",\"content\":\"\\\"Task \\\\\\\"cbd9dafb-3140-4570-8615-e20edf3c9c68\\\\\\\" marked as completed.\\\\n\\\\n{\\\\n  \\\\\\\"yourAgentId\\\\\\\": \\\\\\\"a9dec533-8a13-4800-99b2-3f8bd5640d5d\\\\\\\",\\\\n  \\\\\\\"task\\\\\\\": {\\\\n    \\\\\\\"id\\\\\\\": \\\\\\\"cbd9dafb-3140-4570-8615-e20edf3c9c68\\\\\\\",\\\\n    \\\\\\\"status\\\\\\\": \\\\\\\"completed\\\\\\\",\\\\n    \\\\\\\"finishedAt\\\\\\\": \\\\\\\"2026-10-05T12:02:49.570Z\\\\\\\"\\\\n  }\\\\n}\\\"\",\"is_error\":false}]},\"parent_tool_use_id\":null,\"session_id\":\"T-fixture-thread\"}",
+    "lineNumber": 2,
+    "createdAt": "2026-10-05T12:02:49.928Z"
+  },
+  {
+    "id": "amp-08",
+    "taskId": "task-amp",
+    "sessionId": "session-amp-a",
+    "iteration": 1,
+    "cli": "amp",
+    "content": "{\"type\":\"system\",\"subtype\":\"model.resolved\",\"provider\":\"amp\",\"model\":\"accounts/fireworks/models/glm-5p3-flash\",\"mode\":\"low\"}",
+    "lineNumber": 2,
+    "createdAt": "2026-10-05T12:02:56.253Z"
+  }
+]

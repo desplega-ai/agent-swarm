@@ -441,6 +441,15 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         docsUrl: `${DOCS}guides/harness-providers`,
       },
       {
+        key: "CURSOR_NATIVE_SYSTEM_PROMPT",
+        label: "Cursor native system prompt",
+        description:
+          "cursor workers only. Pass the swarm prompt as Cursor's systemPrompt, replacing Cursor's own. Cursor enables this per account; when it rejects the option, the session falls back to carrying the prompt in the first message. Off by default (first-message path). Takes effect on the worker's next task.",
+        kind: "boolean",
+        defaultValue: "false",
+        docsUrl: `${DOCS}guides/harness-providers`,
+      },
+      {
         key: "PI_CODEMODE_MODELS",
         label: "pi codemode model access (pilot)",
         description:

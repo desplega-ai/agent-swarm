@@ -6,7 +6,7 @@ import { getAgentModelPresentation } from "./agents-list-model-display";
  * (Anthropic, OpenAI, DeepSeek, Z.ai, ...) and not the route it runs through
  * (OpenRouter). The logos live in `public/provider-logos/`.
  */
-export type ModelVendor = "anthropic" | "openai" | "deepseek" | "zai" | "google" | "xai";
+export type ModelVendor = "anthropic" | "openai" | "deepseek" | "zai" | "google" | "xai" | "amp";
 
 export const MODEL_VENDOR_LOGO: Record<ModelVendor, string> = {
   anthropic: "/provider-logos/anthropic.svg",
@@ -15,6 +15,7 @@ export const MODEL_VENDOR_LOGO: Record<ModelVendor, string> = {
   zai: "/provider-logos/zai.svg",
   google: "/provider-logos/google.svg",
   xai: "/provider-logos/xai.svg",
+  amp: "/provider-logos/amp.svg",
 };
 
 const VENDOR_PATTERNS: ReadonlyArray<[RegExp, ModelVendor]> = [
@@ -24,6 +25,8 @@ const VENDOR_PATTERNS: ReadonlyArray<[RegExp, ModelVendor]> = [
   [/^(z-ai\/|glm-)/, "zai"],
   [/^(google\/|gemini)/, "google"],
   [/^(x-ai\/|grok)/, "xai"],
+  // An Amp mode (`AMP_MODES`) lets Amp pick the model, so it carries Amp's mark.
+  [/^(low|medium|high|ultra)$/, "amp"],
 ];
 
 export function modelVendor(model: string | null | undefined): ModelVendor | null {

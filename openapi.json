@@ -446,7 +446,9 @@
               "claude-managed",
               "opencode",
               "acp",
-              "dsh"
+              "dsh",
+              "amp",
+              "cursor"
             ]
           },
           "providerMeta": {
@@ -517,7 +519,9 @@
               "claude-managed",
               "opencode",
               "acp",
-              "dsh"
+              "dsh",
+              "amp",
+              "cursor"
             ]
           },
           "capabilities": {
@@ -665,6 +669,8 @@
               "opencode",
               "acp",
               "dsh",
+              "amp",
+              "cursor",
               null
             ],
             "default": null
@@ -996,7 +1002,9 @@
               "claude-managed",
               "opencode",
               "acp",
-              "dsh"
+              "dsh",
+              "amp",
+              "cursor"
             ]
           },
           "harnessProvider": {
@@ -1013,6 +1021,8 @@
               "opencode",
               "acp",
               "dsh",
+              "amp",
+              "cursor",
               null
             ]
           },
@@ -3158,7 +3168,9 @@
               "devin",
               "gemini",
               "acp",
-              "dsh"
+              "dsh",
+              "amp",
+              "cursor"
             ]
           },
           "model": {
@@ -3573,7 +3585,8 @@
             "enum": [
               "harness",
               "pricing-table",
-              "unpriced"
+              "unpriced",
+              "estimated"
             ],
             "default": "harness"
           },
@@ -9688,7 +9701,9 @@
                       "claude-managed",
                       "opencode",
                       "acp",
-                      "dsh"
+                      "dsh",
+                      "amp",
+                      "cursor"
                     ]
                   },
                   "harness_provider": {
@@ -9701,7 +9716,9 @@
                       "claude-managed",
                       "opencode",
                       "acp",
-                      "dsh"
+                      "dsh",
+                      "amp",
+                      "cursor"
                     ]
                   },
                   "runtimeInstanceId": {
@@ -9990,7 +10007,9 @@
                       "claude-managed",
                       "opencode",
                       "acp",
-                      "dsh"
+                      "dsh",
+                      "amp",
+                      "cursor"
                     ]
                   }
                 },
@@ -10206,7 +10225,9 @@
                       "pi",
                       "opencode",
                       "acp",
-                      "dsh"
+                      "dsh",
+                      "amp",
+                      "cursor"
                     ]
                   },
                   "model": {
@@ -11305,6 +11326,8 @@
                         "opencode",
                         "acp",
                         "dsh",
+                        "amp",
+                        "cursor",
                         null
                       ]
                     },
@@ -11322,6 +11345,8 @@
                         "opencode",
                         "acp",
                         "dsh",
+                        "amp",
+                        "cursor",
                         null
                       ]
                     },
@@ -11441,6 +11466,8 @@
                               "opencode",
                               "acp",
                               "dsh",
+                              "amp",
+                              "cursor",
                               null
                             ]
                           },
@@ -11458,6 +11485,8 @@
                               "opencode",
                               "acp",
                               "dsh",
+                              "amp",
+                              "cursor",
                               null
                             ]
                           },
@@ -24526,7 +24555,9 @@
                               "claude-managed",
                               "opencode",
                               "acp",
-                              "dsh"
+                              "dsh",
+                              "amp",
+                              "cursor"
                             ]
                           },
                           "tier": {
@@ -26464,7 +26495,9 @@
                               "claude-managed",
                               "opencode",
                               "acp",
-                              "dsh"
+                              "dsh",
+                              "amp",
+                              "cursor"
                             ]
                           },
                           "providers": {
@@ -26482,7 +26515,9 @@
                                     "claude-managed",
                                     "opencode",
                                     "acp",
-                                    "dsh"
+                                    "dsh",
+                                    "amp",
+                                    "cursor"
                                   ]
                                 },
                                 "state": {
@@ -26809,7 +26844,9 @@
                       "claude-managed",
                       "opencode",
                       "acp",
-                      "dsh"
+                      "dsh",
+                      "amp",
+                      "cursor"
                     ]
                   }
                 },
@@ -27395,7 +27432,9 @@
                                   "claude-managed",
                                   "opencode",
                                   "acp",
-                                  "dsh"
+                                  "dsh",
+                                  "amp",
+                                  "cursor"
                                 ]
                               },
                               "state": {
@@ -28386,7 +28425,9 @@
                                   "claude-managed",
                                   "opencode",
                                   "acp",
-                                  "dsh"
+                                  "dsh",
+                                  "amp",
+                                  "cursor"
                                 ]
                               },
                               "state": {
@@ -31094,7 +31135,9 @@
                 "devin",
                 "gemini",
                 "acp",
-                "dsh"
+                "dsh",
+                "amp",
+                "cursor"
               ]
             },
             "required": true,
@@ -31176,7 +31219,9 @@
                 "devin",
                 "gemini",
                 "acp",
-                "dsh"
+                "dsh",
+                "amp",
+                "cursor"
               ]
             },
             "required": true,
@@ -31291,7 +31336,9 @@
                 "devin",
                 "gemini",
                 "acp",
-                "dsh"
+                "dsh",
+                "amp",
+                "cursor"
               ]
             },
             "required": true,
@@ -31374,7 +31421,9 @@
                 "devin",
                 "gemini",
                 "acp",
-                "dsh"
+                "dsh",
+                "amp",
+                "cursor"
               ]
             },
             "required": true,
@@ -41284,7 +41333,9 @@
                       "devin",
                       "gemini",
                       "acp",
-                      "dsh"
+                      "dsh",
+                      "amp",
+                      "cursor"
                     ]
                   },
                   "createdAt": {
@@ -42237,7 +42288,9 @@
                                       "claude-managed",
                                       "opencode",
                                       "acp",
-                                      "dsh"
+                                      "dsh",
+                                      "amp",
+                                      "cursor"
                                     ]
                                   },
                                   "requestedByUserId": {
@@ -47583,7 +47636,9 @@
                                   "claude-managed",
                                   "opencode",
                                   "acp",
-                                  "dsh"
+                                  "dsh",
+                                  "amp",
+                                  "cursor"
                                 ]
                               },
                               "requestedByUserId": {
@@ -48058,7 +48113,9 @@
                           "claude-managed",
                           "opencode",
                           "acp",
-                          "dsh"
+                          "dsh",
+                          "amp",
+                          "cursor"
                         ]
                       },
                       "model": {
@@ -49002,7 +49059,9 @@
                       "claude-managed",
                       "opencode",
                       "acp",
-                      "dsh"
+                      "dsh",
+                      "amp",
+                      "cursor"
                     ]
                   }
                 },

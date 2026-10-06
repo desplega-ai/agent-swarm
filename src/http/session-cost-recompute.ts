@@ -5,6 +5,7 @@ import type {
   SessionCostModelBreakdown,
   SessionCostSource,
 } from "../types";
+import { AMP_ESTIMATE_MODELS, ampBillsCacheWrites, resolveAmpModel } from "../utils/amp-models";
 
 const PER_MILLION = 1_000_000;
 
@@ -121,6 +122,52 @@ function unpricedResult(
   };
 }
 
+/**
+ * An amp row with no per-model usage means the thread export failed, and the
+ * adapter sent the stream's token totals under the requested mode or pin.
+ * Recording $0 would let the session skip budget admission, so the totals are
+ * priced at the pin, or at the model the mode is known to run, falling back to
+ * the `medium` model when the pin has no rates. The row is tagged `estimated`.
+ */
+async function estimateAmpCost(
+  input: SessionCostRecomputeInput,
+  lookupRate: PricingRateLookup,
+): Promise<SessionCostRecomputeResult> {
+  let selection: ReturnType<typeof resolveAmpModel> | undefined;
+  try {
+    selection = resolveAmpModel(input.model);
+  } catch {
+    selection = undefined;
+  }
+  const candidates = [
+    ...new Set([
+      selection?.pin,
+      selection ? AMP_ESTIMATE_MODELS[selection.baseMode] : undefined,
+      AMP_ESTIMATE_MODELS.medium,
+    ]),
+  ].filter((model): model is string => !!model);
+  for (const model of candidates) {
+    // Same rule as the export parser: only Anthropic bills cache creation as writes.
+    const writes = ampBillsCacheWrites(model);
+    const costUsd = await priceModel(
+      "amp",
+      {
+        model,
+        inputTokens: input.inputTokens + (writes ? 0 : input.cacheWriteTokens),
+        outputTokens: input.outputTokens,
+        cacheReadTokens: input.cacheReadTokens,
+        cacheWriteTokens: writes ? input.cacheWriteTokens : 0,
+      },
+      null,
+      input.atEpochMs,
+      lookupRate,
+    );
+    if (costUsd != null)
+      return { totalCostUsd: costUsd, costSource: "estimated", modelBreakdown: undefined };
+  }
+  return unpricedResult(input, undefined);
+}
+
 export async function recomputeSessionCost(
   input: SessionCostRecomputeInput,
   lookupRate: PricingRateLookup,
@@ -134,6 +181,23 @@ export async function recomputeSessionCost(
       modelBreakdown,
     };
   }
+
+  // Amp's own recorded cost (`amp threads usage`) is what it billed, including
+  // subagent threads the token counts miss. The adapter sends it only when
+  // every request was billed through Amp, so it wins over the token price,
+  // which still fills the per-model breakdown.
+  if (input.provider === "amp" && input.harnessCostUsd > 0) {
+    const priced = await recomputeSessionCost({ ...input, harnessCostUsd: 0 }, lookupRate);
+    return {
+      totalCostUsd: input.harnessCostUsd,
+      costSource: "harness",
+      modelBreakdown: priced.modelBreakdown,
+    };
+  }
+
+  // amp's top-level model is the mode or pin it was asked for; only the thread
+  // export's per-model usage says what ran and how its cache tokens bill.
+  if (input.provider === "amp" && !modelUsageEntries) return estimateAmpCost(input, lookupRate);
 
   const split = cacheWriteSplit(input);
   const usages: SessionCostModelUsageInput[] = modelUsageEntries

@@ -508,8 +508,8 @@ describe("previewModelTiers", () => {
 
     // acp has no portable tier mapping, so it has nothing to preview.
     expect(rows.some((r) => r.provider === "acp")).toBe(false);
-    expect(new Set(rows.map((r) => r.provider)).size).toBe(7);
-    expect(rows).toHaveLength(28);
+    expect(new Set(rows.map((r) => r.provider)).size).toBe(9);
+    expect(rows).toHaveLength(36);
   });
 
   test("an alias that resolves to nothing reports the default it falls back to", async () => {
@@ -564,7 +564,7 @@ describe("GET /api/models-catalog/tiers", () => {
     expect(handled).toBe(true);
     expect(status).toBe(200);
     const body = JSON.parse(bodyStr) as { tiers: { provider: string; tier: string }[] };
-    expect(body.tiers).toHaveLength(28);
+    expect(body.tiers).toHaveLength(36);
     expect(body.tiers.find((t) => t.provider === "claude" && t.tier === "smart")).toMatchObject({
       key: "MODEL_TIER_CLAUDE_SMART",
       source: "tier-config",

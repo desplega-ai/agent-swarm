@@ -90,21 +90,21 @@ const cases = [
     path: ["api", "github", "webhook"],
     body: githubIssue,
     headers: { "x-github-event": "issues", "x-hub-signature-256": "sha256=x" },
-    event: "github.issue.opened",
+    events: ["github.issue.opened"],
   },
   {
     name: "GitLab",
     path: ["api", "gitlab", "webhook"],
     body: gitlabIssue,
     headers: { "x-gitlab-token": "t" },
-    event: "gitlab.issue.open",
+    events: ["gitlab.issue.opened", "gitlab.issue.open"],
   },
   {
     name: "Azure DevOps",
     path: ["api", "azure-devops", "webhook"],
     body: azureDevOpsPullRequest,
     headers: { authorization: "Basic test" },
-    event: "azure-devops.pull_request.created",
+    events: ["azure-devops.pull_request.created"],
   },
 ];
 
@@ -136,7 +136,7 @@ describe("webhook task creation blocked by extension", () => {
         reason: "sender not allowed",
         extension: { id: "ext-1", name: "gate" },
       });
-      expect(emitted).toEqual([c.event]);
+      expect(emitted).toEqual(c.events);
     });
 
     test(`${c.name}: a non-blocked handler error still returns 500`, async () => {

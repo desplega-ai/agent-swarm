@@ -198,6 +198,10 @@ import { isInternalConfigKey, isReservedConfigKey, reservedKeyError } from "./sw
 import { emitTaskStarted } from "./task-lifecycle-events";
 
 export {
+  refreshActiveSessionOnActivity,
+  SESSION_ACTIVITY_REFRESH_MIN_INTERVAL_MS,
+} from "./db/active-sessions";
+export {
   buildRoutingAffinityFromAgent,
   createAgent,
   deleteAgent,
@@ -4754,6 +4758,8 @@ export interface CreateSessionCostInput {
    *  - 'pricing-table'  — value recomputed by the API from `pricing` rows.
    *  - 'unpriced'       — recompute attempted but no matching pricing rows;
    *                       `totalCostUsd` is whatever the worker submitted.
+   *  - 'estimated'      — fallback token counts priced at an assumed model
+   *                       (amp with a failed thread export).
    */
   costSource?: SessionCostSource;
   harnessCostUsd?: number | null;

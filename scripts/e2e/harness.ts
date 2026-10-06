@@ -11,6 +11,10 @@ const DEFAULT_MODELS: Record<string, string> = {
   pi: "openrouter/deepseek/deepseek-v4-flash",
   opencode: "openrouter/deepseek/deepseek-v4-flash",
   dsh: "openrouter/deepseek/deepseek-v4.1-flash",
+  // Amp's cheapest mode (GLM-5.3 Flash when verified live).
+  amp: "low",
+  // The cheapest model Cursor.models.list() offers our account.
+  cursor: "gpt-5.4-nano",
 };
 const PROVIDER_CREDENTIAL_KEYS = {
   claude: { keys: ["CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"], fallbackKeys: [] },
@@ -27,6 +31,8 @@ const PROVIDER_CREDENTIAL_KEYS = {
     keys: ["OPENROUTER_API_KEY", "OPENROUTER_BASE_URL", "DEEPSEEK_API_KEY", "DSH_BINARY"],
     fallbackKeys: [],
   },
+  amp: { keys: ["AMP_API_KEY", "AMP_BINARY"], fallbackKeys: [] },
+  cursor: { keys: ["CURSOR_API_KEY"], fallbackKeys: [] },
 } as const;
 type HarnessChild = Bun.Subprocess<"ignore", "pipe", "pipe">;
 
@@ -139,6 +145,14 @@ function requireCredential(provider: string): void {
       : "DEEPSEEK_API_KEY";
     expect(process.env[key], `Dsh requires ${key} for the selected model`);
     expect(Bun.which(process.env.DSH_BINARY || "dsh"), "Dsh requires a preinstalled dsh executable");
+  } else if (provider === "cursor") {
+    expect(process.env.CURSOR_API_KEY, "Cursor requires CURSOR_API_KEY");
+  } else if (provider === "amp") {
+    expect(process.env.AMP_API_KEY, "Amp requires AMP_API_KEY");
+    expect(
+      Bun.which(process.env.AMP_BINARY || "amp"),
+      "Amp requires a preinstalled amp executable",
+    );
   } else if (provider === "opencode") {
     expect(
       process.env.OPENROUTER_API_KEY || process.env.ANTHROPIC_API_KEY || process.env.OPENAI_API_KEY,
@@ -203,8 +217,9 @@ async function prepareHarnessHome(homeDir: string, provider: string): Promise<st
   const piDir = `${homeDir}/.pi/agent/skills/work-on-task`;
   const codexDir = `${homeDir}/.codex/skills/work-on-task`;
   const opencodeDir = `${homeDir}/.opencode/skills/work-on-task`;
+  const agentsDir = `${homeDir}/.agents/skills/work-on-task`;
   const workspaceDir = `${homeDir}/workspace`;
-  await Bun.$`mkdir -p ${homeDir}/logs ${workspaceDir} ${claudeDir} ${piDir} ${codexDir} ${opencodeDir}`.quiet();
+  await Bun.$`mkdir -p ${homeDir}/logs ${workspaceDir} ${claudeDir} ${piDir} ${codexDir} ${opencodeDir} ${agentsDir}`.quiet();
   const skillTemplateDir = `${repoRoot}/templates/skills/work-on-task`;
   const config = (await Bun.file(`${skillTemplateDir}/config.json`).json()) as {
     name: string;
@@ -217,6 +232,7 @@ async function prepareHarnessHome(homeDir: string, provider: string): Promise<st
     Bun.write(`${piDir}/SKILL.md`, skill),
     Bun.write(`${codexDir}/SKILL.md`, skill),
     Bun.write(`${opencodeDir}/SKILL.md`, skill),
+    Bun.write(`${agentsDir}/SKILL.md`, skill),
   ]);
   if (provider === "codex" && process.env.CODEX_OAUTH) {
     const authPath = `${homeDir}/.codex/auth.json`;
@@ -340,7 +356,7 @@ async function runHarnessAttempt(
   let cost: HarnessCost | undefined;
   try {
     expect(
-      ["claude", "codex", "pi", "opencode", "dsh"].includes(provider),
+      ["claude", "codex", "pi", "opencode", "dsh", "cursor", "amp"].includes(provider),
       `Unsupported harness provider: ${provider}`,
     );
     requireCredential(provider);
@@ -373,7 +389,8 @@ async function runHarnessAttempt(
     const create = await api("POST", "/api/tasks", {
       body: {
         task: `Reply with exactly the text ${marker} and nothing else. Do not use any tools.`,
-        routingReason: "human_pinned", agentId,
+        routingReason: "human_pinned",
+        agentId,
         source: "api",
         dir: workspaceDir,
       },

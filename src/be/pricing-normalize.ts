@@ -59,7 +59,17 @@ const ROUTING_PREFIXES_BY_PROVIDER: Record<PricingProvider, readonly string[]> =
   // DeepSeek id (`deepseek-v4-pro`) for the direct API. Stripping `openrouter/`
   // lands the former on the openrouter rows; the latter is already canonical.
   dsh: ["openrouter/"],
+  // amp reports the model Amp routed to: a bare Anthropic/OpenAI/Google id, or
+  // a Fireworks path (`accounts/fireworks/models/...`, kept whole). A plugin pin
+  // is `provider/model`, so strip the vendor. OpenAI also reports dated
+  // snapshots (`gpt-5-nano-2025-08-07`); see `AMP_DATED_SUFFIX`.
+  amp: ["anthropic/", "openai/", "google-vertex/", "google/"],
+  // cursor reports a bare Cursor model id, already the vendor's own id.
+  cursor: [],
 };
+
+/** `gpt-5-nano-2025-08-07` -> `gpt-5-nano`. Anthropic's 8-digit dates (`-20251001`) are real catalog ids and are left alone. */
+const AMP_DATED_SUFFIX = /-\d{4}-\d{2}-\d{2}$/;
 
 /**
  * Canonical model key for a `(provider, model)` pair. Idempotent — calling
@@ -84,5 +94,6 @@ export function normalizeModelKey(provider: PricingProvider, model: string): str
       break;
     }
   }
+  if (provider === "amp") key = key.replace(AMP_DATED_SUFFIX, "");
   return key;
 }

@@ -153,11 +153,27 @@ export const DEFAULT_MODEL_TIER_MAP: Record<ProviderName, Record<ModelTier, stri
     smart: "openrouter/deepseek/deepseek-v4-pro-0813",
     ultra: "openrouter/anthropic/claude-opus-5.5",
   },
+  // Bare Cursor model ids (`Cursor.models.list()`); reasoning effort rides in
+  // the model's own params (see src/providers/cursor-adapter.ts).
+  cursor: {
+    smol: "gpt-5.4-mini",
+    regular: "claude-sonnet-5-5",
+    smart: "claude-opus-5-5",
+    ultra: "claude-fable-5-1",
+  },
   devin: {
     smol: "devin",
     regular: "devin",
     smart: "devin",
     ultra: "devin",
+  },
+  // Amp picks the model server-side per mode, so the tiers map onto its four
+  // built-in modes. `low` is the cheapest (GLM-5.3 Flash when verified live).
+  amp: {
+    smol: "low",
+    regular: "medium",
+    smart: "high",
+    ultra: "ultra",
   },
   // ACP has no portable tier-to-model mapping. Operators may set an explicit
   // MODEL_OVERRIDE, which the adapter applies through an advertised `model`
@@ -395,6 +411,8 @@ export const ProviderNameSchema = z.enum([
   "opencode",
   "acp",
   "dsh",
+  "amp",
+  "cursor",
 ]);
 export type ProviderName = z.infer<typeof ProviderNameSchema>;
 
@@ -486,6 +504,12 @@ export const PROVIDER_STEER_CAPABILITIES: Record<ProviderName, SteerMode[]> = {
   // Advertise nothing rather than promise semantics we can't honor.
   acp: [],
   dsh: [],
+  // `--stream-json-input` queues a stdin message until the running turn ends
+  // (verified live); there is no interrupt primitive, so queue only.
+  amp: ["queue"],
+  // `run.steer()` reaches the in-flight run; a message the SDK reverts to a
+  // follow-up, and every queued one, starts the next run on the same agent.
+  cursor: ["steer", "queue"],
 };
 
 export type DevinProviderMeta = {
@@ -506,6 +530,8 @@ export type ProviderMetaMap = {
   opencode: NoProviderMeta;
   acp: NoProviderMeta;
   dsh: NoProviderMeta;
+  amp: NoProviderMeta;
+  cursor: NoProviderMeta;
 };
 
 export const FollowUpConfigSchema = z
@@ -1532,7 +1558,12 @@ export type SessionLog = z.infer<typeof SessionLogSchema>;
 // Session Cost Types (aggregated cost data per session)
 // Migration 063 widened the set to include 'unpriced' for cases where the API
 // recompute path couldn't find pricing rows for the (provider, model, token_class).
-export const SessionCostSourceSchema = z.enum(["harness", "pricing-table", "unpriced"]);
+export const SessionCostSourceSchema = z.enum([
+  "harness",
+  "pricing-table",
+  "unpriced",
+  "estimated",
+]);
 export type SessionCostSource = z.infer<typeof SessionCostSourceSchema>;
 
 export const SessionCostModelBreakdownSchema = z
@@ -1576,6 +1607,8 @@ export const SessionCostSchema = z
     //   'unpriced'       — the API tried to recompute but the (provider, model)
     //                      had no matching pricing rows; totalCostUsd is whatever
     //                      the worker submitted (often 0).
+    //   'estimated'      — the API priced fallback token counts at an assumed
+    //                      model (amp with a failed thread export).
     costSource: SessionCostSourceSchema.default("harness"),
     // Migration 128: adapter-reported amount retained for reconciliation only.
     harnessCostUsd: z.number().nullable().optional(),
@@ -3436,6 +3469,8 @@ export const PricingProviderSchema = z.enum([
   // `costSource: 'unpriced'`. Accepted here so the row is recorded at all.
   "acp",
   "dsh",
+  "amp",
+  "cursor",
 ]);
 export type PricingProvider = z.infer<typeof PricingProviderSchema>;
 

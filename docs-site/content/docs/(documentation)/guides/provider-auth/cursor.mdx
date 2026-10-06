@@ -1,0 +1,76 @@
+---
+title: Cursor
+description: Get a Cursor API key for cursor workers, pick a model, and understand how Cursor runs are billed and priced
+---
+
+`cursor` workers run the [Cursor TypeScript SDK](https://cursor.com/docs/sdk/typescript) (`@cursor/sdk`) with its local runtime. The agent loop and tools run inside the worker; inference runs on Cursor's hosted models. The worker authenticates with a single `CURSOR_API_KEY`.
+
+For the adapter internals, see [Harness Providers](/docs/guides/harness-providers). Everything below about Cursor accounts, plans, and keys comes from Cursor's docs, linked inline.
+
+## Plan requirement
+
+Use a paid Cursor plan: Pro, Pro+, Ultra, Teams, or Enterprise.
+
+- Cursor's [pricing docs](https://cursor.com/docs/models-and-pricing) say the Start plan "does not include the Other Models pool, on-demand usage, Bugbot, Auto, Automations, or the Cursor SDK. Upgrade to Pro for those."
+- The free Hobby plan includes only "Limited Agent requests" ([cursor.com/pricing](https://cursor.com/pricing)).
+- [Service accounts](https://cursor.com/docs/account/enterprise/service-accounts) "are available on the Enterprise plan".
+
+## Create the API key
+
+The SDK accepts two kinds of key, for both local and cloud runs ([SDK docs](https://cursor.com/docs/sdk/typescript#authentication)). Team Admin API keys are not supported yet.
+
+| Key | Where to create it | Who pays |
+|---|---|---|
+| User API key | [Cursor Dashboard → API Keys](https://cursor.com/dashboard/api) | Billed to that user's plan |
+| Service account API key (Enterprise) | [Team settings](https://cursor.com/dashboard/team-settings) | Billed to the team that owns the service account |
+
+Prefer a service account key for a shared swarm. Its runs are not tied to one person's account, and admins can rotate the key without touching anyone's login.
+
+## Configure the worker
+
+```bash
+# .env.docker
+HARNESS_PROVIDER=cursor
+CURSOR_API_KEY=key_...
+```
+
+You can also store `CURSOR_API_KEY` as a swarm secret instead of the worker environment. A worker started without a key waits until the key appears in the swarm config. The dashboard's **Test connection** checks the key with `Cursor.me()`, which authenticates without running a model.
+
+## Models
+
+The models a key can use depend on its account and team. `Cursor.models.list()` returns that list, and the dashboard model picker offers a curated subset. A custom model id still works.
+
+- **Vendor models** use the vendor's own id: `claude-sonnet-5-5`, `gpt-5.4-mini`, `gemini-3.5-flash`, `grok-4.6`.
+- **Composer** (`composer-2.5`) is Cursor's own model. `composer-2` is retired, and Cursor reroutes it to Composer 2.5.
+- **Auto** (`default`) lets Cursor pick the model for each request.
+
+Without an explicit model, the swarm picks by tier:
+
+| Tier | Model |
+|---|---|
+| `smol` | `gpt-5.4-mini` |
+| `regular` | `claude-sonnet-5-5` |
+| `smart` | `claude-opus-5-5` |
+| `ultra` | `claude-fable-5-1` |
+
+Override a tier on the worker with `MODEL_TIER_<TIER>`, for example `MODEL_TIER_REGULAR=composer-2.5`. Reasoning effort maps onto the model's own parameter (`reasoning_effort`, `reasoning`, or `effort`) when the model has one.
+
+## System prompt
+
+`CURSOR_NATIVE_SYSTEM_PROMPT` defaults to `false`. With it off, the swarm prompt goes at the top of the first user message, and Cursor's own system prompt stays in place.
+
+With it on, the adapter passes the swarm prompt as Cursor's `systemPrompt`, which replaces Cursor's prompt. Cursor enables this per account. If Cursor rejects the option, the session falls back to the first-message path. Set it in **Settings → Configuration** or as an environment variable. It takes effect on the worker's next task.
+
+## Cost
+
+Cursor bills SDK runs like IDE runs: "SDK runs follow the same pricing, request pools, and Privacy Mode rules as runs from the IDE and Cloud Agents. Spend shows up in your team's usage dashboard under the SDK tag" ([SDK docs](https://cursor.com/docs/sdk/typescript)). That dashboard is the source of truth for what you pay.
+
+Agent Swarm records the tokens of each run and estimates USD from list prices:
+
+- **Vendor models** price at the vendor's API rate, which is what Cursor charges for them ([models and pricing](https://cursor.com/docs/models-and-pricing)).
+- **Composer** prices at Cursor's published Composer 2.5 (Fast) rate: $3.00 input, $0.50 cache read, $15.00 output per million tokens. Fast is Composer's default variant ([Composer 2.5](https://cursor.com/blog/composer-2-5)), and the swarm does not change it.
+- **Auto** (`default`) has no rate of its own. Cursor bills it at the price of whichever model it routes each request to, so these runs show as unpriced. Models from other vendors, such as `kimi-*` and `glm-*`, have no pricing row yet and also show as unpriced.
+
+The estimate leaves out plan discounts and included usage. It also leaves out the [Cursor Token Rate](https://cursor.com/help/models-and-usage/token-rate): Teams and Enterprise plans pay $0.25 per million tokens on third-party model requests, while Composer and Grok are exempt.
+
+Cursor's `agent.getUsage()` would give the billed amount, but it answered `feature_unavailable` for local agents when we tested it in October 2026. See [Cost and context computation](/docs/guides/cost-and-context-computation) for how the swarm computes the estimate.

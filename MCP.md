@@ -427,7 +427,7 @@ Acknowledge a live steering message after you have incorporated it into your cur
 
 **Steer Task**
 
-Send a message to a task that is already running. `mode:"steer"` is honored on pi and claude-managed; claude, devin, opencode and codex support queue only (codex delivery lands at the next tool-call boundary via its lifecycle hooks). Pass `onUnsupported:"fail"` to get an error instead of a downgrade.
+Send a message to a task that is already running. `mode:"steer"` is honored on pi and claude-managed; claude, devin, opencode, codex and amp support queue only (codex and amp delivery lands at the next tool-call boundary). Pass `onUnsupported:"fail"` to get an error instead of a downgrade.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|

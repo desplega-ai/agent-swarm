@@ -199,7 +199,16 @@ const setAgentHarnessProviderRoute = route({
   },
 });
 
-const LocalHarnessProviderSchema = z.enum(["claude", "codex", "pi", "opencode", "acp", "dsh"]);
+const LocalHarnessProviderSchema = z.enum([
+  "claude",
+  "codex",
+  "pi",
+  "opencode",
+  "acp",
+  "dsh",
+  "amp",
+  "cursor",
+]);
 const AcpRuntimeConfigSchema = z
   .object({
     target: z.enum(ACP_TARGET_IDS),

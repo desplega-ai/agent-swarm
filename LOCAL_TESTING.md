@@ -168,16 +168,21 @@ Then render both profiles:
 bun run e2e:visuals /tmp/vis/legacy && bun run e2e:visuals /tmp/vis/v2
 ```
 
-Use `--harness claude,codex,pi,opencode,dsh` to add real worker legs after the contract layer.
+Use `--harness claude,codex,pi,opencode,dsh,cursor,amp` to add real worker legs after the contract layer.
 Claude needs `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY`.
 Codex needs `CODEX_OAUTH` or `OPENAI_API_KEY`. Pi needs `OPENROUTER_API_KEY` or `ANTHROPIC_API_KEY`.
 Opencode needs `OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY`, or `OPENAI_API_KEY`.
-Override models with `E2E_MODEL_CLAUDE`, `E2E_MODEL_CODEX`, `E2E_MODEL_PI`, `E2E_MODEL_OPENCODE`, or `E2E_MODEL_DSH`.
+Override models with `E2E_MODEL_CLAUDE`, `E2E_MODEL_CODEX`, `E2E_MODEL_PI`, `E2E_MODEL_OPENCODE`, `E2E_MODEL_DSH`, `E2E_MODEL_CURSOR`, or `E2E_MODEL_AMP`.
+Cursor needs `CURSOR_API_KEY` and defaults to `gpt-5.4-nano`, the cheapest model `Cursor.models.list()` offers.
+Amp needs `AMP_API_KEY` and a preinstalled `amp` executable (`AMP_BINARY`), and defaults to the `low` mode.
 Dsh defaults to `openrouter/deepseek/deepseek-v4.1-flash` and needs `OPENROUTER_API_KEY`.
 Provision `npm install --global @deepseek-ai/dsh@0.2.1-alpha.1` first, then run
 `DSH_BINARY=$(command -v dsh) bun run e2e --only health --harness dsh`.
 A native `E2E_MODEL_DSH=deepseek-flash` override instead requires `DEEPSEEK_API_KEY`.
 The nightly dsh leg installs that pin explicitly because its slim image omits dsh.
+Amp defaults to its cheapest mode, `low`, and needs `AMP_API_KEY` plus an `amp` executable
+(`AMP_BINARY=$(command -v amp) bun run e2e --only health --harness amp`). Each run creates one
+thread on ampcode.com and costs about a cent. The nightly workflow has no amp leg.
 Create a Codex blob with `bun scripts/e2e/codex-oauth-blob.ts /path/to/.codex/auth.json | gh secret set E2E_CODEX_OAUTH`.
 Use a dedicated Codex login for that blob. CI refresh rotates the token and can break a main login.
 The blob goes stale after its first refresh, about ten days after issue.
