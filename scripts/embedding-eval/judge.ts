@@ -33,6 +33,9 @@ const POOL_CONFIGS = [
   "gem-2-or@768",
   "qwen3-8b@4096",
   "voyage-4@1024",
+  "nomic-v15@512",
+  "nomic-v15-noprefix@512",
+  "gemma-300m@512",
 ];
 const MODES = ["vec", "hybrid"] as const;
 
@@ -153,6 +156,7 @@ for (const mode of MODES) {
     );
   }
 }
-await Bun.write(`${import.meta.dir}/results/judged.json`, JSON.stringify(result, null, 1));
+const outDir = process.env.EMBED_EVAL_OUT ?? `${import.meta.dir}/results`;
+await Bun.write(`${outDir}/judged.json`, JSON.stringify(result, null, 1));
 console.log(lines.join("\n"));
 console.error(JSON.stringify({ judgeJobs: jobs.length, llmUsage }));
