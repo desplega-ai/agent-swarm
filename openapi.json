@@ -52675,7 +52675,8 @@
                 "properties": {
                   "code": {
                     "type": "string",
-                    "minLength": 1
+                    "minLength": 1,
+                    "maxLength": 256
                   }
                 },
                 "required": [
@@ -52713,7 +52714,17 @@
             }
           },
           "404": {
-            "description": "Code unknown, expired or already used",
+            "description": "Code unknown, malformed, expired or already used",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Request body too large",
             "content": {
               "application/json": {
                 "schema": {

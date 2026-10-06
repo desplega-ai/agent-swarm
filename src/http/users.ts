@@ -424,7 +424,9 @@ const exchangeConnectorCodeRoute = route({
   description:
     "Unauthenticated: the single-use code is the credential. Rate limited per IP. Unknown, expired and used codes all return 404 code_invalid.",
   tags: ["Users"],
-  body: z.object({ code: z.string().min(1) }),
+  body: z.object({ code: z.string().min(1).max(256) }),
+  // Public route: cap the body before it is buffered and parsed.
+  maxBodyBytes: 1024,
   responses: {
     200: {
       description: "Minted MCP token for the code's user",
@@ -434,7 +436,8 @@ const exchangeConnectorCodeRoute = route({
         version: z.string(),
       }),
     },
-    404: { description: "Code unknown, expired or already used" },
+    404: { description: "Code unknown, malformed, expired or already used" },
+    413: { description: "Request body too large" },
     429: { description: "Rate limited" },
   },
   auth: { apiKey: false },
@@ -608,6 +611,9 @@ function isHttpsOrigin(value: string): boolean {
     return false;
   }
 }
+
+/** `createConnectorCode` output: 32 random bytes in unpadded base64url. */
+const CONNECTOR_CODE_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 
 /** 10 exchanges per minute per client IP. */
 const connectorExchangeRateLimiter = createIpRateLimiter({
@@ -827,6 +833,12 @@ export async function handleUsers(
     }
     const parsed = await exchangeConnectorCodeRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
+
+    // Reject anything that is not a generated code shape before hashing it.
+    if (!CONNECTOR_CODE_PATTERN.test(parsed.body.code)) {
+      jsonError(res, "code_invalid", 404);
+      return true;
+    }
 
     try {
       const result = await exchangeConnectorCode(parsed.body.code);

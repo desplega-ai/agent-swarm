@@ -362,6 +362,25 @@ describe("ChatGPT connector codes", () => {
     expect(tokens).toHaveLength(1);
   });
 
+  test("exchange rejects malformed codes with 404 and oversized bodies with 413", async () => {
+    const user = await createUser({ name: "Malformed Code User" });
+    const { code } = await createCode(user.id);
+
+    const truncated = await exchange(code.slice(0, 42));
+    expect(truncated.status).toBe(404);
+    expect(await truncated.json()).toEqual({ error: "code_invalid" });
+
+    const oversized = await fetch(url("/api/connector/exchange"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code: "x".repeat(4096) }),
+    });
+    expect(oversized.status).toBe(413);
+
+    // The real code still works after the rejected attempts.
+    expect((await exchange(code)).status).toBe(200);
+  });
+
   test("concurrent exchanges of one code mint exactly one token", async () => {
     const user = await createUser({ name: "Race User" });
     const { code } = await createCode(user.id);
