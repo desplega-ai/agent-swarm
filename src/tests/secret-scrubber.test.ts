@@ -499,6 +499,52 @@ describe("scrubSecrets — env dumps and escaped forms", () => {
     expect(scrubSecrets(jsonBody(s))).toBe(jsonBody(s));
   });
 
+  test("leaves shell references under a sensitive key intact", () => {
+    const s = [
+      "export GH_TOKEN=$(gh auth token) && gh pr list",
+      "ATTIO_API_KEY=$(get-config ATTIO_API_KEY)",
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: testing shell syntax
+      "FOO_TOKEN=${OTHER_TOKEN} run",
+      'FOO_TOKEN="$OTHER_TOKEN" run',
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: testing shell syntax
+      'FOO_TOKEN="${OTHER_TOKEN:-x}" run',
+    ].join("\n");
+    expect(scrubSecrets(s)).toBe(s);
+    expect(scrubSecrets(jsonBody(s))).toBe(jsonBody(s));
+
+    // An assignment nested inside the reference is still scanned.
+    expect(scrubSecrets("A_TOKEN=$(B_TOKEN=s3cr3t cmd)")).toBe(
+      "A_TOKEN=$(B_TOKEN=[REDACTED:B_TOKEN] cmd)",
+    );
+    // Single quotes are literal in shell, and declare -x escapes a literal `$`.
+    expect(scrubSecrets("FOO_TOKEN='$lit3ral' run")).toBe("FOO_TOKEN='[REDACTED:FOO_TOKEN]' run");
+    const dump = declareX("FOO_TOKEN", "$lit3ral");
+    expect(scrubSecrets(dump)).toBe('declare -x FOO_TOKEN="[REDACTED:FOO_TOKEN]"');
+    expect(scrubSecrets(jsonBody(dump))).toBe('declare -x FOO_TOKEN=\\"[REDACTED:FOO_TOKEN]\\"');
+  });
+
+  test("an unterminated quoted value stops at the first newline", () => {
+    for (const s of [
+      'Set API_TOKEN="\nline two\nline "three" here',
+      "Set API_TOKEN='\nline two\nline 'three' here",
+    ]) {
+      expect(scrubSecrets(s)).toBe(s);
+      expect(scrubSecrets(jsonBody(s))).toBe(jsonBody(s));
+    }
+
+    const s = 'Set API_TOKEN="abc123\nline two\nline "three" here';
+    const want = 'Set API_TOKEN="[REDACTED:API_TOKEN]\nline two\nline "three" here';
+    expect(scrubSecrets(s)).toBe(want);
+    expect(scrubSecrets(jsonBody(s))).toBe(jsonBody(want));
+  });
+
+  test("a quoted value closed at end of line may span lines", () => {
+    const dump = `${declareX("DEMO_MULTI_TOKEN", "line1\nline2")}\n${declareX("USER", "deploy")}`;
+    const want = `declare -x DEMO_MULTI_TOKEN="[REDACTED:DEMO_MULTI_TOKEN]"\n${declareX("USER", "deploy")}`;
+    expect(scrubSecrets(dump)).toBe(want);
+    expect(scrubSecrets(jsonBody(dump))).toBe(jsonBody(want));
+  });
+
   test("is idempotent on redacted assignments", () => {
     process.env.DEMO_ACCOUNT_PASSWORD = "Qz8#kLm2";
     refreshSecretScrubberCache();

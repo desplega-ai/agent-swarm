@@ -109,16 +109,42 @@ function escapedForms(value: string): string[] {
 }
 
 // Value shapes after `KEY=`. Each one consumes escape pairs whole, so the
-// first unescaped closing quote ends the value. Closing quotes are optional
-// so a truncated line still gets its tail redacted.
+// first unescaped closing quote ends the value.
 //   JSON_DQ: `\"…\"` — a shell double-quoted value inside a JSON string.
 //   RAW_DQ:  `"…"`   — a shell double-quoted value (`declare -x KEY="…"`).
 //   SQ:      `'…'`   — a shell single-quoted value, raw or JSON (`'\''`).
 //   BARE:    unquoted, up to whitespace, a quote, or a JSON escape (`\n`).
-const JSON_DQ = String.raw`\\"(?:\\\\(?:\\\\|\\"|[^\\"])|\\[^\\"]|[^"\\])*(?:\\")?`;
-const RAW_DQ = String.raw`"(?:\\[\s\S]|[^"\\])*"?`;
-const SQ = String.raw`'(?:[^'\\]|'\\\\?''|\\[\s\S])*'?`;
-const BARE = String.raw`(?:\\[^nrtu"\s]|[^\s"'\\])+`;
+// A bare or double-quoted value starting with an unescaped `$` is a shell
+// reference (`$VAR`, `${VAR}`, `$(cmd)`), not a secret; `declare -x` writes a
+// literal `$` as `\$`, so dumps still match.
+//
+// A quoted value may span lines only when its closing quote ends a line, as a
+// multi-line value in an env dump does. An unterminated quote (or one whose
+// close sits mid-line further down) stops at the first newline, raw or JSON
+// `\n`, so it never swallows the rest of the text.
+const QUOTE_EOL = String.raw`(?=$|[\r\n]|\\[rn]|")`;
+function quoted(open: string, close: string, item: string, lineItem: string): string {
+  return `${open}(?:(?:${lineItem})*${close}|(?:${item})*${close}${QUOTE_EOL}|(?:${lineItem})*)`;
+}
+const JSON_DQ = quoted(
+  String.raw`\\"(?!\$)`,
+  String.raw`\\"`,
+  String.raw`\\\\(?:\\\\|\\"|[^\\"])|\\[^\\"]|[^"\\]`,
+  String.raw`\\\\(?:\\\\|\\"|[^\\"\r\n])|\\[^\\"nr\r\n]|[^"\\\r\n]`,
+);
+const RAW_DQ = quoted(
+  `"(?!\\$)`,
+  `"`,
+  String.raw`\\[\s\S]|[^"\\]`,
+  String.raw`\\[^\r\n]|[^"\\\r\n]`,
+);
+const SQ = quoted(
+  `'`,
+  `'`,
+  String.raw`[^'\\]|'\\\\?''|\\[\s\S]`,
+  String.raw`[^'\\\r\n]|'\\\\?''|\\[^nr\r\n]`,
+);
+const BARE = String.raw`(?!\$)(?:\\[^nrtu"\s]|[^\s"'\\])+`;
 
 /**
  * `KEY=value` where the value is redacted when KEY is sensitive, whatever the
