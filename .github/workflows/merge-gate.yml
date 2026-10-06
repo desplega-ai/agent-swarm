@@ -1170,9 +1170,50 @@ jobs:
           MIGRATION_BASE_REF: ${{ github.event_name == 'merge_group' && github.event.merge_group.base_sha || github.event.pull_request.base.sha }}
         run: bash scripts/check-migration-conflicts.sh
 
+  # Run on every PR and merge queue group: any path can carry a secret, and the
+  # scan takes seconds. Only commits the event adds are scanned, so
+  # secret-shaped lines already on main never block anyone.
+  secret-scan:
+    name: Secret Scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The scan range needs the base branch history.
+          fetch-depth: 0
+
+      - name: Self-test the scanner
+        run: bash scripts/gitleaks-selftest.sh
+
+      - name: Scan new commits
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          PUSH_SHA: ${{ github.sha }}
+        run: |
+          case "$EVENT_NAME" in
+            pull_request) range="origin/${BASE_REF:-main}..HEAD" ;;
+            merge_group) range="$MERGE_GROUP_BASE_SHA..HEAD" ;;
+            push)
+              # A new branch reports an all-zeros `before`; scan from main then.
+              if [ -z "$PUSH_BEFORE" ] || [ -z "${PUSH_BEFORE//0/}" ]; then
+                range="origin/main..$PUSH_SHA"
+              else
+                range="$PUSH_BEFORE..$PUSH_SHA"
+              fi
+              ;;
+            *) echo "::error::secret-scan: unhandled event $EVENT_NAME"; exit 1 ;;
+          esac
+          bash scripts/gitleaks.sh "$range"
+
   gate:
     name: Merge Gate
-    needs: [detect-changes, restore-timings, lint-and-typecheck, test, e2e-contract, pi-skills-freshness, seed-skills, script-types-freshness, openapi-freshness, vendored-openapi, docker-build, ui-lint, template-workflow-validation, operator-skill, migration-conflict-check]
+    needs: [detect-changes, restore-timings, lint-and-typecheck, test, e2e-contract, pi-skills-freshness, seed-skills, script-types-freshness, openapi-freshness, vendored-openapi, docker-build, ui-lint, template-workflow-validation, operator-skill, migration-conflict-check, secret-scan]
     if: always()
     runs-on: ubuntu-latest
     # No checkout, no API calls; the job only inspects `needs` results.

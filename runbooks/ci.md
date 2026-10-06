@@ -28,6 +28,7 @@ CI detects what changed and runs the matching jobs:
 | **Restore test timings** + **Run Tests (1/2, 2/2)** + **Save test timings** | `bun run test:root -- --parallel=4 --shard=1/2` and `--shard=2/2`. `restore-timings` resolves the latest per-file durations from the actions cache once and hands them to both shards as one artifact (two independent restores could pick different snapshots and split different file lists); `save-timings` merges the shards' `--update-timings` output into the next cache entry after a green matrix | New test or test that depends on undocumented setup; a hard-coded test port colliding under `--parallel` (use `getFreePort()` / `port: 0`, see [LOCAL_TESTING.md](../LOCAL_TESTING.md)) |
 | **Pi-Skills Freshness** | `bun run build:pi-skills` (must produce zero diff in `plugin/pi-skills/`) | Edited `plugin/commands/*.md` without rebuilding |
 | **Seeded Skills Check** | `bun run check:skill-sources && bun run check:ai-toolbox-skills && bun run check:skill-md && bun run check:seed-skill-files` | Edited a generated skill source without rebuilding its `SKILL.md`, drifted a vendored ai-toolbox skill from its manifest, left a seeded skill unwired, or introduced a delivery-path collision |
+| **Secret Scan** | `bash scripts/gitleaks-selftest.sh && bash scripts/gitleaks.sh` (also the prek `gitleaks` pre-push hook) | A commit in the PR adds a secret-shaped line. Runs on every PR, ungated. Scans only the commits the PR adds, with a pinned, checksum-verified gitleaks and `--redact`. Remove the value and rewrite the commit. For an intentional fixture, build it at runtime (`"AKIA" + ...`) or add an inline `gitleaks:allow` comment; do not widen `.gitleaks.toml`. `SKIP=gitleaks` is fine if the download host is down; `--no-verify` is still forbidden |
 | **Operator Skill Check** | `bun run check:operator-skill` | Missing public skill, invalid frontmatter, untracked GitHub target, or documentation URL without HTTP 200 after three HEAD attempts. Runs on every PR because any tracked target can disappear. Documentation outages can fail this check. |
 | **Script SDK Types Freshness** | `bun run check:script-types` (regenerates `src/scripts-runtime/types/*.d.ts`, must produce zero diff) | Edited `src/be/scripts/typecheck.ts` (the source of truth) without `bun run build:script-types`, or edited the generated `.d.ts` files directly (never do that) |
 | **OpenAPI Spec Freshness** | `bun run docs:openapi` (must produce zero diff in `openapi.json` AND `docs-site/content/docs/api-reference/`) | Edited an HTTP route or bumped `package.json` `version` without regenerating |
@@ -138,6 +139,7 @@ bun run check:rbac-coverage
 bun run check:openapi-response-coverage
 bun run check:dep-graph
 bun run check:operator-skill
+bash scripts/gitleaks.sh                   # secret scan of commits since origin/main
 
 # Drift checks (run if you touched the relevant files)
 bun run build:pi-skills && git diff --quiet plugin/pi-skills/ || echo "pi-skills drift — commit the regenerated files"

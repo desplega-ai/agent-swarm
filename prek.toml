@@ -3,7 +3,8 @@
 # downstream job behind a per-domain path filter. The `files` regexes below
 # mirror those filters so a push only runs a hook when files it actually
 # validates changed. Meta-only pushes (workflows, docs, runbooks, this config)
-# match nothing and run no hooks — same as CI skipping every gated job.
+# run only the match-all `gitleaks` hook — same as CI skipping every gated job
+# except `secret-scan`.
 #
 # Mechanics: with `always_run` unset (default false) + `pass_filenames = false`,
 # prek runs the whole-project entry once, but only if a pushed file matches
@@ -104,6 +105,21 @@ entry = "bash -c 'bun run build:pi-skills && test -z \"$(git diff --name-only pl
 files = '^(plugin/commands/|plugin/pi-skills/|plugin/build-pi-skills\.ts$)'
 pass_filenames = false
 stages = ["pre-push"]
+
+[[repos.hooks]]
+id = "gitleaks"
+name = "Secret scan (gitleaks, commits since origin/main)"
+language = "system"
+# Same pinned, checksum-verified binary as the CI `secret-scan` job. Scans
+# commits since the merge base with origin/main, findings redacted. If the
+# download host is down, `SKIP=gitleaks git push`; CI stays authoritative.
+# Never --no-verify.
+entry = "bash scripts/gitleaks.sh"
+# Any pushed file can carry a secret, like the ungated CI job.
+files = '.'
+pass_filenames = false
+stages = ["pre-push"]
+fail_fast = true
 
 [[repos]]
 repo = "local"
