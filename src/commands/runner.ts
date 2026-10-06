@@ -24,6 +24,11 @@ import { configureHttpResolver, resolveTemplateAsync } from "../prompts/resolver
 import { renderSteeringDelivery } from "../prompts/steering-delivery.ts";
 import { authJsonToCredentialSelection } from "../providers/codex-oauth/auth-json.js";
 import { materializeCodexAuthJson } from "../providers/codex-oauth/auth-json-fs.js";
+import {
+  CODEX_OAUTH_POOL_SLOTS_ENV,
+  countCodexOAuthPoolSlots,
+  isCodexOAuthConfigKey,
+} from "../providers/codex-oauth/env-keys.js";
 import { loadAllCodexOAuthSlots } from "../providers/codex-oauth/storage.js";
 import {
   type CostData,
@@ -837,6 +842,11 @@ export async function fetchResolvedEnv(
   },
 ): Promise<ResolvedEnvResult> {
   const env: Record<string, string | undefined> = { ...baseEnv };
+  // Codex OAuth rows carry refresh tokens; keep them out of every env this
+  // loader builds, even when an older entrypoint exported them at boot.
+  for (const key of Object.keys(env)) {
+    if (isCodexOAuthConfigKey(key)) delete env[key];
+  }
   const repoId = sessionContext?.repoId;
   let scriptsOnlyConfigValue: string | undefined;
 
@@ -871,6 +881,8 @@ export async function fetchResolvedEnv(
             (config) => config.key === "SCRIPTS_ONLY_MCP",
           )?.value;
           for (const config of data.configs) {
+            // Read on demand via codex-oauth/storage.ts; see env-keys.ts.
+            if (isCodexOAuthConfigKey(config.key)) continue;
             // A blank swarm_config value for a BLANK_ROW_IS_STRAY_KEYS entry
             // (the model-control keys) must not silently blank out a
             // genuinely-set container/boot env value — that key exists
@@ -901,6 +913,10 @@ export async function fetchResolvedEnv(
           }
           console.log(`[env-reload] Loaded ${data.configs.length} config entries from API`);
         }
+        // Non-secret stand-in for the pool rows skipped above, so credential
+        // readiness checks can still see that a pool exists.
+        const codexPoolSlots = countCodexOAuthPoolSlots(data.configs ?? []);
+        env[CODEX_OAUTH_POOL_SLOTS_ENV] = codexPoolSlots > 0 ? String(codexPoolSlots) : undefined;
       }
     } catch (error) {
       console.warn(`[env-reload] Could not fetch config, using current env: ${error}`);
@@ -1115,6 +1131,9 @@ export const RELOADABLE_ENV_KEYS: ReadonlySet<string> = new Set([
   "PI_TOOL_DEFERRAL",
   "PI_CODEMODE",
   "PI_CODEMODE_MODELS",
+  // Non-secret pool-slot count; `checkCodexCredentials` reads it from
+  // process.env at boot and during the credential wait.
+  CODEX_OAUTH_POOL_SLOTS_ENV,
 ]);
 
 /**

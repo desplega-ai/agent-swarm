@@ -1,6 +1,20 @@
-import { readFile, unlink, writeFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { randomUUID } from "node:crypto";
+import {
+  copyFile,
+  mkdir,
+  readFile,
+  realpath,
+  rename,
+  rmdir,
+  stat,
+  unlink,
+  utimes,
+  writeFile,
+} from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { promisify } from "node:util";
 import { deriveDefaultRoute, routeCredentialStatus, routeUnsetEnv } from "@desplega/model-routing";
 import { type Span, trace } from "@opentelemetry/api";
 import {
@@ -10,12 +24,14 @@ import {
 import { isClaudeBridgeEffective, resolveClaudeTransport } from "../utils/claude-transport";
 import { getContextWindowSize } from "../utils/context-window";
 import { CLAUDE_CREDENTIALS_HINT, validateClaudeCredentials } from "../utils/credentials";
+import { isEnvFlagEnabled } from "../utils/env-flag";
 import {
   parseStderrForErrors,
   redactRateLimitEventLine,
   SessionErrorTracker,
   trackErrorFromJson,
 } from "../utils/error-tracker";
+import { withFileLock } from "../utils/file-lock";
 import { fetchInstalledMcpServers } from "../utils/mcp-server-fetcher";
 import { swarmRuntimeInstanceId } from "../utils/multi-runtime";
 import {
@@ -296,62 +312,221 @@ function withClaudeBridgeAuthArgs(
   return [...argv];
 }
 
+const execFileAsync = promisify(execFile);
+
 /**
- * Pre-seed `~/.claude.json` so the per-project trust-dialog ("Quick safety
- * check: Is this a project you trust?") doesn't block on first run.
+ * Pre-seed `~/.claude.json` so Claude Code treats `dirs` as trusted. Untrusted
+ * workspaces make headless `claude -p` ignore `permissions.allow` from
+ * `.claude/settings.json`, and block the interactive trust dialog in tmux.
  *
- * Mirrors the onboarding-skip hack in `Dockerfile.worker` (which writes
- * `hasCompletedOnboarding` and `bypassPermissionsModeAccepted`). When the
- * resolved binary runs interactive claude inside tmux, claude does NOT
- * reliably auto-accept the dialog, so the pane can hang forever. Writing
- * `projects[cwd].hasTrustDialogAccepted = true` (and `hasCompletedProjectOnboarding`)
- * tells claude-code the cwd is pre-trusted.
- *
- * Idempotent (no-op when already true), read-merge-write (never clobbers
- * other keys), graceful on missing / malformed file.
+ * Read-merge-write: sets `projects[dir].hasTrustDialogAccepted`, keeps every
+ * other key, skips the write when nothing changes, and renames a temp file into
+ * place (mode preserved). A malformed file is backed up, not clobbered. The
+ * whole cycle runs under the `~/.claude.json.lock` mkdir lock Claude Code uses.
  *
  * Exported for unit testing.
  */
 export async function preseedClaudeTrustDialog(
-  cwd: string,
-  // Prefer `$HOME` over `homedir()` so callers in tests / sandboxed envs that
-  // override HOME get the override. Bun's `os.homedir()` caches the real
-  // passwd entry at process boot and ignores HOME mutations.
+  dirs: string[],
+  // Prefer `$HOME` over `homedir()`: Bun's `os.homedir()` ignores HOME mutations.
   homeDir: string = process.env.HOME ?? homedir(),
 ): Promise<void> {
   const claudeJsonPath = join(homeDir, ".claude.json");
-  let data: Record<string, unknown> = {};
-  try {
-    const raw = await readFile(claudeJsonPath, "utf-8");
-    const parsed = JSON.parse(raw);
-    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-      data = parsed as Record<string, unknown>;
+  const seed = async () => {
+    // A foreign writer (Claude Code itself) can still take over our mkdir lock,
+    // so confirm the write landed and redo it if an overwrite dropped our entries.
+    for (let attempt = 1; ; attempt++) {
+      await withClaudeJsonLock(claudeJsonPath, () => seedTrustLocked(claudeJsonPath, dirs));
+      if (await trustPersisted(claudeJsonPath, dirs)) return;
+      if (attempt >= CLAUDE_JSON_ATTEMPTS) {
+        throw new Error(
+          `trust entries for ${dirs.join(", ")} did not persist in ${claudeJsonPath}`,
+        );
+      }
     }
+  };
+  // Writers in this swarm exclude each other with a kernel flock, which a
+  // suspended or slow holder keeps and a dead one releases. No staleness
+  // threshold, so no second writer can enter a transaction that is still running.
+  const locked = await withFileLock(`${claudeJsonPath}.swarm-lock`, seed, {
+    waitMs: CLAUDE_JSON_LOCK_TIMEOUT_MS,
+  });
+  if (locked.acquired) return;
+  if (locked.reason === "busy") {
+    throw new Error(`timed out waiting for ${claudeJsonPath}.swarm-lock`);
+  }
+  // Fail closed: the mkdir lock is lease-based, so without the flock a paused
+  // writer can resume after a takeover and commit an older snapshot over a newer one.
+  throw new Error(
+    locked.reason === "unsupported"
+      ? `flock unavailable; not seeding trust in ${claudeJsonPath}`
+      : `cannot open ${claudeJsonPath}.swarm-lock: ${locked.error}`,
+  );
+}
+
+// Claude Code's own writer (proper-lockfile) takes `mkdir <file>.lock` and
+// treats a lock whose mtime is older than 10s as stale. We follow that protocol
+// so Claude Code and we exclude each other; our own writers are already
+// serialized by the flock above, so stale takeover only ever races Claude Code.
+const CLAUDE_JSON_LOCK_STALE_MS = 10_000;
+const CLAUDE_JSON_LOCK_RENEW_MS = 3_000;
+const CLAUDE_JSON_LOCK_TIMEOUT_MS = 15_000;
+const CLAUDE_JSON_ATTEMPTS = 5;
+
+async function withClaudeJsonLock<T>(claudeJsonPath: string, fn: () => Promise<T>): Promise<T> {
+  const lockPath = `${claudeJsonPath}.lock`;
+  const ino = await acquireClaudeJsonLock(lockPath, Date.now() + CLAUDE_JSON_LOCK_TIMEOUT_MS);
+  // Touch and remove the lock only while it is still the directory we created.
+  const ifOwned = async (act: () => Promise<unknown>) => {
+    const current = await stat(lockPath).catch(() => null);
+    if (current?.ino === ino) await act().catch(() => {});
+  };
+  const renew = setInterval(
+    () =>
+      void ifOwned(() => {
+        const now = new Date();
+        return utimes(lockPath, now, now);
+      }),
+    CLAUDE_JSON_LOCK_RENEW_MS,
+  );
+  renew.unref?.();
+  try {
+    return await fn();
+  } finally {
+    clearInterval(renew);
+    await ifOwned(() => rmdir(lockPath));
+  }
+}
+
+async function acquireClaudeJsonLock(lockPath: string, deadline: number): Promise<number> {
+  for (;;) {
+    try {
+      await mkdir(lockPath);
+      return (await stat(lockPath)).ino;
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code !== "EEXIST" && code !== "ENOENT") throw err; // ENOENT: removed under us
+    }
+    const seen = await stat(lockPath).catch(() => null);
+    if (!seen) continue; // lock vanished; retry the mkdir
+    if (Date.now() - seen.mtimeMs > CLAUDE_JSON_LOCK_STALE_MS) {
+      // rmdir only removes an empty directory; re-check identity right before so
+      // a lock that changed hands since we looked is left alone.
+      const again = await stat(lockPath).catch(() => null);
+      if (again?.ino === seen.ino && again.mtimeMs === seen.mtimeMs) {
+        await rmdir(lockPath).catch(() => {});
+      }
+      continue;
+    }
+    if (Date.now() > deadline) throw new Error(`timed out waiting for ${lockPath}`);
+    await new Promise((r) => setTimeout(r, 20 + Math.random() * 30));
+  }
+}
+
+async function trustPersisted(claudeJsonPath: string, dirs: string[]): Promise<boolean> {
+  try {
+    const parsed = JSON.parse(await readFile(claudeJsonPath, "utf-8"));
+    const projects = (parsed?.projects ?? {}) as Record<string, Record<string, unknown>>;
+    return dirs.every((d) => projects[d]?.hasTrustDialogAccepted === true);
   } catch {
-    // missing or malformed — start from {}
-    console.warn(
-      `\x1b[33m[claude]\x1b[0m Starting with empty .claude.json for trust pre-seed at ${claudeJsonPath}`,
-    );
+    return false;
+  }
+}
+
+async function seedTrustLocked(claudeJsonPath: string, dirs: string[]): Promise<void> {
+  let data: Record<string, unknown> = {};
+  let mode: number | undefined;
+  try {
+    mode = (await stat(claudeJsonPath)).mode & 0o777;
+    const parsed = JSON.parse(await readFile(claudeJsonPath, "utf-8"));
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new Error("not a JSON object");
+    }
+    data = parsed as Record<string, unknown>;
+  } catch (err) {
+    if (mode !== undefined) {
+      const backup = `${claudeJsonPath}.malformed-${Date.now()}`;
+      await copyFile(claudeJsonPath, backup);
+      console.warn(
+        scrubSecrets(
+          `\x1b[33m[claude]\x1b[0m ${claudeJsonPath} is unreadable (${err}); backed up to ${backup}`,
+        ),
+      );
+    }
   }
 
   const projects = (data.projects ?? {}) as Record<string, Record<string, unknown>>;
-  const existing = projects[cwd] ?? {};
-  if (existing.hasTrustDialogAccepted === true) {
-    // Already trusted — no-op, no write.
-    return;
+  let changed = false;
+  for (const dir of dirs) {
+    const existing = projects[dir] ?? {};
+    if (existing.hasTrustDialogAccepted === true) continue;
+    projects[dir] = {
+      ...existing,
+      hasTrustDialogAccepted: true,
+      hasCompletedProjectOnboarding: true,
+    };
+    changed = true;
   }
-
-  projects[cwd] = {
-    ...existing,
-    hasTrustDialogAccepted: true,
-    hasCompletedProjectOnboarding: true,
-  };
+  if (!changed) return;
   data.projects = projects;
 
-  await writeFile(claudeJsonPath, `${JSON.stringify(data, null, 2)}\n`);
+  const tmp = `${claudeJsonPath}.${process.pid}.${randomUUID()}.tmp`;
+  try {
+    await writeFile(tmp, `${JSON.stringify(data, null, 2)}\n`, { mode: mode ?? 0o600, flag: "wx" });
+    await rename(tmp, claudeJsonPath);
+  } catch (err) {
+    await unlink(tmp).catch(() => {});
+    throw err;
+  }
   console.log(
-    `\x1b[2m[claude]\x1b[0m Pre-seeded trust dialog acceptance for ${cwd} in ${claudeJsonPath}`,
+    scrubSecrets(
+      `\x1b[2m[claude]\x1b[0m Pre-seeded trust for ${dirs.join(", ")} in ${claudeJsonPath}`,
+    ),
   );
+}
+
+/**
+ * Directories Claude Code keys trust by for `cwd`: its real path, plus the main
+ * checkout when `cwd` is a git worktree. Non-repo cwds yield just the real path.
+ */
+export async function resolveClaudeTrustDirs(cwd: string): Promise<string[]> {
+  const dirs = [await realpath(cwd).catch(() => cwd)];
+  try {
+    // The first `worktree` entry is the primary checkout; a bare repo is marked
+    // `bare` and has no checkout. Metadata parents (`dirname(--git-common-dir)`)
+    // are not trusted: with --separate-git-dir they are unrelated paths.
+    const { stdout } = await execFileAsync("git", ["-C", cwd, "worktree", "list", "--porcelain"]);
+    const first = stdout.split("\n\n")[0]?.split("\n") ?? [];
+    const path = first.find((l) => l.startsWith("worktree "))?.slice("worktree ".length);
+    if (path && !first.includes("bare")) {
+      let main = path;
+      // With --separate-git-dir the entry is the git dir; the checkout is `core.worktree`.
+      const configured = await execFileAsync("git", [
+        "--git-dir",
+        path,
+        "config",
+        "--get",
+        "core.worktree",
+      ]).then(
+        (r) => r.stdout.trim(),
+        () => "",
+      );
+      if (configured) main = resolve(path, configured);
+      main = await realpath(main);
+      // A real checkout has a `.git` file or directory at its root.
+      if (
+        await stat(join(main, ".git")).then(
+          () => true,
+          () => false,
+        )
+      ) {
+        if (!dirs.includes(main)) dirs.push(main);
+      }
+    }
+  } catch {
+    // git missing or cwd is not a repo
+  }
+  return dirs;
 }
 
 /**
@@ -1181,14 +1356,14 @@ export class ClaudeAdapter implements ProviderAdapter {
       );
     }
 
-    // Claude Bridge and its legacy compatibility path drive interactive
-    // `claude` in tmux, where the first-run trust dialog can block startup.
-    if (isInteractiveTmuxClaude) {
+    // Untrusted workspaces make Claude ignore `.claude/settings.json` permissions
+    // (headless) or block on the trust dialog (tmux), so seed trust for every session.
+    if (isEnvFlagEnabled("CLAUDE_TRUST_PRESEED", true, sourceEnv)) {
       try {
-        await preseedClaudeTrustDialog(config.cwd);
+        await preseedClaudeTrustDialog(await resolveClaudeTrustDirs(config.cwd));
       } catch (err) {
         console.warn(
-          `\x1b[33m[claude]\x1b[0m Failed to pre-seed trust dialog for ${config.cwd}: ${err}`,
+          `\x1b[33m[claude]\x1b[0m ${scrubSecrets(`Failed to pre-seed trust for ${config.cwd}: ${err}`)}`,
         );
       }
     }
