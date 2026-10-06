@@ -57,8 +57,8 @@ import {
   unlinkIdentity,
 } from "../be/users";
 import { UserCommsPrefsSchema, UserSchema } from "../types";
-import { getPublicMcpBaseUrl } from "../utils/constants";
 import { getRequestAuth } from "../utils/request-auth-context";
+import { resolveMcpBaseUrl } from "./config-values";
 import { clientIp, createIpRateLimiter } from "./ip-rate-limit";
 import { getOperatorActor } from "./operator-actor";
 import { route } from "./route-def";
@@ -801,7 +801,8 @@ export async function handleUsers(
       return true;
     }
     // The connector refuses non-HTTPS swarm origins, so fail before minting a code.
-    const swarmOrigin = getPublicMcpBaseUrl();
+    // Same swarm_config-aware resolver as the dashboard's HTTPS gate.
+    const swarmOrigin = await resolveMcpBaseUrl();
     if (!isHttpsOrigin(swarmOrigin)) {
       jsonError(
         res,
@@ -817,7 +818,10 @@ export async function handleUsers(
         parsed.body.label ?? DEFAULT_CONNECTOR_CODE_LABEL,
         actor,
       );
-      const connectUrl = `${getConnectorConnectUrl()}?swarm=${encodeURIComponent(swarmOrigin)}&code=${code}`;
+      const connect = new URL(getConnectorConnectUrl());
+      connect.searchParams.set("swarm", swarmOrigin);
+      connect.searchParams.set("code", code);
+      const connectUrl = connect.toString();
       createConnectorCodeRoute.respond(res, 201, { code, expiresAt, connectUrl });
     } catch (err) {
       jsonError(res, err instanceof Error ? err.message : "Failed to create connector code", 500);
@@ -828,6 +832,7 @@ export async function handleUsers(
   // ─── POST /api/connector/exchange ─────────────────────────────────────────
   if (exchangeConnectorCodeRoute.match(req.method, pathSegments)) {
     if (!connectorExchangeRateLimiter.take(clientIp(req))) {
+      res.setHeader("Retry-After", "6");
       jsonError(res, "rate_limited", 429);
       return true;
     }

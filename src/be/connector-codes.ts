@@ -61,10 +61,12 @@ export async function exchangeConnectorCode(
       [nowIso, sha256Hex(code), nowIso],
     );
     if (!row) return null;
-    const { plaintext } = await mintToken(row.user_id, row.label, {
-      kind: row.actor_kind,
-      id: row.actor_id,
-    });
+    const { plaintext } = await mintToken(
+      row.user_id,
+      row.label,
+      { kind: row.actor_kind, id: row.actor_id },
+      { source: "connector_exchange" },
+    );
     return { token: plaintext, userId: row.user_id };
   });
 }

@@ -456,6 +456,7 @@ export async function mintToken(
   userId: string,
   label: string | null,
   actor: IdentityActor,
+  options: { source?: string } = {},
 ): Promise<{ tokenId: string; plaintext: string }> {
   // 24 base62 chars from 24 random bytes (~143 bits of entropy).
   const plaintext = `${TOKEN_PREFIX}${base62(randomBytes(24))}`;
@@ -470,7 +471,12 @@ export async function mintToken(
        VALUES (?, ?, ?, ?, ?, ?)`,
       [tokenId, userId, label, hash, preview, now],
     );
-    await recordIdentityEvent(userId, "token_minted", actor, null, { tokenId, label, preview });
+    await recordIdentityEvent(userId, "token_minted", actor, null, {
+      tokenId,
+      label,
+      preview,
+      ...(options.source ? { source: options.source } : {}),
+    });
   });
 
   return { tokenId, plaintext };

@@ -7,9 +7,10 @@ import {
   type ServerResponse,
 } from "node:http";
 import { deleteExpiredConnectorCodes, exchangeConnectorCode } from "../be/connector-codes";
-import { closeDb, createUser, getDbClient, initDb } from "../be/db";
+import { closeDb, createUser, getDbClient, initDb, upsertSwarmConfig } from "../be/db";
 import { fingerprintApiKey, resolveUserByToken } from "../be/users";
 import { handleCore } from "../http/core";
+import { clientIp } from "../http/ip-rate-limit";
 import { _resetConnectorExchangeRateLimitForTests, handleUsers } from "../http/users";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import { listenOnFreePort } from "./test-net";
@@ -69,6 +70,7 @@ beforeEach(async () => {
   const client = getDbClient();
   _resetConnectorExchangeRateLimitForTests();
   await client.run("DELETE FROM connector_codes");
+  await client.run("DELETE FROM swarm_config WHERE key = 'PUBLIC_MCP_BASE_URL'");
   await client.run("DELETE FROM user_identity_events");
   await client.run("DELETE FROM user_tokens");
   await client.run("DELETE FROM users");
@@ -272,16 +274,34 @@ describe("ChatGPT connector codes", () => {
     expect(tokens).toHaveLength(0);
   });
 
-  test("POST honors CONNECTOR_CONNECT_URL and a custom label", async () => {
-    process.env.CONNECTOR_CONNECT_URL = "https://connector.test/connect";
+  test("POST honors CONNECTOR_CONNECT_URL (keeping its query) and a custom label", async () => {
+    process.env.CONNECTOR_CONNECT_URL = "https://connector.test/connect?ref=swarm";
     const user = await createUser({ name: "Custom Connector User" });
     const body = await createCode(user.id, { label: "my chatgpt" });
-    expect(body.connectUrl.startsWith("https://connector.test/connect?swarm=")).toBe(true);
+    const connect = new URL(body.connectUrl);
+    expect(`${connect.origin}${connect.pathname}`).toBe("https://connector.test/connect");
+    expect(connect.searchParams.get("ref")).toBe("swarm");
+    expect(connect.searchParams.get("swarm")).toBe("https://swarm.example.com");
+    expect(connect.searchParams.get("code")).toBe(body.code);
     const row = await getDbClient().get<{ label: string }>(
       "SELECT label FROM connector_codes WHERE user_id = ?",
       [user.id],
     );
     expect(row?.label).toBe("my chatgpt");
+  });
+
+  test("POST resolves the public origin from swarm_config before env", async () => {
+    process.env.PUBLIC_MCP_BASE_URL = "http://localhost:3013";
+    await upsertSwarmConfig({
+      scope: "global",
+      key: "PUBLIC_MCP_BASE_URL",
+      value: "https://configured.example.com/",
+    });
+    const user = await createUser({ name: "Config Origin User" });
+    const body = await createCode(user.id);
+    expect(new URL(body.connectUrl).searchParams.get("swarm")).toBe(
+      "https://configured.example.com",
+    );
   });
 
   test("POST rejects a non-HTTPS public origin, unknown users, and missing auth", async () => {
@@ -328,6 +348,7 @@ describe("ChatGPT connector codes", () => {
     );
     expect(event?.actor).toBe(`operator:${fingerprintApiKey(API_KEY)}`);
     expect(JSON.parse(event!.afterJson).label).toBe("ChatGPT connector");
+    expect(JSON.parse(event!.afterJson).source).toBe("connector_exchange");
     const row = await getDbClient().get<{ used_at: string | null }>(
       "SELECT used_at FROM connector_codes WHERE user_id = ?",
       [user.id],
@@ -395,6 +416,7 @@ describe("ChatGPT connector codes", () => {
     }
     const limited = await exchange("unknown-11", ip);
     expect(limited.status).toBe(429);
+    expect(limited.headers.get("retry-after")).toBe("6");
     expect((await exchange("other-ip", { "X-Forwarded-For": "203.0.113.8" })).status).toBe(404);
   });
 
@@ -409,5 +431,29 @@ describe("ChatGPT connector codes", () => {
     );
     expect(await deleteExpiredConnectorCodes(new Date(now))).toBe(1);
     expect(await getDbClient().query("SELECT code_hash FROM connector_codes")).toHaveLength(1);
+  });
+});
+
+describe("clientIp", () => {
+  function fakeReq(remoteAddress: string, xff?: string): IncomingMessage {
+    return {
+      socket: { remoteAddress },
+      headers: xff ? { "x-forwarded-for": xff } : {},
+    } as unknown as IncomingMessage;
+  }
+
+  test("trusts the rightmost X-Forwarded-For hop only behind a private peer", () => {
+    expect(clientIp(fakeReq("127.0.0.1", "1.1.1.1, 203.0.113.7"))).toBe("203.0.113.7");
+    expect(clientIp(fakeReq("::ffff:172.18.0.2", "203.0.113.7"))).toBe("203.0.113.7");
+    expect(clientIp(fakeReq("10.0.0.5", "203.0.113.7"))).toBe("203.0.113.7");
+  });
+
+  test("ignores X-Forwarded-For from a public peer", () => {
+    expect(clientIp(fakeReq("198.51.100.4", "203.0.113.7"))).toBe("198.51.100.4");
+    expect(clientIp(fakeReq("172.32.0.1", "203.0.113.7"))).toBe("172.32.0.1");
+  });
+
+  test("falls back to the peer when the header is absent", () => {
+    expect(clientIp(fakeReq("127.0.0.1"))).toBe("127.0.0.1");
   });
 });
