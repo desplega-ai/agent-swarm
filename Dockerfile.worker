@@ -123,7 +123,7 @@ RUN if ! gh extension install github/gh-stack; then \
     fi
 
 # Install Claude CLI (pinned version — bump ARG to update)
-ARG CLAUDE_CODE_VERSION=2.1.290
+ARG CLAUDE_CODE_VERSION=2.1.291
 USER root
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache \
     npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} \
@@ -582,9 +582,9 @@ RUN curl -fsSL "https://registry.npmjs.org/@deepseek-ai/dsh/-/dsh-${DSH_VERSION}
 # "disabled". Bump AMP_VERSION, both SHA-512 pins and AMP_PACKAGE in
 # src/providers/amp-adapter.ts together. The vendor licence is proprietary
 # (https://ampcode.com/terms): confirm it before publishing this image.
-ARG AMP_VERSION=0.0.1791244891-g160ca9
-ARG AMP_SHA512_AMD64=784e2bccd987d0e3eddc6c5bb590abc57e219dc27b90448cfa452e2a5a926c495d9836da75e728e2f665214d207f0641b64e59f9a84b64929f9be71ff263b14b
-ARG AMP_SHA512_ARM64=801293e98ff85b0eb20c4ca246b8c19aa18edcd08f4cf6592a29d821a28856d3d6596e24f18a2cadbecb5a50cbd9d99e4cfd1a7470f8a568ed156c8267f93f1f
+ARG AMP_VERSION=0.0.1791273659-g33d612
+ARG AMP_SHA512_AMD64=00331f256eaaf1334fcc26401bd8a2f4a437da9201e54cf103351231f1b01bc3412494557cb77e2d26c74902f252d80dcab9030b8a0b0c86ff7739bcb4a485d2
+ARG AMP_SHA512_ARM64=39cf7c7a09f7023a49c7aec8aa61cc32117b9aad3f5bf5b22a8dd7e9e2f56c76273cb83cd53410c74f2b991a66eab0d452321c41c4ec8206932b755a60e603fe
 RUN case "$TARGETARCH" in \
       amd64) amp_platform=linux-x64; amp_sha512="$AMP_SHA512_AMD64" ;; \
       arm64) amp_platform=linux-arm64; amp_sha512="$AMP_SHA512_ARM64" ;; \
