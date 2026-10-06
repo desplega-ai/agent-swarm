@@ -367,6 +367,8 @@ export async function completeTask(
     return null;
   }
 
+  // One scrubbed copy feeds both the stored row and the task.completed event.
+  const scrubbedOutput = output ? scrubSecrets(output) : output;
   const row = await getDbClient().transaction(async () => {
     const finishedAt = new Date().toISOString();
     // The status predicate re-checks the idempotency guard atomically: the
@@ -379,10 +381,10 @@ export async function completeTask(
     );
     if (!completed) return null;
 
-    if (output) {
+    if (scrubbedOutput) {
       completed = await getDbClient().get<AgentTaskRow>(
         "UPDATE agent_tasks SET output = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ? RETURNING *",
-        [scrubSecrets(output), id],
+        [scrubbedOutput, id],
       );
     }
     if (completed && options?.addTags?.length) {
@@ -443,7 +445,7 @@ export async function completeTask(
         .then(({ workflowEventBus }) => {
           workflowEventBus.emit("task.completed", {
             taskId: id,
-            output,
+            output: scrubbedOutput,
             agentId: row.agentId,
             workflowRunId: row.workflowRunId,
             workflowRunStepId: row.workflowRunStepId,
@@ -544,7 +546,7 @@ export async function failTask(
         .then(({ workflowEventBus }) => {
           workflowEventBus.emit("task.failed", {
             taskId: id,
-            failureReason: reason,
+            failureReason: scrubbedReason,
             agentId: row.agentId,
             workflowRunId: row.workflowRunId,
             workflowRunStepId: row.workflowRunStepId,
@@ -629,7 +631,7 @@ export async function cancelTask(id: string, reason?: string): Promise<AgentTask
   }
 
   const finishedAt = new Date().toISOString();
-  const cancelReason = reason ?? "Cancelled by user";
+  const cancelReason = scrubSecrets(reason ?? "Cancelled by user");
   // Status predicate re-checks the idempotency guard atomically (a racing
   // terminal transition can land during the await above).
   const row = await getDbClient().get<AgentTaskRow>(
@@ -660,7 +662,7 @@ export async function cancelTask(id: string, reason?: string): Promise<AgentTask
         agentId: row.agentId ?? undefined,
         oldValue: oldTask.status,
         newValue: "cancelled",
-        metadata: reason ? { reason } : undefined,
+        metadata: reason ? { reason: cancelReason } : undefined,
       });
     } catch {}
     getDbClient().afterCommit(() => {
