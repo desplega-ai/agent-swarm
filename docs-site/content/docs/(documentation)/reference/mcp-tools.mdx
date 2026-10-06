@@ -178,10 +178,10 @@ Cancel a task that is pending or in progress. Only the lead or task creator can 
 
 Send additional instructions to a task that is already running. Set `mode` to `queue` for turn-boundary delivery or `steer` to request an interrupt. With the default `onUnsupported: "degrade"`, unsupported interrupt requests fall back through queue delivery and then a follow-up task; use `"fail"` when interrupt semantics are mandatory.
 
-pi-mono and Claude Managed advertise both modes. Claude Code, Devin, opencode,
-and Codex advertise queue only. Codex delivers queued messages at the next
-`SessionStart`, `PostToolUse`, or `Stop` lifecycle hook; messages that are never
-picked up are promoted to follow-up tasks by the terminal sweep. See
+pi-mono, Claude Managed, Codex, and Cursor advertise both modes. Claude Code,
+Devin, opencode, and Amp advertise queue only. Amp delivers queued messages at
+the next tool result; messages that are never picked up are promoted to
+follow-up tasks by the terminal sweep. See
 [Steer a Running Task](/docs/guides/task-steering) for the capability matrix
 and lifecycle.
 

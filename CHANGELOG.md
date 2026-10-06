@@ -6,6 +6,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.164.0] - 2026-10-06
+
+### Added
+- Providers: a native `cursor` harness on `@cursor/sdk` with swarm MCP, steer + queue steering, cancel and per-run token cost (#1882).
+- Providers: a native `amp` harness on the Amp CLI (`--stream-json`), with credentials and live test, model validation, cost, swarm MCP and queued steering (#1883).
+- Extensions: approval, budget-refusal, email, Kapso and code-host (GitHub, GitLab, Azure DevOps) events bridged as `post.*` events (#1878).
+- Dashboard: task detail page overhaul for desktop and mobile (#1881).
+- Docs: release notes for the week of 2026-10-05 (#1867).
+
+### Changed
+- Approvals: the responder comes from the caller's credential, and the route enforces the gate's `approvers` users, roles and any/all/min policy (#1854).
+- Worker image: pi 1.0.2 -> 1.0.3 (#1874); codex 0.160.1, `@cursor/sdk` 1.0.36 and a re-pinned amp CLI (#1888).
+- Docs: heartbeat spec synced (#1873), dreaming-v2 skill seed patches (#1871), and bash script `args[0]` binding to `$0` documented (#1870).
+
+### Fixed
+- GitHub: an approval with no body and no open review items no longer creates a lead task; set `GITHUB_SKIP_NOOP_APPROVALS=false` to restore it (#1872).
+- GitLab: workflow events use the documented past-tense names (#1880).
+- Heartbeat: session-log ingestion refreshes a task's session liveness (#1879).
+- x402: spending is reserved before payment creation, so concurrent payments cannot exceed the daily limit (#1885).
+- Amp: queued steering is delivered at the next tool result and reported delivered only on a consumption receipt; unknown model pins fail fast (#1887).
+- Cursor: cache writes are excluded from fresh input tokens (#1886).
+- Coverage: the nightly coverage job uses the script endpoint (#1884).
+
 ## [1.163.0] - 2026-10-05
 
 ### Added

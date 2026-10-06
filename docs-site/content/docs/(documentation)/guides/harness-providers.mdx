@@ -218,6 +218,8 @@ Running tasks can receive more input through the optional `ProviderSession.deliv
 | `devin` | `queue` | `queued` | The message API accepts working sessions but does not guarantee interruption. |
 | `claude` | `queue` | `queued` | Raw CLI stream-json can queue only. |
 | `codex` | `steer`, `queue` | `steered` or `queued` | The per-task app-server receives native `turn/steer`. Queued input starts after the active turn ends. See below. |
+| `cursor` | `steer`, `queue` | `steered` or `queued` | `run.steer()` reaches the in-flight run; a message the SDK reverts to a follow-up, and every queued one, starts the next run on the same agent. |
+| `amp` | `queue` | `queued` | No interrupt primitive. Queued input is appended to the next tool result; see [Amp](#amp-amp). |
 | `acp` | none | n/a | ACP exposes a single in-flight `session/prompt`; the only interrupt is `session/cancel` (a full abort), so no steering mode is advertised. |
 
 The static `PROVIDER_STEER_CAPABILITIES` map drives `supportedSteerModes` in task responses and `onUnsupported: "fail"` admission. It must match `adapter.traits.steerModes ?? []`. `src/tests/provider-steering-capabilities.test.ts` iterates every name in `ProviderNameSchema`, constructs its adapter, and fails with the provider name if the two drift.
