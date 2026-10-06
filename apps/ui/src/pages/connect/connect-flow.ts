@@ -69,6 +69,24 @@ export function validateReturnTo(
 }
 
 /**
+ * Connections that may receive a code for a non-built-in `return_to`: only
+ * those whose own discovery reports that origin as their
+ * `CONNECTOR_CONNECT_URL`. One swarm's discovery must never authorize a
+ * destination for another swarm's code.
+ */
+export function connectionsForCustomReturnTo<C>(
+  raw: string | null,
+  discovered: readonly { connection: C; connectUrl: string | null | undefined }[],
+): C[] {
+  return discovered
+    .filter(
+      ({ connectUrl }) =>
+        !!connectUrl && validateReturnTo(raw, { extraOrigins: [connectUrl] }) !== null,
+    )
+    .map(({ connection }) => connection);
+}
+
+/**
  * The connector URL to navigate to. The server's `connectUrl` carries
  * `swarm` and `code` on its own (env-configured) base; the base is replaced
  * by the validated `returnTo` (its own query and fragment kept), and

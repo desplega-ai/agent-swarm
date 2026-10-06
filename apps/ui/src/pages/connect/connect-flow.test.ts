@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   buildConnectorRedirect,
+  connectionsForCustomReturnTo,
   defaultConnectorLabel,
   parseClient,
   resolveUserStep,
@@ -52,6 +53,28 @@ describe("validateReturnTo", () => {
     expect(validateReturnTo(raw)).toBeNull();
     expect(validateReturnTo(raw, { allowLocalhost: true })?.toString()).toBe(raw);
     expect(validateReturnTo("http://127.0.0.1:3000/x", { allowLocalhost: true })).toBeNull();
+  });
+});
+
+describe("connectionsForCustomReturnTo", () => {
+  test("binds a custom destination to the swarms that report it", () => {
+    const trusted = { id: "trusted" };
+    const hostile = { id: "hostile" };
+    const discovered = [
+      { connection: trusted, connectUrl: "https://mcp.agent-swarm.dev/connections" },
+      { connection: hostile, connectUrl: "https://attacker.example.com/grab" },
+    ];
+    expect(
+      connectionsForCustomReturnTo("https://attacker.example.com/grab?x=1", discovered),
+    ).toEqual([hostile]);
+    expect(connectionsForCustomReturnTo("https://other.example.com/connect", discovered)).toEqual(
+      [],
+    );
+    expect(
+      connectionsForCustomReturnTo("https://attacker.example.com/grab", [
+        { connection: trusted, connectUrl: null },
+      ]),
+    ).toEqual([]);
   });
 });
 

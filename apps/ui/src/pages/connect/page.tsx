@@ -39,6 +39,7 @@ import {
   buildConnectorRedirect,
   CONNECT_CLIENT_NAMES,
   type ConnectClient,
+  connectionsForCustomReturnTo,
   defaultConnectorLabel,
   lastUserStorageKey,
   parseClient,
@@ -128,7 +129,8 @@ export default function ConnectPage() {
 
   const staticReturnTo = validateReturnTo(rawReturnTo, { allowLocalhost: ALLOW_LOCALHOST });
   // Not a built-in connector origin: it may still be a swarm's own
-  // CONNECTOR_CONNECT_URL, which each server reports through discovery.
+  // CONNECTOR_CONNECT_URL, which each server reports through discovery. Such a
+  // destination is bound to the swarms that report it: only they are offered.
   const needsDiscovery = !staticReturnTo && !!rawReturnTo;
   const discoveries = useQueries({
     queries: connections.map((connection) => ({
@@ -139,15 +141,17 @@ export default function ConnectPage() {
       staleTime: 60_000,
     })),
   });
-  const discoveredOrigins = discoveries
-    .map((query) => query.data?.connectUrl)
-    .filter((value): value is string => !!value);
+  const boundConnections = needsDiscovery
+    ? connectionsForCustomReturnTo(
+        rawReturnTo,
+        connections.map((connection, i) => ({
+          connection,
+          connectUrl: discoveries[i]?.data?.connectUrl,
+        })),
+      )
+    : connections;
   const returnTo =
-    staticReturnTo ??
-    validateReturnTo(rawReturnTo, {
-      extraOrigins: discoveredOrigins,
-      allowLocalhost: ALLOW_LOCALHOST,
-    });
+    staticReturnTo ?? (boundConnections.length > 0 ? new URL(rawReturnTo as string) : null);
 
   if (!returnTo) {
     if (needsDiscovery && discoveries.some((query) => query.isPending)) {
@@ -166,8 +170,7 @@ export default function ConnectPage() {
     <ConnectFlow
       client={client}
       returnTo={returnTo}
-      connections={connections}
-      extraOrigins={discoveredOrigins}
+      connections={boundConnections}
       label={params.get("label")}
       connectionHint={params.get("connection")}
       userHint={params.get("user")}
@@ -179,7 +182,6 @@ function ConnectFlow({
   client,
   returnTo,
   connections,
-  extraOrigins,
   label,
   connectionHint,
   userHint,
@@ -187,7 +189,6 @@ function ConnectFlow({
   client: ConnectClient;
   returnTo: URL;
   connections: Connection[];
-  extraOrigins: string[];
   label: string | null;
   connectionHint: string | null;
   userHint: string | null;
@@ -239,7 +240,6 @@ function ConnectFlow({
       client={client}
       connection={step.connection}
       returnTo={returnTo}
-      extraOrigins={extraOrigins}
       label={label}
       userHint={userHint}
       onBack={connections.length > 1 ? () => setPickedId(null) : undefined}
@@ -281,7 +281,6 @@ function UserStep({
   client,
   connection,
   returnTo,
-  extraOrigins,
   label,
   userHint,
   onBack,
@@ -289,7 +288,6 @@ function UserStep({
   client: ConnectClient;
   connection: Connection;
   returnTo: URL;
-  extraOrigins: string[];
   label: string | null;
   userHint: string | null;
   onBack?: () => void;
@@ -356,7 +354,6 @@ function UserStep({
       connection={connection}
       user={confirmUser}
       returnTo={returnTo}
-      extraOrigins={extraOrigins}
       initialLabel={label || defaultConnectorLabel(client)}
       onCancel={() => {
         setChosen(null);
@@ -449,7 +446,6 @@ function ConfirmDialog({
   connection,
   user,
   returnTo,
-  extraOrigins,
   initialLabel,
   onCancel,
 }: {
@@ -457,7 +453,6 @@ function ConfirmDialog({
   connection: Connection;
   user: User;
   returnTo: URL;
-  extraOrigins: string[];
   initialLabel: string;
   onCancel: () => void;
 }) {
@@ -472,9 +467,10 @@ function ConfirmDialog({
         user.id,
         label.trim() || initialLabel,
       );
-      // Re-check at the last moment; the server's own connect URL also counts.
+      // Re-check at the last moment. Only this swarm's own connect URL may
+      // extend the allowlist, so the code goes nowhere another swarm chose.
       const target = validateReturnTo(returnTo.toString(), {
-        extraOrigins: [...extraOrigins, connectUrl],
+        extraOrigins: [connectUrl],
         allowLocalhost: ALLOW_LOCALHOST,
       });
       if (!target) throw new Error("This connect link is not from agent-swarm.dev.");
@@ -501,7 +497,8 @@ function ConfirmDialog({
           </DialogTitle>
           <DialogDescription className="text-pretty">
             The token can do what {user.name} can do on this swarm
-            {user.role ? ` (${user.role})` : ""}, nothing more.
+            {user.role ? ` (${user.role})` : ""}, nothing more. You then go back to{" "}
+            <span className="font-medium text-foreground">{returnTo.host}</span>.
           </DialogDescription>
         </DialogHeader>
         <div className="flex flex-col gap-2">
