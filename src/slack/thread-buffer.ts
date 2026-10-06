@@ -301,6 +301,9 @@ async function slackFlush(
       requestedByUserId,
       dependsOn,
       parentTaskId: mostRecentTask?.id,
+      // A human message in the thread: never answer it in the latest thread
+      // task's structured-output contract.
+      inheritParentOutputSchema: false,
       contextKey: slackContextKey({ channelId, threadTs }),
     },
     inbound,
