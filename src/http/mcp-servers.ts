@@ -19,6 +19,7 @@ import { enqueueAdmissionRow } from "../be/rbac-audit";
 import { getUserGrant } from "../be/rbac-roles";
 import { ensureMcpToken } from "../oauth/ensure-mcp-token";
 import { assertUrlSafe, publicEndpointSsrfOptions } from "../oauth/mcp-wrapper";
+import { isCodexOAuthConfigKey } from "../providers/codex-oauth/env-keys";
 import {
   can,
   isRbacEnabled,
@@ -325,11 +326,15 @@ export async function handleMcpServers(
           // Resolve env config keys
           // Supports both array format ["KEY_A", "KEY_B"] (key = config key = element)
           // and object format {"ENV_VAR": "config-key-name"}
+          // Codex OAuth rows never resolve into a stdio env: they carry the
+          // refresh token. Filter on the source config key so an alias
+          // ({"AUTH_BLOB": "codex_oauth_0"}) cannot route around the denylist.
           if (server.envConfigKeys) {
             try {
               const parsed = JSON.parse(server.envConfigKeys);
               if (Array.isArray(parsed)) {
                 for (const key of parsed) {
+                  if (isCodexOAuthConfigKey(key)) continue;
                   const value = configMap.get(key);
                   if (value !== undefined) {
                     resolvedEnv[key] = value;
@@ -339,6 +344,7 @@ export async function handleMcpServers(
                 for (const [envVar, configKey] of Object.entries(
                   parsed as Record<string, string>,
                 )) {
+                  if (isCodexOAuthConfigKey(configKey)) continue;
                   const value = configMap.get(configKey);
                   if (value !== undefined) {
                     resolvedEnv[envVar] = value;
