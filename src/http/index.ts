@@ -134,6 +134,7 @@ import {
   setCorsHeaders,
   warnIfCorsAllowsAnyOrigin,
   wireHttpSpanLifecycle,
+  writeUnhandledError,
 } from "./utils";
 import { handleWebhooks } from "./webhooks";
 import { handleWorkflowEvents } from "./workflow-events";
@@ -415,16 +416,7 @@ const httpServer = createHttpServer(async (req, res) => {
           span.recordException(err);
           span.setStatus({ code: 2, message: err instanceof Error ? err.message : String(err) });
         }
-        const message = err instanceof Error ? err.message : String(err);
-        console.error(
-          `[HTTP] ❌ ${req.method} ${safeRequestUrlForLog(req.url)} → ${scrubSecrets(message)}`,
-        );
-        if (!res.headersSent) {
-          res.writeHead(500, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ error: message }));
-        } else if (!res.writableEnded) {
-          res.end();
-        }
+        writeUnhandledError(res, err, req);
       }
     };
 
