@@ -1,10 +1,12 @@
+import { useQuery } from "@tanstack/react-query";
 import { ExternalLink } from "lucide-react";
-import { toast } from "sonner";
 import { useMcpUserConfig } from "@/api/hooks/use-integrations-meta";
-import { useCreateConnectorCode } from "@/api/hooks/use-users";
 import type { User } from "@/api/types";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { useConfig } from "@/hooks/use-config";
+import { fetchDiscovery } from "@/pages/connect/connect-api";
+import { DEFAULT_CONNECTOR_CONNECT_URL } from "@/pages/connect/connect-flow";
 
 export const CONNECT_CHATGPT_HINT =
   "A new tab opens on agent-swarm.dev. Sign in there and confirm. The link expires in 10 minutes.";
@@ -19,32 +21,33 @@ function isHttps(url: string | undefined): boolean {
 }
 
 /**
- * One-click link to the agent-swarm.dev ChatGPT connector. The server returns
- * a 10-minute single-use code; the connector trades it for a token, so no
- * token passes through the URL or the clipboard.
+ * One-click link to the agent-swarm.dev ChatGPT connector. It opens the same
+ * `/connect` route the connector uses, with this person and connection
+ * preselected and `return_to` set to the swarm's CONNECTOR_CONNECT_URL. That
+ * tab mints the single-use code, so no token passes through the URL or the
+ * clipboard.
  */
 export function ConnectChatGptButton({ user }: { user: User }) {
-  const createCode = useCreateConnectorCode();
+  const { activeConnection } = useConfig();
   const mcpConfig = useMcpUserConfig();
+  const discovery = useQuery({
+    queryKey: ["connect-discovery", activeConnection?.apiUrl],
+    queryFn: () => (activeConnection ? fetchDiscovery(activeConnection) : null),
+    enabled: !!activeConnection,
+    retry: false,
+    staleTime: 60_000,
+  });
   const apiOrigin = mcpConfig.data?.mcpBaseUrl;
   const httpsReady = isHttps(apiOrigin);
 
-  async function connect() {
-    // Open the tab inside the click handler so popup blockers allow it, then
-    // point it at the connect URL once the code exists.
-    const tab = window.open("about:blank", "_blank");
-    if (tab) tab.opener = null;
-    try {
-      const { connectUrl } = await createCode.mutateAsync({ id: user.id });
-      if (tab && !tab.closed) {
-        tab.location.href = connectUrl;
-      } else {
-        window.open(connectUrl, "_blank", "noopener");
-      }
-    } catch (err) {
-      tab?.close();
-      toast.error(err instanceof Error ? err.message : "Failed to create connect link");
-    }
+  function connect() {
+    const params = new URLSearchParams({
+      return_to: discovery.data?.connectUrl ?? DEFAULT_CONNECTOR_CONNECT_URL,
+      client: "chatgpt",
+      user: user.id,
+    });
+    if (activeConnection) params.set("connection", activeConnection.id);
+    window.open(`/connect?${params.toString()}`, "_blank", "noopener");
   }
 
   const button = (
@@ -52,10 +55,10 @@ export function ConnectChatGptButton({ user }: { user: User }) {
       size="sm"
       variant="outline"
       onClick={connect}
-      disabled={!httpsReady || createCode.isPending}
+      disabled={!httpsReady || discovery.isLoading}
     >
       <ExternalLink className="h-3.5 w-3.5 mr-1.5" />
-      {createCode.isPending ? "Opening..." : "Connect to ChatGPT"}
+      Connect to ChatGPT
     </Button>
   );
 

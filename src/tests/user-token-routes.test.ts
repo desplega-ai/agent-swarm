@@ -70,7 +70,7 @@ beforeEach(async () => {
   const client = getDbClient();
   _resetConnectorExchangeRateLimitForTests();
   await client.run("DELETE FROM connector_codes");
-  await client.run("DELETE FROM swarm_config WHERE key = 'PUBLIC_MCP_BASE_URL'");
+  await client.run("DELETE FROM swarm_config WHERE key IN ('PUBLIC_MCP_BASE_URL', 'APP_URL')");
   await client.run("DELETE FROM user_identity_events");
   await client.run("DELETE FROM user_tokens");
   await client.run("DELETE FROM users");
@@ -324,6 +324,40 @@ describe("ChatGPT connector codes", () => {
     expect(new URL(body.connectUrl).searchParams.get("swarm")).toBe(
       "https://configured.example.com",
     );
+  });
+
+  test("discovery is public and reports the API, dashboard and connect URLs", async () => {
+    const originalAppUrl = process.env.APP_URL;
+    const originalDashboardUrl = process.env.DASHBOARD_URL;
+    try {
+      delete process.env.APP_URL;
+      delete process.env.DASHBOARD_URL;
+      const bare = await fetch(url("/api/connector/discovery"));
+      expect(bare.status).toBe(200);
+      expect(await bare.json()).toEqual({
+        apiUrl: "https://swarm.example.com",
+        connectUrl: "https://mcp.agent-swarm.dev/connections",
+      });
+
+      process.env.APP_URL = "https://env-app.example.com";
+      await upsertSwarmConfig({
+        scope: "global",
+        key: "APP_URL",
+        value: "https://app.example.com/, https://other.example.com",
+      });
+      process.env.CONNECTOR_CONNECT_URL = "http://insecure.test/connect";
+      const configured = await fetch(url("/api/connector/discovery"));
+      expect(await configured.json()).toEqual({
+        apiUrl: "https://swarm.example.com",
+        appUrl: "https://app.example.com",
+        connectUrl: null,
+      });
+    } finally {
+      if (originalAppUrl === undefined) delete process.env.APP_URL;
+      else process.env.APP_URL = originalAppUrl;
+      if (originalDashboardUrl === undefined) delete process.env.DASHBOARD_URL;
+      else process.env.DASHBOARD_URL = originalDashboardUrl;
+    }
   });
 
   test("POST rejects a non-HTTPS public origin, unknown users, and missing auth", async () => {

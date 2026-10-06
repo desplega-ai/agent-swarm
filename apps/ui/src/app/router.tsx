@@ -66,6 +66,7 @@ const AppDetailPage = lazyRoute(() => import("@/pages/apps/[id]/page"));
 const CombPage = lazyRoute(() => import("@/pages/comb/page"));
 const NotFoundPage = lazyRoute(() => import("@/pages/not-found/page"));
 const SetupPage = lazyRoute(() => import("@/pages/setup/page"));
+const ConnectPage = lazyRoute(() => import("@/pages/connect/page"));
 
 /**
  * Dev-only routes. `/dev/embed-test` mounts an `<AppSurface>` outside the
@@ -122,6 +123,16 @@ export const router = createBrowserRouter([
     element: (
       <Suspense fallback={<HiveLoadingScreen />}>
         <SetupPage />
+      </Suspense>
+    ),
+  },
+  // Inbound handoff from the agent-swarm.dev connector. Also outside the app
+  // shell: it opens as a fresh tab and must work with no connection yet.
+  {
+    path: "/connect",
+    element: (
+      <Suspense fallback={<HiveLoadingScreen />}>
+        <ConnectPage />
       </Suspense>
     ),
   },

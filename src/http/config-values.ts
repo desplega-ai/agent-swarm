@@ -41,3 +41,19 @@ export async function resolveMcpBaseUrl(): Promise<string> {
   const fallback = `http://localhost:${process.env.PORT || "3013"}`;
   return (configured || fallback).replace(/\/+$/, "");
 }
+
+/**
+ * Dashboard origin with swarm_config precedence (`APP_URL`, then the
+ * deprecated `DASHBOARD_URL`). Both accept a comma-separated list; the first
+ * entry wins, matching `getAppUrl`. Returns null when neither is set, so
+ * callers can omit it instead of guessing the hosted default.
+ */
+export async function resolveAppUrl(): Promise<string | null> {
+  const configured =
+    (await resolveConfigValue("APP_URL")) ?? (await resolveConfigValue("DASHBOARD_URL"));
+  const first = configured
+    ?.split(",")
+    .map((value) => value.trim().replace(/\/+$/, ""))
+    .find(Boolean);
+  return first || null;
+}

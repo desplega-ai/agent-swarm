@@ -75,12 +75,6 @@ export function useMintUserToken() {
   });
 }
 
-export function useCreateConnectorCode() {
-  return useMutation({
-    mutationFn: ({ id }: { id: string }) => api.createConnectorCode(id),
-  });
-}
-
 export function useRevokeUserToken() {
   const queryClient = useQueryClient();
   return useMutation({

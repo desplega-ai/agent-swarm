@@ -58,7 +58,7 @@ import {
 } from "../be/users";
 import { UserCommsPrefsSchema, UserSchema } from "../types";
 import { getRequestAuth } from "../utils/request-auth-context";
-import { resolveMcpBaseUrl } from "./config-values";
+import { resolveAppUrl, resolveMcpBaseUrl } from "./config-values";
 import { clientIp, createIpRateLimiter } from "./ip-rate-limit";
 import { getOperatorActor } from "./operator-actor";
 import { route } from "./route-def";
@@ -445,6 +445,27 @@ const exchangeConnectorCodeRoute = route({
     ungated:
       "the single-use code is the credential; the minted token carries the user's own grant and is admitted on use",
   },
+});
+
+const connectorDiscoveryRoute = route({
+  method: "get",
+  path: "/api/connector/discovery",
+  pattern: ["api", "connector", "discovery"],
+  summary: "Public origins the agent-swarm.dev connector needs to find this swarm's dashboard",
+  description:
+    "Unauthenticated. Lets the connector turn an API origin into the dashboard URL that serves /connect. appUrl is omitted when APP_URL is not set.",
+  tags: ["Users"],
+  responses: {
+    200: {
+      description: "Public API origin, dashboard origin and connector connect URL",
+      schema: z.object({
+        apiUrl: z.string(),
+        appUrl: z.string().optional(),
+        connectUrl: z.string().nullable(),
+      }),
+    },
+  },
+  auth: { apiKey: false },
 });
 
 const mergeUsersRoute = route({
@@ -841,6 +862,19 @@ export async function handleUsers(
     } catch (err) {
       jsonError(res, err instanceof Error ? err.message : "Failed to create connector code", 500);
     }
+    return true;
+  }
+
+  // ─── GET /api/connector/discovery ─────────────────────────────────────────
+  if (connectorDiscoveryRoute.match(req.method, pathSegments)) {
+    const parsed = await connectorDiscoveryRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    const appUrl = await resolveAppUrl();
+    connectorDiscoveryRoute.respond(res, 200, {
+      apiUrl: await resolveMcpBaseUrl(),
+      ...(appUrl ? { appUrl } : {}),
+      connectUrl: getConnectorConnectUrl()?.toString() ?? null,
+    });
     return true;
   }
 

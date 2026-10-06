@@ -21333,6 +21333,49 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/connector/discovery": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Public origins the agent-swarm.dev connector needs to find this swarm's dashboard
+         * @description Unauthenticated. Lets the connector turn an API origin into the dashboard URL that serves /connect. appUrl is omitted when APP_URL is not set.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Public API origin, dashboard origin and connector connect URL */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            apiUrl: string;
+                            appUrl?: string;
+                            connectUrl: string | null;
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/users/{id}/merge": {
         parameters: {
             query?: never;
