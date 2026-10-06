@@ -25,6 +25,8 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { CURRENT_USER_CARD_KEY } from "@/contexts/current-user-context";
+import { deriveStorageKey } from "@/hooks/use-dismissible-card-key";
 import { type Connection, getConnections } from "@/lib/config";
 import { cn } from "@/lib/utils";
 import {
@@ -43,6 +45,7 @@ import {
   defaultConnectorLabel,
   lastUserStorageKey,
   parseClient,
+  pickPreferredUser,
   resolveUserStep,
   selectConnectionStep,
   validateReturnTo,
@@ -58,9 +61,9 @@ function hostOf(apiUrl: string): string {
   }
 }
 
-function readLastUser(connectionId: string): string | null {
+function readStoredValue(key: string): string | null {
   try {
-    return localStorage.getItem(lastUserStorageKey(connectionId));
+    return localStorage.getItem(key);
   } catch {
     return null;
   }
@@ -307,12 +310,19 @@ function UserStep({
     retry: false,
   });
   const [chosen, setChosen] = useState<User | null>(null);
-  // The `user` hint (People page) and a token-bound user open the dialog
-  // straight away; Cancel closes it until the user asks again.
+  // A known user skips the picker and opens the dialog straight away: the
+  // `user` hint (People page), then the dashboard's own "who are you" choice
+  // for this connection, then the last pick on this page. A token-bound user
+  // does the same. Cancel closes it and shows the picker.
   const [autoDismissed, setAutoDismissed] = useState(false);
 
-  const hinted =
-    !autoDismissed && userHint ? (users.data?.find((u) => u.id === userHint) ?? null) : null;
+  const hinted = autoDismissed
+    ? null
+    : pickPreferredUser(users.data ?? [], [
+        userHint,
+        readStoredValue(deriveStorageKey(connection.apiUrl, CURRENT_USER_CARD_KEY)),
+        readStoredValue(lastUserStorageKey(connection.id)),
+      ]);
   const selfUser = userStep?.kind === "self" ? userStep.user : null;
   const confirmUser = chosen ?? hinted ?? (autoDismissed ? null : selfUser);
 
@@ -386,7 +396,7 @@ function UserStep({
     );
   }
 
-  const lastUserId = readLastUser(connection.id);
+  const lastUserId = readStoredValue(lastUserStorageKey(connection.id));
   const sorted = [...(users.data ?? [])].sort((a, b) =>
     a.id === lastUserId ? -1 : b.id === lastUserId ? 1 : a.name.localeCompare(b.name),
   );

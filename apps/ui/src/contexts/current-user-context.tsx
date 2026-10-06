@@ -52,7 +52,8 @@ import { deriveStorageKey } from "@/hooks/use-dismissible-card-key";
 import { isUserTokenApiKey } from "@/lib/config";
 import { uiDeploymentConfig } from "@/lib/deployment-config";
 
-const CARD_KEY = "current-user";
+/** Per-connection localStorage card key for the dashboard identity pick. */
+export const CURRENT_USER_CARD_KEY = "current-user";
 
 export type CurrentUserState = "pending" | "needs-pick" | "ready";
 
@@ -83,7 +84,10 @@ function readStoredUserId(storageKey: string): string | null {
 export function CurrentUserProvider({ children }: { children: ReactNode }) {
   const { config, pendingIdentity, clearPendingIdentity } = useConfig();
   const { supported: identitySupported } = useFeatureGate("1.76.0");
-  const storageKey = useMemo(() => deriveStorageKey(config.apiUrl, CARD_KEY), [config.apiUrl]);
+  const storageKey = useMemo(
+    () => deriveStorageKey(config.apiUrl, CURRENT_USER_CARD_KEY),
+    [config.apiUrl],
+  );
 
   // DES-771: a user-bound `aswt_` bearer fixes the tab's identity server-side
   // — resolve it from /api/whoami instead of localStorage. `locked` is true

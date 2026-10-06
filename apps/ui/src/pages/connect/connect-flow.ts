@@ -143,6 +143,21 @@ export function resolveUserStep<U>(
   return { kind: "pick" };
 }
 
+/**
+ * The user to confirm straight away, without the picker: the first candidate
+ * id (in priority order) that names a listed user. Null shows the picker.
+ */
+export function pickPreferredUser<U extends { id: string }>(
+  users: readonly U[],
+  candidateIds: readonly (string | null | undefined)[],
+): U | null {
+  for (const id of candidateIds) {
+    const match = id ? users.find((user) => user.id === id) : undefined;
+    if (match) return match;
+  }
+  return null;
+}
+
 const LAST_USER_KEY_PREFIX = "agent-swarm-connect-user:";
 
 export function lastUserStorageKey(connectionId: string): string {

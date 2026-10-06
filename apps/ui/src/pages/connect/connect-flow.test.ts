@@ -4,6 +4,7 @@ import {
   connectionsForCustomReturnTo,
   defaultConnectorLabel,
   parseClient,
+  pickPreferredUser,
   resolveUserStep,
   selectConnectionStep,
   validateReturnTo,
@@ -151,6 +152,19 @@ describe("resolveUserStep", () => {
   test("asks for a pick for an operator key or an older server", () => {
     expect(resolveUserStep({ kind: "operator", user: null })).toEqual({ kind: "pick" });
     expect(resolveUserStep(null)).toEqual({ kind: "pick" });
+  });
+});
+
+describe("pickPreferredUser", () => {
+  const users = [{ id: "a" }, { id: "b" }];
+
+  test("returns the first candidate that names a listed user", () => {
+    expect(pickPreferredUser(users, [null, "missing", "b", "a"])).toEqual({ id: "b" });
+  });
+
+  test("returns null so the picker shows when nothing is remembered", () => {
+    expect(pickPreferredUser(users, [null, undefined, "gone"])).toBeNull();
+    expect(pickPreferredUser([], ["a"])).toBeNull();
   });
 });
 
