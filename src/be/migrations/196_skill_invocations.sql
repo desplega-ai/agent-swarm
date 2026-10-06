@@ -15,6 +15,11 @@ CREATE TABLE IF NOT EXISTS skill_invocations (
   skillId TEXT REFERENCES skills(id) ON DELETE SET NULL,
   -- Canonical name of the resolved row, else the name the worker reported.
   skillName TEXT,
+  -- `skills.version` of the resolved row at invocation time; NULL when skillId is NULL.
+  skillVersion INTEGER,
+  -- Estimated size of the loaded skill content, ceil(chars / 4)
+  -- (estimateTokens in src/be/memory/key-browser.ts); NULL when skillId is NULL.
+  tokenCount INTEGER,
   agentId TEXT,
   taskId TEXT,
   sessionId TEXT,

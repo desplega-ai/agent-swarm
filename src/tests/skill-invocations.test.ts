@@ -9,6 +9,7 @@ import {
   getSkillById,
   initDb,
   listSkills,
+  updateSkill,
 } from "../be/db";
 import { type CreateEventInput, createEvent, createEventsBatch } from "../be/events";
 import { runMigrations } from "../be/migrations/runner";
@@ -19,6 +20,8 @@ const MIGRATION_DB_PATH = "./test-skill-invocations-migration.sqlite";
 type InvocationRow = {
   skillId: string | null;
   skillName: string | null;
+  skillVersion: number | null;
+  tokenCount: number | null;
   agentId: string | null;
   taskId: string | null;
   sessionId: string | null;
@@ -56,7 +59,7 @@ function invoke(
 
 async function invocationsFor(name: string): Promise<InvocationRow[]> {
   return getDbClient().query<InvocationRow>(
-    "SELECT skillId, skillName, agentId, taskId, sessionId, harness, via, eventId FROM skill_invocations WHERE skillName = ? ORDER BY createdAt",
+    "SELECT skillId, skillName, skillVersion, tokenCount, agentId, taskId, sessionId, harness, via, eventId FROM skill_invocations WHERE skillName = ? ORDER BY createdAt",
     [name],
   );
 }
@@ -82,6 +85,12 @@ describe("migration 196 skill invocations", () => {
       const columns = db.query<{ name: string }, []>("PRAGMA table_info(skills)").all();
       expect(columns.map((c) => c.name)).toEqual(
         expect.arrayContaining(["invocationCount", "lastInvokedAt"]),
+      );
+      const invocationColumns = db
+        .query<{ name: string }, []>("PRAGMA table_info(skill_invocations)")
+        .all();
+      expect(invocationColumns.map((c) => c.name)).toEqual(
+        expect.arrayContaining(["skillVersion", "tokenCount"]),
       );
       const indexes = db
         .query<{ name: string }, []>(
@@ -187,7 +196,36 @@ describe("skill.invoke ingestion", () => {
 
     const rows = await invocationsFor("inv-not-a-swarm-skill");
     expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ skillId: null, skillName: "inv-not-a-swarm-skill" });
+    expect(rows[0]).toMatchObject({
+      skillId: null,
+      skillName: "inv-not-a-swarm-skill",
+      skillVersion: null,
+      tokenCount: null,
+    });
+  });
+
+  test("records the skill's version and token estimate at invocation time", async () => {
+    // 10 chars -> ceil(10 / 4) = 3 tokens.
+    const skill = await createSkill({
+      name: "inv-versioned",
+      description: "d",
+      content: "x".repeat(10),
+      scope: "global",
+    });
+    expect(skill.version).toBe(1);
+
+    await createEvent(invoke({ skillName: "inv-versioned" }, { sessionId: "ver-s1" }));
+
+    // A content update bumps the version; the next session records it and the new size.
+    const updated = await updateSkill(skill.id, { content: "y".repeat(41) });
+    expect(updated?.version).toBe(2);
+    await createEvent(invoke({ skillName: "inv-versioned" }, { sessionId: "ver-s2" }));
+
+    const rows = await invocationsFor("inv-versioned");
+    expect(rows.map((r) => [r.sessionId, r.skillVersion, r.tokenCount])).toEqual([
+      ["ver-s1", 1, 3],
+      ["ver-s2", 2, 11],
+    ]);
   });
 
   test("a name resolves to the invoking agent's own skill before swarm and global", async () => {
