@@ -80,6 +80,68 @@ const realSpawn = Bun.spawn;
 const isGit = (cmd: unknown) =>
   (Array.isArray(cmd) ? cmd : (cmd as { cmd?: unknown[] } | null)?.cmd)?.[0] === "git";
 
+// `git rev-parse --local-env-vars`. git exports GIT_DIR to a pre-push hook run
+// from a linked worktree; a fixture `git` child that inherits it acts on the
+// pushing repo (commits, worktrees, core.bare) instead of its temp dir.
+const REPO_LOCAL_GIT_ENV = [
+  "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+  "GIT_CONFIG",
+  "GIT_CONFIG_PARAMETERS",
+  "GIT_CONFIG_COUNT",
+  "GIT_OBJECT_DIRECTORY",
+  "GIT_DIR",
+  "GIT_WORK_TREE",
+  "GIT_IMPLICIT_WORK_TREE",
+  "GIT_GRAFT_FILE",
+  "GIT_INDEX_FILE",
+  "GIT_NO_REPLACE_OBJECTS",
+  "GIT_REPLACE_REF_BASE",
+  "GIT_PREFIX",
+  "GIT_SHALLOW_FILE",
+  "GIT_COMMON_DIR",
+];
+
+/** Run a fixture `git` command with the repo-local git env stripped. */
+function runFixtureGit(args: string[]) {
+  const env: Record<string, string | undefined> = { ...process.env };
+  for (const key of REPO_LOCAL_GIT_ENV) delete env[key];
+  return runChild(["git", ...args], { env });
+}
+
+async function setUpWorktreeFixture(repo: string, wt: string): Promise<void> {
+  for (const args of [
+    ["init", "-q"],
+    ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "x"],
+    ["worktree", "add", "-q", wt],
+  ]) {
+    expectChildOk(await runFixtureGit(["-C", repo, ...args]), `git ${args[0]}`);
+  }
+}
+
+async function setUpSeparateGitDirFixture(root: string, checkout: string, wt: string) {
+  await mkdir(checkout);
+  await mkdir(join(root, "metadata"));
+  expectChildOk(
+    await runFixtureGit([
+      "init",
+      "-q",
+      `--separate-git-dir=${join(root, "metadata", "repo.git")}`,
+      checkout,
+    ]),
+    "git init",
+  );
+  for (const args of [
+    ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "x"],
+    ["worktree", "add", "-q", wt],
+  ]) {
+    expectChildOk(await runFixtureGit(["-C", checkout, ...args]), `git ${args[0]}`);
+  }
+}
+
+async function setUpBareFixture(bare: string): Promise<void> {
+  expectChildOk(await runFixtureGit(["init", "-q", "--bare", bare]), "git init");
+}
+
 /** Fake Bun.Subprocess that behaves as a process that exited cleanly with no output. */
 function makeFakeProc(): ReturnType<typeof Bun.spawn> {
   return {
@@ -410,13 +472,7 @@ describe("preseedClaudeTrustDialog", () => {
       const repo = await realpath(await mkdtemp(join(tmpdir(), "claude-trust-repo-")));
       const wt = join(repo, "..", `wt-${Date.now()}`);
       try {
-        for (const args of [
-          ["init", "-q"],
-          ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "x"],
-          ["worktree", "add", "-q", wt],
-        ]) {
-          expectChildOk(await runChild(["git", "-C", repo, ...args]), `git ${args[0]}`);
-        }
+        await setUpWorktreeFixture(repo, wt);
         const dirs = await resolveClaudeTrustDirs(wt);
         expect(dirs).toEqual([await realpath(wt), repo]);
         await preseedClaudeTrustDialog(dirs, homeDir);
@@ -437,19 +493,7 @@ describe("preseedClaudeTrustDialog", () => {
       try {
         const checkout = join(root, "checkout");
         const wt = join(root, "wt");
-        await mkdir(checkout);
-        await mkdir(join(root, "metadata"));
-        for (const args of [
-          ["init", "-q", `--separate-git-dir=${join(root, "metadata", "repo.git")}`, checkout],
-        ]) {
-          expectChildOk(await runChild(["git", ...args]), "git init");
-        }
-        for (const args of [
-          ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "x"],
-          ["worktree", "add", "-q", wt],
-        ]) {
-          expectChildOk(await runChild(["git", "-C", checkout, ...args]), `git ${args[0]}`);
-        }
+        await setUpSeparateGitDirFixture(root, checkout, wt);
         expect(await resolveClaudeTrustDirs(checkout)).toEqual([checkout]);
         // The checkout is not discoverable from a linked worktree here; never fall back to metadata.
         expect(await resolveClaudeTrustDirs(wt)).toEqual([wt]);
@@ -466,9 +510,57 @@ describe("preseedClaudeTrustDialog", () => {
       const root = await realpath(await mkdtemp(join(tmpdir(), "claude-trust-bare-")));
       try {
         const bare = join(root, "bare.git");
-        expectChildOk(await runChild(["git", "init", "-q", "--bare", bare]), "git init");
+        await setUpBareFixture(bare);
         expect(await resolveClaudeTrustDirs(bare)).toEqual([bare]);
       } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+    CHILD_PROCESS_TEST_BUDGET_MS,
+  );
+
+  test(
+    "fixture git setup never touches the repo named by an inherited GIT_DIR",
+    async () => {
+      const root = await realpath(await mkdtemp(join(tmpdir(), "claude-trust-gitdir-")));
+      const sentinel = join(root, "sentinel");
+      const gitDir = join(sentinel, ".git");
+      const sentinelGit = (...args: string[]) => runFixtureGit(["--git-dir", gitDir, ...args]);
+      // A leaked GIT_WORK_TREE can turn `.git` into a gitfile; record that as a diff, not a throw.
+      const snapshot = async () => ({
+        head: (await sentinelGit("rev-parse", "HEAD")).stdout,
+        config: await readFile(join(gitDir, "config"), "utf-8").catch((e) => `<${e.code}>`),
+        worktrees: (await sentinelGit("worktree", "list", "--porcelain")).stdout,
+      });
+      const saved = Object.fromEntries(REPO_LOCAL_GIT_ENV.map((k) => [k, process.env[k]]));
+      const restoreEnv = () => {
+        for (const [k, v] of Object.entries(saved)) {
+          if (v === undefined) delete process.env[k];
+          else process.env[k] = v;
+        }
+      };
+      try {
+        await mkdir(sentinel);
+        await mkdir(join(root, "repo"));
+        await setUpWorktreeFixture(sentinel, join(root, "sentinel-wt"));
+        const before = await snapshot();
+        // What a pre-push hook run from a linked worktree hands its children.
+        process.env.GIT_DIR = gitDir;
+        let setupError: unknown;
+        try {
+          await setUpWorktreeFixture(join(root, "repo"), join(root, "wt"));
+          await setUpSeparateGitDirFixture(root, join(root, "checkout"), join(root, "sep-wt"));
+          await setUpBareFixture(join(root, "bare.git"));
+        } catch (err) {
+          setupError = err;
+        } finally {
+          restoreEnv();
+        }
+        // A leaked GIT_DIR can also fail a step, so compare the sentinel first.
+        expect(await snapshot()).toEqual(before);
+        if (setupError) throw setupError;
+      } finally {
+        restoreEnv();
         await rm(root, { recursive: true, force: true });
       }
     },

@@ -16,6 +16,13 @@
 # bunfig.toml intentionally sets no global test timeout.
 set -euo pipefail
 
+# git exports GIT_DIR (and friends) to a hook when the push runs from a linked
+# worktree. Every git child a test spawns would inherit it and act on the
+# pushing repo instead of its temp fixture. Hooks run at the worktree root, so
+# git below still finds this repo by discovery.
+# shellcheck disable=SC2046
+unset $(git rev-parse --local-env-vars)
+
 FULL_RUN_PATHS='^(src/be/migrations/|templates/|bunfig\.toml$|bun\.lock)'
 
 run_full_suite() {
