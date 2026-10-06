@@ -180,7 +180,8 @@ RegisterSession(w, t) ==
     /\ UNCHANGED <<st, own, offTo, par, gen, pin, ver, stale, touched, running,
                    alive, cl, acc, hb, rb, apiUp, wc, ac, liveKill, badAcc>>
 
-\* PostToolUse hook -> PUT /api/active-sessions/heartbeat (tool activity only)
+\* PostToolUse hook -> PUT /api/active-sessions/heartbeat (tool activity), or
+\* POST /api/session-logs {taskId} -> refreshActiveSessionOnActivity (provider output, #1879)
 SessionBeat(w, t) ==
     /\ apiUp /\ alive[w] /\ t \in running[w] /\ sess[t] = "prelive"
     /\ sess' = [sess EXCEPT ![t] = "live"]
