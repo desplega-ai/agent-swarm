@@ -4132,6 +4132,7 @@ async function spawnProviderProcess(
         skillName,
         ...(skillId ? { skillId } : {}),
         via,
+        harness: opts.harnessProvider,
         clientTimestamp: new Date().toISOString(),
       },
     });

@@ -34,6 +34,7 @@ seed_state
 session_costs
 session_logs
 session_tokens         # internal auth store: programmatically minted/revoked per ACP session, no user attribution (146)
+skill_invocations      # append-only telemetry written from ingested skill.invoke events; no user attribution (196)
 task_context_snapshots
 task_steering_messages # attribution via created_by_kind/created_by_user_id/created_by_agent_id (121)
 tracker_agent_mapping

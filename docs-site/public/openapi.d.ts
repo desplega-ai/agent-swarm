@@ -24055,6 +24055,9 @@ export interface components {
             version: number;
             isEnabled: boolean;
             systemDefault: boolean;
+            /** @description Confirmed invocations across all harnesses, at most one per runner session */
+            invocationCount: number;
+            lastInvokedAt: string | null;
             createdAt: string;
             lastUpdatedAt: string;
             lastFetchedAt: string | null;

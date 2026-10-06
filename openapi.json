@@ -3794,6 +3794,16 @@
           "systemDefault": {
             "type": "boolean"
           },
+          "invocationCount": {
+            "type": "integer",
+            "description": "Confirmed invocations across all harnesses, at most one per runner session"
+          },
+          "lastInvokedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "createdAt": {
             "type": "string"
           },
@@ -3831,6 +3841,8 @@
           "version",
           "isEnabled",
           "systemDefault",
+          "invocationCount",
+          "lastInvokedAt",
           "createdAt",
           "lastUpdatedAt",
           "lastFetchedAt"

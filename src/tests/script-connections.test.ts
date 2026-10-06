@@ -604,6 +604,8 @@ describe("script connections", () => {
       markMigrationApplied(database, "192_favorites_agent_fs_path.sql");
       // 195 alters approval_requests, which this migration-112-only fixture does not create.
       markMigrationApplied(database, "195_approval_request_approvals.sql");
+      // 196 alters skills, which this migration-112-only fixture does not create.
+      markMigrationApplied(database, "196_skill_invocations.sql");
 
       const id = crypto.randomUUID();
       const now = new Date().toISOString();
