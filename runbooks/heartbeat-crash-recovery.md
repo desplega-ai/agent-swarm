@@ -18,7 +18,7 @@ flowchart TD
   expire --> detect["detectAndRemediateStalledTasks()"]
   detect --> repair["repairSupersededWithoutResume()<br/>superseded, no resume child,<br/>finished 1m-24h ago → create resume<br/>+ settle dependents left on a superseded task"]
   repair --> health["checkWorkerHealth()<br/>busy ↔ idle (skips offline)"]
-  health --> cleanup["cleanupStaleResources()<br/>stale sessions (30m), reviewing,<br/>inbox, mentions, workflow runs,<br/>+ approval timeout + auto-cancel sweeps<br/>+ reaper: escalate unreclaimed pinned resumes (§3)<br/>+ escalateStarvedPoolTasks: zero-eligible-agent pool tasks (§4)"]
+  health --> cleanup["cleanupStaleResources()<br/>stale sessions (30m), reviewing,<br/>inbox, mentions, workflow runs,<br/>+ approval timeout + auto-cancel sweeps<br/>+ reaper: escalate unreclaimed pinned resumes (§3)<br/>+ escalateStarvedPoolTasks: zero-eligible-agent pool tasks (§4)<br/>+ expired connector codes"]
   cleanup --> assign["autoAssignPoolTasks()<br/>per-task: first idle worker satisfying<br/>isAgentEligibleForTask (§4) and<br/>poolTaskRunsOnHarness — else leave queued"]
 
   boot["Server boot (once)"] --> reboot["runRebootSweep()<br/>in_progress claimed after boot → skip<br/>else: no session OR pre-boot stale session<br/>→ failTask + retry child<br/>(pinned to original agent when recoverable, §4)<br/>never-started dependents re-pointed to the retry"]
@@ -92,6 +92,10 @@ A request with `expiresAt` is never auto-cancelled. A `cancelled` request never
 routes to a workflow port. The counts land in `staleCleanup.approvalTimedOut`
 and `staleCleanup.approvalAutoCancelled` and add to `stale_cleanup=` in the
 sweep log line.
+
+The last cleanup step deletes `connector_codes` rows that expired more than
+1 hour ago (`deleteExpiredConnectorCodes` in `src/be/connector-codes.ts`). The
+count lands in `staleCleanup.connectorCodes` and adds to `stale_cleanup=`.
 
 ## 1a. Runtime liveness (`MULTI_RUNTIME_ENABLED` only)
 

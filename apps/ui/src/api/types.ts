@@ -481,6 +481,12 @@ export interface MintTokenResponse {
   user: User;
 }
 
+export interface ConnectorCodeResponse {
+  code: string;
+  expiresAt: string;
+  connectUrl: string;
+}
+
 export interface McpUserConfigResponse {
   mcpBaseUrl: string;
   mcpUserUrl: string;

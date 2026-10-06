@@ -35,6 +35,7 @@ import type {
   CombReviewBatchInput,
   CombReviewBatchResult,
   CombSkippedComment,
+  ConnectorCodeResponse,
   CreateUserInput,
   CredentialMissingAgent,
   CredentialMissingAgentsResponse,
@@ -2892,6 +2893,20 @@ class ApiClient {
       throw new Error(err.error || `Failed to mint token: ${res.status}`);
     }
     return (await res.json()) as MintTokenResponse;
+  }
+
+  async createConnectorCode(id: string): Promise<ConnectorCodeResponse> {
+    const url = `${this.getBaseUrl()}/api/users/${encodeURIComponent(id)}/connector-codes`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: this.getHeaders(),
+      body: JSON.stringify({}),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: "Failed to create connect link" }));
+      throw new Error(err.error || `Failed to create connect link: ${res.status}`);
+    }
+    return (await res.json()) as ConnectorCodeResponse;
   }
 
   async revokeUserToken(id: string, tokenId: string): Promise<User> {

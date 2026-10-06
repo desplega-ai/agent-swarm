@@ -2,6 +2,7 @@ import {
   autoCancelStaleApprovalRequests,
   timeoutExpiredApprovalRequests,
 } from "../be/approval-sweeps";
+import { deleteExpiredConnectorCodes } from "../be/connector-codes";
 import {
   assignUnassignedTaskPending,
   backfillSupersedeTaskResumeTaskId,
@@ -288,6 +289,7 @@ export interface HeartbeatFindings {
     abandonedDraftTasks: number;
     approvalAutoCancelled: number;
     approvalTimedOut: number;
+    connectorCodes: number;
   };
 }
 
@@ -368,6 +370,7 @@ export async function codeLevelTriage(): Promise<HeartbeatFindings> {
       abandonedDraftTasks: 0,
       approvalAutoCancelled: 0,
       approvalTimedOut: 0,
+      connectorCodes: 0,
     },
   };
 
@@ -1389,6 +1392,12 @@ async function cleanupStaleResources(findings: HeartbeatFindings): Promise<void>
     console.error("[heartbeat] approval auto-cancel sweep failed:", err);
     findings.staleCleanup.approvalAutoCancelled = 0;
   }
+  try {
+    findings.staleCleanup.connectorCodes = await deleteExpiredConnectorCodes();
+  } catch (err) {
+    console.error("[heartbeat] connector code cleanup failed:", err);
+    findings.staleCleanup.connectorCodes = 0;
+  }
 }
 
 // ============================================================================
@@ -1691,6 +1700,7 @@ export async function runHeartbeatSweep(): Promise<void> {
           abandonedDraftTasks: 0,
           approvalAutoCancelled: 0,
           approvalTimedOut: 0,
+          connectorCodes: 0,
         },
       };
       // Expiry runs even on a cleanup-only tick: an idle agent whose runtime
@@ -1762,6 +1772,7 @@ function logFindings(findings: HeartbeatFindings): void {
     abandonedDraftTasks,
     approvalAutoCancelled,
     approvalTimedOut,
+    connectorCodes,
   } = findings.staleCleanup;
   const totalCleanup =
     sessions +
@@ -1770,7 +1781,8 @@ function logFindings(findings: HeartbeatFindings): void {
     inboxProcessing +
     workflowRuns +
     approvalAutoCancelled +
-    approvalTimedOut;
+    approvalTimedOut +
+    connectorCodes;
   if (totalCleanup > 0) {
     parts.push(`stale_cleanup=${totalCleanup}`);
   }

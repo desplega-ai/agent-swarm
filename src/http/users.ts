@@ -18,6 +18,8 @@
  *   PATCH  /api/users/:id
  *   POST   /api/users/:id/mcp-tokens
  *   DELETE /api/users/:id/mcp-tokens/:tokenId
+ *   POST   /api/users/:id/connector-codes
+ *   POST   /api/connector/exchange                   (public: the code is the credential)
  *   POST   /api/users/:id/merge
  *   GET    /api/users/:id/events
  *   POST   /api/users/:id/identities
@@ -26,6 +28,11 @@
 
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
+import {
+  createConnectorCode,
+  DEFAULT_CONNECTOR_CODE_LABEL,
+  exchangeConnectorCode,
+} from "../be/connector-codes";
 import {
   createUser,
   deleteBudget,
@@ -50,7 +57,9 @@ import {
   unlinkIdentity,
 } from "../be/users";
 import { UserCommsPrefsSchema, UserSchema } from "../types";
+import { getPublicMcpBaseUrl } from "../utils/constants";
 import { getRequestAuth } from "../utils/request-auth-context";
+import { clientIp, createIpRateLimiter } from "./ip-rate-limit";
 import { getOperatorActor } from "./operator-actor";
 import { route } from "./route-def";
 import { jsonError } from "./utils";
@@ -378,6 +387,63 @@ const revokeUserMcpTokenRoute = route({
   auth: { apiKey: true },
 });
 
+const createConnectorCodeRoute = route({
+  method: "post",
+  path: "/api/users/{id}/connector-codes",
+  pattern: ["api", "users", null, "connector-codes"],
+  summary: "Create a single-use connect code for the agent-swarm.dev ChatGPT connector",
+  description:
+    "Returns a 10-minute single-use code and the connector URL that carries it. The connector trades the code for an MCP token at POST /api/connector/exchange.",
+  tags: ["Users"],
+  params: z.object({ id: z.string() }),
+  body: z.object({
+    label: z.string().min(1).optional(),
+  }),
+  responses: {
+    201: {
+      description: "Connect code, its expiry and the connector URL",
+      schema: z.object({
+        code: z.string(),
+        expiresAt: z.string(),
+        connectUrl: z.string(),
+      }),
+    },
+    400: { description: "The public API origin is not HTTPS" },
+    401: { description: "Unauthorized" },
+    404: { description: "User not found" },
+  },
+  auth: { apiKey: true },
+  rbac: { ungated: "same posture as POST /api/users/{id}/mcp-tokens (operator-only admission)" },
+});
+
+const exchangeConnectorCodeRoute = route({
+  method: "post",
+  path: "/api/connector/exchange",
+  pattern: ["api", "connector", "exchange"],
+  summary: "Exchange a connect code for a user MCP token",
+  description:
+    "Unauthenticated: the single-use code is the credential. Rate limited per IP. Unknown, expired and used codes all return 404 code_invalid.",
+  tags: ["Users"],
+  body: z.object({ code: z.string().min(1) }),
+  responses: {
+    200: {
+      description: "Minted MCP token for the code's user",
+      schema: z.object({
+        token: z.string(),
+        userId: z.string(),
+        version: z.string(),
+      }),
+    },
+    404: { description: "Code unknown, expired or already used" },
+    429: { description: "Rate limited" },
+  },
+  auth: { apiKey: false },
+  rbac: {
+    ungated:
+      "the single-use code is the credential; the minted token carries the user's own grant and is admitted on use",
+  },
+});
+
 const mergeUsersRoute = route({
   method: "post",
   path: "/api/users/{id}/merge",
@@ -527,6 +593,30 @@ async function collectUnmappedForKind(kind: string, limit: number) {
     }
   }
   return Array.from(byId.values());
+}
+
+const DEFAULT_CONNECTOR_CONNECT_URL = "https://mcp.agent-swarm.dev/connections";
+
+function getConnectorConnectUrl(): string {
+  return process.env.CONNECTOR_CONNECT_URL?.trim() || DEFAULT_CONNECTOR_CONNECT_URL;
+}
+
+function isHttpsOrigin(value: string): boolean {
+  try {
+    return new URL(value).protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+/** 10 exchanges per minute per client IP. */
+const connectorExchangeRateLimiter = createIpRateLimiter({
+  capacity: 10,
+  refillPerMs: 10 / 60_000,
+});
+
+export function _resetConnectorExchangeRateLimitForTests(): void {
+  connectorExchangeRateLimiter.reset();
 }
 
 // ─── Handler ─────────────────────────────────────────────────────────────────
@@ -690,6 +780,64 @@ export async function handleUsers(
       });
     } catch (err) {
       jsonError(res, err instanceof Error ? err.message : "Failed to mint token", 500);
+    }
+    return true;
+  }
+
+  // ─── POST /api/users/:id/connector-codes ──────────────────────────────────
+  if (createConnectorCodeRoute.match(req.method, pathSegments)) {
+    const parsed = await createConnectorCodeRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    const actor = getOperatorActor(req, res);
+    if (!actor) return true;
+    if (!(await getUserById(parsed.params.id))) {
+      jsonError(res, "User not found", 404);
+      return true;
+    }
+    // The connector refuses non-HTTPS swarm origins, so fail before minting a code.
+    const swarmOrigin = getPublicMcpBaseUrl();
+    if (!isHttpsOrigin(swarmOrigin)) {
+      jsonError(
+        res,
+        `The public API origin (${swarmOrigin}) is not HTTPS. Set PUBLIC_MCP_BASE_URL to an https:// origin.`,
+        400,
+      );
+      return true;
+    }
+
+    try {
+      const { code, expiresAt } = await createConnectorCode(
+        parsed.params.id,
+        parsed.body.label ?? DEFAULT_CONNECTOR_CODE_LABEL,
+        actor,
+      );
+      const connectUrl = `${getConnectorConnectUrl()}?swarm=${encodeURIComponent(swarmOrigin)}&code=${code}`;
+      createConnectorCodeRoute.respond(res, 201, { code, expiresAt, connectUrl });
+    } catch (err) {
+      jsonError(res, err instanceof Error ? err.message : "Failed to create connector code", 500);
+    }
+    return true;
+  }
+
+  // ─── POST /api/connector/exchange ─────────────────────────────────────────
+  if (exchangeConnectorCodeRoute.match(req.method, pathSegments)) {
+    if (!connectorExchangeRateLimiter.take(clientIp(req))) {
+      jsonError(res, "rate_limited", 429);
+      return true;
+    }
+    const parsed = await exchangeConnectorCodeRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+
+    try {
+      const result = await exchangeConnectorCode(parsed.body.code);
+      if (!result) {
+        jsonError(res, "code_invalid", 404);
+        return true;
+      }
+      const version = (await Bun.file("package.json").json()).version;
+      exchangeConnectorCodeRoute.respond(res, 200, { ...result, version });
+    } catch (err) {
+      jsonError(res, err instanceof Error ? err.message : "Failed to exchange code", 500);
     }
     return true;
   }

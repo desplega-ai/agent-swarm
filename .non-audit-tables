@@ -42,4 +42,5 @@ tracker_sync
 user_identity_events
 wait_states
 model_alias_resolutions
+connector_codes        # ephemeral single-use connect codes; attribution via actor_kind/actor_id + token_minted identity event (197)
 harness_model_support

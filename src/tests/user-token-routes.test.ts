@@ -6,10 +6,11 @@ import {
   type Server,
   type ServerResponse,
 } from "node:http";
+import { deleteExpiredConnectorCodes, exchangeConnectorCode } from "../be/connector-codes";
 import { closeDb, createUser, getDbClient, initDb } from "../be/db";
-import { fingerprintApiKey } from "../be/users";
+import { fingerprintApiKey, resolveUserByToken } from "../be/users";
 import { handleCore } from "../http/core";
-import { handleUsers } from "../http/users";
+import { _resetConnectorExchangeRateLimitForTests, handleUsers } from "../http/users";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import { listenOnFreePort } from "./test-net";
 
@@ -66,6 +67,8 @@ afterAll(async () => {
 
 beforeEach(async () => {
   const client = getDbClient();
+  _resetConnectorExchangeRateLimitForTests();
+  await client.run("DELETE FROM connector_codes");
   await client.run("DELETE FROM user_identity_events");
   await client.run("DELETE FROM user_tokens");
   await client.run("DELETE FROM users");
@@ -202,5 +205,190 @@ describe("operator MCP token routes", () => {
       [user.id],
     );
     expect(row?.actor).toBe(`operator:${fingerprintApiKey(API_KEY)}`);
+  });
+});
+
+describe("ChatGPT connector codes", () => {
+  const ORIGINAL_PUBLIC_URL = process.env.PUBLIC_MCP_BASE_URL;
+  const ORIGINAL_CONNECT_URL = process.env.CONNECTOR_CONNECT_URL;
+
+  beforeEach(() => {
+    process.env.PUBLIC_MCP_BASE_URL = "https://swarm.example.com";
+    delete process.env.CONNECTOR_CONNECT_URL;
+  });
+
+  afterAll(() => {
+    if (ORIGINAL_PUBLIC_URL === undefined) delete process.env.PUBLIC_MCP_BASE_URL;
+    else process.env.PUBLIC_MCP_BASE_URL = ORIGINAL_PUBLIC_URL;
+    if (ORIGINAL_CONNECT_URL === undefined) delete process.env.CONNECTOR_CONNECT_URL;
+    else process.env.CONNECTOR_CONNECT_URL = ORIGINAL_CONNECT_URL;
+  });
+
+  type CodeBody = { code: string; expiresAt: string; connectUrl: string };
+
+  async function createCode(userId: string, body: object = {}): Promise<CodeBody> {
+    const response = await authedFetch(`/api/users/${userId}/connector-codes`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+    expect(response.status).toBe(201);
+    return (await response.json()) as CodeBody;
+  }
+
+  function exchange(code: string, headers: Record<string, string> = {}): Promise<Response> {
+    return fetch(url("/api/connector/exchange"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...headers },
+      body: JSON.stringify({ code }),
+    });
+  }
+
+  test("POST creates a single-use code, stores only its hash, and mints no token", async () => {
+    const user = await createUser({ name: "Connector User" });
+    const before = Date.now();
+    const body = await createCode(user.id);
+
+    expect(body.code).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    const ttl = new Date(body.expiresAt).getTime() - before;
+    expect(ttl).toBeGreaterThan(9 * 60 * 1000);
+    expect(ttl).toBeLessThanOrEqual(10 * 60 * 1000 + 1000);
+    expect(body.connectUrl).toBe(
+      `https://mcp.agent-swarm.dev/connections?swarm=${encodeURIComponent("https://swarm.example.com")}&code=${body.code}`,
+    );
+
+    const rows = await getDbClient().query<{
+      code_hash: string;
+      label: string;
+      used_at: string | null;
+    }>("SELECT code_hash, label, used_at FROM connector_codes WHERE user_id = ?", [user.id]);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.code_hash).toHaveLength(64);
+    expect(rows[0]!.code_hash).not.toContain(body.code);
+    expect(rows[0]!.label).toBe("ChatGPT connector");
+    expect(rows[0]!.used_at).toBeNull();
+    const tokens = await getDbClient().query("SELECT id FROM user_tokens WHERE userId = ?", [
+      user.id,
+    ]);
+    expect(tokens).toHaveLength(0);
+  });
+
+  test("POST honors CONNECTOR_CONNECT_URL and a custom label", async () => {
+    process.env.CONNECTOR_CONNECT_URL = "https://connector.test/connect";
+    const user = await createUser({ name: "Custom Connector User" });
+    const body = await createCode(user.id, { label: "my chatgpt" });
+    expect(body.connectUrl.startsWith("https://connector.test/connect?swarm=")).toBe(true);
+    const row = await getDbClient().get<{ label: string }>(
+      "SELECT label FROM connector_codes WHERE user_id = ?",
+      [user.id],
+    );
+    expect(row?.label).toBe("my chatgpt");
+  });
+
+  test("POST rejects a non-HTTPS public origin, unknown users, and missing auth", async () => {
+    const user = await createUser({ name: "Http Origin User" });
+    process.env.PUBLIC_MCP_BASE_URL = "http://localhost:3013";
+    const insecure = await authedFetch(`/api/users/${user.id}/connector-codes`, {
+      method: "POST",
+      body: "{}",
+    });
+    expect(insecure.status).toBe(400);
+    process.env.PUBLIC_MCP_BASE_URL = "https://swarm.example.com";
+
+    const unknown = await authedFetch("/api/users/not-a-user/connector-codes", {
+      method: "POST",
+      body: "{}",
+    });
+    expect(unknown.status).toBe(404);
+
+    const unauthed = await fetch(url(`/api/users/${user.id}/connector-codes`), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+    });
+    expect(unauthed.status).toBe(401);
+    expect(await getDbClient().query("SELECT code_hash FROM connector_codes")).toHaveLength(0);
+  });
+
+  test("exchange mints a working token without the API key and records token_minted", async () => {
+    const user = await createUser({ name: "Exchange User" });
+    const { code } = await createCode(user.id);
+
+    const response = await exchange(code);
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { token: string; userId: string; version: string };
+    expect(body.token.startsWith("aswt_")).toBe(true);
+    expect(body.userId).toBe(user.id);
+    const pkg = (await Bun.file("package.json").json()) as { version: string };
+    expect(body.version).toBe(pkg.version);
+
+    expect((await resolveUserByToken(body.token))?.id).toBe(user.id);
+    const event = await getDbClient().get<{ actor: string; afterJson: string }>(
+      "SELECT actor, afterJson FROM user_identity_events WHERE userId = ? AND eventType = 'token_minted'",
+      [user.id],
+    );
+    expect(event?.actor).toBe(`operator:${fingerprintApiKey(API_KEY)}`);
+    expect(JSON.parse(event!.afterJson).label).toBe("ChatGPT connector");
+    const row = await getDbClient().get<{ used_at: string | null }>(
+      "SELECT used_at FROM connector_codes WHERE user_id = ?",
+      [user.id],
+    );
+    expect(row?.used_at).toBeTruthy();
+  });
+
+  test("exchange returns the same 404 for reused, expired and unknown codes", async () => {
+    const user = await createUser({ name: "Invalid Code User" });
+    const { code } = await createCode(user.id);
+    expect((await exchange(code)).status).toBe(200);
+
+    const reused = await exchange(code);
+    expect(reused.status).toBe(404);
+    expect(await reused.json()).toEqual({ error: "code_invalid" });
+
+    const { code: expiredCode } = await createCode(user.id);
+    await getDbClient().run("UPDATE connector_codes SET expires_at = ? WHERE used_at IS NULL", [
+      new Date(Date.now() - 1000).toISOString(),
+    ]);
+    const expired = await exchange(expiredCode);
+    expect(expired.status).toBe(404);
+    expect(await expired.json()).toEqual({ error: "code_invalid" });
+
+    const unknown = await exchange("not-a-real-code");
+    expect(unknown.status).toBe(404);
+    expect(await unknown.json()).toEqual({ error: "code_invalid" });
+
+    const tokens = await getDbClient().query("SELECT id FROM user_tokens WHERE userId = ?", [
+      user.id,
+    ]);
+    expect(tokens).toHaveLength(1);
+  });
+
+  test("concurrent exchanges of one code mint exactly one token", async () => {
+    const user = await createUser({ name: "Race User" });
+    const { code } = await createCode(user.id);
+    const results = await Promise.all([exchangeConnectorCode(code), exchangeConnectorCode(code)]);
+    expect(results.filter(Boolean)).toHaveLength(1);
+  });
+
+  test("exchange is rate limited to 10 per minute per IP", async () => {
+    const ip = { "X-Forwarded-For": "203.0.113.7" };
+    for (let i = 0; i < 10; i++) {
+      expect((await exchange(`unknown-${i}`, ip)).status).toBe(404);
+    }
+    const limited = await exchange("unknown-11", ip);
+    expect(limited.status).toBe(429);
+    expect((await exchange("other-ip", { "X-Forwarded-For": "203.0.113.8" })).status).toBe(404);
+  });
+
+  test("cleanup deletes codes that expired more than an hour ago", async () => {
+    const user = await createUser({ name: "Sweep User" });
+    await createCode(user.id);
+    await createCode(user.id);
+    const now = Date.now();
+    await getDbClient().run(
+      "UPDATE connector_codes SET expires_at = ? WHERE rowid = (SELECT MIN(rowid) FROM connector_codes)",
+      [new Date(now - 61 * 60 * 1000).toISOString()],
+    );
+    expect(await deleteExpiredConnectorCodes(new Date(now))).toBe(1);
+    expect(await getDbClient().query("SELECT code_hash FROM connector_codes")).toHaveLength(1);
   });
 });

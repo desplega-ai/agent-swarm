@@ -52563,6 +52563,178 @@
         }
       }
     },
+    "/api/users/{id}/connector-codes": {
+      "post": {
+        "summary": "Create a single-use connect code for the agent-swarm.dev ChatGPT connector",
+        "description": "Returns a 10-minute single-use code and the connector URL that carries it. The connector trades the code for an MCP token at POST /api/connector/exchange.",
+        "tags": [
+          "Users"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "label": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Connect code, its expiry and the connector URL",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "expiresAt": {
+                      "type": "string"
+                    },
+                    "connectUrl": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "expiresAt",
+                    "connectUrl"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The public API origin is not HTTPS",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "User not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/connector/exchange": {
+      "post": {
+        "summary": "Exchange a connect code for a user MCP token",
+        "description": "Unauthenticated: the single-use code is the credential. Rate limited per IP. Unknown, expired and used codes all return 404 code_invalid.",
+        "tags": [
+          "Users"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "code": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "code"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Minted MCP token for the code's user",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "token": {
+                      "type": "string"
+                    },
+                    "userId": {
+                      "type": "string"
+                    },
+                    "version": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "token",
+                    "userId",
+                    "version"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Code unknown, expired or already used",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/users/{id}/merge": {
       "post": {
         "summary": "Merge another user into this one — moves identities + email aliases, deletes source",
