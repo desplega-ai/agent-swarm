@@ -408,7 +408,7 @@ const createConnectorCodeRoute = route({
         connectUrl: z.string(),
       }),
     },
-    400: { description: "The public API origin is not HTTPS" },
+    400: { description: "The public API origin or CONNECTOR_CONNECT_URL is not HTTPS" },
     401: { description: "Unauthorized" },
     404: { description: "User not found" },
   },
@@ -600,8 +600,19 @@ async function collectUnmappedForKind(kind: string, limit: number) {
 
 const DEFAULT_CONNECTOR_CONNECT_URL = "https://mcp.agent-swarm.dev/connections";
 
-function getConnectorConnectUrl(): string {
-  return process.env.CONNECTOR_CONNECT_URL?.trim() || DEFAULT_CONNECTOR_CONNECT_URL;
+/**
+ * The connector's connect page. Returns null unless it parses as an https://
+ * URL: the link carries a bearer-equivalent code, so it must never go out
+ * over plaintext or to a non-web scheme.
+ */
+function getConnectorConnectUrl(): URL | null {
+  const raw = process.env.CONNECTOR_CONNECT_URL?.trim() || DEFAULT_CONNECTOR_CONNECT_URL;
+  try {
+    const url = new URL(raw);
+    return url.protocol === "https:" ? url : null;
+  } catch {
+    return null;
+  }
 }
 
 function isHttpsOrigin(value: string): boolean {
@@ -811,6 +822,11 @@ export async function handleUsers(
       );
       return true;
     }
+    const connect = getConnectorConnectUrl();
+    if (!connect) {
+      jsonError(res, "CONNECTOR_CONNECT_URL must be an https:// URL.", 400);
+      return true;
+    }
 
     try {
       const { code, expiresAt } = await createConnectorCode(
@@ -818,7 +834,6 @@ export async function handleUsers(
         parsed.body.label ?? DEFAULT_CONNECTOR_CODE_LABEL,
         actor,
       );
-      const connect = new URL(getConnectorConnectUrl());
       connect.searchParams.set("swarm", swarmOrigin);
       connect.searchParams.set("code", code);
       const connectUrl = connect.toString();

@@ -21222,7 +21222,7 @@ export interface paths {
                         };
                     };
                 };
-                /** @description The public API origin is not HTTPS */
+                /** @description The public API origin or CONNECTOR_CONNECT_URL is not HTTPS */
                 400: {
                     headers: {
                         [name: string]: unknown;

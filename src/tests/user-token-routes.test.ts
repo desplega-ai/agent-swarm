@@ -290,6 +290,28 @@ describe("ChatGPT connector codes", () => {
     expect(row?.label).toBe("my chatgpt");
   });
 
+  test("POST keeps a fragment on CONNECTOR_CONNECT_URL outside the query", async () => {
+    process.env.CONNECTOR_CONNECT_URL = "https://connector.test/connect#signup";
+    const user = await createUser({ name: "Fragment Connector User" });
+    const body = await createCode(user.id);
+    const connect = new URL(body.connectUrl);
+    expect(connect.hash).toBe("#signup");
+    expect(connect.searchParams.get("code")).toBe(body.code);
+  });
+
+  test("POST rejects an insecure or malformed CONNECTOR_CONNECT_URL without storing a code", async () => {
+    const user = await createUser({ name: "Insecure Connector User" });
+    for (const value of ["http://connector.test/connect", "not a url", "javascript:alert(1)"]) {
+      process.env.CONNECTOR_CONNECT_URL = value;
+      const response = await authedFetch(`/api/users/${user.id}/connector-codes`, {
+        method: "POST",
+        body: "{}",
+      });
+      expect(response.status).toBe(400);
+    }
+    expect(await getDbClient().query("SELECT code_hash FROM connector_codes")).toHaveLength(0);
+  });
+
   test("POST resolves the public origin from swarm_config before env", async () => {
     process.env.PUBLIC_MCP_BASE_URL = "http://localhost:3013";
     await upsertSwarmConfig({
