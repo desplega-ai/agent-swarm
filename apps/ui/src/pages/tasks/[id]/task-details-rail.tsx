@@ -1,14 +1,4 @@
-import {
-  Check,
-  Copy,
-  ExternalLink,
-  GitBranch,
-  Github,
-  Gitlab,
-  GitPullRequest,
-  Link2,
-  User,
-} from "lucide-react";
+import { ExternalLink, GitBranch, Github, Gitlab, GitPullRequest, Link2, User } from "lucide-react";
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 import type {
@@ -20,15 +10,14 @@ import type {
 } from "@/api/types";
 import { AgentLink } from "@/components/shared/agent-link";
 import { CollapsibleSection } from "@/components/shared/collapsible-section";
+import { CopyValueButton } from "@/components/shared/copy-value-button";
 import { CostSourceBadge, costDriftPercent } from "@/components/shared/cost-source-badge";
 import { SessionId } from "@/components/shared/session-id";
 import type { EndSummary } from "@/components/shared/session-log-messages";
-import { Button } from "@/components/ui/button";
 import { MiddleTruncation } from "@/components/ui/middle-truncation";
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
 import { findLatestUsableContextSnapshot } from "@/lib/context-display";
 import { formatCost } from "@/lib/cost-format";
 import { formatDurationMs } from "@/lib/format-duration-ms";
@@ -37,6 +26,7 @@ import { progressBarTone } from "@/lib/percent-progress-tone";
 import { TERMINAL_STATUSES } from "@/lib/task-activity";
 import { describeTaskEvent, TASK_EVENT_DOT, TASK_EVENT_TEXT } from "@/lib/task-events";
 import { cn, formatElapsed, formatRelativeTime, formatSmartTime, parseUTCDate } from "@/lib/utils";
+import { taskSourceLabel } from "./task-source-line";
 import { NARROW_ICON_TARGET, NARROW_INLINE_TARGET, NARROW_TARGET } from "./touch-targets";
 
 // Below this, harness-vs-recomputed divergence is rounding noise; above it,
@@ -46,27 +36,6 @@ const DRIFT_HINT_THRESHOLD_PCT = 2;
 // Devin bills in ACUs. Its provider meta carries the rate; this is the
 // documented default.
 const DEFAULT_ACU_COST_USD = 2.25;
-
-const TASK_SOURCE_LABELS: Record<string, string> = {
-  agentmail: "Email",
-  api: "API",
-  comb: "Comb",
-  github: "GitHub",
-  gitlab: "GitLab",
-  jira: "Jira",
-  linear: "Linear",
-  mcp: "MCP",
-  schedule: "Schedule",
-  slack: "Slack",
-  system: "System",
-  ui: "Dashboard",
-  workflow: "Workflow",
-};
-
-/** Where a task came from, as people say it ("Slack", "GitHub", "Dashboard"). */
-export function taskSourceLabel(source: string): string {
-  return TASK_SOURCE_LABELS[source] ?? source.charAt(0).toUpperCase() + source.slice(1);
-}
 
 /** Token counts without a trailing ".0": "1M", not "1.0M". */
 function shortTokens(n: number): string {
@@ -180,6 +149,12 @@ export function taskRunSummary(
   };
 }
 
+// RailSection and RailRow are local on purpose. `DetailPageSection` and
+// `QuickStat` (`components/ui/detail-page-layout.tsx`) draw their heading as
+// an h4 at 10 px: under the Floor Rule's 11 px, and out of this page's h1 to
+// h2 order. DESIGN.md §3 names this exception. The shared primitives keep
+// their style on the other detail pages.
+
 /** A rail section: a quiet uppercase heading over its rows. */
 function RailSection({
   title,
@@ -223,23 +198,6 @@ function RailRow({
   );
 }
 
-/** Copy a value. The button keeps one width: only the icon changes. */
-function CopyValueButton({ value, label }: { value: string; label: string }) {
-  const { copied, copy } = useCopyToClipboard();
-  return (
-    <Button
-      type="button"
-      variant="ghost"
-      size="icon-xs"
-      className={cn("shrink-0 text-muted-foreground hover:text-foreground", NARROW_ICON_TARGET)}
-      onClick={() => void copy(value)}
-      aria-label={copied ? "Copied" : label}
-    >
-      {copied ? <Check /> : <Copy />}
-    </Button>
-  );
-}
-
 /** A long id, middle-truncated, with a copy button. */
 function CopyableId({
   value,
@@ -255,7 +213,12 @@ function CopyableId({
       <span className="min-w-0 flex-1">
         {children ?? <MiddleTruncation className="font-mono">{value}</MiddleTruncation>}
       </span>
-      <CopyValueButton value={value} label={label} />
+      <CopyValueButton
+        value={value}
+        label={label}
+        size="icon-xs"
+        className={cn("shrink-0 text-muted-foreground hover:text-foreground", NARROW_ICON_TARGET)}
+      />
     </span>
   );
 }
@@ -460,7 +423,7 @@ function SourceControlSection({ task }: { task: TaskWithLogs }) {
   );
 }
 
-export interface TaskDetailsRailProps {
+interface TaskDetailsRailProps {
   task: TaskWithLogs;
   /** The assignee's name, when the agents list has it. */
   agentName: string | null;

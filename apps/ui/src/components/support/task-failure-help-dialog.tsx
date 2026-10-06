@@ -1,5 +1,5 @@
 import { Check, Copy, ExternalLink, LifeBuoy, Mail } from "lucide-react";
-import { useLayoutEffect, useRef } from "react";
+import type { RefObject } from "react";
 import type { AgentTask } from "@/api/types";
 import { MarkdownView } from "@/components/shared/markdown-view";
 import { Button } from "@/components/ui/button";
@@ -35,39 +35,34 @@ export function TaskFailureHelpDialog({
   task,
   open,
   onOpenChange,
+  returnFocus,
 }: {
   task: AgentTask;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /**
+   * Gets focus when the dialog closes. A button outside the dialog opens it
+   * (there is no DialogTrigger), so the caller names the opener: the button,
+   * or the trigger of the menu that held the item.
+   */
+  returnFocus?: RefObject<HTMLElement | null>;
 }) {
   const { apiVersion } = useLeadCredentialIssue();
   const { copied, copy } = useCopyToClipboard();
   const diagnostics = buildDiagnostics(task, apiVersion);
-  // A button outside the dialog opens it (there is no DialogTrigger), so the
-  // dialog remembers that button and gives it focus back on close. A menu item
-  // closes with its menu, so the menu's trigger takes its place.
-  const openerRef = useRef<HTMLElement | null>(null);
-  useLayoutEffect(() => {
-    if (!open) return;
-    const active = document.activeElement;
-    const menuId = active?.closest('[role="menu"]')?.id;
-    const menuTrigger = menuId
-      ? document.querySelector(`[aria-controls="${CSS.escape(menuId)}"]`)
-      : null;
-    const opener = menuTrigger ?? active;
-    openerRef.current = opener instanceof HTMLElement ? opener : null;
-  }, [open]);
   const emailHref = `mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent("Agent Swarm task failed")}&body=${encodeURIComponent(diagnostics)}`;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        onCloseAutoFocus={(event) => {
-          const opener = openerRef.current;
-          if (!opener?.isConnected) return;
-          event.preventDefault();
-          opener.focus();
-        }}
+        onCloseAutoFocus={
+          returnFocus
+            ? (event) => {
+                event.preventDefault();
+                returnFocus.current?.focus();
+              }
+            : undefined
+        }
       >
         <DialogHeader>
           <div className="flex items-center gap-2 text-status-error-strong">

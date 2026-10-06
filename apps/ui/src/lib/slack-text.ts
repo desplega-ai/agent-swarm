@@ -8,7 +8,7 @@
  */
 
 /** A message in the Slack thread that came before the ask. */
-export interface SlackThreadMessage {
+interface SlackThreadMessage {
   /** Display name. `undefined` when the author is not resolved. */
   speaker?: string;
   /** Raw message text. Slack tokens stay: format it with `formatSlackMentions`. */

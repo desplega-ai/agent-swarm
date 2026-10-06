@@ -19,6 +19,9 @@ const VIRTUALIZE_THRESHOLD = 120;
 /** How close (px) the last row must be to the visible bottom to count as "at the end". */
 const AT_END_PX = 72;
 
+/** Page mode, virtualized: how long (ms) the jump to the end glides before it snaps. */
+const GLIDE_MAX_MS = 900;
+
 /**
  * Page mode: where the log sits in the caller's scroller, in px. `listTop` is
  * the rows' offset inside the scroll content (the virtualizer's
@@ -187,6 +190,29 @@ export function useLogScroll({
     return () => ro.disconnect();
   }, [pageMode, scrollElement, readPageGeometry]);
 
+  // The instant jump to the end. In virtualized mode getTotalSize() is an
+  // estimate until rows measure, so a bare scrollTop can undershoot the real
+  // bottom. scrollToIndex forces the tail to render + measure; the scrollTop
+  // assignment then lands flush.
+  const snapToEnd = useCallback(() => {
+    const el = getScroller();
+    if (!el) return;
+    if (virtualize && rows.length > 0) {
+      virtualizer.scrollToIndex(rows.length - 1, { align: "end" });
+    }
+    el.scrollTop = el.scrollHeight;
+    setPending(0);
+  }, [getScroller, virtualize, virtualizer, rows.length]);
+
+  // Page mode, virtualized: ends a jump glide that has not landed in time.
+  const landingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (landingTimer.current) clearTimeout(landingTimer.current);
+    },
+    [],
+  );
+
   const stickToBottom = useCallback(
     (behavior: ScrollBehavior = "auto") => {
       const el = getScroller();
@@ -205,7 +231,16 @@ export function useLogScroll({
           // Page mode opens at the top, so the rows on the way down were
           // never measured, and their size fixes stop a plain glide short.
           // The virtualizer's own glide aims again as those rows measure.
+          // Each new aim restarts the glide, so it crawls the last screens
+          // for seconds, and it gives up after 5 s (a hidden tab never runs
+          // it). After GLIDE_MAX_MS the instant snap lands it, and its scroll
+          // event turns follow mode on.
           virtualizer.scrollToIndex(rows.length - 1, { align: "end", behavior: "smooth" });
+          if (landingTimer.current) clearTimeout(landingTimer.current);
+          landingTimer.current = setTimeout(() => {
+            landingTimer.current = null;
+            if (!atBottomRef.current) snapToEnd();
+          }, GLIDE_MAX_MS);
         } else {
           // No instant scrollToIndex first: it snaps and defeats the glide.
           // The estimate can undershoot in virtualized mode; once the scroll
@@ -216,16 +251,9 @@ export function useLogScroll({
         setPending(0);
         return;
       }
-      // In virtualized mode getTotalSize() is an estimate until rows measure, so a
-      // bare scrollTop can undershoot the real bottom. scrollToIndex forces the
-      // tail to render + measure; the scrollTop assignment then lands flush.
-      if (virtualize && rows.length > 0) {
-        virtualizer.scrollToIndex(rows.length - 1, { align: "end" });
-      }
-      el.scrollTop = el.scrollHeight;
-      setPending(0);
+      snapToEnd();
     },
-    [getScroller, pageMode, virtualize, virtualizer, rows.length],
+    [getScroller, pageMode, virtualize, virtualizer, rows.length, snapToEnd],
   );
 
   // Keep pinned to the bottom as content grows/measures (only when already there).
@@ -389,7 +417,9 @@ export function useLogScroll({
     } else if (virtualize) {
       // Not rendered yet: its place comes from the virtualizer. The rows
       // that rendered at the old offset measured on commit, which moved the
-      // starts: `getTotalSize` refreshes them before the read.
+      // starts: `getTotalSize` refreshes them before the read. Not
+      // `getOffsetForIndex`: it reads the same cache without the refresh and
+      // clamps to the scroll range, which moves a row in the last screen.
       virtualizer.getTotalSize();
       const item = virtualizer.measurementsCache[index];
       if (item) rowTop = el.getBoundingClientRect().top + el.clientTop + item.start - el.scrollTop;

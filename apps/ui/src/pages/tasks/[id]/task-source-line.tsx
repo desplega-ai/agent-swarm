@@ -1,11 +1,9 @@
 import {
   Bot,
   CalendarClock,
-  Check,
   CircleDot,
   Code,
   Cog,
-  Copy,
   type LucideIcon,
   Mail,
   MessagesSquare,
@@ -16,6 +14,7 @@ import { Fragment, type ReactNode, useId, useMemo } from "react";
 import { Link } from "react-router-dom";
 import type { AgentTask } from "@/api/types";
 import { BrandLogo } from "@/components/shared/brand-logo";
+import { CopyValueButton } from "@/components/shared/copy-value-button";
 import { MarkdownView } from "@/components/shared/markdown-view";
 import { Button } from "@/components/ui/button";
 import {
@@ -27,11 +26,30 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
 import { formatSlackMentions, parseSlackPrompt, type SlackPrompt } from "@/lib/slack-text";
 import { cn } from "@/lib/utils";
-import { taskSourceLabel } from "./task-details-rail";
 import { NARROW_INLINE_TARGET, NARROW_TARGET } from "./touch-targets";
+
+const TASK_SOURCE_LABELS: Record<string, string> = {
+  agentmail: "Email",
+  api: "API",
+  comb: "Comb",
+  github: "GitHub",
+  gitlab: "GitLab",
+  jira: "Jira",
+  linear: "Linear",
+  mcp: "MCP",
+  schedule: "Schedule",
+  slack: "Slack",
+  system: "System",
+  ui: "Dashboard",
+  workflow: "Workflow",
+};
+
+/** Where a task came from, as people say it ("Slack", "GitHub", "Dashboard"). */
+export function taskSourceLabel(source: string): string {
+  return TASK_SOURCE_LABELS[source] ?? source.charAt(0).toUpperCase() + source.slice(1);
+}
 
 type SourceTask = Pick<
   AgentTask,
@@ -284,7 +302,6 @@ function TaskPromptDialog({
   prompt: SlackPrompt;
   description: string;
 }) {
-  const { copied, copy } = useCopyToClipboard();
   const threadHeadingId = useId();
   const askHeadingId = useId();
   // A prompt that is only a thread block has no ask: show the whole prompt.
@@ -344,15 +361,9 @@ function TaskPromptDialog({
           </section>
         </div>
         <DialogFooter className="border-t border-border-subtle px-6 py-4">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => void copy(task.task)}
-            aria-label={copied ? "Copied" : undefined}
-          >
-            {copied ? <Check /> : <Copy />}
+          <CopyValueButton value={task.task} variant="outline">
             Copy prompt
-          </Button>
+          </CopyValueButton>
         </DialogFooter>
       </DialogContent>
     </Dialog>

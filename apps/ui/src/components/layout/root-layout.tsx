@@ -18,6 +18,7 @@ import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { AgentFsProvider } from "@/contexts/agent-fs-context";
 import { useCurrentUser } from "@/contexts/current-user-context";
 import { useConfig } from "@/hooks/use-config";
+import { MAIN_GUTTER } from "@/lib/main-gutter";
 import { cn } from "@/lib/utils";
 import { AppFooter } from "./app-footer";
 import { AppHeader } from "./app-header";
@@ -54,7 +55,7 @@ export function RootLayout() {
   // The unified Home (`/`) owns its own internal padding so the full-bleed
   // canvas can reach the content-area edges; every other route gets the
   // standard gutter.
-  const mainPadding = pathname === "/" ? "p-0" : "p-4 md:p-6";
+  const mainPadding = pathname === "/" ? "p-0" : MAIN_GUTTER;
 
   // No connection yet: the full-page `/setup` flow starts at step 1 (connect)
   // and returns here after connecting.

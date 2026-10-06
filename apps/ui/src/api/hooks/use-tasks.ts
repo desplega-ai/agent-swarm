@@ -5,7 +5,6 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
-import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { buildRetryInput } from "../../lib/task-retry";
 import { api } from "../client";
@@ -80,16 +79,25 @@ export function useTask(id: string, opts?: { refetchInterval?: number | false })
 }
 
 /**
- * Session log lines, polled every 5 s. A caller that knows the task is
- * finished passes `refetchInterval: false`: its log is frozen, and one read is
- * about 300 KB. An omitted (or `undefined`) value keeps the 5 s default.
+ * How often a task's live data refetches. A caller that knows the task is
+ * finished passes `refetchInterval: false` and `staleTime: Infinity`: the data
+ * is frozen, so it is read once, with no refetch on window focus or
+ * reconnect. An invalidation still refetches it. An omitted (or `undefined`)
+ * value keeps the hook's default.
  */
-export function useTaskSessionLogs(taskId: string, opts?: { refetchInterval?: number | false }) {
+interface TaskLiveReadOptions {
+  refetchInterval?: number | false;
+  staleTime?: number;
+}
+
+/** Session log lines, polled every 5 s. One read is about 300 KB. */
+export function useTaskSessionLogs(taskId: string, opts?: TaskLiveReadOptions) {
   return useQuery({
     queryKey: ["task", taskId, "session-logs"],
     queryFn: () => api.fetchTaskSessionLogs(taskId),
     enabled: !!taskId,
     refetchInterval: opts?.refetchInterval ?? 5000,
+    ...(opts?.staleTime !== undefined ? { staleTime: opts.staleTime } : {}),
   });
 }
 
@@ -100,7 +108,7 @@ export function useTaskSessionLogs(taskId: string, opts?: { refetchInterval?: nu
  */
 export function useTaskSteeringMessages(
   taskId: string,
-  opts?: { enabled?: boolean; refetchInterval?: number | false },
+  opts?: TaskLiveReadOptions & { enabled?: boolean },
 ) {
   return useQuery({
     queryKey: ["task", taskId, "steering-messages"],
@@ -110,19 +118,18 @@ export function useTaskSteeringMessages(
     // `false` for finished tasks, their steering rows are frozen history, so
     // there is nothing to poll for.
     refetchInterval: opts?.refetchInterval ?? 5000,
+    ...(opts?.staleTime !== undefined ? { staleTime: opts.staleTime } : {}),
   });
 }
 
-/**
- * Context-window snapshots, polled every 10 s. Pass `refetchInterval: false`
- * for a finished task. An omitted (or `undefined`) value keeps the default.
- */
-export function useTaskContext(taskId: string, opts?: { refetchInterval?: number | false }) {
+/** Context-window snapshots, polled every 10 s. */
+export function useTaskContext(taskId: string, opts?: TaskLiveReadOptions) {
   return useQuery({
     queryKey: ["task", taskId, "context"],
     queryFn: () => api.fetchTaskContext(taskId),
     enabled: !!taskId,
     refetchInterval: opts?.refetchInterval ?? 10000,
+    ...(opts?.staleTime !== undefined ? { staleTime: opts.staleTime } : {}),
   });
 }
 
@@ -342,20 +349,17 @@ export function useCreateTask() {
 
 /**
  * Retry: a copy of the task as a new child (`buildRetryInput`), created with
- * `POST /api/tasks`. Nothing is destroyed, so there is no confirm step. On
- * success the page moves to the new task.
+ * `POST /api/tasks`. Nothing is destroyed, so there is no confirm step. The
+ * caller moves to the new task (`mutate`'s `onSuccess`).
  */
 export function useRetryTask() {
   const queryClient = useQueryClient();
-  const navigate = useNavigate();
   return useMutation<TaskWithLogs, Error, { task: AgentTask; userId: string | null }>({
     mutationFn: ({ task, userId }) => api.createTask(buildRetryInput(task, userId)),
     onSuccess: (created, { task }) => {
       queryClient.setQueryData(["task", created.id], created);
       queryClient.invalidateQueries({ queryKey: ["tasks"] });
       queryClient.invalidateQueries({ queryKey: ["session", task.id] });
-      toast.success("Retry created. It runs as a new task.");
-      void navigate(`/tasks/${created.id}`);
     },
     onError: (err) => {
       toast.error(err.message || "Failed to retry task");

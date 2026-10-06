@@ -1,7 +1,7 @@
 import type { AgentTask } from "@/api/types";
 
 /** The `POST /api/tasks` body that runs a task again. */
-export interface RetryTaskInput {
+interface RetryTaskInput {
   task: string;
   agentId?: string;
   routingReason?: "continuity";

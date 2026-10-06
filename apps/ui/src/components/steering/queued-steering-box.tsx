@@ -34,7 +34,7 @@ export function QueuedSteeringBox({ messages, touchTargets, className }: QueuedS
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
         className={cn(
-          "flex w-full min-w-0 cursor-pointer items-center gap-2 px-3 py-2 text-left text-[12.5px]",
+          "flex w-full min-w-0 cursor-pointer items-center gap-2 px-3 py-2 text-left text-xs",
           touchTargets && "min-h-11",
         )}
       >
@@ -48,14 +48,14 @@ export function QueuedSteeringBox({ messages, touchTargets, className }: QueuedS
         <span className="shrink-0 font-medium text-status-pending-strong">
           {messages.length} queued
         </span>
-        <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground">
+        <span className="min-w-0 flex-1 truncate text-meta text-muted-foreground">
           {open || !messages[0]
             ? null
             : `${steeringSenderLabel(messages[0])}: ${messages[0].body.replace(/\s+/g, " ").trim()}`}
         </span>
       </button>
       {open ? (
-        <div className="flex max-h-40 flex-col gap-1 overflow-y-auto px-3 pb-2 text-[12px]">
+        <div className="flex max-h-40 flex-col gap-1 overflow-y-auto px-3 pb-2 text-xs">
           {messages.map((message) => (
             <SteeringLine key={message.id} message={message} />
           ))}

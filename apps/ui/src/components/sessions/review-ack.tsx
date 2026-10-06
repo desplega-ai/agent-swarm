@@ -4,7 +4,7 @@
  * needed." follow-ups against it.
  *
  * The review row itself is hidden from the timeline (operational, not
- * conversational, see `isAutoReview` in `lib/task-links.ts`), but the
+ * conversational, see `isAutoReview` in `lib/auto-review.ts`), but the
  * *outcome* of the most recent review is not: this chip mirrors the same
  * live-activity / final-outcome split a normal `<TaskCard>` uses, because a
  * hidden review is frequently where the agent's actual human-facing answer

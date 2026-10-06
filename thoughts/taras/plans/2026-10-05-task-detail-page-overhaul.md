@@ -2,8 +2,8 @@
 date: 2026-10-05
 status: in-progress
 autonomy: critical
-last_updated: 2026-10-05
-last_updated_by: claude (phase 7 follow-up agent, composer text at 11 px, one set of cost and run-time numbers, 60rem layout switch; PR section left to the orchestrator)
+last_updated: 2026-10-06
+last_updated_by: claude (code review agent, useLogScroll extraction and the 2026-10-06 code review fixes)
 commit_per_phase: true
 ---
 
@@ -472,6 +472,7 @@ Every status gets its actions:
   - Move `isAutoReview` (`session-timeline.tsx:39-41`) into `lib/task-links.ts` and import it in both places.
 - Each row shows `TaskStatusIcon`, the title (`taskListTitle`), the agent and the age, and links to `/tasks/{id}`. Render the section only when it is not empty.
 - `linkTaskIds(markdown, ids)` rewrites known task id prefixes (8 or more hex characters, with or without `#`, inside or outside inline code) into markdown links to `/tasks/{fullId}`. The known ids are the chain plus the parent. The answer renders through it.
+- These links open in the same tab, like the spawned task rows (Taras, 2026-10-06 code review). Other markdown links keep the app rule: a new tab.
 
 #### 5. Failed state
 **File**: `apps/ui/src/pages/tasks/[id]/page.tsx` (948-962, 1346-1359), `apps/ui/src/components/support/task-failure-help-dialog.tsx`, `apps/ui/src/lib/task-support.ts` and its test
@@ -652,7 +653,7 @@ The log viewer gets a Messages and Everything switch. Messages folds tool and th
 - **Labels.** An activity line reads "Ran 4 tools · 5.0s · thought for 2.0s", "Thought for 3.0s" or "Thought" (thinking only), or "2 events" (no tool and no thinking, for example a hook). Thinking under 1 s is left out. The tool names follow in mono. The end line reads "Finished · $1.42 · 4m 7s · 26 turns" with the green check, or "Ended with an error · …" with the failed icon. Cost uses `formatCost(x, { precision: 2 })`, as the rail does. (Changed on 2026-10-05 after the phase 7 critique (Taras): on the task page the end line shows the rail's numbers. See the follow-up fixes under phase 7.)
 - **Open activity line.** It shows the folded rows with their renderers. Tool groups show their tool rows directly (no second "N steps" toggle), so a tool result is two clicks away. Activity lines start closed.
 - **Toolbar.** Without subagents, the toolbar is the switch and the filter (no tab list). The tab panel is then a region named "Session log". With subagents, the "Logs" and "Agents (n)" tabs stay and the switch follows them. Callers without `onViewChange` (the Sessions sheet) keep the "Logs" tab, Everything, and "Session complete". On a phone, the filter takes the rest of the row, so the toolbar stays one row. In the narrow tree the switch is 50 px tall, so its options are 44 px.
-- **Footer.** It counts events in both views (an activity line counts its rows), so Messages and Everything both say "48 events". A failed task says "Session ended · failed" in the error tone, a cancelled or superseded one "Session ended · cancelled" in the neutral tone, both with `TaskStatusIcon`.
+- **Footer.** It counts events in both views (an activity line counts its rows), so Messages and Everything both say "48 events". A failed task says "Session ended · failed" in the error tone. A cancelled task says "Session ended · cancelled" and a superseded task "Session ended · superseded", both in the neutral tone. All three show `TaskStatusIcon`. (Corrected in the 2026-10-06 code review: an earlier note said a superseded task reads "cancelled". The code names its own status.)
 - **View switch keeps the reader's place** (no jump to the top or the bottom of the page):
   - The log start in view: nothing moves. Follow mode turns off, so a short view that was "at the end" does not pin the new view to its end.
   - At the end of a log the reader scrolled into: the end stays in view (follow mode).
@@ -794,6 +795,39 @@ Then the PR goes up with screenshots and a recording.
 - [ ] Taras reviews the PR screenshots and recordings, then merges.
 
 **Implementation Note**: After this phase, pause for manual confirmation. Then commit `[phase 7] task page a11y and type scale`, and open the PR.
+
+---
+
+## Code review (2026-10-06)
+
+The end-of-branch review (Standards and Spec axes) of draft PR #1881 found the items below. Taras approved all of them. Two commits apply them:
+- `refactor(ui): move session log scroll plumbing into useLogScroll`. No behavior change.
+- `fix(ui): task page code review fixes`.
+
+### Decisions (Taras)
+- **Task id links open in the same tab.** Only the links that `linkTaskIds` makes on this page (`MarkdownView` `sameTabHrefs`). Other markdown links still open a new tab.
+- **Sessions page spillover is accepted.** The Sessions sheet gets the shared changes: the viewer's type scale and no-fade text, the em dash copy fixes, and `hit-area` on the composer.
+- **`useLogScroll`.** The scroll plumbing of `SessionLogViewer` is one hook in `components/shared/use-log-scroll.ts`. The viewer keeps the rows, the row state and the rendering.
+- **The jump-to-latest pill shows on every log** (Taras, phase 3 review), not only on the task page.
+
+### Fixed or answered
+1. **Jump to latest, page mode, virtualized.** The virtualizer's glide aims again each time a row measures, so it crawled the last screens for about 2.5 s with the pill in view. It also stops after 5 s, and a hidden tab never runs it. Now the instant snap ends the glide after 900 ms, and follow mode starts. In-progress route at 1440x900 with the steer box: at the end 1.0 s after the click (before: 2.3 to 2.8 s). The last row ends at the tail top (619 px), and the pill hides. The review's cause does not apply to `@tanstack/virtual-core` 3.17.3: for the last row, `align: "end"` aims at the scroller's maximum offset. `scrollPaddingEnd` changes nothing there, so it is not added.
+2. **Finished tasks do not refetch on focus or reconnect.** The page passes `staleTime: Infinity` with `refetchInterval: false` for a finished task's log, context and steering reads. Three focus and reconnect events on the completed route: before, 3 reads of each; after, 0. A task that finishes while open still gets its one final read (1 read of each, at the status change). Invalidation ignores `staleTime`.
+3. **Type scale in the log.** The queued steering box and the steering line use `text-xs` and `text-meta`, and the body text is `text-foreground` (no fade).
+4. **Spawned tasks heading id.** It comes from `useId()`, so the two layout trees do not repeat an id.
+5. **`--color-status-info-solid` is gone.** Nothing read it. The root `DESIGN.md` lists `status-active-solid` in its place and calls the in-progress ring amber.
+6. **Focus return from "Get help".** The help dialog takes an explicit `returnFocus` ref, as `CancelTaskDialog` does. Measured: focus goes back to the callout's "Get help", or to the wide or narrow "More actions" trigger.
+7. **Not changed: `getOffsetForIndex`.** In 3.17.3 it reads the same `measurementsCache` without the refresh, and it clamps to the scroll range. That moves a row in the last screen. A comment in `use-log-scroll.ts` says why.
+8. **One copy button.** No existing primitive in `components/` fits a text button and an icon button with the icon swap. The new `CopyValueButton` (`components/shared/copy-value-button.tsx`) replaces the three local ones. The width stays, and the name reads "Copied" for 1.5 s.
+9. **Rail exception.** `RailSection` and `RailRow` stay local, with a comment. DESIGN.md §3 names the exception next to the task page's h1.
+10. **`useRetryTask` is data-only.** The caller's `onSuccess` shows the toast and moves to the new task.
+11. **Placement.** `taskSourceLabel` is in `task-source-line.tsx`. `parseStructuredOutput` is in `lib/structured-output.ts`. `useElementHeight` and `TaskEffortMark` have their own files. `isAutoReview` is in `lib/auto-review.ts`.
+12. **Not changed: `TASK_STATUS_TONE`.** A derived map needs a variant-to-tone map of the same size, and a lib to component import. Every root test that imports `task-events` would then mock `@/lib/utils`. The parity test stays.
+13. **Gutter classes.** `lib/main-gutter.ts` holds `<main>`'s padding and the page's bleed and padding classes. `root-layout.tsx` and the task page use them.
+14. **Unused exports** are local now. The narrow-layout spec blocks name the 60rem page-width switch.
+15. **Defaults follow the fresh status.** The first tab and the log view use the first status fetched after mount, or a cached one that is still fresh. A tab or view pick before that keeps the cached defaults. Measured with in-app navigation to a task that finished while away: before, Log and Everything; after, Outcome and Messages, after about 90 ms on the cached state.
+16. **Task id links in the answer open in the same tab** (see Decisions).
+17. **Steer rules have unit tests.** `canSteerTask` (task page) and `canSteerSessionTask` (Sessions, lead-only) are in `lib/task-steer.ts`, with `lib/task-steer.test.ts`.
 
 ---
 

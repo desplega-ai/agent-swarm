@@ -5,7 +5,7 @@ import { statusLabel } from "./status-labels";
  * Tone of a task event. Status changes take the tone of the status badge
  * (`TaskStatusIcon`), so `cancelled` is neutral here as it is on the badge.
  */
-export type TaskEventTone =
+type TaskEventTone =
   | "success"
   | "error"
   | "active"
@@ -15,7 +15,7 @@ export type TaskEventTone =
   | "neutral"
   | "muted";
 
-export interface TaskEventDescription {
+interface TaskEventDescription {
   /** Sentence-case words, such as "Started by Lead". Never a raw status value. */
   label: string;
   /** A second line for events the dashboard has no words for. */

@@ -4,7 +4,8 @@ import { Link } from "react-router-dom";
 
 /**
  * A link that stays in the dashboard (`to`, same tab) or opens `href` in a new
- * tab. Used where an agent-fs link opens in Comb while Comb is connected.
+ * tab. Used where an agent-fs link opens in Comb while Comb is connected, and
+ * for the task page's task id links.
  */
 export function InAppOrExternalLink({
   to,

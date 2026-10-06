@@ -1,9 +1,10 @@
 import { ChevronRight } from "lucide-react";
+import { useId } from "react";
 import { Link } from "react-router-dom";
 import type { AgentTask } from "@/api/types";
 import { TaskStatusIcon } from "@/components/shared/task-status-icon";
+import { isAutoReview } from "@/lib/auto-review";
 import { statusLabel } from "@/lib/status-labels";
-import { isAutoReview } from "@/lib/task-links";
 import { taskListTitle } from "@/lib/task-title";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import { NARROW_TARGET } from "./touch-targets";
@@ -26,11 +27,13 @@ export function SpawnedTasks({
   tasks: AgentTask[];
   agentNameFor: (agentId: string) => string | null;
 }) {
+  // Both layout trees render the list, so the heading id is per instance.
+  const headingId = useId();
   if (tasks.length === 0) return null;
   return (
-    <section aria-labelledby="spawned-tasks-heading" className="flex flex-col gap-1.5">
+    <section aria-labelledby={headingId} className="flex flex-col gap-1.5">
       <h2
-        id="spawned-tasks-heading"
+        id={headingId}
         className="flex items-center gap-2 text-xs font-medium text-muted-foreground"
       >
         Spawned tasks

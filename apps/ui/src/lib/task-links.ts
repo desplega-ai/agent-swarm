@@ -1,15 +1,3 @@
-import type { AgentTask } from "@/api/types";
-
-/**
- * `true` for the orchestrator's auto-spawned review follow-ups ("Worker task
- * completed, review needed." rows). Identified by the wire fields, not by the
- * task text. The Sessions timeline folds them into a chip, and the task page
- * leaves them out of its spawned tasks.
- */
-export function isAutoReview(task: Pick<AgentTask, "source" | "taskType">): boolean {
-  return task.source === "system" && task.taskType === "follow-up";
-}
-
 /** A full task id (UUID), or a hex run of 8 or more characters (a short id). */
 const ID = "[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}|[0-9a-f]{8,}";
 

@@ -73,7 +73,6 @@
      disc and the amber in-progress ring. Saturated on purpose, they carry a
      16px glyph, not a text or fill surface, so they sit outside the pale set. */
   --color-status-success-solid: oklch(0.627 0.194 149.2);
-  --color-status-info-solid: oklch(0.52 0.24 263);
   --color-status-active-solid: oklch(0.666 0.179 58.318);
   --color-status-pending: oklch(0.84 0.1 95);
   --color-status-pending-strong: oklch(0.55 0.09 90);
@@ -213,7 +212,6 @@
   --color-status-info-strong: oklch(0.78 0.09 235);
   --color-status-info-foreground: oklch(0.21 0.006 285.885);
   --color-status-success-solid: oklch(0.723 0.219 149.6);
-  --color-status-info-solid: oklch(0.623 0.214 259.8);
   --color-status-active-solid: oklch(0.769 0.188 70.08);
   --color-status-pending: oklch(0.86 0.09 95);
   --color-status-pending-strong: oklch(0.86 0.09 95);

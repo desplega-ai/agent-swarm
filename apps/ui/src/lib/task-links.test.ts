@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { isAutoReview, linkTaskIds } from "./task-links";
+import { linkTaskIds } from "./task-links";
 
 const CHILD = "ef3a67a9-7255-42a0-bb5d-5e6ffc056cdb";
 const PARENT = "a173a469-0e39-4c4f-8a1d-d8ce6e8158ed";
@@ -51,14 +51,5 @@ describe("linkTaskIds", () => {
     const text = "No ids here. `code` and [a link](https://example.com).";
     expect(linkTaskIds(text, IDS)).toBe(text);
     expect(linkTaskIds("ef3a67a9", [])).toBe("ef3a67a9");
-  });
-});
-
-describe("isAutoReview", () => {
-  test("only system follow-ups are auto reviews", () => {
-    expect(isAutoReview({ source: "system", taskType: "follow-up" })).toBe(true);
-    expect(isAutoReview({ source: "ui", taskType: "follow-up" })).toBe(false);
-    expect(isAutoReview({ source: "system", taskType: "question" })).toBe(false);
-    expect(isAutoReview({ source: "system" })).toBe(false);
   });
 });

@@ -39,13 +39,13 @@ colors:
   status-active: "oklch(0.84 0.1 80)"
   status-active-strong: "oklch(0.84 0.1 80)"
   status-active-foreground: "oklch(0.21 0.006 285.885)"
+  status-active-solid: "oklch(0.769 0.188 70.08)"
   status-error: "oklch(0.74 0.11 22)"
   status-error-strong: "oklch(0.74 0.11 22)"
   status-error-foreground: "oklch(0.21 0.006 285.885)"
   status-info: "oklch(0.78 0.09 235)"
   status-info-strong: "oklch(0.78 0.09 235)"
   status-info-foreground: "oklch(0.21 0.006 285.885)"
-  status-info-solid: "oklch(0.623 0.214 259.8)"
   status-pending: "oklch(0.86 0.09 95)"
   status-pending-strong: "oklch(0.86 0.09 95)"
   status-pending-foreground: "oklch(0.21 0.006 285.885)"
@@ -88,7 +88,7 @@ Use primary for actions and ring for focus. Use accent for interactive hover fil
 
 Status fills take their foreground token; use status-strong tokens for emphasis on neutral surfaces. Workflow action colors remain a separate named palette in the governing stylesheet.
 
-Task, run, step, and approval status is drawn by `TaskStatusIcon` (`apps/ui/src/components/shared/task-status-icon.tsx`): a thin-stroke ring family on one 16px grid, with a green disc for done and a dashed blue ring for in progress. Its status-success-solid and status-info-solid stops are saturated on purpose and apply only to those glyphs; never use them for text or fills. `ProgressRing` is the aggregate form.
+Task, run, step, and approval status is drawn by `TaskStatusIcon` (`apps/ui/src/components/shared/task-status-icon.tsx`): a thin-stroke ring family on one 16px grid, with a green disc for done and a dashed amber ring for in progress. Its status-success-solid and status-active-solid stops are saturated on purpose and apply only to those glyphs; never use them for text or fills. `ProgressRing` is the aggregate form.
 
 ## Themes
 
@@ -132,13 +132,13 @@ The token frontmatter records Hive dark, matching the initial mode in `apps/ui/s
 | status-active | `oklch(0.81 0.11 75)` |
 | status-active-strong | `oklch(0.55 0.1 68)` |
 | status-active-foreground | `oklch(0.21 0.006 285.885)` |
+| status-active-solid | `oklch(0.666 0.179 58.318)` |
 | status-error | `oklch(0.72 0.12 25)` |
 | status-error-strong | `oklch(0.51 0.14 25)` |
 | status-error-foreground | `oklch(0.21 0.006 285.885)` |
 | status-info | `oklch(0.74 0.09 235)` |
 | status-info-strong | `oklch(0.5 0.09 240)` |
 | status-info-foreground | `oklch(0.21 0.006 285.885)` |
-| status-info-solid | `oklch(0.52 0.24 263)` |
 | status-pending | `oklch(0.84 0.1 95)` |
 | status-pending-strong | `oklch(0.55 0.09 90)` |
 | status-pending-foreground | `oklch(0.21 0.006 285.885)` |

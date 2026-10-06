@@ -1,33 +1,10 @@
 import { type ReactNode, useEffect, useState } from "react";
 import type { ReasoningEffortLevel } from "@/api/types";
 import { ModelLabel } from "@/components/shared/model-logo";
-import {
-  REASONING_EFFORT_LABEL,
-  ReasoningEffortIcon,
-} from "@/components/shared/reasoning-effort-icon";
 import { TaskStatusIcon } from "@/components/shared/task-status-icon";
 import { statusLabel } from "@/lib/status-labels";
 import { cn } from "@/lib/utils";
-
-/**
- * The effort level's signal icon, shown next to the model when the task sets
- * one. "off" gets no icon, the same as the agents list (`agent-model-cell`).
- */
-export function TaskEffortMark({
-  effort,
-  className,
-}: {
-  effort?: ReasoningEffortLevel | null;
-  className?: string;
-}) {
-  if (!effort || effort === "off") return null;
-  return (
-    <>
-      <ReasoningEffortIcon level={effort} className={cn("h-3 w-3 shrink-0", className)} />
-      <span className="sr-only">, {REASONING_EFFORT_LABEL[effort]} effort</span>
-    </>
-  );
-}
+import { TaskEffortMark } from "./task-effort-mark";
 
 /**
  * Height of the compact bar, in rem. The page publishes it as
@@ -71,34 +48,6 @@ export function useHeroScrolledPast() {
   }, [scroller, sentinel]);
 
   return { past, scroller, scrollerRef: setScroller, sentinelRef: setSentinel };
-}
-
-/**
- * The border-box height of an element, in px, kept current by a
- * ResizeObserver. Attach the returned callback ref. It is 0 while nothing is
- * attached. The third item is the attached element.
- */
-export function useElementHeight(): [
-  number,
-  (element: HTMLElement | null) => void,
-  HTMLElement | null,
-] {
-  const [element, setElement] = useState<HTMLElement | null>(null);
-  const [height, setHeight] = useState(0);
-
-  useEffect(() => {
-    if (!element) {
-      setHeight(0);
-      return;
-    }
-    const measure = () => setHeight(element.offsetHeight);
-    const observer = new ResizeObserver(measure);
-    observer.observe(element);
-    measure();
-    return () => observer.disconnect();
-  }, [element]);
-
-  return [height, setElement, element];
 }
 
 /** Scrolls an element to its top: a glide, or a jump under reduced motion. */

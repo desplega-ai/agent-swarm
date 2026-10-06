@@ -289,7 +289,7 @@ test("context usage does not combine incomplete measurements", async ({
   await clean.assertClean();
 });
 
-test.describe("below the lg breakpoint", () => {
+test.describe("below the 60rem page-width switch (tabs layout)", () => {
   test.use({ viewport: { width: 900, height: 900 } });
 
   test("Codex app-server messages render in the Log tab", async ({

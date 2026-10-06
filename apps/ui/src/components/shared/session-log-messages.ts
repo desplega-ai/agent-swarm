@@ -232,7 +232,7 @@ export function matchingRowIndex(rows: readonly StreamRow[], id: string): number
 }
 
 /** A one-line row label: a title, then stats joined with " · ". */
-export interface RowSummary {
+interface RowSummary {
   title: string;
   stats: string[];
 }

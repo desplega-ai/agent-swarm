@@ -32,7 +32,7 @@ test("tasks list opens the seeded task and its session logs", async ({ page, see
   await clean.assertClean();
 });
 
-test.describe("below the lg breakpoint", () => {
+test.describe("below the 60rem page-width switch (tabs layout)", () => {
   test.use({ viewport: { width: 900, height: 900 } });
 
   test("session logs open from the Log tab", async ({ page, seed, clean }) => {

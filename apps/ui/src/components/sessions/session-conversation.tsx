@@ -14,6 +14,7 @@ import { TaskComposer, type TaskComposerProps } from "@/components/shared/task-c
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAutoScroll } from "@/hooks/use-auto-scroll";
+import { canSteerSessionTask } from "@/lib/task-steer";
 import { cn } from "@/lib/utils";
 import { SessionTimeline } from "./session-timeline";
 
@@ -56,15 +57,8 @@ export function SessionConversation({
     [detail?.chain],
   );
 
-  // Sessions steers only the latest *lead* task (decision 6). `pending`
-  // counts: the server holds the message and delivers it once the session
-  // starts. Anything else sends a follow-up task, which the server routes to
-  // the Lead.
-  const canSteer =
-    steerGate.supported &&
-    steeringEnabled &&
-    !!latestLeafTask?.isLeadTask &&
-    (latestLeafTask.status === "in_progress" || latestLeafTask.status === "pending");
+  // Sessions steers only the latest *lead* task (decision 6).
+  const canSteer = steerGate.supported && steeringEnabled && canSteerSessionTask(latestLeafTask);
 
   const [scrollEl, setScrollEl] = useState<HTMLDivElement | null>(null);
   const { isFollowing, scrollToBottom } = useAutoScroll(scrollEl, [chainSignature]);

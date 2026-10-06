@@ -52,15 +52,17 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useLocalToggle } from "@/hooks/use-local-toggle";
 import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
+import { MAIN_BLEED, MAIN_BLEED_Y, MAIN_GUTTER_X } from "@/lib/main-gutter";
 import { modelTierLabel } from "@/lib/model-tiers";
+import { parseStructuredOutput } from "@/lib/structured-output";
 import { TERMINAL_STATUSES, taskIsRunning } from "@/lib/task-activity";
 import { linkTaskIds } from "@/lib/task-links";
 import { describeModelResolution, taskDisplayModel } from "@/lib/task-model-resolution";
+import { canSteerTask } from "@/lib/task-steer";
 import { taskListTitle } from "@/lib/task-title";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import { directChildren, SpawnedTasks } from "./spawned-tasks";
 import {
-  parseStructuredOutput,
   TaskActions,
   TaskActionsMenu,
   TaskFailureCallout,
@@ -68,15 +70,15 @@ import {
   useTaskActions,
 } from "./task-actions";
 import { TaskDetailsRail, taskRunSummary, taskRunTime } from "./task-details-rail";
+import { TaskEffortMark } from "./task-effort-mark";
 import { TaskSourceLine } from "./task-source-line";
 import {
   STICKY_BAR_HEIGHT,
   scrollToTop,
-  TaskEffortMark,
   TaskStickyBar,
-  useElementHeight,
   useHeroScrolledPast,
 } from "./task-sticky-bar";
+import { useElementHeight } from "./use-element-height";
 
 /** The narrow layout's tabs. The `?tab=` values predate the labels: Log is `logs`. */
 const TASK_DETAIL_TABS = new Set(["outcome", "logs", "details"]);
@@ -178,7 +180,10 @@ function describeWaiting(
   }
 }
 
-/** Task ids in the answer link to their pages. `taskIds` are the ids the page knows. */
+/**
+ * Task ids in the answer link to their pages, in the same tab, like the
+ * spawned task rows. `taskIds` are the ids the page knows.
+ */
 function StructuredOutputContent({
   raw,
   maxH,
@@ -190,12 +195,14 @@ function StructuredOutputContent({
   citations?: TaskCitation[];
   taskIds: readonly string[];
 }) {
+  const taskLinks = new Set(taskIds.map((taskId) => `/tasks/${taskId}`));
   const structured = parseStructuredOutput(raw);
   if (!structured) {
     return (
       <div className={`text-sm leading-relaxed overflow-auto text-foreground ${maxH}`}>
         <MarkdownView
           text={linkTaskIds(renderTaskCitations(raw, citations, "markdown"), taskIds)}
+          sameTabHrefs={taskLinks}
         />
       </div>
     );
@@ -213,6 +220,7 @@ function StructuredOutputContent({
                 renderTaskCitations(structured.summary, citations, "markdown", false),
                 taskIds,
               )}
+              sameTabHrefs={taskLinks}
             />
           </div>
         </div>
@@ -228,6 +236,7 @@ function StructuredOutputContent({
                 renderTaskCitations(structured.output, citations, "markdown", false),
                 taskIds,
               )}
+              sameTabHrefs={taskLinks}
             />
           </div>
         </div>
@@ -259,29 +268,30 @@ function focusVisibleComposer(wideBox: HTMLElement | null, narrowBar: HTMLElemen
 export default function TaskDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { data: task, isLoading } = useTask(id!);
+  const { data: task, isLoading, isFetchedAfterMount, isStale } = useTask(id!);
   // A finished task's log, context and steering rows are frozen history: read
-  // them once and never poll. Until the task itself loads, hold the poll too,
+  // them once, with no poll and no refetch on window focus or reconnect
+  // (`staleTime: Infinity`). Until the task itself loads, hold the poll too,
   // so a finished task never gets a second read. `undefined` keeps each
   // hook's live cadence.
   const taskLive = !!task && !TERMINAL_STATUSES.has(task.status);
-  const livePoll = taskLive ? undefined : false;
-  const { data: sessionLogs, isLoading: sessionLogsLoading } = useTaskSessionLogs(id!, {
-    refetchInterval: livePoll,
-  });
+  const liveReads = taskLive
+    ? undefined
+    : task
+      ? { refetchInterval: false as const, staleTime: Number.POSITIVE_INFINITY }
+      : { refetchInterval: false as const };
+  const { data: sessionLogs, isLoading: sessionLogsLoading } = useTaskSessionLogs(id!, liveReads);
   const { data: agents } = useAgents();
   const { data: users } = useUsers();
   const { data: costs, isLoading: costsLoading } = useSessionCosts({ taskId: id });
-  const { data: contextData, isLoading: contextLoading } = useTaskContext(id!, {
-    refetchInterval: livePoll,
-  });
+  const { data: contextData, isLoading: contextLoading } = useTaskContext(id!, liveReads);
   // Steering (≥1.122.1), soft-degrade against older API servers, which 404
   // both `/steer` and `/steering-messages`.
   const steerGate = useFeatureGate("1.122.1");
   const { data: steeringEnabled = true } = useSteeringEnabled();
   const { data: steeringMessages } = useTaskSteeringMessages(id!, {
     enabled: steerGate.supported && steeringEnabled,
-    refetchInterval: livePoll,
+    ...liveReads,
   });
   // The tasks this one started (≥1.76.0): `GET /api/sessions/{id}` returns
   // every descendant for any task id. Children can join late (a follow-up, a
@@ -289,7 +299,8 @@ export default function TaskDetailPage() {
   const sessionsGate = useFeatureGate("1.76.0");
   const { data: session } = useSession(sessionsGate.supported ? id : undefined);
   // A task that finishes while the page is open gets one last read: the final
-  // log lines and context snapshot can land after the previous poll.
+  // log lines and context snapshot can land after the previous poll. An
+  // invalidation refetches even under `staleTime: Infinity`.
   const queryClient = useQueryClient();
   const wasLiveRef = useRef(false);
   useEffect(() => {
@@ -313,8 +324,10 @@ export default function TaskDetailPage() {
   // switch, a status flip, or a narrow tab switch does not eat what the user
   // typed.
   const [draft, setDraft] = useState("");
-  // The support dialog opens only from "Get help".
+  // The support dialog opens only from "Get help", and gives focus back to it
+  // (or to the "..." trigger of the menu that held it) when it closes.
   const [helpOpen, setHelpOpen] = useState(false);
+  const helpOpener = useRef<HTMLElement | null>(null);
   // A draft and an open dialog belong to one task: Retry and the spawned task
   // links move this page to another task id.
   // biome-ignore lint/correctness/useExhaustiveDependencies: reset on a new task id only.
@@ -324,24 +337,38 @@ export default function TaskDetailPage() {
   }, [id]);
   const { searchParams, setParam } = useUrlSearchState();
   // The narrow layout's first tab and the log's first view follow the status
-  // the page opened with. A status change while the page is open (the task
-  // finishes) does not move the reader to another tab or view.
+  // the page opened with: the first one fetched after the page mounted, or a
+  // cached one that is still fresh. The cache keeps a task for hours (it
+  // persists in localStorage), so a task that finished while the reader was
+  // away must not open on its log. Until the fresh status arrives, the
+  // defaults follow the cached one, and a pick (a tab or a view) keeps them.
+  // A status change after that (the task finishes while the page is open)
+  // does not move the reader to another tab or view.
   const [openedWith, setOpenedWith] = useState<{ id: string; status: AgentTaskStatus } | null>(
     null,
   );
+  const statusFresh = isFetchedAfterMount || !isStale;
   useEffect(() => {
-    if (task && openedWith?.id !== task.id) setOpenedWith({ id: task.id, status: task.status });
-  }, [task, openedWith]);
+    if (task && statusFresh && openedWith?.id !== task.id) {
+      setOpenedWith({ id: task.id, status: task.status });
+    }
+  }, [task, statusFresh, openedWith]);
   const openedStatus = task && openedWith?.id === task.id ? openedWith.status : task?.status;
+  const keepOpenedStatus = useCallback(() => {
+    if (!task) return;
+    setOpenedWith((prev) => (prev?.id === task.id ? prev : { id: task.id, status: task.status }));
+  }, [task]);
   const defaultTab = defaultTaskTab(openedStatus);
   const activeTab = coerceTaskDetailTab(
     readStringParam(searchParams, "tab", defaultTab),
     defaultTab,
   );
   const setActiveTab = useCallback(
-    (tab: string) =>
-      setParam("tab", coerceTaskDetailTab(tab, defaultTab), { defaultValue: defaultTab }),
-    [setParam, defaultTab],
+    (tab: string) => {
+      keepOpenedStatus();
+      setParam("tab", coerceTaskDetailTab(tab, defaultTab), { defaultValue: defaultTab });
+    },
+    [setParam, defaultTab, keepOpenedStatus],
   );
   // Messages or Everything, shared by both layouts' logs.
   const logViewFallback = defaultLogView(openedStatus);
@@ -350,8 +377,11 @@ export default function TaskDetailPage() {
     logViewFallback,
   );
   const setLogView = useCallback(
-    (view: SessionLogView) => setParam("logView", view, { defaultValue: logViewFallback }),
-    [setParam, logViewFallback],
+    (view: SessionLogView) => {
+      keepOpenedStatus();
+      setParam("logView", view, { defaultValue: logViewFallback });
+    },
+    [setParam, logViewFallback, keepOpenedStatus],
   );
   // The wide layout's compact bar shows once the hero scrolls out of the
   // center column. The column is the page's one scroller: the log flows in it.
@@ -390,7 +420,10 @@ export default function TaskDetailPage() {
   );
   const actions = useTaskActions(task, {
     onFollowUp: requestFollowUp,
-    onGetHelp: () => setHelpOpen(true),
+    onGetHelp: (opener) => {
+      helpOpener.current = opener;
+      setHelpOpen(true);
+    },
   });
   const announceFollowUp = useCallback(
     (created: AgentTask) => {
@@ -435,13 +468,9 @@ export default function TaskDetailPage() {
 
   const isTerminal = TERMINAL_STATUSES.has(task.status);
 
-  // Steering reaches any assignee: a running task directly, a `pending` one by
-  // queueing until its session starts, and a `paused` one by resuming it.
-  // A finished task gets the follow-up box instead.
-  const canSteer =
-    steerGate.supported &&
-    steeringEnabled &&
-    (task.status === "in_progress" || task.status === "pending" || task.status === "paused");
+  // Steering reaches any assignee (`canSteerTask`). A finished task gets the
+  // follow-up box instead.
+  const canSteer = steerGate.supported && steeringEnabled && canSteerTask(task);
 
   const isFailed = task.status === "failed";
   const isCompleted = task.status === "completed";
@@ -775,7 +804,12 @@ export default function TaskDetailPage() {
     // page.
     <div className="@container flex flex-col flex-1 min-h-0">
       {isFailed ? (
-        <TaskFailureHelpDialog task={task} open={helpOpen} onOpenChange={setHelpOpen} />
+        <TaskFailureHelpDialog
+          task={task}
+          open={helpOpen}
+          onOpenChange={setHelpOpen}
+          returnFocus={helpOpener}
+        />
       ) : null}
 
       {/* Narrow (under 60rem of page width): one scroller from under the app
@@ -792,15 +826,21 @@ export default function TaskDetailPage() {
             "--log-sticky-bottom": `${narrowBarHeight}px`,
           } as CSSProperties
         }
-        className="@min-[60rem]:hidden -m-4 flex min-h-0 flex-1 flex-col overflow-y-auto [scrollbar-gutter:stable] md:-m-6"
+        className={cn(
+          "@min-[60rem]:hidden flex min-h-0 flex-1 flex-col overflow-y-auto [scrollbar-gutter:stable]",
+          MAIN_BLEED,
+        )}
       >
-        <div ref={narrowHeroRef} className="px-4 md:px-6">
+        <div ref={narrowHeroRef} className={MAIN_GUTTER_X}>
           {narrowHero}
         </div>
         <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 gap-0">
           <div
             ref={narrowTabsRef}
-            className="sticky top-0 z-20 border-b border-border-subtle bg-background px-4 py-2 md:px-6"
+            className={cn(
+              "sticky top-0 z-20 border-b border-border-subtle bg-background py-2",
+              MAIN_GUTTER_X,
+            )}
           >
             <TabsList className="w-full group-data-[orientation=horizontal]/tabs:h-auto">
               <TabsTrigger value="outcome" className="h-11">
@@ -815,16 +855,16 @@ export default function TaskDetailPage() {
             </TabsList>
           </div>
           {/* Each panel is a Tab stop (Radix), so it shows the focus ring. */}
-          <TabsContent value="outcome" className={cn("px-4 py-3 md:px-6", PANEL_FOCUS_RING)}>
+          <TabsContent value="outcome" className={cn("py-3", MAIN_GUTTER_X, PANEL_FOCUS_RING)}>
             {outcomeContent}
           </TabsContent>
           <TabsContent
             value="logs"
-            className={cn("flex flex-col px-4 py-3 md:px-6", PANEL_FOCUS_RING)}
+            className={cn("flex flex-col py-3", MAIN_GUTTER_X, PANEL_FOCUS_RING)}
           >
             {renderSessionLogs(narrowScroller, true)}
           </TabsContent>
-          <TabsContent value="details" className={cn("px-4 py-3 md:px-6", PANEL_FOCUS_RING)}>
+          <TabsContent value="details" className={cn("py-3", MAIN_GUTTER_X, PANEL_FOCUS_RING)}>
             {detailsRail}
           </TabsContent>
         </Tabs>
@@ -833,7 +873,10 @@ export default function TaskDetailPage() {
           // indicator when the page runs edge to edge.
           <div
             ref={narrowBarRef}
-            className="sticky bottom-0 z-20 border-t border-border bg-background px-4 pt-2 pb-[calc(env(safe-area-inset-bottom)+0.5rem)] md:px-6"
+            className={cn(
+              "sticky bottom-0 z-20 border-t border-border bg-background pt-2 pb-[calc(env(safe-area-inset-bottom)+0.5rem)]",
+              MAIN_GUTTER_X,
+            )}
           >
             <TaskComposer {...composerProps} bar />
           </div>
@@ -844,7 +887,12 @@ export default function TaskDetailPage() {
           bleeds into <main>'s vertical padding, so the column scrolls from
           under the app header down to the window edge and the log gets those
           pixels. */}
-      <div className="hidden @min-[60rem]:grid flex-1 min-h-0 grid-cols-[minmax(0,1fr)_300px] -my-4 md:-my-6">
+      <div
+        className={cn(
+          "hidden @min-[60rem]:grid flex-1 min-h-0 grid-cols-[minmax(0,1fr)_300px]",
+          MAIN_BLEED_Y,
+        )}
+      >
         {/* The column is the only scroller. The log flows in it, and its
             toolbar, minimap and live footer stick under the bar and above the
             message box: both heights go to the log as CSS variables. */}
