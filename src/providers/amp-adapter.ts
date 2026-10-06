@@ -398,6 +398,7 @@ interface AmpContentBlock {
   input?: unknown;
   tool_use_id?: string;
   content?: unknown;
+  is_error?: boolean;
 }
 
 interface AmpStreamEvent {
@@ -828,7 +829,13 @@ class AmpSession implements ProviderSession {
         this.markReceived(toolCallId, event.parent_tool_use_id ?? null);
         const toolName = this.toolNames.get(toolCallId) ?? "tool";
         this.toolNames.delete(toolCallId);
-        this.emit({ type: "tool_end", toolCallId, toolName, result: block.content });
+        this.emit({
+          type: "tool_end",
+          toolCallId,
+          toolName,
+          result: block.content,
+          isError: block.is_error === true,
+        });
       } else if (block.type === "text" && !event.parent_tool_use_id) {
         // Amp echoes each user message as its turn starts.
         const echoed = (block.text ?? "").trim();
@@ -1132,6 +1139,7 @@ export class AmpAdapter implements ProviderAdapter {
     const prompt = await resolveSlashSkillPrompt(config.prompt, {
       providerLabel: "amp",
       skillsDir: join(env.HOME ?? "/home/worker", ".agents", "skills"),
+      onInline: config.onPromptSkill,
     });
     // The effort rides on the plugin agent. Catalog levels exist for a pinned
     // provider/model only; a mode names no model Amp will tell us in advance.

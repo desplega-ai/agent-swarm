@@ -49,6 +49,7 @@ import { readPkgVersion } from "./harness-version";
 import { createSwarmHooksExtension } from "./pi-mono-extension";
 import { McpHttpClient, type McpTool } from "./pi-mono-mcp-client";
 import { applyReasoningEffort, type ReasoningEffort } from "./reasoning-effort";
+import { piPromptSkillName } from "./skill-invoke";
 import type {
   CostData,
   CredCheckOptions,
@@ -1041,6 +1042,7 @@ export class PiMonoSession implements ProviderSession {
           toolCallId: event.toolCallId,
           toolName: event.toolName,
           result: event.result,
+          isError: event.isError,
         });
         break;
       case "auto_retry_end": {
@@ -1060,6 +1062,16 @@ export class PiMonoSession implements ProviderSession {
 
   private async runSession(): Promise<ProviderResult> {
     try {
+      // Pi expands a leading `/skill:name` itself, with no tool call to observe.
+      const onPromptSkill = this.config.onPromptSkill;
+      if (onPromptSkill && this.config.prompt.startsWith("/skill:")) {
+        const promptSkill = piPromptSkillName(
+          this.config.prompt,
+          this.agentSession.resourceLoader.getSkills().skills.map((skill) => skill.name),
+        );
+        if (promptSkill) onPromptSkill(promptSkill);
+      }
+
       // Send the prompt
       await this.agentSession.prompt(this.config.prompt, {
         source: "rpc",

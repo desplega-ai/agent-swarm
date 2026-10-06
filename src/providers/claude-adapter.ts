@@ -655,7 +655,11 @@ export function getSystemPromptFilePath(taskId: string): string {
  * Commands with no SKILL.md under `<home>/.claude/skills` pass through for
  * Claude Code to expand natively. Exported for unit testing.
  */
-export async function resolveClaudePrompt(prompt: string, home: string): Promise<string> {
+export async function resolveClaudePrompt(
+  prompt: string,
+  home: string,
+  onInline?: (skillName: string) => void,
+): Promise<string> {
   const resolved = await resolveSlashSkillPrompt(prompt, {
     providerLabel: "claude",
     skillsDir: join(home, ".claude", "skills"),
@@ -666,6 +670,9 @@ export async function resolveClaudePrompt(prompt: string, home: string): Promise
     emit: (event) => {
       if (event.type === "raw_stderr") console.warn(event.content.trimEnd());
     },
+    // Fires before the leading-dash fallback below; that fallback still loads
+    // the same skill through Claude Code's native expansion.
+    onInline,
   });
   // Any other leading dash would hit the same argv parse error; keep the
   // native (duplicated but working) form instead.
@@ -1102,7 +1109,11 @@ export class ClaudeAdapter implements ProviderAdapter {
     const sourceEnv = withClaudeRouteEnv(config.env || process.env);
     const sessionConfig: ProviderSessionConfig = {
       ...config,
-      prompt: await resolveClaudePrompt(config.prompt, process.env.HOME ?? homedir()),
+      prompt: await resolveClaudePrompt(
+        config.prompt,
+        process.env.HOME ?? homedir(),
+        config.onPromptSkill,
+      ),
     };
     const transport = resolveClaudeTransport(sourceEnv);
     const credType = validateClaudeCredentials(sourceEnv);

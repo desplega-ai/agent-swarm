@@ -334,6 +334,7 @@ export class DshAdapter implements ProviderAdapter {
     const prompt = await resolveSlashSkillPrompt(config.prompt, {
       providerLabel: "dsh",
       skillsDir: join(env.HOME ?? "/home/worker", ".agents", "skills"),
+      onInline: config.onPromptSkill,
     });
     const route = openrouter ? "openrouter" : "deepseek-official";
     const effort = applyReasoningEffort("dsh", model, config.reasoningEffort);

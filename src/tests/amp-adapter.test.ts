@@ -451,6 +451,7 @@ describe("amp session", () => {
       toolCallId: "TU-1",
       toolName: "code_exec",
       result: "2",
+      isError: false,
     });
     expect(events).toContainEqual({ type: "message", role: "assistant", content: "Done ✓" });
     const contexts = events.filter((e) => e.type === "context_usage");

@@ -78,6 +78,7 @@ describe("translateAcpSessionNotification", () => {
           rawOutput: "ok",
           locations: undefined,
         },
+        isError: false,
       },
     ]);
   });

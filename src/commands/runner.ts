@@ -33,6 +33,12 @@ import {
   type ProviderSession,
   type ProviderSessionConfig,
 } from "../providers/index.ts";
+import {
+  createSkillInvokeTracker,
+  isSkillLoaderCall,
+  type SkillInvoke,
+  skillFromToolArgs,
+} from "../providers/skill-invoke.ts";
 import type { SteerDeliveryResult } from "../providers/types.ts";
 import { initTelemetry, telemetry } from "../telemetry.ts";
 import { mapTriggerSurface } from "../telemetry-context.ts";
@@ -3571,12 +3577,10 @@ function extractToolKey(toolName: string, args: unknown): Record<string, string 
       return { pattern: a.pattern as string | undefined };
     case "Glob":
       return { pattern: a.pattern as string | undefined };
-    case "Skill":
-      return { skillName: a.skill as string | undefined };
     case "Agent":
       return { description: a.description as string | undefined };
     default:
-      return {};
+      return isSkillLoaderCall(toolName, args) ? skillFromToolArgs(args) : {};
   }
 }
 
@@ -3992,6 +3996,10 @@ async function spawnProviderProcess(
     }
   }
 
+  // Prompt-path skills can resolve inside createSession, before the event
+  // buffer below exists; the tracker holds them until `attach`.
+  const skillInvokes = createSkillInvokeTracker();
+
   const config: ProviderSessionConfig = {
     prompt: opts.prompt,
     systemPrompt: opts.systemPrompt || "",
@@ -4016,6 +4024,7 @@ async function spawnProviderProcess(
     codexSlot: oauthIsPoolBacked ? oauthSelection?.index : undefined,
     contextKey: opts.contextKey,
     reasoningEffort: reasoningEffortOverride,
+    onPromptSkill: skillInvokes.promptSkill,
   };
 
   // Create the long-lived `worker.session` span up front so the provider
@@ -4110,6 +4119,26 @@ async function spawnProviderProcess(
       );
     }
   }
+
+  function recordSkillInvoke({ via, skillName, skillId }: SkillInvoke) {
+    bufferEvent({
+      category: "skill",
+      event: "skill.invoke",
+      source: "worker",
+      agentId: opts.agentId,
+      taskId: effectiveTaskId,
+      sessionId: opts.runnerSessionId,
+      data: {
+        skillName,
+        ...(skillId ? { skillId } : {}),
+        via,
+        harness: opts.harnessProvider,
+        clientTimestamp: new Date().toISOString(),
+      },
+    });
+  }
+
+  skillInvokes.attach(recordSkillInvoke);
 
   async function flushEvents() {
     if (eventBuffer.length === 0) return;
@@ -4321,25 +4350,13 @@ async function spawnProviderProcess(
             },
           });
 
-          // Also emit skill event when tool is Skill
-          if (event.toolName === "Skill") {
-            const args = event.args as Record<string, unknown>;
-            bufferEvent({
-              category: "skill",
-              event: "skill.invoke",
-              source: "worker",
-              agentId: opts.agentId,
-              taskId: effectiveTaskId,
-              sessionId: opts.runnerSessionId,
-              data: {
-                skillName: args.skill as string,
-                clientTimestamp: new Date().toISOString(),
-              },
-            });
-          }
+          // Also emit a skill event when the tool loads a skill
+          skillInvokes.onEvent(event);
           break;
         }
         case "tool_end": {
+          // A SKILL.md read counts as a skill load only once it succeeds
+          skillInvokes.onEvent(event);
           const active = activeToolSpans.get(event.toolCallId);
           const now = Date.now();
           if (active) {

@@ -537,6 +537,7 @@ class ClaudeManagedSession implements ProviderSession {
           // passing through an empty string here is fine.
           toolName: "",
           result: { content: tr.content ?? [], isError: tr.is_error ?? false },
+          isError: tr.is_error ?? false,
         });
         return { terminal: false, isError: false };
       }
@@ -547,6 +548,7 @@ class ClaudeManagedSession implements ProviderSession {
           toolCallId: tr.mcp_tool_use_id,
           toolName: "",
           result: { content: tr.content ?? [], isError: tr.is_error ?? false },
+          isError: tr.is_error ?? false,
         });
         return { terminal: false, isError: false };
       }

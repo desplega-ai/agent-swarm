@@ -10174,6 +10174,8 @@ type SkillRow = {
   version: number;
   isEnabled: number;
   systemDefault: number;
+  invocationCount: number;
+  lastInvokedAt: string | null;
   createdAt: string;
   lastUpdatedAt: string;
   lastFetchedAt: string | null;
@@ -10204,6 +10206,8 @@ function rowToSkill(row: SkillRow): Skill {
     version: row.version,
     isEnabled: row.isEnabled === 1,
     systemDefault: row.systemDefault === 1,
+    invocationCount: row.invocationCount,
+    lastInvokedAt: row.lastInvokedAt,
     createdAt: row.createdAt,
     lastUpdatedAt: row.lastUpdatedAt,
     lastFetchedAt: row.lastFetchedAt,
@@ -10715,7 +10719,7 @@ export interface SkillFilters {
  * which is replaced with an empty string so the row still satisfies `Skill`.
  */
 const SKILL_SLIM_COLUMNS =
-  "id, name, description, type, scope, ownerAgentId, sourceUrl, sourceRepo, sourcePath, sourceBranch, sourceHash, isComplex, allowedTools, model, effort, context, agent, disableModelInvocation, userInvocable, version, isEnabled, systemDefault, createdAt, lastUpdatedAt, lastFetchedAt, '' as content";
+  "id, name, description, type, scope, ownerAgentId, sourceUrl, sourceRepo, sourcePath, sourceBranch, sourceHash, isComplex, allowedTools, model, effort, context, agent, disableModelInvocation, userInvocable, version, isEnabled, systemDefault, invocationCount, lastInvokedAt, createdAt, lastUpdatedAt, lastFetchedAt, '' as content";
 
 export async function listSkills(filters?: SkillFilters): Promise<Skill[]> {
   const columns = filters?.includeContent === false ? SKILL_SLIM_COLUMNS : "*";

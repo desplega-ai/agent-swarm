@@ -1001,6 +1001,7 @@ export class OpencodeAdapter implements ProviderAdapter {
         providerLabel: "opencode",
         skillsDir: defaultOpencodeSkillsDir(),
         emit: (event) => session?.emitProviderEvent(event),
+        onInline: config.onPromptSkill,
       });
       await client.session.prompt({
         path: { id: sessionId },

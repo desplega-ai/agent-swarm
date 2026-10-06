@@ -81,7 +81,14 @@ export type ProviderEvent =
       messageId?: string;
     }
   | { type: "tool_start"; toolCallId: string; toolName: string; args: unknown }
-  | { type: "tool_end"; toolCallId: string; toolName: string; result: unknown }
+  | {
+      type: "tool_end";
+      toolCallId: string;
+      toolName: string;
+      result: unknown;
+      /** The tool call failed. Set by adapters whose harness reports it; absent means unknown. */
+      isError?: boolean;
+    }
   | { type: "result"; cost: CostData; output?: string; isError: boolean; errorCategory?: string }
   | { type: "error"; message: string; category?: string }
   | { type: "raw_log"; content: string }
@@ -154,6 +161,13 @@ export interface ProviderSessionConfig {
    * (Phase 4).
    */
   reasoningEffort?: ReasoningEffort;
+  /**
+   * Called with the skill name when the adapter loads a skill from the prompt
+   * itself: `resolveSlashSkillPrompt` inlined a leading `/name`, or pi
+   * expanded `/skill:name`. No tool call happens on that path, so the runner
+   * records `skill.invoke` (`via: "prompt"`) from this callback.
+   */
+  onPromptSkill?: (skillName: string) => void;
 }
 
 export type SteerDelivery = { mode: SteerMode; text: string };

@@ -173,6 +173,7 @@ export function translateCursorMessage(message: SDKMessage): ProviderEvent[] {
           toolCallId: message.call_id,
           toolName,
           result: message.status === "error" ? { error: message.result } : message.result,
+          isError: message.status === "error",
         },
       ];
     }
@@ -577,6 +578,7 @@ export class CursorAdapter implements ProviderAdapter {
     const prompt = await resolveSlashSkillPrompt(config.prompt, {
       providerLabel: "cursor",
       skillsDir: join(env.HOME ?? "/home/worker", ".agents", "skills"),
+      onInline: config.onPromptSkill,
     });
     const runtimeInstanceId = swarmRuntimeInstanceId();
     const swarmMcp: McpServerConfig = {

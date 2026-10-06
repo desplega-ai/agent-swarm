@@ -57,17 +57,21 @@ function defaultSkillsDir(): string {
  * @param emit - Optional callback used to surface a `raw_stderr` warning when
  *   the slash command points at a missing SKILL.md. When omitted, warnings
  *   are silently dropped (useful in tests).
+ * @param onInline - Optional callback, called with the skill name when a
+ *   SKILL.md is inlined (the runner records it as `skill.invoke`).
  * @returns The rewritten prompt, or the original if there's nothing to do.
  */
 export async function resolveCodexPrompt(
   prompt: string,
   skillsDir?: string,
   emit?: (event: ProviderEvent) => void,
+  onInline?: (skillName: string) => void,
 ): Promise<string> {
   return resolveSlashSkillPrompt(prompt, {
     providerLabel: "codex",
     skillsDir: skillsDir ?? defaultSkillsDir(),
     emit,
+    onInline,
   });
 }
 
@@ -79,6 +83,8 @@ export async function resolveSlashSkillPrompt(
     emit?: (event: ProviderEvent) => void;
     /** Drop a leading YAML frontmatter block from SKILL.md before inlining. */
     stripFrontmatter?: boolean;
+    /** Called with the skill name once its SKILL.md is inlined. */
+    onInline?: (skillName: string) => void;
   },
 ): Promise<string> {
   if (!prompt) {
@@ -138,6 +144,8 @@ export async function resolveSlashSkillPrompt(
   // plus any subsequent lines from the original prompt. Joined with a newline
   // so `/work-on-task foo\n\nproceed` becomes `foo\n\nproceed`.
   const userRequestBody = trailingArgs && rest ? `${trailingArgs}\n${rest}` : trailingArgs || rest;
+
+  opts.onInline?.(commandName);
 
   return `${skillContent}\n\n---\n\nUser request: ${userRequestBody}`;
 }

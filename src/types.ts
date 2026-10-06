@@ -3282,6 +3282,11 @@ export const SkillSchema = z
     version: z.number(),
     isEnabled: z.boolean(),
     systemDefault: z.boolean(),
+    invocationCount: z
+      .number()
+      .int()
+      .describe("Confirmed invocations across all harnesses, at most one per runner session"),
+    lastInvokedAt: z.string().nullable(),
     createdAt: z.string(),
     lastUpdatedAt: z.string(),
     lastFetchedAt: z.string().nullable(),
