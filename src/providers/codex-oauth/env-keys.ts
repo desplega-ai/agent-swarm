@@ -16,8 +16,14 @@
 
 const CODEX_OAUTH_CONFIG_KEY = /^codex_oauth(_\d+)?$/;
 const CODEX_OAUTH_POOL_SLOT_KEY = /^codex_oauth_\d+$/;
+const CODEX_OAUTH_LEGACY_KEY = "codex_oauth";
+const CODEX_OAUTH_SLOT0_KEY = "codex_oauth_0";
 
-/** Env var carrying the number of usable `codex_oauth_<n>` slots. Not a secret. */
+/**
+ * Env var carrying the number of usable `codex_oauth_<n>` slots. Not a secret.
+ * A legacy `codex_oauth` row counts as slot 0 when no `codex_oauth_0` row has a
+ * value, matching `loadAllCodexOAuthSlots()` in `storage.ts`.
+ */
 export const CODEX_OAUTH_POOL_SLOTS_ENV = "CODEX_OAUTH_POOL_SLOTS";
 
 /** True for the legacy `codex_oauth` key and every `codex_oauth_<n>` slot. */
@@ -25,17 +31,32 @@ export function isCodexOAuthConfigKey(key: string): boolean {
   return CODEX_OAUTH_CONFIG_KEY.test(key);
 }
 
-/** Pool slots whose value carries a non-empty access token. */
+function hasAccessToken(value: string): boolean {
+  try {
+    const parsed = JSON.parse(value);
+    return typeof parsed?.access === "string" && parsed.access.length > 0;
+  } catch {
+    // Unparseable slot: not usable, not counted.
+    return false;
+  }
+}
+
+/**
+ * Pool slots whose value carries a non-empty access token. The legacy
+ * `codex_oauth` row stands in for slot 0 only when no `codex_oauth_0` row has a
+ * value, so the two are never double-counted.
+ */
 export function countCodexOAuthPoolSlots(configs: Array<{ key: string; value: string }>): number {
   let count = 0;
+  let hasSlot0 = false;
   for (const { key, value } of configs) {
     if (!CODEX_OAUTH_POOL_SLOT_KEY.test(key)) continue;
-    try {
-      const parsed = JSON.parse(value);
-      if (typeof parsed?.access === "string" && parsed.access.length > 0) count++;
-    } catch {
-      // Unparseable slot: not usable, not counted.
-    }
+    if (key === CODEX_OAUTH_SLOT0_KEY && value) hasSlot0 = true;
+    if (hasAccessToken(value)) count++;
+  }
+  if (!hasSlot0) {
+    const legacy = configs.find((c) => c.key === CODEX_OAUTH_LEGACY_KEY);
+    if (legacy?.value && hasAccessToken(legacy.value)) count++;
   }
   return count;
 }
