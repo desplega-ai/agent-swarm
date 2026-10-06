@@ -120,6 +120,20 @@ export function translateAcpSessionUpdate(update: SessionUpdate): ProviderEvent[
   }
 }
 
+/**
+ * The USD cost a `usage_update` reports, or null when it reports none. ACP's
+ * `Cost.amount` is the session's cumulative total, not a per-turn delta, so the
+ * latest report is the session total. Session costs are recorded in USD, so a
+ * cost in another currency is ignored; the raw notification keeps it.
+ */
+export function acpReportedCostUsd(update: SessionUpdate): number | null {
+  if (update.sessionUpdate !== "usage_update" || !update.cost) return null;
+  const { amount, currency } = update.cost;
+  if (typeof currency !== "string" || currency.trim().toUpperCase() !== "USD") return null;
+  if (typeof amount !== "number" || !Number.isFinite(amount) || amount < 0) return null;
+  return amount;
+}
+
 export function translateAcpSessionNotification(
   notification: SessionNotification,
 ): ProviderEvent[] {

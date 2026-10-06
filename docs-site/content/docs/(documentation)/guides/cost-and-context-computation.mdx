@@ -40,6 +40,7 @@ When the API receives a `POST /api/session-costs` with a `provider` tag, it does
 | A tag was supplied but pricing cannot be completed | `'unpriced'` | Adapter report |
 | `amp` with a billed cost from `amp threads usage` | `'harness'` | What Amp billed for the thread; the token price fills the per-model breakdown |
 | `amp` without a per-model breakdown (the thread export failed) | `'estimated'` | Stream token totals priced at an assumed model |
+| `acp` whose target reported a USD cost in `usage_update` | `'harness'` | The target's cumulative session cost |
 
 `harnessCostUsd` always preserves the adapter's submitted `totalCostUsd`, even
 when the server replaces `totalCostUsd` with the recomputed value.
@@ -249,7 +250,18 @@ require a separate request/DB/response contract change. Context-window
 
 The `acp_prompt_response` raw session log retains the bounded, scrubbed usage
 payload and optional `_meta`; `usage: null` records an absent payload.
-ACP does not infer USD or a pricing alias from its target. A session with an
-unresolved `(acp, model)` pricing identity remains `unpriced`, even when token
-counts are available. A requested model ID is insufficient evidence for a rate
-mapping when the target can reject that model and fall back to another.
+
+A target can report money in `usage_update.cost` (`amount` plus an ISO 4217
+`currency`). ACP defines `amount` as the session's cumulative cost, and OpenCode
+1.18.34 sends it that way: two turns in one session reported $0.0172 and then
+$0.0345. The swarm sends one prompt per session, so the adapter takes the latest
+USD amount as the session total and sends it as `totalCostUsd`. The API stores it
+as `costSource: 'harness'`.
+
+ACP does not infer USD or a pricing alias from its target. When the target
+reports no cost, or reports it in a currency other than USD, `totalCostUsd` stays
+0 and a session with an unresolved `(acp, model)` pricing identity remains
+`unpriced`, even when token counts are available. The raw `usage_update` session
+log keeps the reported value. A requested model ID is insufficient evidence for
+a rate mapping when the target can reject that model and fall back to another; a
+target-reported cost does not depend on the model ID, so it needs no rate.

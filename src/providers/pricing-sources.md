@@ -189,9 +189,12 @@ and heartbeat-classified roots are omitted, and the metrics remain separate.
   counters to zero, so persisted costs and UI displays lose unknown-vs-zero. The scrubbed
   `acp_prompt_response` session log preserves the payload and optional `_meta`.
   Context-window `usage_update` totals are not billing token estimates.
-  ACP reports no USD amount through `CostData`; unresolved `(acp, model)`
-  pricing identity stays `unpriced`. A target may fall back after rejecting
-  the requested model, so that requested ID alone cannot justify a rate alias.
+  A target may report `usage_update.cost`, the session's cumulative cost. The
+  adapter sends the latest USD amount as `totalCostUsd` and the API stores it as
+  `costSource: 'harness'`. With no cost or a non-USD cost, `totalCostUsd` is 0
+  and unresolved `(acp, model)` pricing identity stays `unpriced`. A target may
+  fall back after rejecting the requested model, so that requested ID alone
+  cannot justify a rate alias.
 
 ## When a model is missing
 

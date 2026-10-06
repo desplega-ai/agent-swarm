@@ -831,4 +831,127 @@ new AgentSideConnection((connection) => new FakeAgent(connection), stream);
       await new Promise<void>((resolve) => swarmServer.close(() => resolve()));
     }
   });
+
+  // Live OpenCode 1.18.34: two turns in one session reported cost 0.0172435 and
+  // then 0.03449, so `cost.amount` is cumulative per session, as the SDK says.
+  test.each<{
+    name: string;
+    costs: Array<{ amount: number; currency: string } | null>;
+    totalCostUsd: number;
+    costSource: string;
+  }>([
+    {
+      name: "cumulative USD reports keep the latest amount",
+      costs: [{ amount: 0.01, currency: "USD" }, null, { amount: 0.025, currency: "USD" }],
+      totalCostUsd: 0.025,
+      costSource: "harness",
+    },
+    {
+      name: "an absent cost stays unpriced",
+      costs: [null],
+      totalCostUsd: 0,
+      costSource: "unpriced",
+    },
+    {
+      name: "a non-USD cost stays unpriced",
+      costs: [{ amount: 0.02, currency: "EUR" }],
+      totalCostUsd: 0,
+      costSource: "unpriced",
+    },
+  ])("$name", async ({ costs, totalCostUsd, costSource }) => {
+    const cwd = makeTempDir();
+    const agentPath = join(cwd, "fake-acp-cost-agent.ts");
+    const sdkPath = join(process.cwd(), "node_modules/@agentclientprotocol/sdk/dist/acp.js");
+    await Bun.write(
+      agentPath,
+      `
+import { Readable, Writable } from "node:stream";
+import { AgentSideConnection, PROTOCOL_VERSION, ndJsonStream } from "${sdkPath}";
+class FakeAgent {
+  constructor(connection) { this.connection = connection; }
+  async initialize() {
+    return { protocolVersion: PROTOCOL_VERSION, agentCapabilities: { loadSession: false } };
+  }
+  async newSession() { return { sessionId: "cost-session-1" }; }
+  async prompt(params) {
+    for (const cost of ${JSON.stringify(costs)}) {
+      await this.connection.sessionUpdate({
+        sessionId: params.sessionId,
+        update: { sessionUpdate: "usage_update", used: 10, size: 100, ...(cost ? { cost } : {}) },
+      });
+    }
+    return { stopReason: "end_turn", usage: { inputTokens: 10, outputTokens: 2, totalTokens: 12 } };
+  }
+  async cancel() {}
+}
+const stream = ndJsonStream(Writable.toWeb(process.stdout), Readable.toWeb(process.stdin));
+new AgentSideConnection((connection) => new FakeAgent(connection), stream);
+`,
+    );
+    const { server: tokenStub, apiUrl } = await startTokenStubServer(
+      "stub-token-id",
+      "aseph_stubtokenfortest1234567890",
+    );
+    try {
+      const session = await new ACPAdapter().createSession(
+        baseConfig({
+          cwd,
+          apiUrl,
+          env: {
+            PATH: process.env.PATH ?? "",
+            HOME: process.env.HOME ?? "",
+            ACP_TARGET_COMMAND: "bun",
+            ACP_TARGET_ARGS: JSON.stringify([agentPath]),
+          },
+        }),
+      );
+      const events: ProviderEvent[] = [];
+      session.onEvent((event) => events.push(event));
+      const result = await session.waitForCompletion();
+      expect(result.cost?.totalCostUsd).toBe(totalCostUsd);
+
+      // The raw usage_update log keeps whatever the target reported.
+      const loggedCosts = events
+        .filter(
+          (event): event is Extract<ProviderEvent, { type: "raw_log" }> => event.type === "raw_log",
+        )
+        .map((event) => JSON.parse(event.content) as { update?: Record<string, unknown> })
+        .filter((entry) => entry.update?.sessionUpdate === "usage_update")
+        .map((entry) => entry.update?.cost ?? null);
+      expect(loggedCosts).toEqual(costs);
+
+      initDb(":memory:");
+      const agent = await createAgent({ name: "ACP USD cost", isLead: false, status: "idle" });
+      const server = createServer(async (req, res) => {
+        const handled = await handleSessionData(
+          req,
+          res,
+          getPathSegments(req.url ?? ""),
+          parseQueryParams(req.url ?? ""),
+          agent.id,
+        );
+        if (!handled) {
+          res.writeHead(404);
+          res.end();
+        }
+      });
+      try {
+        const task = await createTaskExtended("ACP USD cost test");
+        const port = await listenOnFreePort(server);
+        const response = await fetch(`http://127.0.0.1:${port}/api/session-costs`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ...result.cost, agentId: agent.id, taskId: task.id }),
+        });
+        expect(response.status).toBe(201);
+        const { cost } = await response.json();
+        expect(cost).toMatchObject({ totalCostUsd, costSource });
+      } finally {
+        await new Promise<void>((resolve) => server.close(() => resolve()));
+        closeDb();
+      }
+    } finally {
+      await new Promise<void>((resolve) => tokenStub.close(() => resolve()));
+    }
+  });
 });

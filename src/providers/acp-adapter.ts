@@ -20,7 +20,7 @@ import {
   terminateProcessGroup,
 } from "../utils/process-group";
 import { scrubSecrets } from "../utils/secret-scrubber";
-import { translateAcpSessionNotification } from "./acp-swarm-events";
+import { acpReportedCostUsd, translateAcpSessionNotification } from "./acp-swarm-events";
 import { resolveAcpTarget } from "./acp-targets";
 import type {
   CostData,
@@ -147,6 +147,9 @@ function boundedAcpLogScalar(value: unknown): unknown {
 }
 
 class SwarmAcpClient implements Client {
+  /** Latest cumulative USD cost the target reported for the session. */
+  reportedCostUsd: number | null = null;
+
   constructor(private readonly emit: (event: ProviderEvent) => void) {}
 
   async requestPermission(params: RequestPermissionRequest): Promise<RequestPermissionResponse> {
@@ -160,6 +163,8 @@ class SwarmAcpClient implements Client {
 
   async sessionUpdate(params: SessionNotification): Promise<void> {
     this.emit({ type: "raw_log", content: serializeAcpLog(params) });
+    const costUsd = acpReportedCostUsd(params.update);
+    if (costUsd !== null) this.reportedCostUsd = costUsd;
     for (const event of translateAcpSessionNotification(params)) {
       this.emit(event);
     }
@@ -184,6 +189,7 @@ class ACPSession implements ProviderSession {
 
   constructor(
     private readonly connection: ClientSideConnection,
+    private readonly client: SwarmAcpClient,
     private readonly process: Bun.Subprocess<"pipe", "pipe", "pipe">,
     private readonly config: ProviderSessionConfig,
     sessionId: string,
@@ -328,7 +334,9 @@ class ACPSession implements ProviderSession {
       sessionId: this.sessionId,
       taskId: this.config.taskId,
       agentId: this.config.agentId,
-      totalCostUsd: 0,
+      // A swarm session sends one prompt, so the target's cumulative session
+      // cost is the task's total. No USD report keeps 0 and the row unpriced.
+      totalCostUsd: this.client.reportedCostUsd ?? 0,
       inputTokens: usage?.inputTokens,
       outputTokens: usage?.outputTokens,
       cacheReadTokens: usage?.cachedReadTokens ?? undefined,
@@ -439,6 +447,7 @@ export class ACPAdapter implements ProviderAdapter {
       );
       session = new ACPSession(
         connection,
+        client,
         proc,
         config,
         newSession.sessionId,

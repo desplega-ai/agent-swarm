@@ -195,6 +195,13 @@ export async function recomputeSessionCost(
     };
   }
 
+  // An ACP target can fall back from the requested model, so the swarm keeps no
+  // (acp, model) rates. The cost the target reports does not depend on the
+  // model id, so the adapter sends it only when the target reported USD.
+  if (input.provider === "acp" && input.harnessCostUsd > 0) {
+    return { totalCostUsd: input.harnessCostUsd, costSource: "harness", modelBreakdown };
+  }
+
   // amp's top-level model is the mode or pin it was asked for; only the thread
   // export's per-model usage says what ran and how its cache tokens bill.
   if (input.provider === "amp" && !modelUsageEntries) return estimateAmpCost(input, lookupRate);
