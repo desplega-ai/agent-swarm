@@ -1042,6 +1042,7 @@ export class PiMonoSession implements ProviderSession {
           toolCallId: event.toolCallId,
           toolName: event.toolName,
           result: event.result,
+          isError: event.isError,
         });
         break;
       case "auto_retry_end": {

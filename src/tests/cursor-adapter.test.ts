@@ -304,7 +304,13 @@ describe("translateCursorMessage", () => {
         result: "boom",
       }),
     ).toEqual([
-      { type: "tool_end", toolCallId: "c1", toolName: "shell", result: { error: "boom" } },
+      {
+        type: "tool_end",
+        toolCallId: "c1",
+        toolName: "shell",
+        result: { error: "boom" },
+        isError: true,
+      },
     ]);
   });
 

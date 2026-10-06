@@ -34,11 +34,10 @@ import {
   type ProviderSessionConfig,
 } from "../providers/index.ts";
 import {
-  createPromptSkillRecorder,
-  isSkillToolName,
+  createSkillInvokeTracker,
+  isSkillLoaderCall,
   type SkillInvoke,
   skillFromToolArgs,
-  skillInvokeFromToolStart,
 } from "../providers/skill-invoke.ts";
 import type { SteerDeliveryResult } from "../providers/types.ts";
 import { initTelemetry, telemetry } from "../telemetry.ts";
@@ -3581,7 +3580,7 @@ function extractToolKey(toolName: string, args: unknown): Record<string, string 
     case "Agent":
       return { description: a.description as string | undefined };
     default:
-      return isSkillToolName(toolName) ? skillFromToolArgs(args) : {};
+      return isSkillLoaderCall(toolName, args) ? skillFromToolArgs(args) : {};
   }
 }
 
@@ -3998,8 +3997,8 @@ async function spawnProviderProcess(
   }
 
   // Prompt-path skills can resolve inside createSession, before the event
-  // buffer below exists; the recorder holds them until `attach`.
-  const promptSkills = createPromptSkillRecorder();
+  // buffer below exists; the tracker holds them until `attach`.
+  const skillInvokes = createSkillInvokeTracker();
 
   const config: ProviderSessionConfig = {
     prompt: opts.prompt,
@@ -4025,7 +4024,7 @@ async function spawnProviderProcess(
     codexSlot: oauthIsPoolBacked ? oauthSelection?.index : undefined,
     contextKey: opts.contextKey,
     reasoningEffort: reasoningEffortOverride,
-    onPromptSkill: promptSkills.record,
+    onPromptSkill: skillInvokes.promptSkill,
   };
 
   // Create the long-lived `worker.session` span up front so the provider
@@ -4138,7 +4137,7 @@ async function spawnProviderProcess(
     });
   }
 
-  promptSkills.attach((skillName) => recordSkillInvoke({ via: "prompt", skillName }));
+  skillInvokes.attach(recordSkillInvoke);
 
   async function flushEvents() {
     if (eventBuffer.length === 0) return;
@@ -4351,11 +4350,12 @@ async function spawnProviderProcess(
           });
 
           // Also emit a skill event when the tool loads a skill
-          const skillInvoke = skillInvokeFromToolStart(event.toolName, event.args);
-          if (skillInvoke) recordSkillInvoke(skillInvoke);
+          skillInvokes.onEvent(event);
           break;
         }
         case "tool_end": {
+          // A SKILL.md read counts as a skill load only once it succeeds
+          skillInvokes.onEvent(event);
           const active = activeToolSpans.get(event.toolCallId);
           const now = Date.now();
           if (active) {

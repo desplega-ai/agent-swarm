@@ -13,12 +13,13 @@ import { resolveClaudePrompt } from "../providers/claude-adapter";
 import { resolveCodexPrompt, resolveSlashSkillPrompt } from "../providers/codex-skill-resolver";
 import { PiMonoSession } from "../providers/pi-mono-adapter";
 import {
-  createPromptSkillRecorder,
-  isSkillToolName,
+  createSkillInvokeTracker,
+  isSkillLoaderCall,
   piPromptSkillName,
+  type SkillInvoke,
   skillInvokeFromToolStart,
 } from "../providers/skill-invoke";
-import type { ProviderSessionConfig } from "../providers/types";
+import type { ProviderEvent, ProviderSessionConfig } from "../providers/types";
 
 describe("skillInvokeFromToolStart — tool path", () => {
   test.each([
@@ -27,6 +28,8 @@ describe("skillInvokeFromToolStart — tool path", () => {
     ["skill-get", { name: "researching" }, "researching"],
     ["swarm_skill-get", { name: "planning" }, "planning"],
     ["mcp__agent-swarm__skill-get", { name: "implementing" }, "implementing"],
+    ["mcp__agent_swarm__skill_get", { name: "pages" }, "pages"],
+    ["agent-swarm.skill-get", { name: "apps" }, "apps"],
   ])("%s records the skill named in its args", (toolName, args, skillName) => {
     expect(skillInvokeFromToolStart(toolName, args)).toEqual({ via: "tool", skillName });
   });
@@ -63,8 +66,28 @@ describe("skillInvokeFromToolStart — tool path", () => {
     "Skills",
     "reskill",
   ])("negative control: %s records nothing", (toolName) => {
-    expect(isSkillToolName(toolName)).toBe(false);
+    expect(isSkillLoaderCall(toolName, {})).toBe(false);
     expect(skillInvokeFromToolStart(toolName, { name: "commit", skill: "commit" })).toBeNull();
+  });
+});
+
+describe("skillInvokeFromToolStart — only known skill loaders count", () => {
+  test.each([
+    // Codex reports an MCP call by its bare tool name; the server sits in the args.
+    ["skill", { server: "crm", tool: "skill", arguments: { name: "typescript" } }],
+    ["skill-get", { server: "crm", tool: "skill-get", arguments: { name: "typescript" } }],
+    ["skill_get", { server: "docs", tool: "skill_get", arguments: '{"name":"typescript"}' }],
+    ["skill-get", { server: "agent-swarm", tool: "skill-list", arguments: { name: "x" } }],
+    // Prefixed names from a server other than the swarm's.
+    ["mcp__crm__skill_get", { name: "typescript" }],
+    ["mcp__crm__skill-get", { name: "typescript" }],
+    ["mcp__crm__Skill", { skill: "typescript" }],
+    ["crm_skill-get", { name: "typescript" }],
+    ["crm.skill-get", { name: "typescript" }],
+    ["crm:skill_get", { name: "typescript" }],
+  ])("negative control: %s %j records nothing", (toolName, args) => {
+    expect(isSkillLoaderCall(toolName, args)).toBe(false);
+    expect(skillInvokeFromToolStart(toolName, args)).toBeNull();
   });
 });
 
@@ -102,18 +125,85 @@ describe("piPromptSkillName", () => {
   });
 });
 
-describe("createPromptSkillRecorder", () => {
-  test("holds names recorded before attach, then emits each name once", () => {
-    const recorder = createPromptSkillRecorder();
-    const emitted: string[] = [];
-    recorder.record("work-on-task");
-    recorder.record("work-on-task");
+describe("createSkillInvokeTracker", () => {
+  function track() {
+    const tracker = createSkillInvokeTracker();
+    const emitted: SkillInvoke[] = [];
+    return { tracker, emitted, attach: () => tracker.attach((i) => emitted.push(i)) };
+  }
+  const toolStart = (toolCallId: string, toolName: string, args: unknown): ProviderEvent => ({
+    type: "tool_start",
+    toolCallId,
+    toolName,
+    args,
+  });
+  const toolEnd = (toolCallId: string, isError?: boolean): ProviderEvent => ({
+    type: "tool_end",
+    toolCallId,
+    toolName: "read",
+    result: isError ? "ENOENT: no such file or directory" : "# Skill",
+    ...(isError === undefined ? {} : { isError }),
+  });
+  const skillMd = (name: string) => ({ path: `/home/worker/.pi/agent/skills/${name}/SKILL.md` });
+
+  test("holds invocations recorded before attach, then emits each skill once", () => {
+    const { tracker, emitted, attach } = track();
+    tracker.promptSkill("work-on-task");
+    tracker.promptSkill("work-on-task");
     expect(emitted).toEqual([]);
-    recorder.attach((name) => emitted.push(name));
-    expect(emitted).toEqual(["work-on-task"]);
-    recorder.record("researching");
-    recorder.record("work-on-task");
-    expect(emitted).toEqual(["work-on-task", "researching"]);
+    attach();
+    expect(emitted).toEqual([{ via: "prompt", skillName: "work-on-task" }]);
+    tracker.promptSkill("researching");
+    expect(emitted.map((i) => i.skillName)).toEqual(["work-on-task", "researching"]);
+  });
+
+  test("one session-level row per skill across prompt, tool, and read delivery", () => {
+    const { tracker, emitted, attach } = track();
+    tracker.promptSkill("work-on-task");
+    attach();
+    tracker.onEvent(toolStart("t1", "skill-get", { name: "work-on-task" }));
+    tracker.onEvent(toolStart("t2", "mcp__agent-swarm__skill-get", { name: "work-on-task" }));
+    tracker.onEvent(toolStart("t3", "read", skillMd("work-on-task")));
+    tracker.onEvent(toolEnd("t3"));
+    tracker.onEvent(toolStart("t4", "Skill", { skill: "researching" }));
+    tracker.onEvent(toolStart("t5", "read", skillMd("researching")));
+    tracker.onEvent(toolEnd("t5"));
+    expect(emitted).toEqual([
+      { via: "prompt", skillName: "work-on-task" },
+      { via: "tool", skillName: "researching" },
+    ]);
+  });
+
+  test("a call naming both a skill and its id claims both keys", () => {
+    const { tracker, emitted, attach } = track();
+    attach();
+    tracker.onEvent(toolStart("t1", "skill-get", { name: "pages", skillId: "sk-1" }));
+    tracker.onEvent(toolStart("t2", "skill-get", { skillId: "sk-1" }));
+    tracker.onEvent(toolStart("t3", "skill-get", { name: "pages" }));
+    expect(emitted).toEqual([{ via: "tool", skillName: "pages", skillId: "sk-1" }]);
+  });
+
+  test("a SKILL.md read counts only after its tool_end succeeds", () => {
+    const { tracker, emitted, attach } = track();
+    attach();
+    tracker.onEvent(toolStart("r1", "read", skillMd("researching")));
+    expect(emitted).toEqual([]);
+    tracker.onEvent(toolEnd("r1", false));
+    expect(emitted).toEqual([{ via: "read", skillName: "researching" }]);
+  });
+
+  test("negative control: a failed or unfinished SKILL.md read records nothing", () => {
+    const { tracker, emitted, attach } = track();
+    attach();
+    tracker.onEvent(toolStart("r1", "read", skillMd("does-not-exist")));
+    tracker.onEvent(toolEnd("r1", true));
+    tracker.onEvent(toolStart("r2", "read", skillMd("never-finished")));
+    tracker.onEvent(toolEnd("other-call"));
+    expect(emitted).toEqual([]);
+    // The failed read does not claim the name: a later successful load still counts.
+    tracker.onEvent(toolStart("r3", "read", skillMd("does-not-exist")));
+    tracker.onEvent(toolEnd("r3"));
+    expect(emitted).toEqual([{ via: "read", skillName: "does-not-exist" }]);
   });
 });
 
@@ -224,5 +314,82 @@ describe("prompt path — pi /skill:", () => {
     await piSession("/skill:unknown abc", (n) => reported.push(n)).waitForCompletion();
     await piSession("plain prompt", (n) => reported.push(n)).waitForCompletion();
     expect(reported).toEqual([]);
+  });
+});
+
+describe("read path — pi event boundary", () => {
+  type PiListener = (event: Record<string, unknown>) => void;
+
+  /** A pi session whose prompt runs two `read` calls of SKILL.md: one fails, one succeeds. */
+  function piReadSession(): PiMonoSession {
+    const listeners: PiListener[] = [];
+    const read = (toolCallId: string, name: string, isError: boolean) => {
+      const args = { path: `/home/worker/.pi/agent/skills/${name}/SKILL.md` };
+      for (const l of listeners)
+        l({ type: "tool_execution_start", toolCallId, toolName: "read", args });
+      for (const l of listeners) {
+        l({
+          type: "tool_execution_end",
+          toolCallId,
+          toolName: "read",
+          result: isError ? "ENOENT: no such file or directory" : "# Skill",
+          isError,
+        });
+      }
+    };
+    const agentSession = {
+      sessionId: "mock-session-id",
+      isStreaming: false,
+      model: undefined,
+      resourceLoader: { getSkills: () => ({ skills: [] }) },
+      subscribe: (listener: PiListener) => {
+        listeners.push(listener);
+        return () => {};
+      },
+      prompt: async () => {
+        read("missing", "does-not-exist", true);
+        read("found", "researching", false);
+      },
+      getContextUsage: () => null,
+      getSessionStats: () => ({
+        tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+        cost: 0,
+        userMessages: 0,
+        assistantMessages: 0,
+      }),
+      abort: async () => {},
+      dispose: () => {},
+    } as unknown as AgentSession;
+    const config: ProviderSessionConfig = {
+      prompt: "load your skills",
+      systemPrompt: "",
+      model: "test-model",
+      role: "worker",
+      agentId: "test-agent-id",
+      taskId: "test-task-id",
+      apiUrl: "http://localhost:0",
+      apiKey: "test",
+      cwd: tmpdir(),
+      logFile: join(tmpdir(), `skill-invoke-pi-read-${Date.now()}-${Math.random()}.log`),
+    };
+    return new PiMonoSession(agentSession, config, false);
+  }
+
+  test("a failed read is not a skill load; the successful one is", async () => {
+    const tracker = createSkillInvokeTracker();
+    const emitted: SkillInvoke[] = [];
+    tracker.attach((i) => emitted.push(i));
+    const session = piReadSession();
+    const toolEnds: ProviderEvent[] = [];
+    session.onEvent((event) => {
+      if (event.type === "tool_end") toolEnds.push(event);
+      tracker.onEvent(event);
+    });
+    await session.waitForCompletion();
+    expect(toolEnds.map((e) => e.type === "tool_end" && [e.toolCallId, e.isError])).toEqual([
+      ["missing", true],
+      ["found", false],
+    ]);
+    expect(emitted).toEqual([{ via: "read", skillName: "researching" }]);
   });
 });

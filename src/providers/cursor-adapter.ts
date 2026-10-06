@@ -173,6 +173,7 @@ export function translateCursorMessage(message: SDKMessage): ProviderEvent[] {
           toolCallId: message.call_id,
           toolName,
           result: message.status === "error" ? { error: message.result } : message.result,
+          isError: message.status === "error",
         },
       ];
     }

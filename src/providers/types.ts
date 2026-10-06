@@ -81,7 +81,14 @@ export type ProviderEvent =
       messageId?: string;
     }
   | { type: "tool_start"; toolCallId: string; toolName: string; args: unknown }
-  | { type: "tool_end"; toolCallId: string; toolName: string; result: unknown }
+  | {
+      type: "tool_end";
+      toolCallId: string;
+      toolName: string;
+      result: unknown;
+      /** The tool call failed. Set by adapters whose harness reports it; absent means unknown. */
+      isError?: boolean;
+    }
   | { type: "result"; cost: CostData; output?: string; isError: boolean; errorCategory?: string }
   | { type: "error"; message: string; category?: string }
   | { type: "raw_log"; content: string }

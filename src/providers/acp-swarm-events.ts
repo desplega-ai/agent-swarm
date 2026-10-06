@@ -69,6 +69,7 @@ export function translateAcpSessionUpdate(update: SessionUpdate): ProviderEvent[
             toolCallId: update.toolCallId,
             toolName: toolName(update),
             result: toolResult(update),
+            isError: update.status === "failed",
           },
         ];
       }
