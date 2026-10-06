@@ -68,7 +68,7 @@ import {
   REBOOT_RETRY_PIN_TAG,
   resolveLeadOnlyRecoveryAssignment,
 } from "../tasks/worker-follow-up";
-import type { AgentTask } from "../types";
+import { type AgentTask, TERMINAL_TASK_STATUSES } from "../types";
 import { isEnvFlagEnabled } from "../utils/env-flag";
 import { isMultiRuntimeEnabled } from "../utils/multi-runtime";
 import { scrubSecrets } from "../utils/secret-scrubber";
@@ -880,9 +880,9 @@ export async function runRebootSweep(): Promise<void> {
         const existingRetry = await getDbClient().get<{ id: string }>(
           `SELECT id FROM agent_tasks
            WHERE parentTaskId = ?
-             AND status NOT IN ('completed', 'failed', 'cancelled')
+             AND status NOT IN (${TERMINAL_TASK_STATUSES.map(() => "?").join(", ")})
            LIMIT 1`,
-          [task.id],
+          [task.id, ...TERMINAL_TASK_STATUSES],
         );
 
         if (!existingRetry) {
@@ -1625,9 +1625,9 @@ export async function checkHeartbeatChecklist(): Promise<void> {
     `SELECT id FROM agent_tasks
        WHERE agentId = ?
          AND taskType = 'heartbeat-checklist'
-         AND status NOT IN ('completed', 'failed', 'cancelled')
+         AND status NOT IN (${TERMINAL_TASK_STATUSES.map(() => "?").join(", ")})
        LIMIT 1`,
-    [lead.id],
+    [lead.id, ...TERMINAL_TASK_STATUSES],
   );
   if (existing) return;
 
@@ -1858,9 +1858,9 @@ export async function createBootTriageTask(): Promise<void> {
     `SELECT id FROM agent_tasks
        WHERE agentId = ?
          AND taskType = 'boot-triage'
-         AND status NOT IN ('completed', 'failed', 'cancelled')
+         AND status NOT IN (${TERMINAL_TASK_STATUSES.map(() => "?").join(", ")})
        LIMIT 1`,
-    [lead.id],
+    [lead.id, ...TERMINAL_TASK_STATUSES],
   );
   if (existing) return;
 
