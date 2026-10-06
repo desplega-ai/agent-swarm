@@ -70,7 +70,14 @@ const SENSITIVE_KEY_EXACT = new Set<string>([
 ]);
 
 /** Suffixes that mark an env-var value as sensitive by convention. */
-const SENSITIVE_KEY_SUFFIXES = ["_API_KEY", "_TOKEN", "_SECRET", "_PASSWORD", "_PRIVATE_KEY"];
+const SENSITIVE_KEY_SUFFIXES = [
+  "_API_KEY",
+  "_TOKEN",
+  "_SECRET",
+  "_PASSWORD",
+  "_PASS",
+  "_PRIVATE_KEY",
+];
 
 /** Keys that match the sensitive suffix heuristic but are actually safe URLs/configs. */
 const NON_SECRET_EXCEPTIONS = new Set<string>([
@@ -84,9 +91,60 @@ const NON_SECRET_EXCEPTIONS = new Set<string>([
  * Minimum length for an env-var value to be considered scrub-worthy.
  * Short values (< 12 chars) cause false-positive replacements across
  * legitimate log content (e.g. a 6-char password would collide with a user
- * name). For short secrets we rely on the regex pass only.
+ * name). Short secrets are still caught when they appear as the value of a
+ * sensitive `KEY=value` assignment (see ASSIGNMENT_RE).
  */
 const MIN_VALUE_LENGTH = 12;
+
+/**
+ * Every form a known value can take in a log line: raw, escaped inside shell
+ * double quotes (`declare -x` / `export -p` prefix `\`, `$`, `"` and backtick
+ * with a backslash), inside shell single quotes, and each of those again as a
+ * JSON string body (session logs are JSONL).
+ */
+function escapedForms(value: string): string[] {
+  const forms = new Set([value, value.replace(/[\\$"`]/g, "\\$&"), value.replaceAll("'", "'\\''")]);
+  for (const form of [...forms]) forms.add(JSON.stringify(form).slice(1, -1));
+  return [...forms];
+}
+
+// Value shapes after `KEY=`. Each one consumes escape pairs whole, so the
+// first unescaped closing quote ends the value. Closing quotes are optional
+// so a truncated line still gets its tail redacted.
+//   JSON_DQ: `\"…\"` — a shell double-quoted value inside a JSON string.
+//   RAW_DQ:  `"…"`   — a shell double-quoted value (`declare -x KEY="…"`).
+//   SQ:      `'…'`   — a shell single-quoted value, raw or JSON (`'\''`).
+//   BARE:    unquoted, up to whitespace, a quote, or a JSON escape (`\n`).
+const JSON_DQ = String.raw`\\"(?:\\\\(?:\\\\|\\"|[^\\"])|\\[^\\"]|[^"\\])*(?:\\")?`;
+const RAW_DQ = String.raw`"(?:\\[\s\S]|[^"\\])*"?`;
+const SQ = String.raw`'(?:[^'\\]|'\\\\?''|\\[\s\S])*'?`;
+const BARE = String.raw`(?:\\[^nrtu"\s]|[^\s"'\\])+`;
+
+/**
+ * `KEY=value` where the value is redacted when KEY is sensitive, whatever the
+ * value's length and whether this process ever saw it (e.g. a token the
+ * harness generated inside a child process). The key must start a word or
+ * follow a JSON `\n`/`\r`/`\t` escape. `==` comparisons are not assignments.
+ */
+const ASSIGNMENT_RE = new RegExp(
+  String.raw`(?:(?<=\\[nrt])|(?<![\w\\]))([A-Za-z_][A-Za-z0-9_]*)=(?!=)(${JSON_DQ}|${RAW_DQ}|${SQ}|${BARE})`,
+  "g",
+);
+
+function redactAssignment(match: string, key: string, value: string): string {
+  if (!isSensitiveKey(key)) return match;
+  let open = "";
+  let close = "";
+  for (const quote of ['\\"', '"', "'"]) {
+    if (!value.startsWith(quote)) continue;
+    open = quote;
+    if (value.length >= quote.length * 2 && value.endsWith(quote)) close = quote;
+    break;
+  }
+  const inner = value.slice(open.length, value.length - close.length);
+  if (inner === "" || /^\[REDACTED:[^\]]*\]$/.test(inner)) return match;
+  return `${key}=${open}[REDACTED:${key}]${close}`;
+}
 
 /**
  * Structural regex patterns for common credential shapes. Applied AFTER the
@@ -175,6 +233,8 @@ interface ScrubCache {
 
 let cache: ScrubCache | null = null;
 const volatileSecrets = new Map<string, string>();
+/** Key names marked secret at runtime (swarm_config rows with isSecret=1). */
+const registeredSensitiveKeys = new Set<string>();
 
 /** Fingerprint current env so we can invalidate cache cheaply when it changes. */
 function snapshotEnv(): string {
@@ -190,7 +250,7 @@ function snapshotEnv(): string {
 
 export function isSensitiveKey(key: string): boolean {
   if (NON_SECRET_EXCEPTIONS.has(key)) return false;
-  if (SENSITIVE_KEY_EXACT.has(key)) return true;
+  if (SENSITIVE_KEY_EXACT.has(key) || registeredSensitiveKeys.has(key)) return true;
   for (const suffix of SENSITIVE_KEY_SUFFIXES) {
     if (key.endsWith(suffix)) return true;
   }
@@ -217,9 +277,11 @@ function buildCache(): ScrubCache {
     for (const candidate of candidates) {
       if (!candidate) continue;
       if (candidate.length < MIN_VALUE_LENGTH) continue;
-      if (seen.has(candidate)) continue;
-      seen.add(candidate);
-      entries.push({ value: candidate, name: key });
+      for (const form of escapedForms(candidate)) {
+        if (seen.has(form)) continue;
+        seen.add(form);
+        entries.push({ value: form, name: key });
+      }
     }
   }
 
@@ -271,6 +333,10 @@ export function scrubSecrets(text: string | null | undefined): string {
     out = out.replace(re, `[REDACTED:${name}]`);
   }
 
+  // Pass 3: values of sensitive `KEY=value` assignments (env dumps, .env
+  // files, shell traces), including ones too short for pass 1.
+  out = out.replace(ASSIGNMENT_RE, redactAssignment);
+
   return out;
 }
 
@@ -314,9 +380,24 @@ export function refreshSecretScrubberCache(): void {
  */
 export function registerVolatileSecret(value: string, name: string): void {
   if (value.length < MIN_VALUE_LENGTH) return;
-  volatileSecrets.set(value, name);
+  for (const form of escapedForms(value)) volatileSecrets.set(form, name);
 }
 
+/**
+ * Mark a key name as sensitive at runtime (a swarm_config row with
+ * isSecret=1 whose name matches no suffix rule). Its process.env value joins
+ * the exact-match pass, and `KEY=value` assignments of it are redacted at any
+ * value length.
+ */
+export function registerSensitiveKeyName(key: string): void {
+  if (registeredSensitiveKeys.has(key)) return;
+  registeredSensitiveKeys.add(key);
+  cache = null;
+}
+
+/** Test-only: drop volatile values and runtime-registered key names. */
 export function clearVolatileSecretsForTesting(): void {
   volatileSecrets.clear();
+  registeredSensitiveKeys.clear();
+  cache = null;
 }

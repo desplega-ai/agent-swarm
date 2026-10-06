@@ -36,7 +36,7 @@ import {
   runWithoutRequestAuth,
   setRequestAuth,
 } from "../utils/request-auth-context";
-import { refreshSecretScrubberCache } from "../utils/secret-scrubber";
+import { refreshSecretScrubberCache, registerSensitiveKeyName } from "../utils/secret-scrubber";
 import { resolveHttpRequestAuth } from "./auth";
 import { generateOpenApiSpec, SCALAR_HTML } from "./openapi";
 import { findRoute, isPublicRoute, route, runtimeInstanceHeader } from "./route-def";
@@ -75,6 +75,9 @@ export async function loadGlobalConfigsIntoEnv(override = false): Promise<string
 
   for (const config of globalConfigs) {
     liveKeys.add(config.key);
+    // A secret row's name may match no sensitive-suffix rule; register it so
+    // the scrubber covers its env value and `KEY=value` dumps of it.
+    if (config.isSecret) registerSensitiveKeyName(config.key);
     if (override || !process.env[config.key]) {
       const previous = injectedEnvOriginals.get(config.key);
       injectedEnvOriginals.set(config.key, {

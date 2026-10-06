@@ -75,7 +75,7 @@ import { prettyPrintLine, prettyPrintStderr } from "../utils/pretty-print.ts";
 import { terminateRegisteredProcessGroups } from "../utils/process-group.ts";
 import { refreshRuntimeModelCatalog } from "../utils/runtime-model-catalog.ts";
 import { resolveScriptsOnlyMode } from "../utils/scripts-only-mode.ts";
-import { scrubSecrets } from "../utils/secret-scrubber.ts";
+import { registerSensitiveKeyName, scrubSecrets } from "../utils/secret-scrubber.ts";
 import { refreshSkillsIfChanged } from "../utils/skills-refresh.ts";
 import { guardSpawnModel } from "../utils/spawn-model-guard.ts";
 import { isSteeringEnabled } from "../utils/steering-enabled.ts";
@@ -862,7 +862,7 @@ export async function fetchResolvedEnv(
         console.warn(`[env-reload] Failed to fetch config: ${response.status}`);
       } else {
         const data = (await response.json()) as {
-          configs: Array<{ key: string; value: string }>;
+          configs: Array<{ key: string; value: string; isSecret?: boolean }>;
         };
 
         // A deleted row restores the deployment value (including unset), while
@@ -883,6 +883,9 @@ export async function fetchResolvedEnv(
           for (const config of data.configs) {
             // Read on demand via codex-oauth/storage.ts; see env-keys.ts.
             if (isCodexOAuthConfigKey(config.key)) continue;
+            // Lets the scrubber redact `KEY=value` dumps of secret rows whose
+            // name matches no sensitive-suffix rule.
+            if (config.isSecret) registerSensitiveKeyName(config.key);
             // A blank swarm_config value for a BLANK_ROW_IS_STRAY_KEYS entry
             // (the model-control keys) must not silently blank out a
             // genuinely-set container/boot env value — that key exists

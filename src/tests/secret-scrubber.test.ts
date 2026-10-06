@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   clearVolatileSecretsForTesting,
   refreshSecretScrubberCache,
+  registerSensitiveKeyName,
   registerVolatileSecret,
   scrubObject,
   scrubSecrets,
@@ -389,5 +390,125 @@ describe("registerVolatileSecret", () => {
     registerVolatileSecret("short", "TOO_SHORT");
     const out = scrubSecrets("contains short somewhere");
     expect(out).toBe("contains short somewhere");
+  });
+});
+
+// All values below are synthetic. `declare -x` (and bash `export -p`) wraps a
+// value in double quotes and prefixes `\`, `$`, `"` and backtick with `\`.
+function declareX(key: string, value: string): string {
+  return `declare -x ${key}="${value.replace(/[\\$"`]/g, "\\$&")}"`;
+}
+
+/** A log line as it lands in session_logs: the text inside a JSON string. */
+function jsonBody(text: string): string {
+  return JSON.stringify(text).slice(1, -1);
+}
+
+describe("scrubSecrets — env dumps and escaped forms", () => {
+  afterEach(() => {
+    clearVolatileSecretsForTesting();
+  });
+
+  test("redacts an 8-char secret in a sensitive assignment, raw and JSON-escaped", () => {
+    const secret = "Qz8#kLm2";
+    process.env.DEMO_ACCOUNT_PASSWORD = secret;
+    refreshSecretScrubberCache();
+
+    const dump = declareX("DEMO_ACCOUNT_PASSWORD", secret);
+    expect(scrubSecrets(dump)).toBe(
+      'declare -x DEMO_ACCOUNT_PASSWORD="[REDACTED:DEMO_ACCOUNT_PASSWORD]"',
+    );
+    expect(scrubSecrets(jsonBody(dump))).toBe(
+      'declare -x DEMO_ACCOUNT_PASSWORD=\\"[REDACTED:DEMO_ACCOUNT_PASSWORD]\\"',
+    );
+    expect(scrubSecrets(`DEMO_ACCOUNT_PASSWORD=${secret}\\nNEXT=1`)).toBe(
+      "DEMO_ACCOUNT_PASSWORD=[REDACTED:DEMO_ACCOUNT_PASSWORD]\\nNEXT=1",
+    );
+    expect(scrubSecrets(`export DEMO_ACCOUNT_PASSWORD='${secret}'`)).toBe(
+      "export DEMO_ACCOUNT_PASSWORD='[REDACTED:DEMO_ACCOUNT_PASSWORD]'",
+    );
+  });
+
+  test("redacts a short secret whose key is only known as an isSecret config row", () => {
+    const secret = "pw7$Kx";
+    const dump = jsonBody(`${declareX("DEMO_LOGIN_PW", secret)}\n`);
+    // Not sensitive by name alone.
+    expect(scrubSecrets(dump)).toBe(dump);
+
+    registerSensitiveKeyName("DEMO_LOGIN_PW");
+    const out = scrubSecrets(dump);
+    expect(out).toBe('declare -x DEMO_LOGIN_PW=\\"[REDACTED:DEMO_LOGIN_PW]\\"\\n');
+    expect(out).not.toContain("Kx");
+  });
+
+  test('redacts a secret containing $ and " rendered through declare -x', () => {
+    const secret = 'Ab$cD"eF`gh\\iJ90';
+    process.env.DEMO_BOT_PASS = secret;
+    refreshSecretScrubberCache();
+
+    const dump = declareX("DEMO_BOT_PASS", secret);
+    for (const line of [dump, jsonBody(dump)]) {
+      const out = scrubSecrets(line);
+      expect(out).toContain("[REDACTED:DEMO_BOT_PASS]");
+      expect(out).not.toContain("iJ90");
+    }
+
+    // Outside an assignment, the exact-match pass still sees the escaped forms.
+    const escaped = secret.replace(/[\\$"`]/g, "\\$&");
+    for (const line of [`echo "${escaped}"`, jsonBody(`echo "${escaped}"`), jsonBody(secret)]) {
+      const out = scrubSecrets(line);
+      expect(out).toContain("[REDACTED:DEMO_BOT_PASS]");
+      expect(out).not.toContain("iJ90");
+    }
+  });
+
+  test("redacts a harness-generated *_TOKEN value this process never saw", () => {
+    const token = "0f1e2d3c4b5a69788796a5b4c3d2e1f0";
+    // The harness sets this in its child's env, not in the scrubbing process.
+    delete process.env.CLAUDE_CODE_MESSAGING_TOKEN;
+    refreshSecretScrubberCache();
+    const dump = declareX("CLAUDE_CODE_MESSAGING_TOKEN", token);
+    expect(scrubSecrets(dump)).toBe(
+      'declare -x CLAUDE_CODE_MESSAGING_TOKEN="[REDACTED:CLAUDE_CODE_MESSAGING_TOKEN]"',
+    );
+    expect(scrubSecrets(jsonBody(`x\n${dump}\n`))).toBe(
+      'x\\ndeclare -x CLAUDE_CODE_MESSAGING_TOKEN=\\"[REDACTED:CLAUDE_CODE_MESSAGING_TOKEN]\\"\\n',
+    );
+  });
+
+  test("registered volatile secrets are matched in escaped forms too", () => {
+    const secret = 'vol$tile"Secret_123';
+    registerVolatileSecret(secret, "config:DEMO_VOLATILE");
+    const out = scrubSecrets(jsonBody(`a ${secret} b ${secret.replace(/[\\$"`]/g, "\\$&")}`));
+    expect(out).toBe("a [REDACTED:config:DEMO_VOLATILE] b [REDACTED:config:DEMO_VOLATILE]");
+  });
+
+  test("leaves short non-secret values and non-assignments alone", () => {
+    process.env.DEMO_SHORT_TOKEN = "deploy";
+    refreshSecretScrubberCache();
+    const s = [
+      declareX("USER", "deploy"),
+      declareX("SHELL", "/bin/bash"),
+      "NODE_ENV=prod LANG=C",
+      "logged in as deploy",
+      "if (process.env.GITHUB_TOKEN === undefined) return;",
+      "DEMO_SHORT_TOKEN== deploy",
+      'declare -x DEMO_SHORT_TOKEN=""',
+    ].join("\n");
+    expect(scrubSecrets(s)).toBe(s);
+    expect(scrubSecrets(jsonBody(s))).toBe(jsonBody(s));
+  });
+
+  test("is idempotent on redacted assignments", () => {
+    process.env.DEMO_ACCOUNT_PASSWORD = "Qz8#kLm2";
+    refreshSecretScrubberCache();
+    for (const line of [
+      declareX("DEMO_ACCOUNT_PASSWORD", "Qz8#kLm2"),
+      jsonBody(declareX("DEMO_ACCOUNT_PASSWORD", "Qz8#kLm2")),
+      "DEMO_ACCOUNT_PASSWORD=Qz8#kLm2",
+    ]) {
+      const once = scrubSecrets(line);
+      expect(scrubSecrets(once)).toBe(once);
+    }
   });
 });

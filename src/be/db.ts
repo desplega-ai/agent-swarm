@@ -147,7 +147,11 @@ import {
 } from "../utils/identity-field-budget";
 import { activeModelBlock, type ModelFamily } from "../utils/model-rate-limit-windows";
 import { getCurrentRequestUserId } from "../utils/request-auth-context";
-import { registerVolatileSecret, scrubSecrets } from "../utils/secret-scrubber";
+import {
+  registerSensitiveKeyName,
+  registerVolatileSecret,
+  scrubSecrets,
+} from "../utils/secret-scrubber";
 import {
   estimateClaudePlan,
   planAllowsModelFamily,
@@ -6611,6 +6615,7 @@ export async function upsertSwarmConfig(data: {
 
   if (config.isSecret) {
     registerVolatileSecret(config.value, `config:${config.key}`);
+    registerSensitiveKeyName(config.key);
   }
 
   return config;
