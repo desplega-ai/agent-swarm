@@ -1557,8 +1557,11 @@ export class CodexSession implements ProviderSession {
       // prompt doesn't begin with a recognized slash command (or the skill
       // file is missing), this returns the prompt unchanged and emits a
       // `raw_stderr` warning in the latter case.
-      const resolvedPrompt = await resolveCodexPrompt(this.config.prompt, this.skillsDir, (event) =>
-        this.emit(event),
+      const resolvedPrompt = await resolveCodexPrompt(
+        this.config.prompt,
+        this.skillsDir,
+        (event) => this.emit(event),
+        this.config.onPromptSkill,
       );
 
       // Reset + seed the transcript buffer so the session-end summarizer has

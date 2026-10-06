@@ -577,6 +577,7 @@ export class CursorAdapter implements ProviderAdapter {
     const prompt = await resolveSlashSkillPrompt(config.prompt, {
       providerLabel: "cursor",
       skillsDir: join(env.HOME ?? "/home/worker", ".agents", "skills"),
+      onInline: config.onPromptSkill,
     });
     const runtimeInstanceId = swarmRuntimeInstanceId();
     const swarmMcp: McpServerConfig = {

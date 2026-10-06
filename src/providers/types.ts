@@ -154,6 +154,13 @@ export interface ProviderSessionConfig {
    * (Phase 4).
    */
   reasoningEffort?: ReasoningEffort;
+  /**
+   * Called with the skill name when the adapter loads a skill from the prompt
+   * itself: `resolveSlashSkillPrompt` inlined a leading `/name`, or pi
+   * expanded `/skill:name`. No tool call happens on that path, so the runner
+   * records `skill.invoke` (`via: "prompt"`) from this callback.
+   */
+  onPromptSkill?: (skillName: string) => void;
 }
 
 export type SteerDelivery = { mode: SteerMode; text: string };

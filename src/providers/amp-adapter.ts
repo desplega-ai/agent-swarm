@@ -1132,6 +1132,7 @@ export class AmpAdapter implements ProviderAdapter {
     const prompt = await resolveSlashSkillPrompt(config.prompt, {
       providerLabel: "amp",
       skillsDir: join(env.HOME ?? "/home/worker", ".agents", "skills"),
+      onInline: config.onPromptSkill,
     });
     // The effort rides on the plugin agent. Catalog levels exist for a pinned
     // provider/model only; a mode names no model Amp will tell us in advance.
