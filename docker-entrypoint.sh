@@ -530,7 +530,11 @@ if [ -n "$AGENT_ID" ]; then
             # /api/config/resolved on each iteration. Baking them into env at
             # boot would persist a stale value if the operator later deletes
             # the swarm_config row (env would shadow the now-missing config).
-            #   - codex_oauth: provider auth blob, read on demand
+            #   - codex_oauth and codex_oauth_<n>: provider auth blobs with
+            #     live refresh tokens, read on demand. Exporting them puts a
+            #     replayable refresh token in every process env, and a replay
+            #     revokes the whole token family. Mirrors isCodexOAuthConfigKey
+            #     in src/providers/codex-oauth/env-keys.ts.
             #   - HARNESS_PROVIDER: live-reconciled by runner.ts poll loop;
             #     baking it would also defeat the precedence invariant
             #     (swarm_config > env > "claude")
@@ -542,11 +546,11 @@ if [ -n "$AGENT_ID" ]; then
             # "command not found", aborting the rest of the export. These keys
             # are still available to the runner via headerConfigKeys (resolved
             # per-request), so skipping them here is safe.
-            SKIPPED_NONIDENT=$(jq -r '.configs[] | select(.key != "codex_oauth" and .key != "HARNESS_PROVIDER" and .key != "CLAUDE_TRANSPORT") | select(.key | test("^[A-Za-z_][A-Za-z0-9_]*$") | not) | .key' /tmp/swarm_config.json 2>/dev/null || true)
+            SKIPPED_NONIDENT=$(jq -r '.configs[] | select((.key | test("^codex_oauth(_[0-9]+)?$") | not) and .key != "HARNESS_PROVIDER" and .key != "CLAUDE_TRANSPORT") | select(.key | test("^[A-Za-z_][A-Za-z0-9_]*$") | not) | .key' /tmp/swarm_config.json 2>/dev/null || true)
             if [ -n "$SKIPPED_NONIDENT" ]; then
                 echo "[entrypoint] debug: skipping non-identifier config keys (not valid POSIX shell variable names, still available via headerConfigKeys): $(echo "$SKIPPED_NONIDENT" | tr '\n' ' ')"
             fi
-            jq -r '.configs[] | select(.key != "codex_oauth" and .key != "HARNESS_PROVIDER" and .key != "CLAUDE_TRANSPORT") | select(.key | test("^[A-Za-z_][A-Za-z0-9_]*$")) | "\(.key)=" + (.value | @sh)' /tmp/swarm_config.json > /tmp/swarm_config.env 2>/dev/null || true
+            jq -r '.configs[] | select((.key | test("^codex_oauth(_[0-9]+)?$") | not) and .key != "HARNESS_PROVIDER" and .key != "CLAUDE_TRANSPORT") | select(.key | test("^[A-Za-z_][A-Za-z0-9_]*$")) | "\(.key)=" + (.value | @sh)' /tmp/swarm_config.json > /tmp/swarm_config.env 2>/dev/null || true
             if [ -f /tmp/swarm_config.env ]; then
                 set -a
                 . /tmp/swarm_config.env

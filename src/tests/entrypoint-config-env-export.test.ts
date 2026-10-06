@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { CHILD_PROCESS_TEST_BUDGET_MS, expectChildOk, runChild } from "./test-proc";
 
 /**
  * Tests for the config→env-var export filter in docker-entrypoint.sh.
@@ -78,4 +79,68 @@ describe("entrypoint config env export: POSIX identifier filter", () => {
   test("returns empty object for empty configs array", () => {
     expect(filterForEnvExport([])).toEqual({});
   });
+});
+
+/**
+ * The jq programs below are extracted verbatim from docker-entrypoint.sh and
+ * run against real `jq`, so they track the deployed filter instead of the
+ * hand-written mirror above.
+ */
+const entrypointPath = `${import.meta.dir}/../../docker-entrypoint.sh`;
+
+function extractExportFilter(lineMarker: string): string {
+  const script: string = require("node:fs").readFileSync(entrypointPath, "utf8");
+  const line = script.split("\n").find((l) => l.includes(lineMarker) && l.includes("jq -r '"));
+  if (!line) throw new Error(`Could not locate the jq line containing ${lineMarker}`);
+  const start = line.indexOf("jq -r '") + "jq -r '".length;
+  const end = line.indexOf("' /tmp/swarm_config.json", start);
+  if (end === -1) throw new Error(`Could not locate the end of the jq program for ${lineMarker}`);
+  return line.slice(start, end);
+}
+
+async function runJq(filter: string, input: unknown): Promise<string[]> {
+  const result = await runChild(["jq", "-r", filter], { stdin: JSON.stringify(input) });
+  expectChildOk(result, "jq");
+  return result.stdout.split("\n").filter(Boolean);
+}
+
+const slotValue = JSON.stringify({
+  access: "at.value",
+  refresh: "rt.secret",
+  expires: 1,
+  accountId: "acct",
+});
+const configs = {
+  configs: [
+    { key: "NORMAL", value: "val" },
+    { key: "codex_oauth", value: slotValue },
+    { key: "codex_oauth_0", value: slotValue },
+    { key: "codex_oauth_12", value: slotValue },
+    { key: "codex_oauth_extra", value: "kept" },
+    { key: "HARNESS_PROVIDER", value: "codex" },
+    { key: "CLAUDE_TRANSPORT", value: "sdk" },
+    { key: "CF-Access-Client-Id", value: "id" },
+  ],
+};
+
+describe("entrypoint config env export: real jq filter", () => {
+  test(
+    "never exports codex_oauth or codex_oauth_<n>, nor the runner-resolved keys",
+    async () => {
+      const lines = await runJq(extractExportFilter("> /tmp/swarm_config.env"), configs);
+      const keys = lines.map((l) => l.slice(0, l.indexOf("=")));
+      expect(keys).toEqual(["NORMAL", "codex_oauth_extra"]);
+      expect(lines.join("\n")).not.toContain("rt.secret");
+    },
+    CHILD_PROCESS_TEST_BUDGET_MS,
+  );
+
+  test(
+    "the non-identifier debug list skips the same denylisted keys",
+    async () => {
+      const lines = await runJq(extractExportFilter("SKIPPED_NONIDENT=$(jq"), configs);
+      expect(lines).toEqual(["CF-Access-Client-Id"]);
+    },
+    CHILD_PROCESS_TEST_BUDGET_MS,
+  );
 });

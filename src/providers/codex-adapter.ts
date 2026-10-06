@@ -55,6 +55,7 @@ import {
 } from "./codex-app-server";
 import { computeCodexCostUsd, getCodexContextWindow, resolveCodexModel } from "./codex-models";
 import { credentialsToAuthJson } from "./codex-oauth/auth-json.js";
+import { hasCodexOAuthPoolSlots } from "./codex-oauth/env-keys.js";
 import { codexUserHome } from "./codex-oauth/home.js";
 import { CodexOAuthRefreshError, getValidCodexOAuth } from "./codex-oauth/storage.js";
 import { resolveCodexPrompt } from "./codex-skill-resolver";
@@ -210,9 +211,10 @@ export function checkCodexCredentials(
       hint: "Credential present in env; entrypoint will materialise ~/.codex/auth.json on next boot.",
     };
   }
-  // Pool credentials: codex_oauth_0, codex_oauth_1, ... loaded from swarm_config
-  // into the resolved env. Runner materialises auth.json per-task from the pool.
-  if (Object.keys(env).some((k) => /^codex_oauth_\d+$/.test(k))) {
+  // Pool credentials (codex_oauth_0, codex_oauth_1, ...) stay out of env; the
+  // resolved-env loader records only their count. Runner materialises
+  // auth.json per-task from the pool.
+  if (hasCodexOAuthPoolSlots(env)) {
     return {
       ready: true,
       missing: [],
