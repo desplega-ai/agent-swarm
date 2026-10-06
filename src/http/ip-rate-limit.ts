@@ -10,6 +10,8 @@ import type { IncomingMessage } from "node:http";
 const PRUNE_THRESHOLD = 10_000;
 /** Minimum time between prunes, so a flood of new IPs cannot force a scan per request. */
 const PRUNE_INTERVAL_MS = 60_000;
+/** Hard cap on tracked buckets. New keys past it evict the oldest-inserted bucket in O(1). */
+const MAX_BUCKETS = 50_000;
 
 /** Loopback, RFC1918, link-local and IPv6 unique-local addresses (IPv4-mapped forms included). */
 function isPrivateAddress(address: string): boolean {
@@ -60,6 +62,10 @@ export function createIpRateLimiter(options: { capacity: number; refillPerMs: nu
       }
       let bucket = buckets.get(ip);
       if (!bucket) {
+        if (buckets.size >= MAX_BUCKETS) {
+          const oldest = buckets.keys().next().value;
+          if (oldest !== undefined) buckets.delete(oldest);
+        }
         bucket = { tokens: options.capacity, updatedAt: now };
         buckets.set(ip, bucket);
       }

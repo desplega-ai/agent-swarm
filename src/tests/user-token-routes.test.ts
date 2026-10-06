@@ -10,7 +10,7 @@ import { deleteExpiredConnectorCodes, exchangeConnectorCode } from "../be/connec
 import { closeDb, createUser, getDbClient, initDb, upsertSwarmConfig } from "../be/db";
 import { fingerprintApiKey, resolveUserByToken } from "../be/users";
 import { handleCore } from "../http/core";
-import { clientIp } from "../http/ip-rate-limit";
+import { clientIp, createIpRateLimiter } from "../http/ip-rate-limit";
 import { _resetConnectorExchangeRateLimitForTests, handleUsers } from "../http/users";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import { listenOnFreePort } from "./test-net";
@@ -455,5 +455,17 @@ describe("clientIp", () => {
 
   test("falls back to the peer when the header is absent", () => {
     expect(clientIp(fakeReq("127.0.0.1"))).toBe("127.0.0.1");
+  });
+});
+
+describe("createIpRateLimiter", () => {
+  test("caps tracked buckets by evicting the oldest key", () => {
+    const limiter = createIpRateLimiter({ capacity: 1, refillPerMs: 0 });
+    const now = 1_000;
+    expect(limiter.take("first", now)).toBe(true);
+    expect(limiter.take("first", now)).toBe(false);
+    for (let i = 0; i < 50_000; i++) limiter.take(`ip-${i}`, now);
+    // "first" was evicted, so it starts with a fresh bucket.
+    expect(limiter.take("first", now)).toBe(true);
   });
 });
