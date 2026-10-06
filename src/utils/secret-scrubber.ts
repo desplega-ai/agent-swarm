@@ -21,6 +21,15 @@
  * API↔worker DB boundary (scripts/check-db-boundary.sh).
  */
 
+/**
+ * Version of the redaction rules below. Bump it on EVERY rule change (new
+ * key, suffix, regex, pass or threshold): the API's boot retro-sweep
+ * (src/be/boot-scrub-sweep.ts) keys its done marker on this number and
+ * re-scrubs stored rows once per version. v2 = the #1907 rules, swept over
+ * session_logs only; v3 = the first version swept across every target table.
+ */
+export const SCRUBBER_RULES_VERSION = 3;
+
 /** Env-var names that are always considered secrets, even without suffix hints. */
 const SENSITIVE_KEY_EXACT = new Set<string>([
   "API_KEY",

@@ -4597,7 +4597,7 @@ export async function createSessionLogs(logs: {
   lines: string[];
 }): Promise<void> {
   // Bounded batches, one short transaction each (reference shape:
-  // src/be/boot-scrub-logs.ts): worker log batches have unbounded line
+  // src/be/boot-scrub-sweep.ts): worker log batches have unbounded line
   // counts, and a single transaction across thousands of scrub+INSERT
   // iterations would hold the global write lock — and the event loop — for
   // the whole sweep. The regex scrub runs outside the transaction so only

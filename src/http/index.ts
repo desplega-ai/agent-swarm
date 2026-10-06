@@ -809,13 +809,13 @@ httpServer
         console.error("[boot-reembed-scripts] startup backfill failed (non-fatal):", err);
       });
 
-    // One-time scrub: retroactively redact any session_logs rows containing
-    // sensitive patterns that pre-date the defense-in-depth scrub layer.
-    // Idempotent, tracked via seed_state.
-    import("../be/boot-scrub-logs")
-      .then(({ runBootScrubLogs }) => runBootScrubLogs())
+    // Versioned retro-sweep: once per SCRUBBER_RULES_VERSION, redact stored
+    // rows (logs, tasks, memory, events, workflow steps) that pre-date the
+    // current scrubber rules. Idempotent and resumable, tracked via seed_state.
+    import("../be/boot-scrub-sweep")
+      .then(({ runBootScrubSweep }) => runBootScrubSweep())
       .catch((err) => {
-        console.error("[boot-scrub-logs] startup scrub failed (non-fatal):", err);
+        console.error("[boot-scrub-sweep] startup scrub failed (non-fatal):", err);
       });
   })
   .on("error", (err) => {

@@ -35,3 +35,17 @@ It covers:
 
 1. Extend `SENSITIVE_KEY_EXACT` (env-key match) or `TOKEN_REGEXES` (structural pattern) in `src/utils/secret-scrubber.ts`.
 2. Add a regression test in `src/tests/secret-scrubber.test.ts`.
+3. Bump `SCRUBBER_RULES_VERSION` (see Retro-sweep).
+
+## Retro-sweep
+
+A new rule protects only rows written after it ships. `src/be/boot-scrub-sweep.ts` re-scrubs stored rows once per `SCRUBBER_RULES_VERSION`, so **bump the version on every rule change** (key, suffix, regex, pass, or threshold).
+
+- Runs after the API starts listening, fire-and-forget. Done marker: `seed_state(kind='maintenance', key='boot-scrub-v<N>')`. Per-table resume cursor: `boot-scrub-v<N>:<table>:cursor`.
+- Swept columns, in order: `session_logs.content`; `agent_tasks.task`, `output`, `failureReason`, `progress`; `agent_memory.name`, `content`, `summary`; `agent_memory_version.content`; `events.data`; `workflow_run_steps.input`, `output`, `error`, `diagnostics`.
+- It **redacts matching rows in place**. That is irreversible (a redaction, not a deletion). Take a copy first if forensic evidence matters.
+- Regexes run outside the write lock. Each write is compare-and-set on the value read, so a concurrently updated row is skipped, not clobbered.
+- `agent_memory` rows go through the memory store: FTS is rewritten, `contentHash` recomputed, and the embedding and `memory_vec` row dropped. The sweep then runs the re-embed backfill.
+- A row whose scrub would turn valid JSON into invalid JSON is skipped and counted as `skipped_invalid_json`.
+- Log line per table (counts only): `boot-scrub-v<N>: <table> scanned=… changed=… skipped_invalid_json=…`.
+- To re-run a version by hand, delete its done row from `seed_state` and restart the API.

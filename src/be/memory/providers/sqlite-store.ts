@@ -19,6 +19,7 @@ import type {
   MemoryInput,
   MemoryListOptions,
   MemoryRetrievalSource,
+  MemoryScrubFields,
   MemorySearchOptions,
   MemoryStats,
   MemoryStore,
@@ -1266,6 +1267,47 @@ export class SqliteMemoryStore implements MemoryStore {
         console.error(`[memory-vec] update failed memory_id=${id}: ${(err as Error).message}`);
       }
     }
+  }
+
+  async rewriteForScrub(
+    id: string,
+    before: MemoryScrubFields,
+    after: MemoryScrubFields,
+  ): Promise<boolean> {
+    const contentChanged = after.content !== before.content;
+    return getDbClient().transaction(async (tx) => {
+      // Compare-and-set: the sweep scrubbed `before` outside the write lock, so
+      // skip the row if a concurrent write moved it since.
+      const result = await tx.run(
+        `UPDATE agent_memory
+         SET name = ?, content = ?, summary = ?, contentHash = ?,
+             embedding = CASE WHEN ? = 1 THEN NULL ELSE embedding END,
+             embeddingModel = CASE WHEN ? = 1 THEN NULL ELSE embeddingModel END
+         WHERE id = ? AND name IS ? AND content IS ? AND summary IS ?`,
+        [
+          after.name,
+          after.content,
+          after.summary,
+          contentSha256(after.content),
+          contentChanged ? 1 : 0,
+          contentChanged ? 1 : 0,
+          id,
+          before.name,
+          before.content,
+          before.summary,
+        ],
+      );
+      if (result.changes === 0) return false;
+      // The vector embeds the old (secret-bearing) content. Drop it; the
+      // re-embed backfill picks the row up via `embedding IS NULL`.
+      if (contentChanged && this.vecInitialized && this.getVecTableSchema()) {
+        await tx.run("DELETE FROM memory_vec WHERE memory_id = ?", [id]);
+      }
+      if (after.name !== before.name || contentChanged) {
+        await this.syncFtsRow(id, after.name, after.content);
+      }
+      return true;
+    });
   }
 
   async getStats(agentId: string): Promise<MemoryStats> {
