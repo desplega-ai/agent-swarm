@@ -41,7 +41,7 @@
  */
 
 import { appendFileSync } from "node:fs";
-import { findPrBodyLeaks, isSwarmBotLogin } from "../src/utils/pr-body-leaks";
+import { findPrBodyLeaks, isSwarmBotLogin, markdownHeadings } from "../src/utils/pr-body-leaks";
 
 const TEMPLATE_PATH = ".github/pull_request_template.md";
 
@@ -84,17 +84,13 @@ export const isFixTitle = (title: string) => /^fix(\([^)]*\))?!?:/i.test(title.t
 export const touchesUi = (files: string[]) =>
   files.some((f) => UI_PATHS.some((p) => f.replace(/^\.?\//, "").startsWith(p)));
 
-/** Split markdown into the preamble and level-1/level-2 sections. Headings inside code fences do not count. */
+/** Split markdown into the preamble and level-1/level-2 sections. Headings inside code fences or HTML comments do not count. */
 function parseSections(markdown: string): { preamble: string; sections: Section[] } {
   const sections: Section[] = [];
   let preamble = "";
   let current: Section | null = null;
-  let inFence = false;
-  for (const line of markdown.replace(/\r\n/g, "\n").split("\n")) {
-    if (/^\s*(```|~~~)/.test(line)) inFence = !inFence;
-    const match = inFence ? null : /^#{1,2}\s+(.+?)\s*#*\s*$/.exec(line);
-    if (match) {
-      const raw = match[1] ?? "";
+  for (const { line, heading: raw } of markdownHeadings(markdown)) {
+    if (raw !== null) {
       const flags = [...raw.matchAll(COMMENT)].map((m) => normalize(m[1] ?? ""));
       current = { heading: stripComments(raw).trim(), flags, content: "" };
       sections.push(current);

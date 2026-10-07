@@ -186,6 +186,33 @@ describe("findPrBodyLeaks: Swarm provenance allowlist", () => {
     expect(findPrBodyLeaks(fenced)).toContain("slack-link");
   });
 
+  test("a heading inside an HTML comment does not open it", () => {
+    const body = `<!--\n## Swarm provenance\n-->\n${dashboardLink()}\n`;
+    expect(findPrBodyLeaks(body)).toEqual(["swarm-dashboard-link"]);
+    const oneLine = `<!-- note -->\n## Swarm provenance\n\n- ${dashboardLink()}\n`;
+    expect(findPrBodyLeaks(oneLine)).toEqual([]);
+  });
+
+  test("a shorter fence does not close a longer one", () => {
+    const body = `\`\`\`\`md\n\`\`\`\n## Swarm provenance\n\`\`\`\`\n${dashboardLink()}\n`;
+    expect(findPrBodyLeaks(body)).toEqual(["swarm-dashboard-link"]);
+  });
+
+  test("tildes do not close a backtick fence", () => {
+    const body = `\`\`\`\n~~~\n## Swarm provenance\n\`\`\`\n${dashboardLink()}\n`;
+    expect(findPrBodyLeaks(body)).toEqual(["swarm-dashboard-link"]);
+  });
+
+  test("a fence line with an info string does not close it", () => {
+    const body = `\`\`\`\n\`\`\`md\n## Swarm provenance\n\`\`\`\n${dashboardLink()}\n`;
+    expect(findPrBodyLeaks(body)).toEqual(["swarm-dashboard-link"]);
+  });
+
+  test("a longer closing fence closes it, so a later section opens", () => {
+    const body = `\`\`\`\ncode\n\`\`\`\`\`\n## Swarm provenance\n\n- ${dashboardLink()}\n`;
+    expect(findPrBodyLeaks(body)).toEqual([]);
+  });
+
   test("the heading matches case-insensitively with a trailing marker", () => {
     const body = `## swarm  PROVENANCE <!-- bot -->\n\n- ${dashboardLink()}\n`;
     expect(findPrBodyLeaks(body)).toEqual([]);

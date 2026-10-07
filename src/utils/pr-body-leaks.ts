@@ -152,7 +152,7 @@ const PLACEHOLDER_UUIDS = new RegExp(
 );
 
 /** Fenced code blocks (``` or ~~~). An unclosed fence runs to the end, as in CommonMark. */
-const FENCED_CODE = /^[ \t]*(`{3,}|~{3,})[^\n]*\n[\s\S]*?(?:^[ \t]*\1[`~]*[ \t]*$|$(?![\s\S]))/gm;
+const FENCED_CODE = /^[ \t]*(([`~])\2{2,})[^\n]*\n[\s\S]*?(?:^[ \t]*\1\2*[ \t]*$|$(?![\s\S]))/gm;
 
 /** The section heading under which auth-gated provenance links are allowed. */
 export const PROVENANCE_HEADING = "Swarm provenance";
@@ -170,7 +170,41 @@ export const PROVENANCE_ALLOWED: ReadonlySet<LeakCategory> = new Set<LeakCategor
 const SLACK_URL = /https?:\/\/[^\s)"'<>]*slack\.com\/(?:archives|client)\/[^\s)"'<>]*/gi;
 
 const HEADING = /^#{1,2}\s+(.+?)\s*#*\s*$/;
-const FENCE = /^\s*(```|~~~)/;
+const FENCE_LINE = /^[ \t]*(`{3,}|~{3,})(.*)$/;
+const COMMENT_OPEN = /^[ \t]*<!--/;
+
+/**
+ * Each line of `markdown`, with the text of the level-1/level-2 heading it
+ * starts as GitHub renders it, else null. Headings inside fenced code blocks
+ * and HTML comment blocks do not count. A fence closes only on a line of the
+ * same character, at least as long as the opening one, with no info string.
+ * Shared with `scripts/check-pr-body.ts` so both read sections the same way.
+ */
+export function markdownHeadings(markdown: string): { line: string; heading: string | null }[] {
+  const out: { line: string; heading: string | null }[] = [];
+  let fence: { char: string; length: number } | null = null;
+  let inComment = false;
+  for (const line of markdown.replace(/\r\n/g, "\n").split("\n")) {
+    const fenceLine = FENCE_LINE.exec(line);
+    const run = fenceLine?.[1] ?? "";
+    const info = fenceLine?.[2] ?? "";
+    if (fence) {
+      if (run[0] === fence.char && run.length >= fence.length && !info.trim()) fence = null;
+    } else if (inComment) {
+      if (line.includes("-->")) inComment = false;
+    } else if (fenceLine && !(run[0] === "`" && info.includes("`"))) {
+      fence = { char: run[0] ?? "`", length: run.length };
+    } else if (COMMENT_OPEN.test(line)) {
+      inComment = !line.slice(line.indexOf("<!--") + 4).includes("-->");
+    } else {
+      out.push({ line, heading: HEADING.exec(line)?.[1] ?? null });
+      continue;
+    }
+    out.push({ line, heading: null });
+  }
+  return out;
+}
+
 const isProvenanceHeading = (raw: string) =>
   raw
     .replace(/<!--[\s\S]*?-->/g, "")
@@ -180,18 +214,14 @@ const isProvenanceHeading = (raw: string) =>
 
 /**
  * Split a body into the `## Swarm provenance` section(s) and everything else.
- * A section runs to the next level-1/level-2 heading. Headings inside code
- * fences do not count, as in `scripts/check-pr-body.ts`.
+ * A section runs to the next level-1/level-2 heading, as `markdownHeadings` reads them.
  */
 export function splitProvenance(body: string): { outside: string; provenance: string } {
   const outside: string[] = [];
   const provenance: string[] = [];
-  let inFence = false;
   let inProvenance = false;
-  for (const line of body.replace(/\r\n/g, "\n").split("\n")) {
-    if (FENCE.test(line)) inFence = !inFence;
-    const heading = inFence ? null : HEADING.exec(line);
-    if (heading) inProvenance = isProvenanceHeading(heading[1] ?? "");
+  for (const { line, heading } of markdownHeadings(body)) {
+    if (heading !== null) inProvenance = isProvenanceHeading(heading);
     (inProvenance ? provenance : outside).push(line);
   }
   return { outside: outside.join("\n"), provenance: provenance.join("\n") };

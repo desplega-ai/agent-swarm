@@ -44,6 +44,13 @@ describe("check-pr-body", () => {
     ]);
   });
 
+  test("headings inside HTML comments or still-open fences are not sections", () => {
+    const hidden = "<!--\n## Intent\n-->\n````md\n```\n## Intent\n````\n";
+    expect(checkPrBody(TEMPLATE, `${hidden}${URGENT}`, "feat: x")).toEqual([
+      "missing section: ## Intent",
+    ]);
+  });
+
   test("fix titles are detected by conventional-commit type", () => {
     expect(isFixTitle("fix: x")).toBe(true);
     expect(isFixTitle("fix(slack): x")).toBe(true);
