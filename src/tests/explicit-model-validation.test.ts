@@ -47,6 +47,7 @@ let leadId = "";
 let workerId = "";
 let acpId = "";
 let codexId = "";
+let grokId = "";
 
 beforeAll(async () => {
   await removeDbFiles(TEST_DB_PATH);
@@ -76,6 +77,14 @@ beforeAll(async () => {
       isLead: false,
       status: "idle",
       harnessProvider: "codex",
+    })
+  ).id;
+  grokId = (
+    await createAgent({
+      name: "validation-grok",
+      isLead: false,
+      status: "idle",
+      harnessProvider: "grok",
     })
   ).id;
 
@@ -247,6 +256,78 @@ describe("explicitModelError", () => {
       expect(await explicitModelErrorForAgent({ model: "gpt-5.6-sol" })).toBeNull();
       expect(await explicitModelErrorForAgent({ model: "latest:anthropic/opus" })).toBeNull();
     });
+  });
+});
+
+describe("grok model namespace", () => {
+  test("another vendor's id, namespace or alias is refused, even with allowCustomModel", async () => {
+    for (const model of [
+      "claude-opus-5-5",
+      "anthropic/claude-opus-5-5",
+      "gpt-5.6-sol",
+      "openai/gpt-5.6-sol",
+      "deepseek/deepseek-v4.1-flash",
+      "latest:anthropic/opus",
+      "latest:openai/gpt-5*",
+    ]) {
+      for (const allowCustomModel of [false, true]) {
+        const error = await explicitModelError({
+          model,
+          harnessProvider: "grok",
+          allowCustomModel,
+        });
+        expect(error).toContain(`Model "${model}" does not run on the grok harness`);
+        expect(error).toContain("openrouter/<vendor>/<id>");
+      }
+    }
+  });
+
+  test("bare xAI ids and both OpenRouter spellings pass", async () => {
+    for (const model of [
+      "grok-4.6",
+      "openrouter/deepseek/deepseek-v4.1-flash",
+      "latest:openrouter/deepseek/deepseek-v4.1-*",
+    ]) {
+      expect(await explicitModelError({ model, harnessProvider: "grok" })).toBeNull();
+    }
+  });
+
+  test("xai/<id> runs on grok; the API catalog has no xai section, so it needs allowCustomModel", async () => {
+    expect(
+      await explicitModelError({
+        model: "xai/grok-4.6",
+        harnessProvider: "grok",
+        allowCustomModel: true,
+      }),
+    ).toBeNull();
+    expect(await explicitModelError({ model: "xai/grok-4.6", harnessProvider: "grok" })).toContain(
+      'Unknown model "xai/grok-4.6"',
+    );
+  });
+
+  test("POST /api/tasks to a grok agent: vendor ids are a 400, xAI and OpenRouter ids a 201", async () => {
+    const base = { task: "grok route", agentId: grokId, routingReason: "human_pinned" };
+    for (const model of ["claude-opus-5-5", "latest:anthropic/opus"]) {
+      const refused = await api("POST", "/api/tasks", { ...base, model });
+      expect(refused.status).toBe(400);
+      expect(String(refused.body.error)).toContain(
+        `does not run on the grok harness of agent "validation-grok" (${grokId})`,
+      );
+    }
+    for (const model of ["grok-4.6", "openrouter/deepseek/deepseek-v4.1-flash"]) {
+      const accepted = await api("POST", "/api/tasks", { ...base, model });
+      expect(accepted.status).toBe(201);
+    }
+  });
+
+  test("MODEL_TIER_GROK_<TIER> refuses another vendor's model", () => {
+    expect(validateTierConfigValue("MODEL_TIER_GROK_SMART", "claude-opus-5-5")).toBe(
+      'Invalid MODEL_TIER_GROK_SMART: model "claude-opus-5-5" does not run on the grok harness.',
+    );
+    expect(validateTierConfigValue("MODEL_TIER_GROK_SMART", "grok-4.6")).toBeNull();
+    expect(
+      validateTierConfigValue("MODEL_TIER_GROK_SMOL", "openrouter/deepseek/deepseek-v4.1-flash"),
+    ).toBeNull();
   });
 });
 

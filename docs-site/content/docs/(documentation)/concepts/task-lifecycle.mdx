@@ -74,6 +74,7 @@ send-task(task: "Refactor auth module", agentId: "worker-uuid", routingReason: "
 ### External Sources
 
 Tasks are automatically created from:
+- **User MCP** - Authenticated user tasks are assigned to the online Lead and remain pending while the Lead is busy. No task is created when no Lead is online.
 - **Slack** — Direct messages to the bot
 - **GitHub** — @mentions, issue assignments, PR review requests
 - **Email** — Messages to registered AgentMail inboxes

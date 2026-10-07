@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Agent Swarm API",
-    "version": "1.164.1",
+    "version": "1.165.0",
     "description": "Multi-agent orchestration API for Claude Code, Codex, and Gemini CLI. Enables task distribution, agent communication, and service discovery.\n\nMCP tools are documented separately in [MCP.md](./MCP.md)."
   },
   "servers": [
@@ -448,7 +448,8 @@
               "acp",
               "dsh",
               "amp",
-              "cursor"
+              "cursor",
+              "grok"
             ]
           },
           "providerMeta": {
@@ -521,7 +522,8 @@
               "acp",
               "dsh",
               "amp",
-              "cursor"
+              "cursor",
+              "grok"
             ]
           },
           "capabilities": {
@@ -671,6 +673,7 @@
               "dsh",
               "amp",
               "cursor",
+              "grok",
               null
             ],
             "default": null
@@ -1006,7 +1009,8 @@
               "acp",
               "dsh",
               "amp",
-              "cursor"
+              "cursor",
+              "grok"
             ]
           },
           "harnessProvider": {
@@ -1025,6 +1029,7 @@
               "dsh",
               "amp",
               "cursor",
+              "grok",
               null
             ]
           },
@@ -3172,7 +3177,8 @@
               "acp",
               "dsh",
               "amp",
-              "cursor"
+              "cursor",
+              "grok"
             ]
           },
           "model": {
@@ -9717,7 +9723,8 @@
                       "acp",
                       "dsh",
                       "amp",
-                      "cursor"
+                      "cursor",
+                      "grok"
                     ]
                   },
                   "harness_provider": {
@@ -9732,7 +9739,8 @@
                       "acp",
                       "dsh",
                       "amp",
-                      "cursor"
+                      "cursor",
+                      "grok"
                     ]
                   },
                   "runtimeInstanceId": {
@@ -10023,7 +10031,8 @@
                       "acp",
                       "dsh",
                       "amp",
-                      "cursor"
+                      "cursor",
+                      "grok"
                     ]
                   }
                 },
@@ -10241,7 +10250,8 @@
                       "acp",
                       "dsh",
                       "amp",
-                      "cursor"
+                      "cursor",
+                      "grok"
                     ]
                   },
                   "model": {
@@ -11344,6 +11354,7 @@
                         "dsh",
                         "amp",
                         "cursor",
+                        "grok",
                         null
                       ]
                     },
@@ -11363,6 +11374,7 @@
                         "dsh",
                         "amp",
                         "cursor",
+                        "grok",
                         null
                       ]
                     },
@@ -11484,6 +11496,7 @@
                               "dsh",
                               "amp",
                               "cursor",
+                              "grok",
                               null
                             ]
                           },
@@ -11503,6 +11516,7 @@
                               "dsh",
                               "amp",
                               "cursor",
+                              "grok",
                               null
                             ]
                           },
@@ -21812,6 +21826,15 @@
                           },
                           "accessCount": {
                             "type": "number"
+                          },
+                          "summary": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "createdAt": {
+                            "type": "string"
                           }
                         },
                         "required": [
@@ -24735,7 +24758,8 @@
                               "acp",
                               "dsh",
                               "amp",
-                              "cursor"
+                              "cursor",
+                              "grok"
                             ]
                           },
                           "tier": {
@@ -26675,7 +26699,8 @@
                               "acp",
                               "dsh",
                               "amp",
-                              "cursor"
+                              "cursor",
+                              "grok"
                             ]
                           },
                           "providers": {
@@ -26695,7 +26720,8 @@
                                     "acp",
                                     "dsh",
                                     "amp",
-                                    "cursor"
+                                    "cursor",
+                                    "grok"
                                   ]
                                 },
                                 "state": {
@@ -27024,7 +27050,8 @@
                       "acp",
                       "dsh",
                       "amp",
-                      "cursor"
+                      "cursor",
+                      "grok"
                     ]
                   }
                 },
@@ -27612,7 +27639,8 @@
                                   "acp",
                                   "dsh",
                                   "amp",
-                                  "cursor"
+                                  "cursor",
+                                  "grok"
                                 ]
                               },
                               "state": {
@@ -28605,7 +28633,8 @@
                                   "acp",
                                   "dsh",
                                   "amp",
-                                  "cursor"
+                                  "cursor",
+                                  "grok"
                                 ]
                               },
                               "state": {
@@ -31315,7 +31344,8 @@
                 "acp",
                 "dsh",
                 "amp",
-                "cursor"
+                "cursor",
+                "grok"
               ]
             },
             "required": true,
@@ -31399,7 +31429,8 @@
                 "acp",
                 "dsh",
                 "amp",
-                "cursor"
+                "cursor",
+                "grok"
               ]
             },
             "required": true,
@@ -31516,7 +31547,8 @@
                 "acp",
                 "dsh",
                 "amp",
-                "cursor"
+                "cursor",
+                "grok"
               ]
             },
             "required": true,
@@ -31601,7 +31633,8 @@
                 "acp",
                 "dsh",
                 "amp",
-                "cursor"
+                "cursor",
+                "grok"
               ]
             },
             "required": true,
@@ -41513,7 +41546,8 @@
                       "acp",
                       "dsh",
                       "amp",
-                      "cursor"
+                      "cursor",
+                      "grok"
                     ]
                   },
                   "createdAt": {
@@ -42468,7 +42502,8 @@
                                       "acp",
                                       "dsh",
                                       "amp",
-                                      "cursor"
+                                      "cursor",
+                                      "grok"
                                     ]
                                   },
                                   "requestedByUserId": {
@@ -47816,7 +47851,8 @@
                                   "acp",
                                   "dsh",
                                   "amp",
-                                  "cursor"
+                                  "cursor",
+                                  "grok"
                                 ]
                               },
                               "requestedByUserId": {
@@ -48293,7 +48329,8 @@
                           "acp",
                           "dsh",
                           "amp",
-                          "cursor"
+                          "cursor",
+                          "grok"
                         ]
                       },
                       "model": {
@@ -49239,7 +49276,8 @@
                       "acp",
                       "dsh",
                       "amp",
-                      "cursor"
+                      "cursor",
+                      "grok"
                     ]
                   }
                 },

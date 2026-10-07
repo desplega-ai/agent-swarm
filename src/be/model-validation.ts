@@ -81,7 +81,7 @@ export interface ExplicitModelCheck {
   agentName?: string | null;
 }
 
-/** Null when `model` runs on `harness`, else the reason. Pure; only judges claude, claude-managed, codex. */
+/** Null when `model` runs on `harness`, else the reason. Pure; only judges claude, claude-managed, codex and grok. */
 export const harnessModelError = harnessModelMismatch;
 
 /** `harnessModelError` against the current catalog, for callers with no agent row (claim path). */

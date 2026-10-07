@@ -359,6 +359,79 @@ describe("claim-time harness guard", () => {
   });
 });
 
+describe("claim-time harness guard on grok", () => {
+  async function grokWorker(name: string) {
+    return createAgent({
+      name,
+      isLead: false,
+      status: "idle",
+      maxTasks: 1,
+      harnessProvider: "grok",
+    });
+  }
+
+  test("a directed task pinning another vendor's model or alias fails fast", async () => {
+    for (const model of ["claude-opus-5-5", "anthropic/claude-opus-5-5", "latest:anthropic/opus"]) {
+      const worker = await grokWorker(`w-grok-mismatch-${model}`);
+      const task = await createTaskExtended("review", { agentId: worker.id, model });
+      const trigger = await callPoll(worker.id, header({}));
+      expect(trigger?.taskId).toBe(task.id);
+      expect(String(trigger?.task.modelUnsupported)).toStartWith(
+        `[model-harness-mismatch] Model "${model}" does not run on the grok harness of this worker.`,
+      );
+      expect(trigger?.task.resolvedModel).toBeUndefined();
+    }
+  });
+
+  test("a directed xAI or OpenRouter model resolves as pinned", async () => {
+    await seedCatalog([
+      entry("anthropic", "claude-opus-5-5", daysAgo(30)),
+      entry("openrouter", "deepseek/deepseek-v4.1-flash", daysAgo(30)),
+    ]);
+    for (const [model, resolved] of [
+      ["grok-4.6", "grok-4.6"],
+      ["openrouter/deepseek/deepseek-v4.1-flash", "openrouter/deepseek/deepseek-v4.1-flash"],
+      ["latest:openrouter/deepseek/deepseek-v4.1-*", "openrouter/deepseek/deepseek-v4.1-flash"],
+    ]) {
+      const worker = await grokWorker(`w-grok-ok-${model}`);
+      const task = await createTaskExtended("review", { agentId: worker.id, model });
+      const trigger = await callPoll(worker.id, header({}));
+      expect(trigger?.taskId).toBe(task.id);
+      expect(trigger?.task.modelUnsupported).toBeUndefined();
+      expect(trigger?.task.resolvedModel).toBe(resolved);
+    }
+  });
+
+  test("an Anthropic worker-env tier value is skipped for the grok tier default", async () => {
+    const worker = await grokWorker("w-grok-env");
+    const task = await createTaskExtended("smart", { agentId: worker.id, modelTier: "smart" });
+    await callPoll(worker.id, header({ grok: { smart: "claude-opus-5-5" } }));
+    expect(await taskRow(task.id)).toEqual({
+      resolvedModel: "grok-4.6",
+      modelSource: "tier-default",
+      modelAlias: null,
+    });
+  });
+
+  test("pool: Grok skips an Anthropic task and claims the xAI and OpenRouter ones", async () => {
+    const vendor = await createTaskExtended("opus pool", {
+      model: "claude-opus-5-5",
+      priority: 90,
+    });
+    const xai = await createTaskExtended("xai pool", { model: "grok-4.6", priority: 50 });
+    const openrouter = await createTaskExtended("or pool", {
+      model: "openrouter/deepseek/deepseek-v4.1-flash",
+      priority: 10,
+    });
+    const first = await callPoll((await grokWorker("w-grok-pool-1")).id, header({}));
+    expect(first?.taskId).toBe(xai.id);
+    const second = await callPoll((await grokWorker("w-grok-pool-2")).id, header({}));
+    expect(second?.taskId).toBe(openrouter.id);
+    const third = await callPoll((await grokWorker("w-grok-pool-3")).id, header({}));
+    expect(third?.type === "task_assigned" && third.taskId === vendor.id).toBe(false);
+  });
+});
+
 describe("task list summaries", () => {
   test("carry the claim-time resolution the dashboard table shows", async () => {
     const worker = await createAgent({
@@ -508,8 +581,8 @@ describe("previewModelTiers", () => {
 
     // acp has no portable tier mapping, so it has nothing to preview.
     expect(rows.some((r) => r.provider === "acp")).toBe(false);
-    expect(new Set(rows.map((r) => r.provider)).size).toBe(9);
-    expect(rows).toHaveLength(36);
+    expect(new Set(rows.map((r) => r.provider)).size).toBe(10);
+    expect(rows).toHaveLength(40);
   });
 
   test("an alias that resolves to nothing reports the default it falls back to", async () => {
@@ -564,7 +637,7 @@ describe("GET /api/models-catalog/tiers", () => {
     expect(handled).toBe(true);
     expect(status).toBe(200);
     const body = JSON.parse(bodyStr) as { tiers: { provider: string; tier: string }[] };
-    expect(body.tiers).toHaveLength(36);
+    expect(body.tiers).toHaveLength(40);
     expect(body.tiers.find((t) => t.provider === "claude" && t.tier === "smart")).toMatchObject({
       key: "MODEL_TIER_CLAUDE_SMART",
       source: "tier-config",

@@ -21,6 +21,24 @@
  * API↔worker DB boundary (scripts/check-db-boundary.sh).
  */
 
+import { GITLEAKS_RULES } from "./secret-rules.generated";
+
+/**
+ * Version of the redaction rules below. Bump it on EVERY rule change (new
+ * key, suffix, regex, pass or threshold): the API's boot retro-sweep
+ * (src/be/boot-scrub-sweep.ts) keys its done marker on this number and
+ * re-scrubs stored rows once per version. v2 = the #1907 rules, swept over
+ * session_logs only; v3 = the first version swept across every target table;
+ * v4 = the API's secret registry (src/be/secret-registry.ts) registers every
+ * stored secret at boot, plus its base64, base64url and URL-encoded forms, and
+ * the known-value pass matches them all through one combined regex; v5 = pass
+ * 5, the vendored gitleaks rule set, plus hand-written Resend, Google OAuth,
+ * Discord webhook, xAI and bare Telegram shapes in pass 2; v6 = pass 5 resumes
+ * after the secret, not the match, so adjacent secrets that share a delimiter
+ * both redact, and sourcegraph-access-token drops its bare 40-hex branch.
+ */
+export const SCRUBBER_RULES_VERSION = 6;
+
 /** Env-var names that are always considered secrets, even without suffix hints. */
 const SENSITIVE_KEY_EXACT = new Set<string>([
   "API_KEY",
@@ -452,6 +470,9 @@ function scrubKeyContext(text: string): string {
 // Leading word boundary that also matches after JSON escape sequences (\n, \t,
 // \r, etc.) where the trailing char is alphanumeric and defeats standard \b.
 const TB = String.raw`(?:(?<=\\[nrtbfu0])|(?<!\w))`;
+// Rules whose token class includes `-` end on `(?!\w)`, not `\b`: a token
+// ending in `-` has no word boundary after it, so `\b` backtracks and leaves
+// the last character behind.
 
 const TOKEN_REGEXES: ReadonlyArray<{ name: string; re: RegExp }> = [
   // GitHub fine-grained PATs
@@ -461,34 +482,40 @@ const TOKEN_REGEXES: ReadonlyArray<{ name: string; re: RegExp }> = [
   // ACP ephemeral session tokens (base62 payload)
   { name: "acp_session_token", re: new RegExp(String.raw`${TB}aseph_[A-Za-z0-9]{20,}\b`, "g") },
   // GitLab personal access tokens
-  { name: "gitlab_pat", re: new RegExp(String.raw`${TB}glpat-[A-Za-z0-9_-]{20,}\b`, "g") },
+  { name: "gitlab_pat", re: new RegExp(String.raw`${TB}glpat-[A-Za-z0-9_-]{20,}(?!\w)`, "g") },
   // Azure DevOps personal access tokens (84 chars, "AZDO" signature at offset 76)
   {
     name: "azure_devops_pat",
     re: new RegExp(String.raw`${TB}[A-Za-z0-9]{76}AZDO[A-Za-z0-9]{4}\b`, "g"),
   },
   // Anthropic API keys (must match before the generic sk- rule below)
-  { name: "anthropic_key", re: new RegExp(String.raw`${TB}sk-ant-[A-Za-z0-9_-]{20,}\b`, "g") },
+  { name: "anthropic_key", re: new RegExp(String.raw`${TB}sk-ant-[A-Za-z0-9_-]{20,}(?!\w)`, "g") },
   // OpenAI project keys
-  { name: "openai_proj_key", re: new RegExp(String.raw`${TB}sk-proj-[A-Za-z0-9_-]{20,}\b`, "g") },
+  {
+    name: "openai_proj_key",
+    re: new RegExp(String.raw`${TB}sk-proj-[A-Za-z0-9_-]{20,}(?!\w)`, "g"),
+  },
   // OpenRouter keys
   {
     name: "openrouter_key",
-    re: new RegExp(String.raw`${TB}sk-or-(?:v1-)?[A-Za-z0-9_-]{20,}\b`, "g"),
+    re: new RegExp(String.raw`${TB}sk-or-(?:v1-)?[A-Za-z0-9_-]{20,}(?!\w)`, "g"),
   },
   // Generic sk- legacy OpenAI keys (must come AFTER the ant/proj/or variants)
   { name: "sk_key", re: new RegExp(String.raw`${TB}sk-[A-Za-z0-9]{20,}\b`, "g") },
   // Slack tokens
-  { name: "slack_token", re: new RegExp(String.raw`${TB}xox[baprseo]-[A-Za-z0-9-]{10,}\b`, "g") },
+  {
+    name: "slack_token",
+    re: new RegExp(String.raw`${TB}xox[baprseo]-[A-Za-z0-9-]{10,}(?!\w)`, "g"),
+  },
   // AWS access key IDs
   { name: "aws_access_key", re: new RegExp(String.raw`${TB}AKIA[0-9A-Z]{16}\b`, "g") },
   // Google API keys
-  { name: "google_api_key", re: new RegExp(String.raw`${TB}AIza[A-Za-z0-9_-]{35}\b`, "g") },
+  { name: "google_api_key", re: new RegExp(String.raw`${TB}AIza[A-Za-z0-9_-]{35}(?!\w)`, "g") },
   // JWTs (3 dot-separated base64url segments)
   {
     name: "jwt",
     re: new RegExp(
-      String.raw`${TB}eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b`,
+      String.raw`${TB}eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}(?!\w)`,
       "g",
     ),
   },
@@ -498,21 +525,201 @@ const TOKEN_REGEXES: ReadonlyArray<{ name: string; re: RegExp }> = [
     re: new RegExp(String.raw`${TB}signoz-ingestion-key=[A-Za-z0-9._~+/-]{20,}={0,2}\b`, "g"),
   },
   // Linear OAuth tokens and API keys
-  { name: "linear_oauth", re: new RegExp(String.raw`${TB}lin_oauth_[A-Za-z0-9_-]{10,}\b`, "g") },
-  { name: "linear_api", re: new RegExp(String.raw`${TB}lin_api_[A-Za-z0-9_-]{10,}\b`, "g") },
+  {
+    name: "linear_oauth",
+    re: new RegExp(String.raw`${TB}lin_oauth_[A-Za-z0-9_-]{10,}(?!\w)`, "g"),
+  },
+  { name: "linear_api", re: new RegExp(String.raw`${TB}lin_api_[A-Za-z0-9_-]{10,}(?!\w)`, "g") },
   // npm tokens
-  { name: "npm_token", re: new RegExp(String.raw`${TB}npm_[A-Za-z0-9_-]{20,}\b`, "g") },
+  { name: "npm_token", re: new RegExp(String.raw`${TB}npm_[A-Za-z0-9_-]{20,}(?!\w)`, "g") },
   // Jira API tokens (Atlassian cloud)
   {
     name: "atlassian_token",
-    re: new RegExp(String.raw`${TB}ATATT[A-Za-z0-9_-]{20,}\b`, "g"),
+    re: new RegExp(String.raw`${TB}ATATT[A-Za-z0-9_=-]{20,}(?![\w=])`, "g"),
   },
   // Agent-swarm MCP user tokens (`aswt_<base62-20+>`). Schema lands in
   // migration 064; mint/revoke endpoints ship with the MCP-token plan.
   // Rule lives here now so plaintexts never leak into logs once endpoints
   // come online.
   { name: "mcp_token", re: new RegExp(String.raw`${TB}aswt_[A-Za-z0-9]{20,}\b`, "g") },
+  // Vendor shapes the gitleaks rule set (pass 5) has no rule for.
+  // Resend API keys: re_<8>_<24>, with a digit and an uppercase letter so
+  // snake_case identifiers never match.
+  {
+    name: "resend_key",
+    re: new RegExp(
+      String.raw`${TB}re_(?=[A-Za-z0-9_]*[0-9])(?=[A-Za-z0-9_]*[A-Z])[A-Za-z0-9]{8}_[A-Za-z0-9]{24}\b`,
+      "g",
+    ),
+  },
+  // Google OAuth access tokens and refresh tokens
+  { name: "google_oauth_token", re: new RegExp(String.raw`${TB}ya29\.[A-Za-z0-9_-]{20,}`, "g") },
+  { name: "google_refresh_token", re: /(?<![\w/])1\/\/0[A-Za-z0-9_-]{30,}/g },
+  // Discord webhook URLs (the token is the last path segment)
+  {
+    name: "discord_webhook",
+    re: /https?:\/\/(?:ptb\.|canary\.)?discord(?:app)?\.com\/api\/webhooks\/\d+\/[A-Za-z0-9_-]{50,}/g,
+  },
+  // xAI API keys
+  { name: "xai_key", re: new RegExp(String.raw`${TB}xai-[A-Za-z0-9]{40,}\b`, "g") },
+  // Telegram bot tokens without a "telegram" keyword nearby: <bot id>:AA<33>
+  {
+    name: "telegram_bot_token",
+    re: new RegExp(String.raw`${TB}\d{8,10}:AA[A-Za-z0-9_-]{33}(?![A-Za-z0-9_-])`, "g"),
+  },
 ];
+
+/**
+ * Pass 5: the vendored gitleaks rule set (src/utils/secret-rules.generated.ts).
+ * Compiled on first use. A rule runs only when the text contains one of its
+ * keywords, and a match counts only when its secret clears the rule's entropy
+ * floor and no allowlist claims it, the same gates gitleaks applies.
+ */
+interface CompiledAllowlist {
+  target: "secret" | "match";
+  res: RegExp[];
+  stopwords: string[];
+}
+
+interface CompiledGitleaksRule {
+  id: string;
+  re: RegExp;
+  keywords: string[];
+  entropy?: number;
+  secretGroup?: number;
+  redactWholeMatch?: boolean;
+  allowlists: CompiledAllowlist[];
+}
+
+interface CompiledGitleaks {
+  /** Every keyword in one case-insensitive, longest-first alternation. */
+  keywordRe: RegExp;
+  /** keyword -> every keyword it contains, itself included. */
+  implied: Map<string, string[]>;
+  rules: CompiledGitleaksRule[];
+  global: CompiledAllowlist;
+}
+
+let gitleaks: CompiledGitleaks | null = null;
+
+function getGitleaks(): CompiledGitleaks {
+  if (gitleaks) return gitleaks;
+  const compile = (r: { source: string; flags: string }) => new RegExp(r.source, r.flags);
+  const rules = GITLEAKS_RULES.rules.map((rule) => ({
+    id: rule.id,
+    re: new RegExp(rule.source, `${rule.flags}gd`),
+    keywords: rule.keywords,
+    entropy: rule.entropy,
+    secretGroup: rule.secretGroup,
+    redactWholeMatch: rule.redactWholeMatch,
+    allowlists: (rule.allowlists ?? []).map((list) => ({
+      target: list.target,
+      res: list.regexes.map(compile),
+      stopwords: list.stopwords,
+    })),
+  }));
+  const keywords = [...new Set(rules.flatMap((rule) => rule.keywords))].sort(
+    (a, b) => b.length - a.length,
+  );
+  gitleaks = {
+    keywordRe: new RegExp(keywords.map(escapeRegExp).join("|"), "gi"),
+    implied: new Map(keywords.map((k) => [k, keywords.filter((other) => k.includes(other))])),
+    rules,
+    global: {
+      target: "secret",
+      res: GITLEAKS_RULES.globalAllowlist.regexes.map(compile),
+      stopwords: GITLEAKS_RULES.globalAllowlist.stopwords,
+    },
+  };
+  return gitleaks;
+}
+
+/** Shannon entropy in bits per character, as gitleaks computes it. */
+function shannonEntropy(value: string): number {
+  if (value.length === 0) return 0;
+  const counts = new Map<string, number>();
+  for (const ch of value) counts.set(ch, (counts.get(ch) ?? 0) + 1);
+  let entropy = 0;
+  for (const count of counts.values()) {
+    const p = count / value.length;
+    entropy -= p * Math.log2(p);
+  }
+  return entropy;
+}
+
+function allowedBy(list: CompiledAllowlist, secret: string, match: string): boolean {
+  const target = list.target === "match" ? match : secret;
+  if (list.res.some((re) => re.test(target))) return true;
+  if (list.stopwords.length === 0) return false;
+  const lower = secret.toLowerCase();
+  return list.stopwords.some((word) => lower.includes(word));
+}
+
+function applyGitleaksRule(text: string, rule: CompiledGitleaksRule, global: CompiledAllowlist) {
+  const { re } = rule;
+  re.lastIndex = 0;
+  let out = "";
+  let last = 0;
+  let changed = false;
+  for (let m = re.exec(text); m !== null; m = re.exec(text)) {
+    if (m[0].length === 0) {
+      re.lastIndex++;
+      continue;
+    }
+    // gitleaks' secret: the configured group, else the first non-empty group,
+    // else the whole match. Only the secret is redacted; the context stays.
+    let group = 0;
+    if (rule.secretGroup && m[rule.secretGroup]) group = rule.secretGroup;
+    else if (!rule.redactWholeMatch && !rule.secretGroup) {
+      group = m.findIndex((g, i) => i > 0 && !!g);
+      if (group === -1) group = 0;
+    }
+    const secret = m[group] as string;
+    const span = m.indices?.[group];
+    if (!span) continue;
+    // Resume at the end of the secret, not the match. Many rules consume a
+    // delimiter on each side, so `a b` shares one space: resuming after it
+    // hides the second secret's leading boundary. The next match starts at or
+    // after span[1], so redacted spans never overlap; the max keeps progress.
+    re.lastIndex = Math.max(span[1], m.index + 1);
+    if (rule.entropy && shannonEntropy(secret) <= rule.entropy) continue;
+    if (allowedBy(global, secret, m[0])) continue;
+    if (rule.allowlists.some((list) => allowedBy(list, secret, m[0]))) continue;
+    out += `${text.slice(last, span[0])}[REDACTED:gitleaks:${rule.id}]`;
+    last = span[1];
+    changed = true;
+  }
+  return changed ? out + text.slice(last) : text;
+}
+
+let gitleaksPassEnabled = true;
+
+/** Test-only: switch pass 5 off to measure what it costs. */
+export function setGitleaksPassEnabledForTesting(enabled: boolean): void {
+  gitleaksPassEnabled = enabled;
+}
+
+function scrubGitleaks(text: string): string {
+  if (!gitleaksPassEnabled) return text;
+  const { keywordRe, implied, rules, global } = getGitleaks();
+  // Visit every start position that has a keyword. The alternation is
+  // longest-first, so a shorter keyword starting at the same position is a
+  // substring of the one found, and `implied` adds it.
+  const present = new Set<string>();
+  keywordRe.lastIndex = 0;
+  for (let m = keywordRe.exec(text); m !== null; m = keywordRe.exec(text)) {
+    for (const keyword of implied.get(m[0].toLowerCase()) ?? []) present.add(keyword);
+    keywordRe.lastIndex = m.index + 1;
+  }
+  if (present.size === 0) return text;
+  let out = text;
+  for (const rule of rules) {
+    if (rule.keywords.some((keyword) => present.has(keyword))) {
+      out = applyGitleaksRule(out, rule, global);
+    }
+  }
+  return out;
+}
 
 interface EnvValueEntry {
   value: string;
@@ -524,8 +731,28 @@ interface ScrubCache {
   snapshotKey: string;
 }
 
+/**
+ * Pass 1 matcher: every known value (env entries + volatile secrets) in one
+ * alternation regex, longest value first, so each scrub is a single scan no
+ * matter how many values are registered.
+ */
+interface KnownValueMatcher {
+  /** null when there is nothing to match, or the regex could not be built. */
+  re: RegExp | null;
+  /** value -> marker name. */
+  names: Map<string, string>;
+  /** Longest-first values, used only when `re` failed to build. */
+  fallback: string[];
+  /** Inputs the matcher was built from; a change on either rebuilds it. */
+  builtFor: ScrubCache;
+  builtAtGeneration: number;
+}
+
 let cache: ScrubCache | null = null;
+let matcher: KnownValueMatcher | null = null;
 const volatileSecrets = new Map<string, string>();
+/** Bumped whenever `volatileSecrets` changes, so the matcher rebuilds lazily. */
+let volatileGeneration = 0;
 /** Key names marked secret at runtime (swarm_config rows with isSecret=1). */
 const registeredSensitiveKeys = new Set<string>();
 
@@ -613,29 +840,77 @@ function getCache(): ScrubCache {
   return cache;
 }
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function buildMatcher(envCache: ScrubCache): KnownValueMatcher {
+  // Volatile names first, env names second: when a value is both, the env
+  // name wins, as it did when the env pass ran before the volatile pass.
+  const names = new Map<string, string>(volatileSecrets);
+  for (const { value, name } of envCache.entries) names.set(value, name);
+
+  // Longest first: a regex alternation takes the first alternative that
+  // matches at a position, so a value that is a prefix of a longer one must
+  // come after it or the longer value would be cut in half.
+  const values = [...names.keys()].sort((a, b) => b.length - a.length);
+  let re: RegExp | null = null;
+  if (values.length > 0) {
+    try {
+      re = new RegExp(values.map(escapeRegExp).join("|"), "g");
+    } catch {
+      // Pattern too large for the engine: fall back to the per-value loop.
+      re = null;
+    }
+  }
+  return {
+    re,
+    names,
+    fallback: re ? [] : values,
+    builtFor: envCache,
+    builtAtGeneration: volatileGeneration,
+  };
+}
+
+function getMatcher(): KnownValueMatcher {
+  const envCache = getCache();
+  if (
+    !matcher ||
+    matcher.builtFor !== envCache ||
+    matcher.builtAtGeneration !== volatileGeneration
+  ) {
+    matcher = buildMatcher(envCache);
+  }
+  return matcher;
+}
+
+/**
+ * A string that has passed through `scrubSecrets`. Still a plain `string` at
+ * runtime; the brand lets a DB writer demand scrubbed input so `tsc` rejects a
+ * raw string. Only `scrubSecrets` produces it.
+ */
+export type ScrubbedText = string & { readonly __scrubbed: true };
+
 /**
  * Replace known secret values in `text` with `[REDACTED:<name>]` markers.
  * Null/undefined inputs return an empty string. Empty strings pass through.
  */
-export function scrubSecrets(text: string | null | undefined): string {
-  if (text == null) return "";
-  if (text.length === 0) return text;
+export function scrubSecrets(text: string | null | undefined): ScrubbedText {
+  if (text == null) return "" as ScrubbedText;
+  if (text.length === 0) return text as ScrubbedText;
 
   let out = text;
 
-  // Pass 1: exact-match env values (preserves the env-var name in the marker
-  // for debugging).
-  const { entries } = getCache();
-  for (const { value, name } of entries) {
-    if (out.includes(value)) {
-      // split/join is O(n) and faster than building a RegExp for every value.
-      out = out.split(value).join(`[REDACTED:${name}]`);
-    }
-  }
-
-  for (const [value, name] of volatileSecrets) {
-    if (out.includes(value)) {
-      out = out.split(value).join(`[REDACTED:${name}]`);
+  // Pass 1: exact-match known values, env first then volatile (registered at
+  // runtime, incl. every stored secret the API's secret registry loads). The
+  // marker keeps the env-var / source name for debugging.
+  const { re, names, fallback } = getMatcher();
+  if (re) {
+    re.lastIndex = 0;
+    out = out.replace(re, (match) => `[REDACTED:${names.get(match) ?? "secret"}]`);
+  } else {
+    for (const value of fallback) {
+      if (out.includes(value)) out = out.split(value).join(`[REDACTED:${names.get(value)}]`);
     }
   }
 
@@ -653,7 +928,11 @@ export function scrubSecrets(text: string | null | undefined): string {
 
   // Pass 4: credentials known by their context (JSON/YAML keys, auth headers,
   // curl flags, URL userinfo, PEM blocks).
-  return scrubKeyContext(out);
+  out = scrubKeyContext(out);
+
+  // Pass 5: vendor token shapes from the gitleaks rule set, behind a keyword
+  // prefilter and each rule's entropy floor.
+  return scrubGitleaks(out) as ScrubbedText;
 }
 
 export function scrubObject<T>(value: T, seen = new WeakSet<object>()): T {
@@ -696,7 +975,11 @@ export function refreshSecretScrubberCache(): void {
  */
 export function registerVolatileSecret(value: string, name: string): void {
   if (value.length < MIN_VALUE_LENGTH) return;
-  for (const form of escapedForms(value)) volatileSecrets.set(form, name);
+  for (const form of escapedForms(value)) {
+    if (volatileSecrets.get(form) === name) continue;
+    volatileSecrets.set(form, name);
+    volatileGeneration++;
+  }
 }
 
 /**
@@ -715,6 +998,8 @@ export function registerSensitiveKeyName(key: string): void {
 /** Test-only: drop volatile values and runtime-registered key names. */
 export function clearVolatileSecretsForTesting(): void {
   volatileSecrets.clear();
+  volatileGeneration++;
+  matcher = null;
   registeredSensitiveKeys.clear();
   sensitiveKeyVerdicts.clear();
   cache = null;

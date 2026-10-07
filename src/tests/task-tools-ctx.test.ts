@@ -37,6 +37,7 @@ afterAll(async () => {
 describe("task tool ctx", () => {
   test("sendTaskHandler with user ctx writes requestedByUserId", async () => {
     const user = await createUser({ name: "MCP User" });
+    const lead = await createAgent({ name: "MCP User Lead", isLead: true, status: "idle" });
 
     const result = await sendTaskHandler(userCtx(user), {
       task: "user requested task",
@@ -53,6 +54,8 @@ describe("task tool ctx", () => {
     expect(data.task.requestedByUserId).toBe(user.id);
 
     const stored = await getTaskById(data.task.id);
+    expect(stored?.status).toBe("pending");
+    expect(stored?.agentId).toBe(lead.id);
     expect(stored?.creatorAgentId).toBeUndefined();
     expect(stored?.requestedByUserId).toBe(user.id);
   });

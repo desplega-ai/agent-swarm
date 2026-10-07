@@ -81,6 +81,7 @@ const CREDENTIAL_KEYS = [
   "DEEPSEEK_API_KEY",
   "AMP_API_KEY",
   "CURSOR_API_KEY",
+  "XAI_API_KEY",
 ];
 
 function configuredModel(configs: { key: string; value: string }[] | undefined): string {

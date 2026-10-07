@@ -309,3 +309,64 @@ describe("cursor harness models", () => {
     expect(effortLevelsFor("cursor", "composer-2.5", catalog)).toEqual([]);
   });
 });
+
+describe("grok harness models", () => {
+  const catalog = live({
+    xai: {
+      "grok-4.6": {
+        name: "Grok 4.6",
+        reasoning: true,
+        reasoning_options: effort(["low", "medium", "high", "xhigh"]),
+      },
+    },
+    openrouter: {
+      "acme/thing": {
+        name: "Acme Thing",
+        reasoning: true,
+        reasoning_options: effort(["low", "high"]),
+      },
+    },
+  });
+
+  test("an xAI group behind XAI_API_KEY with the CLI's models", () => {
+    const [group] = modelGroupsForHarness("grok", [], { XAI_API_KEY: true }, null, catalog);
+    expect(group?.provider).toBe("xAI");
+    expect(group?.requiredKey).toBe("XAI_API_KEY");
+    expect(group?.enabled).toBe(true);
+    expect(group?.models.map((m) => m.id)).toEqual([
+      "grok-4.7",
+      "grok-4.6",
+      "grok-4.5",
+      "grok-4.3",
+      "grok-4.20-0309-reasoning",
+      "grok-4.20-0309-non-reasoning",
+      "grok-build-0.1",
+    ]);
+    const grok46 = group?.models.find((m) => m.id === "grok-4.6");
+    expect(grok46?.label).toBe("Grok 4.6");
+    expect(grok46?.reasoningLevels).toEqual(["low", "medium", "high", "xhigh"]);
+    expect(modelGroupsForHarness("grok", [], {}, null, catalog)[0]?.enabled).toBe(false);
+  });
+
+  test("an OpenRouter group behind OPENROUTER_API_KEY with openrouter/ ids", () => {
+    const groups = modelGroupsForHarness("grok", [], { OPENROUTER_API_KEY: true }, null, catalog);
+    expect(groups.map((g) => [g.requiredKey, g.enabled])).toEqual([
+      ["XAI_API_KEY", false],
+      ["OPENROUTER_API_KEY", true],
+    ]);
+    expect(groups[1]?.models.map((m) => [m.id, m.reasoningLevels])).toEqual([
+      ["openrouter/acme/thing", ["low", "high"]],
+    ]);
+    expect(effortLevelsFor("grok", "openrouter/acme/thing", catalog)).toEqual(["low", "high"]);
+  });
+
+  test("effort reads the xai section", () => {
+    expect(effortLevelsFor("grok", "grok-4.6", catalog)).toEqual([
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+    ]);
+    expect(effortLevelsFor("grok", "grok-unknown", catalog)).toEqual([]);
+  });
+});

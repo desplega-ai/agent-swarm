@@ -263,7 +263,7 @@ export function normalizeAcp(ordered: DecodedRecord[]): NormalizedItem[] {
       }
       case "progress": {
         // Only suppress the provider's generated duplicate for a known call.
-        const match = /^ACP tool (\S+) (?:pending|in_progress|completed|failed)$/.exec(
+        const match = /^ACP tool (\S+) (?:pending|in_progress|completed|failed|updated)$/.exec(
           String(ev.message ?? ""),
         );
         if (!match?.[1] || !toolCalls.has(match[1])) {

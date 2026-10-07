@@ -147,11 +147,7 @@ import {
 } from "../utils/identity-field-budget";
 import { activeModelBlock, type ModelFamily } from "../utils/model-rate-limit-windows";
 import { getCurrentRequestUserId } from "../utils/request-auth-context";
-import {
-  registerSensitiveKeyName,
-  registerVolatileSecret,
-  scrubSecrets,
-} from "../utils/secret-scrubber";
+import { registerSensitiveKeyName, scrubSecrets } from "../utils/secret-scrubber";
 import {
   estimateClaudePlan,
   planAllowsModelFamily,
@@ -197,6 +193,7 @@ import {
   rowToAgentTaskSummary,
 } from "./db/tasks/read";
 import { configureTaskWriteDependencies, failTask } from "./db/tasks/write";
+import { configSecretName, registerStoredSecret } from "./secret-registry";
 import { promotePendingSteeringForTask } from "./steering";
 import { isInternalConfigKey, isReservedConfigKey, reservedKeyError } from "./swarm-config-guard";
 import { emitTaskStarted } from "./task-lifecycle-events";
@@ -4597,7 +4594,7 @@ export async function createSessionLogs(logs: {
   lines: string[];
 }): Promise<void> {
   // Bounded batches, one short transaction each (reference shape:
-  // src/be/boot-scrub-logs.ts): worker log batches have unbounded line
+  // src/be/boot-scrub-sweep.ts): worker log batches have unbounded line
   // counts, and a single transaction across thousands of scrub+INSERT
   // iterations would hold the global write lock — and the event loop — for
   // the whole sweep. The regex scrub runs outside the transaction so only
@@ -6614,7 +6611,7 @@ export async function upsertSwarmConfig(data: {
   }
 
   if (config.isSecret) {
-    registerVolatileSecret(config.value, `config:${config.key}`);
+    registerStoredSecret(config.value, configSecretName(config.key));
     registerSensitiveKeyName(config.key);
   }
 

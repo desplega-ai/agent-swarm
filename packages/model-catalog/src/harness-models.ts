@@ -32,6 +32,27 @@ export function harnessCatalogSection(harness: string): "anthropic" | "openai" |
   return HARNESS_CATALOG_SECTION[harness] ?? null;
 }
 
+/**
+ * Whether `harnessModelMismatch` judges this harness: the pinned-section
+ * harnesses, plus grok, which runs bare xAI ids and `openrouter/<id>` only.
+ */
+export function isHarnessModelJudged(harness: string | null | undefined): boolean {
+  return !!harness && (harnessCatalogSection(harness) !== null || harness === "grok");
+}
+
+const XAI_PREFIX_RE = /^xai\//i;
+/** xAI names every model `grok-*`; a slash means another namespace. */
+const GROK_ID_RE = /^grok-[^/]+$/i;
+
+/**
+ * The model id the Grok CLI runs: `xai/<id>` is the xAI catalog's qualified
+ * spelling of a bare xAI id, so the prefix is dropped. Every other value,
+ * `openrouter/<vendor>/<id>` included, is returned trimmed.
+ */
+export function normalizeGrokModel(model: string): string {
+  return model.trim().replace(XAI_PREFIX_RE, "");
+}
+
 const DATED_ID_RE = /-\d{8}$/;
 const ISO_DATED_ID_RE = /-\d{4}-\d{2}-\d{2}$/;
 
@@ -171,7 +192,8 @@ const MAX_EXAMPLE_IDS = 8;
 
 /**
  * Null when `model` runs on `harness`, else the reason. Only the pinned
- * harnesses (claude, claude-managed, codex) are judged; every other harness,
+ * harnesses (claude, claude-managed, codex) and grok (`grokModelMismatch`)
+ * are judged; every other harness,
  * and an id the catalog does not know at all, passes (the catalog membership
  * check decides those). Legacy shortnames and `modelTier` never reach here as
  * a cross-harness problem: a bare `opus` on codex is unknown to every section.
@@ -184,6 +206,7 @@ export function harnessModelMismatch(
   sections: HarnessCatalogSections,
   context: { agentName?: string | null; agentId?: string | null } = {},
 ): string | null {
+  if (harness === "grok") return grokModelMismatch(model, sections, context);
   const section = harness ? harnessCatalogSection(harness) : null;
   if (!harness || !section) return null;
   const id = model.trim().replace(CONTEXT_SUFFIX_RE, "");
@@ -216,6 +239,66 @@ export function harnessModelMismatch(
     if (other?.models && Object.hasOwn(other.models, bare)) return fail();
   }
   return null;
+}
+
+/**
+ * The grok harness sends a bare id to xAI and registers `openrouter/<id>` as
+ * an OpenAI-compatible model on OpenRouter; nothing else has a route. So a
+ * `latest:openrouter/...` alias, `openrouter/<id>`, an xAI id (bare or
+ * `xai/`-qualified) and an id no section knows pass; another vendor's
+ * namespace, alias or catalog id fails. An xAI id is one the `xai` section
+ * lists or any `grok-*` id: the API catalog carries no `xai` section, and
+ * aggregator sections (`opencode`) list xAI's bare ids too.
+ */
+function grokModelMismatch(
+  model: string,
+  sections: HarnessCatalogSections,
+  context: { agentName?: string | null; agentId?: string | null },
+): string | null {
+  const id = model.trim();
+  if (!id) return null;
+  const fail = () => grokMismatchMessage(id, sections, context);
+  if (isAlias(id)) {
+    const parsed = parseAlias(id);
+    if (!parsed) return null;
+    return parsed.kind === "openrouter" ? null : fail();
+  }
+  if (/^openrouter\/./i.test(id)) return null;
+  const bare = normalizeGrokModel(id);
+  if (!bare || bare.includes("/")) return fail();
+  if (GROK_ID_RE.test(bare) || Object.hasOwn(sections.xai?.models ?? {}, bare)) return null;
+  for (const [name, other] of Object.entries(sections)) {
+    if (name === "xai") continue;
+    if (other?.models && Object.hasOwn(other.models, bare)) return fail();
+  }
+  return null;
+}
+
+function grokMismatchMessage(
+  model: string,
+  sections: HarnessCatalogSections,
+  context: { agentName?: string | null; agentId?: string | null },
+): string {
+  const agent = context.agentId
+    ? ` of agent "${context.agentName ?? context.agentId}" (${context.agentId})`
+    : "";
+  // Examples from the xai section, else the `grok-*` ids any section lists.
+  const pool = sections.xai?.models
+    ? [sections.xai.models]
+    : Object.values(sections).map((section) => section?.models ?? {});
+  const best = new Map<string, { id: string; release_date: string | null }>();
+  for (const models of pool) {
+    for (const [id, m] of Object.entries(models)) {
+      if (m.status === "deprecated" || !GROK_ID_RE.test(id) || best.has(id)) continue;
+      best.set(id, { id, release_date: m.release_date ?? null });
+    }
+  }
+  const ids = [...best.values()].sort(compareNewestFirst).map((m) => m.id);
+  const extra = ids.length - MAX_EXAMPLE_IDS;
+  const examples = ids.length
+    ? ` (for example: ${ids.slice(0, MAX_EXAMPLE_IDS).join(", ")}${extra > 0 ? ` and ${extra} more` : ""})`
+    : "";
+  return `Model "${model}" does not run on the grok harness${agent}. The grok harness accepts xai catalog models${examples} and openrouter/<vendor>/<id>. Use modelTier (smol, regular, smart, ultra) for portable intent, or omit model and let the assignee resolve it.`;
 }
 
 function harnessMismatchMessage(

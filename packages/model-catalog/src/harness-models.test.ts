@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { type HarnessCatalogSections, harnessModelMismatch } from "./index.ts";
+import { type HarnessCatalogSections, harnessModelMismatch, normalizeGrokModel } from "./index.ts";
 
 const catalog: HarnessCatalogSections = {
   anthropic: {
@@ -122,5 +122,70 @@ describe("harnessModelMismatch", () => {
     expect(error).toContain("for example: claude-opus-5-5, claude-sonnet-5, claude-haiku-4-5. Use");
     expect(error).not.toContain("more");
     expect(error).not.toContain("of agent");
+  });
+});
+
+describe("harnessModelMismatch on grok", () => {
+  const withXai: HarnessCatalogSections = {
+    ...catalog,
+    xai: {
+      models: {
+        "grok-4.6": { release_date: "2026-09-01" },
+        "grok-build-0.1": { release_date: "2026-08-01" },
+        "grok-imagine-image": { release_date: "2026-07-01" },
+      },
+    },
+  };
+
+  test("xAI ids, bare or xai/-qualified, and the OpenRouter route pass", () => {
+    for (const model of [
+      "grok-4.6",
+      "xai/grok-4.6",
+      "XAI/grok-build-0.1",
+      "openrouter/anthropic/claude-opus-5.5",
+      "openrouter/deepseek/uncatalogued-1",
+      "latest:openrouter/deepseek/deepseek-v4*",
+      "grok-5-uncatalogued",
+    ]) {
+      expect(harnessModelMismatch(model, "grok", withXai)).toBeNull();
+    }
+  });
+
+  test("another vendor's id, namespace or alias fails with the routes it accepts", () => {
+    for (const model of [
+      "claude-opus-5-5",
+      "anthropic/claude-opus-5-5",
+      "gpt-5.6-sol",
+      "openai/gpt-5.6-sol",
+      "anthropic/claude-opus-5.5",
+      "xai/",
+      "latest:anthropic/opus",
+      "latest:openai/gpt-5*",
+    ]) {
+      const error = harnessModelMismatch(model, "grok", withXai, {
+        agentName: "Grokker",
+        agentId: "a3b9cca2-1b37-9078-b000-000000000001",
+      });
+      expect(error).toContain(`Model "${model}" does not run on the grok harness`);
+      expect(error).toContain("(for example: grok-4.6, grok-build-0.1, grok-imagine-image)");
+      expect(error).toContain("openrouter/<vendor>/<id>");
+      expect(error).toContain('of agent "Grokker"');
+    }
+  });
+
+  test("an xAI id that another section also lists still passes", () => {
+    const shared: HarnessCatalogSections = {
+      ...withXai,
+      azure: { models: { "grok-4.6": {} } },
+    };
+    expect(harnessModelMismatch("grok-4.6", "grok", shared)).toBeNull();
+  });
+});
+
+describe("normalizeGrokModel", () => {
+  test("drops the xai/ prefix and nothing else", () => {
+    expect(normalizeGrokModel(" xai/grok-4.6 ")).toBe("grok-4.6");
+    expect(normalizeGrokModel("grok-4.6")).toBe("grok-4.6");
+    expect(normalizeGrokModel("openrouter/x-ai/grok-4")).toBe("openrouter/x-ai/grok-4");
   });
 });
