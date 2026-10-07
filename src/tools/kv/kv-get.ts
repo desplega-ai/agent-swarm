@@ -4,6 +4,7 @@ import { getKv } from "@/be/db";
 import {
   hasKvViewArgs,
   joinKvPath,
+  KV_PATH_MAX_CHARS,
   type KvView,
   resolveKvTarget,
   resolveKvView,
@@ -92,15 +93,34 @@ function boundedView(
   if (baseView.total === undefined) return render(checked.value, baseView);
 
   const offset = baseView.offset ?? 0;
+  const wanted = Math.min(args.limit ?? baseView.total, Math.max(0, baseView.total - offset));
+  const firstKey =
+    baseView.type === "array"
+      ? String(offset)
+      : baseView.type === "object"
+        ? Object.keys(target.value as object)[offset]
+        : undefined;
+  // An empty key or an over-long path cannot be passed back as `path`.
+  const firstPath =
+    firstKey === undefined || firstKey === ""
+      ? undefined
+      : `${baseView.path ? `${baseView.path}.` : ""}${joinKvPath([firstKey])}`;
+  const narrowTo = firstPath !== undefined && firstPath.length <= KV_PATH_MAX_CHARS;
+  // A shrunk page carries its note, so the note is part of what gets sized.
   const page = (count: number) => {
     const sliced = sliceKvTarget(target.value, offset, count);
-    return render(sliced?.value, {
+    const result = render(sliced?.value, {
       ...baseView,
       returned: sliced?.returned ?? 0,
       nextOffset: sliced?.nextOffset ?? null,
     });
+    if (count >= wanted) return result;
+    const note =
+      count === 0 && narrowTo
+        ? ` The entry at offset ${offset} alone exceeds the ${MCP_RESULT_WIRE_LIMIT_BYTES}-byte cap; narrow the path to "${firstPath}".`
+        : ` Page shrunk to fit the ${MCP_RESULT_WIRE_LIMIT_BYTES}-byte cap; continue at view.nextOffset.`;
+    return { ...result, message: `${result.message}${note}` };
   };
-  const wanted = Math.min(args.limit ?? baseView.total, Math.max(0, baseView.total - offset));
   const fits = (count: number) => swarmToolResultBytes(page(count)) <= MCP_RESULT_WIRE_LIMIT_BYTES;
   if (fits(wanted)) return page(wanted);
 
@@ -111,22 +131,7 @@ function boundedView(
     if (fits(mid)) low = mid;
     else high = mid - 1;
   }
-  const bounded = page(low);
-  const firstKey =
-    baseView.type === "array"
-      ? String(offset)
-      : baseView.type === "object"
-        ? Object.keys(target.value as object)[offset]
-        : undefined;
-  const firstPath =
-    firstKey === undefined
-      ? undefined
-      : `${baseView.path ? `${baseView.path}.` : ""}${joinKvPath([firstKey])}`;
-  const note =
-    low === 0 && firstPath !== undefined
-      ? ` The entry at offset ${offset} alone exceeds the ${MCP_RESULT_WIRE_LIMIT_BYTES}-byte cap; narrow the path to "${firstPath}".`
-      : ` Page shrunk to fit the ${MCP_RESULT_WIRE_LIMIT_BYTES}-byte cap; continue at view.nextOffset.`;
-  return { ...bounded, message: `${bounded.message}${note}` };
+  return page(low);
 }
 
 export const registerKvGetTool = (server: McpServer) => {
@@ -145,7 +150,7 @@ export const registerKvGetTool = (server: McpServer) => {
         ),
         path: z
           .string()
-          .max(1024)
+          .max(KV_PATH_MAX_CHARS)
           .optional()
           .describe(
             'Dot path into the JSON value, e.g. "outcome.data.rows" or "rows.3". "" is the whole value. A dot inside a key is escaped as "\\.".',

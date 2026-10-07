@@ -15,6 +15,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:tes
 import { unlink } from "node:fs/promises";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { closeDb, createAgent, getDbClient, initDb } from "../be/db";
+import { summarizeKvShape } from "../kv-view";
 import {
   registerKvDeleteTool,
   registerKvGetTool,
@@ -373,6 +374,73 @@ describe("kv MCP tools", () => {
       meta(agentA),
     )) as ViewResult;
     expect(JSON.parse(narrowed.structuredContent.details!)).toBe("f".repeat(100));
+  });
+
+  test("a shrunk kv-get page counts its note, so both channels stay within the cap", async () => {
+    const tools = buildServer();
+    const channelBytes = (res: ViewResult) => ({
+      text: Buffer.byteLength(res.content.map((part) => part.text).join(""), "utf8"),
+      structured: Buffer.byteLength(JSON.stringify(res.structuredContent), "utf8"),
+    });
+    const longKey = "k".repeat(900);
+    await tools.set.handler(
+      {
+        key: "near-cap",
+        value: {
+          text: "a".repeat(20_000),
+          rows: Array.from({ length: 400 }, (_, id) => ({ id, note: "r".repeat(100) })),
+          [longKey]: [{ blob: "f".repeat(20_000) }],
+        },
+      },
+      meta(agentA),
+    );
+    const cases = [
+      { args: { path: "text" }, note: "Page shrunk" },
+      { args: { path: "text", offset: 3 }, note: "Page shrunk" },
+      { args: { path: "rows" }, note: "Page shrunk" },
+      { args: { path: longKey }, note: `narrow the path to "${longKey}.0"` },
+    ];
+    for (const { args, note } of cases) {
+      const res = (await tools.get.handler(
+        { key: "near-cap", ...args },
+        meta(agentA),
+      )) as ViewResult;
+      expect(res.structuredContent.success).toBe(true);
+      expect(res.structuredContent.message).toContain(note);
+      const bytes = channelBytes(res);
+      expect(bytes.text).toBeLessThanOrEqual(MCP_RESULT_WIRE_LIMIT_BYTES);
+      expect(bytes.structured).toBeLessThanOrEqual(MCP_RESULT_WIRE_LIMIT_BYTES);
+    }
+  });
+
+  test("every spill shape path, long or empty-keyed, works as a kv-get path", async () => {
+    const tools = buildServer();
+    const rows = (n: number) =>
+      Array.from({ length: n }, (_, id) => ({ id, note: "r".repeat(60) }));
+    const longKey = "L".repeat(200);
+    const values = {
+      long: { [longKey]: rows(80), small: 1 },
+      emptyRoot: { "": rows(80), small: 1 },
+      emptyNested: { outer: { "": rows(80), side: rows(40) }, small: 1 },
+      overMax: { ["X".repeat(1_100)]: rows(80), small: 1 },
+    };
+    for (const [key, value] of Object.entries(values)) {
+      await tools.set.handler({ key, value: JSON.stringify(value) }, meta(agentA));
+      const shape = summarizeKvShape(value);
+      expect(shape.length).toBeGreaterThan(0);
+      for (const entry of shape) {
+        const res = (await tools.get.handler(
+          { key, path: entry.path, ...(entry.items === undefined ? {} : { offset: 0 }) },
+          meta(agentA),
+        )) as ViewResult;
+        expect(res.structuredContent.success).toBe(true);
+        expect(res.structuredContent.view).toMatchObject({ path: entry.path, type: entry.type });
+        if (entry.items !== undefined) {
+          expect(res.structuredContent.view!.total).toBe(entry.items);
+        }
+      }
+      if (key === "long") expect(shape[0]!.path).toBe(longKey);
+    }
   });
 
   test("kv-incr creates + increments + reports value", async () => {
