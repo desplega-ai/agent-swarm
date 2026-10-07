@@ -101,7 +101,7 @@ their private `mcp:overflow:<agentId>` partition.
 
 `kv-get` with no view args returns the whole stored value, unbounded, and the harness applies its own native truncation (unchanged behaviour). With any of `path`, `offset`, `limit` it returns a bounded view instead:
 
-- `path` is a dot path into the JSON value; numeric segments index arrays (`outcome.data.rows`, `rows.3`). A `string` entry whose text parses to an object or array (every spill payload) counts as JSON. A path into a plain string, a missing key, or a bad index is a tool error that names the segment.
+- `path` is a dot path into the JSON value; numeric segments index arrays (`outcome.data.rows`, `rows.3`); `\.` is a literal dot inside a key and `\\` a literal backslash, and every shape path is emitted escaped. A `string` entry whose text parses to an object or array (every spill payload) counts as JSON. A path into a plain string, a missing key, or a bad index is a tool error that names the segment.
 - `offset`/`limit` page the array items, object keys, or string characters at the path. An offset past the end returns an empty page with the real `total`. Paging a number/boolean/null is an error.
 - The tool bounds the view itself (it stays spill-exempt): if the page breaks the 10,000-byte per-channel cap it shrinks by binary search, and `view.nextOffset` says where to resume. When even one item is too big, the message names the narrower path to fetch.
 - Text carries the slice as compact JSON (or the raw characters); `structuredContent` carries `view` plus `entry` metadata without `value`, and the slice in `details`.

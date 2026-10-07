@@ -81,12 +81,39 @@ function itemCount(value: unknown): number | undefined {
   return undefined;
 }
 
+/**
+ * Split a dot path into keys. `\.` is a literal dot and `\\` a literal
+ * backslash, so object keys containing dots stay addressable.
+ */
+export function splitKvPath(path: string): string[] {
+  const segments: string[] = [];
+  let current = "";
+  for (let i = 0; i < path.length; i++) {
+    const char = path[i] as string;
+    if (char === "\\" && i + 1 < path.length) {
+      current += path[++i];
+    } else if (char === ".") {
+      segments.push(current);
+      current = "";
+    } else {
+      current += char;
+    }
+  }
+  segments.push(current);
+  return segments;
+}
+
+/** Inverse of `splitKvPath`: escape each key and join with dots. */
+export function joinKvPath(segments: string[]): string {
+  return segments.map((key) => key.replace(/[\\.]/g, "\\$&")).join(".");
+}
+
 function resolvePath(
   root: unknown,
   path: string,
 ): { ok: true; value: unknown } | { ok: false; error: string } {
   if (path === "") return { ok: true, value: root };
-  const segments = path.split(".");
+  const segments = splitKvPath(path);
   if (segments.some((segment) => segment === "")) {
     return {
       ok: false,
@@ -96,7 +123,7 @@ function resolvePath(
   let current = root;
   for (let i = 0; i < segments.length; i++) {
     const segment = segments[i] as string;
-    const at = segments.slice(0, i).join(".") || "(root)";
+    const at = joinKvPath(segments.slice(0, i)) || "(root)";
     if (Array.isArray(current)) {
       const index = /^\d+$/.test(segment) ? Number(segment) : Number.NaN;
       if (!(index < current.length)) {
@@ -216,7 +243,7 @@ function shapeEntry(path: string, value: unknown): KvShapeEntry & { value: unkno
 function childEntries(value: unknown, path: string): Array<KvShapeEntry & { value: unknown }> {
   if (value === null || typeof value !== "object" || Array.isArray(value)) return [];
   return Object.entries(value).map(([key, child]) =>
-    shapeEntry(path ? `${path}.${key}` : key, child),
+    shapeEntry(path ? `${path}.${joinKvPath([key])}` : joinKvPath([key]), child),
   );
 }
 

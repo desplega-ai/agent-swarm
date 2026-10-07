@@ -3,6 +3,7 @@ import * as z from "zod";
 import { getKv } from "@/be/db";
 import {
   hasKvViewArgs,
+  joinKvPath,
   type KvView,
   resolveKvTarget,
   resolveKvView,
@@ -114,9 +115,13 @@ function boundedView(
       : baseView.type === "object"
         ? Object.keys(target.value as object)[offset]
         : undefined;
+  const firstPath =
+    firstKey === undefined
+      ? undefined
+      : `${baseView.path ? `${baseView.path}.` : ""}${joinKvPath([firstKey])}`;
   const note =
-    low === 0 && firstKey !== undefined
-      ? ` The entry at offset ${offset} alone exceeds the ${MCP_RESULT_WIRE_LIMIT_BYTES}-byte cap; narrow the path to "${baseView.path ? `${baseView.path}.` : ""}${firstKey}".`
+    low === 0 && firstPath !== undefined
+      ? ` The entry at offset ${offset} alone exceeds the ${MCP_RESULT_WIRE_LIMIT_BYTES}-byte cap; narrow the path to "${firstPath}".`
       : ` Page shrunk to fit the ${MCP_RESULT_WIRE_LIMIT_BYTES}-byte cap; continue at view.nextOffset.`;
   return { ...bounded, message: `${bounded.message}${note}` };
 }
@@ -127,7 +132,7 @@ export const registerKvGetTool = (server: McpServer) => {
     {
       title: "KV Get",
       description:
-        "Read a key from the swarm KV store. Returns the entry or null if missing/expired. Namespace defaults to your current context (Slack thread / PR / Linear issue when invoked from a task; otherwise your agent scratchpad). Without path/offset/limit the whole value comes back unbounded. With any of them you get a bounded view (≤10KB per channel): `path` is a dot path into a JSON value (string entries holding JSON, such as spilled tool results, count as JSON; numeric segments index arrays, e.g. `outcome.data.rows` or `rows.3`), and `offset`/`limit` page the array items, object keys, or string characters found there. The result's `view.nextOffset` says where the next page starts.",
+        "Read a key from the swarm KV store. Returns the entry or null if missing/expired. Namespace defaults to your current context (Slack thread / PR / Linear issue when invoked from a task; otherwise your agent scratchpad). Without path/offset/limit the whole value comes back unbounded. With any of them you get a bounded view (≤10KB per channel): `path` is a dot path into a JSON value (string entries holding JSON, such as spilled tool results, count as JSON; numeric segments index arrays, e.g. `outcome.data.rows` or `rows.3`; escape a dot inside a key as `\\.`), and `offset`/`limit` page the array items, object keys, or string characters found there. The result's `view.nextOffset` says where the next page starts.",
       annotations: { readOnlyHint: true },
 
       inputSchema: z.object({
@@ -140,7 +145,7 @@ export const registerKvGetTool = (server: McpServer) => {
           .max(1024)
           .optional()
           .describe(
-            'Dot path into the JSON value, e.g. "outcome.data.rows" or "rows.3". "" is the whole value.',
+            'Dot path into the JSON value, e.g. "outcome.data.rows" or "rows.3". "" is the whole value. A dot inside a key is escaped as "\\.".',
           ),
         offset: z
           .number()

@@ -95,6 +95,19 @@ describe("summarizeKvShape", () => {
     expect(shape.map((entry) => entry.path)).not.toContain("version");
   });
 
+  test("escapes keys with dots so every shape path resolves", () => {
+    const rows = Array.from({ length: 50 }, (_, id) => ({ id, note: "x".repeat(50) }));
+    const value = { "rows.v2": rows, "a\\b": { "c.d": "y".repeat(2_000) } };
+    const shape = summarizeKvShape(value);
+    expect(shape.map((entry) => entry.path)).toEqual(["rows\\.v2", "a\\\\b.c\\.d"]);
+    for (const entry of shape) {
+      expect(resolveKvView(value, { path: entry.path, offset: 0 })).toMatchObject({
+        ok: true,
+        view: { path: entry.path, type: entry.type, total: entry.items },
+      });
+    }
+  });
+
   test("is bounded to maxEntries", () => {
     const wide = Object.fromEntries(
       Array.from({ length: 50 }, (_, i) => [`k${i}`, "v".repeat(100)]),

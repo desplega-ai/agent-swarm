@@ -870,7 +870,7 @@ Read a key. Returns the entry or `null` if missing/expired. Namespace defaults t
 |-----------|------|----------|-------------|
 | `key` | string | Yes | Key to read |
 | `namespace` | string | No | Override the auto-resolved namespace |
-| `path` | string | No | Dot path into the JSON value (`outcome.data.rows`, `rows.3`). String entries holding JSON count as JSON |
+| `path` | string | No | Dot path into the JSON value (`outcome.data.rows`, `rows.3`; escape a dot inside a key as `\.`). String entries holding JSON count as JSON |
 | `offset` | number | No | First array item / object key / string character to return. Default 0 |
 | `limit` | number | No | Max items / keys / characters. The page also shrinks to fit the cap |
 
