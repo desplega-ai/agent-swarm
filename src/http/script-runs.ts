@@ -23,6 +23,7 @@ import {
   upsertScriptRunJournalStep,
 } from "../be/db";
 import { explicitModelErrorForAgent } from "../be/model-validation";
+import { refuseSourceWithSecrets } from "../be/scripts/source-secrets";
 import { lintWorkflowLabels } from "../script-workflows/label-lint";
 import { scriptRunMaxAgentTasks, scriptRunMaxSteps } from "../script-workflows/limits";
 import {
@@ -369,6 +370,12 @@ export async function handleScriptRuns(
     if (!parsed) return true;
     const agent = await requireAgent(res, agentId);
     if (!agent) return true;
+
+    const secretRefusal = refuseSourceWithSecrets(parsed.body.source);
+    if (secretRefusal) {
+      json(res, secretRefusal, 400);
+      return true;
+    }
 
     const lint = lintWorkflowLabels(parsed.body.source);
     if (!lint.ok) {

@@ -14,12 +14,16 @@ import {
   initDb,
   updateScriptRun,
 } from "../be/db";
+import { configSecretName, registerStoredSecret } from "../be/secret-registry";
 import { handleCore } from "../http/core";
 import { handleScriptRuns } from "../http/script-runs";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import { localProcessScriptExecutor } from "../script-workflows/executor";
 import { setScriptRunExecutor } from "../script-workflows/supervisor";
-import { refreshSecretScrubberCache } from "../utils/secret-scrubber";
+import {
+  clearVolatileSecretsForTesting,
+  refreshSecretScrubberCache,
+} from "../utils/secret-scrubber";
 import { randomToken } from "./synthetic-secret-helpers";
 
 const TEST_DB_PATH = "./test-script-runs-http.sqlite";
@@ -621,5 +625,34 @@ describe("/api/script-runs HTTP", () => {
     const body = (await detail.json()) as { run: { status: string; error?: string } };
     expect(body.run.status).toBe("failed");
     expect(body.run.error).toBe("original failure");
+  });
+});
+
+describe("durable launch source with an embedded secret", () => {
+  test("is refused before the run row is written", async () => {
+    const value = `durable-${randomToken(32)}`;
+    const name = configSecretName("DURABLE_TOKEN");
+    registerStoredSecret(value, name);
+    try {
+      const before = await getDbClient().get<{ n: number }>(
+        "SELECT COUNT(*) AS n FROM script_runs",
+      );
+      const response = await dispatch("/api/script-runs", {
+        method: "POST",
+        agentId,
+        body: createBody({
+          source: `export default async function main() { return { auth: "${value}" }; }`,
+        }),
+      });
+      expect(response.status).toBe(400);
+      expect(response.text).not.toContain(value);
+      const body = (await response.json()) as { error: string; findings: { id: string }[] };
+      expect(body.error).toBe("source_contains_secret");
+      expect(body.findings.map((f) => f.id)).toEqual([name]);
+      const after = await getDbClient().get<{ n: number }>("SELECT COUNT(*) AS n FROM script_runs");
+      expect(after?.n).toBe(before?.n);
+    } finally {
+      clearVolatileSecretsForTesting();
+    }
   });
 });

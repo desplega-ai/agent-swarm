@@ -2357,7 +2357,7 @@
       "pending": "unassigned: no batch yet scrubs this writer"
     },
     "source": {
-      "pending": "arbitrary executable source: pending until a reviewed byte-exact storage contract exists. Redacting code would change what runs, so the canary drives it instead of skipping it"
+      "exempt": "executable source, stored and served byte-exact. Writers refuse a source that embeds a registered secret value or matches a gitleaks rule (src/be/scripts/source-secrets.ts: script-upsert, inline script-run, durable launch); rows written before the check are left as they are"
     },
     "args": {
       "sealed": "createScriptRun seals durable-run args (the supervisor relaunches from the exact value); recordInlineScriptRun stores scrubbed JSON. Readers: getScriptRunExecutionArgs (exact), rowToScriptRun (redacted)"
@@ -2403,7 +2403,7 @@
       "exempt": "identifier"
     },
     "source": {
-      "pending": "arbitrary executable source: pending until a reviewed byte-exact storage contract exists. Redacting code would change what runs, so the canary drives it instead of skipping it"
+      "exempt": "executable source, stored and served byte-exact. Writers refuse a source that embeds a registered secret value or matches a gitleaks rule (src/be/scripts/source-secrets.ts: script-upsert, inline script-run, durable launch); rows written before the check are left as they are"
     },
     "description": {
       "pending": "unassigned: no batch yet scrubs this writer"
@@ -2447,7 +2447,7 @@
       "exempt": "identifier"
     },
     "source": {
-      "pending": "arbitrary executable source: pending until a reviewed byte-exact storage contract exists. Redacting code would change what runs, so the canary drives it instead of skipping it"
+      "exempt": "executable source, stored and served byte-exact. Writers refuse a source that embeds a registered secret value or matches a gitleaks rule (src/be/scripts/source-secrets.ts: script-upsert, inline script-run, durable launch); rows written before the check are left as they are"
     },
     "description": {
       "pending": "unassigned: no batch yet scrubs this writer"

@@ -6,11 +6,16 @@ import { createApp } from "../apps/store";
 import { closeDb, createAgent, getDbClient, initDb } from "../be/db";
 import { getScript, listScripts } from "../be/scripts/db";
 import { setScriptEmbeddingProviderForTests } from "../be/scripts/embeddings";
+import { configSecretName, registerStoredSecret } from "../be/secret-registry";
 import { handleCore } from "../http/core";
 import { handleScripts } from "../http/scripts";
 import { getPathSegments, parseQueryParams } from "../http/utils";
-import { refreshSecretScrubberCache } from "../utils/secret-scrubber";
+import {
+  clearVolatileSecretsForTesting,
+  refreshSecretScrubberCache,
+} from "../utils/secret-scrubber";
 import { SKIP_SANDBOX_SPAWN_TESTS } from "./sandbox-spawn-test-helpers";
+import { randomToken } from "./synthetic-secret-helpers";
 
 const skip = test.skipIf(SKIP_SANDBOX_SPAWN_TESTS);
 
@@ -646,5 +651,81 @@ describe("/api/scripts HTTP", () => {
     const result = body.results.find((r) => r.name === "search-with-schema");
     expect(result).toBeDefined();
     expect(result?.argsJsonSchema).not.toBeNull();
+  });
+});
+
+describe("script source with an embedded secret is refused at write", () => {
+  const sourceWith = (literal: string) =>
+    `export default async () => ({ auth: ${JSON.stringify(literal)} });`;
+
+  async function storedSourceRows(): Promise<number> {
+    const row = await getDbClient().get<{ n: number }>(
+      `SELECT (SELECT COUNT(*) FROM scripts) + (SELECT COUNT(*) FROM script_versions)
+            + (SELECT COUNT(*) FROM script_runs) AS n`,
+    );
+    return row?.n ?? 0;
+  }
+
+  type Refusal = { error: string; message: string; findings: { kind: string; id: string }[] };
+
+  async function expectRefused(
+    response: TestResponse,
+    secretValue: string,
+    finding: { kind: string; id: string },
+  ): Promise<void> {
+    expect(response.status).toBe(400);
+    expect(response.text).not.toContain(secretValue);
+    const body = (await response.json()) as Refusal;
+    expect(body.error).toBe("source_contains_secret");
+    expect(body.findings).toContainEqual(finding);
+    expect(body.message).toContain(finding.id);
+    expect(body.message).toContain("ctx.swarm.config.get");
+    expect(body.message).toContain("credential binding");
+  }
+
+  afterAll(() => clearVolatileSecretsForTesting());
+
+  test("script-upsert refuses a registered secret in every encoded form, and persists nothing", async () => {
+    const value = `upsert-${randomToken(32)}`;
+    const name = configSecretName("UPSTREAM_TOKEN");
+    registerStoredSecret(value, name);
+    const before = await storedSourceRows();
+    for (const form of [
+      value,
+      Buffer.from(value).toString("base64"),
+      Buffer.from(value).toString("base64url"),
+    ]) {
+      const response = await upsert({ name: "leaky-upsert", source: sourceWith(form) });
+      await expectRefused(response, value, { kind: "registered-secret", id: name });
+      expect(response.text).not.toContain(form);
+    }
+    expect(await storedSourceRows()).toBe(before);
+  });
+
+  test("script-upsert refuses a gitleaks token shape and names the rule", async () => {
+    const token = `ghp_${randomToken(36)}`;
+    const before = await storedSourceRows();
+    const response = await upsert({ name: "leaky-gitleaks", source: sourceWith(token) });
+    await expectRefused(response, token, { kind: "gitleaks-rule", id: "github-pat" });
+    expect(await storedSourceRows()).toBe(before);
+  });
+
+  test("inline script-run refuses before running, saving a scratch script or recording the run", async () => {
+    const value = `inline-${randomToken(32)}`;
+    const name = configSecretName("INLINE_TOKEN");
+    registerStoredSecret(value, name);
+    const before = await storedSourceRows();
+    const response = await dispatch("/api/scripts/run", {
+      method: "POST",
+      agentId: workerId,
+      body: JSON.stringify({ source: sourceWith(value), intent: "leaky inline" }),
+    });
+    await expectRefused(response, value, { kind: "registered-secret", id: name });
+    expect(await storedSourceRows()).toBe(before);
+  });
+
+  test("control: clean source still upserts", async () => {
+    const response = await upsert({ name: "clean-upsert", source: validSource(2) });
+    expect(response.status).toBe(200);
   });
 });
