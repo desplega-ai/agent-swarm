@@ -309,22 +309,24 @@ const ESCAPED_JSON_KEY_RE = new RegExp(String.raw`\\"(${JSON_KEY})\\"[ \t]*:[ \t
 
 /**
  * Index of the quote token that closes the JSON string body starting at
- * `start`, or -1 if the line ends first. Escapes are consumed whole, so a PEM
- * with `\n` escapes ends at its real closing quote. With `escaped`, the body
- * is itself JSON-escaped: each `\x` pair is one inner character, and the
- * close is an inner `"` (the pair `\"`) not preceded by an inner `\`.
+ * `start`. If the line ends first, returns `-(stop + 1)` where `stop` is the
+ * index the walk halted at, so the caller can resume past it. Escapes are
+ * consumed whole, so a PEM with `\n` escapes ends at its real closing quote.
+ * With `escaped`, the body is itself JSON-escaped: each `\x` pair is one inner
+ * character, and the close is an inner `"` (the pair `\"`) not preceded by an
+ * inner `\`.
  */
 function jsonStringEnd(text: string, start: number, escaped: boolean): number {
   let innerEscape = false;
   for (let i = start; i < text.length; i++) {
     let ch = text[i];
-    if (ch === "\r" || ch === "\n") return -1;
+    if (ch === "\r" || ch === "\n") return -(i + 1);
     const at = i;
     if (escaped) {
-      if (ch === '"') return -1;
+      if (ch === '"') return -(i + 1);
       if (ch === "\\") {
         ch = text[++i];
-        if (ch === undefined || ch === "\r" || ch === "\n") return -1;
+        if (ch === undefined || ch === "\r" || ch === "\n") return -(i + 1);
         if (ch !== "\\" && ch !== '"') ch = "x";
       }
     }
@@ -332,7 +334,7 @@ function jsonStringEnd(text: string, start: number, escaped: boolean): number {
     else if (ch === "\\") innerEscape = true;
     else if (ch === '"') return at;
   }
-  return -1;
+  return -(text.length + 1);
 }
 
 function redactJsonValues(text: string, re: RegExp, escaped: boolean): string {
@@ -344,7 +346,12 @@ function redactJsonValues(text: string, re: RegExp, escaped: boolean): string {
     if (!isSensitiveKeyPath(key)) continue;
     const valueStart = m.index + m[0].length;
     const end = jsonStringEnd(text, valueStart, escaped);
-    if (end < 0) continue;
+    if (end < 0) {
+      // Resume where the walk stopped so no span is walked twice. Back off one
+      // character: an escaped walk stops on the bare `"` of a `\"` opener.
+      re.lastIndex = Math.max(re.lastIndex, -end - 2);
+      continue;
+    }
     re.lastIndex = end + 1;
     if (isPlaceholderValue(text.slice(valueStart, end))) continue;
     out += `${text.slice(last, valueStart)}[REDACTED:${key}]`;

@@ -541,6 +541,32 @@ describe("scrubSecrets — env dumps and escaped forms", () => {
     expect(scrubSecrets(jsonBody(s))).toBe(jsonBody(want));
   });
 
+  // retry: wall-clock bound on a shared CI runner; a quadratic rescan takes seconds.
+  test(
+    "an unterminated escaped JSON value resumes the key scan where it stopped",
+    () => {
+      // The value walk stops on the bare quote; the next key still redacts.
+      const s = String.raw`log \"token\":\"abc\\"password\":\"s3cr3tval\" end`;
+      expect(scrubSecrets(s)).toBe(
+        String.raw`log \"token\":\"abc\\"password\":\"[REDACTED:password]\" end`,
+      );
+
+      // ~200 KB single lines of escaped key fragments whose values never close.
+      for (const fragment of [
+        String.raw`\\\"token\\\":\\\"`,
+        String.raw`\"token\":\"\\\"`,
+        String.raw`\"token\":\"\\`,
+        String.raw`\"token\":\"`,
+      ]) {
+        const input = fragment.repeat(Math.ceil(200_000 / fragment.length));
+        const start = performance.now();
+        scrubSecrets(input);
+        expect(performance.now() - start).toBeLessThan(50);
+      }
+    },
+    { retry: 2 },
+  );
+
   test("a quoted value closed at end of line may span lines", () => {
     const dump = `${declareX("DEMO_MULTI_TOKEN", "line1\nline2")}\n${declareX("USER", "deploy")}`;
     const want = `declare -x DEMO_MULTI_TOKEN="[REDACTED:DEMO_MULTI_TOKEN]"\n${declareX("USER", "deploy")}`;
