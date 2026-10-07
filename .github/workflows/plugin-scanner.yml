@@ -27,7 +27,7 @@ jobs:
 
       - name: Scan repository
         id: scanner
-        uses: hashgraph-online/ai-plugin-scanner-action@46ad86451b45941cd853a03ee6ccdb55f3dbee28 # v1.2.683
+        uses: hashgraph-online/ai-plugin-scanner-action@9a85f17293940b730c459e0702d42af9e6e049e1 # v1.2.763
         with:
           mode: scan
           plugin_dir: .
