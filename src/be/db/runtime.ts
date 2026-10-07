@@ -7,6 +7,7 @@ import { resolveEncryptionKey } from "../crypto";
 import { createBunSqliteClient, type DbClient } from "../db-client";
 import { runMigrations } from "../migrations/runner";
 import { autoEncryptLegacyOAuthSecrets } from "../oauth-encryption-backfill";
+import { sealedReplayExistsSql } from "../sealed-json";
 
 let db: Database | null = null;
 let sqliteVecAvailable = false;
@@ -233,6 +234,9 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
              WHERE clientSecretEncrypted = 1 AND clientSecret IS NOT NULL
            UNION ALL
            SELECT 1 FROM oauth_authorizations WHERE tokensEncrypted = 1
+           ${sealedReplayExistsSql()
+             .map((arm) => `UNION ALL ${arm}`)
+             .join("\n           ")}
          ) AS present`,
       )
       .get()?.present ?? 0) === 1;

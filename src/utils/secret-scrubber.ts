@@ -935,6 +935,55 @@ export function scrubSecrets(text: string | null | undefined): ScrubbedText {
   return scrubGitleaks(out) as ScrubbedText;
 }
 
+/** What `findSecretsIn` found: names and rule ids only, never the values. */
+export interface SecretFindings {
+  /** Names of known values (env + registered secrets, every encoded form). */
+  knownValues: string[];
+  /** Ids of gitleaks rules whose pattern matched. */
+  gitleaksRules: string[];
+}
+
+/**
+ * Detect, without redacting, the two secret classes a write must refuse
+ * outright: a known value (pass 1, every form it was registered in) and a
+ * gitleaks vendor-token rule (pass 5). The key-context passes are left out on
+ * purpose: on code they flag `password: "…"`-shaped literals that are often
+ * not secrets.
+ */
+export function findSecretsIn(text: string): SecretFindings {
+  const knownValues = new Set<string>();
+  const gitleaksRules = new Set<string>();
+  if (text.length === 0) return { knownValues: [], gitleaksRules: [] };
+
+  const { re, names, fallback } = getMatcher();
+  if (re) {
+    re.lastIndex = 0;
+    for (let m = re.exec(text); m !== null; m = re.exec(text)) {
+      knownValues.add(names.get(m[0]) ?? "secret");
+    }
+  } else {
+    for (const value of fallback) {
+      if (text.includes(value)) knownValues.add(names.get(value) ?? "secret");
+    }
+  }
+
+  if (gitleaksPassEnabled) {
+    const { keywordRe, implied, rules, global } = getGitleaks();
+    const present = new Set<string>();
+    keywordRe.lastIndex = 0;
+    for (let m = keywordRe.exec(text); m !== null; m = keywordRe.exec(text)) {
+      for (const keyword of implied.get(m[0].toLowerCase()) ?? []) present.add(keyword);
+      keywordRe.lastIndex = m.index + 1;
+    }
+    for (const rule of rules) {
+      if (!rule.keywords.some((keyword) => present.has(keyword))) continue;
+      if (applyGitleaksRule(text, rule, global) !== text) gitleaksRules.add(rule.id);
+    }
+  }
+
+  return { knownValues: [...knownValues].sort(), gitleaksRules: [...gitleaksRules].sort() };
+}
+
 export function scrubObject<T>(value: T, seen = new WeakSet<object>()): T {
   if (value === null || value === undefined) return value;
   if (typeof value === "string") return scrubSecrets(value) as T;

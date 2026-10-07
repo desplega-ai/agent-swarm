@@ -46,6 +46,9 @@ Every TEXT column in the schema is classified in `.text-columns.json`, and `scri
 - `"scrubbed"`: every writer scrubs the value. A writer that takes free text should type its parameter as `ScrubbedText` (the brand `scrubSecrets` returns), so `tsc` rejects a raw string.
 - `{"exempt": "<reason>"}`: ids, enums, timestamps, hashes, or values that must round-trip byte-exact (ciphertext, credential stores, `kv_entries.value`).
 - `{"pending": "<note>"}`: free text whose writers are not scrubbed yet. The note names the batch that flips it.
+- `{"sealed": "<reason>"}`: byte-exact replay state (durable script-run args, journal step results). Writers encrypt it with `sealJson` from `src/be/sealed-json.ts`. Replay readers call `openSealedJson`; everything a person sees goes through `sealedJsonForDisplay`, which redacts.
+
+Executable source (`scripts.source`, `script_versions.source`, `script_runs.source`) is neither redacted nor sealed: redaction changes what runs. `script-upsert`, inline `script-run` and durable launches refuse a source that embeds a registered secret value (any encoded form) or matches a gitleaks rule, before it runs or persists (`src/be/scripts/source-secrets.ts`). The error names the key or rule id and points to credential bindings or `ctx.swarm.config.get`.
 
 Do not scrub inside `db-client.execute()`: a blanket scrub corrupts byte-exact values and runs regexes inside the write lock.
 

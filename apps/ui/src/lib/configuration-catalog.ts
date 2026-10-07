@@ -932,8 +932,9 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         key: "LINEAR_SWARM_READY_LABEL",
         label: "Linear swarm-ready label",
         description:
-          "Label that marks a Linear issue as ready for the swarm to pick up. Leave unset to skip label filtering.",
+          "Label that bypasses the workflow-state gate, so a labeled issue creates a task in any state. Defaults to `swarm-ready`.",
         kind: "string",
+        defaultValue: "swarm-ready",
         placeholder: "e.g. swarm-ready",
         docsUrl: `${DOCS}integrations/linear`,
       },

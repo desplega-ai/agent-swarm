@@ -1,6 +1,8 @@
 import type { EventCategory, EventName, EventSource, EventStatus, SwarmEvent } from "../types";
+import { type ScrubbedText, scrubObject, scrubSecrets } from "../utils/secret-scrubber";
 import { getDbClient } from "./db";
 import type { DbExecutor } from "./db-client";
+import { breaksJsonValidity } from "./scrub-json";
 import { recordSkillInvocation } from "./skill-invocations";
 
 // -- Events --
@@ -59,6 +61,20 @@ export interface CreateEventInput {
   data?: Record<string, unknown>;
 }
 
+/**
+ * Serialize an event payload for `events.data` with secrets redacted. Scrubs
+ * the serialized string; if a redaction breaks JSON validity (e.g. a marker
+ * swallowed a closing quote), falls back to scrubbing each leaf string so the
+ * column always parses for `rowToSwarmEvent`.
+ */
+function serializeEventData(data: Record<string, unknown>): ScrubbedText {
+  const raw = JSON.stringify(data);
+  const scrubbed = scrubSecrets(raw);
+  if (!breaksJsonValidity(raw, scrubbed)) return scrubbed;
+  // Every leaf string went through scrubSecrets, so the brand holds.
+  return JSON.stringify(scrubObject(data)) as ScrubbedText;
+}
+
 async function insertEvent(db: DbExecutor, id: string, input: CreateEventInput): Promise<void> {
   await db.run(INSERT_EVENT_SQL, [
     id,
@@ -72,7 +88,7 @@ async function insertEvent(db: DbExecutor, id: string, input: CreateEventInput):
     input.parentEventId ?? null,
     input.numericValue ?? null,
     input.durationMs ?? null,
-    input.data ? JSON.stringify(input.data) : null,
+    input.data ? serializeEventData(input.data) : null,
   ]);
   // `skill.invoke` also feeds the per-skill counter and invocation history.
   await recordSkillInvocation(db, input, id);

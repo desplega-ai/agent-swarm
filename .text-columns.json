@@ -976,9 +976,7 @@
     "parentEventId": {
       "exempt": "identifier"
     },
-    "data": {
-      "pending": "12b: events writer"
-    },
+    "data": "scrubbed",
     "createdAt": {
       "exempt": "timestamp"
     }
@@ -2327,18 +2325,14 @@
     "stepType": {
       "pending": "unassigned: no batch yet scrubs this writer"
     },
-    "config": {
-      "pending": "12c: script run journal"
-    },
+    "config": "scrubbed",
     "status": {
       "exempt": "enum or fixed-format value"
     },
     "result": {
-      "pending": "12c: script run journal"
+      "sealed": "the harness replays it verbatim as the step return, so upsertScriptRunJournalStep seals it. Readers: getScriptRunJournalStep (replay route, exact), listScriptRunJournalSteps (redacted)"
     },
-    "error": {
-      "pending": "12c: script run journal"
-    },
+    "error": "scrubbed",
     "startedAt": {
       "exempt": "timestamp"
     },
@@ -2363,10 +2357,10 @@
       "pending": "unassigned: no batch yet scrubs this writer"
     },
     "source": {
-      "pending": "arbitrary executable source: pending until a reviewed byte-exact storage contract exists. Redacting code would change what runs, so the canary drives it instead of skipping it"
+      "exempt": "executable source, stored and served byte-exact. Writers refuse a source that embeds a registered secret value or matches a gitleaks rule (src/be/scripts/source-secrets.ts: script-upsert, inline script-run, durable launch); rows written before the check are left as they are"
     },
     "args": {
-      "pending": "12c: script run writers"
+      "sealed": "createScriptRun seals durable-run args (the supervisor relaunches from the exact value); recordInlineScriptRun stores scrubbed JSON. Readers: getScriptRunExecutionArgs (exact), rowToScriptRun (redacted)"
     },
     "status": {
       "exempt": "enum or fixed-format value"
@@ -2377,12 +2371,8 @@
     "finishedAt": {
       "exempt": "timestamp"
     },
-    "output": {
-      "pending": "12c: script run writers"
-    },
-    "error": {
-      "pending": "12c: script run writers"
-    },
+    "output": "scrubbed",
+    "error": "scrubbed",
     "last_heartbeat_at": {
       "exempt": "timestamp"
     },
@@ -2413,7 +2403,7 @@
       "exempt": "identifier"
     },
     "source": {
-      "pending": "arbitrary executable source: pending until a reviewed byte-exact storage contract exists. Redacting code would change what runs, so the canary drives it instead of skipping it"
+      "exempt": "executable source, stored and served byte-exact. Writers refuse a source that embeds a registered secret value or matches a gitleaks rule (src/be/scripts/source-secrets.ts: script-upsert, inline script-run, durable launch); rows written before the check are left as they are"
     },
     "description": {
       "pending": "unassigned: no batch yet scrubs this writer"
@@ -2457,7 +2447,7 @@
       "exempt": "identifier"
     },
     "source": {
-      "pending": "arbitrary executable source: pending until a reviewed byte-exact storage contract exists. Redacting code would change what runs, so the canary drives it instead of skipping it"
+      "exempt": "executable source, stored and served byte-exact. Writers refuse a source that embeds a registered secret value or matches a gitleaks rule (src/be/scripts/source-secrets.ts: script-upsert, inline script-run, durable launch); rows written before the check are left as they are"
     },
     "description": {
       "pending": "unassigned: no batch yet scrubs this writer"
