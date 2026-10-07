@@ -1,8 +1,10 @@
 import { NativeScriptExecutor } from "./native";
+import { QuickJSScriptExecutor } from "./quickjs";
 import type { ScriptExecutor } from "./types";
 
 const EXECUTORS: Record<string, () => ScriptExecutor> = {
   native: () => new NativeScriptExecutor(),
+  quickjs: () => new QuickJSScriptExecutor(),
 };
 
 export function getScriptExecutor(name = process.env.SCRIPT_EXECUTOR ?? "native"): ScriptExecutor {
