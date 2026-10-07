@@ -1,5 +1,5 @@
-import { ensure } from "@desplega.ai/business-use";
 import { getDbClient } from "@/be/db";
+import { ensure } from "../../../utils/business-use";
 import { type RatingEvent, REFERENCES_SOURCE_MAX_LENGTH, sanitizeReferencesSource } from "./types";
 
 /**

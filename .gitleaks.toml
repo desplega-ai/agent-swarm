@@ -1,0 +1,17 @@
+# gitleaks config for scripts/gitleaks.sh (merge-gate `secret-scan` job and the
+# prek `gitleaks` pre-push hook). Only commits a branch adds are scanned.
+#
+# Keep exemptions visible in review. For an intentional fixture, build the
+# value at runtime ("AKIA" + ...) or add an inline `gitleaks:allow` comment on
+# that line. Do not add broad path or regex allowlists here.
+title = "agent-swarm"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Planning docs and static mockups. Never executed."
+paths = [
+  '''^thoughts/''',
+  '''^mockups/''',
+]

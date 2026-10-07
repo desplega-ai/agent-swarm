@@ -105,8 +105,10 @@ describe("findPrBodyLeaks: negative controls", () => {
   test("a fenced code example with a fresh UUID taskId", () => {
     const body = `## Proof of work\n\n\`\`\`ts\nconst taskId = "${randomUUID()}";\nawait store({ parentTaskId: "${randomUUID()}" });\n\`\`\`\n`;
     expect(findPrBodyLeaks(body)).toEqual([]);
-    // The same line outside the fence is still a ref.
-    expect(findPrBodyLeaks(`taskId = "${randomUUID()}"`)).toEqual(["swarm-task-ref"]);
+    // The same line outside the fence is still a ref. The rule needs a letter in
+    // the first group, so a random UUID would flake (~2% are all digits there).
+    const ref = `${hexWithLetter()}-1111-2222-3333-444444444444`;
+    expect(findPrBodyLeaks(`taskId = "${ref}"`)).toEqual(["swarm-task-ref"]);
   });
 
   test("a fence does not hide Slack or dashboard links", () => {
@@ -146,6 +148,47 @@ describe("findPrBodyLeaks: negative controls", () => {
   test("the repo PR template passes its own check", async () => {
     const template = await Bun.file(".github/pull_request_template.md").text();
     expect(findPrBodyLeaks(template)).toEqual([]);
+  });
+});
+
+describe("findPrBodyLeaks: Swarm provenance allowlist", () => {
+  const provenance = (...lines: string[]) =>
+    `${NORMAL_BODY}\n## Swarm provenance <!-- bot -->\n\n${lines.map((l) => `- ${l}`).join("\n")}\n`;
+
+  test("task, session, agent-fs and Slack permalinks pass inside the section", () => {
+    const body = provenance(
+      `Task: ${dashboardLink()} · tree: ${dashboardLink().replace("/tasks/", "/sessions/")}`,
+      `Ask: ${slackLink()}?thread_ts=${slackTs()}&cid=${slackId("D")}`,
+      `Plan: ${agentFsLink()} (durable: ${agentFsPath()})`,
+      `Follow-up of task ${hexWithLetter()}.`,
+    );
+    expect(findPrBodyLeaks(body)).toEqual([]);
+  });
+
+  test("the same links outside the section still fail", () => {
+    const body = `${NORMAL_BODY}\nSee ${slackLink()} and ${dashboardLink()}.\n${provenance()}`;
+    // The permalink's embedded channel id also counts outside the section.
+    expect(findPrBodyLeaks(body)).toEqual(["slack-id", "slack-link", "swarm-dashboard-link"]);
+  });
+
+  test("bare Slack ids, ts values and private-chat quotes stay blocked inside it", () => {
+    expect(findPrBodyLeaks(provenance(`Channel ${slackId("C")}`))).toEqual(["slack-id"]);
+    expect(findPrBodyLeaks(provenance(`ts ${slackTs()}`))).toEqual(["slack-ts"]);
+    expect(
+      findPrBodyLeaks(provenance(`Taras in ${"DM"}: "it would be nice to explain the motivation"`)),
+    ).toEqual(["private-chat-quote"]);
+  });
+
+  test("the section ends at the next heading, and a fenced heading does not open it", () => {
+    const after = `${provenance(`Task: ${dashboardLink()}`)}\n## Notes\n\n${dashboardLink()}\n`;
+    expect(findPrBodyLeaks(after)).toEqual(["swarm-dashboard-link"]);
+    const fenced = `\`\`\`md\n## Swarm provenance\n\`\`\`\n${slackLink()}\n`;
+    expect(findPrBodyLeaks(fenced)).toContain("slack-link");
+  });
+
+  test("the heading matches case-insensitively with a trailing marker", () => {
+    const body = `## swarm  PROVENANCE <!-- bot -->\n\n- ${dashboardLink()}\n`;
+    expect(findPrBodyLeaks(body)).toEqual([]);
   });
 });
 

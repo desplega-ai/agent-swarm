@@ -46,7 +46,7 @@ SDK selection is incompatible with an effective Claude Bridge or legacy bridge b
 | Steering | `STEERING_ENABLED`, `SLACK_THREAD_STEERING`, `SLACK_THREAD_STEERING_MODE` |
 | Memory | `MEMORY_HYBRID_SEARCH`, `MEMORY_GRAPH_EXPANSION`, `MEMORY_RATERS`, `EMBEDDING_MODEL` |
 | Heartbeat & crash recovery | `API_DRAIN_MAX_MS`, `HEARTBEAT_INTERVAL_MS`, `HEARTBEAT_STALL_THRESHOLD_MIN`, `RUNTIME_STALE_THRESHOLD_MIN`, `HEARTBEAT_PIN_CRASH_RESUME`, `APPROVAL_REQUEST_AUTO_CANCELLATION_DAYS` |
-| Harness & tools | `SCRIPTS_ONLY_MCP`, `TASK_TOOL_PRELOAD_ENABLED`, `PI_TOOL_DEFERRAL`, `PI_CODEMODE`, `CURSOR_NATIVE_SYSTEM_PROMPT`, `PI_CODEMODE_MODELS`, `TASK_TOOL_MANIFESTS`, `MULTI_RUNTIME_ENABLED`, `CAPABILITIES`, `OPENROUTER_BASE_URL`, `WORKER_API_READY_TIMEOUT_SECONDS`, `CONTEXT_PREAMBLE_MAX_TOKENS`, `MODEL_WINDOW_EXHAUSTED_POLICY`, `MODEL_LATEST_SOAK_DAYS`, `MODEL_AUTO_UPGRADE` |
+| Harness & tools | `CLAUDE_TRUST_PRESEED`, `SCRIPTS_ONLY_MCP`, `TASK_TOOL_PRELOAD_ENABLED`, `PI_TOOL_DEFERRAL`, `PI_CODEMODE`, `CURSOR_NATIVE_SYSTEM_PROMPT`, `PI_CODEMODE_MODELS`, `TASK_TOOL_MANIFESTS`, `MULTI_RUNTIME_ENABLED`, `CAPABILITIES`, `OPENROUTER_BASE_URL`, `WORKER_API_READY_TIMEOUT_SECONDS`, `CONTEXT_PREAMBLE_MAX_TOKENS`, `MODEL_WINDOW_EXHAUSTED_POLICY`, `MODEL_LATEST_SOAK_DAYS`, `MODEL_AUTO_UPGRADE` |
 | Model tiers | `MODEL_TIER_<PROVIDER>_<TIER>` for every provider with a tier mapping |
 | Database | `DB_QUERY_BOUNDED_ENABLED`, `DB_QUERY_HTTP_BUDGET_MS`, `DB_QUERY_HTTP_MAX_ROWS`, `DB_QUERY_MCP_BUDGET_MS`, `DB_QUERY_MCP_MAX_ROWS`, `DB_QUERY_CONCURRENCY_CAP`, `SESSION_LOG_RETENTION_DAYS`, `AGENT_LOG_RETENTION_DAYS`, `EVENTS_RETENTION_DAYS`, `DB_RETENTION_DRY_RUN`, `DB_RETENTION_TICK_BUDGET_MS`, `DB_RETENTION_CATCHUP_INTERVAL_MS`, `DB_RETENTION_MAX_STATEMENT_MS` |
 | Integrations | `SLACK_MODE`, `SLACK_DISABLE`, `SLACK_ALLOW_DEV_SOCKET_MODE`, `SLACK_RENDER_V2`, `SLACK_RENDER_V2_DELEGATION`, `SLACK_CONCLUSION_SETTLE_SEC`, `SLACK_CONCLUSION_TIMEOUT_MIN`, `SLACK_TREE_STALL_MIN`, `GITHUB_DISABLE`, `LINEAR_DISABLE`, `SLACK_ALERTS_CHANNEL`, `AGENT_FS_REQUEST_TIMEOUT_MS`, `COMB_ENABLED`, `AGENT_FS_PUBLIC_URL`, `SLACK_REACTION_ACCEPTED`, `SLACK_REACTION_BUFFERED`, `SLACK_REACTION_NOW`, `SLACK_REACTION_STEERED`, `SLACK_REACTION_COMPLETED`, `SLACK_REACTION_FAILED` |
@@ -56,6 +56,8 @@ SDK selection is incompatible with an effective Claude Bridge or legacy bridge b
 | Branding & URLs | `SWARM_ORG_NAME`, `SWARM_BRAND_COLOR`, `DASHBOARD_URL` |
 
 Harness **provider and model selection are deliberately absent** from this page — they are configured per agent. A global value would silently become the default for every agent in the swarm, so those knobs live on each agent's own configuration instead. `OPENROUTER_BASE_URL` is a deployment-wide routing endpoint rather than a model choice, which is why it does belong here.
+
+`CLAUDE_TRUST_PRESEED` is on by default. Before each Claude session it marks the session directory (and the main checkout, when that directory is a git worktree) as trusted in `~/.claude.json`. Without it, headless Claude ignores the repo's `.claude/settings.json` `permissions.allow` entries. Set it to `false` to skip the write.
 
 Settings with deeper behavior link out to the relevant guide (for example the [task steering](/docs/guides/task-steering) and [harness providers](/docs/guides/harness-providers) guides) directly from the row.
 

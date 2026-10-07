@@ -17,6 +17,8 @@ import {
 import { handleCore } from "../http/core";
 import { handleScriptRuns } from "../http/script-runs";
 import { getPathSegments, parseQueryParams } from "../http/utils";
+import { localProcessScriptExecutor } from "../script-workflows/executor";
+import { setScriptRunExecutor } from "../script-workflows/supervisor";
 import { refreshSecretScrubberCache } from "../utils/secret-scrubber";
 
 const TEST_DB_PATH = "./test-script-runs-http.sqlite";
@@ -162,6 +164,42 @@ describe("/api/script-runs HTTP", () => {
     expect(listBody.runs[0]?.source).toBeUndefined();
     expect(listBody.runs[0]?.args).toBeUndefined();
     expect(listBody.runs[0]?.output).toBeUndefined();
+  });
+
+  test("background runs call back through MCP_BASE_URL, not the public base URL", async () => {
+    process.env.SCRIPT_RUN_SUPERVISOR_DISABLE = "false";
+    process.env.MCP_BASE_URL = "http://swarm-internal.example.test:3013";
+    process.env.PUBLIC_MCP_BASE_URL = "https://swarm-public.example.test";
+    const spawnedWith: string[] = [];
+    setScriptRunExecutor({
+      async start({ baseUrl }) {
+        spawnedWith.push(baseUrl);
+        return {
+          pid: null,
+          tmpdir: "",
+          startedAtMs: Date.now(),
+          exited: new Promise(() => {}),
+          terminate: async () => {},
+          cleanup: async () => {},
+        };
+      },
+      isRunning: () => false,
+      terminatePid: async () => {},
+    });
+
+    try {
+      const created = await dispatch("/api/script-runs", {
+        method: "POST",
+        agentId,
+        body: createBody({ background: true }),
+      });
+      expect(created.status).toBe(201);
+      expect(spawnedWith).toEqual(["http://swarm-internal.example.test:3013"]);
+    } finally {
+      setScriptRunExecutor(localProcessScriptExecutor);
+      delete process.env.MCP_BASE_URL;
+      delete process.env.PUBLIC_MCP_BASE_URL;
+    }
   });
 
   test("returns the existing run for an idempotency key", async () => {

@@ -123,7 +123,7 @@ RUN if ! gh extension install github/gh-stack; then \
     fi
 
 # Install Claude CLI (pinned version — bump ARG to update)
-ARG CLAUDE_CODE_VERSION=2.1.291
+ARG CLAUDE_CODE_VERSION=2.1.292
 USER root
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache \
     npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} \
@@ -186,10 +186,10 @@ RUN mkdir -p /home/worker/.codex && \
 # The installer drops the binary at ~/.opencode/bin/opencode and only modifies
 # ~/.bashrc — non-interactive shells (entrypoint, gosu drops) miss that PATH
 # update, so we extend ENV PATH explicitly.
-ARG OPENCODE_VERSION=1.18.34
+ARG OPENCODE_VERSION=1.18.35
 RUN curl -fsSL https://opencode.ai/install | VERSION=${OPENCODE_VERSION} bash
 ENV PATH="/home/worker/.opencode/bin:$PATH"
-ARG OPENCODE_SDK_VERSION=1.18.34
+ARG OPENCODE_SDK_VERSION=1.18.35
 USER root
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache \
     npm install -g @opencode-ai/sdk@${OPENCODE_SDK_VERSION} \
@@ -582,9 +582,9 @@ RUN curl -fsSL "https://registry.npmjs.org/@deepseek-ai/dsh/-/dsh-${DSH_VERSION}
 # "disabled". Bump AMP_VERSION, both SHA-512 pins and AMP_PACKAGE in
 # src/providers/amp-adapter.ts together. The vendor licence is proprietary
 # (https://ampcode.com/terms): confirm it before publishing this image.
-ARG AMP_VERSION=0.0.1791273659-g33d612
-ARG AMP_SHA512_AMD64=00331f256eaaf1334fcc26401bd8a2f4a437da9201e54cf103351231f1b01bc3412494557cb77e2d26c74902f252d80dcab9030b8a0b0c86ff7739bcb4a485d2
-ARG AMP_SHA512_ARM64=39cf7c7a09f7023a49c7aec8aa61cc32117b9aad3f5bf5b22a8dd7e9e2f56c76273cb83cd53410c74f2b991a66eab0d452321c41c4ec8206932b755a60e603fe
+ARG AMP_VERSION=0.0.1791360091-gfb32ce
+ARG AMP_SHA512_AMD64=ad78bf7f0d5a130d8df99fc1fa6e4f75e94d4a92648d3dcb6b688c0376baadeba9a8e9e056bcb2f17e17c4ba28c275f8790ff15d52be5a60c0f87f2604c75b36
+ARG AMP_SHA512_ARM64=5448953e44de9dbfff3118417ca605958c106bf8ec657b96de6004d2122949aa9cf679927c8ad5d47a0c286d3cb752bc5c5ca243a3f2d4f019d9014090a73e95
 RUN case "$TARGETARCH" in \
       amd64) amp_platform=linux-x64; amp_sha512="$AMP_SHA512_AMD64" ;; \
       arm64) amp_platform=linux-arm64; amp_sha512="$AMP_SHA512_ARM64" ;; \

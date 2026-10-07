@@ -1,5 +1,4 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { ensure } from "@desplega.ai/business-use";
 import { z } from "zod";
 import { AssetKeyAuthorizationError, authorizeAssetKeyWrite } from "../be/asset-key-auth";
 import { resolveHttpAuditUserId } from "../be/audit-user";
@@ -73,6 +72,7 @@ import {
   splitLegacyModelAlias,
   TaskAttachmentSchema,
 } from "../types";
+import { ensure } from "../utils/business-use";
 import { getRequestAuth } from "../utils/request-auth-context";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { route } from "./route-def";

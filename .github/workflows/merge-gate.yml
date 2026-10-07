@@ -179,17 +179,22 @@ jobs:
           echo "status=$([ $code -eq 0 ] && echo success || echo failure)" >> "$GITHUB_OUTPUT"
           exit $code
 
+      # tsc 5 stays the authority here. Local `tsc:check` (and the prek typecheck
+      # hook) run tsgo; the step below keeps the tsconfig tsgo-clean.
       - name: Run TypeScript type check
         id: tsc
         run: |
           start=$(date +%s%3N)
           set +e
-          bun run tsc:check
+          bun run tsc:check:tsc
           code=$?
           set -e
           echo "duration_ms=$(( $(date +%s%3N) - start ))" >> "$GITHUB_OUTPUT"
           echo "status=$([ $code -eq 0 ] && echo success || echo failure)" >> "$GITHUB_OUTPUT"
           exit $code
+
+      - name: Run TypeScript type check (tsgo)
+        run: bun run tsc:check
 
       - name: Check extension catalog and manifest schema freshness
         # templates/extensions/ is embedded as src/extensions/catalog.generated.json and
@@ -881,8 +886,11 @@ jobs:
         # The worker builds only the worker-slim target here (fast PR gate — it still
         # exercises the shared worker-base layers and the leaf block); the full target
         # is built and published on merge by docker-and-deploy.yml.
-        # `metric` legs load the built image into the local daemon and report its
-        # uncompressed size to the ci-metrics swarm script (sticky PR diff comment).
+        # `metric` legs load the built image into the local daemon (pull_request only)
+        # and report its uncompressed size to the ci-metrics swarm script (sticky PR
+        # diff comment). The worker-slim leg keeps `--bytecode` on: the size is diffed
+        # against main's published (bytecode) worker-slim image, so a non-bytecode PR
+        # build would show a fake ~130 MB delta.
         # See agent-fs docs/ci-metrics.md for the script contract.
         # `cache-from` reads the amd64 BuildKit cache docker-and-deploy.yml pushes to
         # GHCR on main (public packages, so fork PRs read it anonymously). Read-only:
@@ -924,7 +932,9 @@ jobs:
           file: ./${{ matrix.dockerfile }}
           target: ${{ matrix.target }}
           push: false
-          load: ${{ matrix.metric != '' }}
+          # Only the image-size step below reads the loaded image, and it runs on
+          # pull_request only. merge_group runs skip the ~90s export + import.
+          load: ${{ matrix.metric != '' && github.event_name == 'pull_request' }}
           tags: test-image:latest
           cache-from: ${{ matrix.cache-from }}
 
@@ -1056,6 +1066,11 @@ jobs:
           exit $code
         working-directory: apps/ui
 
+      # tsc above is the authority; the prek ui-typecheck hook runs tsgo.
+      - name: Run TypeScript type check (tsgo)
+        run: bunx tsgo -b
+        working-directory: apps/ui
+
       - name: Run UI E2E TypeScript type check
         run: bun run e2e:ui:tsc
 
@@ -1170,9 +1185,50 @@ jobs:
           MIGRATION_BASE_REF: ${{ github.event_name == 'merge_group' && github.event.merge_group.base_sha || github.event.pull_request.base.sha }}
         run: bash scripts/check-migration-conflicts.sh
 
+  # Run on every PR and merge queue group: any path can carry a secret, and the
+  # scan takes seconds. Only commits the event adds are scanned, so
+  # secret-shaped lines already on main never block anyone.
+  secret-scan:
+    name: Secret Scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The scan range needs the base branch history.
+          fetch-depth: 0
+
+      - name: Self-test the scanner
+        run: bash scripts/gitleaks-selftest.sh
+
+      - name: Scan new commits
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          PUSH_SHA: ${{ github.sha }}
+        run: |
+          case "$EVENT_NAME" in
+            pull_request) range="origin/${BASE_REF:-main}..HEAD" ;;
+            merge_group) range="$MERGE_GROUP_BASE_SHA..HEAD" ;;
+            push)
+              # A new branch reports an all-zeros `before`; scan from main then.
+              if [ -z "$PUSH_BEFORE" ] || [ -z "${PUSH_BEFORE//0/}" ]; then
+                range="origin/main..$PUSH_SHA"
+              else
+                range="$PUSH_BEFORE..$PUSH_SHA"
+              fi
+              ;;
+            *) echo "::error::secret-scan: unhandled event $EVENT_NAME"; exit 1 ;;
+          esac
+          bash scripts/gitleaks.sh "$range"
+
   gate:
     name: Merge Gate
-    needs: [detect-changes, restore-timings, lint-and-typecheck, test, e2e-contract, pi-skills-freshness, seed-skills, script-types-freshness, openapi-freshness, vendored-openapi, docker-build, ui-lint, template-workflow-validation, operator-skill, migration-conflict-check]
+    needs: [detect-changes, restore-timings, lint-and-typecheck, test, e2e-contract, pi-skills-freshness, seed-skills, script-types-freshness, openapi-freshness, vendored-openapi, docker-build, ui-lint, template-workflow-validation, operator-skill, migration-conflict-check, secret-scan]
     if: always()
     runs-on: ubuntu-latest
     # No checkout, no API calls; the job only inspects `needs` results.

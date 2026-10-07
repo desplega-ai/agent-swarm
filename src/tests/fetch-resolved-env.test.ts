@@ -5,6 +5,9 @@ import {
   fetchResolvedEnv,
   RELOADABLE_ENV_KEYS,
 } from "../commands/runner";
+import { checkCodexCredentials } from "../providers/codex-adapter";
+
+const noFiles = { existsSync: () => false };
 
 /**
  * Tests for the fetchResolvedEnv() / applyResolvedEnvToProcessEnv() behavior
@@ -155,6 +158,65 @@ describe("fetchResolvedEnv", () => {
     const inherited = await fetchResolvedEnv(testUrl, "key", agentId, baseEnv);
     expect(inherited.env.CLAUDE_TRANSPORT).toBe("cli");
     expect(requestedRepoIds.get(agentId)).toBeNull();
+  });
+
+  test("keeps codex_oauth rows out of the resolved env and records only the pool-slot count", async () => {
+    const agentId = crypto.randomUUID();
+    const slot = (access: string) =>
+      JSON.stringify({ access, refresh: "rt.secret", expires: 1, accountId: "acct" });
+    mockResponsesByAgentId.set(agentId, {
+      status: 200,
+      body: {
+        configs: [
+          { key: "codex_oauth", value: slot("legacy") },
+          { key: "codex_oauth_0", value: slot("a0") },
+          { key: "codex_oauth_1", value: slot("a1") },
+          { key: "codex_oauth_2", value: "not-json" },
+          { key: "FOO", value: "bar" },
+        ],
+      },
+    });
+    // An older entrypoint exported the slot at boot; the loader drops it too.
+    const baseEnv = { codex_oauth_7: slot("stale") };
+    const { env } = await fetchResolvedEnv(testUrl, "key", agentId, baseEnv);
+
+    expect(Object.keys(env).filter((key) => key.startsWith("codex_oauth"))).toEqual([]);
+    expect(JSON.stringify(env)).not.toContain("rt.secret");
+    expect(env.FOO).toBe("bar");
+    expect(env.CODEX_OAUTH_POOL_SLOTS).toBe("2");
+    expect(checkCodexCredentials(env, { homeDir: "/nonexistent", fs: noFiles }).ready).toBe(true);
+
+    mockResponsesByAgentId.set(agentId, { status: 200, body: { configs: [] } });
+    const emptied = await fetchResolvedEnv(testUrl, "key", agentId, {
+      CODEX_OAUTH_POOL_SLOTS: "2",
+    });
+    expect(emptied.env.CODEX_OAUTH_POOL_SLOTS).toBeUndefined();
+    expect(checkCodexCredentials(emptied.env, { homeDir: "/nonexistent", fs: noFiles }).ready).toBe(
+      false,
+    );
+  });
+
+  test("applies the pool-slot count to process.env and clears it when the pool is deleted", async () => {
+    const agentId = crypto.randomUUID();
+    const previous = process.env.CODEX_OAUTH_POOL_SLOTS;
+    delete process.env.CODEX_OAUTH_POOL_SLOTS;
+    try {
+      mockResponsesByAgentId.set(agentId, {
+        status: 200,
+        body: { configs: [{ key: "codex_oauth_0", value: JSON.stringify({ access: "a0" }) }] },
+      });
+      const withPool = await fetchResolvedEnv(testUrl, "key", agentId);
+      expect(applyResolvedEnvToProcessEnv(withPool.env)).toContain("CODEX_OAUTH_POOL_SLOTS");
+      expect(process.env.CODEX_OAUTH_POOL_SLOTS).toBe("1");
+
+      mockResponsesByAgentId.set(agentId, { status: 200, body: { configs: [] } });
+      const withoutPool = await fetchResolvedEnv(testUrl, "key", agentId);
+      applyResolvedEnvToProcessEnv(withoutPool.env);
+      expect(process.env.CODEX_OAUTH_POOL_SLOTS).toBeUndefined();
+    } finally {
+      if (previous === undefined) delete process.env.CODEX_OAUTH_POOL_SLOTS;
+      else process.env.CODEX_OAUTH_POOL_SLOTS = previous;
+    }
   });
 
   test("selects both Claude credential pools for the executing adapter despite repository harness config", async () => {

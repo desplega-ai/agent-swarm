@@ -386,6 +386,16 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
     icon: Cpu,
     entries: [
       {
+        key: "CLAUDE_TRUST_PRESEED",
+        label: "Claude workspace trust pre-seed",
+        description:
+          "Mark the session workspace (and the main checkout, for git worktrees) as trusted in ~/.claude.json before each Claude session, so Claude Code does not ignore the repo's .claude/settings.json permissions.",
+        kind: "boolean",
+        defaultValue: "true",
+        restartRequired: false,
+        docsUrl: `${DOCS}guides/harness-providers`,
+      },
+      {
         key: "SWARM_DEV_MODE",
         label: "Dev mode",
         description:

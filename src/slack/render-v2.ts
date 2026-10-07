@@ -1,4 +1,3 @@
-import { ensure } from "@desplega.ai/business-use";
 import type { WebClient } from "@slack/web-api";
 import {
   abandonSlackOutcomeDelivery,
@@ -31,6 +30,7 @@ import {
 import { getTaskCitations } from "../be/task-citations";
 import { slackContextKey } from "../tasks/context-key";
 import type { AgentTask, TaskAttachment } from "../types";
+import { ensure } from "../utils/business-use";
 import { isEnvFlagEnabled } from "../utils/env-flag";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { taskAttachmentDisplayUrl } from "../utils/task-attachment-links";

@@ -29,8 +29,8 @@ import { deriveCodexKeySuffix } from "../providers/codex-oauth/auth-json.js";
 import { getValidCodexOAuth, loadAllCodexOAuthSlots } from "../providers/codex-oauth/storage.js";
 import { getApiKey } from "../utils/api-key";
 import { CODEX_AUTH_WATCH_NAMESPACE, codexAuthBenchMarkerKey } from "../utils/codex-auth-failure";
+import { getMcpBaseUrl } from "../utils/constants";
 import { route } from "./route-def";
-import { deriveApiBaseUrl } from "./utils";
 
 /** ~weekly refresh cadence, comfortably inside OpenAI's ~8-day staleness window given the 10-day TTL. */
 const KEEP_WARM_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
@@ -80,7 +80,7 @@ export async function handleCodexOAuthKeepWarm(
   const parsed = await keepWarmRoute.parse(req, res, pathSegments, new URLSearchParams());
   if (!parsed) return true;
 
-  const apiUrl = deriveApiBaseUrl(req);
+  const apiUrl = getMcpBaseUrl();
   const apiKey = getApiKey();
   const slots = await loadAllCodexOAuthSlots(apiUrl, apiKey);
   const results: SlotOutcome[] = [];

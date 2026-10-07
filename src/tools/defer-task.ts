@@ -1,4 +1,3 @@
-import { ensure } from "@desplega.ai/business-use";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { resolveTaskAuditUserId } from "@/be/audit-user";
@@ -18,6 +17,7 @@ import { getTaskOutputValidationError } from "@/tasks/terminal-result-guard";
 import { assertOwnsTask, ownerCtx } from "@/tools/task-tool-ctx";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 import { isTerminalTaskStatus } from "@/types";
+import { ensure } from "../utils/business-use";
 
 /** Thrown inside the transaction to abort and roll back the schedule INSERT. */
 class DeferAbortedError extends Error {}

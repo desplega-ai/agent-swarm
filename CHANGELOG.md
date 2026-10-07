@@ -6,6 +6,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.164.1] - 2026-10-07
+
+### Changed
+- CI: gitleaks secret scanning runs in the merge gate and as a prek hook (#1910).
+- Worker image: claude-code 2.1.289 -> 2.1.292 (Agent SDK 0.3.292), opencode 1.18.35, pi 1.0.4 and re-pinned amp CLI builds (#1890, #1893, #1901, #1905).
+- Docs: ACP bearer auth and harness default corrected in DEPLOYMENT.md (#1895); heartbeat spec synced (#1891); local embedding model spike notes (#1900).
+
+### Fixed
+- Secret scrubbing: HTTP error response bodies (#1911), task completion memory, terminal events and cancel reasons (#1912), business-use payloads and OTel attributes (#1914), the Devin adapter emit and raw log (#1913), and short or shell-escaped secrets in env dumps (#1907).
+- Tasks: worker output schemas no longer leak onto Lead follow-ups and Slack continuations (#1904).
+- Codex: `codex_oauth` pool rows stay out of the worker env (#1897), and the legacy `codex_oauth` row counts as pool slot 0 (#1902).
+- pi: `GEMINI_API_KEY` is accepted for `google/` models (#1892).
+- Claude: workspace trust is seeded for every Claude session (#1899).
+- Linear: the session-opening comment goes into the task body (#1898).
+- ACP: the USD cost an ACP target reports is recorded (#1896).
+- Telemetry: `skill.invoke` is recorded for every harness (#1894).
+- Tests: pre-push test git children stay out of the pushing repo (#1908).
+
 ## [1.164.0] - 2026-10-06
 
 ### Added

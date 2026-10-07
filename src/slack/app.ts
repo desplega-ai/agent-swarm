@@ -2,6 +2,7 @@ import { App, LogLevel, SocketModeReceiver } from "@slack/bolt";
 import { emitBuiltInIntegrationConnectedOnce, ensureSlackRenderV2Activation } from "../be/db";
 import { getSlackConfiguration } from "./config";
 import { type SlackConnectionState, setSlackConnectionState } from "./connection-state";
+import { installSlackEgressScrub } from "./egress-scrub";
 import { getSlackSocketModeBlockReason, SLACK_DEV_SOCKET_MODE_OPT_IN } from "./socket-mode-guard";
 import { startTaskWatcher, stopTaskWatcher } from "./watcher";
 
@@ -75,6 +76,9 @@ export async function initSlackApp(): Promise<App | null> {
     );
     return null;
   }
+
+  // Every client Bolt builds from here on scrubs outbound text.
+  installSlackEgressScrub();
 
   // SLACK_API_URL points Bolt (Web API and apps.connections.open) at a mock Slack server for e2e tests.
   const slackApiUrl = process.env.SLACK_API_URL;

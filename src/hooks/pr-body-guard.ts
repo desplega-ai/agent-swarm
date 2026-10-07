@@ -859,7 +859,7 @@ function parseWithState(
 }
 
 const BLOCK_ADVICE =
-  "Paraphrase the motivation ('a maintainer asked for X') and link only public sources (Fixes #N, a public PR or issue). Internal provenance stays in the swarm task.";
+  "Paraphrase the motivation ('a maintainer asked for X') and link only public sources (Fixes #N, a public PR or issue). Task, session, agent-fs and Slack permalinks go only under '## Swarm provenance'. Bare Slack ids, ts values and private-chat quotes are blocked everywhere.";
 
 /** Check a shell command. Returns a block reason, or null to allow. */
 export async function checkGhPrCommand(

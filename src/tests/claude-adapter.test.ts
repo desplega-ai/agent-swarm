@@ -208,7 +208,12 @@ describe("Claude stream-json event parsing", () => {
 describe("ClaudeSession processStreams — ProviderResult.output capture", () => {
   let originalClaudeTransport: string | undefined;
   let spawnSpy: ReturnType<typeof spyOn>;
-  const CLEAN_ENV: Record<string, string> = { CLAUDE_CODE_OAUTH_TOKEN: "example-test-oauth-token" };
+  // The trust pre-seed shells out to `git` and writes ~/.claude.json; neither belongs in
+  // tests that replace Bun.spawn with a canned stream.
+  const CLEAN_ENV: Record<string, string> = {
+    CLAUDE_CODE_OAUTH_TOKEN: "example-test-oauth-token",
+    CLAUDE_TRUST_PRESEED: "0",
+  };
 
   /** Fake Bun.Subprocess whose stdout streams the given NDJSON lines, then closes. */
   function makeStreamingFakeProc(lines: string[]): ReturnType<typeof Bun.spawn> {

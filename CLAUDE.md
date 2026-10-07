@@ -71,7 +71,8 @@ Full rules: [runbooks/extensions.md](./runbooks/extensions.md).
 | `bun run start:http` | MCP HTTP server (port 3013) |
 | `bun run dev:http` | Hot reload, portless: `https://api.swarm.localhost:1355` |
 | `bun run lint:fix` | Lint & format with Biome |
-| `bun run tsc:check` | Type check |
+| `bun run check` | Agent check loop: frozen install, Biome + tsgo + affected tests on your change |
+| `bun run tsc:check` | Type check with tsgo (`tsc:check:tsc` runs tsc 5, the CI authority) |
 | `bun run test:root` | Run root unit tests (`bun run test:root -- src/tests/<file>.test.ts` for one) |
 | `bun run e2e:ui` | Playwright UI suite: builds `apps/ui`, one seeded API per worker (`-- --grep @smoke`, `-- --no-build`) |
 | `bun run pm2-{start,stop,restart,logs,status}` | All services (API 3013, UI 5274, lead 3201, worker 3202) |
@@ -297,7 +298,7 @@ Hub: [runbooks/testing.md](./runbooks/testing.md) — routes to LOCAL_TESTING.md
 Hard rules:
 - Plan-mode verification steps MUST copy real commands from LOCAL_TESTING.md; don't paraphrase.
 - The black-box runner and optional `--harness` legs are documented in `LOCAL_TESTING.md` under `Black-box E2E`. The Playwright UI suite (`bun run e2e:ui`, `packages/ui-e2e`) is under `UI E2E`; its workflow `ui-e2e.yml` is informational.
-- Frontend PRs (`apps/ui/`, `apps/templates-ui/`) MUST include screenshots of the change running locally and a recording for interaction/flow changes (navigation, form, modal, drag, animation, or multi-step flow), captured with `agent-browser` and uploaded to agent-fs (signed URLs in the PR body). Screenshots remain required for static/layout changes. Never `qa-use` unless explicitly asked. This is a reviewer convention; no CI job enforces it. Commands: the `agent-browser` skill and [LOCAL_TESTING.md § When you need to verify a UI change](./LOCAL_TESTING.md#when-you-need-to-verify-a-ui-change).
+- Frontend PRs (`apps/ui/`, `apps/templates-ui/`) MUST include screenshots of the change running locally and a recording for interaction/flow changes (navigation, form, modal, drag, animation, or multi-step flow), captured with `agent-browser` and uploaded as GitHub user attachments (`github-attach` skill; fallback for images only: `agent-fs signed-url --inline`) in the `## Before / after` section. Screenshots remain required for static/layout changes. Never `qa-use` unless explicitly asked. This is a reviewer convention; no CI job enforces it. Commands: the `agent-browser` skill and [LOCAL_TESTING.md § When you need to verify a UI change](./LOCAL_TESTING.md#when-you-need-to-verify-a-ui-change).
 - E2E/test agents MUST use valid UUID agent IDs (e.g. `AGENT_ID=$(uuidgen)`), never slugs like `e2e-lead` — several MCP tool *output* schemas pin `yourAgentId`/`task.agentId` to UUID, so slug-ID agents get `MCP error -32602: Output validation error` on `get-tasks`/`get-task-details`/`store-progress`/`memory-search` **after the write already landed** (retrying double-writes).
 - Tests MUST NOT hard-code ports. CI runs `bun test --parallel=4` (one worker process per file), so two files with the same literal collide. Use `src/tests/test-net.ts`: `listenOnFreePort(server)` for in-process `node:http` servers, `port: 0` + `server.port` for `Bun.serve`, `getFreePort()` + `waitForServer()` for spawned `src/http.ts` children. No global test retry: a timing-sensitive test opts in with `test(name, fn, { retry: 2 })` plus a comment.
 
@@ -316,12 +317,14 @@ Hard rules:
 
 Mirror what `.github/workflows/merge-gate.yml` runs. Full job-by-job breakdown, drift checks, lockfile rules, and "why CI fails" list: [runbooks/ci.md](./runbooks/ci.md).
 
-Quick checklist (run from repo root):
+Inner loop: `bun run check` (`scripts/check.sh`). It runs a frozen install, Biome on changed files, tsgo, and the tests affected by your change (the pre-push hook's scoping). Run it before every push. Secrets scanning stays with the prek hooks.
+
+Before opening the PR, mirror the rest of the gate (run from repo root):
 
 ```bash
-bun install --frozen-lockfile
-bun run lint           # NOT lint:fix — CI runs `lint` (read-only)
-bun run tsc:check
+bun run check
+bun run lint           # whole lint scope; NOT lint:fix — CI runs `lint` (read-only)
+bun run tsc:check:tsc  # tsc 5, the CI authority (`tsc:check` runs tsgo)
 bun run test:root -- --parallel=4     # CI: 2 shards x --parallel=4, balanced by cached --timings
 bun run e2e                          # black-box contract suite: boots the API on a free port, no Docker, no LLM
 bun run e2e:ui                       # Playwright UI suite: seeded API per worker, headless Chromium, needs Node 22+
@@ -344,7 +347,7 @@ Drift checks — run only if you touched the trigger files, MUST commit any rege
 - Touched `apps/ui/` — or root `bun.lock`/`package.json`/`bunfig.toml` (ui deps resolve from the root lock)? → `cd apps/ui && bun install --frozen-lockfile && bun run lint && bunx tsc -b` (CI uses `tsc -b`, not `--noEmit`)
 - Touched `Dockerfile` / `Dockerfile.worker` / `apps/evals/Dockerfile` / files they COPY (incl. `bunfig.toml`, member `package.json`s, `.dockerignore`)? → `docker build -f <Dockerfile> .` — CI builds all three images
 
-Frontend (`apps/ui/`, `apps/templates-ui/`) PRs additionally require screenshots (including static/layout changes) and a recording for interaction/flow changes (navigation, form, modal, drag, animation, or multi-step flow), uploaded to agent-fs with signed URLs in the PR body. This is a reviewer convention, not a CI gate. Commands: the `agent-browser` skill and [LOCAL_TESTING.md § When you need to verify a UI change](./LOCAL_TESTING.md#when-you-need-to-verify-a-ui-change).
+Frontend (`apps/ui/`, `apps/templates-ui/`) PRs additionally require screenshots (including static/layout changes) and a recording for interaction/flow changes (navigation, form, modal, drag, animation, or multi-step flow), uploaded as GitHub user attachments (`github-attach` skill; fallback for images only: `agent-fs signed-url --inline`) in the `## Before / after` section. The PR Body check requires that section when the diff touches those paths. Commands: the `agent-browser` skill and [LOCAL_TESTING.md § When you need to verify a UI change](./LOCAL_TESTING.md#when-you-need-to-verify-a-ui-change).
 
 </important>
 
@@ -352,16 +355,18 @@ Frontend (`apps/ui/`, `apps/templates-ui/`) PRs additionally require screenshots
 
 Most PRs here are written by agents, so the description must carry the intent a reviewer checks the diff against. Write for a human, in the style of the [`comms` skill](https://github.com/desplega-ai/ai-toolbox/blob/main/cc-plugin/base/skills/comms/SKILL.md) (Precise mode): short direct sentences, no filler. Each template section gives a length target. Synthesize to meet it, and go past it only when the reviewer needs the detail.
 
-PR descriptions MUST fill every required section of [.github/pull_request_template.md](./.github/pull_request_template.md). A `fix:` / `fix(scope):` title also requires Repro and Setup.
+PR descriptions MUST fill every required section of [.github/pull_request_template.md](./.github/pull_request_template.md): the `**Why:**` and `**Risk:**` lines, Review map, Change outline, Heads-up, Verified and Urgency. A `fix:` title adds Repro. A diff touching `apps/ui/` or `apps/templates-ui/` adds Before / after. A desplega-bot body adds Swarm provenance. Show the change, do not narrate it: about 250 prose words, with code blocks, mermaid, tables and `<details>` not counted (the check warns above 300).
 
-- **Intent**: why this change exists, paraphrased. Link only public sources (Fixes #N, a public PR or issue). Never paste Slack or DM ids, ts or permalinks, swarm task, run or memory ids, app.agent-swarm.dev or agent-fs links or paths, customer names, or verbatim quotes from private chat. Write 'a maintainer asked for X'. Internal provenance stays in the swarm task. Do not rewrite the ask to match what you built. The **PR Body** check and a PreToolUse hook on `gh pr create|edit` reject bot PR bodies that carry these identifiers (`src/utils/pr-body-leaks.ts`).
-- **Decisions & trade-offs**: up to 3 choices the request did not specify, each with its cost. Always list every migration, new config key, and breaking change.
+- **Why**: one sentence, paraphrased. Link only public sources here (Fixes #N, a public PR or issue). Never paste customer names or verbatim quotes from private chat. Do not rewrite the ask to match what you built.
+- **Risk**: how deep to read, set by the author. `high` (migration, auth/RBAC, secrets, billing, data deletion, prompt or routing changes that hit every agent, a public API break) adds the `risk:high` label. Review pings stay driven by Urgency.
+- **Swarm provenance**: links to the swarm task and its tree, the Slack permalink of the ask, any workflow run, and the plan or research (share link plus durable agent-fs path). These auth-gated links are allowed **only** in this section. Bare Slack ids, ts values and private-chat quotes stay blocked everywhere. The **PR Body** check and a PreToolUse hook on `gh pr create|edit` enforce this for bot bodies (`src/utils/pr-body-leaks.ts`).
 - **Urgency**: copy it from the request. If the request gives none, check "nice to have". Never pick it yourself. After the check passes, "asap" requests a review from tarasyarema and posts a comment. "this week" requests a review from desplega-bot, which starts a swarm review.
+- **Links**: images, GIFs and mp4s as GitHub user attachments (`github-attach` skill); docs as `agent-fs share-create` links. A presigned `signed-url` is an image-only fallback, with `--inline`. Never use one for docs or mp4s: it downloads and expires in 7 days.
 
 `gh pr create --body` skips the template, so write the description to a file, check it, then pass the file:
 
 ```bash
-bun scripts/check-pr-body.ts --title "<conventional title>" --body-file /tmp/pr-body.md
+bun scripts/check-pr-body.ts --title "<conventional title>" --body-file /tmp/pr-body.md --author desplega-bot
 gh pr create --title "<conventional title>" --body-file /tmp/pr-body.md
 ```
 

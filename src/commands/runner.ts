@@ -1,6 +1,5 @@
 import { existsSync, statSync } from "node:fs";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
-import { ensure, initialize } from "@desplega.ai/business-use";
 import type { TemplateResponse } from "../../templates/schema.ts";
 import {
   type Attributes,
@@ -24,6 +23,11 @@ import { configureHttpResolver, resolveTemplateAsync } from "../prompts/resolver
 import { renderSteeringDelivery } from "../prompts/steering-delivery.ts";
 import { authJsonToCredentialSelection } from "../providers/codex-oauth/auth-json.js";
 import { materializeCodexAuthJson } from "../providers/codex-oauth/auth-json-fs.js";
+import {
+  CODEX_OAUTH_POOL_SLOTS_ENV,
+  countCodexOAuthPoolSlots,
+  isCodexOAuthConfigKey,
+} from "../providers/codex-oauth/env-keys.js";
 import { loadAllCodexOAuthSlots } from "../providers/codex-oauth/storage.js";
 import {
   type CostData,
@@ -55,6 +59,7 @@ import {
 import { isApiDrainingResponse } from "../utils/api-drain.ts";
 import { getApiKey } from "../utils/api-key.ts";
 import { computeBudgetBackoffMs } from "../utils/budget-backoff.ts";
+import { ensure, initialize } from "../utils/business-use";
 import { isCodexAuthFailureReason } from "../utils/codex-auth-failure.ts";
 import { getMcpBaseUrl } from "../utils/constants.ts";
 import { getContextWindowSize } from "../utils/context-window.ts";
@@ -70,7 +75,7 @@ import { prettyPrintLine, prettyPrintStderr } from "../utils/pretty-print.ts";
 import { terminateRegisteredProcessGroups } from "../utils/process-group.ts";
 import { refreshRuntimeModelCatalog } from "../utils/runtime-model-catalog.ts";
 import { resolveScriptsOnlyMode } from "../utils/scripts-only-mode.ts";
-import { scrubSecrets } from "../utils/secret-scrubber.ts";
+import { registerSensitiveKeyName, scrubSecrets } from "../utils/secret-scrubber.ts";
 import { refreshSkillsIfChanged } from "../utils/skills-refresh.ts";
 import { guardSpawnModel } from "../utils/spawn-model-guard.ts";
 import { isSteeringEnabled } from "../utils/steering-enabled.ts";
@@ -837,6 +842,11 @@ export async function fetchResolvedEnv(
   },
 ): Promise<ResolvedEnvResult> {
   const env: Record<string, string | undefined> = { ...baseEnv };
+  // Codex OAuth rows carry refresh tokens; keep them out of every env this
+  // loader builds, even when an older entrypoint exported them at boot.
+  for (const key of Object.keys(env)) {
+    if (isCodexOAuthConfigKey(key)) delete env[key];
+  }
   const repoId = sessionContext?.repoId;
   let scriptsOnlyConfigValue: string | undefined;
 
@@ -852,7 +862,7 @@ export async function fetchResolvedEnv(
         console.warn(`[env-reload] Failed to fetch config: ${response.status}`);
       } else {
         const data = (await response.json()) as {
-          configs: Array<{ key: string; value: string }>;
+          configs: Array<{ key: string; value: string; isSecret?: boolean }>;
         };
 
         // A deleted row restores the deployment value (including unset), while
@@ -871,6 +881,11 @@ export async function fetchResolvedEnv(
             (config) => config.key === "SCRIPTS_ONLY_MCP",
           )?.value;
           for (const config of data.configs) {
+            // Read on demand via codex-oauth/storage.ts; see env-keys.ts.
+            if (isCodexOAuthConfigKey(config.key)) continue;
+            // Lets the scrubber redact `KEY=value` dumps of secret rows whose
+            // name matches no sensitive-suffix rule.
+            if (config.isSecret) registerSensitiveKeyName(config.key);
             // A blank swarm_config value for a BLANK_ROW_IS_STRAY_KEYS entry
             // (the model-control keys) must not silently blank out a
             // genuinely-set container/boot env value — that key exists
@@ -901,6 +916,10 @@ export async function fetchResolvedEnv(
           }
           console.log(`[env-reload] Loaded ${data.configs.length} config entries from API`);
         }
+        // Non-secret stand-in for the pool rows skipped above, so credential
+        // readiness checks can still see that a pool exists.
+        const codexPoolSlots = countCodexOAuthPoolSlots(data.configs ?? []);
+        env[CODEX_OAUTH_POOL_SLOTS_ENV] = codexPoolSlots > 0 ? String(codexPoolSlots) : undefined;
       }
     } catch (error) {
       console.warn(`[env-reload] Could not fetch config, using current env: ${error}`);
@@ -1115,6 +1134,9 @@ export const RELOADABLE_ENV_KEYS: ReadonlySet<string> = new Set([
   "PI_TOOL_DEFERRAL",
   "PI_CODEMODE",
   "PI_CODEMODE_MODELS",
+  // Non-secret pool-slot count; `checkCodexCredentials` reads it from
+  // process.env at boot and during the credential wait.
+  CODEX_OAUTH_POOL_SLOTS_ENV,
 ]);
 
 /**

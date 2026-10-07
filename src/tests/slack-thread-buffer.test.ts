@@ -457,6 +457,35 @@ describe("Slack thread buffer", () => {
     });
   });
 
+  describe("flush does not inherit the latest thread task's outputSchema", () => {
+    test("continuation of a schema-carrying worker task is created with none", async () => {
+      const channelId = "C750";
+      const threadTs = "7500.0001";
+      const worker = await createAgent({
+        name: "buf-worker-schema",
+        isLead: false,
+        status: "idle",
+        capabilities: [],
+      });
+      const workerTask = await createTaskExtended("worker task with a contract", {
+        agentId: worker.id,
+        slackChannelId: channelId,
+        slackThreadTs: threadTs,
+        outputSchema: { type: "object", properties: { prs: { type: "array" } } },
+      });
+
+      bufferThreadMessage(channelId, threadTs, "status?", "U1", "7500.0010");
+      await instantFlush(`${channelId}:${threadTs}`);
+
+      const continuation = await getMostRecentTaskInThread(channelId, threadTs);
+      expect(continuation).not.toBeNull();
+      expect(continuation!.id).not.toBe(workerTask.id);
+      expect(continuation!.source).toBe("slack");
+      expect(continuation!.parentTaskId).toBe(workerTask.id);
+      expect(continuation!.outputSchema).toBeUndefined();
+    });
+  });
+
   describe("flush without active task produces no dependsOn", () => {
     test("flushed task in thread with no active task has no dependency", async () => {
       const channelId = "C800";

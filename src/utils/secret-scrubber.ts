@@ -67,10 +67,40 @@ const SENSITIVE_KEY_EXACT = new Set<string>([
   "LINEAR_OAUTH_CLIENT_SECRET",
   "OTEL_EXPORTER_OTLP_HEADERS",
   "SIGNOZ_INGESTION_KEY",
+  // Bare names, as they appear in .env files, JSON/YAML configs and headers.
+  // `PWD` is deliberately absent: it is the shell's working directory.
+  "SECRET",
+  "PASSWORD",
+  "PASSWD",
+  "TOKEN",
+  "PRIVATE_KEY",
+  "APIKEY",
+  "ACCESS_TOKEN",
+  "REFRESH_TOKEN",
+  "CLIENT_SECRET",
+  "AUTHORIZATION",
+  "CREDENTIALS",
 ]);
 
-/** Suffixes that mark an env-var value as sensitive by convention. */
-const SENSITIVE_KEY_SUFFIXES = ["_API_KEY", "_TOKEN", "_SECRET", "_PASSWORD", "_PRIVATE_KEY"];
+/**
+ * Suffixes that mark an env-var value as sensitive by convention. There is no
+ * bare `_KEY` suffix: it would match `SORT_KEY`, `PRIMARY_KEY`, `contextKey`.
+ */
+const SENSITIVE_KEY_SUFFIXES = [
+  "_API_KEY",
+  "_TOKEN",
+  "_SECRET",
+  "_PASSWORD",
+  "_PASS",
+  "_PRIVATE_KEY",
+  "_ACCESS_KEY",
+  "_SECRET_KEY",
+  "_APIKEY",
+  "_AUTH_HEADER",
+  "_CREDENTIALS",
+  "_DSN",
+  "_DEPLOY_KEY",
+];
 
 /** Keys that match the sensitive suffix heuristic but are actually safe URLs/configs. */
 const NON_SECRET_EXCEPTIONS = new Set<string>([
@@ -78,15 +108,336 @@ const NON_SECRET_EXCEPTIONS = new Set<string>([
   "APP_URL",
   "API_URL",
   "TEMPLATE_REGISTRY_URL",
+  // A file path, not the credential itself.
+  "GOOGLE_APPLICATION_CREDENTIALS",
+  // Pagination cursors. Tool results are scrubbed before the model sees them,
+  // so redacting these would break paging through an API response.
+  "PAGE_TOKEN",
+  "NEXT_PAGE_TOKEN",
+  "PREV_PAGE_TOKEN",
+  "NEXT_TOKEN",
+  "CONTINUATION_TOKEN",
+  "SYNC_TOKEN",
+  "NEXT_SYNC_TOKEN",
 ]);
+
+/**
+ * Canonical form of a key name for the sensitivity check: camelCase becomes
+ * snake case (`apiKey` → `API_KEY`), `.` and `-` become `_`, and the result is
+ * uppercased. An all-caps key is never split (`OAUTH2TOKEN` stays whole).
+ */
+export function normalizeKey(key: string): string {
+  if (!/[a-z.-]/.test(key)) return key;
+  let out = key;
+  if (/[a-z]/.test(out) && /[A-Z]/.test(out)) {
+    out = out.replace(/([a-z0-9])([A-Z])/g, "$1_$2").replace(/([A-Z]+)([A-Z][a-z])/g, "$1_$2");
+  }
+  return out.replace(/[.-]/g, "_").toUpperCase();
+}
 
 /**
  * Minimum length for an env-var value to be considered scrub-worthy.
  * Short values (< 12 chars) cause false-positive replacements across
  * legitimate log content (e.g. a 6-char password would collide with a user
- * name). For short secrets we rely on the regex pass only.
+ * name). Short secrets are still caught when they appear as the value of a
+ * sensitive `KEY=value` assignment (see ASSIGNMENT_RE).
  */
 const MIN_VALUE_LENGTH = 12;
+
+/**
+ * Every form a known value can take in a log line: raw, escaped inside shell
+ * double quotes (`declare -x` / `export -p` prefix `\`, `$`, `"` and backtick
+ * with a backslash), inside shell single quotes, and each of those again as a
+ * JSON string body (session logs are JSONL).
+ */
+function escapedForms(value: string): string[] {
+  const forms = new Set([value, value.replace(/[\\$"`]/g, "\\$&"), value.replaceAll("'", "'\\''")]);
+  for (const form of [...forms]) forms.add(JSON.stringify(form).slice(1, -1));
+  return [...forms];
+}
+
+// Value shapes after `KEY=`. Each one consumes escape pairs whole, so the
+// first unescaped closing quote ends the value.
+//   JSON_DQ: `\"…\"` — a shell double-quoted value inside a JSON string.
+//   RAW_DQ:  `"…"`   — a shell double-quoted value (`declare -x KEY="…"`).
+//   SQ:      `'…'`   — a shell single-quoted value, raw or JSON (`'\''`).
+//   BARE:    unquoted, up to whitespace, a quote, or a JSON escape (`\n`).
+// A bare or double-quoted value starting with an unescaped `$` is a shell
+// reference (`$VAR`, `${VAR}`, `$(cmd)`), not a secret; `declare -x` writes a
+// literal `$` as `\$`, so dumps still match.
+//
+// A quoted value may span lines only when its closing quote ends a line, as a
+// multi-line value in an env dump does. An unterminated quote (or one whose
+// close sits mid-line further down) stops at the first newline, raw or JSON
+// `\n`, so it never swallows the rest of the text.
+const QUOTE_EOL = String.raw`(?=$|[\r\n]|\\[rn]|")`;
+function quoted(open: string, close: string, item: string, lineItem: string): string {
+  return `${open}(?:(?:${lineItem})*${close}|(?:${item})*${close}${QUOTE_EOL}|(?:${lineItem})*)`;
+}
+const JSON_DQ = quoted(
+  String.raw`\\"(?!\$)`,
+  String.raw`\\"`,
+  String.raw`\\\\(?:\\\\|\\"|[^\\"])|\\[^\\"]|[^"\\]`,
+  String.raw`\\\\(?:\\\\|\\"|[^\\"\r\n])|\\[^\\"nr\r\n]|[^"\\\r\n]`,
+);
+const RAW_DQ = quoted(
+  `"(?!\\$)`,
+  `"`,
+  String.raw`\\[\s\S]|[^"\\]`,
+  String.raw`\\[^\r\n]|[^"\\\r\n]`,
+);
+const SQ = quoted(
+  `'`,
+  `'`,
+  String.raw`[^'\\]|'\\\\?''|\\[\s\S]`,
+  String.raw`[^'\\\r\n]|'\\\\?''|\\[^nr\r\n]`,
+);
+const BARE = String.raw`(?!\$)(?:\\[^nrtu"\s]|[^\s"'\\])+`;
+
+/**
+ * `KEY=value` where the value is redacted when KEY is sensitive, whatever the
+ * value's length and whether this process ever saw it (e.g. a token the
+ * harness generated inside a child process). The key must start a word or
+ * follow a JSON `\n`/`\r`/`\t` escape, and may contain dots
+ * (`SLACK.BOT.TOKEN=`). `==` comparisons are not assignments. There is no
+ * whitespace around `=` here, so `const password = getPassword()` in a logged
+ * diff is never touched; spaced `key = value` is only matched line-anchored
+ * (INI_ASSIGNMENT_RE).
+ */
+const ASSIGNMENT_RE = new RegExp(
+  String.raw`(?:(?<=\\[nrt])|(?<![\w\\.]))([A-Za-z_][A-Za-z0-9_.]*)=(?!=)(${JSON_DQ}|${RAW_DQ}|${SQ}|${BARE})`,
+  "g",
+);
+
+/** A dotted key is sensitive when the whole name or its last segment is. */
+function isSensitiveKeyPath(key: string): boolean {
+  if (isSensitiveKey(key)) return true;
+  const dot = key.lastIndexOf(".");
+  return dot >= 0 && isSensitiveKey(key.slice(dot + 1));
+}
+
+function redactAssignment(match: string, key: string, value: string): string {
+  if (!isSensitiveKeyPath(key)) return match;
+  let open = "";
+  let close = "";
+  for (const quote of ['\\"', '"', "'"]) {
+    if (!value.startsWith(quote)) continue;
+    open = quote;
+    if (value.length >= quote.length * 2 && value.endsWith(quote)) close = quote;
+    break;
+  }
+  const inner = value.slice(open.length, value.length - close.length);
+  if (inner === "" || /^\[REDACTED:[^\]]*\]$/.test(inner)) return match;
+  return `${key}=${open}[REDACTED:${key}]${close}`;
+}
+
+/**
+ * Values the key-context rules leave alone: empty, already redacted, a
+ * reference or template (`$VAR`, `${{ … }}`, `<your-token>`, `***`, `%VAR%`,
+ * `{{ x }}`), a YAML/JSON literal, or a bare number.
+ */
+function isPlaceholderValue(value: string): boolean {
+  return (
+    value === "" ||
+    value.includes("[REDACTED") ||
+    /^[$<*%{]/.test(value) ||
+    /^(?:null|none|nil|true|false|yes|no|undefined|~)$/i.test(value) ||
+    /^[+-]?\d+(?:\.\d+)?$/.test(value)
+  );
+}
+
+/**
+ * An unquoted right-hand side that reads as code or prose rather than a
+ * literal credential: a call, index, object or list (`get_token()`,
+ * `env["X"]`), a trailing `,`/`;`, a member chain (`process.env.TOKEN`), or a
+ * short plain word (`string`, `pwd`, `required`) as in a TS type or a name.
+ */
+function looksLikeCode(value: string): boolean {
+  return (
+    /[()[\]{};,]/.test(value) ||
+    /^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)+$/.test(value) ||
+    (/^[A-Za-z_]+$/.test(value) && value.length < 16)
+  );
+}
+
+// Line boundaries, raw or as JSON `\n`/`\r` escapes inside a session-log
+// string (whose closing `"` also ends the last line).
+const LINE_START = String.raw`(?:^|(?<=\\[nr]))`;
+const LINE_END = String.raw`(?=[ \t]*(?:$|\r|\\[nr]|"))`;
+// A one-line value: double-, single- or JSON-escaped-double-quoted, or bare.
+const LINE_VALUE = String.raw`"[^"\\\r\n]*"|'[^'\\\r\n]*'|\\"[^"\\\r\n]*\\"|[^\s"'\\]+`;
+
+/**
+ * Line-anchored INI/TOML `key = value` (`aws_secret_access_key = …` in
+ * ~/.aws/credentials). Spaces around `=` are only accepted here, where the
+ * key starts the line, so `const password = getPassword()` stays intact.
+ */
+const INI_ASSIGNMENT_RE = new RegExp(
+  String.raw`${LINE_START}([ \t]*)([A-Za-z_][\w.]*)([ \t]*=[ \t]*)(${LINE_VALUE})${LINE_END}`,
+  "gm",
+);
+
+/** Line-anchored YAML `key: value`, including list items (`- token: …`). */
+const YAML_KEY_RE = new RegExp(
+  String.raw`${LINE_START}([ \t]*(?:-[ \t]+)?)([A-Za-z_][\w.-]*)([ \t]*:[ \t]+)(${LINE_VALUE})${LINE_END}`,
+  "gm",
+);
+
+function redactLineValue(
+  match: string,
+  lead: string,
+  key: string,
+  sep: string,
+  value: string,
+): string {
+  if (!isSensitiveKeyPath(key)) return match;
+  const quote = /^(?:\\"|"|')/.exec(value)?.[0] ?? "";
+  const inner = quote ? value.slice(quote.length, -quote.length) : value;
+  if (isPlaceholderValue(inner) || (!quote && looksLikeCode(inner))) return match;
+  return `${lead}${key}${sep}${quote}[REDACTED:${key}]${quote}`;
+}
+
+const JSON_KEY = String.raw`[A-Za-z_][\w.-]{0,63}`;
+/**
+ * The opening of `"key": "value"`, raw or JSON-escaped inside a session-log
+ * string (`\"key\":\"value\"`). Only string values are redacted. The value
+ * itself is walked by `jsonStringEnd`, not by the regex: a backtracking value
+ * pattern costs ~100 ms on a 200 KB unterminated value.
+ */
+const JSON_KEY_RE = new RegExp(String.raw`"(${JSON_KEY})"[ \t]*:[ \t]*"`, "g");
+const ESCAPED_JSON_KEY_RE = new RegExp(String.raw`\\"(${JSON_KEY})\\"[ \t]*:[ \t]*\\"`, "g");
+
+/**
+ * Index of the quote token that closes the JSON string body starting at
+ * `start`. If the line ends first, returns `-(stop + 1)` where `stop` is the
+ * index the walk halted at, so the caller can resume past it. Escapes are
+ * consumed whole, so a PEM with `\n` escapes ends at its real closing quote.
+ * With `escaped`, the body is itself JSON-escaped: each `\x` pair is one inner
+ * character, and the close is an inner `"` (the pair `\"`) not preceded by an
+ * inner `\`.
+ */
+function jsonStringEnd(text: string, start: number, escaped: boolean): number {
+  let innerEscape = false;
+  for (let i = start; i < text.length; i++) {
+    let ch = text[i];
+    if (ch === "\r" || ch === "\n") return -(i + 1);
+    const at = i;
+    if (escaped) {
+      if (ch === '"') return -(i + 1);
+      if (ch === "\\") {
+        ch = text[++i];
+        if (ch === undefined || ch === "\r" || ch === "\n") return -(i + 1);
+        if (ch !== "\\" && ch !== '"') ch = "x";
+      }
+    }
+    if (innerEscape) innerEscape = false;
+    else if (ch === "\\") innerEscape = true;
+    else if (ch === '"') return at;
+  }
+  return -(text.length + 1);
+}
+
+function redactJsonValues(text: string, re: RegExp, escaped: boolean): string {
+  let out = "";
+  let last = 0;
+  re.lastIndex = 0;
+  for (let m = re.exec(text); m; m = re.exec(text)) {
+    const key = m[1] ?? "";
+    if (!isSensitiveKeyPath(key)) continue;
+    const valueStart = m.index + m[0].length;
+    const end = jsonStringEnd(text, valueStart, escaped);
+    if (end < 0) {
+      // Resume where the walk stopped so no span is walked twice. Back off one
+      // character: an escaped walk stops on the bare `"` of a `\"` opener.
+      re.lastIndex = Math.max(re.lastIndex, -end - 2);
+      continue;
+    }
+    re.lastIndex = end + 1;
+    if (isPlaceholderValue(text.slice(valueStart, end))) continue;
+    out += `${text.slice(last, valueStart)}[REDACTED:${key}]`;
+    last = end;
+  }
+  return last === 0 ? text : out + text.slice(last);
+}
+
+// An RFC 7235 token68 credential, as carried by Authorization headers.
+// It must end the run, so a fragment glued to a marker (`x-[REDACTED:…]`) is skipped.
+const TOKEN68 = String.raw`[A-Za-z0-9._~+/=-]{8,}(?![A-Za-z0-9._~+/=\[-])`;
+// `Header: ` in raw, JSON (`"Header": "`), escaped JSON and curl `-H '…'` forms.
+const HEADER_SEP = String.raw`\\?["']?[ \t]*:[ \t]*\\?["']?`;
+
+/** `Authorization: Bearer <cred>`; the scheme survives redaction. */
+const AUTH_HEADER_RE = new RegExp(
+  String.raw`(?<![\w-])((?:proxy-)?authorization)(${HEADER_SEP}(?:bearer|basic|token|bot)[ \t]+)(${TOKEN68})`,
+  "gi",
+);
+const API_KEY_HEADER_RE = new RegExp(
+  String.raw`(?<![\w-])(x-api-key)(${HEADER_SEP})(${TOKEN68})`,
+  "gi",
+);
+
+function redactHeader(match: string, name: string, sep: string, value: string): string {
+  if (/^[A-Za-z_]+$/.test(value) && value.length < 16) return match; // a prose word
+  return `${name}${sep}[REDACTED:${name.toLowerCase().replace(/-/g, "_")}]`;
+}
+
+/** curl `--password <pw>` and `-u|--user|-U|--proxy-user user:<pw>`. */
+const CURL_PASSWORD_RE = /(?<=^|[\s'"])(--password(?:[ \t]+|=)\\?["']?)([^\s"'\\]+)/g;
+const CURL_USER_RE =
+  /(?<=^|[\s'"])((?:-u|-U|--user|--proxy-user)(?:[ \t]+|=)\\?["']?([^\s"'\\:@]+):)([^\s"'\\@]+)/g;
+
+/** `scheme://user:<pw>@host`: only the password goes, the host survives. */
+const URL_USERINFO_RE =
+  /(?<![a-z0-9+.-])([a-z][a-z0-9+.-]{0,31}:\/\/[^\s/:@?#"'\\]+:)([^\s/@?#"'\\]+)(?=@)/gi;
+
+/**
+ * PEM private-key blocks, raw or with literal `\n` escapes. The body cannot
+ * contain `-----`, so a missing END marker costs one scan to the next dash
+ * run, and the 16 KB cap bounds even that.
+ */
+const PEM_RE =
+  /(-----BEGIN [A-Z0-9 ]{0,32}PRIVATE KEY(?: BLOCK)?-----)((?:(?!-----)[\s\S]){1,16384})(-----END [A-Z0-9 ]{0,32}PRIVATE KEY(?: BLOCK)?-----)/g;
+const PEM_MARKER = "[REDACTED:private_key]";
+
+/**
+ * Pass 4: credentials identified by their context (a sensitive JSON/YAML
+ * key, an auth header, a curl flag, URL userinfo, PEM armor) rather than by a
+ * vendor prefix. Every rule skips a value that is already redacted, so the
+ * pass is idempotent.
+ */
+function scrubKeyContext(text: string): string {
+  let out = text;
+  if (out.includes("PRIVATE KEY")) {
+    out = out.replace(PEM_RE, (match, begin: string, body: string, end: string) =>
+      body === PEM_MARKER ? match : `${begin}${PEM_MARKER}${end}`,
+    );
+  }
+  if (/authorization|x-api-key/i.test(out)) {
+    out = out.replace(AUTH_HEADER_RE, redactHeader).replace(API_KEY_HEADER_RE, redactHeader);
+  }
+  if (out.includes("--password")) {
+    out = out.replace(CURL_PASSWORD_RE, (match, flag: string, pw: string) =>
+      isPlaceholderValue(pw) ? match : `${flag}[REDACTED:curl_password]`,
+    );
+  }
+  if (/(?:^|\s)-(?:u|U|-user|-proxy-user)\b/.test(out)) {
+    out = out.replace(CURL_USER_RE, (match, prefix: string, user: string, pw: string) =>
+      // `-u 1000:1000` / `-u node:node` is a docker uid:gid, not a credential.
+      isPlaceholderValue(pw) || pw === user ? match : `${prefix}[REDACTED:curl_password]`,
+    );
+  }
+  if (out.includes("://")) {
+    out = out.replace(URL_USERINFO_RE, (match, prefix: string, pw: string) =>
+      isPlaceholderValue(pw) ? match : `${prefix}[REDACTED:url_password]`,
+    );
+  }
+  if (out.includes('"')) {
+    out = redactJsonValues(out, JSON_KEY_RE, false);
+    if (out.includes('\\"')) out = redactJsonValues(out, ESCAPED_JSON_KEY_RE, true);
+  }
+  if (out.includes(":")) out = out.replace(YAML_KEY_RE, redactLineValue);
+  return out;
+}
 
 /**
  * Structural regex patterns for common credential shapes. Applied AFTER the
@@ -175,6 +526,8 @@ interface ScrubCache {
 
 let cache: ScrubCache | null = null;
 const volatileSecrets = new Map<string, string>();
+/** Key names marked secret at runtime (swarm_config rows with isSecret=1). */
+const registeredSensitiveKeys = new Set<string>();
 
 /** Fingerprint current env so we can invalidate cache cheaply when it changes. */
 function snapshotEnv(): string {
@@ -188,11 +541,31 @@ function snapshotEnv(): string {
   return parts.join("|");
 }
 
+/**
+ * Memoized verdicts. Every scrub call re-checks every env key, and log text
+ * repeats the same JSON/YAML keys, so the normalization runs once per name.
+ * Bounded because log text can carry arbitrary key names; cleared whenever
+ * the registered key set changes.
+ */
+const sensitiveKeyVerdicts = new Map<string, boolean>();
+const MAX_KEY_VERDICTS = 4096;
+
 export function isSensitiveKey(key: string): boolean {
-  if (NON_SECRET_EXCEPTIONS.has(key)) return false;
-  if (SENSITIVE_KEY_EXACT.has(key)) return true;
+  const cached = sensitiveKeyVerdicts.get(key);
+  if (cached !== undefined) return cached;
+  const verdict = computeIsSensitiveKey(key);
+  if (sensitiveKeyVerdicts.size >= MAX_KEY_VERDICTS) sensitiveKeyVerdicts.clear();
+  sensitiveKeyVerdicts.set(key, verdict);
+  return verdict;
+}
+
+function computeIsSensitiveKey(key: string): boolean {
+  const normalized = normalizeKey(key);
+  if (NON_SECRET_EXCEPTIONS.has(normalized)) return false;
+  if (SENSITIVE_KEY_EXACT.has(normalized)) return true;
+  if (registeredSensitiveKeys.has(key) || registeredSensitiveKeys.has(normalized)) return true;
   for (const suffix of SENSITIVE_KEY_SUFFIXES) {
-    if (key.endsWith(suffix)) return true;
+    if (normalized.endsWith(suffix)) return true;
   }
   // Codex OAuth pool credentials: codex_oauth (legacy) + codex_oauth_0…N (pool slots).
   // The outer JSON structure (accountId, expires) isn't covered by TOKEN_REGEXES.
@@ -217,9 +590,11 @@ function buildCache(): ScrubCache {
     for (const candidate of candidates) {
       if (!candidate) continue;
       if (candidate.length < MIN_VALUE_LENGTH) continue;
-      if (seen.has(candidate)) continue;
-      seen.add(candidate);
-      entries.push({ value: candidate, name: key });
+      for (const form of escapedForms(candidate)) {
+        if (seen.has(form)) continue;
+        seen.add(form);
+        entries.push({ value: form, name: key });
+      }
     }
   }
 
@@ -271,7 +646,14 @@ export function scrubSecrets(text: string | null | undefined): string {
     out = out.replace(re, `[REDACTED:${name}]`);
   }
 
-  return out;
+  // Pass 3: values of sensitive `KEY=value` assignments (env dumps, .env
+  // files, shell traces), including ones too short for pass 1.
+  out = out.replace(ASSIGNMENT_RE, redactAssignment);
+  if (out.includes("=")) out = out.replace(INI_ASSIGNMENT_RE, redactLineValue);
+
+  // Pass 4: credentials known by their context (JSON/YAML keys, auth headers,
+  // curl flags, URL userinfo, PEM blocks).
+  return scrubKeyContext(out);
 }
 
 export function scrubObject<T>(value: T, seen = new WeakSet<object>()): T {
@@ -314,9 +696,26 @@ export function refreshSecretScrubberCache(): void {
  */
 export function registerVolatileSecret(value: string, name: string): void {
   if (value.length < MIN_VALUE_LENGTH) return;
-  volatileSecrets.set(value, name);
+  for (const form of escapedForms(value)) volatileSecrets.set(form, name);
 }
 
+/**
+ * Mark a key name as sensitive at runtime (a swarm_config row with
+ * isSecret=1 whose name matches no suffix rule). Its process.env value joins
+ * the exact-match pass, and `KEY=value` assignments of it are redacted at any
+ * value length.
+ */
+export function registerSensitiveKeyName(key: string): void {
+  if (registeredSensitiveKeys.has(key)) return;
+  registeredSensitiveKeys.add(key);
+  sensitiveKeyVerdicts.clear();
+  cache = null;
+}
+
+/** Test-only: drop volatile values and runtime-registered key names. */
 export function clearVolatileSecretsForTesting(): void {
   volatileSecrets.clear();
+  registeredSensitiveKeys.clear();
+  sensitiveKeyVerdicts.clear();
+  cache = null;
 }

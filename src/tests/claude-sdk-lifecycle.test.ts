@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { mkdtemp, readFile, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ClaudeAdapter, getTaskFilePath } from "../providers/claude-adapter";
@@ -76,7 +76,19 @@ async function processIsRunning(pid: number): Promise<boolean> {
   return state !== "" && !state.startsWith("Z");
 }
 
+// Every session seeds Claude trust into `$HOME/.claude.json`; keep that off the real home.
+let originalHome: string | undefined;
+let homeDir: string;
+
+beforeEach(async () => {
+  originalHome = process.env.HOME;
+  homeDir = await temporaryDirectory();
+  process.env.HOME = homeDir;
+});
+
 afterEach(async () => {
+  if (originalHome === undefined) delete process.env.HOME;
+  else process.env.HOME = originalHome;
   await Promise.all(temporaryDirectories.splice(0).map((path) => rm(path, { recursive: true })));
 });
 
@@ -187,6 +199,35 @@ describe("Claude SDK production adapter lifecycle", () => {
         session.deliverSteering?.({ mode: "queue", text: "queued-message-b" }),
       ]);
       expect((await session.waitForCompletion()).exitCode).toBe(0);
+    },
+    { timeout: CHILD_PROCESS_TEST_BUDGET_MS },
+  );
+
+  test(
+    "SDK session seeds workspace trust",
+    async () => {
+      const directory = await temporaryDirectory();
+      const session = await new ClaudeAdapter(async () => {}).createSession(
+        config(directory, "cancel", join(directory, "trust-state.json")),
+      );
+      await session.abort("done");
+      await session.waitForCompletion();
+      const data = JSON.parse(await readFile(join(homeDir, ".claude.json"), "utf-8"));
+      expect(data.projects[await realpath(directory)].hasTrustDialogAccepted).toBe(true);
+    },
+    { timeout: CHILD_PROCESS_TEST_BUDGET_MS },
+  );
+
+  test(
+    "SDK session with CLAUDE_TRUST_PRESEED=false writes nothing",
+    async () => {
+      const directory = await temporaryDirectory();
+      const fixtureConfig = config(directory, "cancel", join(directory, "off-state.json"));
+      fixtureConfig.env = { ...fixtureConfig.env, CLAUDE_TRUST_PRESEED: "false" };
+      const session = await new ClaudeAdapter(async () => {}).createSession(fixtureConfig);
+      await session.abort("done");
+      await session.waitForCompletion();
+      expect(await Bun.file(join(homeDir, ".claude.json")).exists()).toBe(false);
     },
     { timeout: CHILD_PROCESS_TEST_BUDGET_MS },
   );

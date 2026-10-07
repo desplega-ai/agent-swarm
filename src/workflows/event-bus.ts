@@ -1,4 +1,5 @@
 import { InProcessBus, realtimeBus } from "../realtime/bus";
+import { scrubSecrets } from "../utils/secret-scrubber";
 
 export type PrefixHandler = (event: string, data: unknown) => void;
 
@@ -20,7 +21,10 @@ export class InProcessEventBus implements WorkflowEventBus {
 
   constructor(private readonly bus = new InProcessBus()) {}
 
-  emit(event: string, data: unknown): void {
+  emit(event: string, rawData: unknown): void {
+    // Backstop only: emitters still own scrubbing. Top-level strings, shallow
+    // copy, so class instances and nested rows pass through untouched.
+    const data = scrubTopLevelStrings(rawData);
     this.bus.publish(`workflow:${event}`, data);
     for (const [prefix, handlers] of this.prefixHandlers) {
       if (!event.startsWith(prefix)) continue;
@@ -48,6 +52,20 @@ export class InProcessEventBus implements WorkflowEventBus {
     handlers.delete(handler);
     if (handlers.size === 0) this.prefixHandlers.delete(prefix);
   }
+}
+
+function scrubTopLevelStrings(data: unknown): unknown {
+  if (data === null || typeof data !== "object" || Array.isArray(data)) return data;
+  if (Object.getPrototypeOf(data) !== Object.prototype) return data;
+  let copy: Record<string, unknown> | null = null;
+  for (const [key, value] of Object.entries(data)) {
+    if (typeof value !== "string") continue;
+    const scrubbed = scrubSecrets(value);
+    if (scrubbed === value) continue;
+    copy ??= { ...(data as Record<string, unknown>) };
+    copy[key] = scrubbed;
+  }
+  return copy ?? data;
 }
 
 export const workflowEventBus: WorkflowEventBus = new InProcessEventBus(realtimeBus);

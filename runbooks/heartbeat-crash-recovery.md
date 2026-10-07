@@ -8,6 +8,8 @@ Queue-pickup liveness alarm: `src/queue-stall-alarm.ts`.
 
 ---
 
+Heartbeat-checklist and boot-triage deduplication only count tasks outside `TERMINAL_TASK_STATUSES` (`completed`, `failed`, `cancelled`, `superseded`). The reboot retry-child guard uses the same exclusion. A superseded task therefore never blocks a new checklist, boot triage, or retry.
+
 ## 1. The heartbeat sweep (every ~90s)
 
 `runHeartbeatSweep` → `codeLevelTriage` runs on `DEFAULT_INTERVAL_MS` (90s, env `HEARTBEAT_INTERVAL_MS`):
