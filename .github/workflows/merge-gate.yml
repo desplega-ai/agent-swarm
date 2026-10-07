@@ -179,17 +179,22 @@ jobs:
           echo "status=$([ $code -eq 0 ] && echo success || echo failure)" >> "$GITHUB_OUTPUT"
           exit $code
 
+      # tsc 5 stays the authority here. Local `tsc:check` (and the prek typecheck
+      # hook) run tsgo; the step below keeps the tsconfig tsgo-clean.
       - name: Run TypeScript type check
         id: tsc
         run: |
           start=$(date +%s%3N)
           set +e
-          bun run tsc:check
+          bun run tsc:check:tsc
           code=$?
           set -e
           echo "duration_ms=$(( $(date +%s%3N) - start ))" >> "$GITHUB_OUTPUT"
           echo "status=$([ $code -eq 0 ] && echo success || echo failure)" >> "$GITHUB_OUTPUT"
           exit $code
+
+      - name: Run TypeScript type check (tsgo)
+        run: bun run tsc:check
 
       - name: Check extension catalog and manifest schema freshness
         # templates/extensions/ is embedded as src/extensions/catalog.generated.json and
@@ -1059,6 +1064,11 @@ jobs:
           echo "duration_ms=$(( $(date +%s%3N) - start ))" >> "$GITHUB_OUTPUT"
           echo "status=$([ $code -eq 0 ] && echo success || echo failure)" >> "$GITHUB_OUTPUT"
           exit $code
+        working-directory: apps/ui
+
+      # tsc above is the authority; the prek ui-typecheck hook runs tsgo.
+      - name: Run TypeScript type check (tsgo)
+        run: bunx tsgo -b
         working-directory: apps/ui
 
       - name: Run UI E2E TypeScript type check

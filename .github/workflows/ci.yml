@@ -48,12 +48,14 @@ jobs:
           echo "status=$([ $code -eq 0 ] && echo success || echo failure)" >> "$GITHUB_OUTPUT"
           exit $code
 
+      # tsc 5, like the merge gate, so the nightly `tsc:check` timing baseline
+      # stays comparable with PR runs.
       - name: Run TypeScript type check
         id: tsc
         run: |
           start=$(date +%s%3N)
           set +e
-          bun run tsc:check
+          bun run tsc:check:tsc
           code=$?
           set -e
           echo "duration_ms=$(( $(date +%s%3N) - start ))" >> "$GITHUB_OUTPUT"
