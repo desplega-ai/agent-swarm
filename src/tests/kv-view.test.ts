@@ -108,6 +108,35 @@ describe("summarizeKvShape", () => {
     }
   });
 
+  test("keeps long paths exact and replaces unaddressable ones with their nearest ancestor", () => {
+    const rows = Array.from({ length: 80 }, (_, id) => ({ id, note: "x".repeat(60) }));
+    const longKey = "L".repeat(200);
+    expect(summarizeKvShape({ [longKey]: rows })[0]).toMatchObject({ path: longKey, items: 80 });
+    // An empty key has no path syntax: its parent object stands in.
+    expect(summarizeKvShape({ "": rows, small: 1 })[0]).toMatchObject({
+      path: "",
+      type: "object",
+      items: 2,
+    });
+    expect(summarizeKvShape({ outer: { "": rows, side: [1] } })[0]).toMatchObject({
+      path: "outer",
+      type: "object",
+    });
+    // Longer than kv-get's path limit: the root stands in.
+    expect(summarizeKvShape({ ["X".repeat(1_100)]: rows })[0]).toMatchObject({ path: "" });
+  });
+
+  test("is bounded by total path bytes", () => {
+    const value = Object.fromEntries(
+      Array.from({ length: 8 }, (_, i) => [`${i}`.repeat(600), "v".repeat(1_000)]),
+    );
+    const shape = summarizeKvShape(value);
+    const pathBytes = shape.reduce((sum, entry) => sum + JSON.stringify(entry.path).length, 0);
+    expect(pathBytes).toBeLessThanOrEqual(2_048);
+    expect(shape.filter((entry) => entry.path.length === 600)).toHaveLength(3);
+    expect(shape.at(-1)).toMatchObject({ path: "", type: "object", items: 8 });
+  });
+
   test("is bounded to maxEntries", () => {
     const wide = Object.fromEntries(
       Array.from({ length: 50 }, (_, i) => [`k${i}`, "v".repeat(100)]),

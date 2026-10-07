@@ -28,6 +28,16 @@ export type KvViewResult =
   | { ok: true; value: unknown; view: KvView }
   | { ok: false; error: string };
 
+/** Longest `path` kv-get accepts. */
+export const KV_PATH_MAX_CHARS = 1024;
+
+/** JSON-encoded path bytes a spill shape summary may spend across its entries. */
+export const KV_SHAPE_PATH_BUDGET_BYTES = 2048;
+
+function pathBytes(path: string): number {
+  return Buffer.byteLength(JSON.stringify(path), "utf8");
+}
+
 export type KvShapeEntry = {
   path: string;
   type: KvViewType;
@@ -229,22 +239,45 @@ export function resolveKvView(value: unknown, args: KvViewArgs): KvViewResult {
   };
 }
 
-function shapeEntry(path: string, value: unknown): KvShapeEntry & { value: unknown } {
+type ShapeNode = KvShapeEntry & { value: unknown; segments: string[]; ancestors: unknown[] };
+
+function shapeEntry(segments: string[], value: unknown, ancestors: unknown[]): ShapeNode {
   const items = itemCount(value);
   return {
-    path,
+    path: joinKvPath(segments),
     type: kvViewType(value),
     bytes: Buffer.byteLength(JSON.stringify(value) ?? "", "utf8"),
     ...(items !== undefined ? { items } : {}),
     value,
+    segments,
+    ancestors,
   };
 }
 
-function childEntries(value: unknown, path: string): Array<KvShapeEntry & { value: unknown }> {
+function childEntries(node: Pick<ShapeNode, "value" | "segments" | "ancestors">): ShapeNode[] {
+  const { value, segments, ancestors } = node;
   if (value === null || typeof value !== "object" || Array.isArray(value)) return [];
   return Object.entries(value).map(([key, child]) =>
-    shapeEntry(path ? `${path}.${joinKvPath([key])}` : joinKvPath([key]), child),
+    shapeEntry([...segments, key], child, [...ancestors, value]),
   );
+}
+
+/**
+ * The node itself when kv-get can address it within `budget` (JSON-encoded
+ * path bytes, what a path costs on the wire), else its nearest such ancestor.
+ * An empty key has no path syntax (`""` is the root and empty segments are
+ * rejected), so its parent stands in; the root always fits.
+ */
+function addressable(node: ShapeNode, budget: number): ShapeNode {
+  for (let depth = node.segments.length; depth > 0; depth--) {
+    const segments = node.segments.slice(0, depth);
+    if (segments.includes("")) continue;
+    const path = joinKvPath(segments);
+    if (path.length > KV_PATH_MAX_CHARS || pathBytes(path) > budget) continue;
+    if (depth === node.segments.length) return node;
+    return shapeEntry(segments, node.ancestors[depth], node.ancestors.slice(0, depth));
+  }
+  return shapeEntry([], node.ancestors[0] ?? node.value, []);
 }
 
 /**
@@ -253,22 +286,39 @@ function childEntries(value: unknown, path: string): Array<KvShapeEntry & { valu
  * the bulk lives (e.g. `outcome.data.data.result.rows`). Arrays are reported
  * with their length and never expanded.
  */
-export function summarizeKvShape(root: unknown, maxEntries = 8): KvShapeEntry[] {
+export function summarizeKvShape(
+  root: unknown,
+  maxEntries = 8,
+  maxPathBytes = KV_SHAPE_PATH_BUDGET_BYTES,
+): KvShapeEntry[] {
   const rootBytes = Buffer.byteLength(JSON.stringify(root) ?? "", "utf8");
-  let entries = childEntries(root, "");
+  let entries = childEntries({ value: root, segments: [], ancestors: [] });
   for (let step = 0; step < 8; step++) {
     const candidate = entries
       .filter((entry) => entry.type === "object" && (entry.items ?? 0) > 0)
       .sort((a, b) => b.bytes - a.bytes)[0];
     if (!candidate || candidate.bytes * 4 < rootBytes) break;
-    entries = entries
-      .filter((entry) => entry !== candidate)
-      .concat(childEntries(candidate.value, candidate.path));
+    entries = entries.filter((entry) => entry !== candidate).concat(childEntries(candidate));
   }
   // Skip crumbs (under 1% of the value) so the slots go to where the bulk is.
   const sorted = entries.sort((a, b) => b.bytes - a.bytes);
   const significant = sorted.filter((entry) => entry.bytes * 100 >= rootBytes);
-  return (significant.length > 0 ? significant : sorted)
-    .slice(0, maxEntries)
-    .map(({ value: _value, ...entry }) => ({ ...entry, path: entry.path.slice(0, 160) }));
+  // Paths stay exact so each one works as a kv-get `path`. The summary is
+  // bounded by total path bytes: a path that does not fit the remaining budget
+  // gives way to its nearest ancestor that does.
+  const shape: KvShapeEntry[] = [];
+  let budget = maxPathBytes;
+  for (const entry of significant.length > 0 ? significant : sorted) {
+    if (shape.length >= maxEntries) break;
+    const {
+      value: _value,
+      segments: _segments,
+      ancestors: _ancestors,
+      ...node
+    } = addressable(entry, budget);
+    if (shape.some((seen) => seen.path === node.path)) continue;
+    shape.push(node);
+    budget -= pathBytes(node.path);
+  }
+  return shape;
 }
