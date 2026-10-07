@@ -9570,7 +9570,8 @@ function rowToApprovalRequest(row: ApprovalRequestRow): ApprovalRequest {
     sourceTaskId: row.sourceTaskId,
     approvers: JSON.parse(row.approvers),
     status: row.status as ApprovalRequest["status"],
-    responses: row.responses ? JSON.parse(row.responses) : null,
+    // Sealed at rest: workflow recovery and HITL resume read the exact answer.
+    responses: row.responses ? openSealedJson(row.responses) : null,
     approvals: row.approvals ? JSON.parse(row.approvals) : null,
     resolvedBy: row.resolvedBy,
     resolvedAt: normalizeDate(row.resolvedAt),
@@ -9627,7 +9628,7 @@ export async function createApprovalRequest(data: {
       [
         data.id,
         scrubSecrets(data.title),
-        JSON.stringify(data.questions),
+        scrubJsonValue(data.questions),
         data.workflowRunId ?? null,
         data.workflowRunStepId ?? null,
         data.sourceTaskId ?? null,
@@ -9695,7 +9696,9 @@ export async function resolveApprovalRequest(
        RETURNING *`,
     [
       data.status,
-      data.responses ? JSON.stringify(data.responses) : null,
+      // Sealed, not scrubbed: recovery resumes the workflow from this answer,
+      // so it must stay byte-exact. Votes are diagnostic and get redacted.
+      data.responses ? sealJson(data.responses) : null,
       data.approvals ? scrubApprovalVotesJson(data.approvals) : null,
       data.resolvedBy ?? null,
       data.resolutionReason == null ? null : scrubSecrets(data.resolutionReason),
@@ -9882,7 +9885,7 @@ export interface StuckApprovalRun {
 }
 
 export async function getStuckApprovalRuns(): Promise<StuckApprovalRun[]> {
-  return getDbClient().query<StuckApprovalRun>(
+  const rows = await getDbClient().query<StuckApprovalRun>(
     `SELECT
         wr.id as runId,
         wrs.id as stepId,
@@ -9899,6 +9902,11 @@ export async function getStuckApprovalRuns(): Promise<StuckApprovalRun[]> {
         AND (ar.status IN ('approved', 'rejected', 'timeout')
              OR (ar.status = 'pending' AND ar.expiresAt IS NOT NULL AND ar.expiresAt < strftime('%Y-%m-%dT%H:%M:%fZ', 'now')))`,
   );
+  return rows.map((row) => ({
+    ...row,
+    approvalResponses:
+      row.approvalResponses === null ? null : JSON.stringify(openSealedJson(row.approvalResponses)),
+  }));
 }
 
 export async function getApprovalRequestByStepId(stepId: string): Promise<ApprovalRequest | null> {

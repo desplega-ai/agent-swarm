@@ -22,6 +22,7 @@ import {
   createTaskExtended,
   createWorkflow,
   createWorkflowRun,
+  getApprovalRequestById,
   getDbClient,
   initDb,
   markInboxMessageResponded,
@@ -31,6 +32,7 @@ import {
   updateScheduledTask,
 } from "../be/db";
 import { SqliteMemoryStore } from "../be/memory/providers/sqlite-store";
+import { isSealedJson } from "../be/sealed-json";
 import { registerVolatileSecret } from "../utils/secret-scrubber";
 import { type SyntheticSecret, syntheticSecret } from "./synthetic-secret-helpers";
 
@@ -209,15 +211,18 @@ describe("scheduled_tasks", () => {
 });
 
 describe("approval_requests", () => {
-  test("create, vote and resolve scrub title, approvals and resolutionReason", async () => {
+  test("create, vote and resolve scrub title, questions, approvals and resolutionReason, seal responses", async () => {
     const id = crypto.randomUUID();
     await createApprovalRequest({
       id,
       title: `approve ${secret.value} deploy`,
-      questions: [{ id: "q1", type: "approval", label: "ok?" }],
+      questions: [{ id: "q1", type: "text", label: `paste ${secret.value} here` }],
       approvers: { users: [], policy: "any" },
     });
     expectScrubbed(await column("approval_requests", "title", id), "deploy");
+    const questions = await column("approval_requests", "questions", id);
+    expectScrubbed(questions, "paste");
+    expect(() => JSON.parse(questions!)).not.toThrow();
 
     const vote = {
       responder: "operator",
@@ -230,13 +235,23 @@ describe("approval_requests", () => {
     expectScrubbed(votes, "note");
     expect(() => JSON.parse(votes!)).not.toThrow();
 
+    const responses = { q1: `note ${secret.value}` };
     await resolveApprovalRequest(id, {
       status: "approved",
+      responses,
       approvals: [vote],
       resolutionReason: `because ${secret.value}`,
     });
     expectScrubbed(await column("approval_requests", "resolutionReason", id), "because");
     expectScrubbed(await column("approval_requests", "approvals", id), "note");
+
+    // Responses resume the workflow on recovery, so they stay byte-exact for
+    // the reader and hold no plaintext at rest.
+    const stored = await column("approval_requests", "responses", id);
+    expect(isSealedJson(stored ?? "")).toBe(true);
+    expect(stored).not.toContain(secret.value);
+    expect(stored).not.toContain("note");
+    expect((await getApprovalRequestById(id))?.responses).toEqual(responses);
   });
 
   test("cancel paths scrub the reason", async () => {
