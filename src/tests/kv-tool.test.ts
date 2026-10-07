@@ -394,17 +394,19 @@ describe("kv MCP tools", () => {
       },
       meta(agentA),
     );
+    await tools.set.handler(
+      { key: "dense", value: "x".repeat(20_000), valueType: "string" },
+      meta(agentA),
+    );
     const cases = [
+      { key: "dense", args: { offset: 0 }, note: "Page shrunk" },
       { args: { path: "text" }, note: "Page shrunk" },
       { args: { path: "text", offset: 3 }, note: "Page shrunk" },
       { args: { path: "rows" }, note: "Page shrunk" },
       { args: { path: longKey }, note: `narrow the path to "${longKey}.0"` },
     ];
-    for (const { args, note } of cases) {
-      const res = (await tools.get.handler(
-        { key: "near-cap", ...args },
-        meta(agentA),
-      )) as ViewResult;
+    for (const { key = "near-cap", args, note } of cases) {
+      const res = (await tools.get.handler({ key, ...args }, meta(agentA))) as ViewResult;
       expect(res.structuredContent.success).toBe(true);
       expect(res.structuredContent.message).toContain(note);
       const bytes = channelBytes(res);
