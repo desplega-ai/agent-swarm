@@ -324,8 +324,8 @@ function parseCodexOAuthAccess(blob: string | undefined): string | null {
  * | `claude`         | default route: Foundry / Bedrock / Vertex → gateway (`ANTHROPIC_BASE_URL` + `ANTHROPIC_AUTH_TOKEN` or `ANTHROPIC_API_KEY`) → `CLAUDE_CODE_OAUTH_TOKEN` → `ANTHROPIC_API_KEY` | the route's own `/v1/models`; OAuth presence-only; cloud routes skipped |
  * | `claude-managed` | `ANTHROPIC_API_KEY` (managed agents always use API key + managed envs)  | Anthropic `/v1/models`         |
  * | `codex`          | `~/.codex/auth.json` (file) → `CODEX_OAUTH` (env OAuth) → `OPENAI_API_KEY` | OpenAI `/v1/models` (api-key path only) |
- * | `opencode`       | `OPENROUTER_API_KEY` → `ANTHROPIC_API_KEY` → `OPENAI_API_KEY` (pi-style) | matching provider's `/v1/models` |
- * | `pi`             | `OPENROUTER_API_KEY` → `ANTHROPIC_API_KEY` → `OPENAI_API_KEY`           | matching provider's `/v1/models` |
+ * | `opencode`       | auth.json (file) → `OPENROUTER_API_KEY` → `ANTHROPIC_API_KEY` → `OPENAI_API_KEY` | file presence-only, otherwise provider's `/v1/models` |
+ * | `pi`             | auth.json (file) → provider API keys, including model-specific keys   | file/model-specific key presence-only, otherwise provider's `/v1/models` |
  * | `acp`            | target-specific (the ACP target process owns its own auth)              | presence-only (validated by the target process) |
  * | `pi` (bedrock)   | `MODEL_OVERRIDE=amazon-bedrock/*` → AWS SDK default credential chain    | presence-only (real check is the worker-side Bedrock enumeration) |
  * | `devin`          | `DEVIN_API_KEY` (+ `DEVIN_API_BASE_URL` override)                       | `${baseUrl}/v3/self`            |
@@ -333,10 +333,13 @@ function parseCodexOAuthAccess(blob: string | undefined): string | null {
  *
  * Returns `{ok: true, latency_ms}` on 2xx, `{ok: false, error, latency_ms}`
  * otherwise. Errors are scrubbed via `scrubSecrets` before being returned.
+ * Reports pass their existing presence result so pi/opencode do not repeat
+ * that check.
  */
 export async function validateProviderCredentials(
   provider: string,
   env: Record<string, string | undefined> = process.env,
+  presence?: CredStatus,
 ): Promise<LiveValidationResult> {
   const startedAt = Date.now();
 
@@ -410,12 +413,18 @@ export async function validateProviderCredentials(
         if (provider === "pi" && isBedrockMode(env)) {
           return presenceCheckOk();
         }
-        // Both pi-mono and opencode resolve credentials in the same order:
-        // OPENROUTER → ANTHROPIC → OPENAI. Live-test against the matching
-        // provider's models endpoint.
+        const status = presence ?? (await checkProviderCredentials(provider, env));
+        // The adapters prefer their auth.json over env keys. Reuse that
+        // decision, including any injected filesystem probe used by reports.
+        if (status.ready && status.satisfiedBy === "file") return presenceCheckOk();
+        // Preserve the live-probe order for supported env keys:
+        // OPENROUTER → ANTHROPIC → OPENAI.
         if (env.OPENROUTER_API_KEY) return checkOpenRouter(env.OPENROUTER_API_KEY);
         if (env.ANTHROPIC_API_KEY) return checkAnthropicApiKey(env.ANTHROPIC_API_KEY);
         if (env.OPENAI_API_KEY) return checkOpenAiApiKey(env.OPENAI_API_KEY);
+        // Model-specific keys (e.g. GEMINI_API_KEY) can satisfy readiness
+        // without a probeable endpoint. The harness validates them at inference.
+        if (status.ready) return presenceCheckOk();
         return {
           ok: false,
           error:
@@ -534,7 +543,7 @@ export async function buildCredStatusReport(
 ): Promise<AgentCredStatus> {
   const presence = await checkProviderCredentials(provider, env, opts);
   let liveTest: AgentCredStatus["liveTest"] = null;
-  const live = presence.ready ? await validateProviderCredentials(provider, env) : null;
+  const live = presence.ready ? await validateProviderCredentials(provider, env, presence) : null;
   if (live && !live.skipped) {
     liveTest = {
       ok: live.ok,
