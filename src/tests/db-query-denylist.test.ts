@@ -2,7 +2,8 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { createServer as createHttpServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { closeDb, getDb, initDb } from "../be/db";
+import { closeDb, getDb, initDb, upsertKv } from "../be/db";
+import { upsertCodexDeviceFlow } from "../be/db/codex-oauth-device-flows";
 import {
   DbQueryDeniedTableError,
   executeReadOnlyQueryGated,
@@ -141,5 +142,61 @@ describe("POST /api/db-query", () => {
     expect(serialized).not.toContain(syntheticToken());
     expect(serialized).toContain("[REDACTED:");
     expect(serialized).toContain("from the env dump");
+  });
+
+  test("denies Codex device-login state and keeps general KV readable", async () => {
+    const marker = `device-state-${crypto.randomUUID()}`;
+    await upsertCodexDeviceFlow({
+      flowId: crypto.randomUUID(),
+      state: marker,
+      expiresAt: Date.now() + 60_000,
+    });
+    await upsertKv({
+      namespace: "denylist-test",
+      key: "note",
+      value: "plain kv value",
+      valueType: "string",
+    });
+
+    for (const sql of [
+      "SELECT * FROM codex_oauth_device_flows",
+      "SELECT f.state FROM codex_oauth_device_flows f JOIN kv_entries k ON 1",
+    ]) {
+      const { status, body } = await post(sql);
+      expect(status).toBe(400);
+      expect(String(body.error)).toContain("codex_oauth_device_flows");
+      expect(JSON.stringify(body)).not.toContain(marker);
+    }
+
+    const kv = await post("SELECT namespace, value FROM kv_entries");
+    expect(kv.status).toBe(200);
+    const rows = JSON.stringify(kv.body.rows);
+    expect(rows).toContain("plain kv value");
+    expect(rows).not.toContain("codex-oauth-device");
+    expect(rows).not.toContain(marker);
+  });
+
+  test("migration 198 moves legacy kv device flows out of kv_entries", async () => {
+    const flowId = crypto.randomUUID();
+    const marker = `legacy-state-${crypto.randomUUID()}`;
+    await upsertKv({
+      namespace: "codex-oauth-device",
+      key: flowId,
+      value: marker,
+      valueType: "string",
+      expiresAt: Date.now() + 60_000,
+    });
+    const migration = await Bun.file(
+      join(import.meta.dir, "../be/migrations/198_codex_oauth_device_flows.sql"),
+    ).text();
+    getDb().exec(migration);
+
+    const kv = await post("SELECT key FROM kv_entries WHERE namespace = 'codex-oauth-device'");
+    expect(kv.status).toBe(200);
+    expect(kv.body.rows).toEqual([]);
+    const moved = getDb()
+      .query("SELECT state FROM codex_oauth_device_flows WHERE flow_id = ?")
+      .get(flowId) as { state: string } | null;
+    expect(moved?.state).toBe(marker);
   });
 });

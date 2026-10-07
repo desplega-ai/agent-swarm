@@ -392,7 +392,7 @@ Create, update, delete, or list user profiles in the user registry. Identities a
 
 **Execute database query**
 
-Execute a read-only SQL query against the swarm database (SQLite). Available to all authenticated agents — be aware results may include secrets (oauth_tokens, configs). Runs in a short-lived child process with a wall-clock budget by default (fails gracefully with a timeout or a 429-style concurrency error rather than freezing); results capped at a default row count (operator-configurable via `DB_QUERY_MCP_MAX_ROWS`) regardless of how many the query matched. See the sql parameter's description for which tables are unsafe to read whole, and the db-query-guidance skill for config knobs.
+Execute a read-only SQL query against the swarm database (SQLite). Available to all authenticated agents. Queries that read credential tables (OAuth authorizations, apps and pending flows, user and session tokens, script API bearers, Codex device-login state) are rejected, and secret-shaped values in results are redacted. Runs in a short-lived child process with a wall-clock budget by default (fails gracefully with a timeout or a 429-style concurrency error rather than freezing); results capped at a default row count (operator-configurable via `DB_QUERY_MCP_MAX_ROWS`) regardless of how many the query matched. See the sql parameter's description for which tables are unsafe to read whole, and the db-query-guidance skill for config knobs.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|

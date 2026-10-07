@@ -58,7 +58,8 @@ export function assertSingleStatement(sql: string): void {
 
 /**
  * Tables whose rows are credentials: OAuth tokens and client secrets, PKCE
- * verifiers, API and session token hashes, and encrypted script-API bearers.
+ * verifiers, API and session token hashes, encrypted script-API bearers, and
+ * encrypted Codex device-login state.
  * `db-query` is open to every authenticated agent, so it refuses any query
  * that reads one of these, however the table is reached (alias, CTE, view,
  * subquery, join or covering index). `swarm_config` stays readable: its
@@ -71,6 +72,7 @@ export const DB_QUERY_DENIED_TABLES: ReadonlySet<string> = new Set([
   "user_tokens",
   "session_tokens",
   "script_apis",
+  "codex_oauth_device_flows",
 ]);
 
 /** Thrown when a query would read a table in {@link DB_QUERY_DENIED_TABLES}. */
