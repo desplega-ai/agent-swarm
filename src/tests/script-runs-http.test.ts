@@ -199,6 +199,11 @@ describe("/api/script-runs HTTP", () => {
         body: createBody({ background: true }),
       });
       expect(created.status).toBe(201);
+      // The launch is fire-and-forget and reads the sealed args before it
+      // starts the executor, so it can land after the response.
+      for (let i = 0; i < 50 && spawnedWith.length === 0; i++) {
+        await Bun.sleep(20);
+      }
       expect(spawnedWith).toEqual(["http://swarm-internal.example.test:3013"]);
     } finally {
       setScriptRunExecutor(localProcessScriptExecutor);
