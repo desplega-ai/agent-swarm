@@ -1,4 +1,4 @@
-export const ACP_TARGET_IDS = ["opencode", "gemini", "custom"] as const;
+export const ACP_TARGET_IDS = ["opencode", "gemini", "copilot", "custom"] as const;
 
 export type AcpTarget = (typeof ACP_TARGET_IDS)[number];
 
@@ -58,6 +58,40 @@ export const ACP_TARGET_CATALOG: readonly AcpTargetCatalogEntry[] = [
       "GOOGLE_GEMINI_BASE_URL",
       "GOOGLE_VERTEX_BASE_URL",
       "GEMINI_CLI_HOME",
+    ],
+    knobs: [{ id: "model", label: "Model", category: "model" }],
+  },
+  {
+    id: "copilot",
+    label: "GitHub Copilot CLI",
+    description:
+      "GitHub Copilot CLI's ACP server, launched with `copilot --acp`. Uses a Copilot-entitled COPILOT_GITHUB_TOKEN, or a BYOK provider via COPILOT_PROVIDER_*.",
+    command: "copilot",
+    args: ["--acp"],
+    envKeys: [
+      "COPILOT_GITHUB_TOKEN",
+      "COPILOT_GH_HOST",
+      "GH_HOST",
+      "COPILOT_HOME",
+      "COPILOT_MODEL",
+      "COPILOT_AUTO_TIER",
+      "COPILOT_OFFLINE",
+      "COPILOT_PROVIDER_BASE_URL",
+      "COPILOT_PROVIDER_TYPE",
+      "COPILOT_PROVIDER_API_KEY",
+      "COPILOT_PROVIDER_API_KEY_COMMAND",
+      "COPILOT_PROVIDER_BEARER_TOKEN",
+      "COPILOT_PROVIDER_WIRE_API",
+      "COPILOT_PROVIDER_TRANSPORT",
+      "COPILOT_PROVIDER_AZURE_API_VERSION",
+      "COPILOT_PROVIDER_MODEL_ID",
+      "COPILOT_PROVIDER_WIRE_MODEL",
+      "COPILOT_PROVIDER_MAX_PROMPT_TOKENS",
+      "COPILOT_PROVIDER_MAX_OUTPUT_TOKENS",
+      "COPILOT_PROVIDER_HEADERS",
+      "HTTP_PROXY",
+      "HTTPS_PROXY",
+      "NO_PROXY",
     ],
     knobs: [{ id: "model", label: "Model", category: "model" }],
   },

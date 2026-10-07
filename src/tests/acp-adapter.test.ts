@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -22,7 +22,12 @@ import {
   sanitizeAcpConfigOptions,
   toAcpMcpServers,
 } from "../providers/acp-adapter";
-import { AcpTargetResolutionError, resolveAcpTarget } from "../providers/acp-targets";
+import {
+  AcpTargetResolutionError,
+  COPILOT_INSTRUCTIONS_FILE,
+  copilotInstructionsDir,
+  resolveAcpTarget,
+} from "../providers/acp-targets";
 import type { ProviderEvent, ProviderSessionConfig } from "../providers/types";
 import { listenOnFreePort } from "./test-net";
 
@@ -598,6 +603,126 @@ new AgentSideConnection((connection) => new FakeAgent(connection), stream);
     await target.writeSystemPromptArtifact(config);
 
     expect(target.env(config).GEMINI_SYSTEM_MD).toBeUndefined();
+  });
+
+  test("Copilot preset forwards its own credentials, pins the model, and never forwards GITHUB_TOKEN", () => {
+    const config = baseConfig({
+      model: "openai/gpt-5.2",
+      env: {
+        PATH: "/bin",
+        HOME: "/home/test",
+        ACP_TARGET: "copilot",
+        COPILOT_GITHUB_TOKEN: "example-copilot-token",
+        COPILOT_PROVIDER_BASE_URL: "https://llm.example/v1",
+        COPILOT_PROVIDER_API_KEY: "example-provider-key",
+        COPILOT_CUSTOM_INSTRUCTIONS_DIRS: "/opt/team-instructions",
+        GITHUB_TOKEN: "example-git-token",
+        GH_TOKEN: "example-gh-token",
+      },
+    });
+    const target = resolveAcpTarget(config);
+
+    expect(target.target).toBe("copilot");
+    expect(target.command(config)).toEqual(["copilot", "--acp"]);
+    const env = target.env(config);
+    expect(env).toMatchObject({
+      COPILOT_GITHUB_TOKEN: "example-copilot-token",
+      COPILOT_PROVIDER_BASE_URL: "https://llm.example/v1",
+      COPILOT_PROVIDER_API_KEY: "example-provider-key",
+      COPILOT_MODEL: "openai/gpt-5.2",
+      COPILOT_AUTO_UPDATE: "false",
+      COPILOT_CUSTOM_INSTRUCTIONS_DIRS: `${copilotInstructionsDir(config)},/opt/team-instructions`,
+    });
+    // The worker's git token lacks the Copilot Requests permission and would
+    // shadow a BYOK or COPILOT_GITHUB_TOKEN setup.
+    expect(env.GITHUB_TOKEN).toBeUndefined();
+    expect(env.GH_TOKEN).toBeUndefined();
+  });
+
+  test("Copilot preset delivers the system prompt outside the repo and removes it after the session", async () => {
+    const cwd = makeTempDir();
+    const binDir = makeTempDir();
+    const captureFile = join(binDir, "capture.json");
+    const agentPath = join(binDir, "fake-copilot-acp.ts");
+    const sdkPath = join(process.cwd(), "node_modules/@agentclientprotocol/sdk/dist/acp.js");
+    const repoAgentsMd = "# Repo rules\nKeep this file as is.\n";
+    await Bun.write(join(cwd, "AGENTS.md"), repoAgentsMd);
+    await Bun.write(
+      agentPath,
+      `
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { Readable, Writable } from "node:stream";
+import { AgentSideConnection, PROTOCOL_VERSION, ndJsonStream } from "${sdkPath}";
+class FakeCopilot {
+  constructor(connection) { this.connection = connection; }
+  async initialize() {
+    return { protocolVersion: PROTOCOL_VERSION, agentCapabilities: { loadSession: false } };
+  }
+  async newSession() {
+    const dir = process.env.COPILOT_CUSTOM_INSTRUCTIONS_DIRS.split(",")[0];
+    await Bun.write(${JSON.stringify(captureFile)}, JSON.stringify({
+      argv: process.argv.slice(2),
+      dir,
+      instructions: readFileSync(join(dir, ${JSON.stringify(COPILOT_INSTRUCTIONS_FILE)}), "utf8"),
+      model: process.env.COPILOT_MODEL,
+    }));
+    return { sessionId: "copilot-session-1" };
+  }
+  async prompt(params) {
+    await this.connection.sessionUpdate({
+      sessionId: params.sessionId,
+      update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "done" }, messageId: "m1" },
+    });
+    return { stopReason: "end_turn" };
+  }
+  async cancel() {}
+}
+const stream = ndJsonStream(Writable.toWeb(process.stdout), Readable.toWeb(process.stdin));
+new AgentSideConnection((connection) => new FakeCopilot(connection), stream);
+`,
+    );
+    const copilotStub = join(binDir, "copilot");
+    await Bun.write(copilotStub, `#!/bin/sh\nexec "${process.execPath}" "${agentPath}" "$@"\n`);
+    chmodSync(copilotStub, 0o755);
+    mkdirSync(join(binDir, "home"));
+
+    const { server, apiUrl } = await startTokenStubServer("copilot-token-id", "example-aseph_x");
+    try {
+      const config = baseConfig({
+        cwd,
+        apiUrl,
+        model: "openai/gpt-5.2",
+        systemPrompt: "You are a swarm worker.",
+        env: {
+          PATH: `${binDir}:${process.env.PATH ?? ""}`,
+          HOME: join(binDir, "home"),
+          ACP_TARGET: "copilot",
+        },
+      });
+      const session = await new ACPAdapter().createSession(config);
+      const result = await session.waitForCompletion();
+      expect(result.isError).toBe(false);
+
+      const captured = JSON.parse(await Bun.file(captureFile).text()) as {
+        argv: string[];
+        dir: string;
+        instructions: string;
+        model: string;
+      };
+      expect(captured.argv).toEqual(["--acp"]);
+      expect(captured.dir).toBe(copilotInstructionsDir(config));
+      expect(captured.dir.startsWith(cwd)).toBe(false);
+      expect(captured.instructions).toBe('---\napplyTo: "**"\n---\n\nYou are a swarm worker.\n');
+      expect(captured.model).toBe("openai/gpt-5.2");
+      expect(await Bun.file(join(cwd, "AGENTS.md")).text()).toBe(repoAgentsMd);
+
+      const deadline = Date.now() + 2_000;
+      while (existsSync(captured.dir) && Date.now() < deadline) await Bun.sleep(10);
+      expect(existsSync(captured.dir)).toBe(false);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
   });
 
   test("custom target passes through only explicitly named env and supports a model env fallback", () => {

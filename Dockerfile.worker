@@ -626,6 +626,20 @@ RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
     && ln -sf /opt/gemini-cli/node_modules/.bin/gemini /usr/local/bin/gemini \
     && test "$(HOME=/tmp/gemini-home gemini --version)" = "${GEMINI_CLI_VERSION}" \
     && rm -rf /tmp/npm-cache /tmp/gemini-home /root/.npm /root/.cache /root/.gemini
+# GitHub Copilot CLI, the `copilot` ACP target (HARNESS_PROVIDER=acp,
+# ACP_TARGET=copilot; `copilot --acp`). Proprietary: its LICENSE.md allows
+# redistributing unmodified copies as part of an application that does more
+# than the CLI, with that licence included. npm keeps LICENSE.md in the
+# package dir; the copy under /usr/share/doc makes it easy to find. The adapter
+# sets COPILOT_AUTO_UPDATE=false, so the pinned binary is the one that runs.
+ARG COPILOT_CLI_VERSION=1.0.93
+RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
+      --prefix /opt/copilot-cli --no-audit --no-fund "@github/copilot@${COPILOT_CLI_VERSION}" \
+    && ln -sf /opt/copilot-cli/node_modules/.bin/copilot /usr/local/bin/copilot \
+    && mkdir -p /usr/share/doc/github-copilot-cli \
+    && cp /opt/copilot-cli/node_modules/@github/copilot/LICENSE.md /usr/share/doc/github-copilot-cli/LICENSE.md \
+    && HOME=/root COPILOT_AUTO_UPDATE=false copilot --version | grep -F "${COPILOT_CLI_VERSION}" \
+    && rm -rf /tmp/npm-cache /root/.npm /root/.cache /root/.copilot
 
 # Full-image global npm tools, staged in a SEPARATE dir from worker-base's
 # /opt/global-deps so its layer is never rewritten. Same overrides rationale

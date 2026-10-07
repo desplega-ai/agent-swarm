@@ -44,6 +44,7 @@ const STUB_BINARIES = [
   "codex",
   "opencode",
   "gemini",
+  "copilot",
   "dsh",
   "acp-target-stub",
   "acp target stub",
@@ -143,6 +144,35 @@ describe("docker-entrypoint.sh: acp target binary verification", () => {
   );
 
   test(
+    "resolves the copilot catalog target to the copilot binary",
+    async () => {
+      const result = await runChain({ HARNESS_PROVIDER: "acp", ACP_TARGET: "copilot" });
+
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain("ACP target: ");
+      expect(result.stdout).toContain("ACP_TARGET='copilot'");
+    },
+    CHILD_PROCESS_TEST_BUDGET_MS,
+  );
+
+  test(
+    "fails boot with an install hint when the copilot binary is missing",
+    async () => {
+      // No stub dir on PATH, so `copilot` cannot resolve.
+      const result = await runChain({
+        HARNESS_PROVIDER: "acp",
+        ACP_TARGET: "copilot",
+        PATH: "/usr/bin:/bin",
+      });
+
+      expect(result.exitCode).not.toBe(0);
+      expect(result.stdout).toContain("FATAL: ACP target binary not found: 'copilot'");
+      expect(result.stdout).toContain("npm install -g @github/copilot");
+    },
+    CHILD_PROCESS_TEST_BUDGET_MS,
+  );
+
+  test(
     "resolves a custom target supplied as a command string with argv",
     async () => {
       const result = await runChain({
@@ -191,7 +221,7 @@ describe("docker-entrypoint.sh: acp target binary verification", () => {
 
       expect(result.exitCode).not.toBe(0);
       expect(result.stdout).toContain(
-        "FATAL: unsupported ACP target 'gemini-cli'. Supported targets: opencode, gemini, custom.",
+        "FATAL: unsupported ACP target 'gemini-cli'. Supported targets: opencode, gemini, copilot, custom.",
       );
     },
     CHILD_PROCESS_TEST_BUDGET_MS,

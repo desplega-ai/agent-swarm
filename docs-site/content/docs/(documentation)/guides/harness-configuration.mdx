@@ -371,7 +371,7 @@ For full provider design rationale (why we don't `agents.create` at runtime, the
 
 `acp` drives any agent that speaks the [Agent Client Protocol](https://agentclientprotocol.com) — an open, editor-agnostic JSON-RPC protocol for driving coding agents over stdio. If your agent already has an ACP server mode (or you build one), you can run it as a swarm worker with no adapter code of your own. See the protocol's own [Get started → Agents](https://agentclientprotocol.com/get-started/agents) guide for what it takes for an agent to speak ACP.
 
-The dashboard offers a curated **OpenCode** preset and a free-form **Custom** target. ACP has no live steering (see the steering table in [Adding a Harness Provider](/docs/guides/harness-providers#live-task-steering) — ACP exposes a single in-flight `session/prompt` and the only interrupt is a full `session/cancel`).
+The dashboard offers curated **OpenCode** and **GitHub Copilot CLI** presets and a free-form **Custom** target. ACP has no live steering (see the steering table in [Adding a Harness Provider](/docs/guides/harness-providers#live-task-steering) — ACP exposes a single in-flight `session/prompt` and the only interrupt is a full `session/cancel`).
 
 ### How it works
 
@@ -384,7 +384,7 @@ Because the target process owns its own model credentials, `acp` reports `ready:
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
 | `HARNESS_PROVIDER` | Yes | — | Must be set to `acp` |
-| `ACP_TARGET` | No | `custom` | `opencode` or `gemini` for a curated preset, or `custom` for an operator-supplied command |
+| `ACP_TARGET` | No | `custom` | `opencode` or `gemini` for a curated preset, `copilot` for the GitHub Copilot CLI preset, or `custom` for an operator-supplied command |
 | `ACP_TARGET_COMMAND` | Custom only | — | Executable to spawn as the custom ACP agent (also accepts the shorter `ACP_COMMAND` alias). Must resolve on `$PATH` or be an absolute path |
 | `ACP_TARGET_ARGS` | No | — | Arguments to the target command. Accepts a JSON array (`["acp", "--flag"]`) or a plain whitespace-separated string |
 | `ACP_TARGET_ENV_KEYS` | No | `[]` | JSON array (or comma-separated list for hand-authored config) of environment/config keys explicitly allowed into a custom target process |
@@ -398,7 +398,7 @@ Use the dashboard runtime editor when possible. It updates the harness, `MODEL_O
 
 Any ACP-speaking agent works. A few starting points:
 
-<Tabs items={["opencode", "claude-code-acp", "Gemini CLI", "Custom"]}>
+<Tabs items={["opencode", "GitHub Copilot CLI", "claude-code-acp", "Gemini CLI", "Custom"]}>
   <Tab value="opencode">
     [opencode](https://opencode.ai) ships a built-in ACP server:
 
@@ -409,6 +409,34 @@ Any ACP-speaking agent works. A few starting points:
     ```
 
     The adapter applies `MODEL_OVERRIDE` through ACP's advertised `model` option. It also merges the model into `OPENCODE_CONFIG_CONTENT` before spawn as a fallback. OpenCode resolves its own model credentials from `~/.local/share/opencode/auth.json` or the preset's allowlisted provider env vars (`OPENROUTER_API_KEY`, `OPENAI_API_KEY`, etc.).
+  </Tab>
+  <Tab value="GitHub Copilot CLI">
+    [GitHub Copilot CLI](https://github.com/github/copilot-cli) runs as `copilot --acp`. The full worker image ships it, pinned. On a slim or custom image, install it first (`npm install -g @github/copilot`); the entrypoint fails boot with that hint when the binary is missing.
+
+    With a Copilot subscription, give it a token that has the **Copilot Requests** permission:
+
+    ```bash
+    HARNESS_PROVIDER=acp
+    ACP_TARGET=copilot
+    COPILOT_GITHUB_TOKEN=github_pat_...
+    MODEL_OVERRIDE=claude-sonnet-4.5   # optional; the CLI default otherwise
+    ```
+
+    Without one, bring your own model provider (BYOK). No GitHub login is needed:
+
+    ```bash
+    HARNESS_PROVIDER=acp
+    ACP_TARGET=copilot
+    COPILOT_PROVIDER_BASE_URL=https://openrouter.ai/api/v1
+    COPILOT_PROVIDER_API_KEY=sk-or-...
+    MODEL_OVERRIDE=google/gemini-3-flash-preview
+    ```
+
+    The preset forwards only `COPILOT_*` variables (`COPILOT_GITHUB_TOKEN`, every `COPILOT_PROVIDER_*` BYOK knob, `COPILOT_HOME`, `COPILOT_MODEL`) plus `GH_HOST` and the proxy variables. It never forwards the worker's `GITHUB_TOKEN` or `GH_TOKEN`: a git token without the Copilot Requests permission would fail Copilot auth. `MODEL_OVERRIDE` becomes `COPILOT_MODEL`. The adapter sets `COPILOT_AUTO_UPDATE=false`, so the pinned CLI is the one that runs.
+
+    Copilot CLI has no system-prompt flag. The adapter writes the swarm system prompt to `.github/instructions/agent-swarm.instructions.md` in a per-task directory outside the repo, and prepends that directory to `COPILOT_CUSTOM_INSTRUCTIONS_DIRS` (your own value is kept after it). Copilot reads it alongside the repo's own `AGENTS.md` and instructions; no repo file is written. The directory is removed when the session ends.
+
+    Copilot CLI is proprietary software under the [GitHub Copilot CLI License](https://github.com/github/copilot-cli/blob/main/LICENSE.md); the image keeps a copy at `/usr/share/doc/github-copilot-cli/LICENSE.md`. Its use is subject to the GitHub Terms of Service and Copilot terms.
   </Tab>
   <Tab value="claude-code-acp">
     Zed's [`claude-code-acp`](https://github.com/zed-industries/claude-code-acp) bridges Claude Code to ACP:
@@ -454,7 +482,7 @@ An ACP agent's *own* tools (file edit, shell, etc.) are whatever the target proc
 ### ACP Specifics
 
 - **The target receives a session-scoped `aseph_` token.** `newSession`'s swarm MCP server entry carries this token as an `Authorization` header (see [How it works](#how-it-works) above). The adapter mints it for the session's agent and task, with a 24-hour expiry, and fails closed if minting fails; it never falls back to the operator key. Session completion starts best-effort revocation. If revocation fails, the token remains valid until expiry. `ACP_TARGET_COMMAND` is operator-configured and runs in the worker container as the worker; point it only at a binary you trust with that agent's swarm MCP access for up to 24 hours.
-- **No swarm-side credential gate.** The `acp` adapter has no `readyCheck` — the worker reports `ready: true` immediately. The Docker entrypoint does check the target binary at boot: it resolves the command the adapter would spawn (`opencode` or `gemini` for a preset, otherwise `ACP_TARGET_COMMAND` / `ACP_COMMAND`) and exits with `FATAL` if no target is configured or the executable is not on `$PATH`. Outside the Docker image, an unresolvable target still surfaces at session-spawn time (task fails with `ACP target failed during startup: ...`).
+- **No swarm-side credential gate.** The `acp` adapter has no `readyCheck` — the worker reports `ready: true` immediately. The Docker entrypoint does check the target binary at boot: it resolves the command the adapter would spawn (`opencode`, `gemini` or `copilot` for a preset, otherwise `ACP_TARGET_COMMAND` / `ACP_COMMAND`) and exits with `FATAL` if no target is configured or the executable is not on `$PATH`. Outside the Docker image, an unresolvable target still surfaces at session-spawn time (task fails with `ACP target failed during startup: ...`).
 - **No live steering.** `deliverSteering` is not implemented; mid-run messages promote to follow-up tasks the same way an unsupported provider always handles them.
 - **No skill filesystem sync.** The generic worker image still seeds `~/.claude/skills`, `~/.opencode/skills`, etc. at boot, so a target that reads one of those directories natively (like opencode) still sees skills; a fully custom target sees whatever `ACP_SYSTEM_PROMPT_PATH` writes and nothing more.
 

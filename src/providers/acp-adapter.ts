@@ -373,17 +373,29 @@ export class ACPAdapter implements ProviderAdapter {
   async createSession(config: ProviderSessionConfig): Promise<ProviderSession> {
     const target = resolveAcpTarget(config);
     await target.writeSystemPromptArtifact(config);
-    const command = target.command(config);
-    const proc = registerProcessGroup(
-      Bun.spawn(command, {
-        cwd: config.cwd,
-        detached: detachedProcessGroup,
-        env: target.env(config),
-        stdin: "pipe",
-        stdout: "pipe",
-        stderr: "pipe",
-      }),
-    );
+    const cleanupArtifact = async () => {
+      try {
+        await target.cleanupSystemPromptArtifact?.(config);
+      } catch (err) {
+        console.warn(`\x1b[33m[acp]\x1b[0m System prompt cleanup failed: ${formatError(err)}`);
+      }
+    };
+    let proc: Bun.Subprocess<"pipe", "pipe", "pipe">;
+    try {
+      proc = registerProcessGroup(
+        Bun.spawn(target.command(config), {
+          cwd: config.cwd,
+          detached: detachedProcessGroup,
+          env: target.env(config),
+          stdin: "pipe",
+          stdout: "pipe",
+          stderr: "pipe",
+        }),
+      );
+    } catch (err) {
+      await cleanupArtifact();
+      throw err;
+    }
 
     let session: ACPSession | null = null;
     const preSessionEvents: ProviderEvent[] = [];
@@ -458,6 +470,7 @@ export class ACPAdapter implements ProviderAdapter {
         ephemeralToken.tokenId,
       );
       for (const event of preSessionEvents) session.emitFromAcp(event);
+      void session.waitForCompletion().finally(cleanupArtifact);
       return session;
     } catch (err) {
       // Revoke the ephemeral token before re-throwing if ACPSession has not yet
@@ -467,6 +480,7 @@ export class ACPAdapter implements ProviderAdapter {
         void revokeAcpSessionToken(config.apiUrl, config.apiKey, ephemeralToken.tokenId);
       }
       await terminateProcessGroup(proc.pid);
+      await cleanupArtifact();
       throw new Error(`ACP target failed during startup: ${scrubSecrets(formatError(err))}`);
     }
   }
