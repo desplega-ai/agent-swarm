@@ -116,7 +116,7 @@ export function resolveEncryptionKey(
 
   if (!allowGenerate) {
     throw new Error(
-      `Refusing to auto-generate ${KEY_FILENAME} for an existing database with encrypted secret rows. Restore ${ENV_KEY}, ${ENV_KEY_FILE}, or ${keyFilePath} before booting.`,
+      `Refusing to auto-generate ${KEY_FILENAME} for an existing database with encrypted secret rows or sealed replay values. Restore ${ENV_KEY}, ${ENV_KEY_FILE}, or ${keyFilePath} before booting.`,
     );
   }
 
