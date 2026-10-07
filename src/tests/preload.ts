@@ -30,6 +30,16 @@ startHangWatchdog();
 // drain set API_DRAIN_MAX_MS for their own server.
 process.env.API_DRAIN_MAX_MS = "0";
 
+// Credential and provider-routing tests assume no Anthropic credentials, as
+// on CI. A developer shell (or a repo .env, which Bun loads before this file)
+// often sets them, for example a Claude Code session behind a proxy. Then
+// ~17 tests fail locally and the pre-push hook blocks the push. Remove them
+// here; spawned servers inherit the cleaned env, and suites that need a
+// value set their own.
+for (const key of ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL"]) {
+  delete process.env[key];
+}
+
 // @hono/node-server (pulled in transitively by @modelcontextprotocol/sdk's
 // streamableHttp transport) replaces globalThis.Response/Request with its own
 // lightweight Node-adapter classes the first time getRequestListener() runs.
