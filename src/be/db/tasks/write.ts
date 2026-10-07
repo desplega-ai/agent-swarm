@@ -87,7 +87,7 @@ export async function createTask(
       id,
       defaultAssetKey("task", id),
       agentId,
-      task,
+      scrubSecrets(task),
       "pending",
       source,
       options?.slackChannelId ?? null,

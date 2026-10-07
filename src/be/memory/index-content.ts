@@ -90,7 +90,7 @@ export async function indexMemoryContent(
         intent: "re-index memory source path",
         changedByAgentId: agentId,
       });
-      const embedding = await provider.embed(contentChunks[0]!.content);
+      const embedding = await provider.embed(result.memory.content);
       if (embedding) await store.updateEmbedding(result.memory.id, embedding, provider.name);
       try {
         // Re-index of an existing memory: prune stale content-derived links.
@@ -143,7 +143,7 @@ export async function indexMemoryContent(
   // Async batch embed (fire and forget)
   (async () => {
     try {
-      const embeddings = await provider.embedBatch(contentChunks.map((c) => c.content));
+      const embeddings = await provider.embedBatch(memories.map((m) => m.content));
       for (let i = 0; i < embeddings.length; i++) {
         if (embeddings[i]) {
           await store.updateEmbedding(memories[i]!.id, embeddings[i]!, provider.name);

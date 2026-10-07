@@ -178,6 +178,7 @@ import {
   type ApprovalRequestListFilters,
   type ApprovalVote,
   approvalRequestListClause,
+  scrubApprovalVotesJson,
 } from "./db/approvals";
 import {
   computeContentHash,
@@ -2187,7 +2188,7 @@ export async function createLogEntry(entry: {
       entry.eventType,
       entry.agentId ?? null,
       entry.taskId ?? null,
-      entry.oldValue ?? null,
+      entry.oldValue ? scrubSecrets(entry.oldValue) : null,
       entry.newValue ? scrubSecrets(entry.newValue) : null,
       metaJson ? scrubSecrets(metaJson) : null,
     ],
@@ -2816,7 +2817,8 @@ export async function createTaskExtended(
         assetKey,
         options?.agentId ?? null,
         options?.creatorAgentId ?? null,
-        task,
+        // Free text from every task source; scrub at the single INSERT.
+        scrubSecrets(task),
         status,
         options?.source ?? "mcp",
         options?.routingReason ?? null,
@@ -3888,7 +3890,11 @@ export async function postMessage(
 
   // Detect /task prefix - only create tasks when explicitly requested
   const isTaskMessage = content.trimStart().startsWith("/task ");
-  const messageContent = isTaskMessage ? content.replace(/^\s*\/task\s+/, "") : content;
+  // Scrubbed once here: the row, the task description built from it and the
+  // appended task-link UPDATE below all derive from this value.
+  const messageContent = scrubSecrets(
+    isTaskMessage ? content.replace(/^\s*\/task\s+/, "") : content,
+  );
 
   const row = await getDbClient().get<ChannelMessageRow>(
     `INSERT INTO channel_messages (id, channelId, agentId, content, replyToId, mentions, createdAt)
@@ -5557,12 +5563,12 @@ export async function createInboxMessage(
     [
       id,
       agentId,
-      content,
+      scrubSecrets(content),
       options?.source ?? "slack",
       options?.slackChannelId ?? null,
       options?.slackThreadTs ?? null,
       options?.slackUserId ?? null,
-      options?.matchedText ?? null,
+      options?.matchedText == null ? null : scrubSecrets(options.matchedText),
       now,
       now,
     ],
@@ -5638,7 +5644,7 @@ export async function markInboxMessageResponded(
   const now = new Date().toISOString();
   const row = await getDbClient().get<InboxMessageRow>(
     "UPDATE inbox_messages SET status = 'responded', responseText = ?, lastUpdatedAt = ? WHERE id = ? AND status IN ('unread', 'processing') RETURNING *",
-    [responseText, now, id],
+    [scrubSecrets(responseText), now, id],
   );
   return row ? rowToInboxMessage(row) : null;
 }
@@ -6035,10 +6041,10 @@ export async function createScheduledTask(data: CreateScheduledTaskData): Promis
       id,
       normalizeAssetKey(data.key ?? defaultAssetKey("schedule", id)),
       data.name,
-      data.description ?? null,
+      data.description == null ? null : scrubSecrets(data.description),
       data.cronExpression ?? null,
       data.intervalMs ?? null,
-      data.taskTemplate ?? null,
+      data.taskTemplate == null ? null : scrubSecrets(data.taskTemplate),
       data.taskType ?? null,
       JSON.stringify(data.tags ?? []),
       data.priority ?? 50,
@@ -6121,7 +6127,7 @@ export async function updateScheduledTask(
   }
   if (data.description !== undefined) {
     updates.push("description = ?");
-    params.push(data.description);
+    params.push(data.description == null ? null : scrubSecrets(data.description));
   }
   if (data.cronExpression !== undefined) {
     updates.push("cronExpression = ?");
@@ -6133,7 +6139,7 @@ export async function updateScheduledTask(
   }
   if (data.taskTemplate !== undefined) {
     updates.push("taskTemplate = ?");
-    params.push(data.taskTemplate);
+    params.push(data.taskTemplate == null ? null : scrubSecrets(data.taskTemplate));
   }
   if (data.taskType !== undefined) {
     updates.push("taskType = ?");
@@ -6177,7 +6183,7 @@ export async function updateScheduledTask(
   }
   if (data.lastErrorMessage !== undefined) {
     updates.push("lastErrorMessage = ?");
-    params.push(data.lastErrorMessage);
+    params.push(data.lastErrorMessage == null ? null : scrubSecrets(data.lastErrorMessage));
   }
   if (data.model !== undefined) {
     updates.push("model = ?");
@@ -9620,14 +9626,14 @@ export async function createApprovalRequest(data: {
        RETURNING *`,
       [
         data.id,
-        data.title,
+        scrubSecrets(data.title),
         JSON.stringify(data.questions),
         data.workflowRunId ?? null,
         data.workflowRunStepId ?? null,
         data.sourceTaskId ?? null,
         JSON.stringify(data.approvers),
         status,
-        resolutionReason,
+        resolutionReason == null ? null : scrubSecrets(resolutionReason),
         status === "cancelled" ? now : null,
         data.timeoutSeconds ?? null,
         expiresAt,
@@ -9690,9 +9696,9 @@ export async function resolveApprovalRequest(
     [
       data.status,
       data.responses ? JSON.stringify(data.responses) : null,
-      data.approvals ? JSON.stringify(data.approvals) : null,
+      data.approvals ? scrubApprovalVotesJson(data.approvals) : null,
       data.resolvedBy ?? null,
-      data.resolutionReason ?? null,
+      data.resolutionReason == null ? null : scrubSecrets(data.resolutionReason),
       now,
       now,
       id,
@@ -9713,7 +9719,7 @@ export async function cancelApprovalRequestById(
        SET status = 'cancelled', resolutionReason = ?, resolvedBy = ?, resolvedAt = ?, updatedAt = ?
        WHERE id = ? AND status = 'pending'
        RETURNING *`,
-    [data.reason, data.resolvedBy, now, now, id],
+    [scrubSecrets(data.reason), data.resolvedBy, now, now, id],
   );
   return row ? rowToApprovalRequest(row) : null;
 }
@@ -9728,7 +9734,7 @@ export async function cancelPendingApprovalRequestsForRun(
        SET status = 'cancelled', resolutionReason = ?, resolvedAt = ?, updatedAt = ?
        WHERE workflowRunId = ? AND status = 'pending'
        RETURNING *`,
-    [reason, now, now, workflowRunId],
+    [scrubSecrets(reason), now, now, workflowRunId],
   );
   return rows.map(rowToApprovalRequest);
 }

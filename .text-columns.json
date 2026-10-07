@@ -58,9 +58,7 @@
     "taskId": {
       "exempt": "identifier"
     },
-    "oldValue": {
-      "pending": "12e: agent log"
-    },
+    "oldValue": "scrubbed",
     "newValue": "scrubbed",
     "metadata": "scrubbed",
     "createdAt": {
@@ -91,15 +89,9 @@
     "scope": {
       "exempt": "enum or fixed-format value"
     },
-    "name": {
-      "pending": "12e: memory store and edit"
-    },
-    "content": {
-      "pending": "12e: memory store and edit"
-    },
-    "summary": {
-      "pending": "12e: memory store and edit"
-    },
+    "name": "scrubbed",
+    "content": "scrubbed",
+    "summary": "scrubbed",
     "source": {
       "exempt": "enum or fixed-format value"
     },
@@ -164,9 +156,7 @@
     "memory_id": {
       "exempt": "identifier"
     },
-    "content": {
-      "pending": "unassigned: no batch yet scrubs this writer"
-    },
+    "content": "scrubbed",
     "contentHash": {
       "exempt": "hash or digest"
     },
@@ -216,9 +206,7 @@
     "creatorAgentId": {
       "exempt": "identifier"
     },
-    "task": {
-      "pending": "12e: task create"
-    },
+    "task": "scrubbed",
     "status": {
       "exempt": "enum or fixed-format value"
     },
@@ -606,9 +594,7 @@
     "id": {
       "exempt": "identifier"
     },
-    "title": {
-      "pending": "12e: approval requests"
-    },
+    "title": "scrubbed",
     "workflowRunId": {
       "exempt": "identifier"
     },
@@ -624,18 +610,14 @@
     "resolvedBy": {
       "exempt": "identifier"
     },
-    "resolutionReason": {
-      "pending": "12e: approval requests"
-    },
+    "resolutionReason": "scrubbed",
     "created_by": {
       "exempt": "identifier"
     },
     "updated_by": {
       "exempt": "identifier"
     },
-    "approvals": {
-      "pending": "12e: approval requests"
-    }
+    "approvals": "scrubbed"
   },
   "apps": {
     "id": {
@@ -773,9 +755,7 @@
     "agentId": {
       "exempt": "identifier"
     },
-    "content": {
-      "pending": "12e: channel messages"
-    },
+    "content": "scrubbed",
     "replyToId": {
       "exempt": "identifier"
     },
@@ -1214,9 +1194,7 @@
     "agentId": {
       "exempt": "identifier"
     },
-    "content": {
-      "pending": "12e: inbox messages"
-    },
+    "content": "scrubbed",
     "source": {
       "exempt": "enum or fixed-format value"
     },
@@ -1232,15 +1210,11 @@
     "slackUserId": {
       "exempt": "identifier"
     },
-    "matchedText": {
-      "pending": "12e: inbox messages"
-    },
+    "matchedText": "scrubbed",
     "delegatedToTaskId": {
       "exempt": "identifier"
     },
-    "responseText": {
-      "pending": "12e: inbox messages"
-    },
+    "responseText": "scrubbed",
     "createdAt": {
       "exempt": "timestamp"
     },
@@ -2039,15 +2013,11 @@
     "name": {
       "pending": "unassigned: no batch yet scrubs this writer"
     },
-    "description": {
-      "pending": "12e: scheduled tasks"
-    },
+    "description": "scrubbed",
     "cronExpression": {
       "exempt": "enum or fixed-format value"
     },
-    "taskTemplate": {
-      "pending": "12e: scheduled tasks"
-    },
+    "taskTemplate": "scrubbed",
     "taskType": {
       "pending": "unassigned: no batch yet scrubs this writer"
     },
@@ -2072,9 +2042,7 @@
     "lastErrorAt": {
       "exempt": "timestamp"
     },
-    "lastErrorMessage": {
-      "pending": "12e: scheduled tasks"
-    },
+    "lastErrorMessage": "scrubbed",
     "model": {
       "exempt": "enum or fixed-format value"
     },

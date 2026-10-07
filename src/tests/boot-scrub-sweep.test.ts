@@ -132,15 +132,34 @@ describe("boot retro-sweep", () => {
     );
 
     const store = getMemoryStore();
+    const legacy = {
+      name: `note ${known.value}`,
+      content: secretText("memory"),
+      summary: secretText("summary"),
+    };
     const memory = await store.store({
       agentId: AGENT_ID,
       scope: "agent",
       source: "manual",
-      name: `note ${known.value}`,
-      content: secretText("memory"),
-      summary: secretText("summary"),
+      ...legacy,
     });
     ids.memory = memory.id;
+    // store() now scrubs at write; put the raw text back so the row looks like
+    // one written before that, which is what the sweep exists for.
+    await db.run(
+      "UPDATE agent_memory SET name = ?, content = ?, summary = ?, contentHash = ? WHERE id = ?",
+      [legacy.name, legacy.content, legacy.summary, contentSha256(legacy.content), memory.id],
+    );
+    await db.run(
+      "UPDATE agent_memory_version SET content = ?, contentHash = ? WHERE memory_id = ?",
+      [legacy.content, contentSha256(legacy.content), memory.id],
+    );
+    await db.run("DELETE FROM memory_fts WHERE memory_id = ?", [memory.id]);
+    await db.run("INSERT INTO memory_fts(memory_id, name, content) VALUES (?, ?, ?)", [
+      memory.id,
+      legacy.name,
+      legacy.content,
+    ]);
     const embedding = new Float32Array(512);
     embedding[0] = 1;
     await store.updateEmbedding(memory.id, embedding, "test");

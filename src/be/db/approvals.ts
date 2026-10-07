@@ -1,4 +1,6 @@
+import { type ScrubbedText, scrubObject, scrubSecrets } from "../../utils/secret-scrubber";
 import { normalizeDate, normalizeDateRequired } from "../date-utils";
+import { breaksJsonValidity } from "../scrub-json";
 import { getDbClient } from "./runtime";
 
 /**
@@ -126,7 +128,19 @@ export async function recordApprovalVotes(id: string, approvals: ApprovalVote[])
        SET approvals = ?, updatedAt = ?
        WHERE id = ? AND status = 'pending'
        RETURNING id`,
-    [JSON.stringify(approvals), new Date().toISOString(), id],
+    [scrubApprovalVotesJson(approvals), new Date().toISOString(), id],
   );
   return row !== null && row !== undefined;
+}
+
+/**
+ * Serializes votes for the `approvals` column with free-text answers scrubbed.
+ * Falls back to a per-value scrub when a redaction would break the JSON, so
+ * readers can always parse the column.
+ */
+export function scrubApprovalVotesJson(approvals: ApprovalVote[]): ScrubbedText {
+  const raw = JSON.stringify(approvals);
+  const scrubbed = scrubSecrets(raw);
+  if (!breaksJsonValidity(raw, scrubbed)) return scrubbed;
+  return JSON.stringify(scrubObject(approvals)) as ScrubbedText;
 }

@@ -2,6 +2,7 @@ import { getDb, getDbClient, isSqliteVecAvailable } from "@/be/db";
 import { cosineSimilarity, deserializeEmbedding, serializeEmbedding } from "@/be/embedding";
 import { contentSha256 } from "@/commands/profile-sync";
 import type { AgentMemory, AgentMemoryScope, AgentMemorySource } from "@/types";
+import { scrubSecrets } from "@/utils/secret-scrubber";
 import {
   EMBEDDING_DIMENSIONS,
   isHybridSearchEnabled,
@@ -438,7 +439,12 @@ export class SqliteMemoryStore implements MemoryStore {
     const now = new Date().toISOString();
     const key = input.key ?? `${input.scope}/${input.source}/${id}`;
     const expiresAt = computeExpiresAt(input.source, key);
-    const contentHash = contentSha256(input.content);
+    // Scrub before the hash, the FTS sync and the caller's embedding (callers
+    // embed the returned row's content), so all of them see the same text.
+    const name = scrubSecrets(input.name);
+    const content = scrubSecrets(input.content);
+    const summary = input.summary == null ? null : scrubSecrets(input.summary);
+    const contentHash = contentSha256(content);
     const version = 1;
 
     const row = await getDbClient().transaction(async (tx) => {
@@ -450,9 +456,9 @@ export class SqliteMemoryStore implements MemoryStore {
           input.agentId ?? null,
           input.scope,
           key,
-          input.name,
-          input.content,
-          input.summary ?? null,
+          name,
+          content,
+          summary,
           input.source,
           input.sourceTaskId ?? null,
           input.sourcePath ?? null,
@@ -479,7 +485,7 @@ export class SqliteMemoryStore implements MemoryStore {
           crypto.randomUUID(),
           inserted.id,
           version,
-          input.content,
+          content,
           contentHash,
           input.intent ?? "create memory",
           input.agentId ?? null,
@@ -1010,13 +1016,17 @@ export class SqliteMemoryStore implements MemoryStore {
 
       const previousVersion = row.version ?? 1;
       const moving = input.newKey !== undefined && input.newKey !== row.key;
+      // Scrub the edited text before the hash and FTS sync; callers embed the
+      // returned content, so the vector matches the stored row.
       const nextContent = moveOnly
         ? row.content
-        : applyEditMode(input.mode, row.content, {
-            content: input.content,
-            oldString: input.oldString,
-            newString: input.newString,
-          });
+        : scrubSecrets(
+            applyEditMode(input.mode, row.content, {
+              content: input.content,
+              oldString: input.oldString,
+              newString: input.newString,
+            }),
+          );
 
       const nextHash = contentSha256(nextContent);
       const contentChanged = !moveOnly && nextHash !== row.contentHash;
