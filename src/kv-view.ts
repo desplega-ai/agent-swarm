@@ -151,9 +151,12 @@ export function sliceKvTarget(
   if (Array.isArray(target)) {
     value = target.slice(start, end);
   } else if (typeof target === "string") {
-    // Never end a page on a lone high surrogate; the next page starts there.
+    // Never end a page on a lone high surrogate: back off one char so the next
+    // page starts on the pair, or take the whole pair when it is the only char
+    // (otherwise `limit: 1` would return nothing and never advance).
     const lastCode = target.charCodeAt(end - 1);
-    const safeEnd = end < total && lastCode >= 0xd800 && lastCode <= 0xdbff ? end - 1 : end;
+    const splitsPair = end > start && end < total && lastCode >= 0xd800 && lastCode <= 0xdbff;
+    const safeEnd = splitsPair ? (end - 1 > start ? end - 1 : end + 1) : end;
     value = target.slice(start, safeEnd);
     returned = safeEnd - start;
   } else {

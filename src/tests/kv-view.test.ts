@@ -62,6 +62,19 @@ describe("resolveKvView", () => {
     const sliced = sliceKvTarget("a🙂b", 0, 2);
     expect(sliced).toMatchObject({ value: "a", returned: 1, nextOffset: 1 });
   });
+
+  test("limit 1 on an astral character returns the whole pair and advances", () => {
+    const text = "🙂🙃x";
+    const seen: string[] = [];
+    let offset: number | null = 0;
+    while (offset !== null && seen.length < 10) {
+      const page = sliceKvTarget(text, offset, 1)!;
+      expect(page.returned).toBeGreaterThan(0);
+      seen.push(page.value as string);
+      offset = page.nextOffset;
+    }
+    expect(seen).toEqual(["🙂", "🙃", "x"]);
+  });
 });
 
 describe("summarizeKvShape", () => {
