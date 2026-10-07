@@ -43,6 +43,7 @@ import { can, type RbacPrincipal } from "../rbac";
 import { AgentMemorySchema, AgentMemoryScopeSchema, AgentMemorySourceSchema } from "../types";
 import { getRequestAuth } from "../utils/request-auth-context";
 import { scrubSecrets } from "../utils/secret-scrubber";
+import { rejectGuest } from "./request-principal";
 import { route } from "./route-def";
 import { jsonError, parseQueryParams } from "./utils";
 
@@ -108,6 +109,8 @@ const MemorySearchResultItemSchema = z.object({
   scope: AgentMemoryScopeSchema,
   tags: z.array(z.string()),
   accessCount: z.number(),
+  summary: z.string().nullable().optional(),
+  createdAt: z.string().optional(),
 });
 
 const searchMemory = route({
@@ -787,6 +790,7 @@ async function ingestPrincipal(
 ): Promise<RbacPrincipal> {
   const auth = getRequestAuth(req);
   if (auth?.kind === "user") return { kind: "user", userId: auth.userId };
+  if (auth?.kind === "guest") return { kind: "guest" };
   const agentId = auth?.kind === "agent" ? auth.agentId : agentIdHeader;
   if (agentId) {
     const agent = await getAgentById(agentId);
@@ -810,6 +814,9 @@ export async function handleMemory(
 ): Promise<boolean> {
   // Page memory operations use the owner's scope. Authentication and audit retain the signed viewer.
   const myAgentId = getRequestAuth(req)?.page?.executionAgentId ?? callerAgentId;
+  if (pathSegments[0] === "api" && pathSegments[1] === "memory" && rejectGuest(req, res)) {
+    return true;
+  }
   if (indexMemory.match(req.method, pathSegments)) {
     const parsed = await indexMemory.parse(req, res, pathSegments, new URLSearchParams());
     if (!parsed) return true;
@@ -996,6 +1003,8 @@ export async function handleMemory(
           scope: r.scope,
           tags: r.tags,
           accessCount: (r.accessCount ?? 0) + (consumedIdSet.has(r.id) ? 1 : 0),
+          summary: r.summary,
+          createdAt: r.createdAt,
         })),
       });
     } catch (err) {

@@ -29,18 +29,23 @@ Loading recurring operations upfront avoids repeated discovery while leaving les
 
 ## Large Result Handling
 
-Agent-facing MCP results are capped at 10,000 serialized UTF-8 bytes. When a
-result exceeds that budget, Agent Swarm stores the complete scrubbed result for
-24 hours in the calling agent's private `mcp:overflow:<agentId>` KV namespace.
-The bounded response keeps the largest fitting leading slice of an array, or a
-readable prose preview; scalar JSON is omitted as a complete unit rather than
-cut into invalid JSON. Both MCP result channels receive the same
-machine-readable `truncation` metadata and `kv-get` retrieval pointer.
+Agent-facing MCP results are capped at 10,000 UTF-8 bytes per channel: the
+text content and the JSON-encoded structured content must each fit, since
+every harness reads only one of them. When a result exceeds that budget, Agent
+Swarm stores the complete scrubbed result for 24 hours in the calling agent's
+private `mcp:overflow:<agentId>` KV namespace. The bounded response keeps the
+largest fitting leading slice of an array, or the largest prose or JSON preview
+that fits; structured scalar JSON is omitted as a complete unit rather than cut
+into invalid JSON. The text channel ends with one `Full value:` pointer, a
+`Shape:` outline of the stored value, and a `Retrieval:` call; the structured
+channel carries the same as a `truncation` object.
 
-`kv-get` returns the complete stored value, although the active harness may
-still apply its own display limit. For filtering or aggregation, fetch the
-value inside a script with `ctx.swarm.kv_get` and return only the derived
-answer. Script-internal `ctx.swarm.*` responses are not subject to the 10 KB
+`kv-get` without view arguments returns the complete stored value, although the
+active harness may still apply its own display limit. Pass `path` (a dot path
+such as `outcome.data.rows`), `offset`, and `limit` for a bounded page of the
+value instead; `view.nextOffset` says where the next page starts. For filtering
+or aggregation, fetch the value inside a script with `ctx.swarm.kv_get` (same
+arguments) and return only the derived answer. Script-internal `ctx.swarm.*` responses are not subject to the 10 KB
 model-context ceiling; see [Scripts runtime](/docs/guides/scripts-runtime) for
 that separate boundary.
 
@@ -859,12 +864,15 @@ A Redis-like, namespaced key/value store. Calls auto-resolve namespace from your
 
 ### kv-get
 
-Read a key. Returns the entry or `null` if missing/expired. Namespace defaults to your current context.
+Read a key. Returns the entry or `null` if missing/expired. Namespace defaults to your current context. Any of `path`/`offset`/`limit` returns a bounded view (10 KB per channel) instead of the whole value.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `key` | string | Yes | Key to read |
 | `namespace` | string | No | Override the auto-resolved namespace |
+| `path` | string | No | Dot path into the JSON value (`outcome.data.rows`, `rows.3`; escape a dot inside a key as `\.`). String entries holding JSON count as JSON |
+| `offset` | number | No | First array item / object key / string character to return. Default 0 |
+| `limit` | number | No | Max items / keys / characters. The page also shrinks to fit the cap |
 
 ### kv-set
 

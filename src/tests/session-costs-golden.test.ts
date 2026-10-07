@@ -344,6 +344,23 @@ describe("Phase 3 — session cost recompute golden fixtures", () => {
     expect(auto.cost.costSource).toBe("unpriced");
   });
 
+  // Boot-seeded rows only: grok rows project the models.dev xAI section.
+  test("grok runs price from the seeded xAI rates", async () => {
+    const body = await postCost({
+      sessionId: "grok-4-6",
+      provider: "grok",
+      model: "grok-4.6",
+      totalCostUsd: 0,
+      inputTokens: 2_000,
+      outputTokens: 300,
+      cacheReadTokens: 1_000,
+    });
+    const expected = (2_000 * 2 + 1_000 * 0.5 + 300 * 6) / 1_000_000;
+
+    expect(body.cost.costSource).toBe("pricing-table");
+    expectExact(body.cost.totalCostUsd, expected);
+  });
+
   test("legacy cache writes without a TTL split keep the 5m class", async () => {
     await seedModelRates("claude", "claude-legacy-cache-write", {
       input: 5,

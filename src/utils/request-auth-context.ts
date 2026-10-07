@@ -5,6 +5,8 @@ import type { User } from "../types";
 export type HttpRequestAuth = (
   | { kind: "operator"; fingerprint: string }
   | { kind: "user"; userId: string; user: User }
+  /** Password-page viewer with no user identity. Least privilege: every gate denies it. */
+  | { kind: "guest" }
   /** Ephemeral session token minted by the ACP adapter per session (aseph_ prefix). */
   | { kind: "agent"; agentId: string; taskId: string }
 ) & {

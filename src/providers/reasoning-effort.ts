@@ -17,6 +17,7 @@ import {
   claudeCatalogModelId,
   cursorCatalogRef,
   dshCatalogRef,
+  grokCatalogRef,
   REASONING_EFFORT_LEVELS,
   type ReasoningEffortLevel,
   reasoningLevelsFor,
@@ -28,7 +29,15 @@ export { REASONING_EFFORT_LEVELS };
 export type ReasoningEffort = ReasoningEffortLevel;
 
 /** The local harnesses this feature covers (Devin / claude-managed / ACP are out of scope). */
-export type ReasoningHarness = "claude" | "codex" | "pi" | "opencode" | "dsh" | "cursor" | "amp";
+export type ReasoningHarness =
+  | "claude"
+  | "codex"
+  | "pi"
+  | "opencode"
+  | "dsh"
+  | "cursor"
+  | "amp"
+  | "grok";
 
 export interface ReasoningCapability {
   supported: boolean;
@@ -55,6 +64,7 @@ export type ReasoningEffortApplication =
   | { kind: "dsh-effort"; reasoningEffort: ReasoningEffort }
   | { kind: "amp-effort"; reasoningEffort: ReasoningEffort }
   | { kind: "cursor-effort"; reasoningEffort: ReasoningEffort }
+  | { kind: "grok-effort"; reasoningEffort: ReasoningEffort }
   | { kind: "noop" };
 
 // --- Capability lookup --------------------------------------------------------
@@ -90,6 +100,8 @@ function lookupModel(
     ({ providerId, modelId } = dshCatalogRef(model));
   } else if (harness === "cursor") {
     ({ providerId, modelId } = cursorCatalogRef(model));
+  } else if (harness === "grok") {
+    ({ providerId, modelId } = grokCatalogRef(model));
   } else {
     ({ providerId, modelId } = splitProviderModel(model));
     if (!providerId) return undefined;
@@ -223,6 +235,10 @@ export function applyReasoningEffort(
       // (`reasoning`, `reasoning_effort`, `effort`); the adapter maps the
       // level onto the live model list (see `src/providers/cursor-adapter.ts`).
       return { kind: "cursor-effort", reasoningEffort: level };
+    case "grok":
+      // Grok's `--reasoning-effort` takes the normalized names as-is; see
+      // `src/providers/grok-adapter.ts`.
+      return { kind: "grok-effort", reasoningEffort: level };
     default: {
       const _exhaustive: never = harness;
       return _exhaustive;

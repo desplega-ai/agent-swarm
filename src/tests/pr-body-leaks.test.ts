@@ -105,8 +105,10 @@ describe("findPrBodyLeaks: negative controls", () => {
   test("a fenced code example with a fresh UUID taskId", () => {
     const body = `## Proof of work\n\n\`\`\`ts\nconst taskId = "${randomUUID()}";\nawait store({ parentTaskId: "${randomUUID()}" });\n\`\`\`\n`;
     expect(findPrBodyLeaks(body)).toEqual([]);
-    // The same line outside the fence is still a ref.
-    expect(findPrBodyLeaks(`taskId = "${randomUUID()}"`)).toEqual(["swarm-task-ref"]);
+    // The same line outside the fence is still a ref. The rule needs a letter in
+    // the first group, so a random UUID would flake (~2% are all digits there).
+    const ref = `${hexWithLetter()}-1111-2222-3333-444444444444`;
+    expect(findPrBodyLeaks(`taskId = "${ref}"`)).toEqual(["swarm-task-ref"]);
   });
 
   test("a fence does not hide Slack or dashboard links", () => {
@@ -146,6 +148,159 @@ describe("findPrBodyLeaks: negative controls", () => {
   test("the repo PR template passes its own check", async () => {
     const template = await Bun.file(".github/pull_request_template.md").text();
     expect(findPrBodyLeaks(template)).toEqual([]);
+  });
+});
+
+describe("findPrBodyLeaks: Swarm provenance allowlist", () => {
+  const provenance = (...lines: string[]) =>
+    `${NORMAL_BODY}\n## Swarm provenance <!-- bot -->\n\n${lines.map((l) => `- ${l}`).join("\n")}\n`;
+
+  test("task, session, agent-fs and Slack permalinks pass inside the section", () => {
+    const body = provenance(
+      `Task: ${dashboardLink()} · tree: ${dashboardLink().replace("/tasks/", "/sessions/")}`,
+      `Ask: ${slackLink()}?thread_ts=${slackTs()}&cid=${slackId("D")}`,
+      `Plan: ${agentFsLink()} (durable: ${agentFsPath()})`,
+      `Follow-up of task ${hexWithLetter()}.`,
+    );
+    expect(findPrBodyLeaks(body)).toEqual([]);
+  });
+
+  test("the same links outside the section still fail", () => {
+    const body = `${NORMAL_BODY}\nSee ${slackLink()} and ${dashboardLink()}.\n${provenance()}`;
+    // The permalink's embedded channel id also counts outside the section.
+    expect(findPrBodyLeaks(body)).toEqual(["slack-id", "slack-link", "swarm-dashboard-link"]);
+  });
+
+  test("bare Slack ids, ts values and private-chat quotes stay blocked inside it", () => {
+    expect(findPrBodyLeaks(provenance(`Channel ${slackId("C")}`))).toEqual(["slack-id"]);
+    expect(findPrBodyLeaks(provenance(`ts ${slackTs()}`))).toEqual(["slack-ts"]);
+    expect(
+      findPrBodyLeaks(provenance(`Taras in ${"DM"}: "it would be nice to explain the motivation"`)),
+    ).toEqual(["private-chat-quote"]);
+  });
+
+  test("the section ends at the next heading, and a fenced heading does not open it", () => {
+    const after = `${provenance(`Task: ${dashboardLink()}`)}\n## Notes\n\n${dashboardLink()}\n`;
+    expect(findPrBodyLeaks(after)).toEqual(["swarm-dashboard-link"]);
+    const fenced = `\`\`\`md\n## Swarm provenance\n\`\`\`\n${slackLink()}\n`;
+    expect(findPrBodyLeaks(fenced)).toContain("slack-link");
+  });
+
+  test("a heading inside an HTML comment does not open it", () => {
+    const body = `<!--\n## Swarm provenance\n-->\n${dashboardLink()}\n`;
+    expect(findPrBodyLeaks(body)).toEqual(["swarm-dashboard-link"]);
+    const oneLine = `<!-- note -->\n## Swarm provenance\n\n- ${dashboardLink()}\n`;
+    expect(findPrBodyLeaks(oneLine)).toEqual([]);
+  });
+
+  test("a shorter fence does not close a longer one", () => {
+    const body = `\`\`\`\`md\n\`\`\`\n## Swarm provenance\n\`\`\`\`\n${dashboardLink()}\n`;
+    expect(findPrBodyLeaks(body)).toEqual(["swarm-dashboard-link"]);
+  });
+
+  test("tildes do not close a backtick fence", () => {
+    const body = `\`\`\`\n~~~\n## Swarm provenance\n\`\`\`\n${dashboardLink()}\n`;
+    expect(findPrBodyLeaks(body)).toEqual(["swarm-dashboard-link"]);
+  });
+
+  test("a fence line with an info string does not close it", () => {
+    const body = `\`\`\`\n\`\`\`md\n## Swarm provenance\n\`\`\`\n${dashboardLink()}\n`;
+    expect(findPrBodyLeaks(body)).toEqual(["swarm-dashboard-link"]);
+  });
+
+  test("a longer closing fence closes it, so a later section opens", () => {
+    const body = `\`\`\`\ncode\n\`\`\`\`\`\n## Swarm provenance\n\n- ${dashboardLink()}\n`;
+    expect(findPrBodyLeaks(body)).toEqual([]);
+  });
+
+  // CommonMark 0.31.2 §4.5: a fence line is indented at most 3 columns, and a
+  // tab expands to the next multiple of 4, so a deeper "closer" is fence content.
+  test("a closer indented 4 spaces does not close the fence", () => {
+    const body = `\`\`\`\n    \`\`\`\n## Swarm provenance\n\`\`\`\n${dashboardLink()}\n`;
+    expect(findPrBodyLeaks(body)).toEqual(["swarm-dashboard-link"]);
+    expect(checkPrBodyLeaks(body)).toEqual(["internal identifier in body: swarm-dashboard-link"]);
+  });
+
+  test("a closer with a leading tab does not close the fence", () => {
+    const body = `\`\`\`\n\t\`\`\`\n## Swarm provenance\n\`\`\`\n${dashboardLink()}\n`;
+    expect(findPrBodyLeaks(body)).toEqual(["swarm-dashboard-link"]);
+    expect(checkPrBodyLeaks(body)).toEqual(["internal identifier in body: swarm-dashboard-link"]);
+  });
+
+  // CommonMark §2.1 whitespace is ASCII space and tab only; JS trim() and \s
+  // also strip U+00A0, which GitHub renders as text.
+  test("a closer followed by a no-break space does not close the fence", () => {
+    const body = `\`\`\`\n\`\`\` \n## Swarm provenance\n\`\`\`\n${dashboardLink()}\n`;
+    expect(findPrBodyLeaks(body)).toEqual(["swarm-dashboard-link"]);
+    expect(checkPrBodyLeaks(body)).toEqual(["internal identifier in body: swarm-dashboard-link"]);
+  });
+
+  test("a closer followed by ASCII spaces or a tab still closes the fence", () => {
+    for (const tail of ["  ", "\t", " \t "]) {
+      const body = `\`\`\`\ncode\n\`\`\`${tail}\n## Swarm provenance\n\n- ${dashboardLink()}\n`;
+      expect(findPrBodyLeaks(body)).toEqual([]);
+      expect(checkPrBodyLeaks(body)).toEqual([]);
+    }
+  });
+
+  test("a heading needs ASCII whitespace after the hashes to open the section", () => {
+    const nbsp = `## Swarm provenance\n\n- ${dashboardLink()}\n`;
+    expect(findPrBodyLeaks(nbsp)).toEqual(["swarm-dashboard-link"]);
+    expect(checkPrBodyLeaks(nbsp)).toEqual(["internal identifier in body: swarm-dashboard-link"]);
+    const glued = `## Swarm provenance#\n\n- ${dashboardLink()}\n`;
+    expect(findPrBodyLeaks(glued)).toEqual(["swarm-dashboard-link"]);
+    const closed = `##\tSwarm provenance ##\t\n\n- ${dashboardLink()}\n`;
+    expect(findPrBodyLeaks(closed)).toEqual([]);
+  });
+
+  test("a non-breaking space in the heading text is part of the name", () => {
+    for (const heading of ["## Swarm provenance ", "## Swarm provenance"]) {
+      const body = `${heading}\n\n- ${dashboardLink()}\n`;
+      expect(findPrBodyLeaks(body)).toEqual(["swarm-dashboard-link"]);
+      expect(checkPrBodyLeaks(body)).toEqual(["internal identifier in body: swarm-dashboard-link"]);
+    }
+    const spaced = `##  Swarm \t provenance \t\n\n- ${dashboardLink()}\n`;
+    expect(findPrBodyLeaks(spaced)).toEqual([]);
+    const commented = `## Swarm provenance <!-- bot --> \n\n- ${dashboardLink()}\n`;
+    expect(findPrBodyLeaks(commented)).toEqual([]);
+  });
+
+  test("a closer indented 3 spaces still closes the fence", () => {
+    const body = `\`\`\`\ncode\n   \`\`\`\n## Swarm provenance\n\n- ${dashboardLink()}\n`;
+    expect(findPrBodyLeaks(body)).toEqual([]);
+  });
+
+  test("an opener indented 4 spaces is not a fence, for sections or prose", () => {
+    const ref = `${hexWithLetter()}-1111-2222-3333-444444444444`;
+    expect(findPrBodyLeaks(`    \`\`\`\ntaskId = "${ref}"\n\`\`\`\n`)).toEqual(["swarm-task-ref"]);
+    const body = `    \`\`\`\n## Swarm provenance\n\n- ${dashboardLink()}\n`;
+    expect(findPrBodyLeaks(body)).toEqual([]);
+  });
+
+  test("a fence closed less indented than its opener cannot open the section", () => {
+    // In a list item the closer ends the item and opens a new fence, which hides the heading.
+    const body = `- y\n  \`\`\`\n\`\`\`\n## Swarm provenance\n\`\`\`\n${dashboardLink()}\n`;
+    expect(findPrBodyLeaks(body)).toEqual(["swarm-dashboard-link"]);
+  });
+
+  test("an indented heading cannot open the section", () => {
+    // A list item fence indented 4 columns hides it on GitHub.
+    const body = `- y\n    \`\`\`\n   ## Swarm provenance\n    \`\`\`\n${dashboardLink()}\n`;
+    expect(findPrBodyLeaks(body)).toEqual(["swarm-dashboard-link"]);
+  });
+
+  test("an indented, setext, or commented-out heading still ends the section", () => {
+    const section = provenance(`Task: ${dashboardLink()}`);
+    for (const end of ["   ## Notes", "- ## Notes", "\nNotes\n---", "    <!--\n## Notes\n-->"]) {
+      expect(findPrBodyLeaks(`${section}\n${end}\n\n${dashboardLink()}\n`)).toEqual([
+        "swarm-dashboard-link",
+      ]);
+    }
+  });
+
+  test("the heading matches case-insensitively with a trailing marker", () => {
+    const body = `## swarm  PROVENANCE <!-- bot -->\n\n- ${dashboardLink()}\n`;
+    expect(findPrBodyLeaks(body)).toEqual([]);
   });
 });
 

@@ -1,12 +1,14 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   clearVolatileSecretsForTesting,
+  isSensitiveKey,
   refreshSecretScrubberCache,
   registerSensitiveKeyName,
   registerVolatileSecret,
   scrubObject,
   scrubSecrets,
 } from "../utils/secret-scrubber";
+import { randomToken } from "./synthetic-secret-helpers";
 
 // Snapshot/restore process.env between tests so env-derived cache entries
 // don't leak across cases.
@@ -233,7 +235,8 @@ describe("scrubSecrets — regex patterns", () => {
 
   test("regex patterns catch tokens even when env is empty", () => {
     // Fresh env — no secrets registered — regex should still catch well-known shapes.
-    const out = scrubSecrets("token=example-ghp_1234567890abcdefABCDEF1234567890ABCD");
+    // `note=` is not a sensitive key, so only the token-shape pass can fire.
+    const out = scrubSecrets(`note=example-${"ghp_"}1234567890abcdefABCDEF1234567890ABCD`);
     expect(out).toContain("[REDACTED:github_token]");
   });
 
@@ -538,6 +541,32 @@ describe("scrubSecrets — env dumps and escaped forms", () => {
     expect(scrubSecrets(jsonBody(s))).toBe(jsonBody(want));
   });
 
+  // retry: wall-clock bound on a shared CI runner; a quadratic rescan takes seconds.
+  test(
+    "an unterminated escaped JSON value resumes the key scan where it stopped",
+    () => {
+      // The value walk stops on the bare quote; the next key still redacts.
+      const s = String.raw`log \"token\":\"abc\\"password\":\"s3cr3tval\" end`;
+      expect(scrubSecrets(s)).toBe(
+        String.raw`log \"token\":\"abc\\"password\":\"[REDACTED:password]\" end`,
+      );
+
+      // ~200 KB single lines of escaped key fragments whose values never close.
+      for (const fragment of [
+        String.raw`\\\"token\\\":\\\"`,
+        String.raw`\"token\":\"\\\"`,
+        String.raw`\"token\":\"\\`,
+        String.raw`\"token\":\"`,
+      ]) {
+        const input = fragment.repeat(Math.ceil(200_000 / fragment.length));
+        const start = performance.now();
+        scrubSecrets(input);
+        expect(performance.now() - start).toBeLessThan(50);
+      }
+    },
+    { retry: 2 },
+  );
+
   test("a quoted value closed at end of line may span lines", () => {
     const dump = `${declareX("DEMO_MULTI_TOKEN", "line1\nline2")}\n${declareX("USER", "deploy")}`;
     const want = `declare -x DEMO_MULTI_TOKEN="[REDACTED:DEMO_MULTI_TOKEN]"\n${declareX("USER", "deploy")}`;
@@ -557,4 +586,290 @@ describe("scrubSecrets — env dumps and escaped forms", () => {
       expect(scrubSecrets(once)).toBe(once);
     }
   });
+});
+
+// Every credential below is built at runtime; nothing secret-shaped is a literal.
+function pemBlock(label: string): string {
+  const body = Array.from({ length: 5 }, () => randomToken(64)).join("\n");
+  return `-----BEGIN ${label}PRIVATE KEY-----\n${body}\n-----END ${label}PRIVATE KEY-----`;
+}
+
+interface ProbeCase {
+  shape: string;
+  input: string;
+  want: string;
+  secret: string;
+}
+
+function probeCases(): ProbeCase[] {
+  const cases: ProbeCase[] = [];
+  const add = (shape: string, secret: string, input: string, want: string) =>
+    cases.push({ shape, input, want, secret });
+  let s = randomToken(24);
+  add("bare PRIVATE_KEY=", s, `PRIVATE_KEY=${s}`, "PRIVATE_KEY=[REDACTED:PRIVATE_KEY]");
+  s = randomToken(24);
+  add("bare SECRET=", s, `SECRET=${s} next`, "SECRET=[REDACTED:SECRET] next");
+  s = randomToken(10);
+  add("bare PASSWORD=", s, `PASSWORD='${s}'`, "PASSWORD='[REDACTED:PASSWORD]'");
+  s = randomToken(32);
+  add("lowercase api_key=", s, `api_key=${s}`, "api_key=[REDACTED:api_key]");
+  s = randomToken(32);
+  add(
+    "dotted SLACK.BOT.TOKEN=",
+    s,
+    `SLACK.BOT.TOKEN=${s}`,
+    "SLACK.BOT.TOKEN=[REDACTED:SLACK.BOT.TOKEN]",
+  );
+  s = randomToken(40);
+  add(
+    "AWS_SECRET_ACCESS_KEY=",
+    s,
+    `export AWS_SECRET_ACCESS_KEY=${s}`,
+    "export AWS_SECRET_ACCESS_KEY=[REDACTED:AWS_SECRET_ACCESS_KEY]",
+  );
+  s = randomToken(40);
+  add(
+    "INI aws_secret_access_key = …",
+    s,
+    `[default]\naws_secret_access_key = ${s}\nregion = us-east-1`,
+    "[default]\naws_secret_access_key = [REDACTED:aws_secret_access_key]\nregion = us-east-1",
+  );
+  s = randomToken(20);
+  add(
+    "DATABASE_URL with userinfo",
+    s,
+    `DATABASE_URL=postgres://app:${s}@db.example:5432/x`,
+    "DATABASE_URL=postgres://app:[REDACTED:url_password]@db.example:5432/x",
+  );
+  s = randomToken(20);
+  add(
+    "https URL with userinfo",
+    s,
+    `git clone https://bob:${s}@git.example/r.git`,
+    "git clone https://bob:[REDACTED:url_password]@git.example/r.git",
+  );
+  for (const label of ["RSA ", "OPENSSH "]) {
+    const pem = pemBlock(label);
+    add(
+      `${label}PEM block`,
+      pem.split("\n")[2] ?? "",
+      `key:\n${pem}\ndone`,
+      `key:\n-----BEGIN ${label}PRIVATE KEY-----[REDACTED:private_key]-----END ${label}PRIVATE KEY-----\ndone`,
+    );
+  }
+  const gcpPem = pemBlock("");
+  add(
+    "GCP service-account JSON private_key",
+    gcpPem.split("\n")[2] ?? "",
+    JSON.stringify({
+      type: "service_account",
+      private_key: `${gcpPem}\n`,
+      client_email: "bot@x.example",
+    }),
+    '{"type":"service_account","private_key":"-----BEGIN PRIVATE KEY-----[REDACTED:private_key]-----END PRIVATE KEY-----\\n","client_email":"bot@x.example"}',
+  );
+  s = `${randomToken(30)}.${randomToken(20)}`;
+  add(
+    "Authorization: Bearer (raw)",
+    s,
+    `Authorization: Bearer ${s}\nAccept: */*`,
+    "Authorization: Bearer [REDACTED:authorization]\nAccept: */*",
+  );
+  s = randomToken(40);
+  add(
+    "Authorization: Bearer (JSON headers)",
+    s,
+    JSON.stringify({ headers: { Authorization: `Bearer ${s}`, Accept: "x" } }),
+    '{"headers":{"Authorization":"Bearer [REDACTED:authorization]","Accept":"x"}}',
+  );
+  s = randomToken(32);
+  add("x-api-key header", s, `x-api-key: ${s}`, "x-api-key: [REDACTED:x_api_key]");
+  s = randomToken(40);
+  add(
+    "curl -H 'Authorization: token …'",
+    s,
+    `curl -H 'Authorization: token ${s}' https://api.example/x`,
+    "curl -H 'Authorization: token [REDACTED:authorization]' https://api.example/x",
+  );
+  s = randomToken(14);
+  add(
+    "curl --password",
+    s,
+    `curl --user bob --password ${s} https://x.example`,
+    "curl --user bob --password [REDACTED:curl_password] https://x.example",
+  );
+  s = randomToken(14);
+  add(
+    "curl -u user:pass",
+    s,
+    `curl -u bob:${s} https://x.example`,
+    "curl -u bob:[REDACTED:curl_password] https://x.example",
+  );
+  s = `${randomToken(8)}\\"${randomToken(8)}`;
+  add(
+    'JSON "password" (with an escaped quote)',
+    s,
+    `{"user":"bob","password":"${s}"}`,
+    '{"user":"bob","password":"[REDACTED:password]"}',
+  );
+  s = randomToken(32);
+  add('JSON "apiKey"', s, JSON.stringify({ apiKey: s }), '{"apiKey":"[REDACTED:apiKey]"}');
+  s = randomToken(32);
+  add(
+    'JSON "client_secret"',
+    s,
+    JSON.stringify({ client_id: "abc", client_secret: s }),
+    '{"client_id":"abc","client_secret":"[REDACTED:client_secret]"}',
+  );
+  s = randomToken(32);
+  add(
+    "YAML token:",
+    s,
+    `auth:\n  token: ${s}\n  user: bob\n`,
+    "auth:\n  token: [REDACTED:token]\n  user: bob\n",
+  );
+  return cases;
+}
+
+describe("scrubSecrets — structured credentials (audit probe)", () => {
+  for (const { shape, input, want, secret } of probeCases()) {
+    test(shape, () => {
+      expect(secret.length).toBeGreaterThan(8);
+      // Raw, and JSON-escaped as the line lands in session_logs.
+      for (const [text, expected] of [
+        [input, want],
+        [jsonBody(input), jsonBody(want)],
+      ]) {
+        const out = scrubSecrets(text);
+        expect(out).not.toContain(secret);
+        expect(out).toContain("[REDACTED:");
+        expect(out).toBe(expected as string);
+        expect(scrubSecrets(out)).toBe(out);
+      }
+    });
+  }
+
+  test("a JSON private_key value is consumed whole across \\n escapes", () => {
+    const tail = randomToken(24);
+    const input = JSON.stringify({ private_key: `${randomToken(16)}\n${tail}\n` });
+    expect(scrubSecrets(input)).toBe('{"private_key":"[REDACTED:private_key]"}');
+  });
+
+  test("a sensitive key nested under a dotted path still counts", () => {
+    const s = randomToken(20);
+    expect(scrubSecrets(`config.SECRETS_ENCRYPTION_KEY=${s}`)).toBe(
+      "config.SECRETS_ENCRYPTION_KEY=[REDACTED:config.SECRETS_ENCRYPTION_KEY]",
+    );
+  });
+
+  test("isSensitiveKey normalizes case, camelCase, dots and dashes", () => {
+    for (const key of [
+      "apiKey",
+      "client_secret",
+      "x-api-key",
+      "slack.bot.token",
+      "secretAccessKey",
+      "SENTRY_DSN",
+      "DEPLOY_CREDENTIALS",
+      "passwd",
+    ]) {
+      expect(isSensitiveKey(key)).toBe(true);
+    }
+    for (const key of [
+      "PWD",
+      "SORT_KEY",
+      "primaryKey",
+      "contextKey",
+      "max_tokens",
+      "token_count",
+      "nextPageToken",
+      "GOOGLE_APPLICATION_CREDENTIALS",
+      "MCP_BASE_URL",
+    ]) {
+      expect(isSensitiveKey(key)).toBe(false);
+    }
+  });
+});
+
+describe("scrubSecrets — over-redaction guards", () => {
+  test("non-secret text stays byte-identical, raw and JSON-escaped", () => {
+    const sha = randomToken(40)
+      .toLowerCase()
+      .replace(/[^0-9a-f]/g, "0");
+    const png = `data:image/png;base64,${Buffer.from(randomToken(60)).toString("base64")}`;
+    const lines = [
+      "max_tokens=4096",
+      '"input_tokens": 1234',
+      "token_count: 12",
+      "PWD=/workspace",
+      "SORT_KEY=abc",
+      "primaryKey: id",
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: testing workflow syntax
+      "password: ${{ secrets.DB_PASSWORD }}",
+      "token: <your-token>",
+      "Authorization: Bearer [REDACTED:x]",
+      `commit ${sha}`,
+      crypto.randomUUID(),
+      `task: ${crypto.randomUUID()}`,
+      png,
+      "https://github.com/org/repo",
+      "const password = getPassword()",
+      // Code and prose that share a key name with a credential.
+      "  token: string;",
+      "  password: process.env.DB_PASSWORD",
+      "token = get_token()",
+      "    password = pwd",
+      "Authorization: Bearer followed by the token",
+      '{"nextPageToken":"CAoQAA","secret":false,"token":null}',
+      "docker run -u 1000:1000 -u node:node img",
+      "echo $PW | docker login --password-stdin",
+      "http://localhost:3013/x?email=a@b.example",
+      "GOOGLE_APPLICATION_CREDENTIALS=/home/worker/.config/gcloud/sa.json",
+      "      - uses: actions/checkout@v4",
+      "postgres://app:***@db.example/x",
+    ];
+    for (const line of lines) {
+      expect(scrubSecrets(line)).toBe(line);
+      expect(scrubSecrets(jsonBody(line))).toBe(jsonBody(line));
+    }
+    const all = lines.join("\n");
+    expect(scrubSecrets(all)).toBe(all);
+    expect(scrubSecrets(jsonBody(all))).toBe(jsonBody(all));
+  });
+
+  // Each input is ~200 KB and built to make a naive pattern backtrack.
+  // retry: wall-clock bound on a shared CI runner; a real ReDoS takes seconds.
+  test(
+    "new key-context rules stay linear on 200 KB adversarial input",
+    () => {
+      const inputs = [
+        `-----BEGIN RSA PRIVATE KEY-----${"A".repeat(200_000)}`,
+        "-----BEGIN RSA PRIVATE KEY-----\n".repeat(6_000),
+        `"password": "${"\\\\".repeat(100_000)}`,
+        `\\"password\\": \\"${"\\\\".repeat(100_000)}`,
+        `"password": "${"a".repeat(200_000)}`,
+        `\\"password\\": \\"${"a".repeat(200_000)}`,
+        `"password": "`.repeat(14_000),
+        `token: ${"a".repeat(200_000)} x`,
+        "token: a\n".repeat(25_000),
+        `password = ${"a".repeat(200_000)} x`,
+        "Authorization: Bearer ".repeat(9_000),
+        `Authorization: Bearer ${"A".repeat(200_000)}[`,
+        "a".repeat(200_000),
+        `https://${"u".repeat(200_000)}`,
+        "a://a:".repeat(33_000),
+        " -u a:".repeat(33_000),
+        `curl -u ${"a".repeat(200_000)}`,
+        "a.".repeat(100_000),
+        "\\n".repeat(100_000),
+        `"${"a".repeat(63)}":`.repeat(3_000),
+      ];
+      for (const input of inputs) {
+        const start = performance.now();
+        scrubSecrets(input);
+        expect(performance.now() - start).toBeLessThan(50);
+      }
+    },
+    { retry: 2 },
+  );
 });

@@ -143,6 +143,43 @@ describe("runScript", () => {
     }
   });
 
+  spawnTest("ctx.swarm.kv_get forwards path/offset/limit as a view query", async () => {
+    const seen: string[] = [];
+    const server = Bun.serve({
+      port: 0,
+      fetch(req) {
+        const url = new URL(req.url);
+        seen.push(`${url.pathname}${url.search}`);
+        return Response.json({ key: "k", value: [1, 2], view: { path: "rows", type: "array" } });
+      },
+    });
+
+    try {
+      const output = await runScript({
+        agentId: "agent-1",
+        mcpBaseUrl: `http://127.0.0.1:${server.port}`,
+        resources,
+        source: `
+          export default async (_args, ctx) => {
+            await ctx.swarm.kv_get({ key: "k", namespace: "ns", path: "rows", offset: 2, limit: 2 });
+            await ctx.swarm.kv_getOrNull({ key: "k", path: "rows" });
+            await ctx.swarm.kv_get({ key: "k" });
+            return "ok";
+          };
+        `,
+      });
+
+      expect(output.error).toBeUndefined();
+      expect(seen).toEqual([
+        "/api/kv/_/ns/k?path=rows&offset=2&limit=2",
+        "/api/kv/k?path=rows",
+        "/api/kv/k",
+      ]);
+    } finally {
+      server.stop(true);
+    }
+  });
+
   spawnTest("ctx.swarm exposes nullable KV reads and both hard-delete names", async () => {
     const deleted: string[] = [];
     const server = Bun.serve({

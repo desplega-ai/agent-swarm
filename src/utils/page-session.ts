@@ -47,6 +47,8 @@ export interface PageSessionPayload {
   uid?: string;
   /** Display name for a user or generated guest session. */
   name?: string;
+  /** Set only when the shared swarm key launched the session. A session with neither this nor `uid` is a guest. */
+  op?: true;
 }
 
 /** base64url encode a byte buffer (no padding). */
@@ -212,7 +214,8 @@ export async function verifyPageSession(
     return null;
   }
 
-  const candidate = payload as { uid?: unknown; name?: unknown };
+  const candidate = payload as { uid?: unknown; name?: unknown; op?: unknown };
+  if (candidate.op !== undefined && candidate.op !== true) return null;
   if (candidate.uid !== undefined && typeof candidate.uid !== "string") return null;
   if (candidate.name !== undefined && typeof candidate.name !== "string") return null;
 
@@ -286,7 +289,7 @@ const PAGE_SESSION_TTL_SECONDS = 3600;
  */
 export async function issuePageSessionCookie(
   pageId: string,
-  opts: { dev: boolean; uid?: string; name?: string },
+  opts: { dev: boolean; uid?: string; name?: string; op?: true },
 ): Promise<string> {
   const exp = Math.floor(Date.now() / 1000) + PAGE_SESSION_TTL_SECONDS;
   const token = await signPageSession({
@@ -294,6 +297,7 @@ export async function issuePageSessionCookie(
     exp,
     ...(opts.uid ? { uid: opts.uid } : {}),
     ...(opts.name ? { name: opts.name } : {}),
+    ...(opts.op ? { op: true as const } : {}),
   });
   const attrs = [
     `page_session=${token}`,

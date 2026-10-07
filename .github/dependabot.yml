@@ -4,3 +4,10 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+  # Only the digest-pinned nginx base of Dockerfile.ui; Bun pins follow package.json.
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    allow:
+      - dependency-name: "nginxinc/nginx-unprivileged"

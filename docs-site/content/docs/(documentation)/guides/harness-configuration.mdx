@@ -384,7 +384,7 @@ Because the target process owns its own model credentials, `acp` reports `ready:
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
 | `HARNESS_PROVIDER` | Yes | — | Must be set to `acp` |
-| `ACP_TARGET` | No | `custom` | `opencode` for the curated OpenCode preset, or `custom` for an operator-supplied command |
+| `ACP_TARGET` | No | `custom` | `opencode` or `gemini` for a curated preset, or `custom` for an operator-supplied command |
 | `ACP_TARGET_COMMAND` | Custom only | — | Executable to spawn as the custom ACP agent (also accepts the shorter `ACP_COMMAND` alias). Must resolve on `$PATH` or be an absolute path |
 | `ACP_TARGET_ARGS` | No | — | Arguments to the target command. Accepts a JSON array (`["acp", "--flag"]`) or a plain whitespace-separated string |
 | `ACP_TARGET_ENV_KEYS` | No | `[]` | JSON array (or comma-separated list for hand-authored config) of environment/config keys explicitly allowed into a custom target process |
@@ -423,16 +423,16 @@ Any ACP-speaking agent works. A few starting points:
     Needs `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY` in the worker env. `ACP_TARGET_ENV_KEYS` explicitly forwards both supported credential options to the bridge process. This is a different code path from the swarm's native `HARNESS_PROVIDER=claude` adapter; prefer `claude` directly unless you specifically need the ACP transport.
   </Tab>
   <Tab value="Gemini CLI">
-    Gemini CLI has an experimental ACP mode:
+    [Gemini CLI](https://github.com/google-gemini/gemini-cli) has a curated preset that runs `gemini --acp` (the full worker image ships it):
 
     ```bash
     HARNESS_PROVIDER=acp
-    ACP_TARGET_COMMAND=gemini
-    ACP_TARGET_ARGS=["--experimental-acp"]
-    ACP_TARGET_ENV_KEYS=["GEMINI_API_KEY"]
+    ACP_TARGET=gemini
+    MODEL_OVERRIDE=gemini-3-flash-preview
+    GEMINI_API_KEY=...
     ```
 
-    Needs `GEMINI_API_KEY` in the worker env. If the installed Gemini CLI version expects another credential, add that key to `ACP_TARGET_ENV_KEYS` instead.
+    The preset forwards only Gemini's own auth and endpoint keys: `GEMINI_API_KEY`, `GOOGLE_API_KEY`, the Vertex AI set (`GOOGLE_GENAI_USE_VERTEXAI`, `GOOGLE_CLOUD_PROJECT`, `GOOGLE_CLOUD_LOCATION`, `GOOGLE_APPLICATION_CREDENTIALS`), `GOOGLE_GEMINI_BASE_URL`, `GOOGLE_VERTEX_BASE_URL` and `GEMINI_CLI_HOME`. The adapter writes the composed system prompt to a private temp file outside the task `cwd` and points `GEMINI_SYSTEM_MD` at it, so it replaces Gemini CLI's built-in prompt. Gemini CLI does not advertise an ACP `model` option, so `MODEL_OVERRIDE` reaches it as `GEMINI_MODEL` at spawn. The preset also sets `GEMINI_CLI_TRUST_WORKSPACE=true`, because a worker cannot answer the folder-trust prompt.
   </Tab>
   <Tab value="Custom">
     Any executable that speaks ACP over stdio (reads ndjson on stdin, writes ndjson on stdout) works without modification:
@@ -454,7 +454,7 @@ An ACP agent's *own* tools (file edit, shell, etc.) are whatever the target proc
 ### ACP Specifics
 
 - **The target receives a session-scoped `aseph_` token.** `newSession`'s swarm MCP server entry carries this token as an `Authorization` header (see [How it works](#how-it-works) above). The adapter mints it for the session's agent and task, with a 24-hour expiry, and fails closed if minting fails; it never falls back to the operator key. Session completion starts best-effort revocation. If revocation fails, the token remains valid until expiry. `ACP_TARGET_COMMAND` is operator-configured and runs in the worker container as the worker; point it only at a binary you trust with that agent's swarm MCP access for up to 24 hours.
-- **No swarm-side credential gate.** The `acp` adapter has no `readyCheck` — the worker reports `ready: true` immediately. The Docker entrypoint does check the target binary at boot: it resolves the command the adapter would spawn (`opencode` for the preset, otherwise `ACP_TARGET_COMMAND` / `ACP_COMMAND`) and exits with `FATAL` if no target is configured or the executable is not on `$PATH`. Outside the Docker image, an unresolvable target still surfaces at session-spawn time (task fails with `ACP target failed during startup: ...`).
+- **No swarm-side credential gate.** The `acp` adapter has no `readyCheck` — the worker reports `ready: true` immediately. The Docker entrypoint does check the target binary at boot: it resolves the command the adapter would spawn (`opencode` or `gemini` for a preset, otherwise `ACP_TARGET_COMMAND` / `ACP_COMMAND`) and exits with `FATAL` if no target is configured or the executable is not on `$PATH`. Outside the Docker image, an unresolvable target still surfaces at session-spawn time (task fails with `ACP target failed during startup: ...`).
 - **No live steering.** `deliverSteering` is not implemented; mid-run messages promote to follow-up tasks the same way an unsupported provider always handles them.
 - **No skill filesystem sync.** The generic worker image still seeds `~/.claude/skills`, `~/.opencode/skills`, etc. at boot, so a target that reads one of those directories natively (like opencode) still sees skills; a fully custom target sees whatever `ACP_SYSTEM_PROMPT_PATH` writes and nothing more.
 

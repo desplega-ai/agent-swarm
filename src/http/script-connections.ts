@@ -1047,6 +1047,10 @@ async function ensureConnectionAdmin(
 ): Promise<boolean> {
   const auth = getRequestAuth(req);
   if (auth?.kind === "operator" || auth?.kind === "user") return true;
+  if (auth?.kind === "guest") {
+    jsonError(res, "Forbidden", 403);
+    return false;
+  }
 
   const callerAgentId = agentId ?? singleHeader(req, "x-agent-id");
   const agent = callerAgentId ? await getAgentById(callerAgentId) : undefined;
@@ -1081,6 +1085,10 @@ async function ensureVerbAdmin(
 ): Promise<boolean> {
   const auth = getRequestAuth(req);
   if (auth?.kind === "operator" || auth?.kind === "user") return true;
+  if (auth?.kind === "guest") {
+    jsonError(res, "Forbidden", 403);
+    return false;
+  }
 
   const callerAgentId = agentId ?? singleHeader(req, "x-agent-id");
   const agent = callerAgentId ? await getAgentById(callerAgentId) : undefined;

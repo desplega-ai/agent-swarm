@@ -24,8 +24,11 @@ import {
   type SystemOneProvider,
   type SystemOneProviderId,
   systemOneKeyRejectedMessage,
+  systemOneModelProblem,
   systemOneProviderOf,
+  systemOneQuestionLimitProblem,
 } from "./system-one-providers";
+import { cloudflareErrorCode, SYSTEM_ONE_WIRE, SystemOneWireError } from "./system-one-wire";
 
 // ─── Constants ──────────────────────────────────────────────
 
@@ -226,6 +229,15 @@ export const SystemOneDecisionConfigSchema = z
         });
       }
     }
+    // Provider limits. A {{token}} model is skipped at save and checked again at run,
+    // where the interpolated config is parsed by this same schema.
+    const modelProblem = systemOneModelProblem(
+      config.provider,
+      config.model ?? (SYSTEM_ONE_PROVIDERS[config.provider] as SystemOneProvider).defaultModel,
+    );
+    if (modelProblem) ctx.addIssue({ code: "custom", path: ["model"], message: modelProblem });
+    const limitProblem = systemOneQuestionLimitProblem(config.provider, questionIds.length);
+    if (limitProblem) ctx.addIssue({ code: "custom", path: ["questions"], message: limitProblem });
   });
 
 export type SystemOneDecisionConfig = z.infer<typeof SystemOneDecisionConfigSchema>;
@@ -805,7 +817,8 @@ const REQUEST_ID_RE = /^[A-Za-z0-9._:-]{1,128}$/;
 const ERROR_CODE_RE = /^[A-Za-z0-9._:-]{1,64}$/;
 
 function readRequestId(headers: Headers): string | undefined {
-  const value = headers.get("x-request-id") ?? headers.get("request-id");
+  // Cloudflare marks every response with `cf-ray` and sends no request id.
+  const value = headers.get("x-request-id") ?? headers.get("request-id") ?? headers.get("cf-ray");
   return value && REQUEST_ID_RE.test(value) ? value : undefined;
 }
 
@@ -839,7 +852,8 @@ function readErrorCode(text: string): string | undefined {
   ]) {
     if (typeof candidate === "string" && ERROR_CODE_RE.test(candidate)) return candidate;
   }
-  return undefined;
+  // Cloudflare's envelope: `{ success: false, errors: [{ code: 10000, message }] }`.
+  return cloudflareErrorCode(parsed);
 }
 
 function defaultSleep(ms: number, signal: AbortSignal): Promise<void> {
@@ -878,10 +892,11 @@ export class SystemOneDecisionExecutor extends BaseExecutor<
     return { db: this.deps.db, env: this.options.env ?? process.env };
   }
 
-  private resolveTarget(id: SystemOneProviderId) {
+  private resolveTarget(id: SystemOneProviderId, model?: string) {
     return resolveSystemOneTarget(id, this.providerContext(), {
       apiKey: this.options.getApiKey,
       serverUrl: this.options.getServerUrl,
+      model,
     });
   }
 
@@ -922,17 +937,17 @@ export class SystemOneDecisionExecutor extends BaseExecutor<
 
     const providerId = config.provider;
     const provider: SystemOneProvider = SYSTEM_ONE_PROVIDERS[providerId];
-    const target = await this.resolveTarget(providerId);
-    if (!target.ok) return { status: "failed", error: target.error };
-    const { apiKey, endpoint } = target;
 
     // A provider with no default sends no `model` when the node sets none.
     const model = config.model ?? provider.defaultModel;
-    const body = JSON.stringify({
-      state: config.state,
-      ...(model === undefined ? {} : { model }),
-      questions: config.questions,
-    });
+    const modelProblem = systemOneModelProblem(providerId, model);
+    if (modelProblem) return { status: "failed", error: modelProblem };
+    const target = await this.resolveTarget(providerId, model);
+    if (!target.ok) return { status: "failed", error: target.error };
+    const { apiKey, endpoint } = target;
+
+    const wire = provider.wire ?? SYSTEM_ONE_WIRE;
+    const body = JSON.stringify(wire.buildRequest(config, model));
 
     const scrub = (message: string) => message.split(apiKey).join("[REDACTED]");
     const sent = await this.send(
@@ -955,11 +970,15 @@ export class SystemOneDecisionExecutor extends BaseExecutor<
     try {
       decision = validateSystemOneResponse(
         config.questions,
-        parsed,
+        wire.toSystemOne(parsed, { questions: config.questions, model }),
         sent.requestId,
         provider.confidenceField,
       );
     } catch (err) {
+      if (err instanceof SystemOneWireError) {
+        const withId = sent.requestId ? `${err.message} [request ${sent.requestId}]` : err.message;
+        return { status: "failed", error: scrub(withId) };
+      }
       if (err instanceof SystemOneContractError) {
         return {
           status: "failed",

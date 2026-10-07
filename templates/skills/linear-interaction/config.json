@@ -5,7 +5,7 @@
   "slug": "linear-interaction",
   "title": "Linear Interaction",
   "description": "Create issues, update status, and post comments in Linear with explicit project placeholders.",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "category": "skills",
   "placeholders": [
     "LINEAR_PROJECT_ID"

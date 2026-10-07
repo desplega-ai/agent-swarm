@@ -13,6 +13,7 @@ import {
 } from "../be/db";
 import { mcpOverflowAuthError } from "../kv-overflow";
 import { reservedNamespaceError, reservedRoomKeyError } from "../kv-reserved-namespaces";
+import { hasKvViewArgs, resolveKvView } from "../kv-view";
 import { can } from "../rbac";
 import { agentContextKey, pageContextKey } from "../tasks/context-key";
 import { KvEntrySchema, KvKeySchema, KvNamespaceSchema, KvValueTypeSchema } from "../types";
@@ -69,12 +70,33 @@ const kvListQuerySchema = z.object({
   offset: z.coerce.number().int().nonnegative().optional(),
 });
 
+// Targeted read of one entry: dot path into a JSON value + offset/limit page.
+// Unbounded by design: these routes back ctx.swarm.kv_get inside the script
+// sandbox; the model-facing kv-get MCP tool applies its own size cap.
+const kvGetQuerySchema = z.object({
+  path: z.string().max(1024).optional(),
+  offset: z.coerce.number().int().nonnegative().optional(),
+  limit: z.coerce.number().int().positive().optional(),
+});
+
+const kvViewSchema = z.object({
+  path: z.string(),
+  type: z.enum(["object", "array", "string", "number", "boolean", "null"]),
+  total: z.number().int().nonnegative().optional(),
+  offset: z.number().int().nonnegative().optional(),
+  returned: z.number().int().nonnegative().optional(),
+  nextOffset: z.number().int().nonnegative().nullable().optional(),
+});
+
+// With path/offset/limit, `value` is the resolved slice and `view` describes it.
+const kvEntryViewSchema = KvEntrySchema.extend({ view: kvViewSchema.optional() });
+
 // ─── Routes ──────────────────────────────────────────────────────────────────
 
 const RESPONSES_GET = {
-  200: { description: "KV entry", schema: KvEntrySchema },
+  200: { description: "KV entry (or a path/offset/limit view of it)", schema: kvEntryViewSchema },
   404: { description: "KV entry not found or expired" },
-  400: { description: "Validation error or unresolvable namespace" },
+  400: { description: "Validation error, unresolvable namespace, or invalid view path" },
 } as const;
 
 const RESPONSES_PUT = {
@@ -106,6 +128,7 @@ const getKvHeader = route({
   summary: "Get a KV entry by key (namespace resolved from request headers)",
   tags: ["KV"],
   params: z.object({ key: KvKeySchema }),
+  query: kvGetQuerySchema,
   responses: RESPONSES_GET,
 });
 
@@ -167,6 +190,7 @@ const getKvExplicit = route({
   summary: "Get a KV entry by explicit namespace + key",
   tags: ["KV"],
   params: z.object({ namespace: KvNamespaceSchema, key: KvKeySchema }),
+  query: kvGetQuerySchema,
   responses: RESPONSES_GET,
 });
 
@@ -471,7 +495,7 @@ export async function handleKv(
     if (!ns) return true;
     const key = decodeKvSegment(res, parsed.params.key, "key");
     if (!key) return true;
-    return sendGet(req, res, ns, key, getKvExplicit.respond);
+    return sendGet(req, res, ns, key, parsed.query, getKvExplicit.respond);
   }
   if (putKvExplicit.match(req.method, pathSegments)) {
     if (enforceContentLengthCap(req, res, MAX_KV_BODY_BYTES) === BODY_TOO_LARGE) return true;
@@ -511,7 +535,7 @@ export async function handleKv(
     }
     const key = decodeKvSegment(res, parsed.params.key, "key");
     if (!key) return true;
-    return sendGet(req, res, ns, key, getKvHeader.respond);
+    return sendGet(req, res, ns, key, parsed.query, getKvHeader.respond);
   }
   if (putKvHeader.match(req.method, pathSegments)) {
     if (enforceContentLengthCap(req, res, MAX_KV_BODY_BYTES) === BODY_TOO_LARGE) return true;
@@ -638,6 +662,7 @@ async function sendGet(
   res: ServerResponse,
   namespace: string,
   key: string,
+  query: z.infer<typeof kvGetQuerySchema>,
   respond: GetKvRespond,
 ): Promise<boolean> {
   const authErr = authorizeRead(namespace, await buildAuthCtx(req));
@@ -648,6 +673,15 @@ async function sendGet(
   const entry = await getKv(namespace, key);
   if (!entry) {
     jsonError(res, "not found", 404);
+    return true;
+  }
+  if (hasKvViewArgs(query)) {
+    const view = resolveKvView(entry.value, query);
+    if (!view.ok) {
+      jsonError(res, view.error, 400);
+      return true;
+    }
+    respond(res, 200, { ...entry, value: view.value, view: view.view });
     return true;
   }
   respond(res, 200, entry);

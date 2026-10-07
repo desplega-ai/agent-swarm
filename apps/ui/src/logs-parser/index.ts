@@ -53,6 +53,8 @@ const ADAPTERS: Record<string, Adapter> = {
   // Amp's `--stream-json` is Claude Code-compatible: assistant, user, system and result events.
   amp: normalizeAnthropic,
   cursor: normalizeCursor,
+  // Grok runs on the ACP client, so its session logs are ACP updates.
+  grok: normalizeAcp,
 };
 
 export function normalizeSessionLogs(logs: SessionLogRecord[]): TranscriptParseResult {

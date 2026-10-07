@@ -606,8 +606,12 @@ describe("script connections", () => {
       markMigrationApplied(database, "195_approval_request_approvals.sql");
       // 196 alters skills, which this migration-112-only fixture does not create.
       markMigrationApplied(database, "196_skill_invocations.sql");
-      // 198 moves rows out of kv_entries, which this migration-112-only fixture does not create.
-      markMigrationApplied(database, "198_codex_oauth_device_flows.sql");
+      // 198 rebuilds permission_audit, which this migration-112-only fixture does not create.
+      markMigrationApplied(database, "198_permission_audit_guest.sql");
+      // 200 backfills agent_memory, which this migration-112-only fixture does not create.
+      markMigrationApplied(database, "200_backfill_auto_memory_expiry.sql");
+      // 202 moves rows out of kv_entries, which this migration-112-only fixture does not create.
+      markMigrationApplied(database, "202_codex_oauth_device_flows.sql");
 
       const id = crypto.randomUUID();
       const now = new Date().toISOString();

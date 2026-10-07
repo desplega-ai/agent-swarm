@@ -104,3 +104,6 @@ __pycache__/
 
 # Claude Code lays the mod API types here when it loads this checkout as a plugin
 .claude-plugin/types/
+
+# Bun compile scratch files
+*.bun-build

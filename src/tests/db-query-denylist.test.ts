@@ -187,7 +187,7 @@ describe("POST /api/db-query", () => {
       expiresAt: Date.now() + 60_000,
     });
     const migration = await Bun.file(
-      join(import.meta.dir, "../be/migrations/198_codex_oauth_device_flows.sql"),
+      join(import.meta.dir, "../be/migrations/202_codex_oauth_device_flows.sql"),
     ).text();
     getDb().exec(migration);
 

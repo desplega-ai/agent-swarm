@@ -76,3 +76,10 @@ apps/evals/evals.db
 apps/evals/evals.db-shm
 apps/evals/evals.db-wal
 apps/evals/evals-replica.db*
+
+# Local dashboard installs, builds and env files: Vite would bake .env values into the bundle.
+apps/ui/**/node_modules/
+apps/ui/dist/
+apps/ui/test-results/
+apps/ui/**/.env
+apps/ui/**/.env.*

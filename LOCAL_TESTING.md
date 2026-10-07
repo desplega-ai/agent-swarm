@@ -168,13 +168,14 @@ Then render both profiles:
 bun run e2e:visuals /tmp/vis/legacy && bun run e2e:visuals /tmp/vis/v2
 ```
 
-Use `--harness claude,codex,pi,opencode,dsh,cursor,amp` to add real worker legs after the contract layer.
+Use `--harness claude,codex,pi,opencode,dsh,cursor,amp,grok` to add real worker legs after the contract layer.
 Claude needs `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY`.
 Codex needs `CODEX_OAUTH` or `OPENAI_API_KEY`. Pi needs `OPENROUTER_API_KEY` or `ANTHROPIC_API_KEY`.
 Opencode needs `OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY`, or `OPENAI_API_KEY`.
-Override models with `E2E_MODEL_CLAUDE`, `E2E_MODEL_CODEX`, `E2E_MODEL_PI`, `E2E_MODEL_OPENCODE`, `E2E_MODEL_DSH`, `E2E_MODEL_CURSOR`, or `E2E_MODEL_AMP`.
+Override models with `E2E_MODEL_CLAUDE`, `E2E_MODEL_CODEX`, `E2E_MODEL_PI`, `E2E_MODEL_OPENCODE`, `E2E_MODEL_DSH`, `E2E_MODEL_CURSOR`, `E2E_MODEL_AMP`, or `E2E_MODEL_GROK`.
 Cursor needs `CURSOR_API_KEY` and defaults to `gpt-5.4-nano`, the cheapest model `Cursor.models.list()` offers.
 Amp needs `AMP_API_KEY` and a preinstalled `amp` executable (`AMP_BINARY`), and defaults to the `low` mode.
+Grok needs `XAI_API_KEY` and a preinstalled `grok` executable (`GROK_BINARY`), and defaults to `grok-build-0.1`, xAI's cheapest model. `E2E_MODEL_GROK=openrouter/deepseek/deepseek-v4.1-flash` runs it on `OPENROUTER_API_KEY` instead.
 Dsh defaults to `openrouter/deepseek/deepseek-v4.1-flash` and needs `OPENROUTER_API_KEY`.
 Provision `npm install --global @deepseek-ai/dsh@0.2.1-alpha.1` first, then run
 `DSH_BINARY=$(command -v dsh) bun run e2e --only health --harness dsh`.
@@ -476,18 +477,25 @@ ffmpeg -i /tmp/ui-tasks-1.5x.mp4 2>&1 | grep Duration
 
 `record start` has no speed or human flag; speed-up happens afterward. Keep `fps=30` to preserve steady 30 fps output rather than uneven frame drops at an inferred rate. `-an` disables audio because recordings have no audio track. The worker ships `ffmpeg` only, so duration checks use it rather than `ffprobe`.
 
-To share screenshots and recordings (PR body, review comment, Slack), upload them to the same agent-fs QA path and paste the signed URLs:
+Keep the originals on agent-fs under the same QA path. In a PR body or review comment, embed images and mp4s as GitHub user attachments: they never expire, and GitHub plays an mp4 inline. A presigned agent-fs URL downloads instead and dies after 7 days.
 
 ```bash
 agent-fs write qa/agent-swarm/$(date +%F)-<topic>/ui-tasks.png --file /tmp/ui-tasks.png -m "<what it shows>"
-agent-fs signed-url qa/agent-swarm/$(date +%F)-<topic>/ui-tasks.png --json   # 24h default, --expires-in up to 7d
 agent-fs write qa/agent-swarm/$(date +%F)-<topic>/ui-tasks-1.5x.mp4 --file /tmp/ui-tasks-1.5x.mp4 -m "<flow it demonstrates>"
-agent-fs signed-url qa/agent-swarm/$(date +%F)-<topic>/ui-tasks-1.5x.mp4 --json
+# Upload /tmp/ui-tasks.png and /tmp/ui-tasks-1.5x.mp4 with the github-attach skill (or the github-attach swarm script)
+# -> https://github.com/user-attachments/assets/<uuid>
 ```
 
 `agent-fs write --file` (or piped stdin) is the binary-safe path (CLI >= 0.7.1). `--content` is text-only and mangles PNGs.
 
-**PR requirement**: any PR touching `apps/ui/` or `apps/templates-ui/` must include `agent-browser` screenshots of the change running locally, embedded as `![caption](<signed-url>)`. Screenshots stay required for static/layout changes; interaction/flow changes (navigation, form, modal, drag, animation, or multi-step flow) also require a recording, linked as `[Watch the walkthrough](<signed-url>)`. Follow the `agent-browser` skill and the recipe above, using the same agent-fs upload and signed-URL delivery. This is a reviewer convention. No job in `.github/workflows/merge-gate.yml` checks it.
+| Content | Use |
+|---|---|
+| Image or GIF | GitHub user attachment. Fallback only when the token is a GitHub App token: `agent-fs signed-url <path> --inline --json` (expires in 7 days) |
+| Video (mp4) | GitHub user attachment on its own line, else an `agent-fs share-create` link. Never a presigned link |
+| Doc (plan, research, report) | `agent-fs share-create <path> --expires-in 604800` |
+| Durable `live.agent-fs.dev` path, swarm task links | Only under `## Swarm provenance` |
+
+**PR requirement**: any PR touching `apps/ui/` or `apps/templates-ui/` must fill `## Before / after` with `agent-browser` screenshots of the change running locally: a before (main) and after table of `![caption](<attachment-url>)`. Interaction/flow changes (navigation, form, modal, drag, animation, or multi-step flow) also need a recording, as an attachment mp4 on its own line. The PR Body check requires the section for those paths; the media itself is a reviewer convention.
 
 ### Port-conflict resolution
 

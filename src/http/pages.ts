@@ -660,7 +660,9 @@ export async function handlePages(
     }
     const favoriteScope = (await resolveHttpFavoriteOwner(req, myAgentId))?.scope;
     const [decorated] = await withFavoriteFlags([page], { favoriteScope, itemType: "page" });
-    getPageRoute.respond(res, 200, withShareUrls(decorated ?? page));
+    const body = withShareUrls(decorated ?? page);
+    if (getRequestAuth(req)?.kind === "guest") delete body.passwordHash;
+    getPageRoute.respond(res, 200, body);
     return true;
   }
 
@@ -808,7 +810,7 @@ export async function handlePages(
       auth?.kind === "user"
         ? { uid: auth.userId, name: auth.user.name }
         : auth?.kind === "operator"
-          ? { name: `guest-${randomUUID().slice(0, 8)}` }
+          ? { name: `guest-${randomUUID().slice(0, 8)}`, op: true as const }
           : undefined;
     const cookie = await issuePageSessionCookie(page.id, {
       dev: isDevRequest(req),

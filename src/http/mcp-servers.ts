@@ -253,6 +253,7 @@ async function mcpServerPrincipal(req: IncomingMessage): Promise<RbacPrincipal> 
   const auth = getRequestAuth(req);
   if (auth?.kind === "operator") return { kind: "operator" };
   if (auth?.kind === "user") return { kind: "user", userId: auth.userId };
+  if (auth?.kind === "guest") return { kind: "guest" };
   return { kind: "agent", agentId: "", isLead: false };
 }
 

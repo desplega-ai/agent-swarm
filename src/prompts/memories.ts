@@ -19,7 +19,45 @@ export type RelevantMemory = {
   content: string;
   similarity: number;
   rawSimilarity?: number;
+  /** Memory provenance (`task_completion`, `manual`, ...). Older servers omit it. */
+  source?: string;
+  summary?: string | null;
+  createdAt?: string;
 };
+
+const SNIPPET_CHARS = 300;
+const OUTPUT_MARKER = "\n\nOutput:\n";
+const FAILURE_MARKER = "\n\nFailure reason:\n";
+const FAILURE_SUFFIX = "\n\nThis task failed. Learn from this to avoid repeating the mistake.";
+
+/**
+ * The text a memory line shows: its `summary` when set, else, for a
+ * `task_completion` row, the outcome after `Output:` / `Failure reason:`
+ * instead of the start of the old task prompt. The last marker wins because a
+ * follow-up task prompt can itself embed an earlier worker's `Output:` block.
+ */
+export function memorySnippet(memory: RelevantMemory): string {
+  const summary = memory.summary?.trim();
+  if (summary) return summary;
+  const { content } = memory;
+  if (memory.source !== "task_completion") return content;
+
+  const outputAt = content.lastIndexOf(OUTPUT_MARKER);
+  const failureAt = content.lastIndexOf(FAILURE_MARKER);
+  if (outputAt === -1 && failureAt === -1) return content;
+  if (outputAt > failureAt) return content.slice(outputAt + OUTPUT_MARKER.length).trim();
+
+  let reason = content.slice(failureAt + FAILURE_MARKER.length);
+  if (reason.endsWith(FAILURE_SUFFIX)) reason = reason.slice(0, -FAILURE_SUFFIX.length);
+  return `FAILED: ${reason.trim()}`;
+}
+
+/** `[2026-09-29, task_completion] ` from whatever of createdAt/source the server sent. */
+function memoryLinePrefix(memory: RelevantMemory): string {
+  const date = /^\d{4}-\d{2}-\d{2}/.exec(memory.createdAt ?? "")?.[0];
+  const parts = [date, memory.source].filter(Boolean);
+  return parts.length > 0 ? `[${parts.join(", ")}] ` : "";
+}
 
 /**
  * Minimum pre-boost relevance for a memory to be injected into a task prompt.
@@ -56,7 +94,10 @@ export function renderMemoriesPrompt(memories: RelevantMemory[]): string | null 
   if (useful.length === 0) return null;
 
   const memoryContext = useful
-    .map((m) => `- **${m.name}** (id: ${m.id}): ${m.content.substring(0, 300)}`)
+    .map(
+      (m) =>
+        `- ${memoryLinePrefix(m)}**${m.name}** (id: ${m.id}): ${memorySnippet(m).substring(0, SNIPPET_CHARS)}`,
+    )
     .join("\n");
 
   let prompt = `\n\n### Relevant Past Knowledge\n\nThese memories from your previous sessions may be useful. Use \`memory-get\` with the memory ID to retrieve full details.\n\n${memoryContext}\n`;

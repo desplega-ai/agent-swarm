@@ -1,16 +1,5 @@
 # Linear Interaction (Outbound Push)
 
-**Before attempting any API call below, check if the token has been renewed:**
-```bash
-# Use db-query MCP tool
-db-query: SELECT accessToken, expiresAt FROM oauth_tokens WHERE provider = 'linear'
-```
-If `expiresAt` is in the past, do NOT attempt the API calls — just report the needed update in your task output.
-
-To re-authorize, use your swarm API base URL with `/api/trackers/linear/authorize` (potentially needing to remove the app and re-auth). Only mention this if you can confirm the token is expired or not present.
-
----
-
 ## Critical Context
 
 The swarm's Linear integration is **inbound-only**: Linear → swarm. This means:
@@ -26,33 +15,42 @@ The available MCP tracker tools (`tracker-link-task`, `tracker-link-epic`, `trac
 - **Standard PR workflow:** Transition to **In Review** on PR open, **Done** after merge. If the ticket is still "In Progress" 30 min after the PR merges, you're late.
 - **Blocked:** If a ticket is stuck on a dependency, add a comment linking the blocker — don't leave it silent.
 
-## Authentication
+## Authentication: script credential binding
 
-The OAuth token is stored in the swarm database (`oauth_tokens` table, provider = 'linear').
+Use the `swarm-scripts` skill and `script-run` (`args` first, `ctx` second) for every authenticated request. The API server resolves an OAuth authorization, refreshes it when needed, and substitutes `[REDACTED:LINEAR_OAUTH_ACCESS_TOKEN]` in the request header only for the binding's allowed hosts. Never read credential tables, request a raw token from Lead, or copy a token into source, arguments, environment variables, logs, or task output.
 
-**To get the token:**
-```bash
-# Use db-query MCP tool
-db-query: SELECT accessToken FROM oauth_tokens WHERE provider = 'linear'
+Try the conventional binding key `LINEAR_OAUTH_ACCESS_TOKEN` first, using `Authorization: Bearer [REDACTED:LINEAR_OAUTH_ACCESS_TOKEN]` for `api.linear.app`. Do not ask Lead before the first try. `credential-bindings` is lead-only; workers cannot list bindings.
+
+On HTTP 401 with the conventional key, report the missing binding or authorization to Lead as a blocker. The fetch wrapper in `src/scripts-runtime/credential-broker/fetch-patch.ts` drops any header with an unresolved `[REDACTED:` placeholder, so a missing binding sends an unauthenticated request that yields 401, never a credential leak.
+
+Lead uses `credential-bindings` action `list` to check the binding. If missing, Lead registers/authorizes the provider and creates a binding visible to the agent with `configKey: "LINEAR_OAUTH_ACCESS_TOKEN"`, `authKind: "oauth"`, `oauthAuthorizationId`, `allowedHosts: ["api.linear.app"]`, and `headerTemplate: "Authorization: Bearer [REDACTED:LINEAR_OAUTH_ACCESS_TOKEN]"`.
+
+An expiring authorization is refreshed server-side; a refresh failure, revoked/missing authorization, or persistent 401 needs Lead/user re-authorization through `credential-bindings` action `oauth-authorize-url`. Do not query expiry/token columns or loop on 401s.
+
+Supported implementation: `src/be/script-credential-broker.ts` loads scoped relational bindings and calls `resolveOAuthBindingToken` from `src/be/oauth-credential-bindings.ts`. The scripts runtime substitutes placeholders at egress for allowed hosts.
+
+## Making API calls
+
+Allowed host: `api.linear.app`. Send GraphQL queries and mutations with `script-run`; the common operations below supply the `query` and optional `variables`:
+
+```typescript
+export default async function (args, ctx) {
+  const response = await fetch("https://api.linear.app/graphql", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: "Bearer [REDACTED:LINEAR_OAUTH_ACCESS_TOKEN]",
+    },
+    body: JSON.stringify({ query: args.query, variables: args.variables ?? {} }),
+  });
+  if (!response.ok) throw new Error(`Linear HTTP ${response.status}`);
+  const result = await response.json();
+  if (result.errors?.length) throw new Error(JSON.stringify(result.errors));
+  return result.data;
+}
 ```
 
-> **Worker agents (non-lead):** If you are a non-lead agent and cannot access the Linear token via `db-query`, message the lead agent in the task and request the token. Do not complete the task without updating Linear.
-
-**Token details:**
-- Scopes: `app:assignable app:mentionable comments:create issues:create read write`
-- Tokens expire — check `expiresAt` column. If expired, the user needs to re-authorize via the OAuth flow.
-- API endpoint: `https://api.linear.app/graphql`
-
-## Making API Calls
-
-All Linear API calls use GraphQL via POST to `https://api.linear.app/graphql`.
-
-```bash
-curl -s -X POST https://api.linear.app/graphql \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer <ACCESS_TOKEN>" \
-  -d '{"query": "<GRAPHQL_QUERY>"}'
-```
+Return only the issue fields needed for the task; never return request headers or credentials.
 
 ## Agent Interaction API — `action` vs `thought`
 
@@ -191,30 +189,13 @@ query {
 
 This is the most common scenario — completing a Linear-sourced swarm task and updating the ticket:
 
-```bash
-# 1. Get the token
-TOKEN=$(db-query result from oauth_tokens)
-
-# 2. Get issue details and team states
-curl -s -X POST https://api.linear.app/graphql \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $TOKEN" \
-  -d '{"query": "{ issue(id: \"DES-12\") { id team { states { nodes { id name type } } } } }"}'
-
-# 3. Find the "Done" state UUID from the response (type: "completed")
-
-# 4. Update the issue
-curl -s -X POST https://api.linear.app/graphql \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $TOKEN" \
-  -d '{"query": "mutation { issueUpdate(id: \"<ISSUE-UUID>\", input: { stateId: \"<DONE-STATE-UUID>\" }) { success issue { identifier state { name } } } }"}'
-```
+Run the query in operation 1 through the script above to get the issue UUID and team states. Select the state whose `type` is `completed`, then run `issueUpdate` with that state UUID through the same script. Check GraphQL errors and mutation `success` before reporting the ticket updated.
 
 ## Important Notes
 
 - **Always update Linear when completing Linear-sourced tasks.** The user expects the ticket to reflect the swarm's work. Marking only the swarm task as complete is insufficient. Do not complete only the swarm task — failing to update Linear breaks the sync and wastes resources.
 - **Transition timing:** see the "When to Transition" section above. Direct-to-main work transitions on ship, not on merge.
-- **Token expiry:** Check `expiresAt` before making calls. If expired, notify the user — they need to re-authorize.
+- **Authorization failures:** Report refresh failures or persistent 401s to Lead/user for re-authorization; the server handles normal expiry.
 - **Rate limits:** Linear has rate limits. For bulk operations, add small delays between calls.
 - **Issue identifiers vs UUIDs:** The human-readable identifier (e.g., "DES-12") works for queries but the `issueUpdate` mutation requires the actual UUID. Always fetch the UUID first via a query.
 - **Markdown support:** Linear supports markdown in descriptions and comments.
@@ -222,7 +203,7 @@ curl -s -X POST https://api.linear.app/graphql \
 ## Error Handling
 
 Common errors:
-- `401 Unauthorized` → Token expired or invalid, needs re-auth
+- `401 Unauthorized` → Report the missing binding or authorization to Lead as a blocker; Lead checks provisioning or re-authorization
 - `Forbidden` → Token doesn't have required scope
 - `Entity not found` → Wrong issue ID/identifier
 - `"parameter must not be empty"` (or similar on Agent Interaction API) → You sent an `action` activity without a `parameter` — convert to `thought` or fill in a real noun. See "Agent Interaction API — action vs thought" above.

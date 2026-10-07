@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { ExecutorMeta } from "../../types";
+import { scrubSecrets } from "../../utils/secret-scrubber";
 import { BaseExecutor, type ExecutorResult } from "./base";
 
 // ─── Schemas ────────────────────────────────────────────────
@@ -32,7 +33,11 @@ export class NotifyExecutor extends BaseExecutor<
     context: Readonly<Record<string, unknown>>,
     _meta: ExecutorMeta,
   ): Promise<ExecutorResult<z.infer<typeof NotifyOutputSchema>>> {
-    const message = this.deps.interpolate(config.template, context as Record<string, unknown>);
+    // Scrub once: the message reaches Slack, the swarm channel, a log line and
+    // the step output.
+    const message = scrubSecrets(
+      this.deps.interpolate(config.template, context as Record<string, unknown>),
+    );
 
     switch (config.channel) {
       case "swarm": {

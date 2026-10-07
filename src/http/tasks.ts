@@ -75,6 +75,7 @@ import {
 import { ensure } from "../utils/business-use";
 import { getRequestAuth } from "../utils/request-auth-context";
 import { scrubSecrets } from "../utils/secret-scrubber";
+import { rejectGuest } from "./request-principal";
 import { route } from "./route-def";
 import { jsonError, parseBody } from "./utils";
 
@@ -713,6 +714,8 @@ async function canSteerTask(
   } else if (auth?.kind === "user") {
     principal = { kind: "user", userId: auth.userId };
     verb = "task.steer.own";
+  } else if (auth?.kind === "guest") {
+    return false;
   } else {
     if (!myAgentId) return false;
     const agent = await getAgentById(myAgentId);
@@ -750,6 +753,8 @@ async function canActOnOwnTask(
     principal = { kind: "operator" };
   } else if (auth?.kind === "user") {
     principal = { kind: "user", userId: auth.userId };
+  } else if (auth?.kind === "guest") {
+    return false;
   } else {
     if (!myAgentId) return false;
     const agent = await getAgentById(myAgentId);
@@ -772,6 +777,7 @@ async function resolveTaskWritePrincipal(
 ): Promise<RbacPrincipal> {
   const auth = getRequestAuth(req);
   if (auth?.kind === "user") return { kind: "user", userId: auth.userId };
+  if (auth?.kind === "guest") return { kind: "guest" };
   const agentId = auth?.kind === "agent" ? auth.agentId : myAgentId;
   if (!agentId) return { kind: "operator" };
   const agent = await getAgentById(agentId);
@@ -787,6 +793,9 @@ export async function handleTasks(
   queryParams: URLSearchParams,
   myAgentId: string | undefined,
 ): Promise<boolean> {
+  if (pathSegments[0] === "api" && pathSegments[1] === "tasks" && rejectGuest(req, res)) {
+    return true;
+  }
   if (listTasks.match(req.method, pathSegments)) {
     const parsed = await listTasks.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;

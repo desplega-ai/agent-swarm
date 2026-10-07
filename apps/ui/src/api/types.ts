@@ -59,7 +59,7 @@ export interface ModelTierPreview {
 export { REASONING_EFFORT_LEVELS };
 export type { ReasoningEffortLevel };
 
-export type AcpTarget = "opencode" | "custom";
+export type AcpTarget = "opencode" | "gemini" | "custom";
 
 export type ClaudeTransport = "cli" | "sdk";
 
@@ -338,6 +338,7 @@ export const PROVIDER_NAMES = [
   "dsh",
   "amp",
   "cursor",
+  "grok",
 ] as const;
 export type ProviderName = (typeof PROVIDER_NAMES)[number];
 export function isProviderName(value: string | null | undefined): value is ProviderName {
@@ -479,6 +480,12 @@ export interface MintTokenResponse {
   plaintext: string;
   token: UserToken;
   user: User;
+}
+
+export interface ConnectorCodeResponse {
+  code: string;
+  expiresAt: string;
+  connectUrl: string;
 }
 
 export interface McpUserConfigResponse {

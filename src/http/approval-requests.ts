@@ -689,6 +689,7 @@ async function approvalCancelPrincipal(
   const rawAgentId = req.headers["x-agent-id"];
   const agentId =
     auth?.kind === "agent" ? auth.agentId : Array.isArray(rawAgentId) ? rawAgentId[0] : rawAgentId;
+  if (auth?.kind === "guest") return { principal: { kind: "guest" }, resolvedBy: null };
   if (agentId) {
     const agent = await getAgentById(agentId);
     return {

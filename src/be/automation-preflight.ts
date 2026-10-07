@@ -1,5 +1,6 @@
 import type { AutomationIntegrationId, ScheduledTask, Workflow } from "@/types";
 import { getSlackConfiguration, isSlackConfigured } from "../slack/config";
+import { isEnvFlagEnabled } from "../utils/env-flag";
 import { getDbClient } from "./db";
 import { getOAuthApp, getOAuthTokens } from "./db-queries/oauth";
 
@@ -252,10 +253,6 @@ export function renderAutomationTokens<T>(value: T, params: Record<string, unkno
   return render(value) as T;
 }
 
-function enabled(flag: string | undefined): boolean {
-  return flag !== "true" && flag !== "1";
-}
-
 function present(value: string | undefined): boolean {
   return !!value?.trim();
 }
@@ -299,7 +296,7 @@ export async function getAutomationSetupStates(): Promise<AutomationSetupStates>
     jira: jiraTokens && jiraCloudId ? "verified" : "unverified",
     gsc: gscConfigured ? "verified" : "unverified",
     agentmail:
-      enabled(process.env.AGENTMAIL_DISABLE) && present(process.env.AGENTMAIL_API_KEY)
+      !isEnvFlagEnabled("AGENTMAIL_DISABLE", false) && present(process.env.AGENTMAIL_API_KEY)
         ? "verified"
         : "unverified",
     agentfs:

@@ -1,6 +1,6 @@
 # Harness providers runbook
 
-Operational rules for editing or adding harness providers (claude, codex, opencode, pi, devin, acp, dsh, cursor, amp, future).
+Operational rules for editing or adding harness providers (claude, codex, opencode, pi, devin, acp, dsh, cursor, amp, grok, future).
 
 ## Supported providers
 
@@ -12,10 +12,71 @@ Operational rules for editing or adding harness providers (claude, codex, openco
 | pi-mono | `pi` | `PiMonoAdapter` | In-process library; OpenRouter, Anthropic, or Amazon Bedrock (via `MODEL_OVERRIDE=amazon-bedrock/*` — see Bedrock auth below) |
 | Devin | `devin` | `DevinAdapter` | Cloud-managed via Cognition `/sessions` API |
 | Claude Managed | `claude-managed` | `ClaudeManagedAdapter` | Anthropic managed sandbox; SSE relay |
-| ACP | `acp` | `ACPAdapter` | Curated `opencode` preset or a custom [Agent Client Protocol](https://agentclientprotocol.com) command. Session knobs such as model use `session/set_config_option` when advertised, with target-specific startup fallbacks. No swarm-side *model-provider* credential — the target owns its own model auth. The target receives a session-scoped `aseph_` token as the swarm MCP bearer, granting that agent's swarm MCP access for up to 24 hours, so point custom targets only at binaries you trust |
+| ACP | `acp` | `ACPAdapter` | Curated `opencode` or `gemini` preset, or a custom [Agent Client Protocol](https://agentclientprotocol.com) command. Session knobs such as model use `session/set_config_option` when advertised, with target-specific startup fallbacks. No swarm-side *model-provider* credential — the target owns its own model auth. The target receives a session-scoped `aseph_` token as the swarm MCP bearer, granting that agent's swarm MCP access for up to 24 hours, so point custom targets only at binaries you trust |
 | DeepSeek Harness | `dsh` | `DshAdapter` | Spawns `dsh --profile headless --json` per task; OpenRouter or direct DeepSeek API. See [DeepSeek Harness](#deepseek-harness-dsh) below |
 | Amp | `amp` | `AmpAdapter` | Spawns `amp -x --stream-json --stream-json-input` per task; `AMP_API_KEY`; every thread is stored on ampcode.com. See [Amp](#amp-amp) below |
 | Cursor | `cursor` | `CursorAdapter` | In-process `@cursor/sdk` local runtime; inference on Cursor's hosted models with `CURSOR_API_KEY`. See [Cursor](#cursor-cursor) below |
+| Grok | `grok` | `GrokAdapter` | xAI Grok CLI as an ACP server (`grok agent --no-leader stdio`) on the shared ACP client; `XAI_API_KEY`, or `OPENROUTER_API_KEY` for `openrouter/<id>` models. See [Grok](#grok-grok) below |
+
+## Grok (`grok`)
+
+Set `HARNESS_PROVIDER=grok` and `XAI_API_KEY` (or `OPENROUTER_API_KEY` for `openrouter/<id>` models). `grok agent stdio` is a spec ACP
+server, so `GrokAdapter` is a thin wrapper over `ACPAdapter` with a fixed `grok`
+target profile (`grokTargetProfile` in `src/providers/acp-targets.ts`) and
+`provider: "grok"` on `session_init` and `CostData`. `grok` is not an operator
+`ACP_TARGET`.
+
+The full worker image installs the pinned `@xai-official/grok-linux-*` native
+binary (`GROK_VERSION` in `Dockerfile.worker`, SHA-512 verified, unpacked from
+its brotli payload without the npm postinstall). The slim image has none: the
+entrypoint fails when the executable is absent. `GROK_BINARY` selects a trusted
+preinstalled executable.
+
+- **Spawn.** `grok agent --no-leader --always-approve [--model M]
+  [--reasoning-effort E] stdio`. `--no-leader` keeps one agent process per task.
+  Model and effort go on the command line, which the CLI parses before auth.
+- **Isolation.** A fresh `GROK_HOME` (`swarm-grok-*` under the tmpdir) per
+  session, removed when it settles. It holds `config.toml` (auto-update off,
+  Codex compat off, the worker's Claude Code plugins listed in
+  `[plugins].disabled`) and `requirements.toml` (`allow_managed_hooks_only =
+  true`). The env turns off Claude and Cursor compat for hooks, MCP servers,
+  agents and rules (`GROK_ISOLATION_ENV`). Claude skills stay on, so
+  `nativeSkillDiscovery` is `true`. Verified with `grok inspect` against this
+  worker's `~/.claude`: no MCP servers, `CLAUDE.md` disabled, "Hooks outside
+  managed policy disabled".
+- **System prompt.** `session/new` `_meta.rules`, which Grok appends to its own
+  prompt. `_meta.systemPromptOverride` would replace it, tool guidance included.
+  `_meta.yoloMode` is set alongside `--always-approve`.
+- **Models.** A bare id runs on xAI. `openrouter/<vendor>/<id>` adds a
+  `[model."openrouter/<vendor>/<id>"]` block to the session `config.toml`
+  (`base_url` = `OPENROUTER_BASE_URL` or OpenRouter, `env_key =
+  "OPENROUTER_API_KEY"`, `api_backend = "chat_completions"`), and that
+  session's env carries `OPENROUTER_API_KEY` and never `XAI_API_KEY`. The xAI
+  route passes `GROK_MODELS_BASE_URL`, `GROK_MODELS_LIST_URL` and
+  `GROK_XAI_API_BASE_URL` through.
+- **Logs and cost.** Grok reaches MCP tools through its `use_tool` proxy;
+  `rewriteEvent` logs those calls as `mcp__<server>__<tool>` with the inner
+  input. The prompt response has no ACP `usage`: `promptCost` reads
+  `_meta.usage` (input includes cache reads, output excludes reasoning,
+  `costUsdTicks` = 1e-10 USD) into `CostData`, and `_meta.usage.modelUsage`
+  into the per-model `models` rows. The row's model and its context window
+  come from `_meta.modelId`, the model that ran; on the OpenRouter route the
+  reported ids keep the `openrouter/` namespace. An abort waits up to 3s for
+  the `cancelled` answer so its usage is kept.
+- **Models.** `harnessModelMismatch` judges grok at create, claim and spawn:
+  an `xai` id (bare, or `xai/` which the adapter drops), `openrouter/<id>` or
+  `latest:openrouter/...` passes; another vendor's id, namespace or alias is
+  refused, so an Anthropic or OpenAI task never reaches the xAI endpoint.
+- **Credentials.** Readiness is `XAI_API_KEY` or `OPENROUTER_API_KEY`; Test
+  connection is `GET https://api.x.ai/v1/models` (OpenRouter's `/models` when
+  only that key is set). `session/new` without a valid key answers
+  `-32000 Authentication required` (verified), which the adapter reports as
+  "Grok rejected the credentials (XAI_API_KEY invalid or missing)".
+- **Steering and resume.** None: `steerModes: []`, `canResume` false.
+
+Not covered: the SuperGrok OAuth pool (`grok login --device-auth`), which needs
+the CLI's `auth.json` refresh behaviour measured first. The adapter tests replay
+a recorded live session (`src/tests/fixtures/grok/`).
 
 ## Amp (`amp`)
 
@@ -273,6 +334,8 @@ Invalid `HARNESS_PROVIDER` values are rejected at write time (HTTP 400 from `PUT
 The dashboard runtime editor is the preferred configuration path. Selecting ACP on a non-ACP agent starts with the OpenCode preset; an older ACP agent with no `ACP_TARGET` row remains `custom` for backward compatibility. The editor writes the harness, model, and ACP target fields in one `PATCH /api/agents/{id}/runtime` transaction.
 
 OpenCode runs `opencode acp`. Before the first prompt, the adapter applies `MODEL_OVERRIDE` through ACP's advertised `model` config option. It also injects the model into `OPENCODE_CONFIG_CONTENT` before spawn, because the process environment cannot be changed after `session/new`; that startup value is the fallback when the target omits or rejects the protocol option. Missing or rejected options are logged and do not fail the session.
+
+Gemini runs `gemini --acp`. Gemini CLI 0.62.0 advertises no ACP `model` option, so `MODEL_OVERRIDE` reaches it as `GEMINI_MODEL` at spawn. Before spawn, the adapter writes the system prompt to a fresh `mkdtemp` directory outside the task `cwd` and sets `GEMINI_SYSTEM_MD` to that file; an empty prompt keeps Gemini's built-in one. The preset sets `GEMINI_CLI_TRUST_WORKSPACE=true` and forwards only the Gemini API key, Vertex AI and base-URL keys listed in `src/providers/acp-target-catalog.ts`. The full worker image pins the CLI with `GEMINI_CLI_VERSION` in `Dockerfile.worker`.
 
 Custom targets use `ACP_TARGET_COMMAND` plus JSON-array `ACP_TARGET_ARGS`. `ACP_TARGET_ENV_KEYS` is a JSON array of environment/config keys explicitly allowed into the child process; the adapter never forwards the complete resolved environment. `ACP_MODEL_ENV_KEY` optionally maps `MODEL_OVERRIDE` into a target-specific environment variable as its model fallback. `ACP_CONFIG_OPTIONS` is a JSON object of additional string or boolean ACP option values.
 

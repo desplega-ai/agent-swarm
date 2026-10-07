@@ -887,6 +887,96 @@ describe("isCredCheckDisabled", () => {
 });
 
 describe("buildCredStatusReport", () => {
+  const HOME = "/home/worker";
+
+  for (const [provider, authPath] of [
+    ["pi", ".pi/agent/auth.json"],
+    ["opencode", ".local/share/opencode/auth.json"],
+  ] as const) {
+    test(`${provider}: auth.json gives a successful presence-only live test`, async () => {
+      const realFetch = globalThis.fetch;
+      const fetchMock = mock(async () => {
+        throw new Error("file credentials must not be sent to a provider endpoint");
+      });
+      globalThis.fetch = fetchMock as typeof fetch;
+      try {
+        for (const env of [{ HOME }, { HOME, OPENROUTER_API_KEY: "unused-key" }]) {
+          const snap = await buildCredStatusReport(
+            provider,
+            env,
+            { homeDir: HOME, fs: fsWith(new Set([`${HOME}/${authPath}`])) },
+            "boot",
+          );
+          expect(snap.ready).toBe(true);
+          expect(snap.satisfiedBy).toBe("file");
+          expect(snap.liveTest).toMatchObject({ ok: true, error: null, latency_ms: 0 });
+        }
+        expect(fetchMock).not.toHaveBeenCalled();
+      } finally {
+        globalThis.fetch = realFetch;
+      }
+    });
+
+    test(`${provider}: missing credentials do not become a successful live test`, async () => {
+      const snap = await buildCredStatusReport(
+        provider,
+        {},
+        { homeDir: HOME, fs: noFiles },
+        "boot",
+      );
+      expect(snap.ready).toBe(false);
+      expect(snap.liveTest).toBeNull();
+    });
+
+    for (const key of ["OPENROUTER_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY"] as const) {
+      test(`${provider}: ${key} still receives a live probe and reports its result`, async () => {
+        const realFetch = globalThis.fetch;
+        let responseStatus = 200;
+        const fetchMock = mock(async (_url: string | URL | Request, _init?: RequestInit) => {
+          return new Response("{}", { status: responseStatus });
+        });
+        globalThis.fetch = fetchMock as typeof fetch;
+        try {
+          const env = { [key]: "provider-key" };
+          const opts = { homeDir: HOME, fs: noFiles };
+          const success = await buildCredStatusReport(provider, env, opts, "boot");
+          expect(success.liveTest?.ok).toBe(true);
+          responseStatus = 401;
+          const failure = await buildCredStatusReport(provider, env, opts, "post_task");
+          expect(failure.ready).toBe(true);
+          expect(failure.liveTest?.ok).toBe(false);
+          expect(failure.liveTest?.error).toContain("HTTP 401");
+          expect(fetchMock).toHaveBeenCalledTimes(2);
+          expect(String(fetchMock.mock.calls[0]?.[0])).toMatch(/\/models$/);
+        } finally {
+          globalThis.fetch = realFetch;
+        }
+      });
+    }
+  }
+
+  test("pi: a Google model with only GEMINI_API_KEY gives a successful presence-only live test", async () => {
+    const realFetch = globalThis.fetch;
+    const fetchMock = mock(async () => {
+      throw new Error("a presence-only credential must not issue a live probe");
+    });
+    globalThis.fetch = fetchMock as typeof fetch;
+    try {
+      const snap = await buildCredStatusReport(
+        "pi",
+        { MODEL_OVERRIDE: "google/gemini-3-flash-preview", GEMINI_API_KEY: "google-key" },
+        { homeDir: HOME, fs: noFiles },
+        "boot",
+      );
+      expect(snap.ready).toBe(true);
+      expect(snap.satisfiedBy).toBe("env");
+      expect(snap.liveTest).toMatchObject({ ok: true, error: null, latency_ms: 0 });
+      expect(fetchMock).not.toHaveBeenCalled();
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
+
   test("not ready → no live test, snapshot mirrors presence check", async () => {
     const snap = await buildCredStatusReport("claude", {}, {}, "boot");
     expect(snap.ready).toBe(false);

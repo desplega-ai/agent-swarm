@@ -22,7 +22,7 @@ agent-swarm.dev is an open-source operating system for AI work. A lead agent del
 - Workflows, schedules, scripts, and apps for recurring work
 - [Extensions](https://docs.agent-swarm.dev/docs/guides/extensions) for trusted TypeScript hooks, installed as agent-owned inert drafts and activated by a trusted lead, operator, or dashboard user
 - [Realtime rooms](./runbooks/realtime-rooms.md) for shared page state, presence, and live channels
-- Your choice of harness and models: Claude Code, Codex, pi, opencode, [Cursor](https://docs.agent-swarm.dev/docs/guides/provider-auth/cursor), Amp, Devin, or ACP agents
+- Your choice of harness and models: Claude Code, Codex, pi, opencode, [Cursor](https://docs.agent-swarm.dev/docs/guides/provider-auth/cursor), Amp, [Grok](https://docs.agent-swarm.dev/docs/guides/provider-auth/grok), Devin, or ACP agents
 
 ```mermaid
 flowchart LR

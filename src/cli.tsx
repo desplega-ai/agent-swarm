@@ -7,6 +7,7 @@ import type { ComponentType } from "react";
 import { createElement, useEffect, useState } from "react";
 import pkg from "../package.json";
 import { getApiKey, setApiKey } from "./utils/api-key.ts";
+import { installConsoleScrub } from "./utils/console-scrub.ts";
 
 // Get CLI name from bin field (assumes single key)
 const binName = Object.keys(pkg.bin)[0];
@@ -543,6 +544,9 @@ function WorkerRunner({
   const { exit } = useApp();
 
   useEffect(() => {
+    // Inside the effect, not before render(): Ink's console patch would
+    // replace a wrap installed earlier.
+    installConsoleScrub();
     import("./commands/worker.ts")
       .then(({ runWorker }) =>
         runWorker({
@@ -568,6 +572,9 @@ function LeadRunner({ prompt, yolo, systemPrompt, systemPromptFile, additionalAr
   const { exit } = useApp();
 
   useEffect(() => {
+    // Inside the effect, not before render(): Ink's console patch would
+    // replace a wrap installed earlier.
+    installConsoleScrub();
     import("./commands/lead.ts")
       .then(({ runLead }) =>
         runLead({

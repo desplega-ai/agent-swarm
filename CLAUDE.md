@@ -79,6 +79,7 @@ Full rules: [runbooks/extensions.md](./runbooks/extensions.md).
 | `bun run docker:build:worker` | Build Docker worker image (full) |
 | `bun run docker:build:worker:slim` | Build slim worker image (`--target worker-slim`, for CI/E2E) |
 | `bun run docker:build:api` | Build API server image |
+| `bun run docker:build:ui` | Build the dashboard image (`Dockerfile.ui`, nginx) |
 | `bun run docs:openapi` | Regenerate `openapi.json` |
 | `bun run docs:business-use` | Regenerate `BUSINESS_USE.md` (requires BU backend) |
 | `bun run build:pi-skills` | Regenerate `plugin/pi-skills/` from `plugin/commands/*.md` |
@@ -298,7 +299,7 @@ Hub: [runbooks/testing.md](./runbooks/testing.md) — routes to LOCAL_TESTING.md
 Hard rules:
 - Plan-mode verification steps MUST copy real commands from LOCAL_TESTING.md; don't paraphrase.
 - The black-box runner and optional `--harness` legs are documented in `LOCAL_TESTING.md` under `Black-box E2E`. The Playwright UI suite (`bun run e2e:ui`, `packages/ui-e2e`) is under `UI E2E`; its workflow `ui-e2e.yml` is informational.
-- Frontend PRs (`apps/ui/`, `apps/templates-ui/`) MUST include screenshots of the change running locally and a recording for interaction/flow changes (navigation, form, modal, drag, animation, or multi-step flow), captured with `agent-browser` and uploaded to agent-fs (signed URLs in the PR body). Screenshots remain required for static/layout changes. Never `qa-use` unless explicitly asked. This is a reviewer convention; no CI job enforces it. Commands: the `agent-browser` skill and [LOCAL_TESTING.md § When you need to verify a UI change](./LOCAL_TESTING.md#when-you-need-to-verify-a-ui-change).
+- Frontend PRs (`apps/ui/`, `apps/templates-ui/`) MUST include screenshots of the change running locally and a recording for interaction/flow changes (navigation, form, modal, drag, animation, or multi-step flow), captured with `agent-browser` and uploaded as GitHub user attachments (`github-attach` skill; fallback for images only: `agent-fs signed-url --inline`) in the `## Before / after` section. Screenshots remain required for static/layout changes. Never `qa-use` unless explicitly asked. This is a reviewer convention; no CI job enforces it. Commands: the `agent-browser` skill and [LOCAL_TESTING.md § When you need to verify a UI change](./LOCAL_TESTING.md#when-you-need-to-verify-a-ui-change).
 - E2E/test agents MUST use valid UUID agent IDs (e.g. `AGENT_ID=$(uuidgen)`), never slugs like `e2e-lead` — several MCP tool *output* schemas pin `yourAgentId`/`task.agentId` to UUID, so slug-ID agents get `MCP error -32602: Output validation error` on `get-tasks`/`get-task-details`/`store-progress`/`memory-search` **after the write already landed** (retrying double-writes).
 - Tests MUST NOT hard-code ports. CI runs `bun test --parallel=4` (one worker process per file), so two files with the same literal collide. Use `src/tests/test-net.ts`: `listenOnFreePort(server)` for in-process `node:http` servers, `port: 0` + `server.port` for `Bun.serve`, `getFreePort()` + `waitForServer()` for spawned `src/http.ts` children. No global test retry: a timing-sensitive test opts in with `test(name, fn, { retry: 2 })` plus a comment.
 
@@ -346,8 +347,9 @@ Drift checks — run only if you touched the trigger files, MUST commit any rege
 - Edited `templates/extensions/` or `ExtensionManifestSchema`? → `bun run build:extension-catalog && bun run build:extension-schema` and commit both generated files
 - Touched `apps/ui/` — or root `bun.lock`/`package.json`/`bunfig.toml` (ui deps resolve from the root lock)? → `cd apps/ui && bun install --frozen-lockfile && bun run lint && bunx tsc -b` (CI uses `tsc -b`, not `--noEmit`)
 - Touched `Dockerfile` / `Dockerfile.worker` / `apps/evals/Dockerfile` / files they COPY (incl. `bunfig.toml`, member `package.json`s, `.dockerignore`)? → `docker build -f <Dockerfile> .` — CI builds all three images
+- Touched `Dockerfile.ui` / `apps/ui/nginx.conf`? → `bun run docker:build:ui && bash scripts/smoke-ui-image.sh agent-swarm-ui:latest`
 
-Frontend (`apps/ui/`, `apps/templates-ui/`) PRs additionally require screenshots (including static/layout changes) and a recording for interaction/flow changes (navigation, form, modal, drag, animation, or multi-step flow), uploaded to agent-fs with signed URLs in the PR body. This is a reviewer convention, not a CI gate. Commands: the `agent-browser` skill and [LOCAL_TESTING.md § When you need to verify a UI change](./LOCAL_TESTING.md#when-you-need-to-verify-a-ui-change).
+Frontend (`apps/ui/`, `apps/templates-ui/`) PRs additionally require screenshots (including static/layout changes) and a recording for interaction/flow changes (navigation, form, modal, drag, animation, or multi-step flow), uploaded as GitHub user attachments (`github-attach` skill; fallback for images only: `agent-fs signed-url --inline`) in the `## Before / after` section. The PR Body check requires that section when the diff touches those paths. Commands: the `agent-browser` skill and [LOCAL_TESTING.md § When you need to verify a UI change](./LOCAL_TESTING.md#when-you-need-to-verify-a-ui-change).
 
 </important>
 
@@ -355,16 +357,18 @@ Frontend (`apps/ui/`, `apps/templates-ui/`) PRs additionally require screenshots
 
 Most PRs here are written by agents, so the description must carry the intent a reviewer checks the diff against. Write for a human, in the style of the [`comms` skill](https://github.com/desplega-ai/ai-toolbox/blob/main/cc-plugin/base/skills/comms/SKILL.md) (Precise mode): short direct sentences, no filler. Each template section gives a length target. Synthesize to meet it, and go past it only when the reviewer needs the detail.
 
-PR descriptions MUST fill every required section of [.github/pull_request_template.md](./.github/pull_request_template.md). A `fix:` / `fix(scope):` title also requires Repro and Setup.
+PR descriptions MUST fill every required section of [.github/pull_request_template.md](./.github/pull_request_template.md): the `**Why:**` and `**Risk:**` lines, Review map, Change outline, Heads-up, Verified and Urgency. A `fix:` title adds Repro. A diff touching `apps/ui/` or `apps/templates-ui/` adds Before / after. A desplega-bot body adds Swarm provenance. Show the change, do not narrate it: about 250 prose words, with code blocks, mermaid, tables and `<details>` not counted (the check warns above 300).
 
-- **Intent**: why this change exists, paraphrased. Link only public sources (Fixes #N, a public PR or issue). Never paste Slack or DM ids, ts or permalinks, swarm task, run or memory ids, app.agent-swarm.dev or agent-fs links or paths, customer names, or verbatim quotes from private chat. Write 'a maintainer asked for X'. Internal provenance stays in the swarm task. Do not rewrite the ask to match what you built. The **PR Body** check and a PreToolUse hook on `gh pr create|edit` reject bot PR bodies that carry these identifiers (`src/utils/pr-body-leaks.ts`).
-- **Decisions & trade-offs**: up to 3 choices the request did not specify, each with its cost. Always list every migration, new config key, and breaking change.
+- **Why**: one sentence, paraphrased. Link only public sources here (Fixes #N, a public PR or issue). Never paste customer names or verbatim quotes from private chat. Do not rewrite the ask to match what you built.
+- **Risk**: how deep to read, set by the author. `high` (migration, auth/RBAC, secrets, billing, data deletion, prompt or routing changes that hit every agent, a public API break) adds the `risk:high` label. Review pings stay driven by Urgency.
+- **Swarm provenance**: links to the swarm task and its tree, the Slack permalink of the ask, any workflow run, and the plan or research (share link plus durable agent-fs path). These auth-gated links are allowed **only** in this section. Bare Slack ids, ts values and private-chat quotes stay blocked everywhere. The **PR Body** check and a PreToolUse hook on `gh pr create|edit` enforce this for bot bodies (`src/utils/pr-body-leaks.ts`).
 - **Urgency**: copy it from the request. If the request gives none, check "nice to have". Never pick it yourself. After the check passes, "asap" requests a review from tarasyarema and posts a comment. "this week" requests a review from desplega-bot, which starts a swarm review.
+- **Links**: images, GIFs and mp4s as GitHub user attachments (`github-attach` skill); docs as `agent-fs share-create` links. A presigned `signed-url` is an image-only fallback, with `--inline`. Never use one for docs or mp4s: it downloads and expires in 7 days.
 
 `gh pr create --body` skips the template, so write the description to a file, check it, then pass the file:
 
 ```bash
-bun scripts/check-pr-body.ts --title "<conventional title>" --body-file /tmp/pr-body.md
+bun scripts/check-pr-body.ts --title "<conventional title>" --body-file /tmp/pr-body.md --author desplega-bot
 gh pr create --title "<conventional title>" --body-file /tmp/pr-body.md
 ```
 

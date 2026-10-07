@@ -39,14 +39,14 @@ import {
   ScriptRunStatusSchema,
   TERMINAL_SCRIPT_RUN_STATUSES,
 } from "../types";
-import { getAppUrl } from "../utils/constants";
+import { getAppUrl, getMcpBaseUrl } from "../utils/constants";
 import {
   executeRawLlm,
   RawLlmConfigSchema,
   RawLlmOutputSchema,
 } from "../workflows/executors/raw-llm";
 import { route } from "./route-def";
-import { deriveApiBaseUrl, json, jsonError } from "./utils";
+import { json, jsonError } from "./utils";
 
 const DEFAULT_SCRIPT_RUN_CONCURRENCY_CAP = 10;
 
@@ -418,7 +418,7 @@ export async function handleScriptRuns(
     const { run, existing } = creation;
 
     if (!existing && parsed.body.background) {
-      startScriptRunProcess(run, deriveApiBaseUrl(req), bearerToken(req)).catch(async (err) => {
+      startScriptRunProcess(run, getMcpBaseUrl(), bearerToken(req)).catch(async (err) => {
         await updateScriptRun(run.id, {
           status: "failed",
           pid: null,

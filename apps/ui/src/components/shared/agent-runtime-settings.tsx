@@ -81,6 +81,7 @@ const CREDENTIAL_KEYS = [
   "DEEPSEEK_API_KEY",
   "AMP_API_KEY",
   "CURSOR_API_KEY",
+  "XAI_API_KEY",
 ];
 
 function configuredModel(configs: { key: string; value: string }[] | undefined): string {
@@ -147,7 +148,7 @@ function configuredAcpTarget(
   fallback: AcpTarget,
 ): AcpTarget {
   const target = configuredValue(configs, "ACP_TARGET");
-  return target === "opencode" || target === "custom" ? target : fallback;
+  return target === "opencode" || target === "gemini" || target === "custom" ? target : fallback;
 }
 
 export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
