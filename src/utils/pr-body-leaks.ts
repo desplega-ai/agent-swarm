@@ -21,6 +21,13 @@
  *     label and a commit SHA. Only "swarm run", "workflow run" or "run id"
  *     followed by a hex id counts. Cost: "run <id>" alone passes.
  * Every other category is checked everywhere, fences included.
+ *
+ * Swarm provenance: a `## Swarm provenance` section may carry the auth-gated
+ * links a maintainer uses to backtrack (task and session links, durable
+ * agent-fs paths, the Slack permalink of the ask). Inside that section only,
+ * `PROVENANCE_ALLOWED` categories pass, and a Slack permalink's embedded
+ * channel id and ts do not count. Bare Slack ids, ts values and private-chat
+ * quotes stay blocked there too.
  */
 
 export type LeakCategory =
@@ -147,24 +154,76 @@ const PLACEHOLDER_UUIDS = new RegExp(
 /** Fenced code blocks (``` or ~~~). An unclosed fence runs to the end, as in CommonMark. */
 const FENCED_CODE = /^[ \t]*(`{3,}|~{3,})[^\n]*\n[\s\S]*?(?:^[ \t]*\1[`~]*[ \t]*$|$(?![\s\S]))/gm;
 
-/** Returns the distinct leak categories found in `body`, in rule order. Empty means clean. */
-export function findPrBodyLeaks(body: string): LeakCategory[] {
-  const text = body
-    .replace(/\r\n/g, "\n")
+/** The section heading under which auth-gated provenance links are allowed. */
+export const PROVENANCE_HEADING = "Swarm provenance";
+
+/** Categories allowed inside the provenance section. Everything else stays blocked there too. */
+export const PROVENANCE_ALLOWED: ReadonlySet<LeakCategory> = new Set<LeakCategory>([
+  "slack-link",
+  "swarm-dashboard-link",
+  "agent-fs-link",
+  "swarm-task-ref",
+  "agent-fs-path",
+]);
+
+/** A whole Slack permalink, query string included (`?thread_ts=...`). */
+const SLACK_URL = /https?:\/\/[^\s)"'<>]*slack\.com\/(?:archives|client)\/[^\s)"'<>]*/gi;
+
+const HEADING = /^#{1,2}\s+(.+?)\s*#*\s*$/;
+const FENCE = /^\s*(```|~~~)/;
+const isProvenanceHeading = (raw: string) =>
+  raw
+    .replace(/<!--[\s\S]*?-->/g, "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .toLowerCase() === PROVENANCE_HEADING.toLowerCase();
+
+/**
+ * Split a body into the `## Swarm provenance` section(s) and everything else.
+ * A section runs to the next level-1/level-2 heading. Headings inside code
+ * fences do not count, as in `scripts/check-pr-body.ts`.
+ */
+export function splitProvenance(body: string): { outside: string; provenance: string } {
+  const outside: string[] = [];
+  const provenance: string[] = [];
+  let inFence = false;
+  let inProvenance = false;
+  for (const line of body.replace(/\r\n/g, "\n").split("\n")) {
+    if (FENCE.test(line)) inFence = !inFence;
+    const heading = inFence ? null : HEADING.exec(line);
+    if (heading) inProvenance = isProvenanceHeading(heading[1] ?? "");
+    (inProvenance ? provenance : outside).push(line);
+  }
+  return { outside: outside.join("\n"), provenance: provenance.join("\n") };
+}
+
+function scan(text: string, skip: ReadonlySet<LeakCategory>, found: LeakCategory[]) {
+  const clean = text
     .replace(PRESIGNED_URL, "<presigned-url>")
     .replace(PLACEHOLDER_UUIDS, "<placeholder-uuid>");
-  const prose = text.replace(FENCED_CODE, "<code-block>");
-  const found: LeakCategory[] = [];
+  const prose = clean.replace(FENCED_CODE, "<code-block>");
   for (const rule of LEAK_RULES) {
     if (
       rule.enabled &&
+      !skip.has(rule.category) &&
       !found.includes(rule.category) &&
-      rule.pattern.test(rule.proseOnly ? prose : text)
+      rule.pattern.test(rule.proseOnly ? prose : clean)
     ) {
       found.push(rule.category);
     }
   }
-  return found;
+}
+
+/** Returns the distinct leak categories found in `body`, in rule order. Empty means clean. */
+export function findPrBodyLeaks(body: string): LeakCategory[] {
+  const { outside, provenance } = splitProvenance(body);
+  const found: LeakCategory[] = [];
+  scan(outside, new Set(), found);
+  // A permalink carries a channel id and a message ts; allowed here, so drop it whole.
+  scan(provenance.replace(SLACK_URL, "<slack-permalink>"), PROVENANCE_ALLOWED, found);
+  return LEAK_RULES.map((r) => r.category).filter(
+    (c, i, all) => found.includes(c) && all.indexOf(c) === i,
+  );
 }
 
 /** GitHub logins whose PR bodies get the leak check in CI. */

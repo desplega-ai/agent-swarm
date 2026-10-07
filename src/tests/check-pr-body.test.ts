@@ -3,6 +3,10 @@ import {
   checkPrBody,
   isFixTitle,
   pickedChoices,
+  prBodyWarnings,
+  proseWordCount,
+  riskLevel,
+  templateLeadLines,
   templateSections,
 } from "../../scripts/check-pr-body";
 
@@ -91,15 +95,147 @@ describe("check-pr-body", () => {
     expect(checkPrBody(TEMPLATE, body)).toEqual(["missing section: ## Urgency"]);
   });
 
-  test("the real template fails unedited and passes once every section is filled", async () => {
+  test("the real template fails unedited and passes once every part is filled", async () => {
     const template = await Bun.file(".github/pull_request_template.md").text();
+    const leads = templateLeadLines(template);
+    expect(leads).toEqual(["Why", "Risk"]);
     const sections = templateSections(template).filter((s) => s.when !== "optional");
     expect(sections.length).toBeGreaterThan(0);
-    expect(checkPrBody(template, template, "fix: x")).toHaveLength(sections.length);
+    const all = { title: "fix: x", author: "desplega-bot", changedFiles: ["apps/ui/a.tsx"] };
+    // Unknown risk keeps the outline required, so every section and lead line is reported.
+    expect(checkPrBody(template, template, all)).toHaveLength(sections.length + leads.length);
 
-    const filled = sections
-      .map((s) => `## ${s.heading}\n\n${s.choices.length ? `- [x] ${s.choices[0]}` : "filled"}\n`)
-      .join("\n");
-    expect(checkPrBody(template, filled, "fix: x")).toEqual([]);
+    const filled = [
+      "**Why:** because.",
+      "**Risk:** medium",
+      ...sections.map(
+        (s) => `## ${s.heading}\n\n${s.choices.length ? `- [x] ${s.choices[0]}` : "filled"}\n`,
+      ),
+    ].join("\n");
+    expect(checkPrBody(template, filled, all)).toEqual([]);
+  });
+
+  test("the real template's markers", async () => {
+    const template = await Bun.file(".github/pull_request_template.md").text();
+    const when = Object.fromEntries(templateSections(template).map((s) => [s.heading, s.when]));
+    expect(when).toMatchObject({
+      "Review map": "always",
+      "Change outline": "outline",
+      "Before / after": "ui",
+      Repro: "fix",
+      Urgency: "always",
+      "Swarm provenance": "bot",
+    });
+  });
+});
+
+describe("check-pr-body: lead lines, risk and conditional sections", () => {
+  const T = `<!-- top -->
+
+**Why:** <!-- one sentence -->
+
+**Risk:** <!-- low | medium | high -->
+
+## Outline <!-- outline -->
+
+<!-- g -->
+
+## Before / after <!-- ui -->
+
+<!-- g -->
+
+## Swarm provenance <!-- bot -->
+
+<!-- g -->
+`;
+  const human = { author: "octocat" };
+  const leads = (risk: string) => `**Why:** It broke.\n\n**Risk:** ${risk}\n\n`;
+  const outline = "## Outline\n\n```\n+ new\n```\n";
+
+  test("lead lines are read from the template preamble", () => {
+    expect(templateLeadLines(T)).toEqual(["Why", "Risk"]);
+  });
+
+  test("the Why and Risk lines are required and Risk must be a known level", () => {
+    expect(checkPrBody(T, outline, human)).toEqual([
+      "missing line: **Why:**",
+      "missing line: **Risk:**",
+    ]);
+    expect(checkPrBody(T, `**Why:**\n**Risk:** <!-- x -->\n${outline}`, human)).toEqual([
+      "empty line: **Why:**",
+      "empty line: **Risk:**",
+    ]);
+    expect(checkPrBody(T, `${leads("spicy")}${outline}`, human)).toEqual([
+      "**Risk:** must start with one of: low, medium, high",
+    ]);
+    expect(checkPrBody(T, `${leads("High (secrets)")}${outline}`, human)).toEqual([]);
+  });
+
+  test("a lead line after the first heading does not count", () => {
+    expect(checkPrBody(T, `${outline}\n**Why:** x\n**Risk:** low\n`, human)).toContain(
+      "missing line: **Why:**",
+    );
+  });
+
+  test("riskLevel parses the first word only", () => {
+    expect(riskLevel("**Risk:** high (secrets)")).toBe("high");
+    expect(riskLevel("**Risk:** medium")).toBe("medium");
+    expect(riskLevel("**Risk:** lowish")).toBeUndefined();
+    expect(riskLevel("no risk line")).toBeUndefined();
+  });
+
+  test("the outline may be skipped only when Risk is low and the diff is small", () => {
+    const missing = ["missing section: ## Outline"];
+    expect(checkPrBody(T, leads("medium"), { ...human, changedLines: 3 })).toEqual(missing);
+    expect(checkPrBody(T, leads("low"), { ...human, changedLines: 51 })).toEqual(missing);
+    expect(checkPrBody(T, leads("low"), { ...human, changedLines: 50 })).toEqual([]);
+    expect(checkPrBody(T, leads("low"), human)).toEqual([]);
+  });
+
+  test("Before / after is required only when the diff touches a UI app", () => {
+    const body = `${leads("medium")}${outline}`;
+    const missing = ["missing section: ## Before / after"];
+    expect(checkPrBody(T, body, { ...human, changedFiles: ["apps/ui/src/App.tsx"] })).toEqual(
+      missing,
+    );
+    expect(checkPrBody(T, body, { ...human, changedFiles: ["apps/templates-ui/x.ts"] })).toEqual(
+      missing,
+    );
+    expect(checkPrBody(T, body, { ...human, changedFiles: ["src/apps/ui-thing.ts"] })).toEqual([]);
+    expect(checkPrBody(T, body, human)).toEqual([]);
+  });
+
+  test("Swarm provenance is required for the bot and for a local run without an author", () => {
+    const body = `${leads("medium")}${outline}`;
+    const missing = ["missing section: ## Swarm provenance"];
+    expect(checkPrBody(T, body, { author: "desplega-bot" })).toEqual(missing);
+    expect(checkPrBody(T, body, {})).toEqual(missing);
+    expect(checkPrBody(T, body, human)).toEqual([]);
+    const withProvenance = `${body}\n## Swarm provenance\n- Task: link\n`;
+    expect(checkPrBody(T, withProvenance, { author: "desplega-bot" })).toEqual([]);
+  });
+});
+
+describe("check-pr-body: prose budget", () => {
+  test("code fences, tables, details, comments, headings and URLs do not count", () => {
+    const body = [
+      "**Why:** three words here.",
+      "## Review map",
+      "| Area | Depth | Why |",
+      "|---|---|---|",
+      "```",
+      "lots of code words here",
+      "```",
+      "<details>hidden words here</details>",
+      "<!-- hidden comment words -->",
+      "See https://example.com/a/b and #12.",
+    ].join("\n");
+    // "**Why:**", "three", "words", "here.", "See", "and". "#12." has no letter.
+    expect(proseWordCount(body)).toBe(6);
+  });
+
+  test("a long body warns but never fails", () => {
+    expect(prBodyWarnings("word ".repeat(300))).toEqual([]);
+    expect(prBodyWarnings("word ".repeat(301))).toHaveLength(1);
   });
 });

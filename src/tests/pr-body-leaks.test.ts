@@ -149,6 +149,47 @@ describe("findPrBodyLeaks: negative controls", () => {
   });
 });
 
+describe("findPrBodyLeaks: Swarm provenance allowlist", () => {
+  const provenance = (...lines: string[]) =>
+    `${NORMAL_BODY}\n## Swarm provenance <!-- bot -->\n\n${lines.map((l) => `- ${l}`).join("\n")}\n`;
+
+  test("task, session, agent-fs and Slack permalinks pass inside the section", () => {
+    const body = provenance(
+      `Task: ${dashboardLink()} · tree: ${dashboardLink().replace("/tasks/", "/sessions/")}`,
+      `Ask: ${slackLink()}?thread_ts=${slackTs()}&cid=${slackId("D")}`,
+      `Plan: ${agentFsLink()} (durable: ${agentFsPath()})`,
+      `Follow-up of task ${hexWithLetter()}.`,
+    );
+    expect(findPrBodyLeaks(body)).toEqual([]);
+  });
+
+  test("the same links outside the section still fail", () => {
+    const body = `${NORMAL_BODY}\nSee ${slackLink()} and ${dashboardLink()}.\n${provenance()}`;
+    // The permalink's embedded channel id also counts outside the section.
+    expect(findPrBodyLeaks(body)).toEqual(["slack-id", "slack-link", "swarm-dashboard-link"]);
+  });
+
+  test("bare Slack ids, ts values and private-chat quotes stay blocked inside it", () => {
+    expect(findPrBodyLeaks(provenance(`Channel ${slackId("C")}`))).toEqual(["slack-id"]);
+    expect(findPrBodyLeaks(provenance(`ts ${slackTs()}`))).toEqual(["slack-ts"]);
+    expect(
+      findPrBodyLeaks(provenance(`Taras in ${"DM"}: "it would be nice to explain the motivation"`)),
+    ).toEqual(["private-chat-quote"]);
+  });
+
+  test("the section ends at the next heading, and a fenced heading does not open it", () => {
+    const after = `${provenance(`Task: ${dashboardLink()}`)}\n## Notes\n\n${dashboardLink()}\n`;
+    expect(findPrBodyLeaks(after)).toEqual(["swarm-dashboard-link"]);
+    const fenced = `\`\`\`md\n## Swarm provenance\n\`\`\`\n${slackLink()}\n`;
+    expect(findPrBodyLeaks(fenced)).toContain("slack-link");
+  });
+
+  test("the heading matches case-insensitively with a trailing marker", () => {
+    const body = `## swarm  PROVENANCE <!-- bot -->\n\n- ${dashboardLink()}\n`;
+    expect(findPrBodyLeaks(body)).toEqual([]);
+  });
+});
+
 describe("check-pr-body leak gating", () => {
   test("only bot authors, or a local run without an author, get the leak check", () => {
     expect(shouldCheckLeaks(undefined)).toBe(true);
