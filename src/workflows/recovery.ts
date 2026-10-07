@@ -16,7 +16,12 @@ import type { WorkflowRunStep } from "../types";
 import { shapeApprovalResolution } from "./approval-resolution";
 import { loadCompletedStepRouting } from "./completed-step-routing";
 import { FAILED_TASK_OUTPUT_PREFIX } from "./constants";
-import { findReadyNodes, isWorkflowRunActive, walkGraph } from "./engine";
+import {
+  failRunOnUnreadableReplay,
+  findReadyNodes,
+  isWorkflowRunActive,
+  walkGraph,
+} from "./engine";
 import type { ExecutorRegistry } from "./executors/registry";
 import { getSecretInputKeys } from "./input";
 import { finalizeOrWait, resumeWaitState } from "./resume";
@@ -113,6 +118,7 @@ async function recoverRunningRuns(registry: ExecutorRegistry): Promise<number> {
       }
       recovered++;
     } catch (err) {
+      if (await failRunOnUnreadableReplay(runId, err)) continue;
       console.error(`[workflows] Failed to recover running run ${runId}:`, err);
     }
   }
@@ -248,6 +254,7 @@ async function recoverWaitingRuns(registry: ExecutorRegistry): Promise<number> {
       }
       recovered++;
     } catch (err) {
+      if (await failRunOnUnreadableReplay(stuck.runId, err)) continue;
       console.error(`[workflows] Failed to recover waiting run ${stuck.runId}:`, err);
     }
   }
@@ -349,6 +356,7 @@ async function recoverApprovalWaitingRuns(registry: ExecutorRegistry): Promise<n
       }
       recovered++;
     } catch (err) {
+      if (await failRunOnUnreadableReplay(stuck.runId, err)) continue;
       console.error(`[workflows] Failed to recover approval-waiting run ${stuck.runId}:`, err);
     }
   }
@@ -391,6 +399,7 @@ async function recoverWaitStates(registry: ExecutorRegistry): Promise<number> {
       await resumeWaitState(stuck.waitId, resumeStatus, payload, registry);
       recovered++;
     } catch (err) {
+      if (await failRunOnUnreadableReplay(stuck.runId, err)) continue;
       console.error(`[workflows] Failed to recover wait-state ${stuck.waitId}:`, err);
     }
   }

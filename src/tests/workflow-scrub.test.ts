@@ -109,17 +109,23 @@ describe("workflow_runs writers scrub at write", () => {
     expect(JSON.parse(row.triggerData!).source).toBe("webhook-trigger");
   });
 
-  test("updateWorkflowRun redacts error but leaves context byte-exact", async () => {
+  test("updateWorkflowRun redacts error and context; the exact context is sealed", async () => {
     const id = await newRun();
     await updateWorkflowRun(id, {
       status: "failed",
       error: `run exploded with ${secret.value} in the message`,
-      context: { input: { apiKey: secret.value } },
+      context: { input: { apiKey: secret.value, region: "eu-west-1" } },
     });
     const row = await readRun(id);
     expectRedacted(row.error, "run exploded with");
-    // Deliberate: resume rebuilds the live ctx from this column.
-    expect(row.context).toContain(secret.value);
+    expectRedacted(row.context, "eu-west-1");
+    // Resume rebuilds the live ctx from the sealed copy (workflow-replay.test.ts).
+    const sealed = await getDbClient().get<{ context_replay: string }>(
+      "SELECT context_replay FROM workflow_runs WHERE id = ?",
+      [id],
+    );
+    expect(sealed?.context_replay?.startsWith("sealed:v1:")).toBe(true);
+    expect(sealed?.context_replay).not.toContain(secret.value);
   });
 
   test("recordWorkflowPreflightFailure redacts triggerData and error, keeps the dedupe prefix", async () => {

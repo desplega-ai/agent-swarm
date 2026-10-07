@@ -610,6 +610,9 @@ describe("script connections", () => {
       markMigrationApplied(database, "198_permission_audit_guest.sql");
       // 200 backfills agent_memory, which this migration-112-only fixture does not create.
       markMigrationApplied(database, "200_backfill_auto_memory_expiry.sql");
+      // 201 alters workflow_runs and workflow_run_steps, which this
+      // migration-112-only fixture does not create.
+      markMigrationApplied(database, "201_workflow_replay_columns.sql");
 
       const id = crypto.randomUUID();
       const now = new Date().toISOString();

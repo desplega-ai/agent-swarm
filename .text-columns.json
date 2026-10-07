@@ -3382,6 +3382,9 @@
     },
     "input": "scrubbed",
     "output": "scrubbed",
+    "output_replay": {
+      "sealed": "updateWorkflowRunStep seals the exact output that rehydration, dedup, convergence and recovery replay into downstream nodes; the boot sweep seals legacy rows before redacting output. Readers: step replay view (exact, the default), runs API and get-workflow-run (display, the scrubbed output column)"
+    },
     "error": "scrubbed",
     "startedAt": {
       "exempt": "timestamp"
@@ -3417,8 +3420,9 @@
       "exempt": "enum or fixed-format value"
     },
     "triggerData": "scrubbed",
-    "context": {
-      "pending": "12d: left raw on purpose; resume/retry/recovery rebuild the live ctx (resolved secret.* inputs included) from this column, so scrubbing needs input re-resolution on resume first"
+    "context": "scrubbed",
+    "context_replay": {
+      "sealed": "updateWorkflowRun seals the exact ctx that resume, retry and recovery rebuild from (resolved secret.* inputs included); the boot sweep seals legacy rows before redacting context. Readers: getWorkflowRun replay view (exact, the default), runs API and get-workflow-run (display, the scrubbed context column)"
     },
     "error": "scrubbed",
     "startedAt": {

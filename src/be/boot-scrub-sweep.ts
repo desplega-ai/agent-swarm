@@ -19,6 +19,11 @@
  * a row a concurrent writer moved in between is skipped, never clobbered. The
  * loop yields between batches so /health and probes stay responsive.
  *
+ * Replay state: `workflow_run_steps.output` and `workflow_runs.context` are
+ * also replayed by resume and recovery. A row written before the sealed
+ * `*_replay` columns existed has only the plain value, so before redacting it
+ * the sweep seals the original into the empty replay column (same CAS write).
+ *
  * Logs counts only, never content.
  */
 
@@ -29,6 +34,7 @@ import type { DbExecutor, DbParam } from "./db-client";
 import { getMemoryStore } from "./memory";
 import type { MemoryScrubFields } from "./memory/types";
 import { breaksJsonValidity } from "./scrub-json";
+import { sealJson } from "./sealed-json";
 
 const DEFAULT_BATCH_SIZE = 200;
 
@@ -42,6 +48,11 @@ type SweepTarget = {
   hash?: { column: string; of: string };
   /** Route writes through the memory store (FTS sync + embedding reset). */
   memory?: boolean;
+  /**
+   * `column -> sealed replay column`. When the sweep redacts `column` and the
+   * replay column is NULL, it seals the original there first.
+   */
+  replay?: Record<string, string>;
 };
 
 /** Swept in this order. Every table has a TEXT `id` primary key. */
@@ -55,7 +66,16 @@ export const BOOT_SCRUB_TARGETS: readonly SweepTarget[] = [
     hash: { column: "contentHash", of: "content" },
   },
   { table: "events", columns: ["data"] },
-  { table: "workflow_run_steps", columns: ["input", "output", "error", "diagnostics"] },
+  {
+    table: "workflow_run_steps",
+    columns: ["input", "output", "error", "diagnostics"],
+    replay: { output: "output_replay" },
+  },
+  {
+    table: "workflow_runs",
+    columns: ["triggerData", "context", "error"],
+    replay: { context: "context_replay" },
+  },
 ];
 
 export type BootScrubTableStats = {
@@ -166,6 +186,7 @@ async function sweepTarget(
     "id",
     ...target.columns,
     ...(target.hash && !target.columns.includes(target.hash.column) ? [target.hash.column] : []),
+    ...Object.values(target.replay ?? {}),
   ];
 
   for (;;) {
@@ -204,6 +225,15 @@ async function sweepTarget(
         stats.skippedInvalidJson++;
         continue;
       }
+      for (const [col, replayCol] of Object.entries(target.replay ?? {})) {
+        const value = row[col];
+        if (after[col] === value || typeof value !== "string" || row[replayCol] != null) continue;
+        try {
+          after[replayCol] = sealJson(JSON.parse(value));
+        } catch {
+          // Not JSON, so nothing replays it.
+        }
+      }
       pending.push({ id: row.id as string, before: row, after });
     }
 
@@ -240,14 +270,16 @@ async function rewriteRow(
   after: Record<string, string | null>,
 ): Promise<boolean> {
   const changedCols = target.columns.filter((c) => after[c] !== before[c]);
-  const sets = changedCols.map((c) => `${c} = ?`);
-  const params: DbParam[] = changedCols.map((c) => after[c] ?? null);
+  // Replay columns the sweep fills: only while still NULL (guarded below).
+  const sealedCols = Object.values(target.replay ?? {}).filter((c) => after[c] !== undefined);
+  const sets = [...changedCols, ...sealedCols].map((c) => `${c} = ?`);
+  const params: DbParam[] = [...changedCols, ...sealedCols].map((c) => after[c] ?? null);
   if (target.hash && changedCols.includes(target.hash.of)) {
     sets.push(`${target.hash.column} = ?`);
     params.push(contentSha256(after[target.hash.of] ?? ""));
   }
   // Compare-and-set on every changed column.
-  const guards = changedCols.map((c) => `${c} IS ?`);
+  const guards = [...changedCols.map((c) => `${c} IS ?`), ...sealedCols.map((c) => `${c} IS NULL`)];
   params.push(id, ...changedCols.map((c) => before[c] ?? null));
   const result = await tx.run(
     `UPDATE ${target.table} SET ${sets.join(", ")} WHERE id = ? AND ${guards.join(" AND ")}`,
