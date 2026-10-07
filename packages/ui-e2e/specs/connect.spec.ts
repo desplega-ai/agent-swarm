@@ -96,6 +96,13 @@ test.describe("/connect", () => {
     api,
     swarm,
   }) => {
+    // Loopback http passes for local stacks; any other http origin is refused.
+    await api.put("/api/config", {
+      scope: "global",
+      key: "PUBLIC_MCP_BASE_URL",
+      value: "http://swarm-e2e.example.com",
+      isSecret: false,
+    });
     const name = `Connect E2E 400 ${Date.now()}`;
     const { user } = await api.post<{ user: { id: string } }>("/api/users", { name });
     await page.addInitScript(([key, id]) => window.localStorage.setItem(key, id), [

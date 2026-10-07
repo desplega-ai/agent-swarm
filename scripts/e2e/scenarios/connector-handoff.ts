@@ -38,22 +38,33 @@ export const connectorHandoff: Scenario = {
       "minting a code for an unknown user",
     );
 
-    // The SUT's public origin is http://, which the connector refuses.
-    const refused = await ctx.api("POST", `/api/users/${userId}/connector-codes`, { body: {} });
-    expectStatus(refused, [400], "minting a code for a non-https swarm");
-    expect(
-      String((refused.json as { error?: string }).error).includes("PUBLIC_MCP_BASE_URL"),
-      "the non-https error names PUBLIC_MCP_BASE_URL",
+    // The SUT's own origin is loopback http, which passes for local stacks.
+    expectStatus(
+      await ctx.api("POST", `/api/users/${userId}/connector-codes`, { body: {} }),
+      [201],
+      "minting a code for a loopback http swarm",
     );
-    const publicOrigin = `https://swarm-${ctx.nonce}.example.com`;
-    const config = await ctx.api("PUT", "/api/config", {
-      body: { scope: "global", key: "PUBLIC_MCP_BASE_URL", value: publicOrigin, isSecret: false },
-    });
-    expectStatus(config, [200, 201], "set PUBLIC_MCP_BASE_URL");
-    const configId =
-      (config.json as { id?: string; config?: { id?: string } }).config?.id ??
-      (config.json as { id?: string }).id;
+
+    let configId: string | undefined;
+    const setPublicOrigin = async (value: string) => {
+      const config = await ctx.api("PUT", "/api/config", {
+        body: { scope: "global", key: "PUBLIC_MCP_BASE_URL", value, isSecret: false },
+      });
+      expectStatus(config, [200, 201], `set PUBLIC_MCP_BASE_URL=${value}`);
+      configId = (config.json as { id?: string }).id;
+    };
     try {
+      // A non-loopback http origin is one the connector refuses.
+      await setPublicOrigin(`http://swarm-${ctx.nonce}.example.com`);
+      const refused = await ctx.api("POST", `/api/users/${userId}/connector-codes`, { body: {} });
+      expectStatus(refused, [400], "minting a code for a non-https swarm");
+      expect(
+        String((refused.json as { error?: string }).error).includes("PUBLIC_MCP_BASE_URL"),
+        "the non-https error names PUBLIC_MCP_BASE_URL",
+      );
+
+      const publicOrigin = `https://swarm-${ctx.nonce}.example.com`;
+      await setPublicOrigin(publicOrigin);
       await handoff(ctx, userId, publicOrigin);
     } finally {
       if (configId) await ctx.api("DELETE", `/api/config/${configId}`);

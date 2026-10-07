@@ -453,7 +453,7 @@ const connectorDiscoveryRoute = route({
   pattern: ["api", "connector", "discovery"],
   summary: "Public origins the agent-swarm.dev connector needs to find this swarm's dashboard",
   description:
-    "Unauthenticated. Lets the connector turn an API origin into the dashboard URL that serves /connect. appUrl is omitted when APP_URL is not set.",
+    "Unauthenticated. Lets the connector turn an API origin into the dashboard URL that serves /connect. appUrl is omitted when APP_URL is not set or is not https.",
   tags: ["Users"],
   responses: {
     200: {
@@ -636,9 +636,19 @@ function getConnectorConnectUrl(): URL | null {
   }
 }
 
-function isHttpsOrigin(value: string): boolean {
+const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
+
+/**
+ * The connector only links https swarms in production. A loopback http
+ * origin also passes, for local stacks: there the connector's own SSRF guard
+ * (private swarms allowed only in its local env) makes the final call.
+ */
+function isConnectableSwarmOrigin(value: string): boolean {
   try {
-    return new URL(value).protocol === "https:";
+    const url = new URL(value);
+    return (
+      url.protocol === "https:" || (url.protocol === "http:" && LOOPBACK_HOSTS.has(url.hostname))
+    );
   } catch {
     return false;
   }
@@ -835,7 +845,7 @@ export async function handleUsers(
     // The connector refuses non-HTTPS swarm origins, so fail before minting a code.
     // Same swarm_config-aware resolver as the dashboard's HTTPS gate.
     const swarmOrigin = await resolveMcpBaseUrl();
-    if (!isHttpsOrigin(swarmOrigin)) {
+    if (!isConnectableSwarmOrigin(swarmOrigin)) {
       jsonError(
         res,
         `The public API origin (${swarmOrigin}) is not HTTPS. Set PUBLIC_MCP_BASE_URL to an https:// origin.`,
@@ -869,7 +879,9 @@ export async function handleUsers(
   if (connectorDiscoveryRoute.match(req.method, pathSegments)) {
     const parsed = await connectorDiscoveryRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const appUrl = await resolveAppUrl();
+    // The connector only opens an https dashboard, so an http APP_URL is not reported.
+    const resolvedAppUrl = await resolveAppUrl();
+    const appUrl = resolvedAppUrl?.startsWith("https://") ? resolvedAppUrl : null;
     connectorDiscoveryRoute.respond(res, 200, {
       apiUrl: await resolveMcpBaseUrl(),
       ...(appUrl ? { appUrl } : {}),

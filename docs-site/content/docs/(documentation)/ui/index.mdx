@@ -74,7 +74,7 @@ The agent-swarm.dev connector lets ChatGPT, Claude, Codex, and Cursor send and r
 3. Pick yourself from the list of people. A connection that uses your own `aswt_` token skips this step. The dashboard remembers your last choice for each connection.
 4. Confirm. The dashboard asks the swarm for a single-use code that expires in 10 minutes, then sends the tab back to the connector. The connector trades the code for a token and shows "All set".
 
-The token can do what you can do on the swarm, nothing more. The swarm's public API origin (`PUBLIC_MCP_BASE_URL`) must use `https://`. The **Connect to ChatGPT** button on a person's **Tokens** tab starts the same flow.
+The token can do what you can do on the swarm, nothing more. The swarm's public API origin (`PUBLIC_MCP_BASE_URL`) must use `https://`. A loopback `http://localhost` origin also passes, for local development stacks only. The **Connect to ChatGPT** button on a person's **Tokens** tab starts the same flow.
 
 To mint a token by hand instead, open **People**, select yourself, and click **Mint token** on the **Tokens** tab. Copy the token when it is shown: it is shown only once. Revoke it from the same tab.
 

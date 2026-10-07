@@ -166,6 +166,10 @@ describe("pickPreferredUser", () => {
     expect(pickPreferredUser(users, [null, undefined, "gone"])).toBeNull();
     expect(pickPreferredUser([], ["a"])).toBeNull();
   });
+
+  test("returns the only user when there is exactly one", () => {
+    expect(pickPreferredUser([{ id: "solo" }], [null, "gone"])).toEqual({ id: "solo" });
+  });
 });
 
 describe("parseClient", () => {

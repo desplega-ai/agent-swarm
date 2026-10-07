@@ -11,10 +11,17 @@ import { DEFAULT_CONNECTOR_CONNECT_URL } from "@/pages/connect/connect-flow";
 export const CONNECT_CHATGPT_HINT =
   "A new tab opens on agent-swarm.dev. Sign in there and confirm. The link expires in 10 minutes.";
 
-function isHttps(url: string | undefined): boolean {
+const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
+
+/** Mirrors the server gate: https, or loopback http for local stacks. */
+function isConnectable(url: string | undefined): boolean {
   if (!url) return false;
   try {
-    return new URL(url).protocol === "https:";
+    const parsed = new URL(url);
+    return (
+      parsed.protocol === "https:" ||
+      (parsed.protocol === "http:" && LOOPBACK_HOSTS.has(parsed.hostname))
+    );
   } catch {
     return false;
   }
@@ -38,7 +45,7 @@ export function ConnectChatGptButton({ user }: { user: User }) {
     staleTime: 60_000,
   });
   const apiOrigin = mcpConfig.data?.mcpBaseUrl;
-  const httpsReady = isHttps(apiOrigin);
+  const httpsReady = isConnectable(apiOrigin);
 
   function connect() {
     const params = new URLSearchParams({

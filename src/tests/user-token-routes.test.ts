@@ -326,6 +326,16 @@ describe("ChatGPT connector codes", () => {
     );
   });
 
+  test("POST accepts a loopback http public origin for local stacks", async () => {
+    const user = await createUser({ name: "Loopback Origin User" });
+    for (const origin of ["http://localhost:3013", "http://127.0.0.1:3013", "http://[::1]:3013"]) {
+      process.env.PUBLIC_MCP_BASE_URL = origin;
+      const body = await createCode(user.id);
+      expect(new URL(body.connectUrl).searchParams.get("swarm")).toBe(origin);
+    }
+    process.env.PUBLIC_MCP_BASE_URL = "https://swarm.example.com";
+  });
+
   test("discovery is public and reports the API, dashboard and connect URLs", async () => {
     const originalAppUrl = process.env.APP_URL;
     const originalDashboardUrl = process.env.DASHBOARD_URL;
@@ -352,6 +362,14 @@ describe("ChatGPT connector codes", () => {
         appUrl: "https://app.example.com",
         connectUrl: null,
       });
+
+      // The connector ignores an http dashboard, so discovery does not report it.
+      await upsertSwarmConfig({ scope: "global", key: "APP_URL", value: "http://app.example.com" });
+      const insecureApp = await fetch(url("/api/connector/discovery"));
+      expect(await insecureApp.json()).toEqual({
+        apiUrl: "https://swarm.example.com",
+        connectUrl: null,
+      });
     } finally {
       if (originalAppUrl === undefined) delete process.env.APP_URL;
       else process.env.APP_URL = originalAppUrl;
@@ -362,7 +380,7 @@ describe("ChatGPT connector codes", () => {
 
   test("POST rejects a non-HTTPS public origin, unknown users, and missing auth", async () => {
     const user = await createUser({ name: "Http Origin User" });
-    process.env.PUBLIC_MCP_BASE_URL = "http://localhost:3013";
+    process.env.PUBLIC_MCP_BASE_URL = "http://swarm.example.com";
     const insecure = await authedFetch(`/api/users/${user.id}/connector-codes`, {
       method: "POST",
       body: "{}",

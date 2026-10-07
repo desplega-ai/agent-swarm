@@ -21342,7 +21342,7 @@ export interface paths {
         };
         /**
          * Public origins the agent-swarm.dev connector needs to find this swarm's dashboard
-         * @description Unauthenticated. Lets the connector turn an API origin into the dashboard URL that serves /connect. appUrl is omitted when APP_URL is not set.
+         * @description Unauthenticated. Lets the connector turn an API origin into the dashboard URL that serves /connect. appUrl is omitted when APP_URL is not set or is not https.
          */
         get: {
             parameters: {
