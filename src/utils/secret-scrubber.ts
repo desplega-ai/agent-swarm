@@ -33,9 +33,11 @@ import { GITLEAKS_RULES } from "./secret-rules.generated";
  * stored secret at boot, plus its base64, base64url and URL-encoded forms, and
  * the known-value pass matches them all through one combined regex; v5 = pass
  * 5, the vendored gitleaks rule set, plus hand-written Resend, Google OAuth,
- * Discord webhook, xAI and bare Telegram shapes in pass 2.
+ * Discord webhook, xAI and bare Telegram shapes in pass 2; v6 = pass 5 resumes
+ * after the secret, not the match, so adjacent secrets that share a delimiter
+ * both redact, and sourcegraph-access-token drops its bare 40-hex branch.
  */
-export const SCRUBBER_RULES_VERSION = 5;
+export const SCRUBBER_RULES_VERSION = 6;
 
 /** Env-var names that are always considered secrets, even without suffix hints. */
 const SENSITIVE_KEY_EXACT = new Set<string>([
@@ -663,6 +665,11 @@ function applyGitleaksRule(text: string, rule: CompiledGitleaksRule, global: Com
     const secret = m[group] as string;
     const span = m.indices?.[group];
     if (!span) continue;
+    // Resume at the end of the secret, not the match. Many rules consume a
+    // delimiter on each side, so `a b` shares one space: resuming after it
+    // hides the second secret's leading boundary. The next match starts at or
+    // after span[1], so redacted spans never overlap; the max keeps progress.
+    re.lastIndex = Math.max(span[1], m.index + 1);
     if (rule.entropy && shannonEntropy(secret) <= rule.entropy) continue;
     if (allowedBy(global, secret, m[0])) continue;
     if (rule.allowlists.some((list) => allowedBy(list, secret, m[0]))) continue;

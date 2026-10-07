@@ -1811,7 +1811,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
     },
     {
       "id": "sourcegraph-access-token",
-      "source": "\\b(\\b(sgp_(?:[a-fA-F0-9]{16}|local)_[a-fA-F0-9]{40}|sgp_[a-fA-F0-9]{40}|[a-fA-F0-9]{40})\\b)(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
+      "source": "\\b(\\b(sgp_(?:[a-fA-F0-9]{16}|local)_[a-fA-F0-9]{40}|sgp_[a-fA-F0-9]{40})\\b)(?:[\\x60'\"\\s;]|\\\\[nr]|$)", // gitleaks:allow
       "flags": "i",
       "keywords": [
         "sgp_",

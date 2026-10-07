@@ -154,6 +154,12 @@ export function buildPositives(): CorpusPositive[] {
     positive("vault service token", join("hvs", ".", rand(ALNUM, 96)), {
       gitleaksRule: "vault-service-token",
     }),
+    positive("sourcegraph", join("sgp", "_", rand(HEX, 40)), {
+      gitleaksRule: "sourcegraph-access-token",
+    }),
+    positive("sourcegraph instance", join("sgp", "_", rand(HEX, 16), "_", rand(HEX, 40)), {
+      gitleaksRule: "sourcegraph-access-token",
+    }),
   ];
 }
 
@@ -182,6 +188,30 @@ export function buildNegatives(): string[] {
     out.push(`git checkout ${sha1(`short-${i}`).slice(0, 7)}`);
     out.push(`image sha256:${sha256(`image-${i}`)}`);
     out.push(`{"id":"${uuid(`json-${i}`)}","parentTaskId":"${uuid(`parent-${i}`)}"}`);
+  }
+  // Provider keywords in prose next to commit SHAs, digests and UUIDs. The
+  // keyword gate only needs the word somewhere in the text, so a rule with a
+  // bare hex or UUID branch would redact these.
+  for (const [i, kw] of [
+    "sourcegraph",
+    "heroku",
+    "twilio",
+    "mailgun",
+    "databricks",
+    "sentry",
+    "datadog",
+    "github",
+    "gitlab",
+    "linear",
+    "okta",
+    "azure",
+  ].entries()) {
+    out.push(
+      `${kw} searched commit ${sha1(`kw-commit-${i}`)} for references`,
+      `${kw} deploy ${uuid(`kw-deploy-${i}`)} finished`,
+      `${kw} run ${sha256(`kw-run-${i}`)} passed`,
+      `${kw} request id ${sha256(`kw-req-${i}`).slice(0, 32)}`,
+    );
   }
   out.push(
     `data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAA${b64("png", 600)}`,

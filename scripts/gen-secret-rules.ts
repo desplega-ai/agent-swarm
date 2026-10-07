@@ -35,6 +35,19 @@ const EXCLUDED: Record<string, string> = {
 };
 
 /**
+ * Upstream regex fragments we cut on purpose. Each `drop` must appear verbatim
+ * in the upstream regex, so a refresh that changes the rule fails the run.
+ */
+const DROPPED_BRANCHES: Record<string, { drop: string; reason: string }> = {
+  "sourcegraph-access-token": {
+    drop: "|[a-fA-F0-9]{40}",
+    reason:
+      "the legacy bare 40-hex token is shaped like a git commit SHA, and the keyword gate only needs " +
+      '"sourcegraph" somewhere in the text, so it redacted commit hashes in prose; sgp_ tokens still match',
+  },
+};
+
+/**
  * Rules whose secret is the whole match, not the first capture group. gitleaks
  * reports the first non-empty group, which here is a named group that labels
  * the JWT header field.
@@ -278,7 +291,15 @@ export function generate(text: string): string {
       excluded.push({ id: rule.id, reason });
       continue;
     }
-    const converted = convertGoRegex(rule.regex as string);
+    let upstream = rule.regex as string;
+    const cut = DROPPED_BRANCHES[rule.id];
+    if (cut) {
+      if (!upstream.includes(cut.drop)) {
+        throw new Error(`DROPPED_BRANCHES: rule ${rule.id} no longer contains ${cut.drop}`);
+      }
+      upstream = upstream.replace(cut.drop, "");
+    }
+    const converted = convertGoRegex(upstream);
     const regex = { source: stripKeyPrefix(converted.source), flags: converted.flags };
     const ruleRe = new RegExp(regex.source, `${regex.flags}g`);
     const allowlists = (rule.allowlists ?? [])
@@ -295,9 +316,11 @@ export function generate(text: string): string {
       ...(allowlists.length > 0 ? { allowlists } : {}),
     });
   }
-  for (const id of Object.keys(EXCLUDED)) {
+  for (const id of [...Object.keys(EXCLUDED), ...Object.keys(DROPPED_BRANCHES)]) {
     if (!config.rules.some((rule) => rule.id === id)) {
-      throw new Error(`EXCLUDED lists ${id}, which the vendored config no longer has`);
+      throw new Error(
+        `EXCLUDED or DROPPED_BRANCHES lists ${id}, which the vendored config no longer has`,
+      );
     }
   }
 

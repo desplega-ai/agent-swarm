@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { randomBytes } from "node:crypto";
 import { convertGoRegex, stripKeyPrefix } from "../../scripts/gen-secret-rules";
 import { GITLEAKS_RULES } from "../utils/secret-rules.generated";
 import {
@@ -122,6 +123,30 @@ describe("secret corpus", () => {
   test("redacts only the secret of a keyword-context rule, not its key", () => {
     const p = positives.find((x) => x.name === "mailgun");
     expect(scrubSecrets(p?.text)).toBe("mailgun: [REDACTED:gitleaks:mailgun-private-api-token]");
+  });
+
+  test("redacts two secrets that share one delimiter", () => {
+    // azure-ad-client-secret consumes a delimiter on each side, so `a b`
+    // shares one space between the two matches.
+    const azure = () =>
+      [randomBytes(3).toString("hex").slice(0, 3), "7Q", "~", randomToken(31)].join("");
+    const pairs: [string, string][] = [[azure(), azure()]];
+    // The same check for every bare-secret positive (no custom context).
+    const again = new Map(buildPositives().map((p) => [p.name, p]));
+    for (const p of positives) {
+      const q = again.get(p.name);
+      if (q && p.text === `the response included ${p.secret} in its body`) {
+        pairs.push([p.secret, q.secret]);
+      }
+    }
+    for (const [a, b] of pairs) {
+      for (const sep of [" ", "\n", "\t"]) {
+        const out = scrubSecrets(`${a}${sep}${b}`);
+        expect(out, `${a.slice(0, 6)}… ${JSON.stringify(sep)}`).not.toContain(a);
+        expect(out, `${b.slice(0, 6)}… ${JSON.stringify(sep)}`).not.toContain(b);
+        expect(out).toMatch(new RegExp(`^\\[REDACTED:[^\\]]+\\]${sep}\\[REDACTED:[^\\]]+\\]$`));
+      }
+    }
   });
 
   test("leaves every negative untouched", () => {
