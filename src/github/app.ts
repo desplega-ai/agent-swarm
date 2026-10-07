@@ -1,3 +1,5 @@
+import { isEnvFlagEnabled } from "../utils/env-flag";
+
 let initialized = false;
 let webhookSecret: string | null = null;
 let appId: string | null = null;
@@ -8,8 +10,7 @@ const tokenCache = new Map<number, { token: string; expiresAt: number }>();
 
 export function isGitHubEnabled(): boolean {
   // Check if GitHub is explicitly disabled
-  const githubDisable = process.env.GITHUB_DISABLE;
-  if (githubDisable === "true" || githubDisable === "1") {
+  if (isEnvFlagEnabled("GITHUB_DISABLE", false)) {
     return false;
   }
 
@@ -33,8 +34,7 @@ export function initGitHub(): boolean {
   initialized = true;
 
   // Check if GitHub is explicitly disabled
-  const githubDisable = process.env.GITHUB_DISABLE;
-  if (githubDisable === "true" || githubDisable === "1") {
+  if (isEnvFlagEnabled("GITHUB_DISABLE", false)) {
     console.log("[GitHub] Disabled via GITHUB_DISABLE");
     return false;
   }
