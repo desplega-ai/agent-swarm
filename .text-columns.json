@@ -813,6 +813,14 @@
       "exempt": "identifier"
     }
   },
+  "codex_oauth_device_flows": {
+    "flow_id": {
+      "exempt": "identifier"
+    },
+    "state": {
+      "exempt": "ciphertext"
+    }
+  },
   "connector_codes": {
     "code_hash": {
       "exempt": "hash or digest"
