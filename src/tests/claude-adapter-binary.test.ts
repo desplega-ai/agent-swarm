@@ -639,7 +639,7 @@ describe("preseedClaudeTrustDialog", () => {
     const data = JSON.parse(await readFile(join(homeDir, ".claude.json"), "utf-8"));
     expect(data.projects["/a"].hasTrustDialogAccepted).toBe(true);
     expect(data.projects["/b"].hasTrustDialogAccepted).toBe(true);
-    expect(await readdir(homeDir)).toEqual([".claude.json", ".claude.json.swarm-lock"]);
+    expect((await readdir(homeDir)).sort()).toEqual([".claude.json", ".claude.json.swarm-lock"]);
   });
 
   test("many writers on an expired mkdir lock keep every entry of every round", async () => {
