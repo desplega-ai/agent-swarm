@@ -105,8 +105,10 @@ describe("findPrBodyLeaks: negative controls", () => {
   test("a fenced code example with a fresh UUID taskId", () => {
     const body = `## Proof of work\n\n\`\`\`ts\nconst taskId = "${randomUUID()}";\nawait store({ parentTaskId: "${randomUUID()}" });\n\`\`\`\n`;
     expect(findPrBodyLeaks(body)).toEqual([]);
-    // The same line outside the fence is still a ref.
-    expect(findPrBodyLeaks(`taskId = "${randomUUID()}"`)).toEqual(["swarm-task-ref"]);
+    // The same line outside the fence is still a ref. The rule needs a letter in
+    // the first group, so a random UUID would flake (~2% are all digits there).
+    const ref = `${hexWithLetter()}-1111-2222-3333-444444444444`;
+    expect(findPrBodyLeaks(`taskId = "${ref}"`)).toEqual(["swarm-task-ref"]);
   });
 
   test("a fence does not hide Slack or dashboard links", () => {
