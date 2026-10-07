@@ -246,8 +246,8 @@ export function stripFencedCode(markdown: string, placeholder = "<code-block>"):
 const isProvenanceHeading = (raw: string) =>
   raw
     .replace(/<!--[\s\S]*?-->/g, "")
-    .trim()
-    .replace(/\s+/g, " ")
+    .replace(/^[ \t]+|[ \t]+$/g, "")
+    .replace(/[ \t]+/g, " ")
     .toLowerCase() === PROVENANCE_HEADING.toLowerCase();
 
 /**

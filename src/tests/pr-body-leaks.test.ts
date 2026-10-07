@@ -253,6 +253,18 @@ describe("findPrBodyLeaks: Swarm provenance allowlist", () => {
     expect(findPrBodyLeaks(closed)).toEqual([]);
   });
 
+  test("a non-breaking space in the heading text is part of the name", () => {
+    for (const heading of ["## Swarm provenance ", "## Swarm provenance"]) {
+      const body = `${heading}\n\n- ${dashboardLink()}\n`;
+      expect(findPrBodyLeaks(body)).toEqual(["swarm-dashboard-link"]);
+      expect(checkPrBodyLeaks(body)).toEqual(["internal identifier in body: swarm-dashboard-link"]);
+    }
+    const spaced = `##  Swarm \t provenance \t\n\n- ${dashboardLink()}\n`;
+    expect(findPrBodyLeaks(spaced)).toEqual([]);
+    const commented = `## Swarm provenance <!-- bot --> \n\n- ${dashboardLink()}\n`;
+    expect(findPrBodyLeaks(commented)).toEqual([]);
+  });
+
   test("a closer indented 3 spaces still closes the fence", () => {
     const body = `\`\`\`\ncode\n   \`\`\`\n## Swarm provenance\n\n- ${dashboardLink()}\n`;
     expect(findPrBodyLeaks(body)).toEqual([]);
