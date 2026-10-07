@@ -55,7 +55,7 @@ class QuickJSWorkerPool {
   private spawn(): Slot {
     const worker = new Worker(workerSpecifier());
     // Idle workers must not keep the API process (or a test run) alive.
-    worker.unref();
+    (worker as Worker & { unref?: () => void }).unref?.();
     const ready = new Promise<void>((resolve, reject) => {
       const onMessage = (event: MessageEvent<QuickJSWorkerMessage>) => {
         if (event.data.type === "ready") resolve();
