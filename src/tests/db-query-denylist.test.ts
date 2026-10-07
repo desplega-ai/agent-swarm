@@ -176,7 +176,7 @@ describe("POST /api/db-query", () => {
     expect(rows).not.toContain(marker);
   });
 
-  test("migration 198 moves legacy kv device flows out of kv_entries", async () => {
+  test("migration 202 moves legacy kv device flows out of kv_entries", async () => {
     const flowId = crypto.randomUUID();
     const marker = `legacy-state-${crypto.randomUUID()}`;
     await upsertKv({
