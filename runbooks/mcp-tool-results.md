@@ -97,14 +97,16 @@ their private `mcp:overflow:<agentId>` partition.
 
 `shape` is a bounded outline of the stored value (`summarizeKvShape` in `src/kv-view.ts`): at most 8 branches by serialized bytes, expanding the dominant object one level at a time, skipping branches under 1% of the value. Arrays report their length, objects their key count, strings their length. Every `path` is relative to the stored value, so it is a valid kv-get `path`. The text channel renders it as one `Shape:` line; it shares the per-channel cap with the preview, which fills whatever is left. `retrieval` points at the biggest array in the shape (else the biggest branch).
 
-`originalBytes` is the larger channel of the unspilled result. The text channel renders `fullValueAt`, `originalBytes`, and `retrieval`; `structuredContent` carries the object. ### Targeted retrieval: `kv-get` path/offset/limit
+`originalBytes` is the larger channel of the unspilled result. The text channel renders `fullValueAt`, `originalBytes`, and `retrieval`; `structuredContent` carries the object.
+
+### Targeted retrieval: `kv-get` path/offset/limit
 
 `kv-get` with no view args returns the whole stored value, unbounded, and the harness applies its own native truncation (unchanged behaviour). With any of `path`, `offset`, `limit` it returns a bounded view instead:
 
 - `path` is a dot path into the JSON value; numeric segments index arrays (`outcome.data.rows`, `rows.3`); `\.` is a literal dot inside a key and `\\` a literal backslash, and every shape path is emitted escaped. A `string` entry whose text parses to an object or array (every spill payload) counts as JSON. A path into a plain string, a missing key, or a bad index is a tool error that names the segment.
 - `offset`/`limit` page the array items, object keys, or string characters at the path. An offset past the end returns an empty page with the real `total`. Paging a number/boolean/null is an error.
 - The tool bounds the view itself (it stays spill-exempt): if the page breaks the 10,000-byte per-channel cap it shrinks by binary search, and `view.nextOffset` says where to resume. When even one item is too big, the message names the narrower path to fetch.
-- Text carries the slice as compact JSON (or the raw characters); `structuredContent` carries `view` plus `entry` metadata without `value`, and the slice in `details`.
+- Text carries the slice as compact JSON (a string slice is JSON-encoded, so edge whitespace survives the wire composer's trim); `structuredContent` carries `view` plus `entry` metadata without `value`, and the slice in `details`.
 
 The REST routes behind `ctx.swarm.kv_get` / `kv_getOrNull` take the same args as query params (`?path=&offset=&limit=`) and return `{ ...entry, value: <slice>, view }`. They apply no size cap: script reads land in the sandbox, not in model context. The `kv-get` entry in `NUDGES` steers a big whole-value read toward a view or a script.
 

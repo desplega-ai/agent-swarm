@@ -316,13 +316,29 @@ describe("kv MCP tools", () => {
       meta(agentA),
     )) as ViewResult;
     expect(chars.structuredContent.success).toBe(true);
-    expect(chars.structuredContent.details).toBe("world");
+    expect(chars.structuredContent.details).toBe('"world"');
     expect(chars.structuredContent.view).toMatchObject({
       type: "string",
       total: 21,
       returned: 5,
       nextOffset: 11,
     });
+
+    await tools.set.handler(
+      { key: "spaced", value: "a  \n  b", valueType: "string" },
+      meta(agentA),
+    );
+    for (const [offset, slice] of [
+      [1, "  \n  "],
+      [0, "a  "],
+    ] as const) {
+      const exact = (await tools.get.handler(
+        { key: "spaced", offset, limit: slice.length },
+        meta(agentA),
+      )) as ViewResult;
+      expect(JSON.parse(exact.structuredContent.details!)).toBe(slice);
+      expect(JSON.parse(exact.content[0]!.text.split("\n\n").at(-1)!)).toBe(slice);
+    }
 
     const pathed = (await tools.get.handler(
       { key: "plain", path: "a" },
@@ -356,7 +372,7 @@ describe("kv MCP tools", () => {
       { key: "fat-items", path: "items.0.blob", limit: 100 },
       meta(agentA),
     )) as ViewResult;
-    expect(narrowed.structuredContent.details).toBe("f".repeat(100));
+    expect(JSON.parse(narrowed.structuredContent.details!)).toBe("f".repeat(100));
   });
 
   test("kv-incr creates + increments + reports value", async () => {

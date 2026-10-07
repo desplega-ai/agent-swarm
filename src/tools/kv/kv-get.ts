@@ -56,7 +56,8 @@ const kvViewOutputSchema = z.looseObject({
 function describeView(view: KvView): string {
   const target = view.path ? `"${view.path}"` : "the value";
   if (view.total === undefined) return `${target} (${view.type})`;
-  const unit = view.type === "array" ? "items" : view.type === "object" ? "keys" : "chars";
+  const unit =
+    view.type === "array" ? "items" : view.type === "object" ? "keys" : "chars (JSON-encoded)";
   const offset = view.offset ?? 0;
   return `${target} ${unit} ${offset}..${offset + (view.returned ?? 0)} of ${view.total}`;
 }
@@ -80,9 +81,11 @@ function boundedView(
   if (!target.ok) return failed(target.error);
 
   const { value: _value, ...meta } = entry;
+  // Strings go out JSON-encoded too: the wire composer trims `details`, which
+  // would drop a slice's edge whitespace and erase a whitespace-only slice.
   const render = (value: unknown, view: KvView) =>
     toolOk(`Read ${describeView(view)} from "${key}" in "${namespace}".`, {
-      details: typeof value === "string" ? value : JSON.stringify(value),
+      details: JSON.stringify(value),
       data: { yourAgentId: agentId, namespace, entry: meta, view },
     });
   const baseView = checked.view;
