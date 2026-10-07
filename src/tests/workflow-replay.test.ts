@@ -15,6 +15,7 @@ import { __resetEncryptionKeyForTests, encryptSecret, resolveEncryptionKey } fro
 import {
   closeDb,
   createUser,
+  createWaitState,
   createWorkflow,
   createWorkflowRun,
   createWorkflowRunStep,
@@ -30,9 +31,10 @@ import type { Workflow, WorkflowDefinition } from "../types";
 import { getExecutorRegistry } from "../workflows";
 import { checkpointStep } from "../workflows/checkpoint";
 import { walkGraph } from "../workflows/engine";
+import { InProcessEventBus } from "../workflows/event-bus";
 import { ScriptExecutor } from "../workflows/executors/script";
 import { recoverIncompleteRuns } from "../workflows/recovery";
-import { retryFailedRun } from "../workflows/resume";
+import { resumeWaitState, retryFailedRun, setupWorkflowResumeListener } from "../workflows/resume";
 import { type SyntheticSecret, syntheticSecret } from "./synthetic-secret-helpers";
 
 const TEST_DB_PATH = `./test-workflow-replay-${crypto.randomUUID()}.sqlite`;
@@ -349,6 +351,124 @@ describe("an unreadable sealed copy fails the run instead of replaying markers",
     await persistCrashAfterFetch(runId);
     __resetEncryptionKeyForTests();
     await expectFailedClosed(runId, "its context");
+  });
+});
+
+describe("a live resume with an unreadable sealed context fails the run", () => {
+  const parkedDefinition: WorkflowDefinition = {
+    nodes: [
+      { id: "work", type: "agent-task", config: { template: "Work" }, next: "done" },
+      {
+        id: "review",
+        type: "human-in-the-loop",
+        config: { title: "Approve?", questions: [] },
+        next: { approved: "done", rejected: "done" },
+      },
+      {
+        id: "pause",
+        type: "wait",
+        config: { mode: "time", durationMs: 60_000 },
+        next: { default: "done" },
+      },
+      { id: "done", type: "script", config: { runtime: "bash", script: "echo done" } },
+    ],
+  };
+
+  let eventBus: InProcessEventBus;
+  let teardown: () => void;
+
+  beforeEach(() => {
+    eventBus = new InProcessEventBus();
+    teardown = setupWorkflowResumeListener(eventBus, getExecutorRegistry());
+  });
+
+  afterEach(() => teardown());
+
+  /** A `waiting` run parked on `nodeId`, its context sealed under another key. */
+  async function parkedRunWithRotatedContext(
+    nodeId: string,
+    nodeType: string,
+  ): Promise<{ runId: string; stepId: string }> {
+    const workflow = await createWorkflow({
+      name: `workflow-replay-live-${crypto.randomUUID()}`,
+      definition: parkedDefinition,
+    });
+    const runId = crypto.randomUUID();
+    await createWorkflowRun({ id: runId, workflowId: workflow.id, triggerType: "manual" });
+    await updateWorkflowRun(runId, { status: "waiting", context: { trigger: { n: 7 } } });
+    const stepId = crypto.randomUUID();
+    await createWorkflowRunStep({ id: stepId, runId, nodeId, nodeType });
+    await updateWorkflowRunStep(stepId, { status: "waiting" });
+    const rotated = `sealed:v1:${encryptSecret(JSON.stringify({ trigger: { n: 7 } }), randomBytes(32))}`;
+    await getDbClient().run("UPDATE workflow_runs SET context_replay = ? WHERE id = ?", [
+      rotated,
+      runId,
+    ]);
+    return { runId, stepId };
+  }
+
+  /** Bus handlers are fire-and-forget: poll until the run leaves `waiting`. */
+  async function expectFailedClosed(runId: string, stepId: string): Promise<void> {
+    for (let i = 0; i < 100; i++) {
+      if ((await getWorkflowRun(runId, "display"))?.status !== "waiting") break;
+      await Bun.sleep(10);
+    }
+    const run = await getWorkflowRun(runId, "display");
+    expect(run?.status).toBe("failed");
+    expect(run?.error).toContain("cannot replay its context");
+    const step = (await getWorkflowRunStepsByRunId(runId, "display")).find((s) => s.id === stepId);
+    expect(step?.status).toBe("failed");
+    expect(step?.error).toContain("cannot replay its context");
+  }
+
+  test("task.completed", async () => {
+    const { runId, stepId } = await parkedRunWithRotatedContext("work", "agent-task");
+    eventBus.emit("task.completed", {
+      taskId: crypto.randomUUID(),
+      output: "done",
+      workflowRunId: runId,
+      workflowRunStepId: stepId,
+    });
+    await expectFailedClosed(runId, stepId);
+  });
+
+  test("approval.resolved", async () => {
+    const { runId, stepId } = await parkedRunWithRotatedContext("review", "human-in-the-loop");
+    eventBus.emit("approval.resolved", {
+      requestId: crypto.randomUUID(),
+      status: "approved",
+      responses: {},
+      workflowRunId: runId,
+      workflowRunStepId: stepId,
+    });
+    await expectFailedClosed(runId, stepId);
+  });
+
+  test("a cancelled approval leaves the step to the run cancel path", async () => {
+    const { runId, stepId } = await parkedRunWithRotatedContext("review", "human-in-the-loop");
+    eventBus.emit("approval.resolved", {
+      requestId: crypto.randomUUID(),
+      status: "cancelled",
+      responses: null,
+      workflowRunId: runId,
+      workflowRunStepId: stepId,
+    });
+    await Bun.sleep(50);
+    expect((await getWorkflowRun(runId, "display"))?.status).toBe("waiting");
+  });
+
+  test("wait-state resume", async () => {
+    const { runId, stepId } = await parkedRunWithRotatedContext("pause", "wait");
+    const waitId = crypto.randomUUID();
+    await createWaitState({
+      id: waitId,
+      workflowRunId: runId,
+      workflowRunStepId: stepId,
+      mode: "time",
+      wakeUpAt: new Date().toISOString(),
+    });
+    await resumeWaitState(waitId, "fired", undefined, getExecutorRegistry());
+    await expectFailedClosed(runId, stepId);
   });
 });
 
