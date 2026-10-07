@@ -66,8 +66,10 @@ jobs:
           PR_AUTHOR: ${{ github.event.pull_request.user.login }}
           PR_CHANGED_FILES_FILE: ${{ runner.temp }}/changed-files.txt
           # A low-risk diff of 50 lines or fewer may skip the Change outline.
-          PR_CHANGED_LINES: ${{ github.event.pull_request.additions + github.event.pull_request.deletions }}
-        run: bun scripts/check-pr-body.ts
+          # Expressions have no arithmetic, so the shell adds them.
+          PR_ADDITIONS: ${{ github.event.pull_request.additions }}
+          PR_DELETIONS: ${{ github.event.pull_request.deletions }}
+        run: PR_CHANGED_LINES=$(( ${PR_ADDITIONS:-0} + ${PR_DELETIONS:-0} )) bun scripts/check-pr-body.ts
 
   label:
     name: Label by risk
