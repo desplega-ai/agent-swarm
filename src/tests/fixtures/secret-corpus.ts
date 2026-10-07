@@ -13,6 +13,7 @@ const ALNUM = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
 const UPPER_ALNUM = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
 const LOWER_ALNUM = "abcdefghijklmnopqrstuvwxyz0123456789";
 const LOWER = "abcdefghijklmnopqrstuvwxyz";
+const LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
 const HEX = "0123456789abcdef";
 const DIGITS = "0123456789";
 const URLSAFE = `${ALNUM}_-`;
@@ -154,6 +155,15 @@ export function buildPositives(): CorpusPositive[] {
     positive("vault service token", join("hvs", ".", rand(ALNUM, 96)), {
       gitleaksRule: "vault-service-token",
     }),
+    // gitleaks' `s\.[A-Za-z]{24}` allowlist used to fire inside a token whose
+    // first 24 characters after "hvs." are all letters (~1.5% of real tokens).
+    positive(
+      "vault service token, letters-only head",
+      join("hvs", ".", rand(LETTERS, 24), rand(ALNUM, 72)),
+      {
+        gitleaksRule: "vault-service-token",
+      },
+    ),
     positive("sourcegraph", join("sgp", "_", rand(HEX, 40)), {
       gitleaksRule: "sourcegraph-access-token",
     }),

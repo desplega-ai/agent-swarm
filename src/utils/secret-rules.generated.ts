@@ -1973,7 +1973,7 @@ export const GITLEAKS_RULES: GeneratedSecretRuleSet = {
           "target": "secret",
           "regexes": [
             {
-              "source": "s\\.[A-Za-z]{24}", // gitleaks:allow
+              "source": "^(?:s\\.[A-Za-z]{24})$", // gitleaks:allow
               "flags": ""
             }
           ],

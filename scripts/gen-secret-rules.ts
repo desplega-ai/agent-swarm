@@ -48,6 +48,20 @@ const DROPPED_BRANCHES: Record<string, { drop: string; reason: string }> = {
 };
 
 /**
+ * Allowlist regexes anchored to the whole secret. gitleaks runs them unanchored,
+ * so `s\.[A-Za-z]{24}` (meant to skip all-letter `s.` legacy tokens) also fires
+ * inside any `hvs.` token whose text after the second `s.` starts with 24
+ * letters: about 1.5% of real service tokens leaked. The generator throws when
+ * an entry no longer exists upstream.
+ */
+const ANCHORED_ALLOWLIST_REGEXES: Record<string, { regex: string; reason: string }> = {
+  "vault-service-token": {
+    regex: String.raw`s\.[A-Za-z]{24}`,
+    reason: "unanchored, it allowlisted hvs. tokens that contain s. plus 24 letters",
+  },
+};
+
+/**
  * Rules whose secret is the whole match, not the first capture group. gitleaks
  * reports the first non-empty group, which here is a named group that labels
  * the JWT header field.
@@ -266,6 +280,16 @@ function convertAllowlist(rule: GitleaksRule, ruleRe: RegExp, list: GitleaksAllo
     ruleRe.lastIndex = 0;
     return !ruleRe.test(re);
   });
+  const anchor = ANCHORED_ALLOWLIST_REGEXES[rule.id];
+  if (anchor) {
+    const at = regexes.indexOf(anchor.regex);
+    if (at === -1) {
+      throw new Error(
+        `ANCHORED_ALLOWLIST_REGEXES: rule ${rule.id} no longer lists ${anchor.regex}`,
+      );
+    }
+    regexes[at] = `^(?:${anchor.regex})$`;
+  }
   return {
     target,
     regexes: regexes.map(convertGoRegex),
