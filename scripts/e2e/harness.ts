@@ -15,6 +15,8 @@ const DEFAULT_MODELS: Record<string, string> = {
   amp: "low",
   // The cheapest model Cursor.models.list() offers our account.
   cursor: "gpt-5.4-nano",
+  // xAI's cheapest model (`grok models` with an API key).
+  grok: "grok-build-0.1",
 };
 const PROVIDER_CREDENTIAL_KEYS = {
   claude: { keys: ["CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"], fallbackKeys: [] },
@@ -33,6 +35,10 @@ const PROVIDER_CREDENTIAL_KEYS = {
   },
   amp: { keys: ["AMP_API_KEY", "AMP_BINARY"], fallbackKeys: [] },
   cursor: { keys: ["CURSOR_API_KEY"], fallbackKeys: [] },
+  grok: {
+    keys: ["XAI_API_KEY", "GROK_BINARY", "OPENROUTER_API_KEY", "OPENROUTER_BASE_URL"],
+    fallbackKeys: [],
+  },
 } as const;
 type HarnessChild = Bun.Subprocess<"ignore", "pipe", "pipe">;
 
@@ -144,9 +150,19 @@ function requireCredential(provider: string): void {
       ? "OPENROUTER_API_KEY"
       : "DEEPSEEK_API_KEY";
     expect(process.env[key], `Dsh requires ${key} for the selected model`);
-    expect(Bun.which(process.env.DSH_BINARY || "dsh"), "Dsh requires a preinstalled dsh executable");
+    expect(
+      Bun.which(process.env.DSH_BINARY || "dsh"),
+      "Dsh requires a preinstalled dsh executable",
+    );
   } else if (provider === "cursor") {
     expect(process.env.CURSOR_API_KEY, "Cursor requires CURSOR_API_KEY");
+  } else if (provider === "grok") {
+    const key = modelFor(provider).startsWith("openrouter/") ? "OPENROUTER_API_KEY" : "XAI_API_KEY";
+    expect(process.env[key], `Grok requires ${key} for the selected model`);
+    expect(
+      Bun.which(process.env.GROK_BINARY || "grok"),
+      "Grok requires a preinstalled grok executable",
+    );
   } else if (provider === "amp") {
     expect(process.env.AMP_API_KEY, "Amp requires AMP_API_KEY");
     expect(
@@ -356,7 +372,7 @@ async function runHarnessAttempt(
   let cost: HarnessCost | undefined;
   try {
     expect(
-      ["claude", "codex", "pi", "opencode", "dsh", "cursor", "amp"].includes(provider),
+      ["claude", "codex", "pi", "opencode", "dsh", "cursor", "amp", "grok"].includes(provider),
       `Unsupported harness provider: ${provider}`,
     );
     requireCredential(provider);

@@ -273,6 +273,14 @@ export function buildModelsDevSeedRows(cache: ModelsDevCache): PricingSeedRow[] 
     }
   }
 
+  // ---- Grok CLI (bare xAI ids, billed at xAI's API rates via XAI_API_KEY) --
+  for (const [id, model] of Object.entries(cache.xai?.models ?? {})) {
+    if (!model?.cost) continue;
+    for (const row of projectCostBlock("grok", id, model.cost, { anthropicBilled: false })) {
+      rows.push(row);
+    }
+  }
+
   // ---- DeepSeek direct API (dsh with DEEPSEEK_API_KEY, bare ids) ---------
   const deepseek = cache.deepseek?.models ?? {};
   for (const [id, model] of Object.entries(deepseek)) {
@@ -303,6 +311,12 @@ export function buildModelsDevSeedRows(cache: ModelsDevCache): PricingSeedRow[] 
     // dsh routes `openrouter/<id>` models (all four tier defaults) through
     // OpenRouter, so it bills at the same rates.
     for (const row of projectCostBlock("dsh", id, model.cost, {
+      anthropicBilled: id.startsWith("anthropic/"),
+    })) {
+      rows.push(row);
+    }
+    // grok runs `openrouter/<id>` models as OpenAI-compatible BYOK models.
+    for (const row of projectCostBlock("grok", id, model.cost, {
       anthropicBilled: id.startsWith("anthropic/"),
     })) {
       rows.push(row);

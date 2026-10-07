@@ -30,6 +30,7 @@ import {
   harnessCatalogSection,
   harnessModelMismatch,
   isAlias,
+  isHarnessModelJudged,
   type ModelsDevCatalog,
   type ModelsDevModel,
   parseAlias,
@@ -340,7 +341,7 @@ export async function resolveTaskModel(
   input: ResolveTaskModelInput,
 ): Promise<TaskModelResolution | TaskModelHarnessMismatch | null> {
   const harness = input.harnessProvider ?? null;
-  const judged = harness !== null && harnessCatalogSection(harness) !== null;
+  const judged = harness !== null && isHarnessModelJudged(harness);
   const sections = judged
     ? ((await loadResolutionCatalog()).catalog as HarnessCatalogSections)
     : {};

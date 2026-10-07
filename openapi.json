@@ -448,7 +448,8 @@
               "acp",
               "dsh",
               "amp",
-              "cursor"
+              "cursor",
+              "grok"
             ]
           },
           "providerMeta": {
@@ -521,7 +522,8 @@
               "acp",
               "dsh",
               "amp",
-              "cursor"
+              "cursor",
+              "grok"
             ]
           },
           "capabilities": {
@@ -671,6 +673,7 @@
               "dsh",
               "amp",
               "cursor",
+              "grok",
               null
             ],
             "default": null
@@ -1004,7 +1007,8 @@
               "acp",
               "dsh",
               "amp",
-              "cursor"
+              "cursor",
+              "grok"
             ]
           },
           "harnessProvider": {
@@ -1023,6 +1027,7 @@
               "dsh",
               "amp",
               "cursor",
+              "grok",
               null
             ]
           },
@@ -3170,7 +3175,8 @@
               "acp",
               "dsh",
               "amp",
-              "cursor"
+              "cursor",
+              "grok"
             ]
           },
           "model": {
@@ -9715,7 +9721,8 @@
                       "acp",
                       "dsh",
                       "amp",
-                      "cursor"
+                      "cursor",
+                      "grok"
                     ]
                   },
                   "harness_provider": {
@@ -9730,7 +9737,8 @@
                       "acp",
                       "dsh",
                       "amp",
-                      "cursor"
+                      "cursor",
+                      "grok"
                     ]
                   },
                   "runtimeInstanceId": {
@@ -10021,7 +10029,8 @@
                       "acp",
                       "dsh",
                       "amp",
-                      "cursor"
+                      "cursor",
+                      "grok"
                     ]
                   }
                 },
@@ -10239,7 +10248,8 @@
                       "acp",
                       "dsh",
                       "amp",
-                      "cursor"
+                      "cursor",
+                      "grok"
                     ]
                   },
                   "model": {
@@ -11341,6 +11351,7 @@
                         "dsh",
                         "amp",
                         "cursor",
+                        "grok",
                         null
                       ]
                     },
@@ -11360,6 +11371,7 @@
                         "dsh",
                         "amp",
                         "cursor",
+                        "grok",
                         null
                       ]
                     },
@@ -11481,6 +11493,7 @@
                               "dsh",
                               "amp",
                               "cursor",
+                              "grok",
                               null
                             ]
                           },
@@ -11500,6 +11513,7 @@
                               "dsh",
                               "amp",
                               "cursor",
+                              "grok",
                               null
                             ]
                           },
@@ -21809,6 +21823,15 @@
                           },
                           "accessCount": {
                             "type": "number"
+                          },
+                          "summary": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "createdAt": {
+                            "type": "string"
                           }
                         },
                         "required": [
@@ -24732,7 +24755,8 @@
                               "acp",
                               "dsh",
                               "amp",
-                              "cursor"
+                              "cursor",
+                              "grok"
                             ]
                           },
                           "tier": {
@@ -26672,7 +26696,8 @@
                               "acp",
                               "dsh",
                               "amp",
-                              "cursor"
+                              "cursor",
+                              "grok"
                             ]
                           },
                           "providers": {
@@ -26692,7 +26717,8 @@
                                     "acp",
                                     "dsh",
                                     "amp",
-                                    "cursor"
+                                    "cursor",
+                                    "grok"
                                   ]
                                 },
                                 "state": {
@@ -27021,7 +27047,8 @@
                       "acp",
                       "dsh",
                       "amp",
-                      "cursor"
+                      "cursor",
+                      "grok"
                     ]
                   }
                 },
@@ -27609,7 +27636,8 @@
                                   "acp",
                                   "dsh",
                                   "amp",
-                                  "cursor"
+                                  "cursor",
+                                  "grok"
                                 ]
                               },
                               "state": {
@@ -28602,7 +28630,8 @@
                                   "acp",
                                   "dsh",
                                   "amp",
-                                  "cursor"
+                                  "cursor",
+                                  "grok"
                                 ]
                               },
                               "state": {
@@ -31312,7 +31341,8 @@
                 "acp",
                 "dsh",
                 "amp",
-                "cursor"
+                "cursor",
+                "grok"
               ]
             },
             "required": true,
@@ -31396,7 +31426,8 @@
                 "acp",
                 "dsh",
                 "amp",
-                "cursor"
+                "cursor",
+                "grok"
               ]
             },
             "required": true,
@@ -31513,7 +31544,8 @@
                 "acp",
                 "dsh",
                 "amp",
-                "cursor"
+                "cursor",
+                "grok"
               ]
             },
             "required": true,
@@ -31598,7 +31630,8 @@
                 "acp",
                 "dsh",
                 "amp",
-                "cursor"
+                "cursor",
+                "grok"
               ]
             },
             "required": true,
@@ -41510,7 +41543,8 @@
                       "acp",
                       "dsh",
                       "amp",
-                      "cursor"
+                      "cursor",
+                      "grok"
                     ]
                   },
                   "createdAt": {
@@ -42465,7 +42499,8 @@
                                       "acp",
                                       "dsh",
                                       "amp",
-                                      "cursor"
+                                      "cursor",
+                                      "grok"
                                     ]
                                   },
                                   "requestedByUserId": {
@@ -47813,7 +47848,8 @@
                                   "acp",
                                   "dsh",
                                   "amp",
-                                  "cursor"
+                                  "cursor",
+                                  "grok"
                                 ]
                               },
                               "requestedByUserId": {
@@ -48290,7 +48326,8 @@
                           "acp",
                           "dsh",
                           "amp",
-                          "cursor"
+                          "cursor",
+                          "grok"
                         ]
                       },
                       "model": {
@@ -49236,7 +49273,8 @@
                       "acp",
                       "dsh",
                       "amp",
-                      "cursor"
+                      "cursor",
+                      "grok"
                     ]
                   }
                 },

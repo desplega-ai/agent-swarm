@@ -109,6 +109,8 @@ const MemorySearchResultItemSchema = z.object({
   scope: AgentMemoryScopeSchema,
   tags: z.array(z.string()),
   accessCount: z.number(),
+  summary: z.string().nullable().optional(),
+  createdAt: z.string().optional(),
 });
 
 const searchMemory = route({
@@ -1001,6 +1003,8 @@ export async function handleMemory(
           scope: r.scope,
           tags: r.tags,
           accessCount: (r.accessCount ?? 0) + (consumedIdSet.has(r.id) ? 1 : 0),
+          summary: r.summary,
+          createdAt: r.createdAt,
         })),
       });
     } catch (err) {

@@ -1,4 +1,4 @@
 {
   "title": "Provider Auth",
-  "pages": ["model-gateways", "codex-oauth", "cursor", "amp"]
+  "pages": ["model-gateways", "codex-oauth", "cursor", "amp", "grok"]
 }
