@@ -464,7 +464,7 @@ export class SqliteMemoryStore implements MemoryStore {
           input.sourcePath ?? null,
           input.chunkIndex ?? 0,
           input.totalChunks ?? 1,
-          JSON.stringify(input.tags ?? []),
+          JSON.stringify((input.tags ?? []).map((tag) => scrubSecrets(tag))),
           now,
           now,
           now,

@@ -82,7 +82,7 @@ afterAll(async () => {
 });
 
 describe("agent_memory", () => {
-  test("store scrubs name, content, summary, version row and FTS row", async () => {
+  test("store scrubs name, content, summary, tags, version row and FTS row", async () => {
     const store = new SqliteMemoryStore();
     const memory = await store.store({
       agentId,
@@ -90,6 +90,7 @@ describe("agent_memory", () => {
       name: `deploy note ${secret.value}`,
       content: `the deploy token is ${secret.value} for staging`,
       summary: `summary ${secret.value}`,
+      tags: [`tag ${secret.value}`, "plain"],
       source: "manual",
     });
     // Callers embed the returned content, so it must be the scrubbed text.
@@ -97,6 +98,9 @@ describe("agent_memory", () => {
     expectScrubbed(await column("agent_memory", "name", memory.id), "deploy note");
     expectScrubbed(await column("agent_memory", "content", memory.id), "for staging");
     expectScrubbed(await column("agent_memory", "summary", memory.id), "summary");
+    const tags = await column("agent_memory", "tags", memory.id);
+    expectScrubbed(tags, "plain");
+    expect(JSON.parse(tags!)[0]).toContain("tag ");
     const version = await getDbClient().get<{ content: string }>(
       "SELECT content FROM agent_memory_version WHERE memory_id = ?",
       [memory.id],

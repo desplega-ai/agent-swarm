@@ -101,9 +101,7 @@
     "sourcePath": {
       "pending": "unassigned: no batch yet scrubs this writer"
     },
-    "tags": {
-      "pending": "unassigned: no batch yet scrubs this writer"
-    },
+    "tags": "scrubbed",
     "createdAt": {
       "exempt": "timestamp"
     },
