@@ -60,6 +60,7 @@ if [[ "$probe_status" -eq 134 ]]; then
     src/tests/script-connections.test.ts \
     src/tests/script-executor-conformance.test.ts \
     src/tests/script-workflows-runtime-e2e.test.ts \
+    src/tests/secret-canary-sweep.test.ts \
     src/tests/scripts-external-api.test.ts \
     src/tests/scripts-http.test.ts \
     src/tests/scripts-mcp-e2e.test.ts \

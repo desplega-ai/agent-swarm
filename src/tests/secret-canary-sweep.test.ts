@@ -15,9 +15,10 @@
  * canary raw, JSON-escaped, shell-escaped, base64 and URL-encoded.
  *
  * Verdicts come from `.text-columns.json`. A hit in an `exempt` column is
- * skipped. A hit in a `scrubbed`, unclassified or non-TEXT column fails. The
- * set of `pending` columns with a hit must equal `KNOWN_PENDING_HITS`, so a
- * new sink fails and a fixed one forces its entry out of the list.
+ * skipped. A hit in any other column fails (`scrubbed`, `sealed`, `pending`,
+ * unclassified or non-TEXT), except the columns in `OPEN_DECISIONS`: each is
+ * a known leak waiting on a named design decision. The set of those hits must
+ * match exactly, so a new sink fails and a fixed one forces its entry out.
  *
  * Every secret is built at runtime from random bytes. Never a literal.
  */
@@ -34,6 +35,7 @@ import {
   cancelTask,
   closeDb,
   createAgent,
+  createApprovalRequest,
   createChannel,
   createTaskExtended,
   createWorkflow,
@@ -42,9 +44,11 @@ import {
   getTaskById,
   getWorkflowRun,
   initDb,
+  resolveApprovalRequest,
   startTask,
   upsertSwarmConfig,
 } from "../be/db";
+import { createTrackerSync } from "../be/db-queries/tracker";
 import { getEmbeddingProvider } from "../be/memory";
 import { setScriptEmbeddingProviderForTests } from "../be/scripts/embeddings";
 import { loadSecretRegistry } from "../be/secret-registry";
@@ -54,6 +58,8 @@ import { handleEvents } from "../http/events";
 import { handleScriptRuns } from "../http/script-runs";
 import { handleScripts } from "../http/scripts";
 import { getPathSegments, parseQueryParams, writeUnhandledError } from "../http/utils";
+import { initJiraOutboundSync, teardownJiraOutboundSync } from "../jira/outbound";
+import { initLinearOutboundSync, teardownLinearOutboundSync } from "../linear/outbound";
 import { installSlackEgressScrub } from "../slack/egress-scrub";
 import { slackContextKey } from "../tasks/context-key";
 import { registerMemoryStoreTool } from "../tools/memory-store";
@@ -82,6 +88,29 @@ let fakeSlackApp: { client: InstanceType<typeof webApi.WebClient> } | null = nul
 mock.module("../slack/app", () => ({
   ...realSlackAppModule,
   getSlackApp: () => fakeSlackApp ?? realGetSlackApp(),
+}));
+
+// ─── Linear and Jira: capture what the outbound sync would send ─────────────
+// Captured at the transport client, after every scrub in the outbound path.
+const trackerCapture: { sink: string; body: string }[] = [];
+const realLinearClientModule = { ...(await import("../linear/client")) };
+mock.module("../linear/client", () => ({
+  ...realLinearClientModule,
+  getLinearClient: async () => ({
+    createComment: async (input: unknown) => {
+      trackerCapture.push({ sink: "linear createComment", body: JSON.stringify(input) });
+      return { success: true };
+    },
+  }),
+  resetLinearClient: () => {},
+}));
+const realJiraClientModule = { ...(await import("../jira/client")) };
+mock.module("../jira/client", () => ({
+  ...realJiraClientModule,
+  jiraFetch: async (path: string, init?: RequestInit) => {
+    trackerCapture.push({ sink: `jira ${path}`, body: String(init?.body ?? "") });
+    return Response.json({});
+  },
 }));
 
 // ─── Canaries ────────────────────────────────────────────────────────────────
@@ -187,7 +216,7 @@ function needlesIn(text: string): Needle[] {
 
 const CONTROL_TABLE = "canary_sweep_scanner_control";
 
-type ColumnClass = "scrubbed" | "exempt" | "pending" | "unclassified" | "untyped";
+type ColumnClass = "scrubbed" | "sealed" | "exempt" | "pending" | "unclassified" | "untyped";
 
 interface DbScan {
   /** `table.column` → canary/form hits. */
@@ -251,31 +280,33 @@ function classOf(id: string, textColumns: Set<string>): ColumnClass {
   const entry = classification[table]?.[column];
   if (entry === undefined) return "unclassified";
   if (entry === "scrubbed") return "scrubbed";
+  if ("sealed" in entry) return "sealed";
   return "exempt" in entry ? "exempt" : "pending";
 }
 
 /**
- * `pending` columns the canary is expected to reach today. Exact set
- * equality: a new sink fails the sweep, and so does a fixed one until its
- * entry is removed here.
- *
- * Not listed because no driven path reaches it with a raw value:
- * `script_run_journal.result` is replayed verbatim on resume, but every
- * durable step type stores an upstream API response that is already
- * scrubbed (swarm-script stores the inline-run response, agent-task the
- * task's stored output). raw-llm would need a live model.
+ * Known leaks, each waiting on a named design decision. Every other
+ * non-exempt hit fails the sweep, `pending` included. Exact set equality: a
+ * new sink fails, and so does a fixed one until its entry is removed here.
+ * Never add a column to make the sweep pass; fix or protect its writer.
  */
-const KNOWN_PENDING_HITS: Record<string, string> = {
-  "script_runs.args":
-    "createScriptRun keeps durable-run args raw: the supervisor (re)launches the run from this column, so redaction would change the script's input.",
+const SOURCE_DECISION =
+  "Executable source is byte-exact; redacting code changes what runs. Needs a reviewed storage contract (seal or reject secret-bearing source) before it can be closed.";
+const OPEN_DECISIONS: Record<string, string> = {
+  // An inline run records its source and also catalogs it as a script version.
+  "script_runs.source": SOURCE_DECISION,
+  "scripts.source": SOURCE_DECISION,
+  "script_versions.source": SOURCE_DECISION,
   "workflow_runs.context":
-    "Resume, retry and recovery rebuild the live ctx (trigger data and resolved inputs) from this column.",
-  "agent_memory.tags":
-    "memory-store tags are free text with no write-time scrub yet (unassigned batch).",
+    "Resume, retry and recovery rebuild the live ctx from this column. Waiting on the replay-state decision for workflow runs (seal context and step output, as script runs do).",
 };
 
 /** Reached only by the sandbox-subprocess paths, which CI can switch off. */
-const SANDBOX_ONLY_PENDING = new Set(["script_runs.args"]);
+const SANDBOX_ONLY_DECISIONS = new Set([
+  "script_runs.source",
+  "scripts.source",
+  "script_versions.source",
+]);
 
 // ─── Captured egress ─────────────────────────────────────────────────────────
 
@@ -672,7 +703,8 @@ describe("drive every write path", () => {
       const ok = await api("/api/scripts/run", {
         method: "POST",
         body: JSON.stringify({
-          source: `export default async (args) => { console.log("inline saw", args.note); return { note: args.note }; };`,
+          // A secret pasted into the source itself, so the source columns are swept.
+          source: `const pasted = ${JSON.stringify(payload("inline source"))};\nexport default async (args) => { console.log("inline saw", args.note, pasted.length); return { note: args.note }; };`,
           args: { note: payload("inline args") },
           intent: "canary sweep inline ok",
         }),
@@ -718,6 +750,71 @@ describe("drive every write path", () => {
     },
     60_000,
   );
+
+  test("approval request (questions, votes and responses)", async () => {
+    const id = crypto.randomUUID();
+    await createApprovalRequest({
+      id,
+      title: payload("approval title"),
+      questions: [{ id: "q1", type: "text", label: payload("approval question") }],
+      approvers: { users: [], policy: "any" },
+    });
+    const responses = { q1: payload("approval response") };
+    const resolved = await resolveApprovalRequest(id, {
+      status: "approved",
+      responses,
+      approvals: [
+        {
+          responder: "operator",
+          approved: true,
+          responses,
+          respondedAt: new Date().toISOString(),
+        },
+      ],
+      resolutionReason: payload("approval reason"),
+    });
+    // The workflow resumes from the exact answer.
+    expect(resolved?.responses).toEqual(responses);
+    driven.push("approval");
+  });
+
+  test("Linear and Jira outbound comments for a completed task", async () => {
+    const storeProgress = mcpTool(registerStoreProgressTool, "store-progress");
+    initLinearOutboundSync();
+    initJiraOutboundSync();
+    try {
+      for (const provider of ["linear", "jira"] as const) {
+        const task = await createTaskExtended(payload(`${provider} task brief`), {
+          agentId: workerId,
+          source: "mcp",
+        });
+        await createTrackerSync({
+          provider,
+          entityType: "task",
+          swarmId: task.id,
+          externalId: provider === "linear" ? `LIN-${randomToken(6)}` : "10042",
+          externalIdentifier: provider === "linear" ? "ENG-42" : "KAN-42",
+          syncDirection: "bidirectional",
+        });
+        await startTask(task.id);
+        const done = await storeProgress(
+          { taskId: task.id, status: "completed", output: payload(`${provider} output`) },
+          workerId,
+        );
+        expect(done.isError).toBeFalsy();
+      }
+      await Bun.sleep(100);
+    } finally {
+      teardownLinearOutboundSync();
+      teardownJiraOutboundSync();
+    }
+    // Independent capture: both transports really received a comment.
+    expect(trackerCapture.some((e) => e.sink === "linear createComment")).toBe(true);
+    expect(trackerCapture.some((e) => e.sink.startsWith("jira /rest/api/2/issue/KAN-42"))).toBe(
+      true,
+    );
+    driven.push("linear", "jira");
+  });
 
   test("workflow run (notify to a swarm channel and to Slack)", async () => {
     const channel = await createChannel(`canary-sweep-${randomToken(8).toLowerCase()}`);
@@ -799,12 +896,12 @@ describe("sweep", () => {
     expect(scan.hits.get(`${CONTROL_TABLE}.body`)?.size).toBe(NEEDLES.length);
 
     const failures: string[] = [];
-    const pendingHits: string[] = [];
+    const openDecisionHits: string[] = [];
     for (const [id, found] of scan.hits) {
       if (id.startsWith(`${CONTROL_TABLE}.`)) continue;
       const cls = classOf(id, textColumns);
       if (cls === "exempt") continue;
-      if (cls === "pending") pendingHits.push(id);
+      if (id in OPEN_DECISIONS) openDecisionHits.push(id);
       else failures.push(`${id} [${cls}] <- ${[...found].sort().join(", ")}`);
     }
 
@@ -818,6 +915,7 @@ describe("sweep", () => {
         ]),
       ]),
       ...httpErrorBodies.map((e): [string, string] => [`http ${e.status} ${e.path}`, e.body]),
+      ...trackerCapture.map((e): [string, string] => [e.sink, e.body]),
     ];
     for (const [sink, text] of egress) {
       const found = needlesIn(text);
@@ -827,10 +925,10 @@ describe("sweep", () => {
     }
 
     expect(failures).toEqual([]);
-    const expectedPending = Object.keys(KNOWN_PENDING_HITS).filter(
-      (id) => !SKIP_SANDBOX_SPAWN_TESTS || !SANDBOX_ONLY_PENDING.has(id),
+    const expectedOpen = Object.keys(OPEN_DECISIONS).filter(
+      (id) => !SKIP_SANDBOX_SPAWN_TESTS || !SANDBOX_ONLY_DECISIONS.has(id),
     );
-    expect(pendingHits.sort()).toEqual(expectedPending.sort());
+    expect(openDecisionHits.sort()).toEqual(expectedOpen.sort());
 
     // The canaries really reached the sinks: each registration channel's
     // marker shows up at rest and in the Slack payloads.
