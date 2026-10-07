@@ -6,9 +6,12 @@ import { __resetEncryptionKeyForTests, resolveEncryptionKey } from "../be/crypto
 import {
   closeDb,
   createScriptRun,
+  createWorkflow,
+  createWorkflowRun,
   getDbClient,
   getScriptRunExecutionArgs,
   initDb,
+  updateWorkflowRun,
   upsertScriptRunJournalStep,
 } from "../be/db";
 import { SEALED_REPLAY_COLUMNS } from "../be/sealed-json";
@@ -67,6 +70,8 @@ describe("boot key guard counts sealed replay values as encrypted data", () => {
       expect.arrayContaining([
         { table: "script_runs", column: "args" },
         { table: "script_run_journal", column: "result" },
+        { table: "workflow_run_steps", column: "output_replay" },
+        { table: "workflow_runs", column: "context_replay" },
       ]),
     );
   });
@@ -90,6 +95,21 @@ describe("boot key guard counts sealed replay values as encrypted data", () => {
       args: { n: 7 },
     });
     expect(await getScriptRunExecutionArgs(id)).toEqual({ n: 7 });
+
+    restartWithoutKey();
+    expect(() => initDb(dbPath)).toThrow(/sealed replay values/);
+    expect(existsSync(keyFile)).toBe(false);
+  });
+
+  test("sealed workflow run context: boot refuses and writes no key", async () => {
+    initDb(dbPath);
+    const workflow = await createWorkflow({
+      name: `sealed-key-guard-${crypto.randomUUID()}`,
+      definition: { nodes: [] },
+    });
+    const runId = crypto.randomUUID();
+    await createWorkflowRun({ id: runId, workflowId: workflow.id });
+    await updateWorkflowRun(runId, { context: { trigger: { n: 7 } } });
 
     restartWithoutKey();
     expect(() => initDb(dbPath)).toThrow(/sealed replay values/);
