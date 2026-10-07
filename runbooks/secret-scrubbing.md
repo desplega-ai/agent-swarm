@@ -39,6 +39,16 @@ All known values (env and volatile) are matched by one combined, longest-first a
 - **Structural patterns:** GitHub PATs, ACP session tokens (`aseph_`), Anthropic/OpenAI/OpenRouter `sk-*`, Slack `xox*`, JWTs, AWS access keys, Google API keys, plus vendor shapes gitleaks lacks (Resend `re_`, Google `ya29.` and `1//0`, Discord webhooks, xAI `xai-`, bare Telegram bot tokens).
 - **Vendor shapes (pass 5):** the gitleaks default rule set, vendored at `scripts/vendor/gitleaks/gitleaks.toml` and generated into `src/utils/secret-rules.generated.ts`. A rule runs only when the text contains one of its keywords. A match counts only when its secret clears the rule's entropy floor and no allowlist claims it. Only the secret is replaced, with `[REDACTED:gitleaks:<rule id>]`, so the key name around it stays readable. `generic-api-key`, the curl rules, `private-key` and path-scoped rules are excluded; the generator records each reason in the generated file.
 
+## TEXT columns
+
+Every TEXT column in the schema is classified in `.text-columns.json`, and `scripts/check-text-columns.ts` (merge-gate, Lint and Type Check) fails on an unclassified or stale entry:
+
+- `"scrubbed"`: every writer scrubs the value. A writer that takes free text should type its parameter as `ScrubbedText` (the brand `scrubSecrets` returns), so `tsc` rejects a raw string.
+- `{"exempt": "<reason>"}`: ids, enums, timestamps, hashes, or values that must round-trip byte-exact (ciphertext, credential stores, `kv_entries.value`).
+- `{"pending": "<note>"}`: free text whose writers are not scrubbed yet. The note names the batch that flips it.
+
+Do not scrub inside `db-client.execute()`: a blanket scrub corrupts byte-exact values and runs regexes inside the write lock.
+
 ## Adding a new secret shape
 
 1. Extend `SENSITIVE_KEY_EXACT` (env-key match) or `TOKEN_REGEXES` (structural pattern) in `src/utils/secret-scrubber.ts`. Check first whether a gitleaks rule already covers it.

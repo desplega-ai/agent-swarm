@@ -885,12 +885,19 @@ function getMatcher(): KnownValueMatcher {
 }
 
 /**
+ * A string that has passed through `scrubSecrets`. Still a plain `string` at
+ * runtime; the brand lets a DB writer demand scrubbed input so `tsc` rejects a
+ * raw string. Only `scrubSecrets` produces it.
+ */
+export type ScrubbedText = string & { readonly __scrubbed: true };
+
+/**
  * Replace known secret values in `text` with `[REDACTED:<name>]` markers.
  * Null/undefined inputs return an empty string. Empty strings pass through.
  */
-export function scrubSecrets(text: string | null | undefined): string {
-  if (text == null) return "";
-  if (text.length === 0) return text;
+export function scrubSecrets(text: string | null | undefined): ScrubbedText {
+  if (text == null) return "" as ScrubbedText;
+  if (text.length === 0) return text as ScrubbedText;
 
   let out = text;
 
@@ -925,7 +932,7 @@ export function scrubSecrets(text: string | null | undefined): string {
 
   // Pass 5: vendor token shapes from the gitleaks rule set, behind a keyword
   // prefilter and each rule's entropy floor.
-  return scrubGitleaks(out);
+  return scrubGitleaks(out) as ScrubbedText;
 }
 
 export function scrubObject<T>(value: T, seen = new WeakSet<object>()): T {
