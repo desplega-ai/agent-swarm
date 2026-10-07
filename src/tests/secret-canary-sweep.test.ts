@@ -16,9 +16,11 @@
  *
  * Verdicts come from `.text-columns.json`. A hit in an `exempt` column is
  * skipped. A hit in any other column fails (`scrubbed`, `sealed`, `pending`,
- * unclassified or non-TEXT), except the columns in `OPEN_DECISIONS`: each is
- * a known leak waiting on a named design decision. The set of those hits must
- * match exactly, so a new sink fails and a fixed one forces its entry out.
+ * unclassified or non-TEXT). There are no known open leaks.
+ *
+ * Executable source is exempt because its writers refuse a secret-bearing
+ * source outright, so canaries reach scripts through args only, and a
+ * dedicated case proves a canary in source is refused and nothing persists.
  *
  * Every secret is built at runtime from random bytes. Never a literal.
  */
@@ -283,30 +285,6 @@ function classOf(id: string, textColumns: Set<string>): ColumnClass {
   if ("sealed" in entry) return "sealed";
   return "exempt" in entry ? "exempt" : "pending";
 }
-
-/**
- * Known leaks, each waiting on a named design decision. Every other
- * non-exempt hit fails the sweep, `pending` included. Exact set equality: a
- * new sink fails, and so does a fixed one until its entry is removed here.
- * Never add a column to make the sweep pass; fix or protect its writer.
- */
-const SOURCE_DECISION =
-  "Executable source is byte-exact; redacting code changes what runs. Needs a reviewed storage contract (seal or reject secret-bearing source) before it can be closed.";
-const OPEN_DECISIONS: Record<string, string> = {
-  // An inline run records its source and also catalogs it as a script version.
-  "script_runs.source": SOURCE_DECISION,
-  "scripts.source": SOURCE_DECISION,
-  "script_versions.source": SOURCE_DECISION,
-  "workflow_runs.context":
-    "Resume, retry and recovery rebuild the live ctx from this column. Waiting on the replay-state decision for workflow runs (seal context and step output, as script runs do).",
-};
-
-/** Reached only by the sandbox-subprocess paths, which CI can switch off. */
-const SANDBOX_ONLY_DECISIONS = new Set([
-  "script_runs.source",
-  "scripts.source",
-  "script_versions.source",
-]);
 
 // ─── Captured egress ─────────────────────────────────────────────────────────
 
@@ -703,8 +681,7 @@ describe("drive every write path", () => {
       const ok = await api("/api/scripts/run", {
         method: "POST",
         body: JSON.stringify({
-          // A secret pasted into the source itself, so the source columns are swept.
-          source: `const pasted = ${JSON.stringify(payload("inline source"))};\nexport default async (args) => { console.log("inline saw", args.note, pasted.length); return { note: args.note }; };`,
+          source: `export default async (args) => { console.log("inline saw", args.note); return { note: args.note }; };`,
           args: { note: payload("inline args") },
           intent: "canary sweep inline ok",
         }),
@@ -750,6 +727,47 @@ describe("drive every write path", () => {
     },
     60_000,
   );
+
+  test("a canary in script source is refused at upsert and inline run, and nothing persists", async () => {
+    const db = getDb();
+    const countRows = () =>
+      ["scripts", "script_versions", "script_runs"].map(
+        (table) => (db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get() as { n: number }).n,
+      );
+    const before = countRows();
+    const expectedFinding: Record<CanaryName, string> = {
+      env: ENV_KEY,
+      volatile: VOLATILE_NAME,
+      config: `config:${CONFIG_KEY}`,
+      pattern: "github-pat",
+    };
+    for (const name of Object.keys(CANARY) as CanaryName[]) {
+      const source = `const pasted = ${JSON.stringify(CANARY[name])};\nexport default async () => pasted.length;`;
+      const attempts = [
+        await api("/api/scripts/upsert", {
+          method: "POST",
+          body: JSON.stringify({
+            name: `canary-source-${name}`,
+            source,
+            intent: "canary in source",
+          }),
+        }),
+        await api("/api/scripts/run", {
+          method: "POST",
+          body: JSON.stringify({ source, args: {}, intent: "canary in inline source" }),
+        }),
+      ];
+      for (const { status, body } of attempts) {
+        expect(status).toBe(400);
+        const refusal = JSON.parse(body) as { error: string; findings: { id: string }[] };
+        expect(refusal.error).toBe("source_contains_secret");
+        expect(refusal.findings.map((f) => f.id)).toContain(expectedFinding[name]);
+        expect(needlesIn(body)).toEqual([]);
+      }
+    }
+    expect(countRows()).toEqual(before);
+    driven.push("refused source");
+  });
 
   test("approval request (questions, votes and responses)", async () => {
     const id = crypto.randomUUID();
@@ -896,13 +914,11 @@ describe("sweep", () => {
     expect(scan.hits.get(`${CONTROL_TABLE}.body`)?.size).toBe(NEEDLES.length);
 
     const failures: string[] = [];
-    const openDecisionHits: string[] = [];
     for (const [id, found] of scan.hits) {
       if (id.startsWith(`${CONTROL_TABLE}.`)) continue;
       const cls = classOf(id, textColumns);
       if (cls === "exempt") continue;
-      if (id in OPEN_DECISIONS) openDecisionHits.push(id);
-      else failures.push(`${id} [${cls}] <- ${[...found].sort().join(", ")}`);
+      failures.push(`${id} [${cls}] <- ${[...found].sort().join(", ")}`);
     }
 
     const egress: [string, string][] = [
@@ -925,10 +941,6 @@ describe("sweep", () => {
     }
 
     expect(failures).toEqual([]);
-    const expectedOpen = Object.keys(OPEN_DECISIONS).filter(
-      (id) => !SKIP_SANDBOX_SPAWN_TESTS || !SANDBOX_ONLY_DECISIONS.has(id),
-    );
-    expect(openDecisionHits.sort()).toEqual(expectedOpen.sort());
 
     // The canaries really reached the sinks: each registration channel's
     // marker shows up at rest and in the Slack payloads.
