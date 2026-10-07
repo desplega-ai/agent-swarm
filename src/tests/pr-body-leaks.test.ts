@@ -213,6 +213,53 @@ describe("findPrBodyLeaks: Swarm provenance allowlist", () => {
     expect(findPrBodyLeaks(body)).toEqual([]);
   });
 
+  // CommonMark 0.31.2 §4.5: a fence line is indented at most 3 columns, and a
+  // tab expands to the next multiple of 4, so a deeper "closer" is fence content.
+  test("a closer indented 4 spaces does not close the fence", () => {
+    const body = `\`\`\`\n    \`\`\`\n## Swarm provenance\n\`\`\`\n${dashboardLink()}\n`;
+    expect(findPrBodyLeaks(body)).toEqual(["swarm-dashboard-link"]);
+    expect(checkPrBodyLeaks(body)).toEqual(["internal identifier in body: swarm-dashboard-link"]);
+  });
+
+  test("a closer with a leading tab does not close the fence", () => {
+    const body = `\`\`\`\n\t\`\`\`\n## Swarm provenance\n\`\`\`\n${dashboardLink()}\n`;
+    expect(findPrBodyLeaks(body)).toEqual(["swarm-dashboard-link"]);
+    expect(checkPrBodyLeaks(body)).toEqual(["internal identifier in body: swarm-dashboard-link"]);
+  });
+
+  test("a closer indented 3 spaces still closes the fence", () => {
+    const body = `\`\`\`\ncode\n   \`\`\`\n## Swarm provenance\n\n- ${dashboardLink()}\n`;
+    expect(findPrBodyLeaks(body)).toEqual([]);
+  });
+
+  test("an opener indented 4 spaces is not a fence, for sections or prose", () => {
+    const ref = `${hexWithLetter()}-1111-2222-3333-444444444444`;
+    expect(findPrBodyLeaks(`    \`\`\`\ntaskId = "${ref}"\n\`\`\`\n`)).toEqual(["swarm-task-ref"]);
+    const body = `    \`\`\`\n## Swarm provenance\n\n- ${dashboardLink()}\n`;
+    expect(findPrBodyLeaks(body)).toEqual([]);
+  });
+
+  test("a fence closed less indented than its opener cannot open the section", () => {
+    // In a list item the closer ends the item and opens a new fence, which hides the heading.
+    const body = `- y\n  \`\`\`\n\`\`\`\n## Swarm provenance\n\`\`\`\n${dashboardLink()}\n`;
+    expect(findPrBodyLeaks(body)).toEqual(["swarm-dashboard-link"]);
+  });
+
+  test("an indented heading cannot open the section", () => {
+    // A list item fence indented 4 columns hides it on GitHub.
+    const body = `- y\n    \`\`\`\n   ## Swarm provenance\n    \`\`\`\n${dashboardLink()}\n`;
+    expect(findPrBodyLeaks(body)).toEqual(["swarm-dashboard-link"]);
+  });
+
+  test("an indented, setext, or commented-out heading still ends the section", () => {
+    const section = provenance(`Task: ${dashboardLink()}`);
+    for (const end of ["   ## Notes", "- ## Notes", "\nNotes\n---", "    <!--\n## Notes\n-->"]) {
+      expect(findPrBodyLeaks(`${section}\n${end}\n\n${dashboardLink()}\n`)).toEqual([
+        "swarm-dashboard-link",
+      ]);
+    }
+  });
+
   test("the heading matches case-insensitively with a trailing marker", () => {
     const body = `## swarm  PROVENANCE <!-- bot -->\n\n- ${dashboardLink()}\n`;
     expect(findPrBodyLeaks(body)).toEqual([]);

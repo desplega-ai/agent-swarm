@@ -151,9 +151,6 @@ const PLACEHOLDER_UUIDS = new RegExp(
   "gi",
 );
 
-/** Fenced code blocks (``` or ~~~). An unclosed fence runs to the end, as in CommonMark. */
-const FENCED_CODE = /^[ \t]*(([`~])\2{2,})[^\n]*\n[\s\S]*?(?:^[ \t]*\1\2*[ \t]*$|$(?![\s\S]))/gm;
-
 /** The section heading under which auth-gated provenance links are allowed. */
 export const PROVENANCE_HEADING = "Swarm provenance";
 
@@ -169,40 +166,78 @@ export const PROVENANCE_ALLOWED: ReadonlySet<LeakCategory> = new Set<LeakCategor
 /** A whole Slack permalink, query string included (`?thread_ts=...`). */
 const SLACK_URL = /https?:\/\/[^\s)"'<>]*slack\.com\/(?:archives|client)\/[^\s)"'<>]*/gi;
 
+// CommonMark 0.31.2 §4.5: a fence line starts at most 3 columns in, and a tab
+// expands to the next multiple of 4, so a line with a leading tab is too deep.
 const HEADING = /^#{1,2}\s+(.+?)\s*#*\s*$/;
-const FENCE_LINE = /^[ \t]*(`{3,}|~{3,})(.*)$/;
+const FENCE_LINE = /^( {0,3})(`{3,}|~{3,})(.*)$/;
 const COMMENT_OPEN = /^[ \t]*<!--/;
 
+export type MarkdownLine = {
+  line: string;
+  /** Text of the level-1/level-2 heading this line starts, else null. */
+  heading: string | null;
+  /** True for a fence line or a line inside a fenced code block. */
+  code: boolean;
+  /**
+   * True once a fence closed on a line less indented than its opener. The
+   * opener may sit in a list item, where that line ends the item and opens a
+   * new fence instead, so GitHub can read the rest of the body differently.
+   */
+  ambiguous: boolean;
+};
+
 /**
- * Each line of `markdown`, with the text of the level-1/level-2 heading it
- * starts as GitHub renders it, else null. Headings inside fenced code blocks
- * and HTML comment blocks do not count. A fence closes only on a line of the
- * same character, at least as long as the opening one, with no info string.
+ * Each line of `markdown`, read the way GitHub renders it at the top level.
+ * Headings inside fenced code blocks and HTML comment blocks do not count.
+ * A fence opens or closes only on a line indented at most 3 columns; it closes
+ * on the same character, at least as long as the opener, with no info string.
+ * An unclosed fence runs to the end. Inside an ambiguous span no line counts
+ * as code, so prose checks still see it.
  * Shared with `scripts/check-pr-body.ts` so both read sections the same way.
  */
-export function markdownHeadings(markdown: string): { line: string; heading: string | null }[] {
-  const out: { line: string; heading: string | null }[] = [];
-  let fence: { char: string; length: number } | null = null;
+export function markdownHeadings(markdown: string): MarkdownLine[] {
+  const out: MarkdownLine[] = [];
+  let fence: { char: string; length: number; indent: number } | null = null;
   let inComment = false;
+  let ambiguous = false;
   for (const line of markdown.replace(/\r\n/g, "\n").split("\n")) {
     const fenceLine = FENCE_LINE.exec(line);
-    const run = fenceLine?.[1] ?? "";
-    const info = fenceLine?.[2] ?? "";
+    const indent = fenceLine?.[1]?.length ?? 0;
+    const run = fenceLine?.[2] ?? "";
+    const info = fenceLine?.[3] ?? "";
+    let heading: string | null = null;
+    let code = false;
     if (fence) {
-      if (run[0] === fence.char && run.length >= fence.length && !info.trim()) fence = null;
+      code = true;
+      if (run[0] === fence.char && run.length >= fence.length && !info.trim()) {
+        if (indent < fence.indent) ambiguous = true;
+        fence = null;
+      }
     } else if (inComment) {
       if (line.includes("-->")) inComment = false;
     } else if (fenceLine && !(run[0] === "`" && info.includes("`"))) {
-      fence = { char: run[0] ?? "`", length: run.length };
+      fence = { char: run[0] ?? "`", length: run.length, indent };
+      code = true;
     } else if (COMMENT_OPEN.test(line)) {
       inComment = !line.slice(line.indexOf("<!--") + 4).includes("-->");
     } else {
-      out.push({ line, heading: HEADING.exec(line)?.[1] ?? null });
-      continue;
+      heading = HEADING.exec(line)?.[1] ?? null;
     }
-    out.push({ line, heading: null });
+    out.push({ line, heading, code: code && !ambiguous, ambiguous });
   }
   return out;
+}
+
+/** `markdown` with every fenced code block collapsed to one placeholder line. */
+export function stripFencedCode(markdown: string, placeholder = "<code-block>"): string {
+  const out: string[] = [];
+  let wasCode = false;
+  for (const { line, code } of markdownHeadings(markdown)) {
+    if (!code) out.push(line);
+    else if (!wasCode && placeholder) out.push(placeholder);
+    wasCode = code;
+  }
+  return out.join("\n");
 }
 
 const isProvenanceHeading = (raw: string) =>
@@ -213,15 +248,27 @@ const isProvenanceHeading = (raw: string) =>
     .toLowerCase() === PROVENANCE_HEADING.toLowerCase();
 
 /**
+ * A line GitHub might render as a level-1/level-2 heading in some context: an
+ * ATX heading at any indent or behind list or quote markers, or a setext
+ * underline. Fence and comment state are ignored on purpose.
+ */
+const MAYBE_HEADING =
+  /^[ \t]*(?:(?:[-*+>]|\d{1,9}[.)])[ \t]*)*(?:#{1,2}(?:[ \t]|$)|(?:=+|-+)[ \t]*$)/;
+
+/**
  * Split a body into the `## Swarm provenance` section(s) and everything else.
- * A section runs to the next level-1/level-2 heading, as `markdownHeadings` reads them.
+ * Fails closed both ways. A section opens only on a heading `markdownHeadings`
+ * reads at the top level, outside an ambiguous span. It ends on any line that
+ * might render as a level-1/level-2 heading, even one the parser reads as
+ * fenced or commented out.
  */
 export function splitProvenance(body: string): { outside: string; provenance: string } {
   const outside: string[] = [];
   const provenance: string[] = [];
   let inProvenance = false;
-  for (const { line, heading } of markdownHeadings(body)) {
-    if (heading !== null) inProvenance = isProvenanceHeading(heading);
+  for (const { line, heading, ambiguous } of markdownHeadings(body)) {
+    if (heading !== null && !ambiguous && isProvenanceHeading(heading)) inProvenance = true;
+    else if (heading !== null || MAYBE_HEADING.test(line)) inProvenance = false;
     (inProvenance ? provenance : outside).push(line);
   }
   return { outside: outside.join("\n"), provenance: provenance.join("\n") };
@@ -231,7 +278,7 @@ function scan(text: string, skip: ReadonlySet<LeakCategory>, found: LeakCategory
   const clean = text
     .replace(PRESIGNED_URL, "<presigned-url>")
     .replace(PLACEHOLDER_UUIDS, "<placeholder-uuid>");
-  const prose = clean.replace(FENCED_CODE, "<code-block>");
+  const prose = stripFencedCode(clean);
   for (const rule of LEAK_RULES) {
     if (
       rule.enabled &&

@@ -41,7 +41,12 @@
  */
 
 import { appendFileSync } from "node:fs";
-import { findPrBodyLeaks, isSwarmBotLogin, markdownHeadings } from "../src/utils/pr-body-leaks";
+import {
+  findPrBodyLeaks,
+  isSwarmBotLogin,
+  markdownHeadings,
+  stripFencedCode,
+} from "../src/utils/pr-body-leaks";
 
 const TEMPLATE_PATH = ".github/pull_request_template.md";
 
@@ -138,8 +143,7 @@ export function riskLevel(body: string): Risk | undefined {
 
 /** Words a reviewer reads as prose: code fences, tables, `<details>`, comments, headings and URLs excluded. */
 export function proseWordCount(body: string): number {
-  const prose = stripComments(body.replace(/\r\n/g, "\n"))
-    .replace(/^[ \t]*(`{3,}|~{3,})[^\n]*\n[\s\S]*?(?:^[ \t]*\1[`~]*[ \t]*$|$(?![\s\S]))/gm, "")
+  const prose = stripComments(stripFencedCode(body, ""))
     .replace(/<details>[\s\S]*?<\/details>/gi, "")
     .split("\n")
     .filter((line) => !/^\s*(\||#)/.test(line))
