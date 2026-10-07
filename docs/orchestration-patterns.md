@@ -8,6 +8,8 @@ Use sequential delegation when each step needs the result of the previous one: r
 
 At the task level, the lead creates a task with `send-task` and lists earlier task IDs in `dependsOn`. A task with dependencies is never offered or claimable until every listed dependency is `completed`, and the gate checks for `completed` specifically, so a dependent cannot proceed on a failed parent. Direct assignment uses `agentId` with a `routingReason` and a routing note; omitting `agentId` puts the task in the pool instead. For continuity across steps, `parentTaskId` gives the child a bounded context preamble from the task chain, capped by `CONTEXT_PREAMBLE_MAX_TOKENS` (default 2000), and auto-routes to the same worker unless an `agentId` is given.
 
+The `/mcp-user` ingress assigns each new user task directly to the online Lead. A busy Lead keeps the task pending until capacity returns. The call fails without creating a task when no Lead is online.
+
 ```
 send-task(
   task: "Deploy to production",

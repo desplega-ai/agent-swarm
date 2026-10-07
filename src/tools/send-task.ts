@@ -11,6 +11,7 @@ import {
   getActiveTaskCount,
   getAgentById,
   getDbClient,
+  getLeadAgent,
   getTaskById,
   getUserById,
   hasCapacity,
@@ -289,11 +290,28 @@ export async function sendTaskHandler(
     outputSchema,
   }: SendTaskArgs,
 ): Promise<SwarmToolResult> {
+  const userLead = ctx.kind === "user" ? await getLeadAgent() : null;
+  if (ctx.kind === "user" && (!userLead || userLead.status === "offline")) {
+    return toolErr("No online Lead is available. Start or register a Lead before sending a task.");
+  }
+
+  const requestedAgentId = ctx.kind === "user" ? userLead!.id : agentId;
+  const requestedRoutingReason = ctx.kind === "user" ? "skill" : routingReason;
+  const requestedRoutingNote =
+    ctx.kind === "user"
+      ? "User MCP ingress assigns new work to the Lead for delegation."
+      : routingNote;
+  const requestedOfferMode = ctx.kind === "user" ? false : offerMode;
+  const requestedLeadOnly = ctx.kind === "user" ? false : leadOnly;
+  const requestedCapabilities = ctx.kind === "user" ? undefined : requiredCapabilities;
+  const requestedAllowDuplicate = ctx.kind === "user" ? false : allowDuplicate;
+  const requestedOverrideSlackContext = ctx.kind === "user" ? false : overrideSlackContext;
+
   // Defense in depth for direct TypeScript callers that bypass MCP schema parsing.
-  if (agentId !== undefined && routingReason === undefined) {
+  if (requestedAgentId !== undefined && requestedRoutingReason === undefined) {
     return toolErr("routingReason is required when agentId is supplied.");
   }
-  if (agentId !== undefined && (routingNote?.trim().length ?? 0) < 10) {
+  if (requestedAgentId !== undefined && (requestedRoutingNote?.trim().length ?? 0) < 10) {
     return toolErr(
       "routingNote is required when agentId is supplied (at least 10 characters after trim).",
     );
@@ -337,7 +355,7 @@ export async function sendTaskHandler(
     });
   }
 
-  if (ctx.kind === "owner" && agentId === ctx.agentId) {
+  if (ctx.kind === "owner" && requestedAgentId === ctx.agentId) {
     return toolErr("Cannot send a task to yourself, are you drunk?", {
       data: { yourAgentId: ctx.agentId },
     });
@@ -358,7 +376,10 @@ export async function sendTaskHandler(
   }
   // A public continuation cannot accidentally declassify its parent before
   // createTaskExtended performs the authoritative merge.
-  const effectiveLeadOnly = leadOnly || effectiveParentTask?.routingAffinity?.leadOnly === true;
+  const effectiveLeadOnly =
+    ctx.kind === "user"
+      ? false
+      : requestedLeadOnly || effectiveParentTask?.routingAffinity?.leadOnly === true;
 
   // Slack-routing coherence guard: reject a hand-typed slackChannelId/slackThreadTs
   // that disagrees with the parent task or the contextKey this child will inherit.
@@ -367,7 +388,7 @@ export async function sendTaskHandler(
   // dispatch-slack-channel-must-match-parent-context-2026-07-10). Omitting the
   // three Slack fields lets inheritance do the right thing; overrideSlackContext
   // opts into a deliberate cross-channel dispatch.
-  if (!overrideSlackContext) {
+  if (!requestedOverrideSlackContext) {
     // send-task never passes contextKey explicitly, so the child inherits the
     // parent's contextKey verbatim (createTaskExtended, src/be/db.ts:3556-3558).
     const inheritedContextKey = effectiveParentTask?.contextKey;
@@ -406,8 +427,8 @@ export async function sendTaskHandler(
   }
 
   // Auto-route to parent's worker if parentTaskId is set and no explicit agentId
-  let effectiveAgentId = agentId;
-  if (effectiveParentTaskId && !agentId) {
+  let effectiveAgentId = requestedAgentId;
+  if (effectiveParentTaskId && !requestedAgentId) {
     if (effectiveParentTask?.agentId) {
       effectiveAgentId = effectiveParentTask.agentId;
     }
@@ -421,15 +442,25 @@ export async function sendTaskHandler(
   });
   if (modelError) return toolErr(modelError, { data: { yourAgentId: creatorAgentId } });
   const effectiveRoutingReason =
-    agentId !== undefined ? routingReason : effectiveAgentId ? "continuity" : undefined;
-  const effectiveRoutingNote = effectiveRoutingReason ? routingNote : undefined;
+    requestedAgentId !== undefined
+      ? requestedRoutingReason
+      : effectiveAgentId
+        ? "continuity"
+        : undefined;
+  const effectiveRoutingNote = effectiveRoutingReason ? requestedRoutingNote : undefined;
   const effectiveRoutingSource =
-    agentId !== undefined ? "declared" : effectiveAgentId ? "engine_default" : undefined;
+    ctx.kind === "user"
+      ? "engine_default"
+      : requestedAgentId !== undefined
+        ? "declared"
+        : effectiveAgentId
+          ? "engine_default"
+          : undefined;
 
   const requestedTaskOptions: CreateTaskOptions = {
     key: assetKey,
-    agentId: offerMode ? undefined : effectiveAgentId,
-    offeredTo: offerMode ? effectiveAgentId : undefined,
+    agentId: requestedOfferMode ? undefined : effectiveAgentId,
+    offeredTo: requestedOfferMode ? effectiveAgentId : undefined,
     creatorAgentId,
     requestedByUserId,
     source: "mcp",
@@ -447,7 +478,7 @@ export async function sendTaskHandler(
     slackChannelId,
     slackThreadTs,
     slackUserId,
-    overrideSlackContext,
+    overrideSlackContext: requestedOverrideSlackContext,
     followUpConfig,
     // A delegation with parentTaskId is new work and starts without the
     // parent's followUpConfig. A `resume` re-delegation (the reroute-decision
@@ -458,8 +489,8 @@ export async function sendTaskHandler(
     routingSource: effectiveRoutingSource,
     routingNote: effectiveRoutingNote,
     routingAffinity:
-      effectiveLeadOnly || requiredCapabilities?.length
-        ? { leadOnly: effectiveLeadOnly, capabilities: requiredCapabilities ?? [] }
+      effectiveLeadOnly || requestedCapabilities?.length
+        ? { leadOnly: effectiveLeadOnly, capabilities: requestedCapabilities ?? [] }
         : undefined,
   };
   const preCreate = await applyPreTaskCreate({
@@ -477,6 +508,12 @@ export async function sendTaskHandler(
   }
   const taskDescription = preCreate.description;
   const taskOptions = preCreate.options;
+  if (
+    ctx.kind === "user" &&
+    (taskOptions.agentId !== userLead!.id || taskOptions.offeredTo !== undefined)
+  ) {
+    return toolErr("A pre.task.create extension cannot change the user task's Lead assignment.");
+  }
 
   // The three dedup guards are pure reads, so they run twice: once here as a
   // fast path (keeping this tool's existing early-exit responses), and once
@@ -500,7 +537,7 @@ export async function sendTaskHandler(
     }
 
     // Dedup guard: check for similar recent tasks
-    if (!allowDuplicate && creatorAgentId) {
+    if (!requestedAllowDuplicate && creatorAgentId) {
       const duplicate = await findDuplicateTask({
         taskDescription,
         creatorAgentId: taskOptions.creatorAgentId ?? creatorAgentId,
@@ -616,6 +653,13 @@ export async function sendTaskHandler(
       };
     }
 
+    if (ctx.kind === "user" && (!agent.isLead || agent.status === "offline")) {
+      return {
+        success: false,
+        message: "The Lead is no longer online. No task was created.",
+      };
+    }
+
     if (isExtensionAgent(agent)) {
       return { success: false, message: extensionAgentAssignmentError(agent) };
     }
@@ -628,7 +672,7 @@ export async function sendTaskHandler(
     }
 
     // For direct assignment (not offer), check if agent has capacity
-    if (!taskOptions.offeredTo && !(await hasCapacity(targetAgentId))) {
+    if (ctx.kind !== "user" && !taskOptions.offeredTo && !(await hasCapacity(targetAgentId))) {
       const activeCount = await getActiveTaskCount(targetAgentId);
       return {
         success: false,

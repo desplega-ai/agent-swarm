@@ -155,13 +155,6 @@ async function createPendingTask(base: string, token: string): Promise<string> {
   return res.body.id as string;
 }
 
-function taskIdFrom(result: ToolCallResult): string {
-  expect(result.isError).not.toBe(true);
-  const task = result.structuredContent?.task as { id?: unknown } | undefined;
-  expect(typeof task?.id).toBe("string");
-  return task.id as string;
-}
-
 function expectToolSuccess(result: ToolCallResult): void {
   expect(result.isError).not.toBe(true);
   expect(result.structuredContent?.success).toBe(true);
@@ -179,24 +172,11 @@ function expectSoftForbidden(result: ToolCallResult, verb: string): void {
   );
 }
 
-async function createUnassignedViaMcp(
-  base: string,
-  token: string,
-  sessionId: string,
-): Promise<string> {
-  const created = await mcpUserCall(base, token, sessionId, "send-task", {
-    task: `unassigned task ${crypto.randomUUID()}`,
-  });
-  expectToolSuccess(created);
-  return taskIdFrom(created);
-}
-
 async function exerciseAllowedUserTools(
   base: string,
   token: string,
   sessionId: string,
   pendingTaskId: string,
-  unassignedTaskId: string,
 ): Promise<void> {
   const created = await mcpUserCall(base, token, sessionId, "send-task", {
     task: `allowed send-task ${crypto.randomUUID()}`,
@@ -217,12 +197,6 @@ async function exerciseAllowedUserTools(
     reason: "rbac mcp-user e2e",
   });
   expectToolSuccess(cancelled);
-
-  const moved = await mcpUserCall(base, token, sessionId, "task-action", {
-    action: "to_backlog",
-    taskId: unassignedTaskId,
-  });
-  expectToolSuccess(moved);
 }
 
 describe("RBAC admission over /mcp-user", () => {
@@ -248,25 +222,13 @@ describe("RBAC admission over /mcp-user", () => {
     const admin = await createUserToken(server.base, "MCP Admin");
     const adminSid = await mcpUserInit(server.base, admin.token);
     const adminPendingTaskId = await createPendingTask(server.base, admin.token);
-    const adminUnassignedTaskId = await createUnassignedViaMcp(server.base, admin.token, adminSid);
 
-    await exerciseAllowedUserTools(
-      server.base,
-      admin.token,
-      adminSid,
-      adminPendingTaskId,
-      adminUnassignedTaskId,
-    );
+    await exerciseAllowedUserTools(server.base, admin.token, adminSid, adminPendingTaskId);
     expect(countAuditRows(enabledDbPath)).toBe(0);
 
     const requester = await createUserToken(server.base, "MCP Requester");
     const requesterSid = await mcpUserInit(server.base, requester.token);
     const requesterPendingTaskId = await createPendingTask(server.base, requester.token);
-    const requesterUnassignedTaskId = await createUnassignedViaMcp(
-      server.base,
-      requester.token,
-      requesterSid,
-    );
     rewriteUserRoles(enabledDbPath, requester.userId, [REQUESTER_ROLE_ID]);
 
     await exerciseAllowedUserTools(
@@ -274,13 +236,11 @@ describe("RBAC admission over /mcp-user", () => {
       requester.token,
       requesterSid,
       requesterPendingTaskId,
-      requesterUnassignedTaskId,
     );
 
     const empty = await createUserToken(server.base, "MCP Empty Grant");
     const emptySid = await mcpUserInit(server.base, empty.token);
     const emptyPendingTaskId = await createPendingTask(server.base, empty.token);
-    const emptyUnassignedTaskId = await createUnassignedViaMcp(server.base, empty.token, emptySid);
     rewriteUserRoles(enabledDbPath, empty.userId, []);
 
     expectSoftForbidden(
@@ -294,13 +254,6 @@ describe("RBAC admission over /mcp-user", () => {
         taskId: emptyPendingTaskId,
       }),
       "task.cancel.own",
-    );
-    expectSoftForbidden(
-      await mcpUserCall(server.base, empty.token, emptySid, "task-action", {
-        action: "to_backlog",
-        taskId: emptyUnassignedTaskId,
-      }),
-      "task.action.own",
     );
     expectReadableToolResult(
       await mcpUserCall(server.base, empty.token, emptySid, "get-tasks", { limit: 10 }),
@@ -323,7 +276,7 @@ describe("RBAC admission over /mcp-user", () => {
               row.verb === "task.create.own" &&
               row.decision === "allow",
           ) &&
-          ["task.create.own", "task.cancel.own", "task.action.own"].every((verb) =>
+          ["task.create.own", "task.cancel.own"].every((verb) =>
             auditRows.some(
               (row) =>
                 row.principalId === empty.userId && row.decision === "deny" && row.verb === verb,
@@ -346,7 +299,7 @@ describe("RBAC admission over /mcp-user", () => {
       mcpRows
         .filter((row) => row.principalId === empty.userId && row.decision === "deny")
         .map((row) => row.verb),
-    ).toEqual(["task.create.own", "task.cancel.own", "task.action.own"]);
+    ).toEqual(["task.create.own", "task.cancel.own"]);
 
     await server.stop();
     server = undefined;
@@ -362,19 +315,8 @@ describe("RBAC admission over /mcp-user", () => {
     const flagOffSid = await mcpUserInit(server.base, flagOff.token);
     rewriteUserRoles(disabledDbPath, flagOff.userId, []);
     const flagOffPendingTaskId = await createPendingTask(server.base, flagOff.token);
-    const flagOffUnassignedTaskId = await createUnassignedViaMcp(
-      server.base,
-      flagOff.token,
-      flagOffSid,
-    );
 
-    await exerciseAllowedUserTools(
-      server.base,
-      flagOff.token,
-      flagOffSid,
-      flagOffPendingTaskId,
-      flagOffUnassignedTaskId,
-    );
+    await exerciseAllowedUserTools(server.base, flagOff.token, flagOffSid, flagOffPendingTaskId);
     expect(countAuditRows(disabledDbPath)).toBe(0);
   });
 });

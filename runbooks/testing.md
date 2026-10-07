@@ -14,7 +14,7 @@ Hub for everything test-shaped in this repo. The canonical, up-to-date testing r
 | Testing the Helm chart on a real cluster (HTTPS, cert-manager, agent-fs, the example values) | [k8s-test-cluster.md](./k8s-test-cluster.md) — throwaway single-node k3s on a VPS, verify list, teardown |
 | Modifying memory-system code | [memory-system.md](./memory-system.md) — runs all four memory test files |
 | Testing Slack integration / driving the **LOCAL** dev swarm | Dev channel `#swarm-dev-2` (`C0AR967K0KZ`), bot `@dev-swarm` (`U0ALZGQCF96`). Send via `slack_send_message` MCP tool to trigger task-assignment flow |
-| Sending a task to the **PRODUCTION / deployed** swarm | Use the swarm-user MCP `mcp__agent-swarm-user__send-task` (creates an unassigned task in the production pool; read back with `mcp__agent-swarm-user__get-tasks`). **Not** the dev Slack channel. MCP may not be enabled every session — check for `mcp__agent-swarm-user__*` first |
+| Sending a task to the **PRODUCTION / deployed** swarm | Use `mcp__agent-swarm-user__send-task`. It queues work directly for the online Lead. The call fails without creating a task when no Lead is online. Read results with `mcp__agent-swarm-user__get-tasks`. **Not** the dev Slack channel. MCP may not be enabled every session. Check for `mcp__agent-swarm-user__*` first. |
 | Driving a browser to verify UI | `agent-browser` only (`open`, `snapshot`, `screenshot`). Load the guide with `agent-browser skills get core`. Never `qa-use` unless explicitly asked |
 
 ## Hard rules
