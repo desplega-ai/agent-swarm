@@ -976,9 +976,7 @@
     "parentEventId": {
       "exempt": "identifier"
     },
-    "data": {
-      "pending": "12b: events writer"
-    },
+    "data": "scrubbed",
     "createdAt": {
       "exempt": "timestamp"
     }

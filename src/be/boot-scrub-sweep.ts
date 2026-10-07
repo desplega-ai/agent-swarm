@@ -232,7 +232,7 @@ async function sweepTarget(
 }
 
 /** True when `before` parsed as JSON and `after` no longer does. */
-function breaksJsonValidity(before: string, after: string): boolean {
+export function breaksJsonValidity(before: string, after: string): boolean {
   try {
     JSON.parse(before);
   } catch {
