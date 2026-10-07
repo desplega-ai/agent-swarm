@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { inspect } from "node:util";
 import { installConsoleLogBridge, uninstallConsoleLogBridge } from "../otel-impl";
 import { installConsoleScrub, uninstallConsoleScrub } from "../utils/console-scrub";
 
@@ -89,6 +90,43 @@ describe("installConsoleScrub", () => {
     const line = lastLine();
     expect(line).not.toContain(SECRET);
     expect(line).toContain(REDACTED);
+  });
+
+  test("a log written by a custom inspector during formatting fails closed", () => {
+    installConsoleScrub();
+    const noisy = {
+      [inspect.custom]() {
+        console.log("nested", SECRET);
+        return "noisy-object";
+      },
+    };
+    console.log("outer", noisy);
+    expect(written).toHaveLength(2);
+    const [nested, outer] = written.map((entry) => entry.args);
+    expect(nested).toEqual([
+      "[console-scrub] suppressed a log line written while formatting another",
+    ]);
+    expect(outer).toEqual(["outer noisy-object"]);
+    expect(JSON.stringify(written)).not.toContain(SECRET);
+  });
+
+  test("a formatting throw writes a fixed line, never the raw arguments", () => {
+    installConsoleScrub();
+    const broken = {
+      [inspect.custom]() {
+        throw new Error(`inspector failed near ${SECRET}`);
+      },
+    };
+    console.error("payload", SECRET, broken);
+    expect(written).toHaveLength(1);
+    expect(written[0]?.args).toEqual(["[console-scrub] failed to scrub log line"]);
+    expect(JSON.stringify(written)).not.toContain(SECRET);
+  });
+
+  test("zero arguments still print an empty line", () => {
+    installConsoleScrub();
+    console.log();
+    expect(written.at(-1)?.args).toEqual([]);
   });
 
   test("10k lines stay cheap", () => {

@@ -13,6 +13,7 @@ const METHODS = ["log", "info", "warn", "error", "debug"] as const;
 type ConsoleMethod = (typeof METHODS)[number];
 
 const SCRUB_FAILED = "[console-scrub] failed to scrub log line";
+const NESTED_SUPPRESSED = "[console-scrub] suppressed a log line written while formatting another";
 
 let restore: (() => void) | undefined;
 
@@ -24,8 +25,11 @@ export function installConsoleScrub(): void {
     const original = console[method];
     originals.set(method, original);
     console[method] = (...args: unknown[]) => {
-      // A scrubber that logs must not recurse into itself.
-      if (args.length === 0 || scrubbing) return original.apply(console, args);
+      if (args.length === 0) return original.call(console);
+      // `format` runs custom inspectors synchronously, and one that logs lands
+      // here mid-scrub. Its arguments are unscrubbed and formatting them again
+      // could recurse, so fail closed with a fixed line instead.
+      if (scrubbing) return original.call(console, NESTED_SUPPRESSED);
       scrubbing = true;
       let line: string;
       try {
