@@ -138,8 +138,15 @@ function bridgeRequestFor(name: string, args: unknown): BridgeRequest | null {
 
     // ── kv ──
     case "kv_get":
-    case "kv_getOrNull":
-      return { method: "GET", path: kvPath(body) };
+    case "kv_getOrNull": {
+      // Optional targeted read: dot path into a JSON value + offset/limit page.
+      const view = new URLSearchParams();
+      if (typeof body.path === "string") view.set("path", body.path);
+      if (typeof body.offset === "number") view.set("offset", String(body.offset));
+      if (typeof body.limit === "number") view.set("limit", String(body.limit));
+      const qs = view.toString();
+      return { method: "GET", path: qs ? `${kvPath(body)}?${qs}` : kvPath(body) };
+    }
     case "kv_set":
       return {
         method: "PUT",

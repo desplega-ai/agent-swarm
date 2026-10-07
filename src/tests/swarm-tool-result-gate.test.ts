@@ -409,11 +409,12 @@ describe("finalizeSwarmToolResult", () => {
       };
     };
 
-    expect(text).toContain("JSON payload omitted");
+    // The head of the JSON rendering fills the budget as labelled prose; the
+    // structured `data` is never cut (a cut value would read as real).
+    expect(text).toContain(`JSON payload head:\n{\n  "blob": "${blob.slice(0, 100)}`);
     expect(text).not.toContain('"truncated":true');
-    expect(text).not.toContain(`"blob": "${blob.slice(0, 100)}`);
     expect(structured).not.toHaveProperty("blob");
-    expect(structured.details).toContain("JSON payload omitted");
+    expect(structured.details).toContain("JSON payload head:");
     const fullValueAt = structured.truncation!.fullValueAt;
     const retrieval = structured.truncation!.retrieval;
     expect(fullValueAt).toMatch(/^kv:\/\/mcp:overflow:tool-result-test-agent\/v1\/some-tool\//);
@@ -425,7 +426,7 @@ describe("finalizeSwarmToolResult", () => {
     });
     const key = fullValueAt.replace(`kv://${TEST_OVERFLOW_NAMESPACE}/`, "");
     expect(retrieval).toContain(
-      `kv-get({"namespace":"${TEST_OVERFLOW_NAMESPACE}","key":"${key}"})`,
+      `kv-get({"namespace":"${TEST_OVERFLOW_NAMESPACE}","key":"${key}","path":"outcome.data.blob","offset":0})`,
     );
     // One pointer per channel: a single kv:// line plus the retrieval call in
     // text; only the truncation object in structuredContent.
@@ -569,6 +570,7 @@ describe("finalizeSwarmToolResult", () => {
     expect(text).toBe(
       `Big rendered payload.\n\n${structured.details}\n\n` +
         `Full value: ${fullValueAt} (${originalBytes} bytes)\n` +
+        `Shape: outcome.details string 50004 chars 48.8KB; outcome.data.blob string 50000 chars 48.8KB\n` +
         `Retrieval: ${retrieval}`,
     );
     expect(occurrences(text, fullValueAt)).toBe(1);
@@ -635,6 +637,41 @@ describe("finalizeSwarmToolResult", () => {
     expectEachChannelWithinLimit(finalized);
   });
 
+  test("a spill carries a bounded shape summary on both channels, inside the cap", async () => {
+    const rows = Array.from({ length: 400 }, (_, id) => ({ id, note: "r".repeat(100) }));
+    const result = await finalizeSwarmToolResult(
+      "script-run",
+      {
+        ok: true,
+        message: "Script run completed.",
+        details: `result:\n${JSON.stringify({ rows }, null, 2)}`,
+        data: { status: 200, data: { result: { rows } } },
+      },
+      { agentId: TEST_AGENT_ID },
+    );
+    const text = (result.content?.[0] as { text: string }).text;
+    const truncation = (result.structuredContent as { truncation: SwarmToolTruncation }).truncation;
+
+    // Sorted by bytes: the details rendering outweighs the rows it renders.
+    expect(truncation.shape?.map((entry) => entry.path)).toEqual([
+      "outcome.details",
+      "outcome.data.data.result.rows",
+    ]);
+    expect(truncation.shape?.[1]).toMatchObject({ type: "array", items: 400 });
+    expect(truncation.shape!.length).toBeLessThanOrEqual(8);
+    expect(text).toContain("Shape: ");
+    expect(text).toContain("outcome.data.data.result.rows array[400]");
+    expect(occurrences(text, "Shape: ")).toBe(1);
+    expect(truncation.retrieval).toContain('"path":"outcome.data.data.result.rows","offset":0');
+    // Structured channel: shape only inside the truncation object.
+    expect(JSON.stringify(result.structuredContent)).not.toContain("Shape:");
+    // The array path keeps tool prose out of structuredContent (it carries the
+    // rows themselves), so each channel fills its own budget with payload.
+    expect(result.structuredContent).not.toHaveProperty("details");
+    expect(text.indexOf("… [truncated")).toBeGreaterThan(8_000);
+    expectEachChannelWithinLimit(result);
+  });
+
   test("oversized results without an agent identity never spill to the flat namespace", async () => {
     const result = await finalizeSwarmToolResult("anonymous-tool", {
       ok: true,
@@ -693,7 +730,7 @@ describe("finalizeSwarmToolResult", () => {
       }
     ).truncation;
     expect(truncation.retrieval).toMatch(
-      /^kv-get\(\{"namespace":"mcp:overflow:tool-result-test-agent","key":"[^"]+"\}\) returns the full value/,
+      /^kv-get\(\{"namespace":"mcp:overflow:tool-result-test-agent","key":"[^"]+","path":"outcome.details","offset":0\}\) returns a bounded page/,
     );
     expect(truncation.retrieval).toContain("ctx.swarm.kv_get");
     const key = truncation.fullValueAt.replace(`kv://${TEST_OVERFLOW_NAMESPACE}/`, "");

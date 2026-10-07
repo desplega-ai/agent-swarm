@@ -22,7 +22,12 @@ import {
   registerKvListTool,
   registerKvSetTool,
 } from "../tools/kv";
-import { finalizeSwarmToolResult, mcpOverflowNamespace } from "../tools/utils";
+import {
+  finalizeSwarmToolResult,
+  MCP_RESULT_WIRE_LIMIT_BYTES,
+  mcpOverflowNamespace,
+  wireChannelBytes,
+} from "../tools/utils";
 
 const TEST_DB_PATH = "./test-kv-tool.sqlite";
 
@@ -170,6 +175,163 @@ describe("kv MCP tools", () => {
     expect(intruderList.structuredContent.success).toBe(false);
     expect(intruderList.structuredContent.message).toMatch(/another agent/);
     expect(intruderList.structuredContent.entries).toBeUndefined();
+  });
+
+  type ViewResult = {
+    content: Array<{ type: string; text: string }>;
+    structuredContent: {
+      success: boolean;
+      message: string;
+      details?: string;
+      entry?: { value?: unknown; key?: string };
+      view?: {
+        path: string;
+        type: string;
+        total?: number;
+        offset?: number;
+        returned?: number;
+        nextOffset?: number | null;
+      };
+    };
+  };
+
+  test("kv-get path/offset/limit follows the spill hint to a bounded, pageable slice", async () => {
+    const tools = buildServer();
+    const rows = Array.from({ length: 400 }, (_, id) => ({ id, note: "r".repeat(100) }));
+    const spill = await finalizeSwarmToolResult(
+      "script-run",
+      {
+        ok: true,
+        message: "Script run completed.",
+        details: `result:\n${JSON.stringify({ rows }, null, 2)}`,
+        data: { status: 200, data: { result: { rows } } },
+      },
+      { agentId: agentA },
+    );
+    const truncation = (
+      spill.structuredContent as {
+        truncation: { retrieval: string; shape: Array<{ path: string; items?: number }> };
+      }
+    ).truncation;
+    expect(truncation.shape).toContainEqual(
+      expect.objectContaining({ path: "outcome.data.data.result.rows", type: "array", items: 400 }),
+    );
+    // The hint is a literal, copy-pasteable call.
+    const hinted = JSON.parse(
+      truncation.retrieval.slice("kv-get(".length, truncation.retrieval.indexOf(") returns")),
+    ) as { namespace: string; key: string; path: string; offset: number };
+    expect(hinted.path).toBe("outcome.data.data.result.rows");
+
+    const first = (await tools.get.handler(hinted, meta(agentA))) as ViewResult;
+    const view = first.structuredContent.view!;
+    expect(first.structuredContent.success).toBe(true);
+    expect(view).toMatchObject({
+      path: "outcome.data.data.result.rows",
+      type: "array",
+      total: 400,
+    });
+    expect(view.returned).toBeGreaterThan(0);
+    expect(view.returned).toBeLessThan(400);
+    expect(view.nextOffset).toBe(view.returned);
+    expect(JSON.parse(first.structuredContent.details!)).toEqual(rows.slice(0, view.returned));
+    expect(first.structuredContent.entry).not.toHaveProperty("value");
+    expect(first.structuredContent.message).toContain("continue at view.nextOffset");
+    expect(wireChannelBytes(first)).toBeLessThanOrEqual(MCP_RESULT_WIRE_LIMIT_BYTES);
+
+    const next = (await tools.get.handler(
+      { ...hinted, offset: view.nextOffset!, limit: 5 },
+      meta(agentA),
+    )) as ViewResult;
+    expect(next.structuredContent.view).toMatchObject({ offset: view.nextOffset, returned: 5 });
+    expect(JSON.parse(next.structuredContent.details!)).toEqual(
+      rows.slice(view.nextOffset!, view.nextOffset! + 5),
+    );
+
+    const pastEnd = (await tools.get.handler(
+      { ...hinted, offset: 10_000 },
+      meta(agentA),
+    )) as ViewResult;
+    expect(pastEnd.structuredContent.success).toBe(true);
+    expect(pastEnd.structuredContent.view).toMatchObject({
+      total: 400,
+      returned: 0,
+      nextOffset: null,
+    });
+    expect(pastEnd.structuredContent.details).toBe("[]");
+
+    const missing = (await tools.get.handler(
+      { ...hinted, path: "outcome.data.nope" },
+      meta(agentA),
+    )) as ViewResult;
+    expect(missing.structuredContent.success).toBe(false);
+    expect(missing.structuredContent.message).toContain('no key "nope" under "outcome.data"');
+
+    const badIndex = (await tools.get.handler(
+      { ...hinted, path: "outcome.data.data.result.rows.400" },
+      meta(agentA),
+    )) as ViewResult;
+    expect(badIndex.structuredContent.success).toBe(false);
+    expect(badIndex.structuredContent.message).toContain("array of 400");
+
+    const oneRow = (await tools.get.handler(
+      { ...hinted, path: "outcome.data.data.result.rows.7" },
+      meta(agentA),
+    )) as ViewResult;
+    expect(JSON.parse(oneRow.structuredContent.details!)).toEqual(rows[7]);
+  });
+
+  test("kv-get view on a plain string pages characters and rejects a JSON path", async () => {
+    const tools = buildServer();
+    await tools.set.handler(
+      { key: "plain", value: "hello world, not json", valueType: "string" },
+      meta(agentA),
+    );
+    const chars = (await tools.get.handler(
+      { key: "plain", offset: 6, limit: 5 },
+      meta(agentA),
+    )) as ViewResult;
+    expect(chars.structuredContent.success).toBe(true);
+    expect(chars.structuredContent.details).toBe("world");
+    expect(chars.structuredContent.view).toMatchObject({
+      type: "string",
+      total: 21,
+      returned: 5,
+      nextOffset: 11,
+    });
+
+    const pathed = (await tools.get.handler(
+      { key: "plain", path: "a" },
+      meta(agentA),
+    )) as ViewResult;
+    expect(pathed.structuredContent.success).toBe(false);
+    expect(pathed.structuredContent.message).toContain("plain string");
+
+    await tools.set.handler({ key: "num", value: 42 }, meta(agentA));
+    const scalar = (await tools.get.handler({ key: "num", offset: 1 }, meta(agentA))) as ViewResult;
+    expect(scalar.structuredContent.success).toBe(false);
+    expect(scalar.structuredContent.message).toContain("is a number");
+  });
+
+  test("kv-get view names a narrower path when one item alone exceeds the cap", async () => {
+    const tools = buildServer();
+    await tools.set.handler(
+      { key: "fat-items", value: { items: [{ blob: "f".repeat(20_000) }, { id: 2 }] } },
+      meta(agentA),
+    );
+    const res = (await tools.get.handler(
+      { key: "fat-items", path: "items" },
+      meta(agentA),
+    )) as ViewResult;
+    expect(res.structuredContent.success).toBe(true);
+    expect(res.structuredContent.view).toMatchObject({ returned: 0, nextOffset: 0, total: 2 });
+    expect(res.structuredContent.message).toContain('narrow the path to "items.0"');
+    expect(wireChannelBytes(res)).toBeLessThanOrEqual(MCP_RESULT_WIRE_LIMIT_BYTES);
+
+    const narrowed = (await tools.get.handler(
+      { key: "fat-items", path: "items.0.blob", limit: 100 },
+      meta(agentA),
+    )) as ViewResult;
+    expect(narrowed.structuredContent.details).toBe("f".repeat(100));
   });
 
   test("kv-incr creates + increments + reports value", async () => {

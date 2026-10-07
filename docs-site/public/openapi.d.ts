@@ -7597,7 +7597,11 @@ export interface paths {
         /** Get a KV entry by key (namespace resolved from request headers) */
         get: {
             parameters: {
-                query?: never;
+                query?: {
+                    path?: string;
+                    offset?: number | null;
+                    limit?: number;
+                };
                 header?: never;
                 path: {
                     key: string;
@@ -7606,16 +7610,26 @@ export interface paths {
             };
             requestBody?: never;
             responses: {
-                /** @description KV entry */
+                /** @description KV entry (or a path/offset/limit view of it) */
                 200: {
                     headers: {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["KvEntry"];
+                        "application/json": components["schemas"]["KvEntry"] & {
+                            view?: {
+                                path: string;
+                                /** @enum {string} */
+                                type: "object" | "array" | "string" | "number" | "boolean" | "null";
+                                total?: number;
+                                offset?: number;
+                                returned?: number;
+                                nextOffset?: number | null;
+                            };
+                        };
                     };
                 };
-                /** @description Validation error or unresolvable namespace */
+                /** @description Validation error, unresolvable namespace, or invalid view path */
                 400: {
                     headers: {
                         [name: string]: unknown;
@@ -7900,7 +7914,11 @@ export interface paths {
         /** Get a KV entry by explicit namespace + key */
         get: {
             parameters: {
-                query?: never;
+                query?: {
+                    path?: string;
+                    offset?: number | null;
+                    limit?: number;
+                };
                 header?: never;
                 path: {
                     namespace: string;
@@ -7910,16 +7928,26 @@ export interface paths {
             };
             requestBody?: never;
             responses: {
-                /** @description KV entry */
+                /** @description KV entry (or a path/offset/limit view of it) */
                 200: {
                     headers: {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["KvEntry"];
+                        "application/json": components["schemas"]["KvEntry"] & {
+                            view?: {
+                                path: string;
+                                /** @enum {string} */
+                                type: "object" | "array" | "string" | "number" | "boolean" | "null";
+                                total?: number;
+                                offset?: number;
+                                returned?: number;
+                                nextOffset?: number | null;
+                            };
+                        };
                     };
                 };
-                /** @description Validation error or unresolvable namespace */
+                /** @description Validation error, unresolvable namespace, or invalid view path */
                 400: {
                     headers: {
                         [name: string]: unknown;

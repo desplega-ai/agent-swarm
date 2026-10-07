@@ -246,6 +246,40 @@ describe("/api/kv REST — explicit namespace shape", () => {
     expect((await get.json()).value).toBe("hi");
   });
 
+  test("GET with path/offset/limit returns a view of a JSON string value", async () => {
+    const ns = "swarm:test:view";
+    const stored = JSON.stringify({ outcome: { data: { rows: [10, 11, 12, 13, 14] } } });
+    const put = await authedFetch(`/api/kv/_/${encodeURIComponent(ns)}/spill`, {
+      method: "PUT",
+      body: JSON.stringify({ value: stored, valueType: "string" }),
+      agentId,
+    });
+    expect(put.status).toBe(200);
+    const base = `/api/kv/_/${encodeURIComponent(ns)}/spill`;
+
+    const page = await authedFetch(`${base}?path=outcome.data.rows&offset=1&limit=2`, { agentId });
+    expect(page.status).toBe(200);
+    const body = await page.json();
+    expect(body.value).toEqual([11, 12]);
+    expect(body.view).toEqual({
+      path: "outcome.data.rows",
+      type: "array",
+      total: 5,
+      offset: 1,
+      returned: 2,
+      nextOffset: 3,
+    });
+
+    const whole = await authedFetch(base, { agentId });
+    const wholeBody = await whole.json();
+    expect(wholeBody.value).toBe(stored);
+    expect(wholeBody).not.toHaveProperty("view");
+
+    const missing = await authedFetch(`${base}?path=outcome.nope`, { agentId });
+    expect(missing.status).toBe(400);
+    expect((await missing.json()).error).toContain('no key "nope"');
+  });
+
   test("list with explicit namespace", async () => {
     const ns = "swarm:test:explicit-list";
     await authedFetch(`/api/kv/_/${encodeURIComponent(ns)}/k`, {

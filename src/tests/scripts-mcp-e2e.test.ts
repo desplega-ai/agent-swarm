@@ -75,6 +75,7 @@ type StructuredResult<T> = {
       originalBytes: number;
       limitBytes: number;
       retrieval: string;
+      shape?: Array<{ path: string; type: string; bytes: number; items?: number }>;
     };
     status?: number;
     data?: T;
@@ -482,6 +483,15 @@ describe("script_ MCP HTTP proxy tools", () => {
     expect(run.structuredContent.message).toContain(`${kept.length} of 20`);
     expect(run.structuredContent.truncation).toBeDefined();
     expect(wireChannelBytes(run)).toBeLessThanOrEqual(MCP_RESULT_WIRE_LIMIT_BYTES);
+    // The shape names the stored array and the hint fetches it directly.
+    expect(run.structuredContent.truncation?.shape?.[0]).toMatchObject({
+      path: "outcome.data.data.result",
+      type: "array",
+      items: 20,
+    });
+    expect(run.structuredContent.truncation?.retrieval).toContain(
+      '"path":"outcome.data.data.result","offset":0',
+    );
 
     const overflowNamespace = mcpOverflowNamespace(workerId);
     const fullValueAt = run.structuredContent.truncation?.fullValueAt ?? "";

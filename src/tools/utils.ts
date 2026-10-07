@@ -20,6 +20,7 @@ import type {
 import * as z from "zod";
 import { sweepExpiredKvPrefix, upsertKv } from "../be/db";
 import { MCP_OVERFLOW_NAMESPACE, mcpOverflowNamespace } from "../kv-overflow";
+import { type KvShapeEntry, summarizeKvShape } from "../kv-view";
 import { withSpan } from "../otel";
 import type { PermissionVerb } from "../rbac/permissions";
 import { SCRIPT_LONG_TIMEOUT_HINT_MS } from "../scripts-runtime/executors/types";
@@ -138,6 +139,8 @@ export type SwarmToolTruncation = {
   originalBytes: number;
   limitBytes: number;
   retrieval: string;
+  /** Biggest branches of the stored value; each `path` is a kv-get `path`. */
+  shape?: KvShapeEntry[];
 };
 
 export type SwarmToolResult<TData extends SwarmToolData = SwarmToolData> = {
@@ -192,6 +195,16 @@ const swarmToolTruncationSchema = z.looseObject({
   originalBytes: z.number(),
   limitBytes: z.number(),
   retrieval: z.string(),
+  shape: z
+    .array(
+      z.looseObject({
+        path: z.string().optional(),
+        type: z.string().optional(),
+        bytes: z.number().optional(),
+        items: z.number().optional(),
+      }),
+    )
+    .optional(),
 });
 
 export const swarmToolEnvelopeShape = {
@@ -347,7 +360,7 @@ export const NUDGES: Record<string, (result: SwarmToolResult) => string | undefi
     const rendered =
       typeof entry.value === "string" ? entry.value : (JSON.stringify(entry.value) ?? "");
     return rendered.length > MCP_RESULT_WIRE_LIMIT_BYTES
-      ? "Large value — your harness may truncate this result; to filter or aggregate it, process it in a script via ctx.swarm.kv_get instead."
+      ? "Large value — your harness may truncate this result; re-call kv-get with path/offset/limit for a bounded slice, or process it in a script via ctx.swarm.kv_get."
       : undefined;
   },
 };
@@ -430,7 +443,8 @@ function composeWireResult(r: SwarmToolResult): CallToolResult {
 }
 
 function renderTruncationPointer(t: SwarmToolTruncation): string {
-  return `Full value: ${t.fullValueAt} (${t.originalBytes} bytes)\nRetrieval: ${t.retrieval}`;
+  const shape = t.shape?.length ? `\nShape: ${renderShape(t.shape)}` : "";
+  return `Full value: ${t.fullValueAt} (${t.originalBytes} bytes)${shape}\nRetrieval: ${t.retrieval}`;
 }
 
 /**
@@ -499,12 +513,43 @@ function overflowKey(toolName: string, value: string): string {
   return `v1/${safeToolName}/${hash}`;
 }
 
-function overflowRetrieval(namespace: string, key: string): string {
+/**
+ * Point the model at a targeted fetch: the biggest array in the shape (or the
+ * biggest branch), which kv-get returns as a bounded, pageable slice.
+ */
+function overflowRetrieval(namespace: string, key: string, shape: KvShapeEntry[]): string {
+  const target = shape.find((entry) => entry.type === "array") ?? shape[0];
+  if (!target) {
+    return (
+      `kv-get(${JSON.stringify({ namespace, key })}) returns the full value ` +
+      `(your harness may truncate it); in a script, ctx.swarm.kv_get keeps it out of your context.`
+    );
+  }
   return (
-    `kv-get(${JSON.stringify({ namespace, key })}) returns the full value ` +
-    `(your harness may truncate it); to filter or aggregate it instead, ` +
-    `process it in a script via ctx.swarm.kv_get.`
+    `kv-get(${JSON.stringify({ namespace, key, path: target.path, offset: 0 })}) returns a ` +
+    `bounded page (nextOffset pages on; any Shape path works; no path = the full value). ` +
+    `ctx.swarm.kv_get takes the same args in a script.`
   );
+}
+
+function formatBytes(bytes: number): string {
+  return bytes >= 1_024 ? `${(bytes / 1_024).toFixed(1)}KB` : `${bytes}B`;
+}
+
+function renderShape(shape: KvShapeEntry[]): string {
+  return shape
+    .map((entry) => {
+      const count =
+        entry.items === undefined
+          ? ""
+          : entry.type === "array"
+            ? `[${entry.items}]`
+            : entry.type === "object"
+              ? `{${entry.items} keys}`
+              : ` ${entry.items} chars`;
+      return `${entry.path} ${entry.type}${count} ${formatBytes(entry.bytes)}`;
+    })
+    .join("; ");
 }
 
 function canonicalOverflowPayload(toolName: string, result: SwarmToolResult): string {
@@ -740,14 +785,16 @@ const ctxControlMiddleware: FinalizeMiddleware = async (result, ctx) => {
     if (fitsWireLimit(deduped)) return deduped;
   }
 
+  const storedValue = canonicalOverflowPayload(ctx.toolName, result);
+  // Paths are relative to the stored value, so each one is a kv-get `path`.
+  const shape = summarizeKvShape(JSON.parse(storedValue));
   let fullValueAt: string;
   let retrieval: string;
   if (ctx.agentId) {
-    const storedValue = canonicalOverflowPayload(ctx.toolName, result);
     const key = overflowKey(ctx.toolName, storedValue);
     const namespace = mcpOverflowNamespace(ctx.agentId);
     fullValueAt = `kv://${namespace}/${key}`;
-    retrieval = overflowRetrieval(namespace, key);
+    retrieval = overflowRetrieval(namespace, key, shape);
     const expiresAt = Date.now() + MCP_OVERFLOW_TTL_MS;
 
     // The public KV write surfaces cap values at 2 MiB, while the SQLite TEXT
@@ -773,6 +820,7 @@ const ctxControlMiddleware: FinalizeMiddleware = async (result, ctx) => {
     originalBytes: fullWireBytes,
     limitBytes: MCP_RESULT_WIRE_LIMIT_BYTES,
     retrieval,
+    ...(shape.length > 0 ? { shape } : {}),
   };
   const arrayPreservingResult = truncateArraysInPlace(result, truncation);
   if (arrayPreservingResult) return arrayPreservingResult;
@@ -786,9 +834,12 @@ const ctxControlMiddleware: FinalizeMiddleware = async (result, ctx) => {
   });
   const prose = result.details?.trim() || undefined;
   if (prose) return fillPreviewToBudget(prose, spilled);
-  return spilled(
-    `JSON payload omitted because the result exceeded ${MCP_RESULT_WIRE_LIMIT_BYTES} bytes per channel.`,
-  );
+  // Data without arrays to shorten: show the head of its JSON rendering as
+  // labelled prose. Structured `data` stays omitted, since a cut JSON value
+  // there would read as a real (wrong) value.
+  const json = result.data ? JSON.stringify(result.data, null, 2) : "";
+  if (!json) return spilled("Payload omitted.");
+  return fillPreviewToBudget(json, (preview) => spilled(`JSON payload head:\n${preview}`));
 };
 
 // Ordered and security-sensitive: ctx-control runs only after the result and

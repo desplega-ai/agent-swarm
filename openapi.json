@@ -20567,21 +20567,102 @@
             "required": true,
             "name": "key",
             "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "required": false,
+            "name": "path",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
+            },
+            "required": false,
+            "name": "offset",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "exclusiveMinimum": 0
+            },
+            "required": false,
+            "name": "limit",
+            "in": "query"
           }
         ],
         "responses": {
           "200": {
-            "description": "KV entry",
+            "description": "KV entry (or a path/offset/limit view of it)",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/KvEntry"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/KvEntry"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "view": {
+                          "type": "object",
+                          "properties": {
+                            "path": {
+                              "type": "string"
+                            },
+                            "type": {
+                              "type": "string",
+                              "enum": [
+                                "object",
+                                "array",
+                                "string",
+                                "number",
+                                "boolean",
+                                "null"
+                              ]
+                            },
+                            "total": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "offset": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "returned": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "nextOffset": {
+                              "type": [
+                                "integer",
+                                "null"
+                              ],
+                              "minimum": 0
+                            }
+                          },
+                          "required": [
+                            "path",
+                            "type"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
           },
           "400": {
-            "description": "Validation error or unresolvable namespace",
+            "description": "Validation error, unresolvable namespace, or invalid view path",
             "content": {
               "application/json": {
                 "schema": {
@@ -20977,21 +21058,102 @@
             "required": true,
             "name": "key",
             "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "required": false,
+            "name": "path",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
+            },
+            "required": false,
+            "name": "offset",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "exclusiveMinimum": 0
+            },
+            "required": false,
+            "name": "limit",
+            "in": "query"
           }
         ],
         "responses": {
           "200": {
-            "description": "KV entry",
+            "description": "KV entry (or a path/offset/limit view of it)",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/KvEntry"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/KvEntry"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "view": {
+                          "type": "object",
+                          "properties": {
+                            "path": {
+                              "type": "string"
+                            },
+                            "type": {
+                              "type": "string",
+                              "enum": [
+                                "object",
+                                "array",
+                                "string",
+                                "number",
+                                "boolean",
+                                "null"
+                              ]
+                            },
+                            "total": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "offset": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "returned": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "nextOffset": {
+                              "type": [
+                                "integer",
+                                "null"
+                              ],
+                              "minimum": 0
+                            }
+                          },
+                          "required": [
+                            "path",
+                            "type"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
           },
           "400": {
-            "description": "Validation error or unresolvable namespace",
+            "description": "Validation error, unresolvable namespace, or invalid view path",
             "content": {
               "application/json": {
                 "schema": {

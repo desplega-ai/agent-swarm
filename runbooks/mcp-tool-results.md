@@ -72,7 +72,7 @@ Ctx-control stores the full canonical, scrubbed outcome directly through the API
   lazy-expiry behavior.
 - **Value:** raw string JSON containing `{ version, toolName, outcome }`, including full `details`/`data`/`nudge`. The KV table itself has no declared `TEXT` size constraint; the public KV PUT surfaces impose a separate 2 MiB request cap, which does not apply to this direct server-side write.
 
-The wire replacement keeps `message` and `nudge` on both channels. The pointer appears once per channel: the text channel ends with one `Full value: kv://…` line and one `Retrieval:` line; `structuredContent` carries only the `truncation` object (never a copy of the pointer inside `details`). For array-shaped structured data, ctx-control preserves the array key and finds the largest leading element prefix that fits, sizing arrays against a 1,200-char prose floor and then growing the prose preview into the budget left over. In this path `details` stays out of `structuredContent` (it carries the shortened data itself), so the text preview and the structured array each fill their own channel. It also rewrites or augments the human message with the surviving count, so callers cannot confuse a shortened array with a genuine full or empty result. Tool-authored prose keeps the largest prefix that fits the per-channel budget (binary search on characters, never splitting a surrogate pair) plus a `… [truncated N chars]` marker. Scalar-only oversized JSON is still omitted as a complete unit—returning a scalar or malformed JSON prefix would be misleading. Details-only outcomes are persisted the same way as data outcomes, so `fullValueAt` can never become `"not retained"`.
+The wire replacement keeps `message` and `nudge` on both channels. The pointer appears once per channel: the text channel ends with one `Full value: kv://…` line and one `Retrieval:` line; `structuredContent` carries only the `truncation` object (never a copy of the pointer inside `details`). For array-shaped structured data, ctx-control preserves the array key and finds the largest leading element prefix that fits, sizing arrays against a 1,200-char prose floor and then growing the prose preview into the budget left over. In this path `details` stays out of `structuredContent` (it carries the shortened data itself), so the text preview and the structured array each fill their own channel. It also rewrites or augments the human message with the surviving count, so callers cannot confuse a shortened array with a genuine full or empty result. Tool-authored prose keeps the largest prefix that fits the per-channel budget (binary search on characters, never splitting a surrogate pair) plus a `… [truncated N chars]` marker. Oversized `data` with no array to shorten is omitted from `structuredContent` as a complete unit (a cut JSON value there would read as a real one); the text and structured `details` instead carry a labelled `JSON payload head:` prefix of its pretty-printed rendering, filled to the budget. Details-only outcomes are persisted the same way as data outcomes, so `fullValueAt` can never become `"not retained"`.
 
 An oversized request without an authenticated agent identity is never written
 to a shared fallback namespace. It receives an explicit unavailable pointer and
@@ -87,11 +87,26 @@ their private `mcp:overflow:<agentId>` partition.
   fullValueAt: "kv://mcp:overflow:<agentId>/v1/<tool>/<sha256>",
   originalBytes: 12345,
   limitBytes: 10000,
-  retrieval: 'kv-get({"namespace":"mcp:overflow:<agentId>","key":"v1/<tool>/<sha256>"}) returns the full value (your harness may truncate it); to filter or aggregate it instead, process it in a script via ctx.swarm.kv_get.'
+  retrieval: 'kv-get({"namespace":"mcp:overflow:<agentId>","key":"v1/<tool>/<sha256>","path":"outcome.data.data.result.rows","offset":0}) returns a bounded page (nextOffset pages on; any Shape path works; no path = the full value). ctx.swarm.kv_get takes the same args in a script.',
+  shape: [
+    { path: "outcome.details", type: "string", bytes: 41210, items: 40100 },
+    { path: "outcome.data.data.result.rows", type: "array", bytes: 38120, items: 412 },
+  ],
 }
 ```
 
-`originalBytes` is the larger channel of the unspilled result. The text channel renders `fullValueAt`, `originalBytes`, and `retrieval`; `structuredContent` carries the object. Retrieval is deliberately unbounded at the model-facing `kv-get` tool: it returns the whole stored value and the harness applies its own native truncation (there is no server-side chunking API — reassembling a big value in 10KB tool results would cost the model several times the payload in context). The `kv-get` entry in `NUDGES` steers big-value work toward scripts, where `ctx.swarm.kv_get` fetches the full value into the sandbox and only the derived answer enters the model's context.
+`shape` is a bounded outline of the stored value (`summarizeKvShape` in `src/kv-view.ts`): at most 8 branches by serialized bytes, expanding the dominant object one level at a time, skipping branches under 1% of the value. Arrays report their length, objects their key count, strings their length. Every `path` is relative to the stored value, so it is a valid kv-get `path`. The text channel renders it as one `Shape:` line; it shares the per-channel cap with the preview, which fills whatever is left. `retrieval` points at the biggest array in the shape (else the biggest branch).
+
+`originalBytes` is the larger channel of the unspilled result. The text channel renders `fullValueAt`, `originalBytes`, and `retrieval`; `structuredContent` carries the object. ### Targeted retrieval: `kv-get` path/offset/limit
+
+`kv-get` with no view args returns the whole stored value, unbounded, and the harness applies its own native truncation (unchanged behaviour). With any of `path`, `offset`, `limit` it returns a bounded view instead:
+
+- `path` is a dot path into the JSON value; numeric segments index arrays (`outcome.data.rows`, `rows.3`). A `string` entry whose text parses to an object or array (every spill payload) counts as JSON. A path into a plain string, a missing key, or a bad index is a tool error that names the segment.
+- `offset`/`limit` page the array items, object keys, or string characters at the path. An offset past the end returns an empty page with the real `total`. Paging a number/boolean/null is an error.
+- The tool bounds the view itself (it stays spill-exempt): if the page breaks the 10,000-byte per-channel cap it shrinks by binary search, and `view.nextOffset` says where to resume. When even one item is too big, the message names the narrower path to fetch.
+- Text carries the slice as compact JSON (or the raw characters); `structuredContent` carries `view` plus `entry` metadata without `value`, and the slice in `details`.
+
+The REST routes behind `ctx.swarm.kv_get` / `kv_getOrNull` take the same args as query params (`?path=&offset=&limit=`) and return `{ ...entry, value: <slice>, view }`. They apply no size cap: script reads land in the sandbox, not in model context. The `kv-get` entry in `NUDGES` steers a big whole-value read toward a view or a script.
 
 ### Script-internal SDK boundary
 

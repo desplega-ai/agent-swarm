@@ -1797,12 +1797,15 @@ Capability: `kv` (enabled by default)
 
 **KV Get**
 
-Read a key from the swarm KV store. Returns the entry or null if missing/expired. Namespace defaults to your current context (Slack thread / PR / Linear issue when invoked from a task; otherwise your agent scratchpad).
+Read a key from the swarm KV store. Returns the entry or null if missing/expired. Namespace defaults to your current context (Slack thread / PR / Linear issue when invoked from a task; otherwise your agent scratchpad). Without path/offset/limit the whole value comes back unbounded. With any of them you get a bounded view (≤10KB per channel): `path` is a dot path into a JSON value (string entries holding JSON, such as spilled tool results, count as JSON; numeric segments index arrays, e.g. `outcome.data.rows` or `rows.3`), and `offset`/`limit` page the array items, object keys, or string characters found there. The result's `view.nextOffset` says where the next page starts.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `key` | `unknown` | Yes | - | KV key (≤512 chars, [a-zA-Z0-9._:/-]). |
 | `namespace` | `unknown` | No | - | Optional explicit namespace. Defaults to the caller's contextKey. |
+| `path` | `string` | No | - | Dot path into the JSON value, e.g. "outcome.data.rows" or "rows.3". "" is the whole value. |
+| `offset` | `number` | No | - | First array item / object key / string char to return. Default 0. |
+| `limit` | `number` | No | - | Max items / keys / chars to return; the page also shrinks to fit the cap. |
 
 ### kv-set
 
