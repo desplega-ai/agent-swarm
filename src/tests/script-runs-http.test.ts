@@ -20,6 +20,7 @@ import { getPathSegments, parseQueryParams } from "../http/utils";
 import { localProcessScriptExecutor } from "../script-workflows/executor";
 import { setScriptRunExecutor } from "../script-workflows/supervisor";
 import { refreshSecretScrubberCache } from "../utils/secret-scrubber";
+import { randomToken } from "./synthetic-secret-helpers";
 
 const TEST_DB_PATH = "./test-script-runs-http.sqlite";
 const API_KEY = "example-test-script-runs-http-key-1234567890";
@@ -301,6 +302,54 @@ describe("/api/script-runs HTTP", () => {
       status: "failed",
       error: "agent-task implement failed: Agent task failed (taskId task-9)",
     });
+  });
+
+  test("redacts journal config/error and run output/error posted by the harness", async () => {
+    const token = ["ghp", randomToken(36)].join("_");
+    const created = await dispatch("/api/script-runs", {
+      method: "POST",
+      agentId,
+      body: createBody(),
+    });
+    const { id } = (await created.json()) as { id: string };
+
+    const recorded = await dispatch(`/api/internal/script-runs/${id}/steps`, {
+      method: "POST",
+      agentId,
+      body: JSON.stringify({
+        stepKey: "deploy",
+        stepType: "agent-task",
+        config: { task: `deploy with ${token}` },
+        status: "failed",
+        error: `deploy failed: bad credential ${token}`,
+      }),
+    });
+    expect(recorded.status).toBe(201);
+    const step = await getDbClient().get<{ config: string; error: string }>(
+      "SELECT config, error FROM script_run_journal WHERE runId = ?",
+      [id],
+    );
+    for (const value of [step?.config, step?.error]) {
+      expect(value).toBeString();
+      expect(value!.includes(token)).toBe(false);
+      expect(value!).toContain("[REDACTED:");
+    }
+    expect(step!.error).toContain("deploy failed: bad credential");
+    expect((JSON.parse(step!.config) as { task: string }).task).toContain("deploy with");
+
+    await updateScriptRun(id, { status: "running" });
+    const status = await dispatch(`/api/internal/script-runs/${id}/status`, {
+      method: "POST",
+      agentId,
+      body: JSON.stringify({ status: "failed", error: `exit: ${token}` }),
+    });
+    expect(status.status).toBe(204);
+    const run = await getDbClient().get<{ error: string }>(
+      "SELECT error FROM script_runs WHERE id = ?",
+      [id],
+    );
+    expect(run!.error.includes(token)).toBe(false);
+    expect(run!.error).toContain("exit: [REDACTED:");
   });
 
   test("aborts the run when the journal step cap is exceeded", async () => {

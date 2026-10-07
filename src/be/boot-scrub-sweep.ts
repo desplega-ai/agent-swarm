@@ -28,6 +28,7 @@ import { getDbClient } from "./db";
 import type { DbExecutor, DbParam } from "./db-client";
 import { getMemoryStore } from "./memory";
 import type { MemoryScrubFields } from "./memory/types";
+import { breaksJsonValidity } from "./scrub-json";
 
 const DEFAULT_BATCH_SIZE = 200;
 
@@ -229,21 +230,6 @@ async function sweepTarget(
   }
 
   return stats;
-}
-
-/** True when `before` parsed as JSON and `after` no longer does. */
-export function breaksJsonValidity(before: string, after: string): boolean {
-  try {
-    JSON.parse(before);
-  } catch {
-    return false;
-  }
-  try {
-    JSON.parse(after);
-    return false;
-  } catch {
-    return true;
-  }
 }
 
 async function rewriteRow(

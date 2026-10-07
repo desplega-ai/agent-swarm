@@ -147,7 +147,11 @@ import {
 } from "../utils/identity-field-budget";
 import { activeModelBlock, type ModelFamily } from "../utils/model-rate-limit-windows";
 import { getCurrentRequestUserId } from "../utils/request-auth-context";
-import { registerSensitiveKeyName, scrubSecrets } from "../utils/secret-scrubber";
+import {
+  registerSensitiveKeyName,
+  type ScrubbedText,
+  scrubSecrets,
+} from "../utils/secret-scrubber";
 import {
   estimateClaudePlan,
   planAllowsModelFamily,
@@ -193,6 +197,7 @@ import {
   rowToAgentTaskSummary,
 } from "./db/tasks/read";
 import { configureTaskWriteDependencies, failTask } from "./db/tasks/write";
+import { scrubJsonValue } from "./scrub-json";
 import { configSecretName, registerStoredSecret } from "./secret-registry";
 import { promotePendingSteeringForTask } from "./steering";
 import { isInternalConfigKey, isReservedConfigKey, reservedKeyError } from "./swarm-config-guard";
@@ -13891,6 +13896,9 @@ export async function createScriptRun(data: {
       data.agentId,
       data.scriptName ?? null,
       data.source,
+      // Not scrubbed: this row is the run's execution input. The supervisor
+      // launches (and relaunches after a restart or pause) from `run.args`,
+      // so a redacted value would change what the script receives.
       JSON.stringify(data.args ?? null),
       data.idempotencyKey ?? null,
       data.requestedByUserId ?? null,
@@ -13913,7 +13921,7 @@ export async function recordInlineScriptRun(data: {
   scriptName?: string;
   status: "completed" | "failed";
   output?: unknown;
-  error?: string;
+  error?: ScrubbedText;
   startedAt: string;
   finishedAt: string;
   requestedByUserId?: string;
@@ -13921,6 +13929,10 @@ export async function recordInlineScriptRun(data: {
   /** Set when this run originated from an external API endpoint (POST /api/x/script/<id>). */
   apiEndpointId?: string | null;
 }): Promise<ScriptRun> {
+  // The run already executed, so args and output are a record, not an input:
+  // redact them here so every caller is covered.
+  const args = scrubJsonValue(data.args ?? null);
+  const output = data.output === undefined ? null : scrubJsonValue(data.output);
   const row = await getDbClient().get<ScriptRunRow>(
     `INSERT INTO script_runs
         (id, agentId, scriptName, source, args, kind, status, output, error,
@@ -13932,9 +13944,9 @@ export async function recordInlineScriptRun(data: {
       data.agentId,
       data.scriptName ?? null,
       data.source,
-      JSON.stringify(data.args ?? null),
+      args,
       data.status,
-      data.output === undefined ? null : JSON.stringify(data.output),
+      output,
       data.error ?? null,
       data.startedAt,
       data.finishedAt,
@@ -14073,13 +14085,16 @@ function scriptRunUpdateSets(patch: ScriptRunPatch): {
     sets.push("finishedAt = ?");
     vals.push(patch.finishedAt);
   }
+  // Every script_runs UPDATE builds its SET list here, so this is the
+  // chokepoint for the output and error columns. Output is a record of the
+  // finished run (nothing re-reads it as input), so redaction is safe.
   if ("output" in patch) {
     sets.push("output = ?");
-    vals.push(patch.output === undefined ? null : JSON.stringify(patch.output));
+    vals.push(patch.output === undefined ? null : scrubJsonValue(patch.output));
   }
   if (patch.error !== undefined) {
     sets.push("error = ?");
-    vals.push(patch.error);
+    vals.push(patch.error === null ? null : scrubSecrets(patch.error));
   }
   if (patch.lastHeartbeatAt !== undefined) {
     sets.push("last_heartbeat_at = ?");
@@ -14208,9 +14223,12 @@ export async function upsertScriptRunJournalStep(data: {
   config: unknown;
   status: "completed" | "failed";
   result?: unknown;
-  error?: string;
+  error?: ScrubbedText;
   durationMs?: number;
 }): Promise<void> {
+  // `config` is diagnostic only (the step GET never returns it), so it is
+  // redacted. `result` is NOT: the harness replays it verbatim as the step's
+  // return value on resume, so redaction would change what later steps see.
   await getDbClient().run(
     `INSERT OR IGNORE INTO script_run_journal
       (id, runId, stepKey, stepType, config, status, result, error, durationMs, completedAt)
@@ -14220,7 +14238,7 @@ export async function upsertScriptRunJournalStep(data: {
       data.runId,
       data.stepKey,
       data.stepType,
-      JSON.stringify(data.config ?? {}),
+      scrubJsonValue(data.config ?? {}),
       data.status,
       data.result !== undefined ? JSON.stringify(data.result) : null,
       data.error ?? null,

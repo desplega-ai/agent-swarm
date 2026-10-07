@@ -2325,18 +2325,14 @@
     "stepType": {
       "pending": "unassigned: no batch yet scrubs this writer"
     },
-    "config": {
-      "pending": "12c: script run journal"
-    },
+    "config": "scrubbed",
     "status": {
       "exempt": "enum or fixed-format value"
     },
     "result": {
-      "pending": "12c: script run journal"
+      "pending": "12c: left raw on purpose. The harness replays this value verbatim as the step return on resume, so redaction would change what later steps receive"
     },
-    "error": {
-      "pending": "12c: script run journal"
-    },
+    "error": "scrubbed",
     "startedAt": {
       "exempt": "timestamp"
     },
@@ -2364,7 +2360,7 @@
       "pending": "arbitrary executable source: pending until a reviewed byte-exact storage contract exists. Redacting code would change what runs, so the canary drives it instead of skipping it"
     },
     "args": {
-      "pending": "12c: script run writers"
+      "pending": "12c: inline-run writer scrubs; createScriptRun keeps raw args because the supervisor (re)launches durable runs from this column, so redaction would change script input. Needs args moved out of the row (or encrypted) first"
     },
     "status": {
       "exempt": "enum or fixed-format value"
@@ -2375,12 +2371,8 @@
     "finishedAt": {
       "exempt": "timestamp"
     },
-    "output": {
-      "pending": "12c: script run writers"
-    },
-    "error": {
-      "pending": "12c: script run writers"
-    },
+    "output": "scrubbed",
+    "error": "scrubbed",
     "last_heartbeat_at": {
       "exempt": "timestamp"
     },

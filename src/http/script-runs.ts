@@ -40,6 +40,7 @@ import {
   TERMINAL_SCRIPT_RUN_STATUSES,
 } from "../types";
 import { getAppUrl, getMcpBaseUrl } from "../utils/constants";
+import { scrubSecrets } from "../utils/secret-scrubber";
 import {
   executeRawLlm,
   RawLlmConfigSchema,
@@ -545,7 +546,7 @@ export async function handleScriptRuns(
         config: parsed.body.config ?? {},
         status: parsed.body.status,
         result: parsed.body.result,
-        error: parsed.body.error,
+        error: parsed.body.error === undefined ? undefined : scrubSecrets(parsed.body.error),
         durationMs: parsed.body.durationMs,
       });
       return assertRunWithinLimits(run.id);

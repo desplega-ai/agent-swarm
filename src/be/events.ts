@@ -1,8 +1,8 @@
 import type { EventCategory, EventName, EventSource, EventStatus, SwarmEvent } from "../types";
 import { type ScrubbedText, scrubObject, scrubSecrets } from "../utils/secret-scrubber";
-import { breaksJsonValidity } from "./boot-scrub-sweep";
 import { getDbClient } from "./db";
 import type { DbExecutor } from "./db-client";
+import { breaksJsonValidity } from "./scrub-json";
 import { recordSkillInvocation } from "./skill-invocations";
 
 // -- Events --
