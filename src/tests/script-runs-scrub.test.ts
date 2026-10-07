@@ -4,7 +4,10 @@ import {
   closeDb,
   createScriptRun,
   getDbClient,
+  getRunningScriptRuns,
+  getScriptRunJournalStep,
   initDb,
+  listScriptRunJournalSteps,
   recordInlineScriptRun,
   updateScriptRun,
   updateScriptRunIfNotTerminal,
@@ -12,6 +15,13 @@ import {
   upsertScriptRunJournalStep,
 } from "../be/db";
 import { breaksJsonValidity, scrubJsonValue } from "../be/scrub-json";
+import { isSealedJson } from "../be/sealed-json";
+import {
+  localProcessScriptExecutor,
+  type ScriptExecutionResult,
+  type StartScriptExecutionInput,
+} from "../script-workflows/executor";
+import { setScriptRunExecutor, startScriptRunProcess } from "../script-workflows/supervisor";
 import { refreshSecretScrubberCache, scrubSecrets } from "../utils/secret-scrubber";
 import { randomToken, type SyntheticSecret, syntheticSecret } from "./synthetic-secret-helpers";
 
@@ -103,7 +113,7 @@ describe("script run writers scrub at write", () => {
     expect((JSON.parse(row!.output!) as { lines: string[] }).lines[0]).toContain(CONTEXT);
   });
 
-  test("createScriptRun keeps args byte-exact: they are the run's execution input", async () => {
+  test("createScriptRun seals args: nothing readable at rest, redacted for callers", async () => {
     const id = crypto.randomUUID();
     const args = { note: secretText("launch") };
     const { run } = await createScriptRun({
@@ -112,8 +122,52 @@ describe("script run writers scrub at write", () => {
       source: "export default () => 1",
       args,
     });
-    expect(run.args).toEqual(args);
-    expect((await runRow(id))?.args).toBe(JSON.stringify(args));
+    const stored = (await runRow(id))?.args ?? "";
+    expect(isSealedJson(stored)).toBe(true);
+    expect(stored.includes(known.value)).toBe(false);
+    expect(stored.includes(ghToken)).toBe(false);
+    expect(stored.includes(CONTEXT)).toBe(false);
+    expectRedacted((run.args as { note: string }).note, "run.args");
+  });
+
+  test("a relaunch after restart executes with the exact sealed args", async () => {
+    const id = crypto.randomUUID();
+    const args = { note: secretText("relaunch"), n: 3 };
+    await createScriptRun({ id, agentId: AGENT_ID, source: "export default () => 1", args });
+    await updateScriptRun(id, { status: "running" });
+
+    // A restarted API sees the run as running with no live process and
+    // relaunches it from the row, as reconcileScriptRuns does.
+    const [recovered] = await getRunningScriptRuns();
+    expect(recovered?.id).toBe(id);
+    expectRedacted((recovered!.args as { note: string }).note, "recovered.args");
+
+    let launched: StartScriptExecutionInput | undefined;
+    let exit!: (result: ScriptExecutionResult) => void;
+    setScriptRunExecutor({
+      async start(input) {
+        launched = input;
+        return {
+          pid: null,
+          tmpdir: "/tmp",
+          startedAtMs: Date.now(),
+          exited: new Promise((resolve) => {
+            exit = resolve;
+          }),
+          async terminate() {},
+          async cleanup() {},
+        };
+      },
+      isRunning: () => false,
+      async terminatePid() {},
+    });
+    try {
+      await startScriptRunProcess(recovered!, "http://127.0.0.1:1", "test-key");
+      expect(launched?.run.args).toEqual(args);
+    } finally {
+      exit({ exitCode: 0, stderr: "" });
+      setScriptRunExecutor(localProcessScriptExecutor);
+    }
   });
 
   test("updateScriptRun redacts output and error", async () => {
@@ -162,7 +216,7 @@ describe("script run writers scrub at write", () => {
     expect(row?.error).toBeNull();
   });
 
-  test("upsertScriptRunJournalStep redacts config and error, keeps result for replay", async () => {
+  test("upsertScriptRunJournalStep redacts config and error, seals result for replay", async () => {
     const id = await seedRun();
     const result = { text: secretText("result") };
     await upsertScriptRunJournalStep({
@@ -182,8 +236,14 @@ describe("script run writers scrub at write", () => {
     expectRedacted(row?.config, "config");
     expectRedacted(row?.error, "error");
     expect((JSON.parse(row!.config) as { prompt: string }).prompt).toContain(CONTEXT);
-    // Replay contract: the harness returns this verbatim as the step result.
-    expect(row?.result).toBe(JSON.stringify(result));
+    // Replay contract: the harness returns this verbatim as the step result,
+    // so it is sealed at rest and opened exactly only on the replay route.
+    expect(isSealedJson(row?.result ?? "")).toBe(true);
+    expect(row!.result!.includes(known.value)).toBe(false);
+    expect(row!.result!.includes(ghToken)).toBe(false);
+    expect((await getScriptRunJournalStep(id, "fetch"))?.result).toEqual(result);
+    const [listed] = await listScriptRunJournalSteps(id);
+    expectRedacted((listed?.result as { text: string }).text, "listed result");
   });
 });
 

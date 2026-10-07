@@ -1,6 +1,7 @@
 import {
   getRunningScriptRuns,
   getScriptRun,
+  getScriptRunExecutionArgs,
   updateScriptRun,
   updateScriptRunIfRunning,
 } from "../be/db";
@@ -45,7 +46,10 @@ export async function startScriptRunProcess(
     );
   }
 
-  const execution = await scriptExecutor.start({ run, baseUrl, apiKey });
+  // `run.args` is the redacted view; launch with the exact sealed value.
+  const sealedArgs = await getScriptRunExecutionArgs(run.id);
+  const args = sealedArgs === undefined ? run.args : sealedArgs;
+  const execution = await scriptExecutor.start({ run: { ...run, args }, baseUrl, apiKey });
   managed.set(run.id, { execution });
   await updateScriptRun(run.id, {
     status: "running",

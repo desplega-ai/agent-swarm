@@ -9,6 +9,9 @@
  *   stores, KV values).
  * - `{ "pending": "<tracking note>" }`: free text whose writers are not yet
  *   scrubbed. The note names the batch that will flip it.
+ * - `{ "sealed": "<reason>" }`: byte-exact replay state that every writer
+ *   encrypts with `sealJson` (src/be/sealed-json.ts), so no plaintext lands at
+ *   rest and readers choose an exact or a redacted view.
  *
  * A new TEXT column with no entry fails the check, so a new sink cannot land
  * without someone deciding how secrets are kept out of it. A stale entry (the
@@ -22,7 +25,11 @@ import { runMigrations } from "../src/be/migrations/runner";
 
 export const TEXT_COLUMNS_PATH = ".text-columns.json";
 
-export type TextColumnClass = "scrubbed" | { exempt: string } | { pending: string };
+export type TextColumnClass =
+  | "scrubbed"
+  | { exempt: string }
+  | { pending: string }
+  | { sealed: string };
 export type TextColumnClassification = Record<string, Record<string, TextColumnClass>>;
 
 function quoteIdent(identifier: string): string {
@@ -41,7 +48,7 @@ function isValidClass(value: unknown): value is TextColumnClass {
   if (entries.length !== 1) return false;
   const [kind, reason] = entries[0] as [string, unknown];
   return (
-    (kind === "exempt" || kind === "pending") &&
+    (kind === "exempt" || kind === "pending" || kind === "sealed") &&
     typeof reason === "string" &&
     reason.trim().length > 0
   );
@@ -79,7 +86,7 @@ export function checkTextColumns(db: Database, classification: TextColumnClassif
       declared.add(id);
       if (!isValidClass(value)) {
         violations.push(
-          `${id}: invalid entry ${JSON.stringify(value)} (use "scrubbed", {"exempt": "<reason>"} or {"pending": "<note>"})`,
+          `${id}: invalid entry ${JSON.stringify(value)} (use "scrubbed", {"exempt": "<reason>"}, {"pending": "<note>"} or {"sealed": "<reason>"})`,
         );
       }
       if (!actual.has(id)) violations.push(`${id}: stale entry, no such TEXT column`);
@@ -113,19 +120,21 @@ if (import.meta.main) {
       for (const violation of violations) console.error(`  - ${violation}`);
       console.error("");
       console.error(
-        'Classify each new TEXT column as "scrubbed" (every writer scrubs it), {"exempt": "<reason>"} or {"pending": "<tracking note>"}. See runbooks/secret-scrubbing.md.',
+        'Classify each new TEXT column as "scrubbed" (every writer scrubs it), {"exempt": "<reason>"}, {"pending": "<tracking note>"} or {"sealed": "<reason>"}. See runbooks/secret-scrubbing.md.',
       );
       process.exit(1);
     }
 
-    const counts = { scrubbed: 0, exempt: 0, pending: 0 };
+    const counts = { scrubbed: 0, exempt: 0, pending: 0, sealed: 0 };
     for (const columns of Object.values(classification)) {
       for (const value of Object.values(columns)) {
-        counts[value === "scrubbed" ? "scrubbed" : "exempt" in value ? "exempt" : "pending"]++;
+        counts[
+          value === "scrubbed" ? "scrubbed" : (Object.keys(value)[0] as keyof typeof counts)
+        ]++;
       }
     }
     console.log(
-      `TEXT-column check passed: ${counts.scrubbed} scrubbed, ${counts.exempt} exempt, ${counts.pending} pending.`,
+      `TEXT-column check passed: ${counts.scrubbed} scrubbed, ${counts.sealed} sealed, ${counts.exempt} exempt, ${counts.pending} pending.`,
     );
   } finally {
     rmSync(tempDir, { recursive: true, force: true });

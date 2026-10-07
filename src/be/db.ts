@@ -198,6 +198,7 @@ import {
 } from "./db/tasks/read";
 import { configureTaskWriteDependencies, failTask } from "./db/tasks/write";
 import { scrubJsonValue } from "./scrub-json";
+import { openSealedJson, sealedJsonForDisplay, sealJson } from "./sealed-json";
 import { configSecretName, registerStoredSecret } from "./secret-registry";
 import { promotePendingSteeringForTask } from "./steering";
 import { isInternalConfigKey, isReservedConfigKey, reservedKeyError } from "./swarm-config-guard";
@@ -259,6 +260,7 @@ export {
   getContextVersionHistory,
   getLatestContextVersion,
 } from "./db/context-versions";
+export { getScriptRunExecutionArgs } from "./db/script-runs";
 
 configureAgentDependencies({
   createLogEntry: (entry) => createLogEntry(entry),
@@ -13835,7 +13837,9 @@ function rowToScriptRun(row: ScriptRunRow): ScriptRun {
     agentId: row.agentId,
     scriptName: row.scriptName ?? undefined,
     source: row.source,
-    args: JSON.parse(row.args),
+    // Durable-run args are sealed replay state; callers get the redacted view.
+    // The supervisor reads the exact value via getScriptRunExecutionArgs.
+    args: sealedJsonForDisplay(row.args),
     kind: row.kind as ScriptRunKind,
     status: row.status as ScriptRunStatus,
     pid: row.pid ?? undefined,
@@ -13896,10 +13900,10 @@ export async function createScriptRun(data: {
       data.agentId,
       data.scriptName ?? null,
       data.source,
-      // Not scrubbed: this row is the run's execution input. The supervisor
-      // launches (and relaunches after a restart or pause) from `run.args`,
-      // so a redacted value would change what the script receives.
-      JSON.stringify(data.args ?? null),
+      // Sealed, not scrubbed: this is the run's execution input. The supervisor
+      // launches (and relaunches after a restart or pause) from it, so a
+      // redacted value would change what the script receives.
+      sealJson(data.args ?? null),
       data.idempotencyKey ?? null,
       data.requestedByUserId ?? null,
       data.createdBy ?? null,
@@ -14189,7 +14193,11 @@ type ScriptRunJournalRow = {
   updated_by: string | null;
 };
 
-function rowToScriptRunJournalEntry(row: ScriptRunJournalRow): ScriptRunJournalEntry {
+function rowToScriptRunJournalEntry(
+  row: ScriptRunJournalRow,
+  view: "display" | "replay" = "display",
+): ScriptRunJournalEntry {
+  const open = view === "replay" ? openSealedJson : sealedJsonForDisplay;
   return {
     id: row.id,
     runId: row.runId,
@@ -14197,7 +14205,7 @@ function rowToScriptRunJournalEntry(row: ScriptRunJournalRow): ScriptRunJournalE
     stepType: row.stepType,
     config: JSON.parse(row.config),
     status: row.status as "completed" | "failed",
-    result: parseJsonColumn(row.result),
+    result: row.result === null ? undefined : open(row.result),
     error: row.error ?? undefined,
     startedAt: row.startedAt,
     completedAt: row.completedAt ?? undefined,
@@ -14205,6 +14213,10 @@ function rowToScriptRunJournalEntry(row: ScriptRunJournalRow): ScriptRunJournalE
   };
 }
 
+/**
+ * One journal step with its exact `result`, for the harness replay route only.
+ * Everything that shows a journal to a person uses listScriptRunJournalSteps.
+ */
 export async function getScriptRunJournalStep(
   runId: string,
   stepKey: string,
@@ -14213,7 +14225,7 @@ export async function getScriptRunJournalStep(
     "SELECT * FROM script_run_journal WHERE runId = ? AND stepKey = ?",
     [runId, stepKey],
   );
-  return row ? rowToScriptRunJournalEntry(row) : null;
+  return row ? rowToScriptRunJournalEntry(row, "replay") : null;
 }
 
 export async function upsertScriptRunJournalStep(data: {
@@ -14227,8 +14239,9 @@ export async function upsertScriptRunJournalStep(data: {
   durationMs?: number;
 }): Promise<void> {
   // `config` is diagnostic only (the step GET never returns it), so it is
-  // redacted. `result` is NOT: the harness replays it verbatim as the step's
-  // return value on resume, so redaction would change what later steps see.
+  // redacted. `result` is sealed instead: the harness replays it verbatim as
+  // the step's return value on resume, so redaction would change what later
+  // steps see.
   await getDbClient().run(
     `INSERT OR IGNORE INTO script_run_journal
       (id, runId, stepKey, stepType, config, status, result, error, durationMs, completedAt)
@@ -14240,7 +14253,7 @@ export async function upsertScriptRunJournalStep(data: {
       data.stepType,
       scrubJsonValue(data.config ?? {}),
       data.status,
-      data.result !== undefined ? JSON.stringify(data.result) : null,
+      data.result !== undefined ? sealJson(data.result) : null,
       data.error ?? null,
       data.durationMs ?? null,
     ],
@@ -14252,7 +14265,7 @@ export async function listScriptRunJournalSteps(runId: string): Promise<ScriptRu
     "SELECT * FROM script_run_journal WHERE runId = ? ORDER BY startedAt ASC",
     [runId],
   );
-  return rows.map(rowToScriptRunJournalEntry);
+  return rows.map((row) => rowToScriptRunJournalEntry(row));
 }
 
 export async function countScriptRunJournalSteps(runId: string): Promise<number> {

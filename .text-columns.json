@@ -2330,7 +2330,7 @@
       "exempt": "enum or fixed-format value"
     },
     "result": {
-      "pending": "12c: left raw on purpose. The harness replays this value verbatim as the step return on resume, so redaction would change what later steps receive"
+      "sealed": "the harness replays it verbatim as the step return, so upsertScriptRunJournalStep seals it. Readers: getScriptRunJournalStep (replay route, exact), listScriptRunJournalSteps (redacted)"
     },
     "error": "scrubbed",
     "startedAt": {
@@ -2360,7 +2360,7 @@
       "pending": "arbitrary executable source: pending until a reviewed byte-exact storage contract exists. Redacting code would change what runs, so the canary drives it instead of skipping it"
     },
     "args": {
-      "pending": "12c: inline-run writer scrubs; createScriptRun keeps raw args because the supervisor (re)launches durable runs from this column, so redaction would change script input. Needs args moved out of the row (or encrypted) first"
+      "sealed": "createScriptRun seals durable-run args (the supervisor relaunches from the exact value); recordInlineScriptRun stores scrubbed JSON. Readers: getScriptRunExecutionArgs (exact), rowToScriptRun (redacted)"
     },
     "status": {
       "exempt": "enum or fixed-format value"
