@@ -149,6 +149,25 @@ describe("secret corpus", () => {
     }
   });
 
+  test("redacts a token whose last character is a dash or equals sign", () => {
+    // `\b` after a trailing `-` backtracks one character and leaves it behind.
+    const tokens = [
+      `ATATT3${randomToken(185)}-`,
+      `ATATT3${randomToken(185)}=`,
+      `glpat-${randomToken(19)}-`,
+      `AIza${randomToken(34)}-`,
+      `npm_${randomToken(35)}-`,
+      `lin_api_${randomToken(39)}-`,
+    ];
+    for (const token of tokens) {
+      for (const tail of ["", " next", "\n"]) {
+        expect(scrubSecrets(`${token}${tail}`), token.slice(0, 6)).toMatch(
+          new RegExp(`^\\[REDACTED:[^\\]]+\\]${tail}$`),
+        );
+      }
+    }
+  });
+
   test("leaves every negative untouched", () => {
     const changed = buildNegatives().filter((text) => scrubSecrets(text) !== text);
     expect(changed).toEqual([]);

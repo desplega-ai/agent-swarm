@@ -470,6 +470,9 @@ function scrubKeyContext(text: string): string {
 // Leading word boundary that also matches after JSON escape sequences (\n, \t,
 // \r, etc.) where the trailing char is alphanumeric and defeats standard \b.
 const TB = String.raw`(?:(?<=\\[nrtbfu0])|(?<!\w))`;
+// Rules whose token class includes `-` end on `(?!\w)`, not `\b`: a token
+// ending in `-` has no word boundary after it, so `\b` backtracks and leaves
+// the last character behind.
 
 const TOKEN_REGEXES: ReadonlyArray<{ name: string; re: RegExp }> = [
   // GitHub fine-grained PATs
@@ -479,34 +482,40 @@ const TOKEN_REGEXES: ReadonlyArray<{ name: string; re: RegExp }> = [
   // ACP ephemeral session tokens (base62 payload)
   { name: "acp_session_token", re: new RegExp(String.raw`${TB}aseph_[A-Za-z0-9]{20,}\b`, "g") },
   // GitLab personal access tokens
-  { name: "gitlab_pat", re: new RegExp(String.raw`${TB}glpat-[A-Za-z0-9_-]{20,}\b`, "g") },
+  { name: "gitlab_pat", re: new RegExp(String.raw`${TB}glpat-[A-Za-z0-9_-]{20,}(?!\w)`, "g") },
   // Azure DevOps personal access tokens (84 chars, "AZDO" signature at offset 76)
   {
     name: "azure_devops_pat",
     re: new RegExp(String.raw`${TB}[A-Za-z0-9]{76}AZDO[A-Za-z0-9]{4}\b`, "g"),
   },
   // Anthropic API keys (must match before the generic sk- rule below)
-  { name: "anthropic_key", re: new RegExp(String.raw`${TB}sk-ant-[A-Za-z0-9_-]{20,}\b`, "g") },
+  { name: "anthropic_key", re: new RegExp(String.raw`${TB}sk-ant-[A-Za-z0-9_-]{20,}(?!\w)`, "g") },
   // OpenAI project keys
-  { name: "openai_proj_key", re: new RegExp(String.raw`${TB}sk-proj-[A-Za-z0-9_-]{20,}\b`, "g") },
+  {
+    name: "openai_proj_key",
+    re: new RegExp(String.raw`${TB}sk-proj-[A-Za-z0-9_-]{20,}(?!\w)`, "g"),
+  },
   // OpenRouter keys
   {
     name: "openrouter_key",
-    re: new RegExp(String.raw`${TB}sk-or-(?:v1-)?[A-Za-z0-9_-]{20,}\b`, "g"),
+    re: new RegExp(String.raw`${TB}sk-or-(?:v1-)?[A-Za-z0-9_-]{20,}(?!\w)`, "g"),
   },
   // Generic sk- legacy OpenAI keys (must come AFTER the ant/proj/or variants)
   { name: "sk_key", re: new RegExp(String.raw`${TB}sk-[A-Za-z0-9]{20,}\b`, "g") },
   // Slack tokens
-  { name: "slack_token", re: new RegExp(String.raw`${TB}xox[baprseo]-[A-Za-z0-9-]{10,}\b`, "g") },
+  {
+    name: "slack_token",
+    re: new RegExp(String.raw`${TB}xox[baprseo]-[A-Za-z0-9-]{10,}(?!\w)`, "g"),
+  },
   // AWS access key IDs
   { name: "aws_access_key", re: new RegExp(String.raw`${TB}AKIA[0-9A-Z]{16}\b`, "g") },
   // Google API keys
-  { name: "google_api_key", re: new RegExp(String.raw`${TB}AIza[A-Za-z0-9_-]{35}\b`, "g") },
+  { name: "google_api_key", re: new RegExp(String.raw`${TB}AIza[A-Za-z0-9_-]{35}(?!\w)`, "g") },
   // JWTs (3 dot-separated base64url segments)
   {
     name: "jwt",
     re: new RegExp(
-      String.raw`${TB}eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b`,
+      String.raw`${TB}eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}(?!\w)`,
       "g",
     ),
   },
@@ -516,14 +525,17 @@ const TOKEN_REGEXES: ReadonlyArray<{ name: string; re: RegExp }> = [
     re: new RegExp(String.raw`${TB}signoz-ingestion-key=[A-Za-z0-9._~+/-]{20,}={0,2}\b`, "g"),
   },
   // Linear OAuth tokens and API keys
-  { name: "linear_oauth", re: new RegExp(String.raw`${TB}lin_oauth_[A-Za-z0-9_-]{10,}\b`, "g") },
-  { name: "linear_api", re: new RegExp(String.raw`${TB}lin_api_[A-Za-z0-9_-]{10,}\b`, "g") },
+  {
+    name: "linear_oauth",
+    re: new RegExp(String.raw`${TB}lin_oauth_[A-Za-z0-9_-]{10,}(?!\w)`, "g"),
+  },
+  { name: "linear_api", re: new RegExp(String.raw`${TB}lin_api_[A-Za-z0-9_-]{10,}(?!\w)`, "g") },
   // npm tokens
-  { name: "npm_token", re: new RegExp(String.raw`${TB}npm_[A-Za-z0-9_-]{20,}\b`, "g") },
+  { name: "npm_token", re: new RegExp(String.raw`${TB}npm_[A-Za-z0-9_-]{20,}(?!\w)`, "g") },
   // Jira API tokens (Atlassian cloud)
   {
     name: "atlassian_token",
-    re: new RegExp(String.raw`${TB}ATATT[A-Za-z0-9_-]{20,}\b`, "g"),
+    re: new RegExp(String.raw`${TB}ATATT[A-Za-z0-9_=-]{20,}(?![\w=])`, "g"),
   },
   // Agent-swarm MCP user tokens (`aswt_<base62-20+>`). Schema lands in
   // migration 064; mint/revoke endpoints ship with the MCP-token plan.
