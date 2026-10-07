@@ -273,6 +273,14 @@ export function buildModelsDevSeedRows(cache: ModelsDevCache): PricingSeedRow[] 
     }
   }
 
+  // ---- Grok CLI (bare xAI ids, billed at xAI's API rates via XAI_API_KEY) --
+  for (const [id, model] of Object.entries(cache.xai?.models ?? {})) {
+    if (!model?.cost) continue;
+    for (const row of projectCostBlock("grok", id, model.cost, { anthropicBilled: false })) {
+      rows.push(row);
+    }
+  }
+
   // ---- DeepSeek direct API (dsh with DEEPSEEK_API_KEY, bare ids) ---------
   const deepseek = cache.deepseek?.models ?? {};
   for (const [id, model] of Object.entries(deepseek)) {

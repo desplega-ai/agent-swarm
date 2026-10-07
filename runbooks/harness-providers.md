@@ -1,6 +1,6 @@
 # Harness providers runbook
 
-Operational rules for editing or adding harness providers (claude, codex, opencode, pi, devin, acp, dsh, cursor, amp, future).
+Operational rules for editing or adding harness providers (claude, codex, opencode, pi, devin, acp, dsh, cursor, amp, grok, future).
 
 ## Supported providers
 
@@ -16,6 +16,47 @@ Operational rules for editing or adding harness providers (claude, codex, openco
 | DeepSeek Harness | `dsh` | `DshAdapter` | Spawns `dsh --profile headless --json` per task; OpenRouter or direct DeepSeek API. See [DeepSeek Harness](#deepseek-harness-dsh) below |
 | Amp | `amp` | `AmpAdapter` | Spawns `amp -x --stream-json --stream-json-input` per task; `AMP_API_KEY`; every thread is stored on ampcode.com. See [Amp](#amp-amp) below |
 | Cursor | `cursor` | `CursorAdapter` | In-process `@cursor/sdk` local runtime; inference on Cursor's hosted models with `CURSOR_API_KEY`. See [Cursor](#cursor-cursor) below |
+| Grok | `grok` | `GrokAdapter` | xAI Grok CLI as an ACP server (`grok agent --no-leader stdio`) on the shared ACP client; `XAI_API_KEY`. See [Grok](#grok-grok) below |
+
+## Grok (`grok`)
+
+Set `HARNESS_PROVIDER=grok` and `XAI_API_KEY`. `grok agent stdio` is a spec ACP
+server, so `GrokAdapter` is a thin wrapper over `ACPAdapter` with a fixed `grok`
+target profile (`grokTargetProfile` in `src/providers/acp-targets.ts`) and
+`provider: "grok"` on `session_init` and `CostData`. `grok` is not an operator
+`ACP_TARGET`.
+
+The full worker image installs the pinned `@xai-official/grok-linux-*` native
+binary (`GROK_VERSION` in `Dockerfile.worker`, SHA-512 verified, unpacked from
+its brotli payload without the npm postinstall). The slim image has none: the
+entrypoint fails when the executable is absent. `GROK_BINARY` selects a trusted
+preinstalled executable.
+
+- **Spawn.** `grok agent --no-leader --always-approve [--model M]
+  [--reasoning-effort E] stdio`. `--no-leader` keeps one agent process per task.
+  Model and effort go on the command line, which the CLI parses before auth.
+- **Isolation.** A fresh `GROK_HOME` (`swarm-grok-*` under the tmpdir) per
+  session, removed when it settles. It holds `config.toml` (auto-update off,
+  Codex compat off, the worker's Claude Code plugins listed in
+  `[plugins].disabled`) and `requirements.toml` (`allow_managed_hooks_only =
+  true`). The env turns off Claude and Cursor compat for hooks, MCP servers,
+  agents and rules (`GROK_ISOLATION_ENV`). Claude skills stay on, so
+  `nativeSkillDiscovery` is `true`. Verified with `grok inspect` against this
+  worker's `~/.claude`: no MCP servers, `CLAUDE.md` disabled, "Hooks outside
+  managed policy disabled".
+- **System prompt.** `session/new` `_meta.rules`, which Grok appends to its own
+  prompt. `_meta.systemPromptOverride` would replace it, tool guidance included.
+  `_meta.yoloMode` is set alongside `--always-approve`.
+- **Credentials.** Readiness is the presence of `XAI_API_KEY`; Test connection
+  is `GET https://api.x.ai/v1/models`. `session/new` without a valid key answers
+  `-32000 Authentication required` (verified), which the adapter reports as
+  "Grok rejected the credentials (XAI_API_KEY invalid or missing)".
+- **Steering and resume.** None: `steerModes: []`, `canResume` false.
+
+Not covered: the SuperGrok OAuth pool (`grok login --device-auth`), which needs
+the CLI's `auth.json` refresh behaviour measured first. The success path was
+built against the ACP shapes in the CLI's bundled docs; no authenticated model
+turn has run yet.
 
 ## Amp (`amp`)
 

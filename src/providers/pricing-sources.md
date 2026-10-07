@@ -69,6 +69,9 @@ rate by hand should also update this file.
     When the adapter reports what Amp billed (`amp threads usage`, only when
     every request was billed through Amp), that harness cost wins and the
     rows above only fill the per-model breakdown.
+  - xAI models (models.dev `xai` section, bare ids such as `grok-4.6`) → rows
+    under `provider='grok'`. Base rates only; the `context_over_200k` tier is
+    not projected (no provider projects context tiers yet).
   - OpenAI, Anthropic, Google and xAI models (bare vendor ids) → rows under
     `provider='cursor'`. Cursor bills the vendor's API rates and reports the
     vendor's own id. The adapter subtracts cache reads and writes from SDK

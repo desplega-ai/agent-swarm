@@ -172,6 +172,15 @@ Codex can also authenticate through `~/.codex/auth.json`, including ChatGPT OAut
 
 See [Provider Auth: Amp](/docs/guides/provider-auth/amp) for the token, modes and cost tracking.
 
+**Grok** (`HARNESS_PROVIDER=grok`):
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `XAI_API_KEY` | Yes | — | xAI API key from console.x.ai. SuperGrok subscription logins are not supported |
+| `GROK_BINARY` | No | `grok` on `PATH` | Path to another trusted Grok CLI executable |
+
+See [Provider Auth: Grok](/docs/guides/provider-auth/grok) for models, isolation and cost tracking.
+
 **opencode** (`HARNESS_PROVIDER=opencode`):
 
 | Variable | Required | Default | Description |

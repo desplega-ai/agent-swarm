@@ -99,6 +99,10 @@ elif [ "$HARNESS_PROVIDER" = "amp" ]; then
     if [ -z "$AMP_API_KEY" ]; then
         echo "Warning: amp provider has no credentials yet (AMP_API_KEY). Worker will park in credential-wait until creds appear in swarm_config."
     fi
+elif [ "$HARNESS_PROVIDER" = "grok" ]; then
+    if [ -z "$XAI_API_KEY" ]; then
+        echo "Warning: grok provider has no credentials yet (XAI_API_KEY). Worker will park in credential-wait until creds appear in swarm_config."
+    fi
 elif [ "$HARNESS_PROVIDER" = "cursor" ]; then
     if [ -z "$CURSOR_API_KEY" ]; then
         echo "Warning: cursor provider has no credentials yet (CURSOR_API_KEY). Worker will park in credential-wait until creds appear in swarm_config."
@@ -346,6 +350,13 @@ elif [ "$HARNESS_PROVIDER" = "amp" ]; then
         exit 1
     fi
     echo "amp CLI: $(command -v "$AMP_BIN")"
+elif [ "$HARNESS_PROVIDER" = "grok" ]; then
+    GROK_BIN="${GROK_BINARY:-grok}"
+    if ! command -v "$GROK_BIN" >/dev/null 2>&1; then
+        echo "FATAL: grok CLI not found: '$GROK_BIN'. Use worker-full or install @xai-official/grok@1.0.46 during image provisioning."
+        exit 1
+    fi
+    echo "grok CLI: $(command -v "$GROK_BIN") ($(GROK_DISABLE_AUTOUPDATER=1 "$GROK_BIN" --version 2>/dev/null))"
 elif [ "$HARNESS_PROVIDER" = "cursor" ]; then
     # @cursor/sdk runs in-process inside the worker binary; its ripgrep comes
     # from the platform package installed in worker-full (CURSOR_RIPGREP_PATH).

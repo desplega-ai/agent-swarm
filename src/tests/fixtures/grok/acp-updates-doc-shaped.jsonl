@@ -1,0 +1,7 @@
+{"sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":"I should check the swarm first."}}
+{"sessionUpdate":"tool_call","toolCallId":"call_1","title":"mcp__swarm__get-swarm","kind":"other","status":"pending","rawInput":{}}
+{"sessionUpdate":"tool_call_update","toolCallId":"call_1","status":"completed","rawOutput":{"agents":2}}
+{"sessionUpdate":"tool_call","toolCallId":"call_2","title":"run_terminal_cmd","kind":"execute","status":"pending","rawInput":{"command":"echo hi"}}
+{"sessionUpdate":"tool_call_update","toolCallId":"call_2","status":"completed","content":[{"type":"content","content":{"type":"text","text":"hi"}}]}
+{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"The swarm has 2 agents."}}
+{"sessionUpdate":"usage_update","used":24100,"size":500000}

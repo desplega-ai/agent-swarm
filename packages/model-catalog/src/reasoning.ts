@@ -16,7 +16,16 @@ export const REASONING_EFFORT_LEVELS = ["off", "low", "medium", "high", "xhigh",
 export type ReasoningEffortLevel = (typeof REASONING_EFFORT_LEVELS)[number];
 
 /** The local harnesses with an effort control (Devin, claude-managed and ACP have none). */
-export const REASONING_HARNESSES = ["claude", "codex", "pi", "opencode", "dsh", "cursor", "amp"] as const;
+export const REASONING_HARNESSES = [
+  "claude",
+  "codex",
+  "pi",
+  "opencode",
+  "dsh",
+  "cursor",
+  "amp",
+  "grok",
+] as const;
 export type ReasoningHarnessName = (typeof REASONING_HARNESSES)[number];
 
 /**
@@ -214,6 +223,10 @@ export function reasoningLevelsForModel(
     ({ providerId, modelId: catalogId } = dshCatalogRef(model));
   } else if (harness === "cursor") {
     ({ providerId, modelId: catalogId } = cursorCatalogRef(model));
+  } else if (harness === "grok") {
+    // The Grok CLI takes bare xAI model ids (`grok-4.6`).
+    providerId = "xai";
+    catalogId = model;
   } else {
     const slash = model.indexOf("/");
     if (slash <= 0) return [];

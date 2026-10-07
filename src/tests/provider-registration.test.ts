@@ -61,6 +61,7 @@ const modelsDevFixture = {
   anthropic: { models: { "claude-test": { cost: { input: 1, output: 2 } } } },
   openai: { models: { "gpt-test": { cost: { input: 1, output: 2 } } } },
   openrouter: { models: { "test/model": { cost: { input: 1, output: 2 } } } },
+  xai: { models: { "grok-test": { cost: { input: 1, output: 2 } } } },
 };
 
 interface TouchPoint {
@@ -233,6 +234,7 @@ const BOOTSTRAP: Record<ProviderName, { expect: string } | { exempt: string }> =
   dsh: { expect: "Warning: dsh provider has no credentials yet" },
   amp: { expect: "Warning: amp provider has no credentials yet" },
   cursor: { expect: "Warning: cursor provider has no credentials yet" },
+  grok: { expect: "Warning: grok provider has no credentials yet" },
   pi: { expect: "Warning: pi provider has no credentials yet" },
   opencode: { expect: "Warning: opencode provider has no credentials yet" },
   "claude-managed": { expect: "Warning: claude-managed provider missing:" },
@@ -282,7 +284,7 @@ function extractMarkedBlock(name: string): string {
 /** Resolvable no-op stubs for every binary the verify chain may look up. */
 function makeBinaryStubDir(): string {
   const dir = mkdtempSync(join(tmpdir(), "provider-registration-bin-"));
-  for (const name of ["claude", "codex", "opencode", "dsh", "amp"]) {
+  for (const name of ["claude", "codex", "opencode", "dsh", "amp", "grok"]) {
     const file = join(dir, name);
     writeFileSync(file, "#!/bin/sh\nexit 0\n");
     chmodSync(file, 0o755);

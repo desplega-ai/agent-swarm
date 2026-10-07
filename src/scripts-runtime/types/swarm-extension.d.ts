@@ -93,6 +93,7 @@ declare module "swarm-extension" {
             | "dsh"
             | "amp"
             | "cursor"
+            | "grok"
             | undefined;
           leadOnly?: boolean | undefined;
         }
@@ -221,6 +222,7 @@ declare module "swarm-extension" {
       | "dsh"
       | "amp"
       | "cursor"
+      | "grok"
       | undefined;
     providerMeta?: Record<string, unknown> | undefined;
     harnessVariant?: string | undefined;
@@ -242,6 +244,7 @@ declare module "swarm-extension" {
             | "dsh"
             | "amp"
             | "cursor"
+            | "grok"
             | undefined;
           leadOnly?: boolean | undefined;
         }

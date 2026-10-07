@@ -2,14 +2,20 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type AcpTarget, getAcpTargetCatalogEntry, isAcpTarget } from "./acp-target-catalog";
+import { applyReasoningEffort } from "./reasoning-effort";
 import type { ProviderSessionConfig } from "./types";
 
 export interface AcpTargetProfile {
-  readonly target: AcpTarget;
+  /** An operator-selectable ACP target, or a first-class harness built on the ACP client. */
+  readonly target: AcpTarget | "grok";
   command(config: ProviderSessionConfig): string[];
   env(config: ProviderSessionConfig): Record<string, string>;
   configuredOptions(config: ProviderSessionConfig): Record<string, string | boolean>;
   writeSystemPromptArtifact(config: ProviderSessionConfig): Promise<void>;
+  /** Target-specific `session/new` `_meta`. Targets without one send none. */
+  sessionMeta?(config: ProviderSessionConfig): Record<string, unknown> | undefined;
+  /** A clearer message for a target error whose own text misleads, else undefined. */
+  describeError?(message: string): string | undefined;
 }
 
 export class AcpTargetResolutionError extends Error {
@@ -215,6 +221,70 @@ const geminiTargetProfile: AcpTargetProfile = {
     const path = join(directory, "system.md");
     await Bun.write(path, config.systemPrompt);
     geminiSystemPromptPaths.set(config, path);
+  },
+};
+
+/**
+ * Grok CLI env keys passed through to `grok agent stdio`. `GROK_HOME` is the
+ * per-session state dir the grok adapter creates; the rest switch off the
+ * Claude/Cursor compat surfaces that would otherwise load the worker's own
+ * Claude hooks, MCP servers, CLAUDE.md and rules into a Grok session.
+ * Claude skills stay on so swarm skills remain invocable.
+ */
+export const GROK_ISOLATION_ENV: Readonly<Record<string, string>> = {
+  GROK_DISABLE_AUTOUPDATER: "1",
+  GROK_TELEMETRY_ENABLED: "0",
+  GROK_CLAUDE_HOOKS_ENABLED: "false",
+  GROK_CLAUDE_MCPS_ENABLED: "false",
+  GROK_CLAUDE_AGENTS_ENABLED: "false",
+  GROK_CLAUDE_RULES_ENABLED: "false",
+  GROK_CURSOR_HOOKS_ENABLED: "false",
+  GROK_CURSOR_MCPS_ENABLED: "false",
+  GROK_CURSOR_AGENTS_ENABLED: "false",
+  GROK_CURSOR_RULES_ENABLED: "false",
+  GROK_CURSOR_SKILLS_ENABLED: "false",
+};
+
+/** `-32000 Authentication required` (ACP) or the CLI's "Not signed in" text. */
+const GROK_AUTH_ERROR_RE = /authentication required|not signed in/i;
+
+export const grokTargetProfile: AcpTargetProfile = {
+  target: "grok",
+  command(config) {
+    const binary = readEnv(config, "GROK_BINARY")?.trim() || "grok";
+    // `--no-leader` keeps each session on its own agent process (the default
+    // config may enable a shared leader socket). Flags go before `stdio`.
+    const args = [binary, "agent", "--no-leader", "--always-approve"];
+    if (config.model.trim()) args.push("--model", config.model.trim());
+    const effort = config.reasoningEffort
+      ? applyReasoningEffort("grok", config.model.trim(), config.reasoningEffort)
+      : null;
+    if (effort?.kind === "grok-effort") args.push("--reasoning-effort", effort.reasoningEffort);
+    args.push("stdio");
+    return args;
+  },
+  env(config) {
+    const env = baseTargetEnv(config);
+    copyEnvKeys(config, env, ["XAI_API_KEY", "GROK_HOME"]);
+    Object.assign(env, GROK_ISOLATION_ENV);
+    return env;
+  },
+  // Model and effort ride on the command line, which the CLI accepts before auth.
+  configuredOptions() {
+    return {};
+  },
+  async writeSystemPromptArtifact() {},
+  sessionMeta(config) {
+    // `rules` appends to Grok's own system prompt; `systemPromptOverride`
+    // would replace it, tool instructions included.
+    return {
+      ...(config.systemPrompt?.trim() ? { rules: config.systemPrompt } : {}),
+      yoloMode: true,
+    };
+  },
+  describeError(message) {
+    if (!GROK_AUTH_ERROR_RE.test(message)) return undefined;
+    return `Grok rejected the credentials (XAI_API_KEY invalid or missing): ${message}`;
   },
 };
 

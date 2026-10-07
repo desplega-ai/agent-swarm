@@ -21,7 +21,7 @@ import {
 } from "../utils/process-group";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { acpReportedCostUsd, translateAcpSessionNotification } from "./acp-swarm-events";
-import { resolveAcpTarget } from "./acp-targets";
+import { type AcpTargetProfile, resolveAcpTarget } from "./acp-targets";
 import type {
   CostData,
   ProviderAdapter,
@@ -33,6 +33,8 @@ import type {
 } from "./types";
 
 type EventListener = (event: ProviderEvent) => void;
+/** Providers that run on this ACP client. */
+export type AcpProviderName = "acp" | "grok";
 const ACP_LOG_MAX_CHARS = 30_000;
 const ACP_LOG_FIELD_MAX_CHARS = 12_000;
 const ACP_LOG_PREVIEW_MAX_CHARS = 10_000;
@@ -193,6 +195,8 @@ class ACPSession implements ProviderSession {
     private readonly process: Bun.Subprocess<"pipe", "pipe", "pipe">,
     private readonly config: ProviderSessionConfig,
     sessionId: string,
+    private readonly providerName: AcpProviderName,
+    private readonly target: AcpTargetProfile,
     providerMeta?: Record<string, unknown>,
     ephemeralTokenId?: string,
   ) {
@@ -202,7 +206,7 @@ class ACPSession implements ProviderSession {
       this.completionResolve = resolve;
     });
     void this.consumeStderr();
-    this.emit({ type: "session_init", sessionId, provider: "acp", providerMeta });
+    this.emit({ type: "session_init", sessionId, provider: providerName, providerMeta });
     void this.runPrompt();
   }
 
@@ -297,7 +301,7 @@ class ACPSession implements ProviderSession {
       };
       this.emit({ type: "result", cost, output: this.output, isError });
     } catch (err) {
-      const message = scrubSecrets(formatError(err));
+      const message = describeTargetError(this.target, scrubSecrets(formatError(err)));
       this.emit({ type: "error", message, category: "protocol" });
       result = {
         exitCode: 1,
@@ -345,7 +349,7 @@ class ACPSession implements ProviderSession {
       numTurns: 1,
       model: this.config.model,
       isError,
-      provider: "acp",
+      provider: this.providerName,
     };
   }
 
@@ -361,8 +365,15 @@ class ACPSession implements ProviderSession {
   }
 }
 
+export interface ACPAdapterOptions {
+  /** Provider recorded on session_init and cost rows. Defaults to `acp`. */
+  providerName?: AcpProviderName;
+  /** A fixed target profile. Defaults to the `ACP_TARGET` resolution. */
+  target?: AcpTargetProfile;
+}
+
 export class ACPAdapter implements ProviderAdapter {
-  readonly name = "acp";
+  readonly name: AcpProviderName;
 
   readonly traits: ProviderTraits = {
     hasMcp: true,
@@ -370,8 +381,12 @@ export class ACPAdapter implements ProviderAdapter {
     hasLocalEnvironment: true,
   };
 
+  constructor(private readonly options: ACPAdapterOptions = {}) {
+    this.name = options.providerName ?? "acp";
+  }
+
   async createSession(config: ProviderSessionConfig): Promise<ProviderSession> {
-    const target = resolveAcpTarget(config);
+    const target = this.options.target ?? resolveAcpTarget(config);
     await target.writeSystemPromptArtifact(config);
     const command = target.command(config);
     const proc = registerProcessGroup(
@@ -423,7 +438,9 @@ export class ACPAdapter implements ProviderAdapter {
       // (mcp/connect, mcp/message, mcp/disconnect) instead of a network hop -- the
       // shape for an ACP agent with no network route to the swarm API. Gated on
       // `mcpCapabilities.acp` and UNSTABLE; not adopted here.
+      const sessionMeta = target.sessionMeta?.(config);
       const newSession = await connection.newSession({
+        ...(sessionMeta ? { _meta: sessionMeta } : {}),
         cwd: config.cwd,
         mcpServers: [
           {
@@ -451,6 +468,8 @@ export class ACPAdapter implements ProviderAdapter {
         proc,
         config,
         newSession.sessionId,
+        this.name,
+        target,
         {
           target: target.target,
           configOptions: sanitizeAcpConfigOptions(configOptions),
@@ -467,7 +486,9 @@ export class ACPAdapter implements ProviderAdapter {
         void revokeAcpSessionToken(config.apiUrl, config.apiKey, ephemeralToken.tokenId);
       }
       await terminateProcessGroup(proc.pid);
-      throw new Error(`ACP target failed during startup: ${scrubSecrets(formatError(err))}`);
+      throw new Error(
+        `ACP target failed during startup: ${describeTargetError(target, scrubSecrets(formatError(err)))}`,
+      );
     }
   }
 
@@ -601,6 +622,10 @@ export function toAcpMcpServers(
     );
   }
   return servers;
+}
+
+function describeTargetError(target: AcpTargetProfile, message: string): string {
+  return target.describeError?.(message) ?? message;
 }
 
 function formatError(err: unknown): string {

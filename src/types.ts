@@ -175,6 +175,14 @@ export const DEFAULT_MODEL_TIER_MAP: Record<ProviderName, Record<ModelTier, stri
     smart: "high",
     ultra: "ultra",
   },
+  // `grok models` lists grok-4.6 (default) and grok-4.5 at the same per-token
+  // rate, so every tier takes the default; effort carries the tier spread.
+  grok: {
+    smol: "grok-4.6",
+    regular: "grok-4.6",
+    smart: "grok-4.6",
+    ultra: "grok-4.6",
+  },
   // ACP has no portable tier-to-model mapping. Operators may set an explicit
   // MODEL_OVERRIDE, which the adapter applies through an advertised `model`
   // config option with a target-specific startup fallback.
@@ -413,6 +421,7 @@ export const ProviderNameSchema = z.enum([
   "dsh",
   "amp",
   "cursor",
+  "grok",
 ]);
 export type ProviderName = z.infer<typeof ProviderNameSchema>;
 
@@ -510,6 +519,9 @@ export const PROVIDER_STEER_CAPABILITIES: Record<ProviderName, SteerMode[]> = {
   // `run.steer()` reaches the in-flight run; a message the SDK reverts to a
   // follow-up, and every queued one, starts the next run on the same agent.
   cursor: ["steer", "queue"],
+  // Grok runs on the ACP client: one `session/prompt` turn, interrupted only
+  // by `session/cancel`. No Grok surface (ACP or headless) exposes a steer.
+  grok: [],
 };
 
 export type DevinProviderMeta = {
@@ -532,6 +544,7 @@ export type ProviderMetaMap = {
   dsh: NoProviderMeta;
   amp: NoProviderMeta;
   cursor: NoProviderMeta;
+  grok: NoProviderMeta;
 };
 
 export const FollowUpConfigSchema = z
@@ -3476,6 +3489,7 @@ export const PricingProviderSchema = z.enum([
   "dsh",
   "amp",
   "cursor",
+  "grok",
 ]);
 export type PricingProvider = z.infer<typeof PricingProviderSchema>;
 

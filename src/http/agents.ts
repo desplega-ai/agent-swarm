@@ -208,6 +208,7 @@ const LocalHarnessProviderSchema = z.enum([
   "dsh",
   "amp",
   "cursor",
+  "grok",
 ]);
 const AcpRuntimeConfigSchema = z
   .object({

@@ -25,7 +25,8 @@ export type LocalHarnessProvider =
   | "acp"
   | "dsh"
   | "cursor"
-  | "amp";
+  | "amp"
+  | "grok";
 
 /** USD per 1M tokens, as models.dev names the rates. Cache rates are absent for models without prompt caching. */
 export interface ModelCost {
@@ -156,7 +157,8 @@ function runtimeSectionModels(
  * `modelId` is the string the harness stores: a bare id for claude and codex
  * (a Claude CLI shortname such as `opus` resolves to the newest model of its
  * family), `<provider>/<id>` for pi and opencode, `openrouter/<id>` or a bare
- * DeepSeek API id for dsh, a bare Cursor model id for cursor.
+ * DeepSeek API id for dsh, a bare Cursor model id for cursor, a bare xAI id
+ * for grok.
  */
 export function effortLevelsFor(
   harness: string,
@@ -176,6 +178,9 @@ export function effortLevelsFor(
     ({ providerId, modelId: catalogId } = dshCatalogRef(modelId));
   } else if (harness === "cursor") {
     ({ providerId, modelId: catalogId } = cursorCatalogRef(modelId));
+  } else if (harness === "grok") {
+    providerId = "xai";
+    catalogId = modelId;
   } else {
     // The id may hold more slashes (`openrouter/google/gemini-3-flash-preview`).
     const slash = modelId.indexOf("/");
@@ -232,6 +237,7 @@ export const LOCAL_HARNESSES: LocalHarnessProvider[] = [
   "dsh",
   "amp",
   "cursor",
+  "grok",
   "acp",
 ];
 
@@ -257,6 +263,12 @@ export const CURSOR_MODELS = [
 ] as const;
 
 /**
+ * The models the Grok CLI lists (`grok models`). The account's own list can
+ * hold more (the docs name `grok-build`), so a custom id still goes through.
+ */
+export const GROK_MODELS = ["grok-4.6", "grok-4.5"] as const;
+
+/**
  * The models dsh's DeepSeek-direct route serves out of the box (its bundled
  * `deepseek-official` catalog). dsh rejects other bare ids, so the picker
  * offers only these; anything else goes through OpenRouter or a custom id.
@@ -274,6 +286,7 @@ export const HARNESS_LABEL: Record<ProviderName | string, string> = {
   dsh: "DeepSeek (dsh)",
   amp: "Amp",
   cursor: "Cursor",
+  grok: "Grok",
 } satisfies Record<ProviderName, string>;
 
 export function harnessSupportsModelSelection(harness: LocalHarnessProvider): boolean {
@@ -373,6 +386,8 @@ const FALLBACK_MODEL: Record<LocalHarnessProvider, string> = {
   cursor: "claude-sonnet-5-5",
   // `low` is Amp's cheapest mode; the regular tier (`medium`) runs an Opus-class model.
   amp: "low",
+  // The grok tier default (DEFAULT_MODEL_TIER_MAP.grok in src/types.ts).
+  grok: "grok-4.6",
   acp: "",
 };
 
@@ -443,6 +458,7 @@ export function modelGroupsForHarness(
   if (harness === "dsh") return dshModelGroups(configs, envPresence, liveCatalog);
   if (harness === "amp") return ampModelGroups(configs, envPresence, liveCatalog);
   if (harness === "cursor") return cursorModelGroups(configs, envPresence, liveCatalog);
+  if (harness === "grok") return grokModelGroups(configs, envPresence, liveCatalog);
 
   const snapshotGroups = SNAPSHOT_ORDER.map((providerId) => {
     const meta = SNAPSHOT_META[providerId];
@@ -630,6 +646,35 @@ function dshModelGroups(
       models: direct,
       requiredKey: "DEEPSEEK_API_KEY",
       enabled: hasRuntimeCredential("DEEPSEEK_API_KEY", configs, envPresence),
+    },
+  ];
+}
+
+/** The Grok CLI bills every model to XAI_API_KEY; see `src/providers/grok-adapter.ts`. */
+function grokModelGroups(
+  configs: SwarmConfig[] | undefined,
+  envPresence: Record<string, boolean> | undefined,
+  liveCatalog?: LiveModelsCatalog | null,
+): ModelGroup[] {
+  const xai = runtimeSectionModels("xai", liveCatalog);
+  const models: ModelOption[] = GROK_MODELS.map((id) => {
+    const m = xai[id];
+    return {
+      id,
+      label: m ? (modelDisplayName(m.name) ?? id) : id,
+      provider: "xAI",
+      providerId: null,
+      requiredKey: "XAI_API_KEY",
+      ...(m ? catalogFacts(m) : {}),
+      reasoningLevels: m ? reasoningLevelsFor("grok", id, m) : [],
+    };
+  });
+  return [
+    {
+      provider: "xAI",
+      models,
+      requiredKey: "XAI_API_KEY",
+      enabled: hasRuntimeCredential("XAI_API_KEY", configs, envPresence),
     },
   ];
 }
@@ -964,6 +1009,7 @@ export function isLocalHarness(
     value === "dsh" ||
     value === "amp" ||
     value === "cursor" ||
+    value === "grok" ||
     value === "acp"
   );
 }

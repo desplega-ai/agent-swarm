@@ -56,7 +56,8 @@ export interface CostData {
     | "acp"
     | "dsh"
     | "cursor"
-    | "amp";
+    | "amp"
+    | "grok";
 }
 
 import type { ProviderName, SteerMode } from "../types";

@@ -27,6 +27,7 @@ import { hasCodexOAuthPoolSlots } from "../providers/codex-oauth/env-keys";
 import { checkCursorCredentials } from "../providers/cursor-adapter";
 import { checkDevinCredentials } from "../providers/devin-adapter";
 import { checkDshCredentials } from "../providers/dsh-adapter";
+import { checkGrokCredentials } from "../providers/grok-adapter";
 import { checkOpencodeCredentials } from "../providers/opencode-adapter";
 import type { CredCheckOptions, CredStatus } from "../providers/types";
 import type {
@@ -50,7 +51,8 @@ export type SupportedProvider =
   | "acp"
   | "dsh"
   | "cursor"
-  | "amp";
+  | "amp"
+  | "grok";
 
 /**
  * True when the pi harness authenticates against Bedrock rather than a provider
@@ -117,6 +119,7 @@ export const REQUIRED_CRED_VARS_BY_PROVIDER: Record<SupportedProvider, readonly 
   dsh: ["DEEPSEEK_API_KEY", "OPENROUTER_API_KEY"],
   amp: ["AMP_API_KEY"],
   cursor: ["CURSOR_API_KEY"],
+  grok: ["XAI_API_KEY"],
 };
 
 type CredentialChecker = (
@@ -129,6 +132,7 @@ export const CREDENTIAL_PROVIDER_CHECKERS: Record<SupportedProvider, CredentialC
   dsh: (env) => checkDshCredentials(env),
   amp: (env) => checkAmpCredentials(env),
   cursor: (env) => checkCursorCredentials(env),
+  grok: (env) => checkGrokCredentials(env),
   claude: (env) => checkClaudeCredentials(env),
   "claude-managed": (env) => checkClaudeManagedCredentials(env),
   codex: (env, opts) => checkCodexCredentials(env, opts),
@@ -258,6 +262,20 @@ function presenceCheckOk(): LiveValidationResult {
 
 async function checkOpenAiApiKey(apiKey: string): Promise<LiveValidationResult> {
   const r = await timedFetch("https://api.openai.com/v1/models", {
+    method: "GET",
+    headers: { Authorization: `Bearer ${apiKey}` },
+  });
+  if (r.ok) return { ok: true, latency_ms: r.latency_ms };
+  return {
+    ok: false,
+    error: scrubSecrets(`HTTP ${r.status}: ${r.bodyText.slice(0, 200)}`),
+    latency_ms: r.latency_ms,
+  };
+}
+
+/** `GET /v1/models` is the call the Grok CLI makes first; it runs no inference. */
+async function checkXaiApiKey(apiKey: string): Promise<LiveValidationResult> {
+  const r = await timedFetch("https://api.x.ai/v1/models", {
     method: "GET",
     headers: { Authorization: `Bearer ${apiKey}` },
   });
@@ -488,12 +506,23 @@ export async function validateProviderCredentials(
           ? { ok: true, latency_ms: Date.now() - startedAt }
           : { ok: false, error: result.error, latency_ms: Date.now() - startedAt };
       }
+      case "grok": {
+        const apiKey = env.XAI_API_KEY?.trim();
+        if (!apiKey) {
+          return {
+            ok: false,
+            error: "XAI_API_KEY is not set.",
+            latency_ms: Date.now() - startedAt,
+          };
+        }
+        return checkXaiApiKey(apiKey);
+      }
       case "acp":
         return presenceCheckOk();
       default:
         return {
           ok: false,
-          error: `Unknown provider "${provider}". Supported: claude, claude-managed, codex, devin, opencode, pi, acp, dsh, cursor, amp.`,
+          error: `Unknown provider "${provider}". Supported: claude, claude-managed, codex, devin, opencode, pi, acp, dsh, cursor, amp, grok.`,
           latency_ms: Date.now() - startedAt,
         };
     }
