@@ -16,7 +16,11 @@ import { registerScriptRunTool } from "../tools/script-run";
 import { registerScriptRunsTools } from "../tools/script-runs";
 import { registerScriptSearchTool } from "../tools/script-search";
 import { registerScriptUpsertTool } from "../tools/script-upsert";
-import { mcpOverflowNamespace } from "../tools/utils";
+import {
+  MCP_RESULT_WIRE_LIMIT_BYTES,
+  mcpOverflowNamespace,
+  wireChannelBytes,
+} from "../tools/utils";
 import { refreshSecretScrubberCache } from "../utils/secret-scrubber";
 import { SKIP_SANDBOX_SPAWN_TESTS } from "./sandbox-spawn-test-helpers";
 
@@ -395,8 +399,7 @@ describe("script_ MCP HTTP proxy tools", () => {
         retrieval: expect.stringContaining("ctx.swarm.kv_get"),
       });
       expect(run.structuredContent.truncation?.originalBytes).toBeGreaterThan(blob.length);
-      const afterBytes = Buffer.byteLength(JSON.stringify(run), "utf8");
-      expect(afterBytes).toBeLessThanOrEqual(10_000);
+      expect(wireChannelBytes(run)).toBeLessThanOrEqual(MCP_RESULT_WIRE_LIMIT_BYTES);
       expect(text).toContain('result:\n{\n  "blob": "');
       expect(text).toContain("[truncated");
       expect(text).toContain(`kv://${overflowNamespace}/`);
@@ -425,10 +428,33 @@ describe("script_ MCP HTTP proxy tools", () => {
         },
         isError: !canonical.outcome.ok,
       };
-      const beforeBytes = Buffer.byteLength(JSON.stringify(beforeWire), "utf8");
-      expect(beforeBytes).toBeGreaterThan(10_000);
+      expect(wireChannelBytes(beforeWire)).toBeGreaterThan(MCP_RESULT_WIRE_LIMIT_BYTES);
     },
   );
+
+  spawnTest("a ~6.5KB script result goes out whole on both channels (no spill)", async () => {
+    // Regression for a ~1.6k-token script-run page that spilled: the summed
+    // two-channel measure plus the data+details duplicate inside
+    // structuredContent put it over the cap although no harness saw >10KB.
+    const tools = buildToolServer();
+    const source = `
+      export default async () => ({
+        rows: Array.from({ length: 65 }, (_, id) => ({ id, note: "n".repeat(70) })),
+      });
+    `;
+
+    const run = (await tools.run.handler(
+      { source, intent: "6.5KB page regression" },
+      meta(workerId),
+    )) as StructuredResult<{ result: { rows: Array<{ id: number; note: string }> } }>;
+
+    const text = run.content[0]?.text ?? "";
+    expect(run.isError).toBeFalsy();
+    expect(run.structuredContent.truncation).toBeUndefined();
+    expect(run.structuredContent.data?.result.rows).toHaveLength(65);
+    expect(text).toContain('"id": 64');
+    expect(wireChannelBytes(run)).toBeLessThanOrEqual(MCP_RESULT_WIRE_LIMIT_BYTES);
+  });
 
   spawnTest("oversized script-return arrays keep a shortened non-empty prefix", async () => {
     const tools = buildToolServer();
@@ -455,7 +481,7 @@ describe("script_ MCP HTTP proxy tools", () => {
     expect(run.structuredContent.message).toContain(`Script run completed`);
     expect(run.structuredContent.message).toContain(`${kept.length} of 20`);
     expect(run.structuredContent.truncation).toBeDefined();
-    expect(Buffer.byteLength(JSON.stringify(run), "utf8")).toBeLessThanOrEqual(10_000);
+    expect(wireChannelBytes(run)).toBeLessThanOrEqual(MCP_RESULT_WIRE_LIMIT_BYTES);
 
     const overflowNamespace = mcpOverflowNamespace(workerId);
     const fullValueAt = run.structuredContent.truncation?.fullValueAt ?? "";

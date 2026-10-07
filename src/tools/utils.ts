@@ -154,6 +154,12 @@ export type SwarmToolResult<TData extends SwarmToolData = SwarmToolData> = {
   /** Ctx-control metadata attached centrally when the full wire result is spilled. */
   truncation?: SwarmToolTruncation;
   /**
+   * Set by ctx-control only. Keeps `details` out of structuredContent when
+   * that channel already carries `data` verbatim and the duplicate rendering
+   * is what pushes it over the size budget. The text channel keeps `details`.
+   */
+  omitStructuredDetails?: boolean;
+  /**
    * Skip the finalize pipeline's secret scrubbing for this result. ONLY for
    * deliberate credential-reveal branches (oauth-access-token, script-apis
    * create/rotate, get-config includeSecrets) whose entire purpose is handing
@@ -346,10 +352,16 @@ export const NUDGES: Record<string, (result: SwarmToolResult) => string | undefi
   },
 };
 
+/**
+ * Per-channel budget: every harness reads ONE channel (text or structured,
+ * runbook §3), so each channel must fit on its own. See `wireChannelBytes`.
+ */
 export const MCP_RESULT_WIRE_LIMIT_BYTES = 10_000;
 export { MCP_OVERFLOW_NAMESPACE, mcpOverflowNamespace };
 export const MCP_OVERFLOW_TTL_MS = 24 * 60 * 60 * 1_000;
-const MCP_PROSE_PREVIEW_CHARS = 1_200;
+// Floor for the prose preview while the array path sizes its arrays; the
+// preview then grows into whatever budget the arrays leave.
+const MCP_PROSE_PREVIEW_FLOOR_CHARS = 1_200;
 
 type FinalizeContext = {
   toolName: string;
@@ -391,7 +403,14 @@ function composeWireResult(r: SwarmToolResult): CallToolResult {
   // Payload LAST: harnesses truncate oversized text from the tail (or keep
   // head+tail), so message and nudge lead and a cut lands inside the payload
   // rendering — a truncated JSON prefix still shows its first key values.
-  const text = [r.message, r.nudge, normalizedDetails ?? dataFallback]
+  // A spill pointer follows the bounded preview; the text channel renders it
+  // once, the structured channel carries only the `truncation` object.
+  const text = [
+    r.message,
+    r.nudge,
+    normalizedDetails ?? dataFallback,
+    r.truncation ? renderTruncationPointer(r.truncation) : undefined,
+  ]
     .filter((part): part is string => Boolean(part?.trim()))
     .join("\n\n");
   const structuredContent: Record<string, unknown> = {
@@ -399,7 +418,7 @@ function composeWireResult(r: SwarmToolResult): CallToolResult {
     success: r.ok,
     message: r.message,
   };
-  if (normalizedDetails) structuredContent.details = normalizedDetails;
+  if (normalizedDetails && !r.omitStructuredDetails) structuredContent.details = normalizedDetails;
   if (r.nudge) structuredContent.nudge = r.nudge;
   if (r.truncation) structuredContent.truncation = r.truncation;
 
@@ -408,6 +427,70 @@ function composeWireResult(r: SwarmToolResult): CallToolResult {
     structuredContent,
     isError: !r.ok,
   };
+}
+
+function renderTruncationPointer(t: SwarmToolTruncation): string {
+  return `Full value: ${t.fullValueAt} (${t.originalBytes} bytes)\nRetrieval: ${t.retrieval}`;
+}
+
+/**
+ * Bytes the model sees from one wire result: the larger of the two channels.
+ * pi/opencode/claude-managed read only `content.text`; Codex reads only the
+ * JSON-encoded `structuredContent` (runbook §3). Summing both would spill a
+ * result at half the payload any single harness actually receives.
+ */
+export function wireChannelBytes(wire: {
+  content?: ReadonlyArray<{ type: string; text?: string }>;
+  structuredContent?: unknown;
+}): number {
+  const text = (wire.content ?? [])
+    .map((block) => (block.type === "text" ? (block.text ?? "") : ""))
+    .join("");
+  return Math.max(
+    Buffer.byteLength(text, "utf8"),
+    Buffer.byteLength(JSON.stringify(wire.structuredContent ?? {}), "utf8"),
+  );
+}
+
+/** `wireChannelBytes` of the wire result a SwarmToolResult composes to. */
+export function swarmToolResultBytes(r: SwarmToolResult): number {
+  return wireChannelBytes(composeWireResult(r));
+}
+
+function fitsWireLimit(r: SwarmToolResult): boolean {
+  return swarmToolResultBytes(r) <= MCP_RESULT_WIRE_LIMIT_BYTES;
+}
+
+/** A prefix of `source` that never ends on a lone high surrogate. */
+function safePrefix(source: string, chars: number): string {
+  const end = Math.min(chars, source.length);
+  const code = source.charCodeAt(end - 1);
+  return code >= 0xd800 && code <= 0xdbff ? source.slice(0, end - 1) : source.slice(0, end);
+}
+
+function previewWithMarker(source: string, chars: number): string {
+  const preview = safePrefix(source, chars);
+  const omitted = source.length - preview.length;
+  return omitted > 0 ? `${preview}\n… [truncated ${omitted} chars]` : preview;
+}
+
+/**
+ * Largest preview of `source` whose rendered result still fits the per-channel
+ * budget (binary search on characters). Falls back to the empty preview when
+ * nothing fits, so the pointer still goes out.
+ */
+function fillPreviewToBudget(
+  source: string,
+  render: (preview: string) => SwarmToolResult,
+): SwarmToolResult {
+  let low = 0;
+  let high = source.length;
+  while (low < high) {
+    const mid = Math.ceil((low + high) / 2);
+    if (fitsWireLimit(render(previewWithMarker(source, mid)))) low = mid;
+    else high = mid - 1;
+  }
+  return render(previewWithMarker(source, low));
 }
 
 function overflowKey(toolName: string, value: string): string {
@@ -549,15 +632,13 @@ function arrayPreservingOverflowResult(
   data: SwarmToolData,
   targets: ArrayTarget[],
   truncation: SwarmToolTruncation,
-  pointer: string,
+  detailsPreview: string | undefined,
 ): SwarmToolResult {
-  const normalizedDetails = result.details?.trim() || undefined;
-  const details = normalizedDetails
-    ? `${normalizedDetails.slice(0, MCP_PROSE_PREVIEW_CHARS)}\n… [truncated ${Math.max(
-        normalizedDetails.length - MCP_PROSE_PREVIEW_CHARS,
-        0,
-      )} chars]\n${pointer}`
-    : `JSON payload truncated in place:\n${JSON.stringify(data, null, 2)}\n${pointer}`;
+  // The structured channel carries the shortened data verbatim, so `details`
+  // (tool prose, or the data rendered for text-only harnesses) stays out of
+  // it and each channel spends its own budget on payload.
+  const details =
+    detailsPreview ?? `JSON payload truncated in place:\n${JSON.stringify(data, null, 2)}`;
   return {
     ok: result.ok,
     message: arrayTruncationMessage(result.message, targets),
@@ -565,6 +646,7 @@ function arrayPreservingOverflowResult(
     data,
     nudge: result.nudge,
     truncation,
+    omitStructuredDetails: true,
   };
 }
 
@@ -576,7 +658,6 @@ function arrayPreservingOverflowResult(
 function truncateArraysInPlace(
   result: SwarmToolResult,
   truncation: SwarmToolTruncation,
-  pointer: string,
 ): SwarmToolResult | undefined {
   if (!result.data) return undefined;
   const data = cloneResultData(result.data) as SwarmToolData;
@@ -590,10 +671,15 @@ function truncateArraysInPlace(
       Buffer.byteLength(JSON.stringify(a.originalItems), "utf8"),
   );
 
-  const render = () => arrayPreservingOverflowResult(result, data, targets, truncation, pointer);
-  const fits = () =>
-    Buffer.byteLength(JSON.stringify(composeWireResult(render())), "utf8") <=
-    MCP_RESULT_WIRE_LIMIT_BYTES;
+  // Size the arrays against a fixed prose floor, then let the prose preview
+  // grow into whatever budget the arrays leave.
+  const prose = result.details?.trim() || undefined;
+  const renderWith = (preview: string | undefined) =>
+    arrayPreservingOverflowResult(result, data, targets, truncation, preview);
+  const render = () =>
+    renderWith(prose ? previewWithMarker(prose, MCP_PROSE_PREVIEW_FLOOR_CHARS) : undefined);
+  const fits = () => fitsWireLimit(render());
+  const finish = () => (prose ? fillPreviewToBudget(prose, renderWith) : render());
 
   for (const target of targets) {
     setArrayLength(target, 0);
@@ -608,10 +694,10 @@ function truncateArraysInPlace(
       else high = mid - 1;
     }
     setArrayLength(target, low);
-    return render();
+    return finish();
   }
 
-  if (fits()) return render();
+  if (fits()) return finish();
 
   // A large scalar sibling can keep the result oversized even after every
   // array is emptied. Prefer dropping those non-array branches over dropping
@@ -630,7 +716,7 @@ function truncateArraysInPlace(
     }
     setArrayLength(target, low);
   }
-  return render();
+  return finish();
 }
 
 const ctxControlMiddleware: FinalizeMiddleware = async (result, ctx) => {
@@ -640,11 +726,18 @@ const ctxControlMiddleware: FinalizeMiddleware = async (result, ctx) => {
   if (ctx.callOrigin === "script-sdk" || ctx.callOrigin === "extension") return result;
   if (CTX_CONTROL_EXEMPT_TOOLS.has(ctx.toolName)) return result;
 
-  const fullWire = composeWireResult(result);
-  const fullWireJson = JSON.stringify(fullWire);
-  const fullWireBytes = Buffer.byteLength(fullWireJson, "utf8");
+  const fullWireBytes = swarmToolResultBytes(result);
   if (fullWireBytes <= MCP_RESULT_WIRE_LIMIT_BYTES) {
     return result;
+  }
+
+  // Lossless first: tools like script-run put the payload in `data` AND a
+  // rendering of it in `details`, so structuredContent carries it twice. That
+  // channel stays self-sufficient with `data` alone; drop the duplicate there
+  // before spilling anything.
+  if (result.details?.trim() && result.data && Object.keys(result.data).length > 0) {
+    const deduped: SwarmToolResult = { ...result, omitStructuredDetails: true };
+    if (fitsWireLimit(deduped)) return deduped;
   }
 
   let fullValueAt: string;
@@ -681,27 +774,21 @@ const ctxControlMiddleware: FinalizeMiddleware = async (result, ctx) => {
     limitBytes: MCP_RESULT_WIRE_LIMIT_BYTES,
     retrieval,
   };
-  const pointer =
-    `Full value: ${fullValueAt}\nRetrieval: ${retrieval}\n` +
-    `Truncation: ${JSON.stringify(truncation)}`;
-  const arrayPreservingResult = truncateArraysInPlace(result, truncation, pointer);
+  const arrayPreservingResult = truncateArraysInPlace(result, truncation);
   if (arrayPreservingResult) return arrayPreservingResult;
 
-  const normalizedDetails = result.details?.trim() || undefined;
-  const details = normalizedDetails
-    ? `${normalizedDetails.slice(0, MCP_PROSE_PREVIEW_CHARS)}\n… [truncated ${Math.max(
-        normalizedDetails.length - MCP_PROSE_PREVIEW_CHARS,
-        0,
-      )} chars]\n${pointer}`
-    : `JSON payload omitted because the composed result exceeded ${MCP_RESULT_WIRE_LIMIT_BYTES} bytes.\n${pointer}`;
-
-  return {
+  const spilled = (details: string): SwarmToolResult => ({
     ok: result.ok,
     message: result.message,
     details,
     nudge: result.nudge,
     truncation,
-  };
+  });
+  const prose = result.details?.trim() || undefined;
+  if (prose) return fillPreviewToBudget(prose, spilled);
+  return spilled(
+    `JSON payload omitted because the result exceeded ${MCP_RESULT_WIRE_LIMIT_BYTES} bytes per channel.`,
+  );
 };
 
 // Ordered and security-sensitive: ctx-control runs only after the result and

@@ -14,12 +14,33 @@ import {
   type SwarmToolResult,
   type SwarmToolTruncation,
   WORKFLOW_LONG_SCRIPT_TIMEOUT_NUDGE,
+  wireChannelBytes,
 } from "../tools/utils";
 import { clearVolatileSecretsForTesting, registerVolatileSecret } from "../utils/secret-scrubber";
 
 const TEST_DB_PATH = "./test-swarm-tool-result-gate.sqlite";
 const TEST_AGENT_ID = "tool-result-test-agent";
 const TEST_OVERFLOW_NAMESPACE = mcpOverflowNamespace(TEST_AGENT_ID);
+
+function channelSizes(result: { content?: unknown; structuredContent?: unknown }) {
+  const text = ((result.content as Array<{ text?: string }> | undefined) ?? [])
+    .map((block) => block.text ?? "")
+    .join("");
+  return {
+    text: Buffer.byteLength(text, "utf8"),
+    structured: Buffer.byteLength(JSON.stringify(result.structuredContent ?? {}), "utf8"),
+  };
+}
+
+function expectEachChannelWithinLimit(result: { content?: unknown; structuredContent?: unknown }) {
+  const sizes = channelSizes(result);
+  expect(sizes.text).toBeLessThanOrEqual(MCP_RESULT_WIRE_LIMIT_BYTES);
+  expect(sizes.structured).toBeLessThanOrEqual(MCP_RESULT_WIRE_LIMIT_BYTES);
+}
+
+function occurrences(haystack: string, needle: string): number {
+  return haystack.split(needle).length - 1;
+}
 
 // ── Part 1: finalize pipeline contract ────────────────────────────────────────
 // Both channels must be independently self-sufficient and semantically
@@ -389,7 +410,7 @@ describe("finalizeSwarmToolResult", () => {
     };
 
     expect(text).toContain("JSON payload omitted");
-    expect(text).toContain('"truncated":true');
+    expect(text).not.toContain('"truncated":true');
     expect(text).not.toContain(`"blob": "${blob.slice(0, 100)}`);
     expect(structured).not.toHaveProperty("blob");
     expect(structured.details).toContain("JSON payload omitted");
@@ -406,17 +427,14 @@ describe("finalizeSwarmToolResult", () => {
     expect(retrieval).toContain(
       `kv-get({"namespace":"${TEST_OVERFLOW_NAMESPACE}","key":"${key}"})`,
     );
-    expect(text).toContain(fullValueAt);
-    expect(text).toContain(`"key":"${key}"`);
-    expect(structured.details).toContain(fullValueAt);
-    expect(structured.details).toContain(`"key":"${key}"`);
-    expect(Buffer.byteLength(JSON.stringify(result), "utf8")).toBeLessThanOrEqual(
-      MCP_RESULT_WIRE_LIMIT_BYTES,
-    );
-    expect(Buffer.byteLength(text, "utf8")).toBeLessThanOrEqual(MCP_RESULT_WIRE_LIMIT_BYTES);
-    expect(Buffer.byteLength(JSON.stringify(result.structuredContent), "utf8")).toBeLessThanOrEqual(
-      MCP_RESULT_WIRE_LIMIT_BYTES,
-    );
+    // One pointer per channel: a single kv:// line plus the retrieval call in
+    // text; only the truncation object in structuredContent.
+    expect(occurrences(text, fullValueAt)).toBe(1);
+    expect(occurrences(text, `"key":"${key}"`)).toBe(1);
+    expect(structured.details).not.toContain(fullValueAt);
+    expect(structured.details).not.toContain("Retrieval:");
+    expect(occurrences(JSON.stringify(result.structuredContent), fullValueAt)).toBe(1);
+    expectEachChannelWithinLimit(result);
 
     const stored = await getKv(TEST_OVERFLOW_NAMESPACE, key);
     expect(stored?.valueType).toBe("string");
@@ -474,9 +492,7 @@ describe("finalizeSwarmToolResult", () => {
       truncated: true,
       limitBytes: MCP_RESULT_WIRE_LIMIT_BYTES,
     });
-    expect(Buffer.byteLength(JSON.stringify(result), "utf8")).toBeLessThanOrEqual(
-      MCP_RESULT_WIRE_LIMIT_BYTES,
-    );
+    expectEachChannelWithinLimit(result);
 
     const key = structured.truncation.fullValueAt.replace(`kv://${TEST_OVERFLOW_NAMESPACE}/`, "");
     const stored = await getKv(TEST_OVERFLOW_NAMESPACE, key);
@@ -509,9 +525,7 @@ describe("finalizeSwarmToolResult", () => {
     expect(structured.items).toEqual([{ id: 1 }, { id: 2 }]);
     expect(structured).not.toHaveProperty("blob");
     expect(structured.truncation.truncated).toBe(true);
-    expect(Buffer.byteLength(JSON.stringify(result), "utf8")).toBeLessThanOrEqual(
-      MCP_RESULT_WIRE_LIMIT_BYTES,
-    );
+    expectEachChannelWithinLimit(result);
   });
 
   test("oversized prose keeps a readable prefix + marker + resolvable pointer on both channels", async () => {
@@ -540,12 +554,11 @@ describe("finalizeSwarmToolResult", () => {
 
     expect(structured.details).toContain(blob.slice(0, 100));
     expect(structured.details).toContain("[truncated");
-    expect(structured.details).toContain(`kv://${TEST_OVERFLOW_NAMESPACE}/`);
-    expect(structured.details!.length).toBeLessThan(2_500);
-    expect(text).toBe(`Big rendered payload.\n\n${structured.details}`);
+    expect(structured.details).not.toContain(`kv://${TEST_OVERFLOW_NAMESPACE}/`);
     expect(structured).not.toHaveProperty("blob");
     const fullValueAt = structured.truncation!.fullValueAt;
     const retrieval = structured.truncation!.retrieval;
+    const originalBytes = structured.truncation!.originalBytes;
     expect(structured.truncation).toMatchObject({
       truncated: true,
       fullValueAt: expect.stringMatching(/^kv:\/\/mcp:overflow:tool-result-test-agent\//),
@@ -553,10 +566,73 @@ describe("finalizeSwarmToolResult", () => {
       limitBytes: MCP_RESULT_WIRE_LIMIT_BYTES,
       retrieval: expect.stringContaining("kv-get("),
     });
-    expect(text).toContain(fullValueAt);
-    expect(text).toContain(retrieval);
-    expect(structured.details).toContain(fullValueAt);
-    expect(structured.details).toContain(retrieval);
+    expect(text).toBe(
+      `Big rendered payload.\n\n${structured.details}\n\n` +
+        `Full value: ${fullValueAt} (${originalBytes} bytes)\n` +
+        `Retrieval: ${retrieval}`,
+    );
+    expect(occurrences(text, fullValueAt)).toBe(1);
+    expectEachChannelWithinLimit(result);
+  });
+
+  test("the prose preview fills the remaining budget instead of a fixed 1,200 chars", async () => {
+    const prose = Array.from({ length: 400 }, (_, i) => `line ${i}: ${"p".repeat(60)}`).join("\n");
+    const result = await finalizeSwarmToolResult(
+      "some-tool",
+      { ok: true, message: "Long prose.", details: prose },
+      { agentId: TEST_AGENT_ID },
+    );
+    const structured = result.structuredContent as { details: string };
+    const preview = structured.details.slice(0, structured.details.indexOf("\n… [truncated"));
+    expect(prose.startsWith(preview)).toBe(true);
+    // Fills to within one line of the budget: far past the old 1,200-char cut.
+    expect(preview.length).toBeGreaterThan(8_000);
+    const sizes = channelSizes(result);
+    expect(Math.max(sizes.text, sizes.structured)).toBeGreaterThan(
+      MCP_RESULT_WIRE_LIMIT_BYTES - 200,
+    );
+    expectEachChannelWithinLimit(result);
+  });
+
+  test("the cap is max(text, structured), not their sum", async () => {
+    // ~6.5KB of payload: each channel holds one copy (~6.6KB), the old summed
+    // measure was ~13KB and spilled it.
+    const rows = Array.from({ length: 65 }, (_, i) => ({ id: i, note: "n".repeat(70) }));
+    const result = await finalizeSwarmToolResult(
+      "some-tool",
+      { ok: true, message: "65 rows.", data: { rows } },
+      { agentId: TEST_AGENT_ID },
+    );
+    const sizes = channelSizes(result);
+    expect(sizes.text + sizes.structured).toBeGreaterThan(MCP_RESULT_WIRE_LIMIT_BYTES);
+    expect(Math.max(sizes.text, sizes.structured)).toBeLessThanOrEqual(MCP_RESULT_WIRE_LIMIT_BYTES);
+    expect(result.structuredContent).not.toHaveProperty("truncation");
+    expect((result.structuredContent as { rows: unknown[] }).rows).toEqual(rows);
+    expect(wireChannelBytes(result)).toBe(Math.max(sizes.text, sizes.structured));
+  });
+
+  test("a details rendering of data leaves structuredContent before anything spills", async () => {
+    // script-run shape: `data` plus a pretty-printed `details` of the same
+    // payload, so structuredContent alone carries it twice (~14KB).
+    const result = {
+      rows: Array.from({ length: 65 }, (_, i) => ({ id: i, note: "n".repeat(70) })),
+    };
+    const finalized = await finalizeSwarmToolResult(
+      "script-run",
+      {
+        ok: true,
+        message: "Script run completed.",
+        details: `result:\n${JSON.stringify(result, null, 2)}`,
+        data: { status: 200, data: { result } },
+      },
+      { agentId: TEST_AGENT_ID },
+    );
+    const text = (finalized.content?.[0] as { text: string }).text;
+    expect(finalized.structuredContent).not.toHaveProperty("truncation");
+    expect(finalized.structuredContent).not.toHaveProperty("details");
+    expect((finalized.structuredContent as { data: unknown }).data).toEqual({ result });
+    expect(text).toContain(`result:\n${JSON.stringify(result, null, 2)}`);
+    expectEachChannelWithinLimit(finalized);
   });
 
   test("oversized results without an agent identity never spill to the flat namespace", async () => {
