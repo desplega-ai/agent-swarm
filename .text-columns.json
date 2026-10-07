@@ -3380,15 +3380,9 @@
     "status": {
       "exempt": "enum or fixed-format value"
     },
-    "input": {
-      "pending": "12d: workflow step writers"
-    },
-    "output": {
-      "pending": "12d: workflow step writers"
-    },
-    "error": {
-      "pending": "12d: workflow step writers"
-    },
+    "input": "scrubbed",
+    "output": "scrubbed",
+    "error": "scrubbed",
     "startedAt": {
       "exempt": "timestamp"
     },
@@ -3399,13 +3393,11 @@
       "exempt": "timestamp"
     },
     "idempotencyKey": {
-      "pending": "12d: workflow step writers"
+      "exempt": "byte-exact idempotency key (runId:nodeId:iteration) behind a UNIQUE index"
     },
-    "diagnostics": {
-      "pending": "12d: workflow step writers"
-    },
+    "diagnostics": "scrubbed",
     "nextPort": {
-      "pending": "12d: workflow step writers"
+      "exempt": "routing port name read back byte-exact to pick successors"
     },
     "created_by": {
       "exempt": "identifier"
@@ -3424,15 +3416,11 @@
     "status": {
       "exempt": "enum or fixed-format value"
     },
-    "triggerData": {
-      "pending": "12d: workflow run writers"
-    },
+    "triggerData": "scrubbed",
     "context": {
-      "pending": "12d: workflow run writers"
+      "pending": "12d: left raw on purpose; resume/retry/recovery rebuild the live ctx (resolved secret.* inputs included) from this column, so scrubbing needs input re-resolution on resume first"
     },
-    "error": {
-      "pending": "12d: workflow run writers"
-    },
+    "error": "scrubbed",
     "startedAt": {
       "exempt": "timestamp"
     },

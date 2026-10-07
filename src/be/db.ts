@@ -7696,7 +7696,7 @@ export async function createWorkflowRun(data: {
       data.workflowId,
       data.triggerType ?? "manual",
       now,
-      data.triggerData ? JSON.stringify(data.triggerData) : null,
+      data.triggerData ? scrubJsonValue(data.triggerData) : null,
       data.createdBy ?? null,
     ],
   );
@@ -7750,12 +7750,15 @@ export async function updateWorkflowRun(
     params.push(data.status);
   }
   if (data.context !== undefined) {
+    // Not scrubbed: resume/retry/recovery rebuild the live ctx from this
+    // column (including resolved `secret.*` inputs, which are never
+    // re-resolved), so a redaction here would change downstream interpolation.
     updates.push("context = ?");
     params.push(JSON.stringify(data.context));
   }
   if (data.error !== undefined) {
     updates.push("error = ?");
-    params.push(data.error);
+    params.push(data.error === null ? null : scrubSecrets(data.error));
   }
   if (data.finishedAt !== undefined) {
     updates.push("finishedAt = ?");
@@ -7940,7 +7943,7 @@ export async function createWorkflowRunStep(data: {
       data.nodeId,
       data.nodeType,
       now,
-      data.input ? JSON.stringify(data.input) : null,
+      data.input ? scrubJsonValue(data.input) : null,
       data.idempotencyKey ?? null,
     ],
   );
@@ -7979,11 +7982,11 @@ export async function updateWorkflowRunStep(
   }
   if (data.output !== undefined) {
     updates.push("output = ?");
-    params.push(JSON.stringify(data.output));
+    params.push(scrubJsonValue(data.output));
   }
   if (data.error !== undefined) {
     updates.push("error = ?");
-    params.push(data.error);
+    params.push(data.error === null ? null : scrubSecrets(data.error));
   }
   if (data.finishedAt !== undefined) {
     updates.push("finishedAt = ?");
@@ -8007,7 +8010,7 @@ export async function updateWorkflowRunStep(
   }
   if (data.diagnostics !== undefined) {
     updates.push("diagnostics = ?");
-    params.push(data.diagnostics);
+    params.push(scrubSecrets(data.diagnostics));
   }
   if (data.nextPort !== undefined) {
     updates.push("nextPort = ?");
