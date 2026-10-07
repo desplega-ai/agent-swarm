@@ -1,0 +1,13 @@
+{
+  "kind": "skill",
+  "name": "fxmacrodata",
+  "displayName": "FXMacroData",
+  "slug": "fxmacrodata",
+  "title": "FXMacroData",
+  "description": "Official macroeconomic releases (CPI, policy rates, payrolls, GDP), release calendars and FX rates for 22 currencies through the FXMacroData REST API. Use when the answer is a published number, the time it was or will be released, or a currency pair's rate.",
+  "version": "1.0.0",
+  "category": "skills",
+  "placeholders": ["FXMACRODATA_API_KEY"],
+  "runAllSeedersCandidate": false,
+  "tags": ["finance", "macro", "research"]
+}

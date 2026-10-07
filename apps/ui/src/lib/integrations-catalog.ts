@@ -770,6 +770,40 @@ export const INTEGRATIONS: IntegrationDef[] = [
     ],
   },
 
+  // ----------------------------------------------------------- FXMacroData
+  {
+    id: "fxmacrodata",
+    name: "FXMacroData",
+    description:
+      "Official macro releases, release calendars and FX rates for 22 currencies, over the FXMacroData REST API.",
+    category: "other",
+    iconKey: "chart-line",
+    docsUrl: "https://fxmacrodata.com/documentation",
+    recommendedSkills: [
+      {
+        name: "fxmacrodata",
+        source: "template",
+        templateRepo: "desplega-ai/agent-swarm",
+        templatePath: "templates/skills/fxmacrodata",
+        roles: ["lead", "worker"],
+        reason:
+          "Endpoints, slugs and field meanings. The key alone does not tell an agent that `date` is the reference period rather than the publication day, or which routes answer without a key.",
+        installOnSetup: true,
+      },
+    ],
+    fields: [
+      {
+        key: "FXMACRODATA_API_KEY",
+        label: "API key",
+        type: "password",
+        required: true,
+        isSecret: true,
+        helpText:
+          "FXMacroData API key, read by the fxmacrodata skill and sent as the `X-API-Key` header. Recent USD data works without one. Get one at https://fxmacrodata.com/subscribe",
+      },
+    ],
+  },
+
   // -------------------------------------------------------------- Anthropic
   {
     id: "anthropic",
