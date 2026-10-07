@@ -7660,7 +7660,7 @@ type WorkflowRunRow = {
   triggerData: string | null;
   /** Absent from list rows: see `WORKFLOW_RUN_SUMMARY_COLUMNS`. */
   context?: string | null;
-  /** Sealed exact `context` (migration 199). Absent from list rows. */
+  /** Sealed exact `context` (migration 201). Absent from list rows. */
   context_replay?: string | null;
   error: string | null;
   created_by: string | null;
@@ -7909,7 +7909,7 @@ type WorkflowRunStepRow = {
   status: string;
   input: string | null;
   output: string | null;
-  /** Sealed exact `output` (migration 199). */
+  /** Sealed exact `output` (migration 201). */
   output_replay: string | null;
   error: string | null;
   startedAt: string;
