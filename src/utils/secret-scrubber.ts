@@ -21,6 +21,8 @@
  * API↔worker DB boundary (scripts/check-db-boundary.sh).
  */
 
+import { GITLEAKS_RULES } from "./secret-rules.generated";
+
 /**
  * Version of the redaction rules below. Bump it on EVERY rule change (new
  * key, suffix, regex, pass or threshold): the API's boot retro-sweep
@@ -29,9 +31,11 @@
  * session_logs only; v3 = the first version swept across every target table;
  * v4 = the API's secret registry (src/be/secret-registry.ts) registers every
  * stored secret at boot, plus its base64, base64url and URL-encoded forms, and
- * the known-value pass matches them all through one combined regex.
+ * the known-value pass matches them all through one combined regex; v5 = pass
+ * 5, the vendored gitleaks rule set, plus hand-written Resend, Google OAuth,
+ * Discord webhook, xAI and bare Telegram shapes in pass 2.
  */
-export const SCRUBBER_RULES_VERSION = 4;
+export const SCRUBBER_RULES_VERSION = 5;
 
 /** Env-var names that are always considered secrets, even without suffix hints. */
 const SENSITIVE_KEY_EXACT = new Set<string>([
@@ -524,7 +528,179 @@ const TOKEN_REGEXES: ReadonlyArray<{ name: string; re: RegExp }> = [
   // Rule lives here now so plaintexts never leak into logs once endpoints
   // come online.
   { name: "mcp_token", re: new RegExp(String.raw`${TB}aswt_[A-Za-z0-9]{20,}\b`, "g") },
+  // Vendor shapes the gitleaks rule set (pass 5) has no rule for.
+  // Resend API keys: re_<8>_<24>, with a digit and an uppercase letter so
+  // snake_case identifiers never match.
+  {
+    name: "resend_key",
+    re: new RegExp(
+      String.raw`${TB}re_(?=[A-Za-z0-9_]*[0-9])(?=[A-Za-z0-9_]*[A-Z])[A-Za-z0-9]{8}_[A-Za-z0-9]{24}\b`,
+      "g",
+    ),
+  },
+  // Google OAuth access tokens and refresh tokens
+  { name: "google_oauth_token", re: new RegExp(String.raw`${TB}ya29\.[A-Za-z0-9_-]{20,}`, "g") },
+  { name: "google_refresh_token", re: /(?<![\w/])1\/\/0[A-Za-z0-9_-]{30,}/g },
+  // Discord webhook URLs (the token is the last path segment)
+  {
+    name: "discord_webhook",
+    re: /https?:\/\/(?:ptb\.|canary\.)?discord(?:app)?\.com\/api\/webhooks\/\d+\/[A-Za-z0-9_-]{50,}/g,
+  },
+  // xAI API keys
+  { name: "xai_key", re: new RegExp(String.raw`${TB}xai-[A-Za-z0-9]{40,}\b`, "g") },
+  // Telegram bot tokens without a "telegram" keyword nearby: <bot id>:AA<33>
+  {
+    name: "telegram_bot_token",
+    re: new RegExp(String.raw`${TB}\d{8,10}:AA[A-Za-z0-9_-]{33}(?![A-Za-z0-9_-])`, "g"),
+  },
 ];
+
+/**
+ * Pass 5: the vendored gitleaks rule set (src/utils/secret-rules.generated.ts).
+ * Compiled on first use. A rule runs only when the text contains one of its
+ * keywords, and a match counts only when its secret clears the rule's entropy
+ * floor and no allowlist claims it, the same gates gitleaks applies.
+ */
+interface CompiledAllowlist {
+  target: "secret" | "match";
+  res: RegExp[];
+  stopwords: string[];
+}
+
+interface CompiledGitleaksRule {
+  id: string;
+  re: RegExp;
+  keywords: string[];
+  entropy?: number;
+  secretGroup?: number;
+  redactWholeMatch?: boolean;
+  allowlists: CompiledAllowlist[];
+}
+
+interface CompiledGitleaks {
+  /** Every keyword in one case-insensitive, longest-first alternation. */
+  keywordRe: RegExp;
+  /** keyword -> every keyword it contains, itself included. */
+  implied: Map<string, string[]>;
+  rules: CompiledGitleaksRule[];
+  global: CompiledAllowlist;
+}
+
+let gitleaks: CompiledGitleaks | null = null;
+
+function getGitleaks(): CompiledGitleaks {
+  if (gitleaks) return gitleaks;
+  const compile = (r: { source: string; flags: string }) => new RegExp(r.source, r.flags);
+  const rules = GITLEAKS_RULES.rules.map((rule) => ({
+    id: rule.id,
+    re: new RegExp(rule.source, `${rule.flags}gd`),
+    keywords: rule.keywords,
+    entropy: rule.entropy,
+    secretGroup: rule.secretGroup,
+    redactWholeMatch: rule.redactWholeMatch,
+    allowlists: (rule.allowlists ?? []).map((list) => ({
+      target: list.target,
+      res: list.regexes.map(compile),
+      stopwords: list.stopwords,
+    })),
+  }));
+  const keywords = [...new Set(rules.flatMap((rule) => rule.keywords))].sort(
+    (a, b) => b.length - a.length,
+  );
+  gitleaks = {
+    keywordRe: new RegExp(keywords.map(escapeRegExp).join("|"), "gi"),
+    implied: new Map(keywords.map((k) => [k, keywords.filter((other) => k.includes(other))])),
+    rules,
+    global: {
+      target: "secret",
+      res: GITLEAKS_RULES.globalAllowlist.regexes.map(compile),
+      stopwords: GITLEAKS_RULES.globalAllowlist.stopwords,
+    },
+  };
+  return gitleaks;
+}
+
+/** Shannon entropy in bits per character, as gitleaks computes it. */
+function shannonEntropy(value: string): number {
+  if (value.length === 0) return 0;
+  const counts = new Map<string, number>();
+  for (const ch of value) counts.set(ch, (counts.get(ch) ?? 0) + 1);
+  let entropy = 0;
+  for (const count of counts.values()) {
+    const p = count / value.length;
+    entropy -= p * Math.log2(p);
+  }
+  return entropy;
+}
+
+function allowedBy(list: CompiledAllowlist, secret: string, match: string): boolean {
+  const target = list.target === "match" ? match : secret;
+  if (list.res.some((re) => re.test(target))) return true;
+  if (list.stopwords.length === 0) return false;
+  const lower = secret.toLowerCase();
+  return list.stopwords.some((word) => lower.includes(word));
+}
+
+function applyGitleaksRule(text: string, rule: CompiledGitleaksRule, global: CompiledAllowlist) {
+  const { re } = rule;
+  re.lastIndex = 0;
+  let out = "";
+  let last = 0;
+  let changed = false;
+  for (let m = re.exec(text); m !== null; m = re.exec(text)) {
+    if (m[0].length === 0) {
+      re.lastIndex++;
+      continue;
+    }
+    // gitleaks' secret: the configured group, else the first non-empty group,
+    // else the whole match. Only the secret is redacted; the context stays.
+    let group = 0;
+    if (rule.secretGroup && m[rule.secretGroup]) group = rule.secretGroup;
+    else if (!rule.redactWholeMatch && !rule.secretGroup) {
+      group = m.findIndex((g, i) => i > 0 && !!g);
+      if (group === -1) group = 0;
+    }
+    const secret = m[group] as string;
+    const span = m.indices?.[group];
+    if (!span) continue;
+    if (rule.entropy && shannonEntropy(secret) <= rule.entropy) continue;
+    if (allowedBy(global, secret, m[0])) continue;
+    if (rule.allowlists.some((list) => allowedBy(list, secret, m[0]))) continue;
+    out += `${text.slice(last, span[0])}[REDACTED:gitleaks:${rule.id}]`;
+    last = span[1];
+    changed = true;
+  }
+  return changed ? out + text.slice(last) : text;
+}
+
+let gitleaksPassEnabled = true;
+
+/** Test-only: switch pass 5 off to measure what it costs. */
+export function setGitleaksPassEnabledForTesting(enabled: boolean): void {
+  gitleaksPassEnabled = enabled;
+}
+
+function scrubGitleaks(text: string): string {
+  if (!gitleaksPassEnabled) return text;
+  const { keywordRe, implied, rules, global } = getGitleaks();
+  // Visit every start position that has a keyword. The alternation is
+  // longest-first, so a shorter keyword starting at the same position is a
+  // substring of the one found, and `implied` adds it.
+  const present = new Set<string>();
+  keywordRe.lastIndex = 0;
+  for (let m = keywordRe.exec(text); m !== null; m = keywordRe.exec(text)) {
+    for (const keyword of implied.get(m[0].toLowerCase()) ?? []) present.add(keyword);
+    keywordRe.lastIndex = m.index + 1;
+  }
+  if (present.size === 0) return text;
+  let out = text;
+  for (const rule of rules) {
+    if (rule.keywords.some((keyword) => present.has(keyword))) {
+      out = applyGitleaksRule(out, rule, global);
+    }
+  }
+  return out;
+}
 
 interface EnvValueEntry {
   value: string;
@@ -726,7 +902,11 @@ export function scrubSecrets(text: string | null | undefined): string {
 
   // Pass 4: credentials known by their context (JSON/YAML keys, auth headers,
   // curl flags, URL userinfo, PEM blocks).
-  return scrubKeyContext(out);
+  out = scrubKeyContext(out);
+
+  // Pass 5: vendor token shapes from the gitleaks rule set, behind a keyword
+  // prefilter and each rule's entropy floor.
+  return scrubGitleaks(out);
 }
 
 export function scrubObject<T>(value: T, seen = new WeakSet<object>()): T {

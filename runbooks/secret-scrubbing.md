@@ -36,13 +36,21 @@ It covers:
 - **Stored secrets (API only):** every value the secret registry loads at boot or registers at a write, plus its encoded forms.
 
 All known values (env and volatile) are matched by one combined, longest-first alternation regex, rebuilt lazily when either set changes, so the cost stays flat as the set grows.
-- **Structural patterns:** GitHub PATs, ACP session tokens (`aseph_`), Anthropic/OpenAI/OpenRouter `sk-*`, Slack `xox*`, JWTs, AWS access keys, Google API keys.
+- **Structural patterns:** GitHub PATs, ACP session tokens (`aseph_`), Anthropic/OpenAI/OpenRouter `sk-*`, Slack `xox*`, JWTs, AWS access keys, Google API keys, plus vendor shapes gitleaks lacks (Resend `re_`, Google `ya29.` and `1//0`, Discord webhooks, xAI `xai-`, bare Telegram bot tokens).
+- **Vendor shapes (pass 5):** the gitleaks default rule set, vendored at `scripts/vendor/gitleaks/gitleaks.toml` and generated into `src/utils/secret-rules.generated.ts`. A rule runs only when the text contains one of its keywords. A match counts only when its secret clears the rule's entropy floor and no allowlist claims it. Only the secret is replaced, with `[REDACTED:gitleaks:<rule id>]`, so the key name around it stays readable. `generic-api-key`, the curl rules, `private-key` and path-scoped rules are excluded; the generator records each reason in the generated file.
 
 ## Adding a new secret shape
 
-1. Extend `SENSITIVE_KEY_EXACT` (env-key match) or `TOKEN_REGEXES` (structural pattern) in `src/utils/secret-scrubber.ts`.
-2. Add a regression test in `src/tests/secret-scrubber.test.ts`.
+1. Extend `SENSITIVE_KEY_EXACT` (env-key match) or `TOKEN_REGEXES` (structural pattern) in `src/utils/secret-scrubber.ts`. Check first whether a gitleaks rule already covers it.
+2. Add a regression test in `src/tests/secret-scrubber.test.ts`, or a runtime-built positive in `src/tests/fixtures/secret-corpus.ts`.
 3. Bump `SCRUBBER_RULES_VERSION` (see Retro-sweep).
+
+## Refreshing the gitleaks rules
+
+1. Replace everything below the marker line of `scripts/vendor/gitleaks/gitleaks.toml` with upstream `config/gitleaks.toml` at the new tag, and update `version`, `commit` and `sha256` in its header. Keep `version` in step with `GITLEAKS_VERSION` in `scripts/gitleaks.sh`.
+2. Run `bun run build:secret-rules`. It fails on any RE2-only syntax it cannot convert, on a body that does not match the header sha256, and on an `EXCLUDED` id upstream no longer has.
+3. Run `bun run test:root -- src/tests/secret-rules.test.ts`. A new rule that trips the 50 ms ReDoS bound gets fixed in the generator or added to `EXCLUDED` with a reason.
+4. Bump `SCRUBBER_RULES_VERSION`. CI's `check:secret-rules` fails if the generated file is stale.
 
 ## Retro-sweep
 

@@ -95,6 +95,8 @@
     "check:extension-schema": "bun scripts/build-extension-manifest-schema.ts --check",
     "build:extension-catalog": "bun scripts/build-extension-catalog.ts",
     "check:extension-catalog": "bun scripts/build-extension-catalog.ts --check",
+    "build:secret-rules": "bun scripts/gen-secret-rules.ts",
+    "check:secret-rules": "bun scripts/gen-secret-rules.ts --check",
     "build:cli": "bun run scripts/build-cli.ts",
     "mono:build": "turbo run build",
     "mono:test": "turbo run test",

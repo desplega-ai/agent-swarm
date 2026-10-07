@@ -207,6 +207,11 @@ jobs:
           bun run check:extension-catalog
           bun run check:extension-schema
 
+      # scripts/vendor/gitleaks/gitleaks.toml is converted to src/utils/secret-rules.generated.ts;
+      # the check also verifies the vendored body against its pinned sha256.
+      - name: Check generated secret rules freshness
+        run: bun run check:secret-rules
+
       - name: Run structural consistency lint
         id: structural-lint
         continue-on-error: true
