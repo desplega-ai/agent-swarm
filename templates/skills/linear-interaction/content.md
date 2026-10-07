@@ -17,11 +17,15 @@ The available MCP tracker tools (`tracker-link-task`, `tracker-link-epic`, `trac
 
 ## Authentication: script credential binding
 
-Use the `swarm-scripts` skill and `script-run` (`args` first, `ctx` second) for every authenticated request. The API server resolves an OAuth authorization, refreshes it when needed, and substitutes `[REDACTED:<BINDING_KEY>]` in the request header only for the binding's allowed hosts. Never read credential tables, request a raw token from Lead, or copy a token into source, arguments, environment variables, logs, or task output.
+Use the `swarm-scripts` skill and `script-run` (`args` first, `ctx` second) for every authenticated request. The API server resolves an OAuth authorization, refreshes it when needed, and substitutes `[REDACTED:LINEAR_OAUTH_ACCESS_TOKEN]` in the request header only for the binding's allowed hosts. Never read credential tables, request a raw token from Lead, or copy a token into source, arguments, environment variables, logs, or task output.
 
-Before running examples, ask Lead to confirm an active OAuth binding visible to your agent: its non-secret `configKey`, `allowedHosts`, and token status. Lead uses `credential-bindings` action `list`; if missing, Lead registers/authorizes the provider and creates a binding with `authKind: "oauth"`, `oauthAuthorizationId`, the allowed host below, and `headerTemplate: "Authorization: Bearer [REDACTED:<BINDING_KEY>]"`. Replace `<BINDING_KEY>` with that actual key, not a token. There is no assumed default Jira or Linear binding.
+Try the conventional binding key `LINEAR_OAUTH_ACCESS_TOKEN` first, using `Authorization: Bearer [REDACTED:LINEAR_OAUTH_ACCESS_TOKEN]` for `api.linear.app`. Do not ask Lead before the first try. `credential-bindings` is lead-only; workers cannot list bindings.
 
-If access is unavailable, report the missing binding or authorization as a blocker. An expiring authorization is refreshed server-side; a refresh failure, revoked/missing authorization, or persistent 401 needs Lead/user re-authorization through `credential-bindings` action `oauth-authorize-url`. Do not query expiry/token columns or loop on 401s.
+On HTTP 401 with the conventional key, report the missing binding or authorization to Lead as a blocker. The fetch wrapper in `src/scripts-runtime/credential-broker/fetch-patch.ts` drops any header with an unresolved `[REDACTED:` placeholder, so a missing binding sends an unauthenticated request that yields 401, never a credential leak.
+
+Lead uses `credential-bindings` action `list` to check the binding. If missing, Lead registers/authorizes the provider and creates a binding visible to the agent with `configKey: "LINEAR_OAUTH_ACCESS_TOKEN"`, `authKind: "oauth"`, `oauthAuthorizationId`, `allowedHosts: ["api.linear.app"]`, and `headerTemplate: "Authorization: Bearer [REDACTED:LINEAR_OAUTH_ACCESS_TOKEN]"`.
+
+An expiring authorization is refreshed server-side; a refresh failure, revoked/missing authorization, or persistent 401 needs Lead/user re-authorization through `credential-bindings` action `oauth-authorize-url`. Do not query expiry/token columns or loop on 401s.
 
 Supported implementation: `src/be/script-credential-broker.ts` loads scoped relational bindings and calls `resolveOAuthBindingToken` from `src/be/oauth-credential-bindings.ts`. The scripts runtime substitutes placeholders at egress for allowed hosts.
 
@@ -35,7 +39,7 @@ export default async function (args, ctx) {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: "Bearer [REDACTED:<BINDING_KEY>]",
+      Authorization: "Bearer [REDACTED:LINEAR_OAUTH_ACCESS_TOKEN]",
     },
     body: JSON.stringify({ query: args.query, variables: args.variables ?? {} }),
   });
@@ -199,7 +203,7 @@ Run the query in operation 1 through the script above to get the issue UUID and 
 ## Error Handling
 
 Common errors:
-- `401 Unauthorized` → Token expired or invalid, needs re-auth
+- `401 Unauthorized` → Report the missing binding or authorization to Lead as a blocker; Lead checks provisioning or re-authorization
 - `Forbidden` → Token doesn't have required scope
 - `Entity not found` → Wrong issue ID/identifier
 - `"parameter must not be empty"` (or similar on Agent Interaction API) → You sent an `action` activity without a `parameter` — convert to `thought` or fill in a real noun. See "Agent Interaction API — action vs thought" above.

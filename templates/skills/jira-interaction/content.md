@@ -4,11 +4,15 @@ The swarm has Jira OAuth support but no inbound sync. Use Atlassian REST API v3 
 
 ## Authentication: script credential binding
 
-Use the `swarm-scripts` skill and `script-run` (`args` first, `ctx` second) for every authenticated request. The API server resolves an OAuth authorization, refreshes it when needed, and substitutes `[REDACTED:<BINDING_KEY>]` in the request header only for the binding's allowed hosts. Never read credential tables, request a raw token from Lead, or copy a token into source, arguments, environment variables, logs, or task output.
+Use the `swarm-scripts` skill and `script-run` (`args` first, `ctx` second) for every authenticated request. The API server resolves an OAuth authorization, refreshes it when needed, and substitutes `[REDACTED:JIRA_OAUTH_ACCESS_TOKEN]` in the request header only for the binding's allowed hosts. Never read credential tables, request a raw token from Lead, or copy a token into source, arguments, environment variables, logs, or task output.
 
-Before running examples, ask Lead to confirm an active OAuth binding visible to your agent: its non-secret `configKey`, `allowedHosts`, and token status. Lead uses `credential-bindings` action `list`; if missing, Lead registers/authorizes the provider and creates a binding with `authKind: "oauth"`, `oauthAuthorizationId`, the allowed host below, and `headerTemplate: "Authorization: Bearer [REDACTED:<BINDING_KEY>]"`. Replace `<BINDING_KEY>` with that actual key, not a token. There is no assumed default Jira or Linear binding.
+Try the conventional binding key `JIRA_OAUTH_ACCESS_TOKEN` first, using `Authorization: Bearer [REDACTED:JIRA_OAUTH_ACCESS_TOKEN]` for `api.atlassian.com`. Do not ask Lead before the first try. `credential-bindings` is lead-only; workers cannot list bindings.
 
-If access is unavailable, report the missing binding or authorization as a blocker. An expiring authorization is refreshed server-side; a refresh failure, revoked/missing authorization, or persistent 401 needs Lead/user re-authorization through `credential-bindings` action `oauth-authorize-url`. Do not query expiry/token columns or loop on 401s.
+On HTTP 401 with the conventional key, report the missing binding or authorization to Lead as a blocker. The fetch wrapper in `src/scripts-runtime/credential-broker/fetch-patch.ts` drops any header with an unresolved `[REDACTED:` placeholder, so a missing binding sends an unauthenticated request that yields 401, never a credential leak.
+
+Lead uses `credential-bindings` action `list` to check the binding. If missing, Lead registers/authorizes the provider and creates a binding visible to the agent with `configKey: "JIRA_OAUTH_ACCESS_TOKEN"`, `authKind: "oauth"`, `oauthAuthorizationId`, `allowedHosts: ["api.atlassian.com"]`, and `headerTemplate: "Authorization: Bearer [REDACTED:JIRA_OAUTH_ACCESS_TOKEN]"`.
+
+An expiring authorization is refreshed server-side; a refresh failure, revoked/missing authorization, or persistent 401 needs Lead/user re-authorization through `credential-bindings` action `oauth-authorize-url`. Do not query expiry/token columns or loop on 401s.
 
 Supported implementation: `src/be/script-credential-broker.ts` loads scoped relational bindings and calls `resolveOAuthBindingToken` from `src/be/oauth-credential-bindings.ts`. The scripts runtime substitutes placeholders at egress for allowed hosts.
 
@@ -16,7 +20,7 @@ Supported implementation: `src/be/script-credential-broker.ts` loads scoped rela
 
 Allowed host: `api.atlassian.com`. Use the 3LO proxy `https://api.atlassian.com/ex/jira/<CLOUD_ID>/rest/api/3`, rather than the site hostname. Keep the site, cloud ID, and default project as deployment-specific values.
 
-Run this source with `script-run`, supplying non-secret `args`: `cloudId`, `path`, optional `method`, `query`, and `body`. Replace `<BINDING_KEY>` with Lead's confirmed binding key.
+Run this source with `script-run`, supplying non-secret `args`: `cloudId`, `path`, optional `method`, `query`, and `body`.
 
 ```typescript
 export default async function (args, ctx) {
@@ -27,7 +31,7 @@ export default async function (args, ctx) {
   const response = await fetch(url, {
     method: args.method ?? "GET",
     headers: {
-      Authorization: "Bearer [REDACTED:<BINDING_KEY>]",
+      Authorization: "Bearer [REDACTED:JIRA_OAUTH_ACCESS_TOKEN]",
       Accept: "application/json",
       ...(args.body ? { "Content-Type": "application/json" } : {}),
     },
