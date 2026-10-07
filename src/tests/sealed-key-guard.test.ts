@@ -5,12 +5,14 @@ import { join } from "node:path";
 import { __resetEncryptionKeyForTests, resolveEncryptionKey } from "../be/crypto";
 import {
   closeDb,
+  createApprovalRequest,
   createScriptRun,
   createWorkflow,
   createWorkflowRun,
   getDbClient,
   getScriptRunExecutionArgs,
   initDb,
+  resolveApprovalRequest,
   updateWorkflowRun,
   upsertScriptRunJournalStep,
 } from "../be/db";
@@ -72,6 +74,7 @@ describe("boot key guard counts sealed replay values as encrypted data", () => {
         { table: "script_run_journal", column: "result" },
         { table: "workflow_run_steps", column: "output_replay" },
         { table: "workflow_runs", column: "context_replay" },
+        { table: "approval_requests", column: "responses" },
       ]),
     );
   });
@@ -110,6 +113,26 @@ describe("boot key guard counts sealed replay values as encrypted data", () => {
     const runId = crypto.randomUUID();
     await createWorkflowRun({ id: runId, workflowId: workflow.id });
     await updateWorkflowRun(runId, { context: { trigger: { n: 7 } } });
+
+    restartWithoutKey();
+    expect(() => initDb(dbPath)).toThrow(/sealed replay values/);
+    expect(existsSync(keyFile)).toBe(false);
+  });
+
+  test("sealed approval responses: boot refuses and writes no key", async () => {
+    initDb(dbPath);
+    const id = crypto.randomUUID();
+    await createApprovalRequest({
+      id,
+      title: "sealed-key-guard",
+      questions: [{ id: "ok", type: "approval", label: "Proceed?" }],
+      approvers: { users: [] },
+    });
+    const resolved = await resolveApprovalRequest(id, {
+      status: "approved",
+      responses: { ok: { approved: true } },
+    });
+    expect(resolved?.status).toBe("approved");
 
     restartWithoutKey();
     expect(() => initDb(dbPath)).toThrow(/sealed replay values/);
