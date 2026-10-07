@@ -835,6 +835,32 @@
       "exempt": "identifier"
     }
   },
+  "connector_codes": {
+    "code_hash": {
+      "exempt": "hash or digest"
+    },
+    "user_id": {
+      "exempt": "identifier"
+    },
+    "label": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "actor_kind": {
+      "exempt": "enum or fixed-format value"
+    },
+    "actor_id": {
+      "exempt": "identifier"
+    },
+    "created_at": {
+      "exempt": "timestamp"
+    },
+    "expires_at": {
+      "exempt": "timestamp"
+    },
+    "used_at": {
+      "exempt": "timestamp"
+    }
+  },
   "context_versions": {
     "id": {
       "exempt": "identifier"
