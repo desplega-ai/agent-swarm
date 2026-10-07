@@ -392,7 +392,9 @@ export async function createServer(
     registerResolveUserTool(server);
     registerManageUserTool(server); // self-guards with lead check
 
-    // Debug tools (self-guard with lead check)
+    // Debug tools. Neither has a lead check: both are open to every
+    // authenticated agent. db-query refuses credential tables and its results
+    // are scrubbed; get-oauth-access-token returns tokens by design.
     registerDbQueryTool(server);
     registerGetOauthAccessTokenTool(server);
 

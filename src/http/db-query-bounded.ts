@@ -37,6 +37,7 @@
 import { getDb, resolveSqliteVecExtensionPath } from "../be/db";
 import type { DbQueryResult } from "./db-query-shared";
 import {
+  assertNoDeniedTables,
   assertSingleStatement,
   DbQueryConcurrencyCapError,
   DbQueryTimeoutError,
@@ -203,6 +204,8 @@ export async function executeReadOnlyQueryBounded(
   maxRows?: number,
 ): Promise<DbQueryResult> {
   assertSingleStatement(sql);
+  // The child opens its own connection, so the parent checks the program first.
+  assertNoDeniedTables(sql);
   acquireBoundedQuerySlot();
 
   try {

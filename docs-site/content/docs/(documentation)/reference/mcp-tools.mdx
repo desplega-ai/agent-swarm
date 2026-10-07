@@ -1256,7 +1256,7 @@ underscores, for example `ctx.swarm.extension_enable({ id })`.
 
 ### db-query
 
-Execute a read-only SQL query against the swarm database. Available to all authenticated agents — be aware results may include secrets (`oauth_tokens`, `configs`). Results are capped by the operator-configurable `DB_QUERY_MCP_MAX_ROWS` limit. Read-only enforcement also applies to fallback execution when bounded queries are disabled; write statements with `RETURNING` cannot bypass it.
+Execute a read-only SQL query against the swarm database. Available to all authenticated agents. Queries that read a credential table (`oauth_authorizations`, `oauth_apps`, `oauth_pending`, `user_tokens`, `session_tokens`, `script_apis`) are rejected, however the table is reached (alias, CTE, view, join or subquery). Secret-shaped values in results are redacted. Use `get-oauth-access-token` for OAuth tokens. Results are capped by the operator-configurable `DB_QUERY_MCP_MAX_ROWS` limit. Read-only enforcement also applies to fallback execution when bounded queries are disabled; write statements with `RETURNING` cannot bypass it.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|

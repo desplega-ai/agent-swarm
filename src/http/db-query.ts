@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
+import { scrubObject } from "../utils/secret-scrubber";
 import { executeReadOnlyQueryBounded } from "./db-query-bounded";
 import {
   assertSingleStatement,
@@ -18,7 +19,10 @@ import { json, jsonError } from "./utils";
 
 export type { DbQueryResult } from "./db-query-shared";
 export {
+  assertNoDeniedTables,
   assertSingleStatement,
+  DB_QUERY_DENIED_TABLES,
+  DbQueryDeniedTableError,
   executeReadOnlyQuery,
   getDbQueryHttpBudgetMs,
   getDbQueryHttpMaxRows,
@@ -104,7 +108,9 @@ const dbQueryRoute = route({
         rowLimit: z.number().nullable(),
       }),
     },
-    400: { description: "Invalid or disallowed SQL" },
+    400: {
+      description: "Invalid or disallowed SQL, including queries that read credential tables",
+    },
     408: { description: "Query exceeded its wall-clock budget and was terminated" },
     429: { description: "Too many concurrent bounded db-query executions; retry shortly" },
   },
@@ -131,7 +137,9 @@ export async function handleDbQuery(
       getDbQueryHttpBudgetMs(),
       getDbQueryHttpMaxRows(),
     );
-    dbQueryRoute.respond(res, 200, result);
+    // Rows can hold secrets pasted into free text (task output, logs, events).
+    // The MCP tool gets this from the registrar; the HTTP route does it here.
+    dbQueryRoute.respond(res, 200, scrubObject(result));
   } catch (err: unknown) {
     if (err instanceof DbQueryConcurrencyCapError) {
       // Machine-readable code + Retry-After so a caller can back off instead

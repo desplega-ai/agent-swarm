@@ -2164,7 +2164,7 @@ export interface paths {
                         };
                     };
                 };
-                /** @description Invalid or disallowed SQL */
+                /** @description Invalid or disallowed SQL, including queries that read credential tables */
                 400: {
                     headers: {
                         [name: string]: unknown;
