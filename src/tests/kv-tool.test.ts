@@ -280,6 +280,31 @@ describe("kv MCP tools", () => {
     expect(JSON.parse(oneRow.structuredContent.details!)).toEqual(rows[7]);
   });
 
+  test("a wide-object spill hint pages the parent of its scalar leaves", async () => {
+    const tools = buildServer();
+    const wide = Object.fromEntries(
+      Array.from({ length: 2_000 }, (_, i) => [`k${i}`, 1_000_000_000.5 + i]),
+    );
+    const spill = await finalizeSwarmToolResult(
+      "wide-tool",
+      { ok: true, message: "Done.", data: wide },
+      { agentId: agentA },
+    );
+    const { retrieval, shape } = (
+      spill.structuredContent as {
+        truncation: { retrieval: string; shape: Array<{ path: string; type: string }> };
+      }
+    ).truncation;
+    expect(shape[0]).toMatchObject({ type: "number" });
+    const hinted = JSON.parse(retrieval.slice("kv-get(".length, retrieval.indexOf(") returns")));
+    expect(hinted).toMatchObject({ path: "outcome.data", offset: 0 });
+
+    const page = (await tools.get.handler(hinted, meta(agentA))) as ViewResult;
+    expect(page.structuredContent.success).toBe(true);
+    expect(page.structuredContent.view).toMatchObject({ type: "object", total: 2_000 });
+    expect(page.structuredContent.view!.returned).toBeGreaterThan(0);
+  });
+
   test("kv-get view on a plain string pages characters and rejects a JSON path", async () => {
     const tools = buildServer();
     await tools.set.handler(

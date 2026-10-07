@@ -20,7 +20,7 @@ import type {
 import * as z from "zod";
 import { sweepExpiredKvPrefix, upsertKv } from "../be/db";
 import { MCP_OVERFLOW_NAMESPACE, mcpOverflowNamespace } from "../kv-overflow";
-import { type KvShapeEntry, summarizeKvShape } from "../kv-view";
+import { joinKvPath, type KvShapeEntry, splitKvPath, summarizeKvShape } from "../kv-view";
 import { withSpan } from "../otel";
 import type { PermissionVerb } from "../rbac/permissions";
 import { SCRIPT_LONG_TIMEOUT_HINT_MS } from "../scripts-runtime/executors/types";
@@ -514,11 +514,16 @@ function overflowKey(toolName: string, value: string): string {
 }
 
 /**
- * Point the model at a targeted fetch: the biggest array in the shape (or the
- * biggest branch), which kv-get returns as a bounded, pageable slice.
+ * Point the model at a targeted fetch: the biggest array in the shape, else the
+ * biggest object or string, which kv-get returns as a bounded, pageable slice.
+ * A shape of only scalar leaves (a wide object) points at their parent object,
+ * since kv-get rejects offset on a scalar.
  */
 function overflowRetrieval(namespace: string, key: string, shape: KvShapeEntry[]): string {
-  const target = shape.find((entry) => entry.type === "array") ?? shape[0];
+  const target =
+    shape.find((entry) => entry.type === "array") ??
+    shape.find((entry) => entry.type === "object" || entry.type === "string") ??
+    (shape[0] && { path: joinKvPath(splitKvPath(shape[0].path).slice(0, -1)) });
   if (!target) {
     return (
       `kv-get(${JSON.stringify({ namespace, key })}) returns the full value ` +
