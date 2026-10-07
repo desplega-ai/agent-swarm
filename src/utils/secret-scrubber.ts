@@ -26,9 +26,12 @@
  * key, suffix, regex, pass or threshold): the API's boot retro-sweep
  * (src/be/boot-scrub-sweep.ts) keys its done marker on this number and
  * re-scrubs stored rows once per version. v2 = the #1907 rules, swept over
- * session_logs only; v3 = the first version swept across every target table.
+ * session_logs only; v3 = the first version swept across every target table;
+ * v4 = the API's secret registry (src/be/secret-registry.ts) registers every
+ * stored secret at boot, plus its base64, base64url and URL-encoded forms, and
+ * the known-value pass matches them all through one combined regex.
  */
-export const SCRUBBER_RULES_VERSION = 3;
+export const SCRUBBER_RULES_VERSION = 4;
 
 /** Env-var names that are always considered secrets, even without suffix hints. */
 const SENSITIVE_KEY_EXACT = new Set<string>([
@@ -533,8 +536,28 @@ interface ScrubCache {
   snapshotKey: string;
 }
 
+/**
+ * Pass 1 matcher: every known value (env entries + volatile secrets) in one
+ * alternation regex, longest value first, so each scrub is a single scan no
+ * matter how many values are registered.
+ */
+interface KnownValueMatcher {
+  /** null when there is nothing to match, or the regex could not be built. */
+  re: RegExp | null;
+  /** value -> marker name. */
+  names: Map<string, string>;
+  /** Longest-first values, used only when `re` failed to build. */
+  fallback: string[];
+  /** Inputs the matcher was built from; a change on either rebuilds it. */
+  builtFor: ScrubCache;
+  builtAtGeneration: number;
+}
+
 let cache: ScrubCache | null = null;
+let matcher: KnownValueMatcher | null = null;
 const volatileSecrets = new Map<string, string>();
+/** Bumped whenever `volatileSecrets` changes, so the matcher rebuilds lazily. */
+let volatileGeneration = 0;
 /** Key names marked secret at runtime (swarm_config rows with isSecret=1). */
 const registeredSensitiveKeys = new Set<string>();
 
@@ -622,6 +645,50 @@ function getCache(): ScrubCache {
   return cache;
 }
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function buildMatcher(envCache: ScrubCache): KnownValueMatcher {
+  // Volatile names first, env names second: when a value is both, the env
+  // name wins, as it did when the env pass ran before the volatile pass.
+  const names = new Map<string, string>(volatileSecrets);
+  for (const { value, name } of envCache.entries) names.set(value, name);
+
+  // Longest first: a regex alternation takes the first alternative that
+  // matches at a position, so a value that is a prefix of a longer one must
+  // come after it or the longer value would be cut in half.
+  const values = [...names.keys()].sort((a, b) => b.length - a.length);
+  let re: RegExp | null = null;
+  if (values.length > 0) {
+    try {
+      re = new RegExp(values.map(escapeRegExp).join("|"), "g");
+    } catch {
+      // Pattern too large for the engine: fall back to the per-value loop.
+      re = null;
+    }
+  }
+  return {
+    re,
+    names,
+    fallback: re ? [] : values,
+    builtFor: envCache,
+    builtAtGeneration: volatileGeneration,
+  };
+}
+
+function getMatcher(): KnownValueMatcher {
+  const envCache = getCache();
+  if (
+    !matcher ||
+    matcher.builtFor !== envCache ||
+    matcher.builtAtGeneration !== volatileGeneration
+  ) {
+    matcher = buildMatcher(envCache);
+  }
+  return matcher;
+}
+
 /**
  * Replace known secret values in `text` with `[REDACTED:<name>]` markers.
  * Null/undefined inputs return an empty string. Empty strings pass through.
@@ -632,19 +699,16 @@ export function scrubSecrets(text: string | null | undefined): string {
 
   let out = text;
 
-  // Pass 1: exact-match env values (preserves the env-var name in the marker
-  // for debugging).
-  const { entries } = getCache();
-  for (const { value, name } of entries) {
-    if (out.includes(value)) {
-      // split/join is O(n) and faster than building a RegExp for every value.
-      out = out.split(value).join(`[REDACTED:${name}]`);
-    }
-  }
-
-  for (const [value, name] of volatileSecrets) {
-    if (out.includes(value)) {
-      out = out.split(value).join(`[REDACTED:${name}]`);
+  // Pass 1: exact-match known values, env first then volatile (registered at
+  // runtime, incl. every stored secret the API's secret registry loads). The
+  // marker keeps the env-var / source name for debugging.
+  const { re, names, fallback } = getMatcher();
+  if (re) {
+    re.lastIndex = 0;
+    out = out.replace(re, (match) => `[REDACTED:${names.get(match) ?? "secret"}]`);
+  } else {
+    for (const value of fallback) {
+      if (out.includes(value)) out = out.split(value).join(`[REDACTED:${names.get(value)}]`);
     }
   }
 
@@ -705,7 +769,11 @@ export function refreshSecretScrubberCache(): void {
  */
 export function registerVolatileSecret(value: string, name: string): void {
   if (value.length < MIN_VALUE_LENGTH) return;
-  for (const form of escapedForms(value)) volatileSecrets.set(form, name);
+  for (const form of escapedForms(value)) {
+    if (volatileSecrets.get(form) === name) continue;
+    volatileSecrets.set(form, name);
+    volatileGeneration++;
+  }
 }
 
 /**
@@ -724,6 +792,8 @@ export function registerSensitiveKeyName(key: string): void {
 /** Test-only: drop volatile values and runtime-registered key names. */
 export function clearVolatileSecretsForTesting(): void {
   volatileSecrets.clear();
+  volatileGeneration++;
+  matcher = null;
   registeredSensitiveKeys.clear();
   sensitiveKeyVerdicts.clear();
   cache = null;

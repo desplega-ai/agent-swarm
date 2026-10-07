@@ -17,7 +17,11 @@ Module: `src/utils/secret-scrubber.ts`.
 
 After reloading `swarm_config` or rotating credential pools, call `refreshSecretScrubberCache()` so newly-added secrets get covered. `/internal/reload-config` and worker credential-selection already do this.
 
-Secret `swarm_config` writes also register the new plaintext with the scrubber synchronously before the write call returns. This closes the in-process window between rotating a secret and persisting task output or rendering an automatic Slack completion that contains it. Callers adding another runtime secret source must likewise call `registerVolatileSecret(value, name)` at the successful write/rotation boundary.
+Secret `swarm_config` writes also register the new plaintext with the scrubber synchronously before the write call returns. This closes the in-process window between rotating a secret and persisting task output or rendering an automatic Slack completion that contains it. Callers adding another runtime secret source must likewise call `registerVolatileSecret(value, name)` at the successful write/rotation boundary. On the API, a new *stored* (encrypted) secret source calls `registerStoredSecret(value, name)` from `src/be/secret-registry.ts` at its encrypt site instead, and adds a loader to `loadSecretRegistry()`.
+
+## Secret registry (API)
+
+`src/be/secret-registry.ts` loads every stored secret at API boot, before listen and before the retro-sweep: secret `swarm_config` rows of all scopes (incl. `connection.<slug>.secret`), OAuth app client secrets and authorization tokens (provider and MCP apps share these tables), and script API bearer tokens. Each value is registered with its base64, base64url (incl. offset-shifted windows, e.g. inside `Basic` auth) and URL-encoded forms through `registerVolatileSecret`. Markers are `config:<KEY>`, `oauth:<provider>:<client_secret|access_token|refresh_token>` and `script-api:<id>`. The registry is append-only: deleted or rotated values stay registered. A row that cannot be decrypted is counted and skipped; the boot log line `[secret-registry] registered config=… oauth=… scriptApi=… failed=…` carries counts only.
 
 Volatile registration is process-local. It does not update another already-running API or worker process. Cross-process coverage begins only after that process reloads the config or otherwise learns and registers the new value; deployments with multiple API replicas must coordinate reloads when rotating shared secrets.
 
@@ -29,6 +33,9 @@ It covers:
 
 - **Env-sourced values:** any env value ≥12 chars exact-match, plus comma-separated pool components.
 - **Runtime config values:** successful secret `swarm_config` writes register values ≥12 chars for immediate, process-local exact-match scrubbing.
+- **Stored secrets (API only):** every value the secret registry loads at boot or registers at a write, plus its encoded forms.
+
+All known values (env and volatile) are matched by one combined, longest-first alternation regex, rebuilt lazily when either set changes, so the cost stays flat as the set grows.
 - **Structural patterns:** GitHub PATs, ACP session tokens (`aseph_`), Anthropic/OpenAI/OpenRouter `sk-*`, Slack `xox*`, JWTs, AWS access keys, Google API keys.
 
 ## Adding a new secret shape

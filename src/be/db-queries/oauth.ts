@@ -2,6 +2,7 @@ import type { OAuthApp, OAuthTokens } from "../../tracker/types";
 import { decryptSecret, encryptSecret, getEncryptionKey } from "../crypto";
 import { normalizeDateRequired } from "../date-utils";
 import { getDbClient } from "../db";
+import { oauthSecretName, registerStoredSecret } from "../secret-registry";
 
 type OAuthAppRow = Omit<
   OAuthApp,
@@ -241,6 +242,7 @@ async function writeOAuthApp(
   const metadataProvided = data.metadata !== undefined;
   const lifted = metadataProvided ? storageMetadata(data.metadata as string) : null;
   const encryptedSecret = encryptSecret(data.clientSecret, getEncryptionKey());
+  registerStoredSecret(data.clientSecret, oauthSecretName(provider, "client_secret"));
   const scopeSeparator =
     data.scopeSeparator ?? existing?.scopeSeparator ?? (provider === "linear" ? "," : " ");
   const rotation =
@@ -373,6 +375,79 @@ export async function getAuthorizationById(id: string): Promise<OAuthAuthorizati
   return row ? normalizeAuthorization(row) : null;
 }
 
+/** Register an authorization's new plaintext tokens with the secret registry,
+ * named by the owning app's provider (`mcp-<serverId>` for MCP apps). */
+async function registerAuthorizationSecrets(
+  appId: string,
+  accessToken: string,
+  refreshToken: string | null | undefined,
+): Promise<void> {
+  const app = await getDbClient().get<{ provider: string }>(
+    "SELECT provider FROM oauth_apps WHERE id = ?",
+    [appId],
+  );
+  const provider = app?.provider ?? appId;
+  registerStoredSecret(accessToken, oauthSecretName(provider, "access_token"));
+  registerStoredSecret(refreshToken, oauthSecretName(provider, "refresh_token"));
+}
+
+export type StoredOAuthSecretKind = "client_secret" | "access_token" | "refresh_token";
+
+/**
+ * Every stored OAuth credential, decrypted, for the secret registry
+ * (src/be/secret-registry.ts): client secrets of all apps (provider and
+ * MCP-managed) and the tokens of all authorizations, whatever their status.
+ * A row that fails to decrypt is counted, not thrown.
+ */
+export async function listStoredOAuthSecrets(): Promise<{
+  secrets: { provider: string; kind: StoredOAuthSecretKind; value: string }[];
+  failed: number;
+}> {
+  const secrets: { provider: string; kind: StoredOAuthSecretKind; value: string }[] = [];
+  let failed = 0;
+
+  const apps = await getDbClient().query<OAuthAppRow>("SELECT * FROM oauth_apps");
+  for (const row of apps) {
+    try {
+      const app = normalizeOAuthApp(row);
+      if (app.clientSecret) {
+        secrets.push({ provider: app.provider, kind: "client_secret", value: app.clientSecret });
+      }
+    } catch {
+      failed++;
+    }
+  }
+
+  const authorizations = await getDbClient().query<OAuthAuthorizationRow & { provider: string }>(
+    `SELECT z.*, a.provider AS provider
+       FROM oauth_authorizations z
+       JOIN oauth_apps a ON a.id = z.appId`,
+  );
+  for (const row of authorizations) {
+    try {
+      const authorization = normalizeAuthorization(row);
+      if (authorization.accessToken) {
+        secrets.push({
+          provider: row.provider,
+          kind: "access_token",
+          value: authorization.accessToken,
+        });
+      }
+      if (authorization.refreshToken) {
+        secrets.push({
+          provider: row.provider,
+          kind: "refresh_token",
+          value: authorization.refreshToken,
+        });
+      }
+    } catch {
+      failed++;
+    }
+  }
+
+  return { secrets, failed };
+}
+
 export async function upsertAuthorization(data: {
   id?: string;
   appId: string;
@@ -402,6 +477,7 @@ export async function upsertAuthorization(data: {
       : data.refreshToken == null
         ? null
         : encryptSecret(data.refreshToken, key);
+  await registerAuthorizationSecrets(data.appId, data.accessToken, data.refreshToken);
 
   if (existing) {
     await getDbClient().run(
@@ -486,6 +562,7 @@ export async function updateAuthorizationTokens(
       : data.refreshToken == null
         ? null
         : encryptSecret(data.refreshToken, key);
+  await registerAuthorizationSecrets(existing.appId, data.accessToken, data.refreshToken);
   const result = await getDbClient().run(
     `UPDATE oauth_authorizations SET
          accessToken = ?, refreshToken = ?, expiresAt = ?, scope = ?,

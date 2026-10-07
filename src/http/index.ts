@@ -26,6 +26,7 @@ import {
   stopAuditWriter,
 } from "../be/rbac-audit";
 import { startScratchScriptGc, stopScratchScriptGc } from "../be/scripts/retention";
+import { loadSecretRegistry } from "../be/secret-registry";
 import { seedLegacyCapabilitiesConfig } from "../be/seed-capabilities";
 import {
   loadEnabledExtensions,
@@ -588,6 +589,22 @@ try {
   throw err;
 }
 warnIfCorsAllowsAnyOrigin();
+
+// Register every stored secret (config secrets of all scopes, OAuth and MCP
+// OAuth credentials, script API tokens) with the scrubber before listen, so
+// egress and the boot retro-sweep below can redact values not touched since
+// the last restart. Non-fatal: a decrypt failure only loses redaction coverage.
+try {
+  const loaded = await loadSecretRegistry();
+  console.log(
+    `[secret-registry] registered config=${loaded.config} oauth=${loaded.oauth} scriptApi=${loaded.scriptApi} failed=${loaded.failed}`,
+  );
+} catch (err) {
+  console.error(
+    "[secret-registry] load failed (non-fatal):",
+    scrubSecrets(err instanceof Error ? err.message : String(err)),
+  );
+}
 
 // Upgrade seed: explicit CAPABILITIES env values that predate capability
 // gating get the previously always-registered groups backfilled into a
