@@ -227,6 +227,32 @@ describe("findPrBodyLeaks: Swarm provenance allowlist", () => {
     expect(checkPrBodyLeaks(body)).toEqual(["internal identifier in body: swarm-dashboard-link"]);
   });
 
+  // CommonMark §2.1 whitespace is ASCII space and tab only; JS trim() and \s
+  // also strip U+00A0, which GitHub renders as text.
+  test("a closer followed by a no-break space does not close the fence", () => {
+    const body = `\`\`\`\n\`\`\` \n## Swarm provenance\n\`\`\`\n${dashboardLink()}\n`;
+    expect(findPrBodyLeaks(body)).toEqual(["swarm-dashboard-link"]);
+    expect(checkPrBodyLeaks(body)).toEqual(["internal identifier in body: swarm-dashboard-link"]);
+  });
+
+  test("a closer followed by ASCII spaces or a tab still closes the fence", () => {
+    for (const tail of ["  ", "\t", " \t "]) {
+      const body = `\`\`\`\ncode\n\`\`\`${tail}\n## Swarm provenance\n\n- ${dashboardLink()}\n`;
+      expect(findPrBodyLeaks(body)).toEqual([]);
+      expect(checkPrBodyLeaks(body)).toEqual([]);
+    }
+  });
+
+  test("a heading needs ASCII whitespace after the hashes to open the section", () => {
+    const nbsp = `## Swarm provenance\n\n- ${dashboardLink()}\n`;
+    expect(findPrBodyLeaks(nbsp)).toEqual(["swarm-dashboard-link"]);
+    expect(checkPrBodyLeaks(nbsp)).toEqual(["internal identifier in body: swarm-dashboard-link"]);
+    const glued = `## Swarm provenance#\n\n- ${dashboardLink()}\n`;
+    expect(findPrBodyLeaks(glued)).toEqual(["swarm-dashboard-link"]);
+    const closed = `##\tSwarm provenance ##\t\n\n- ${dashboardLink()}\n`;
+    expect(findPrBodyLeaks(closed)).toEqual([]);
+  });
+
   test("a closer indented 3 spaces still closes the fence", () => {
     const body = `\`\`\`\ncode\n   \`\`\`\n## Swarm provenance\n\n- ${dashboardLink()}\n`;
     expect(findPrBodyLeaks(body)).toEqual([]);

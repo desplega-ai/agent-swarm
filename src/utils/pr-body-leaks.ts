@@ -168,9 +168,12 @@ const SLACK_URL = /https?:\/\/[^\s)"'<>]*slack\.com\/(?:archives|client)\/[^\s)"
 
 // CommonMark 0.31.2 §4.5: a fence line starts at most 3 columns in, and a tab
 // expands to the next multiple of 4, so a line with a leading tab is too deep.
-const HEADING = /^#{1,2}\s+(.+?)\s*#*\s*$/;
+// Only ASCII space and tab count as whitespace here (§2.1); JS `\s` and
+// `trim()` also match U+00A0 and other Unicode spaces, which GitHub treats as text.
+const HEADING = /^#{1,2}[ \t]+(.+?)(?:[ \t]+#+)?[ \t]*$/;
 const FENCE_LINE = /^( {0,3})(`{3,}|~{3,})(.*)$/;
 const COMMENT_OPEN = /^[ \t]*<!--/;
+const BLANK = /^[ \t]*$/;
 
 export type MarkdownLine = {
   line: string;
@@ -209,7 +212,7 @@ export function markdownHeadings(markdown: string): MarkdownLine[] {
     let code = false;
     if (fence) {
       code = true;
-      if (run[0] === fence.char && run.length >= fence.length && !info.trim()) {
+      if (run[0] === fence.char && run.length >= fence.length && BLANK.test(info)) {
         if (indent < fence.indent) ambiguous = true;
         fence = null;
       }
