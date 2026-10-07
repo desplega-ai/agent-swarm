@@ -31,6 +31,20 @@ export type QuickJSJob = {
 };
 
 const BUNDLE_FILE = USER_SCRIPT_FILE.replace(/\.ts$/, ".js");
+// Host calls (fetch, ctx.swarm, ctx.api, ctx.mcp) for one run: at most this
+// many run at once, and the rest wait. The native executor has a similar
+// bound from its file-descriptor ulimit (64).
+const MAX_CONCURRENT_HOST_CALLS = 16;
+// Host calls and timers that one run can have in flight or queued.
+const MAX_PENDING_HOST_CALLS = 1024;
+// After a run ends, its host calls are aborted. Wait this long for them to settle.
+const HOST_CALL_SETTLE_MS = 1_000;
+
+export type QuickJSJobResult = {
+  output: ExecutorOutput;
+  /** Host calls still running after the settle wait. The worker must not be reused. */
+  leakedHostCalls: number;
+};
 const MAX_STACK_BYTES = 1024 * 1024;
 const TIMEOUT_EXIT_CODE = 124;
 
@@ -138,16 +152,22 @@ function callable(target: unknown, name: string): (...args: unknown[]) => Promis
 }
 
 /** Runs an async host call that the sandbox requested. Only these paths exist. */
-async function dispatchCall(hostCtx: RuntimeCtx, path: string, args: unknown[]): Promise<unknown> {
+async function dispatchCall(
+  hostCtx: RuntimeCtx,
+  path: string,
+  args: unknown[],
+  signal: AbortSignal,
+): Promise<unknown> {
   if (path === "fetch" || path === "stdlib.fetch" || path === "stdlib.fetchJson") {
     const request = args[0] as SandboxRequest;
     const response =
       path === "fetch"
-        ? await fetch(request.url, requestInit(request))
+        ? await fetch(request.url, { ...requestInit(request), signal })
         : await runtimeFetch(request.url, {
             ...requestInit(request),
             retries: request.retries,
             timeoutMs: request.timeoutMs,
+            signal,
           });
     if (path !== "stdlib.fetchJson") return serializeResponse(response, path);
     // Read the header first. Bun 1.4 returns null headers for a data: URL
@@ -256,12 +276,116 @@ function errorStderr(runtimeError: ScriptRuntimeError): string {
 }
 
 /**
+ * Owns the host side of one run: an abort signal on every host fetch
+ * (including the ones inside ctx.swarm, ctx.api and ctx.mcp), a per-run
+ * concurrency budget, and teardown that aborts and settles every host call
+ * before the worker can take another job.
+ */
+class HostCallScope {
+  private readonly controller = new AbortController();
+  private readonly ops = new Set<Promise<unknown>>();
+  private readonly waiters: Array<() => void> = [];
+  private readonly outerFetch = globalThis.fetch;
+  private active = 0;
+
+  constructor() {
+    const outer = this.outerFetch;
+    const runSignal = this.controller.signal;
+    // The worker runs one job at a time, so scoping the global fetch is safe.
+    globalThis.fetch = Object.assign(
+      (input: string | URL | Request, init?: RequestInit) =>
+        outer(input, {
+          ...init,
+          signal: init?.signal ? AbortSignal.any([init.signal, runSignal]) : runSignal,
+        }),
+      { preconnect: outer.preconnect },
+    ) as typeof fetch;
+  }
+
+  get signal(): AbortSignal {
+    return this.controller.signal;
+  }
+
+  /** Track a host call. `limited` calls share the per-run concurrency budget. */
+  call<T>(run: () => Promise<T>, limited: boolean): Promise<T> {
+    if (this.ops.size >= MAX_PENDING_HOST_CALLS) {
+      return Promise.reject(
+        new Error(
+          `Too many pending host calls in one script run (limit ${MAX_PENDING_HOST_CALLS})`,
+        ),
+      );
+    }
+    const op = limited ? this.limited(run) : run();
+    this.ops.add(op);
+    void op.then(
+      () => this.ops.delete(op),
+      () => this.ops.delete(op),
+    );
+    return op;
+  }
+
+  sleep(ms: number): Promise<null> {
+    return this.call(
+      () =>
+        new Promise<null>((resolve) => {
+          const done = () => {
+            clearTimeout(timer);
+            resolve(null);
+          };
+          const timer = setTimeout(done, ms);
+          this.signal.addEventListener("abort", done, { once: true });
+        }),
+      false,
+    );
+  }
+
+  private async limited<T>(run: () => Promise<T>): Promise<T> {
+    while (this.active >= MAX_CONCURRENT_HOST_CALLS) {
+      await new Promise<void>((resolve) => this.waiters.push(resolve));
+    }
+    this.active++;
+    try {
+      this.signal.throwIfAborted();
+      return await run();
+    } finally {
+      this.active--;
+      this.waiters.shift()?.();
+    }
+  }
+
+  /** Abort every host call, wait for them to settle, and restore fetch. */
+  async close(): Promise<number> {
+    this.controller.abort(new Error("The script run ended"));
+    for (const wake of this.waiters.splice(0)) wake();
+    await Promise.race([Promise.allSettled([...this.ops]), Bun.sleep(HOST_CALL_SETTLE_MS)]);
+    globalThis.fetch = this.outerFetch;
+    return this.ops.size;
+  }
+}
+
+/**
  * Evaluates one script in a fresh QuickJS runtime. The caller owns the
  * process-level setup (one job at a time, egress fetch patch).
  */
 export async function runQuickJSJob(
   QuickJS: QuickJSWASMModule,
   job: QuickJSJob,
+): Promise<QuickJSJobResult> {
+  const host = new HostCallScope();
+  let output: ExecutorOutput;
+  try {
+    output = await evaluateJob(QuickJS, job, host);
+  } catch (error) {
+    await host.close();
+    throw error;
+  }
+  return { output, leakedHostCalls: await host.close() };
+}
+
+async function evaluateJob(
+  QuickJS: QuickJSWASMModule,
+  job: QuickJSJob,
+  host: HostCallScope,
 ): Promise<ExecutorOutput> {
   const start = performance.now();
   const stdout = new CappedLog(job.resources.maxStdoutBytes);
@@ -367,7 +491,7 @@ export async function runQuickJSJob(
   define("__host_call", (pathHandle, argsHandle) => {
     const path = ctx.getString(pathHandle);
     const callArgs = JSON.parse(ctx.getString(argsHandle)) as unknown[];
-    return bridge(() => dispatchCall(hostCtx, path, callArgs));
+    return bridge(() => host.call(() => dispatchCall(hostCtx, path, callArgs, host.signal), true));
   });
   define("__host_sync", (opHandle, valueHandle) => {
     let envelope: unknown;
@@ -390,7 +514,7 @@ export async function runQuickJSJob(
   });
   define("__host_sleep", (msHandle) => {
     const ms = Math.max(0, ctx.getNumber(msHandle));
-    return bridge(() => Bun.sleep(ms).then(() => null));
+    return bridge(() => host.sleep(ms));
   });
   define("__host_done", (jsonHandle) => {
     finish(JSON.parse(ctx.getString(jsonHandle)) as Outcome);

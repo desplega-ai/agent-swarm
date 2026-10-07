@@ -157,7 +157,11 @@ export class QuickJSScriptExecutor implements ScriptExecutor {
       const onMessage = (event: MessageEvent<QuickJSWorkerMessage>) => {
         const message = event.data;
         if (message.type === "result" && message.id === id) {
-          settle(message.output, (message.wasmHeapBytes ?? 0) <= RECYCLE_WASM_HEAP_BYTES);
+          // Reuse the worker only if every host call settled and its memory stayed small.
+          const reusable =
+            message.leakedHostCalls === 0 &&
+            (message.wasmHeapBytes ?? 0) <= RECYCLE_WASM_HEAP_BYTES;
+          settle(message.output, reusable);
         } else if (message.type === "fatal" && message.id === id) {
           settle(
             { ...emptyOutput("executor_error", message.message), durationMs: elapsed() },

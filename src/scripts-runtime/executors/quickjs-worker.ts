@@ -11,7 +11,7 @@
 import variant from "@jitl/quickjs-singlefile-mjs-release-sync";
 import { newQuickJSWASMModuleFromVariant } from "quickjs-emscripten-core";
 import { patchFetchWithEgressSubstitution } from "../egress-secrets";
-import { type QuickJSJob, runQuickJSJob } from "./quickjs-runner";
+import { type QuickJSJob, type QuickJSJobResult, runQuickJSJob } from "./quickjs-runner";
 
 declare const self: Worker;
 
@@ -21,9 +21,11 @@ export type QuickJSWorkerMessage =
   | {
       type: "result";
       id: number;
-      output: Awaited<ReturnType<typeof runQuickJSJob>>;
+      output: QuickJSJobResult["output"];
       /** Size of the worker's WASM linear memory after the job, when known. */
       wasmHeapBytes?: number;
+      /** Host calls that did not settle after the run was aborted. */
+      leakedHostCalls: number;
     }
   | { type: "fatal"; id?: number; message: string };
 
@@ -50,11 +52,12 @@ self.onmessage = async (event: MessageEvent<QuickJSWorkerRequest>) => {
       job.configPayload.egressSecrets ?? [],
       job.configPayload.failedBindings ?? [],
     );
-    const output = await runQuickJSJob(QuickJS, job);
+    const { output, leakedHostCalls } = await runQuickJSJob(QuickJS, job);
     postMessage({
       type: "result",
       id,
       output,
+      leakedHostCalls,
       wasmHeapBytes: wasmHeapBytes(QuickJS),
     } satisfies QuickJSWorkerMessage);
   } catch (error) {

@@ -292,6 +292,11 @@ access except the host calls below. These are the differences from `native`:
   `wallClockMs` bounds both synchronous code and awaited calls
   (`error: "timeout"`). Runtime errors keep the `runtimeError` shape above,
   with lines mapped back to `user-script.ts`.
+- **Host calls:** at most 16 host calls (`fetch`, `ctx.swarm`, `ctx.api`,
+  `ctx.mcp`) run at the same time for one script, and the rest wait. A run
+  can have at most 1024 host calls and timers in flight or waiting. When the
+  run ends, the executor aborts every host call that is still open, including
+  a `fetch` that the script did not await.
 
 ## Exposing a script externally
 

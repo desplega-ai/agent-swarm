@@ -41,13 +41,14 @@ that import `zod`. Keep `native` as the default.
 API process
  └─ QuickJSScriptExecutor (executors/quickjs.ts)
      └─ pool of 4 Bun Workers (executors/quickjs-worker.ts), one job each at a time,
-        recycled after an abort, a hang, or WASM memory above 64 MB
+        recycled after an abort, a hang, unsettled host calls, or WASM memory above 64 MB
          ├─ QuickJS WASM module loaded once per worker (~25 ms, singlefile variant)
          ├─ per job: restore pristine fetch, apply egress patch, build host ctx
          └─ runQuickJSJob (executors/quickjs-runner.ts)
              ├─ bundleForQuickJS (executors/quickjs-bundle.ts): Bun.build in memory,
              │   IIFE, zod from ESM sources (tree-shaken), stdlib/swarm-sdk virtual,
              │   external source map, LRU cache of 128 bundles per worker
+             ├─ HostCallScope: run-scoped AbortController on every host fetch, 16 concurrent / 1024 pending
              ├─ fresh QuickJS runtime: heap = memoryMb, interrupt at wallClockMs
              ├─ prelude (executors/quickjs-prelude.ts) rebuilds ctx on host calls
              └─ epilogue runs argsSchema + default(args, ctx), reports via __host_done
@@ -159,7 +160,18 @@ Docker = the API image built from this branch's Dockerfile, run under OrbStack.
     QuickJS runtime was disposed. With 4 workers and `memoryMb: 512`, the API
     process could hold ~2 GB of idle WASM memory. The worker now reports its
     heap size after each job, and the pool recycles any worker above 64 MB.
-13. **Script APIs already validate args on the host.** `src/http/x.ts` checks
+13. **Host calls can outlive the sandbox** (found in review on #1951). The
+    native executor kills the whole process group at the deadline, so a
+    `fetch` that the script never awaited dies with it. In QuickJS the fetch
+    runs on the host, so disposing the runtime does not stop it, and the
+    worker went back to the pool with sockets still open. Now every run owns
+    a `HostCallScope`: one `AbortController` on every host fetch (the worker
+    scopes `globalThis.fetch`, so the SDK fetches inside `ctx.swarm`,
+    `ctx.api` and `ctx.mcp` are covered too), a cap of 16 concurrent host
+    calls (native has a 64-fd ulimit), a cap of 1024 pending calls, and a
+    teardown that aborts and waits up to 1 s for every call to settle. If a
+    call does not settle, the pool terminates the worker instead of reusing it.
+14. **Script APIs already validate args on the host.** `src/http/x.ts` checks
     `argsJsonSchema` before it runs the script, so the in-sandbox zod parse is
     a second check. Skipping zod inside QuickJS for script APIs is a safe
     follow-up that removes the zod cost.

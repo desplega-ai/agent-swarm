@@ -9,6 +9,27 @@ import { DEFAULT_SCRIPT_RESOURCES } from "../scripts-runtime/executors/types";
 const requests: Array<{ method: string; path: string; auth: string | null; agent: string | null }> =
   [];
 const kv = new Map<string, unknown>();
+// Requests to /hang (or kv key "hang") never get a response. The test reads
+// how many of them the client aborted.
+const hang = { started: 0, aborted: 0 };
+const slow = { inFlight: 0, maxInFlight: 0 };
+function hangUntilAborted(req: Request): Promise<Response> {
+  hang.started++;
+  return new Promise((resolve) => {
+    req.signal.addEventListener("abort", () => {
+      hang.aborted++;
+      resolve(new Response("aborted"));
+    });
+  });
+}
+async function waitFor(check: () => boolean, timeoutMs = 3_000): Promise<boolean> {
+  const until = Date.now() + timeoutMs;
+  while (!check()) {
+    if (Date.now() > until) return false;
+    await Bun.sleep(10);
+  }
+  return true;
+}
 const server = Bun.serve({
   port: 0,
   async fetch(req) {
@@ -19,6 +40,14 @@ const server = Bun.serve({
       auth: req.headers.get("authorization"),
       agent: req.headers.get("x-agent-id"),
     });
+    if (url.pathname === "/hang" || url.pathname === "/api/kv/hang") return hangUntilAborted(req);
+    if (url.pathname === "/slow") {
+      slow.inFlight++;
+      slow.maxInFlight = Math.max(slow.maxInFlight, slow.inFlight);
+      await Bun.sleep(30);
+      slow.inFlight--;
+      return Response.json({ ok: true });
+    }
     if (url.pathname.startsWith("/api/kv/")) {
       const key = decodeURIComponent(url.pathname.slice("/api/kv/".length));
       if (req.method === "PUT") {
@@ -321,6 +350,85 @@ export default async (args: T) => explode(args);
       "ctx.swarm.constructor is not a function",
       "ctx.api.__proto__.x is not a function",
     ]);
+  });
+
+  test("aborts a host fetch the script did not await when the run returns", async () => {
+    await executor.run(input("export default async () => 0;"));
+    const workers = quickJSWorkerCount();
+    const before = { ...hang };
+    const output = await executor.run(
+      // The 100 ms wait lets the request reach the server before the run ends.
+      input(`export default async () => {
+  void fetch("${baseUrl}/hang");
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  return 1;
+};`),
+    );
+    expect(output.result).toBe(1);
+    expect(hang.started).toBe(before.started + 1);
+    expect(await waitFor(() => hang.aborted > before.aborted)).toBe(true);
+    // The run aborted and settled the fetch itself, so the pool kept the worker.
+    // Terminating the worker is only the fallback for calls that do not settle.
+    expect(quickJSWorkerCount()).toBe(workers);
+  });
+
+  test("aborts a pending host fetch when the run times out", async () => {
+    const before = hang.aborted;
+    const output = await executor.run(
+      input(`export default async () => (await fetch("${baseUrl}/hang")).text();`, {
+        resources: { ...DEFAULT_SCRIPT_RESOURCES, wallClockMs: 200 },
+      }),
+    );
+    expect(output.error).toBe("timeout");
+    expect(await waitFor(() => hang.aborted > before)).toBe(true);
+
+    const after = await executor.run(input("export default async () => 'next';"));
+    expect(after.result).toBe("next");
+  });
+
+  test("aborts ctx.swarm host calls too", async () => {
+    await executor.run(input("export default async () => 0;"));
+    const workers = quickJSWorkerCount();
+    const before = { ...hang };
+    const output = await executor.run(
+      input(
+        `export default async (_args, ctx) => {
+  void ctx.swarm.kv_get({ key: "hang" });
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  return 1;
+};`,
+      ),
+    );
+    expect(output.result).toBe(1);
+    expect(hang.started).toBe(before.started + 1);
+    expect(await waitFor(() => hang.aborted > before.aborted)).toBe(true);
+    expect(quickJSWorkerCount()).toBe(workers);
+  });
+
+  test("caps concurrent host calls per run and queues the rest", async () => {
+    slow.maxInFlight = 0;
+    const output = await executor.run(
+      input(`export default async () => {
+  const replies = await Promise.all(
+    Array.from({ length: 40 }, () => fetch("${baseUrl}/slow").then((r) => r.json())),
+  );
+  return replies.filter((r: any) => r.ok).length;
+};`),
+    );
+    expect(output.result).toBe(40);
+    expect(slow.maxInFlight).toBeGreaterThan(1);
+    expect(slow.maxInFlight).toBeLessThanOrEqual(16);
+  });
+
+  test("rejects host calls beyond the per-run pending limit", async () => {
+    const output = await executor.run(
+      input(`export default async () => {
+  const calls = Array.from({ length: 1100 }, () => fetch("${baseUrl}/slow").then(() => "ok", (e) => e.message));
+  const results = await Promise.all(calls);
+  return results.filter((r) => r !== "ok").length > 0 ? results.find((r) => r !== "ok") : "none";
+};`),
+    );
+    expect(output.result).toContain("Too many pending host calls");
   });
 
   test("queues runs beyond the pool size", async () => {
