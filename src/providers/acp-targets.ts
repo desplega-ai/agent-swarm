@@ -1,3 +1,5 @@
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type AcpTarget, getAcpTargetCatalogEntry, isAcpTarget } from "./acp-target-catalog";
 import type { ProviderSessionConfig } from "./types";
@@ -181,16 +183,53 @@ const opencodeTargetProfile: AcpTargetProfile = {
   async writeSystemPromptArtifact() {},
 };
 
+// The prompt file is per session and lives outside the task cwd, so it never
+// lands in the repo tree. `env()` runs after `writeSystemPromptArtifact()` and
+// reads the path back from here.
+const geminiSystemPromptPaths = new WeakMap<ProviderSessionConfig, string>();
+
+const geminiTargetProfile: AcpTargetProfile = {
+  target: "gemini",
+  command() {
+    const entry = getAcpTargetCatalogEntry("gemini");
+    return [entry.command!, ...(entry.args ?? [])];
+  },
+  env(config) {
+    const env = baseTargetEnv(config);
+    const entry = getAcpTargetCatalogEntry("gemini");
+    copyEnvKeys(config, env, entry.envKeys);
+    // A worker has no interactive trust prompt; the task cwd is ours.
+    env.GEMINI_CLI_TRUST_WORKSPACE = "true";
+    // Startup fallback when the ACP `model` option is not advertised.
+    if (config.model.trim()) env.GEMINI_MODEL = config.model.trim();
+    const systemPromptPath = geminiSystemPromptPaths.get(config);
+    if (systemPromptPath) env.GEMINI_SYSTEM_MD = systemPromptPath;
+    return env;
+  },
+  configuredOptions,
+  async writeSystemPromptArtifact(config) {
+    // GEMINI_SYSTEM_MD replaces Gemini CLI's built-in prompt, so an empty
+    // swarm prompt keeps the built-in one instead of blanking it.
+    if (!config.systemPrompt?.trim()) return;
+    const directory = await mkdtemp(join(tmpdir(), "swarm-acp-gemini-"));
+    const path = join(directory, "system.md");
+    await Bun.write(path, config.systemPrompt);
+    geminiSystemPromptPaths.set(config, path);
+  },
+};
+
 export function resolveAcpTarget(config: ProviderSessionConfig): AcpTargetProfile {
   const target = readEnv(config, "ACP_TARGET") ?? "custom";
   if (!isAcpTarget(target)) {
     throw new AcpTargetResolutionError(
-      `Unsupported ACP target "${target}". Supported targets: opencode, custom.`,
+      `Unsupported ACP target "${target}". Supported targets: opencode, gemini, custom.`,
     );
   }
   switch (target) {
     case "opencode":
       return opencodeTargetProfile;
+    case "gemini":
+      return geminiTargetProfile;
     case "custom":
       return customTargetProfile;
   }

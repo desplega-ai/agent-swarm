@@ -536,6 +536,70 @@ new AgentSideConnection((connection) => new FakeAgent(connection), stream);
     });
   });
 
+  test("Gemini preset supplies command, credentials, trust, and a model environment fallback", () => {
+    const config = baseConfig({
+      model: "gemini-3-flash-preview",
+      env: {
+        PATH: "/bin",
+        HOME: "/home/test",
+        ACP_TARGET: "gemini",
+        GEMINI_API_KEY: "example-test-key",
+        GOOGLE_GENAI_USE_VERTEXAI: "true",
+        GOOGLE_CLOUD_PROJECT: "example-project",
+        OPENAI_API_KEY: "not-for-gemini",
+      },
+    });
+    const target = resolveAcpTarget(config);
+
+    expect(target.target).toBe("gemini");
+    expect(target.command(config)).toEqual(["gemini", "--acp"]);
+    const env = target.env(config);
+    expect(env).toMatchObject({
+      GEMINI_API_KEY: "example-test-key",
+      GOOGLE_GENAI_USE_VERTEXAI: "true",
+      GOOGLE_CLOUD_PROJECT: "example-project",
+      GEMINI_CLI_TRUST_WORKSPACE: "true",
+      GEMINI_MODEL: "gemini-3-flash-preview",
+    });
+    expect(env.OPENAI_API_KEY).toBeUndefined();
+    // No artifact written for this config, so the built-in prompt stays.
+    expect(env.GEMINI_SYSTEM_MD).toBeUndefined();
+  });
+
+  test("Gemini preset writes the system prompt outside the cwd and points GEMINI_SYSTEM_MD at it", async () => {
+    const cwd = mkdtempSync(join(tmpdir(), "acp-gemini-cwd-"));
+    try {
+      const config = baseConfig({
+        cwd,
+        systemPrompt: "You are a swarm worker.",
+        env: { PATH: "/bin", ACP_TARGET: "gemini" },
+      });
+      const target = resolveAcpTarget(config);
+      await target.writeSystemPromptArtifact(config);
+      const path = target.env(config).GEMINI_SYSTEM_MD;
+
+      expect(path).toBeDefined();
+      expect(path!.startsWith(cwd)).toBe(false);
+      expect(await Bun.file(path!).text()).toBe("You are a swarm worker.");
+      // A second session gets its own file.
+      const other = baseConfig({ cwd, systemPrompt: "other", env: config.env });
+      await target.writeSystemPromptArtifact(other);
+      expect(target.env(other).GEMINI_SYSTEM_MD).not.toBe(path);
+      rmSync(join(path!, ".."), { recursive: true, force: true });
+      rmSync(join(target.env(other).GEMINI_SYSTEM_MD!, ".."), { recursive: true, force: true });
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
+  test("Gemini preset keeps the built-in prompt when the swarm prompt is empty", async () => {
+    const config = baseConfig({ systemPrompt: "  ", env: { PATH: "/bin", ACP_TARGET: "gemini" } });
+    const target = resolveAcpTarget(config);
+    await target.writeSystemPromptArtifact(config);
+
+    expect(target.env(config).GEMINI_SYSTEM_MD).toBeUndefined();
+  });
+
   test("custom target passes through only explicitly named env and supports a model env fallback", () => {
     const config = baseConfig({
       model: "custom-model",

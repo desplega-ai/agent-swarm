@@ -616,6 +616,17 @@ RUN case "$TARGETARCH" in \
 ENV CURSOR_RIPGREP_PATH=/opt/cursor-sdk/platform/bin/rg \
     CURSOR_TREE_SITTER_VENDOR_DIR=/opt/cursor-sdk/platform/vendor
 
+# Gemini CLI (Apache-2.0) for HARNESS_PROVIDER=acp with ACP_TARGET=gemini; the
+# adapter launches `gemini --acp`. Its own prefix keeps the ~100 MB install out
+# of the shared global-deps layer. Lifecycle scripts are not needed for ACP.
+ARG GEMINI_CLI_VERSION=0.62.0
+RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
+      --prefix /opt/gemini-cli --ignore-scripts --no-audit --no-fund \
+      "@google/gemini-cli@${GEMINI_CLI_VERSION}" \
+    && ln -sf /opt/gemini-cli/node_modules/.bin/gemini /usr/local/bin/gemini \
+    && test "$(HOME=/tmp/gemini-home gemini --version)" = "${GEMINI_CLI_VERSION}" \
+    && rm -rf /tmp/npm-cache /tmp/gemini-home /root/.npm /root/.cache /root/.gemini
+
 # Full-image global npm tools, staged in a SEPARATE dir from worker-base's
 # /opt/global-deps so its layer is never rewritten. Same overrides rationale
 # as worker-base (see that heredoc's comment).

@@ -9,7 +9,7 @@ import {
   type ReasoningEffortLevel,
   reasoningLevelsFor,
 } from "@desplega/model-catalog";
-import type { ProviderName, SwarmConfig } from "@/api/types";
+import type { AcpTarget, ProviderName, SwarmConfig } from "@/api/types";
 import modelsCache from "./modelsdev-cache.json";
 
 // Every `@/api/types` import here is `import type`: backend unit tests import
@@ -669,7 +669,7 @@ function cursorModelGroups(
  * models.dev and custom targets have no catalog we can infer safely.
  */
 export function modelGroupsForAcpTarget(
-  target: "opencode" | "custom",
+  target: AcpTarget,
   liveCatalog?: LiveModelsCatalog | null,
 ): ModelGroup[] {
   if (target !== "opencode") return [];

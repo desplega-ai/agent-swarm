@@ -1,4 +1,4 @@
-export const ACP_TARGET_IDS = ["opencode", "custom"] as const;
+export const ACP_TARGET_IDS = ["opencode", "gemini", "custom"] as const;
 
 export type AcpTarget = (typeof ACP_TARGET_IDS)[number];
 
@@ -39,6 +39,25 @@ export const ACP_TARGET_CATALOG: readonly AcpTargetCatalogEntry[] = [
       "OPENCODE_CONFIG_DIR",
       "XDG_CONFIG_HOME",
       "XDG_DATA_HOME",
+    ],
+    knobs: [{ id: "model", label: "Model", category: "model" }],
+  },
+  {
+    id: "gemini",
+    label: "Gemini CLI",
+    description: "Google's Gemini CLI, launched with `gemini --acp`.",
+    command: "gemini",
+    args: ["--acp"],
+    envKeys: [
+      "GEMINI_API_KEY",
+      "GOOGLE_API_KEY",
+      "GOOGLE_GENAI_USE_VERTEXAI",
+      "GOOGLE_CLOUD_PROJECT",
+      "GOOGLE_CLOUD_LOCATION",
+      "GOOGLE_APPLICATION_CREDENTIALS",
+      "GOOGLE_GEMINI_BASE_URL",
+      "GOOGLE_VERTEX_BASE_URL",
+      "GEMINI_CLI_HOME",
     ],
     knobs: [{ id: "model", label: "Model", category: "model" }],
   },

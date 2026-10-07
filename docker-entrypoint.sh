@@ -366,6 +366,9 @@ elif [ "$HARNESS_PROVIDER" = "acp" ]; then
         # Catalog command for the opencode target (acp-target-catalog.ts) is
         # `opencode acp`; only "opencode" is the executable, "acp" is argv.
         ACP_BIN="opencode"
+    elif [ "$ACP_TARGET_ID" = "gemini" ]; then
+        # Catalog command for the gemini target is `gemini --acp`.
+        ACP_BIN="gemini"
     elif [ "$ACP_TARGET_ID" = "custom" ]; then
         if [ -n "${ACP_TARGET_COMMAND+set}" ]; then
             ACP_BIN="$ACP_TARGET_COMMAND"
@@ -395,7 +398,7 @@ elif [ "$HARNESS_PROVIDER" = "acp" ]; then
             ACP_BIN=$(printf '%s' "$ACP_BIN" | awk '{print $1}')
         fi
     else
-        echo "FATAL: unsupported ACP target '$ACP_TARGET_ID'. Supported targets: opencode, custom."
+        echo "FATAL: unsupported ACP target '$ACP_TARGET_ID'. Supported targets: opencode, gemini, custom."
         echo "  PATH=$PATH"
         exit 1
     fi

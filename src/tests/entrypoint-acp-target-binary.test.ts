@@ -43,6 +43,7 @@ const STUB_BINARIES = [
   "claude",
   "codex",
   "opencode",
+  "gemini",
   "dsh",
   "acp-target-stub",
   "acp target stub",
@@ -130,6 +131,18 @@ describe("docker-entrypoint.sh: acp target binary verification", () => {
   );
 
   test(
+    "resolves the gemini catalog target to the gemini binary",
+    async () => {
+      const result = await runChain({ HARNESS_PROVIDER: "acp", ACP_TARGET: "gemini" });
+
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain("ACP target: ");
+      expect(result.stdout).toContain("ACP_TARGET='gemini'");
+    },
+    CHILD_PROCESS_TEST_BUDGET_MS,
+  );
+
+  test(
     "resolves a custom target supplied as a command string with argv",
     async () => {
       const result = await runChain({
@@ -178,7 +191,7 @@ describe("docker-entrypoint.sh: acp target binary verification", () => {
 
       expect(result.exitCode).not.toBe(0);
       expect(result.stdout).toContain(
-        "FATAL: unsupported ACP target 'gemini-cli'. Supported targets: opencode, custom.",
+        "FATAL: unsupported ACP target 'gemini-cli'. Supported targets: opencode, gemini, custom.",
       );
     },
     CHILD_PROCESS_TEST_BUDGET_MS,
