@@ -61,10 +61,19 @@ test.describe("/connect", () => {
     await page.getByPlaceholder("Search people…").fill(name);
     await page.getByRole("option", { name: new RegExp(name) }).click();
 
-    const dialog = page.getByRole("dialog");
-    await expect(dialog).toContainText(`Create a token for ${name}`);
-    await expect(dialog).toContainText("mcp.agent-swarm.dev");
-    await dialog.getByRole("button", { name: "Create and continue" }).click();
+    // The picked user swaps the card body to the confirm step: no dialog.
+    await expect(page.getByText(`Connect ChatGPT as ${name}?`)).toBeVisible();
+    await expect(page.getByText("Who are you?")).toHaveCount(0);
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await expect(page.getByRole("main")).toContainText("mcp.agent-swarm.dev");
+    // Not you? swaps back to the picker in place.
+    await page.getByRole("button", { name: "Pick someone else" }).click();
+    await expect(page.getByText("Who are you?")).toBeVisible();
+    await page.getByPlaceholder("Search people…").fill(name);
+    await page.getByRole("option", { name: new RegExp(name) }).click();
+    // The primary action has focus, so Enter mints.
+    await expect(page.getByRole("button", { name: "Create and continue" })).toBeFocused();
+    await page.keyboard.press("Enter");
 
     await page.waitForURL((url) => url.origin === "https://mcp.agent-swarm.dev");
     const landed = new URL(page.url());
@@ -88,7 +97,7 @@ test.describe("/connect", () => {
 
     // Second visit: the remembered user opens the confirm step without a click.
     await page.goto(CONNECT_PATH);
-    await expect(page.getByRole("dialog")).toContainText(`Create a token for ${name}`);
+    await expect(page.getByText(`Connect ChatGPT as ${name}?`)).toBeVisible();
   });
 
   test("shows the swarm's 400 with a settings link and stays on the page", async ({
@@ -112,11 +121,11 @@ test.describe("/connect", () => {
     await stubConnector(page);
 
     await page.goto(CONNECT_PATH);
-    const dialog = page.getByRole("dialog");
-    await expect(dialog).toContainText(`Create a token for ${name}`);
-    await dialog.getByRole("button", { name: "Create and continue" }).click();
-    await expect(dialog).toContainText("is not HTTPS");
-    await expect(dialog.getByRole("link", { name: "Open connection settings" })).toBeVisible();
+    const card = page.getByRole("main");
+    await expect(card).toContainText(`Connect ChatGPT as ${name}?`);
+    await card.getByRole("button", { name: "Create and continue" }).click();
+    await expect(card).toContainText("is not HTTPS");
+    await expect(card.getByRole("link", { name: "Open connection settings" })).toBeVisible();
     expect(new URL(page.url()).pathname).toBe("/connect");
   });
 });

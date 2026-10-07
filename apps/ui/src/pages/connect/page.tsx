@@ -1,6 +1,6 @@
 import { useMutation, useQueries, useQuery } from "@tanstack/react-query";
 import { AlertCircle, ArrowRight, Loader2, MousePointer2, RotateCw } from "lucide-react";
-import { type ReactNode, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useSearchParams } from "react-router-dom";
 import type { User } from "@/api/types";
 import { ProviderIcon } from "@/components/shared/provider-icon";
@@ -15,14 +15,6 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { CURRENT_USER_CARD_KEY } from "@/contexts/current-user-context";
@@ -310,10 +302,10 @@ function UserStep({
     retry: false,
   });
   const [chosen, setChosen] = useState<User | null>(null);
-  // A known user skips the picker and opens the dialog straight away: the
-  // `user` hint (People page), then the dashboard's own "who are you" choice
-  // for this connection, then the last pick on this page. A token-bound user
-  // does the same. Cancel closes it and shows the picker.
+  // A known user skips the picker and the card shows the confirm step: the
+  // token-bound user, else the `user` hint (People page), then the dashboard's
+  // own "who are you" choice for this connection, then the last pick on this
+  // page. "Pick someone else" swaps the card back to the picker.
   const [autoDismissed, setAutoDismissed] = useState(false);
 
   const hinted = autoDismissed
@@ -324,7 +316,7 @@ function UserStep({
         readStoredValue(lastUserStorageKey(connection.id)),
       ]);
   const selfUser = userStep?.kind === "self" ? userStep.user : null;
-  const confirmUser = chosen ?? hinted ?? (autoDismissed ? null : selfUser);
+  const confirmUser = selfUser ?? chosen ?? hinted;
 
   if (whoami.isPending || (userStep?.kind === "pick" && users.isPending)) {
     return <ConnectShell client={client} title={`Connecting to ${host}…`} />;
@@ -358,41 +350,26 @@ function UserStep({
     );
   }
 
-  const confirm = confirmUser ? (
-    <ConfirmDialog
-      client={client}
-      connection={connection}
-      user={confirmUser}
-      returnTo={returnTo}
-      initialLabel={label || defaultConnectorLabel(client)}
-      onCancel={() => {
-        setChosen(null);
-        setAutoDismissed(true);
-      }}
-    />
-  ) : null;
-
-  if (selfUser) {
-    // Token-bound connection: the token fixes the user, so there is no picker.
+  if (confirmUser) {
+    // A token-bound user, or the only user: there is no one else to pick.
+    const canPickAnother = !selfUser && (users.data?.length ?? 0) > 1;
     return (
-      <ConnectShell
+      <ConfirmStep
         client={client}
-        title={`Link ${clientName} to ${host}`}
-        description={`Signed in as ${selfUser.name}.`}
-      >
-        <div className="flex gap-2">
-          <Button onClick={() => setChosen(selfUser)}>
-            Continue
-            <ArrowRight className="size-4" />
-          </Button>
-          {onBack ? (
-            <Button variant="ghost" onClick={onBack}>
-              Choose another swarm
-            </Button>
-          ) : null}
-        </div>
-        {confirm}
-      </ConnectShell>
+        connection={connection}
+        user={confirmUser}
+        returnTo={returnTo}
+        initialLabel={label || defaultConnectorLabel(client)}
+        onPickAnother={
+          canPickAnother
+            ? () => {
+                setChosen(null);
+                setAutoDismissed(true);
+              }
+            : undefined
+        }
+        onBack={onBack}
+      />
     );
   }
 
@@ -446,30 +423,37 @@ function UserStep({
           Choose another swarm
         </Button>
       ) : null}
-      {confirm}
     </ConnectShell>
   );
 }
 
-function ConfirmDialog({
+function ConfirmStep({
   client,
   connection,
   user,
   returnTo,
   initialLabel,
-  onCancel,
+  onPickAnother,
+  onBack,
 }: {
   client: ConnectClient;
   connection: Connection;
   user: User;
   returnTo: URL;
   initialLabel: string;
-  onCancel: () => void;
+  onPickAnother?: () => void;
+  onBack?: () => void;
 }) {
   const clientName = CONNECT_CLIENT_NAMES[client];
   const host = hostOf(connection.apiUrl);
   const [label, setLabel] = useState(initialLabel);
   const [redirecting, setRedirecting] = useState(false);
+  const submitRef = useRef<HTMLButtonElement>(null);
+  // Focus the primary action, not the label: most people keep the default
+  // label, so Enter mints straight away.
+  useEffect(() => {
+    submitRef.current?.focus();
+  }, []);
   const create = useMutation({
     mutationFn: async () => {
       const { connectUrl } = await createConnectorCode(
@@ -491,33 +475,37 @@ function ConfirmDialog({
       window.location.assign(redirectUrl);
     },
   });
+  const busy = create.isPending || redirecting;
   const error = create.error;
   const apiError = error instanceof ConnectApiError ? error : null;
 
   return (
-    <Dialog open onOpenChange={(open) => !open && !create.isPending && !redirecting && onCancel()}>
-      <DialogContent className="sm:max-w-md" showCloseButton={false}>
-        <DialogHeader>
-          <div className="mb-1 flex size-9 items-center justify-center rounded-lg border bg-muted">
-            <ClientMark client={client} className="size-4" />
-          </div>
-          <DialogTitle className="text-balance">
-            Create a token for {user.name} on {host} so {clientName} can send and read tasks as
-            them?
-          </DialogTitle>
-          <DialogDescription className="text-pretty">
-            The token can do what {user.name} can do on this swarm
-            {user.role ? ` (${user.role})` : ""}, nothing more. You then go back to{" "}
-            <span className="font-medium text-foreground">{returnTo.host}</span>.
-          </DialogDescription>
-        </DialogHeader>
+    <ConnectShell
+      client={client}
+      title={`Connect ${clientName} as ${user.name}?`}
+      description={
+        <>
+          The token can do what {user.name} can do on{" "}
+          <span className="font-medium text-foreground">{host}</span>
+          {user.role ? ` (${user.role})` : ""}, nothing more. You then go back to{" "}
+          <span className="font-medium text-foreground">{returnTo.host}</span>.
+        </>
+      }
+    >
+      <form
+        className="flex flex-col gap-4"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (!busy) create.mutate();
+        }}
+      >
         <div className="flex flex-col gap-2">
           <Label htmlFor="connect-label">Label</Label>
           <Input
             id="connect-label"
             value={label}
             onChange={(e) => setLabel(e.target.value)}
-            disabled={create.isPending || redirecting}
+            disabled={busy}
           />
         </div>
         {error ? (
@@ -533,16 +521,32 @@ function ConfirmDialog({
         {redirecting ? (
           <p className="text-sm text-muted-foreground">Taking you back to agent-swarm.dev…</p>
         ) : null}
-        <DialogFooter>
-          <Button variant="outline" onClick={onCancel} disabled={create.isPending || redirecting}>
-            Cancel
-          </Button>
-          <Button onClick={() => create.mutate()} disabled={create.isPending || redirecting}>
-            {create.isPending || redirecting ? <Loader2 className="size-4 animate-spin" /> : null}
+        <div className="flex flex-wrap items-center gap-2">
+          <Button ref={submitRef} type="submit" disabled={busy}>
+            {busy ? <Loader2 className="size-4 animate-spin" /> : null}
             {apiError?.status === null ? "Retry" : "Create and continue"}
           </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+          {onBack ? (
+            <Button type="button" variant="ghost" onClick={onBack} disabled={busy}>
+              Choose another swarm
+            </Button>
+          ) : null}
+        </div>
+      </form>
+      {onPickAnother ? (
+        <p className="text-sm text-muted-foreground">
+          Not you?{" "}
+          <Button
+            type="button"
+            variant="link"
+            className="h-auto p-0"
+            onClick={onPickAnother}
+            disabled={busy}
+          >
+            Pick someone else
+          </Button>
+        </p>
+      ) : null}
+    </ConnectShell>
   );
 }
