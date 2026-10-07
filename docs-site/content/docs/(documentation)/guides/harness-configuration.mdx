@@ -429,8 +429,11 @@ Any ACP-speaking agent works. A few starting points:
     ACP_TARGET=copilot
     COPILOT_PROVIDER_BASE_URL=https://openrouter.ai/api/v1
     COPILOT_PROVIDER_API_KEY=sk-or-...
+    COPILOT_PROVIDER_MAX_PROMPT_TOKENS=200000
     MODEL_OVERRIDE=google/gemini-3-flash-preview
     ```
+
+    Set `COPILOT_PROVIDER_MAX_PROMPT_TOKENS` to the model's real context window. For a model it does not know, Copilot assumes a small budget, and the first turn (about 150k tokens of Copilot and swarm tool definitions) fails with "Static system messages and tool definitions exceed the model's usable context budget".
 
     The preset forwards only `COPILOT_*` variables (`COPILOT_GITHUB_TOKEN`, every `COPILOT_PROVIDER_*` BYOK knob, `COPILOT_HOME`, `COPILOT_MODEL`) plus `GH_HOST` and the proxy variables. It never forwards the worker's `GITHUB_TOKEN` or `GH_TOKEN`: a git token without the Copilot Requests permission would fail Copilot auth. `MODEL_OVERRIDE` becomes `COPILOT_MODEL`. The adapter sets `COPILOT_AUTO_UPDATE=false`, so the pinned CLI is the one that runs.
 
