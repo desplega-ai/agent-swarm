@@ -36,6 +36,12 @@ type EventListener = (event: ProviderEvent) => void;
 /** Providers that run on this ACP client. */
 export type AcpProviderName = "acp" | "grok";
 const ACP_LOG_MAX_CHARS = 30_000;
+/**
+ * How long an abort waits after `session/cancel` for the prompt to answer
+ * `cancelled`. That answer carries the turn's usage (Grok's `_meta.usage`),
+ * so killing the process first would drop the session's cost row.
+ */
+const ACP_CANCEL_SETTLE_MS = 3_000;
 const ACP_LOG_FIELD_MAX_CHARS = 12_000;
 const ACP_LOG_PREVIEW_MAX_CHARS = 10_000;
 const CREDENTIAL_HEADER_NAMES = new Set([
@@ -152,7 +158,10 @@ class SwarmAcpClient implements Client {
   /** Latest cumulative USD cost the target reported for the session. */
   reportedCostUsd: number | null = null;
 
-  constructor(private readonly emit: (event: ProviderEvent) => void) {}
+  constructor(
+    private readonly emit: (event: ProviderEvent) => void,
+    private readonly target?: AcpTargetProfile,
+  ) {}
 
   async requestPermission(params: RequestPermissionRequest): Promise<RequestPermissionResponse> {
     const selected =
@@ -168,7 +177,7 @@ class SwarmAcpClient implements Client {
     const costUsd = acpReportedCostUsd(params.update);
     if (costUsd !== null) this.reportedCostUsd = costUsd;
     for (const event of translateAcpSessionNotification(params)) {
-      this.emit(event);
+      this.emit(this.target?.rewriteEvent?.(event) ?? event);
     }
   }
 }
@@ -226,6 +235,7 @@ class ACPSession implements ProviderSession {
     this.aborted = true;
     try {
       await this.connection.cancel({ sessionId: this.sessionId });
+      await Promise.race([this.completionPromise, Bun.sleep(ACP_CANCEL_SETTLE_MS)]);
     } catch (err) {
       this.emit({
         type: "error",
@@ -289,8 +299,10 @@ class ACPSession implements ProviderSession {
           },
         }),
       });
+      const context = this.target.promptContext?.(response._meta, this.config.model);
+      if (context) this.emit(context);
       const isError = response.stopReason === "refusal" || response.stopReason === "cancelled";
-      const cost = this.buildCostData(isError, response.usage);
+      const cost = this.buildCostData(isError, response.usage, response._meta);
       result = {
         exitCode: isError ? 1 : 0,
         sessionId: this.sessionId,
@@ -325,7 +337,11 @@ class ACPSession implements ProviderSession {
         const { done, value } = await reader.read();
         if (done) break;
         if (value.length > 0) {
-          this.emit({ type: "raw_stderr", content: scrubSecrets(decoder.decode(value)) });
+          // Targets such as Grok color their tracing output; the log view shows text.
+          this.emit({
+            type: "raw_stderr",
+            content: scrubSecrets(Bun.stripANSI(decoder.decode(value))),
+          });
         }
       }
     } catch {
@@ -333,7 +349,12 @@ class ACPSession implements ProviderSession {
     }
   }
 
-  private buildCostData(isError: boolean, usage?: Usage | null): CostData {
+  private buildCostData(
+    isError: boolean,
+    usage?: Usage | null,
+    responseMeta?: Record<string, unknown> | null,
+  ): CostData {
+    const targetCost = this.target.promptCost?.(responseMeta);
     return {
       sessionId: this.sessionId,
       taskId: this.config.taskId,
@@ -350,6 +371,7 @@ class ACPSession implements ProviderSession {
       model: this.config.model,
       isError,
       provider: this.providerName,
+      ...targetCost,
     };
   }
 
@@ -405,7 +427,7 @@ export class ACPAdapter implements ProviderAdapter {
     const client = new SwarmAcpClient((event) => {
       if (session) session.emitFromAcp(event);
       else preSessionEvents.push(event);
-    });
+    }, target);
     const stream = ndJsonStream(fileSinkWritableStream(proc.stdin), proc.stdout);
     const connection = new ClientSideConnection(() => client, stream);
 

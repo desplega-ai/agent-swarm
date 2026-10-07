@@ -1,9 +1,10 @@
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { getOpenRouterBaseUrl } from "../utils/openrouter-base-url";
 import { registerVolatileSecret } from "../utils/secret-scrubber";
 import { ACPAdapter } from "./acp-adapter";
-import { grokTargetProfile } from "./acp-targets";
+import { grokTargetProfile, isGrokOpenRouterModel } from "./acp-targets";
 import type {
   CredStatus,
   ProviderAdapter,
@@ -18,16 +19,18 @@ import type {
  * injection, permissions, event translation and cost all come from
  * {@link ACPAdapter}. This adapter adds the per-session `GROK_HOME`.
  *
- * Auth is `XAI_API_KEY` only. A SuperGrok OAuth pool needs the CLI's
- * `auth.json` refresh behaviour measured first (issue #1952 follow-up).
+ * Auth is `XAI_API_KEY` for xAI models, or `OPENROUTER_API_KEY` for an
+ * `openrouter/<id>` model, which runs as an OpenAI-compatible BYOK model. A
+ * SuperGrok OAuth pool needs the CLI's `auth.json` refresh behaviour measured
+ * first (issue #1952 follow-up).
  */
 export function checkGrokCredentials(env: Record<string, string | undefined>): CredStatus {
-  return env.XAI_API_KEY?.trim()
+  return env.XAI_API_KEY?.trim() || env.OPENROUTER_API_KEY?.trim()
     ? { ready: true, missing: [], satisfiedBy: "env" }
     : {
         ready: false,
-        missing: ["XAI_API_KEY"],
-        hint: "Set XAI_API_KEY (an xAI API key from console.x.ai) for grok.",
+        missing: ["XAI_API_KEY", "OPENROUTER_API_KEY"],
+        hint: "Set XAI_API_KEY (console.x.ai) or OPENROUTER_API_KEY (openrouter/<id> models) for grok.",
       };
 }
 
@@ -49,9 +52,48 @@ export async function installedClaudePluginNames(home: string | undefined): Prom
   }
 }
 
+/** An OpenAI-compatible model the session registers under `[model."<id>"]`. */
+export interface GrokCustomModel {
+  /** The swarm model string, which is also the id passed to `--model`. */
+  id: string;
+  /** The id sent to the endpoint. */
+  model: string;
+  baseUrl: string;
+  /** Env var holding the endpoint's API key. */
+  envKey: string;
+}
+
+/** `openrouter/<vendor>/<id>` -> a `[model."openrouter/<vendor>/<id>"]` block on OpenRouter. */
+export function grokOpenRouterModel(
+  model: string,
+  env: Record<string, string | undefined>,
+): GrokCustomModel | null {
+  const id = model.trim();
+  if (!isGrokOpenRouterModel(id)) return null;
+  return {
+    id,
+    model: id.slice("openrouter/".length),
+    baseUrl: getOpenRouterBaseUrl(env),
+    envKey: "OPENROUTER_API_KEY",
+  };
+}
+
 /** `$GROK_HOME/config.toml` for one swarm session. */
-export function buildGrokConfigToml(disabledPlugins: readonly string[]): string {
+export function buildGrokConfigToml(
+  disabledPlugins: readonly string[],
+  customModel: GrokCustomModel | null = null,
+): string {
   const list = disabledPlugins.map((name) => JSON.stringify(name)).join(", ");
+  const modelBlock = customModel
+    ? [
+        "",
+        `[model.${JSON.stringify(customModel.id)}]`,
+        `model = ${JSON.stringify(customModel.model)}`,
+        `base_url = ${JSON.stringify(customModel.baseUrl)}`,
+        `env_key = ${JSON.stringify(customModel.envKey)}`,
+        `api_backend = "chat_completions"`,
+      ]
+    : [];
   return [
     "[cli]",
     "auto_update = false",
@@ -62,6 +104,7 @@ export function buildGrokConfigToml(disabledPlugins: readonly string[]): string 
     "",
     "[plugins]",
     `disabled = [${list}]`,
+    ...modelBlock,
     "",
   ].join("\n");
 }
@@ -90,9 +133,17 @@ export class GrokAdapter implements ProviderAdapter {
 
   async createSession(config: ProviderSessionConfig): Promise<ProviderSession> {
     const env = { ...process.env, ...config.env };
-    const apiKey = env.XAI_API_KEY?.trim();
-    if (!apiKey) throw new Error("grok requires XAI_API_KEY");
-    registerVolatileSecret(apiKey, "XAI_API_KEY");
+    const customModel = grokOpenRouterModel(config.model, env);
+    const keyName = customModel ? "OPENROUTER_API_KEY" : "XAI_API_KEY";
+    const apiKey = env[keyName]?.trim();
+    if (!apiKey) {
+      throw new Error(
+        customModel
+          ? `grok requires OPENROUTER_API_KEY for ${customModel.id}`
+          : "grok requires XAI_API_KEY",
+      );
+    }
+    registerVolatileSecret(apiKey, keyName);
 
     // A fresh GROK_HOME per session: no shared auth.json, sessions or leader
     // socket between tasks, and the config below applies to this run only.
@@ -100,7 +151,7 @@ export class GrokAdapter implements ProviderAdapter {
     try {
       await writeFile(
         join(grokHome, "config.toml"),
-        buildGrokConfigToml(await installedClaudePluginNames(env.HOME)),
+        buildGrokConfigToml(await installedClaudePluginNames(env.HOME), customModel),
         { mode: 0o600 },
       );
       await writeFile(join(grokHome, "requirements.toml"), GROK_REQUIREMENTS_TOML, {
@@ -108,7 +159,7 @@ export class GrokAdapter implements ProviderAdapter {
       });
       const session = await this.acp.createSession({
         ...config,
-        env: { ...config.env, XAI_API_KEY: apiKey, GROK_HOME: grokHome },
+        env: { ...config.env, [keyName]: apiKey, GROK_HOME: grokHome },
       });
       void session
         .waitForCompletion()

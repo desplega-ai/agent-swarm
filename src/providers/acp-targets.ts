@@ -1,9 +1,10 @@
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { clampContextPercent, getContextWindowSize } from "../utils/context-window";
 import { type AcpTarget, getAcpTargetCatalogEntry, isAcpTarget } from "./acp-target-catalog";
 import { applyReasoningEffort } from "./reasoning-effort";
-import type { ProviderSessionConfig } from "./types";
+import type { CostData, ProviderEvent, ProviderSessionConfig } from "./types";
 
 export interface AcpTargetProfile {
   /** An operator-selectable ACP target, or a first-class harness built on the ACP client. */
@@ -16,6 +17,15 @@ export interface AcpTargetProfile {
   sessionMeta?(config: ProviderSessionConfig): Record<string, unknown> | undefined;
   /** A clearer message for a target error whose own text misleads, else undefined. */
   describeError?(message: string): string | undefined;
+  /** Rewrites a translated event for display, e.g. unwrapping a tool proxy. */
+  rewriteEvent?(event: ProviderEvent): ProviderEvent;
+  /** Usage and cost the target reports in the `session/prompt` response `_meta`. */
+  promptCost?(meta: Record<string, unknown> | null | undefined): Partial<CostData> | undefined;
+  /** A context snapshot from the `session/prompt` response `_meta`, for targets without `usage_update`. */
+  promptContext?(
+    meta: Record<string, unknown> | null | undefined,
+    model: string,
+  ): Extract<ProviderEvent, { type: "context_usage" }> | undefined;
 }
 
 export class AcpTargetResolutionError extends Error {
@@ -245,6 +255,104 @@ export const GROK_ISOLATION_ENV: Readonly<Record<string, string>> = {
   GROK_CURSOR_SKILLS_ENABLED: "false",
 };
 
+/**
+ * The Grok CLI's endpoint overrides for the xAI route (docs.x.ai settings
+ * reference): `GROK_MODELS_BASE_URL` points inference and the model list at
+ * any OpenAI-compatible gateway, authenticated with XAI_API_KEY.
+ */
+export const GROK_XAI_ENDPOINT_KEYS = [
+  "GROK_MODELS_BASE_URL",
+  "GROK_MODELS_LIST_URL",
+  "GROK_XAI_API_BASE_URL",
+] as const;
+
+/** `openrouter/<vendor>/<id>`: an OpenRouter model the grok adapter registers in `config.toml`. */
+export function isGrokOpenRouterModel(model: string): boolean {
+  return model.trim().startsWith("openrouter/");
+}
+
+/**
+ * Grok exposes MCP tools through its `use_tool` proxy (on-demand tool search),
+ * so every swarm call arrives as `use_tool {tool_name: "swarm__get-swarm",
+ * tool_input}`. Unwrap it to the `mcp__<server>__<tool>` name and its own
+ * input, the shape every other harness logs. Grok's in-progress updates
+ * repeat the input tagged with a `variant` (`UseTool`, `SearchTool`); the
+ * dashboard merges update input into the call, so the tag is dropped and a
+ * `UseTool` update carries only the inner input.
+ */
+function unwrapGrokToolProxy(event: ProviderEvent): ProviderEvent {
+  if (event.type === "tool_start" && event.toolName === "use_tool") {
+    const args = event.args as { tool_name?: unknown; tool_input?: unknown } | null;
+    if (typeof args?.tool_name !== "string" || !args.tool_name) return event;
+    return { ...event, toolName: `mcp__${args.tool_name}`, args: args.tool_input ?? {} };
+  }
+  if (event.type !== "custom" || event.name !== "acp_tool_call_update") return event;
+  const data = event.data as { rawInput?: unknown } | null;
+  const raw = data?.rawInput as Record<string, unknown> | null | undefined;
+  if (!raw || typeof raw !== "object" || typeof raw.variant !== "string") return event;
+  const { variant, ...rest } = raw;
+  const rawInput = variant === "UseTool" ? (rest.tool_input ?? {}) : rest;
+  return { ...event, data: { ...(data as Record<string, unknown>), rawInput } };
+}
+
+function finiteCount(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
+}
+
+/** xAI bills in ticks of 1e-10 USD (`costUsdTicks`). */
+const XAI_USD_TICKS = 10_000_000_000;
+
+/**
+ * Grok answers `session/prompt` with `usage: null` and puts the prompt's
+ * cumulative usage in `_meta.usage`. Its `inputTokens` include cache reads and
+ * its `outputTokens` exclude reasoning, so both are converted to the swarm's
+ * disjoint input and reasoning-inclusive output. `costUsdTicks` is what xAI
+ * billed; a BYOK model (OpenRouter) reports none and is priced from the table.
+ */
+export function grokPromptCost(
+  meta: Record<string, unknown> | null | undefined,
+): Partial<CostData> | undefined {
+  const usage = meta?.usage as Record<string, unknown> | undefined;
+  if (!usage || typeof usage !== "object") return undefined;
+  const input = finiteCount(usage.inputTokens) ?? 0;
+  const cacheRead = finiteCount(usage.cachedReadTokens) ?? 0;
+  const reasoning = finiteCount(usage.reasoningTokens) ?? 0;
+  const ticks = finiteCount(usage.costUsdTicks);
+  const turns = finiteCount(usage.numTurns) ?? finiteCount(usage.modelCalls);
+  return {
+    inputTokens: Math.max(0, input - cacheRead),
+    cacheReadTokens: cacheRead,
+    cacheWriteTokens: finiteCount(usage.cacheCreationTokens) ?? 0,
+    outputTokens: (finiteCount(usage.outputTokens) ?? 0) + reasoning,
+    reasoningOutputTokens: reasoning,
+    ...(ticks ? { totalCostUsd: ticks / XAI_USD_TICKS } : {}),
+    ...(turns ? { numTurns: turns } : {}),
+  };
+}
+
+/**
+ * Grok sends no `usage_update`. The prompt response's top-level `_meta`
+ * describes the last model call: `totalTokens` is its input (cache reads
+ * included), output and reasoning, i.e. how full the context was at the end.
+ */
+export function grokPromptContext(
+  meta: Record<string, unknown> | null | undefined,
+  model: string,
+): Extract<ProviderEvent, { type: "context_usage" }> | undefined {
+  const used = finiteCount(meta?.totalTokens);
+  if (!used) return undefined;
+  const id = model.trim();
+  const total = getContextWindowSize(isGrokOpenRouterModel(id) ? id : `xai/${id}`);
+  return {
+    type: "context_usage",
+    contextUsedTokens: used,
+    contextTotalTokens: total,
+    contextPercent: clampContextPercent(used, total),
+    outputTokens: finiteCount(meta?.outputTokens) ?? null,
+    contextFormula: "harness-reported",
+  };
+}
+
 /** `-32000 Authentication required` (ACP) or the CLI's "Not signed in" text. */
 const GROK_AUTH_ERROR_RE = /authentication required|not signed in/i;
 
@@ -265,7 +373,13 @@ export const grokTargetProfile: AcpTargetProfile = {
   },
   env(config) {
     const env = baseTargetEnv(config);
-    copyEnvKeys(config, env, ["XAI_API_KEY", "GROK_HOME"]);
+    // Each route gets only its own key: an OpenRouter session never sees
+    // XAI_API_KEY, so no side model (web search, summaries) bills xAI.
+    if (isGrokOpenRouterModel(config.model)) {
+      copyEnvKeys(config, env, ["OPENROUTER_API_KEY", "GROK_HOME"]);
+    } else {
+      copyEnvKeys(config, env, ["XAI_API_KEY", "GROK_HOME", ...GROK_XAI_ENDPOINT_KEYS]);
+    }
     Object.assign(env, GROK_ISOLATION_ENV);
     return env;
   },
@@ -282,9 +396,12 @@ export const grokTargetProfile: AcpTargetProfile = {
       yoloMode: true,
     };
   },
+  rewriteEvent: unwrapGrokToolProxy,
+  promptCost: grokPromptCost,
+  promptContext: grokPromptContext,
   describeError(message) {
     if (!GROK_AUTH_ERROR_RE.test(message)) return undefined;
-    return `Grok rejected the credentials (XAI_API_KEY invalid or missing): ${message}`;
+    return `Grok rejected the credentials (XAI_API_KEY or OPENROUTER_API_KEY invalid or missing): ${message}`;
   },
 };
 

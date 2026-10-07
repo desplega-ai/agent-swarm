@@ -175,7 +175,7 @@ Opencode needs `OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY`, or `OPENAI_API_KEY`.
 Override models with `E2E_MODEL_CLAUDE`, `E2E_MODEL_CODEX`, `E2E_MODEL_PI`, `E2E_MODEL_OPENCODE`, `E2E_MODEL_DSH`, `E2E_MODEL_CURSOR`, `E2E_MODEL_AMP`, or `E2E_MODEL_GROK`.
 Cursor needs `CURSOR_API_KEY` and defaults to `gpt-5.4-nano`, the cheapest model `Cursor.models.list()` offers.
 Amp needs `AMP_API_KEY` and a preinstalled `amp` executable (`AMP_BINARY`), and defaults to the `low` mode.
-Grok needs `XAI_API_KEY` and a preinstalled `grok` executable (`GROK_BINARY`), and defaults to `grok-4.6`.
+Grok needs `XAI_API_KEY` and a preinstalled `grok` executable (`GROK_BINARY`), and defaults to `grok-build-0.1`, xAI's cheapest model. `E2E_MODEL_GROK=openrouter/deepseek/deepseek-v4.1-flash` runs it on `OPENROUTER_API_KEY` instead.
 Dsh defaults to `openrouter/deepseek/deepseek-v4.1-flash` and needs `OPENROUTER_API_KEY`.
 Provision `npm install --global @deepseek-ai/dsh@0.2.1-alpha.1` first, then run
 `DSH_BINARY=$(command -v dsh) bun run e2e --only health --harness dsh`.

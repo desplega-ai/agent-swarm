@@ -3,6 +3,7 @@ import {
   claudeCatalogModelId,
   cursorCatalogRef,
   dshCatalogRef,
+  grokCatalogRef,
   harnessModelIds,
   isReasoningHarness,
   modelDisplayName,
@@ -179,8 +180,7 @@ export function effortLevelsFor(
   } else if (harness === "cursor") {
     ({ providerId, modelId: catalogId } = cursorCatalogRef(modelId));
   } else if (harness === "grok") {
-    providerId = "xai";
-    catalogId = modelId;
+    ({ providerId, modelId: catalogId } = grokCatalogRef(modelId));
   } else {
     // The id may hold more slashes (`openrouter/google/gemini-3-flash-preview`).
     const slash = modelId.indexOf("/");
@@ -263,10 +263,19 @@ export const CURSOR_MODELS = [
 ] as const;
 
 /**
- * The models the Grok CLI lists (`grok models`). The account's own list can
- * hold more (the docs name `grok-build`), so a custom id still goes through.
+ * The xAI text models the Grok CLI lists for an API key (`grok models`),
+ * minus `grok-4.20-multi-agent-0309`, which takes no client tools. The
+ * account's own list can hold more, so a custom id still goes through.
  */
-export const GROK_MODELS = ["grok-4.6", "grok-4.5"] as const;
+export const GROK_MODELS = [
+  "grok-4.7",
+  "grok-4.6",
+  "grok-4.5",
+  "grok-4.3",
+  "grok-4.20-0309-reasoning",
+  "grok-4.20-0309-non-reasoning",
+  "grok-build-0.1",
+] as const;
 
 /**
  * The models dsh's DeepSeek-direct route serves out of the box (its bundled
@@ -386,8 +395,8 @@ const FALLBACK_MODEL: Record<LocalHarnessProvider, string> = {
   cursor: "claude-sonnet-5-5",
   // `low` is Amp's cheapest mode; the regular tier (`medium`) runs an Opus-class model.
   amp: "low",
-  // The grok tier default (DEFAULT_MODEL_TIER_MAP.grok in src/types.ts).
-  grok: "grok-4.6",
+  // The grok regular-tier default (DEFAULT_MODEL_TIER_MAP.grok in src/types.ts).
+  grok: "grok-4.3",
   acp: "",
 };
 
@@ -650,12 +659,28 @@ function dshModelGroups(
   ];
 }
 
-/** The Grok CLI bills every model to XAI_API_KEY; see `src/providers/grok-adapter.ts`. */
+/**
+ * xAI models bill to XAI_API_KEY; `openrouter/<id>` models run through the
+ * Grok CLI as OpenAI-compatible models on OPENROUTER_API_KEY. See
+ * `src/providers/grok-adapter.ts`.
+ */
 function grokModelGroups(
   configs: SwarmConfig[] | undefined,
   envPresence: Record<string, boolean> | undefined,
   liveCatalog?: LiveModelsCatalog | null,
 ): ModelGroup[] {
+  const openrouterMeta = SNAPSHOT_META.openrouter;
+  const openrouter = Object.values((liveCatalog?.openrouter ?? CACHE.openrouter)?.models ?? {})
+    .map((m) => ({
+      id: `openrouter/${m.id}`,
+      label: modelDisplayName(m.name) ?? m.id,
+      provider: openrouterMeta.label,
+      providerId: openrouterMeta.iconKey,
+      requiredKey: openrouterMeta.requiredKey,
+      ...catalogFacts(m),
+      reasoningLevels: reasoningLevelsFor("grok", m.id, m),
+    }))
+    .sort((a, b) => a.label.localeCompare(b.label));
   const xai = runtimeSectionModels("xai", liveCatalog);
   const models: ModelOption[] = GROK_MODELS.map((id) => {
     const m = xai[id];
@@ -675,6 +700,12 @@ function grokModelGroups(
       models,
       requiredKey: "XAI_API_KEY",
       enabled: hasRuntimeCredential("XAI_API_KEY", configs, envPresence),
+    },
+    {
+      provider: openrouterMeta.label,
+      models: openrouter,
+      requiredKey: openrouterMeta.requiredKey,
+      enabled: hasRuntimeCredential(openrouterMeta.requiredKey, configs, envPresence),
     },
   ];
 }

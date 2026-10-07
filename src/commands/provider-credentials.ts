@@ -119,7 +119,7 @@ export const REQUIRED_CRED_VARS_BY_PROVIDER: Record<SupportedProvider, readonly 
   dsh: ["DEEPSEEK_API_KEY", "OPENROUTER_API_KEY"],
   amp: ["AMP_API_KEY"],
   cursor: ["CURSOR_API_KEY"],
-  grok: ["XAI_API_KEY"],
+  grok: ["XAI_API_KEY", "OPENROUTER_API_KEY"],
 };
 
 type CredentialChecker = (
@@ -508,14 +508,14 @@ export async function validateProviderCredentials(
       }
       case "grok": {
         const apiKey = env.XAI_API_KEY?.trim();
-        if (!apiKey) {
-          return {
-            ok: false,
-            error: "XAI_API_KEY is not set.",
-            latency_ms: Date.now() - startedAt,
-          };
-        }
-        return checkXaiApiKey(apiKey);
+        if (apiKey) return checkXaiApiKey(apiKey);
+        const openRouterKey = env.OPENROUTER_API_KEY?.trim();
+        if (openRouterKey) return checkOpenRouter(openRouterKey);
+        return {
+          ok: false,
+          error: "Set XAI_API_KEY or OPENROUTER_API_KEY for grok.",
+          latency_ms: Date.now() - startedAt,
+        };
       }
       case "acp":
         return presenceCheckOk();

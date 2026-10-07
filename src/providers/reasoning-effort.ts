@@ -17,6 +17,7 @@ import {
   claudeCatalogModelId,
   cursorCatalogRef,
   dshCatalogRef,
+  grokCatalogRef,
   REASONING_EFFORT_LEVELS,
   type ReasoningEffortLevel,
   reasoningLevelsFor,
@@ -100,8 +101,7 @@ function lookupModel(
   } else if (harness === "cursor") {
     ({ providerId, modelId } = cursorCatalogRef(model));
   } else if (harness === "grok") {
-    providerId = "xai";
-    modelId = model;
+    ({ providerId, modelId } = grokCatalogRef(model));
   } else {
     ({ providerId, modelId } = splitProviderModel(model));
     if (!providerId) return undefined;

@@ -100,8 +100,8 @@ elif [ "$HARNESS_PROVIDER" = "amp" ]; then
         echo "Warning: amp provider has no credentials yet (AMP_API_KEY). Worker will park in credential-wait until creds appear in swarm_config."
     fi
 elif [ "$HARNESS_PROVIDER" = "grok" ]; then
-    if [ -z "$XAI_API_KEY" ]; then
-        echo "Warning: grok provider has no credentials yet (XAI_API_KEY). Worker will park in credential-wait until creds appear in swarm_config."
+    if [ -z "$XAI_API_KEY" ] && [ -z "$OPENROUTER_API_KEY" ]; then
+        echo "Warning: grok provider has no credentials yet (XAI_API_KEY or OPENROUTER_API_KEY). Worker will park in credential-wait until creds appear in swarm_config."
     fi
 elif [ "$HARNESS_PROVIDER" = "cursor" ]; then
     if [ -z "$CURSOR_API_KEY" ]; then

@@ -29,7 +29,7 @@ Each harness/provider maps the same tier to its own concrete model:
 | `amp` | `low` | `medium` | `high` | `ultra` |
 | `opencode` | `openrouter/deepseek/deepseek-v4.1-flash` | `openrouter/deepseek/deepseek-v4.1-flash` | `openrouter/deepseek/deepseek-v4-pro-0813` | `openrouter/anthropic/claude-opus-5.5` |
 | `cursor` | `gpt-5.4-mini` | `claude-sonnet-5-5` | `claude-opus-5-5` | `claude-fable-5-1` |
-| `grok` | `grok-4.6` | `grok-4.6` | `grok-4.6` | `grok-4.6` |
+| `grok` | `grok-build-0.1` | `grok-4.3` | `grok-4.6` | `grok-4.7` |
 | `devin` | `devin` | `devin` | `devin` | `devin` |
 
 Update `DEFAULT_MODEL_TIER_MAP` and this table together when defaults change.

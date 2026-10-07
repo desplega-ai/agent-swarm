@@ -35,7 +35,7 @@ export const PROVIDER_CREDENTIAL_VARS: Record<string, readonly string[]> = {
   dsh: ["OPENROUTER_API_KEY", "DEEPSEEK_API_KEY"],
   amp: ["AMP_API_KEY"],
   cursor: ["CURSOR_API_KEY"],
-  grok: ["XAI_API_KEY"],
+  grok: ["XAI_API_KEY", "OPENROUTER_API_KEY"],
   opencode: ["OPENROUTER_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY"],
 };
 
@@ -70,6 +70,10 @@ export function getModelAwareCredentialVars(provider: string, model?: string): r
   // dsh has exact prefix routing; the generic slash rule only filters OpenAI keys.
   if (provider === "dsh" && model) {
     return model.startsWith("openrouter/") ? ["OPENROUTER_API_KEY"] : ["DEEPSEEK_API_KEY"];
+  }
+  // grok routes `openrouter/<id>` to OpenRouter and every other model to xAI.
+  if (provider === "grok" && model) {
+    return model.startsWith("openrouter/") ? ["OPENROUTER_API_KEY"] : ["XAI_API_KEY"];
   }
   if (!SLASH_MODEL_PROVIDERS.has(provider) || !model) return base;
   if (model.includes("/")) {

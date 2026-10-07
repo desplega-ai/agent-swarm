@@ -185,8 +185,9 @@ export async function recomputeSessionCost(
   // Amp's own recorded cost (`amp threads usage`) is what it billed, including
   // subagent threads the token counts miss. The adapter sends it only when
   // every request was billed through Amp, so it wins over the token price,
-  // which still fills the per-model breakdown.
-  if (input.provider === "amp" && input.harnessCostUsd > 0) {
+  // which still fills the per-model breakdown. Grok's `costUsdTicks` is the
+  // same kind of report: what xAI billed, long-context tiers included.
+  if ((input.provider === "amp" || input.provider === "grok") && input.harnessCostUsd > 0) {
     const priced = await recomputeSessionCost({ ...input, harnessCostUsd: 0 }, lookupRate);
     return {
       totalCostUsd: input.harnessCostUsd,

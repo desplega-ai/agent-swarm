@@ -17,6 +17,7 @@ export {
   claudeCatalogModelId,
   cursorCatalogRef,
   dshCatalogRef,
+  grokCatalogRef,
   isReasoningHarness,
   nearestReasoningLevel,
   REASONING_EFFORT_LEVELS,

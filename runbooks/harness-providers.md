@@ -16,11 +16,11 @@ Operational rules for editing or adding harness providers (claude, codex, openco
 | DeepSeek Harness | `dsh` | `DshAdapter` | Spawns `dsh --profile headless --json` per task; OpenRouter or direct DeepSeek API. See [DeepSeek Harness](#deepseek-harness-dsh) below |
 | Amp | `amp` | `AmpAdapter` | Spawns `amp -x --stream-json --stream-json-input` per task; `AMP_API_KEY`; every thread is stored on ampcode.com. See [Amp](#amp-amp) below |
 | Cursor | `cursor` | `CursorAdapter` | In-process `@cursor/sdk` local runtime; inference on Cursor's hosted models with `CURSOR_API_KEY`. See [Cursor](#cursor-cursor) below |
-| Grok | `grok` | `GrokAdapter` | xAI Grok CLI as an ACP server (`grok agent --no-leader stdio`) on the shared ACP client; `XAI_API_KEY`. See [Grok](#grok-grok) below |
+| Grok | `grok` | `GrokAdapter` | xAI Grok CLI as an ACP server (`grok agent --no-leader stdio`) on the shared ACP client; `XAI_API_KEY`, or `OPENROUTER_API_KEY` for `openrouter/<id>` models. See [Grok](#grok-grok) below |
 
 ## Grok (`grok`)
 
-Set `HARNESS_PROVIDER=grok` and `XAI_API_KEY`. `grok agent stdio` is a spec ACP
+Set `HARNESS_PROVIDER=grok` and `XAI_API_KEY` (or `OPENROUTER_API_KEY` for `openrouter/<id>` models). `grok agent stdio` is a spec ACP
 server, so `GrokAdapter` is a thin wrapper over `ACPAdapter` with a fixed `grok`
 target profile (`grokTargetProfile` in `src/providers/acp-targets.ts`) and
 `provider: "grok"` on `session_init` and `CostData`. `grok` is not an operator
@@ -47,16 +47,29 @@ preinstalled executable.
 - **System prompt.** `session/new` `_meta.rules`, which Grok appends to its own
   prompt. `_meta.systemPromptOverride` would replace it, tool guidance included.
   `_meta.yoloMode` is set alongside `--always-approve`.
-- **Credentials.** Readiness is the presence of `XAI_API_KEY`; Test connection
-  is `GET https://api.x.ai/v1/models`. `session/new` without a valid key answers
+- **Models.** A bare id runs on xAI. `openrouter/<vendor>/<id>` adds a
+  `[model."openrouter/<vendor>/<id>"]` block to the session `config.toml`
+  (`base_url` = `OPENROUTER_BASE_URL` or OpenRouter, `env_key =
+  "OPENROUTER_API_KEY"`, `api_backend = "chat_completions"`), and that
+  session's env carries `OPENROUTER_API_KEY` and never `XAI_API_KEY`. The xAI
+  route passes `GROK_MODELS_BASE_URL`, `GROK_MODELS_LIST_URL` and
+  `GROK_XAI_API_BASE_URL` through.
+- **Logs and cost.** Grok reaches MCP tools through its `use_tool` proxy;
+  `rewriteEvent` logs those calls as `mcp__<server>__<tool>` with the inner
+  input. The prompt response has no ACP `usage`: `promptCost` reads
+  `_meta.usage` (input includes cache reads, output excludes reasoning,
+  `costUsdTicks` = 1e-10 USD) into `CostData`. An abort waits up to 3s for
+  the `cancelled` answer so its usage is kept.
+- **Credentials.** Readiness is `XAI_API_KEY` or `OPENROUTER_API_KEY`; Test
+  connection is `GET https://api.x.ai/v1/models` (OpenRouter's `/models` when
+  only that key is set). `session/new` without a valid key answers
   `-32000 Authentication required` (verified), which the adapter reports as
   "Grok rejected the credentials (XAI_API_KEY invalid or missing)".
 - **Steering and resume.** None: `steerModes: []`, `canResume` false.
 
 Not covered: the SuperGrok OAuth pool (`grok login --device-auth`), which needs
-the CLI's `auth.json` refresh behaviour measured first. The success path was
-built against the ACP shapes in the CLI's bundled docs; no authenticated model
-turn has run yet.
+the CLI's `auth.json` refresh behaviour measured first. The adapter tests replay
+a recorded live session (`src/tests/fixtures/grok/`).
 
 ## Amp (`amp`)
 

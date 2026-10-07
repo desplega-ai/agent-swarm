@@ -176,8 +176,10 @@ See [Provider Auth: Amp](/docs/guides/provider-auth/amp) for the token, modes an
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `XAI_API_KEY` | Yes | — | xAI API key from console.x.ai. SuperGrok subscription logins are not supported |
+| `XAI_API_KEY` | One of the two | — | xAI API key from console.x.ai, for xAI models. SuperGrok subscription logins are not supported |
+| `OPENROUTER_API_KEY` | One of the two | — | OpenRouter key, for `openrouter/<id>` models |
 | `GROK_BINARY` | No | `grok` on `PATH` | Path to another trusted Grok CLI executable |
+| `GROK_MODELS_BASE_URL`, `GROK_MODELS_LIST_URL`, `GROK_XAI_API_BASE_URL` | No | — | The Grok CLI's endpoint overrides, passed through on the xAI route |
 
 See [Provider Auth: Grok](/docs/guides/provider-auth/grok) for models, isolation and cost tracking.
 

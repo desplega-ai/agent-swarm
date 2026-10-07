@@ -315,6 +315,12 @@ export function buildModelsDevSeedRows(cache: ModelsDevCache): PricingSeedRow[] 
     })) {
       rows.push(row);
     }
+    // grok runs `openrouter/<id>` models as OpenAI-compatible BYOK models.
+    for (const row of projectCostBlock("grok", id, model.cost, {
+      anthropicBilled: id.startsWith("anthropic/"),
+    })) {
+      rows.push(row);
+    }
     // Gemini specifically: also project under the 'gemini' provider so
     // internal-ai callers that tag with provider='gemini' find a hit.
     if (id.startsWith("google/")) {

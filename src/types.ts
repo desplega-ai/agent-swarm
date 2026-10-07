@@ -175,13 +175,14 @@ export const DEFAULT_MODEL_TIER_MAP: Record<ProviderName, Record<ModelTier, stri
     smart: "high",
     ultra: "ultra",
   },
-  // `grok models` lists grok-4.6 (default) and grok-4.5 at the same per-token
-  // rate, so every tier takes the default; effort carries the tier spread.
+  // xAI's text models as `grok models` lists them for an API key, cheapest
+  // first: grok-build-0.1 ($1/$2 per 1M), grok-4.3 ($1.25/$2.50), then the
+  // grok-4.6/4.7 frontier pair ($2/$6).
   grok: {
-    smol: "grok-4.6",
-    regular: "grok-4.6",
+    smol: "grok-build-0.1",
+    regular: "grok-4.3",
     smart: "grok-4.6",
-    ultra: "grok-4.6",
+    ultra: "grok-4.7",
   },
   // ACP has no portable tier-to-model mapping. Operators may set an explicit
   // MODEL_OVERRIDE, which the adapter applies through an advertised `model`

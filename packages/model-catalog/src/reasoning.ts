@@ -42,6 +42,17 @@ export function dshCatalogRef(model: string): { providerId: string; modelId: str
 }
 
 /**
+ * A grok model string is a bare xAI id (`grok-4.6`) or `openrouter/<vendor>/<id>`,
+ * which the grok adapter registers as an OpenAI-compatible model on OpenRouter.
+ */
+export function grokCatalogRef(model: string): { providerId: string; modelId: string } {
+  if (model.startsWith("openrouter/")) {
+    return { providerId: "openrouter", modelId: model.slice("openrouter/".length) };
+  }
+  return { providerId: "xai", modelId: model };
+}
+
+/**
  * A cursor model string is a bare Cursor model id (`gpt-5.4-nano`,
  * `claude-sonnet-5-5`, `composer-2.5`). Cursor names the vendor models it
  * hosts by their vendor ids, so the vendor follows from the id prefix. Ids
@@ -224,9 +235,7 @@ export function reasoningLevelsForModel(
   } else if (harness === "cursor") {
     ({ providerId, modelId: catalogId } = cursorCatalogRef(model));
   } else if (harness === "grok") {
-    // The Grok CLI takes bare xAI model ids (`grok-4.6`).
-    providerId = "xai";
-    catalogId = model;
+    ({ providerId, modelId: catalogId } = grokCatalogRef(model));
   } else {
     const slash = model.indexOf("/");
     if (slash <= 0) return [];
