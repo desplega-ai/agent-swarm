@@ -21809,6 +21809,15 @@
                           },
                           "accessCount": {
                             "type": "number"
+                          },
+                          "summary": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "createdAt": {
+                            "type": "string"
                           }
                         },
                         "required": [

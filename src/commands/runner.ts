@@ -18,7 +18,7 @@ import {
   generateDefaultSoulMd,
   generateDefaultToolsMd,
 } from "../prompts/defaults.ts";
-import { renderMemoriesPrompt } from "../prompts/memories.ts";
+import { type RelevantMemory, renderMemoriesPrompt } from "../prompts/memories.ts";
 import { configureHttpResolver, resolveTemplateAsync } from "../prompts/resolver.ts";
 import { renderSteeringDelivery } from "../prompts/steering-delivery.ts";
 import { authJsonToCredentialSelection } from "../providers/codex-oauth/auth-json.js";
@@ -3564,15 +3564,7 @@ async function fetchRelevantMemories(
 
     if (!response.ok) return null;
 
-    const data = (await response.json()) as {
-      results: Array<{
-        id: string;
-        name: string;
-        content: string;
-        similarity: number;
-        rawSimilarity?: number;
-      }>;
-    };
+    const data = (await response.json()) as { results: RelevantMemory[] };
 
     return renderMemoriesPrompt(data.results || []);
   } catch {

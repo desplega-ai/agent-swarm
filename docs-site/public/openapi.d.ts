@@ -8355,6 +8355,8 @@ export interface paths {
                                 scope: "agent" | "swarm";
                                 tags: string[];
                                 accessCount: number;
+                                summary?: string | null;
+                                createdAt?: string;
                             }[];
                         };
                     };
