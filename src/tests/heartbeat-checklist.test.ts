@@ -242,6 +242,28 @@ describe("Heartbeat Checklist", () => {
       expect(tasks.length).toBe(1);
     });
 
+    test("dedup: superseded heartbeat-checklist does not block a new task", async () => {
+      const lead = await createAgent({ name: "lead", isLead: true, status: "idle" });
+      await updateAgentProfile(lead.id, { heartbeatMd: "- Check tasks\n" });
+      await checkHeartbeatChecklist();
+      const previous = await getDbClient().get<{ id: string }>(
+        "SELECT id FROM agent_tasks WHERE taskType = 'heartbeat-checklist'",
+      );
+      expect(previous).toBeDefined();
+      await getDbClient().run("UPDATE agent_tasks SET status = 'superseded' WHERE id = ?", [
+        previous!.id,
+      ]);
+
+      await checkHeartbeatChecklist();
+
+      const tasks = await getDbClient().query<{ id: string; status: string }>(
+        "SELECT id, status FROM agent_tasks WHERE taskType = 'heartbeat-checklist'",
+      );
+      expect(tasks).toHaveLength(2);
+      expect(tasks.find((task) => task.id === previous!.id)?.status).toBe("superseded");
+      expect(tasks.find((task) => task.id !== previous!.id)?.status).toBe("pending");
+    });
+
     test("created task includes system status with [auto-generated] labels", async () => {
       const lead = await createAgent({ name: "lead", isLead: true, status: "idle" });
       await updateAgentProfile(lead.id, {
@@ -425,6 +447,28 @@ describe("Heartbeat Checklist", () => {
         "SELECT * FROM agent_tasks WHERE taskType = 'boot-triage'",
       );
       expect(tasks.length).toBe(1);
+    });
+
+    test("dedup: superseded boot-triage does not block a new task", async () => {
+      const lead = await createAgent({ name: "lead", isLead: true, status: "idle" });
+      await updateAgentProfile(lead.id, { heartbeatMd: "- Check tasks\n" });
+      await createBootTriageTask();
+      const previous = await getDbClient().get<{ id: string }>(
+        "SELECT id FROM agent_tasks WHERE taskType = 'boot-triage'",
+      );
+      expect(previous).toBeDefined();
+      await getDbClient().run("UPDATE agent_tasks SET status = 'superseded' WHERE id = ?", [
+        previous!.id,
+      ]);
+
+      await createBootTriageTask();
+
+      const tasks = await getDbClient().query<{ id: string; status: string }>(
+        "SELECT id, status FROM agent_tasks WHERE taskType = 'boot-triage'",
+      );
+      expect(tasks).toHaveLength(2);
+      expect(tasks.find((task) => task.id === previous!.id)?.status).toBe("superseded");
+      expect(tasks.find((task) => task.id !== previous!.id)?.status).toBe("pending");
     });
 
     test("boot-triage has correct tags", async () => {

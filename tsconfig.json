@@ -13,10 +13,10 @@
     "moduleResolution": "bundler",
     "allowImportingTsExtensions": true,
 
-    // Path aliases
-    "baseUrl": ".",
+    // Path aliases. No `baseUrl`: TS 7 (tsgo) removed it, and relative
+    // `paths` resolve against this file in both TS 5 and TS 7.
     "paths": {
-      "@/*": ["src/*"]
+      "@/*": ["./src/*"]
     },
     "verbatimModuleSyntax": true,
     "noEmit": true,

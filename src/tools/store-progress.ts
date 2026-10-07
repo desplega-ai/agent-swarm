@@ -1,4 +1,3 @@
-import { ensure } from "@desplega.ai/business-use";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import {
@@ -32,6 +31,7 @@ import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/t
 import { AgentTaskStatusSchema, AttachmentInputSchema, isTerminalTaskStatus } from "@/types";
 import { scrubSecrets } from "@/utils/secret-scrubber";
 import { taskCitationIssues, taskCitationWarnings } from "@/utils/task-citations";
+import { ensure } from "../utils/business-use";
 
 // Phase 11: the `cost` / `costData` field was removed from this tool's input
 // schema. Adapters (claude/codex/pi/opencode/devin/claude-managed) are the

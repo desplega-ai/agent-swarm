@@ -138,6 +138,7 @@ Which credentials you need depends on your selected harness provider:
 |----------|----------|---------|-------------|
 | `ANTHROPIC_API_KEY` | One of* | — | Anthropic API key for Claude models via pi-mono |
 | `OPENROUTER_API_KEY` | One of* | — | OpenRouter API key for multi-provider model access |
+| `GOOGLE_API_KEY` or `GEMINI_API_KEY` | When `MODEL_OVERRIDE` starts with `google/` | — | Google AI API key for direct Google models. Either name is accepted |
 | `OPENROUTER_BASE_URL` | No | `https://openrouter.ai/api/v1` | OpenAI-compatible gateway used for OpenRouter model and summarizer traffic. Any chat-completions gateway works — see [Model Gateways](/docs/guides/provider-auth/model-gateways) |
 | `BEDROCK_AUTH_MODE` | No | inferred from `MODEL_OVERRIDE` | Optional Bedrock mode override. `sdk` uses the AWS SDK credential chain; `bearer` requires `AWS_BEARER_TOKEN_BEDROCK`. Both probe credentials and enumerate models |
 | `AWS_BEARER_TOKEN_BEDROCK` | In Bedrock bearer mode | — | Bedrock API key required when `BEDROCK_AUTH_MODE=bearer` |

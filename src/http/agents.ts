@@ -1,6 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { isAlias } from "@desplega/model-catalog";
-import { ensure } from "@desplega.ai/business-use";
 import { z } from "zod";
 import {
   computeContentHash,
@@ -65,6 +64,7 @@ import {
   RuntimeInstanceSchema,
   VersionableFieldSchema,
 } from "../types";
+import { ensure } from "../utils/business-use";
 import {
   type ClaudeTransport,
   isClaudeBridgeEffective,

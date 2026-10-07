@@ -25,6 +25,13 @@ unset $(git rev-parse --local-env-vars)
 
 FULL_RUN_PATHS='^(src/be/migrations/|templates/|bunfig\.toml$|bun\.lock)'
 
+# The push compares commits only. `bun run check` (scripts/check.sh) sets
+# PRE_PUSH_TESTS_INCLUDE_WORKTREE=1 so uncommitted edits count as changes too.
+diff_to=HEAD
+if [[ "${PRE_PUSH_TESTS_INCLUDE_WORKTREE:-}" == 1 ]]; then
+  diff_to=
+fi
+
 run_full_suite() {
   # Mirror merge-gate's shard boundaries so local load matches CI.
   bun run test:root -- --timeout 10000 --parallel=4 --shard=1/2
@@ -75,13 +82,13 @@ if ! base=$(git merge-base origin/main HEAD 2>/dev/null); then
   run_full_suite
 fi
 
-if git diff --name-only "$base" HEAD | grep -Eq "$FULL_RUN_PATHS"; then
+if git diff --name-only "$base" ${diff_to:+"$diff_to"} | grep -Eq "$FULL_RUN_PATHS"; then
   echo "[pre-push-tests] migrations/templates/bunfig/bun.lock changed; running the full suite"
   run_full_suite
 fi
 
-if git diff --name-only "$base" HEAD | grep -qx 'package.json' &&
-  git diff -U0 "$base" HEAD -- package.json |
+if git diff --name-only "$base" ${diff_to:+"$diff_to"} | grep -qx 'package.json' &&
+  git diff -U0 "$base" ${diff_to:+"$diff_to"} -- package.json |
     grep -E '^[+-]' |
     grep -vE '^(\+\+\+|---)' |
     grep -qvE '^[+-][[:space:]]*"version":'; then

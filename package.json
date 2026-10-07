@@ -1,6 +1,6 @@
 {
   "name": "@desplega.ai/agent-swarm",
-  "version": "1.164.0",
+  "version": "1.164.1",
   "description": "agent-swarm.dev — an open-source operating system for AI work: a lead agent breaks goals into tasks, routes them to specialized workers such as Claude Code or Codex, runs each worker in an isolated container, and preserves shared memory, tools, schedules, and review gates so delegated work compounds across sessions.",
   "keywords": [
     "agent-swarm.dev",
@@ -108,7 +108,9 @@
     "e2e:codex-oauth-blob": "bun scripts/e2e/codex-oauth-blob.ts",
     "e2e:tsc": "bun tsc --noEmit -p scripts/e2e/tsconfig.json",
     "prepack": "bun run build:cli",
-    "tsc:check": "bun tsc --noEmit",
+    "check": "bash scripts/check.sh",
+    "tsc:check": "tsgo --noEmit",
+    "tsc:check:tsc": "bun tsc --noEmit",
     "check:db-boundary": "bash scripts/check-db-boundary.sh",
     "check:test-spawn-sync": "bash scripts/check-test-spawn-sync.sh",
     "check:dep-graph": "depcruise src plugin/opencode-plugins packages/model-routing --config .dependency-cruiser.cjs",
@@ -181,6 +183,7 @@
     "@faker-js/faker": "^10.4.0",
     "@opencode-ai/plugin": "1.18.35",
     "@types/bun": "latest",
+    "@typescript/native-preview": "7.0.0-dev.20260707.2",
     "dependency-cruiser": "^18.0.0",
     "konsistent": "1.0.0-beta.1",
     "openapi-typescript": "^7",

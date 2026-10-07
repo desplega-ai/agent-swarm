@@ -1,6 +1,5 @@
 import { existsSync, statSync } from "node:fs";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
-import { ensure, initialize } from "@desplega.ai/business-use";
 import type { TemplateResponse } from "../../templates/schema.ts";
 import {
   type Attributes,
@@ -60,6 +59,7 @@ import {
 import { isApiDrainingResponse } from "../utils/api-drain.ts";
 import { getApiKey } from "../utils/api-key.ts";
 import { computeBudgetBackoffMs } from "../utils/budget-backoff.ts";
+import { ensure, initialize } from "../utils/business-use";
 import { isCodexAuthFailureReason } from "../utils/codex-auth-failure.ts";
 import { getMcpBaseUrl } from "../utils/constants.ts";
 import { getContextWindowSize } from "../utils/context-window.ts";

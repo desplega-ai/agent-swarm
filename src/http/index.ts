@@ -4,7 +4,6 @@ import {
   type Server,
   type ServerResponse,
 } from "node:http";
-import { ensure, initialize } from "@desplega.ai/business-use";
 import type { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { getEnabledCapabilities, hasCapability } from "@/server";
 import { initAgentMail } from "../agentmail";
@@ -57,6 +56,7 @@ import { initTelemetry, telemetry } from "../telemetry";
 import { startTelemetryTicker } from "../telemetry-snapshot";
 import { API_DRAINING_HEADER } from "../utils/api-drain";
 import { getApiKey } from "../utils/api-key";
+import { ensure, initialize } from "../utils/business-use";
 import { getMcpBaseUrl } from "../utils/constants";
 import { isEnvFlagEnabled } from "../utils/env-flag";
 import { scrubSecrets } from "../utils/secret-scrubber";
@@ -134,6 +134,7 @@ import {
   setCorsHeaders,
   warnIfCorsAllowsAnyOrigin,
   wireHttpSpanLifecycle,
+  writeUnhandledError,
 } from "./utils";
 import { handleWebhooks } from "./webhooks";
 import { handleWorkflowEvents } from "./workflow-events";
@@ -415,16 +416,7 @@ const httpServer = createHttpServer(async (req, res) => {
           span.recordException(err);
           span.setStatus({ code: 2, message: err instanceof Error ? err.message : String(err) });
         }
-        const message = err instanceof Error ? err.message : String(err);
-        console.error(
-          `[HTTP] ❌ ${req.method} ${safeRequestUrlForLog(req.url)} → ${scrubSecrets(message)}`,
-        );
-        if (!res.headersSent) {
-          res.writeHead(500, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ error: message }));
-        } else if (!res.writableEnded) {
-          res.end();
-        }
+        writeUnhandledError(res, err, req);
       }
     };
 

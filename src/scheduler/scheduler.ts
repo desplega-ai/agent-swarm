@@ -1,4 +1,3 @@
-import { ensure } from "@desplega.ai/business-use";
 import { CronExpressionParser } from "cron-parser";
 import { notifyAutomationPreflightFailure } from "@/automation-preflight-alert";
 import {
@@ -32,6 +31,7 @@ import { getExecutorRegistry as getWorkflowExecutorRegistry } from "@/workflows"
 import { startWorkflowExecution } from "@/workflows/engine";
 import type { ExecutorRegistry } from "@/workflows/executors/registry";
 import { handleScheduleTrigger } from "@/workflows/triggers";
+import { ensure } from "../utils/business-use";
 
 import {
   dispatchDeferredTaskWait,

@@ -3,7 +3,8 @@
 # downstream job behind a per-domain path filter. The `files` regexes below
 # mirror those filters so a push only runs a hook when files it actually
 # validates changed. Meta-only pushes (workflows, docs, runbooks, this config)
-# match nothing and run no hooks — same as CI skipping every gated job.
+# run only the match-all `gitleaks` hook — same as CI skipping every gated job
+# except `secret-scan`.
 #
 # Mechanics: with `always_run` unset (default false) + `pass_filenames = false`,
 # prek runs the whole-project entry once, but only if a pushed file matches
@@ -42,6 +43,7 @@ name = "TypeScript type check"
 language = "system"
 entry = "bun run tsc:check"
 # Same CI "lint" domain (tsc:check is bundled in the lint-and-typecheck job).
+# tsc:check runs tsgo; CI keeps `tsc --noEmit` (tsc:check:tsc) as the authority.
 files = '^(src/|apps/evals/|package\.json$|bun\.lock|bunfig\.toml$|tsconfig\.json$|biome\.json$)'
 pass_filenames = false
 stages = ["pre-push"]
@@ -105,6 +107,21 @@ files = '^(plugin/commands/|plugin/pi-skills/|plugin/build-pi-skills\.ts$)'
 pass_filenames = false
 stages = ["pre-push"]
 
+[[repos.hooks]]
+id = "gitleaks"
+name = "Secret scan (gitleaks, commits since origin/main)"
+language = "system"
+# Same pinned, checksum-verified binary as the CI `secret-scan` job. Scans
+# commits since the merge base with origin/main, findings redacted. If the
+# download host is down, `SKIP=gitleaks git push`; CI stays authoritative.
+# Never --no-verify.
+entry = "bash scripts/gitleaks.sh"
+# Any pushed file can carry a secret, like the ungated CI job.
+files = '.'
+pass_filenames = false
+stages = ["pre-push"]
+fail_fast = true
+
 [[repos]]
 repo = "local"
 
@@ -121,7 +138,7 @@ stages = ["pre-push"]
 id = "ui-typecheck"
 name = "UI TypeScript type check"
 language = "system"
-entry = "bash -c 'cd apps/ui && bunx tsc -b'"
+entry = "bash -c 'cd apps/ui && bunx tsgo -b'"
 files = "^apps/ui/"
 pass_filenames = false
 stages = ["pre-push"]
