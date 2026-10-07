@@ -14,7 +14,7 @@
 import { isEnvFlagEnabled } from "../utils/env-flag";
 import { hasLeadEquivalence } from "./elevated-agents";
 import type { PermissionVerb } from "./permissions";
-import type { RbacPrincipal, RbacResource } from "./types";
+import type { RbacResource, RbacRulePrincipal } from "./types";
 
 export type LegacyRule = {
   /** Stable rule identifier — surfaces in audit rows and debug output. */
@@ -22,13 +22,13 @@ export type LegacyRule = {
   /** Human-readable reason attached to deny decisions. */
   denyReason: string;
   /** Pure predicate — true = allow. Never touches the DB. */
-  evaluate: (principal: RbacPrincipal, resource: RbacResource | undefined) => boolean;
+  evaluate: (principal: RbacRulePrincipal, resource: RbacResource | undefined) => boolean;
 };
 
 // ── Named rules (research §3 Rule column) ────────────────────────────────────
 
 /** Lead agents, plus extension system agents registered as lead-equivalent. */
-function actsAsLead(principal: RbacPrincipal): boolean {
+function actsAsLead(principal: RbacRulePrincipal): boolean {
   return principal.kind === "agent" && (principal.isLead || hasLeadEquivalence(principal.agentId));
 }
 

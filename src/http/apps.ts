@@ -671,6 +671,9 @@ async function authorizeApp(
   } else if (auth?.kind === "user") {
     principal = { kind: "user", userId: auth.userId };
     actor = `user:${auth.userId}`;
+  } else if (auth?.kind === "guest") {
+    principal = { kind: "guest" };
+    actor = "guest";
   } else {
     const agent = myAgentId ? await getAgentById(myAgentId) : null;
     principal = { kind: "agent", agentId: myAgentId ?? "", isLead: agent?.isLead ?? false };

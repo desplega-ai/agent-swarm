@@ -168,6 +168,38 @@ describe("buffer + flush persistence", () => {
     expect(denyRow?.reason).toBeTruthy();
   });
 
+  test("persists a mixed batch with a guest denial and an operator decision", async () => {
+    setAuditSink(enqueueAuditRow);
+
+    const operator = can({
+      principal: { kind: "operator" },
+      verb: "models.catalog.write",
+      source: "http",
+    });
+    const guest = can({
+      principal: { kind: "guest" },
+      verb: "models.catalog.write",
+      source: "http",
+    });
+    expect(operator.allow).toBe(true);
+    expect(guest.allow).toBe(false);
+
+    await flushAuditBuffer();
+
+    const rows = await selectAuditRows();
+    expect(rows.length).toBe(2);
+    expect(rows.find((r) => r.principalType === "operator")).toMatchObject({
+      principalId: null,
+      verb: "models.catalog.write",
+      decision: "allow",
+    });
+    expect(rows.find((r) => r.principalType === "guest")).toMatchObject({
+      principalId: null,
+      verb: "models.catalog.write",
+      decision: "deny",
+    });
+  });
+
   test("auto-flushes at the 200-row threshold without the interval writer", async () => {
     for (let i = 0; i < 200; i++) {
       enqueueAuditRow(

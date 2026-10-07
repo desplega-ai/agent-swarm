@@ -64,6 +64,7 @@ async function requestMayReadSecrets(req: IncomingMessage): Promise<boolean> {
       source: "http",
     }).allow;
   }
+  if (auth?.kind === "guest") return false;
   // Preserve legacy reads without a user or session-token principal.
   if (auth?.kind !== "user") return true;
   if (!isRbacEnabled()) return true;
@@ -102,6 +103,10 @@ export async function ensureConfigAdmin(
 ): Promise<boolean> {
   const auth = getRequestAuth(req);
   if (auth?.kind === "operator" || auth?.kind === "user") return true;
+  if (auth?.kind === "guest") {
+    jsonError(res, "Forbidden", 403);
+    return false;
+  }
   const agentId = auth?.kind === "agent" ? auth.agentId : singleHeader(req, "x-agent-id");
   const agent = agentId ? await getAgentById(agentId) : undefined;
   const decision = can({

@@ -28,9 +28,10 @@ export function clearAuditSink(): void {
 
 export function can(check: RbacCheck): RbacDecision {
   const rule = LEGACY_POLICY[check.verb];
-  const decision: RbacDecision = rule.evaluate(check.principal, check.resource)
-    ? { allow: true }
-    : { allow: false, reason: rule.denyReason, missing: check.verb };
+  const decision: RbacDecision =
+    check.principal.kind !== "guest" && rule.evaluate(check.principal, check.resource)
+      ? { allow: true }
+      : { allow: false, reason: rule.denyReason, missing: check.verb };
 
   if (auditSink) {
     try {

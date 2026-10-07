@@ -606,6 +606,8 @@ describe("script connections", () => {
       markMigrationApplied(database, "195_approval_request_approvals.sql");
       // 196 alters skills, which this migration-112-only fixture does not create.
       markMigrationApplied(database, "196_skill_invocations.sql");
+      // 198 rebuilds permission_audit, which this migration-112-only fixture does not create.
+      markMigrationApplied(database, "198_permission_audit_guest.sql");
 
       const id = crypto.randomUUID();
       const now = new Date().toISOString();

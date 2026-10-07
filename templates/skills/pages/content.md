@@ -454,7 +454,9 @@ with a custom `swarm.call` action handler. Action shape:
 `swarm.call` dispatches through the SPA's bearer (for `app_url` loads) or
 the page-session cookie (for direct `api_url` loads). The endpoint must be
 a valid swarm API path. User-token sessions retain user authorization.
-Operator and password sessions retain deployment-level API access.
+Operator-launched sessions retain deployment-level API access. Password
+sessions are guests: they reach only their own page record and KV, so
+`swarm.call` to any other endpoint returns 403.
 
 See the `@json-render/core` docs for the supported node types (`text`,
 `button`, `input`, `card`, etc.).
@@ -462,8 +464,9 @@ See the `@json-render/core` docs for the supported node types (`text`,
 ## Security & Blast Radius
 
 - User-token launches retain the signed viewer identity and its API permissions.
-- Operator and password sessions are guests with deployment-level API access.
-  They do not inherit the page author's agent identity. Review actions before sharing these pages.
+- Operator launches keep deployment-level API access. They do not inherit the page author's agent identity.
+- Password sessions are guests. Through the proxy they reach only `GET pages/<own id>` (without
+  `passwordHash`) and the page's own KV. Every other route returns 403, and every RBAC verb denies a guest.
 - Browser SDK memory operations use the page owner's agent scope through verified page execution context.
   Viewer authentication, permissions, and audit identity remain separate from this resource scope.
 - Treat agent-generated HTML / JSON like trusted code — the agent already
@@ -473,7 +476,8 @@ See the `@json-render/core` docs for the supported node types (`text`,
 - HTML pages render inside a sandboxed iframe with
   `sandbox="allow-scripts allow-forms allow-same-origin"`. This limits
   some attack surface (no top-level navigation, no pointer-lock) but the
-  page still has full access to the SwarmSDK if cookies are present.
+  page still has the SwarmSDK access of its session: full for user and
+  operator sessions, page record and KV only for password guests.
 - All page bodies pass through `scrubSecrets` at the egress boundary
   (`/p/:id`, `/p/:id.json`, listing endpoint) — accidental secrets in
   the body get masked at serve time, not at write time. Don't rely on

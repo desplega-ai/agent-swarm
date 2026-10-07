@@ -84,11 +84,32 @@ describe("page-session viewer auth", () => {
     expect(forged?.page).toBeUndefined();
   });
 
-  test("guest sessions retain separate page execution context", async () => {
+  test("guest sessions resolve to guest", async () => {
     const session = await signPageSession({
       pageId: PAGE_ID,
       exp: Math.floor(Date.now() / 1000) + 3600,
       name: "guest-test",
+    });
+    const auth = await resolveHttpRequestAuth(
+      request({
+        authorization: `Bearer ${API_KEY}`,
+        "x-page-session": session,
+        "x-page-id": PAGE_ID,
+      }),
+      API_KEY,
+    );
+    expect(auth).toMatchObject({
+      kind: "guest",
+      page: { id: PAGE_ID, executionAgentId: PAGE_AGENT_ID },
+    });
+  });
+
+  test("operator-launched sessions stay operator", async () => {
+    const session = await signPageSession({
+      pageId: PAGE_ID,
+      exp: Math.floor(Date.now() / 1000) + 3600,
+      name: "guest-test",
+      op: true,
     });
     const auth = await resolveHttpRequestAuth(
       request({

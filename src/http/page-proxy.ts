@@ -150,6 +150,22 @@ function isSafeProxySuffix(suffix: string): boolean {
 }
 
 /**
+ * What a guest page session (a password-page cookie with no signed-in user) may
+ * reach. Everything else is refused before it is forwarded:
+ *   - `GET pages/<its own id>`: the page reads its own record.
+ *   - `kv`, `kv/*`: the page's key-value store. The KV handler pins every such
+ *     request to `task:page:<own id>` through the `X-Page-Id` header set below.
+ * Exported for tests.
+ */
+export function isGuestAllowedProxyPath(method: string, suffix: string, pageId: string): boolean {
+  const segments = suffix.split("/").map((seg) => decodeURIComponent(seg));
+  if (segments[0] === "kv") return true;
+  return (
+    method === "GET" && segments.length === 2 && segments[0] === "pages" && segments[1] === pageId
+  );
+}
+
+/**
  * Handle `/@swarm/api/*` requests. Returns `true` if the request was handled
  * (response sent), `false` if not — caller continues to the next handler.
  *
@@ -191,6 +207,12 @@ export async function handlePageProxy(req: IncomingMessage, res: ServerResponse)
     // Cookie was issued before the page was deleted. Treat as a stale session
     // rather than 404 so the client knows to refresh / re-launch.
     jsonError(res, "page session no longer valid", 401);
+    return true;
+  }
+
+  // A password-page session carries no user, so only the allowlist above is reachable.
+  if (!payload.uid && !payload.op && !isGuestAllowedProxyPath(method, suffix, page.id)) {
+    jsonError(res, "forbidden", 403);
     return true;
   }
 
