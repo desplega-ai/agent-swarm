@@ -2337,7 +2337,7 @@
       "pending": "unassigned: no batch yet scrubs this writer"
     },
     "source": {
-      "exempt": "enum or fixed-format value"
+      "pending": "arbitrary executable source: pending until a reviewed byte-exact storage contract exists. Redacting code would change what runs, so the canary drives it instead of skipping it"
     },
     "args": {
       "pending": "12c: script run writers"
@@ -2387,7 +2387,7 @@
       "exempt": "identifier"
     },
     "source": {
-      "exempt": "enum or fixed-format value"
+      "pending": "arbitrary executable source: pending until a reviewed byte-exact storage contract exists. Redacting code would change what runs, so the canary drives it instead of skipping it"
     },
     "description": {
       "pending": "unassigned: no batch yet scrubs this writer"
@@ -2431,7 +2431,7 @@
       "exempt": "identifier"
     },
     "source": {
-      "exempt": "enum or fixed-format value"
+      "pending": "arbitrary executable source: pending until a reviewed byte-exact storage contract exists. Redacting code would change what runs, so the canary drives it instead of skipping it"
     },
     "description": {
       "pending": "unassigned: no batch yet scrubs this writer"

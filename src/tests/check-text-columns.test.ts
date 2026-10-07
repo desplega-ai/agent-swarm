@@ -1,5 +1,6 @@
 import { Database } from "bun:sqlite";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { unlink } from "node:fs/promises";
 import { join } from "node:path";
 import {
   checkTextColumns,
@@ -7,8 +8,16 @@ import {
   TEXT_COLUMNS_PATH,
   type TextColumnClassification,
 } from "../../scripts/check-text-columns";
+import {
+  closeDb,
+  createAgent,
+  createTask,
+  getDbClient,
+  initDb,
+  updateTaskProgress,
+} from "../be/db";
 import { runMigrations } from "../be/migrations/runner";
-import { type ScrubbedText, scrubSecrets } from "../utils/secret-scrubber";
+import { type SyntheticSecret, syntheticSecret } from "./synthetic-secret-helpers";
 
 const repoRoot = join(import.meta.dir, "..", "..");
 
@@ -86,16 +95,51 @@ describe("TEXT-column classification check", () => {
       violations.some((v) => v.startsWith(`${firstTable}.${firstColumn}: invalid entry`)),
     ).toBe(true);
   });
+});
 
-  test("ScrubbedText is a plain string at runtime and only scrubSecrets produces it", () => {
-    const writer = (value: ScrubbedText): string => value;
-    const secret = `ghp_${"Z".repeat(36)}`;
-    const scrubbed = scrubSecrets(`token ${secret}`);
+describe("ScrubbedText at a production writer", () => {
+  const dbPath = "./test-check-text-columns-writer.sqlite";
+  let secret: SyntheticSecret;
 
-    expect(typeof scrubbed).toBe("string");
-    expect(writer(scrubbed)).not.toContain(secret);
-    expect(writer(scrubbed)).toContain("[REDACTED:");
-    // @ts-expect-error a raw string must not satisfy a ScrubbedText parameter
-    expect(writer(`token ${secret}`)).toContain(secret);
+  async function removeDbFiles(): Promise<void> {
+    for (const suffix of ["", "-wal", "-shm"]) {
+      try {
+        await unlink(dbPath + suffix);
+      } catch {}
+    }
+  }
+
+  beforeAll(async () => {
+    await removeDbFiles();
+    initDb(dbPath);
+    secret = syntheticSecret("textcol");
+  });
+
+  afterAll(async () => {
+    secret.cleanup();
+    closeDb();
+    await removeDbFiles();
+  });
+
+  test("a column classified scrubbed holds no secret after its real writer runs", async () => {
+    const committed = await loadCommitted();
+    expect(committed.agent_tasks?.progress).toBe("scrubbed");
+
+    const agent = await createAgent({
+      name: "text-columns-writer",
+      isLead: false,
+      status: "idle",
+      capabilities: [],
+    });
+    const task = await createTask(agent.id, "classification writer check");
+    await updateTaskProgress(task.id, `step 2 of 3 token=${secret.value} done`);
+
+    const row = await getDbClient().get<{ progress: string }>(
+      "SELECT progress FROM agent_tasks WHERE id = ?",
+      [task.id],
+    );
+    expect(row?.progress).toContain("step 2 of 3");
+    expect(row?.progress).toContain(`[REDACTED:${secret.name}]`);
+    expect(row?.progress.includes(secret.value)).toBe(false);
   });
 });
