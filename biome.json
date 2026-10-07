@@ -82,6 +82,23 @@
           }
         }
       }
+    },
+    {
+      "includes": ["src/**", "!src/utils/business-use.ts"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@desplega.ai/business-use": "Import from src/utils/business-use.ts instead: its ensure() scrubs secrets from event data before it leaves the process."
+                }
+              }
+            }
+          }
+        }
+      }
     }
   ]
 }

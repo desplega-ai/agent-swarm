@@ -75,11 +75,21 @@ function parseResourceAttributes(value = process.env.OTEL_RESOURCE_ATTRIBUTES): 
   return attributes;
 }
 
+// Span attributes can carry task text, tool arguments and error strings.
+// Scrub every string (and string array element) before it reaches the exporter.
+function scrubAttributeValue(value: AttributeValue): AttributeValue {
+  if (typeof value === "string") return scrubSecrets(value);
+  if (Array.isArray(value) && value.some((item) => typeof item === "string")) {
+    return (value as string[]).map((item) => scrubSecrets(item));
+  }
+  return value;
+}
+
 function cleanAttributes(attributes?: Attributes): Record<string, AttributeValue> | undefined {
   if (!attributes) return undefined;
   const cleaned: Record<string, AttributeValue> = {};
   for (const [key, value] of Object.entries(attributes)) {
-    if (value !== undefined) cleaned[key] = value;
+    if (value !== undefined) cleaned[key] = scrubAttributeValue(value);
   }
   return cleaned;
 }
@@ -112,7 +122,7 @@ function spanAdapter(span: Span): AdaptedSwarmSpan {
   return {
     [RAW_SPAN]: span,
     setAttribute(key, value) {
-      span.setAttribute(key, value);
+      span.setAttribute(key, scrubAttributeValue(value));
       return this;
     },
     setAttributes(attributes) {

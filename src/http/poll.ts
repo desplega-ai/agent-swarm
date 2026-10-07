@@ -1,5 +1,4 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { ensure } from "@desplega.ai/business-use";
 import { z } from "zod";
 import { isApiDraining } from "../be/api-drain";
 import { canClaim } from "../be/budget-admission";
@@ -46,6 +45,7 @@ import {
   UserCommsPrefsSchema,
   UserSchema,
 } from "../types";
+import { ensure } from "../utils/business-use";
 import { isMultiRuntimeEnabled } from "../utils/multi-runtime";
 import { getUserCommsPrefs } from "../utils/requester-comms";
 import { route, runtimeInstanceHeader } from "./route-def";
