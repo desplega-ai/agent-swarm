@@ -58,8 +58,15 @@ preinstalled executable.
   `rewriteEvent` logs those calls as `mcp__<server>__<tool>` with the inner
   input. The prompt response has no ACP `usage`: `promptCost` reads
   `_meta.usage` (input includes cache reads, output excludes reasoning,
-  `costUsdTicks` = 1e-10 USD) into `CostData`. An abort waits up to 3s for
+  `costUsdTicks` = 1e-10 USD) into `CostData`, and `_meta.usage.modelUsage`
+  into the per-model `models` rows. The row's model and its context window
+  come from `_meta.modelId`, the model that ran; on the OpenRouter route the
+  reported ids keep the `openrouter/` namespace. An abort waits up to 3s for
   the `cancelled` answer so its usage is kept.
+- **Models.** `harnessModelMismatch` judges grok at create, claim and spawn:
+  an `xai` id (bare, or `xai/` which the adapter drops), `openrouter/<id>` or
+  `latest:openrouter/...` passes; another vendor's id, namespace or alias is
+  refused, so an Anthropic or OpenAI task never reaches the xAI endpoint.
 - **Credentials.** Readiness is `XAI_API_KEY` or `OPENROUTER_API_KEY`; Test
   connection is `GET https://api.x.ai/v1/models` (OpenRouter's `/models` when
   only that key is set). `session/new` without a valid key answers

@@ -1,5 +1,13 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -9,6 +17,7 @@ import { ACPAdapter } from "../providers/acp-adapter";
 import {
   GROK_ISOLATION_ENV,
   grokPromptCost,
+  grokReportedModel,
   grokTargetProfile,
   resolveAcpTarget,
 } from "../providers/acp-targets";
@@ -83,7 +92,35 @@ async function startTokenStub(): Promise<{ server: Server; apiUrl: string }> {
  * its argv, the isolation env, the files in GROK_HOME and the `session/new`
  * params into `capture.json` in its cwd, then replays the fixture.
  */
-function writeFakeGrok(dir: string, mode: "ok" | "auth-required" | "wait-for-cancel"): string {
+/**
+ * The recorded prompt `_meta` plus a side-model call: a second `modelUsage`
+ * entry (grok-4.3) folded into the cumulative totals, the shape Grok sends
+ * when a fallback or side model runs inside one prompt.
+ */
+function promptMetaWithSideModel(dir: string): string {
+  const meta = JSON.parse(readFileSync(PROMPT_META, "utf8"));
+  const side = {
+    inputTokens: 2000,
+    outputTokens: 40,
+    totalTokens: 2050,
+    cachedReadTokens: 500,
+    cacheCreationTokens: 0,
+    reasoningTokens: 10,
+    modelCalls: 1,
+    costUsdTicks: 20000000,
+  };
+  for (const key of Object.keys(side) as (keyof typeof side)[]) meta.usage[key] += side[key];
+  meta.usage.modelUsage["grok-4.3"] = side;
+  const path = join(dir, "prompt-meta-two-models.json");
+  writeFileSync(path, JSON.stringify(meta));
+  return path;
+}
+
+function writeFakeGrok(
+  dir: string,
+  mode: "ok" | "auth-required" | "wait-for-cancel",
+  promptMeta = PROMPT_META,
+): string {
   const agentPath = join(dir, "fake-grok-agent.ts");
   writeFileSync(
     agentPath,
@@ -118,7 +155,7 @@ class FakeGrok {
     if (${JSON.stringify(mode)} === "wait-for-cancel") await new Promise((resolve) => { this.cancelled = resolve; });
     // Grok sends no ACP \`usage\`; its usage rides in \`_meta\`.
     const stopReason = ${JSON.stringify(mode)} === "wait-for-cancel" ? "cancelled" : "end_turn";
-    return { stopReason, _meta: JSON.parse(readFileSync(${JSON.stringify(PROMPT_META)}, "utf8")) };
+    return { stopReason, _meta: JSON.parse(readFileSync(${JSON.stringify(promptMeta)}, "utf8")) };
   }
   async cancel() { this.cancelled?.(); }
 }
@@ -155,18 +192,65 @@ describe("GrokAdapter", () => {
   });
 
   test("prompt cost reads Grok's _meta.usage; a BYOK model reports no USD", () => {
-    expect(grokPromptCost(undefined)).toBeUndefined();
-    expect(grokPromptCost({ totalTokens: 10 })).toBeUndefined();
-    const byok = grokPromptCost({
-      usage: { inputTokens: 1000, cachedReadTokens: 0, outputTokens: 5, modelCalls: 2 },
-    });
+    expect(grokPromptCost(undefined, "grok-4.6")).toBeUndefined();
+    expect(grokPromptCost({ totalTokens: 10 }, "grok-4.6")).toBeUndefined();
+    const byok = grokPromptCost(
+      { usage: { inputTokens: 1000, cachedReadTokens: 0, outputTokens: 5, modelCalls: 2 } },
+      "openrouter/acme/thing",
+    );
     expect(byok).toEqual({
+      model: "openrouter/acme/thing",
       inputTokens: 1000,
       cacheReadTokens: 0,
       cacheWriteTokens: 0,
       outputTokens: 5,
       reasoningOutputTokens: 0,
       numTurns: 2,
+    });
+  });
+
+  test("reported models keep the session's route namespace", () => {
+    expect(grokReportedModel("grok-build-0.1", "grok-4.6")).toBe("grok-build-0.1");
+    expect(grokReportedModel("xai/grok-4.3", "grok-4.6")).toBe("grok-4.3");
+    expect(grokReportedModel("deepseek/deepseek-v4.1-flash", "openrouter/acme/thing")).toBe(
+      "openrouter/deepseek/deepseek-v4.1-flash",
+    );
+    expect(
+      grokReportedModel("openrouter/deepseek/deepseek-v4.1-flash", "openrouter/acme/thing"),
+    ).toBe("openrouter/deepseek/deepseek-v4.1-flash");
+    // Per-model rows carry no reasoning field; the final model is the one that ran.
+    expect(
+      grokPromptCost(
+        {
+          modelId: "deepseek/deepseek-v4.1-flash",
+          usage: {
+            inputTokens: 100,
+            cachedReadTokens: 40,
+            outputTokens: 5,
+            reasoningTokens: 3,
+            modelUsage: {
+              "deepseek/deepseek-v4.1-flash": {
+                inputTokens: 100,
+                cachedReadTokens: 40,
+                outputTokens: 5,
+                reasoningTokens: 3,
+              },
+            },
+          },
+        },
+        "openrouter/acme/thing",
+      ),
+    ).toMatchObject({
+      model: "openrouter/deepseek/deepseek-v4.1-flash",
+      models: [
+        {
+          model: "openrouter/deepseek/deepseek-v4.1-flash",
+          inputTokens: 60,
+          cacheReadTokens: 40,
+          cacheWriteTokens: 0,
+          outputTokens: 8,
+        },
+      ],
     });
   });
 
@@ -191,7 +275,7 @@ describe("GrokAdapter", () => {
 
   test("runs a session as provider grok in an isolated GROK_HOME", async () => {
     const dir = makeTempDir();
-    const grok = writeFakeGrok(dir, "ok");
+    const grok = writeFakeGrok(dir, "ok", promptMetaWithSideModel(dir));
     const { server, apiUrl } = await startTokenStub();
     try {
       const config = baseConfig({
@@ -216,19 +300,40 @@ describe("GrokAdapter", () => {
 
       expect(result.isError).toBe(false);
       expect(result.output).toBe("1: grok-e2e-worker");
-      // `_meta.usage`: 134378 input incl. 109504 cached, 144 output + 1827
-      // reasoning, 507168000 ticks (1e-10 USD) over 6 model calls.
+      // `_meta.usage`: the recorded grok-build-0.1 usage (134378 input incl.
+      // 109504 cached, 144 output + 1827 reasoning, 507168000 ticks of 1e-10
+      // USD over 6 calls) plus one grok-4.3 side call. The task asked for
+      // grok-4.6; `_meta.modelId` says grok-build-0.1 ran, and the cost row
+      // says so too.
       expect(result.cost).toMatchObject({
         provider: "grok",
-        model: "grok-4.6",
-        inputTokens: 24874,
-        cacheReadTokens: 109504,
+        model: "grok-build-0.1",
+        inputTokens: 26374,
+        cacheReadTokens: 110004,
         cacheWriteTokens: 0,
-        outputTokens: 1971,
-        reasoningOutputTokens: 1827,
-        totalCostUsd: 0.0507168,
+        outputTokens: 2021,
+        reasoningOutputTokens: 1837,
+        totalCostUsd: 0.0527168,
         numTurns: 6,
       });
+      expect(result.cost?.models).toEqual([
+        {
+          model: "grok-build-0.1",
+          inputTokens: 24874,
+          cacheReadTokens: 109504,
+          cacheWriteTokens: 0,
+          outputTokens: 1971,
+          harnessCostUsd: 0.0507168,
+        },
+        {
+          model: "grok-4.3",
+          inputTokens: 1500,
+          cacheReadTokens: 500,
+          cacheWriteTokens: 0,
+          outputTokens: 50,
+          harnessCostUsd: 0.002,
+        },
+      ]);
 
       const init = events.find((e) => e.type === "session_init");
       expect(init).toMatchObject({ provider: "grok", sessionId: "grok-session-1" });
@@ -246,9 +351,10 @@ describe("GrokAdapter", () => {
       });
       expect(events.filter((e) => e.type === "tool_end")).toHaveLength(5);
       // No `usage_update`: the last model call's `_meta.totalTokens` is the snapshot.
+      // The window is grok-build-0.1's (256k), not the requested grok-4.6's (500k).
       expect(events.find((e) => e.type === "context_usage")).toMatchObject({
         contextUsedTokens: 25028,
-        contextTotalTokens: 500000,
+        contextTotalTokens: 256000,
         contextFormula: "harness-reported",
       });
 
@@ -320,7 +426,18 @@ describe("GrokAdapter", () => {
 
   test("runs an openrouter/ model as an OpenAI-compatible model on OPENROUTER_API_KEY", async () => {
     const dir = makeTempDir();
-    const grok = writeFakeGrok(dir, "ok");
+    // A BYOK route reports the endpoint's id and no ticks.
+    const metaPath = join(dir, "prompt-meta-openrouter.json");
+    const usage = { inputTokens: 900, cachedReadTokens: 100, outputTokens: 20, reasoningTokens: 0 };
+    writeFileSync(
+      metaPath,
+      JSON.stringify({
+        totalTokens: 920,
+        modelId: "google/gemini-3-flash-preview",
+        usage: { ...usage, numTurns: 1, modelUsage: { "google/gemini-3-flash-preview": usage } },
+      }),
+    );
+    const grok = writeFakeGrok(dir, "ok", metaPath);
     const { server, apiUrl } = await startTokenStub();
     const saved = process.env.XAI_API_KEY;
     delete process.env.XAI_API_KEY;
@@ -341,7 +458,19 @@ describe("GrokAdapter", () => {
       expect(result.cost).toMatchObject({
         provider: "grok",
         model: "openrouter/google/gemini-3-flash-preview",
+        inputTokens: 800,
+        totalCostUsd: 0,
       });
+      // The reported endpoint id keeps the openrouter/ namespace pricing reads.
+      expect(result.cost?.models).toEqual([
+        {
+          model: "openrouter/google/gemini-3-flash-preview",
+          inputTokens: 800,
+          cacheReadTokens: 100,
+          cacheWriteTokens: 0,
+          outputTokens: 20,
+        },
+      ]);
 
       const capture = JSON.parse(await Bun.file(join(config.cwd, "capture.json")).text());
       expect(capture.argv).toContain("openrouter/google/gemini-3-flash-preview");
@@ -362,6 +491,37 @@ describe("GrokAdapter", () => {
       );
     } finally {
       if (saved !== undefined) process.env.XAI_API_KEY = saved;
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  test("an xai/-qualified model runs as the bare xAI id", async () => {
+    const dir = makeTempDir();
+    const grok = writeFakeGrok(dir, "ok");
+    const { server, apiUrl } = await startTokenStub();
+    try {
+      const config = baseConfig({
+        apiUrl,
+        model: "xai/grok-4.6",
+        env: {
+          PATH: process.env.PATH ?? "",
+          HOME: makeTempDir(),
+          GROK_BINARY: grok,
+          XAI_API_KEY: "k",
+        },
+      });
+      const result = await (await new GrokAdapter().createSession(config)).waitForCompletion();
+      expect(result.isError).toBe(false);
+      const capture = JSON.parse(await Bun.file(join(config.cwd, "capture.json")).text());
+      expect(capture.argv).toEqual([
+        "agent",
+        "--no-leader",
+        "--always-approve",
+        "--model",
+        "grok-4.6",
+        "stdio",
+      ]);
+    } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
   });

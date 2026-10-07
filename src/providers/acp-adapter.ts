@@ -354,7 +354,7 @@ class ACPSession implements ProviderSession {
     usage?: Usage | null,
     responseMeta?: Record<string, unknown> | null,
   ): CostData {
-    const targetCost = this.target.promptCost?.(responseMeta);
+    const targetCost = this.target.promptCost?.(responseMeta, this.config.model);
     return {
       sessionId: this.sessionId,
       taskId: this.config.taskId,

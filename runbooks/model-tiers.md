@@ -115,7 +115,8 @@ A concrete `model` or `latest:` alias must also run on the harness that will run
 | `claude` | `anthropic` | an `anthropic` id that passes `isHarnessCatalogModel("claude", id)`, a Claude CLI shortname (`opus`, `sonnet`, ...), an optional `[1m]` suffix | `latest:anthropic/...` |
 | `claude-managed` | `anthropic` | same as `claude` | `latest:anthropic/...` |
 | `codex` | `openai` | an `openai` id that passes `isHarnessCatalogModel("codex", id)` | `latest:openai/...` |
-| `pi`, `opencode`, `grok` | none pinned | any catalog model, bare or provider-qualified | any |
+| `grok` | `xai` | a `grok-*` or `xai` id, bare or `xai/`-qualified (the adapter drops the prefix; the API catalog has no `xai` section, so `xai/<id>` needs `allowCustomModel`), or `openrouter/<vendor>/<id>`; another vendor's catalog id or namespace is refused | `latest:openrouter/...` |
+| `pi`, `opencode` | none pinned | any catalog model, bare or provider-qualified | any |
 | `dsh`, `cursor`, `devin`, `acp` | free-form | any string | any |
 | `amp` | none (`src/utils/amp-models.ts`) | a mode (`low`, `medium`, `high`, `ultra`) or a `provider/model` pin (for example `openai/gpt-5-nano`) | none |
 

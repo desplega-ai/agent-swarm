@@ -1,6 +1,8 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+// Bun has no temp-dir or recursive-delete API; file reads and writes use Bun.file/Bun.write.
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { normalizeGrokModel } from "@desplega/model-catalog";
 import { getOpenRouterBaseUrl } from "../utils/openrouter-base-url";
 import { registerVolatileSecret } from "../utils/secret-scrubber";
 import { ACPAdapter } from "./acp-adapter";
@@ -42,8 +44,9 @@ export function checkGrokCredentials(env: Record<string, string | undefined>): C
 export async function installedClaudePluginNames(home: string | undefined): Promise<string[]> {
   if (!home) return [];
   try {
-    const raw = await readFile(join(home, ".claude", "plugins", "installed_plugins.json"), "utf8");
-    const parsed = JSON.parse(raw) as { plugins?: Record<string, unknown> };
+    const parsed = (await Bun.file(
+      join(home, ".claude", "plugins", "installed_plugins.json"),
+    ).json()) as { plugins?: Record<string, unknown> };
     const ids = Object.keys(parsed.plugins ?? {});
     // Keys are `<plugin>@<marketplace>`; Grok matches on the plugin name.
     return [...new Set(ids.map((id) => id.split("@")[0] ?? "").filter(Boolean))];
@@ -131,7 +134,9 @@ export class GrokAdapter implements ProviderAdapter {
 
   private readonly acp = new ACPAdapter({ providerName: "grok", target: grokTargetProfile });
 
-  async createSession(config: ProviderSessionConfig): Promise<ProviderSession> {
+  async createSession(sessionConfig: ProviderSessionConfig): Promise<ProviderSession> {
+    // `xai/<id>` is the catalog's spelling of a bare xAI id; the CLI takes the bare one.
+    const config = { ...sessionConfig, model: normalizeGrokModel(sessionConfig.model) };
     const env = { ...process.env, ...config.env };
     const customModel = grokOpenRouterModel(config.model, env);
     const keyName = customModel ? "OPENROUTER_API_KEY" : "XAI_API_KEY";
@@ -149,12 +154,12 @@ export class GrokAdapter implements ProviderAdapter {
     // socket between tasks, and the config below applies to this run only.
     const grokHome = await mkdtemp(join(tmpdir(), "swarm-grok-"));
     try {
-      await writeFile(
+      await Bun.write(
         join(grokHome, "config.toml"),
         buildGrokConfigToml(await installedClaudePluginNames(env.HOME), customModel),
         { mode: 0o600 },
       );
-      await writeFile(join(grokHome, "requirements.toml"), GROK_REQUIREMENTS_TOML, {
+      await Bun.write(join(grokHome, "requirements.toml"), GROK_REQUIREMENTS_TOML, {
         mode: 0o600,
       });
       const session = await this.acp.createSession({

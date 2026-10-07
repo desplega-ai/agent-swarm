@@ -1,10 +1,11 @@
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { normalizeGrokModel } from "@desplega/model-catalog";
 import { clampContextPercent, getContextWindowSize } from "../utils/context-window";
 import { type AcpTarget, getAcpTargetCatalogEntry, isAcpTarget } from "./acp-target-catalog";
 import { applyReasoningEffort } from "./reasoning-effort";
-import type { CostData, ProviderEvent, ProviderSessionConfig } from "./types";
+import type { CostData, CostModelUsage, ProviderEvent, ProviderSessionConfig } from "./types";
 
 export interface AcpTargetProfile {
   /** An operator-selectable ACP target, or a first-class harness built on the ACP client. */
@@ -19,8 +20,11 @@ export interface AcpTargetProfile {
   describeError?(message: string): string | undefined;
   /** Rewrites a translated event for display, e.g. unwrapping a tool proxy. */
   rewriteEvent?(event: ProviderEvent): ProviderEvent;
-  /** Usage and cost the target reports in the `session/prompt` response `_meta`. */
-  promptCost?(meta: Record<string, unknown> | null | undefined): Partial<CostData> | undefined;
+  /** Usage, cost and the model that ran, from the `session/prompt` response `_meta`. */
+  promptCost?(
+    meta: Record<string, unknown> | null | undefined,
+    model: string,
+  ): Partial<CostData> | undefined;
   /** A context snapshot from the `session/prompt` response `_meta`, for targets without `usage_update`. */
   promptContext?(
     meta: Record<string, unknown> | null | undefined,
@@ -303,29 +307,86 @@ function finiteCount(value: unknown): number | undefined {
 const XAI_USD_TICKS = 10_000_000_000;
 
 /**
- * Grok answers `session/prompt` with `usage: null` and puts the prompt's
- * cumulative usage in `_meta.usage`. Its `inputTokens` include cache reads and
- * its `outputTokens` exclude reasoning, so both are converted to the swarm's
- * disjoint input and reasoning-inclusive output. `costUsdTicks` is what xAI
- * billed; a BYOK model (OpenRouter) reports none and is priced from the table.
+ * The swarm id of a model Grok reports (`_meta.modelId`, a `modelUsage` key)
+ * in a session started on `sessionModel`. An OpenRouter session only reaches
+ * OpenRouter, so its ids keep the `openrouter/` namespace pricing and context
+ * lookups need; an xAI session's ids are bare xAI ids.
  */
-export function grokPromptCost(
-  meta: Record<string, unknown> | null | undefined,
-): Partial<CostData> | undefined {
-  const usage = meta?.usage as Record<string, unknown> | undefined;
-  if (!usage || typeof usage !== "object") return undefined;
+export function grokReportedModel(reported: string, sessionModel: string): string {
+  const id = normalizeGrokModel(reported);
+  if (!isGrokOpenRouterModel(sessionModel) || isGrokOpenRouterModel(id)) return id;
+  return `openrouter/${id}`;
+}
+
+/** The model Grok says ran the prompt's last call, else the session's model. */
+function grokFinalModel(meta: Record<string, unknown> | null | undefined, model: string): string {
+  const reported = typeof meta?.modelId === "string" ? meta.modelId.trim() : "";
+  return reported ? grokReportedModel(reported, model) : normalizeGrokModel(model);
+}
+
+/**
+ * Grok's usage counts in the swarm's shape: its `inputTokens` include cache
+ * reads and its `outputTokens` exclude reasoning, so both are converted to the
+ * swarm's disjoint input and reasoning-inclusive output.
+ */
+function grokUsageCounts(usage: Record<string, unknown>) {
   const input = finiteCount(usage.inputTokens) ?? 0;
   const cacheRead = finiteCount(usage.cachedReadTokens) ?? 0;
   const reasoning = finiteCount(usage.reasoningTokens) ?? 0;
   const ticks = finiteCount(usage.costUsdTicks);
-  const turns = finiteCount(usage.numTurns) ?? finiteCount(usage.modelCalls);
   return {
     inputTokens: Math.max(0, input - cacheRead),
     cacheReadTokens: cacheRead,
     cacheWriteTokens: finiteCount(usage.cacheCreationTokens) ?? 0,
     outputTokens: (finiteCount(usage.outputTokens) ?? 0) + reasoning,
     reasoningOutputTokens: reasoning,
-    ...(ticks ? { totalCostUsd: ticks / XAI_USD_TICKS } : {}),
+    costUsd: ticks ? ticks / XAI_USD_TICKS : undefined,
+  };
+}
+
+/** `_meta.usage.modelUsage` as per-model rows, keyed by the swarm model id. */
+function grokModelUsage(usage: Record<string, unknown>, model: string): CostModelUsage[] {
+  const byModel = usage.modelUsage;
+  if (!byModel || typeof byModel !== "object" || Array.isArray(byModel)) return [];
+  const rows: CostModelUsage[] = [];
+  for (const [reported, entry] of Object.entries(byModel as Record<string, unknown>)) {
+    if (!reported.trim() || !entry || typeof entry !== "object") continue;
+    const {
+      costUsd,
+      reasoningOutputTokens: _,
+      ...counts
+    } = grokUsageCounts(entry as Record<string, unknown>);
+    rows.push({
+      model: grokReportedModel(reported, model),
+      ...counts,
+      ...(costUsd !== undefined ? { harnessCostUsd: costUsd } : {}),
+    });
+  }
+  return rows;
+}
+
+/**
+ * Grok answers `session/prompt` with `usage: null` and puts the prompt's
+ * cumulative usage in `_meta.usage`, split per model in `modelUsage` (a side
+ * model or a fallback shows up as its own entry). `_meta.modelId` names the
+ * model that ran, which can differ from the one requested. `costUsdTicks` is
+ * what xAI billed; a BYOK model (OpenRouter) reports none and is priced from
+ * the table, per model.
+ */
+export function grokPromptCost(
+  meta: Record<string, unknown> | null | undefined,
+  model: string,
+): Partial<CostData> | undefined {
+  const usage = meta?.usage as Record<string, unknown> | undefined;
+  if (!usage || typeof usage !== "object") return undefined;
+  const { costUsd, ...counts } = grokUsageCounts(usage);
+  const turns = finiteCount(usage.numTurns) ?? finiteCount(usage.modelCalls);
+  const models = grokModelUsage(usage, model);
+  return {
+    model: grokFinalModel(meta, model),
+    ...counts,
+    ...(models.length ? { models } : {}),
+    ...(costUsd !== undefined ? { totalCostUsd: costUsd } : {}),
     ...(turns ? { numTurns: turns } : {}),
   };
 }
@@ -333,7 +394,8 @@ export function grokPromptCost(
 /**
  * Grok sends no `usage_update`. The prompt response's top-level `_meta`
  * describes the last model call: `totalTokens` is its input (cache reads
- * included), output and reasoning, i.e. how full the context was at the end.
+ * included), output and reasoning, i.e. how full the context was at the end,
+ * and `modelId` is the model whose window that is.
  */
 export function grokPromptContext(
   meta: Record<string, unknown> | null | undefined,
@@ -341,7 +403,7 @@ export function grokPromptContext(
 ): Extract<ProviderEvent, { type: "context_usage" }> | undefined {
   const used = finiteCount(meta?.totalTokens);
   if (!used) return undefined;
-  const id = model.trim();
+  const id = grokFinalModel(meta, model);
   const total = getContextWindowSize(isGrokOpenRouterModel(id) ? id : `xai/${id}`);
   return {
     type: "context_usage",

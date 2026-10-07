@@ -9,7 +9,11 @@
  *
  * Pure module: no IO, no Bun APIs.
  */
-import { buildClaudeShortnameMap, type HarnessCatalogModel } from "./harness-models.ts";
+import {
+  buildClaudeShortnameMap,
+  type HarnessCatalogModel,
+  normalizeGrokModel,
+} from "./harness-models.ts";
 
 /** Closed, normalized enum. `minimal` stays out of scope; GPT-5.6 Codex adds `max`. */
 export const REASONING_EFFORT_LEVELS = ["off", "low", "medium", "high", "xhigh", "max"] as const;
@@ -42,14 +46,15 @@ export function dshCatalogRef(model: string): { providerId: string; modelId: str
 }
 
 /**
- * A grok model string is a bare xAI id (`grok-4.6`) or `openrouter/<vendor>/<id>`,
+ * A grok model string is a bare xAI id (`grok-4.6`, or `xai/grok-4.6`) or `openrouter/<vendor>/<id>`,
  * which the grok adapter registers as an OpenAI-compatible model on OpenRouter.
  */
 export function grokCatalogRef(model: string): { providerId: string; modelId: string } {
-  if (model.startsWith("openrouter/")) {
-    return { providerId: "openrouter", modelId: model.slice("openrouter/".length) };
+  const id = normalizeGrokModel(model);
+  if (id.startsWith("openrouter/")) {
+    return { providerId: "openrouter", modelId: id.slice("openrouter/".length) };
   }
-  return { providerId: "xai", modelId: model };
+  return { providerId: "xai", modelId: id };
 }
 
 /**

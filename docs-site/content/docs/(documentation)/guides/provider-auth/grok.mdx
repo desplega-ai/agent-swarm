@@ -29,7 +29,7 @@ A rejected key surfaces as `Grok rejected the credentials (XAI_API_KEY or OPENRO
 
 ## Models
 
-With an `XAI_API_KEY`, `grok models` lists xAI's text models: `grok-4.7`, `grok-4.6`, `grok-4.5`, `grok-4.3`, `grok-4.20-0309-reasoning`, `grok-4.20-0309-non-reasoning` (the CLI default) and `grok-build-0.1`. The picker shows all of them. It leaves out `grok-4.20-multi-agent-0309`, which takes no client tools, and the image and video models. A custom model id still works.
+With an `XAI_API_KEY`, `grok models` lists xAI's text models: `grok-4.7`, `grok-4.6`, `grok-4.5`, `grok-4.3`, `grok-4.20-0309-reasoning`, `grok-4.20-0309-non-reasoning` (the CLI default) and `grok-build-0.1`. The picker shows all of them. It leaves out `grok-4.20-multi-agent-0309`, which takes no client tools, and the image and video models. A custom model id still works. A grok worker refuses another vendor's model (`claude-opus-5-5`, `openai/gpt-5.6-sol`, `latest:anthropic/opus`) at task creation and claim: those run only as `openrouter/<vendor>/<id>`.
 
 | Tier | Model | Per 1M tokens (input / cache read / output) |
 |---|---|---|
@@ -79,7 +79,7 @@ The swarm prompt is appended to Grok's own system prompt (`session/new` `_meta.r
 
 ## Cost
 
-Grok answers each prompt without an ACP `usage` and puts the prompt's cumulative usage in `_meta.usage`: tokens, model calls and `costUsdTicks`, what xAI billed in units of 1e-10 USD. The adapter converts it to the swarm's shape: input without cache reads, output with reasoning tokens, and the billed USD. The API keeps that USD as the row's cost (`costSource: harness`), long-context rates included, and prices the per-model breakdown from the `grok` pricing rows (models.dev xAI rates).
+Grok answers each prompt without an ACP `usage` and puts the prompt's cumulative usage in `_meta.usage`: tokens, model calls and `costUsdTicks`, what xAI billed in units of 1e-10 USD. The adapter converts it to the swarm's shape: input without cache reads, output with reasoning tokens, and the billed USD. `_meta.modelId` names the model that ran, and `_meta.usage.modelUsage` splits the usage per model, so a side model or fallback gets its own row in the breakdown. The API keeps that USD as the row's cost (`costSource: harness`), long-context rates included, and prices the per-model breakdown from the `grok` pricing rows (models.dev xAI rates).
 
 An OpenRouter model reports tokens but no USD, so the API prices it from the OpenRouter rates (`costSource: pricing-table`). See [Cost and context computation](/docs/guides/cost-and-context-computation).
 
