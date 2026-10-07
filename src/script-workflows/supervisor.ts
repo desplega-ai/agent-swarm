@@ -1,11 +1,13 @@
 import {
   getRunningScriptRuns,
   getScriptRun,
+  getScriptRunExecutionArgs,
   updateScriptRun,
   updateScriptRunIfRunning,
 } from "../be/db";
 import type { ScriptRun } from "../types";
 import { getApiKey } from "../utils/api-key";
+import { scrubSecrets } from "../utils/secret-scrubber";
 import {
   localProcessScriptExecutor,
   type ScriptExecutionHandle,
@@ -44,7 +46,10 @@ export async function startScriptRunProcess(
     );
   }
 
-  const execution = await scriptExecutor.start({ run, baseUrl, apiKey });
+  // `run.args` is the redacted view; launch with the exact sealed value.
+  const sealedArgs = await getScriptRunExecutionArgs(run.id);
+  const args = sealedArgs === undefined ? run.args : sealedArgs;
+  const execution = await scriptExecutor.start({ run: { ...run, args }, baseUrl, apiKey });
   managed.set(run.id, { execution });
   await updateScriptRun(run.id, {
     status: "running",
@@ -57,8 +62,12 @@ export async function startScriptRunProcess(
       const current = await getScriptRun(run.id);
       if (current && current.status === "running") {
         if (exitCode !== 0) {
+          // Script stderr can echo whatever the script printed; scrub at the
+          // log egress. The `error` column below is scrubbed by the DB writer.
           console.error(
-            `[script-workflows] run ${run.id} subprocess exited ${exitCode}: ${stderr.trim() || "(no stderr)"}`,
+            scrubSecrets(
+              `[script-workflows] run ${run.id} subprocess exited ${exitCode}: ${stderr.trim() || "(no stderr)"}`,
+            ),
           );
         }
         // Guarded write: the read above is followed by an await, so the

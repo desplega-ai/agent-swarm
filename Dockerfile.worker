@@ -123,7 +123,7 @@ RUN if ! gh extension install github/gh-stack; then \
     fi
 
 # Install Claude CLI (pinned version — bump ARG to update)
-ARG CLAUDE_CODE_VERSION=2.1.292
+ARG CLAUDE_CODE_VERSION=2.1.293
 USER root
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache \
     npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} \
@@ -149,7 +149,7 @@ ENV PI_PACKAGE_DIR=/usr/lib/node_modules/@earendil-works/pi-coding-agent
 # Install Codex CLI (alternative harness, selected via HARNESS_PROVIDER=codex)
 # Pinned version must match direct @openai/codex in package.json. Enforced by
 # scripts/check-codex-default-model.sh and the CI merge gate.
-ARG CODEX_VERSION=0.160.1
+ARG CODEX_VERSION=0.161.0
 USER root
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache \
     npm install -g @openai/codex@${CODEX_VERSION} \
@@ -582,9 +582,9 @@ RUN curl -fsSL "https://registry.npmjs.org/@deepseek-ai/dsh/-/dsh-${DSH_VERSION}
 # "disabled". Bump AMP_VERSION, both SHA-512 pins and AMP_PACKAGE in
 # src/providers/amp-adapter.ts together. The vendor licence is proprietary
 # (https://ampcode.com/terms): confirm it before publishing this image.
-ARG AMP_VERSION=0.0.1791360091-gfb32ce
-ARG AMP_SHA512_AMD64=ad78bf7f0d5a130d8df99fc1fa6e4f75e94d4a92648d3dcb6b688c0376baadeba9a8e9e056bcb2f17e17c4ba28c275f8790ff15d52be5a60c0f87f2604c75b36
-ARG AMP_SHA512_ARM64=5448953e44de9dbfff3118417ca605958c106bf8ec657b96de6004d2122949aa9cf679927c8ad5d47a0c286d3cb752bc5c5ca243a3f2d4f019d9014090a73e95
+ARG AMP_VERSION=0.0.1791403257-g05ffa9
+ARG AMP_SHA512_AMD64=4bfd29a7cc0135e7f4a40f2f77ef77e99b3d88e9a49a29b96e7bd60cb45d76e37f473289cc2a86c0770150bff1ad21a04d135e8f60279fbb4b55ae11f852db93
+ARG AMP_SHA512_ARM64=af0b9893754f59af2f63ac0873d5e0725123011350fa1f92ec9673d9e38c149afddba1e174161471d209ccf8e96a0e5e22bee662b2f8d9e57e78e40543033a06
 RUN case "$TARGETARCH" in \
       amd64) amp_platform=linux-x64; amp_sha512="$AMP_SHA512_AMD64" ;; \
       arm64) amp_platform=linux-arm64; amp_sha512="$AMP_SHA512_ARM64" ;; \
@@ -600,7 +600,7 @@ RUN case "$TARGETARCH" in \
 # carries its JS. Its native helpers (ripgrep, tree-sitter) ship in a platform
 # package the binary cannot embed, so install it here and point the SDK at it.
 # Bump CURSOR_SDK_VERSION with package.json and src/providers/cursor-adapter.ts.
-ARG CURSOR_SDK_VERSION=1.0.36
+ARG CURSOR_SDK_VERSION=1.0.37
 RUN case "$TARGETARCH" in \
       amd64) cursor_platform="linux-x64" ;; \
       arm64) cursor_platform="linux-arm64" ;; \
@@ -626,6 +626,20 @@ RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
     && ln -sf /opt/gemini-cli/node_modules/.bin/gemini /usr/local/bin/gemini \
     && test "$(HOME=/tmp/gemini-home gemini --version)" = "${GEMINI_CLI_VERSION}" \
     && rm -rf /tmp/npm-cache /tmp/gemini-home /root/.npm /root/.cache /root/.gemini
+# GitHub Copilot CLI, the `copilot` ACP target (HARNESS_PROVIDER=acp,
+# ACP_TARGET=copilot; `copilot --acp`). Proprietary: its LICENSE.md allows
+# redistributing unmodified copies as part of an application that does more
+# than the CLI, with that licence included. npm keeps LICENSE.md in the
+# package dir; the copy under /usr/share/doc makes it easy to find. The adapter
+# sets COPILOT_AUTO_UPDATE=false, so the pinned binary is the one that runs.
+ARG COPILOT_CLI_VERSION=1.0.93
+RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
+      --prefix /opt/copilot-cli --no-audit --no-fund "@github/copilot@${COPILOT_CLI_VERSION}" \
+    && ln -sf /opt/copilot-cli/node_modules/.bin/copilot /usr/local/bin/copilot \
+    && mkdir -p /usr/share/doc/github-copilot-cli \
+    && cp /opt/copilot-cli/node_modules/@github/copilot/LICENSE.md /usr/share/doc/github-copilot-cli/LICENSE.md \
+    && HOME=/root COPILOT_AUTO_UPDATE=false copilot --version | grep -F "${COPILOT_CLI_VERSION}" \
+    && rm -rf /tmp/npm-cache /root/.npm /root/.cache /root/.copilot
 
 # Grok CLI (xAI, Apache-2.0). Its npm platform package carries one
 # brotli-compressed native binary that the wrapper's postinstall unpacks (and

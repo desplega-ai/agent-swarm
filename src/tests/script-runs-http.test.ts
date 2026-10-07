@@ -14,12 +14,17 @@ import {
   initDb,
   updateScriptRun,
 } from "../be/db";
+import { configSecretName, registerStoredSecret } from "../be/secret-registry";
 import { handleCore } from "../http/core";
 import { handleScriptRuns } from "../http/script-runs";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import { localProcessScriptExecutor } from "../script-workflows/executor";
 import { setScriptRunExecutor } from "../script-workflows/supervisor";
-import { refreshSecretScrubberCache } from "../utils/secret-scrubber";
+import {
+  clearVolatileSecretsForTesting,
+  refreshSecretScrubberCache,
+} from "../utils/secret-scrubber";
+import { randomToken } from "./synthetic-secret-helpers";
 
 const TEST_DB_PATH = "./test-script-runs-http.sqlite";
 const API_KEY = "example-test-script-runs-http-key-1234567890";
@@ -194,6 +199,11 @@ describe("/api/script-runs HTTP", () => {
         body: createBody({ background: true }),
       });
       expect(created.status).toBe(201);
+      // The launch is fire-and-forget and reads the sealed args before it
+      // starts the executor, so it can land after the response.
+      for (let i = 0; i < 50 && spawnedWith.length === 0; i++) {
+        await Bun.sleep(20);
+      }
       expect(spawnedWith).toEqual(["http://swarm-internal.example.test:3013"]);
     } finally {
       setScriptRunExecutor(localProcessScriptExecutor);
@@ -301,6 +311,54 @@ describe("/api/script-runs HTTP", () => {
       status: "failed",
       error: "agent-task implement failed: Agent task failed (taskId task-9)",
     });
+  });
+
+  test("redacts journal config/error and run output/error posted by the harness", async () => {
+    const token = ["ghp", randomToken(36)].join("_");
+    const created = await dispatch("/api/script-runs", {
+      method: "POST",
+      agentId,
+      body: createBody(),
+    });
+    const { id } = (await created.json()) as { id: string };
+
+    const recorded = await dispatch(`/api/internal/script-runs/${id}/steps`, {
+      method: "POST",
+      agentId,
+      body: JSON.stringify({
+        stepKey: "deploy",
+        stepType: "agent-task",
+        config: { task: `deploy with ${token}` },
+        status: "failed",
+        error: `deploy failed: bad credential ${token}`,
+      }),
+    });
+    expect(recorded.status).toBe(201);
+    const step = await getDbClient().get<{ config: string; error: string }>(
+      "SELECT config, error FROM script_run_journal WHERE runId = ?",
+      [id],
+    );
+    for (const value of [step?.config, step?.error]) {
+      expect(value).toBeString();
+      expect(value!.includes(token)).toBe(false);
+      expect(value!).toContain("[REDACTED:");
+    }
+    expect(step!.error).toContain("deploy failed: bad credential");
+    expect((JSON.parse(step!.config) as { task: string }).task).toContain("deploy with");
+
+    await updateScriptRun(id, { status: "running" });
+    const status = await dispatch(`/api/internal/script-runs/${id}/status`, {
+      method: "POST",
+      agentId,
+      body: JSON.stringify({ status: "failed", error: `exit: ${token}` }),
+    });
+    expect(status.status).toBe(204);
+    const run = await getDbClient().get<{ error: string }>(
+      "SELECT error FROM script_runs WHERE id = ?",
+      [id],
+    );
+    expect(run!.error.includes(token)).toBe(false);
+    expect(run!.error).toContain("exit: [REDACTED:");
   });
 
   test("aborts the run when the journal step cap is exceeded", async () => {
@@ -572,5 +630,34 @@ describe("/api/script-runs HTTP", () => {
     const body = (await detail.json()) as { run: { status: string; error?: string } };
     expect(body.run.status).toBe("failed");
     expect(body.run.error).toBe("original failure");
+  });
+});
+
+describe("durable launch source with an embedded secret", () => {
+  test("is refused before the run row is written", async () => {
+    const value = `durable-${randomToken(32)}`;
+    const name = configSecretName("DURABLE_TOKEN");
+    registerStoredSecret(value, name);
+    try {
+      const before = await getDbClient().get<{ n: number }>(
+        "SELECT COUNT(*) AS n FROM script_runs",
+      );
+      const response = await dispatch("/api/script-runs", {
+        method: "POST",
+        agentId,
+        body: createBody({
+          source: `export default async function main() { return { auth: "${value}" }; }`,
+        }),
+      });
+      expect(response.status).toBe(400);
+      expect(response.text).not.toContain(value);
+      const body = (await response.json()) as { error: string; findings: { id: string }[] };
+      expect(body.error).toBe("source_contains_secret");
+      expect(body.findings.map((f) => f.id)).toEqual([name]);
+      const after = await getDbClient().get<{ n: number }>("SELECT COUNT(*) AS n FROM script_runs");
+      expect(after?.n).toBe(before?.n);
+    } finally {
+      clearVolatileSecretsForTesting();
+    }
   });
 });

@@ -12,7 +12,7 @@ Operational rules for editing or adding harness providers (claude, codex, openco
 | pi-mono | `pi` | `PiMonoAdapter` | In-process library; OpenRouter, Anthropic, or Amazon Bedrock (via `MODEL_OVERRIDE=amazon-bedrock/*` — see Bedrock auth below) |
 | Devin | `devin` | `DevinAdapter` | Cloud-managed via Cognition `/sessions` API |
 | Claude Managed | `claude-managed` | `ClaudeManagedAdapter` | Anthropic managed sandbox; SSE relay |
-| ACP | `acp` | `ACPAdapter` | Curated `opencode` or `gemini` preset, or a custom [Agent Client Protocol](https://agentclientprotocol.com) command. Session knobs such as model use `session/set_config_option` when advertised, with target-specific startup fallbacks. No swarm-side *model-provider* credential — the target owns its own model auth. The target receives a session-scoped `aseph_` token as the swarm MCP bearer, granting that agent's swarm MCP access for up to 24 hours, so point custom targets only at binaries you trust |
+| ACP | `acp` | `ACPAdapter` | Curated `opencode`, `gemini` and `copilot` presets or a custom [Agent Client Protocol](https://agentclientprotocol.com) command. Session knobs such as model use `session/set_config_option` when advertised, with target-specific startup fallbacks. No swarm-side *model-provider* credential — the target owns its own model auth. The target receives a session-scoped `aseph_` token as the swarm MCP bearer, granting that agent's swarm MCP access for up to 24 hours, so point custom targets only at binaries you trust |
 | DeepSeek Harness | `dsh` | `DshAdapter` | Spawns `dsh --profile headless --json` per task; OpenRouter or direct DeepSeek API. See [DeepSeek Harness](#deepseek-harness-dsh) below |
 | Amp | `amp` | `AmpAdapter` | Spawns `amp -x --stream-json --stream-json-input` per task; `AMP_API_KEY`; every thread is stored on ampcode.com. See [Amp](#amp-amp) below |
 | Cursor | `cursor` | `CursorAdapter` | In-process `@cursor/sdk` local runtime; inference on Cursor's hosted models with `CURSOR_API_KEY`. See [Cursor](#cursor-cursor) below |
@@ -233,7 +233,7 @@ and the installed CLI's top-level and headless help.
 
 Set `HARNESS_PROVIDER=cursor` and `CURSOR_API_KEY` (a Cursor user or
 service-account key; Team Admin keys do not work). The adapter runs
-`@cursor/sdk` (pinned `1.0.36`) in-process: `Agent.create` with the local
+`@cursor/sdk` (pinned `1.0.37`) in-process: `Agent.create` with the local
 runtime on the task's cwd, then one `agent.send` per run. The agent loop and
 its file and shell tools run in the worker; inference always runs on Cursor's
 hosted models and bills the key's Cursor plan.
@@ -336,6 +336,8 @@ The dashboard runtime editor is the preferred configuration path. Selecting ACP 
 OpenCode runs `opencode acp`. Before the first prompt, the adapter applies `MODEL_OVERRIDE` through ACP's advertised `model` config option. It also injects the model into `OPENCODE_CONFIG_CONTENT` before spawn, because the process environment cannot be changed after `session/new`; that startup value is the fallback when the target omits or rejects the protocol option. Missing or rejected options are logged and do not fail the session.
 
 Gemini runs `gemini --acp`. Gemini CLI 0.62.0 advertises no ACP `model` option, so `MODEL_OVERRIDE` reaches it as `GEMINI_MODEL` at spawn. Before spawn, the adapter writes the system prompt to a fresh `mkdtemp` directory outside the task `cwd` and sets `GEMINI_SYSTEM_MD` to that file; an empty prompt keeps Gemini's built-in one. The preset sets `GEMINI_CLI_TRUST_WORKSPACE=true` and forwards only the Gemini API key, Vertex AI and base-URL keys listed in `src/providers/acp-target-catalog.ts`. The full worker image pins the CLI with `GEMINI_CLI_VERSION` in `Dockerfile.worker`.
+
+Copilot runs `copilot --acp` (GitHub Copilot CLI, baked pinned into `worker-full-base` via `COPILOT_CLI_VERSION`; the entrypoint FATALs with an install hint when the binary is missing). Copilot advertises no `model` config option, so `MODEL_OVERRIDE` goes to `COPILOT_MODEL` before spawn. The env allowlist is `COPILOT_GITHUB_TOKEN`, the `COPILOT_PROVIDER_*` BYOK keys, `COPILOT_HOME`, `COPILOT_MODEL`, `GH_HOST`, and proxy vars; `GITHUB_TOKEN`/`GH_TOKEN` are deliberately not forwarded. `COPILOT_AUTO_UPDATE=false` is forced. BYOK with a model Copilot does not know needs `COPILOT_PROVIDER_MAX_PROMPT_TOKENS` set to the real window: the first turn is about 150k tokens of tool definitions, and the default budget rejects it. The CLI has no system-prompt flag: the adapter writes the prompt to `.github/instructions/agent-swarm.instructions.md` under a per-task tmp dir and prepends that dir to `COPILOT_CUSTOM_INSTRUCTIONS_DIRS` (verified on 1.0.93: extra dirs load `.github/instructions/*.instructions.md`, not `AGENTS.md`). No file in the task cwd is touched; `cleanupSystemPromptArtifact` removes the dir when the session ends or fails to start.
 
 Custom targets use `ACP_TARGET_COMMAND` plus JSON-array `ACP_TARGET_ARGS`. `ACP_TARGET_ENV_KEYS` is a JSON array of environment/config keys explicitly allowed into the child process; the adapter never forwards the complete resolved environment. `ACP_MODEL_ENV_KEY` optionally maps `MODEL_OVERRIDE` into a target-specific environment variable as its model fallback. `ACP_CONFIG_OPTIONS` is a JSON object of additional string or boolean ACP option values.
 

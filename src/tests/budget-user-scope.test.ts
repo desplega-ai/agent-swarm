@@ -181,23 +181,15 @@ async function callPoll(agentId: string): Promise<{
 }> {
   let status = 200;
   let bodyStr = "";
-  const headers: Record<string, string> = {};
-
   const req = {
     method: "GET",
     url: "/api/poll",
     headers: { "x-agent-id": agentId },
   } as unknown as Parameters<typeof handlePoll>[0];
-
   const res = {
-    setHeader(name: string, value: string) {
-      headers[name.toLowerCase()] = value;
-    },
-    writeHead(code: number, h?: Record<string, string>) {
+    setHeader() {},
+    writeHead(code: number) {
       status = code;
-      if (h) {
-        for (const [k, v] of Object.entries(h)) headers[k.toLowerCase()] = v;
-      }
     },
     end(body?: string) {
       bodyStr = body ?? "";
@@ -288,17 +280,11 @@ describe("user budget scope", () => {
     expect(result.allowed).toBe(true);
   });
 
-  test("/mcp-user task is refused at worker admission when user budget is spent", async () => {
+  test("/mcp-user task is refused when the Lead polls after the user budget is spent", async () => {
     const server = createMcpUserTestServer();
     const port = await listenOnFreePort(server, "127.0.0.1");
     try {
       const lead = await createAgent({ name: "lead", isLead: true, status: "idle", maxTasks: 1 });
-      const worker = await createAgent({
-        name: "worker",
-        isLead: false,
-        status: "idle",
-        maxTasks: 1,
-      });
       const user = await createUser({ name: "MCP Budget User", dailyBudgetUsd: 0.5 });
       await upsertBudget("user", user.id, 0.5);
       const token = await mintToken(user.id, "qa", ACTOR);
@@ -329,21 +315,21 @@ describe("user budget scope", () => {
       await createSessionCost({
         sessionId: `sess-${crypto.randomUUID()}`,
         taskId,
-        agentId: worker.id,
+        agentId: lead.id,
         totalCostUsd: 0.5,
         durationMs: 1000,
         numTurns: 1,
         model: "test-model",
       });
 
-      const firstPoll = await callPoll(worker.id);
+      const firstPoll = await callPoll(lead.id);
       expect(firstPoll.status).toBe(200);
       if ("error" in firstPoll.body) throw new Error("unexpected poll error");
       expect(firstPoll.body.trigger?.type).toBe("budget_refused");
       expect((firstPoll.body.trigger as { cause: string }).cause).toBe("user");
       expect((firstPoll.body.trigger as { userSpend: number }).userSpend).toBe(0.5);
       expect((firstPoll.body.trigger as { userBudget: number }).userBudget).toBe(0.5);
-      expect((await getTaskById(taskId))?.status).toBe("unassigned");
+      expect((await getTaskById(taskId))?.status).toBe("pending");
 
       const firstDedup = await getDbClient().get<{
         follow_up_task_id: string | null;
@@ -357,7 +343,7 @@ describe("user budget scope", () => {
       const firstFollowUpId = firstDedup?.follow_up_task_id;
       expect(firstFollowUpId ? (await getTaskById(firstFollowUpId))?.agentId : null).toBe(lead.id);
 
-      const secondPoll = await callPoll(worker.id);
+      const secondPoll = await callPoll(lead.id);
       expect(secondPoll.status).toBe(200);
       if ("error" in secondPoll.body) throw new Error("unexpected poll error");
       expect(secondPoll.body.trigger?.type).toBe("budget_refused");

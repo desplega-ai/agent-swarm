@@ -1,8 +1,10 @@
 import type { AutomationIntegrationId, ScheduledTask, Workflow } from "@/types";
 import { getSlackConfiguration, isSlackConfigured } from "../slack/config";
 import { isEnvFlagEnabled } from "../utils/env-flag";
+import { scrubSecrets } from "../utils/secret-scrubber";
 import { getDbClient } from "./db";
 import { getOAuthApp, getOAuthTokens } from "./db-queries/oauth";
+import { scrubJsonValue } from "./scrub-json";
 
 export type AutomationKind = "schedule" | "workflow";
 export type AutomationState = "running" | "needs_setup";
@@ -349,6 +351,9 @@ export async function recordSchedulePreflightFailure(
   failureReason: string,
   now: Date = new Date(),
 ): Promise<boolean> {
+  // Scrub before the same-day dedup compare: the stored message is scrubbed,
+  // so a raw reason would never match it and the dedup would stop working.
+  const message = scrubSecrets(failureReason);
   return await getDbClient().transaction(async (tx) => {
     const row = await tx.get<{ lastErrorAt: string | null; lastErrorMessage: string | null }>(
       "SELECT lastErrorAt, lastErrorMessage FROM scheduled_tasks WHERE id = ?",
@@ -356,7 +361,7 @@ export async function recordSchedulePreflightFailure(
     );
     if (!row) return false;
     if (
-      row.lastErrorMessage === failureReason &&
+      row.lastErrorMessage === message &&
       row.lastErrorAt?.slice(0, 10) === now.toISOString().slice(0, 10)
     ) {
       return false;
@@ -365,7 +370,7 @@ export async function recordSchedulePreflightFailure(
       `UPDATE scheduled_tasks
        SET lastErrorAt = ?, lastErrorMessage = ?, lastUpdatedAt = ?
        WHERE id = ?`,
-      [now.toISOString(), failureReason, now.toISOString(), scheduleId],
+      [now.toISOString(), message, now.toISOString(), scheduleId],
     );
     return true;
   });
@@ -404,8 +409,8 @@ export async function recordWorkflowPreflightFailure(input: {
         runId,
         input.workflowId,
         input.triggerType,
-        input.triggerData === undefined ? null : JSON.stringify(input.triggerData),
-        input.failureReason,
+        input.triggerData === undefined ? null : scrubJsonValue(input.triggerData),
+        scrubSecrets(input.failureReason),
         input.createdBy ?? null,
         timestamp,
         timestamp,

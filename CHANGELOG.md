@@ -6,6 +6,36 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.165.0] - 2026-10-07
+
+### Added
+- Users: one-click Connect to ChatGPT via single-use connector codes (#1903).
+- Dashboard: the `/connect` confirm step renders inline instead of in a dialog (#1944).
+- Docker: the dashboard is published as an nginx image (#1943).
+- ACP: a `gemini` ACP target that runs `gemini --acp` (#1956).
+- Workflows: OpenAI and Cloudflare clef providers for `system-one-decision` (#1945).
+- Logging: a process-wide console scrub at API and worker boot (#1921).
+- Repo: a show-me PR template with review map, risk and swarm provenance (#1937).
+
+### Changed
+- Pages: page sessions run under a guest principal (#1955).
+- CI: the merge queue skips the image load, typechecks with tsgo, and `bun run check` is the local inner loop (#1920); the HOL plugin scanner workflow is removed (#1950).
+- Worker image: amp re-pinned (#1931); dashboard image base `nginxinc/nginx-unprivileged` bumped (#1946).
+- Skills: vendored ai-toolbox skills re-synced to 77abe63 (#1942).
+- Docs: heartbeat spec synced (#1933).
+- Tests: Anthropic credentials are dropped from the test env (#1954).
+
+### Fixed
+- Credentials: pi and opencode presence-only credentials are honored (#1960).
+- MCP: tool results get a per-channel budget, spills carry a shape summary, and `kv-get` gains views (#1949).
+- Integrations: `*_DISABLE` flags use the shared env-flag parser (#1948).
+- Secret scrubbing: bare and case-insensitive keys, structured key-context rules, PEM blocks and URL credentials (#1916); Slack and WhatsApp sends are scrubbed at the client (#1919).
+- Scripts: background runs and codex keep-warm call back through the internal base URL (#1935).
+- Skills: Jira and Linear use OAuth bindings (#1929).
+- PR body check: fence and HTML comment state are tracked before the Swarm provenance section (#1938).
+- Dashboard: self-hosted support links are shown (#1936).
+- Heartbeat: every terminal status is excluded from deduplication (#1909).
+
 ## [1.164.1] - 2026-10-07
 
 ### Changed

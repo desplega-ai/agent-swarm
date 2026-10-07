@@ -29,6 +29,7 @@
 #        src/tools/join-swarm.ts    — registration-time lead assignment
 #                                     (increment-4 hardening surface)
 #        src/tools/send-task.ts     — target-shape guard (task TO lead)
+#                                     and user-ingress Lead availability.
 #        src/http/poll.ts           — lead-vs-worker trigger routing
 #   4. Principal-construction plumbing:
 #        src/http/kv.ts             — buildAuthCtx isLead local feeding can()
@@ -51,6 +52,7 @@ ALLOWED_PATTERNS=(
   'src/tools/join-swarm.ts|agents\.find\(\(agent\) => agent\.isLead\)'
   'src/tools/join-swarm.ts|agent\.isLead \? "Lead" : "Worker"'
   'src/tools/send-task.ts|if \(taskOptions\.routingAffinity\?\.leadOnly && !agent\.isLead\) \{'
+  'src/tools/send-task.ts|if \(ctx\.kind === "user" && \(!agent\.isLead \|\| agent\.status === "offline"\)\) \{'
   'src/http/poll.ts|if \(agent\??\.isLead\) \{'
   'src/http/kv.ts|let isLead = false;'
   'src/http/kv.ts|isLead = agent\?\.isLead === true;'

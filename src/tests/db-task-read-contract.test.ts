@@ -357,6 +357,7 @@ value:getScheduledTaskByName
 value:getScheduledTasks
 value:getScriptRun
 value:getScriptRunByIdempotencyKey
+value:getScriptRunExecutionArgs
 value:getScriptRunJournalStep
 value:getServiceByAgentAndName
 value:getServiceById

@@ -1,9 +1,14 @@
-import { mkdtemp } from "node:fs/promises";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { normalizeGrokModel } from "@desplega/model-catalog";
 import { clampContextPercent, getContextWindowSize } from "../utils/context-window";
-import { type AcpTarget, getAcpTargetCatalogEntry, isAcpTarget } from "./acp-target-catalog";
+import {
+  ACP_TARGET_IDS,
+  type AcpTarget,
+  getAcpTargetCatalogEntry,
+  isAcpTarget,
+} from "./acp-target-catalog";
 import { applyReasoningEffort } from "./reasoning-effort";
 import type { CostData, CostModelUsage, ProviderEvent, ProviderSessionConfig } from "./types";
 
@@ -14,6 +19,8 @@ export interface AcpTargetProfile {
   env(config: ProviderSessionConfig): Record<string, string>;
   configuredOptions(config: ProviderSessionConfig): Record<string, string | boolean>;
   writeSystemPromptArtifact(config: ProviderSessionConfig): Promise<void>;
+  /** Removes what writeSystemPromptArtifact wrote. Called once the session ends or fails to start. */
+  cleanupSystemPromptArtifact?(config: ProviderSessionConfig): Promise<void>;
   /** Target-specific `session/new` `_meta`. Targets without one send none. */
   sessionMeta?(config: ProviderSessionConfig): Record<string, unknown> | undefined;
   /** A clearer message for a target error whose own text misleads, else undefined. */
@@ -235,6 +242,63 @@ const geminiTargetProfile: AcpTargetProfile = {
     const path = join(directory, "system.md");
     await Bun.write(path, config.systemPrompt);
     geminiSystemPromptPaths.set(config, path);
+  },
+};
+
+/**
+ * Copilot CLI has no system-prompt flag. Under `--acp` it reads custom
+ * instructions from the git root, the cwd, and every directory listed in
+ * COPILOT_CUSTOM_INSTRUCTIONS_DIRS. Verified against 1.0.93: from those extra
+ * directories it loads `.github/instructions/*.instructions.md`, but not
+ * `AGENTS.md`. So the swarm prompt goes into a per-task directory outside the
+ * repo, and the repo's own AGENTS.md is never touched.
+ */
+export function copilotInstructionsDir(config: ProviderSessionConfig): string {
+  const key = new Bun.CryptoHasher("sha256")
+    .update(`${config.agentId}:${config.taskId}:${config.cwd}`)
+    .digest("hex")
+    .slice(0, 16);
+  return join(tmpdir(), "agent-swarm-copilot-instructions", key);
+}
+
+export const COPILOT_INSTRUCTIONS_FILE = join(
+  ".github",
+  "instructions",
+  "agent-swarm.instructions.md",
+);
+
+const copilotTargetProfile: AcpTargetProfile = {
+  target: "copilot",
+  command() {
+    const entry = getAcpTargetCatalogEntry("copilot");
+    return [entry.command!, ...(entry.args ?? [])];
+  },
+  env(config) {
+    const env = baseTargetEnv(config);
+    const entry = getAcpTargetCatalogEntry("copilot");
+    copyEnvKeys(config, env, entry.envKeys);
+    if (config.model.trim()) env.COPILOT_MODEL = config.model.trim();
+    // The image pins the CLI; a self-update would run an unpinned binary.
+    env.COPILOT_AUTO_UPDATE = "false";
+    const operatorDirs = readEnv(config, "COPILOT_CUSTOM_INSTRUCTIONS_DIRS")?.trim();
+    env.COPILOT_CUSTOM_INSTRUCTIONS_DIRS = [copilotInstructionsDir(config), operatorDirs]
+      .filter(Boolean)
+      .join(",");
+    return env;
+  },
+  configuredOptions,
+  async writeSystemPromptArtifact(config) {
+    const dir = copilotInstructionsDir(config);
+    await rm(dir, { recursive: true, force: true });
+    if (!config.systemPrompt) return;
+    await mkdir(join(dir, ".github", "instructions"), { recursive: true });
+    await Bun.write(
+      join(dir, COPILOT_INSTRUCTIONS_FILE),
+      `---\napplyTo: "**"\n---\n\n${config.systemPrompt}\n`,
+    );
+  },
+  async cleanupSystemPromptArtifact(config) {
+    await rm(copilotInstructionsDir(config), { recursive: true, force: true });
   },
 };
 
@@ -471,7 +535,7 @@ export function resolveAcpTarget(config: ProviderSessionConfig): AcpTargetProfil
   const target = readEnv(config, "ACP_TARGET") ?? "custom";
   if (!isAcpTarget(target)) {
     throw new AcpTargetResolutionError(
-      `Unsupported ACP target "${target}". Supported targets: opencode, gemini, custom.`,
+      `Unsupported ACP target "${target}". Supported targets: ${ACP_TARGET_IDS.join(", ")}.`,
     );
   }
   switch (target) {
@@ -479,6 +543,8 @@ export function resolveAcpTarget(config: ProviderSessionConfig): AcpTargetProfil
       return opencodeTargetProfile;
     case "gemini":
       return geminiTargetProfile;
+    case "copilot":
+      return copilotTargetProfile;
     case "custom":
       return customTargetProfile;
   }

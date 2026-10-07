@@ -40,6 +40,17 @@ export interface MemoryStore {
   deleteBySourcePath(sourcePath: string, agentId: string): Promise<number>;
   purgeExpired(): Promise<number>;
   updateEmbedding(id: string, embedding: Float32Array, model: string): Promise<void>;
+  /**
+   * Redact a row in place (boot retro-sweep). Writes only if the row still
+   * holds `before`; keeps FTS in sync and drops the embedding when the
+   * content changed so the re-embed backfill regenerates it. Returns whether
+   * the row was written.
+   */
+  rewriteForScrub(
+    id: string,
+    before: MemoryScrubFields,
+    after: MemoryScrubFields,
+  ): Promise<boolean>;
   getStats(agentId: string): Promise<MemoryStats>;
   getHealth(): MemoryHealth;
 }
@@ -47,6 +58,9 @@ export interface MemoryStore {
 // ============================================================================
 // Supporting types
 // ============================================================================
+
+/** The free-text `agent_memory` columns the boot retro-sweep redacts. */
+export type MemoryScrubFields = { name: string; content: string; summary: string | null };
 
 export interface MemoryInput {
   agentId: string | null;

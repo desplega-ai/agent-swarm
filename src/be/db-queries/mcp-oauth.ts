@@ -2,6 +2,7 @@ import { scrubSecrets } from "../../utils/secret-scrubber";
 import { decryptSecret, encryptSecret, getEncryptionKey } from "../crypto";
 import { normalizeDateRequired } from "../date-utils";
 import { getDbClient } from "../db";
+import { oauthSecretName, registerStoredSecret } from "../secret-registry";
 import {
   type OAuthAuthorizationStatus,
   updateAuthorizationTokens,
@@ -266,6 +267,10 @@ async function upsertMcpApp(input: {
     input.dcrClientSecret == null || input.dcrClientSecret === ""
       ? (existing?.clientSecret ?? null)
       : encryptSecret(input.dcrClientSecret, getEncryptionKey());
+  registerStoredSecret(
+    input.dcrClientSecret,
+    oauthSecretName(`mcp-${input.mcpServerId}`, "client_secret"),
+  );
   // MCP OAuth applications are DCR-owned storage rows even when the client
   // credentials were supplied manually or preregistered. Preserve that exact
   // distinction in metadata for the legacy adapter boundary.

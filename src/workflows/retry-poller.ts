@@ -11,6 +11,7 @@ import { checkpointStep, checkpointStepFailure, checkpointStepWaiting } from "./
 import { getSuccessors, resolveValidationPort } from "./definition";
 import {
   buildNodeInterpolationCtx,
+  failRunOnUnreadableReplay,
   holdWorkflowRun,
   interpolateNodeConfig,
   rehydrateCompletedStepOutputs,
@@ -200,11 +201,13 @@ export function startRetryPoller(registry: ExecutorRegistry, intervalMs = 5000):
             }
           } catch (err) {
             // Execution threw — treat as failure
+            if (await failRunOnUnreadableReplay(run.id, err, step.id)) continue;
             const errorMsg = err instanceof Error ? err.message : String(err);
             const retryPolicy = node.retry || executor.retryPolicy;
             await checkpointStepFailure(run.id, step.id, errorMsg, step.retryCount, retryPolicy);
           }
         } catch (err) {
+          if (await failRunOnUnreadableReplay(step.runId, err, step.id)) continue;
           console.error(`[workflows] Retry failed for step ${step.id}:`, err);
         } finally {
           release?.();

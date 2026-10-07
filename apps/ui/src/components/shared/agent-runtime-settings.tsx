@@ -148,7 +148,7 @@ function configuredAcpTarget(
   fallback: AcpTarget,
 ): AcpTarget {
   const target = configuredValue(configs, "ACP_TARGET");
-  return target === "opencode" || target === "gemini" || target === "custom" ? target : fallback;
+  return ACP_TARGET_CATALOG.some((entry) => entry.id === target) ? (target as AcpTarget) : fallback;
 }
 
 export function AgentRuntimeSettings({ agent }: { agent: Agent }) {

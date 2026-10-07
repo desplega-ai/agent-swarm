@@ -380,6 +380,15 @@ elif [ "$HARNESS_PROVIDER" = "acp" ]; then
     elif [ "$ACP_TARGET_ID" = "gemini" ]; then
         # Catalog command for the gemini target is `gemini --acp`.
         ACP_BIN="gemini"
+    elif [ "$ACP_TARGET_ID" = "copilot" ]; then
+        # Catalog command for the copilot target is `copilot --acp`. The full
+        # image bakes it; a slim or custom image must install it itself.
+        ACP_BIN="copilot"
+        if ! command -v "$ACP_BIN" > /dev/null 2>&1; then
+            echo "FATAL: ACP target binary not found: 'copilot' (ACP_TARGET='copilot'). Install GitHub Copilot CLI: npm install -g @github/copilot"
+            echo "  PATH=$PATH"
+            exit 1
+        fi
     elif [ "$ACP_TARGET_ID" = "custom" ]; then
         if [ -n "${ACP_TARGET_COMMAND+set}" ]; then
             ACP_BIN="$ACP_TARGET_COMMAND"
@@ -409,7 +418,7 @@ elif [ "$HARNESS_PROVIDER" = "acp" ]; then
             ACP_BIN=$(printf '%s' "$ACP_BIN" | awk '{print $1}')
         fi
     else
-        echo "FATAL: unsupported ACP target '$ACP_TARGET_ID'. Supported targets: opencode, gemini, custom."
+        echo "FATAL: unsupported ACP target '$ACP_TARGET_ID'. Supported targets: opencode, gemini, copilot, custom."
         echo "  PATH=$PATH"
         exit 1
     fi

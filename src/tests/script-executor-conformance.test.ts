@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { classifyExit, NativeScriptExecutor } from "../scripts-runtime/executors/native";
+import { QuickJSScriptExecutor } from "../scripts-runtime/executors/quickjs";
 import type {
   ExecutorInput,
   ExecutorOutput,
@@ -128,6 +129,8 @@ function conformance(name: string, makeExecutor: () => ScriptExecutor, spawns: b
 
 conformance("native", () => new NativeScriptExecutor(), true);
 conformance("fake", () => new FakeScriptExecutor(), false);
+// Worker threads and WASM, no Bun.spawn: runs even when the spawn probe fails.
+conformance("quickjs", () => new QuickJSScriptExecutor(), false);
 
 describe("native-only executor behavior", () => {
   test.skipIf(SKIP_SANDBOX_SPAWN_TESTS)("timeout maps to timeout", async () => {

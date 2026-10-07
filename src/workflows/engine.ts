@@ -20,6 +20,7 @@ import {
   updateWorkflowRun,
   updateWorkflowRunStep,
 } from "../be/db";
+import { WorkflowReplayStateError } from "../be/workflow-replay";
 import { telemetry } from "../telemetry";
 import type { Workflow, WorkflowDefinition, WorkflowNode, WorkflowRunStep } from "../types";
 import { checkpointStep, checkpointStepFailure, checkpointStepWaiting } from "./checkpoint";
@@ -226,6 +227,32 @@ const activeWalks = new Map<string, number>();
 // left behind is not mistaken for a live execution.
 const executingSteps = new Set<string>();
 
+/**
+ * Fail closed when a run's sealed replay state cannot be opened. Resuming from
+ * the scrubbed copy would feed redaction markers to downstream nodes, so the
+ * run (and `stepId`, when one was claimed) fails with the error instead.
+ * Returns false, writing nothing, for any other error.
+ */
+export async function failRunOnUnreadableReplay(
+  runId: string,
+  err: unknown,
+  stepId?: string,
+): Promise<boolean> {
+  if (!(err instanceof WorkflowReplayStateError)) return false;
+  const finishedAt = new Date().toISOString();
+  console.error(`[workflow] ${err.message}`);
+  if (stepId) {
+    await updateWorkflowRunStep(stepId, {
+      status: "failed",
+      error: err.message,
+      finishedAt,
+      nextRetryAt: null,
+    });
+  }
+  await updateWorkflowRun(runId, { status: "failed", error: err.message, finishedAt });
+  return true;
+}
+
 export function isWorkflowRunActive(runId: string): boolean {
   return activeWalks.has(runId);
 }
@@ -267,6 +294,8 @@ export async function walkGraph(
   const release = holdWorkflowRun(runId);
   try {
     await walkGraphOwned(def, runId, ctx, startNodes, registry, workflowId, secretKeys, options);
+  } catch (err) {
+    if (!(await failRunOnUnreadableReplay(runId, err))) throw err;
   } finally {
     release();
   }
@@ -374,10 +403,11 @@ async function walkGraphOwned(
     const results = await Promise.all(
       pendingNodes.map((node) =>
         executeStep(def, runId, ctx, node, registry, workflowId, secretKeys, options).catch(
-          (_err): StepResult => ({
-            outcome: "failed",
-            successors: [],
-          }),
+          async (err): Promise<StepResult> => {
+            // The run-status check below then stops the walk.
+            await failRunOnUnreadableReplay(runId, err);
+            return { outcome: "failed", successors: [] };
+          },
         ),
       ),
     );
@@ -742,6 +772,11 @@ async function executeStep(
       workflowId,
       options,
     );
+  } catch (err) {
+    if (await failRunOnUnreadableReplay(runId, err, dedup.stepId)) {
+      return { outcome: "failed", successors: [] };
+    }
+    throw err;
   } finally {
     executingSteps.delete(dedup.stepId);
   }
