@@ -122,15 +122,28 @@ jq '.findings | group_by(.ruleId) | map({rule: .[0].ruleId, count: length}) | so
 jq -r '.findings[] | [.ruleId, .severity, .filePath, (.lineNumber // "")] | @tsv' plugin-scanner.json
 ```
 
+## The local check loop
+
+`bun run check` (`scripts/check.sh`) is the inner loop. Run it before every push:
+
+1. `bun install --frozen-lockfile`
+2. Biome, read-only, on changed files in the CI lint scope (`src/`, `apps/evals/`, `apps/ui/`, `packages/ui-e2e/`, `packages/model-routing/`)
+3. tsgo on the root project, plus `apps/ui` (`tsgo -b`) when it changed
+4. `test:root` on the affected tests, using `scripts/pre-push-tests.sh` scoping and its full-suite fallbacks
+
+"Changed" means committed since the merge-base with `origin/main`, plus uncommitted and untracked edits. It stops at the first failure. It does not scan for secrets; the prek pre-push hooks own that.
+
+In Claude Code, the repo's `.claude/settings.json` also runs `biome format --write` on each edited file in that scope (`scripts/claude-format-on-edit.sh`). The hook always exits 0, so it never blocks an edit.
+
 ## The full local pre-push command
 
-Run this from the repo root before every push. It mirrors merge-gate exactly for the most common path (root code changes, possibly `apps/ui/`):
+Run this from the repo root before opening a PR. It mirrors merge-gate exactly for the most common path (root code changes, possibly `apps/ui/`):
 
 ```bash
 # Root project
-bun install --frozen-lockfile
-bun run lint            # NOT lint:fix — CI fails on warnings, not just errors
-bun run tsc:check
+bun run check           # frozen install, Biome on changed files, tsgo, affected tests
+bun run lint            # whole lint scope; NOT lint:fix — CI fails on warnings, not just errors
+bun run tsc:check:tsc   # tsc 5, the CI authority
 bun run test:root -- --parallel=4          # CI splits this into --shard=1/2 and --shard=2/2
 bun run check:bun-version
 bash scripts/check-db-boundary.sh

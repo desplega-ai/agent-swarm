@@ -108,6 +108,7 @@
     "e2e:codex-oauth-blob": "bun scripts/e2e/codex-oauth-blob.ts",
     "e2e:tsc": "bun tsc --noEmit -p scripts/e2e/tsconfig.json",
     "prepack": "bun run build:cli",
+    "check": "bash scripts/check.sh",
     "tsc:check": "tsgo --noEmit",
     "tsc:check:tsc": "bun tsc --noEmit",
     "check:db-boundary": "bash scripts/check-db-boundary.sh",
