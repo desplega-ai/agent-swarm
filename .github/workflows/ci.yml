@@ -435,8 +435,10 @@ jobs:
             --status "${{ steps.tests.outputs.status || 'unknown' }}"
           echo "payload=.bun-test-results/payload.json" >> "$GITHUB_OUTPUT"
 
+      # main only: a manual dispatch can select any branch, and that branch's code
+      # must never run in a job step that holds the token.
       - name: Report unit test results to ci-metrics
-        if: ${{ !cancelled() && steps.test-results.outputs.payload != '' }}
+        if: ${{ !cancelled() && github.ref == 'refs/heads/main' && steps.test-results.outputs.payload != '' }}
         continue-on-error: true
         env:
           TOKEN: ${{ secrets.SWARM_CI_METRICS_TOKEN }}
