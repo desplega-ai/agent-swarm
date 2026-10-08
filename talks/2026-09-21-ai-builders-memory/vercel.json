@@ -5,5 +5,5 @@
   "buildCommand": "true",
   "outputDirectory": ".",
   "cleanUrls": true,
-  "ignoreCommand": "s=$VERCEL_GIT_PREVIOUS_SHA; [ -n \"$s\" ] && git -C ../.. diff --quiet \"$s\" HEAD -- talks/2026-09-21-ai-builders-memory package.json bun.lock turbo.json; [ $? -eq 0 ]"
+  "ignoreCommand": "sh ../../scripts/vercel-ignore.sh talks/2026-09-21-ai-builders-memory"
 }

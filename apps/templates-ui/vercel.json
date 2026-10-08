@@ -1,6 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "ignoreCommand": "s=$VERCEL_GIT_PREVIOUS_SHA; [ -n \"$s\" ] && git -C ../.. diff --quiet \"$s\" HEAD -- apps/templates-ui templates package.json bun.lock turbo.json; [ $? -eq 0 ]",
+  "ignoreCommand": "sh ../../scripts/vercel-ignore.sh apps/templates-ui templates",
   "git": {
     "deploymentEnabled": {
       "**": false,
