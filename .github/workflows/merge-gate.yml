@@ -655,11 +655,12 @@ jobs:
         run: |
           start=$(date +%s%3N)
           set +e
-          mkdir -p .bun-test-timings/next
+          mkdir -p .bun-test-timings/next .bun-test-results
           echo "timings snapshot: $(cat .bun-test-timings/snapshot-key.txt 2>/dev/null || echo none)"
           # shellcheck disable=SC2046
           bun run test:root -- --timeout 10000 --parallel=4 --shard=${{ matrix.shard }}/2 \
             --update-timings --timings=.bun-test-timings/next/${{ matrix.shard }}.json \
+            --reporter=junit --reporter-outfile=.bun-test-results/junit-${{ matrix.shard }}.xml \
             $(ls .bun-test-timings/*.json 2>/dev/null | sed 's/^/--timings=/')
           code=$?
           set -e
@@ -675,6 +676,39 @@ jobs:
           path: .bun-test-timings/next/${{ matrix.shard }}.json
           retention-days: 1
           if-no-files-found: ignore
+
+      # Per-test results for this shard (CI only: local `bun test` keeps the
+      # console reporter). The JUnit file is the full-fidelity record.
+      - name: Upload this shard's test results
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: unit-test-results-${{ matrix.shard }}
+          path: .bun-test-results/junit-${{ matrix.shard }}.xml
+          retention-days: 14
+          if-no-files-found: ignore
+
+      # Per-test durations, pass/fail and flake detection via the ci-metrics swarm
+      # script (`action: "tests"`; flake rules in agent-fs docs/ci-metrics.md).
+      # Skipped on forks (no secret); never blocks the gate, and never retries.
+      - name: Report unit test results to ci-metrics
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        env:
+          TOKEN: ${{ secrets.SWARM_CI_METRICS_TOKEN }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number || '' }}
+          REPORT: .bun-test-results/junit-${{ matrix.shard }}.xml
+        run: |
+          set -euo pipefail
+          if [ -z "$TOKEN" ]; then echo "SWARM_CI_METRICS_TOKEN not available; skipping"; exit 0; fi
+          if [ ! -s "$REPORT" ]; then echo "no JUnit report; skipping"; exit 0; fi
+          bun scripts/ci-unit-test-report.ts --junit "$REPORT" --out .bun-test-results/payload.json \
+            --shard ${{ matrix.shard }}/2 --wall-ms "${{ steps.tests.outputs.duration_ms || '0' }}" \
+            --status "${{ steps.tests.outputs.status || 'unknown' }}"
+          curl -sSf --max-time 60 -X POST https://api.desplega.agent-swarm.dev/api/x/script/JWCeFHIQUAQQ \
+            -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+            --data-binary @.bun-test-results/payload.json | jq -r '.result.markdown // empty' >> "$GITHUB_STEP_SUMMARY"
 
       # Each shard reports independently. See agent-fs docs/ci-timings.md.
       # Skipped on merge_group events and forks (no secret); never blocks the gate.

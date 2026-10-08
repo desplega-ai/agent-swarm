@@ -84,6 +84,7 @@ docker-compose.desplega.yaml
 
 # bun test --timings scratch dir (CI restores it from the actions cache)
 .bun-test-timings/
+.bun-test-results/
 
 # Standalone black-box E2E reports
 e2e-results.json
