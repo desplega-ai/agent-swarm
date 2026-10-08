@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
-import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Usage } from "@agentclientprotocol/sdk";
@@ -64,20 +64,29 @@ function baseConfig(overrides: Partial<ProviderSessionConfig> = {}): ProviderSes
 
 /**
  * Start a minimal swarm API stub that handles POST /api/sessions/tokens and
- * DELETE /api/sessions/tokens/:id. Returns the server and its base URL.
- * The caller is responsible for closing the server.
+ * DELETE /api/sessions/tokens/:id. Returns its base URL and `close()`, which
+ * the caller must await. The adapter revokes a minted token fire-and-forget,
+ * so closing before that DELETE lands fails it and leaks a revoke warning
+ * into a later test.
  */
 async function startTokenStubServer(
   tokenId: string,
   plaintext: string,
-): Promise<{ server: Server; apiUrl: string }> {
+): Promise<{ apiUrl: string; close: () => Promise<void> }> {
+  let minted = false;
+  let resolveRevoked!: () => void;
+  const revoked = new Promise<void>((resolve) => {
+    resolveRevoked = resolve;
+  });
   const stub = createServer(async (req: IncomingMessage, res: ServerResponse) => {
     if (req.method === "POST" && req.url === "/api/sessions/tokens") {
+      minted = true;
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ tokenId, plaintext }));
     } else if (req.method === "DELETE" && req.url?.startsWith("/api/sessions/tokens/")) {
       res.writeHead(204);
       res.end();
+      resolveRevoked();
     } else {
       res.writeHead(404);
       res.end();
@@ -85,7 +94,13 @@ async function startTokenStubServer(
   });
   await new Promise<void>((resolve) => stub.listen(0, "127.0.0.1", resolve));
   const addr = stub.address() as import("net").AddressInfo;
-  return { server: stub, apiUrl: `http://127.0.0.1:${addr.port}` };
+  const close = async () => {
+    // A minted token is always revoked; wait for it, bounded so a failed test
+    // still tears down.
+    if (minted) await Promise.race([revoked, Bun.sleep(5_000)]);
+    await new Promise<void>((resolve) => stub.close(() => resolve()));
+  };
+  return { apiUrl: `http://127.0.0.1:${addr.port}`, close };
 }
 
 describe("ACPAdapter", () => {
@@ -305,7 +320,7 @@ new AgentSideConnection((connection) => new FakeAgent(connection), stream);
 `,
     );
 
-    const { server: tokenStub, apiUrl } = await startTokenStubServer(
+    const { close: closeTokenStub, apiUrl } = await startTokenStubServer(
       "stub-token-id",
       "aseph_stubtokenfortest1234567890",
     );
@@ -503,7 +518,7 @@ new AgentSideConnection((connection) => new FakeAgent(connection), stream);
         closeDb();
       }
     } finally {
-      await new Promise<void>((resolve) => tokenStub.close(() => resolve()));
+      await closeTokenStub();
     }
   });
 
@@ -687,7 +702,10 @@ new AgentSideConnection((connection) => new FakeCopilot(connection), stream);
     chmodSync(copilotStub, 0o755);
     mkdirSync(join(binDir, "home"));
 
-    const { server, apiUrl } = await startTokenStubServer("copilot-token-id", "example-aseph_x");
+    const { close: closeTokenStub, apiUrl } = await startTokenStubServer(
+      "copilot-token-id",
+      "example-aseph_x",
+    );
     try {
       const config = baseConfig({
         cwd,
@@ -721,7 +739,7 @@ new AgentSideConnection((connection) => new FakeCopilot(connection), stream);
       while (existsSync(captured.dir) && Date.now() < deadline) await Bun.sleep(10);
       expect(existsSync(captured.dir)).toBe(false);
     } finally {
-      await new Promise<void>((resolve) => server.close(() => resolve()));
+      await closeTokenStub();
     }
   });
 
@@ -1077,7 +1095,7 @@ const stream = ndJsonStream(Writable.toWeb(process.stdout), Readable.toWeb(proce
 new AgentSideConnection((connection) => new FakeAgent(connection), stream);
 `,
     );
-    const { server: tokenStub, apiUrl } = await startTokenStubServer(
+    const { close: closeTokenStub, apiUrl } = await startTokenStubServer(
       "stub-token-id",
       "aseph_stubtokenfortest1234567890",
     );
@@ -1140,7 +1158,7 @@ new AgentSideConnection((connection) => new FakeAgent(connection), stream);
         closeDb();
       }
     } finally {
-      await new Promise<void>((resolve) => tokenStub.close(() => resolve()));
+      await closeTokenStub();
     }
   });
 });
