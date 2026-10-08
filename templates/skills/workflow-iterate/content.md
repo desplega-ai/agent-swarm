@@ -173,6 +173,15 @@ Afterwards, a `warnings` entry on `create-workflow` or a patch tool means the ke
 - Do not set `retry` or `validation.retry` on a `system-one-decision` node. It retries connection errors, 408, 429, and 5xx itself (`config.maxRetries`, 0 to 3, default 2) inside `config.timeoutMs` (default 30000). A 401, a 422, or an answer that fails validation ends after one attempt.
 - The node reads its provider's key (`TYPESAFE_API_KEY`, `OPENROUTER_API_KEY`, `LAYA_API_KEY`, `OPENAI_DECISIONS_API_KEY`, or `CLOUDFLARE_API_TOKEN`, plus `LAYA_URL` for `laya` and `CLOUDFLARE_ACCOUNT_ID` for `cloudflare`) server-side. The key never appears in the definition, the step output, or an error. A run whose key or `LAYA_URL` is missing fails before any node executes, and a 401 or 403 fails the step as `<KEY> was rejected`. An unresolved `{{token}}` fails the step before any request.
 
+### `human-in-the-loop` (how approvals render)
+
+The same rules apply to a standalone `request-human-input` call.
+
+- **Dashboard card.** `title` is plain text. Each question's `label` is its heading and renders as markdown. `description` renders as full markdown and is the only field that shows images, so put drafts, diffs, and logs there.
+- **Code.** Fence code, logs, and JSON with a language (```` ```json ````): the block keeps its lines and scrolls. Fence a prose draft with no language: it wraps. A single newline outside a fence becomes a paragraph break.
+- **Images.** Put an `http(s)` URL ending in `.png`, `.jpg`, `.jpeg`, `.gif`, or `.webp` alone on its own line in `description`, or use `![alt](url)`. The link must outlive the request: an expired presigned URL shows an "image unavailable" note.
+- **Slack.** A node's `notifications` post the title, the question labels (each collapsed to one line, capped at 3000 characters in total), a Review button, and the timeout. Descriptions, options, code, and images are not shown, so the title and labels must make sense alone. `request-human-input` posts nothing to Slack: share the returned URL yourself.
+
 ### `swarm-script`
 
 ```json

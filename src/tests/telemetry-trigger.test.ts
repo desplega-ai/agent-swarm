@@ -127,7 +127,18 @@ describe("trigger_surface on task telemetry", () => {
   // so each one is run for real and judged on the row it persists and the
   // task.created event it emits.
   const heartbeatCreators: Array<{ taskType: string; create: () => Promise<void> }> = [
-    { taskType: "boot-triage", create: createBootTriageTask },
+    {
+      taskType: "boot-triage",
+      create: async () => {
+        // A clean boot creates no task; force one to judge its source.
+        process.env.HEARTBEAT_BOOT_TRIAGE_ALWAYS = "true";
+        try {
+          await createBootTriageTask();
+        } finally {
+          delete process.env.HEARTBEAT_BOOT_TRIAGE_ALWAYS;
+        }
+      },
+    },
     {
       taskType: "heartbeat-checklist",
       create: async () => {

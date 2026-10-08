@@ -12,7 +12,10 @@ const QuestionSchema = z.object({
     .describe("Question type"),
   label: z.string().describe("The question text displayed to the user"),
   required: z.boolean().optional().describe("Whether this question is required (default: true)"),
-  description: z.string().optional().describe("Optional help text"),
+  description: z
+    .string()
+    .optional()
+    .describe("Optional help text, rendered as markdown (code fences, images)"),
   placeholder: z.string().optional().describe("Placeholder text (for text type)"),
   multiline: z.boolean().optional().describe("Use textarea instead of input (for text type)"),
   options: z
@@ -39,7 +42,9 @@ export const registerRequestHumanInputTool = (server: McpServer) => {
       description:
         "Create an approval request and return at once with the request id and URL. The answer arrives later as a hitl-follow-up task. " +
         "Supports multiple question types: approval (yes/no), text, single-select, " +
-        "multi-select, and boolean. Returns the request ID and URL for the human to respond.",
+        "multi-select, and boolean. Returns the request ID and URL for the human to respond. " +
+        "The dashboard renders each label and description as markdown: put long content in description, fence code with a language, and put an image URL alone on its own line to show it. " +
+        "No Slack message is sent; share the URL yourself.",
       inputSchema: z.object({
         title: z.string().min(1).describe("Title of the approval request"),
         questions: z.array(QuestionSchema).min(1).describe("Questions to ask the human"),

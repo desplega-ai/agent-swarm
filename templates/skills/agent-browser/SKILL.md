@@ -47,6 +47,8 @@ agent-browser close
 
 ## Recording
 
+Pass `record start` an absolute path (`/tmp/<topic>/raw.webm`). A relative path resolves against the agent-browser daemon's cwd, not yours, and fails with `ffmpeg write failed: Broken pipe` while `doctor` stays green.
+
 Default: record with `--cursor`, drive every supported pointer action (`click`, `mouse move`, `drag`) with `--human`, and ship the **1.5x video**. Keep the 1x original only if a reviewer asks for it. Human pointer movement follows an eased curve; use `--seed <n>` on `mouse move` to make the take reproducible instead of using a bare move.
 
 Open the page first, then record the interaction:

@@ -1,5 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
+  "ignoreCommand": "sh ../../scripts/vercel-ignore.sh apps/ui packages/model-catalog src/utils/task-citations.ts src/utils/dsh-usage.ts src/be/modelsdev-cache.json",
   "rewrites": [{ "source": "/((?!assets/).*)", "destination": "/index.html" }],
   "headers": [
     {

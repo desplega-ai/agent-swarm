@@ -38,7 +38,12 @@ COPY apps/templates-ui/package.json ./apps/templates-ui/package.json
 COPY apps/evals/package.json ./apps/evals/package.json
 COPY packages/model-catalog/package.json ./packages/model-catalog/package.json
 COPY packages/model-routing/package.json ./packages/model-routing/package.json
-RUN bun install --frozen-lockfile
+# Retry transient extraction failures with a clean dependency tree.
+RUN for attempt in 1 2 3; do \
+        bun install --frozen-lockfile && break; \
+        if [ "$attempt" -eq 3 ]; then exit 1; fi; \
+        rm -rf node_modules && sleep 2 || exit 1; \
+    done
 COPY packages/model-catalog/ ./packages/model-catalog/
 COPY packages/model-routing/ ./packages/model-routing/
 COPY src/ ./src/
@@ -137,7 +142,7 @@ ENV PATH="/home/worker/.local/bin:$PATH"
 # Install pi-mono CLI (alternative harness, selected via HARNESS_PROVIDER=pi)
 # PI_PACKAGE_DIR tells pi-mono where to find its package.json at runtime
 # (needed because bun --compile makes process.execPath resolve to the binary location)
-ARG PI_CODING_AGENT_VERSION=1.0.4
+ARG PI_CODING_AGENT_VERSION=1.1.0
 USER root
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache \
     npm install -g @earendil-works/pi-coding-agent@${PI_CODING_AGENT_VERSION} \
@@ -582,9 +587,9 @@ RUN curl -fsSL "https://registry.npmjs.org/@deepseek-ai/dsh/-/dsh-${DSH_VERSION}
 # "disabled". Bump AMP_VERSION, both SHA-512 pins and AMP_PACKAGE in
 # src/providers/amp-adapter.ts together. The vendor licence is proprietary
 # (https://ampcode.com/terms): confirm it before publishing this image.
-ARG AMP_VERSION=0.0.1791403257-g05ffa9
-ARG AMP_SHA512_AMD64=4bfd29a7cc0135e7f4a40f2f77ef77e99b3d88e9a49a29b96e7bd60cb45d76e37f473289cc2a86c0770150bff1ad21a04d135e8f60279fbb4b55ae11f852db93
-ARG AMP_SHA512_ARM64=af0b9893754f59af2f63ac0873d5e0725123011350fa1f92ec9673d9e38c149afddba1e174161471d209ccf8e96a0e5e22bee662b2f8d9e57e78e40543033a06
+ARG AMP_VERSION=0.0.1791425319-gd969c3
+ARG AMP_SHA512_AMD64=af13add6fcd1f89be310efc2b631a318b03aefad4b4bea1d2aa2d4eadd85eb81c9c5d47f59699c137272b39d7aea8a43504d1bb124dd8d1fc9a73d97c947a71f
+ARG AMP_SHA512_ARM64=a2dba7c412a9865583c046871ae4af43dd6f715ece42d6b43b427afd254806dbe451cf0f653c114abde0021bbd3053757f80e2d1457620943a166ccdc670b027
 RUN case "$TARGETARCH" in \
       amd64) amp_platform=linux-x64; amp_sha512="$AMP_SHA512_AMD64" ;; \
       arm64) amp_platform=linux-arm64; amp_sha512="$AMP_SHA512_ARM64" ;; \
@@ -619,7 +624,7 @@ ENV CURSOR_RIPGREP_PATH=/opt/cursor-sdk/platform/bin/rg \
 # Gemini CLI (Apache-2.0) for HARNESS_PROVIDER=acp with ACP_TARGET=gemini; the
 # adapter launches `gemini --acp`. Its own prefix keeps the ~100 MB install out
 # of the shared global-deps layer. Lifecycle scripts are not needed for ACP.
-ARG GEMINI_CLI_VERSION=0.62.0
+ARG GEMINI_CLI_VERSION=0.63.0
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
       --prefix /opt/gemini-cli --ignore-scripts --no-audit --no-fund \
       "@google/gemini-cli@${GEMINI_CLI_VERSION}" \

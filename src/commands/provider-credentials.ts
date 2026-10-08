@@ -19,6 +19,7 @@
  */
 
 import { deriveDefaultRoute, validateRoute } from "@desplega/model-routing";
+import { ACP_TARGET_IDS, isAcpTarget } from "../providers/acp-target-catalog";
 import { checkAmpCredentials, liveTestAmpCredentials } from "../providers/amp-adapter";
 import { checkClaudeCredentials } from "../providers/claude-adapter";
 import { checkClaudeManagedCredentials } from "../providers/claude-managed-adapter";
@@ -114,7 +115,7 @@ export const REQUIRED_CRED_VARS_BY_PROVIDER: Record<SupportedProvider, readonly 
   devin: ["DEVIN_API_KEY", "DEVIN_ORG_ID"],
   opencode: ["OPENROUTER_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY"],
   pi: ["ANTHROPIC_API_KEY", "OPENROUTER_API_KEY", "OPENAI_API_KEY"],
-  // The ACP target process owns its own auth, so the swarm requires nothing.
+  // The ACP target owns its auth; custom targets still need a command.
   acp: [],
   dsh: ["DEEPSEEK_API_KEY", "OPENROUTER_API_KEY"],
   amp: ["AMP_API_KEY"],
@@ -142,7 +143,25 @@ export const CREDENTIAL_PROVIDER_CHECKERS: Record<SupportedProvider, CredentialC
     const { checkPiMonoCredentials } = await import("../providers/pi-mono-adapter");
     return checkPiMonoCredentials(env, opts);
   },
-  acp: () => ({ ready: true, missing: [], satisfiedBy: "sdk-delegated" }),
+  acp: (env) => {
+    const target = env.ACP_TARGET ?? "custom";
+    if (!isAcpTarget(target)) {
+      return {
+        ready: false,
+        missing: ["ACP_TARGET"],
+        hint: `Set ACP_TARGET to one of: ${ACP_TARGET_IDS.join(", ")}.`,
+      };
+    }
+    const command = env.ACP_TARGET_COMMAND ?? env.ACP_COMMAND;
+    if (target === "custom" && !command?.trim()) {
+      return {
+        ready: false,
+        missing: ["ACP_TARGET_COMMAND"],
+        hint: "Set ACP_TARGET_COMMAND (or ACP_COMMAND) to an ACP-compatible executable, or select a preset with ACP_TARGET.",
+      };
+    }
+    return { ready: true, missing: [], satisfiedBy: "sdk-delegated" };
+  },
 };
 
 /**

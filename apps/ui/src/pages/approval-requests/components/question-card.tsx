@@ -5,6 +5,10 @@ import type { ApprovalQuestion } from "@/api/types";
 import { SetupChip } from "@/components/onboarding/setup-card";
 import { AnimatedReveal } from "@/components/shared/animated-reveal";
 import { BorderBeam } from "@/components/shared/border-beam";
+import {
+  MARKDOWN_IMAGE_COMPONENTS,
+  MARKDOWN_IMAGE_REHYPE_PLUGINS,
+} from "@/components/shared/markdown-image";
 import { StatusIcon, type StatusTone } from "@/components/shared/status-icon";
 import { selectionRange } from "@/lib/approval-format";
 import { cn, normalizeNewlines } from "@/lib/utils";
@@ -64,7 +68,12 @@ export const QuestionCard = forwardRef<
     <div className="flex flex-col gap-3 px-4 pb-4 sm:pl-[3.25rem]">
       {question.description ? (
         <div className={cn("prose-chat max-w-prose text-sm text-muted-foreground", WRAP)}>
-          <Streamdown>{normalizeNewlines(question.description)}</Streamdown>
+          <Streamdown
+            components={MARKDOWN_IMAGE_COMPONENTS}
+            rehypePlugins={MARKDOWN_IMAGE_REHYPE_PLUGINS}
+          >
+            {normalizeNewlines(question.description)}
+          </Streamdown>
         </div>
       ) : null}
       {children}
