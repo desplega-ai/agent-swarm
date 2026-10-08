@@ -207,6 +207,7 @@ const opencodeTargetProfile: AcpTargetProfile = {
     const env = baseTargetEnv(config);
     const entry = getAcpTargetCatalogEntry("opencode");
     copyEnvKeys(config, env, entry.envKeys);
+    copyEnvKeys(config, env, ["OPENROUTER_APP_ATTRIBUTION"]);
     withOpencodeConfig(env, config.model);
     return env;
   },
