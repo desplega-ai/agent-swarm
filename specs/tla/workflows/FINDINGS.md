@@ -15,6 +15,7 @@ handlers, user cancel, user retry, crash). Code map: `ACTIONS.md`. Calibration: 
 | Open counterexamples on `main` @ `795526ca3` (CX8-CX10) | **3**, no repro test yet |
 | Closed by #1832 (CX11) | **1** |
 | Open counterexamples on `main` @ `eaf5d0cc1` (CX12 from #1832, CX13 pre-existing) | **2**, no repro test yet |
+| Open counterexamples on `main` @ `7912fff73` (CX14 from #1926) | **1**, no repro test yet |
 | Dropped as model drift | **0** (false-positive rate 0 / 7) |
 
 CX1-CX7 each have a repro in `src/tests/workflow-tla-races.test.ts`. The tests call the
@@ -125,6 +126,38 @@ introduced by #1832; no earlier config combined leaves, async branches, and canc
 
 - Property: `TerminalRunStaysQuiet` (Inv1). `Probe-cancel-finalize.cfg`, 954 distinct states, depth 20.
 - Trace: `… XCkWait (B waiting) → TaskFinish(B ok) → E1 → E2 (run running) → Cancel → EFin (run completed)`
+
+## Sync with #1926 fail-closed write (`main` @ `7912fff73`)
+
+#1926 seals the exact run context and step outputs into `*_replay` columns. Reads open them
+lazily; when a sealed copy cannot be opened (missing or rotated `SECRETS_ENCRYPTION_KEY`,
+corrupt ciphertext), `failRunOnUnreadableReplay` writes the claimed step `failed`, then the run
+`failed`. Both writes are `WHERE id = ?` with no status guard, and they are separate awaits after
+the read. The spec models this with the `ReplayUnreadable` constant and one alternative action
+per read site (ACTIONS.md, "Unreadable replay state"). `ReplayUnreadable` is `FALSE` in every
+earlier config, which keep their verdicts; every config that holds keeps its exact state count.
+
+### CX14 (opened by #1926): the fail-closed write turns a cancelled or completed run into failed
+
+Leaf `A` is an agent task. Its task completes, and the `task.completed` handler passes its
+checks (run `waiting`, step `waiting`, task still bound). Its `run.context` read then throws.
+Before `failRunOnUnreadableReplay` writes, the user cancels the run, which cancels `A`. The
+handler then writes `A` `cancelled -> failed` (or `A` is already `failed` when the cancel lands
+between the two writes) and the run `cancelled -> failed`. The cancel is lost: the run reads as
+failed and is open to a user retry.
+
+- Property: `TerminalNeverFails` (Inv1b). `Probe-replay-unreadable.cfg`, 1,408 distinct states, depth 20.
+- Trace: `… XCkWait (A waiting) → TaskFinish(A ok) → E1 → E2Unreadable (context read throws) → Cancel (run cancelled) → RFStep (A failed) → RFRun (run failed)`
+- Without cancel (same config, `UserCancel = FALSE`, 4,010 distinct states) the target is a
+  completed run: `E2` claims `A` and sets the run `running`; with no successors it does not take
+  `activeWalks`, so a sweep passes `H1`, and its `run.context` read throws (`H2Unreadable`);
+  `EFin` completes the run; `RFRun` writes `completed -> failed`. Trace:
+  `… XCkWait (A waiting) → TaskFinish(A ok) → E1 → WBatchEnd → WRet → E2 (run running) → H1 → H2Unreadable → EFin (run completed) → RFRun (run failed)`
+- Control: `Probe-replay-unreadable-control.cfg` (`ReplayUnreadable = FALSE`) holds, 13,005
+  distinct states. The violation needs the new path.
+- A guard of the shape the other terminal writers use (`run.status IN (running, waiting)` on the
+  run write, `status NOT IN (completed, cancelled)` on the step write, in one transaction) would
+  close it. Not fixed here: this PR changes the spec only.
 
 ## Counterexamples
 
@@ -318,3 +351,22 @@ same verdict as on `eaf5d0cc1`. `src/tests/workflow-tla-races.test.ts`: 8 pass /
 | `Probe-task-retry.cfg` | CX12 found | 492,241 | 34 |
 | `Probe-cancel-finalize.cfg` | CX13 found | 861 | 18 |
 | `Probe-input-await.cfg` | CX6 found | 510 | 12 |
+
+Re-run on `main` @ `7912fff73` (tla2tools 2.19, BFS, `-workers auto`) after modelling the #1926
+fail-closed write. Every earlier config sets `ReplayUnreadable = FALSE` and gives the same
+verdict as on `262770f33`; every config that holds has the same distinct-state count.
+`src/tests/workflow-tla-races.test.ts`: 8 pass / 0 fail / 0 `test.failing`.
+
+| Config | Result | Distinct states | Trace |
+|---|---|---|---|
+| `Workflows.cfg` | `JoinWaitsForBranches` violated (CX8) | 22,558 | 26 |
+| `Long.cfg` | `AtMostOneExecuting` violated (crash trace) | 14,116 | 18 |
+| `Cal-bf12ab53.cfg` / control | found / holds | 336 / 160 | 11 / - |
+| `Cal-d4753302.cfg` / control | found / found | 4,881 / 2,512 | 32 / 32 |
+| `Fix-CX1` .. `Fix-CX7` | all hold | 4,073 / 471,850 / 308,120 / 113,010 / 26,296 / 3,325 / 3,778 | - |
+| `Ctl-CX2` .. `Ctl-CX7` | all find their CX | 2,307 / 2,634 / 30,220 / 7,710 / 533 / 947 | 22 / 19 / 29 / 32 / 12 / 27 |
+| `Fix-CX11` / `Ctl-CX11` | holds / found | 78,384 / 1,415 | - / 20 |
+| `Probe-task-retry.cfg` | CX12 found | 604,546 | 34 |
+| `Probe-cancel-finalize.cfg` | CX13 found | 773 | 17 |
+| `Probe-input-await.cfg` | CX6 found | 309 | 12 |
+| `Probe-replay-unreadable.cfg` / control | CX14 found / holds | 1,408 / 13,005 | 20 / - |

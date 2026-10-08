@@ -100,7 +100,34 @@ Not modelled: the readiness preflight (#1715, `findWorkflowReadinessProblems` `e
 
 Not modelled: `retryFailedRun` refuses before the claim when a node still to run is not ready (#1715, `resume.ts:399-405`). It is a read with no write, and the model's executors are always ready.
 
-Not modelled: the fail-closed path for an unreadable replay state (#1926, `failRunOnUnreadableReplay` `engine.ts:236-254`). When a run's sealed replay context cannot be opened, the walk (`:298`, `:408`, `:776`), the retry poller (`retry-poller.ts:204`, `:210`), every recovery sweep (`recovery.ts:121`, `:257`, `:359`, `:402`), and every live resume (`failClosedOnUnreadableReplay` `resume.ts:136-146`) write `step -> failed` and `run -> failed` with no status guard, instead of resuming on redacted values. The model's replay state is always readable, so that branch is unreachable; #1926 changes no modelled guard. The `E1`/`E2` reads moved into the `*Unguarded` resume functions that this wrapper calls.
+## Unreadable replay state (#1926, `ReplayUnreadable`)
+
+Run and step reads default to the replay view, which opens the sealed `context_replay` /
+`output_replay` copy lazily, on first property access (`defineWorkflowPayload`
+`workflow-replay.ts:43-77`). When the copy cannot be opened (missing or rotated key, corrupt
+ciphertext) the read throws `WorkflowReplayStateError`, and `failRunOnUnreadableReplay`
+(`engine.ts:236-254`) fails the claimed step, then the run. Both writes go through
+`updateWorkflowRunStep` / `updateWorkflowRun` (`db.ts:7994`, `:7758`), whose `UPDATE` is
+`WHERE id = ?` only, and they are separate awaits. With `ReplayUnreadable`, each read site below may
+throw instead of the action that performs the read.
+
+| Action | Code | Guard |
+|---|---|---|
+| `WStartUnreadable` | `rehydrateCompletedStepOutputs` `engine.ts:330` opens each completed step's output; `walkGraph` catch `:298` | enabled only when a completed row exists. Run write only (no step id); the walk then releases `activeWalks` (`WRet`) |
+| `XDedupUnreadable` | F3: a memoized completed node opens its stored output after the dedup transaction (`engine.ts:747`, `:754`); `.catch` `:408` | run write only; the node reports `failed`. `WBatchEnd` then re-reads the run and stops the walk if it is `failed` (`engine.ts:421-427`), else skips the node's successors |
+| `P5Unreadable` | `run.context` `retry-poller.ts:66`, after `claimRetry`; catch `:204` / `:210` | step write on the claimed row, then run write; `PRel` releases the hold |
+| `H2Unreadable` | `run.context` `recovery.ts:86`, after the `running` re-check `:80`; catch `:121` | run write only; the sweep moves on to the waiting runs (`H5`) |
+| `H8Unreadable` | completed task: `run.context` `recovery.ts:217`, before the claim; catch `:257` | run write only; the sweep moves on to the next stuck row (`H6`) |
+| `E2Unreadable` | `run.context` `resume.ts:180`, after the `E1` checks, before the claim; `failClosedOnUnreadableReplay` `resume.ts:136-146` | step write on the event's row, then run write |
+| `RFStep` | `updateWorkflowRunStep(stepId, failed, nextRetryAt null)` `engine.ts:243-250` | **none** (`WHERE id = ?`) |
+| `RFRun` | `updateWorkflowRun(runId, failed)` `engine.ts:252` | **none** (`WHERE id = ?`); a completed or cancelled run becomes `failed` (open, CX14) |
+
+Not modelled: `runClaimedStep`'s catch (`engine.ts:776`). The ctx it renders from was already
+opened by `WStart`'s rehydration or by the caller's `run.context` read, and the model's executors
+read no other replay state. The approval and wait-state sweeps (`recovery.ts:359`, `:402`) and
+resumes (`resume.ts:583`, `:695`), and `handleTaskFailure`'s `onNodeFailure: "continue"` read
+(`resume.ts:322`), belong to node kinds and policies the model does not have. `retryFailedRun`
+reads `run.context` (`resume.ts:426`) before its claim and throws to the caller with no write.
 
 Port routing (#1706, `resolveValidationPort` at `engine.ts:994` and `retry-poller.ts:182`) is not modelled: the graph has no ports, and every node's successors are fixed.
 
@@ -114,6 +141,7 @@ bus events) and grants one extra heartbeat sweep (boot recovery). DB rows surviv
 | Invariant | Kind | Meaning |
 |---|---|---|
 | `TerminalRunStaysQuiet` | action property | Inv1: a terminal run never gains a running/pending step; a completed or cancelled run never changes status |
+| `TerminalNeverFails` | action property | Inv1b (#1926): a completed or cancelled run never becomes `failed`. Narrower than Inv1, so CX13 (cancelled -> completed) does not mask it. Checked by `Probe-replay-unreadable*.cfg` |
 | `AtMostOneExecuting` | state | Inv2: at most one live execution per node (executor call or dispatched task) |
 | `ExecutesOnce` | state | Inv3: every node completes at most once |
 | `JoinWaitsForAll` | action property | Inv3b: the join row is only created after every branch completed. Not a property of `main` since #1673: a terminally failed branch still joins (partial failure) |
@@ -132,3 +160,7 @@ F7 `FixTaskRetry` (#1832) adds `ER` and `H7R`, the `ownerTaskId` fence on `H7`/`
 retry-pending clause in `EFin`, and per-generation handler threads. With it off, `tg` never
 exceeds 1 and every pre-existing `Fix-*` config gives the same distinct-state count as before.
 `TaskGenBound` is a model-sanity invariant: every task generation has a handler thread.
+
+`ReplayUnreadable` is an environment constant, not a fix flag: `TRUE` lets every read site in
+"Unreadable replay state" throw. It is `FALSE` in every config except `Probe-replay-unreadable.cfg`,
+so those configs keep their verdicts and state spaces.
