@@ -770,7 +770,7 @@ Create an approval request and return at once with the request ID and URL. The a
 | `questions` | array | Yes | Questions to ask the human |
 | `timeoutSeconds` | integer | No | Seconds until the request expires. After that it becomes `timeout` and the requesting agent gets a `hitl-follow-up` task. |
 
-Approval requests are accessible via the dashboard at `/approval-requests/{id}`. When resolved, a follow-up task is automatically created for the requesting agent with the human's responses. A request with no `timeoutSeconds` is cancelled after `APPROVAL_REQUEST_AUTO_CANCELLATION_DAYS` days (default 7) with no answer. An answer after the deadline is refused with 409.
+Approval requests are accessible via the dashboard at `/approval-requests/{id}`. Each question's `label` and `description` render there as markdown; a bare image URL on its own line in `description` shows as an image. The tool sends no Slack message, so share the URL yourself. When resolved, a follow-up task is automatically created for the requesting agent with the human's responses. A request with no `timeoutSeconds` is cancelled after `APPROVAL_REQUEST_AUTO_CANCELLATION_DAYS` days (default 7) with no answer. An answer after the deadline is refused with 409.
 
 ### cancel-approval-request
 

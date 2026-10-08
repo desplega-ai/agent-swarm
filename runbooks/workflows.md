@@ -177,6 +177,9 @@ Rendering limits:
 
 - The dashboard approval page lists every question as its own card. No cap beyond the 100-question
   node limit.
+- On the dashboard, `label` and `description` render as markdown. Fenced code with a language
+  scrolls; without one it wraps. Only `description` turns a bare image URL on its own line (or
+  `![alt](url)`) into an image. Author guidance lives in the `workflow-iterate` skill.
 - The Slack notification lists question labels in one section block, capped by Block Kit at 3000
   characters. When the labels do not fit, the tail becomes `…and N more` and the reviewer answers
   on the dashboard via the card's button. Labels are escaped, so upstream text cannot add mentions
