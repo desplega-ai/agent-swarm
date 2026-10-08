@@ -300,3 +300,21 @@ so the refactor (task generations, per-generation handler threads) is behavior-p
 | `Probe-cancel-finalize.cfg` | CX13 found | 954 | 20 |
 | `Probe-input-await.cfg` | CX6 found | 458 | 20 |
 
+
+Re-run on `main` @ `262770f33` (tla2tools 2.19, BFS, `-workers auto`) after syncing with #1926.
+#1926 adds a fail-closed write path for an unreadable replay state, which the model does not
+reach (see ACTIONS.md), so the `.tla` and `.cfg` files are unchanged and every config gives the
+same verdict as on `eaf5d0cc1`. `src/tests/workflow-tla-races.test.ts`: 8 pass / 0 fail / 0 `test.failing`.
+
+| Config | Result | Distinct states | Trace |
+|---|---|---|---|
+| `Workflows.cfg` | `JoinWaitsForBranches` violated (CX8) | 24,568 | 23 |
+| `Long.cfg` | `AtMostOneExecuting` violated (crash trace) | 16,193 | 19 |
+| `Cal-bf12ab53.cfg` / control | found / holds | 392 / 160 | 11 / - |
+| `Cal-d4753302.cfg` / control | found / found | 4,463 / 3,033 | 32 / 32 |
+| `Fix-CX1` .. `Fix-CX7` | all hold | 4,073 / 471,850 / 308,120 / 113,010 / 26,296 / 3,325 / 3,778 | - |
+| `Ctl-CX2` .. `Ctl-CX7` | all find their CX | 1,169 / 2,541 / 19,565 / 6,037 / 384 / 1,147 | 22 / 19 / 30 / 32 / 12 / 27 |
+| `Fix-CX11` / `Ctl-CX11` | holds / found | 78,384 / 1,162 | - / 20 |
+| `Probe-task-retry.cfg` | CX12 found | 492,241 | 34 |
+| `Probe-cancel-finalize.cfg` | CX13 found | 861 | 18 |
+| `Probe-input-await.cfg` | CX6 found | 510 | 12 |
