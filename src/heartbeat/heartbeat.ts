@@ -1,3 +1,4 @@
+import pkg from "../../package.json";
 import {
   autoCancelStaleApprovalRequests,
   timeoutExpiredApprovalRequests,
@@ -245,6 +246,15 @@ function heartbeatChecklistIntervalMs(): number {
  */
 function isHeartbeatChecklistDisabled(): boolean {
   return isEnvFlagEnabled("HEARTBEAT_CHECKLIST_DISABLE", false);
+}
+
+/**
+ * Whether to create the boot-triage task even when the boot is clean (no
+ * interrupted, stalled, orphaned, or resume-less superseded work). Off by
+ * default: a clean boot only logs a one-line note.
+ */
+function isBootTriageAlways(): boolean {
+  return isEnvFlagEnabled("HEARTBEAT_BOOT_TRIAGE_ALWAYS", false);
 }
 
 // ============================================================================
@@ -1576,24 +1586,7 @@ export async function gatherSystemStatus(options?: { isBootTriage?: boolean }): 
     }
 
     // Orphaned pending/offered tasks (assigned to workers with no active session)
-    const orphanedTasks: AgentTask[] = [];
-
-    for (const status of ["pending", "offered"] as const) {
-      const tasks = await getTasksByStatus(status);
-
-      for (const task of tasks) {
-        // 'pending' tasks carry their holder in agentId; 'offered' tasks have
-        // not been accepted yet, so agentId is still NULL and the offeree
-        // lives in offeredTo instead (#1190) — `!task.agentId` alone used to
-        // skip every offered row here, hiding this whole class of orphan.
-        const holderId = status === "offered" ? task.offeredTo : task.agentId;
-        if (!holderId) continue;
-        const agent = agents.find((a) => a.id === holderId);
-        if (!agent || agent.status === "offline") {
-          orphanedTasks.push(task);
-        }
-      }
-    }
+    const orphanedTasks = await getOrphanedPendingOrOfferedTasks(agents);
 
     if (orphanedTasks.length > 0) {
       sections.push("");
@@ -1615,6 +1608,60 @@ export async function gatherSystemStatus(options?: { isBootTriage?: boolean }): 
   }
 
   return sections.join("\n");
+}
+
+/** Pending/offered tasks whose holder is offline or no longer registered. */
+async function getOrphanedPendingOrOfferedTasks(
+  agents: Awaited<ReturnType<typeof getAllAgents>>,
+): Promise<AgentTask[]> {
+  const orphanedTasks: AgentTask[] = [];
+
+  for (const status of ["pending", "offered"] as const) {
+    const tasks = await getTasksByStatus(status);
+
+    for (const task of tasks) {
+      // 'pending' tasks carry their holder in agentId; 'offered' tasks have
+      // not been accepted yet, so agentId is still NULL and the offeree
+      // lives in offeredTo instead (#1190) — `!task.agentId` alone used to
+      // skip every offered row here, hiding this whole class of orphan.
+      const holderId = status === "offered" ? task.offeredTo : task.agentId;
+      if (!holderId) continue;
+      const agent = agents.find((a) => a.id === holderId);
+      if (!agent || agent.status === "offline") {
+        orphanedTasks.push(task);
+      }
+    }
+  }
+
+  return orphanedTasks;
+}
+
+export interface BootTriageFindings {
+  rebootInterrupted: number;
+  stalled: number;
+  orphaned: number;
+  supersededWithoutResume: number;
+}
+
+/**
+ * Count the boot signals the Lead would have to act on. All zero means a
+ * clean boot: nothing was interrupted, stuck, orphaned, or left without a
+ * resume, so a Lead task would only echo the deploy.
+ */
+export async function getBootTriageFindings(): Promise<BootTriageFindings> {
+  const now = Date.now();
+  const agents = await getAllAgents();
+  return {
+    rebootInterrupted: getRebootAffectedTasks().length,
+    stalled: (await getStalledInProgressTasks(stallThresholdMinutes())).length,
+    orphaned: (await getOrphanedPendingOrOfferedTasks(agents)).length,
+    supersededWithoutResume: (
+      await getSupersededTasksWithoutResume(
+        new Date(now - ORPHAN_SUPERSEDE_MIN_AGE_MS).toISOString(),
+        new Date(now - ORPHAN_SUPERSEDE_MAX_AGE_MS).toISOString(),
+      )
+    ).length,
+  };
 }
 
 /**
@@ -1858,6 +1905,8 @@ export function stopHeartbeat(): void {
 /**
  * Create a one-off boot triage task for the lead after a server restart.
  * Uses the same HEARTBEAT.md content but with reboot-specific context prepended.
+ * Skipped on a clean boot (see getBootTriageFindings) unless
+ * HEARTBEAT_BOOT_TRIAGE_ALWAYS is set.
  */
 export async function createBootTriageTask(): Promise<void> {
   const lead = await getLeadAgent();
@@ -1875,6 +1924,24 @@ export async function createBootTriageTask(): Promise<void> {
     [lead.id, ...TERMINAL_TASK_STATUSES],
   );
   if (existing) return;
+
+  if (!isBootTriageAlways()) {
+    // A failed read falls through to the Lead task: an unknown boot is not a
+    // clean one.
+    const findings = await getBootTriageFindings().catch((err) => {
+      console.error(
+        "[Heartbeat] Boot triage findings failed, creating Lead task:",
+        scrubSecrets(err instanceof Error ? err.message : String(err)),
+      );
+      return null;
+    });
+    if (findings && Object.values(findings).every((count) => count === 0)) {
+      console.log(
+        `[Heartbeat] Clean boot (v${pkg.version}): 0 interrupted, stalled, orphaned, or resume-less superseded tasks; no boot-triage task for lead ${lead.name}`,
+      );
+      return;
+    }
+  }
 
   const systemStatus = await gatherSystemStatus({ isBootTriage: true });
 

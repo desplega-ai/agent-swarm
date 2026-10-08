@@ -81,6 +81,7 @@ Complete reference for all environment variables used by Agent Swarm.
 | `API_DRAIN_MAX_MS` | `0` | Max wait (ms) for workers to hand off in-flight tasks after the API gets SIGTERM, while it still serves and dispatches nothing. Off by default (`0`, also for an unset, empty, or invalid value); set it for deploys that stop the API and the workers together. While it is on, an API-only restart also makes live workers hand off. Max `120000`. Keep the API stop grace period above this value. |
 | `HEARTBEAT_INTERVAL_MS` | `90000` | Heartbeat sweep interval (ms) |
 | `HEARTBEAT_CHECKLIST_DISABLE` | `false` | Set to `true` or `1` to disable the periodic `HEARTBEAT.md` checklist polling loop and the boot-triage task (separate from the infrastructure sweep). `false` and `0` keep it on. |
+| `HEARTBEAT_BOOT_TRIAGE_ALWAYS` | `false` | Set to `true` or `1` to create the boot-triage task on every restart. By default a clean boot (no interrupted, stalled, orphaned, or resume-less superseded tasks) only logs a one-line note and creates no Lead task. |
 | `HEARTBEAT_CHECKLIST_INTERVAL_MS` | `1800000` | Interval (ms) between `HEARTBEAT.md` checklist checks (default 30 min). `0` turns the recurring check off; boot triage still runs. |
 | `HEARTBEAT_DISABLE` | `false` | Set to `true` to disable the heartbeat module |
 | `HEARTBEAT_STALL_THRESHOLD_MIN` | `30` | Minutes before an in-progress task is considered stalled |
