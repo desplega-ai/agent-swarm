@@ -19,6 +19,7 @@
  */
 
 import { deriveDefaultRoute, validateRoute } from "@desplega/model-routing";
+import { ACP_TARGET_IDS, isAcpTarget } from "../providers/acp-target-catalog";
 import { checkAmpCredentials, liveTestAmpCredentials } from "../providers/amp-adapter";
 import { checkClaudeCredentials } from "../providers/claude-adapter";
 import { checkClaudeManagedCredentials } from "../providers/claude-managed-adapter";
@@ -144,6 +145,13 @@ export const CREDENTIAL_PROVIDER_CHECKERS: Record<SupportedProvider, CredentialC
   },
   acp: (env) => {
     const target = env.ACP_TARGET ?? "custom";
+    if (!isAcpTarget(target)) {
+      return {
+        ready: false,
+        missing: ["ACP_TARGET"],
+        hint: `Set ACP_TARGET to one of: ${ACP_TARGET_IDS.join(", ")}.`,
+      };
+    }
     const command = env.ACP_TARGET_COMMAND ?? env.ACP_COMMAND;
     if (target === "custom" && !command?.trim()) {
       return {
