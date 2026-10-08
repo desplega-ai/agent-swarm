@@ -552,8 +552,130 @@ new AgentSideConnection((connection) => new FakeAgent(connection), stream);
       ),
     ).toMatchObject({
       OPENAI_API_KEY: "example-test-key",
-      OPENCODE_CONFIG_CONTENT: JSON.stringify({ theme: "dark", model: "opencode/model" }),
+      OPENCODE_CONFIG_CONTENT: JSON.stringify({
+        theme: "dark",
+        model: "opencode/model",
+        provider: {
+          openrouter: {
+            options: {
+              headers: {
+                "HTTP-Referer": "https://agent-swarm.dev",
+                "X-OpenRouter-Title": "Agent Swarm",
+                "X-OpenRouter-Categories": "personal-agent,cloud-agent",
+                "X-Title": "Agent Swarm",
+              },
+            },
+          },
+        },
+      }),
     });
+  });
+
+  test("OpenCode preset merges the OpenRouter gateway with model and provider config", () => {
+    const config = baseConfig({
+      model: " openrouter/openai/gpt-4o-mini ",
+      env: {
+        ACP_TARGET: "opencode",
+        OPENROUTER_BASE_URL: " http://127.0.0.1:8080/api/v1/ ",
+        OPENCODE_CONFIG_CONTENT: JSON.stringify({
+          theme: "dark",
+          provider: { openrouter: { options: { apiKey: "dummy" } } },
+        }),
+      },
+    });
+    const env = resolveAcpTarget(config).env(config);
+    expect(JSON.parse(env.OPENCODE_CONFIG_CONTENT!)).toEqual({
+      theme: "dark",
+      model: "openrouter/openai/gpt-4o-mini",
+      provider: {
+        openrouter: { options: { apiKey: "dummy", baseURL: "http://127.0.0.1:8080/api/v1" } },
+      },
+    });
+  });
+
+  test("OpenCode preset omits gateway override for unset, blank, or default URL", () => {
+    for (const url of [undefined, "", "https://openrouter.ai/api/v1/"]) {
+      const config = baseConfig({
+        env: { ACP_TARGET: "opencode", OPENROUTER_BASE_URL: url },
+      });
+      const env = resolveAcpTarget(config).env(config);
+      const content = JSON.parse(env.OPENCODE_CONFIG_CONTENT!);
+      expect(content).toEqual({
+        model: config.model,
+        provider: {
+          openrouter: {
+            options: {
+              headers: {
+                "HTTP-Referer": "https://agent-swarm.dev",
+                "X-OpenRouter-Title": "Agent Swarm",
+                "X-OpenRouter-Categories": "personal-agent,cloud-agent",
+                "X-Title": "Agent Swarm",
+              },
+            },
+          },
+        },
+      });
+      expect(content.provider.openrouter.options.baseURL).toBeUndefined();
+    }
+  });
+
+  test("OpenCode preset adds attribution headers to OPENCODE_CONFIG_CONTENT for an OpenRouter host", () => {
+    const config = baseConfig({
+      model: "",
+      env: {
+        ACP_TARGET: "opencode",
+        OPENROUTER_BASE_URL: "https://openrouter.ai/api/v1",
+        OPENCODE_CONFIG_CONTENT: JSON.stringify({
+          theme: "dark",
+          provider: { openrouter: { options: { headers: { "X-Custom": "preserved" } } } },
+        }),
+      },
+    });
+    const env = resolveAcpTarget(config).env(config);
+    expect(JSON.parse(env.OPENCODE_CONFIG_CONTENT!)).toEqual({
+      theme: "dark",
+      provider: {
+        openrouter: {
+          options: {
+            headers: {
+              "X-Custom": "preserved",
+              "HTTP-Referer": "https://agent-swarm.dev",
+              "X-OpenRouter-Title": "Agent Swarm",
+              "X-OpenRouter-Categories": "personal-agent,cloud-agent",
+              "X-Title": "Agent Swarm",
+            },
+          },
+        },
+      },
+    });
+  });
+
+  test("OpenCode preset leaves OPENCODE_CONFIG_CONTENT unchanged when attribution is disabled", () => {
+    const content = JSON.stringify({
+      theme: "dark",
+      provider: { openrouter: { options: { headers: { "X-Custom": "preserved" } } } },
+    });
+    const config = baseConfig({
+      model: "",
+      env: {
+        ACP_TARGET: "opencode",
+        OPENROUTER_BASE_URL: "https://openrouter.ai/api/v1",
+        OPENROUTER_APP_ATTRIBUTION: "false",
+        OPENCODE_CONFIG_CONTENT: content,
+      },
+    });
+    expect(resolveAcpTarget(config).env(config).OPENCODE_CONFIG_CONTENT).toBe(content);
+  });
+
+  test("OpenCode preset injects gateway even without a model fallback", () => {
+    const config = baseConfig({
+      model: "",
+      env: { ACP_TARGET: "opencode", OPENROUTER_BASE_URL: "http://127.0.0.1:8080/api/v1" },
+    });
+    const env = resolveAcpTarget(config).env(config);
+    expect(JSON.parse(env.OPENCODE_CONFIG_CONTENT!).provider.openrouter.options.baseURL).toBe(
+      "http://127.0.0.1:8080/api/v1",
+    );
   });
 
   test("Gemini preset supplies command, credentials, trust, and a model environment fallback", () => {

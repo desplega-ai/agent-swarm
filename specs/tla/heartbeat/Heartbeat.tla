@@ -25,7 +25,10 @@ CONSTANTS
     G_ORPHAN_REPAIR,  \* sweep re-creates a missing resume (#1670)
     FIX_NO_REBOOT,    \* proposed: delete runRebootSweep, rely on the classifier
     DRAIN_HANDOFF,    \* API drain handoff (#1837), opt-in via API_DRAIN_MAX_MS > 0
-    HYPO_REOFFER      \* hypothetical path that re-offers an unassigned task
+    HYPO_REOFFER,     \* hypothetical path that re-offers an unassigned task
+    BOOT_TRIAGE_ALWAYS, \* HEARTBEAT_BOOT_TRIAGE_ALWAYS: Lead task on every boot (#1973)
+    G_STATUS_FALLBACK,  \* boot triage: a failed gatherSystemStatus still creates the task (#1973)
+    TIMER_RACE          \* boot triage may fire before runRebootSweep finishes (timing assumption off)
 
 None == "none"
 Tasks == 1..NTasks
@@ -54,10 +57,14 @@ VARIABLES
     apiUp,    \* API process up
     wc, ac,   \* crash counters
     liveKill, \* history: a remediation killed a live, progressing task
-    badAcc    \* history: an accept took a task offered to someone else
+    badAcc,   \* history: an accept took a task offered to someone else
+    bt        \* boot-triage gate for the current API boot: armed (90 s timer
+              \* pending), hit (runRebootSweep failed a task: the in-memory
+              \* rebootAffectedTasks), and history of the gate step: fired,
+              \* dirty (a finding or an unreadable status), created (Lead task)
 
 vars == <<st, own, offTo, par, gen, pin, ver, stale, sess, touched, running,
-          alive, cl, acc, hb, rb, apiUp, wc, ac, liveKill, badAcc>>
+          alive, cl, acc, hb, rb, apiUp, wc, ac, liveKill, badAcc, bt>>
 
 Free == {s \in Tasks : st[s] = "free"}
 
@@ -73,6 +80,8 @@ NewChild(s, p, o, g, isPin) ==
     /\ par' = [par EXCEPT ![s] = p]
     /\ gen' = [gen EXCEPT ![s] = g]
     /\ pin' = [pin EXCEPT ![s] = isPin]
+
+BtOff == [armed |-> FALSE, hit |-> FALSE, fired |-> FALSE, dirty |-> FALSE, created |-> FALSE]
 
 ---------------------------------------------------------------------------
 Init ==
@@ -95,6 +104,7 @@ Init ==
     /\ apiUp = TRUE
     /\ wc = 0 /\ ac = 0
     /\ liveKill = FALSE /\ badAcc = FALSE
+    /\ bt = BtOff
 
 ---------------------------------------------------------------------------
 (* Worker-driven lifecycle (via HTTP: every step needs the API up).       *)
@@ -105,7 +115,7 @@ ClaimRead(w, t) ==
     /\ st[t] = "unassigned"
     /\ cl' = [cl EXCEPT ![w] = t]
     /\ UNCHANGED <<st, own, offTo, par, gen, pin, ver, stale, sess, touched,
-                   running, alive, acc, hb, rb, apiUp, wc, ac, liveKill, badAcc>>
+                   running, alive, acc, hb, rb, apiUp, wc, ac, liveKill, badAcc, bt>>
 
 \* ... then UPDATE ... WHERE id = ? AND status = 'unassigned'
 ClaimWrite(w) ==
@@ -121,7 +131,7 @@ ClaimWrite(w) ==
               /\ touched' = [touched EXCEPT ![t] = TRUE]
          ELSE UNCHANGED <<st, own, running, sess, stale, touched>>
     /\ UNCHANGED <<offTo, par, gen, pin, ver, alive, acc, hb, rb, apiUp, wc, ac,
-                   liveKill, badAcc>>
+                   liveKill, badAcc, bt>>
 
 \* acceptTask: JS check offeredTo = me ...
 AcceptRead(w, t) ==
@@ -129,7 +139,7 @@ AcceptRead(w, t) ==
     /\ st[t] = "offered" /\ offTo[t] = w
     /\ acc' = [acc EXCEPT ![w] = t]
     /\ UNCHANGED <<st, own, offTo, par, gen, pin, ver, stale, sess, touched,
-                   running, alive, cl, hb, rb, apiUp, wc, ac, liveKill, badAcc>>
+                   running, alive, cl, hb, rb, apiUp, wc, ac, liveKill, badAcc, bt>>
 
 \* ... then UPDATE SET agentId=?, status='pending' WHERE status IN ('offered','reviewing')
 AcceptWrite(w) ==
@@ -142,7 +152,7 @@ AcceptWrite(w) ==
               /\ badAcc' = (badAcc \/ offTo[t] # w)
          ELSE UNCHANGED <<st, own, badAcc>>
     /\ UNCHANGED <<offTo, par, gen, pin, ver, stale, sess, touched, running,
-                   alive, cl, hb, rb, apiUp, wc, ac, liveKill>>
+                   alive, cl, hb, rb, apiUp, wc, ac, liveKill, bt>>
 
 \* rejectTask, and releaseStaleOfferedTasksForOfflineAgents (same write).
 Reject(t) ==
@@ -150,7 +160,7 @@ Reject(t) ==
     /\ st' = [st EXCEPT ![t] = "unassigned"]
     /\ offTo' = [offTo EXCEPT ![t] = None]
     /\ UNCHANGED <<own, par, gen, pin, ver, stale, sess, touched, running, alive,
-                   cl, acc, hb, rb, apiUp, wc, ac, liveKill, badAcc>>
+                   cl, acc, hb, rb, apiUp, wc, ac, liveKill, badAcc, bt>>
 
 \* No such path exists in the code; switched on only to show the drift.
 ReOffer(t, w) ==
@@ -158,7 +168,7 @@ ReOffer(t, w) ==
     /\ st' = [st EXCEPT ![t] = "offered"]
     /\ offTo' = [offTo EXCEPT ![t] = w]
     /\ UNCHANGED <<own, par, gen, pin, ver, stale, sess, touched, running, alive,
-                   cl, acc, hb, rb, apiUp, wc, ac, liveKill, badAcc>>
+                   cl, acc, hb, rb, apiUp, wc, ac, liveKill, badAcc, bt>>
 
 \* poll.ts: pre-assigned pending -> in_progress (startTask, WHERE status='pending')
 PollStart(w, t) ==
@@ -170,7 +180,7 @@ PollStart(w, t) ==
     /\ stale' = [stale EXCEPT ![t] = FALSE]
     /\ touched' = [touched EXCEPT ![t] = TRUE]
     /\ UNCHANGED <<own, offTo, par, gen, pin, ver, alive, cl, acc, hb, rb, apiUp,
-                   wc, ac, liveKill, badAcc>>
+                   wc, ac, liveKill, badAcc, bt>>
 
 \* runner.ts POST /api/active-sessions (before provider spawn)
 RegisterSession(w, t) ==
@@ -178,7 +188,7 @@ RegisterSession(w, t) ==
     /\ st[t] \notin Terminal
     /\ sess' = [sess EXCEPT ![t] = "live"]
     /\ UNCHANGED <<st, own, offTo, par, gen, pin, ver, stale, touched, running,
-                   alive, cl, acc, hb, rb, apiUp, wc, ac, liveKill, badAcc>>
+                   alive, cl, acc, hb, rb, apiUp, wc, ac, liveKill, badAcc, bt>>
 
 \* PostToolUse hook -> PUT /api/active-sessions/heartbeat (tool activity), or
 \* POST /api/session-logs {taskId} -> refreshActiveSessionOnActivity (provider output, #1879)
@@ -186,7 +196,7 @@ SessionBeat(w, t) ==
     /\ apiUp /\ alive[w] /\ t \in running[w] /\ sess[t] = "prelive"
     /\ sess' = [sess EXCEPT ![t] = "live"]
     /\ UNCHANGED <<st, own, offTo, par, gen, pin, ver, stale, touched, running,
-                   alive, cl, acc, hb, rb, apiUp, wc, ac, liveKill, badAcc>>
+                   alive, cl, acc, hb, rb, apiUp, wc, ac, liveKill, badAcc, bt>>
 
 \* updateTaskProgress: no status guard; bumps lastUpdatedAt unconditionally.
 Progress(w, t) ==
@@ -195,7 +205,7 @@ Progress(w, t) ==
     /\ stale' = [stale EXCEPT ![t] = FALSE]
     /\ touched' = [touched EXCEPT ![t] = TRUE]
     /\ UNCHANGED <<st, own, offTo, par, gen, pin, sess, running, alive, cl, acc,
-                   hb, rb, apiUp, wc, ac, liveKill, badAcc>>
+                   hb, rb, apiUp, wc, ac, liveKill, badAcc, bt>>
 
 \* completeTask: WHERE status NOT IN terminal; worker then drops the session.
 Complete(w, t) ==
@@ -204,7 +214,7 @@ Complete(w, t) ==
     /\ running' = [running EXCEPT ![w] = @ \ {t}]
     /\ sess' = [sess EXCEPT ![t] = "none"]
     /\ UNCHANGED <<own, offTo, par, gen, pin, ver, stale, touched, alive, cl, acc,
-                   hb, rb, apiUp, wc, ac, liveKill, badAcc>>
+                   hb, rb, apiUp, wc, ac, liveKill, badAcc, bt>>
 
 \* The runner aborts any task the server holds as terminal (#1820,
 \* reconcileActiveTasks, runner.ts:4872): cancelled on every poll via
@@ -214,7 +224,7 @@ AbortTerminal(w, t) ==
     /\ apiUp /\ alive[w] /\ t \in running[w] /\ st[t] \in Terminal
     /\ running' = [running EXCEPT ![w] = @ \ {t}]
     /\ UNCHANGED <<st, own, offTo, par, gen, pin, ver, stale, sess, touched,
-                   alive, cl, acc, hb, rb, apiUp, wc, ac, liveKill, badAcc>>
+                   alive, cl, acc, hb, rb, apiUp, wc, ac, liveKill, badAcc, bt>>
 
 \* API drain handoff (#1837): a worker that sees X-Swarm-Draining on /ping or
 \* /api/poll calls POST /api/tasks/:id/supersede for its own in-flight task
@@ -235,7 +245,7 @@ DrainHandoff(w, t) ==
          /\ gen' = [gen EXCEPT ![s] = gen[t] + 1]
          /\ pin' = [pin EXCEPT ![s] = TRUE]
     /\ UNCHANGED <<offTo, ver, stale, sess, touched, running, alive, cl, acc, hb, rb,
-                   apiUp, wc, ac, liveKill, badAcc>>
+                   apiUp, wc, ac, liveKill, badAcc, bt>>
 
 WorkerCrash(w) ==
     /\ alive[w] /\ wc < MaxWorkerCrashes
@@ -246,20 +256,20 @@ WorkerCrash(w) ==
     /\ acc' = [acc EXCEPT ![w] = 0]
     /\ wc' = wc + 1
     /\ UNCHANGED <<st, own, offTo, par, gen, pin, ver, stale, touched, hb, rb,
-                   apiUp, ac, liveKill, badAcc>>
+                   apiUp, ac, liveKill, badAcc, bt>>
 
 WorkerRestart(w) ==
     /\ ~alive[w]
     /\ alive' = [alive EXCEPT ![w] = TRUE]
     /\ UNCHANGED <<st, own, offTo, par, gen, pin, ver, stale, sess, touched,
-                   running, cl, acc, hb, rb, apiUp, wc, ac, liveKill, badAcc>>
+                   running, cl, acc, hb, rb, apiUp, wc, ac, liveKill, badAcc, bt>>
 
 \* Time passes without a lastUpdatedAt write.
 Age(t) ==
     /\ st[t] = "in_progress" /\ ~stale[t]
     /\ stale' = [stale EXCEPT ![t] = TRUE]
     /\ UNCHANGED <<st, own, offTo, par, gen, pin, ver, sess, touched, running,
-                   alive, cl, acc, hb, rb, apiUp, wc, ac, liveKill, badAcc>>
+                   alive, cl, acc, hb, rb, apiUp, wc, ac, liveKill, badAcc, bt>>
 
 ---------------------------------------------------------------------------
 (* Heartbeat sweep (API process).                                         *)
@@ -274,7 +284,7 @@ HbRead(t) ==
        IN hb' = [pc |-> "decided", t |-> t, snap |-> ver[t],
                  act |-> IF resume THEN "supersede" ELSE "fail"]
     /\ UNCHANGED <<st, own, offTo, par, gen, pin, ver, stale, sess, touched,
-                   running, alive, cl, acc, rb, apiUp, wc, ac, liveKill, badAcc>>
+                   running, alive, cl, acc, rb, apiUp, wc, ac, liveKill, badAcc, bt>>
 
 \* supersedeTask / failTask: WHERE id = ? AND status NOT IN terminal
 \* AND lastUpdatedAt = <observed> (expectedLastUpdatedAt, #1668).
@@ -289,7 +299,7 @@ HbWrite ==
          ELSE /\ hb' = [hb EXCEPT !.pc = "idle"]
               /\ UNCHANGED <<st, liveKill, sess>>
     /\ UNCHANGED <<own, offTo, par, gen, pin, ver, stale, touched, running, alive,
-                   cl, acc, rb, apiUp, wc, ac, badAcc>>
+                   cl, acc, rb, apiUp, wc, ac, badAcc, bt>>
 
 \* createResumeFollowUp(crash_recovery): pinned to the original agent
 \* (a hard crash never marks it offline), separate write, no transaction.
@@ -299,7 +309,7 @@ HbResume ==
     /\ \E s \in Free : NewChild(s, t, own[t], gen[t] + 1, TRUE)
     /\ hb' = [hb EXCEPT !.pc = "idle"]
     /\ UNCHANGED <<offTo, ver, stale, sess, touched, running, alive, cl, acc, rb,
-                   apiUp, wc, ac, liveKill, badAcc>>
+                   apiUp, wc, ac, liveKill, badAcc, bt>>
 
 \* repairSupersededWithoutResume (#1670), step 1.5 of the sweep: a superseded
 \* parent with no resume child gets one, within the resume budget. The 1 min
@@ -311,7 +321,7 @@ HbRepair(t) ==
     /\ ~\E s \in Tasks : par[s] = t
     /\ \E s \in Free : NewChild(s, t, own[t], gen[t] + 1, TRUE)
     /\ UNCHANGED <<offTo, ver, stale, sess, touched, running, alive, cl, acc, hb, rb,
-                   apiUp, wc, ac, liveKill, badAcc>>
+                   apiUp, wc, ac, liveKill, badAcc, bt>>
 
 \* autoAssignPoolTasks: UPDATE SET agentId=?, status='pending' WHERE status='unassigned' (tx)
 AutoAssign(t, w) ==
@@ -319,7 +329,7 @@ AutoAssign(t, w) ==
     /\ st' = [st EXCEPT ![t] = "pending"]
     /\ own' = [own EXCEPT ![t] = w]
     /\ UNCHANGED <<offTo, par, gen, pin, ver, stale, sess, touched, running, alive,
-                   cl, acc, hb, rb, apiUp, wc, ac, liveKill, badAcc>>
+                   cl, acc, hb, rb, apiUp, wc, ac, liveKill, badAcc, bt>>
 
 \* escalateUnreclaimedResumes: tx { cancel pending pin; Lead reroute ->
 \* re-delegated to an explicit agent }. Over budget: fail the pin instead.
@@ -336,14 +346,14 @@ Reaper(s) ==
                 /\ gen' = [gen EXCEPT ![n] = gen[s] + 1]
                 /\ pin' = [pin EXCEPT ![n] = FALSE]
     /\ UNCHANGED <<offTo, ver, stale, sess, touched, running, alive, cl, acc, hb, rb,
-                   apiUp, wc, ac, liveKill, badAcc>>
+                   apiUp, wc, ac, liveKill, badAcc, bt>>
 
 \* cleanupStaleResources: delete sessions whose heartbeat is > 30 min old.
 CleanupSession(t) ==
     /\ apiUp /\ sess[t] = "dead"
     /\ sess' = [sess EXCEPT ![t] = "none"]
     /\ UNCHANGED <<st, own, offTo, par, gen, pin, ver, stale, touched, running,
-                   alive, cl, acc, hb, rb, apiUp, wc, ac, liveKill, badAcc>>
+                   alive, cl, acc, hb, rb, apiUp, wc, ac, liveKill, badAcc, bt>>
 
 ---------------------------------------------------------------------------
 (* API crash + boot + runRebootSweep.                                     *)
@@ -356,9 +366,11 @@ ApiCrash ==
     /\ cl' = [w \in Workers |-> 0]
     /\ acc' = [w \in Workers |-> 0]
     /\ ac' = ac + 1
+    /\ bt' = [bt EXCEPT !.armed = FALSE, !.hit = FALSE]  \* timer and process memory lost
     /\ UNCHANGED <<st, own, offTo, par, gen, pin, ver, stale, sess, touched,
                    running, alive, wc, liveKill, badAcc>>
 
+\* Boot also arms the boot-triage timer (startHeartbeatChecklist, T+90 s).
 ApiBoot ==
     /\ ~apiUp
     /\ apiUp' = TRUE
@@ -366,6 +378,7 @@ ApiBoot ==
     /\ sess' = [t \in Tasks |-> IF sess[t] = "live" THEN "prelive" ELSE sess[t]]
     /\ rb' = [todo |-> IF FIX_NO_REBOOT THEN {} ELSE {t \in Tasks : st[t] = "in_progress"},
               pc |-> "idle", t |-> 0]
+    /\ bt' = [BtOff EXCEPT !.armed = TRUE]
     /\ UNCHANGED <<st, own, offTo, par, gen, pin, ver, stale, running,
                    alive, cl, acc, hb, wc, ac, liveKill, badAcc>>
 
@@ -384,8 +397,9 @@ RebootFail(t) ==
        THEN /\ st' = [st EXCEPT ![t] = "failed"]
             /\ liveKill' = (liveKill \/ LiveNow(t))
             /\ rb' = [rb EXCEPT !.todo = @ \ {t}, !.pc = "retry", !.t = t]
+            /\ bt' = [bt EXCEPT !.hit = TRUE]
        ELSE /\ rb' = [rb EXCEPT !.todo = @ \ {t}]
-            /\ UNCHANGED <<st, liveKill>>
+            /\ UNCHANGED <<st, liveKill, bt>>
     /\ UNCHANGED <<own, offTo, par, gen, pin, ver, stale, sess, touched, running,
                    alive, cl, acc, hb, apiUp, wc, ac, badAcc>>
 
@@ -397,7 +411,42 @@ RebootRetry ==
          ELSE UNCHANGED <<st, own, par, gen, pin>>
     /\ rb' = [rb EXCEPT !.pc = "idle"]
     /\ UNCHANGED <<offTo, ver, stale, sess, touched, running, alive, cl, acc, hb,
-                   apiUp, wc, ac, liveKill, badAcc>>
+                   apiUp, wc, ac, liveKill, badAcc, bt>>
+
+---------------------------------------------------------------------------
+(* Boot triage gate (#1973): createBootTriageTask at T+90 s.              *)
+
+\* getBootTriageFindings, read from the state the gate sees. The fourth
+\* count, rebootInterrupted, is bt.hit. A superseded task whose resume is the
+\* in-flight HbResume is under the 1 min floor, so it does not count.
+Stalled == \E t \in Tasks : st[t] = "in_progress" /\ stale[t]
+SupersededNoResume ==
+    \E t \in Tasks : /\ st[t] = "superseded" /\ ~\E s \in Tasks : par[s] = t
+                     /\ ~(hb.pc = "resume" /\ hb.t = t)
+\* Agent status is not a variable: any pending/offered task may have an
+\* offline or unregistered holder.
+OrphanChoices == IF \E t \in Tasks : st[t] \in {"pending", "offered"}
+                   THEN BOOLEAN ELSE {FALSE}
+
+RebootSweepDone == rb.todo = {} /\ rb.pc = "idle"
+
+\* Dedup read, findings read, status read and the task insert collapsed into
+\* one step. `readOk` = getBootTriageFindings resolved; `statusOk` =
+\* gatherSystemStatus resolved. The 90 s timer is not chained to the 5 s
+\* reboot sweep; the model assumes it fires after the sweep (TIMER_RACE off).
+BootTriage ==
+    /\ apiUp /\ bt.armed
+    /\ TIMER_RACE \/ RebootSweepDone
+    /\ \E readOk \in BOOLEAN, statusOk \in BOOLEAN, orphan \in OrphanChoices :
+         LET findings == bt.hit \/ Stalled \/ orphan \/ SupersededNoResume
+             clean    == ~BOOT_TRIAGE_ALWAYS /\ readOk /\ ~findings
+         IN bt' = [armed   |-> FALSE,
+                   hit     |-> bt.hit,
+                   fired   |-> TRUE,
+                   dirty   |-> ~readOk \/ findings,
+                   created |-> ~clean /\ (G_STATUS_FALLBACK \/ statusOk)]
+    /\ UNCHANGED <<st, own, offTo, par, gen, pin, ver, stale, sess, touched, running,
+                   alive, cl, acc, hb, rb, apiUp, wc, ac, liveKill, badAcc>>
 
 ---------------------------------------------------------------------------
 Next ==
@@ -408,7 +457,7 @@ Next ==
     \/ \E w \in Workers : ClaimWrite(w) \/ AcceptWrite(w) \/ WorkerCrash(w) \/ WorkerRestart(w)
     \/ \E t \in Tasks : Reject(t) \/ Age(t) \/ HbRead(t) \/ HbRepair(t) \/ Reaper(t)
          \/ CleanupSession(t) \/ RebootFail(t)
-    \/ HbWrite \/ HbResume \/ RebootRetry \/ ApiCrash \/ ApiBoot
+    \/ HbWrite \/ HbResume \/ RebootRetry \/ ApiCrash \/ ApiBoot \/ BootTriage
 
 Fairness ==
     /\ \A w \in Workers :
@@ -419,6 +468,7 @@ Fairness ==
          /\ WF_vars(Reaper(t)) /\ WF_vars(RebootFail(t)) /\ WF_vars(CleanupSession(t))
          /\ WF_vars(\E w \in Workers : AutoAssign(t, w))
     /\ WF_vars(HbWrite) /\ WF_vars(HbResume) /\ WF_vars(RebootRetry) /\ WF_vars(ApiBoot)
+    /\ WF_vars(BootTriage)
 
 Spec == Init /\ [][Next]_vars /\ Fairness
 
@@ -429,6 +479,7 @@ TypeOK ==
     /\ st \in [Tasks -> Status]
     /\ ver \in [Tasks -> 0..MaxVer]
     /\ sess \in [Tasks -> {"none", "live", "prelive", "dead"}]
+    /\ bt \in [armed: BOOLEAN, hit: BOOLEAN, fired: BOOLEAN, dirty: BOOLEAN, created: BOOLEAN]
 
 \* S1: at most one worker executes a given task row.
 OneRunner == \A t \in Tasks : Cardinality({w \in Workers : t \in running[w]}) <= 1
@@ -461,5 +512,12 @@ Finished == \E t \in Tasks : st[t] \in {"completed", "failed"}
 EventuallyFinished == <>Finished
 \* L2: a superseded task eventually has a resume.
 SupersededGetsResume == \A t \in Tasks : (st[t] = "superseded") ~> (\E s \in Tasks : par[s] = t)
+
+\* S7 (#1973): the boot-triage gate creates a Lead task exactly when the boot
+\* had a finding (reboot-interrupted, stalled, orphaned, superseded without
+\* resume) or its findings were unreadable. A clean boot creates none.
+BootTriageGate == bt.fired => (bt.created <=> (BOOT_TRIAGE_ALWAYS \/ bt.dirty))
+\* L3 (#1973): a task the reboot sweep failed always reaches the Lead.
+RebootFailReported == bt.hit ~> bt.created
 EventuallyQuiet    == <>[](\A t \in Tasks : st[t] \notin Active)
 =============================================================================

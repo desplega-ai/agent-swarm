@@ -9,8 +9,13 @@ Before trusting the model on current code, each historical fix below was removed
 | C3 | #1668 fix(heartbeat): compare-and-swap stall remediation on observed lastUpdatedAt | `G_STALL_CAS=FALSE` (supersede/fail lose `AND lastUpdatedAt = <observed>`) | `NoLiveKill` | `AutoAssign → PollStart → Age → HbRead → Progress → HbWrite`: a progress write between the candidate read and the supersede is overwritten. 7 states. |
 | C4 | #1669 fix(heartbeat): reboot sweep keeps tasks whose session heartbeat is recent | `G_REBOOT_HB_AGE=FALSE` (a pre-boot session heartbeat counts as dead) | `NoLiveKill` | `AutoAssign → PollStart → RegisterSession → ApiCrash → ApiBoot → RebootFail`: a live worker with a registered session is failed at boot. 7 states. Found with `liveKill` restricted to tasks that have a session row, because the shorter no-session trace below hits first; with the guard on, that restricted check passes. |
 | C5 | #1670 fix(heartbeat): create the missing resume for a task superseded without one | `G_ORPHAN_REPAIR=FALSE` (no `repairSupersededWithoutResume` sweep) | `SupersededGetsResume` | `ClaimRead → ClaimWrite → WorkerCrash → Age → WorkerRestart → HbRead → HbWrite → ApiCrash → ApiBoot → stutter`: the API dies between supersede and resume, and the task stays superseded with no resume forever. 10 states. With the sweep on, `SupersededGetsResume` and `EventuallyFinished` hold; the safety form `SupersededHasResume` still fails, because the two writes are still not one transaction. |
+| C6 | #1973 review P1: boot triage falls back when `gatherSystemStatus` rejects | `G_STATUS_FALLBACK=FALSE` (a rejected status read skips the Lead task) | `BootTriageGate` | `ApiCrash → ApiBoot → BootTriage`: the boot is dirty (the findings read rejects, or the still-offered root task counts as an orphan), but the status read also rejects and no Lead task is created. 4 states. |
 
-Result: **5 of 5 calibrations found**; the safety ones (C1 to C4) at the shortest possible depth.
+Result: **6 of 6 calibrations found**; the safety ones (C1 to C4, C6) at the shortest possible depth.
+
+## Timing assumption
+
+`BootTriage` waits for the reboot sweep to finish (`RebootSweepDone`). The code has no such guard: the gate is a 90 s `setTimeout`, and `runRebootSweep` starts on its own 5 s timer, so the order holds only while the sweep finishes within about 85 s. With `TIMER_RACE=TRUE` (sweep on), `BootTriageGate` still holds (16,690,836 distinct states), but `RebootFailReported` fails: `ApiCrash → ApiBoot → BootTriage → RebootFail → RebootRetry → Complete`, 16 states. A boot whose own findings are clean fires the gate, skips the Lead task, and the sweep then fails a task that no triage task reports. Chaining the triage timer to the end of `runRebootSweep` would close it.
 
 ## Still open on current code
 
@@ -34,4 +39,6 @@ F="FIX_NO_REBOOT=TRUE"
 # liveKill' to `liveKill \/ (LiveNow(t) /\ sess[t] # "none")` in a scratch copy.
 ./trace.sh Heartbeat Heartbeat.cfg INVARIANT NoLiveKill G_REBOOT_HB_AGE=FALSE
 ./trace.sh Heartbeat Heartbeat.cfg PROPERTY SupersededGetsResume G_ORPHAN_REPAIR=FALSE $F
+./trace.sh Heartbeat Heartbeat.cfg INVARIANT BootTriageGate G_STATUS_FALLBACK=FALSE $F
+./trace.sh Heartbeat Heartbeat.cfg PROPERTY RebootFailReported TIMER_RACE=TRUE
 ```

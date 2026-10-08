@@ -244,6 +244,11 @@ export async function handleMcp(
       }
       const server = await createServer({
         preloadedTools,
+        // Agent row, then global row, then deployment env. A blank agent row
+        // resolves to "unset" for that agent.
+        enabledTools:
+          configs.find((config) => config.key === "SWARM_ENABLED_TOOLS")?.value ??
+          process.env.SWARM_ENABLED_TOOLS,
         scriptsOnly: resolveScriptsOnlyMode({
           env: process.env.SCRIPTS_ONLY_MCP,
           configValue,
