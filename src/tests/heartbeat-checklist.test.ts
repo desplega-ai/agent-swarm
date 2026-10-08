@@ -1,4 +1,13 @@
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  spyOn,
+  test,
+} from "bun:test";
 import { unlink } from "node:fs/promises";
 import {
   closeDb,
@@ -593,6 +602,54 @@ describe("Heartbeat Checklist", () => {
       await createBootTriageTask();
 
       expect(await bootTriageCount()).toBe(1);
+    });
+
+    test("stalled-only work creates the Lead task", async () => {
+      await createAgent({ name: "lead", isLead: true, status: "idle" });
+      const agent = await createAgent({ name: "stuck-worker", isLead: false, status: "busy" });
+      const task = await createTaskExtended("Stalled work", { agentId: agent.id });
+      await startTask(task.id);
+      await getDbClient().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [
+        new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
+        task.id,
+      ]);
+
+      expect(await getBootTriageFindings()).toEqual({
+        rebootInterrupted: 0,
+        stalled: 1,
+        orphaned: 0,
+        supersededWithoutResume: 0,
+      });
+      await createBootTriageTask();
+
+      expect(await bootTriageCount()).toBe(1);
+    });
+
+    test("a persistent reader error still creates exactly one Lead task", async () => {
+      await createAgent({ name: "lead", isLead: true, status: "idle" });
+      const client = getDbClient();
+      const query = client.query.bind(client);
+      const failStalled = spyOn(client, "query").mockImplementation((sql, params) => {
+        if (sql.includes("status = 'in_progress' AND lastUpdatedAt < ?")) {
+          throw new Error("stalled read unavailable");
+        }
+        return query(sql, params);
+      });
+      const errors = spyOn(console, "error").mockImplementation(() => {});
+      try {
+        await createBootTriageTask();
+        await createBootTriageTask();
+      } finally {
+        failStalled.mockRestore();
+        errors.mockRestore();
+      }
+
+      expect(await bootTriageCount()).toBe(1);
+      const task = await getDbClient().get<{ task: string }>(
+        "SELECT task FROM agent_tasks WHERE taskType = 'boot-triage'",
+      );
+      expect(task?.task).toContain("System status unavailable");
+      expect(task?.task).toContain("stalled read unavailable");
     });
 
     test("HEARTBEAT_BOOT_TRIAGE_ALWAYS creates the task on a clean boot", async () => {

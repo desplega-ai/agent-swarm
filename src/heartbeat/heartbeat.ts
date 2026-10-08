@@ -1943,7 +1943,12 @@ export async function createBootTriageTask(): Promise<void> {
     }
   }
 
-  const systemStatus = await gatherSystemStatus({ isBootTriage: true });
+  // A reader that failed above can fail again here; the task must still land.
+  const systemStatus = await gatherSystemStatus({ isBootTriage: true }).catch((err) => {
+    const reason = scrubSecrets(err instanceof Error ? err.message : String(err));
+    console.error("[Heartbeat] Boot triage status gathering failed:", reason);
+    return `## System status unavailable\n\nStatus gathering failed after this boot (${reason}). Investigate the task, agent, and DB state directly.`;
+  });
 
   const result = resolveTemplate("heartbeat.boot-triage", {
     system_status: systemStatus,
