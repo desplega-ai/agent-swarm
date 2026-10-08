@@ -587,9 +587,9 @@ RUN curl -fsSL "https://registry.npmjs.org/@deepseek-ai/dsh/-/dsh-${DSH_VERSION}
 # "disabled". Bump AMP_VERSION, both SHA-512 pins and AMP_PACKAGE in
 # src/providers/amp-adapter.ts together. The vendor licence is proprietary
 # (https://ampcode.com/terms): confirm it before publishing this image.
-ARG AMP_VERSION=0.0.1791425319-gd969c3
-ARG AMP_SHA512_AMD64=af13add6fcd1f89be310efc2b631a318b03aefad4b4bea1d2aa2d4eadd85eb81c9c5d47f59699c137272b39d7aea8a43504d1bb124dd8d1fc9a73d97c947a71f
-ARG AMP_SHA512_ARM64=a2dba7c412a9865583c046871ae4af43dd6f715ece42d6b43b427afd254806dbe451cf0f653c114abde0021bbd3053757f80e2d1457620943a166ccdc670b027
+ARG AMP_VERSION=0.0.1791460855-g1f688c
+ARG AMP_SHA512_AMD64=725d0241fb987d8c655f0c0f35313ca3026024a9fb43201e04edcd6184f88f6118fd16a4bca92d473a41092e6201990cdffb570e7d4b9adfd2115c341343c8bc
+ARG AMP_SHA512_ARM64=d63f2bd2a1ef3afd2e7e50b6f1bd6ebee4a1b7450ee9f1785b9d04fcc914f865088bca36679792803090d8ff752338c6d655795edb4ae06b5c6f3c9540441568
 RUN case "$TARGETARCH" in \
       amd64) amp_platform=linux-x64; amp_sha512="$AMP_SHA512_AMD64" ;; \
       arm64) amp_platform=linux-arm64; amp_sha512="$AMP_SHA512_ARM64" ;; \
