@@ -77,6 +77,20 @@ Do not add `CLAUDE_CODE_OAUTH_TOKEN` to a pi worker. Keep only credentials used 
 
 OpenRouter's Anthropic-compatible endpoint works as a Claude Code gateway. See [Claude Code through a gateway or cloud provider](#claude-code-through-a-gateway-or-cloud-provider) for the OpenRouter snippet.
 
+### App attribution
+
+Requests sent straight to `openrouter.ai` carry OpenRouter's [app attribution](https://openrouter.ai/docs/app-attribution) headers, so the usage counts toward the Agent Swarm app on OpenRouter's rankings:
+
+```
+HTTP-Referer:            https://agent-swarm.dev
+X-OpenRouter-Title:      Agent Swarm
+X-OpenRouter-Categories: personal-agent,cloud-agent
+```
+
+Every OpenRouter caller sends them: the pi-mono, OpenCode, dsh, grok and Claude Code harnesses, the memory rater and session summaries, workflow LLM nodes, the credential check, and the evals judges. Only an `openrouter.ai` host (or a subdomain) gets them. A gateway set through `OPENROUTER_BASE_URL`, an `EMBEDDING_API_BASE_URL`, or any other endpoint receives none. OpenCode also gets `X-Title: Agent Swarm`, which replaces its built-in `X-Title: opencode`.
+
+Set `OPENROUTER_APP_ATTRIBUTION=false` (or `0`) to turn it off, for example to attribute the traffic to your own app instead. It is read from each task's resolved config, so a value saved under **Settings → Configuration** applies on the worker's next task.
+
 ### Codex: upstream-compatible, not in the stock image
 
 OpenRouter's Codex setup uses the user-level `~/.codex/config.toml`:

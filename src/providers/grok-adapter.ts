@@ -3,7 +3,10 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { normalizeGrokModel } from "@desplega/model-catalog";
-import { getOpenRouterBaseUrl } from "../utils/openrouter-base-url";
+import {
+  getOpenRouterAttributionHeaders,
+  getOpenRouterBaseUrl,
+} from "../utils/openrouter-base-url";
 import { registerVolatileSecret } from "../utils/secret-scrubber";
 import { ACPAdapter } from "./acp-adapter";
 import { grokTargetProfile, isGrokOpenRouterModel } from "./acp-targets";
@@ -64,6 +67,8 @@ export interface GrokCustomModel {
   baseUrl: string;
   /** Env var holding the endpoint's API key. */
   envKey: string;
+  /** Sent verbatim on every request to the endpoint (`extra_headers`). */
+  headers?: Record<string, string>;
 }
 
 /** `openrouter/<vendor>/<id>` -> a `[model."openrouter/<vendor>/<id>"]` block on OpenRouter. */
@@ -73,12 +78,22 @@ export function grokOpenRouterModel(
 ): GrokCustomModel | null {
   const id = model.trim();
   if (!isGrokOpenRouterModel(id)) return null;
+  const baseUrl = getOpenRouterBaseUrl(env);
   return {
     id,
     model: id.slice("openrouter/".length),
-    baseUrl: getOpenRouterBaseUrl(env),
+    baseUrl,
     envKey: "OPENROUTER_API_KEY",
+    headers: getOpenRouterAttributionHeaders(baseUrl, env),
   };
+}
+
+/** `key = { "k" = "v", ... }`, or nothing for an empty map. JSON strings are valid TOML basic strings. */
+function tomlInlineTable(key: string, entries: Record<string, string> | undefined): string[] {
+  const pairs = Object.entries(entries ?? {});
+  if (pairs.length === 0) return [];
+  const body = pairs.map(([k, v]) => `${JSON.stringify(k)} = ${JSON.stringify(v)}`).join(", ");
+  return [`${key} = { ${body} }`];
 }
 
 /** `$GROK_HOME/config.toml` for one swarm session. */
@@ -95,6 +110,7 @@ export function buildGrokConfigToml(
         `base_url = ${JSON.stringify(customModel.baseUrl)}`,
         `env_key = ${JSON.stringify(customModel.envKey)}`,
         `api_backend = "chat_completions"`,
+        ...tomlInlineTable("extra_headers", customModel.headers),
       ]
     : [];
   return [

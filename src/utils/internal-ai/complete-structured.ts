@@ -20,7 +20,11 @@ import { complete } from "@earendil-works/pi-ai/compat";
 import { getBuiltinModel as getModel } from "@earendil-works/pi-ai/providers/all";
 import type { TSchema } from "typebox";
 import { z } from "zod";
-import { DEFAULT_OPENROUTER_BASE_URL, getOpenRouterBaseUrl } from "../openrouter-base-url.js";
+import {
+  DEFAULT_OPENROUTER_BASE_URL,
+  getOpenRouterAttributionHeaders,
+  getOpenRouterBaseUrl,
+} from "../openrouter-base-url.js";
 import { scrubSecrets } from "../secret-scrubber.js";
 import { type ResolvedCredential, resolveCredential } from "./credentials.js";
 import { parseModelStr } from "./models.js";
@@ -319,10 +323,14 @@ export async function completeStructuredWithModel<TZod extends z.ZodTypeAny>(
   // through a gateway (pi-ai's stream path uses `model.baseUrl` verbatim).
   // Resolved from the caller's session env when provided — swarm_config
   // overlays don't reach `process.env`.
-  const openRouterBaseUrl = getOpenRouterBaseUrl((opts.env ?? process.env) as NodeJS.ProcessEnv);
+  const env = opts.env ?? process.env;
+  const openRouterBaseUrl = getOpenRouterBaseUrl(env as NodeJS.ProcessEnv);
   if (provider === "openrouter" && openRouterBaseUrl !== DEFAULT_OPENROUTER_BASE_URL) {
     model = { ...model, baseUrl: openRouterBaseUrl };
   }
+  // pi-ai merges `options.headers` over the provider defaults.
+  const headers =
+    provider === "openrouter" ? getOpenRouterAttributionHeaders(model.baseUrl, env) : {};
 
   const completeFn = opts._complete ?? complete;
   const toolChoice =
@@ -348,7 +356,7 @@ export async function completeStructuredWithModel<TZod extends z.ZodTypeAny>(
         },
         // pi-ai's ProviderStreamOptions type only allows known providers;
         // we pass the validated apiKey through verbatim.
-        { apiKey: cred.apiKey, signal: opts.signal, toolChoice } as Parameters<
+        { apiKey: cred.apiKey, signal: opts.signal, toolChoice, headers } as Parameters<
           typeof completeFn
         >[2],
       );

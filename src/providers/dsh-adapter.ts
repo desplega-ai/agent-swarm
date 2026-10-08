@@ -9,7 +9,10 @@ import {
 } from "../utils/context-window";
 import { addDshStepUsage, type DshStepUsage, normalizeDshStepUsage } from "../utils/dsh-usage";
 import { swarmRuntimeInstanceId } from "../utils/multi-runtime";
-import { getOpenRouterBaseUrl } from "../utils/openrouter-base-url";
+import {
+  getOpenRouterAttributionHeaders,
+  getOpenRouterBaseUrl,
+} from "../utils/openrouter-base-url";
 import {
   detachedProcessGroup,
   registerProcessGroup,
@@ -342,6 +345,9 @@ export class DshAdapter implements ProviderAdapter {
     const directory = await mkdtemp(join(tmpdir(), "swarm-dsh-"));
     try {
       const patchPath = join(directory, "patch.json");
+      const openRouterHeaders = openrouter
+        ? getOpenRouterAttributionHeaders(getOpenRouterBaseUrl(env), env)
+        : {};
       const runtimeInstanceId = swarmRuntimeInstanceId();
       // JSON is valid YAML. Values stay data, including arbitrary system prompts.
       await writeFile(
@@ -364,6 +370,9 @@ export class DshAdapter implements ProviderAdapter {
                     openrouter: {
                       apiKeyEnv: keyEnv,
                       baseURL: getOpenRouterBaseUrl(env),
+                      ...(Object.keys(openRouterHeaders).length > 0
+                        ? { headers: openRouterHeaders }
+                        : {}),
                       api: "openai-completions",
                       // Declare the selected ID even if the bundled catalog predates it.
                       models: [

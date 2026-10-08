@@ -734,4 +734,37 @@ describe("system-one-decision SystemOne wire is unchanged", () => {
       expect(calls[0]?.raw).toBe(expected);
     }
   });
+
+  test("only the openrouter.ai provider carries OpenRouter app attribution", async () => {
+    const referer = async (provider: string, env: Record<string, string>) => {
+      const { executor, calls } = makeExecutor(
+        [
+          jsonResponse({
+            model: "jev",
+            answers: systemOneAnswers,
+            usage: { input_tokens: 1, output_tokens: 0 },
+          }),
+        ],
+        {
+          getApiKey: async () => OPENAI_KEY,
+          getServerUrl: async () => "https://laya.example.test",
+          env: { OPENROUTER_API_KEY: OPENAI_KEY, ...env },
+        },
+      );
+      await run(executor, { ...config({ model: "jev-1.13.0" }), provider });
+      const headers = new Headers(calls[0]?.init.headers);
+      return [headers.get("http-referer"), headers.get("x-openrouter-categories")];
+    };
+    expect(await referer("openrouter", {})).toEqual([
+      "https://agent-swarm.dev",
+      "personal-agent,cloud-agent",
+    ]);
+    expect(await referer("openrouter", { OPENROUTER_APP_ATTRIBUTION: "false" })).toEqual([
+      null,
+      null,
+    ]);
+    for (const provider of ["typesafe", "laya"]) {
+      expect(await referer(provider, {})).toEqual([null, null]);
+    }
+  });
 });

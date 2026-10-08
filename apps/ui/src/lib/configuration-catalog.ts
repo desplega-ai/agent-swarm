@@ -505,6 +505,15 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         docsUrl: `${DOCS}guides/provider-auth/model-gateways`,
       },
       {
+        key: "OPENROUTER_APP_ATTRIBUTION",
+        label: "OpenRouter app attribution",
+        description:
+          "Sends OpenRouter's app attribution headers (HTTP-Referer https://agent-swarm.dev, X-OpenRouter-Title Agent Swarm, X-OpenRouter-Categories personal-agent,cloud-agent) on requests that go straight to openrouter.ai, so the usage counts toward the Agent Swarm app. Gateways and other hosts never get them. Turn off to send no attribution, for example to credit your own OpenRouter app. Takes effect on each worker's next task; no restart.",
+        kind: "boolean",
+        defaultValue: "true",
+        docsUrl: `${DOCS}guides/provider-auth/model-gateways#app-attribution`,
+      },
+      {
         key: "WORKER_API_READY_TIMEOUT_SECONDS",
         label: "API readiness timeout (s)",
         description:

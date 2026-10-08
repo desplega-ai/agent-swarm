@@ -34,6 +34,7 @@ import {
 import { withFileLock } from "../utils/file-lock";
 import { fetchInstalledMcpServers } from "../utils/mcp-server-fetcher";
 import { swarmRuntimeInstanceId } from "../utils/multi-runtime";
+import { getOpenRouterAttributionHeaders } from "../utils/openrouter-base-url";
 import {
   detachedProcessGroup,
   registerProcessGroup,
@@ -738,6 +739,30 @@ export function buildClaudeCodeRuntimeEnv(
   };
 }
 
+/**
+ * `ANTHROPIC_CUSTOM_HEADERS` ("Name: value" per line) with OpenRouter app
+ * attribution appended, when `ANTHROPIC_BASE_URL` points at openrouter.ai.
+ * The operator's lines are kept in order (they may carry gateway
+ * credentials); only lines naming one of our headers are replaced. Returns
+ * `{}` when nothing changes, so the inherited value stays byte-identical.
+ *
+ * Exported for unit testing.
+ */
+export function claudeOpenRouterAttributionEnv(env: Record<string, string | undefined>): {
+  ANTHROPIC_CUSTOM_HEADERS?: string;
+} {
+  const headers = getOpenRouterAttributionHeaders(env.ANTHROPIC_BASE_URL ?? "", env);
+  const names = new Set(Object.keys(headers).map((name) => name.toLowerCase()));
+  if (names.size === 0) return {};
+  const kept = (env.ANTHROPIC_CUSTOM_HEADERS ?? "").split("\n").filter((line) => {
+    const colon = line.indexOf(":");
+    const name = colon === -1 ? "" : line.slice(0, colon).trim().toLowerCase();
+    return line.trim() !== "" && !names.has(name);
+  });
+  const ours = Object.entries(headers).map(([name, value]) => `${name}: ${value}`);
+  return { ANTHROPIC_CUSTOM_HEADERS: [...kept, ...ours].join("\n") };
+}
+
 export function buildClaudeSessionEnvironment(
   config: ProviderSessionConfig,
   model: string,
@@ -751,6 +776,7 @@ export function buildClaudeSessionEnvironment(
     env: {
       ENABLE_PROMPT_CACHING_1H: "1",
       ...sourceEnv,
+      ...claudeOpenRouterAttributionEnv(sourceEnv),
       ...buildClaudeCodeRuntimeEnv(sourceEnv),
       ...buildClaudeCodeOtelEnv(sourceEnv),
       ...(reasoningApplication.kind === "claude-env" ? reasoningApplication.env : {}),

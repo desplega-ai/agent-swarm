@@ -12,7 +12,10 @@
  */
 import { z } from "zod";
 import { MEMORY_RATER_DEFAULT_MODEL } from "../../../utils/internal-ai/models";
-import { getOpenRouterBaseUrl } from "../../../utils/openrouter-base-url";
+import {
+  getOpenRouterAttributionHeaders,
+  getOpenRouterBaseUrl,
+} from "../../../utils/openrouter-base-url";
 import { type SummaryWithRatings, SummaryWithRatingsSchema } from "./llm";
 
 /**
@@ -150,11 +153,13 @@ export async function runMemoryRater(opts: RunMemoryRaterOpts): Promise<RunMemor
   const model = opts.model ?? getMemoryRaterModel();
   const responseLogCap = opts.responseLogCap ?? 200;
 
+  const url = openRouterChatCompletionsUrl();
   let res: Response;
   try {
-    res = await fetchFn(openRouterChatCompletionsUrl(), {
+    res = await fetchFn(url, {
       method: "POST",
       headers: {
+        ...getOpenRouterAttributionHeaders(url),
         "Content-Type": "application/json",
         Authorization: `Bearer ${opts.apiKey}`,
       },

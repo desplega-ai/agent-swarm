@@ -1,9 +1,14 @@
 import { DEFAULT_MODEL, resolveCredential } from "../../utils/internal-ai/credentials";
-import { getOpenRouterBaseUrl } from "../../utils/openrouter-base-url";
+import {
+  getOpenRouterAttributionHeaders,
+  getOpenRouterBaseUrl,
+} from "../../utils/openrouter-base-url";
 
 export interface WorkflowLlmConfig {
   apiKey: string;
   baseURL?: string;
+  /** OpenRouter app attribution; empty for OpenAI and for gateway base URLs. */
+  headers: Record<string, string>;
   model: string;
 }
 
@@ -39,9 +44,11 @@ export async function resolveWorkflowLlmConfig(
   // Workflow defaults are provider-owned; MEMORY_RATER_MODEL only configures memory work.
   const model = requestedModel ?? DEFAULT_MODEL[credential.kind];
 
+  const baseURL = credential.kind === "openrouter" ? getOpenRouterBaseUrl(env) : undefined;
   return {
     apiKey: credential.apiKey,
-    baseURL: credential.kind === "openrouter" ? getOpenRouterBaseUrl(env) : undefined,
+    baseURL,
+    headers: baseURL ? getOpenRouterAttributionHeaders(baseURL, env) : {},
     model: model.startsWith(providerPrefix) ? model.slice(providerPrefix.length) : model,
   };
 }

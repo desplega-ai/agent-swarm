@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { DEFAULT_MODEL } from "../utils/internal-ai/models";
+import { OPENROUTER_APP_ATTRIBUTION_HEADERS } from "../utils/openrouter-base-url";
 import { resolveWorkflowLlmConfig } from "../workflows/executors/workflow-llm";
 
 describe("resolveWorkflowLlmConfig", () => {
@@ -12,8 +13,20 @@ describe("resolveWorkflowLlmConfig", () => {
     expect(config).toEqual({
       apiKey: "sk-or-test",
       baseURL: "https://gateway.example.test/v1",
+      headers: {},
       model: "deepseek/deepseek-v4.1-flash",
     });
+  });
+
+  test("attributes direct openrouter.ai calls unless OPENROUTER_APP_ATTRIBUTION is off", async () => {
+    const direct = await resolveWorkflowLlmConfig(undefined, { OPENROUTER_API_KEY: "sk-or-test" });
+    expect(direct.headers).toEqual(OPENROUTER_APP_ATTRIBUTION_HEADERS);
+
+    const optedOut = await resolveWorkflowLlmConfig(undefined, {
+      OPENROUTER_API_KEY: "sk-or-test",
+      OPENROUTER_APP_ATTRIBUTION: "false",
+    });
+    expect(optedOut.headers).toEqual({});
   });
 
   test("routes OpenAI credentials to the SDK default endpoint", async () => {
@@ -24,6 +37,7 @@ describe("resolveWorkflowLlmConfig", () => {
     expect(config).toEqual({
       apiKey: "example-sk-openai-test",
       baseURL: undefined,
+      headers: {},
       model: "gpt-6-luna",
     });
   });

@@ -21,6 +21,7 @@ import {
 } from "../be/onboarding";
 import { assertUrlSafe, publicEndpointSsrfOptions } from "../oauth/mcp-wrapper";
 import { ProviderNameSchema } from "../types";
+import { getOpenRouterAttributionHeaders } from "../utils/openrouter-base-url";
 import { ensureConfigAdmin } from "./config";
 import { scheduleIntegrationsReload } from "./core";
 import { route } from "./route-def";
@@ -255,6 +256,7 @@ async function handleMemoryProbe(body: OnboardingMemoryRequest): Promise<Onboard
     const client = new OpenAI({
       baseURL: endpoint.toString(),
       apiKey,
+      defaultHeaders: getOpenRouterAttributionHeaders(endpoint.toString()),
       timeout: 15_000,
       maxRetries: 0,
       fetchOptions: { redirect: "manual" },

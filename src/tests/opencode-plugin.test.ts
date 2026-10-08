@@ -21,11 +21,13 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { Message, Part } from "@opencode-ai/sdk";
 import {
   flattenOpencodeTranscript,
+  OPENROUTER_APP_ATTRIBUTION_HEADERS as PLUGIN_OPENROUTER_APP_ATTRIBUTION_HEADERS,
   runSummaryLlm,
   type SummarizeSessionForOpencodeDeps,
   type SwarmConfig,
   summarizeSessionForOpencode,
 } from "../../plugin/opencode-plugins/lib/summarize";
+import { OPENROUTER_APP_ATTRIBUTION_HEADERS } from "../utils/openrouter-base-url";
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -514,6 +516,41 @@ describe("runSummaryLlm — OPENROUTER_BASE_URL gateway", () => {
 
   afterEach(() => {
     delete process.env.OPENROUTER_BASE_URL;
+    delete process.env.OPENROUTER_APP_ATTRIBUTION;
+  });
+
+  const okSummary = async () => ({
+    ok: true,
+    status: 200,
+    text: async () => "",
+    json: async () => summaryBody,
+  });
+  const sentHeaders = () => new Headers(fetchCalls[0]?.init?.headers);
+
+  test("the inlined attribution copy matches src/utils/openrouter-base-url.ts", () => {
+    expect(PLUGIN_OPENROUTER_APP_ATTRIBUTION_HEADERS).toEqual(OPENROUTER_APP_ATTRIBUTION_HEADERS);
+  });
+
+  test("attributes direct openrouter.ai calls to Agent Swarm", async () => {
+    fetchHandler = okSummary;
+    expect(await runSummaryLlm(openrouterCred, "sys", "user")).not.toBeNull();
+    expect(sentHeaders().get("http-referer")).toBe("https://agent-swarm.dev");
+    expect(sentHeaders().get("x-openrouter-title")).toBe("Agent Swarm");
+    expect(sentHeaders().get("x-openrouter-categories")).toBe("personal-agent,cloud-agent");
+  });
+
+  test("a gateway or OPENROUTER_APP_ATTRIBUTION=false sends no attribution", async () => {
+    fetchHandler = okSummary;
+    process.env.OPENROUTER_BASE_URL = "https://control-plane.example/proxy/v1/";
+    await runSummaryLlm(openrouterCred, "sys", "user");
+    expect(sentHeaders().has("http-referer")).toBe(false);
+
+    fetchCalls.length = 0;
+    delete process.env.OPENROUTER_BASE_URL;
+    process.env.OPENROUTER_APP_ATTRIBUTION = "false";
+    await runSummaryLlm(openrouterCred, "sys", "user");
+    expect(fetchCalls[0]?.url).toBe("https://openrouter.ai/api/v1/chat/completions");
+    expect(sentHeaders().has("http-referer")).toBe(false);
   });
 
   test("defaults to openrouter.ai when the env is unset", async () => {

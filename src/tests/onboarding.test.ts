@@ -580,6 +580,50 @@ describe("onboarding memory probe", () => {
     });
   });
 
+  test("only an openrouter.ai endpoint gets OpenRouter app attribution", async () => {
+    const referers: Record<string, string | null> = {};
+    const fake = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch(req) {
+        referers.local = req.headers.get("http-referer");
+        return embeddingResponse(512);
+      },
+    });
+    const origFetch = globalThis.fetch;
+    // The probe builds a fresh OpenAI client per call, which picks up this stub.
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const req = new Request(input, init);
+      if (new URL(req.url).hostname !== "openrouter.ai") return origFetch(input, init);
+      referers[process.env.OPENROUTER_APP_ATTRIBUTION ? "optedOut" : "openrouter"] =
+        req.headers.get("http-referer");
+      return embeddingResponse(512);
+    }) as typeof fetch;
+    const probe = (body: Record<string, unknown>) =>
+      request("/api/onboarding/memory", {
+        method: "POST",
+        body: { model: "test-embedding-model", apiKey: "example-key", ...body },
+      });
+    try {
+      expect((await probe({ preset: "openrouter" })).status).toBe(200);
+      process.env.OPENROUTER_APP_ATTRIBUTION = "false";
+      expect((await probe({ preset: "openrouter" })).status).toBe(200);
+      delete process.env.OPENROUTER_APP_ATTRIBUTION;
+      expect(
+        (await probe({ preset: "custom", baseUrl: `http://127.0.0.1:${fake.port}/v1` })).status,
+      ).toBe(200);
+    } finally {
+      globalThis.fetch = origFetch;
+      delete process.env.OPENROUTER_APP_ATTRIBUTION;
+      fake.stop(true);
+    }
+    expect(referers).toEqual({
+      openrouter: "https://agent-swarm.dev",
+      optedOut: null,
+      local: null,
+    });
+  });
+
   test("classifies a local 401 embeddings response as auth", async () => {
     const fake = startEmbeddingServer(() =>
       Response.json(

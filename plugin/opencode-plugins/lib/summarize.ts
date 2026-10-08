@@ -317,6 +317,31 @@ async function callAnthropic(
   return text;
 }
 
+/**
+ * Copy of `OPENROUTER_APP_ATTRIBUTION_HEADERS` in `src/utils/openrouter-base-url.ts`,
+ * the source of truth (the plugin sandbox can't import from src/).
+ * `src/tests/opencode-plugin.test.ts` fails when the two drift.
+ */
+export const OPENROUTER_APP_ATTRIBUTION_HEADERS = {
+  "HTTP-Referer": "https://agent-swarm.dev",
+  "X-OpenRouter-Title": "Agent Swarm",
+  "X-OpenRouter-Categories": "personal-agent,cloud-agent",
+} as const;
+
+/** Mirrors `getOpenRouterAttributionHeaders`: openrouter.ai hosts only, opt-out via env. */
+export function openRouterAttributionHeaders(url: string): Record<string, string> {
+  const enabled = process.env.OPENROUTER_APP_ATTRIBUTION?.toLowerCase();
+  if (enabled === "false" || enabled === "0") return {};
+  try {
+    const host = new URL(url).hostname;
+    return host === "openrouter.ai" || host.endsWith(".openrouter.ai")
+      ? { ...OPENROUTER_APP_ATTRIBUTION_HEADERS }
+      : {};
+  } catch {
+    return {};
+  }
+}
+
 /** OpenAI-compatible chat completions — covers OpenRouter / OpenAI / OpenAI-Codex. */
 async function callOpenAICompat(
   cred: {
@@ -354,6 +379,7 @@ async function callOpenAICompat(
   const res = await fetch(`${baseUrl}/chat/completions`, {
     method: "POST",
     headers: {
+      ...openRouterAttributionHeaders(baseUrl),
       Authorization: `Bearer ${cred.apiKey}`,
       "Content-Type": "application/json",
     },

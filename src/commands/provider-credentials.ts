@@ -39,7 +39,10 @@ import type {
   ReasoningEffort,
 } from "../types";
 import { CLAUDE_CREDENTIALS_HINT } from "../utils/credentials";
-import { getOpenRouterBaseUrl } from "../utils/openrouter-base-url";
+import {
+  getOpenRouterAttributionHeaders,
+  getOpenRouterBaseUrl,
+} from "../utils/openrouter-base-url";
 import { scrubSecrets } from "../utils/secret-scrubber";
 
 export type SupportedProvider =
@@ -307,9 +310,10 @@ async function checkXaiApiKey(apiKey: string): Promise<LiveValidationResult> {
 }
 
 async function checkOpenRouter(apiKey: string): Promise<LiveValidationResult> {
-  const r = await timedFetch(`${getOpenRouterBaseUrl()}/models`, {
+  const url = `${getOpenRouterBaseUrl()}/models`;
+  const r = await timedFetch(url, {
     method: "GET",
-    headers: { Authorization: `Bearer ${apiKey}` },
+    headers: { ...getOpenRouterAttributionHeaders(url), Authorization: `Bearer ${apiKey}` },
   });
   if (r.ok) return { ok: true, latency_ms: r.latency_ms };
   return {

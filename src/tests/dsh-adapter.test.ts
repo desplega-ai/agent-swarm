@@ -9,7 +9,10 @@ import type { ProviderEvent, ProviderSessionConfig } from "../providers/types";
 import { DEFAULT_MODEL_TIER_MAP } from "../types";
 import { getModelAwareCredentialVars } from "../utils/credentials";
 import { resolveHarnessProvider } from "../utils/harness-provider";
-import { DEFAULT_OPENROUTER_BASE_URL } from "../utils/openrouter-base-url";
+import {
+  DEFAULT_OPENROUTER_BASE_URL,
+  OPENROUTER_APP_ATTRIBUTION_HEADERS,
+} from "../utils/openrouter-base-url";
 
 const directories: string[] = [];
 afterEach(async () => {
@@ -166,6 +169,7 @@ describe("dsh harness", () => {
             openrouter: {
               apiKeyEnv: "OPENROUTER_API_KEY",
               baseURL: DEFAULT_OPENROUTER_BASE_URL,
+              headers: OPENROUTER_APP_ATTRIBUTION_HEADERS,
               api: "openai-completions",
               models: [{ id: modelId }],
             },
@@ -316,6 +320,24 @@ describe("dsh harness", () => {
       model: "deepseek/deepseek-v4.1-flash",
     });
     expect(patch[2].config.providers.openrouter.baseURL).toBe("https://gateway.example/proxy/v1");
+    // A gateway gets no OpenRouter app attribution.
+    expect(patch[2].config.providers.openrouter).not.toHaveProperty("headers");
+  });
+
+  test("OPENROUTER_APP_ATTRIBUTION=false drops the attribution headers", async () => {
+    const config = await fixture();
+    config.model = "openrouter/vendor/new-model";
+    config.env = {
+      ...config.env,
+      DEEPSEEK_API_KEY: "",
+      OPENROUTER_API_KEY: "openrouter-test-key",
+      OPENROUTER_APP_ATTRIBUTION: "false",
+    };
+    const session = await new DshAdapter().createSession(config);
+    expect((await session.waitForCompletion()).isError).toBe(false);
+    const { patch } = await Bun.file(join(config.cwd, "invocation.json")).json();
+    expect(patch[2].config.providers.openrouter.baseURL).toBe(DEFAULT_OPENROUTER_BASE_URL);
+    expect(patch[2].config.providers.openrouter).not.toHaveProperty("headers");
   });
 
   test("bare models keep direct DeepSeek when both keys exist", async () => {

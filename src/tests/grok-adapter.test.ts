@@ -25,6 +25,7 @@ import {
   buildGrokConfigToml,
   checkGrokCredentials,
   GrokAdapter,
+  grokOpenRouterModel,
   installedClaudePluginNames,
 } from "../providers/grok-adapter";
 import type { ProviderEvent, ProviderSessionConfig } from "../providers/types";
@@ -487,12 +488,24 @@ describe("GrokAdapter", () => {
           'base_url = "https://openrouter.ai/api/v1"',
           'env_key = "OPENROUTER_API_KEY"',
           'api_backend = "chat_completions"',
+          'extra_headers = { "HTTP-Referer" = "https://agent-swarm.dev", "X-OpenRouter-Title" = "Agent Swarm", "X-OpenRouter-Categories" = "personal-agent,cloud-agent" }',
         ].join("\n"),
       );
     } finally {
       if (saved !== undefined) process.env.XAI_API_KEY = saved;
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
+  });
+
+  test("OpenRouter app attribution rides only on direct openrouter.ai models", () => {
+    const toml = (env: Record<string, string>) =>
+      buildGrokConfigToml([], grokOpenRouterModel("openrouter/acme/thing", env));
+    expect(toml({})).toContain('extra_headers = { "HTTP-Referer" = "https://agent-swarm.dev"');
+    expect(toml({ OPENROUTER_BASE_URL: "https://gateway.example/v1" })).not.toContain(
+      "extra_headers",
+    );
+    expect(toml({ OPENROUTER_APP_ATTRIBUTION: "false" })).not.toContain("extra_headers");
+    expect(buildGrokConfigToml([], null)).not.toContain("extra_headers");
   });
 
   test("an xai/-qualified model runs as the bare xAI id", async () => {

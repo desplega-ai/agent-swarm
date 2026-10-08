@@ -1,4 +1,3 @@
-import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { generateText, hasToolCall, stepCountIs, tool } from "ai";
 import { z } from "zod";
 import { lookupOpenrouterModel, priceUsage } from "../cost/pricing.ts";
@@ -12,6 +11,7 @@ import {
   truncateMiddle,
   usageToTokens,
 } from "./llm.ts";
+import { createJudgeOpenRouter } from "./openrouter.ts";
 
 const TRANSCRIPT_MAX_CHARS = 60_000;
 
@@ -149,7 +149,7 @@ export async function judgeAgentic(
   try {
     const apiKey = process.env.OPENROUTER_API_KEY;
     if (!apiKey) throw new Error("OPENROUTER_API_KEY is required for the agentic judge");
-    const openrouter = createOpenRouter({ apiKey });
+    const openrouter = createJudgeOpenRouter(apiKey);
     // Resolved once per judge call.
     const priced = await lookupOpenrouterModel(model);
 

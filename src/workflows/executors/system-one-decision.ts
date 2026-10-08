@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { ExecutorMeta } from "../../types";
+import { getOpenRouterAttributionHeaders } from "../../utils/openrouter-base-url";
 import { scrubSecrets } from "../../utils/secret-scrubber";
 import {
   type ApprovalOutcome,
@@ -1170,6 +1171,7 @@ export class SystemOneDecisionExecutor extends BaseExecutor<
       res = await doFetch(endpoint, {
         method: "POST",
         headers: {
+          ...getOpenRouterAttributionHeaders(endpoint, this.providerContext().env),
           "content-type": "application/json",
           accept: "application/json",
           authorization: `Bearer ${apiKey}`,

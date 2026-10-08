@@ -12,6 +12,7 @@ import {
 import {
   buildClaudeSessionEnvironment,
   checkClaudeCredentials,
+  claudeOpenRouterAttributionEnv,
   resolveClaudeBinaryArgv,
   withClaudeRouteEnv,
 } from "../providers/claude-adapter";
@@ -256,5 +257,79 @@ describe("internal-ai credential", () => {
       opts({ ANTHROPIC_BASE_URL: "https://api.anthropic.com", ANTHROPIC_API_KEY: "sk-ant" }),
     );
     expect(cred?.kind).toBe("anthropic");
+  });
+});
+
+describe("claude OpenRouter attribution", () => {
+  const OPENROUTER = {
+    ANTHROPIC_BASE_URL: "https://openrouter.ai/api",
+    ANTHROPIC_AUTH_TOKEN: "sk-or",
+  };
+  const ATTRIBUTION = [
+    "HTTP-Referer: https://agent-swarm.dev",
+    "X-OpenRouter-Title: Agent Swarm",
+    "X-OpenRouter-Categories: personal-agent,cloud-agent",
+  ];
+  const spawnEnv = (env: Record<string, string>) =>
+    buildClaudeSessionEnvironment(
+      {
+        taskId: crypto.randomUUID(),
+        agentId: crypto.randomUUID(),
+        env,
+        apiUrl: "http://fixture.invalid",
+        apiKey: "example-fixture-swarm-key",
+      } as ProviderSessionConfig,
+      "sonnet",
+      "/tmp/fixture-task",
+    ).env;
+
+  test("an openrouter.ai base URL appends the attribution headers", () => {
+    expect(spawnEnv(OPENROUTER).ANTHROPIC_CUSTOM_HEADERS).toBe(ATTRIBUTION.join("\n"));
+  });
+
+  test("the operator's header lines are kept in order; ours replace same-name lines", () => {
+    const env = spawnEnv({
+      ...OPENROUTER,
+      ANTHROPIC_CUSTOM_HEADERS:
+        "X-Gateway-Key: secret\nhttp-referer: https://mine.example\nX-Team: a",
+    });
+    expect(env.ANTHROPIC_CUSTOM_HEADERS).toBe(
+      ["X-Gateway-Key: secret", "X-Team: a", ...ATTRIBUTION].join("\n"),
+    );
+  });
+
+  test("unset, Anthropic, gateway and lookalike base URLs leave ANTHROPIC_CUSTOM_HEADERS byte-identical", () => {
+    const operator = "X-Gateway-Key: secret\n\nX-Team: a  ";
+    for (const base of [
+      {},
+      { ANTHROPIC_BASE_URL: "https://api.anthropic.com" },
+      { ANTHROPIC_BASE_URL: GATEWAY_URL },
+      { ANTHROPIC_BASE_URL: "https://openrouter.ai.evil.example/api" },
+      { ANTHROPIC_BASE_URL: "not a url" },
+    ]) {
+      expect(claudeOpenRouterAttributionEnv(base)).toEqual({});
+      expect(
+        spawnEnv({ ...base, ANTHROPIC_API_KEY: "sk-ant" }).ANTHROPIC_CUSTOM_HEADERS,
+      ).toBeUndefined();
+      expect(
+        spawnEnv({ ...base, ANTHROPIC_API_KEY: "sk-ant", ANTHROPIC_CUSTOM_HEADERS: operator })
+          .ANTHROPIC_CUSTOM_HEADERS,
+      ).toBe(operator);
+    }
+  });
+
+  test("OPENROUTER_APP_ATTRIBUTION=false leaves the operator's value untouched", () => {
+    for (const off of ["false", "0", "FALSE"]) {
+      expect(
+        spawnEnv({
+          ...OPENROUTER,
+          OPENROUTER_APP_ATTRIBUTION: off,
+          ANTHROPIC_CUSTOM_HEADERS: "X-A: b",
+        }).ANTHROPIC_CUSTOM_HEADERS,
+      ).toBe("X-A: b");
+      expect(
+        spawnEnv({ ...OPENROUTER, OPENROUTER_APP_ATTRIBUTION: off }).ANTHROPIC_CUSTOM_HEADERS,
+      ).toBe(undefined);
+    }
   });
 });
