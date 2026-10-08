@@ -690,25 +690,37 @@ jobs:
 
       # Per-test durations, pass/fail and flake detection via the ci-metrics swarm
       # script (`action: "tests"`; flake rules in agent-fs docs/ci-metrics.md).
+      # The payload is built without the secret; only the curl step sees it.
+      # Skipped on merge_group: the token never reaches a queued fork PR's code.
       # Skipped on forks (no secret); never blocks the gate, and never retries.
-      - name: Report unit test results to ci-metrics
-        if: ${{ !cancelled() }}
+      - name: Build unit test results payload
+        id: test-results
+        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
         continue-on-error: true
         env:
-          TOKEN: ${{ secrets.SWARM_CI_METRICS_TOKEN }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
           PR_NUMBER: ${{ github.event.pull_request.number || '' }}
           REPORT: .bun-test-results/junit-${{ matrix.shard }}.xml
         run: |
           set -euo pipefail
-          if [ -z "$TOKEN" ]; then echo "SWARM_CI_METRICS_TOKEN not available; skipping"; exit 0; fi
           if [ ! -s "$REPORT" ]; then echo "no JUnit report; skipping"; exit 0; fi
           bun scripts/ci-unit-test-report.ts --junit "$REPORT" --out .bun-test-results/payload.json \
             --shard ${{ matrix.shard }}/2 --wall-ms "${{ steps.tests.outputs.duration_ms || '0' }}" \
             --status "${{ steps.tests.outputs.status || 'unknown' }}"
+          echo "payload=.bun-test-results/payload.json" >> "$GITHUB_OUTPUT"
+
+      - name: Report unit test results to ci-metrics
+        if: ${{ !cancelled() && github.event_name == 'pull_request' && steps.test-results.outputs.payload != '' }}
+        continue-on-error: true
+        env:
+          TOKEN: ${{ secrets.SWARM_CI_METRICS_TOKEN }}
+          PAYLOAD: ${{ steps.test-results.outputs.payload }}
+        run: |
+          set -euo pipefail
+          if [ -z "$TOKEN" ]; then echo "SWARM_CI_METRICS_TOKEN not available; skipping"; exit 0; fi
           curl -sSf --max-time 60 -X POST https://api.desplega.agent-swarm.dev/api/x/script/JWCeFHIQUAQQ \
             -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
-            --data-binary @.bun-test-results/payload.json | jq -r '.result.markdown // empty' >> "$GITHUB_STEP_SUMMARY"
+            --data-binary "@$PAYLOAD" | jq -r '.result.markdown // empty' >> "$GITHUB_STEP_SUMMARY"
 
       # Each shard reports independently. See agent-fs docs/ci-timings.md.
       # Skipped on merge_group events and forks (no secret); never blocks the gate.
