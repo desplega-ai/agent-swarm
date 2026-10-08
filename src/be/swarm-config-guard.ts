@@ -1,6 +1,7 @@
 import { normalizeSlackReactionShortcode } from "../slack/reaction-shortcode";
 import { ProviderNameSchema } from "../types";
 import { API_DRAIN_MAX_MS_LIMIT } from "../utils/api-drain";
+import { parseEnabledTools } from "../utils/enabled-tools";
 import { parseTaskToolManifest } from "../utils/task-tool-manifest";
 import { isTierConfigKey, validateTierConfigValue } from "./model-tier-keys";
 
@@ -210,6 +211,17 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
       return null;
     } catch {
       return "Invalid TASK_TOOL_MANIFESTS (expected JSON with taskTypes and/or schedules maps, each selecting at most 16 known swarm tools)";
+    }
+  },
+  // MCP tool allowlist: comma-separated names or a JSON array of strings.
+  // Unknown names are accepted here and warned about at session init.
+  SWARM_ENABLED_TOOLS: (value) => {
+    try {
+      if (typeof value !== "string") throw new Error("Expected string");
+      parseEnabledTools(value);
+      return null;
+    } catch {
+      return "Invalid SWARM_ENABLED_TOOLS (expected comma-separated tool names or a JSON array of strings)";
     }
   },
   FEEDBACK_ENDPOINT: (value) => {

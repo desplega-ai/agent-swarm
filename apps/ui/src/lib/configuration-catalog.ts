@@ -495,6 +495,15 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         placeholder: "core,tasks,scripts,memory,workflows",
       },
       {
+        key: "SWARM_ENABLED_TOOLS",
+        label: "MCP tool allowlist",
+        description:
+          "Comma-separated MCP tool names to expose to workers. When set, workers see exactly these tools, ignoring the capability surface and scripts-only mode. Unknown names are logged and skipped; an empty list is ignored. Leave unset for the normal surface. Applies on each agent's next MCP session; an agent-scoped value overrides this one.",
+        kind: "string",
+        placeholder: "get-tasks,store-progress,script-run",
+        docsUrl: `${DOCS}guides/agent-capabilities`,
+      },
+      {
         key: "OPENROUTER_BASE_URL",
         label: "OpenAI-compatible model gateway",
         description:
