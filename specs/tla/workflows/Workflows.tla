@@ -26,6 +26,7 @@ CONSTANTS
   UserCancel,        \* TRUE: the user may cancel the run once
   UserRetry,         \* TRUE: the user may retry a failed run once
   InputAwait,        \* TRUE: workflow.input resolution awaits between run INSERT and walkGraph
+  ReplayUnreadable,  \* TRUE: a sealed replay read may fail (#1926: missing or rotated key, corrupt ciphertext)
   \* --- historical guards (CALIBRATION.md removes them) ---
   GuardActiveWalk,   \* bf12ab53 / #1584: recovery skips runs with a live walk
   GuardConvergeSeed, \* d4753302 lineage: walkGraph gates start nodes on predecessors
@@ -78,7 +79,7 @@ vars == <<run, steps, thr, active, execLive, okCount, hbLeft, crashes>>
 
 Idle == [pc |-> "idle", ret |-> "idle", pend |-> {}, cur |-> "T", sid |-> 0,
          done |-> {}, edges |-> {}, nxt |-> {}, ex |-> {}, hasW |-> FALSE,
-         R |-> {}, rs |-> "running", rc |-> 0, g |-> 0]
+         R |-> {}, rs |-> "running", rc |-> 0, g |-> 0, rf |-> "idle", fl |-> FALSE]
 
 StepIds == DOMAIN steps
 \* F7: task generation `g` of row i is still the task bound to it
@@ -161,7 +162,7 @@ WStart(t) ==
                   ELSE LET ap == {p \in Preds(n) : <<p, n>> \in edges \/ Awaited(p, edges)}
                        IN (IF ap # {} THEN ap ELSE Preds(n)) \subseteq done
      IN SetT(t, [thr[t] EXCEPT !.pc = "wPick", !.pend = {n \in thr[t].pend : ok(n)},
-                  !.done = done, !.edges = edges, !.nxt = {}, !.ex = {}, !.hasW = FALSE])
+                  !.done = done, !.edges = edges, !.nxt = {}, !.ex = {}, !.hasW = FALSE, !.fl = FALSE])
   /\ UNCHANGED <<run, steps, active, execLive, okCount, hbLeft, crashes>>
 
 \* W2 engine.ts:331 — Promise.all over the batch; each node's executeStep
@@ -252,8 +253,9 @@ XCkWait(t) ==
 WBatchEnd(t) ==
   /\ thr[t].pc = "wPick"
   /\ thr[t].pend = {}
-  /\ IF thr[t].hasW
-     THEN SetT(t, [thr[t] EXCEPT !.pc = "wRet"])
+  /\ IF thr[t].hasW \/ (thr[t].fl /\ run = "failed")
+     THEN \* RF: engine.ts:421-427, a failed outcome re-reads the run and stops when it is failed
+          SetT(t, [thr[t] EXCEPT !.pc = "wRet"])
      ELSE LET w == thr[t]
               \* F6: the gate re-reads the steps; a predecessor whose latest
               \* step completed in another walk joins the completed set.
@@ -262,7 +264,7 @@ WBatchEnd(t) ==
                         /\ {p \in Preds(n) : <<p, n>> \in w.edges \/ Awaited(p, w.edges)}
                              \subseteq wd}
           IN IF rn # {}
-             THEN SetT(t, [thr[t] EXCEPT !.pend = rn, !.nxt = {}, !.done = wd])
+             THEN SetT(t, [thr[t] EXCEPT !.pend = rn, !.nxt = {}, !.done = wd, !.fl = FALSE])
              ELSE SetT(t, [thr[t] EXCEPT !.pc = "wFinal", !.done = wd])
   /\ UNCHANGED <<run, steps, active, execLive, okCount, hbLeft, crashes>>
 
@@ -292,8 +294,55 @@ WRet(t) ==
   /\ SetT(t, [thr[t] EXCEPT !.pc = thr[t].ret])
   /\ UNCHANGED <<run, steps, execLive, okCount, hbLeft, crashes>>
 
+----------------------------------------------------------------------------
+(* Unreadable replay state (#1926). Run and step reads open the sealed     *)
+(* `*_replay` copy lazily; when it cannot be opened the reader throws      *)
+(* WorkflowReplayStateError and failRunOnUnreadableReplay fails the run    *)
+(* (and the claimed step) instead of replaying redacted values. Each read  *)
+(* site below is an alternative to the action that performs the read.      *)
+
+\* RF1 engine.ts:298 <- :330 rehydrateCompletedStepOutputs opens each
+\* completed step's output. Reached only when a completed row exists.
+WStartUnreadable(t) ==
+  /\ ReplayUnreadable
+  /\ thr[t].pc = "wStart"
+  /\ NodesWith("completed") # {}
+  /\ SetT(t, [thr[t] EXCEPT !.pc = "rfRun", !.rf = "wRet"])
+  /\ UNCHANGED <<run, steps, active, execLive, okCount, hbLeft, crashes>>
+
+\* RF2 engine.ts:408 <- :747 (F3) a memoized completed node opens its stored
+\* output after the dedup transaction; executeStep's .catch fails the run and
+\* reports outcome "failed".
+XDedupUnreadable(t) ==
+  /\ ReplayUnreadable
+  /\ thr[t].pc = "xDedup"
+  /\ run \in {"running", "waiting"}
+  /\ FixConcurrentJoin
+  /\ thr[t].cur \in NodesWith("completed")
+  /\ SetT(t, [thr[t] EXCEPT !.pc = "rfRun", !.rf = "wPick", !.fl = TRUE,
+               !.ex = @ \cup {thr[t].cur}])
+  /\ UNCHANGED <<run, steps, active, execLive, okCount, hbLeft, crashes>>
+
+\* RFS engine.ts:243-250 failRunOnUnreadableReplay, step write:
+\* updateWorkflowRunStep(stepId, failed, nextRetryAt null). `WHERE id = ?`
+\* only (db.ts updateWorkflowRunStep): no status guard.
+RFStep(t) ==
+  /\ thr[t].pc \in {"pRF", "eRF"}
+  /\ steps' = [steps EXCEPT ![thr[t].sid].st = "failed", ![thr[t].sid].nra = FALSE]
+  /\ SetT(t, [thr[t] EXCEPT !.pc = "rfRun"])
+  /\ UNCHANGED <<run, active, execLive, okCount, hbLeft, crashes>>
+
+\* RFR engine.ts:252 failRunOnUnreadableReplay, run write (a separate await):
+\* updateWorkflowRun(runId, failed). `WHERE id = ?` only: no status guard.
+RFRun(t) ==
+  /\ thr[t].pc = "rfRun"
+  /\ run' = "failed"
+  /\ SetT(t, [thr[t] EXCEPT !.pc = thr[t].rf])
+  /\ UNCHANGED <<steps, active, execLive, okCount, hbLeft, crashes>>
+
 Walk(t) == WStart(t) \/ WPick(t) \/ XDedup(t) \/ XRun(t) \/ XCkOk(t) \/ XFail(t)
            \/ XCkWait(t) \/ WBatchEnd(t) \/ WFinal(t) \/ WRet(t)
+           \/ WStartUnreadable(t) \/ XDedupUnreadable(t) \/ RFStep(t) \/ RFRun(t)
 
 ----------------------------------------------------------------------------
 (* Initial trigger: startWorkflowExecution -> walkGraph([T])               *)
@@ -370,6 +419,15 @@ P5 ==
               /\ SetT(TPoll, [thr[TPoll] EXCEPT !.pc = "p8"])
   /\ UNCHANGED <<run, active, okCount, hbLeft, crashes>>
 
+\* P5U retry-poller.ts:66 `run.context` opens the sealed context after the
+\* claim; the catch (:204 / :210) fails the claimed step and the run.
+P5Unreadable ==
+  /\ ReplayUnreadable
+  /\ thr[TPoll].pc = "p5"
+  /\ execLive' = [execLive EXCEPT ![thr[TPoll].cur] = @ - 1]
+  /\ SetT(TPoll, [thr[TPoll] EXCEPT !.pc = "pRF", !.rf = "pRel"])
+  /\ UNCHANGED <<run, steps, active, okCount, hbLeft, crashes>>
+
 \* P6 retry-poller.ts:181-193 — checkpointStep, then walkGraph(successors).
 P6 ==
   /\ thr[TPoll].pc = "p6"
@@ -432,7 +490,7 @@ PRel ==
   /\ SetT(TPoll, [thr[TPoll] EXCEPT !.pc = "p2"])
   /\ UNCHANGED <<run, steps, execLive, okCount, hbLeft, crashes>>
 
-Poller == P1 \/ P2 \/ P3 \/ P4 \/ P5 \/ P6 \/ P7 \/ P8 \/ P9 \/ P10 \/ PRel \/ Walk(TPoll)
+Poller == P1 \/ P2 \/ P3 \/ P4 \/ P5 \/ P5Unreadable \/ P6 \/ P7 \/ P8 \/ P9 \/ P10 \/ PRel \/ Walk(TPoll)
 
 ----------------------------------------------------------------------------
 (* Heartbeat recoverIncompleteRuns (recovery.ts)                          *)
@@ -465,6 +523,15 @@ H2 ==
           IN SetT(THb, [thr[THb] EXCEPT !.pc = "h3", !.done = done,
                          !.pend = {n \in Ready(done, Edges(done)) :
                                      FixRecoveryRetry => n \notin RetryNodes}])
+  /\ UNCHANGED <<run, steps, active, execLive, okCount, hbLeft, crashes>>
+
+\* H2U recovery.ts:86 `run.context` throws after the status check; the catch
+\* (:121) fails the run, and the sweep moves on to the waiting runs.
+H2Unreadable ==
+  /\ ReplayUnreadable
+  /\ thr[THb].pc = "h2"
+  /\ run = "running"
+  /\ SetT(THb, [thr[THb] EXCEPT !.pc = "rfRun", !.rf = "h5"])
   /\ UNCHANGED <<run, steps, active, execLive, okCount, hbLeft, crashes>>
 
 \* H3 recovery.ts:87-106 — activeWalks re-check; complete or re-walk.
@@ -557,7 +624,15 @@ H8 ==
           /\ UNCHANGED <<steps, okCount, run, active>>
   /\ UNCHANGED <<execLive, hbLeft, crashes>>
 
-Heartbeat == H1 \/ H2 \/ H3 \/ H4 \/ H5 \/ H6 \/ H7R \/ H7 \/ H8 \/ Walk(THb)
+\* H8U recovery.ts:217 `run.context` throws before the claim; the catch
+\* (:257) fails the run (no step id).
+H8Unreadable ==
+  /\ ReplayUnreadable
+  /\ thr[THb].pc = "h8"
+  /\ SetT(THb, [thr[THb] EXCEPT !.pc = "rfRun", !.rf = "h6"])
+  /\ UNCHANGED <<run, steps, active, execLive, okCount, hbLeft, crashes>>
+
+Heartbeat == H1 \/ H2 \/ H2Unreadable \/ H8Unreadable \/ H3 \/ H4 \/ H5 \/ H6 \/ H7R \/ H7 \/ H8 \/ Walk(THb)
 
 ----------------------------------------------------------------------------
 (* Agent tasks and the task-event handlers (resume.ts)                     *)
@@ -600,6 +675,15 @@ E2(t) ==
           /\ UNCHANGED <<steps, okCount, run, active>>
   /\ UNCHANGED <<execLive, hbLeft, crashes>>
 
+\* E2U resume.ts:180 `run.context` throws after the E1 checks, before the
+\* claim; failClosedOnUnreadableReplay (resume.ts:136-146) fails the event's
+\* step and the run.
+E2Unreadable(t) ==
+  /\ ReplayUnreadable
+  /\ thr[t].pc = "e2"
+  /\ SetT(t, [thr[t] EXCEPT !.pc = "eRF", !.rf = "eDone"])
+  /\ UNCHANGED <<run, steps, active, execLive, okCount, hbLeft, crashes>>
+
 \* E3 resume.ts:206-233 finalizeOrWait — transaction, but no run-status guard.
 \* F7: a retry-pending row keeps the run waiting, like a waiting row.
 EFin(t) ==
@@ -637,7 +721,7 @@ EF(t) ==
   /\ SetT(t, [thr[t] EXCEPT !.pc = "eDone"])
   /\ UNCHANGED <<active, execLive, okCount, hbLeft, crashes>>
 
-Event(t) == E1(t) \/ E2(t) \/ EFin(t) \/ ER(t) \/ EF(t) \/ Walk(t)
+Event(t) == E1(t) \/ E2(t) \/ E2Unreadable(t) \/ EFin(t) \/ ER(t) \/ EF(t) \/ Walk(t)
 
 ----------------------------------------------------------------------------
 (* User actions (resume.ts)                                                *)
@@ -725,6 +809,11 @@ TerminalRunStaysQuiet ==
             \A i \in DOMAIN steps' :
               steps'[i].st \in {"running", "pending"} =>
                 (i \in StepIds /\ steps[i].st = steps'[i].st)) ]_vars
+
+\* Inv1b (RF, #1926): a completed or cancelled run never becomes failed.
+\* Narrower than Inv1, so CX13 (cancelled -> completed) does not mask it.
+TerminalNeverFails ==
+  [][ (run \in {"completed", "cancelled"} => run' # "failed") ]_vars
 
 \* Inv2: at most one live execution per node (non-loop graph: iteration 0).
 AtMostOneExecuting ==
