@@ -1,6 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "ignoreCommand": "if [ -z \"$VERCEL_GIT_PREVIOUS_SHA\" ] || ! git cat-file -e \"$VERCEL_GIT_PREVIOUS_SHA^{commit}\" 2>/dev/null; then exit 1; fi; git diff --quiet \"$VERCEL_GIT_PREVIOUS_SHA\" HEAD -- . ../../packages/model-catalog ../../src/utils/task-citations.ts ../../src/utils/dsh-usage.ts ../../src/be/modelsdev-cache.json ../../package.json ../../bun.lock ../../turbo.json; result=$?; if [ \"$result\" -eq 0 ]; then exit 0; else exit 1; fi",
+  "ignoreCommand": "s=$VERCEL_GIT_PREVIOUS_SHA; [ -n \"$s\" ] && git -C ../.. diff --quiet \"$s\" HEAD -- apps/ui packages/model-catalog src/utils/task-citations.ts src/utils/dsh-usage.ts src/be/modelsdev-cache.json package.json bun.lock turbo.json; [ $? -eq 0 ]",
   "rewrites": [{ "source": "/((?!assets/).*)", "destination": "/index.html" }],
   "headers": [
     {
