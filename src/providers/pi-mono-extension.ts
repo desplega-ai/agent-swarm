@@ -422,6 +422,24 @@ export async function summarizeSessionForPi(
   }
 }
 
+/** `customType` of the advisory messages this extension sends to the model. */
+export const SWARM_NUDGE_CUSTOM_TYPE = "swarm-nudge";
+
+/**
+ * Deliver an advisory nudge to the model. pi runs extensions in-process and
+ * never feeds their stdout to the model, so a console.log here only reaches
+ * the worker log. `sendMessage` steers the text in after the current tool
+ * batch while the agent is streaming, and otherwise appends it to the session
+ * so the next prompt carries it.
+ */
+function sendNudge(pi: Parameters<ExtensionFactory>[0], text: string): void {
+  pi.sendMessage({
+    customType: SWARM_NUDGE_CUSTOM_TYPE,
+    content: [{ type: "text", text }],
+    display: false,
+  });
+}
+
 /**
  * Create the swarm hooks extension factory for pi-mono.
  *
@@ -466,7 +484,7 @@ export function createSwarmHooksExtension(config: SwarmHooksConfig): ExtensionFa
       if (config.isLead) {
         const ctx = await fetchConcurrentContext(config);
         if (ctx) {
-          console.log(ctx);
+          sendNudge(pi, ctx);
         }
       }
     });
@@ -506,7 +524,7 @@ export function createSwarmHooksExtension(config: SwarmHooksConfig): ExtensionFa
         }
 
         if (loopResult.severity === "warning" && loopResult.reason) {
-          console.log(`Warning: ${loopResult.reason}`);
+          sendNudge(pi, `Warning: ${loopResult.reason}`);
         }
       }
 
@@ -594,7 +612,8 @@ export function createSwarmHooksExtension(config: SwarmHooksConfig): ExtensionFa
 
       // Reminders
       if (config.isLead && event.toolName?.endsWith("send-task")) {
-        console.log(
+        sendNudge(
+          pi,
           "Task sent successfully. Monitor progress using the get-task-details tool periodically.",
         );
       }
@@ -602,29 +621,30 @@ export function createSwarmHooksExtension(config: SwarmHooksConfig): ExtensionFa
       return undefined;
     });
 
-    // === context → PreCompact ===
-    // The context event allows injecting messages before compaction.
-    // We log the goal reminder to console (it gets captured in context).
+    // === session_compact → PreCompact ===
+    // Re-anchor the model on its task once compaction has summarized the
+    // history. `context` fires before every LLM call, so it cannot carry this.
+    pi.on("session_compact", async () => {
+      if (!config.taskId) return;
+
+      const taskDetails = await fetchTaskDetails(config);
+      if (taskDetails) {
+        const reminder = [
+          "=== GOAL REMINDER (injected before context compaction) ===",
+          `Task ID: ${taskDetails.id}`,
+          `Task: ${taskDetails.task}`,
+        ];
+        if (taskDetails.progress) {
+          reminder.push(`Current Progress: ${taskDetails.progress}`);
+        }
+        reminder.push("=== Continue working on this task after compaction ===");
+        sendNudge(pi, reminder.join("\n"));
+      }
+    });
+
+    // === context (before every LLM call) ===
     pi.on("context", async (_event, ctx) => {
       if (!config.taskId) return undefined;
-
-      try {
-        const taskDetails = await fetchTaskDetails(config);
-        if (taskDetails) {
-          const reminder = [
-            "=== GOAL REMINDER (injected before context compaction) ===",
-            `Task ID: ${taskDetails.id}`,
-            `Task: ${taskDetails.task}`,
-          ];
-          if (taskDetails.progress) {
-            reminder.push(`Current Progress: ${taskDetails.progress}`);
-          }
-          reminder.push("=== Continue working on this task after compaction ===");
-          console.log(reminder.join("\n"));
-        }
-      } catch {
-        /* don't block compaction */
-      }
 
       // Report context usage as a compaction event
       const usage = ctx.getContextUsage?.();
@@ -652,7 +672,10 @@ export function createSwarmHooksExtension(config: SwarmHooksConfig): ExtensionFa
         const { cancelled, reason } = await isTaskCancelled(config);
         if (cancelled) {
           const cancelReason = reason || "Task cancelled by lead or creator";
-          console.log(
+          // "handled" skips the turn; the nudge lands in the session for the
+          // next one instead of paying for a turn on a cancelled task.
+          sendNudge(
+            pi,
             `🛑 TASK CANCELLED: ${cancelReason}. Stop working and use store-progress to acknowledge.`,
           );
           return { action: "handled" as const };

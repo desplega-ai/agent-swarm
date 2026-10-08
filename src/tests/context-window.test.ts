@@ -32,9 +32,9 @@ describe("getContextWindowSize", () => {
     expect(getContextWindowSize("sonnet")).toBe(1_000_000);
   });
 
-  test("returns 200K for haiku models", () => {
+  test("returns 200K for Haiku 4.5 and 1M for the haiku shortname (Haiku 5.5)", () => {
     expect(getContextWindowSize("claude-haiku-4-5")).toBe(200_000);
-    expect(getContextWindowSize("haiku")).toBe(200_000);
+    expect(getContextWindowSize("haiku")).toBe(1_000_000);
   });
 
   test("reads OpenAI windows from the catalog", () => {

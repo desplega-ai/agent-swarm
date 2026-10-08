@@ -242,7 +242,7 @@ jobs:
           RUN_SHA: ${{ steps.context.outputs.sha }}
         run: |
           set -euo pipefail
-          npm i -g @desplega.ai/agent-fs@0.15.1
+          npm i -g @desplega.ai/agent-fs@0.15.2
           node --experimental-strip-types reporter/publish-artifacts.ts \
             --results all-results \
             --prefix "e2e/desplega-ai__agent-swarm/$RUN_TARGET/$RUN_SHA" \
