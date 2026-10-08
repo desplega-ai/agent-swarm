@@ -162,16 +162,11 @@ Rules for any tool that declares an `outputSchema`:
 
 ## 6. `NUDGES` map
 
-Central, keyed by tool name, in `src/tools/utils.ts`:
+Central, keyed by tool name. The source of truth is `NUDGES` in `src/tools/utils.ts`; read it there for the current entries. One entry, for shape:
 
 ```ts
-export const NUDGES: Record<string, (result: SwarmToolResult) => string | undefined> = {
-  "script-run": (r) => (r.ok ? undefined : SCRIPT_AUTHORING_NUDGE),
-  "script-upsert": (r) => (r.ok ? undefined : SCRIPT_AUTHORING_NUDGE),
-  "launch-script-run": (r) => (r.ok ? undefined : SCRIPT_AUTHORING_NUDGE),
-  "get-script-run": (r) => (r.ok ? undefined : SCRIPT_AUTHORING_NUDGE),
-  "script-search": (r) => { /* empty-results hint pointing at seeded scripts */ },
-};
+"defer-task": (r) =>
+  r.ok ? "Stop working on this task now; the wake-up task will carry your note." : undefined,
 ```
 
 The `nudgeMiddleware` stage applies `NUDGES[toolName]?.(result)` only when the tool didn't already set an explicit `nudge` — an explicit nudge always wins. Keep entries to a single conditional sentence, and derive them only from fields on the (already-scrubbed) result — never from closure state, since the middleware runs after `scrubMiddleware` specifically so nudges can't leak unscrubbed data.
