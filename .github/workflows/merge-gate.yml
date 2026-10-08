@@ -114,7 +114,7 @@ jobs:
 
           # script SDK types freshness: source constants + generator + outputs +
           # allowlist/registry (generation validates SDK_ALLOWLIST against server.ts).
-          SCRIPT_TYPES=$(match '^(src/be/scripts/typecheck\.ts$|src/scripts-runtime/types/|src/scripts-runtime/sdk-allowlist\.ts$|scripts/bundle-script-types\.ts$|src/server\.ts$)')
+          SCRIPT_TYPES=$(match '^(src/be/scripts/typecheck\.ts$|src/scripts-runtime/|src/extensions/|scripts/bundle-(script|extension)-types\.ts$|src/server\.ts$)')
 
           # openapi freshness: routes, types, generator, version, generated artifacts.
           OPENAPI=$(match '^(src/http/|src/types\.ts$|scripts/generate-openapi\.ts$|openapi\.json$|docs-site/content/docs/api-reference/|package\.json$)')
