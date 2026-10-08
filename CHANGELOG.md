@@ -6,6 +6,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.167.0] - 2026-10-08
+
+### Added
+- Heartbeat: the Lead boot-triage task is skipped on a clean boot (#1973).
+- CI: unit test durations and flakes are tracked per CI run (#1986).
+
+### Changed
+- Worker image: pi, amp and gemini bumped (#1971).
+- Skills: dreaming-v2 seed patches A1-A4 (#1972).
+- Dependencies: vulnerable root (#1977), `apps/templates-ui` (#1978) and docs-site (#1976) dependencies bumped for Dependabot alerts.
+- CI: unrelated Vercel builds and templates previews are skipped (#1980).
+- Specs: TLA+ specs synced with main for heartbeat and workflows (#1975); the workflows spec models the #1926 fail-closed replay write (#1982).
+
+### Fixed
+- Codex: context reports the latest request, not the turn total (#1988).
+- Codex OAuth: auth refresh and expiry timestamps are tracked separately (#1983).
+- ACP: target configuration is validated before a task is claimed (#1981).
+- Docker: transient Bun installs are retried during image builds (#1984).
+- Dashboard: approvals render clean code blocks and inline images (#1979).
+- Tests: the ACP stub server waits for the token revoke before closing (#1974).
+
 ## [1.166.0] - 2026-10-08
 
 ### Added
