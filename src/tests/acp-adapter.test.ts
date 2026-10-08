@@ -556,6 +556,49 @@ new AgentSideConnection((connection) => new FakeAgent(connection), stream);
     });
   });
 
+  test("OpenCode preset merges the OpenRouter gateway with model and provider config", () => {
+    const config = baseConfig({
+      model: " openrouter/openai/gpt-4o-mini ",
+      env: {
+        ACP_TARGET: "opencode",
+        OPENROUTER_BASE_URL: " http://127.0.0.1:8080/api/v1/ ",
+        OPENCODE_CONFIG_CONTENT: JSON.stringify({
+          theme: "dark",
+          provider: { openrouter: { options: { apiKey: "dummy" } } },
+        }),
+      },
+    });
+    const env = resolveAcpTarget(config).env(config);
+    expect(JSON.parse(env.OPENCODE_CONFIG_CONTENT!)).toEqual({
+      theme: "dark",
+      model: "openrouter/openai/gpt-4o-mini",
+      provider: {
+        openrouter: { options: { apiKey: "dummy", baseURL: "http://127.0.0.1:8080/api/v1" } },
+      },
+    });
+  });
+
+  test("OpenCode preset omits gateway override for unset, blank, or default URL", () => {
+    for (const url of [undefined, "", "https://openrouter.ai/api/v1/"]) {
+      const config = baseConfig({
+        env: { ACP_TARGET: "opencode", OPENROUTER_BASE_URL: url },
+      });
+      const env = resolveAcpTarget(config).env(config);
+      expect(JSON.parse(env.OPENCODE_CONFIG_CONTENT!)).toEqual({ model: config.model });
+    }
+  });
+
+  test("OpenCode preset injects gateway even without a model fallback", () => {
+    const config = baseConfig({
+      model: "",
+      env: { ACP_TARGET: "opencode", OPENROUTER_BASE_URL: "http://127.0.0.1:8080/api/v1" },
+    });
+    const env = resolveAcpTarget(config).env(config);
+    expect(JSON.parse(env.OPENCODE_CONFIG_CONTENT!).provider.openrouter.options.baseURL).toBe(
+      "http://127.0.0.1:8080/api/v1",
+    );
+  });
+
   test("Gemini preset supplies command, credentials, trust, and a model environment fallback", () => {
     const config = baseConfig({
       model: "gemini-3-flash-preview",

@@ -2,6 +2,7 @@ import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { normalizeGrokModel } from "@desplega/model-catalog";
+import type { Config } from "@opencode-ai/sdk";
 import { clampContextPercent, getContextWindowSize } from "../utils/context-window";
 import {
   ACP_TARGET_IDS,
@@ -9,6 +10,7 @@ import {
   getAcpTargetCatalogEntry,
   isAcpTarget,
 } from "./acp-target-catalog";
+import { applyOpenRouterBaseUrlOverride } from "./opencode-adapter";
 import { applyReasoningEffort } from "./reasoning-effort";
 import type { CostData, CostModelUsage, ProviderEvent, ProviderSessionConfig } from "./types";
 
@@ -124,8 +126,8 @@ function configuredOptions(config: ProviderSessionConfig): Record<string, string
   return options;
 }
 
-function withModelInJsonEnv(env: Record<string, string>, key: string, model: string): void {
-  if (!model.trim()) return;
+function withOpencodeConfig(env: Record<string, string>, model: string): void {
+  const key = "OPENCODE_CONFIG_CONTENT";
   let value: Record<string, unknown> = {};
   const existing = env[key];
   if (existing) {
@@ -138,7 +140,9 @@ function withModelInJsonEnv(env: Record<string, string>, key: string, model: str
       console.warn(`\x1b[33m[acp]\x1b[0m Replacing invalid ${key} JSON for model fallback`);
     }
   }
-  env[key] = JSON.stringify({ ...value, model: model.trim() });
+  if (model.trim()) value.model = model.trim();
+  applyOpenRouterBaseUrlOverride(value as Config, env);
+  env[key] = JSON.stringify(value);
 }
 
 function parseCommand(command: string, args: string | undefined): string[] {
@@ -203,7 +207,7 @@ const opencodeTargetProfile: AcpTargetProfile = {
     const env = baseTargetEnv(config);
     const entry = getAcpTargetCatalogEntry("opencode");
     copyEnvKeys(config, env, entry.envKeys);
-    withModelInJsonEnv(env, "OPENCODE_CONFIG_CONTENT", config.model);
+    withOpencodeConfig(env, config.model);
     return env;
   },
   configuredOptions,
