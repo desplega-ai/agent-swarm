@@ -271,7 +271,8 @@ elif [ "$HARNESS_PROVIDER" = "codex" ]; then
                           refresh_token: (if $standalone then (.refresh // "") else "" end),
                           account_id: .accountId
                         },
-                        last_refresh: ((.expires / 1000 | floor) | todateiso8601)
+                        last_refresh: (now | floor | todateiso8601),
+                        expires: .expires
                       }
                     else
                       error("codex_oauth value is neither auth.json format nor flat credential format")

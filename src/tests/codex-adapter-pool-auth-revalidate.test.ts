@@ -34,6 +34,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "bun:test";
 import { unlink } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
+import { join } from "node:path";
 import { closeDb, initDb } from "../be/db";
 import { handleOAuthLocks } from "../http/oauth-locks";
 import { resolveCodexAuthMode } from "../providers/codex-adapter.js";
@@ -45,6 +46,7 @@ const TEST_DB_PATH = "./test-codex-adapter-pool-auth-revalidate.sqlite";
 const MOCK_API_URL = "http://localhost:3013";
 const MOCK_API_KEY = "example-test-api-key";
 const FAKE_HOME = "/home/fake-pool-worker";
+const FAKE_AUTH_PATH = join(FAKE_HOME, ".codex", "auth.json");
 
 process.env.SECRETS_ENCRYPTION_KEY = Buffer.alloc(32, 4).toString("base64");
 
@@ -106,14 +108,14 @@ function fakeAuthJsonFs(initialContent: string) {
   let file: string | null = initialContent;
   const fs = {
     readFile: async (path: string): Promise<string> => {
-      if (path !== `${FAKE_HOME}/.codex/auth.json` || file === null) {
+      if (path !== FAKE_AUTH_PATH || file === null) {
         throw new Error("ENOENT");
       }
       return file;
     },
     mkdir: async (): Promise<undefined> => undefined,
     writeFile: async (path: string, data: string): Promise<void> => {
-      expect(path).toBe(`${FAKE_HOME}/.codex/auth.json`);
+      expect(path).toBe(FAKE_AUTH_PATH);
       file = data;
     },
   };

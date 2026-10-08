@@ -177,10 +177,10 @@ function requireCredential(provider: string): void {
   }
 }
 
-function codexOAuthAuthJson(): string {
+export function codexOAuthAuthJson(raw = process.env.CODEX_OAUTH!): string {
   let parsed: unknown;
   try {
-    parsed = JSON.parse(process.env.CODEX_OAUTH!);
+    parsed = JSON.parse(raw);
   } catch {
     throw new Error("CODEX_OAUTH must be valid JSON");
   }
@@ -213,7 +213,10 @@ function codexOAuthAuthJson(): string {
       refresh_token: credentials.refresh,
       account_id: credentials.accountId,
     },
-    last_refresh: new Date(credentials.expires).toISOString(),
+    // Deliberately mirrors credentialsToAuthJson: the black-box runner
+    // cannot import src/. Keep refresh time distinct from token expiry.
+    last_refresh: new Date().toISOString(),
+    expires: credentials.expires,
   });
 }
 

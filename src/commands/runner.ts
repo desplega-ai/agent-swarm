@@ -21,7 +21,10 @@ import {
 import { type RelevantMemory, renderMemoriesPrompt } from "../prompts/memories.ts";
 import { configureHttpResolver, resolveTemplateAsync } from "../prompts/resolver.ts";
 import { renderSteeringDelivery } from "../prompts/steering-delivery.ts";
-import { authJsonToCredentialSelection } from "../providers/codex-oauth/auth-json.js";
+import {
+  authJsonToCredentialSelection,
+  credentialsToAuthJson,
+} from "../providers/codex-oauth/auth-json.js";
 import { materializeCodexAuthJson } from "../providers/codex-oauth/auth-json-fs.js";
 import {
   CODEX_OAUTH_POOL_SLOTS_ENV,
@@ -1937,17 +1940,9 @@ export async function resolveCodexOAuthCredentialInfo(
           await materializeCodexAuthJson(selectedSlot, slotEntry.creds, {
             includeRefreshToken: false,
           });
-          const authJson = {
-            auth_mode: "chatgpt" as const,
-            OPENAI_API_KEY: null,
-            tokens: {
-              id_token: slotEntry.creds.access,
-              access_token: slotEntry.creds.access,
-              refresh_token: slotEntry.creds.refresh,
-              account_id: slotEntry.creds.accountId,
-            },
-            last_refresh: new Date(slotEntry.creds.expires).toISOString(),
-          };
+          const authJson = credentialsToAuthJson(slotEntry.creds, {
+            includeRefreshToken: false,
+          });
           const sel = {
             ...authJsonToCredentialSelection(authJson, selectedSlot, slots.length),
             authFailureFence,

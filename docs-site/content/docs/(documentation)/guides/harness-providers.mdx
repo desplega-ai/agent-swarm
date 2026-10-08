@@ -1204,7 +1204,9 @@ This is documented separately because it is the most involved integration.
 
 **Key files:** `src/providers/codex-oauth/{flow.ts,storage.ts,auth-json.ts,pkce.ts,types.ts}`, `src/commands/codex-login.ts`, `docker-entrypoint.sh` L13–71, adapter fallback `codex-adapter.ts` L810–844.
 
-The shape conversion (our flat `{access, refresh, expires, accountId}` → Codex CLI's `{auth_mode: "chatgpt", tokens: {...}}`) lives in `credentialsToAuthJson()` at [`src/providers/codex-oauth/auth-json.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/codex-oauth/auth-json.ts) L37–49.
+The shape conversion (our flat `{access, refresh, expires, accountId}` → Codex CLI's `{auth_mode: "chatgpt", tokens: {...}}`) lives in `credentialsToAuthJson()` at [`src/providers/codex-oauth/auth-json.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/codex-oauth/auth-json.ts).
+
+Generated files record the current time in `last_refresh`, separately from the access token's expiry. A Swarm-only `expires` field preserves the expiry in milliseconds for opaque-token round trips. When reading a file, the access token's JWT `exp` takes precedence, including after the CLI refreshes the token and rewrites the file without Swarm metadata. The reader falls back to `expires`, then to the historical expiry-in-`last_refresh` format for legacy files without a usable JWT expiry.
 
 See also: [Codex OAuth setup guide](/docs/guides/provider-auth/codex-oauth).
 
