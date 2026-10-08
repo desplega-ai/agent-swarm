@@ -194,10 +194,27 @@ export function formatElapsed(start: string, end?: string | null): string {
   return `${diffMs}ms`;
 }
 
+const FENCE_OPEN = /^ {0,3}(`{3,}|~{3,})/;
+const FENCED_NEWLINE = "\u0000";
+
 /**
  * Normalize single newlines to double for markdown paragraph breaks,
- * preserving existing double newlines and list/heading markers.
+ * preserving existing double newlines and list/heading markers. Newlines
+ * inside a fenced code block are left alone: doubling them there put a blank
+ * line before the code and between every code line.
  */
 export function normalizeNewlines(text: string): string {
-  return text.replace(/(?<!\n)\n(?!\n|[-*#>|]|\d+\.)/g, "\n\n");
+  const lines = text.split("\n");
+  let out = lines[0] ?? "";
+  let fence = FENCE_OPEN.exec(out)?.[1] ?? null;
+  for (const line of lines.slice(1)) {
+    if (fence) {
+      out += FENCED_NEWLINE + line;
+      if (new RegExp(`^ {0,3}${fence[0]}{${fence.length},}\\s*$`).test(line)) fence = null;
+    } else {
+      out += `\n${line}`;
+      fence = FENCE_OPEN.exec(line)?.[1] ?? null;
+    }
+  }
+  return out.replace(/(?<!\n)\n(?!\n|[-*#>|]|\d+\.)/g, "\n\n").replaceAll(FENCED_NEWLINE, "\n");
 }

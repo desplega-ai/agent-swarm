@@ -883,3 +883,138 @@ summary {
   margin: 0;
   border-style: hidden;
 }
+
+/* Streamdown fenced code blocks, on every page that renders markdown with
+ * Streamdown. Its own layout leans on utility classes our Tailwind build never
+ * emits (`-mt-10`, `text-[var(--sdm-c)]`, ...), so unstyled it stacks an empty
+ * header band, a separate toolbar row and a second bordered card around a
+ * prose `pre`. These rules rebuild it as one container, matching LogCodeBlock:
+ * a slim header row (language + toolbar) when the fence names a language, a
+ * toolbar in the top-right corner when it does not. Plain fences
+ * (drafts, prose) soft-wrap; fences with a language keep horizontal scroll. */
+[data-streamdown="code-block"] {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin: 0.5rem 0;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid color-mix(in oklch, var(--color-border) 70%, transparent);
+  border-radius: 0.5rem;
+  background: color-mix(in oklch, var(--color-muted) 40%, transparent);
+}
+
+[data-streamdown="code-block-header"] {
+  display: flex;
+  align-items: center;
+  height: 2rem;
+  padding: 0 5rem 0 0.75rem;
+  border-bottom: 1px solid color-mix(in oklch, var(--color-border) 50%, transparent);
+  background: color-mix(in oklch, var(--color-muted) 50%, transparent);
+  color: var(--color-muted-foreground);
+  font-family: "Space Mono", monospace;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  user-select: none;
+}
+[data-streamdown="code-block-header"] > span {
+  margin: 0;
+}
+[data-streamdown="code-block"]:is([data-language=""], :not([data-language]))
+  > [data-streamdown="code-block-header"] {
+  display: none;
+}
+
+[data-streamdown="code-block"] > div:has(> [data-streamdown="code-block-actions"]) {
+  position: absolute;
+  top: 0;
+  right: 0.25rem;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  height: 2rem;
+  margin: 0;
+  pointer-events: none;
+}
+[data-streamdown="code-block-actions"] {
+  display: flex;
+  align-items: center;
+  gap: 0.125rem;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  pointer-events: auto;
+}
+[data-streamdown="code-block-actions"] button {
+  display: inline-flex;
+  padding: 0.25rem;
+  border-radius: 0.25rem;
+  color: var(--color-muted-foreground);
+  cursor: pointer;
+}
+[data-streamdown="code-block-actions"] button:hover {
+  background: var(--color-muted);
+  color: var(--color-foreground);
+}
+[data-streamdown="code-block-actions"] svg {
+  width: 14px;
+  height: 14px;
+}
+/* No header row: the toolbar sits in the top-right corner of the code, on its
+ * own surface, and a float reserves its spot so the first line wraps around
+ * it instead of running underneath. */
+[data-streamdown="code-block"]:is([data-language=""], :not([data-language]))
+  [data-streamdown="code-block-actions"] {
+  margin-top: 0.25rem;
+  border-radius: 0.375rem;
+  background: color-mix(in oklch, var(--color-background) 85%, transparent);
+  backdrop-filter: blur(4px);
+}
+[data-streamdown="code-block"]:is([data-language=""], :not([data-language]))
+  > [data-streamdown="code-block-body"]::before {
+  content: "";
+  float: right;
+  width: 3.25rem;
+  height: 1.25rem;
+}
+
+[data-streamdown="code-block-body"] {
+  margin: 0;
+  padding: 0.5rem 0.75rem;
+  overflow-x: auto;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+[data-streamdown="code-block"] pre {
+  margin: 0;
+  padding: 0;
+  overflow: visible;
+  border-radius: 0;
+  background: transparent;
+  color: var(--color-foreground);
+  font-family: "Space Mono", monospace;
+  font-size: 12px;
+  line-height: 1.6;
+}
+[data-streamdown="code-block"] code {
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+  font-family: inherit;
+  font-size: inherit;
+}
+[data-streamdown="code-block"]:is([data-language=""], :not([data-language])) pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+/* Shiki token colors arrive as CSS variables on each token span. */
+[data-streamdown="code-block"] code span {
+  color: var(--sdm-c, inherit);
+}
+.dark [data-streamdown="code-block"] code span {
+  color: var(--shiki-dark, var(--sdm-c, inherit));
+}
