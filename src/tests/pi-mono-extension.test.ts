@@ -19,8 +19,9 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { SummarizeSessionForPiDeps, SwarmHooksConfig } from "../providers/pi-mono-extension";
-import { summarizeSessionForPi } from "../providers/pi-mono-extension";
+import { createSwarmHooksExtension, summarizeSessionForPi } from "../providers/pi-mono-extension";
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -343,5 +344,41 @@ describe("summarizeSessionForPi", () => {
     expect((lastPostRatingsArgs as unknown as Record<string, unknown>).ratings).toBeUndefined();
 
     expect(consoleErrors.length).toBe(0);
+  });
+});
+
+describe("pi provider header attribution", () => {
+  test("uses request model URL and task env, replacing pi attribution", async () => {
+    let handler:
+      | ((event: { headers: Record<string, string> }, ctx: { model: { baseUrl: string } }) => void)
+      | undefined;
+    const pi = {
+      on: (event: string, callback: unknown) => {
+        if (event === "before_provider_headers") handler = callback as NonNullable<typeof handler>;
+      },
+    } as unknown as ExtensionAPI;
+    const config = { ...makeConfig(), env: {} as Record<string, string | undefined> };
+    await createSwarmHooksExtension(config)(pi);
+    expect(handler).toBeDefined();
+    const headers = {
+      "HTTP-Referer": "https://pi.dev",
+      "X-OpenRouter-Title": "pi",
+      "X-Custom": "keep",
+    };
+    handler!({ headers }, { model: { baseUrl: "https://openrouter.ai/api" } });
+    expect(headers).toEqual({
+      "HTTP-Referer": "https://agent-swarm.dev",
+      "X-OpenRouter-Title": "Agent Swarm",
+      "X-OpenRouter-Categories": "personal-agent,cloud-agent",
+      "X-Custom": "keep",
+    });
+    config.env.OPENROUTER_APP_ATTRIBUTION = "false";
+    const optedOut = { "X-Custom": "keep" };
+    handler!({ headers: optedOut }, { model: { baseUrl: "https://openrouter.ai/api" } });
+    expect(optedOut).toEqual({ "X-Custom": "keep" });
+    config.env = {};
+    const gateway = {};
+    handler!({ headers: gateway }, { model: { baseUrl: "http://localhost:1234/v1" } });
+    expect(gateway).toEqual({});
   });
 });

@@ -20,7 +20,11 @@ import {
 import { validateOpencodeCredentials } from "../utils/credentials";
 import { fetchInstalledMcpServers } from "../utils/mcp-server-fetcher";
 import { swarmRuntimeInstanceId } from "../utils/multi-runtime";
-import { DEFAULT_OPENROUTER_BASE_URL, getOpenRouterBaseUrl } from "../utils/openrouter-base-url";
+import {
+  DEFAULT_OPENROUTER_BASE_URL,
+  getOpenRouterAttributionHeaders,
+  getOpenRouterBaseUrl,
+} from "../utils/openrouter-base-url";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { resolveSlashSkillPrompt } from "./codex-skill-resolver";
 import { CTX_MODE_NUDGE_EVERY } from "./ctx-mode-env";
@@ -177,22 +181,34 @@ function formatUnknownError(err: unknown): string {
  * Route OpenRouter traffic through the configured gateway (see
  * src/utils/openrouter-base-url.ts). opencode's bundled openrouter provider
  * honors `provider.openrouter.options.baseURL`. Mutates `opencodeConfig` in
- * place; no-op when `OPENROUTER_BASE_URL` is unset/blank/default, so default
- * openrouter.ai behavior is preserved. Exported for tests.
+ * place, and attribute direct OpenRouter requests to Agent Swarm.
  */
 export function applyOpenRouterBaseUrlOverride(
   opencodeConfig: Config,
   env: Record<string, string | undefined> = process.env,
 ): void {
   const openRouterBaseUrl = getOpenRouterBaseUrl(env as NodeJS.ProcessEnv);
-  if (openRouterBaseUrl === DEFAULT_OPENROUTER_BASE_URL) return;
+  const headers = getOpenRouterAttributionHeaders(openRouterBaseUrl, env);
+  const overrideBaseUrl = openRouterBaseUrl !== DEFAULT_OPENROUTER_BASE_URL;
+  if (!overrideBaseUrl && Object.keys(headers).length === 0) return;
   opencodeConfig.provider = {
     ...opencodeConfig.provider,
     openrouter: {
       ...opencodeConfig.provider?.openrouter,
       options: {
         ...opencodeConfig.provider?.openrouter?.options,
-        baseURL: openRouterBaseUrl,
+        ...(overrideBaseUrl ? { baseURL: openRouterBaseUrl } : {}),
+        ...(Object.keys(headers).length > 0
+          ? {
+              headers: {
+                ...(opencodeConfig.provider?.openrouter?.options?.headers as
+                  | Record<string, string>
+                  | undefined),
+                ...headers,
+                "X-Title": "Agent Swarm",
+              },
+            }
+          : {}),
       },
     },
   };

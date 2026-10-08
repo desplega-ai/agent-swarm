@@ -3,8 +3,7 @@
  *
  * Covers the shared resolver (`src/utils/openrouter-base-url.ts`), the pi
  * models.json override writer (`ensureOpenRouterModelsOverride`) including
- * its composition through pi-coding-agent's ModelRuntime, and the opencode
- * per-task config injection (`applyOpenRouterBaseUrlOverride`).
+ * its composition through pi-coding-agent's ModelRuntime, and attribution host gating.
  */
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
@@ -12,10 +11,12 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
-import type { Config } from "@opencode-ai/sdk";
-import { applyOpenRouterBaseUrlOverride } from "../providers/opencode-adapter";
 import { ensureOpenRouterModelsOverride } from "../providers/pi-mono-adapter";
-import { DEFAULT_OPENROUTER_BASE_URL, getOpenRouterBaseUrl } from "../utils/openrouter-base-url";
+import {
+  DEFAULT_OPENROUTER_BASE_URL,
+  getOpenRouterAttributionHeaders,
+  getOpenRouterBaseUrl,
+} from "../utils/openrouter-base-url";
 
 const GATEWAY = "https://control-plane.example/proxy/v1";
 
@@ -220,40 +221,30 @@ describe("ensureOpenRouterModelsOverride (pi)", () => {
   });
 });
 
-describe("applyOpenRouterBaseUrlOverride (opencode)", () => {
-  test("no-op when OPENROUTER_BASE_URL is unset", () => {
-    const config: Config = { model: "openrouter/google/gemini-3-flash-preview" };
-    applyOpenRouterBaseUrlOverride(config, {});
-    expect(config.provider).toBeUndefined();
-  });
-
-  test("sets provider.openrouter.options.baseURL when the env is set", () => {
-    const config: Config = { model: "openrouter/google/gemini-3-flash-preview" };
-    applyOpenRouterBaseUrlOverride(config, { OPENROUTER_BASE_URL: GATEWAY });
-    expect(config.provider?.openrouter?.options?.baseURL).toBe(GATEWAY);
-  });
-
-  test("preserves existing provider config (e.g. reasoning model options)", () => {
-    const config: Config = {
-      model: "openrouter/google/gemini-3-flash-preview",
-      provider: {
-        openrouter: {
-          models: {
-            "google/gemini-3-flash-preview": { options: { reasoning: { effort: "low" } } },
-          },
-          options: { apiKey: "sk-keep" },
-        },
-        anthropic: { options: { apiKey: "sk-ant" } },
-      },
-    };
-    applyOpenRouterBaseUrlOverride(config, { OPENROUTER_BASE_URL: GATEWAY });
-    expect(config.provider?.openrouter?.options).toEqual({
-      apiKey: "sk-keep",
-      baseURL: GATEWAY,
+describe("getOpenRouterAttributionHeaders", () => {
+  test.each([
+    "https://openrouter.ai/api/v1",
+    "https://api.openrouter.ai/v1",
+  ])("attributes direct OpenRouter host %s", (url) => {
+    expect(getOpenRouterAttributionHeaders(url, {})).toEqual({
+      "HTTP-Referer": "https://agent-swarm.dev",
+      "X-OpenRouter-Title": "Agent Swarm",
+      "X-OpenRouter-Categories": "personal-agent,cloud-agent",
     });
-    expect(config.provider?.openrouter?.models).toEqual({
-      "google/gemini-3-flash-preview": { options: { reasoning: { effort: "low" } } },
-    });
-    expect(config.provider?.anthropic).toEqual({ options: { apiKey: "sk-ant" } });
+  });
+  test.each([
+    "http://localhost:1234/v1",
+    "https://evil-openrouter.ai",
+    "https://openrouter.ai.evil.com",
+    "invalid",
+  ])("does not attribute gateway, lookalike or invalid URL %s", (url) => {
+    expect(getOpenRouterAttributionHeaders(url, {})).toEqual({});
+  });
+  test.each(["false", "FALSE", "FaLsE", "0"])("honors opt-out %s", (value) => {
+    expect(
+      getOpenRouterAttributionHeaders("https://openrouter.ai", {
+        OPENROUTER_APP_ATTRIBUTION: value,
+      }),
+    ).toEqual({});
   });
 });

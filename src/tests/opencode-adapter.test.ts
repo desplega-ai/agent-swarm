@@ -1294,15 +1294,17 @@ describe("OpencodeAdapter — reasoning_effort wiring", () => {
     expect(options).toEqual({ thinking: { type: "enabled", budgetTokens: 32768 } });
   });
 
-  test("undefined reasoningEffort leaves config.provider unset", async () => {
+  test("undefined reasoningEffort leaves model options unset", async () => {
     const events: OpencodeEvent[] = [
       { type: "session.idle", properties: { sessionID: "sess-abc-123" } },
     ];
     const cfg = testConfig({ model: "openrouter/google/gemini-3-flash-preview" });
     await driveSession(events, cfg);
 
-    const opts = lastCreateOpencodeConfig as { config?: { provider?: unknown } };
-    expect(opts.config?.provider).toBeUndefined();
+    const opts = lastCreateOpencodeConfig as {
+      config?: { provider?: Record<string, { models?: unknown }> };
+    };
+    expect(opts.config?.provider?.openrouter?.models).toBeUndefined();
   });
 });
 
@@ -1494,5 +1496,66 @@ describe("OpencodeAdapter: event stream ends without session.idle", () => {
     expect(result.failureReason).toContain("runner exited without result");
     expect(subscribeArgs?.sseMaxRetryAttempts).toBe(OPENCODE_SSE_MAX_RETRY_ATTEMPTS);
     expect(closeServer).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("OpenRouter attribution config", () => {
+  test("overrides harness attribution while preserving custom headers and options", async () => {
+    const { applyOpenRouterBaseUrlOverride } = await import("../providers/opencode-adapter");
+    const config = {
+      provider: {
+        openrouter: {
+          options: {
+            apiKey: "test",
+            headers: {
+              "X-Custom": "keep",
+              "X-Title": "opencode",
+              "HTTP-Referer": "https://opencode.ai",
+            },
+          },
+        },
+      },
+    };
+    applyOpenRouterBaseUrlOverride(config, {});
+    expect(config.provider.openrouter.options).toEqual({
+      apiKey: "test",
+      headers: {
+        "X-Custom": "keep",
+        "HTTP-Referer": "https://agent-swarm.dev",
+        "X-Title": "Agent Swarm",
+        "X-OpenRouter-Title": "Agent Swarm",
+        "X-OpenRouter-Categories": "personal-agent,cloud-agent",
+      },
+    });
+  });
+  test("gateway override preserves options without injecting attribution", async () => {
+    const { applyOpenRouterBaseUrlOverride } = await import("../providers/opencode-adapter");
+    const config = {
+      provider: {
+        openrouter: {
+          models: {
+            "google/gemini-3-flash-preview": { options: { reasoning: { effort: "low" } } },
+          },
+          options: { apiKey: "test", headers: { "X-Custom": "keep" } },
+        },
+        anthropic: { options: { apiKey: "test-other" } },
+      },
+    };
+    applyOpenRouterBaseUrlOverride(config, { OPENROUTER_BASE_URL: "http://localhost:1234/v1" });
+    expect(config.provider.openrouter.options).toEqual({
+      apiKey: "test",
+      headers: { "X-Custom": "keep" },
+      baseURL: "http://localhost:1234/v1",
+    });
+    expect(config.provider.openrouter.models).toEqual({
+      "google/gemini-3-flash-preview": { options: { reasoning: { effort: "low" } } },
+    });
+    expect(config.provider.anthropic).toEqual({ options: { apiKey: "test-other" } });
+  });
+  test("task opt-out leaves default provider config untouched", async () => {
+    const { applyOpenRouterBaseUrlOverride } = await import("../providers/opencode-adapter");
+    const config = {};
+    applyOpenRouterBaseUrlOverride(config, { OPENROUTER_APP_ATTRIBUTION: "false" });
+    expect(config).toEqual({});
   });
 });

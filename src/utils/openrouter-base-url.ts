@@ -26,3 +26,26 @@ export function getOpenRouterBaseUrl(env: NodeJS.ProcessEnv = process.env): stri
   }
   return DEFAULT_OPENROUTER_BASE_URL;
 }
+
+export const OPENROUTER_APP_ATTRIBUTION_HEADERS = {
+  "HTTP-Referer": "https://agent-swarm.dev",
+  "X-OpenRouter-Title": "Agent Swarm",
+  "X-OpenRouter-Categories": "personal-agent,cloud-agent",
+} as const;
+
+/** Attribute direct OpenRouter requests unless the task opts out. */
+export function getOpenRouterAttributionHeaders(
+  url: string,
+  env: Record<string, string | undefined> = process.env,
+): Record<string, string> {
+  const enabled = env.OPENROUTER_APP_ATTRIBUTION?.toLowerCase();
+  if (enabled === "false" || enabled === "0") return {};
+  try {
+    const host = new URL(url).hostname;
+    return host === "openrouter.ai" || host.endsWith(".openrouter.ai")
+      ? { ...OPENROUTER_APP_ATTRIBUTION_HEADERS }
+      : {};
+  } catch {
+    return {};
+  }
+}
