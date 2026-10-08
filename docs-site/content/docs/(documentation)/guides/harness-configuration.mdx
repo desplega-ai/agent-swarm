@@ -371,7 +371,7 @@ For full provider design rationale (why we don't `agents.create` at runtime, the
 
 `acp` drives any agent that speaks the [Agent Client Protocol](https://agentclientprotocol.com) — an open, editor-agnostic JSON-RPC protocol for driving coding agents over stdio. If your agent already has an ACP server mode (or you build one), you can run it as a swarm worker with no adapter code of your own. See the protocol's own [Get started → Agents](https://agentclientprotocol.com/get-started/agents) guide for what it takes for an agent to speak ACP.
 
-The dashboard offers curated **OpenCode** and **GitHub Copilot CLI** presets and a free-form **Custom** target. ACP has no live steering (see the steering table in [Adding a Harness Provider](/docs/guides/harness-providers#live-task-steering) — ACP exposes a single in-flight `session/prompt` and the only interrupt is a full `session/cancel`).
+The dashboard offers curated **OpenCode**, **Gemini CLI**, and **GitHub Copilot CLI** presets and a free-form **Custom** target. ACP has no live steering (see the steering table in [Adding a Harness Provider](/docs/guides/harness-providers#live-task-steering) — ACP exposes a single in-flight `session/prompt` and the only interrupt is a full `session/cancel`).
 
 ### How it works
 

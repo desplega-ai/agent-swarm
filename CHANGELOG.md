@@ -6,6 +6,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.166.0] - 2026-10-08
+
+### Added
+- ACP: a `copilot` ACP target that runs GitHub Copilot CLI (`copilot --acp`), with subscription-token or BYOK provider auth; the full worker image ships it pinned (#1957).
+- Scripts: an opt-in `quickjs` script executor (`SCRIPT_EXECUTOR=quickjs`) that runs scripts in QuickJS (WASM) inside a worker-thread pool (#1951).
+- Secrets: a central secret registry with a combined known-value matcher (#1918).
+- Secret scrubbing: a vendored gitleaks rule set with a keyword prefilter and corpus test (#1922).
+- DB: a `ScrubbedText` write contract and a TEXT-column classification check (#1923).
+
+### Changed
+- Worker image: claude-code, codex, cursor, amp and the Anthropic SDK bumped (#1967).
+- Maintenance: a versioned retro-sweep scrubs logs, memory, tasks, events and workflow steps (#1917).
+- Tests: a canary sweep checks every table and stdout for leaked secrets (#1928).
+
+### Fixed
+- DB: event payloads (#1924), script run args, output and errors (#1925), workflow run and step payloads (#1926), and memory, messages, approvals, schedules and task text (#1927) are scrubbed at write.
+- `db-query`: credential tables are denied and the HTTP route is scrubbed (#1915).
+- Extension SDK bundler: the QuickJS worker is typechecked (#1969).
+- Docs: empty `LINEAR_ALLOWED_STATES` closes the Linear gate (#1965).
+- Tests: the adversarial scrubber timing guard is de-flaked (#1966).
+
 ## [1.165.0] - 2026-10-07
 
 ### Added
