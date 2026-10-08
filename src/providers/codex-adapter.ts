@@ -147,6 +147,8 @@ export type ThreadEvent =
       usage?: Usage;
     }
   | { type: "turn.interrupted"; usage?: Usage }
+  /** Latest single-request usage: a context-window snapshot, not billable usage. */
+  | { type: "context.updated"; usage: Usage; contextWindow?: number }
   | { type: "error"; message: string; codexErrorInfo?: string | null; willRetry?: boolean };
 
 interface CodexThread {
@@ -833,8 +835,25 @@ class AppServerCodexThread implements CodexThread {
         }
         break;
       case "thread/tokenUsage/updated": {
-        const tokenUsage = params.tokenUsage as { total?: unknown } | undefined;
+        const tokenUsage = params.tokenUsage as
+          | { total?: unknown; last?: unknown; modelContextWindow?: unknown }
+          | undefined;
+        // `total` is cumulative for the thread and drives cost accounting at
+        // turn end. `last` is the most recent model request, which is the
+        // only figure that reflects what currently sits in the context window.
         this.latestTotalUsage = normalizeUsage(tokenUsage?.total);
+        const last = normalizeUsage(tokenUsage?.last);
+        if (last) {
+          push({
+            type: "context.updated",
+            usage: last,
+            contextWindow:
+              typeof tokenUsage?.modelContextWindow === "number" &&
+              tokenUsage.modelContextWindow > 0
+                ? tokenUsage.modelContextWindow
+                : undefined,
+          });
+        }
         break;
       }
       case "error": {
@@ -1394,6 +1413,9 @@ export class CodexSession implements ProviderSession {
       case "turn.interrupted":
         this.accountUsage(event.usage);
         break;
+      case "context.updated":
+        this.emitContextUsage(event.usage, event.contextWindow ?? this.contextWindow);
+        break;
       case "error": {
         const { message } = this.formatTerminalError(event.message, event.codexErrorInfo);
         if (event.willRetry === true) {
@@ -1420,7 +1442,12 @@ export class CodexSession implements ProviderSession {
             this.accumulatedUsage.reasoning_output_tokens + usage.reasoning_output_tokens,
         }
       : usage;
+    // No context_usage here: a turn's usage sums every model request in the
+    // turn, so it measures consumption, not window occupancy. Context comes
+    // from the per-request `context.updated` snapshots instead.
+  }
 
+  private emitContextUsage(usage: Usage, contextWindow: number): void {
     // Codex input tokens already include the cached read and write subsets.
     // Passing either subset again would inflate context usage.
     const contextUsed = computeContextUsedUnified({
@@ -1432,8 +1459,8 @@ export class CodexSession implements ProviderSession {
     this.emit({
       type: "context_usage",
       contextUsedTokens: contextUsed,
-      contextTotalTokens: this.contextWindow,
-      contextPercent: clampContextPercent(contextUsed, this.contextWindow) ?? 0,
+      contextTotalTokens: contextWindow,
+      contextPercent: clampContextPercent(contextUsed, contextWindow) ?? 0,
       outputTokens: usage.output_tokens,
       contextFormula: CONTEXT_FORMULA,
     });

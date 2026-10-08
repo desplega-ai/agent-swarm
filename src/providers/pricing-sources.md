@@ -178,6 +178,8 @@ and heartbeat-classified roots are omitted, and the metrics remain separate.
 - **Codex usage:** the app-server reports cumulative token counters, including cache writes.
   The adapter calculates each turn's delta before adding it to the session total.
   This prevents repeated billing of earlier turns when the adapter processes queued input.
+  Context occupancy is separate: it comes from the per-request `tokenUsage.last`
+  snapshot (and `modelContextWindow` when present), never from the turn delta.
 - **Claude breakdown validity is all-or-nothing:** the claude adapter drops the
   entire `modelUsage` breakdown when any entry carries a missing, non-finite,
   or negative token counter — zero-filling would let the server price a
