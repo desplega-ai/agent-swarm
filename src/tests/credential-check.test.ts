@@ -1,6 +1,7 @@
 import { describe, expect, mock, test } from "bun:test";
 import {
   buildCredStatusReport,
+  CREDENTIAL_PROVIDER_CHECKERS,
   checkProviderCredentials,
   isBedrockMode,
   isCredCheckDisabled,
@@ -660,6 +661,45 @@ describe("checkOpencodeCredentials", () => {
   });
 });
 
+describe("ACP readiness", () => {
+  test.each([undefined, "custom"])("requires a command for target %s", async (target) => {
+    const status = await CREDENTIAL_PROVIDER_CHECKERS.acp({ ACP_TARGET: target });
+    expect(status.ready).toBe(false);
+    expect(status.missing).toEqual(["ACP_TARGET_COMMAND"]);
+    expect(status.hint).toContain("ACP_TARGET_COMMAND");
+    expect(status.hint).toContain("ACP_COMMAND");
+  });
+
+  test.each(["", " \t "])("rejects a blank custom command %j", async (command) => {
+    const status = await checkProviderCredentials("acp", {
+      ACP_TARGET: "custom",
+      ACP_TARGET_COMMAND: command,
+      ACP_COMMAND: "legacy-acp",
+    });
+    expect(status.ready).toBe(false);
+    expect(status.missing).toEqual(["ACP_TARGET_COMMAND"]);
+  });
+
+  test.each(["ACP_TARGET_COMMAND", "ACP_COMMAND"])("accepts a command from %s", async (key) => {
+    for (const target of [undefined, "custom"]) {
+      const status = await checkProviderCredentials("acp", {
+        ACP_TARGET: target,
+        [key]: "custom-acp --stdio",
+      });
+      expect(status).toEqual({ ready: true, missing: [], satisfiedBy: "sdk-delegated" });
+    }
+  });
+
+  test.each([
+    "opencode",
+    "gemini",
+    "copilot",
+  ])("keeps preset %s ready without a custom command", async (target) => {
+    const status = await checkProviderCredentials("acp", { ACP_TARGET: target });
+    expect(status).toEqual({ ready: true, missing: [], satisfiedBy: "sdk-delegated" });
+  });
+});
+
 // ─── dispatcher ──────────────────────────────────────────────────────────────
 
 describe("checkProviderCredentials dispatcher", () => {
@@ -720,7 +760,7 @@ describe("checkProviderCredentials dispatcher", () => {
       ).ready,
     ).toBe(true);
 
-    const acpStatus = await checkProviderCredentials("acp", {});
+    const acpStatus = await checkProviderCredentials("acp", { ACP_TARGET: "opencode" });
     expect(acpStatus.ready).toBe(true);
     expect(acpStatus.satisfiedBy).toBe("sdk-delegated");
   });
