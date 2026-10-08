@@ -111,13 +111,13 @@ beforeEach(() => {
 describe("TaskEffortField", () => {
   test("offers the levels of the tier's model for the agent's harness", async () => {
     const view = await mount(<Harness agent={agent("claude")} tier="smol" />);
-    // smol on claude = haiku: a thinking-budget model, off but no xhigh.
+    // smol on claude = haiku, now Haiku 5.5: effort levels up to xhigh, no off.
     expect(await optionLabels(view.container)).toEqual([
       "Agent default",
-      "off",
       "low",
       "medium",
       "high",
+      "xhigh",
     ]);
     await view.unmount();
   });
@@ -156,10 +156,12 @@ describe("TaskEffortField", () => {
   });
 
   test("a tier change that makes the chosen effort unsupported clears it", async () => {
-    const view = await mount(<Harness agent={agent("claude")} tier="smart" initial="xhigh" />);
-    expect(seen.at(-1)).toBe("xhigh");
-    // Same field, new tier: smol = haiku has no xhigh.
-    await view.rerender(<Harness agent={agent("claude")} tier="smol" initial="xhigh" />);
+    // Haiku 4.5 is a thinking-budget model: off is offered.
+    configs = [{ key: "MODEL_OVERRIDE", value: "claude-haiku-4-5" }];
+    const view = await mount(<Harness agent={agent("claude")} tier="" initial="off" />);
+    expect(seen.at(-1)).toBe("off");
+    // Same field, new tier: smol = haiku, now Haiku 5.5, has no off.
+    await view.rerender(<Harness agent={agent("claude")} tier="smol" initial="off" />);
     expect(seen.at(-1)).toBe("");
     await view.unmount();
   });

@@ -19,10 +19,10 @@ describe("taskEffortOptions", () => {
       levels: ["low", "medium", "high", "xhigh"],
       guessed: false,
     });
-    // smol = haiku: a thinking-budget model, off but no xhigh.
+    // smol = haiku, now Haiku 5.5: effort levels like opus, no off.
     expect(taskEffortOptions({ ...base, tier: "smol" })).toEqual({
       kind: "levels",
-      levels: ["off", "low", "medium", "high"],
+      levels: ["low", "medium", "high", "xhigh"],
       guessed: false,
     });
     // codex takes max.
@@ -34,10 +34,11 @@ describe("taskEffortOptions", () => {
     const options = taskEffortOptions({
       ...base,
       tier: "smol",
-      agentModel: "claude-opus-5-5",
+      // Haiku 4.5 is a thinking-budget model: off, no xhigh.
+      agentModel: "claude-haiku-4-5",
     });
-    expect(options.kind === "levels" && options.levels).toContain("off");
-    expect(options.kind === "levels" && options.levels).not.toContain("xhigh");
+    expect(options.kind === "levels" && options.levels).not.toContain("off");
+    expect(options.kind === "levels" && options.levels).toContain("xhigh");
   });
 
   test("with no tier, the agent's stored model decides", () => {
@@ -114,8 +115,8 @@ describe("taskEffortOptions", () => {
 describe("effortAllowed", () => {
   test("keeps an offered level, drops any other", () => {
     const options = taskEffortOptions({ ...base, tier: "smol" });
-    expect(effortAllowed(options, "off")).toBe("off");
-    expect(effortAllowed(options, "xhigh")).toBe("");
+    expect(effortAllowed(options, "xhigh")).toBe("xhigh");
+    expect(effortAllowed(options, "off")).toBe("");
     expect(effortAllowed(options, "")).toBe("");
     expect(effortAllowed({ kind: "unsupported", reason: "x" }, "high")).toBe("");
   });

@@ -168,12 +168,25 @@ export async function postHookProfileUpdate({
 }
 
 /**
- * Hook response for blocking actions
+ * Hook JSON responses. Claude Code parses stdout as JSON only when the whole
+ * stdout is one JSON object, so these must be the only stdout of the event.
  * See: https://code.claude.com/docs/en/hooks
  */
-interface HookBlockResponse {
-  decision: "block";
-  reason: string;
+type HookBlockResponse =
+  | {
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse";
+        permissionDecision: "deny";
+        permissionDecisionReason: string;
+      };
+    }
+  | { decision: "block"; reason: string };
+
+interface HookContextResponse {
+  hookSpecificOutput: {
+    hookEventName: "PreToolUse" | "PostToolUse";
+    additionalContext: string;
+  };
 }
 
 /**
@@ -850,12 +863,33 @@ export async function handleHook(): Promise<void> {
 
   /**
    * Output a blocking response to stop Claude from continuing.
-   * This is used when a task has been cancelled.
+   * Must be the only stdout of the event: any plain line before it makes
+   * Claude Code read the whole stdout as text and run the tool anyway.
    */
   const outputBlockResponse = (reason: string): void => {
-    const response: HookBlockResponse = {
-      decision: "block",
-      reason,
+    const response: HookBlockResponse =
+      msg.hook_event_name === "PreToolUse"
+        ? {
+            hookSpecificOutput: {
+              hookEventName: "PreToolUse",
+              permissionDecision: "deny",
+              permissionDecisionReason: reason,
+            },
+          }
+        : { decision: "block", reason };
+    console.log(JSON.stringify(response));
+  };
+
+  /**
+   * Output context for the model on a tool event. Plain stdout on PreToolUse
+   * and PostToolUse never reaches the model; additionalContext does.
+   */
+  const outputToolContext = (
+    hookEventName: "PreToolUse" | "PostToolUse",
+    additionalContext: string,
+  ): void => {
+    const response: HookContextResponse = {
+      hookSpecificOutput: { hookEventName, additionalContext },
     };
     console.log(JSON.stringify(response));
   };
@@ -988,8 +1022,23 @@ export async function handleHook(): Promise<void> {
   // Get current agent info
   const agentInfo = await getAgentInfo();
 
-  // Always output agent status with system tray
-  if (agentInfo) {
+  // A block must be the only stdout of the event, so a cancelled task is
+  // checked before the status line goes out.
+  if (
+    msg.hook_event_name === "UserPromptSubmit" &&
+    agentInfo &&
+    !agentInfo.isLead &&
+    agentInfo.status === "busy"
+  ) {
+    if (await checkAndBlockIfCancelled(true)) {
+      return;
+    }
+  }
+
+  // Output agent status with system tray. Skipped on tool events: their plain
+  // stdout never reaches the model and would break a JSON decision.
+  const isToolEvent = msg.hook_event_name === "PreToolUse" || msg.hook_event_name === "PostToolUse";
+  if (agentInfo && !isToolEvent) {
     // Base status line
     console.log(
       `You are registered as ${agentInfo.isLead ? "lead" : "worker"} agent "${agentInfo.name}" (ID: ${agentInfo.id}, status: ${agentInfo.status}).`,
@@ -1004,7 +1053,7 @@ export async function handleHook(): Promise<void> {
     }
   } else if (
     shouldShowRegistrationNudge({
-      agentInfoPresent: false,
+      agentInfoPresent: Boolean(agentInfo),
       eventType: msg.hook_event_name,
       hasAgentIdHeader: hasAgentIdHeader(),
     })
@@ -1131,8 +1180,7 @@ export async function handleHook(): Promise<void> {
       }
 
       // Block `gh pr create|edit` when the body for a public repo leaks internal
-      // identifiers. Exit code 2 blocks the call even though the status line
-      // above already went to stdout, and stderr reaches the model.
+      // identifiers. Exit code 2 blocks the call and stderr reaches the model.
       if (msg.tool_name === "Bash") {
         const prBodyBlock = await guardGhPrBody(msg.tool_input, msg.cwd ?? process.cwd());
         if (prBodyBlock) {
@@ -1141,6 +1189,9 @@ export async function handleHook(): Promise<void> {
           return;
         }
       }
+
+      // Emitted last, so a later block stays the only stdout of the event.
+      let loopWarning: string | undefined;
 
       // Tool loop detection (workers only, when processing a task)
       if (agentInfo && !agentInfo.isLead && agentInfo.status === "busy") {
@@ -1162,7 +1213,7 @@ export async function handleHook(): Promise<void> {
           }
 
           if (loopResult.severity === "warning" && loopResult.reason) {
-            console.log(`Warning: ${loopResult.reason}`);
+            loopWarning = `Warning: ${loopResult.reason}`;
           }
         }
       }
@@ -1179,6 +1230,9 @@ export async function handleHook(): Promise<void> {
         }
       }
 
+      if (loopWarning) {
+        outputToolContext("PreToolUse", loopWarning);
+      }
       break;
     }
 
@@ -1200,7 +1254,8 @@ export async function handleHook(): Promise<void> {
           method: "PUT",
           headers: mcpConfig!.headers,
         }).catch((e) => {
-          console.debug("Failed to update agent activity timestamp:", e);
+          // stderr: stdout on this event is reserved for one JSON object.
+          console.error("Failed to update agent activity timestamp:", e);
         });
       }
 
@@ -1270,24 +1325,14 @@ export async function handleHook(): Promise<void> {
           if (msg.tool_name?.endsWith("send-task")) {
             const maybeTaskId = (msg.tool_response as { task?: { id?: string } })?.task?.id;
 
-            console.log(
+            outputToolContext(
+              "PostToolUse",
               `Task sent successfully.${maybeTaskId ? ` Task ID: ${maybeTaskId}.` : ""} Monitor progress using the get-task-details tool periodically.`,
             );
           }
         }
       }
       break;
-
-    case "UserPromptSubmit": {
-      // For worker agents, check if their task has been cancelled
-      // This catches cancellations at the start of a new iteration
-      if (agentInfo && !agentInfo.isLead && agentInfo.status === "busy") {
-        if (await checkAndBlockIfCancelled(true)) {
-          return; // Exit early
-        }
-      }
-      break;
-    }
 
     case "Stop":
       // Clean up any artifact tunnels managed by PM2

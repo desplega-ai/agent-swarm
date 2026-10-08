@@ -1,5 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { type HarnessCatalogSections, harnessModelMismatch, normalizeGrokModel } from "./index.ts";
+import {
+  type HarnessCatalogSections,
+  harnessModelIds,
+  harnessModelMismatch,
+  normalizeGrokModel,
+} from "./index.ts";
 
 const catalog: HarnessCatalogSections = {
   anthropic: {
@@ -39,6 +44,44 @@ describe("harnessModelMismatch", () => {
     expect(harnessModelMismatch("gpt-5.6-sol", "claude", catalog)).toContain(
       "does not run on the claude harness",
     );
+  });
+
+  test("dated and latest Claude ids pass the family guard but stay out of pickers", () => {
+    const models = {
+      ...catalog.anthropic?.models,
+      "claude-haiku-4-5-20251001": { release_date: "2025-10-01" },
+      "claude-haiku-4-5-latest": { release_date: "2025-10-01" },
+    };
+    const sections = { ...catalog, anthropic: { models } };
+    for (const id of ["claude-haiku-4-5-20251001", "claude-haiku-4-5-latest"]) {
+      for (const harness of ["claude", "claude-managed"]) {
+        expect(harnessModelMismatch(id, harness, sections)).toBeNull();
+        expect(harnessModelMismatch(`anthropic/${id}[1m]`, harness, sections)).toBeNull();
+        expect(harnessModelIds(harness, models)).toEqual(
+          harnessModelIds(harness, catalog.anthropic?.models),
+        );
+      }
+      expect(harnessModelMismatch(id, "codex", sections)).toContain(
+        "does not run on the codex harness",
+      );
+    }
+  });
+
+  test("deprecated and pre-4 Claude ids still fail the family guard", () => {
+    const models = {
+      "claude-haiku-4-5-20251001": { status: "deprecated" },
+      "claude-haiku-4-5-latest": { status: "deprecated" },
+      "claude-3-5-sonnet-20241022": {},
+      "claude-3-5-sonnet-latest": {},
+      "claude-3-5-sonnet": {},
+    };
+    for (const id of Object.keys(models)) {
+      for (const harness of ["claude", "claude-managed"]) {
+        expect(harnessModelMismatch(id, harness, { anthropic: { models } })).toContain(
+          `does not run on the ${harness} harness`,
+        );
+      }
+    }
   });
 
   test("opus on claude passes (shortname)", () => {

@@ -42,7 +42,9 @@ describe("effortLevelsFor: what a harness and model accept", () => {
 
   test("Claude CLI shortnames resolve to the newest model of their family", () => {
     expect(effortLevelsFor("claude", "opus")).toEqual(effortLevelsFor("claude", "claude-opus-5-5"));
-    expect(effortLevelsFor("claude", "haiku")).toEqual(["off", "low", "medium", "high"]);
+    expect(effortLevelsFor("claude", "haiku")).toEqual(
+      effortLevelsFor("claude", "claude-haiku-5-5"),
+    );
     expect(effortLevelsFor("claude", "sonnet").length).toBeGreaterThan(0);
     // The live catalog decides which model a shortname means (a model with no
     // release date is just launched, so it ranks newest: the id breaks the tie).

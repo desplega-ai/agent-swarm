@@ -232,7 +232,11 @@ export function harnessModelMismatch(
 
   if (section === "anthropic" && Object.hasOwn(buildClaudeShortnameMap(own), bare)) return null;
   if (Object.hasOwn(own, bare)) {
-    return isHarnessCatalogModel(harness, bare, own[bare]) ? null : fail();
+    // Snapshot and latest suffixes hide duplicate picker entries, not valid
+    // Claude overrides. Keep the deprecated and pre-4 family checks intact.
+    const familyId =
+      section === "anthropic" ? bare.replace(DATED_ID_RE, "").replace(/-latest$/i, "") : bare;
+    return isHarnessCatalogModel(harness, familyId, own[bare]) ? null : fail();
   }
   for (const [name, other] of Object.entries(sections)) {
     if (name === section) continue;

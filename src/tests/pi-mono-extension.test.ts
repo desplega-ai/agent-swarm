@@ -1,5 +1,6 @@
 /**
- * Unit tests for `summarizeSessionForPi` in `src/providers/pi-mono-extension.ts`.
+ * Unit tests for `summarizeSessionForPi` in `src/providers/pi-mono-extension.ts`,
+ * plus the extension's advisory nudges (delivered with `pi.sendMessage`).
  *
  * Plan: thoughts/taras/plans/2026-05-10-fix-session-summarization-workers.md
  * → Phase 1 § "Test coverage"
@@ -19,9 +20,14 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionFactory } from "@earendil-works/pi-coding-agent";
+import { clearToolHistory } from "../hooks/tool-loop-detection";
 import type { SummarizeSessionForPiDeps, SwarmHooksConfig } from "../providers/pi-mono-extension";
-import { createSwarmHooksExtension, summarizeSessionForPi } from "../providers/pi-mono-extension";
+import {
+  createSwarmHooksExtension,
+  SWARM_NUDGE_CUSTOM_TYPE,
+  summarizeSessionForPi,
+} from "../providers/pi-mono-extension";
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -380,5 +386,121 @@ describe("pi provider header attribution", () => {
     const gateway = {};
     handler!({ headers: gateway }, { model: { baseUrl: "http://localhost:1234/v1" } });
     expect(gateway).toEqual({});
+  });
+});
+
+// ── advisory nudges reach the model via pi.sendMessage ───────────────────────
+
+type Handler = (event: unknown, ctx: unknown) => Promise<unknown> | unknown;
+type SentMessage = { customType: string; content: Array<{ type: string; text: string }> };
+
+/** Minimal stand-in for pi's ExtensionAPI: records handlers and sent messages. */
+function loadExtension(config: SwarmHooksConfig) {
+  const handlers = new Map<string, Handler>();
+  const sent: SentMessage[] = [];
+  const pi = {
+    on: (event: string, handler: Handler) => {
+      handlers.set(event, handler);
+    },
+    sendMessage: (message: SentMessage) => {
+      sent.push(message);
+    },
+    registerMcpServer: () => {},
+  };
+  createSwarmHooksExtension(config)(pi as unknown as Parameters<ExtensionFactory>[0]);
+  const ctx = { getContextUsage: () => undefined };
+  const fire = (event: string, payload: unknown = {}) => {
+    const handler = handlers.get(event);
+    if (!handler) throw new Error(`no handler for ${event}`);
+    return handler({ type: event, ...(payload as object) }, ctx);
+  };
+  const texts = () =>
+    sent.map((m) => {
+      expect(m.customType).toBe(SWARM_NUDGE_CUSTOM_TYPE);
+      return m.content.map((c) => c.text).join("");
+    });
+  return { fire, texts };
+}
+
+function jsonResponse(body: unknown): FetchHandlerResp {
+  return { ok: true, status: 200, text: async () => "", json: async () => body };
+}
+
+describe("createSwarmHooksExtension nudges", () => {
+  test("loop warning on tool_call is sent to the model", async () => {
+    const config = { ...makeConfig(), taskId: `task-pi-loop-${crypto.randomUUID()}` };
+    const { fire, texts } = loadExtension(config);
+    try {
+      for (let i = 0; i < 8; i++) {
+        const result = await fire("tool_call", { toolName: "bash", input: { command: "ls" } });
+        expect(result).toBeUndefined();
+      }
+      const warnings = texts().filter((t) => t.startsWith("Warning: "));
+      expect(warnings.length).toBe(1);
+      expect(warnings[0]).toContain("bash");
+    } finally {
+      await clearToolHistory(config.taskId);
+    }
+  });
+
+  test("lead send-task reminder on tool_result is sent to the model", async () => {
+    const { fire, texts } = loadExtension({ ...makeConfig(), isLead: true });
+    await fire("tool_result", { toolName: "mcp__agent-swarm__send-task", input: {} });
+    expect(texts()).toEqual([
+      "Task sent successfully. Monitor progress using the get-task-details tool periodically.",
+    ]);
+  });
+
+  test("lead concurrent context on session_start is sent to the model", async () => {
+    fetchHandler = async (url) =>
+      url.includes("/api/concurrent-context")
+        ? jsonResponse({
+            processingInboxMessages: [
+              { content: "deploy the thing", source: "slack", createdAt: "now" },
+            ],
+            recentTaskDelegations: [],
+            activeSwarmTasks: [],
+          })
+        : jsonResponse({});
+    const { fire, texts } = loadExtension({ ...makeConfig(), isLead: true });
+    await fire("session_start");
+    expect(texts().length).toBe(1);
+    expect(texts()[0]).toContain("=== CONCURRENT SESSION AWARENESS ===");
+    expect(texts()[0]).toContain("deploy the thing");
+  });
+
+  test("goal reminder is sent after compaction, not before every LLM call", async () => {
+    fetchHandler = async (url) =>
+      url.endsWith("/api/tasks/task-pi-1")
+        ? jsonResponse({ id: "task-pi-1", task: "ship the fix", progress: "tests green" })
+        : jsonResponse({});
+    const { fire, texts } = loadExtension(makeConfig());
+
+    await fire("context", { messages: [] });
+    expect(texts()).toEqual([]);
+
+    await fire("session_compact");
+    expect(texts()).toEqual([
+      [
+        "=== GOAL REMINDER (injected before context compaction) ===",
+        "Task ID: task-pi-1",
+        "Task: ship the fix",
+        "Current Progress: tests green",
+        "=== Continue working on this task after compaction ===",
+      ].join("\n"),
+    ]);
+  });
+
+  test("cancelled task on input skips the turn and leaves the nudge in the session", async () => {
+    fetchHandler = async (url) =>
+      url.includes("/cancelled-tasks")
+        ? jsonResponse({ cancelled: [{ id: "task-pi-1", failureReason: "lead stopped it" }] })
+        : jsonResponse({});
+    const { fire, texts } = loadExtension(makeConfig());
+    const result = await fire("input", { text: "go", source: "rpc" });
+    expect(result).toEqual({ action: "handled" });
+    expect(texts()).toEqual([
+      "🛑 TASK CANCELLED: lead stopped it. Stop working and use store-progress to acknowledge.",
+    ]);
   });
 });
