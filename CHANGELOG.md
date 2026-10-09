@@ -6,6 +6,33 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.167.0] - 2026-10-09
+
+### Added
+- MCP: an optional `SWARM_ENABLED_TOOLS` allowlist that exposes exactly the listed tools to agent sessions (#1989).
+- OpenRouter: requests sent straight to openrouter.ai carry Agent Swarm app attribution headers across every harness and internal caller; opt out with `OPENROUTER_APP_ATTRIBUTION=false` (#1995, #1996).
+- Heartbeat: a clean boot no longer creates the Lead boot-triage task; `HEARTBEAT_BOOT_TRIAGE_ALWAYS=true` restores it (#1973).
+- CI: unit test durations and flakes are tracked per CI run (#1986).
+
+### Changed
+- agent-fs bumped to 0.15.2 (#2001).
+- Worker image: pi, amp, gemini and the Anthropic SDK bumped (#1971, #1997).
+- Dependencies: vulnerable root, docs-site and templates-ui dependencies bumped (#1976, #1977, #1978).
+- Vercel skips unrelated builds and templates previews (#1980).
+- Docs: TLA+ specs synced with main and extended for boot triage and workflow replay writes (#1975, #1982, #1991); dreaming-v2 skill seed patches (#1972).
+
+### Fixed
+- Hooks: Claude hook blocks are the only stdout of their event, so Claude Code parses them (#1999).
+- pi: extension nudges reach the model through `pi.sendMessage` (#2000).
+- Models: harness family checks accept dated Claude ids (#2002).
+- Pricing: Claude Haiku 5.5 rates are seeded (#1993) and amp's dated snapshot ids collapse before the refresh insert (#1994).
+- Codex: the context gauge reports the latest request, not the turn total (#1988); OAuth refresh and expiry timestamps are separate (#1983).
+- ACP: target configuration is validated before claiming tasks (#1981) and the opencode target honors the OpenRouter gateway (#1992).
+- UI: approval code blocks and inline images render cleanly (#1979).
+- Docker builds retry transient Bun installs (#1984).
+- CI: Merge Gate runs for model package changes (#2003).
+- Tests: the ACP token-revoke test waits before closing the stub server (#1974).
+
 ## [1.166.0] - 2026-10-08
 
 ### Added

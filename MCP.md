@@ -1463,7 +1463,7 @@ Cancel a running or waiting workflow run. Cancels all non-terminal steps and the
 
 **Request human input**
 
-Create an approval request and return at once with the request id and URL. The answer arrives later as a hitl-follow-up task. Supports multiple question types: approval (yes/no), text, single-select, multi-select, and boolean. Returns the request ID and URL for the human to respond.
+Create an approval request and return at once with the request id and URL. The answer arrives later as a hitl-follow-up task. Supports multiple question types: approval (yes/no), text, single-select, multi-select, and boolean. Returns the request ID and URL for the human to respond. The dashboard renders each label and description as markdown: put long content in description, fence code with a language, and put an image URL alone on its own line to show it. No Slack message is sent; share the URL yourself.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
