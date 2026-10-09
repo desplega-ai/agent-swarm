@@ -41,6 +41,7 @@ import {
   terminateProcessGroup,
 } from "../utils/process-group";
 import { scrubSecrets } from "../utils/secret-scrubber";
+import { ClaudeBackgroundKeepalive } from "./claude-background-keepalive";
 import { normalizeClaudeMessage } from "./claude-session-events";
 import { resolveSlashSkillPrompt } from "./codex-skill-resolver";
 import { CTX_MODE_NUDGE_EVERY } from "./ctx-mode-env";
@@ -904,6 +905,8 @@ class ClaudeSession implements ProviderSession {
   private lastAssistantText = "";
   /** Per-session stream-json transcript used by the parent-owned session summarizer. */
   private transcript: string[];
+  /** Keeps the session heartbeat fresh while Claude idles on background tasks. */
+  private backgroundKeepalive: ClaudeBackgroundKeepalive;
   readonly deliverSteering?: (delivery: SteerDelivery) => Promise<SteerDeliveryResult>;
 
   constructor(
@@ -925,6 +928,7 @@ class ClaudeSession implements ProviderSession {
     this.contextWindowSize = getContextWindowSize(model);
     this.systemPromptFile = systemPromptFile;
     this.transcript = [`User: ${scrubSecrets(config.prompt)}`];
+    this.backgroundKeepalive = new ClaudeBackgroundKeepalive(config);
     const cmd = this.buildCommand();
 
     console.log(
@@ -1158,6 +1162,7 @@ class ClaudeSession implements ProviderSession {
     try {
       await Promise.all([stdoutPromise, stderrPromise]);
     } finally {
+      this.backgroundKeepalive.stop();
       this.closeStdin();
     }
     await logFileHandle.end();
@@ -1226,6 +1231,7 @@ class ClaudeSession implements ProviderSession {
       if (json.type === "result") {
         this.closeStdin();
       }
+      this.backgroundKeepalive.observe(json);
 
       const normalized = normalizeClaudeMessage(json, {
         taskId: this.config.taskId,
