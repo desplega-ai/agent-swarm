@@ -1739,6 +1739,16 @@ class ApiClient {
     return res.json();
   }
 
+  async deleteScriptConnection(id: string): Promise<{ deleted: true; id: string }> {
+    const url = `${this.getBaseUrl()}/api/script-connections/${encodeURIComponent(id)}`;
+    const res = await fetch(url, { method: "DELETE", headers: this.getHeaders() });
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({ error: "Failed to delete connection" }));
+      throw new Error(error.error || `Failed to delete connection: ${res.status}`);
+    }
+    return res.json();
+  }
+
   async fetchCredentialBindings() {
     const url = `${this.getBaseUrl()}/api/credential-bindings`;
     const res = await fetch(url, { headers: this.getHeaders() });

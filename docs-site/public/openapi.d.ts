@@ -14964,7 +14964,11 @@ export interface paths {
         get: operations["script_connections_get"];
         put?: never;
         post?: never;
-        delete?: never;
+        /**
+         * Delete a script connection
+         * @description Hard-deletes the connection, its auto-managed credential binding, and any derived inline secret it owns.
+         */
+        delete: operations["script_connections_delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -26015,6 +26019,50 @@ export interface operations {
                             };
                         };
                     };
+                };
+            };
+            /** @description Script connection not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    script_connections_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Script connection deleted */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        deleted: true;
+                        id: string;
+                    };
+                };
+            };
+            /** @description Only the lead agent can manage script connections */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
             /** @description Script connection not found */

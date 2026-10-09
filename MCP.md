@@ -610,8 +610,8 @@ Lead-only registry management for scripts ctx.api/ctx.mcp connections. Supports 
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `action` | `list \| upsert-openapi \| upsert-mcp \| upsert-graphql \| refresh \| disable` | Yes | - | List, create/update, refresh, or disable a script connection. |
-| `id` | `string` | No | - | Existing connection ID for update, refresh, or disable. |
+| `action` | `list \| upsert-openapi \| upsert-mcp \| upsert-graphql \| refresh \| disable \| delete` | Yes | - | List, create/update, refresh, disable, or delete a script connection. delete is permanent: it removes the connection, its managed credential binding, and any inline secret it owns. |
+| `id` | `string` | No | - | Existing connection ID for update, refresh, disable, or delete. |
 | `slug` | `string` | No | - | Stable script namespace slug exposed under ctx.api or ctx.mcp. |
 | `displayName` | `string` | No | - | Human-readable connection name. |
 | `scope` | `global \| agent \| repo` | No | - | Connection visibility scope. |

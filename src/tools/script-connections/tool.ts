@@ -4,6 +4,7 @@ import { getAgentById } from "@/be/db";
 import {
   ConnectionAuthInputSchema,
   connectionAuthInputFromFlat,
+  deleteScriptConnection,
   getScriptConnectionById,
   listScriptConnections,
   refreshScriptConnection,
@@ -16,13 +17,23 @@ import { resolveScopedResourceId, scopedResourceScopeIdSchema } from "@/utils/sc
 
 const scriptConnectionsInputSchema = z.object({
   action: z
-    .enum(["list", "upsert-openapi", "upsert-mcp", "upsert-graphql", "refresh", "disable"])
-    .describe("List, create/update, refresh, or disable a script connection."),
+    .enum([
+      "list",
+      "upsert-openapi",
+      "upsert-mcp",
+      "upsert-graphql",
+      "refresh",
+      "disable",
+      "delete",
+    ])
+    .describe(
+      "List, create/update, refresh, disable, or delete a script connection. delete is permanent: it removes the connection, its managed credential binding, and any inline secret it owns.",
+    ),
   id: z
     .string()
     .uuid()
     .optional()
-    .describe("Existing connection ID for update, refresh, or disable."),
+    .describe("Existing connection ID for update, refresh, disable, or delete."),
   slug: z
     .string()
     .min(1)
@@ -189,6 +200,27 @@ export const registerScriptConnectionsTool = (server: McpServer) => {
         await setScriptConnectionEnabled(args.id, false);
         const connections = listScriptConnections({ includeDisabled: true, allScopes: true });
         return toolOk("Script connection disabled.", {
+          data: { yourAgentId: requestInfo.agentId, connections },
+        });
+      }
+
+      if (args.action === "delete") {
+        if (!args.id) {
+          return toolErr("id is required for delete.", {
+            data: {
+              yourAgentId: requestInfo.agentId,
+              connections: listScriptConnections({ includeDisabled: true, allScopes: true }),
+            },
+          });
+        }
+        const deleted = await deleteScriptConnection(args.id);
+        const connections = listScriptConnections({ includeDisabled: true, allScopes: true });
+        if (!deleted) {
+          return toolErr(`Script connection ${args.id} not found.`, {
+            data: { yourAgentId: requestInfo.agentId, connections },
+          });
+        }
+        return toolOk(`Script connection ${deleted.slug} deleted.`, {
           data: { yourAgentId: requestInfo.agentId, connections },
         });
       }

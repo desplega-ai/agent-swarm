@@ -26,6 +26,7 @@ import {
   type ConnectionAuthSummary,
   connectionAuthInputFromFlat,
   connectionAuthSummary,
+  deleteScriptConnection,
   findCredentialBindingByIdentity,
   getCredentialBindingById,
   getScriptConnectionById,
@@ -547,6 +548,27 @@ const setConnectionEnabledRoute = route({
     200: {
       description: "Updated script connection",
       schema: z.object({ connection: decoratedConnectionSchema }),
+    },
+    403: { description: "Only the lead agent can manage script connections" },
+    404: { description: "Script connection not found" },
+  },
+  rbac: { permission: "script-connection.manage" },
+});
+
+const deleteConnectionRoute = route({
+  method: "delete",
+  path: "/api/script-connections/{id}",
+  pattern: ["api", "script-connections", null],
+  operationId: "script_connections_delete",
+  summary: "Delete a script connection",
+  description:
+    "Hard-deletes the connection, its auto-managed credential binding, and any derived inline secret it owns.",
+  tags: ["Script Connections"],
+  params: idParamsSchema,
+  responses: {
+    200: {
+      description: "Script connection deleted",
+      schema: z.object({ deleted: z.literal(true), id: z.string() }),
     },
     403: { description: "Only the lead agent can manage script connections" },
     404: { description: "Script connection not found" },
@@ -2108,6 +2130,19 @@ export async function handleScriptConnections(
     setConnectionEnabledRoute.respond(res, 200, {
       connection: (await decorateConnections([updated]))[0]!,
     });
+    return true;
+  }
+
+  if (deleteConnectionRoute.match(req.method, pathSegments)) {
+    const parsed = await deleteConnectionRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    if (!(await ensureConnectionAdmin(req, res, agentId))) return true;
+    const deleted = await deleteScriptConnection(parsed.params.id);
+    if (!deleted) {
+      jsonError(res, "Script connection not found.", 404);
+      return true;
+    }
+    deleteConnectionRoute.respond(res, 200, { deleted: true, id: deleted.id });
     return true;
   }
 
