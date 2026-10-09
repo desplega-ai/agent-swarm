@@ -1,6 +1,6 @@
 # slack-reply-gate
 
-Lead is woken by every human message in a Slack thread the swarm takes part in, including "lol", an emoji, or two people chatting with each other. This extension asks [TypeSafe](https://typesafe.ai) Jev whether Lead should answer a new thread message, and drops the wake-up when it should not.
+Lead is woken by every human message in a Slack thread the swarm takes part in, including "lol", an emoji, or two people chatting with each other. This extension asks Jev, [TypeSafe](https://typesafe.ai)'s decision model, whether Lead should answer a new thread message, and drops the wake-up when it should not.
 
 Install config:
 
@@ -28,10 +28,22 @@ The header counts only at the start of the description or right after the closin
 
 1. A follow-up with downloaded files (status `draft`) passes without a Jev call.
 2. **@mention pass-through.** A new message that @mentions Lead passes without a Jev call. A mention is the bot mention the engine rewrites to `<@U…> (that's you)`, a resolved `<@U…|lead>`, or a literal `@lead` (any name in `leadAliases`). Only the new messages are scanned, never the thread context, so an old mention earlier in the thread does not pass later banter.
-3. Otherwise one Jev call (`POST https://api.typesafe.ai/v1/systemone`, one `choice` question) with the new message(s), the sender kind, and the last `contextMessages` thread messages. Labels: `direct_ask`, `followup_to_lead`, `instruction_to_lead`, `reaction_only`, `banter_between_others`, `not_addressed_to_lead`, `other`.
+3. Otherwise one Jev call (one `choice` question, see [Jev transport](#jev-transport)) with the new message(s), the sender kind, and the last `contextMessages` thread messages. Labels: `direct_ask`, `followup_to_lead`, `instruction_to_lead`, `reaction_only`, `banter_between_others`, `not_addressed_to_lead`, `other`.
 4. The answer is no only when the top label is `reaction_only`, `banter_between_others`, or `not_addressed_to_lead`, and the summed probability of those three labels is at least `minConfidence`. A split between two skip labels is still a skip. An unsure verdict replies.
 
 Several buffered messages are judged together. One mention in any of them passes the batch.
+
+## Jev transport
+
+Jev is reachable two ways. Both take the same request and return the same answer, so the decision is identical whichever one runs.
+
+| `provider` | Endpoint | Key | Model |
+|---|---|---|---|
+| `typesafe` | `POST https://api.typesafe.ai/v1/systemone` | `TYPESAFE_API_KEY` (or `apiKey`) | `model`, default `jev-latest` |
+| `openrouter` | `POST https://openrouter.ai/api/alpha/decisions` | `OPENROUTER_API_KEY` | `openrouterModel`, default `typesafe/jev-1.13` |
+| `auto` (default) | TypeSafe when its key is set, else OpenRouter | | |
+
+Under `auto`, `TYPESAFE_API_KEY` wins when both keys are set. With neither key, every message fails open and the KV row names both secrets. Each decision row records the `provider` that answered.
 
 ## Fail open
 
@@ -52,7 +64,9 @@ The block returns first and the Slack calls run after it. A slow or failing Slac
 |---|---|---|
 | `mode` | `shadow` | `off`, `shadow`, or `enforce` |
 | `timeoutMs` | `3000` | Jev call timeout, capped at 4000 (the dispatcher cancels a handler at 5 s) |
-| `model` | `jev-latest` | TypeSafe model |
+| `provider` | `auto` | `auto`, `typesafe`, or `openrouter`. See [Jev transport](#jev-transport) |
+| `model` | `jev-latest` | Jev model on TypeSafe |
+| `openrouterModel` | `typesafe/jev-1.13` | Jev model on OpenRouter |
 | `minConfidence` | `0.55` | Minimum summed skip probability to skip |
 | `contextMessages` | `6` | Thread messages sent to Jev, 0 to 20 |
 | `leadAliases` | `["lead"]` | A literal `@alias` in a new message counts as a mention |
@@ -63,16 +77,16 @@ The block returns first and the Slack calls run after it. A slow or failing Slac
 
 ## Required secrets
 
-Both are read from the API process environment at call time. Set them as global `swarm_config` secrets: the API process loads global rows into `process.env` at boot and on config reload.
+All are read from the API process environment at call time. Set them as global `swarm_config` secrets: the API process loads global rows into `process.env` at boot and on config reload.
 
-- `TYPESAFE_API_KEY`: required for any evaluation. Without it every message fails open.
+- `TYPESAFE_API_KEY` or `OPENROUTER_API_KEY`: one is required for any evaluation. Under `auto`, TypeSafe wins when both are set. Without either, every message fails open.
 - `SLACK_BOT_TOKEN`: the Slack app's bot token. A swarm with Slack connected already has it. Without it, `enforce` still drops the message but cannot add :mute:, and logs a `mute-error`.
 
-Neither value is written to config, KV, logs, or a description.
+No key is written to config, KV, logs, or a description.
 
 ## KV namespace `ext:slack-reply-gate`
 
-- `d:<epochMs>:<channel>_<threadTs>`: one row per decision, with `action` (`pass`, `shadow-skip`, `skipped`, `fail-open`), `reason`, `confidence`, `skipP`, `latencyMs`, `sender`, and a 300-character `preview`.
+- `d:<epochMs>:<channel>_<threadTs>`: one row per decision, with `action` (`pass`, `shadow-skip`, `skipped`, `fail-open`), `provider`, `reason`, `confidence`, `skipP`, `latencyMs`, `sender`, and a 300-character `preview`.
 - `m:<epochMs>:<channel>_<threadTs>`: one row per mute attempt, with `action` (`muted`, `mute-error`), `removed`, `added`, and `errors`.
 - `last`: the latest decision. Mute rows never overwrite it.
 - Counters: `total`, `mention`, `files`, `reply`, `shadow-skip`, `skipped`, `error`, `muted`, `mute-error`, and `reason:<label>`.

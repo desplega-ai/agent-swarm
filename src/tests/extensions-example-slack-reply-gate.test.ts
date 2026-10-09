@@ -15,6 +15,7 @@ let mod: any;
 // runner's values are saved here and restored after the file.
 const ENV_KEYS = [
   "TYPESAFE_API_KEY",
+  "OPENROUTER_API_KEY",
   "SLACK_BOT_TOKEN",
   ...["ACCEPTED", "BUFFERED", "NOW", "STEERED"].map((k) => `SLACK_REACTION_${k}`),
 ];
@@ -92,7 +93,7 @@ const jevChoice = (
 
 const makeCtx = (
   config: Record<string, unknown> = {},
-  opts: { key?: string; slackToken?: string } = {},
+  opts: { key?: string; openrouterKey?: string; slackToken?: string } = {},
 ) => {
   const kv: Record<string, unknown> = {};
   const counters: Record<string, number> = {};
@@ -101,6 +102,7 @@ const makeCtx = (
     else delete process.env[name];
   };
   setEnv("TYPESAFE_API_KEY", opts.key ?? "tsk-test");
+  setEnv("OPENROUTER_API_KEY", opts.openrouterKey ?? "");
   setEnv("SLACK_BOT_TOKEN", opts.slackToken ?? "xoxb-test");
   const swarm = {
     kv_set: async ({ key, value }: any) => {
@@ -319,6 +321,85 @@ describe("decide", () => {
       reply: false,
       skipP: null,
       lowConfidence: false,
+    });
+  });
+});
+
+describe("Jev transport", () => {
+  const cfg = (extra: Record<string, unknown> = {}) => mod.config.parse(extra);
+
+  test("auto prefers TypeSafe when both keys are set", () => {
+    makeCtx({}, { key: "tsk-test", openrouterKey: "or-test" });
+    expect(mod.resolveTransport(cfg())).toEqual({
+      provider: "typesafe",
+      endpoint: "https://api.typesafe.ai/v1/systemone",
+      key: "tsk-test",
+      model: "jev-latest",
+    });
+  });
+
+  test("auto falls back to OpenRouter when only its key is set", () => {
+    makeCtx({}, { key: "", openrouterKey: "or-test" });
+    expect(mod.resolveTransport(cfg())).toEqual({
+      provider: "openrouter",
+      endpoint: "https://openrouter.ai/api/alpha/decisions",
+      key: "or-test",
+      model: "typesafe/jev-1.13",
+    });
+  });
+
+  test("an explicit provider wins over auto order and needs its own key", () => {
+    makeCtx({}, { key: "tsk-test", openrouterKey: "or-test" });
+    expect(mod.resolveTransport(cfg({ provider: "openrouter" })).provider).toBe("openrouter");
+    mod.resetKeyCache();
+    makeCtx({}, { key: "", openrouterKey: "or-test" });
+    expect(() => mod.resolveTransport(cfg({ provider: "typesafe" }))).toThrow(
+      "no TYPESAFE_API_KEY",
+    );
+  });
+
+  test("auto with no key names both secrets", () => {
+    makeCtx({}, { key: "", openrouterKey: "" });
+    expect(() => mod.resolveTransport(cfg())).toThrow("no TYPESAFE_API_KEY or OPENROUTER_API_KEY");
+  });
+
+  test("an OpenRouter-only swarm classifies through the Decisions endpoint", async () => {
+    // Shape captured from a live OpenRouter Decisions call to typesafe/jev-1.13.
+    mockJev(() =>
+      Response.json({
+        model: "typesafe/jev-1.13-20260917",
+        answers: {
+          reason: {
+            type: "choice",
+            choice: "reaction_only",
+            probabilities: { direct_ask: 0, reaction_only: 0.95, banter_between_others: 0.05 },
+            confidence: 0.93,
+          },
+        },
+        usage: { input_tokens: 430, output_tokens: 53, cost: 0.00001806 },
+        id: "gen-dec-1",
+        provider: "TypeSafe",
+      }),
+    );
+    const { ctx, kv } = makeCtx({ mode: "enforce" }, { key: "", openrouterKey: "or-test" });
+    const result = await handler(slackEvent(["lol nice"]), ctx);
+    expect(result).toEqual({ action: "block", reason: expect.stringContaining("p(skip) 1.00") });
+    expect(jevCalls).toHaveLength(1);
+    expect(jevCalls[0].url).toBe("https://openrouter.ai/api/alpha/decisions");
+    expect(jevCalls[0].body.model).toBe("typesafe/jev-1.13");
+    expect(Object.keys(jevCalls[0].body.questions.reason.criteria)).toEqual(
+      Object.keys(mod.REASONS),
+    );
+    expect(kv.last).toMatchObject({ provider: "openrouter", reason: "reaction_only" });
+  });
+
+  test("an OpenRouter HTTP error fails open and names the provider", async () => {
+    mockJev(() => Response.json({ error: { message: "no credits" } }, { status: 402 }));
+    const { ctx, kv } = makeCtx({ mode: "enforce" }, { key: "", openrouterKey: "or-test" });
+    expect(await handler(slackEvent(["lol"]), ctx)).toBeUndefined();
+    expect(kv.last).toMatchObject({
+      action: "fail-open",
+      error: expect.stringContaining("openrouter 402"),
     });
   });
 });

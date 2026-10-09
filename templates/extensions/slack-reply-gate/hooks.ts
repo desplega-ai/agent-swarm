@@ -22,6 +22,11 @@ import { z } from "zod";
  *     three labels is >= minConfidence (a banter/reaction split is still a skip).
  *   - Fails OPEN on every error, timeout or missing key.
  *
+ * Transport (config.provider): Jev is served by TypeSafe directly and by
+ * OpenRouter's Decisions endpoint. Both take the same {model, state, questions}
+ * body and return the same `answers` shape. `auto` uses TYPESAFE_API_KEY when
+ * set, else OPENROUTER_API_KEY.
+ *
  * modes (config.mode):
  *   off     -> never evaluate
  *   shadow  -> evaluate + record, never block (default)
@@ -42,11 +47,16 @@ import { z } from "zod";
 export const config = z.object({
   mode: z.enum(["off", "shadow", "enforce"]).default("shadow"),
   timeoutMs: z.number().int().positive().default(3000),
+  provider: z.enum(["auto", "typesafe", "openrouter"]).default("auto"),
+  /** Jev model on the TypeSafe transport. */
   model: z.string().default("jev-latest"),
+  /** Jev model on the OpenRouter transport. */
+  openrouterModel: z.string().default("typesafe/jev-1.13"),
   minConfidence: z.number().min(0).max(1).default(0.55),
   contextMessages: z.number().int().min(0).max(20).default(6),
   leadAliases: z.array(z.string()).default(["lead"]),
   botSlackUserIds: z.array(z.string()).default([]),
+  /** Explicit TypeSafe key; otherwise TYPESAFE_API_KEY from the API process env. */
   apiKey: z.string().optional(),
   /** Reaction for a dropped message in enforce mode; "" disables muting. */
   muteReaction: z.string().default("mute"),
@@ -57,7 +67,8 @@ type Cfg = z.infer<typeof config>;
 type Swarm = ApiCtx["swarm"];
 
 const NS = "ext:slack-reply-gate";
-const ENDPOINT = "https://api.typesafe.ai/v1/systemone";
+const TYPESAFE_ENDPOINT = "https://api.typesafe.ai/v1/systemone";
+const OPENROUTER_ENDPOINT = "https://openrouter.ai/api/alpha/decisions";
 const HEADER_LINE_RE = /(?:^|\n)\[Thread follow-up — \d+ message\(s\) buffered\]\n/g;
 const CTX_OPEN = "<thread_context>";
 const CTX_CLOSE = "</thread_context>";
@@ -181,6 +192,46 @@ export const resetKeyCache = (): void => {
   secretCache.clear();
 };
 
+export type JevTransport = {
+  provider: "typesafe" | "openrouter";
+  endpoint: string;
+  key: string;
+  model: string;
+};
+
+/**
+ * Pick the Jev transport. `auto` prefers TypeSafe and falls back to OpenRouter.
+ * Throws when the chosen provider has no usable key; the handler fails open.
+ */
+export const resolveTransport = (cfg: Cfg): JevTransport => {
+  const typesafe = (): JevTransport | null => {
+    const key = secret("TYPESAFE_API_KEY", cfg.apiKey);
+    return usable(key)
+      ? { provider: "typesafe", endpoint: TYPESAFE_ENDPOINT, key, model: cfg.model }
+      : null;
+  };
+  const openrouter = (): JevTransport | null => {
+    const key = secret("OPENROUTER_API_KEY");
+    return usable(key)
+      ? { provider: "openrouter", endpoint: OPENROUTER_ENDPOINT, key, model: cfg.openrouterModel }
+      : null;
+  };
+  const transport =
+    cfg.provider === "typesafe"
+      ? typesafe()
+      : cfg.provider === "openrouter"
+        ? openrouter()
+        : (typesafe() ?? openrouter());
+  if (transport) return transport;
+  throw new Error(
+    cfg.provider === "typesafe"
+      ? "no TYPESAFE_API_KEY"
+      : cfg.provider === "openrouter"
+        ? "no OPENROUTER_API_KEY"
+        : "no TYPESAFE_API_KEY or OPENROUTER_API_KEY",
+  );
+};
+
 const SLACK_API = "https://slack.com/api";
 // The engine's acceptance reactions (src/slack/reaction-shortcode.ts), by config key.
 const ACCEPTANCE_REACTIONS: ReadonlyArray<[string, string]> = [
@@ -273,7 +324,10 @@ export type JevVerdict = {
   latencyMs: number;
 };
 
-/** One Jev call: classify the newest message into a reason. Throws on any failure. */
+/**
+ * One Jev call: classify the newest message into a reason. Throws on any failure.
+ * TypeSafe and OpenRouter share the request body and the `answers` response shape.
+ */
 export const askJev = async (
   input: {
     messages: string[];
@@ -281,7 +335,7 @@ export const askJev = async (
     sender: string;
     leadNames: readonly string[];
   },
-  key: string,
+  transport: JevTransport,
   cfg: Cfg,
   outer?: AbortSignal,
 ): Promise<JevVerdict> => {
@@ -291,9 +345,12 @@ export const askJev = async (
   outer?.addEventListener("abort", onOuterAbort);
   const t0 = Date.now();
   try {
-    const res = await fetch(ENDPOINT, {
+    const res = await fetch(transport.endpoint, {
       method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${transport.key}`,
+      },
       body: JSON.stringify({
         state: {
           role: "Decide whether Lead, the coordinating AI agent of a team's agent swarm, should answer a new Slack message in a thread it takes part in. Lead is woken by every message in the thread, including ones not meant for it. Answering noise wastes everyone's time; missing a real ask is worse.",
@@ -302,7 +359,7 @@ export const askJev = async (
           new_message: input.messages.join("\n---\n"),
           new_message_sender: input.sender,
         },
-        model: cfg.model,
+        model: transport.model,
         questions: {
           reason: {
             type: "choice",
@@ -314,7 +371,7 @@ export const askJev = async (
       }),
       signal: controller.signal,
     });
-    if (!res.ok) throw new Error(`typesafe ${res.status}`);
+    if (!res.ok) throw new Error(`${transport.provider} ${res.status}`);
     const body = (await res.json()) as {
       answers?: { reason?: { choice?: unknown; confidence?: unknown; probabilities?: unknown } };
     } | null;
@@ -446,8 +503,7 @@ const extension: SwarmExtension = (api) => {
         return;
       }
 
-      const key = secret("TYPESAFE_API_KEY", cfg.apiKey);
-      if (!usable(key)) throw new Error("no TYPESAFE_API_KEY");
+      const transport = resolveTransport(cfg);
 
       const sender =
         opts.slackUserId && cfg.botSlackUserIds.includes(opts.slackUserId)
@@ -463,7 +519,7 @@ const extension: SwarmExtension = (api) => {
           sender,
           leadNames: cfg.leadAliases,
         },
-        key,
+        transport,
         cfg,
         ctx.signal,
       );
@@ -482,6 +538,7 @@ const extension: SwarmExtension = (api) => {
           skipP: decision.skipP,
           lowConfidence: decision.lowConfidence,
           latencyMs: verdict.latencyMs,
+          provider: transport.provider,
           sender,
           preview,
         },
