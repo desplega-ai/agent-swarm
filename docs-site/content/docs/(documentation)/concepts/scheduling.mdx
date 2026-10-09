@@ -209,7 +209,7 @@ Native `targetType` replaces the old "workflow trigger references a schedule" in
 }
 ```
 
-Use `targetType: "script"` plus `scriptName` / `scriptArgs` when the scheduled work is a reusable script and does not need an interactive agent task.
+Use `targetType: "script"` plus `scriptName` / `scriptArgs` when the scheduled work is a reusable script and does not need an interactive agent task. Each fire records a completed or failed run under Script Runs. To keep that table small, the run stores a pointer to the script version instead of a copy of the source.
 
 Any registered agent can update or delete schedules.
 

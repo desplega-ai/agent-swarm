@@ -15,6 +15,7 @@ import {
   getUserById,
   getWorkflow,
   getWorkflowRun,
+  recordInlineScriptRun,
   type UpdateScheduledTaskData,
   updateScheduledTask,
 } from "@/be/db";
@@ -32,6 +33,7 @@ import { startWorkflowExecution } from "@/workflows/engine";
 import type { ExecutorRegistry } from "@/workflows/executors/registry";
 import { handleScheduleTrigger } from "@/workflows/triggers";
 import { ensure } from "../utils/business-use";
+import { scrubObject, scrubSecrets } from "../utils/secret-scrubber";
 
 import {
   dispatchDeferredTaskWait,
@@ -83,23 +85,90 @@ async function executeScheduleScript(schedule: ScheduledTask): Promise<void> {
   }
 
   const agentId = schedule.createdByAgentId ?? "schedule";
-  const output = await runScript({
-    source: script.source,
-    args: schedule.scriptArgs ?? {},
-    fsMode: "none",
+  const args = schedule.scriptArgs ?? {};
+  const record = {
     agentId,
-    egressSecrets: await buildScriptCredentialBindings({ agentId }),
-    apiConnections: getScriptApiConnectionDescriptors({ agentId }),
-    mcpConnections: getScriptMcpConnectionDescriptors({ agentId }),
-    timeoutMs: 60_000,
-  });
+    scriptName: schedule.scriptName,
+    // A pointer, not a copy: script schedules fire as often as every minute and
+    // script_runs has no retention sweep, so copying the source on every fire
+    // would grow the table by tens of MB a day. script_versions keeps the text.
+    source: `// Scheduled run of '${script.name}' v${script.version} (global, contentHash ${script.contentHash}) by schedule '${schedule.name}'.\n// Full source: script_versions row for this version.\n`,
+    args,
+    startedAt: new Date().toISOString(),
+  };
+
+  let output: Awaited<ReturnType<typeof runScript>>;
+  try {
+    output = await runScript({
+      source: script.source,
+      args,
+      fsMode: "none",
+      agentId,
+      egressSecrets: await buildScriptCredentialBindings({ agentId }),
+      apiConnections: getScriptApiConnectionDescriptors({ agentId }),
+      mcpConnections: getScriptMcpConnectionDescriptors({ agentId }),
+      timeoutMs: 60_000,
+    });
+  } catch (err) {
+    await recordScheduleScriptRun({
+      ...record,
+      status: "failed",
+      error: err instanceof Error ? err.message : String(err),
+    });
+    throw err;
+  }
 
   if (output.exitCode !== 0 || output.error) {
-    throw new Error(
+    const message =
       output.stderr ||
-        `Script '${schedule.scriptName}' exited with code ${output.exitCode}${
-          output.error ? ` (${output.error})` : ""
-        }`,
+      `Script '${schedule.scriptName}' exited with code ${output.exitCode}${
+        output.error ? ` (${output.error})` : ""
+      }`;
+    await recordScheduleScriptRun({
+      ...record,
+      status: "failed",
+      output: output.result,
+      error: message,
+    });
+    throw new Error(message);
+  }
+
+  await recordScheduleScriptRun({ ...record, status: "completed", output: output.result });
+}
+
+/**
+ * Persist a scheduled script fire as a terminal `script_runs` row, so script
+ * audits see schedule-driven runs the same way as POST /api/scripts/run.
+ * Best effort: a persistence error never changes the schedule's outcome.
+ */
+async function recordScheduleScriptRun(run: {
+  agentId: string;
+  scriptName: string;
+  source: string;
+  args: unknown;
+  startedAt: string;
+  status: "completed" | "failed";
+  output?: unknown;
+  error?: string;
+}): Promise<void> {
+  try {
+    await recordInlineScriptRun({
+      id: crypto.randomUUID(),
+      agentId: run.agentId,
+      scriptName: run.scriptName,
+      source: run.source,
+      args: scrubObject(run.args),
+      status: run.status,
+      output: scrubObject(run.output),
+      error: run.error === undefined ? undefined : scrubSecrets(run.error),
+      startedAt: run.startedAt,
+      finishedAt: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.warn(
+      `[scheduler] could not record script run for '${run.scriptName}': ${scrubSecrets(
+        err instanceof Error ? err.message : String(err),
+      )}`,
     );
   }
 }
