@@ -3416,6 +3416,9 @@
     },
     "triggerType": {
       "exempt": "enum or fixed-format value"
+    },
+    "parentStepId": {
+      "exempt": "identifier"
     }
   },
   "workflow_versions": {

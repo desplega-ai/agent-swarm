@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { getChildWorkflowRunId, getWorkflowRunLineage } from "../../be/db/workflow-runs";
 import type { ExecutorMeta, WorkflowRun } from "../../types";
 import { startWorkflowExecution } from "../engine";
 import type { ExecutorDependencies, ExecutorResult } from "./base";
@@ -78,10 +79,11 @@ export class SubWorkflowExecutor extends BaseExecutor<
   ): Promise<ExecutorResult<SubWorkflowOutput>> {
     const { db } = this.deps;
 
-    const existing = await db.getChildWorkflowRun(meta.stepId);
+    const existingId = await getChildWorkflowRunId(meta.stepId);
+    const existing = existingId ? await db.getWorkflowRun(existingId) : null;
     if (existing) return this.settle(existing);
 
-    const lineage = await db.getWorkflowRunLineage(meta.runId);
+    const lineage = await getWorkflowRunLineage(meta.runId);
     if (config.workflowId === meta.workflowId || lineage.includes(config.workflowId)) {
       return {
         status: "failed",

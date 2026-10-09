@@ -2,7 +2,6 @@ import {
   getApprovalRequestById,
   getCompletedStepNodeIds,
   getDbClient,
-  getSettledChildRunParentSteps,
   getStuckApprovalRuns,
   getStuckWaitRuns,
   getStuckWorkflowRuns,
@@ -13,6 +12,7 @@ import {
   resolveApprovalRequest,
   updateWorkflowRun,
 } from "../be/db";
+import { getSettledChildRunParentSteps } from "../be/db/workflow-runs";
 import type { WorkflowRunStep } from "../types";
 import { shapeApprovalResolution } from "./approval-resolution";
 import { loadCompletedStepRouting } from "./completed-step-routing";

@@ -198,6 +198,7 @@ import {
   rowToAgentTaskSummary,
 } from "./db/tasks/read";
 import { configureTaskWriteDependencies, failTask } from "./db/tasks/write";
+import { emitChildRunFinished } from "./db/workflow-runs";
 import { scrubJsonValue } from "./scrub-json";
 import { openSealedJson, sealedJsonForDisplay, sealJson } from "./sealed-json";
 import { configSecretName, registerStoredSecret } from "./secret-registry";
@@ -7736,44 +7737,6 @@ export async function getWorkflowRun(
   return row ? rowToWorkflowRun(row, view) : null;
 }
 
-/** The child run a `sub-workflow` step started, if any. */
-export async function getChildWorkflowRun(parentStepId: string): Promise<WorkflowRun | null> {
-  const row = await getDbClient().get<WorkflowRunRow>(
-    "SELECT * FROM workflow_runs WHERE parentStepId = ?",
-    [parentStepId],
-  );
-  return row ? rowToWorkflowRun(row) : null;
-}
-
-/** Workflow ids of a run and every ancestor run that started it, nearest first. */
-export async function getWorkflowRunLineage(runId: string): Promise<string[]> {
-  const rows = await getDbClient().query<{ workflowId: string }>(
-    `WITH RECURSIVE lineage(id, workflowId, parentStepId, depth) AS (
-       SELECT id, workflowId, parentStepId, 0 FROM workflow_runs WHERE id = ?
-       UNION ALL
-       SELECT r.id, r.workflowId, r.parentStepId, l.depth + 1
-         FROM lineage l
-         JOIN workflow_run_steps s ON s.id = l.parentStepId
-         JOIN workflow_runs r ON r.id = s.runId
-        WHERE l.depth < 64
-     )
-     SELECT workflowId FROM lineage ORDER BY depth`,
-    [runId],
-  );
-  return rows.map((row) => row.workflowId);
-}
-
-/** Waiting `sub-workflow` steps whose child run is already terminal. */
-export async function getSettledChildRunParentSteps(): Promise<string[]> {
-  const rows = await getDbClient().query<{ parentStepId: string }>(
-    `SELECT c.parentStepId
-       FROM workflow_runs c
-       JOIN workflow_run_steps s ON s.id = c.parentStepId AND s.status = 'waiting'
-      WHERE c.status IN ('completed', 'failed', 'cancelled', 'skipped')`,
-  );
-  return rows.map((row) => row.parentStepId);
-}
-
 function emitWorkflowTerminalTelemetry(run: WorkflowRun): void {
   if (run.status !== "completed" && run.status !== "failed") return;
   const status = run.status;
@@ -7846,32 +7809,9 @@ export async function updateWorkflowRun(
   if (data.status === "completed" || data.status === "failed") {
     emitWorkflowTerminalTelemetry(run);
   }
-  const parentStepId = row.parentStepId;
-  if (parentStepId && TERMINAL_WORKFLOW_RUN_STATUSES.has(run.status)) {
-    // Wakes the waiting `sub-workflow` step. A missed event is caught by the
-    // recovery sweep (getSettledChildRunParentSteps).
-    getDbClient().afterCommit(() => {
-      import("../workflows/event-bus")
-        .then(({ workflowEventBus }) => {
-          workflowEventBus.emit("workflow.child.finished", { childRunId: id, parentStepId });
-        })
-        .catch((err) =>
-          console.error(
-            "[db] workflow.child.finished event not emitted:",
-            scrubSecrets(err instanceof Error ? err.message : String(err)),
-          ),
-        );
-    });
-  }
+  if (row.parentStepId) emitChildRunFinished(id, row.parentStepId, run.status);
   return run;
 }
-
-const TERMINAL_WORKFLOW_RUN_STATUSES = new Set<WorkflowRunStatus>([
-  "completed",
-  "failed",
-  "cancelled",
-  "skipped",
-]);
 
 export type WorkflowRunListOptions = {
   status?: WorkflowRunStatus;

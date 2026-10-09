@@ -1,7 +1,6 @@
 import {
   cancelPendingApprovalRequestsForRun,
   cancelTask,
-  getChildWorkflowRun,
   getCompletedStepNodeIds,
   getDbClient,
   getPendingEventWaitNames,
@@ -18,6 +17,7 @@ import {
   updateWorkflowRun,
   updateWorkflowRunStep,
 } from "../be/db";
+import { getChildWorkflowRunId } from "../be/db/workflow-runs";
 import type { WaitStateRow } from "../types";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import {
@@ -791,7 +791,8 @@ export async function resumeFromChildRun(
 ): Promise<boolean> {
   const step = await getWorkflowRunStep(parentStepId);
   if (!step || step.status !== "waiting") return false;
-  const child = await getChildWorkflowRun(parentStepId);
+  const childId = await getChildWorkflowRunId(parentStepId);
+  const child = childId ? await getWorkflowRun(childId) : null;
   const outcome = child ? childRunOutcome(child) : null;
   if (!outcome) return false;
 
