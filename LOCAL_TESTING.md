@@ -177,7 +177,7 @@ Cursor needs `CURSOR_API_KEY` and defaults to `gpt-5.4-nano`, the cheapest model
 Amp needs `AMP_API_KEY` and a preinstalled `amp` executable (`AMP_BINARY`), and defaults to the `low` mode.
 Grok needs `XAI_API_KEY` and a preinstalled `grok` executable (`GROK_BINARY`), and defaults to `grok-build-0.1`, xAI's cheapest model. `E2E_MODEL_GROK=openrouter/deepseek/deepseek-v4.1-flash` runs it on `OPENROUTER_API_KEY` instead.
 Dsh defaults to `openrouter/deepseek/deepseek-v4.1-flash` and needs `OPENROUTER_API_KEY`.
-Provision `npm install --global @deepseek-ai/dsh@0.2.1-alpha.1` first, then run
+Provision `npm install --global @deepseek-ai/dsh@0.2.1-alpha.2` first, then run
 `DSH_BINARY=$(command -v dsh) bun run e2e --only health --harness dsh`.
 A native `E2E_MODEL_DSH=deepseek-flash` override instead requires `DEEPSEEK_API_KEY`.
 The nightly dsh leg installs that pin explicitly because its slim image omits dsh.
