@@ -142,6 +142,16 @@ function rowsToObjects(res: any): any[] {
 
 `ctx.swarm.db_query` throttles at about three concurrent calls. A wider `Promise.all` fan-out can return 429 responses with no `rows` key, so `res?.data?.rows ?? []` misreads throttling as a clean zero. Check the response status and `data.error` before reading `rows`. Serialize queries or cap concurrency at three.
 
+### Response traps
+
+- Every `ctx.swarm.*` response passes the secret scrubber. Text shaped like a secret-looking `key=value` assignment comes back as `[REDACTED:<key>]`, so code, HTML or profile text read through `kv_get`, `db_query` or a page read can differ from the stored bytes. Never write such a read back verbatim. Read stored text as `hex(...)` through `db_query`, decode it in the script, and refuse to publish or write when the result contains `[REDACTED:`.
+- `db_query` rejects any SQL containing `;`, even inside a string literal. Pass such literals through `params`.
+- `db_query` caps rows without an error (1000 in scripts). Aggregate in SQL and confirm totals with `COUNT(*)`.
+- `kv_get` returns the entry at `data`: read `res.data.value`. The MCP tool shape `entry.value` reads `undefined` in a script.
+- `script_run` returns an envelope (`result`, `truncated`, `durationMs`, `stdout`, `stderr`, `exitCode`). The callee payload is at `.result`. Take key names from a real response: a guessed key that is absent reads as a false zero.
+- An `argsSchema` validation error fires before the body runs and repeats on every retry. Fix the args instead of retrying.
+- Write a dedup or idempotency marker only after the step succeeds. A marker written after a failure blocks the next real attempt.
+
 Common tables: `agent_tasks`, `session_logs`, `agent_memory`, `scheduled_tasks`, `agents`. `session_logs` has no `tool_name` column. Tool names sit inside the `content` JSON column. Extract them with `instr` and `substr` in SQL, or parse the JSON in the script.
 
 ## Progress from a script
