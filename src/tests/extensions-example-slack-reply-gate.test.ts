@@ -703,10 +703,43 @@ describe("mute on drop (enforce)", () => {
     expect(counters.muted).toBe(1);
   });
 
-  test('muteReaction "" blocks without touching Slack', async () => {
-    const { result } = await dropped({ muteReaction: "" });
+  test('muteReaction "" only removes the acceptance reactions, adds nothing', async () => {
+    const { result, counters, kv } = await dropped({ muteReaction: "" });
     expect(result).toEqual({ action: "block", reason: expect.any(String) });
-    expect(slackCalls).toHaveLength(0);
+    expect(slackCalls.some((c) => c.method === "reactions.add")).toBe(false);
+    expect(
+      slackCalls
+        .filter((c) => c.method === "reactions.remove")
+        .map((c) => c.body.name)
+        .sort(),
+    ).toEqual(["eyes", "heavy_plus_sign", "speech_balloon", "zap"].sort());
+    expect(counters.unreacted).toBe(1);
+    expect(counters.muted).toBeUndefined();
+    expect(muteRows(kv)).toEqual([
+      expect.objectContaining({ action: "unreacted", removed: ["eyes"], added: false, errors: [] }),
+    ]);
+  });
+
+  test('muteReaction "": a failed removal is logged as mute-error', async () => {
+    slackReply = (m, b) =>
+      m === "reactions.remove" && b.name === "eyes"
+        ? Response.json({ ok: false, error: "missing_scope" })
+        : slackOk(m, b);
+    const { result, counters, kv } = await dropped({ muteReaction: "" });
+    expect(result).toEqual({ action: "block", reason: expect.any(String) });
+    expect(counters["mute-error"]).toBe(1);
+    expect(counters.unreacted).toBeUndefined();
+    expect(muteRows(kv)[0].errors).toEqual(["remove eyes: missing_scope"]);
+  });
+
+  test("a custom muteReaction is added after the removals", async () => {
+    const { counters } = await dropped({ muteReaction: ":zipper_mouth_face:" });
+    expect(slackCalls.at(-1)).toMatchObject({
+      method: "reactions.add",
+      body: { name: "zipper_mouth_face" },
+    });
+    expect(slackCalls.filter((c) => c.method === "reactions.add")).toHaveLength(1);
+    expect(counters.muted).toBe(1);
   });
 
   test("no reaction for shadow skips, replies, mentions or fail-open", async () => {

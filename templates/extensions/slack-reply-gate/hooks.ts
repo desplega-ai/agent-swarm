@@ -37,7 +37,8 @@ import { z } from "zod";
  * the Slack Web API (reactions.remove / reactions.add) with the bot token. It
  * first removes the bot's own acceptance reactions (:eyes:, :heavy_plus_sign:,
  * :zap:, :speech_balloon:, or their SLACK_REACTION_* overrides), the same set
- * the engine clears when it finalizes a task, then adds :mute:. It runs after
+ * the engine clears when it finalizes a task, then adds :mute:. With
+ * muteReaction "" it only removes them: a true no-op on the message. It runs after
  * the block decision returns, so a slow or failing Slack call never delays or
  * changes the drop; its errors go to the same KV namespace.
  *
@@ -58,7 +59,10 @@ export const config = z.object({
   botSlackUserIds: z.array(z.string()).default([]),
   /** Explicit TypeSafe key; otherwise TYPESAFE_API_KEY from the API process env. */
   apiKey: z.string().optional(),
-  /** Reaction for a dropped message in enforce mode; "" disables muting. */
+  /**
+   * Reaction for a dropped message in enforce mode. "" only removes the bot's
+   * acceptance reaction(s) and adds nothing.
+   */
   muteReaction: z.string().default("mute"),
   slackTimeoutMs: z.number().int().positive().default(5000),
 });
@@ -280,9 +284,10 @@ const slackCall = async (
 export type MuteResult = { removed: string[]; added: boolean; errors: string[] };
 
 /**
- * Replace the bot's acceptance reaction(s) on one message with `name`.
- * `reactions.remove` only removes the calling bot's own reaction, so a human's
- * :eyes: stays. Never throws: every failure lands in `errors`.
+ * Replace the bot's acceptance reaction(s) on one message with `name`, or only
+ * remove them when `name` is "". `reactions.remove` only removes the calling
+ * bot's own reaction, so a human's :eyes: stays. Never throws: every failure
+ * lands in `errors`.
  */
 export const muteMessage = async (
   token: string,
@@ -304,6 +309,7 @@ export const muteMessage = async (
     else if (res.error !== "no_reaction" && res.error !== "invalid_name")
       result.errors.push(`remove ${reaction}: ${res.error ?? "unknown"}`);
   });
+  if (!name) return result;
   const added = await call("reactions.add", name);
   if (added.ok || added.error === "already_reacted") result.added = true;
   else result.errors.push(`add ${name}: ${added.error ?? "unknown"}`);
@@ -444,13 +450,11 @@ const muteTrigger = async (
     const token = secret("SLACK_BOT_TOKEN");
     if (!usable(token)) throw new Error("no SLACK_BOT_TOKEN");
     const result = await muteMessage(token, channel, ts, cfg.muteReaction, cfg.slackTimeoutMs);
-    const ok = result.added && result.errors.length === 0;
-    await record(
-      swarm,
-      { ...base, action: ok ? "muted" : "mute-error", ...result },
-      [ok ? "muted" : "mute-error"],
-      "m",
-    );
+    // "" adds nothing: success is clearing the acceptance reaction(s).
+    const done = cfg.muteReaction ? "muted" : "unreacted";
+    const ok = (result.added || !cfg.muteReaction) && result.errors.length === 0;
+    const action = ok ? done : "mute-error";
+    await record(swarm, { ...base, action, ...result }, [action], "m");
   } catch (err) {
     await record(
       swarm,
@@ -548,12 +552,11 @@ const extension: SwarmExtension = (api) => {
       if (skip && cfg.mode === "enforce") {
         // Not awaited: the block must return inside the dispatcher's 5 s budget
         // whatever Slack does, and a failed reaction never changes the drop.
-        const muteReaction = shortcode(cfg.muteReaction);
-        if (muteReaction) {
-          const pending = muteTrigger(ctx.swarm, { ...cfg, muteReaction }, base);
-          pendingMutes.add(pending);
-          void pending.finally(() => pendingMutes.delete(pending));
-        }
+        // An empty (or invalid) muteReaction still clears the acceptance reaction(s).
+        const muteReaction = shortcode(cfg.muteReaction) ?? "";
+        const pending = muteTrigger(ctx.swarm, { ...cfg, muteReaction }, base);
+        pendingMutes.add(pending);
+        void pending.finally(() => pendingMutes.delete(pending));
         return block(
           `slack-reply-gate: no reply needed (${decision.reason}${decision.skipP !== null ? `, p(skip) ${decision.skipP.toFixed(2)}` : ""})`,
         );

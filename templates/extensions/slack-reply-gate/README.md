@@ -54,9 +54,9 @@ Every error lets the task through: a missing key, a TypeSafe HTTP error, a netwo
 No swarm tool or extension `ctx` method adds a Slack reaction, so the hook calls the Slack Web API with the bot token. It needs the `reactions:write` scope, which the Slack app already uses for its acceptance reactions.
 
 1. `reactions.remove` for each acceptance reaction the engine may have put on the triggering message: `eyes`, `heavy_plus_sign`, `zap`, `speech_balloon`, or their `SLACK_REACTION_ACCEPTED`, `SLACK_REACTION_BUFFERED`, `SLACK_REACTION_NOW`, and `SLACK_REACTION_STEERED` overrides. Slack only removes the bot's own reaction, so a human's :eyes: stays.
-2. `reactions.add` with `muteReaction` (default `mute`). `already_reacted` counts as success.
+2. `reactions.add` with `muteReaction` (default `mute`). `already_reacted` counts as success. Skipped when `muteReaction` is `""`.
 
-The block returns first and the Slack calls run after it. A slow or failing Slack call never delays the drop or turns it back into a task. Set `muteReaction` to `""` to drop silently.
+The block returns first and the Slack calls run after it. A slow or failing Slack call never delays the drop or turns it back into a task. Set `muteReaction` to `""` for a true no-op: step 1 still clears the bot's acceptance reaction(s), and nothing is added.
 
 ## Config
 
@@ -72,7 +72,7 @@ The block returns first and the Slack calls run after it. A slow or failing Slac
 | `leadAliases` | `["lead"]` | A literal `@alias` in a new message counts as a mention |
 | `botSlackUserIds` | `[]` | Slack user ids labelled `bot` as the sender for Jev |
 | `apiKey` | unset | Explicit TypeSafe key. Prefer the `TYPESAFE_API_KEY` secret below |
-| `muteReaction` | `mute` | Reaction for a dropped message; `""` disables muting |
+| `muteReaction` | `mute` | Reaction for a dropped message; `""` only removes the acceptance reaction(s) |
 | `slackTimeoutMs` | `5000` | Timeout per Slack call |
 
 ## Required secrets
@@ -80,16 +80,16 @@ The block returns first and the Slack calls run after it. A slow or failing Slac
 All are read from the API process environment at call time. Set them as global `swarm_config` secrets: the API process loads global rows into `process.env` at boot and on config reload.
 
 - `TYPESAFE_API_KEY` or `OPENROUTER_API_KEY`: one is required for any evaluation. Under `auto`, TypeSafe wins when both are set. Without either, every message fails open.
-- `SLACK_BOT_TOKEN`: the Slack app's bot token. A swarm with Slack connected already has it. Without it, `enforce` still drops the message but cannot add :mute:, and logs a `mute-error`.
+- `SLACK_BOT_TOKEN`: the Slack app's bot token. A swarm with Slack connected already has it. Without it, `enforce` still drops the message but cannot touch its reactions, and logs a `mute-error`.
 
 No key is written to config, KV, logs, or a description.
 
 ## KV namespace `ext:slack-reply-gate`
 
 - `d:<epochMs>:<channel>_<threadTs>`: one row per decision, with `action` (`pass`, `shadow-skip`, `skipped`, `fail-open`), `provider`, `reason`, `confidence`, `skipP`, `latencyMs`, `sender`, and a 300-character `preview`.
-- `m:<epochMs>:<channel>_<threadTs>`: one row per mute attempt, with `action` (`muted`, `mute-error`), `removed`, `added`, and `errors`.
+- `m:<epochMs>:<channel>_<threadTs>`: one row per mute attempt, with `action` (`muted`, `unreacted` when `muteReaction` is `""`, `mute-error`), `removed`, `added`, and `errors`.
 - `last`: the latest decision. Mute rows never overwrite it.
-- Counters: `total`, `mention`, `files`, `reply`, `shadow-skip`, `skipped`, `error`, `muted`, `mute-error`, and `reason:<label>`.
+- Counters: `total`, `mention`, `files`, `reply`, `shadow-skip`, `skipped`, `error`, `muted`, `unreacted`, `mute-error`, and `reason:<label>`.
 
 ## Known limits
 
