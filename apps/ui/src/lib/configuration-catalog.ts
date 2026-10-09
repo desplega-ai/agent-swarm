@@ -1090,6 +1090,16 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         restartRequired: true,
       },
       {
+        key: "SCRIPT_EXECUTOR",
+        label: "Script executor",
+        description:
+          "Executor for server-side scripts. Native runs scripts in Bun subprocesses; QuickJS uses a smaller JavaScript sandbox. Applies to new runs after config reload.",
+        kind: "enum",
+        options: ["native", "quickjs"],
+        defaultValue: "native",
+        docsUrl: `${DOCS}ui/configuration#script-executor`,
+      },
+      {
         key: "SCRIPT_RUN_CONCURRENCY_CAP",
         label: "Script run concurrency cap",
         description:

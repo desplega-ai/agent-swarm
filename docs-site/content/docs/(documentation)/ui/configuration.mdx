@@ -51,7 +51,7 @@ SDK selection is incompatible with an effective Claude Bridge or legacy bridge b
 | Database | `DB_QUERY_BOUNDED_ENABLED`, `DB_QUERY_HTTP_BUDGET_MS`, `DB_QUERY_HTTP_MAX_ROWS`, `DB_QUERY_MCP_BUDGET_MS`, `DB_QUERY_MCP_MAX_ROWS`, `DB_QUERY_CONCURRENCY_CAP`, `SESSION_LOG_RETENTION_DAYS`, `AGENT_LOG_RETENTION_DAYS`, `EVENTS_RETENTION_DAYS`, `DB_RETENTION_DRY_RUN`, `DB_RETENTION_TICK_BUDGET_MS`, `DB_RETENTION_CATCHUP_INTERVAL_MS`, `DB_RETENTION_MAX_STATEMENT_MS` |
 | Integrations | `SLACK_MODE`, `SLACK_DISABLE`, `SLACK_ALLOW_DEV_SOCKET_MODE`, `SLACK_RENDER_V2`, `SLACK_RENDER_V2_DELEGATION`, `SLACK_CONCLUSION_SETTLE_SEC`, `SLACK_CONCLUSION_TIMEOUT_MIN`, `SLACK_TREE_STALL_MIN`, `GITHUB_DISABLE`, `LINEAR_DISABLE`, `SLACK_ALERTS_CHANNEL`, `AGENT_FS_REQUEST_TIMEOUT_MS`, `COMB_ENABLED`, `AGENT_FS_PUBLIC_URL`, `SLACK_REACTION_ACCEPTED`, `SLACK_REACTION_BUFFERED`, `SLACK_REACTION_NOW`, `SLACK_REACTION_STEERED`, `SLACK_REACTION_COMPLETED`, `SLACK_REACTION_FAILED` |
 | Security & access | `RBAC_ENABLED`, `BUDGET_ADMISSION_DISABLED`, `EXTENSION_ALLOW_INLINE_INSTALL`, `MCP_OAUTH_ALLOW_PRIVATE_HOSTS`, `CORS_ALLOWED_ORIGINS` (custom list replaces hosted/dev defaults; unset or blank uses defaults) |
-| Workflows & scheduler | `WORKFLOW_MAX_ITERATIONS`, `SCHEDULER_INTERVAL_MS`, `SEED_AUTOMATIONS_ENABLED`, `EXTENSION_HANDLER_TIMEOUT_MS`, `EXTENSION_MAX_CONSECUTIVE_FAILURES` |
+| Workflows & scheduler | `WORKFLOW_MAX_ITERATIONS`, `SCHEDULER_INTERVAL_MS`, `SCRIPT_EXECUTOR`, `SEED_AUTOMATIONS_ENABLED`, `EXTENSION_HANDLER_TIMEOUT_MS`, `EXTENSION_MAX_CONSECUTIVE_FAILURES` |
 | Telemetry & observability | `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_SERVICE_NAME`, `OTEL_EXPORT_API_LOGS`, `ANONYMIZED_TELEMETRY` |
 | Branding & URLs | `SWARM_ORG_NAME`, `SWARM_BRAND_COLOR`, `DASHBOARD_URL` |
 
@@ -68,6 +68,17 @@ Settings with deeper behavior link out to the relevant guide (for example the [t
 `APPROVAL_REQUEST_AUTO_CANCELLATION_DAYS` (default 7) sets how many days a pending approval request with no explicit timeout waits before the heartbeat sets it to `cancelled`. A request with an explicit timeout is never auto-cancelled; it becomes `timeout` when its deadline passes. `0` turns auto-cancellation off.
 
 ![Editing a configuration group](/ui/configuration-group.png)
+
+## Script executor
+
+The **Workflows & scheduler** group includes `SCRIPT_EXECUTOR`, with `native` as the default
+and `quickjs` as the optional value. Native runs server-side scripts in Bun subprocesses;
+QuickJS runs them in a JavaScript sandbox with fewer available globals and no filesystem access.
+Choose QuickJS only for scripts compatible with its API surface.
+
+The setting applies swarm-wide. Saving it triggers the normal config reload, and new script
+runs use the selected executor without an API restart. Runs already in progress keep their
+executor. Config writes reject values other than `native` and `quickjs`.
 
 ## Editing
 

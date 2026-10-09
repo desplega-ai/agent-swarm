@@ -8,7 +8,7 @@ const EXECUTORS: Record<string, () => ScriptExecutor> = {
 };
 
 export function getScriptExecutor(name = process.env.SCRIPT_EXECUTOR ?? "native"): ScriptExecutor {
-  const factory = EXECUTORS[name];
+  const factory = EXECUTORS[name.trim()];
   if (!factory) {
     throw new Error(
       `Unknown SCRIPT_EXECUTOR: ${name}. Available: ${Object.keys(EXECUTORS).join(", ")}`,
