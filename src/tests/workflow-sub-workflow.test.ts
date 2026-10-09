@@ -15,6 +15,7 @@ import { startWorkflowExecution } from "../workflows/engine";
 import { workflowEventBus } from "../workflows/event-bus";
 import type { ExecutorDependencies } from "../workflows/executors/base";
 import { createExecutorRegistry } from "../workflows/executors/registry";
+import { MAX_SUB_WORKFLOW_DEPTH } from "../workflows/executors/sub-workflow";
 import { recoverIncompleteRuns } from "../workflows/recovery";
 import {
   cancelWorkflowRun,
@@ -224,5 +225,20 @@ describe("sub-workflow node", () => {
     expect(run?.error).toContain("Sub-workflow recursion");
     expect(await childRunsOf(b.id)).toHaveLength(1);
     expect(await childRunsOf(a.id)).toHaveLength(1);
+  });
+
+  test("fails closed past the max nesting depth", async () => {
+    // A chain of distinct workflows, one level deeper than allowed.
+    let next = await makeWorkflow(instantChild);
+    for (let i = 0; i <= MAX_SUB_WORKFLOW_DEPTH; i++) next = await makeWorkflow(parentOf(next.id));
+    const root = next;
+
+    const runId = await startWorkflowExecution(root, {}, registry);
+
+    expect((await getWorkflowRun(runId))?.status).toBe("failed");
+    const rows = await getDbClient().query<{ n: number }>(
+      "SELECT COUNT(*) AS n FROM workflow_run_steps WHERE error LIKE 'Sub-workflow nesting exceeds%'",
+    );
+    expect(rows[0]?.n).toBe(1);
   });
 });

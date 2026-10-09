@@ -21,8 +21,11 @@ export async function getChildWorkflowRunId(parentStepId: string): Promise<strin
   return row?.id ?? null;
 }
 
-/** Workflow ids of a run and every ancestor run that started it, nearest first. */
-export async function getWorkflowRunLineage(runId: string): Promise<string[]> {
+/**
+ * Workflow ids of a run and the ancestor runs that started it, nearest first.
+ * Stops `maxDepth` ancestors up, so it returns at most `maxDepth + 1` ids.
+ */
+export async function getWorkflowRunLineage(runId: string, maxDepth: number): Promise<string[]> {
   const rows = await getDbClient().query<{ workflowId: string }>(
     `WITH RECURSIVE lineage(id, workflowId, parentStepId, depth) AS (
        SELECT id, workflowId, parentStepId, 0 FROM workflow_runs WHERE id = ?
@@ -31,10 +34,10 @@ export async function getWorkflowRunLineage(runId: string): Promise<string[]> {
          FROM lineage l
          JOIN workflow_run_steps s ON s.id = l.parentStepId
          JOIN workflow_runs r ON r.id = s.runId
-        WHERE l.depth < 64
+        WHERE l.depth < ?
      )
      SELECT workflowId FROM lineage ORDER BY depth`,
-    [runId],
+    [runId, maxDepth],
   );
   return rows.map((row) => row.workflowId);
 }

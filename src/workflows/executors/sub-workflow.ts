@@ -26,6 +26,9 @@ const SubWorkflowOutputSchema = z.object({
 
 type SubWorkflowOutput = z.infer<typeof SubWorkflowOutputSchema>;
 
+/** Deepest child run a root run may start, counting the root as depth 0. */
+export const MAX_SUB_WORKFLOW_DEPTH = 16;
+
 /** Run-context keys that are not node outputs. `input` can hold resolved secrets. */
 const NON_NODE_CONTEXT_KEYS = new Set(["trigger", "input", "swarm", "workflow"]);
 
@@ -83,7 +86,15 @@ export class SubWorkflowExecutor extends BaseExecutor<
     const existing = existingId ? await db.getWorkflowRun(existingId) : null;
     if (existing) return this.settle(existing);
 
-    const lineage = await getWorkflowRunLineage(meta.runId);
+    // Capped at the max depth, so a long chain fails closed instead of
+    // hiding a cycle past the end of the scan.
+    const lineage = await getWorkflowRunLineage(meta.runId, MAX_SUB_WORKFLOW_DEPTH);
+    if (lineage.length > MAX_SUB_WORKFLOW_DEPTH) {
+      return {
+        status: "failed",
+        error: `Sub-workflow nesting exceeds ${MAX_SUB_WORKFLOW_DEPTH} levels`,
+      };
+    }
     if (config.workflowId === meta.workflowId || lineage.includes(config.workflowId)) {
       return {
         status: "failed",

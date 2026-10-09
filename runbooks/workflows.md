@@ -216,7 +216,8 @@ A `sub-workflow` node runs another workflow as a child run and waits for it.
   `workflow.child.finished` after commit, and the recovery sweep resumes any waiting step whose
   child already finished, so a lost event or a restart does not strand the parent.
 - Recursion is rejected: a workflow cannot invoke itself or any workflow already running in its
-  ancestor runs. The check runs when the node executes, not when the definition is saved.
+  ancestor runs, and nesting stops at 16 levels below the root run (`MAX_SUB_WORKFLOW_DEPTH`). The
+  checks run when the node executes, not when the definition is saved.
 - Not yet supported (tracked in the sub-workflow issue): pinning the child's definition version
   (the child runs its live definition), cancelling the child when the parent is cancelled, a
   per-node timeout, a `foreach` body that is a workflow, and showing the link in the dashboard.
