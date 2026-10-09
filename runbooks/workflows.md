@@ -185,6 +185,42 @@ Rendering limits:
   on the dashboard via the card's button. Labels are escaped, so upstream text cannot add mentions
   or links.
 
+## Sub-workflow nodes
+
+A `sub-workflow` node runs another workflow as a child run and waits for it.
+
+```yaml
+- id: build
+  type: sub-workflow
+  inputs: { plan: "planner.taskOutput" }
+  config:
+    workflowId: "<child workflow id>"
+    inputs: { spec: "{{plan.spec}}" }
+  next: review
+```
+
+- `config.inputs` becomes the child's `trigger` data and is validated against the child's
+  `triggerSchema`. The child must exist and be enabled.
+- Output: `{ runId, outputs, error? }`. `outputs` holds the child's node outputs keyed by node id;
+  `trigger` and `input` (which can hold resolved secrets) are left out. `error` is set when the child
+  completed with a partial failure. Downstream: `inputs: { b: "build" }`, then
+  `{{b.outputs.<childNodeId>.taskOutput}}`. The node routes on the `success` port.
+- A child that only has instant nodes finishes inside the step. Otherwise the step and the parent
+  run stay `waiting` until the child run is terminal, so the parent never completes while its child
+  is running, waiting on a human, or awaiting a retry.
+- A child that fails, is cancelled, or is skipped (cooldown) fails the node and the parent run,
+  whatever `onNodeFailure` says. Node `retry` reconnects to the same failed child, so it does not
+  rerun it.
+- The child run stores the parent step in `workflow_runs.parentStepId` (unique). A re-executed step
+  reconnects to that child instead of starting a second one. The child's terminal status emits
+  `workflow.child.finished` after commit, and the recovery sweep resumes any waiting step whose
+  child already finished, so a lost event or a restart does not strand the parent.
+- Recursion is rejected: a workflow cannot invoke itself or any workflow already running in its
+  ancestor runs. The check runs when the node executes, not when the definition is saved.
+- Not yet supported (tracked in the sub-workflow issue): pinning the child's definition version
+  (the child runs its live definition), cancelling the child when the parent is cancelled, a
+  per-node timeout, a `foreach` body that is a workflow, and showing the link in the dashboard.
+
 ## Script node types
 
 There are two script-oriented workflow nodes:
@@ -643,6 +679,7 @@ The following events are already emitted on `workflowEventBus` today and are usa
 | `task.completed` / `task.failed` / `task.cancelled` | `src/be/db.ts` (around the `completeTask`/`failTask`/`cancelTask` paths) | `{ taskId, output|failureReason, agentId, workflowRunId, workflowRunStepId }` |
 | `task.created` / `task.progress` / `task.budget_refused` | `src/be/db.ts` | task-id keyed lifecycle payloads |
 | `approval.resolved` | `src/http/approval-requests.ts` (respond route) | `{ requestId, status, responses, workflowRunId?, workflowRunStepId?, sourceTaskId? }`; the run and step id are absent for a standalone request, so a `wait` node with `scope: "global"` and no filter also fires for those |
+| `workflow.child.finished` | `src/be/db.ts` (`updateWorkflowRun`, terminal status of a run with a `parentStepId`) | `{ childRunId, parentStepId }` |
 | `agentmail.message.received` | `src/agentmail/handlers.ts:168` | inbox/message keyed payload |
 | `slack.message` | `src/slack/handlers.ts` | `{ channel, text, user, ts, threadTs }` |
 | `github.pull_request.<action>` | `src/http/webhooks.ts:177` | full GitHub PR payload |

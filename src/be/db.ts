@@ -7673,6 +7673,8 @@ type WorkflowRunRow = {
   startedAt: string;
   lastUpdatedAt: string;
   finishedAt: string | null;
+  /** The `sub-workflow` step that started this run (migration 203). */
+  parentStepId?: string | null;
 };
 
 /**
@@ -7705,10 +7707,11 @@ export async function createWorkflowRun(data: {
   triggerType?: "schedule" | "manual" | "event" | "api";
   triggerData?: unknown;
   createdBy?: string;
+  parentStepId?: string;
 }): Promise<WorkflowRun> {
   const now = new Date().toISOString();
   const row = await getDbClient().get<WorkflowRunRow>(
-    `INSERT INTO workflow_runs (id, workflowId, triggerType, startedAt, triggerData, created_by) VALUES (?, ?, ?, ?, ?, ?) RETURNING *`,
+    `INSERT INTO workflow_runs (id, workflowId, triggerType, startedAt, triggerData, created_by, parentStepId) VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING *`,
     [
       data.id,
       data.workflowId,
@@ -7716,6 +7719,7 @@ export async function createWorkflowRun(data: {
       now,
       data.triggerData ? scrubJsonValue(data.triggerData) : null,
       data.createdBy ?? null,
+      data.parentStepId ?? null,
     ],
   );
   if (!row) throw new Error("Failed to create workflow run");
@@ -7730,6 +7734,44 @@ export async function getWorkflowRun(
     id,
   ]);
   return row ? rowToWorkflowRun(row, view) : null;
+}
+
+/** The child run a `sub-workflow` step started, if any. */
+export async function getChildWorkflowRun(parentStepId: string): Promise<WorkflowRun | null> {
+  const row = await getDbClient().get<WorkflowRunRow>(
+    "SELECT * FROM workflow_runs WHERE parentStepId = ?",
+    [parentStepId],
+  );
+  return row ? rowToWorkflowRun(row) : null;
+}
+
+/** Workflow ids of a run and every ancestor run that started it, nearest first. */
+export async function getWorkflowRunLineage(runId: string): Promise<string[]> {
+  const rows = await getDbClient().query<{ workflowId: string }>(
+    `WITH RECURSIVE lineage(id, workflowId, parentStepId, depth) AS (
+       SELECT id, workflowId, parentStepId, 0 FROM workflow_runs WHERE id = ?
+       UNION ALL
+       SELECT r.id, r.workflowId, r.parentStepId, l.depth + 1
+         FROM lineage l
+         JOIN workflow_run_steps s ON s.id = l.parentStepId
+         JOIN workflow_runs r ON r.id = s.runId
+        WHERE l.depth < 64
+     )
+     SELECT workflowId FROM lineage ORDER BY depth`,
+    [runId],
+  );
+  return rows.map((row) => row.workflowId);
+}
+
+/** Waiting `sub-workflow` steps whose child run is already terminal. */
+export async function getSettledChildRunParentSteps(): Promise<string[]> {
+  const rows = await getDbClient().query<{ parentStepId: string }>(
+    `SELECT c.parentStepId
+       FROM workflow_runs c
+       JOIN workflow_run_steps s ON s.id = c.parentStepId AND s.status = 'waiting'
+      WHERE c.status IN ('completed', 'failed', 'cancelled', 'skipped')`,
+  );
+  return rows.map((row) => row.parentStepId);
 }
 
 function emitWorkflowTerminalTelemetry(run: WorkflowRun): void {
@@ -7804,8 +7846,32 @@ export async function updateWorkflowRun(
   if (data.status === "completed" || data.status === "failed") {
     emitWorkflowTerminalTelemetry(run);
   }
+  const parentStepId = row.parentStepId;
+  if (parentStepId && TERMINAL_WORKFLOW_RUN_STATUSES.has(run.status)) {
+    // Wakes the waiting `sub-workflow` step. A missed event is caught by the
+    // recovery sweep (getSettledChildRunParentSteps).
+    getDbClient().afterCommit(() => {
+      import("../workflows/event-bus")
+        .then(({ workflowEventBus }) => {
+          workflowEventBus.emit("workflow.child.finished", { childRunId: id, parentStepId });
+        })
+        .catch((err) =>
+          console.error(
+            "[db] workflow.child.finished event not emitted:",
+            scrubSecrets(err instanceof Error ? err.message : String(err)),
+          ),
+        );
+    });
+  }
   return run;
 }
+
+const TERMINAL_WORKFLOW_RUN_STATUSES = new Set<WorkflowRunStatus>([
+  "completed",
+  "failed",
+  "cancelled",
+  "skipped",
+]);
 
 export type WorkflowRunListOptions = {
   status?: WorkflowRunStatus;

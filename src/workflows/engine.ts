@@ -54,6 +54,8 @@ function maxIterations(): number {
 export interface WorkflowExecutionOptions {
   requestedByUserId?: string;
   triggerType?: "schedule" | "manual" | "event" | "api";
+  /** Set when a `sub-workflow` step starts this run as its child. */
+  parentStepId?: string;
 }
 
 /**
@@ -133,6 +135,7 @@ export async function startWorkflowExecution(
       triggerType: options.triggerType ?? "manual",
       triggerData,
       createdBy: options.requestedByUserId,
+      parentStepId: options.parentStepId,
     });
     await updateWorkflowRun(runId, {
       status: "skipped",
@@ -149,6 +152,7 @@ export async function startWorkflowExecution(
     triggerType: options.triggerType ?? "manual",
     triggerData,
     createdBy: options.requestedByUserId,
+    parentStepId: options.parentStepId,
   });
   telemetry.workflow("started", {
     workflowId: workflow.id,
