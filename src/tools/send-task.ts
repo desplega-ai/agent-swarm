@@ -355,7 +355,15 @@ export async function sendTaskHandler(
     });
   }
 
-  if (ctx.kind === "owner" && requestedAgentId === ctx.agentId) {
+  // The guard stops an agent session from handing work back to itself. A script runs as its
+  // owner (a scheduled script as the schedule's creator), so a Lead-owned poller that files
+  // work for the Lead is legitimate. The bridge marks script calls `script-sdk`; a caller that
+  // spoofs it can only send itself a task, which grants nothing it could not already do.
+  if (
+    ctx.kind === "owner" &&
+    requestedAgentId === ctx.agentId &&
+    ctx.requestInfo?.callOrigin !== "script-sdk"
+  ) {
     return toolErr("Cannot send a task to yourself, are you drunk?", {
       data: { yourAgentId: ctx.agentId },
     });
