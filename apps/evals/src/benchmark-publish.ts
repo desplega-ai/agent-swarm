@@ -77,7 +77,12 @@ export async function graderValidationFailures(scenarios: Scenario[]): Promise<s
   return failures;
 }
 
+export const COMMIT_RE = /^[0-9a-f]{40}$/;
+
 async function gitCommit(): Promise<string | null> {
+  // The evals image has no .git; a deploy can name its commit instead.
+  const fromEnv = process.env.EVALS_HARNESS_COMMIT?.trim();
+  if (fromEnv && COMMIT_RE.test(fromEnv)) return fromEnv;
   try {
     const proc = Bun.spawn(["git", "rev-parse", "HEAD"], {
       cwd: import.meta.dir,
@@ -85,11 +90,15 @@ async function gitCommit(): Promise<string | null> {
       stderr: "ignore",
     });
     const out = (await new Response(proc.stdout).text()).trim();
-    return (await proc.exited) === 0 && /^[0-9a-f]{40}$/.test(out) ? out : null;
+    return (await proc.exited) === 0 && COMMIT_RE.test(out) ? out : null;
   } catch {
     return null;
   }
 }
+
+export type PublishBundle =
+  | { ok: true; snapshot: BenchmarkSnapshot; files: Record<string, string> }
+  | { ok: false; refusals: string[] };
 
 export type PublishResult =
   | { ok: true; snapshot: BenchmarkSnapshot; outDir: string; files: string[] }
@@ -102,9 +111,19 @@ export interface PublishOptions {
   outDir?: string;
   registry?: Registry;
   now?: () => Date;
+  /** Commit recorded as `run.harnessCommit`; default EVALS_HARNESS_COMMIT, then `git rev-parse HEAD`. */
+  harnessCommit?: string | null;
 }
 
-export async function publishBenchmark(db: Client, opts: PublishOptions): Promise<PublishResult> {
+/**
+ * The bundle `publish` would write, or why it refuses, without touching disk.
+ * `GET /api/runs/:id/publish-bundle` serves this so the scheduled weekly run can
+ * open the snapshot PR without a local copy of the evals DB.
+ */
+export async function buildPublishBundle(
+  db: Client,
+  opts: Omit<PublishOptions, "outDir">,
+): Promise<PublishBundle> {
   const run = await getRun(db, opts.runId);
   if (!run) return { ok: false, refusals: [`run ${opts.runId} not found`] };
   const registry = opts.registry ?? loadRegistry();
@@ -116,7 +135,7 @@ export async function publishBenchmark(db: Client, opts: PublishOptions): Promis
       listAttempts(db, run.id),
       graderValidationFailures(suiteScenarios),
       Bun.file(METHODOLOGY_PATH).text(),
-      gitCommit(),
+      opts.harnessCommit !== undefined ? Promise.resolve(opts.harnessCommit) : gitCommit(),
       getClaudeAliasMap(),
     ]);
   const attempts = await Promise.all(
@@ -148,14 +167,19 @@ export async function publishBenchmark(db: Client, opts: PublishOptions): Promis
     heldOutLeaks(content).map((id) => `${path} mentions held-out scenario ${id}`),
   );
   if (leaks.length > 0) return { ok: false, refusals: leaks };
+  return { ok: true, snapshot, files };
+}
 
+export async function publishBenchmark(db: Client, opts: PublishOptions): Promise<PublishResult> {
+  const bundle = await buildPublishBundle(db, opts);
+  if (!bundle.ok) return bundle;
   const outDir = opts.outDir ?? join(benchmarkDir(), opts.suiteVersion);
   // A re-publish replaces the whole version: no stale scenario or config file survives.
   await rm(outDir, { recursive: true, force: true });
-  for (const [path, content] of Object.entries(files)) {
+  for (const [path, content] of Object.entries(bundle.files)) {
     const target = join(outDir, path);
     await mkdir(dirname(target), { recursive: true });
     await Bun.write(target, content);
   }
-  return { ok: true, snapshot, outDir, files: Object.keys(files) };
+  return { ok: true, snapshot: bundle.snapshot, outDir, files: Object.keys(bundle.files) };
 }

@@ -2,6 +2,8 @@ import { join, normalize, sep } from "node:path";
 import { attachmentContentDisposition } from "../../../../src/utils/content-disposition.ts";
 import { DEFAULT_CONFIG_IDS } from "../../configs/index.ts";
 import { CONFIG_PRESETS, presetRunDefaults, presetScenarioIds } from "../../configs/presets.ts";
+import { SUITE_VERSION } from "../../scenarios/suite.ts";
+import { buildPublishBundle, COMMIT_RE } from "../benchmark-publish.ts";
 import {
   getCatalog,
   getResolutionCatalog,
@@ -724,6 +726,39 @@ export async function startServer(
         }
         const summary = await buildRunSummaryText(deps, run);
         return json({ ...base, final: summary.final, report: summary.report, text: summary.text });
+      },
+      /**
+       * What `bun src/cli.ts publish --suite <v> --run <id>` would write, or why it
+       * refuses, as JSON (`files` maps paths under `benchmark/<suite>/` to contents).
+       * Read-only: writes nothing, so the weekly-matrix workflow can open the snapshot
+       * PR. `harnessCommit` (40-hex) names the commit the snapshot records.
+       */
+      "/api/runs/:id/publish-bundle": async (req) => {
+        if (!(await isAuthorized(req))) return unauthorized();
+        const params = new URL(req.url).searchParams;
+        const suiteVersion = params.get("suite") ?? SUITE_VERSION;
+        const commit = params.get("harnessCommit");
+        if (commit !== null && !COMMIT_RE.test(commit)) {
+          return json({ error: "harnessCommit must be a 40-character hex commit" }, 400);
+        }
+        const run = await getRun(db, req.params.id);
+        if (!run) return json({ error: "run not found" }, 404);
+        const bundle = await buildPublishBundle(db, {
+          suiteVersion,
+          runId: run.id,
+          ...(commit !== null ? { harnessCommit: commit } : {}),
+        });
+        const base = { runId: run.id, suiteVersion, status: run.status };
+        if (!bundle.ok) return json({ ...base, ok: false, refusals: bundle.refusals });
+        const { snapshot } = bundle;
+        return json({
+          ...base,
+          ok: true,
+          publishedAt: snapshot.publishedAt,
+          scenarios: snapshot.scenarios.length,
+          configs: snapshot.configs.map((c) => c.configId),
+          files: bundle.files,
+        });
       },
       "/api/runs/:id/cancel": {
         POST: async (req) => {
