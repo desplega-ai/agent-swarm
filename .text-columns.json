@@ -2732,6 +2732,74 @@
       "exempt": "timestamp"
     }
   },
+  "slack_inbound_receipts": {
+    "id": {
+      "exempt": "identifier"
+    },
+    "dedup_key": {
+      "exempt": "identifier"
+    },
+    "transport": {
+      "exempt": "enum or fixed-format value"
+    },
+    "kind": {
+      "exempt": "enum or fixed-format value"
+    },
+    "payload_type": {
+      "exempt": "enum or fixed-format value"
+    },
+    "api_app_id": {
+      "exempt": "identifier"
+    },
+    "event_id": {
+      "exempt": "identifier"
+    },
+    "payload_ciphertext": {
+      "exempt": "ciphertext"
+    },
+    "retry_reason": {
+      "exempt": "enum or fixed-format value"
+    },
+    "state": {
+      "exempt": "enum or fixed-format value"
+    },
+    "outcome_code": {
+      "exempt": "enum or fixed-format value"
+    },
+    "error_code": {
+      "exempt": "enum or fixed-format value"
+    },
+    "received_at": {
+      "exempt": "timestamp"
+    },
+    "available_at": {
+      "exempt": "timestamp"
+    },
+    "claimed_at": {
+      "exempt": "timestamp"
+    },
+    "completed_at": {
+      "exempt": "timestamp"
+    },
+    "last_duplicate_at": {
+      "exempt": "timestamp"
+    },
+    "payload_erased_at": {
+      "exempt": "timestamp"
+    },
+    "created_at": {
+      "exempt": "timestamp"
+    },
+    "updated_at": {
+      "exempt": "timestamp"
+    },
+    "created_by": {
+      "exempt": "identifier"
+    },
+    "updated_by": {
+      "exempt": "identifier"
+    }
+  },
   "slack_messages": {
     "id": {
       "exempt": "identifier"
