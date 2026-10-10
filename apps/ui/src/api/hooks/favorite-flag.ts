@@ -14,6 +14,26 @@ function patchRows(rows: unknown[], itemId: string, favorite: boolean): unknown[
     : rows;
 }
 
+function findRow(data: unknown, itemId: string): Row | undefined {
+  const match = (row: unknown) => isRow(row) && row.id === itemId;
+  if (Array.isArray(data)) return data.find(match);
+  if (!isRow(data)) return undefined;
+  if (data.id === itemId) return data;
+  for (const value of Object.values(data)) {
+    if (Array.isArray(value) && value.some(match)) return value.find(match);
+  }
+  return undefined;
+}
+
+/**
+ * Read the cached `favorite` flag of `itemId`, in the same cache shapes
+ * `patchFavoriteFlag` writes. Undefined when the data does not carry the item.
+ */
+export function readFavoriteFlag(data: unknown, itemId: string): boolean | undefined {
+  const favorite = findRow(data, itemId)?.favorite;
+  return typeof favorite === "boolean" ? favorite : undefined;
+}
+
 /**
  * Set `favorite` on the entity `itemId` inside cached query data, for the
  * optimistic star flip. Handles the three cache shapes that carry the flag:
