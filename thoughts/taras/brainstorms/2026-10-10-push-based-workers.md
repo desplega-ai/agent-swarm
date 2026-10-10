@@ -467,7 +467,7 @@ All 5 tasks completed with output `pong`.
     | Phase | Calls | Source |
     |---|---|---|
     | Entrypoint: MCP servers, repos (`autoClone`), setup script, skills, agent-fs creds, resolved config | 6 | `docker-entrypoint.sh` (some via `curl`) |
-    | Runner pre-register: resolved config, `keys/available`, `GET /api/config` x4 (scopes), prompt render x5 | 11 | `src/commands/runner.ts`, `src/prompts/resolver.ts` |
+    | Runner pre-register: `keys/available`, `GET /api/config` x4 (scopes), prompt render x5 | 10 | `src/commands/runner.ts`, `src/prompts/resolver.ts` |
     | Register `POST /api/agents` (201), prompt render x5, re-register `POST /api/agents` (200) | 7 | runner |
     | Credential status, session cleanup, orphan recovery, `/me`, profile `PUT`, MCP servers again | 6 | runner |
     | Prompt render x5 | 5 | prompt resolver |
