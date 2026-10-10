@@ -1,6 +1,6 @@
 {
   "name": "@desplega.ai/agent-swarm",
-  "version": "1.167.0",
+  "version": "1.168.0",
   "description": "agent-swarm.dev — an open-source operating system for AI work: a lead agent breaks goals into tasks, routes them to specialized workers such as Claude Code or Codex, runs each worker in an isolated container, and preserves shared memory, tools, schedules, and review gates so delegated work compounds across sessions.",
   "keywords": [
     "agent-swarm.dev",
@@ -200,10 +200,10 @@
     "bun": ">=1.3.12"
   },
   "dependencies": {
-    "@agentclientprotocol/sdk": "1.7.0",
+    "@agentclientprotocol/sdk": "1.8.0",
     "@ai-sdk/openai": "^3.0.41",
-    "@anthropic-ai/claude-agent-sdk": "0.3.295",
-    "@anthropic-ai/sdk": "^0.132.1",
+    "@anthropic-ai/claude-agent-sdk": "0.3.296",
+    "@anthropic-ai/sdk": "^0.133.0",
     "@asteasolutions/zod-to-openapi": "^8.0.0",
     "@aws-sdk/client-bedrock": "3.1048.0",
     "@cursor/sdk": "1.0.37",
@@ -216,7 +216,7 @@
     "@jitl/quickjs-singlefile-mjs-release-sync": "0.32.0",
     "@linear/sdk": "^77.0.0",
     "@modelcontextprotocol/sdk": "1.31.0",
-    "@openai/codex": "0.162.0",
+    "@openai/codex": "0.162.1",
     "@opencode-ai/sdk": "^1.18.35",
     "@openfort/openfort-node": "^0.9.1",
     "@opentelemetry/api": "^1.9.1",

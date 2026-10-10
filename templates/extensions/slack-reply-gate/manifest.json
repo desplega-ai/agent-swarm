@@ -1,0 +1,8 @@
+{
+  "$schema": "../manifest.schema.json",
+  "name": "slack-reply-gate",
+  "description": "Asks Jev (TypeSafe or OpenRouter) whether Lead should answer a buffered Slack thread follow-up, and drops the wake-up when it should not",
+  "version": "1.2.0",
+  "runtime": "api",
+  "assets": { "hooks": "hooks.ts" }
+}
