@@ -253,7 +253,7 @@ const geminiTargetProfile: AcpTargetProfile = {
 /**
  * Copilot CLI has no system-prompt flag. Under `--acp` it reads custom
  * instructions from the git root, the cwd, and every directory listed in
- * COPILOT_CUSTOM_INSTRUCTIONS_DIRS. Verified against 1.0.94: from those extra
+ * COPILOT_CUSTOM_INSTRUCTIONS_DIRS. Verified against 1.0.95: from those extra
  * directories it loads `.github/instructions/*.instructions.md`, but not
  * `AGENTS.md`. So the swarm prompt goes into a per-task directory outside the
  * repo, and the repo's own AGENTS.md is never touched.
