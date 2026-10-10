@@ -462,6 +462,18 @@ All 5 tasks completed with output `pong`.
 - **E2B's 16 s between "registered" and "started" is boot chattiness, not compute.** Between registration and the first poll the worker makes 73 sequential API calls, 42 of them skill-file downloads. Each call crosses ngrok and the E2B region, so latency multiplies. On local Docker the same calls take about 0 s.
   - Follow-up candidate: a bulk boot-bundle endpoint (skills, files, config, prompt templates in one response), or baking seeded skills into the image.
   - This matters more for `per-task` pools, which pay it on every task.
+  - Full boot sequence (E2B run 2, 89 requests before the first `GET /api/poll`, fresh DB with the seeded skills):
+
+    | Phase | Calls | Source |
+    |---|---|---|
+    | Entrypoint: MCP servers, repos (`autoClone`), setup script, skills, agent-fs creds, resolved config | 6 | `docker-entrypoint.sh` (some via `curl`) |
+    | Runner pre-register: resolved config, `keys/available`, `GET /api/config` x4 (scopes), prompt render x5 | 11 | `src/commands/runner.ts`, `src/prompts/resolver.ts` |
+    | Register `POST /api/agents` (201), prompt render x5, re-register `POST /api/agents` (200) | 7 | runner |
+    | Credential status, session cleanup, orphan recovery, `/me`, profile `PUT`, MCP servers again | 6 | runner |
+    | Prompt render x5 | 5 | prompt resolver |
+    | Skills sync: signature, skill list, then per skill a manifest plus each file, one at a time | 44 | `src/utils/skills-refresh.ts:50-147` |
+    | Prompt render x5, paused tasks, `/ping`, resolved config again, `keys/available` again, orphan recovery again, models catalog | 11 | runner |
+  - Repeats worth removing: the same 5 prompt templates rendered 4 times (20 calls), registration twice, and resolved config, `keys/available`, orphan recovery, MCP servers and the skill list each fetched twice. The skills sync is one manifest call plus one call per file, run one after another.
 - **E2B infra time (about 4 s)** includes the fixed 2 s liveness wait in `startDetachedProcess`. Sandbox creation itself is about 2 s.
 - **Stale agent state after terminate.** After `terminate()`, the agent still shows `idle` until the stale-runtime reaper runs. The supervisor must mark the runtime offline on terminate, or the warm-first rule will count a dead runtime as live.
 - **Exposure note.** The ngrok tunnel was up only for the E2B runs, with a random 48-hex API key, and was closed afterwards. A real setup needs a stable public API URL, which every E2B worker already needs today.
