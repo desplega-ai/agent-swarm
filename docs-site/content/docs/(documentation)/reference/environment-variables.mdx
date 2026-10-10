@@ -84,6 +84,8 @@ Complete reference for all environment variables used by Agent Swarm.
 | `HEARTBEAT_INTERVAL_MS` | `90000` | Heartbeat sweep interval (ms) |
 | `HEARTBEAT_CHECKLIST_DISABLE` | `false` | Set to `true` or `1` to disable the periodic `HEARTBEAT.md` checklist polling loop and the boot-triage task (separate from the infrastructure sweep). `false` and `0` keep it on. |
 | `HEARTBEAT_BOOT_TRIAGE_ALWAYS` | `false` | Set to `true` or `1` to create the boot-triage task on every restart. By default a clean boot (no interrupted, stalled, orphaned, or resume-less superseded tasks) only logs a one-line note and creates no Lead task. |
+| `HEARTBEAT_CHECKLIST_GATE_SCRIPT` | - | Name of a global-scope script run (as the Lead, 60 s ceiling) before each recurring checklist task. It returns `{ quiet: boolean, reason?: string, summary?: string }`. A failure, a timeout, or any other shape counts as an `error` verdict and never skips a task. Unset turns the gate off. |
+| `HEARTBEAT_CHECKLIST_GATE_MODE` | `shadow` | `shadow` creates every checklist task and tags it `heartbeat-gate:quiet`, `heartbeat-gate:wake`, or `heartbeat-gate:error`, so you can compare the verdict with the Lead's outcome. `enforce` skips the task on a quiet verdict and appends the gate's `summary` to the task on a wake verdict. |
 | `HEARTBEAT_CHECKLIST_INTERVAL_MS` | `1800000` | Interval (ms) between `HEARTBEAT.md` checklist checks (default 30 min). `0` turns the recurring check off; boot triage still runs. |
 | `HEARTBEAT_DISABLE` | `false` | Set to `true` to disable the heartbeat module |
 | `HEARTBEAT_STALL_THRESHOLD_MIN` | `30` | Minutes before an in-progress task is considered stalled |

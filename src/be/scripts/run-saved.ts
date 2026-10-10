@@ -16,6 +16,7 @@ export async function runSavedScriptAsAgent(args: {
   script: ScriptRecord;
   input: unknown;
   agentId: string;
+  timeoutMs?: number;
 }) {
   // Touch before executing (not just after) so a scratch script that's already
   // stale when a run starts can't be reaped by the retention sweep while the
@@ -36,6 +37,7 @@ export async function runSavedScriptAsAgent(args: {
     failedBindings: credentials.failedBindings,
     apiConnections: getScriptApiConnectionDescriptors({ agentId: args.agentId }),
     mcpConnections: getScriptMcpConnectionDescriptors({ agentId: args.agentId }),
+    ...(args.timeoutMs ? { timeoutMs: args.timeoutMs } : {}),
   });
   if (output.exitCode === 0 && !output.error && !output.runtimeError) {
     await touchScratchScriptLastUsed(args.script.id);

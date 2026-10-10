@@ -25,6 +25,7 @@ import {
   getBootTriageFindings,
   isEffectivelyEmpty,
   runRebootSweep,
+  setChecklistGateRunnerForTests,
 } from "../heartbeat/heartbeat";
 
 // Side-effect import: register heartbeat templates (also done by heartbeat.ts,
@@ -345,6 +346,147 @@ describe("Heartbeat Checklist", () => {
       expect(tags).toContain("auto-generated");
       // Must NOT contain "heartbeat" tag (would be filtered by default listing)
       expect(tags).not.toContain("heartbeat");
+    });
+  });
+
+  // ==========================================================================
+  // checkHeartbeatChecklist() gate script
+  // ==========================================================================
+
+  describe("checklist gate script", () => {
+    const calls: Array<{ scriptName: string; leadAgentId: string }> = [];
+
+    function useGate(result: unknown | (() => never)) {
+      setChecklistGateRunnerForTests(async (scriptName, leadAgentId) => {
+        calls.push({ scriptName, leadAgentId });
+        return typeof result === "function" ? (result as () => never)() : result;
+      });
+    }
+
+    async function checklistTasks() {
+      const rows = await getDbClient().query<{ task: string; tags: string }>(
+        "SELECT task, tags FROM agent_tasks WHERE taskType = 'heartbeat-checklist'",
+      );
+      return rows.map((row) => ({ task: row.task, tags: JSON.parse(row.tags) as string[] }));
+    }
+
+    async function seedLead() {
+      const lead = await createAgent({ name: "lead", isLead: true, status: "idle" });
+      await updateAgentProfile(lead.id, { heartbeatMd: "- Check tasks\n" });
+      return lead;
+    }
+
+    beforeEach(() => {
+      calls.length = 0;
+      process.env.HEARTBEAT_CHECKLIST_GATE_SCRIPT = "quiet-gate";
+      delete process.env.HEARTBEAT_CHECKLIST_GATE_MODE;
+    });
+
+    afterEach(() => {
+      setChecklistGateRunnerForTests(null);
+      delete process.env.HEARTBEAT_CHECKLIST_GATE_SCRIPT;
+      delete process.env.HEARTBEAT_CHECKLIST_GATE_MODE;
+    });
+
+    test("no gate script configured: gate never runs and the task carries no gate tag", async () => {
+      delete process.env.HEARTBEAT_CHECKLIST_GATE_SCRIPT;
+      useGate({ quiet: true });
+      await seedLead();
+
+      await checkHeartbeatChecklist();
+
+      expect(calls).toHaveLength(0);
+      const tasks = await checklistTasks();
+      expect(tasks).toHaveLength(1);
+      expect(tasks[0]!.tags.some((tag) => tag.startsWith("heartbeat-gate:"))).toBe(false);
+    });
+
+    test("shadow mode (default): a quiet verdict still creates the task, tagged quiet", async () => {
+      useGate({ quiet: true, reason: "no change", summary: "nothing moved" });
+      const lead = await seedLead();
+
+      await checkHeartbeatChecklist();
+
+      expect(calls).toEqual([{ scriptName: "quiet-gate", leadAgentId: lead.id }]);
+      const tasks = await checklistTasks();
+      expect(tasks).toHaveLength(1);
+      expect(tasks[0]!.tags).toContain("heartbeat-gate:quiet");
+      expect(tasks[0]!.task).not.toContain("Gate Findings");
+    });
+
+    test("shadow mode leaves a wake summary out of the prompt", async () => {
+      useGate({ quiet: false, summary: "prStates moved" });
+      await seedLead();
+
+      await checkHeartbeatChecklist();
+
+      const tasks = await checklistTasks();
+      expect(tasks).toHaveLength(1);
+      expect(tasks[0]!.tags).toContain("heartbeat-gate:wake");
+      expect(tasks[0]!.task).not.toContain("prStates moved");
+    });
+
+    test("enforce mode: a quiet verdict skips the task", async () => {
+      process.env.HEARTBEAT_CHECKLIST_GATE_MODE = "enforce";
+      useGate({ quiet: true });
+      await seedLead();
+
+      await checkHeartbeatChecklist();
+
+      expect(calls).toHaveLength(1);
+      expect(await checklistTasks()).toHaveLength(0);
+    });
+
+    test("enforce mode: a wake verdict creates the task with the gate summary attached", async () => {
+      process.env.HEARTBEAT_CHECKLIST_GATE_MODE = "enforce";
+      useGate({ quiet: false, reason: "2 sections moved", summary: "prStates moved" });
+      await seedLead();
+
+      await checkHeartbeatChecklist();
+
+      const tasks = await checklistTasks();
+      expect(tasks).toHaveLength(1);
+      expect(tasks[0]!.tags).toContain("heartbeat-gate:wake");
+      expect(tasks[0]!.task).toContain("## Gate Findings [auto-generated]");
+      expect(tasks[0]!.task).toContain("prStates moved");
+    });
+
+    test("enforce mode: a throwing gate fails open", async () => {
+      process.env.HEARTBEAT_CHECKLIST_GATE_MODE = "enforce";
+      useGate(() => {
+        throw new Error("gate exploded");
+      });
+      await seedLead();
+
+      await checkHeartbeatChecklist();
+
+      const tasks = await checklistTasks();
+      expect(tasks).toHaveLength(1);
+      expect(tasks[0]!.tags).toContain("heartbeat-gate:error");
+    });
+
+    test("enforce mode: a result without a boolean quiet field fails open", async () => {
+      process.env.HEARTBEAT_CHECKLIST_GATE_MODE = "enforce";
+      useGate({ changed: false, quiet: "true" });
+      await seedLead();
+
+      await checkHeartbeatChecklist();
+
+      const tasks = await checklistTasks();
+      expect(tasks).toHaveLength(1);
+      expect(tasks[0]!.tags).toContain("heartbeat-gate:error");
+    });
+
+    test("enforce mode: a missing global script fails open through the real runner", async () => {
+      process.env.HEARTBEAT_CHECKLIST_GATE_MODE = "enforce";
+      process.env.HEARTBEAT_CHECKLIST_GATE_SCRIPT = "no-such-gate-script";
+      await seedLead();
+
+      await checkHeartbeatChecklist();
+
+      const tasks = await checklistTasks();
+      expect(tasks).toHaveLength(1);
+      expect(tasks[0]!.tags).toContain("heartbeat-gate:error");
     });
   });
 
