@@ -2,6 +2,7 @@ import { getDb, getDbClient, isSqliteVecAvailable } from "@/be/db";
 import { cosineSimilarity, deserializeEmbedding, serializeEmbedding } from "@/be/embedding";
 import { contentSha256 } from "@/commands/profile-sync";
 import type { AgentMemory, AgentMemoryScope, AgentMemorySource } from "@/types";
+import { scrubSecrets } from "@/utils/secret-scrubber";
 import {
   EMBEDDING_DIMENSIONS,
   isHybridSearchEnabled,
@@ -9,6 +10,7 @@ import {
   PROTECTED_SOURCES,
   TTL_DEFAULTS,
 } from "../constants";
+import { isLongtermKey, LONGTERM_ROOT, tierSource } from "../key-paths";
 import { recencyDecay } from "../reranker";
 import type {
   MemoryCandidate,
@@ -18,6 +20,7 @@ import type {
   MemoryInput,
   MemoryListOptions,
   MemoryRetrievalSource,
+  MemoryScrubFields,
   MemorySearchOptions,
   MemoryStats,
   MemoryStore,
@@ -25,6 +28,20 @@ import type {
 } from "../types";
 
 const VECTOR_BYTES = EMBEDDING_DIMENSIONS * Float32Array.BYTES_PER_ELEMENT;
+
+// memory_fts.memory_id is UNINDEXED (FTS5 cannot index it), so a CORRELATED
+// lookup against it is a full table scan per outer row. The old backfill used
+// `WHERE NOT EXISTS (SELECT 1 FROM memory_fts f WHERE f.memory_id = m.id)`,
+// which is N x N: at ~18k memories it held the main connection for minutes at
+// boot. Both statements below use a non-correlated `NOT IN (subquery)`, which
+// SQLite evaluates once into an ephemeral index, so each is one pass over each
+// table. `memory_id IS NOT NULL` keeps a stray NULL row from turning every
+// NOT IN into NULL (which would insert nothing).
+export const FTS_DELETE_EXTRA_SQL = `DELETE FROM memory_fts
+  WHERE memory_id NOT IN (SELECT id FROM agent_memory)`;
+export const FTS_MISSING_IDS_SQL = `SELECT m.id FROM agent_memory m
+  WHERE m.id NOT IN (SELECT memory_id FROM memory_fts WHERE memory_id IS NOT NULL)`;
+const FTS_POPULATE_BATCH_SIZE = 500;
 
 export type AgentMemoryRow = {
   id: string;
@@ -159,8 +176,8 @@ export function applyEditMode(
   );
 }
 
-function computeExpiresAt(source: AgentMemorySource): string | null {
-  const ttlDays = TTL_DEFAULTS[source];
+function computeExpiresAt(source: AgentMemorySource, key: string | null): string | null {
+  const ttlDays = TTL_DEFAULTS[tierSource(source, key)];
   if (ttlDays == null) return null;
   return new Date(Date.now() + ttlDays * 86400000).toISOString();
 }
@@ -168,6 +185,7 @@ function computeExpiresAt(source: AgentMemorySource): string | null {
 export class SqliteMemoryStore implements MemoryStore {
   private vecInitialized = false;
   private ftsInitialized = false;
+  private ftsPopulate: Promise<void> | null = null;
   private lastPopulate: MemoryVecPopulateStats | null = null;
 
   constructor() {
@@ -187,8 +205,10 @@ export class SqliteMemoryStore implements MemoryStore {
           tokenize='porter unicode61'
         )
       `);
-      this.populateFtsTable();
       this.ftsInitialized = true;
+      this.ftsPopulate = this.populateFtsTable().catch((err) => {
+        console.error("[memory-fts] Failed to populate memory_fts:", (err as Error).message);
+      });
     } catch (err) {
       this.ftsInitialized = false;
       console.error("[memory-fts] Failed to initialize memory_fts:", (err as Error).message);
@@ -206,27 +226,46 @@ export class SqliteMemoryStore implements MemoryStore {
     }
   }
 
-  private populateFtsTable(): void {
-    const db = getDb();
-    const deletedExtra = db
-      .prepare(
-        `DELETE FROM memory_fts
-         WHERE memory_id NOT IN (SELECT id FROM agent_memory)`,
-      )
-      .run();
+  /**
+   * Backfill memory_fts from agent_memory off the constructor's call stack.
+   *
+   * Two things kept this cheap: the diff SQL is linear (see
+   * FTS_MISSING_IDS_SQL), and inserts run in batches that yield the event loop
+   * between them, so a cold rebuild cannot stall the API the way the old
+   * synchronous correlated anti-join did at boot. Rows written by
+   * store()/delete() while this runs go through syncFtsRow/deleteFtsRows,
+   * which delete-then-insert, so a concurrent write cannot leave a duplicate.
+   */
+  private async populateFtsTable(): Promise<void> {
+    const client = getDbClient();
+    const startedAt = performance.now();
+    const deletedExtra = await client.run(FTS_DELETE_EXTRA_SQL);
     if (deletedExtra.changes > 0) {
       console.warn(`[memory-fts] removed_extra_rows count=${deletedExtra.changes}`);
     }
 
-    const inserted = db
-      .prepare(
+    const missing = await client.query<{ id: string }>(FTS_MISSING_IDS_SQL);
+    for (let i = 0; i < missing.length; i += FTS_POPULATE_BATCH_SIZE) {
+      const ids = missing.slice(i, i + FTS_POPULATE_BATCH_SIZE).map((row) => row.id);
+      const placeholders = ids.map(() => "?").join(",");
+      await client.run(
         `INSERT INTO memory_fts(memory_id, name, content)
          SELECT m.id, m.name, m.content
          FROM agent_memory m
-         WHERE NOT EXISTS (SELECT 1 FROM memory_fts f WHERE f.memory_id = m.id)`,
-      )
-      .run();
-    console.log(`[memory-fts] populate inserted=${inserted.changes}`);
+         WHERE m.id IN (${placeholders})
+           AND m.id NOT IN (SELECT memory_id FROM memory_fts WHERE memory_id IS NOT NULL)`,
+        ids,
+      );
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
+    console.log(
+      `[memory-fts] populate missing=${missing.length} ms=${Math.round(performance.now() - startedAt)}`,
+    );
+  }
+
+  /** Resolves once the boot-time FTS backfill has finished (or failed). */
+  whenFtsPopulated(): Promise<void> {
+    return this.ftsPopulate ?? Promise.resolve();
   }
 
   private async syncFtsRow(memoryId: string, name: string, content: string): Promise<void> {
@@ -398,9 +437,14 @@ export class SqliteMemoryStore implements MemoryStore {
   async store(input: MemoryInput): Promise<AgentMemory> {
     const id = crypto.randomUUID();
     const now = new Date().toISOString();
-    const expiresAt = computeExpiresAt(input.source);
     const key = input.key ?? `${input.scope}/${input.source}/${id}`;
-    const contentHash = contentSha256(input.content);
+    const expiresAt = computeExpiresAt(input.source, key);
+    // Scrub before the hash, the FTS sync and the caller's embedding (callers
+    // embed the returned row's content), so all of them see the same text.
+    const name = scrubSecrets(input.name);
+    const content = scrubSecrets(input.content);
+    const summary = input.summary == null ? null : scrubSecrets(input.summary);
+    const contentHash = contentSha256(content);
     const version = 1;
 
     const row = await getDbClient().transaction(async (tx) => {
@@ -412,15 +456,15 @@ export class SqliteMemoryStore implements MemoryStore {
           input.agentId ?? null,
           input.scope,
           key,
-          input.name,
-          input.content,
-          input.summary ?? null,
+          name,
+          content,
+          summary,
           input.source,
           input.sourceTaskId ?? null,
           input.sourcePath ?? null,
           input.chunkIndex ?? 0,
           input.totalChunks ?? 1,
-          JSON.stringify(input.tags ?? []),
+          JSON.stringify((input.tags ?? []).map((tag) => scrubSecrets(tag))),
           now,
           now,
           now,
@@ -441,7 +485,7 @@ export class SqliteMemoryStore implements MemoryStore {
           crypto.randomUUID(),
           inserted.id,
           version,
-          input.content,
+          content,
           contentHash,
           input.intent ?? "create memory",
           input.agentId ?? null,
@@ -495,7 +539,14 @@ export class SqliteMemoryStore implements MemoryStore {
     agentId: string,
     options: MemorySearchOptions = {},
   ): Promise<MemoryCandidate[]> {
-    const { scope = "all", limit = 10, source, isLead = false, includeExpired = false } = options;
+    const {
+      scope = "all",
+      limit = 10,
+      source,
+      isLead = false,
+      includeExpired = false,
+      keyPrefix,
+    } = options;
 
     const health = this.getHealth();
     if (
@@ -515,6 +566,7 @@ export class SqliteMemoryStore implements MemoryStore {
         source,
         isLead,
         includeExpired,
+        keyPrefix,
       });
     }
 
@@ -528,6 +580,7 @@ export class SqliteMemoryStore implements MemoryStore {
         source,
         isLead,
         includeExpired,
+        keyPrefix,
       });
     }
 
@@ -541,6 +594,7 @@ export class SqliteMemoryStore implements MemoryStore {
         source,
         isLead,
         includeExpired,
+        keyPrefix,
       });
     }
 
@@ -553,6 +607,7 @@ export class SqliteMemoryStore implements MemoryStore {
       source,
       isLead,
       includeExpired,
+      keyPrefix,
     });
   }
 
@@ -566,6 +621,7 @@ export class SqliteMemoryStore implements MemoryStore {
       source?: AgentMemorySource;
       isLead: boolean;
       includeExpired: boolean;
+      keyPrefix?: string;
     },
   ): Promise<MemoryCandidate[]> {
     const overfetchLimit = Math.min(Math.max(options.limit * 4, options.limit), 100);
@@ -646,16 +702,18 @@ export class SqliteMemoryStore implements MemoryStore {
       source?: AgentMemorySource;
       isLead: boolean;
       includeExpired: boolean;
+      keyPrefix?: string;
     },
   ): Promise<MemoryCandidate[]> {
     const match = this.buildFtsMatch(queryText);
     if (!match) return [];
 
-    const { scope, limit, source, isLead, includeExpired } = options;
+    const { scope, limit, source, isLead, includeExpired, keyPrefix } = options;
     const conditions: string[] = ["memory_fts MATCH ?"];
     const params: (Buffer | string | number | null)[] = [match];
 
     this.addScopeConditions(conditions, params, agentId, scope, isLead, "m");
+    this.addKeyPrefixCondition(conditions, params, keyPrefix, "m");
 
     if (source) {
       conditions.push("m.source = ?");
@@ -685,7 +743,8 @@ export class SqliteMemoryStore implements MemoryStore {
           return {
             ...rowToCandidate(
               row,
-              rawSimilarity * recencyDecay(row.createdAt, now, row.source as AgentMemorySource),
+              rawSimilarity *
+                recencyDecay(row.createdAt, now, row.source as AgentMemorySource, row.key),
             ),
             rawSimilarity,
             retrievalSource: "fts" as const,
@@ -720,9 +779,10 @@ export class SqliteMemoryStore implements MemoryStore {
       source?: AgentMemorySource;
       isLead: boolean;
       includeExpired: boolean;
+      keyPrefix?: string;
     },
   ): Promise<MemoryCandidate[]> {
-    const { scope, limit, source, isLead, includeExpired } = options;
+    const { scope, limit, source, isLead, includeExpired, keyPrefix } = options;
 
     const embeddingBuffer = serializeEmbedding(queryEmbedding);
     // sqlite-vec hard ceiling is 4096 for knn queries
@@ -732,6 +792,7 @@ export class SqliteMemoryStore implements MemoryStore {
     const params: (Buffer | string | number | null)[] = [embeddingBuffer];
 
     this.addScopeConditions(conditions, params, agentId, scope, isLead, "m");
+    this.addKeyPrefixCondition(conditions, params, keyPrefix, "m");
 
     if (source) {
       conditions.push("m.source = ?");
@@ -774,14 +835,16 @@ export class SqliteMemoryStore implements MemoryStore {
       source?: AgentMemorySource;
       isLead: boolean;
       includeExpired: boolean;
+      keyPrefix?: string;
     },
   ): Promise<MemoryCandidate[]> {
-    const { scope, limit, source, isLead, includeExpired } = options;
+    const { scope, limit, source, isLead, includeExpired, keyPrefix } = options;
 
     const conditions: string[] = ["embedding IS NOT NULL"];
     const params: (string | null)[] = [];
 
     this.addScopeConditions(conditions, params, agentId, scope, isLead);
+    this.addKeyPrefixCondition(conditions, params, keyPrefix);
 
     if (source) {
       conditions.push("source = ?");
@@ -841,15 +904,32 @@ export class SqliteMemoryStore implements MemoryStore {
     }
   }
 
+  /**
+   * Literal prefix match on `key`. substr/length instead of GLOB or LIKE so a
+   * prefix holding `*`, `?`, `[` or `%` is matched as text, not as a pattern.
+   */
+  private addKeyPrefixCondition(
+    conditions: string[],
+    params: (Buffer | string | number | null)[],
+    keyPrefix: string | undefined,
+    tableAlias = "",
+  ): void {
+    if (!keyPrefix) return;
+    const key = tableAlias ? `${tableAlias}.key` : "key";
+    conditions.push(`substr(${key}, 1, length(?)) = ?`);
+    params.push(keyPrefix, keyPrefix);
+  }
+
   private buildListWhereClause(
     agentId: string,
     options: MemoryListOptions,
   ): { whereClause: string; params: (Buffer | string | number | null)[] } {
-    const { scope = "all", isLead = false, ownerAgentId, source, sourcePath } = options;
+    const { scope = "all", isLead = false, ownerAgentId, source, sourcePath, keyPrefix } = options;
     const conditions: string[] = [];
     const params: (Buffer | string | number | null)[] = [];
 
     this.addScopeConditions(conditions, params, agentId, scope, isLead);
+    this.addKeyPrefixCondition(conditions, params, keyPrefix);
 
     if (ownerAgentId) {
       conditions.push("agentId = ?");
@@ -896,8 +976,8 @@ export class SqliteMemoryStore implements MemoryStore {
     return row?.count ?? 0;
   }
 
-  isSourceProtected(source: AgentMemorySource): boolean {
-    return PROTECTED_SOURCES.has(source);
+  isSourceProtected(source: AgentMemorySource, key?: string | null): boolean {
+    return PROTECTED_SOURCES.has(tierSource(source, key));
   }
 
   async edit(input: MemoryEditInput): Promise<MemoryEditResult> {
@@ -921,21 +1001,36 @@ export class SqliteMemoryStore implements MemoryStore {
           );
 
       if (!row) throw new Error("memory not found");
-      if ((row.totalChunks ?? 1) !== 1)
+      // A pure move (newKey, no content fields) may span every chunk; any
+      // content edit still needs a single-chunk row.
+      const moveOnly =
+        input.newKey !== undefined &&
+        input.content === undefined &&
+        input.oldString === undefined &&
+        input.newString === undefined;
+      if (!moveOnly && (row.totalChunks ?? 1) !== 1)
         throw new Error("memory edit only supports single-chunk rows");
       if (input.expectedVersion && input.expectedVersion !== (row.version ?? 1)) {
         throw new Error("memory version conflict");
       }
 
       const previousVersion = row.version ?? 1;
-      const nextContent = applyEditMode(input.mode, row.content, {
-        content: input.content,
-        oldString: input.oldString,
-        newString: input.newString,
-      });
+      const moving = input.newKey !== undefined && input.newKey !== row.key;
+      // Scrub the edited text before the hash and FTS sync; callers embed the
+      // returned content, so the vector matches the stored row.
+      const nextContent = moveOnly
+        ? row.content
+        : scrubSecrets(
+            applyEditMode(input.mode, row.content, {
+              content: input.content,
+              oldString: input.oldString,
+              newString: input.newString,
+            }),
+          );
 
       const nextHash = contentSha256(nextContent);
-      if (nextHash === row.contentHash) {
+      const contentChanged = !moveOnly && nextHash !== row.contentHash;
+      if (!contentChanged && !moving) {
         return {
           result: {
             memory: rowToAgentMemory(row),
@@ -948,31 +1043,86 @@ export class SqliteMemoryStore implements MemoryStore {
         };
       }
 
-      const nextVersion = previousVersion + 1;
+      // Every chunk of the document shares one key, so the move covers all of
+      // them. Legacy multi-chunk manual docs carry a distinct key per chunk and
+      // cannot be located by key: refuse rather than split the document.
+      let targets: AgentMemoryRow[] = [row];
+      if (moving) {
+        const owner = row.agentId ?? null;
+        if (row.key) {
+          targets = await tx.query<AgentMemoryRow>(
+            `SELECT * FROM agent_memory
+             WHERE key = ? AND scope = ? AND coalesce(agentId, '') = coalesce(?, '')
+             ORDER BY chunkIndex ASC`,
+            [row.key, row.scope, owner],
+          );
+        }
+        if (
+          targets.length !== (row.totalChunks ?? 1) ||
+          targets.some((target, index) => target.chunkIndex !== index)
+        ) {
+          throw new Error(
+            "memory move needs every chunk of the document under one key; this document's chunks do not share one, re-store it with a key",
+          );
+        }
+        const taken = await tx.get<{ id: string }>(
+          `SELECT id FROM agent_memory
+           WHERE key = ? AND scope = ? AND coalesce(agentId, '') = coalesce(?, '')
+           LIMIT 1`,
+          [input.newKey!, row.scope, owner],
+        );
+        if (taken) throw new Error(`key "${input.newKey}" is already used in this scope`);
+      }
+
+      // Moving into /longterm makes the memory curated, so it stops expiring.
+      // Moving out restores nothing: the TTL it had is gone.
+      const clearExpiry = moving && isLongtermKey(input.newKey);
       const now = new Date().toISOString();
-      await tx.run(
-        `INSERT INTO agent_memory_version (id, memory_id, version, content, contentHash, intent, operation, changedByAgentId, createdAt, updatedAt, created_by, updated_by)
-         VALUES (?, ?, ?, ?, ?, ?, 'edit', ?, ?, ?, ?, ?)`,
-        [
-          crypto.randomUUID(),
-          row.id,
-          nextVersion,
-          nextContent,
-          nextHash,
-          input.intent,
-          input.changedByAgentId ?? null,
-          now,
-          now,
-          input.changedByAgentId ?? null,
-          input.changedByAgentId ?? null,
-        ],
-      );
-      await tx.run(
-        `UPDATE agent_memory
-         SET content = ?, contentHash = ?, version = ?, updatedAt = ?
-         WHERE id = ?`,
-        [nextContent, nextHash, nextVersion, now, row.id],
-      );
+      const versionIntent = moving
+        ? `${input.intent} [key ${row.key ?? "(none)"} -> ${input.newKey}]`
+        : input.intent;
+      let nextVersion = previousVersion + 1;
+      for (const target of targets) {
+        const addressed = target.id === row.id;
+        const targetContent = addressed ? nextContent : target.content;
+        const targetHash = addressed
+          ? nextHash
+          : (target.contentHash ?? contentSha256(target.content));
+        const targetVersion = (target.version ?? 1) + 1;
+        if (addressed) nextVersion = targetVersion;
+        await tx.run(
+          `INSERT INTO agent_memory_version (id, memory_id, version, content, contentHash, intent, operation, changedByAgentId, createdAt, updatedAt, created_by, updated_by)
+           VALUES (?, ?, ?, ?, ?, ?, 'edit', ?, ?, ?, ?, ?)`,
+          [
+            crypto.randomUUID(),
+            target.id,
+            targetVersion,
+            targetContent,
+            targetHash,
+            versionIntent,
+            input.changedByAgentId ?? null,
+            now,
+            now,
+            input.changedByAgentId ?? null,
+            input.changedByAgentId ?? null,
+          ],
+        );
+        await tx.run(
+          `UPDATE agent_memory
+           SET content = ?, contentHash = ?, version = ?, updatedAt = ?, key = ?,
+               expiresAt = CASE WHEN ? = 1 THEN NULL ELSE expiresAt END
+           WHERE id = ?`,
+          [
+            targetContent,
+            targetHash,
+            targetVersion,
+            now,
+            moving ? input.newKey! : target.key,
+            clearExpiry ? 1 : 0,
+            target.id,
+          ],
+        );
+      }
 
       return {
         result: {
@@ -982,13 +1132,15 @@ export class SqliteMemoryStore implements MemoryStore {
             contentHash: nextHash,
             version: nextVersion,
             updatedAt: now,
+            key: moving ? input.newKey! : row.key,
+            expiresAt: clearExpiry ? null : row.expiresAt,
           }),
           changed: true,
           previousVersion,
           version: nextVersion,
           contentHash: nextHash,
         },
-        ftsContent: nextContent,
+        ftsContent: contentChanged ? nextContent : null,
       };
     });
 
@@ -1004,16 +1156,18 @@ export class SqliteMemoryStore implements MemoryStore {
   ): Promise<{ id: string; source: string; name: string; createdAt: string }[]> {
     const db = getDbClient();
     const protectedList = [...PROTECTED_SOURCES].map((s) => `'${s}'`).join(",");
+    // A /longterm key is protected whatever its source (see tierSource).
+    const notLongterm = `coalesce(key, '') != '${LONGTERM_ROOT}' AND substr(coalesce(key, ''), 1, ${LONGTERM_ROOT.length + 1}) != '${LONGTERM_ROOT}/'`;
     if (agentId) {
       return db.query<{ id: string; source: string; name: string; createdAt: string }>(
         `SELECT id, source, name, createdAt FROM agent_memory
-         WHERE agentId = ? AND source NOT IN (${protectedList})`,
+         WHERE agentId = ? AND source NOT IN (${protectedList}) AND ${notLongterm}`,
         [agentId],
       );
     }
     return db.query<{ id: string; source: string; name: string; createdAt: string }>(
       `SELECT id, source, name, createdAt FROM agent_memory
-       WHERE source NOT IN (${protectedList})`,
+       WHERE source NOT IN (${protectedList}) AND ${notLongterm}`,
     );
   }
 
@@ -1040,9 +1194,22 @@ export class SqliteMemoryStore implements MemoryStore {
   }
 
   async delete(id: string): Promise<boolean> {
-    await this.purgeByIds([id]);
-    const result = await getDbClient().run("DELETE FROM agent_memory WHERE id = ?", [id]);
-    return result.changes > 0;
+    return getDbClient().transaction(async (tx) => {
+      const row = await tx.get<AgentMemoryRow>("SELECT * FROM agent_memory WHERE id = ?", [id]);
+      if (!row) return false;
+      // Explicit keys identify a document. Legacy generated keys identify only a row.
+      const rows = row.key
+        ? await tx.query<{ id: string }>(
+            "SELECT id FROM agent_memory WHERE key = ? AND scope = ? AND COALESCE(agentId, '') = COALESCE(?, '')",
+            [row.key, row.scope, row.agentId],
+          )
+        : [{ id }];
+      const ids = rows.map((chunk) => chunk.id);
+      await this.purgeByIds(ids);
+      const placeholders = ids.map(() => "?").join(",");
+      await tx.run(`DELETE FROM agent_memory WHERE id IN (${placeholders})`, ids);
+      return true;
+    });
   }
 
   async deleteBySourcePath(sourcePath: string, agentId: string): Promise<number> {
@@ -1110,6 +1277,47 @@ export class SqliteMemoryStore implements MemoryStore {
         console.error(`[memory-vec] update failed memory_id=${id}: ${(err as Error).message}`);
       }
     }
+  }
+
+  async rewriteForScrub(
+    id: string,
+    before: MemoryScrubFields,
+    after: MemoryScrubFields,
+  ): Promise<boolean> {
+    const contentChanged = after.content !== before.content;
+    return getDbClient().transaction(async (tx) => {
+      // Compare-and-set: the sweep scrubbed `before` outside the write lock, so
+      // skip the row if a concurrent write moved it since.
+      const result = await tx.run(
+        `UPDATE agent_memory
+         SET name = ?, content = ?, summary = ?, contentHash = ?,
+             embedding = CASE WHEN ? = 1 THEN NULL ELSE embedding END,
+             embeddingModel = CASE WHEN ? = 1 THEN NULL ELSE embeddingModel END
+         WHERE id = ? AND name IS ? AND content IS ? AND summary IS ?`,
+        [
+          after.name,
+          after.content,
+          after.summary,
+          contentSha256(after.content),
+          contentChanged ? 1 : 0,
+          contentChanged ? 1 : 0,
+          id,
+          before.name,
+          before.content,
+          before.summary,
+        ],
+      );
+      if (result.changes === 0) return false;
+      // The vector embeds the old (secret-bearing) content. Drop it; the
+      // re-embed backfill picks the row up via `embedding IS NULL`.
+      if (contentChanged && this.vecInitialized && this.getVecTableSchema()) {
+        await tx.run("DELETE FROM memory_vec WHERE memory_id = ?", [id]);
+      }
+      if (after.name !== before.name || contentChanged) {
+        await this.syncFtsRow(id, after.name, after.content);
+      }
+      return true;
+    });
   }
 
   async getStats(agentId: string): Promise<MemoryStats> {

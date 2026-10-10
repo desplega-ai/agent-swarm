@@ -119,6 +119,7 @@ describe("docker-entrypoint.sh: codex_oauth boot-seed jq transform", () => {
   test(
     "blanks refresh_token for a flat {access,refresh,accountId,expires} input",
     async () => {
+      const before = Math.floor(Date.now() / 1000) * 1000;
       const result = (await runJqFilter(filter, {
         access: "example-access-tok",
         refresh: "example-live-refresh-tok",
@@ -126,6 +127,8 @@ describe("docker-entrypoint.sh: codex_oauth boot-seed jq transform", () => {
         expires: 1_800_000_000_000,
       })) as {
         auth_mode: string;
+        last_refresh: string;
+        expires: number;
         tokens: {
           id_token: string;
           access_token: string;
@@ -139,6 +142,9 @@ describe("docker-entrypoint.sh: codex_oauth boot-seed jq transform", () => {
       expect(result.tokens.id_token).toBe("example-access-tok");
       expect(result.tokens.access_token).toBe("example-access-tok");
       expect(result.tokens.account_id).toBe("acct-456");
+      expect(Date.parse(result.last_refresh)).toBeGreaterThanOrEqual(before);
+      expect(Date.parse(result.last_refresh)).toBeLessThanOrEqual(Date.now());
+      expect(result.expires).toBe(1_800_000_000_000);
     },
     CHILD_PROCESS_TEST_BUDGET_MS,
   );
@@ -182,6 +188,7 @@ describe("docker-entrypoint.sh: codex_oauth boot-seed jq transform", () => {
   test(
     "preserves refresh_token (from the flat `refresh` field) for a flat input on the standalone path",
     async () => {
+      const before = Math.floor(Date.now() / 1000) * 1000;
       const result = (await runJqFilter(
         filter,
         {
@@ -193,9 +200,14 @@ describe("docker-entrypoint.sh: codex_oauth boot-seed jq transform", () => {
         true,
       )) as {
         tokens: { refresh_token: string };
+        last_refresh: string;
+        expires: number;
       };
 
       expect(result.tokens.refresh_token).toBe("example-live-refresh-tok");
+      expect(Date.parse(result.last_refresh)).toBeGreaterThanOrEqual(before);
+      expect(Date.parse(result.last_refresh)).toBeLessThanOrEqual(Date.now());
+      expect(result.expires).toBe(1_800_000_000_000);
     },
     CHILD_PROCESS_TEST_BUDGET_MS,
   );

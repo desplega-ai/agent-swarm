@@ -20,7 +20,11 @@ import {
 import { validateOpencodeCredentials } from "../utils/credentials";
 import { fetchInstalledMcpServers } from "../utils/mcp-server-fetcher";
 import { swarmRuntimeInstanceId } from "../utils/multi-runtime";
-import { DEFAULT_OPENROUTER_BASE_URL, getOpenRouterBaseUrl } from "../utils/openrouter-base-url";
+import {
+  DEFAULT_OPENROUTER_BASE_URL,
+  getOpenRouterAttributionHeaders,
+  getOpenRouterBaseUrl,
+} from "../utils/openrouter-base-url";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { resolveSlashSkillPrompt } from "./codex-skill-resolver";
 import { CTX_MODE_NUDGE_EVERY } from "./ctx-mode-env";
@@ -130,6 +134,9 @@ const MODEL_CACHE_REFRESH_TIMEOUT_MS = 15_000;
 // "Timeout waiting for server to start after 5000ms". Override via
 // OPENCODE_SERVER_TIMEOUT_MS.
 const DEFAULT_SERVER_START_TIMEOUT_MS = 30_000;
+// Event-stream reconnects before the session gives up on a dead local server.
+// The SDK backs off 3s, 6s, 12s, 24s between attempts, so ~45s in total.
+export const OPENCODE_SSE_MAX_RETRY_ATTEMPTS = 5;
 
 function serverStartTimeoutMs(): number {
   return Number(process.env.OPENCODE_SERVER_TIMEOUT_MS) || DEFAULT_SERVER_START_TIMEOUT_MS;
@@ -174,22 +181,34 @@ function formatUnknownError(err: unknown): string {
  * Route OpenRouter traffic through the configured gateway (see
  * src/utils/openrouter-base-url.ts). opencode's bundled openrouter provider
  * honors `provider.openrouter.options.baseURL`. Mutates `opencodeConfig` in
- * place; no-op when `OPENROUTER_BASE_URL` is unset/blank/default, so default
- * openrouter.ai behavior is preserved. Exported for tests.
+ * place, and attribute direct OpenRouter requests to Agent Swarm.
  */
 export function applyOpenRouterBaseUrlOverride(
   opencodeConfig: Config,
   env: Record<string, string | undefined> = process.env,
 ): void {
   const openRouterBaseUrl = getOpenRouterBaseUrl(env as NodeJS.ProcessEnv);
-  if (openRouterBaseUrl === DEFAULT_OPENROUTER_BASE_URL) return;
+  const headers = getOpenRouterAttributionHeaders(openRouterBaseUrl, env);
+  const overrideBaseUrl = openRouterBaseUrl !== DEFAULT_OPENROUTER_BASE_URL;
+  if (!overrideBaseUrl && Object.keys(headers).length === 0) return;
   opencodeConfig.provider = {
     ...opencodeConfig.provider,
     openrouter: {
       ...opencodeConfig.provider?.openrouter,
       options: {
         ...opencodeConfig.provider?.openrouter?.options,
-        baseURL: openRouterBaseUrl,
+        ...(overrideBaseUrl ? { baseURL: openRouterBaseUrl } : {}),
+        ...(Object.keys(headers).length > 0
+          ? {
+              headers: {
+                ...(opencodeConfig.provider?.openrouter?.options?.headers as
+                  | Record<string, string>
+                  | undefined),
+                ...headers,
+                "X-Title": "Agent Swarm",
+              },
+            }
+          : {}),
       },
     },
   };
@@ -998,6 +1017,7 @@ export class OpencodeAdapter implements ProviderAdapter {
         providerLabel: "opencode",
         skillsDir: defaultOpencodeSkillsDir(),
         emit: (event) => session?.emitProviderEvent(event),
+        onInline: config.onPromptSkill,
       });
       await client.session.prompt({
         path: { id: sessionId },
@@ -1039,15 +1059,33 @@ export class OpencodeAdapter implements ProviderAdapter {
     const opcVersion = readPkgVersion("@opencode-ai/sdk");
     session.emitSessionInit("opencode", opcVersion ? { version: opcVersion } : undefined);
 
-    // Subscribe to SSE events and drive the session
+    // Subscribe to SSE events and drive the session. The SDK's SSE client
+    // retries a dropped connection forever by default, so a dead `opencode
+    // serve` child would keep the stream (and the session promise) pending
+    // and hold the worker's slot. Cap the retries so the stream ends.
     client.event
-      .subscribe({ query: { directory: config.cwd } })
+      .subscribe({
+        query: { directory: config.cwd },
+        sseMaxRetryAttempts: OPENCODE_SSE_MAX_RETRY_ATTEMPTS,
+      })
       .then(async ({ stream }) => {
         for await (const event of stream) {
           session.handleOpencodeEvent(event as OpencodeEvent);
           if (session.isFinished) break;
         }
-        // Stream ended without session.idle — treat as completion
+        // The stream ended without session.idle: the opencode server closed
+        // or died. Settle the session so the runner releases the slot.
+        if (!session.isFinished) {
+          session.handleOpencodeEvent({
+            type: "session.error",
+            properties: {
+              sessionID: sessionId,
+              error: {
+                message: "runner exited without result: opencode event stream ended",
+              } as never,
+            },
+          });
+        }
       })
       .catch((err: unknown) => {
         session.handleOpencodeEvent({

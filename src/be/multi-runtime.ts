@@ -389,9 +389,10 @@ export async function agentsWithLiveRuntime(): Promise<Set<string>> {
  *
  * Expiry deliberately does NOT touch active_sessions. Runtime liveness and
  * in-flight work liveness answer different questions: a stale runtime row is
- * enough to stop NEW dispatch, but sessions are heartbeated by tool activity
- * only — a healthy worker inside a long model call or shell command can be
- * quiet past this cutoff — so it is not evidence the CURRENT work is dead.
+ * enough to stop NEW dispatch, but a session's heartbeat only moves on tool
+ * activity or provider output — a healthy worker inside a long shell command
+ * or a model call that is not streaming can be quiet past this cutoff — so it
+ * is not evidence the CURRENT work is dead.
  * Crash classification stays owned by the heartbeat's stalled-task
  * remediation, which requires both a stale session heartbeat and a stale
  * task before reclaiming (and cleans the session when it does); the sweep's

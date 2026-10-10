@@ -4,7 +4,6 @@ import { findUserByExternalId } from "../be/users";
 import { resolveTemplate } from "../prompts/resolver";
 import { githubContextKey } from "../tasks/context-key";
 import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
-import { scrubSecrets } from "../utils/secret-scrubber";
 import { getInstallationToken } from "./app";
 import {
   detectMention,
@@ -13,7 +12,7 @@ import {
   isBotAssignee,
   isSwarmLabel,
 } from "./mentions";
-import { addIssueReaction, addReaction } from "./reactions";
+import { addEyesReactionToTaskSource } from "./task-reactions";
 // Side-effect import: registers all GitHub event templates in the in-memory registry
 import "./templates";
 import type {
@@ -286,14 +285,7 @@ export async function handlePullRequest(
       );
     }
 
-    if (installation?.id) {
-      addIssueReaction(repository.full_name, pr.number, "eyes", installation.id).catch((err) =>
-        console.error(
-          "[GitHub] failed to add issue reaction:",
-          scrubSecrets(err instanceof Error ? err.message : String(err)),
-        ),
-      );
-    }
+    addEyesReactionToTaskSource(task).catch(() => {});
 
     return { created: true, taskId: task.id };
   }
@@ -405,14 +397,7 @@ export async function handlePullRequest(
       );
     }
 
-    if (installation?.id) {
-      addIssueReaction(repository.full_name, pr.number, "eyes", installation.id).catch((err) =>
-        console.error(
-          "[GitHub] failed to add issue reaction:",
-          scrubSecrets(err instanceof Error ? err.message : String(err)),
-        ),
-      );
-    }
+    addEyesReactionToTaskSource(task).catch(() => {});
 
     return { created: true, taskId: task.id };
   }
@@ -519,14 +504,7 @@ export async function handlePullRequest(
       );
     }
 
-    if (installation?.id) {
-      addIssueReaction(repository.full_name, pr.number, "eyes", installation.id).catch((err) =>
-        console.error(
-          "[GitHub] failed to add issue reaction:",
-          scrubSecrets(err instanceof Error ? err.message : String(err)),
-        ),
-      );
-    }
+    addEyesReactionToTaskSource(task).catch(() => {});
 
     return { created: true, taskId: task.id };
   }
@@ -619,14 +597,7 @@ export async function handlePullRequest(
   }
 
   // Add 👀 reaction to acknowledge the mention
-  if (installation?.id) {
-    addIssueReaction(repository.full_name, pr.number, "eyes", installation.id).catch((err) =>
-      console.error(
-        "[GitHub] failed to add issue reaction:",
-        scrubSecrets(err instanceof Error ? err.message : String(err)),
-      ),
-    );
-  }
+  addEyesReactionToTaskSource(task).catch(() => {});
 
   return { created: true, taskId: task.id };
 }
@@ -710,14 +681,7 @@ export async function handleIssue(
       );
     }
 
-    if (installation?.id) {
-      addIssueReaction(repository.full_name, issue.number, "eyes", installation.id).catch((err) =>
-        console.error(
-          "[GitHub] failed to add issue reaction:",
-          scrubSecrets(err instanceof Error ? err.message : String(err)),
-        ),
-      );
-    }
+    addEyesReactionToTaskSource(task).catch(() => {});
 
     return { created: true, taskId: task.id };
   }
@@ -817,14 +781,7 @@ export async function handleIssue(
       );
     }
 
-    if (installation?.id) {
-      addIssueReaction(repository.full_name, issue.number, "eyes", installation.id).catch((err) =>
-        console.error(
-          "[GitHub] failed to add issue reaction:",
-          scrubSecrets(err instanceof Error ? err.message : String(err)),
-        ),
-      );
-    }
+    addEyesReactionToTaskSource(task).catch(() => {});
 
     return { created: true, taskId: task.id };
   }
@@ -899,14 +856,7 @@ export async function handleIssue(
   }
 
   // Add 👀 reaction to acknowledge the mention
-  if (installation?.id) {
-    addIssueReaction(repository.full_name, issue.number, "eyes", installation.id).catch((err) =>
-      console.error(
-        "[GitHub] failed to add issue reaction:",
-        scrubSecrets(err instanceof Error ? err.message : String(err)),
-      ),
-    );
-  }
+  addEyesReactionToTaskSource(task).catch(() => {});
 
   return { created: true, taskId: task.id };
 }
@@ -1020,14 +970,7 @@ export async function handleComment(
   }
 
   // Add 👀 reaction to the comment to acknowledge the mention
-  if (installation?.id) {
-    addReaction(repository.full_name, comment.id, "eyes", installation.id).catch((err) =>
-      console.error(
-        "[GitHub] failed to add comment reaction:",
-        scrubSecrets(err instanceof Error ? err.message : String(err)),
-      ),
-    );
-  }
+  addEyesReactionToTaskSource(task).catch(() => {});
 
   return { created: true, taskId: task.id };
 }
@@ -1197,6 +1140,101 @@ The automatic inline-comment fetch failed or was unverifiable while the reviewer
 Reply to and resolve EVERY unresolved inline thread. Do NOT dispatch off the review body alone.`;
 }
 
+interface PrReviewActionCounts {
+  unresolvedThreads: number;
+  outstandingChangeRequests: number;
+}
+
+const PR_REVIEW_ACTION_ITEMS_QUERY = `query($owner: String!, $name: String!, $number: Int!) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) {
+      reviewThreads(first: 100) { pageInfo { hasNextPage } nodes { isResolved isOutdated } }
+      reviews(first: 100) { pageInfo { hasNextPage } nodes { state submittedAt author { login } } }
+    }
+  }
+}`;
+
+/** Approved reviews with nothing to act on skip the lead task unless this is "false". */
+function skipNoopApprovalsEnabled(): boolean {
+  return process.env.GITHUB_SKIP_NOOP_APPROVALS?.trim().toLowerCase() !== "false";
+}
+
+/**
+ * Count the PR's open review action items: unresolved, non-outdated review threads plus
+ * CHANGES_REQUESTED reviews not superseded by a later APPROVED from the same reviewer.
+ * Returns null when the counts cannot be trusted (no token, API error, or more than one page),
+ * so callers fail open and still notify.
+ */
+async function fetchPrReviewActionCounts(
+  repo: string,
+  prNumber: number,
+  installationId: number,
+): Promise<PrReviewActionCounts | null> {
+  const [owner, name] = repo.split("/");
+  const token = await getInstallationToken(installationId);
+  if (!token || !owner || !name) return null;
+
+  try {
+    const response = await fetch("https://api.github.com/graphql", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        query: PR_REVIEW_ACTION_ITEMS_QUERY,
+        variables: { owner, name, number: prNumber },
+      }),
+    });
+    if (!response.ok) {
+      console.error(`[GitHub] Failed to fetch PR review action items: ${response.status}`);
+      return null;
+    }
+    const json = (await response.json()) as {
+      data?: {
+        repository?: {
+          pullRequest?: {
+            reviewThreads: {
+              pageInfo: { hasNextPage: boolean };
+              nodes: { isResolved: boolean; isOutdated: boolean }[];
+            };
+            reviews: {
+              pageInfo: { hasNextPage: boolean };
+              nodes: {
+                state: string;
+                submittedAt: string | null;
+                author: { login: string } | null;
+              }[];
+            };
+          } | null;
+        } | null;
+      };
+    };
+    const pull = json.data?.repository?.pullRequest;
+    if (!pull || pull.reviewThreads.pageInfo.hasNextPage || pull.reviews.pageInfo.hasNextPage) {
+      return null;
+    }
+
+    const unresolvedThreads = pull.reviewThreads.nodes.filter(
+      (thread) => !thread.isResolved && !thread.isOutdated,
+    ).length;
+
+    const reviews = pull.reviews.nodes.filter((r) => r.author?.login && r.submittedAt);
+    const outstandingChangeRequests = reviews.filter(
+      (r) =>
+        r.state === "CHANGES_REQUESTED" &&
+        !reviews.some(
+          (later) =>
+            later.state === "APPROVED" &&
+            later.author?.login === r.author?.login &&
+            String(later.submittedAt) > String(r.submittedAt),
+        ),
+    ).length;
+
+    return { unresolvedThreads, outstandingChangeRequests };
+  } catch (error) {
+    console.error("[GitHub] Error fetching PR review action items:", error);
+    return null;
+  }
+}
+
 /**
  * Handle pull_request_review events (submitted, edited, dismissed)
  *
@@ -1247,6 +1285,34 @@ export async function handlePullRequestReview(
     return { created: false };
   }
 
+  // An approval with no body, no inline comments and no open review items leaves the lead
+  // nothing to act on. A body is always forwarded: it can carry a live human ask.
+  let approvalActionCounts: PrReviewActionCounts | null = null;
+  if (
+    review.state === "approved" &&
+    !review.body?.trim() &&
+    inlineComments.length === 0 &&
+    !degraded &&
+    installation?.id &&
+    skipNoopApprovalsEnabled()
+  ) {
+    approvalActionCounts = await fetchPrReviewActionCounts(
+      repository.full_name,
+      pr.number,
+      installation.id,
+    );
+    if (
+      approvalActionCounts &&
+      approvalActionCounts.unresolvedThreads === 0 &&
+      approvalActionCounts.outstandingChangeRequests === 0
+    ) {
+      console.log(
+        `[GitHub] Skipped lead task for no-op approval of ${repository.full_name}#${pr.number} by ${sender.login} (review ${review.id})`,
+      );
+      return { created: false };
+    }
+  }
+
   // Find any existing task for this PR
   const existingTask = await findTaskByVcs(repository.full_name, pr.number);
 
@@ -1278,10 +1344,13 @@ export async function handlePullRequestReview(
       : review.state === "changes_requested"
         ? "💡 Suggested: Address the requested changes and update the PR"
         : "💡 Suggested: Review the feedback and respond if needed";
+  const openItemsSuggestion = approvalActionCounts
+    ? `\n📋 Still open on the PR: ${approvalActionCounts.unresolvedThreads} unresolved review thread(s), ${approvalActionCounts.outstandingChangeRequests} outstanding change request(s)`
+    : "";
   const reviewSuggestions =
-    hasInlineComments || degraded
+    (hasInlineComments || degraded
       ? `${baseReviewSuggestion}\n💬 Address EVERY inline comment. After pushing fixes, reply to and resolve each inline review thread on GitHub so the reviewer sees visible confirmation.`
-      : baseReviewSuggestion;
+      : baseReviewSuggestion) + openItemsSuggestion;
 
   const result = resolveTemplate(
     "github.pull_request.review_submitted",
@@ -1339,14 +1408,7 @@ export async function handlePullRequestReview(
   }
 
   // Add reaction to acknowledge the review
-  if (installation?.id) {
-    addIssueReaction(repository.full_name, pr.number, "eyes", installation.id).catch((err) =>
-      console.error(
-        "[GitHub] failed to add issue reaction:",
-        scrubSecrets(err instanceof Error ? err.message : String(err)),
-      ),
-    );
-  }
+  addEyesReactionToTaskSource(task).catch(() => {});
 
   return { created: true, taskId: task.id };
 }

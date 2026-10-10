@@ -32,8 +32,15 @@ export async function runTaskTerminalEffects(args: {
   agentId?: string;
   persistMemory?: boolean;
 }): Promise<void> {
-  const { task, status, output, failureReason, agentId, persistMemory } = args;
+  const { task, status, agentId, persistMemory } = args;
   const taskId = task.id;
+  // Scrub once, here, so every sink below (memory content, name, embedding,
+  // swarm promotion, Lead follow-up) sees only redacted text. Callers pass raw
+  // worker text; keep it that way so new callers are covered automatically.
+  const safeTask = scrubSecrets(task.task);
+  const safeOutput = args.output === undefined ? undefined : scrubSecrets(args.output);
+  const safeFailureReason =
+    args.failureReason === undefined ? undefined : scrubSecrets(args.failureReason);
 
   // Index completed and failed tasks as memory (async, non-blocking).
   // Automatic/recurring tasks are noisy by default; require explicit opt-in.
@@ -42,8 +49,8 @@ export async function runTaskTerminalEffects(args: {
       try {
         const taskContent =
           status === "completed"
-            ? `Task: ${task.task}\n\nOutput:\n${output || "(no output)"}`
-            : `Task: ${task.task}\n\nFailure reason:\n${failureReason || "No reason provided"}\n\nThis task failed. Learn from this to avoid repeating the mistake.`;
+            ? `Task: ${safeTask}\n\nOutput:\n${safeOutput || "(no output)"}`
+            : `Task: ${safeTask}\n\nFailure reason:\n${safeFailureReason || "No reason provided"}\n\nThis task failed. Learn from this to avoid repeating the mistake.`;
 
         // Skip indexing if there's truly no content
         if (taskContent.length < 30) return;
@@ -54,7 +61,7 @@ export async function runTaskTerminalEffects(args: {
         const memory = await store.store({
           agentId: agentId ?? null,
           content: taskContent,
-          name: `Task: ${task.task.slice(0, 80)}`,
+          name: `Task: ${safeTask.slice(0, 80)}`,
           scope: "agent",
           source: "task_completion",
           sourceTaskId: taskId,
@@ -76,7 +83,7 @@ export async function runTaskTerminalEffects(args: {
             const swarmMemory = await store.store({
               agentId: agentId ?? null,
               scope: "swarm",
-              name: `Shared: ${task.task.slice(0, 80)}`,
+              name: `Shared: ${safeTask.slice(0, 80)}`,
               content: `Task completed by agent ${agentId}:\n\n${taskContent}`,
               source: "task_completion",
               sourceTaskId: taskId,
@@ -144,7 +151,12 @@ export async function runTaskTerminalEffects(args: {
   // Skip for workflow-managed tasks — the workflow engine handles sequencing via resume.ts.
   if (!task.workflowRunId) {
     try {
-      const followUp = await createWorkerTaskFollowUp({ task, status, output, failureReason });
+      const followUp = await createWorkerTaskFollowUp({
+        task: { ...task, task: safeTask },
+        status,
+        output: safeOutput,
+        failureReason: safeFailureReason,
+      });
       if (followUp) {
         console.log(
           `[task-terminal-effects] Created follow-up task ${followUp.id.slice(0, 8)} for ${status} task ${taskId.slice(0, 8)}`,

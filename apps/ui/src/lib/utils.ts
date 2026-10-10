@@ -1,7 +1,12 @@
 import { type ClassValue, clsx } from "clsx";
-import { twMerge } from "tailwind-merge";
+import { extendTailwindMerge } from "tailwind-merge";
 import { stripContextFooter } from "../components/session-panel/model";
 import { formatCost } from "./cost-format";
+
+// The theme's own type steps (`--text-data`, `--text-meta` in globals.css).
+// Unregistered, tailwind-merge reads `text-meta` as a color and drops the
+// real color class next to it.
+const twMerge = extendTailwindMerge({ extend: { theme: { text: ["data", "meta"] } } });
 
 /**
  * Merge Tailwind CSS classes with clsx
@@ -12,8 +17,8 @@ export function cn(...inputs: ClassValue[]) {
 
 /**
  * Parse a date string as UTC, handling both ISO 8601 (with T/Z) and bare
- * SQLite format (YYYY-MM-DD HH:MM:SS). The bare format is ambiguous —
- * browsers parse it as local time — so we append 'Z' to force UTC.
+ * SQLite format (YYYY-MM-DD HH:MM:SS). The bare format is ambiguous:
+ * browsers parse it as local time, so we append 'Z' to force UTC.
  */
 export function parseUTCDate(dateStr: string): Date {
   if (dateStr.includes("T") || dateStr.endsWith("Z")) {
@@ -144,7 +149,7 @@ export function formatCompactNumber(num: number): string {
 }
 
 /**
- * Phase 12a — `formatCurrency` is now a thin wrapper around the shared
+ * Phase 12a: `formatCurrency` is now a thin wrapper around the shared
  * `formatCost` utility with `precision: 'compact'`. Prefer the new
  * `formatCost` directly when writing new code (or pick a different
  * precision preset); this export stays for legacy callers.
@@ -174,7 +179,8 @@ export function formatElapsed(start: string, end?: string | null): string {
   const startMs = parseUTCDate(start).getTime();
   const endMs = end ? parseUTCDate(end).getTime() : Date.now();
   const diffMs = endMs - startMs;
-  if (diffMs < 0) return "—";
+  // The app-wide "no value" placeholder (an em dash), as an escape.
+  if (diffMs < 0) return "\u2014";
 
   const seconds = Math.floor(diffMs / 1000);
   const minutes = Math.floor(seconds / 60);
@@ -188,10 +194,27 @@ export function formatElapsed(start: string, end?: string | null): string {
   return `${diffMs}ms`;
 }
 
+const FENCE_OPEN = /^ {0,3}(`{3,}|~{3,})/;
+const FENCED_NEWLINE = "\u0000";
+
 /**
  * Normalize single newlines to double for markdown paragraph breaks,
- * preserving existing double newlines and list/heading markers.
+ * preserving existing double newlines and list/heading markers. Newlines
+ * inside a fenced code block are left alone: doubling them there put a blank
+ * line before the code and between every code line.
  */
 export function normalizeNewlines(text: string): string {
-  return text.replace(/(?<!\n)\n(?!\n|[-*#>|]|\d+\.)/g, "\n\n");
+  const lines = text.split("\n");
+  let out = lines[0] ?? "";
+  let fence = FENCE_OPEN.exec(out)?.[1] ?? null;
+  for (const line of lines.slice(1)) {
+    if (fence) {
+      out += FENCED_NEWLINE + line;
+      if (new RegExp(`^ {0,3}${fence[0]}{${fence.length},}\\s*$`).test(line)) fence = null;
+    } else {
+      out += `\n${line}`;
+      fence = FENCE_OPEN.exec(line)?.[1] ?? null;
+    }
+  }
+  return out.replace(/(?<!\n)\n(?!\n|[-*#>|]|\d+\.)/g, "\n\n").replaceAll(FENCED_NEWLINE, "\n");
 }

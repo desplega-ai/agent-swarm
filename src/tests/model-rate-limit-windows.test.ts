@@ -5,6 +5,7 @@ import {
   isModelScopedWindow,
   modelFamilyOf,
   OPUS_WINDOW,
+  parseCreditsRequiredMessage,
   parseModelLimitMessage,
   SONNET_WINDOW,
   windowForModelFamily,
@@ -146,5 +147,23 @@ describe("isModelScopedWindow", () => {
     expect(isModelScopedWindow("toString")).toBe(false);
     expect(isModelScopedWindow("constructor")).toBe(false);
     expect(isModelScopedWindow("hasOwnProperty")).toBe(false);
+  });
+});
+
+describe("parseCreditsRequiredMessage", () => {
+  test("matches the observed CLI failure text", () => {
+    expect(
+      parseCreditsRequiredMessage(
+        "Fable 5.1 requires usage credits. Switch to another model to continue.",
+      ),
+    ).toBe("fable");
+  });
+
+  test("does not match a model window limit", () => {
+    expect(parseCreditsRequiredMessage("You've reached your Fable limit.")).toBeUndefined();
+  });
+
+  test("matches other families", () => {
+    expect(parseCreditsRequiredMessage("Opus 4.8 requires usage credits.")).toBe("opus");
   });
 });

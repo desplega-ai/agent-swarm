@@ -43,6 +43,41 @@ type AgentFsRawUploadResponse = {
   deduped?: boolean;
 };
 
+/** One agent-fs comment (`comment-get`, `comment-add`). Dates arrive as ISO strings. */
+export type AgentFsComment = {
+  id: string;
+  parentId?: string;
+  /** Stored exactly as the client sent it: "docs/a.md" or "/docs/a.md". */
+  path: string;
+  lineStart?: number;
+  lineEnd?: number;
+  quotedContent?: string;
+  quote?: { exact: string; prefix?: string; suffix?: string };
+  body: string;
+  /** agent-fs user id. */
+  author: string;
+  authorDisplayName?: string;
+  resolved: boolean;
+  /** The file version the comment was made on. */
+  fileVersion?: number;
+  createdAt: string;
+};
+
+/** One entry of a file's `log`. */
+export type AgentFsFileVersion = { version: number; createdAt: string };
+
+/** An agent-fs org and drive. */
+export type AgentFsDrive = { orgId: string; driveId: string };
+
+/** `comment-get`: a comment and its replies (oldest first). */
+export type AgentFsCommentThread = {
+  comment: AgentFsComment;
+  replies: AgentFsComment[];
+};
+
+// A failed identity lookup is not asked again for this long.
+const SERVICE_USER_RETRY_MS = 60_000;
+
 export class AgentFsProvider implements FileStorageProvider {
   readonly id = "agent-fs";
   readonly capabilities = {
@@ -57,6 +92,8 @@ export class AgentFsProvider implements FileStorageProvider {
   private readonly orgId: string;
   private readonly driveId: string;
   private readonly fetchImpl: typeof fetch;
+  private serviceUser: Promise<string> | null = null;
+  private serviceUserRetryAt = 0;
 
   constructor(options: AgentFsProviderOptions = {}) {
     this.apiUrl = stripTrailingSlash(options.apiUrl ?? process.env.AGENT_FS_API_URL ?? "");
@@ -244,6 +281,67 @@ export class AgentFsProvider implements FileStorageProvider {
     })) as FileVersion;
   }
 
+  // Comb (the dashboard review space) reads and answers comments in the swarm
+  // drive with the bootstrap key. The caller names the drive it validated.
+  // These stay narrow on purpose: no generic op call runs with the bootstrap key.
+
+  /** `comment-get`: the comment and its replies. */
+  async getComment(drive: AgentFsDrive, id: string): Promise<AgentFsCommentThread> {
+    return (await this.ops({ op: "comment-get", id }, drive)) as AgentFsCommentThread;
+  }
+
+  /** `log` of one file (at most 200 versions). */
+  async getFileVersions(drive: AgentFsDrive, path: string): Promise<AgentFsFileVersion[]> {
+    const result = asRecord(await this.ops({ op: "log", path, limit: 200 }, drive));
+    return Array.isArray(result?.versions) ? (result.versions as AgentFsFileVersion[]) : [];
+  }
+
+  /** Reply to a root comment. The swarm service account is the author. */
+  async replyToComment(
+    drive: AgentFsDrive,
+    parentId: string,
+    body: string,
+  ): Promise<AgentFsComment> {
+    return (await this.ops({ op: "comment-add", parentId, body }, drive)) as AgentFsComment;
+  }
+
+  /**
+   * The agent-fs user id of this provider's key: the swarm service account
+   * that authors Comb's "sent" replies. One `/auth/me` call, then cached for
+   * the life of the provider (a key change builds a new provider).
+   */
+  getServiceUserId(): Promise<string> {
+    if (!this.serviceUser) {
+      if (Date.now() < this.serviceUserRetryAt) {
+        return Promise.reject(
+          new FilesError("Provider", "agent-fs identity lookup failed recently"),
+        );
+      }
+      this.serviceUser = this.fetchServiceUserId().catch((error: unknown) => {
+        this.serviceUser = null;
+        this.serviceUserRetryAt = Date.now() + SERVICE_USER_RETRY_MS;
+        throw error;
+      });
+    }
+    return this.serviceUser;
+  }
+
+  private async fetchServiceUserId(): Promise<string> {
+    const response = await this.fetchWithDeadline(
+      `${this.apiUrl}/auth/me`,
+      { method: "GET", headers: this.authHeaders() },
+      agentFsRequestTimeoutMs(),
+    );
+    if (!response.ok) {
+      throw await responseToFilesError(response);
+    }
+    const me = asRecord(await response.json().catch(() => null));
+    if (typeof me?.userId !== "string" || !me.userId) {
+      throw new FilesError("Provider", "agent-fs /auth/me did not return a userId");
+    }
+    return me.userId;
+  }
+
   private async fetchRaw(
     scope: FileScope,
     init: RequestInit,
@@ -256,7 +354,10 @@ export class AgentFsProvider implements FileStorageProvider {
     return response;
   }
 
-  private async ops(body: Record<string, unknown>, scope?: FileScope): Promise<unknown> {
+  private async ops(
+    body: Record<string, unknown>,
+    scope?: Pick<FileScope, "orgId" | "driveId">,
+  ): Promise<unknown> {
     const { orgId, driveId } = this.scopeFor(scope);
     const response = await this.fetchWithDeadline(
       `${this.apiUrl}/orgs/${encodeURIComponent(orgId)}/ops`,
@@ -316,7 +417,10 @@ export class AgentFsProvider implements FileStorageProvider {
     return `${this.apiUrl}/orgs/${encodeURIComponent(orgId)}/drives/${encodeURIComponent(driveId)}/files/${providerPath(scope)}/raw`;
   }
 
-  private scopeFor(scope?: FileScope): { orgId: string; driveId: string } {
+  private scopeFor(scope?: Pick<FileScope, "orgId" | "driveId">): {
+    orgId: string;
+    driveId: string;
+  } {
     const orgId = scope?.orgId?.trim();
     const driveId = scope?.driveId?.trim();
 

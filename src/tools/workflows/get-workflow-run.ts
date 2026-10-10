@@ -54,11 +54,12 @@ export const registerGetWorkflowRunTool = (server: McpServer) => {
     },
     async ({ id }) => {
       try {
-        const run = await getWorkflowRun(id);
+        // Display view: the scrubbed context and step outputs, never replay state.
+        const run = await getWorkflowRun(id, "display");
         if (!run) {
           return toolErr(`Workflow run not found: ${id}`, { data: { steps: [] } });
         }
-        const steps = await getWorkflowRunStepsByRunId(id);
+        const steps = await getWorkflowRunStepsByRunId(id, "display");
         return toolOk(`Run ${id} status: ${run.status}.`, {
           details: renderSteps(steps),
           data: { run, steps },

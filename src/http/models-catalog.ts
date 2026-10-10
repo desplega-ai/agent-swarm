@@ -275,6 +275,8 @@ async function ensureCatalogWriter(
   let principal: RbacPrincipal;
   if (auth?.kind === "user") {
     principal = { kind: "user", userId: auth.userId };
+  } else if (auth?.kind === "guest") {
+    principal = { kind: "guest" };
   } else if (agentId) {
     // An X-Agent-ID wins over the shared API key: a worker holds that key, so treating it as the
     // operator would let any worker skip the verb's lead-only rule.

@@ -1,6 +1,8 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
-import { updateSwarmRepo } from "@/be/db";
+import { getAgentById } from "@/be/db";
+import { updateSwarmRepoChecked } from "@/be/repo-checked-update";
+import { can } from "@/rbac";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 import { RepoGuidelinesInputSchema, RepoHooksSchema } from "@/types";
 
@@ -31,7 +33,7 @@ export const registerUpdateRepoTool = (server: McpServer) => {
     {
       title: "Update Repo",
       description:
-        "Update a repo's configuration including guidelines (PR checks, merge policy, review guidance). The lead uses this to set guidelines after asking the user. Pass null for guidelines to clear them.",
+        "Update a repo's configuration including guidelines (PR checks, merge policy, review guidance). The lead uses this to set guidelines after asking the user. Pass null for guidelines to clear them. Only the lead can change allowMerge: resend its current value to edit other guidelines.",
       annotations: { readOnlyHint: false },
 
       inputSchema: z.object({
@@ -56,13 +58,32 @@ export const registerUpdateRepoTool = (server: McpServer) => {
         repo: swarmRepoOutputShape.nullable().optional(),
       }),
     },
-    async ({ id, ...updates }) => {
-      const updated = await updateSwarmRepo(id, updates);
+    async ({ id, ...updates }, requestInfo) => {
+      // The comparison with the stored allowMerge, the decision and the write share one
+      // transaction, so a stale edit cannot overwrite a merge-policy change committed after it.
+      const result = await updateSwarmRepoChecked(id, updates, async (existing) => {
+        const agent = requestInfo.agentId ? await getAgentById(requestInfo.agentId) : null;
+        const decision = can({
+          principal: requestInfo.agentId
+            ? { kind: "agent", agentId: requestInfo.agentId, isLead: agent?.isLead ?? false }
+            : { kind: "operator" },
+          verb: "repo.merge-policy.write",
+          resource: { kind: "none" },
+          source: "mcp",
+        });
+        if (decision.allow) return null;
+        const current = existing.guidelines?.allowMerge === true;
+        return `Only lead agents can change allowMerge (it is currently ${current}). Resend ${current} to keep it while you edit the other guidelines.`;
+      });
 
-      if (!updated) {
+      if (result.kind === "refused") {
+        return toolErr(result.refusal, { data: { repo: null } });
+      }
+      if (result.kind === "not-found") {
         return toolErr(`Repo not found: ${id}`, { data: { repo: null } });
       }
 
+      const updated = result.repo;
       return toolOk(`Updated repo "${updated.name}".`, {
         details: `Updated repo "${updated.name}" — guidelines: ${updated.guidelines ? "configured" : "not set"}`,
         data: { repo: updated },

@@ -18,7 +18,7 @@ Agent Swarm ships without a built-in login page by design — early self-hosters
 | **2. Trusted-header** | oauth2-proxy + forwarded headers | Same gate, plus identity headers forwarded to the upstream | Medium | Recommended for most self-hosters. |
 
 <Callout type="info">
-Role-based access control (RBAC) is on the roadmap — track and upvote it at [feedback.agent-swarm.dev/p/user-rbac](https://feedback.agent-swarm.dev/p/user-rbac).
+Role-based access control (RBAC) is on by default: `RBAC_ENABLED` defaults to `true` (see [Environment Variables](/docs/reference/environment-variables)). There are two built-in roles, `admin` and `requester`, and every user gets `admin` by default. There is no API or UI to assign roles yet. Track and upvote role assignment at [feedback.agent-swarm.dev/p/user-rbac](https://feedback.agent-swarm.dev/p/user-rbac).
 </Callout>
 
 ---
@@ -178,5 +178,6 @@ In Mode 2, the proxy handles:
 
 - [Deployment Guide](/docs/guides/deployment) — base Docker Compose setup this guide extends
 - [Secrets Encryption](/docs/guides/secrets-encryption) — encrypting OIDC client secrets at rest
-- [RBAC / user roles](https://feedback.agent-swarm.dev/p/user-rbac) — track and upvote role-based access control on the roadmap
+- [Environment Variables](/docs/reference/environment-variables) — `RBAC_ENABLED` and the built-in `admin` / `requester` roles
+- [RBAC role assignment](https://feedback.agent-swarm.dev/p/user-rbac) — track and upvote an API and UI for assigning roles to users
 - [Design doc: SSO Integration for Agent Swarm](https://live.agent-fs.dev/file/~/648a5f3c-35c8-4f11-8673-b89de52cd6bd/2faf73ba-4eee-4472-8b3b-359c4ed6bfbb/thoughts/16990304-76e4-4017-b991-f3e37b34cf73/research/2026-06-05-sso-integration-design.md) — internal design doc with full architecture rationale

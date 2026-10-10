@@ -1,5 +1,5 @@
 {
-  "title": "API Reference v1.159.0",
+  "title": "API Reference v1.168.0",
   "description": "REST API reference for agent-swarm.dev",
   "root": true,
   "pages": [
@@ -13,6 +13,7 @@
     "assets",
     "budgets",
     "codex-oauth",
+    "comb",
     "config",
     "core",
     "debug",

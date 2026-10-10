@@ -1,5 +1,6 @@
 import type { ReasoningEffortLevel } from "@/api/types";
 import {
+  AMP_MODES,
   findKnownModel,
   humanizeModelId,
   type LiveModelsCatalog,
@@ -34,7 +35,11 @@ export function getAgentModelPresentation(
   const raw = cleanModel(value);
   if (!raw) return null;
 
-  const known = findKnownModel(raw, liveCatalog);
+  // An Amp mode is not a catalog model, but it should still read as Amp.
+  const ampMode = AMP_MODES.find((mode) => mode.id === raw.toLowerCase());
+  const known =
+    findKnownModel(raw, liveCatalog) ??
+    (ampMode ? { label: ampMode.label, provider: "Amp modes", providerId: "amp" as const } : null);
   return {
     raw,
     label: known?.label ?? formatUnknownModelLabel(raw),

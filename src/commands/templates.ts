@@ -72,6 +72,16 @@ Audit event: {{event_id}}. {{recovery_guidance}}
   category: "task_lifecycle",
 });
 
+// Sent at most once per session by the pi adapter when the model's final turn
+// carries no text and no tool call (see PiMonoSession.repromptAfterEmptyFinalTurn).
+registerTemplate({
+  eventType: "task.nudge.empty_final_turn",
+  header: "",
+  defaultBody: `Your last turn returned no text and no tool call. Finish now: if the task needs a result, call store-progress with it.`,
+  variables: [],
+  category: "task_lifecycle",
+});
+
 registerTemplate({
   eventType: "task.trigger.unread_mentions",
   header: "",

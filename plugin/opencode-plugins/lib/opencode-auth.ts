@@ -39,8 +39,11 @@ export type ResolvedCredential =
     };
 
 /**
- * Mirrors `src/utils/internal-ai/models.ts:DEFAULT_MODEL`. Kept in lockstep
- * with that source manually since the opencode plugin cannot import it.
+ * Rater model per credential kind for the opencode harness. The plugin cannot
+ * import `src/utils/internal-ai/models.ts`, so this is a manual copy, and it has
+ * drifted from `MEMORY_RATER_DEFAULT_MODEL` there (openrouter and openai differ).
+ * Left as is on purpose: changing it would change which model judges opencode
+ * sessions. Each rating records the model it used in `memory_rating.model`.
  */
 const DEFAULT_MODEL: Record<CredentialKind, string> = {
   openrouter: "openrouter/google/gemini-3-flash-preview",

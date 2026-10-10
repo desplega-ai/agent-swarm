@@ -8,6 +8,8 @@
  * Both authenticate with the `X-API-Key` header.
  */
 
+import { scrubSecrets } from "../../utils/secret-scrubber";
+
 /** Result of an outbound text/reply send through the Meta proxy. */
 export interface KapsoSendResult {
   ok: boolean;
@@ -75,7 +77,7 @@ export async function sendKapsoText(params: {
     recipient_type: "individual",
     to: params.to,
     type: "text",
-    text: { preview_url: params.previewUrl ?? false, body: params.body },
+    text: { preview_url: params.previewUrl ?? false, body: scrubSecrets(params.body) },
   };
   if (params.contextMessageId) {
     payload.context = { message_id: params.contextMessageId };

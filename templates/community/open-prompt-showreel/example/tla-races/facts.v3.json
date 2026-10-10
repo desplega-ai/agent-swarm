@@ -1,0 +1,140 @@
+{
+  "readAt": "2026-09-28T21:27:02.622Z",
+  "mainSha": "e3c90a88",
+  "cx": [
+    {
+      "id": "CX1",
+      "title": "the retry poller does not re-execute a failed step of a cancelled run",
+      "failing": false
+    },
+    {
+      "id": "CX2",
+      "title": "a user retry does not re-execute a branch the live walk is still running",
+      "failing": false
+    },
+    {
+      "id": "CX2",
+      "title": "a user retry does not re-dispatch a branch whose waiting checkpoint lost to the run failing",
+      "failing": false
+    },
+    {
+      "id": "CX3",
+      "title": "an async branch completing does not fire the join while a sibling branch is still executing",
+      "failing": false
+    },
+    {
+      "id": "CX4",
+      "title": "two branch completions racing to the join execute it once",
+      "failing": false
+    },
+    {
+      "id": "CX5",
+      "title": "heartbeat recovery leaves a step that is pending retry to the retry poller",
+      "failing": false
+    },
+    {
+      "id": "CX6",
+      "title": "heartbeat recovery does not walk a run whose trigger is still resolving inputs",
+      "failing": false
+    },
+    {
+      "id": "CX7",
+      "title": "the walk finalizer does not complete a run while the retry poller is executing a step",
+      "failing": false
+    }
+  ],
+  "flips": [
+    {
+      "id": "CX1",
+      "pr": 1666,
+      "state": "MERGED"
+    },
+    {
+      "id": "CX2",
+      "pr": 1675,
+      "state": "MERGED"
+    },
+    {
+      "id": "CX3",
+      "pr": 1673,
+      "state": "MERGED"
+    },
+    {
+      "id": "CX4",
+      "pr": 1675,
+      "state": "MERGED"
+    },
+    {
+      "id": "CX5",
+      "pr": 1678,
+      "state": "MERGED"
+    },
+    {
+      "id": "CX6",
+      "pr": 1675,
+      "state": "MERGED"
+    },
+    {
+      "id": "CX7",
+      "pr": 1673,
+      "state": "MERGED"
+    }
+  ],
+  "hbFixes": [
+    {
+      "bug": 1,
+      "bugTitle": "stall classifier supersedes a live task",
+      "pr": 1668,
+      "state": "MERGED",
+      "mergedAt": "2026-09-28T16:50:26Z",
+      "invariant": "NoLiveKill",
+      "trace": ["PollStart", "Age", "HbRead", "Progress", "HbWrite"],
+      "test": "src/tests/heartbeat-stall-cas.test.ts",
+      "testOnMain": true
+    },
+    {
+      "bug": 2,
+      "bugTitle": "API crash between supersede and resume",
+      "pr": 1670,
+      "state": "MERGED",
+      "mergedAt": "2026-09-28T21:11:02Z",
+      "invariant": "SupersededGetsResume",
+      "trace": ["HbRead", "HbWrite", "ApiCrash", "ApiBoot", "stutter"],
+      "test": "src/tests/heartbeat-orphan-resume.test.ts",
+      "testOnMain": true
+    },
+    {
+      "bug": 3,
+      "bugTitle": "reboot sweep fails a live worker",
+      "pr": 1669,
+      "state": "MERGED",
+      "mergedAt": "2026-09-28T16:50:26Z",
+      "invariant": "NoLiveKill",
+      "trace": ["PollStart", "RegisterSession", "ApiCrash", "ApiBoot", "RebootFail"],
+      "test": "src/tests/heartbeat-reboot-live.test.ts",
+      "testOnMain": true
+    }
+  ],
+  "heartbeat": {
+    "bugs": [
+      {
+        "n": 1,
+        "title": "stall classifier supersedes a live task",
+        "violates": "NoLiveKill"
+      },
+      {
+        "n": 2,
+        "title": "API crash between supersede and resume",
+        "violates": "SupersededHasResume"
+      },
+      {
+        "n": 3,
+        "title": "reboot sweep fails a live worker",
+        "violates": "NoLiveKill"
+      }
+    ],
+    "states": ["1,349,396", "544,912", "4,243"],
+    "statusViews": ["64", "n/a", "6"],
+    "rows": ["3", "3", "1"]
+  }
+}

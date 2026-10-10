@@ -195,6 +195,9 @@ export function createAssistant(): Assistant {
               slackTriggerMessageTs: message.ts,
               slackUserId: userId,
               parentTaskId: latestTask?.id,
+              // A human message in the thread: never answer it in the latest
+              // thread task's structured-output contract.
+              inheritParentOutputSchema: false,
               requestedByUserId,
               contextKey: slackContextKey({ channelId, threadTs }),
             },

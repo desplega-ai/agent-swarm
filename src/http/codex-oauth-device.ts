@@ -1,7 +1,8 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import { decryptSecret, encryptSecret, getEncryptionKey } from "../be/crypto";
-import { getDbClient, getKv, upsertKv, upsertSwarmConfig } from "../be/db";
+import { getDbClient, upsertSwarmConfig } from "../be/db";
+import { getCodexDeviceFlow, upsertCodexDeviceFlow } from "../be/db/codex-oauth-device-flows";
 import { updateOnboardingAiFromCodexDevice } from "../be/onboarding";
 import {
   CODEX_DEVICE_VERIFICATION_URL,
@@ -17,7 +18,6 @@ import { ensureConfigAdmin } from "./config";
 import { route } from "./route-def";
 import { jsonError } from "./utils";
 
-const FLOW_NAMESPACE = "codex-oauth-device";
 const FLOW_TTL_MS = 15 * 60 * 1_000;
 const POLL_LEASE_MS = 45_000;
 
@@ -85,10 +85,10 @@ function registerFlowSecrets(state: FlowState): void {
 }
 
 async function readFlow(flowId: string): Promise<FlowState | null> {
-  const entry = await getKv(FLOW_NAMESPACE, flowId);
-  if (!entry || typeof entry.value !== "string") return null;
+  const entry = await getCodexDeviceFlow(flowId);
+  if (!entry) return null;
   try {
-    const plaintext = decryptSecret(entry.value, getEncryptionKey());
+    const plaintext = decryptSecret(entry.state, getEncryptionKey());
     const parsed = FlowStateSchema.safeParse(JSON.parse(plaintext));
     if (!parsed.success) return null;
     registerFlowSecrets(parsed.data);
@@ -99,11 +99,9 @@ async function readFlow(flowId: string): Promise<FlowState | null> {
 }
 
 async function writeFlow(flowId: string, state: FlowState): Promise<void> {
-  await upsertKv({
-    namespace: FLOW_NAMESPACE,
-    key: flowId,
-    value: encryptSecret(JSON.stringify(state), getEncryptionKey()),
-    valueType: "string",
+  await upsertCodexDeviceFlow({
+    flowId,
+    state: encryptSecret(JSON.stringify(state), getEncryptionKey()),
     expiresAt: state.expiresAt,
   });
 }

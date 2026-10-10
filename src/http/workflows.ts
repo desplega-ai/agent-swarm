@@ -901,13 +901,14 @@ export async function handleWorkflows(
   if (getWorkflowRunRoute.match(req.method, pathSegments)) {
     const parsed = await getWorkflowRunRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const run = await getWorkflowRun(parsed.params.id);
+    // Display view: the scrubbed context and step outputs, never replay state.
+    const run = await getWorkflowRun(parsed.params.id, "display");
     if (!run) {
       res.writeHead(404);
       res.end();
       return true;
     }
-    const steps = await getWorkflowRunStepsByRunId(parsed.params.id);
+    const steps = await getWorkflowRunStepsByRunId(parsed.params.id, "display");
     getWorkflowRunRoute.respond(res, 200, { run, steps });
     return true;
   }

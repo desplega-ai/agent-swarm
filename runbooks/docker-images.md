@@ -58,6 +58,8 @@ can't provide).
 bun run docker:build:worker                                       # full -> agent-swarm-worker:latest
 bun run docker:build:worker:slim                                  # slim -> agent-swarm-worker:slim
 bun run docker:build:api                                          # API  -> agent-swarm-api:latest
+bun run docker:build:ui                                           # dashboard -> agent-swarm-ui:latest
+bash scripts/smoke-ui-image.sh agent-swarm-ui:latest               # what the merge gate checks
 docker images --format "{{.Repository}}:{{.Tag}} {{.Size}}" | grep agent-swarm
 docker history agent-swarm-worker:latest --format "{{.Size}}\t{{.CreatedBy}}" \
   | awk -F'\t' '{ if ($1 ~ /[0-9]/ && $1 !~ /^0B/) print }' \
@@ -142,7 +144,7 @@ The worker historically installed Bun once globally (`USER root`) and once for `
 
 ### 4b. Every Bun pin equals `package.json` `packageManager`
 
-Four pins: the builder `FROM oven/bun:<tag>` in `Dockerfile` and in `Dockerfile.worker`, the runtime `curl https://bun.sh/install | bash -s "bun-v<tag>"` in `worker-base`, and `FROM oven/bun:<tag>` in `apps/evals/Dockerfile`. `bun run check:bun-version` (merge gate) fails when any of them differs from `packageManager`. The `Dockerfile` runtime stage also copies `/usr/local/bin/bun` out of the builder, so the scripts-runtime sandbox children run the builder's Bun; keeping the pins equal is what makes "tested in CI on X, runs in prod on X" true.
+Five pins: the builder `FROM oven/bun:<tag>` in `Dockerfile` and in `Dockerfile.worker`, the runtime `curl https://bun.sh/install | bash -s "bun-v<tag>"` in `worker-base`, `FROM oven/bun:<tag>` in `apps/evals/Dockerfile`, and the builder in `Dockerfile.ui`. The nginx base of `Dockerfile.ui` is pinned by digest and updated by Dependabot. `bun run check:bun-version` (merge gate) fails when any of them differs from `packageManager`. The `Dockerfile` runtime stage also copies `/usr/local/bin/bun` out of the builder, so the scripts-runtime sandbox children run the builder's Bun; keeping the pins equal is what makes "tested in CI on X, runs in prod on X" true.
 
 ### 4c. The worker binary is bytecode-compiled; the API binary is not
 

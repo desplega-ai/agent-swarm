@@ -45,7 +45,10 @@ export async function resolveHttpRequestAuth(
         if (!isActiveUser(user)) return null;
         return { kind: "user", userId: user.id, user, page };
       }
-      return { kind: "operator", fingerprint: fingerprintApiKey(bearer), page };
+      if (payload.op) {
+        return { kind: "operator", fingerprint: fingerprintApiKey(bearer), page };
+      }
+      return { kind: "guest", page };
     }
     return { kind: "operator", fingerprint: fingerprintApiKey(bearer) };
   }

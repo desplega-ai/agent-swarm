@@ -197,11 +197,21 @@ The example `docker-compose.yml` sets up:
 | **lead** | Coordinator agent | `3020` | `official/lead` |
 | **worker-1** | Task executor | `3021` | `official/coder` |
 | **worker-2** | Task executor | `3022` | `official/coder` |
+| **worker-researcher** | Researcher | `3031` | `official/researcher` |
+| **worker-reviewer** | Reviewer | `3032` | `official/reviewer` |
+| **worker-tester** | Tester | `3033` | `official/tester` |
+| **worker-forward-deployed-engineer** | Forward-deployed engineer | `3034` | `official/forward-deployed-engineer` |
 | **worker-content-writer** | Content specialist | `3026` | `official/content-writer` |
 | **worker-content-reviewer** | Content reviewer | `3027` | `official/content-reviewer` |
 | **worker-content-strategist** | Content strategist | `3028` | `official/content-strategist` |
+| **worker-ux-principles** | UX analysis | `3029` | `official/ux-principles` |
+| **worker-discoverability-optimizer** | SEO / discoverability | `3030` | `official/discoverability-optimizer` |
+| **minio** | S3-compatible object storage for agent-fs | `9000` (API), `9001` (console) | — |
+| **minio-init** | One-shot job that creates the `agentfs` bucket | — | — |
+| **agent-fs** | Shared file storage service | `7433` | — |
+| **caddy** | TLS reverse proxy, only started with the `tls` profile | `80`, `443` | — |
 
-The content agents are optional — remove them from `docker-compose.yml` if you don't need content workflows.
+The specialist workers are optional — remove any you don't need from `docker-compose.yml`.
 
 <Callout type="info">
 The example Compose files also include a co-deployed MinIO + agent-fs stack for persistent shared files and dashboard task attachments. See [agent-fs Co-deployment](/docs/guides/agent-fs-co-deployment) for Helm and Compose configuration, migration notes, and verification commands.
@@ -292,7 +302,7 @@ docker compose up -d
 
 <h3 id="database-retention">Database retention</h3>
 
-`SESSION_LOG_RETENTION_DAYS`, `AGENT_LOG_RETENTION_DAYS`, and `EVENTS_RETENTION_DAYS` are disabled until you set them. Each value permanently deletes rows older than its window. Start with `DB_RETENTION_DRY_RUN=true`, confirm the exact would-delete count via the `agentswarm.db.retention.backlog` metric and `GET /api/metrics`, then enable one table at a time. See the [database-retention runbook](https://github.com/desplega-ai/agent-swarm/blob/main/runbooks/db-retention.md) before activation.
+`SESSION_LOG_RETENTION_DAYS`, `AGENT_LOG_RETENTION_DAYS`, `EVENTS_RETENTION_DAYS`, and `CONTEXT_VERSIONS_KEEP_LATEST` are disabled until you set them. Each `*_RETENTION_DAYS` value permanently deletes rows older than its window. `CONTEXT_VERSIONS_KEEP_LATEST` is a count, not a window: it keeps that many newest `context_versions` rows per agent and field and deletes older profile history, never the newest version. Start with `DB_RETENTION_DRY_RUN=true`, confirm the exact would-delete count via the `agentswarm.db.retention.backlog` metric and `GET /api/metrics`, then enable one table at a time. See the [database-retention runbook](https://github.com/desplega-ai/agent-swarm/blob/main/runbooks/db-retention.md) before activation.
 
 Three settings tune the sweep itself, all read fresh on every tick with no restart required:
 
@@ -500,6 +510,21 @@ SHUTDOWN_TIMEOUT=30000
 # Docker compose stop grace period (should be >= SHUTDOWN_TIMEOUT + buffer)
 stop_grace_period: 60s
 ```
+
+### API drain
+
+Off by default. Set `API_DRAIN_MAX_MS` (for example `30000`) to turn it on. With it on, the API does not close the moment it gets SIGTERM. It first drains:
+
+1. It keeps serving, but dispatches no new work: HTTP `/api/poll`, MCP `poll-task`, and `task-action` claim and accept all refuse. Creating tasks still works.
+2. It adds `X-Swarm-Draining: 1` to every response.
+3. A worker that sees the header supersedes each in-flight task right away (reason `graceful_shutdown`, the same resume follow-up as the worker's SIGTERM handoff) and takes no new work. It still exits on its own SIGTERM.
+4. The API closes when every task it saw in flight on a live worker has left `in_progress`, or after `API_DRAIN_MAX_MS` (default `0`, which means no drain; max `120000`). With nothing in flight it closes at once.
+
+Orchestrators such as Docker Compose stop the API and the workers together, so a worker's SIGTERM handoff can run after the API is gone and the task falls through to the heartbeat sweep. The drain makes the handoff happen while the API is still up.
+
+Enable it where the API and the workers are stopped together. It also applies to an API-only restart: while it is on, every live worker supersedes its in-flight tasks when the API gets SIGTERM, tasks that would otherwise have kept running. Leave it off for local dev and for API-only rolls.
+
+Keep the API's `stop_grace_period` above `API_DRAIN_MAX_MS` plus the time the API needs to close (a few seconds). Workers older than this feature do not hand off on the header, so the API waits the full cap when they hold tasks.
 
 ### Resume Behavior
 

@@ -9,6 +9,15 @@ import {
   verifyAgentMailWebhook,
 } from "../agentmail";
 import { archiveInboundMessage } from "../agentmail/inbound-archive";
+import type { PullRequestCommentedEvent, PullRequestCreatedEvent } from "../azure-devops";
+import {
+  commentedPayloadOf,
+  createdPullRequestOf,
+  handlePullRequestCommented,
+  handlePullRequestCreated,
+  isAzureDevOpsEnabled,
+  verifyAzureDevOpsWebhook,
+} from "../azure-devops";
 import type {
   CheckRunEvent,
   CheckSuiteEvent,
@@ -43,6 +52,7 @@ import {
   isGitLabEnabled,
   verifyGitLabWebhook,
 } from "../gitlab";
+import { gitlabWorkflowActionName } from "../gitlab/workflow-action-name";
 import {
   type KapsoMessageActionResult,
   markKapsoMessageRead,
@@ -53,6 +63,7 @@ import { getKapsoConfig } from "../integrations/kapso/config";
 import type { KapsoWebhookPayload } from "../integrations/kapso/inbound";
 import { resolveKapsoRequestedByUserId, routeKapsoInbound } from "../integrations/kapso/inbound";
 import { TaskCreationBlockedError } from "../tasks/errors";
+import { canonicalAzureDevOpsRepoUrl } from "../vcs/azure-devops";
 import { getExecutorRegistry } from "../workflows";
 import { workflowEventBus } from "../workflows/event-bus";
 import { handleWebhookTrigger, verifyHmacSignature, WebhookError } from "../workflows/triggers";
@@ -61,8 +72,8 @@ import { route } from "./route-def";
 // ─── Route Definitions (documentation only — webhooks handle their own body parsing) ─
 
 /**
- * Shared shape returned by the GitHub/GitLab dispatch handlers in
- * ../github/handlers.ts and ../gitlab/handlers.ts — `{ created: boolean;
+ * Shared shape returned by the GitHub/GitLab/Azure DevOps dispatch handlers in
+ * ../github/handlers.ts, ../gitlab/handlers.ts and ../azure-devops/handlers.ts — `{ created: boolean;
  * taskId?: string }`, echoed back verbatim as the webhook ack body.
  */
 const WebhookDispatchResultSchema = z.object({
@@ -124,6 +135,24 @@ const gitlabWebhook = route({
     200: { description: "Event processed", schema: WebhookDispatchResultSchema },
     401: { description: "Invalid token" },
     503: { description: "GitLab integration not configured" },
+  },
+});
+
+const azureDevOpsWebhook = route({
+  method: "post",
+  path: "/api/azure-devops/webhook",
+  pattern: ["api", "azure-devops", "webhook"],
+  summary: "Handle Azure DevOps service-hook events",
+  tags: ["Webhooks"],
+  auth: { apiKey: false },
+  rbac: {
+    ungated:
+      "provider webhook: authenticated by the service-hook Basic auth secret, not a swarm principal",
+  },
+  responses: {
+    200: { description: "Event processed", schema: WebhookDispatchResultSchema },
+    401: { description: "Invalid Basic auth credentials" },
+    503: { description: "Azure DevOps integration not configured" },
   },
 });
 
@@ -422,7 +451,8 @@ export async function handleWebhooks(
         case "merge_request": {
           const mr = body as unknown as MergeRequestEvent;
           const action = mr.object_attributes.action;
-          workflowEventBus.emit(`gitlab.merge_request.${action}`, {
+          const workflowAction = gitlabWorkflowActionName(action);
+          const eventPayload = {
             repo: mr.project.path_with_namespace,
             number: mr.object_attributes.iid,
             title: mr.object_attributes.title,
@@ -431,17 +461,27 @@ export async function handleWebhooks(
             merged: mr.object_attributes.state === "merged",
             html_url: mr.object_attributes.url,
             user_login: mr.user.username,
-          });
+          };
+          workflowEventBus.emit(`gitlab.merge_request.${workflowAction}`, eventPayload);
+          if (workflowAction !== action) {
+            workflowEventBus.emit(`gitlab.merge_request.${action}`, eventPayload);
+          }
           break;
         }
         case "issue": {
           const iss = body as unknown as GitLabIssueEvent;
-          workflowEventBus.emit(`gitlab.issue.${iss.object_attributes.action}`, {
+          const action = iss.object_attributes.action;
+          const workflowAction = gitlabWorkflowActionName(action);
+          const eventPayload = {
             repo: iss.project.path_with_namespace,
             number: iss.object_attributes.iid,
             title: iss.object_attributes.title,
-            action: iss.object_attributes.action,
-          });
+            action,
+          };
+          workflowEventBus.emit(`gitlab.issue.${workflowAction}`, eventPayload);
+          if (workflowAction !== action) {
+            workflowEventBus.emit(`gitlab.issue.${action}`, eventPayload);
+          }
           break;
         }
         case "note": {
@@ -469,6 +509,96 @@ export async function handleWebhooks(
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : String(err);
       console.error(`[GitLab] Error handling ${objectKind} event: ${errorMessage}`);
+      if (err instanceof Error && err.stack) {
+        console.error(err.stack);
+      }
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Internal server error" }));
+    }
+    return true;
+  }
+
+  // Azure DevOps service hook — Basic auth secret, JSON body keyed by eventType
+  if (azureDevOpsWebhook.match(req.method, pathSegments)) {
+    if (!isAzureDevOpsEnabled()) {
+      res.writeHead(503, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Azure DevOps integration not configured" }));
+      return true;
+    }
+
+    if (!verifyAzureDevOpsWebhook(req.headers.authorization)) {
+      console.log("[AzureDevOps] Invalid webhook credentials");
+      res.writeHead(401, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Invalid credentials" }));
+      return true;
+    }
+
+    const chunks: Buffer[] = [];
+    for await (const chunk of req) {
+      chunks.push(chunk);
+    }
+    const rawBody = Buffer.concat(chunks).toString();
+
+    let body: Record<string, unknown>;
+    try {
+      body = JSON.parse(rawBody);
+    } catch {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Invalid JSON body" }));
+      return true;
+    }
+
+    const eventType = body.eventType as string | undefined;
+    console.log(`[AzureDevOps] Received ${eventType} event`);
+
+    let result: WebhookDispatchResult = { created: false };
+
+    try {
+      result = await runBlockableHandler("AzureDevOps", async () => {
+        switch (eventType) {
+          case "git.pullrequest.created":
+            return await handlePullRequestCreated(body as unknown as PullRequestCreatedEvent);
+          case "ms.vss-code.git-pullrequest-comment-event":
+            return await handlePullRequestCommented(body as unknown as PullRequestCommentedEvent);
+          default:
+            console.log(`[AzureDevOps] Ignoring unsupported event type: ${eventType}`);
+            return { created: false };
+        }
+      });
+
+      // Emit workflow trigger events for Azure DevOps
+      switch (eventType) {
+        case "git.pullrequest.created": {
+          const pr = createdPullRequestOf(body as unknown as PullRequestCreatedEvent);
+          if (!pr) break;
+          workflowEventBus.emit("azure-devops.pull_request.created", {
+            repo: canonicalAzureDevOpsRepoUrl(pr.repository.remoteUrl),
+            number: pr.pullRequestId,
+            title: pr.title,
+            body: pr.description,
+            action: "created",
+            user_login: pr.createdBy.uniqueName ?? pr.createdBy.id,
+          });
+          break;
+        }
+        case "ms.vss-code.git-pullrequest-comment-event": {
+          const payload = commentedPayloadOf(body as unknown as PullRequestCommentedEvent);
+          if (!payload) break;
+          const { pullRequest: pr, comment } = payload;
+          workflowEventBus.emit("azure-devops.pull_request.commented", {
+            repo: canonicalAzureDevOpsRepoUrl(pr.repository.remoteUrl),
+            number: pr.pullRequestId,
+            action: "commented",
+            user_login: comment.author.uniqueName ?? comment.author.id,
+          });
+          break;
+        }
+      }
+
+      azureDevOpsWebhook.respond(res, 200, result);
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      console.error(`[AzureDevOps] Error handling ${eventType} event: ${errorMessage}`);
       if (err instanceof Error && err.stack) {
         console.error(err.stack);
       }

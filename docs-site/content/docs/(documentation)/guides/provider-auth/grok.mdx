@@ -1,0 +1,90 @@
+---
+title: Grok
+description: Run grok workers on the xAI Grok CLI with an XAI_API_KEY or OpenRouter models, pick a model, and understand how Grok runs are priced
+---
+
+`grok` workers run the official [xAI Grok CLI](https://www.npmjs.com/package/@xai-official/grok) (`@xai-official/grok`, pinned to 1.0.50) as an [Agent Client Protocol](https://agentclientprotocol.com) server: `grok agent --no-leader stdio`. The agent loop and tools run inside the worker. Inference runs on xAI's API with `XAI_API_KEY`, or on OpenRouter with `OPENROUTER_API_KEY` for an `openrouter/<id>` model.
+
+For the adapter internals, see [Harness Providers](/docs/guides/harness-providers).
+
+## Create the API key
+
+Create a key in the [xAI console](https://console.x.ai). API usage is billed to the team that owns the key, so set a spending limit there for a shared swarm.
+
+A SuperGrok subscription login (`grok login`) is not supported yet. The swarm uses API-key billing only.
+
+## Configure the worker
+
+```bash
+# .env.docker
+HARNESS_PROVIDER=grok
+XAI_API_KEY=xai-...
+```
+
+You can also store `XAI_API_KEY` as a swarm secret instead of the worker environment. A worker with neither `XAI_API_KEY` nor `OPENROUTER_API_KEY` waits until one appears in the swarm config. The dashboard's **Test connection** checks the xAI key with `GET https://api.x.ai/v1/models`, the call the CLI makes first, which runs no model. With only `OPENROUTER_API_KEY` set, it checks OpenRouter's `/models`.
+
+The full worker image (`worker-full`) installs the CLI at `/usr/local/bin/grok`. The slim image has none: the entrypoint fails when the executable is absent. `GROK_BINARY` selects another trusted executable.
+
+A rejected key surfaces as `Grok rejected the credentials (XAI_API_KEY or OPENROUTER_API_KEY invalid or missing)`. The CLI's own message for a bad key is "Not signed in", which points at the wrong fix.
+
+## Models
+
+With an `XAI_API_KEY`, `grok models` lists xAI's text models: `grok-4.7`, `grok-4.6`, `grok-4.5`, `grok-4.3`, `grok-4.20-0309-reasoning`, `grok-4.20-0309-non-reasoning` (the CLI default) and `grok-build-0.1`. The picker shows all of them. It leaves out `grok-4.20-multi-agent-0309`, which takes no client tools, and the image and video models. A custom model id still works. A grok worker refuses another vendor's model (`claude-opus-5-5`, `openai/gpt-5.6-sol`, `latest:anthropic/opus`) at task creation and claim: those run only as `openrouter/<vendor>/<id>`.
+
+| Tier | Model | Per 1M tokens (input / cache read / output) |
+|---|---|---|
+| `smol` | `grok-build-0.1` | $1.00 / $0.20 / $2.00 |
+| `regular` | `grok-4.3` | $1.25 / $0.20 / $2.50 |
+| `smart` | `grok-4.6` | $2.00 / $0.50 / $6.00 |
+| `ultra` | `grok-4.7` | $2.00 / $0.50 / $6.00 |
+
+Reasoning effort goes to the CLI's `--reasoning-effort` flag. `grok-4.6` takes `low`, `medium`, `high` and `xhigh`.
+
+### OpenRouter models
+
+The Grok CLI runs any OpenAI-compatible model registered under `[model.<id>]` in its `config.toml`. Pick a model as `openrouter/<vendor>/<id>` (for example `openrouter/deepseek/deepseek-v4.1-flash`), and the adapter writes this block into the session's `GROK_HOME`:
+
+```toml
+[model."openrouter/deepseek/deepseek-v4.1-flash"]
+model = "deepseek/deepseek-v4.1-flash"
+base_url = "https://openrouter.ai/api/v1"   # OPENROUTER_BASE_URL when set
+env_key = "OPENROUTER_API_KEY"
+api_backend = "chat_completions"
+```
+
+An OpenRouter session gets `OPENROUTER_API_KEY` and never `XAI_API_KEY`, so no xAI side model (web search, summaries) bills the xAI key. The picker lists the OpenRouter catalog behind `OPENROUTER_API_KEY`.
+
+### Custom endpoints
+
+The CLI's own endpoint variables pass through on the xAI route, authenticated with `XAI_API_KEY`:
+
+| Variable | Effect |
+|---|---|
+| `GROK_MODELS_BASE_URL` | Sends inference and the model list (`{base}/models`) to another OpenAI-compatible endpoint |
+| `GROK_MODELS_LIST_URL` | Overrides the model-list URL |
+| `GROK_XAI_API_BASE_URL` | Overrides the xAI API base (default `https://api.x.ai/v1`) |
+
+See the [Grok CLI settings reference](https://docs.x.ai/build/settings/reference#environment-variables).
+
+## Isolation
+
+Each session gets a fresh `GROK_HOME`, removed when the session ends, so no login, session or leader socket is shared between tasks. Inside it the adapter:
+
+- turns off the CLI's Claude Code and Cursor compatibility for hooks, MCP servers, `CLAUDE.md` and rules, so the worker's own Claude setup does not load into Grok;
+- disables the worker's Claude Code plugins by name and pins `allow_managed_hooks_only`, so no plugin or compat hook fires;
+- keeps Claude skills on, so the swarm's skills stay available;
+- turns off the auto-updater and telemetry.
+
+The swarm prompt is appended to Grok's own system prompt (`session/new` `_meta.rules`), and every tool call is auto-approved.
+
+## Cost
+
+Grok answers each prompt without an ACP `usage` and puts the prompt's cumulative usage in `_meta.usage`: tokens, model calls and `costUsdTicks`, what xAI billed in units of 1e-10 USD. The adapter converts it to the swarm's shape: input without cache reads, output with reasoning tokens, and the billed USD. `_meta.modelId` names the model that ran, and `_meta.usage.modelUsage` splits the usage per model, so a side model or fallback gets its own row in the breakdown. The API keeps that USD as the row's cost (`costSource: harness`), long-context rates included, and prices the per-model breakdown from the `grok` pricing rows (models.dev xAI rates).
+
+An OpenRouter model reports tokens but no USD, so the API prices it from the OpenRouter rates (`costSource: pricing-table`). See [Cost and context computation](/docs/guides/cost-and-context-computation).
+
+## Limits
+
+- No live steering. Grok exposes no steer primitive, so the worker advertises no steer modes.
+- No session resume.
+- No SuperGrok OAuth pool yet.

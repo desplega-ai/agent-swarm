@@ -38,11 +38,13 @@ import {
 import {
   type Extension,
   ExtensionInstallBodySchema,
+  type ExtensionManifest,
   ExtensionManifestSchema,
   ExtensionRunSchema,
   ExtensionSchema,
   ExtensionVersionSchema,
 } from "../types";
+import { isEnvFlagEnabled } from "../utils/env-flag";
 import { getRequestAuth } from "../utils/request-auth-context";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { route } from "./route-def";
@@ -52,11 +54,20 @@ const idParamsSchema = z.object({ id: z.string().min(1) });
 
 class InlineInstallDisabledError extends Error {}
 
-/** Inline bundles predate the catalog; name the reason instead of a generic unknown-key error. */
-function rejectInlineInstall(body: unknown): unknown {
-  if (typeof body === "object" && body !== null && ("manifest" in body || "files" in body)) {
+/**
+ * Inline bundles run arbitrary code with API-process privileges once enabled, so they stay off
+ * until the operator opts in. Runs before schema validation so a disabled install names the
+ * switch instead of reporting manifest errors. Read per request: a `swarm_config` reload applies.
+ */
+function gateInlineInstall(body: unknown): unknown {
+  if (
+    typeof body === "object" &&
+    body !== null &&
+    ("manifest" in body || "files" in body) &&
+    !isEnvFlagEnabled("EXTENSION_ALLOW_INLINE_INSTALL", false)
+  ) {
     throw new InlineInstallDisabledError(
-      'Inline extension bundles are disabled. Install a predefined extension by name: {"template": "<name>"} (see GET /api/extensions/catalog).',
+      'Inline extension bundles are disabled (EXTENSION_ALLOW_INLINE_INSTALL is off). Install a predefined extension by name: {"template": "<name>"} (see GET /api/extensions/catalog).',
     );
   }
   return body;
@@ -84,11 +95,11 @@ const installRoute = route({
   path: "/api/extensions/install",
   pattern: ["api", "extensions", "install"],
   operationId: "extensions_install",
-  summary: "Install a predefined extension from the catalog",
+  summary: "Install an extension from the catalog or an inline bundle",
   description:
-    "Installs the named template from `GET /api/extensions/catalog`. Inline bundles (`manifest`/`files`) are rejected with `inline_install_disabled`. Any authenticated agent can install a disabled draft owned by its agent ID. Workers can update only their own bundles; activation remains lead/operator-only.",
+    "Installs the named `template` from `GET /api/extensions/catalog`, or an inline `manifest` plus `files`. Inline bundles are rejected with `inline_install_disabled` unless `EXTENSION_ALLOW_INLINE_INSTALL` is on, and then only lead, operator, and dashboard-user callers may send them (workers get 403). Any authenticated agent can install a catalog draft owned by its agent ID. Workers can update only their own bundles. A new extension is always disabled; activation remains lead/operator-only.",
   tags: ["Extensions"],
-  body: z.preprocess(rejectInlineInstall, ExtensionInstallBodySchema),
+  body: z.preprocess(gateInlineInstall, ExtensionInstallBodySchema),
   responses: {
     200: {
       description: "Installed extension",
@@ -99,8 +110,11 @@ const installRoute = route({
         assets: ExtensionAssetsReconcileSchema.nullable(),
       }),
     },
-    400: { description: "Inline bundle rejected or bundle validation failed" },
-    403: { description: "Permission denied" },
+    400: {
+      description:
+        "Inline install disabled, invalid body (template and manifest/files are mutually exclusive), or bundle validation failed",
+    },
+    403: { description: "Permission denied, including inline bundles from workers" },
     404: { description: "Template not found in the catalog" },
   },
   rbac: { permission: "extension.write" },
@@ -397,6 +411,7 @@ async function extensionPrincipal(
   const auth = getRequestAuth(req);
   if (auth?.kind === "operator") return { kind: "operator" };
   if (auth?.kind === "user") return { kind: "user", userId: auth.userId };
+  if (auth?.kind === "guest") return { kind: "guest" };
   return { kind: "agent", agentId: "", isLead: false };
 }
 
@@ -412,7 +427,10 @@ async function requirePermission(
   req: IncomingMessage,
   res: ServerResponse,
   callerAgentId: string | undefined,
-  verb: Extract<PermissionVerb, "extension.write" | "extension.activate">,
+  verb: Extract<
+    PermissionVerb,
+    "extension.write" | "extension.activate" | "extension.install.inline"
+  >,
   resource: RbacResource = { kind: "none" },
 ): Promise<RbacPrincipal | null> {
   const principal = await extensionPrincipal(req, callerAgentId);
@@ -458,29 +476,36 @@ export async function handleExtensions(
       return true;
     }
     if (!parsed) return true;
-    const template = getCatalogEntry(parsed.body.template);
-    if (!template) {
-      json(
-        res,
-        {
-          error: "extension_template_not_found",
-          message: `No predefined extension named "${parsed.body.template}"`,
-        },
-        404,
-      );
-      return true;
+    const { template: templateName, manifest: inlineManifest, files: inlineFiles } = parsed.body;
+    let source: { manifest: ExtensionManifest; files: Record<string, string> };
+    if (inlineManifest !== undefined && inlineFiles !== undefined) {
+      // The flag was checked while parsing; the caller's role is checked here.
+      if (!(await requirePermission(req, res, agentId, "extension.install.inline"))) return true;
+      source = { manifest: inlineManifest, files: inlineFiles };
+    } else {
+      // The body schema guarantees a template here.
+      const template = getCatalogEntry(templateName ?? "");
+      if (!template) {
+        json(
+          res,
+          {
+            error: "extension_template_not_found",
+            message: `No predefined extension named "${templateName}"`,
+          },
+          404,
+        );
+        return true;
+      }
+      source = { manifest: template.manifest, files: template.files };
     }
-    const existing = await getExtensionByName(template.manifest.name);
+    const existing = await getExtensionByName(source.manifest.name);
     const principal = await requirePermission(req, res, agentId, "extension.write", {
       kind: "extension",
       extensionId: existing?.id,
       createdByAgentId: existing?.createdByAgentId,
     });
     if (!principal) return true;
-    const validation = await validateBundle({
-      manifest: template.manifest,
-      files: template.files,
-    });
+    const validation = await validateBundle(source);
     if (!validation.ok) {
       json(res, { error: "extension_validation_failed", diagnostics: validation.diagnostics }, 400);
       return true;
@@ -495,7 +520,7 @@ export async function handleExtensions(
     try {
       result = await installExtensionWithAssets({
         manifest: validation.manifest,
-        files: template.files,
+        files: source.files,
         priority: parsed.body.priority,
         config: parsed.body.config,
         agentId: writerAgentId,

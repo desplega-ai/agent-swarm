@@ -27,6 +27,7 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { formatRelative } from "@/lib/relative-time";
 import { formatSmartTime } from "@/lib/utils";
+import { CONNECT_CHATGPT_HINT, ConnectChatGptButton } from "./connect-chatgpt-button";
 import { MintTokenDialog } from "./mint-token-dialog";
 
 export function TokensTable({ user }: { user: User }) {
@@ -61,11 +62,15 @@ export function TokensTable({ user }: { user: User }) {
                 Hosted client access for this user. Plaintext tokens are only shown at mint time.
               </p>
             </div>
-            <Button size="sm" onClick={() => setMintOpen(true)}>
-              <Plus className="h-3.5 w-3.5 mr-1.5" />
-              Mint token
-            </Button>
+            <div className="flex shrink-0 flex-wrap justify-end gap-2">
+              <ConnectChatGptButton user={user} />
+              <Button size="sm" onClick={() => setMintOpen(true)}>
+                <Plus className="h-3.5 w-3.5 mr-1.5" />
+                Mint token
+              </Button>
+            </div>
           </div>
+          <p className="text-xs text-muted-foreground">{CONNECT_CHATGPT_HINT}</p>
 
           <div className="flex items-center gap-2">
             <Badge variant="outline" size="tag">

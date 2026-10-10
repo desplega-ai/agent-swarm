@@ -34,6 +34,8 @@ import {
   NOT_EXTENSION_AGENT_SQL,
 } from "../be/db";
 import { getEmbeddingProvider } from "../be/memory";
+import { getCombServiceUserId } from "../comb/agent-fs";
+import { getCombConfig } from "../comb/config";
 import { getFileStorageProvider } from "../fs/registry";
 import { getSlackConfiguration } from "../slack/config";
 import { getSlackConnectionState } from "../slack/connection-state";
@@ -120,6 +122,16 @@ export const StatusActivitySchema = z.object({
 });
 export type StatusActivity = z.infer<typeof StatusActivitySchema>;
 
+export const StatusCombSchema = z.object({
+  enabled: z.boolean(),
+  api_url: z.string().nullable(),
+  live_url: z.string(),
+  org_id: z.string().nullable(),
+  drive_id: z.string().nullable(),
+  /** agent-fs user id of the swarm service account, which writes Comb's "sent" replies. */
+  service_user_id: z.string().nullable(),
+});
+
 /**
  * Effective telemetry opt-out state (`ANONYMIZED_TELEMETRY`, on by default).
  * The dashboard reads it to stop its own browser-side notification events when
@@ -135,6 +147,8 @@ export const StatusAgentFsSchema = z.object({
   base_url: z.string().nullable(),
   provider_id: z.string(),
   capabilities: z.record(z.string(), z.unknown()),
+  /** Comb, the agent-fs review space in the dashboard. */
+  comb: StatusCombSchema,
 });
 export type StatusAgentFs = z.infer<typeof StatusAgentFsSchema>;
 
@@ -686,6 +700,10 @@ export function computeHealth(setup: SetupMilestone[]): StatusHealth {
 // ─── Public payload builder (also exported for tests) ────────────────────────
 
 export async function buildStatusPayload(): Promise<StatusResponse> {
+  // step-9: the agent-fs identity lookup (at most 2 s) runs while the DB work below does.
+  const combServiceUserId = getCombConfig().enabled
+    ? getCombServiceUserId()
+    : Promise.resolve(null);
   const automationSetup = await getAutomationSetupStates();
   const setup = await buildSetup(automationSetup);
   const automationInputs = await listEnabledAutomationPreflightInputs();
@@ -694,18 +712,32 @@ export async function buildStatusPayload(): Promise<StatusResponse> {
   const automations: AutomationStatus[] = automationInputs
     .map((automation) => toStatus(preflightAutomation(automation, automationSetup)))
     .sort((a, b) => a.name.localeCompare(b.name) || a.kind.localeCompare(b.kind));
+  const activity = await getInstanceActivity();
   return {
     identity: buildIdentity(),
     setup,
-    activity: await getInstanceActivity(),
+    activity,
     agent_fs: {
       configured: !!process.env.AGENT_FS_API_URL,
       base_url: process.env.AGENT_FS_API_URL ?? null,
       ...getAgentFsStatusProvider(),
+      comb: getCombStatus(await combServiceUserId),
     },
     automations,
     health: computeHealth(setup),
     telemetry: { enabled: isTelemetryEnabled() },
+  };
+}
+
+function getCombStatus(serviceUserId: string | null): StatusAgentFs["comb"] {
+  const comb = getCombConfig();
+  return {
+    enabled: comb.enabled,
+    api_url: comb.apiUrl,
+    live_url: comb.liveUrl,
+    org_id: comb.orgId,
+    drive_id: comb.driveId,
+    service_user_id: comb.enabled ? serviceUserId : null,
   };
 }
 
@@ -735,7 +767,7 @@ const getStatus = route({
   pattern: ["status"],
   summary: "Identity + setup readiness + live activity for the swarm dashboard",
   description:
-    "Single source of truth consumed by the UI home page. Identity comes from SWARM_* envs; setup milestones each emit `unverified | configured | verified`; automations report `running | needs_setup` from the same runtime preflight used at dispatch; activity counts agents alive in the last 5 min and tasks created in the last 24h; agent_fs reports whether AGENT_FS_API_URL is set; telemetry reports the effective ANONYMIZED_TELEMETRY opt-out state.",
+    "Single source of truth consumed by the UI home page. Identity comes from SWARM_* envs; setup milestones each emit `unverified | configured | verified`; automations report `running | needs_setup` from the same runtime preflight used at dispatch; activity counts agents alive in the last 5 min and tasks created in the last 24h; agent_fs reports whether AGENT_FS_API_URL is set, plus the Comb settings (COMB_ENABLED, the browser-facing agent-fs URL, the shared org and drive ids, and the agent-fs user id of the swarm service account); telemetry reports the effective ANONYMIZED_TELEMETRY opt-out state.",
   tags: ["Status"],
   responses: {
     200: { description: "Status payload", schema: StatusResponseSchema },

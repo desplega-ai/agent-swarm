@@ -38,6 +38,7 @@ The Repository Guidelines carry `allowMerge` and `mergeChecks`.
 
 ## Review a PR
 
+0. Re-review check. If you reviewed this PR before, compare `gh pr view <number> --json headRefOid --jq .headRefOid` with the `commit_id` of your last review (`gh api repos/<owner>/<repo>/pulls/<number>/reviews`). Same SHA: reuse that verdict, link it and stop. New SHA: review the diff since that commit, then run the full list below. If the new head merged or rebased main, also read every conflict resolution (files both sides touched), check migration numbering and order against main, grep for stale migration numbers, and confirm CI is green at the exact head you review.
 1. CI status first, including the fork checks below before treating CI as evidence. Failing CI is a REQUEST_CHANGES. Name the failing checks in the review.
 2. Detect a GitHub fork PR with `gh pr view <number> --json isCrossRepository --jq .isCrossRepository`.
 3. For a GitHub fork PR, inspect held runs with `SHA=$(gh pr view <number> --json headRefOid --jq .headRefOid); gh api --paginate "repos/<owner>/<repo>/actions/runs?head_sha=$SHA" --jq '.workflow_runs[] | "\(.conclusion // .status)|\(.name)"'`; `gh pr checks` and `statusCheckRollup` can omit them.

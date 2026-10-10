@@ -193,6 +193,54 @@ describe("runClaudeManagedSetupFlow — happy path", () => {
   });
 });
 
+describe("runClaudeManagedSetupFlow — skill dedupe by display_name", () => {
+  function skill(id: string, displayName: string, updatedAt: string) {
+    return {
+      id,
+      display_name: displayName,
+      updated_at: updatedAt,
+      created_at: updatedAt,
+      latest_version_id: `skver_${id}`,
+      source: { type: "custom" },
+      type: "skill",
+    };
+  }
+
+  test("reuses existing skills by display_name and creates only the missing ones", async () => {
+    const skillsList = mock(async function* () {
+      yield skill("skill_old_worker", "start-worker", "2026-09-01T00:00:00Z");
+      // display_name is not unique: the newest duplicate wins.
+      yield skill("skill_new_worker", "start-worker", "2026-09-20T00:00:00Z");
+      yield skill("skill_stale_worker", "start-worker", "2026-08-01T00:00:00Z");
+    });
+    const skillsCreate = mock(async (params: { display_name?: string }) => ({
+      id: `skill_created_${params.display_name}`,
+    }));
+    const { client } = makeMockClient();
+    client.beta.skills = { create: skillsCreate, list: skillsList } as never;
+
+    const result = await runClaudeManagedSetupFlow(baseConfig, {
+      client: client as any,
+      fetchConfig: mock(async () => null),
+      upsert: mock(async () => undefined),
+      loadSkills: mock(async () => fakeSkillFiles),
+      loadSeededSkills: mock(async () => []),
+      log: mock(() => undefined),
+    });
+
+    expect(result.skillIds).toEqual(["skill_new_worker", "skill_created_create-pr"]);
+    expect(skillsList).toHaveBeenCalledTimes(1);
+    // GA shape only: sending the old beta header would make the API answer
+    // with `display_title`, and the name index would silently be empty.
+    expect(skillsList.mock.calls[0]).toEqual([{ source: "custom" }]);
+    expect(skillsCreate).toHaveBeenCalledTimes(1);
+    const createArgs = skillsCreate.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(createArgs.display_name).toBe("create-pr");
+    expect(createArgs).not.toHaveProperty("display_title");
+    expect(createArgs).not.toHaveProperty("betas");
+  });
+});
+
 describe("runClaudeManagedSetupFlow — idempotent re-run", () => {
   test("short-circuits with already-configured when managed_agent_id exists in swarm_config", async () => {
     const { client, environmentsCreate, agentsCreate } = makeMockClient();

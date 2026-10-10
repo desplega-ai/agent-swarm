@@ -69,6 +69,8 @@ export interface RatingEvent {
   source: string;
   reasoning?: string;
   referencesSource?: string;
+  /** Model that produced the rating; mirrors `RatingEvent.model` in `src/be/memory/raters/types.ts`. */
+  model?: string;
 }
 
 // Mirrored from src/be/memory/raters/llm.ts.
@@ -315,6 +317,31 @@ async function callAnthropic(
   return text;
 }
 
+/**
+ * Copy of `OPENROUTER_APP_ATTRIBUTION_HEADERS` in `src/utils/openrouter-base-url.ts`,
+ * the source of truth (the plugin sandbox can't import from src/).
+ * `src/tests/opencode-plugin.test.ts` fails when the two drift.
+ */
+export const OPENROUTER_APP_ATTRIBUTION_HEADERS = {
+  "HTTP-Referer": "https://agent-swarm.dev",
+  "X-OpenRouter-Title": "Agent Swarm",
+  "X-OpenRouter-Categories": "personal-agent,cloud-agent",
+} as const;
+
+/** Mirrors `getOpenRouterAttributionHeaders`: openrouter.ai hosts only, opt-out via env. */
+export function openRouterAttributionHeaders(url: string): Record<string, string> {
+  const enabled = process.env.OPENROUTER_APP_ATTRIBUTION?.toLowerCase();
+  if (enabled === "false" || enabled === "0") return {};
+  try {
+    const host = new URL(url).hostname;
+    return host === "openrouter.ai" || host.endsWith(".openrouter.ai")
+      ? { ...OPENROUTER_APP_ATTRIBUTION_HEADERS }
+      : {};
+  } catch {
+    return {};
+  }
+}
+
 /** OpenAI-compatible chat completions — covers OpenRouter / OpenAI / OpenAI-Codex. */
 async function callOpenAICompat(
   cred: {
@@ -352,6 +379,7 @@ async function callOpenAICompat(
   const res = await fetch(`${baseUrl}/chat/completions`, {
     method: "POST",
     headers: {
+      ...openRouterAttributionHeaders(baseUrl),
       Authorization: `Bearer ${cred.apiKey}`,
       "Content-Type": "application/json",
     },
@@ -400,6 +428,7 @@ function sanitizeReferencesSource(s: string): string | null {
 export function buildRatingsFromLlm(
   ratings: LlmRating[],
   retrievals: { id: string }[],
+  model?: string,
 ): RatingEvent[] {
   const allowed = new Set(retrievals.map((r) => r.id));
   const events: RatingEvent[] = [];
@@ -420,6 +449,7 @@ export function buildRatingsFromLlm(
     if (cleanedReferencesSource !== undefined) {
       ev.referencesSource = cleanedReferencesSource;
     }
+    if (model) ev.model = model;
     events.push(ev);
   }
   return events;
@@ -482,6 +512,7 @@ export async function postRatings(opts: {
     source: e.source,
     ...(e.reasoning !== undefined ? { reasoning: e.reasoning } : {}),
     ...(e.referencesSource !== undefined ? { referencesSource: e.referencesSource } : {}),
+    ...(e.model !== undefined ? { model: e.model } : {}),
     ...(opts.taskId ? { taskId: opts.taskId } : {}),
   }));
   try {
@@ -638,7 +669,7 @@ export async function summarizeSessionForOpencode(
     }
 
     if (wantRatings && result.ratings && result.ratings.length > 0) {
-      const ratingEvents = _buildRatings(result.ratings, retrievals);
+      const ratingEvents = _buildRatings(result.ratings, retrievals, cred.modelDefault);
       if (ratingEvents.length > 0) {
         await _postRatings({
           apiUrl: config.apiUrl,

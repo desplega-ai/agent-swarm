@@ -6,6 +6,233 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.168.0] - 2026-10-10
+
+### Added
+- Extensions: `slack-reply-gate` ships as a catalog template. It asks Jev (TypeSafe or OpenRouter) whether Lead should answer a Slack thread follow-up, defaults to shadow mode, and fails open (#2023).
+- Script connections: hard delete through the `delete` action on the `script-connections` MCP tool, `DELETE /api/script-connections/{id}`, and a confirm-gated button on `/connections`. It also removes the inline secret the connection minted (#2020).
+- Dashboard: the `SCRIPT_EXECUTOR` setting (`native` or `quickjs`) is selectable on the configuration page (#2004).
+
+### Changed
+- agent-fs bumped to 0.15.3.
+- Worker image: dsh, amp, claude-code, codex, copilot and grok bumped (#2007, #2022).
+- Docs: dreaming-v2 skill seed patches (#2006).
+
+### Fixed
+- Heartbeat: a Claude session waiting on a background task keeps its heartbeat live instead of going stale after 15 minutes (#2017).
+- Scheduler: a script schedule records a `script_runs` row for each fire (#2021).
+- send-task: a script can send a task to its own agent (#2019).
+- UI: the page detail view fits a phone screen (#2018).
+
+## [1.167.0] - 2026-10-09
+
+### Added
+- MCP: an optional `SWARM_ENABLED_TOOLS` allowlist that exposes exactly the listed tools to agent sessions (#1989).
+- OpenRouter: requests sent straight to openrouter.ai carry Agent Swarm app attribution headers across every harness and internal caller; opt out with `OPENROUTER_APP_ATTRIBUTION=false` (#1995, #1996).
+- Heartbeat: a clean boot no longer creates the Lead boot-triage task; `HEARTBEAT_BOOT_TRIAGE_ALWAYS=true` restores it (#1973).
+- CI: unit test durations and flakes are tracked per CI run (#1986).
+
+### Changed
+- agent-fs bumped to 0.15.2 (#2001).
+- Worker image: pi, amp, gemini and the Anthropic SDK bumped (#1971, #1997).
+- Dependencies: vulnerable root, docs-site and templates-ui dependencies bumped (#1976, #1977, #1978).
+- Vercel skips unrelated builds and templates previews (#1980).
+- Docs: TLA+ specs synced with main and extended for boot triage and workflow replay writes (#1975, #1982, #1991); dreaming-v2 skill seed patches (#1972).
+
+### Fixed
+- Hooks: Claude hook blocks are the only stdout of their event, so Claude Code parses them (#1999).
+- pi: extension nudges reach the model through `pi.sendMessage` (#2000).
+- Models: harness family checks accept dated Claude ids (#2002).
+- Pricing: Claude Haiku 5.5 rates are seeded (#1993) and amp's dated snapshot ids collapse before the refresh insert (#1994).
+- Codex: the context gauge reports the latest request, not the turn total (#1988); OAuth refresh and expiry timestamps are separate (#1983).
+- ACP: target configuration is validated before claiming tasks (#1981) and the opencode target honors the OpenRouter gateway (#1992).
+- UI: approval code blocks and inline images render cleanly (#1979).
+- Docker builds retry transient Bun installs (#1984).
+- CI: Merge Gate runs for model package changes (#2003).
+- Tests: the ACP token-revoke test waits before closing the stub server (#1974).
+
+## [1.166.0] - 2026-10-08
+
+### Added
+- ACP: a `copilot` ACP target that runs GitHub Copilot CLI (`copilot --acp`), with subscription-token or BYOK provider auth; the full worker image ships it pinned (#1957).
+- Scripts: an opt-in `quickjs` script executor (`SCRIPT_EXECUTOR=quickjs`) that runs scripts in QuickJS (WASM) inside a worker-thread pool (#1951).
+- Secrets: a central secret registry with a combined known-value matcher (#1918).
+- Secret scrubbing: a vendored gitleaks rule set with a keyword prefilter and corpus test (#1922).
+- DB: a `ScrubbedText` write contract and a TEXT-column classification check (#1923).
+
+### Changed
+- Worker image: claude-code, codex, cursor, amp and the Anthropic SDK bumped (#1967).
+- Maintenance: a versioned retro-sweep scrubs logs, memory, tasks, events and workflow steps (#1917).
+- Tests: a canary sweep checks every table and stdout for leaked secrets (#1928).
+
+### Fixed
+- DB: event payloads (#1924), script run args, output and errors (#1925), workflow run and step payloads (#1926), and memory, messages, approvals, schedules and task text (#1927) are scrubbed at write.
+- `db-query`: credential tables are denied and the HTTP route is scrubbed (#1915).
+- Extension SDK bundler: the QuickJS worker is typechecked (#1969).
+- Docs: empty `LINEAR_ALLOWED_STATES` closes the Linear gate (#1965).
+- Tests: the adversarial scrubber timing guard is de-flaked (#1966).
+
+## [1.165.0] - 2026-10-07
+
+### Added
+- Users: one-click Connect to ChatGPT via single-use connector codes (#1903).
+- Dashboard: the `/connect` confirm step renders inline instead of in a dialog (#1944).
+- Docker: the dashboard is published as an nginx image (#1943).
+- ACP: a `gemini` ACP target that runs `gemini --acp` (#1956).
+- Workflows: OpenAI and Cloudflare clef providers for `system-one-decision` (#1945).
+- Logging: a process-wide console scrub at API and worker boot (#1921).
+- Repo: a show-me PR template with review map, risk and swarm provenance (#1937).
+
+### Changed
+- Pages: page sessions run under a guest principal (#1955).
+- CI: the merge queue skips the image load, typechecks with tsgo, and `bun run check` is the local inner loop (#1920); the HOL plugin scanner workflow is removed (#1950).
+- Worker image: amp re-pinned (#1931); dashboard image base `nginxinc/nginx-unprivileged` bumped (#1946).
+- Skills: vendored ai-toolbox skills re-synced to 77abe63 (#1942).
+- Docs: heartbeat spec synced (#1933).
+- Tests: Anthropic credentials are dropped from the test env (#1954).
+
+### Fixed
+- Credentials: pi and opencode presence-only credentials are honored (#1960).
+- MCP: tool results get a per-channel budget, spills carry a shape summary, and `kv-get` gains views (#1949).
+- Integrations: `*_DISABLE` flags use the shared env-flag parser (#1948).
+- Secret scrubbing: bare and case-insensitive keys, structured key-context rules, PEM blocks and URL credentials (#1916); Slack and WhatsApp sends are scrubbed at the client (#1919).
+- Scripts: background runs and codex keep-warm call back through the internal base URL (#1935).
+- Skills: Jira and Linear use OAuth bindings (#1929).
+- PR body check: fence and HTML comment state are tracked before the Swarm provenance section (#1938).
+- Dashboard: self-hosted support links are shown (#1936).
+- Heartbeat: every terminal status is excluded from deduplication (#1909).
+
+## [1.164.1] - 2026-10-07
+
+### Changed
+- CI: gitleaks secret scanning runs in the merge gate and as a prek hook (#1910).
+- Worker image: claude-code 2.1.289 -> 2.1.292 (Agent SDK 0.3.292), opencode 1.18.35, pi 1.0.4 and re-pinned amp CLI builds (#1890, #1893, #1901, #1905).
+- Docs: ACP bearer auth and harness default corrected in DEPLOYMENT.md (#1895); heartbeat spec synced (#1891); local embedding model spike notes (#1900).
+
+### Fixed
+- Secret scrubbing: HTTP error response bodies (#1911), task completion memory, terminal events and cancel reasons (#1912), business-use payloads and OTel attributes (#1914), the Devin adapter emit and raw log (#1913), and short or shell-escaped secrets in env dumps (#1907).
+- Tasks: worker output schemas no longer leak onto Lead follow-ups and Slack continuations (#1904).
+- Codex: `codex_oauth` pool rows stay out of the worker env (#1897), and the legacy `codex_oauth` row counts as pool slot 0 (#1902).
+- pi: `GEMINI_API_KEY` is accepted for `google/` models (#1892).
+- Claude: workspace trust is seeded for every Claude session (#1899).
+- Linear: the session-opening comment goes into the task body (#1898).
+- ACP: the USD cost an ACP target reports is recorded (#1896).
+- Telemetry: `skill.invoke` is recorded for every harness (#1894).
+- Tests: pre-push test git children stay out of the pushing repo (#1908).
+
+## [1.164.0] - 2026-10-06
+
+### Added
+- Providers: a native `cursor` harness on `@cursor/sdk` with swarm MCP, steer + queue steering, cancel and per-run token cost (#1882).
+- Providers: a native `amp` harness on the Amp CLI (`--stream-json`), with credentials and live test, model validation, cost, swarm MCP and queued steering (#1883).
+- Extensions: approval, budget-refusal, email, Kapso and code-host (GitHub, GitLab, Azure DevOps) events bridged as `post.*` events (#1878).
+- Dashboard: task detail page overhaul for desktop and mobile (#1881).
+- Docs: release notes for the week of 2026-10-05 (#1867).
+
+### Changed
+- Approvals: the responder comes from the caller's credential, and the route enforces the gate's `approvers` users, roles and any/all/min policy (#1854).
+- Worker image: pi 1.0.2 -> 1.0.3 (#1874); codex 0.160.1, `@cursor/sdk` 1.0.36 and a re-pinned amp CLI (#1888).
+- Docs: heartbeat spec synced (#1873), dreaming-v2 skill seed patches (#1871), and bash script `args[0]` binding to `$0` documented (#1870).
+
+### Fixed
+- GitHub: an approval with no body and no open review items no longer creates a lead task; set `GITHUB_SKIP_NOOP_APPROVALS=false` to restore it (#1872).
+- GitLab: workflow events use the documented past-tense names (#1880).
+- Heartbeat: session-log ingestion refreshes a task's session liveness (#1879).
+- x402: spending is reserved before payment creation, so concurrent payments cannot exceed the daily limit (#1885).
+- Amp: queued steering is delivered at the next tool result and reported delivered only on a consumption receipt; unknown model pins fail fast (#1887).
+- Cursor: cache writes are excluded from fresh input tokens (#1886).
+- Coverage: the nightly coverage job uses the script endpoint (#1884).
+
+## [1.163.0] - 2026-10-05
+
+### Added
+- Dashboard: a longterm key tree and whole-memory view on `/memory` (#1856).
+- Dashboard: task status dots and spinners replaced with the reference icon set (#1860).
+- Docs: multi-agent orchestration patterns guide (#1864) and a features section with a team collaboration page (#1865).
+
+### Changed
+- Memory: `DELETE /api/memory/{id}` (and the script SDK's `memory_delete`) follows the `memory-delete` rule, so only the lead deletes swarm-scoped memories; `POST /api/memory/list` returns an agent caller only its own rows plus swarm-scoped ones (#1855).
+- RBAC: only a lead, the operator or a user can create or change stdio MCP servers at agent scope (#1851), change a repo's `allowMerge` (#1852), or attribute a task to a user other than the current task's requester (#1853). The stdio and `allowMerge` checks run inside the write transaction (#1859).
+- Docs: workflow example configs and routing corrected (#1862); SSO RBAC note, Sentry summary and compose service table aligned with code (#1863).
+
+### Fixed
+- Memory: deleting a keyed document removes its stale chunks (#1857), and a key-only chunk lookup resolves to one visible document (#1861).
+- Dashboard: offers a reload instead of crashing when a deploy removes a lazy-loaded chunk (#1866).
+- Tests: adapter tests isolate the inherited Claude transport (#1858).
+
+## [1.162.0] - 2026-10-03
+
+### Added
+- Comb: an agent-fs review space in the dashboard, off by default behind `COMB_ENABLED`, with `AGENT_FS_PUBLIC_URL` for the browser-facing agent-fs URL (#1728).
+- Claude Code mod: a `/swarm` pane, a delegate tool and live task logs inside the agent-swarm plugin (#1838).
+- Memory: Azure / Microsoft Foundry embeddings preset and a Memory integration card (#1836).
+- Telemetry: `schema_version` 2 identity envelope against the proxy event catalog (#1780).
+
+### Changed
+- CI builds and deploys only the newest main commit, and posts deploy outcomes to Slack through the optional `DEPLOY_SLACK_WEBHOOK_URL` (#1842).
+- Dependencies bumped: ACP SDK 1.7.0 (#1841), agent-fs pins 0.15.1 (#1840), agent-browser 0.38.2 (#1835).
+- Docs: heartbeat spec synced with #1820 (#1834); TLA+ heartbeat and workflow specs synced with main (#1848); README links agent-swarm.dev.
+
+### Fixed
+- Shutdown: the API drains on SIGTERM so workers hand off while it still serves, behind `API_DRAIN_MAX_MS` (#1837).
+- Runner recovers fenced JSON output for schema-bound tasks (#1833).
+- pi reprompts once when the final assistant turn is empty (#1831).
+- Workflows honor `node.retry` when an agent-task step's task fails (#1832).
+- Linear tracker holders can delegate (#1839).
+
+## [1.161.0] - 2026-10-02
+
+### Added
+- Azure DevOps integration: Azure Repos pull-request service hooks create swarm tasks from bot mentions (#1812).
+- Claude harness accepts gateway, Microsoft Foundry, Amazon Bedrock and Google Vertex routes (#1816).
+- Extensions: opt-in inline install for leads, the operator and dashboard users behind `EXTENSION_ALLOW_INLINE_INSTALL` (#1828), and a deploy-awareness catalog extension (#1826).
+- Memory: logical paths under `/longterm` via `key`, `newKey`, `keyPrefix` and path weight (#1814).
+- DB retention: count-based retention for `context_versions` via `CONTEXT_VERSIONS_KEEP_LATEST` (#1808).
+- pi: `PI_CODEMODE_MODELS` flag lets codemode scripts call pi's `models` API (#1824).
+- E2E: the Slack rendering preview comment collapses into one dropdown (#1817).
+
+### Changed
+- Harnesses bumped: Claude Code 2.1.287 with claude-agent-sdk 0.3.287, pi 1.0.0, codex 0.160.0 (#1825); ACP SDK 1.6.0 (#1811).
+- claude-managed migrated to `@anthropic-ai/sdk` ^0.131.0 (#1805).
+- Docs: open-prompt showreel videos playbook (#1809).
+
+### Fixed
+- Runner frees a worker slot when the provider session never settles (#1820), and reports pi CLI versions while clearing stale harness versions (#1821).
+- Unknown MCP session ids get a 404 so clients reconnect (#1822).
+- Azure DevOps payloads missing resource fields are acknowledged instead of returning 500 (#1823).
+- Claude sends the task body once in the first message (#1815).
+- GitHub pings get a 👀 reaction via `GITHUB_TOKEN` when no GitHub App is installed (#1813).
+- dsh: MCP, failure path, sandbox, cost and context, effort, runtime editing (#1810), readable progress and one usage normalization with no phantom cost drift (#1818).
+- Memory: a blank `referencesSource` is accepted instead of rejecting the whole summary (#1807); the rater model is pinned and recorded per rating (#1806).
+
+## [1.160.0] - 2026-10-01
+
+### Added
+- Slack shows a native working status for the whole life of an ask (#1770).
+- Task, schedule and workflow tools reject a model that the assignee's harness cannot run (#1764).
+- Webhook workflow triggers support a `standard-webhooks` verification mode (#1760).
+- pi: opt-in codemode behind `PI_CODEMODE` (#1731), non-core swarm tools deferred behind `tool_search` with `PI_TOOL_DEFERRAL` (#1729), and installed MCP servers connected through pi's MCP extension (#1730).
+- OpenCode emits assistant text so the runner validates the final message against `outputSchema` (#1753).
+- Evals: suite v1 freeze and grader validation (#1741), analytics API (#1744), leaderboard with Pareto frontier (#1755, #1771), scenario cards and heatmap (#1759), fan-out, worker-recovery and swarm scenarios (#1745, #1756), publishable benchmark v1.0 page (#1761), and Codex on the ChatGPT subscription with gpt-6.1-sol and gpt-5.6 (#1772).
+
+### Changed
+- agent-fs bumped to 0.15.0 (#1748); codex bumped to 0.159.2 (#1735).
+- CI: UI e2e artifact uploads time out and retry (#1754); the deploy waits for late Dokploy deployment records (#1742).
+- `db.ts` top-level bodies are frozen by a test instead of a line cap (#1783, #1784).
+- Docs: dashboard design reference (#1757), `system-one-decision` with provider laya (#1750), model-catalog overlay proposals (#1733), TLA+ specs synced (#1738), and `PI_CODEMODE` / `PI_TOOL_DEFERRAL` in the environment variable reference.
+
+### Fixed
+- Claude OAuth key selection is seat-aware for Fable (#1765); a Codex pool login is benched after 2 auth failures in a row (#1763).
+- Boot: linear `memory_fts` backfill and retried worker registration (#1791).
+- `store-progress` refuses writes to another agent's task (#1737).
+- pi codemode runs in the compiled binary, and deleted reloadable config is unset (#1767).
+- Telemetry opt-out is honored in dashboard events (#1773).
+- Tool-search prompt guidance is gated by harness capability (#1727).
+- Memory recall uses task content instead of worker wrappers (#1740).
+- OpenCode sends `X-Source-Task-Id` and `X-Context-Key` on the swarm MCP entry (#1749).
+- Seeding treats a source-identical live copy as in sync (#1734); `task-failure-audit` projects failure reasons for every groupBy (#1736).
+- Dashboard and docs-site UI audit findings (#1743, #1774, #1776); evals image ships the Codex OAuth helpers (#1778).
+
 ## [1.159.0] - 2026-09-30
 
 ### Added

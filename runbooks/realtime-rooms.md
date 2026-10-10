@@ -21,10 +21,11 @@ The [REST reference](https://docs.agent-swarm.dev/docs/api-reference/rooms) desc
 
 User-token page launches sign `uid` and `name` into the page session.
 The API resolves the signed user again during proxy authentication. Inactive users cannot use these sessions.
-Operator launches and password unlocks create guest sessions. They do not inherit the page author's agent ID.
+Operator launches sign `op` and a generated guest name. They keep operator API access and do not inherit the page author's agent ID.
+Password unlocks create guest sessions with neither `uid` nor `op`.
 Legacy browser SDK memory operations use the page owner's agent scope through verified page execution context.
 The server loads this context from the signed session's page record. It preserves the viewer's authentication, permissions, and audit identity.
-Guest proxy calls retain deployment-level API access. Review a page before granting external people a password.
+Guest proxy calls reach only `GET pages/<own id>` (without `passwordHash`) and the page's own KV. Every other route returns 403, and every RBAC verb denies a guest.
 Public pages admit anonymous room peers through the dedicated socket path. They do not receive a general API cookie.
 
 Page sockets require a matching `Origin` and host. Authenticated sockets close when the signed page session expires.
@@ -85,6 +86,22 @@ Wait nodes must subscribe before an external change occurs. Room correctness use
 Run a single API replica. Sticky sessions do not provide shared state between replicas.
 Room transport and snapshots do not scrub document content. Never store secrets in a room.
 Logs and error messages still pass through the secret scrubber.
+
+## Dashboard presence (Comb)
+
+The dashboard requests a one-shot ticket with `POST /api/realtime/ticket` and its normal bearer token.
+The ticket expires after 60 seconds and becomes invalid after its first WebSocket upgrade attempt.
+Connect to `/api/realtime?ticket=<ticket>`. `/@swarm/realtime` accepts the same ticket.
+
+Use namespace `presence:comb:<orgId>:<driveId>` and room name `default`.
+Both IDs must match `[A-Za-z0-9_-]{1,64}`. Put the current file path in the presence payload.
+The IDs must be the configured Comb drive (`AGENT_FS_DEFAULT_ORG_ID`, `AGENT_FS_DEFAULT_DRIVE_ID`), and Comb must be on.
+The server does not check agent-fs drive membership: any dashboard principal with `comb.presence` sees the selections.
+Only operator and active user dashboard principals may use these rooms.
+Agents and page sessions cannot join them. RBAC users need `comb.presence`.
+The server accepts only `join`, `leave`, and `presence` for this namespace.
+It rejects `update`, `change`, `reset`, `publish`, `subscribe`, and `unsubscribe`.
+Presence keeps the existing 8 KiB payload limit and never writes room state to the database.
 
 ## Development and verification
 

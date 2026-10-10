@@ -5,15 +5,17 @@ description: Pause a workflow mid-flight until a human approves in Slack. The ag
 
 Pause a workflow mid-flight until a human approves in Slack. The agent does the work; the human owns the irreversible decision.
 
-<Mermaid title="Human-in-the-loop gate: the agent does the work, the workflow pauses on request-human-input, then proceeds on approve or archives on reject." chart={`flowchart LR
-  W["Agent does the work<br/>(draft / audit / plan)"] --> G{{"request-human-input<br/>(workflow pauses)"}}
+<Mermaid title="Human-in-the-loop gate: the agent does the work, the workflow pauses on human-in-the-loop, then proceeds on approve or archives on reject." chart={`flowchart LR
+  W["Agent does the work<br/>(draft / audit / plan)"] --> G{{"human-in-the-loop<br/>(workflow pauses)"}}
   G -- "approve" --> GO["Proceed<br/>(send / merge / prune)"]
   G -- "reject" --> STOP["Archive / abort"]
 `} />
 
 ## What it is
 
-A workflow node (`request-human-input`) that blocks execution and posts to Slack, then resumes only when a human reacts. The agent prepares everything up to the point of no return; the human makes the call on the irreversible step.
+A workflow node (`human-in-the-loop`) that blocks execution and posts to Slack, then resumes only when a human responds. The agent prepares everything up to the point of no return; the human makes the call on the irreversible step.
+
+Agents can also request a human decision with the `request-human-input` MCP tool; that tool is distinct from the `human-in-the-loop` workflow executor.
 
 ## Where we use it
 

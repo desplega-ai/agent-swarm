@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import type { IncomingMessage } from "node:http";
-import { isReservedNamespace, reservedRoomKeyError } from "../kv-reserved-namespaces";
+import {
+  isReservedNamespace,
+  reservedNamespaceError,
+  reservedRoomKeyError,
+} from "../kv-reserved-namespaces";
+import { can } from "../rbac";
 import { authorizeRoomNamespace, resolveRoomNamespace, roomRequestInfo } from "../realtime/auth";
 
 describe("realtime room namespace guards", () => {
@@ -27,6 +32,104 @@ describe("realtime room namespace guards", () => {
 
   test("retains the apps namespace reservation", () => {
     expect(isReservedNamespace("apps:demo")).toBe(true);
+  });
+
+  test("reserves the comb namespace family for Comb's send claims", () => {
+    expect(isReservedNamespace("comb")).toBe(true);
+    expect(isReservedNamespace("comb:sent")).toBe(true);
+    expect(reservedNamespaceError("comb:sent")).toContain("Comb");
+    expect(reservedNamespaceError("apps")).toContain("swarm apps");
+    expect(isReservedNamespace("combo")).toBe(false);
+    expect(isReservedNamespace("user:comb")).toBe(false);
+  });
+
+  test("limits Comb presence namespaces to dashboard presence operations", async () => {
+    const keys = [
+      "RBAC_ENABLED",
+      "COMB_ENABLED",
+      "AGENT_FS_API_URL",
+      "AGENT_FS_DEFAULT_ORG_ID",
+      "AGENT_FS_DEFAULT_DRIVE_ID",
+    ] as const;
+    const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+    process.env.RBAC_ENABLED = "false";
+    process.env.COMB_ENABLED = "true";
+    process.env.AGENT_FS_API_URL = "http://agent-fs.test";
+    process.env.AGENT_FS_DEFAULT_ORG_ID = "org_123";
+    process.env.AGENT_FS_DEFAULT_DRIVE_ID = "drive-456";
+    const namespace = "presence:comb:org_123:drive-456";
+    try {
+      // Only the configured drive, and only while Comb is on.
+      await expect(
+        authorizeRoomNamespace(
+          "presence:comb:org_123:other-drive",
+          { isOperator: true, callOrigin: "ws" },
+          "join",
+        ),
+      ).resolves.toContain("configured Comb drive");
+      process.env.COMB_ENABLED = "false";
+      await expect(
+        authorizeRoomNamespace(namespace, { isOperator: true, callOrigin: "ws" }, "join"),
+      ).resolves.toBe("Comb is off");
+      process.env.COMB_ENABLED = "true";
+      await expect(
+        authorizeRoomNamespace(namespace, { isOperator: true, callOrigin: "ws" }, "join"),
+      ).resolves.toBeNull();
+      await expect(
+        authorizeRoomNamespace(namespace, { userId: "user-1", callOrigin: "ws" }, "presence"),
+      ).resolves.toBeNull();
+      await expect(
+        authorizeRoomNamespace(namespace, { isOperator: true, callOrigin: "ws" }, "update"),
+      ).resolves.toContain("only allow");
+      await expect(
+        authorizeRoomNamespace(namespace, { isOperator: true, callOrigin: "ws" }, "publish"),
+      ).resolves.toContain("only allow");
+      await expect(
+        authorizeRoomNamespace(namespace, { agentId: "agent-1", callOrigin: "ws" }, "join"),
+      ).resolves.toContain("dashboard authentication");
+      await expect(
+        authorizeRoomNamespace(
+          namespace,
+          { pageId: "page-1", userId: "user-1", callOrigin: "ws" },
+          "join",
+        ),
+      ).resolves.toContain("dashboard authentication");
+      await expect(
+        authorizeRoomNamespace(
+          "presence:comb:org:drive:extra",
+          { isOperator: true, callOrigin: "ws" },
+          "join",
+        ),
+      ).resolves.toContain("invalid");
+    } finally {
+      for (const key of keys) {
+        if (previous[key] === undefined) delete process.env[key];
+        else process.env[key] = previous[key];
+      }
+    }
+  });
+
+  test("allows Comb presence for humans and denies agents in the legacy policy", () => {
+    const resource = { kind: "kv-namespace", namespace: "presence:comb:org:drive" } as const;
+    expect(
+      can({ principal: { kind: "operator" }, verb: "comb.presence", resource, source: "http" }),
+    ).toEqual({ allow: true });
+    expect(
+      can({
+        principal: { kind: "user", userId: "user-1" },
+        verb: "comb.presence",
+        resource,
+        source: "http",
+      }),
+    ).toEqual({ allow: true });
+    expect(
+      can({
+        principal: { kind: "agent", agentId: "agent-1", isLead: true },
+        verb: "comb.presence",
+        resource,
+        source: "http",
+      }),
+    ).toMatchObject({ allow: false, missing: "comb.presence" });
   });
 
   test("does not trust an agent header from a user bearer request", () => {

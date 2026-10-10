@@ -1,5 +1,6 @@
 import { upsertOAuthApp } from "../be/db-queries/oauth";
 import { getPublicMcpBaseUrl } from "../utils/constants";
+import { isEnvFlagEnabled } from "../utils/env-flag";
 import { initJiraOutboundSync, teardownJiraOutboundSync } from "./outbound";
 // Side-effect import: registers all Jira event templates in the in-memory
 // registry at module load time (mirrors `src/linear/templates.ts`).
@@ -10,8 +11,7 @@ import { startJiraWebhookKeepalive, stopJiraWebhookKeepalive } from "./webhook-l
 let initialized = false;
 
 export function isJiraEnabled(): boolean {
-  const disabled = process.env.JIRA_DISABLE;
-  if (disabled === "true" || disabled === "1") return false;
+  if (isEnvFlagEnabled("JIRA_DISABLE", false)) return false;
   const enabled = process.env.JIRA_ENABLED;
   if (enabled === "false" || enabled === "0") return false;
   return !!process.env.JIRA_CLIENT_ID;

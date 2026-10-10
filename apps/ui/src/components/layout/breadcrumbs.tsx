@@ -60,6 +60,7 @@ const routeLabels: Record<string, string> = {
   keys: "API Keys",
   "api-keys": "API Keys",
   pages: "Pages",
+  file: "Comb",
   people: "People",
   unmapped: "Unmapped",
 };
@@ -85,7 +86,7 @@ const HEX32_REGEX = /^[0-9a-f]{32}$/i;
  * casing can't produce ("mcp-servers" → "MCP Servers", "keys" → "API Keys"). */
 function humanizeSegment(segment: string): string {
   // Malformed percent escapes ("/%", "/apps/%ZZ") make decodeURIComponent
-  // throw — and the header renders OUTSIDE the route error boundary, so an
+  // throw, and the header renders OUTSIDE the route error boundary, so an
   // uncaught URIError here would take down the whole shell. Show the raw
   // segment instead.
   let decoded = segment;
@@ -123,7 +124,9 @@ function isEntityId(segment: string | undefined): boolean {
 
 export function Breadcrumbs() {
   const location = useLocation();
-  const segments = location.pathname.split("/").filter(Boolean);
+  const pathSegments = location.pathname.split("/").filter(Boolean);
+  // Comb (`/file/~/<org>/<drive>/<path>`) draws its own path trail in the page.
+  const segments = pathSegments[0] === "file" ? pathSegments.slice(0, 1) : pathSegments;
   // Home shows the greeting in the breadcrumb slot (there is no trail to
   // draw and no in-page h1 anymore). Called before the early return so hook
   // order stays stable across routes.

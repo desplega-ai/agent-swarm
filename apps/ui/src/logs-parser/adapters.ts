@@ -1,4 +1,9 @@
-import { asString, isRecord, makeItem, resultBlockText } from "./helpers";
+import {
+  addDshStepUsage,
+  type DshStepUsage,
+  normalizeDshStepUsage,
+} from "../../../../src/utils/dsh-usage";
+import { asString, isRecord, makeItem, resultBlockText, stringifyForDisplay } from "./helpers";
 import { resultImages } from "./result-images";
 import type { DecodedRecord, LogRole, NormalizedItem } from "./types";
 
@@ -258,7 +263,7 @@ export function normalizeAcp(ordered: DecodedRecord[]): NormalizedItem[] {
       }
       case "progress": {
         // Only suppress the provider's generated duplicate for a known call.
-        const match = /^ACP tool (\S+) (?:pending|in_progress|completed|failed)$/.exec(
+        const match = /^ACP tool (\S+) (?:pending|in_progress|completed|failed|updated)$/.exec(
           String(ev.message ?? ""),
         );
         if (!match?.[1] || !toolCalls.has(match[1])) {
@@ -861,6 +866,405 @@ function emitOpencodeEvent(
       break;
     }
   }
+}
+
+// dsh names its file tools in lowercase; map them to the names the viewer
+// renders as file tools (icon + path detail).
+const DSH_TOOL_NAMES: Record<string, string> = {
+  read: "Read",
+  write: "Write",
+  edit: "Edit",
+  glob: "Glob",
+  grep: "Grep",
+  ls: "LS",
+};
+
+/**
+ * dsh (`dsh --json`) prints one flat event per line: `session`, `status`
+ * (turn_start / step_start / step_end / turn_end), `text`, `tool_call`,
+ * `tool_result`, `final`, `error`. The runner stores each line verbatim.
+ */
+export function normalizeDsh(ordered: DecodedRecord[]): NormalizedItem[] {
+  const items: NormalizedItem[] = [];
+  let turnUsage: DshStepUsage | undefined;
+  let turnSteps = 0;
+  let lastAssistantText: string | undefined;
+
+  for (const d of ordered) {
+    const ev = d.event;
+    if (isParseError(ev)) {
+      items.push(makeItem(d, "parse_error", { role: "system", raw: ev.raw }));
+      continue;
+    }
+    if (!isRecord(ev)) {
+      items.push(makeItem(d, "unknown", { role: "system", raw: ev }));
+      continue;
+    }
+
+    if (emitStderr(items, d, ev)) continue;
+
+    switch (ev.type) {
+      case "session": {
+        items.push(
+          makeItem(d, "lifecycle", { role: "system", meta: { ...ev, type: "session.started" } }),
+        );
+        break;
+      }
+      case "thinking": {
+        // Emitted once a reasoning block is committed, when an effort is set.
+        const text = dshText(ev.text, ev.truncated);
+        if (text) items.push(makeItem(d, "reasoning", { role: "assistant", text }));
+        break;
+      }
+      case "model": {
+        // Written by the swarm adapter, not dsh: the model the patch selected.
+        const effort = asString(ev.reasoningEffort);
+        const subtype = `${asString(ev.provider) ?? "?"} · ${asString(ev.model) ?? "?"}${effort ? ` · effort ${effort}` : ""}`;
+        items.push(
+          makeItem(d, "lifecycle", {
+            role: "system",
+            meta: { ...ev, type: "model.selected", subtype },
+          }),
+        );
+        break;
+      }
+      case "text": {
+        const text = dshText(ev.text, ev.truncated);
+        lastAssistantText = text;
+        items.push(makeItem(d, "text", { role: "assistant", text }));
+        break;
+      }
+      case "tool_call": {
+        const tool = asString(ev.tool) ?? "tool";
+        items.push(
+          makeItem(d, "tool_call", {
+            role: "assistant",
+            tool: {
+              id: String(ev.callId ?? ""),
+              name: DSH_TOOL_NAMES[tool] ?? tool,
+              input: ev.input ?? {},
+            },
+          }),
+        );
+        break;
+      }
+      case "tool_result": {
+        items.push(
+          makeItem(d, "tool_result", {
+            role: "user",
+            result: {
+              id: String(ev.callId ?? ""),
+              payload: dshText(ev.result, ev.truncated),
+              isError: ev.status === "error",
+            },
+          }),
+        );
+        break;
+      }
+      case "status": {
+        switch (ev.phase) {
+          case "turn_start": {
+            turnUsage = undefined;
+            turnSteps = 0;
+            items.push(
+              makeItem(d, "lifecycle", { role: "system", meta: { ...ev, type: "turn.started" } }),
+            );
+            break;
+          }
+          case "step_start":
+            // Carries only turn/step counters; step_end holds the usage.
+            break;
+          case "step_end": {
+            turnSteps += 1;
+            const step = normalizeDshStepUsage(ev.usage);
+            if (step) turnUsage = addDshStepUsage(turnUsage, step);
+            break;
+          }
+          case "turn_end": {
+            const reason = isRecord(ev.reason) ? ev.reason : {};
+            if (reason.kind === "completed") {
+              items.push(
+                makeItem(d, "lifecycle", {
+                  role: "system",
+                  meta: {
+                    ...ev,
+                    type: "turn.completed",
+                    // dsh steps are model calls; the cost sidebar counts turns.
+                    steps: turnSteps,
+                    usage: turnUsage && {
+                      // Codex-style: input includes the cached share.
+                      input_tokens: turnUsage.input + turnUsage.cacheRead + turnUsage.cacheWrite,
+                      cached_input_tokens: turnUsage.cacheRead,
+                      output_tokens: turnUsage.output,
+                    },
+                  },
+                }),
+              );
+            } else {
+              const error = isRecord(reason.error) ? reason.error : undefined;
+              const kind = asString(reason.kind) ?? "unknown";
+              items.push(
+                makeItem(d, "result", {
+                  role: "system",
+                  meta: {
+                    ...ev,
+                    type: "dsh_turn_error",
+                    subtype: kind,
+                    isError: true,
+                    output: asString(error?.message) ?? `dsh turn ended: ${kind}`,
+                    usage: turnUsage && {
+                      input_tokens: turnUsage.input,
+                      cache_read_input_tokens: turnUsage.cacheRead,
+                      ...(turnUsage.cacheWrite > 0
+                        ? { cache_creation_input_tokens: turnUsage.cacheWrite }
+                        : {}),
+                      output_tokens: turnUsage.output,
+                    },
+                  },
+                }),
+              );
+            }
+            turnUsage = undefined;
+            turnSteps = 0;
+            break;
+          }
+          default: {
+            items.push(makeItem(d, "unknown", { role: "system", raw: ev }));
+          }
+        }
+        break;
+      }
+      case "final": {
+        const text = asString(ev.text) ?? "";
+        // An errored turn ends with an empty final (the error row already says
+        // why), and a normal one repeats the last assistant text. Only a final
+        // that adds something gets its own row.
+        if (!text || text === lastAssistantText) break;
+        items.push(
+          makeItem(d, "result", {
+            role: "system",
+            meta: { ...ev, type: "dsh_final", subtype: "success", output: text },
+          }),
+        );
+        break;
+      }
+      case "error": {
+        items.push(
+          makeItem(d, "result", {
+            role: "system",
+            meta: {
+              ...ev,
+              type: "dsh_error",
+              subtype: "error",
+              isError: true,
+              output: asString(ev.message) ?? "dsh error",
+            },
+          }),
+        );
+        break;
+      }
+      default: {
+        items.push(makeItem(d, "unknown", { role: "system", raw: ev }));
+      }
+    }
+  }
+
+  return items;
+}
+
+// Cursor's local tools, mapped to the names the viewer renders as file and
+// shell tools.
+const CURSOR_TOOL_NAMES: Record<string, string> = {
+  shell: "Bash",
+  read: "Read",
+  write: "Write",
+  edit: "Edit",
+  glob: "Glob",
+  grep: "Grep",
+  ls: "LS",
+};
+
+/** Cursor reports MCP calls as tool `mcp`; name them like claude's `mcp__<server>__<tool>`. */
+function cursorTool(name: string, args: unknown): { name: string; input: unknown } {
+  if (name === "mcp" && isRecord(args) && typeof args.toolName === "string") {
+    const server = asString(args.providerIdentifier) ?? "agent-swarm";
+    return { name: `mcp__${server}__${args.toolName}`, input: args.args ?? {} };
+  }
+  return { name: CURSOR_TOOL_NAMES[name] ?? name, input: args ?? {} };
+}
+
+/** A Cursor tool result: `{status, value}`, MCP values carry `content[].text.text`. */
+function cursorResultText(result: unknown): string {
+  const value = isRecord(result) && "value" in result ? result.value : result;
+  if (isRecord(value) && Array.isArray(value.content)) {
+    return value.content
+      .map((c) => {
+        if (!isRecord(c)) return stringifyForDisplay(c);
+        const text = isRecord(c.text) ? c.text.text : c.text;
+        return typeof text === "string" ? text : stringifyForDisplay(c);
+      })
+      .join("\n");
+  }
+  if (isRecord(value) && typeof value.stdout === "string") {
+    return [value.stdout, asString(value.stderr)].filter(Boolean).join("\n");
+  }
+  return resultBlockText(value);
+}
+
+/**
+ * The cursor adapter (`@cursor/sdk`) stores each `SDKMessage` verbatim:
+ * `status` (RUNNING / FINISHED / ERROR / CANCELLED), `assistant` text chunks,
+ * `tool_call` (running, then completed or error, same `call_id`), `thinking`,
+ * `usage` (once per run), plus the adapter's own `model` line.
+ */
+export function normalizeCursor(ordered: DecodedRecord[]): NormalizedItem[] {
+  const items: NormalizedItem[] = [];
+  let usage: Record<string, unknown> | undefined;
+  // Cursor streams assistant text in small chunks: one row per text run.
+  let text: NormalizedItem | undefined;
+
+  for (const d of ordered) {
+    const ev = d.event;
+    if (isParseError(ev)) {
+      items.push(makeItem(d, "parse_error", { role: "system", raw: ev.raw }));
+      text = undefined;
+      continue;
+    }
+    if (!isRecord(ev)) {
+      items.push(makeItem(d, "unknown", { role: "system", raw: ev }));
+      text = undefined;
+      continue;
+    }
+    if (emitStderr(items, d, ev)) {
+      text = undefined;
+      continue;
+    }
+
+    if (ev.type === "assistant") {
+      const message = isRecord(ev.message) ? ev.message : {};
+      const chunk = (Array.isArray(message.content) ? message.content : [])
+        .filter((b) => isRecord(b) && b.type === "text")
+        .map((b) => String((b as Record<string, unknown>).text ?? ""))
+        .join("");
+      if (!chunk) continue;
+      if (text) {
+        text.text = `${text.text ?? ""}${chunk}`;
+        text.coveredRecIds = [...(text.coveredRecIds ?? []), d.rec.id];
+      } else {
+        text = makeItem(d, "text", { role: "assistant", text: chunk });
+        items.push(text);
+      }
+      continue;
+    }
+    text = undefined;
+
+    switch (ev.type) {
+      case "model": {
+        // Written by the swarm adapter: the model selection it sent.
+        const model = isRecord(ev.model) ? ev.model : {};
+        const params = Array.isArray(model.params)
+          ? model.params
+              .filter(isRecord)
+              .map((p) => `${asString(p.id)}=${asString(p.value)}`)
+              .join(", ")
+          : "";
+        const subtype = `cursor · ${asString(model.id) ?? "?"}${params ? ` · ${params}` : ""}`;
+        items.push(
+          makeItem(d, "lifecycle", {
+            role: "system",
+            meta: { ...ev, type: "model.selected", subtype },
+          }),
+        );
+        break;
+      }
+      case "thinking": {
+        const thought = asString(ev.text);
+        if (thought) items.push(makeItem(d, "reasoning", { role: "assistant", text: thought }));
+        break;
+      }
+      case "user": {
+        const message = isRecord(ev.message) ? ev.message : {};
+        items.push(makeItem(d, "text", { role: "user", text: resultBlockText(message.content) }));
+        break;
+      }
+      case "tool_call": {
+        const id = String(ev.call_id ?? "");
+        if (ev.status === "running") {
+          const tool = cursorTool(asString(ev.name) ?? "tool", ev.args);
+          items.push(makeItem(d, "tool_call", { role: "assistant", tool: { id, ...tool } }));
+        } else {
+          items.push(
+            makeItem(d, "tool_result", {
+              role: "user",
+              result: {
+                id,
+                payload: cursorResultText(ev.result),
+                isError:
+                  ev.status === "error" || (isRecord(ev.result) && ev.result.status === "error"),
+              },
+            }),
+          );
+        }
+        break;
+      }
+      case "usage": {
+        usage = isRecord(ev.usage) ? ev.usage : undefined;
+        break;
+      }
+      case "status": {
+        if (ev.status === "RUNNING") {
+          usage = undefined;
+          items.push(
+            makeItem(d, "lifecycle", { role: "system", meta: { ...ev, type: "turn.started" } }),
+          );
+        } else if (ev.status === "FINISHED") {
+          items.push(
+            makeItem(d, "lifecycle", {
+              role: "system",
+              meta: {
+                ...ev,
+                type: "turn.completed",
+                usage: usage && {
+                  // Codex-style: Cursor's input already includes the cached share.
+                  input_tokens: usage.inputTokens,
+                  cached_input_tokens: usage.cacheReadTokens,
+                  output_tokens: usage.outputTokens,
+                },
+              },
+            }),
+          );
+        } else if (ev.status === "ERROR" || ev.status === "CANCELLED" || ev.status === "EXPIRED") {
+          const status = String(ev.status).toLowerCase();
+          items.push(
+            makeItem(d, "result", {
+              role: "system",
+              meta: {
+                ...ev,
+                type: "cursor_run_error",
+                subtype: status,
+                isError: true,
+                output: asString(ev.message) ?? `cursor run ${status}`,
+              },
+            }),
+          );
+        }
+        break;
+      }
+      case "request":
+      case "task":
+        items.push(makeItem(d, "lifecycle", { role: "system", meta: ev }));
+        break;
+      default:
+        items.push(makeItem(d, "unknown", { role: "system", raw: ev }));
+    }
+  }
+
+  return items;
+}
+
+function dshText(value: unknown, truncated: unknown): string {
+  const text = typeof value === "string" ? value : resultBlockText(value);
+  return truncated === true ? `${text}\n… [truncated by dsh]` : text;
 }
 
 function hasPresentInput(input: unknown): boolean {

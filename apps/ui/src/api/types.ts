@@ -27,7 +27,8 @@ export type AgentTaskSource =
   | "schedule"
   | "workflow"
   | "linear"
-  | "jira";
+  | "jira"
+  | "comb";
 export type RoutingReason = "skill" | "continuity" | "overflow" | "human_pinned" | "reroute_fault";
 export type ChannelType = "public" | "dm";
 export type ModelTier = "smol" | "regular" | "smart" | "ultra";
@@ -58,7 +59,7 @@ export interface ModelTierPreview {
 export { REASONING_EFFORT_LEVELS };
 export type { ReasoningEffortLevel };
 
-export type AcpTarget = "opencode" | "custom";
+export type AcpTarget = "opencode" | "gemini" | "copilot" | "custom";
 
 export type ClaudeTransport = "cli" | "sdk";
 
@@ -335,6 +336,9 @@ export const PROVIDER_NAMES = [
   "opencode",
   "acp",
   "dsh",
+  "amp",
+  "cursor",
+  "grok",
 ] as const;
 export type ProviderName = (typeof PROVIDER_NAMES)[number];
 export function isProviderName(value: string | null | undefined): value is ProviderName {
@@ -476,6 +480,12 @@ export interface MintTokenResponse {
   plaintext: string;
   token: UserToken;
   user: User;
+}
+
+export interface ConnectorCodeResponse {
+  code: string;
+  expiresAt: string;
+  connectUrl: string;
 }
 
 export interface McpUserConfigResponse {
@@ -668,7 +678,7 @@ export interface InboxStateUpsertResponse {
   item: InboxItemState;
 }
 
-export type FavoriteItemType = "page" | "workflow" | "schedule";
+export type FavoriteItemType = "page" | "workflow" | "schedule" | "agent-fs-path";
 
 export interface UserFavorite {
   id: string;
@@ -937,8 +947,9 @@ export interface ServicesResponse {
  *  - 'harness'        — value reported by the harness as-is.
  *  - 'pricing-table'  — value recomputed by the API from `pricing` rows.
  *  - 'unpriced'       — recompute attempted but no matching pricing rows.
+ *  - 'estimated'      — fallback token counts priced at an assumed model.
  */
-export type SessionCostSource = "harness" | "pricing-table" | "unpriced";
+export type SessionCostSource = "harness" | "pricing-table" | "unpriced" | "estimated";
 
 export interface SessionCostModelBreakdown {
   model: string;
@@ -1691,8 +1702,9 @@ export interface ExtensionBundle {
 }
 
 /**
- * `POST /api/extensions/install` body. Only catalog templates install; an
- * inline `manifest`/`files` bundle is rejected with `inline_install_disabled`.
+ * `POST /api/extensions/install` body as the dashboard sends it: a catalog template.
+ * The API also takes an inline `manifest` + `files` bundle when
+ * `EXTENSION_ALLOW_INLINE_INSTALL` is on; the dashboard does not send one.
  */
 export interface ExtensionInstallInput {
   /** Catalog name from `GET /api/extensions/catalog`. */
@@ -2224,6 +2236,24 @@ export interface ApprovalQuestion {
   defaultValue?: boolean;
 }
 
+/** One accepted answer. The server takes `responder` from the credential, never from the body. */
+export interface ApprovalVote {
+  /** A user id, or `operator` for the shared key. */
+  responder: string;
+  approved: boolean;
+  responses: Record<string, unknown>;
+  /** The `respondedBy` the client sent. Unverified; display only. */
+  claimedRespondedBy?: string;
+  respondedAt: string;
+}
+
+export interface ApprovalProgress {
+  /** Approvals that count toward the policy so far. */
+  approved: number;
+  /** Approvals the policy needs before the request resolves. */
+  required: number;
+}
+
 export interface ApprovalRequest {
   id: string;
   title: string;
@@ -2235,6 +2265,11 @@ export interface ApprovalRequest {
   };
   status: ApprovalRequestStatus;
   responses: Record<string, unknown> | null;
+  /** Every accepted answer, in order. `all` / `{ min: N }` requests collect several before resolving. */
+  approvals?: ApprovalVote[] | null;
+  /** Quorum progress while pending; null once resolved. */
+  approvalProgress?: ApprovalProgress | null;
+  /** From the credential: a user id, `operator` for the shared key, or an agent id for a cancellation. */
   resolvedBy: string | null;
   resolvedAt: string | null;
   resolutionReason: string | null;
@@ -2259,7 +2294,12 @@ export interface ApprovalRequestsResponse {
  */
 export type ApprovalRequestSummary = Omit<
   ApprovalRequest,
-  "questions" | "approvers" | "responses" | "resolutionReason" | "notificationChannels"
+  | "questions"
+  | "approvers"
+  | "responses"
+  | "approvals"
+  | "resolutionReason"
+  | "notificationChannels"
 > & { questionCount: number };
 
 export interface ApprovalRequestSummariesResponse {
@@ -2630,6 +2670,86 @@ export interface MemoryEntry {
   chunkIndex: number;
   totalChunks: number;
   tags: string[];
+  /** Absent on API servers older than the memory browser. */
+  key?: string | null;
+  updatedAt?: string | null;
+  /** Usefulness posterior mean alpha / (alpha + beta); 0.5 = no signal yet. */
+  rating?: number;
+}
+
+/** One keyed memory from `GET /api/memory/keys`, aggregated over its chunk rows. */
+export interface MemoryKeySummary {
+  key: string;
+  scope: MemoryScope;
+  agentId: string | null;
+  memoryId: string;
+  name: string;
+  source: MemorySource;
+  chunkRows: number;
+  totalChunks: number;
+  complete: boolean;
+  chars: number;
+  estTokens: number;
+  accessCount: number;
+  lastAccessedAt: string | null;
+  rating: number;
+  alpha: number;
+  beta: number;
+  usefulRatings: number;
+  notUsefulRatings: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface MemoryKeysResponse {
+  prefix: string;
+  keys: MemoryKeySummary[];
+  truncated: boolean;
+}
+
+export interface MemoryChunk {
+  id: string;
+  agentId: string | null;
+  scope: MemoryScope;
+  key: string | null;
+  name: string;
+  content: string;
+  source: MemorySource;
+  sourceTaskId: string | null;
+  sourcePath: string | null;
+  chunkIndex: number;
+  totalChunks: number;
+  tags: string[];
+  createdAt: string;
+  updatedAt: string | null;
+  accessedAt: string;
+  expiresAt: string | null;
+  accessCount: number;
+  embeddingModel: string | null;
+  rating: number;
+  alpha: number;
+  beta: number;
+  version: number;
+  estTokens: number;
+}
+
+/** `GET /api/memory/chunks`: every chunk row of one memory, in chunkIndex order. */
+export interface MemoryChunksResponse {
+  key: string | null;
+  scope: MemoryScope;
+  agentId: string | null;
+  chunks: MemoryChunk[];
+  estTokens: number;
+  integrity: {
+    ok: boolean;
+    expectedChunks: number;
+    presentIndexes: number[];
+    missingIndexes: number[];
+    duplicateIndexes: number[];
+    conflictingTotals: number[];
+    outOfRangeIds: string[];
+    issues: string[];
+  };
 }
 
 export interface MemoryListResponse {
@@ -2758,11 +2878,64 @@ export interface StatusActivity {
   recent_tasks_count: number;
 }
 
+/** Comb, the agent-fs review space in the dashboard (`/file`). */
+export interface StatusComb {
+  /** `COMB_ENABLED` is on and `AGENT_FS_API_URL` is set. */
+  enabled: boolean;
+  /** Browser-facing agent-fs URL (`AGENT_FS_PUBLIC_URL`, else `AGENT_FS_API_URL`). */
+  api_url: string | null;
+  /** agent-fs live UI host, for "Open in agent-fs" links. */
+  live_url: string;
+  /** The swarm's shared agent-fs org and drive. */
+  org_id: string | null;
+  drive_id: string | null;
+  /**
+   * agent-fs user id of the swarm service account, which writes the
+   * "[comb:sent ...]" replies. Null when unknown. Absent on older APIs.
+   */
+  service_user_id?: string | null;
+}
+
+/** Why "Send to swarm" left a comment out (`POST /api/comb/review-batches`). */
+export type CombSkipReason = "not-found" | "reply" | "resolved" | "already-sent";
+
+export interface CombSkippedComment {
+  id: string;
+  reason: CombSkipReason;
+  /** The task an "already-sent" comment went to, when known. */
+  taskId?: string;
+}
+
+/** A comment of an earlier send whose missing "sent" reply this send posted. */
+export interface CombRepairedComment {
+  id: string;
+  taskId: string;
+}
+
+export interface CombReviewBatchInput {
+  orgId: string;
+  driveId: string;
+  /** agent-fs root comment ids, 1 to 50. */
+  commentIds: string[];
+  /** The file or folder the batch is sent from ("/docs/a.md", "/docs/"). */
+  scopePath: string;
+}
+
+export interface CombReviewBatchResult {
+  /** The new task. Null when the send only posted missing "sent" replies again (HTTP 200). */
+  taskId: string | null;
+  sent: string[];
+  skipped: CombSkippedComment[];
+  repaired: CombRepairedComment[];
+}
+
 export interface StatusAgentFs {
   configured: boolean;
   base_url: string | null;
   provider_id: string;
   capabilities: Record<string, unknown>;
+  /** Absent when the dashboard talks to an API that predates Comb. */
+  comb?: StatusComb;
 }
 
 export interface StatusAutomation {
@@ -3238,6 +3411,7 @@ export type OnboardingErrorClass =
   | "timeout"
   | "dimension"
   | "model"
+  | "endpoint"
   | "not_enabled"
   | "expired"
   | "unknown";
@@ -3255,7 +3429,13 @@ export type OnboardingAiMethod =
 /** The dial level every agent got, or `mixed` (different levels or a custom model). */
 export type OnboardingAgentsMethod = "cheap" | "optimal" | "max" | "mixed";
 
-export type OnboardingMemoryPreset = "openai" | "openrouter" | "vercel" | "custom" | "existing";
+export type OnboardingMemoryPreset =
+  | "openai"
+  | "openrouter"
+  | "vercel"
+  | "azure"
+  | "custom"
+  | "existing";
 
 export type OnboardingIntegrationMethod =
   | "slack"

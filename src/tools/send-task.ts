@@ -11,14 +11,17 @@ import {
   getActiveTaskCount,
   getAgentById,
   getDbClient,
+  getLeadAgent,
   getTaskById,
   getUserById,
   hasCapacity,
   isExtensionAgent,
+  isLinearTrackerContextKey,
 } from "@/be/db";
 import { repointTrackerSyncBySwarmId } from "@/be/db-queries/tracker";
 import { explicitModelErrorForAgent } from "@/be/model-validation";
 import { applyPreTaskCreate } from "@/extensions/apply-task-create";
+import { can } from "@/rbac";
 import { checkSlackRoutingCoherence } from "@/tasks/slack-routing";
 import { findDuplicateTask } from "@/tools/task-dedup";
 import { ownerCtx, type ToolCtx } from "@/tools/task-tool-ctx";
@@ -174,7 +177,7 @@ export const sendTaskInputSchema = z
       .regex(/^[a-f0-9]{32}$/, "Expected a registry user ID (32 lowercase hexadecimal characters).")
       .optional()
       .describe(
-        "Registered requester ID (32 lowercase hexadecimal characters). When omitted, inherited from the caller's current task so the attribution flows through multi-hop delegation automatically.",
+        "Registered requester ID (32 lowercase hexadecimal characters). When omitted, inherited from the caller's current task so the attribution flows through multi-hop delegation automatically. Only lead agents can name a user other than the requester of their current task.",
       ),
     followUpConfig: FollowUpConfigSchema.optional().describe(
       "Control the lead follow-up created when this task finishes. When to use `followUpConfig`: set `disabled: true` when you'll wait for this task to complete inline and no follow-up is needed; set `onCompleted` / `onFailed` with specific instructions when you need to follow up effectively on a particular outcome of a long-running flow; for normal one-shot tasks, leave it unset because defaults are fine. It is most valuable for long-running / complex flows.",
@@ -287,11 +290,28 @@ export async function sendTaskHandler(
     outputSchema,
   }: SendTaskArgs,
 ): Promise<SwarmToolResult> {
+  const userLead = ctx.kind === "user" ? await getLeadAgent() : null;
+  if (ctx.kind === "user" && (!userLead || userLead.status === "offline")) {
+    return toolErr("No online Lead is available. Start or register a Lead before sending a task.");
+  }
+
+  const requestedAgentId = ctx.kind === "user" ? userLead!.id : agentId;
+  const requestedRoutingReason = ctx.kind === "user" ? "skill" : routingReason;
+  const requestedRoutingNote =
+    ctx.kind === "user"
+      ? "User MCP ingress assigns new work to the Lead for delegation."
+      : routingNote;
+  const requestedOfferMode = ctx.kind === "user" ? false : offerMode;
+  const requestedLeadOnly = ctx.kind === "user" ? false : leadOnly;
+  const requestedCapabilities = ctx.kind === "user" ? undefined : requiredCapabilities;
+  const requestedAllowDuplicate = ctx.kind === "user" ? false : allowDuplicate;
+  const requestedOverrideSlackContext = ctx.kind === "user" ? false : overrideSlackContext;
+
   // Defense in depth for direct TypeScript callers that bypass MCP schema parsing.
-  if (agentId !== undefined && routingReason === undefined) {
+  if (requestedAgentId !== undefined && requestedRoutingReason === undefined) {
     return toolErr("routingReason is required when agentId is supplied.");
   }
-  if (agentId !== undefined && (routingNote?.trim().length ?? 0) < 10) {
+  if (requestedAgentId !== undefined && (requestedRoutingNote?.trim().length ?? 0) < 10) {
     return toolErr(
       "routingNote is required when agentId is supplied (at least 10 characters after trim).",
     );
@@ -307,13 +327,43 @@ export async function sendTaskHandler(
   const requestedByUserId =
     ctx.kind === "user" ? ctx.userId : (inputRequestedByUserId ?? undefined);
 
+  // An agent may pass the requester of its own current task, which is what omitting the field
+  // inherits. Naming anyone else is the lead's call: workers share one swarm key, so a
+  // self-declared requester would let any worker attribute work, and its cost, to another user.
+  if (ctx.kind === "owner" && creatorAgentId && requestedByUserId) {
+    const ownRequester = await resolveTaskAuditUserId(sourceTaskId, creatorAgentId);
+    if (requestedByUserId !== ownRequester) {
+      const caller = await getAgentById(creatorAgentId);
+      const decision = can({
+        principal: { kind: "agent", agentId: creatorAgentId, isLead: caller?.isLead ?? false },
+        verb: "task.requester.assign",
+        resource: { kind: "none" },
+        source: "mcp",
+      });
+      if (!decision.allow) {
+        return toolErr(
+          "Only lead agents can set requestedByUserId to anyone but the requester of your current task. Omit it to inherit that requester.",
+          { data: { yourAgentId: creatorAgentId } },
+        );
+      }
+    }
+  }
+
   if (ctx.kind === "owner" && requestedByUserId && !(await getUserById(requestedByUserId))) {
     return toolErr("requestedByUserId must identify an existing registered user.", {
       data: { yourAgentId: creatorAgentId },
     });
   }
 
-  if (ctx.kind === "owner" && agentId === ctx.agentId) {
+  // The guard stops an agent session from handing work back to itself. A script runs as its
+  // owner (a scheduled script as the schedule's creator), so a Lead-owned poller that files
+  // work for the Lead is legitimate. The bridge marks script calls `script-sdk`; a caller that
+  // spoofs it can only send itself a task, which grants nothing it could not already do.
+  if (
+    ctx.kind === "owner" &&
+    requestedAgentId === ctx.agentId &&
+    ctx.requestInfo?.callOrigin !== "script-sdk"
+  ) {
     return toolErr("Cannot send a task to yourself, are you drunk?", {
       data: { yourAgentId: ctx.agentId },
     });
@@ -334,7 +384,10 @@ export async function sendTaskHandler(
   }
   // A public continuation cannot accidentally declassify its parent before
   // createTaskExtended performs the authoritative merge.
-  const effectiveLeadOnly = leadOnly || effectiveParentTask?.routingAffinity?.leadOnly === true;
+  const effectiveLeadOnly =
+    ctx.kind === "user"
+      ? false
+      : requestedLeadOnly || effectiveParentTask?.routingAffinity?.leadOnly === true;
 
   // Slack-routing coherence guard: reject a hand-typed slackChannelId/slackThreadTs
   // that disagrees with the parent task or the contextKey this child will inherit.
@@ -343,7 +396,7 @@ export async function sendTaskHandler(
   // dispatch-slack-channel-must-match-parent-context-2026-07-10). Omitting the
   // three Slack fields lets inheritance do the right thing; overrideSlackContext
   // opts into a deliberate cross-channel dispatch.
-  if (!overrideSlackContext) {
+  if (!requestedOverrideSlackContext) {
     // send-task never passes contextKey explicitly, so the child inherits the
     // parent's contextKey verbatim (createTaskExtended, src/be/db.ts:3556-3558).
     const inheritedContextKey = effectiveParentTask?.contextKey;
@@ -382,8 +435,8 @@ export async function sendTaskHandler(
   }
 
   // Auto-route to parent's worker if parentTaskId is set and no explicit agentId
-  let effectiveAgentId = agentId;
-  if (effectiveParentTaskId && !agentId) {
+  let effectiveAgentId = requestedAgentId;
+  if (effectiveParentTaskId && !requestedAgentId) {
     if (effectiveParentTask?.agentId) {
       effectiveAgentId = effectiveParentTask.agentId;
     }
@@ -397,15 +450,25 @@ export async function sendTaskHandler(
   });
   if (modelError) return toolErr(modelError, { data: { yourAgentId: creatorAgentId } });
   const effectiveRoutingReason =
-    agentId !== undefined ? routingReason : effectiveAgentId ? "continuity" : undefined;
-  const effectiveRoutingNote = effectiveRoutingReason ? routingNote : undefined;
+    requestedAgentId !== undefined
+      ? requestedRoutingReason
+      : effectiveAgentId
+        ? "continuity"
+        : undefined;
+  const effectiveRoutingNote = effectiveRoutingReason ? requestedRoutingNote : undefined;
   const effectiveRoutingSource =
-    agentId !== undefined ? "declared" : effectiveAgentId ? "engine_default" : undefined;
+    ctx.kind === "user"
+      ? "engine_default"
+      : requestedAgentId !== undefined
+        ? "declared"
+        : effectiveAgentId
+          ? "engine_default"
+          : undefined;
 
   const requestedTaskOptions: CreateTaskOptions = {
     key: assetKey,
-    agentId: offerMode ? undefined : effectiveAgentId,
-    offeredTo: offerMode ? effectiveAgentId : undefined,
+    agentId: requestedOfferMode ? undefined : effectiveAgentId,
+    offeredTo: requestedOfferMode ? effectiveAgentId : undefined,
     creatorAgentId,
     requestedByUserId,
     source: "mcp",
@@ -423,7 +486,7 @@ export async function sendTaskHandler(
     slackChannelId,
     slackThreadTs,
     slackUserId,
-    overrideSlackContext,
+    overrideSlackContext: requestedOverrideSlackContext,
     followUpConfig,
     // A delegation with parentTaskId is new work and starts without the
     // parent's followUpConfig. A `resume` re-delegation (the reroute-decision
@@ -434,8 +497,8 @@ export async function sendTaskHandler(
     routingSource: effectiveRoutingSource,
     routingNote: effectiveRoutingNote,
     routingAffinity:
-      effectiveLeadOnly || requiredCapabilities?.length
-        ? { leadOnly: effectiveLeadOnly, capabilities: requiredCapabilities ?? [] }
+      effectiveLeadOnly || requestedCapabilities?.length
+        ? { leadOnly: effectiveLeadOnly, capabilities: requestedCapabilities ?? [] }
         : undefined,
   };
   const preCreate = await applyPreTaskCreate({
@@ -453,6 +516,12 @@ export async function sendTaskHandler(
   }
   const taskDescription = preCreate.description;
   const taskOptions = preCreate.options;
+  if (
+    ctx.kind === "user" &&
+    (taskOptions.agentId !== userLead!.id || taskOptions.offeredTo !== undefined)
+  ) {
+    return toolErr("A pre.task.create extension cannot change the user task's Lead assignment.");
+  }
 
   // The three dedup guards are pure reads, so they run twice: once here as a
   // fast path (keeping this tool's existing early-exit responses), and once
@@ -467,15 +536,16 @@ export async function sendTaskHandler(
   } | null> => {
     const existingTrackerWork = await findExistingLinearTrackerContextWork(
       effectiveParentTask?.contextKey,
+      effectiveParentTask?.id,
     );
     if (existingTrackerWork) {
       const msg = `Skipped: Linear tracker contextKey ${effectiveParentTask?.contextKey} already has ${existingTrackerWork.reason === "active_task" ? "active task" : "linked open PR"} ${existingTrackerWork.task.id.slice(0, 8)}.`;
       console.log(`[send-task] ${msg}`);
-      return { ok: true, message: msg, task: existingTrackerWork.task };
+      return { ok: false, message: msg, task: existingTrackerWork.task };
     }
 
     // Dedup guard: check for similar recent tasks
-    if (!allowDuplicate && creatorAgentId) {
+    if (!requestedAllowDuplicate && creatorAgentId) {
       const duplicate = await findDuplicateTask({
         taskDescription,
         creatorAgentId: taskOptions.creatorAgentId ?? creatorAgentId,
@@ -559,6 +629,12 @@ export async function sendTaskHandler(
     const raced = await evaluateDedupGuards();
     if (raced) return { success: raced.ok, message: raced.message, task: raced.task };
 
+    // This transaction already checked the tracker key, excluding the caller's
+    // lineage. The creation guard would otherwise match work in that lineage.
+    if (isLinearTrackerContextKey(effectiveParentTask?.contextKey)) {
+      taskOptions.bypassTrackerContextDedup = true;
+    }
+
     // If no agentId (and no auto-routed agentId), create an unassigned task for the pool
     const targetAgentId = taskOptions.offeredTo ?? taskOptions.agentId ?? undefined;
     if (!targetAgentId) {
@@ -585,6 +661,13 @@ export async function sendTaskHandler(
       };
     }
 
+    if (ctx.kind === "user" && (!agent.isLead || agent.status === "offline")) {
+      return {
+        success: false,
+        message: "The Lead is no longer online. No task was created.",
+      };
+    }
+
     if (isExtensionAgent(agent)) {
       return { success: false, message: extensionAgentAssignmentError(agent) };
     }
@@ -597,7 +680,7 @@ export async function sendTaskHandler(
     }
 
     // For direct assignment (not offer), check if agent has capacity
-    if (!taskOptions.offeredTo && !(await hasCapacity(targetAgentId))) {
+    if (ctx.kind !== "user" && !taskOptions.offeredTo && !(await hasCapacity(targetAgentId))) {
       const activeCount = await getActiveTaskCount(targetAgentId);
       return {
         success: false,

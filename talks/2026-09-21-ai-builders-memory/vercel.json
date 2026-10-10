@@ -5,5 +5,5 @@
   "buildCommand": "true",
   "outputDirectory": ".",
   "cleanUrls": true,
-  "ignoreCommand": "exit 1"
+  "ignoreCommand": "sh ../../scripts/vercel-ignore.sh talks/2026-09-21-ai-builders-memory"
 }

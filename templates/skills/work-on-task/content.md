@@ -8,4 +8,8 @@ When the task names a skill (`researching`, `planning`, `implementing`), use it.
 
 Finish the task with one of the four endings in your operating contract: `completed`, `defer-task`, `request-human-input`, or `failed`. Then stop.
 
+Resuming (a resume task, or work cut by a graceful shutdown): read the parent's last progress line, then re-read live state once (PR state and head SHA, branch, `git status`) before new work. Re-run controls only if the head moved. Never redo a pushed commit or open a second PR for the same branch. Store a progress line with branch, PR number and head SHA each time you push.
+
+Write times in replies, outputs and defer notes in the requester's timezone when the Requester Profile names one, never raw UTC.
+
 If the user interrupts, follow their instructions. To resume, call `/work-on-task <taskId>` again.

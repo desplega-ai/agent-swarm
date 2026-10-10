@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { ensure } from "@desplega.ai/business-use";
 import { z } from "zod";
+import { isApiDraining } from "../be/api-drain";
 import { canClaim } from "../be/budget-admission";
 import {
   type BudgetRefusalContext,
@@ -37,7 +37,7 @@ import { poolTaskRunsOnHarness } from "../be/model-validation";
 import { touchRuntimeInstance } from "../be/multi-runtime";
 import { hasCapability } from "../server";
 import { fetchChannelActivity } from "../slack/channel-activity";
-import { telemetry } from "../telemetry";
+import { emitTaskTelemetry, resolveTriggerSurface } from "../telemetry-trigger";
 import {
   AgentTaskSchema,
   BudgetRefusedTriggerSchema,
@@ -45,6 +45,7 @@ import {
   UserCommsPrefsSchema,
   UserSchema,
 } from "../types";
+import { ensure } from "../utils/business-use";
 import { isMultiRuntimeEnabled } from "../utils/multi-runtime";
 import { getUserCommsPrefs } from "../utils/requester-comms";
 import { route, runtimeInstanceHeader } from "./route-def";
@@ -123,6 +124,9 @@ const PollTaskOfferedTriggerSchema = z.object({
 const PollTaskAssignedTriggerSchema = z.object({
   type: z.literal("task_assigned"),
   taskId: z.string(),
+  // Surface that started the whole task chain (root task's source, mapped to
+  // the telemetry catalog). Workers tag their session telemetry with it.
+  triggerSurface: z.string().optional(),
   task: AgentTaskSchema.extend({
     attachments: z.array(PollTriggerAttachmentSchema),
   }),
@@ -172,6 +176,9 @@ const pollTriggers = route({
   path: "/api/poll",
   pattern: ["api", "poll"],
   summary: "Poll for triggers (tasks, mentions)",
+  description:
+    "While the API is draining after SIGTERM it dispatches nothing: the answer is `{ trigger: null }` " +
+    "and carries `X-Swarm-Draining: 1`, the signal for a worker to hand off in-flight tasks.",
   tags: ["Poll"],
   auth: { apiKey: true, agentId: true },
   headers: runtimeInstanceHeader("poll for work").extend({
@@ -369,6 +376,13 @@ export async function handlePoll(
           return { trigger: null };
         }
 
+        // A draining API dispatches nothing: offers, assignments and pool claims
+        // wait for the next API. Workers learn to hand off from the
+        // X-Swarm-Draining header the HTTP pipeline adds (src/be/api-drain.ts).
+        if (isApiDraining()) {
+          return { trigger: null };
+        }
+
         // Check for offered tasks first (highest priority for both workers and leads)
         // Atomically claim the task for review to prevent duplicate processing.
         // Capacity is checked in the same transaction as the claim: with
@@ -470,7 +484,7 @@ export async function handlePoll(
                 conditions: [{ timeout_ms: 300_000 }], // 5 min: polling interval + queue wait
               });
 
-              telemetry.taskEvent("started", {
+              void emitTaskTelemetry("started", {
                 taskId: pendingTask.id,
                 source: pendingTask.source,
                 agentId: myAgentId,
@@ -480,11 +494,18 @@ export async function handlePoll(
             // Resolve requesting user if available (UNKNOWN sentinel handling
             // lives in buildTriggerRequestedBy).
             const assignedRequestedBy = await buildTriggerRequestedBy(pendingTask);
+            // The surface that started the whole chain, so the worker can tag
+            // its session events with it (workers cannot read the task tree).
+            const assignedTriggerSurface = await resolveTriggerSurface(
+              pendingTask.id,
+              pendingTask.source,
+            );
 
             return {
               trigger: {
                 type: "task_assigned",
                 taskId: pendingTask.id,
+                triggerSurface: assignedTriggerSurface,
                 task: {
                   ...pendingTask,
                   ...(await claimModelFields(pendingTask, agent)),
@@ -612,17 +633,22 @@ export async function handlePoll(
                 // Post-commit (see the `started` path above): a rolled-back
                 // claim must not report the task as claimed.
                 getDbClient().afterCommit(() => {
-                  telemetry.taskEvent("claimed", {
+                  void emitTaskTelemetry("claimed", {
                     taskId: claimed.id,
                     source: claimed.source,
                     agentId: myAgentId,
                   });
                 });
                 const claimedRequestedBy = await buildTriggerRequestedBy(claimed);
+                const claimedTriggerSurface = await resolveTriggerSurface(
+                  claimed.id,
+                  claimed.source,
+                );
                 return {
                   trigger: {
                     type: "task_assigned",
                     taskId: claimed.id,
+                    triggerSurface: claimedTriggerSurface,
                     task: {
                       ...claimed,
                       ...(await claimModelFields(claimed, agent)),
@@ -672,6 +698,7 @@ export async function handlePoll(
     // Throttled to avoid Slack API rate limits (~50 calls/min).
     if (
       result.trigger === null &&
+      !isApiDraining() &&
       process.env.LEAD_MONITOR_CHANNELS === "true" &&
       Date.now() - lastChannelActivityCheckAt >= CHANNEL_ACTIVITY_INTERVAL_MS
     ) {

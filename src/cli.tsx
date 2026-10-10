@@ -7,6 +7,7 @@ import type { ComponentType } from "react";
 import { createElement, useEffect, useState } from "react";
 import pkg from "../package.json";
 import { getApiKey, setApiKey } from "./utils/api-key.ts";
+import { installConsoleScrub } from "./utils/console-scrub.ts";
 
 // Get CLI name from bin field (assumes single key)
 const binName = Object.keys(pkg.bin)[0];
@@ -279,7 +280,7 @@ const COMMAND_HELP: Record<
   "codex-hook": {
     usage: `${binName} codex-hook`,
     description:
-      "Handle Codex CLI hook events from stdin (steering delivery).\nUsed internally by the codex hooks registered in the worker image.",
+      "Handle Codex CLI hook events from stdin (steering delivery, PR body leak guard).\nUsed internally by the codex hooks registered in the worker image.",
     options: "  -h, --help             Show this help",
     examples: `  ${binName} codex-hook`,
   },
@@ -543,6 +544,9 @@ function WorkerRunner({
   const { exit } = useApp();
 
   useEffect(() => {
+    // Inside the effect, not before render(): Ink's console patch would
+    // replace a wrap installed earlier.
+    installConsoleScrub();
     import("./commands/worker.ts")
       .then(({ runWorker }) =>
         runWorker({
@@ -568,6 +572,9 @@ function LeadRunner({ prompt, yolo, systemPrompt, systemPromptFile, additionalAr
   const { exit } = useApp();
 
   useEffect(() => {
+    // Inside the effect, not before render(): Ink's console patch would
+    // replace a wrap installed earlier.
+    installConsoleScrub();
     import("./commands/lead.ts")
       .then(({ runLead }) =>
         runLead({
@@ -745,7 +752,8 @@ if (args.showHelp || args.command === "help" || args.command === undefined) {
 } else if (args.command === "codex-hook") {
   const { handleCodexHook } = await import("./hooks/codex-hook.ts");
   await handleCodexHook();
-  process.exit(0);
+  // Exit code 2 from the PreToolUse guard blocks the tool call.
+  process.exit(process.exitCode ?? 0);
 } else if (args.command === "session-summary-stdin") {
   const { runSessionSummaryFromStdin } = await import("./hooks/hook.ts");
   await runSessionSummaryFromStdin();

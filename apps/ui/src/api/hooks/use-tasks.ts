@@ -6,6 +6,7 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { buildRetryInput } from "../../lib/task-retry";
 import { api } from "../client";
 import type {
   AgentTask,
@@ -45,7 +46,7 @@ export interface UseTasksOptions {
   /**
    * Keep serving the previous key's data while a new key resolves, instead of
    * dropping to `undefined`. Callers whose filters are time-derived (and so
-   * mint a fresh query key on a timer) need this — otherwise every key change
+   * mint a fresh query key on a timer) need this, otherwise every key change
    * flashes their whole view back to its loading state.
    */
   keepPreviousData?: boolean;
@@ -77,41 +78,58 @@ export function useTask(id: string, opts?: { refetchInterval?: number | false })
   });
 }
 
-export function useTaskSessionLogs(taskId: string) {
+/**
+ * How often a task's live data refetches. A caller that knows the task is
+ * finished passes `refetchInterval: false` and `staleTime: Infinity`: the data
+ * is frozen, so it is read once, with no refetch on window focus or
+ * reconnect. An invalidation still refetches it. An omitted (or `undefined`)
+ * value keeps the hook's default.
+ */
+interface TaskLiveReadOptions {
+  refetchInterval?: number | false;
+  staleTime?: number;
+}
+
+/** Session log lines, polled every 5 s. One read is about 300 KB. */
+export function useTaskSessionLogs(taskId: string, opts?: TaskLiveReadOptions) {
   return useQuery({
     queryKey: ["task", taskId, "session-logs"],
     queryFn: () => api.fetchTaskSessionLogs(taskId),
     enabled: !!taskId,
-    refetchInterval: 5000,
+    refetchInterval: opts?.refetchInterval ?? 5000,
+    ...(opts?.staleTime !== undefined ? { staleTime: opts.staleTime } : {}),
   });
 }
 
 /**
  * Steering lifecycle readout (≥1.122.1). Polls on the same 5s cadence as
- * `useTaskSessionLogs` — steering status moves `pending → delivered → handled`
+ * `useTaskSessionLogs`, steering status moves `pending → delivered → handled`
  * on the worker, and there is no websocket/SSE channel for it by design.
  */
 export function useTaskSteeringMessages(
   taskId: string,
-  opts?: { enabled?: boolean; refetchInterval?: number | false },
+  opts?: TaskLiveReadOptions & { enabled?: boolean },
 ) {
   return useQuery({
     queryKey: ["task", taskId, "steering-messages"],
     queryFn: () => api.fetchTaskSteeringMessages(taskId),
     enabled: !!taskId && (opts?.enabled ?? true),
     // Callers rendering many tasks at once (the sessions timeline) pass
-    // `false` for finished tasks — their steering rows are frozen history, so
+    // `false` for finished tasks, their steering rows are frozen history, so
     // there is nothing to poll for.
     refetchInterval: opts?.refetchInterval ?? 5000,
+    ...(opts?.staleTime !== undefined ? { staleTime: opts.staleTime } : {}),
   });
 }
 
-export function useTaskContext(taskId: string) {
+/** Context-window snapshots, polled every 10 s. */
+export function useTaskContext(taskId: string, opts?: TaskLiveReadOptions) {
   return useQuery({
     queryKey: ["task", taskId, "context"],
     queryFn: () => api.fetchTaskContext(taskId),
     enabled: !!taskId,
-    refetchInterval: 10000,
+    refetchInterval: opts?.refetchInterval ?? 10000,
+    ...(opts?.staleTime !== undefined ? { staleTime: opts.staleTime } : {}),
   });
 }
 
@@ -329,6 +347,26 @@ export function useCreateTask() {
   });
 }
 
+/**
+ * Retry: a copy of the task as a new child (`buildRetryInput`), created with
+ * `POST /api/tasks`. Nothing is destroyed, so there is no confirm step. The
+ * caller moves to the new task (`mutate`'s `onSuccess`).
+ */
+export function useRetryTask() {
+  const queryClient = useQueryClient();
+  return useMutation<TaskWithLogs, Error, { task: AgentTask; userId: string | null }>({
+    mutationFn: ({ task, userId }) => api.createTask(buildRetryInput(task, userId)),
+    onSuccess: (created, { task }) => {
+      queryClient.setQueryData(["task", created.id], created);
+      queryClient.invalidateQueries({ queryKey: ["tasks"] });
+      queryClient.invalidateQueries({ queryKey: ["session", task.id] });
+    },
+    onError: (err) => {
+      toast.error(err.message || "Failed to retry task");
+    },
+  });
+}
+
 export function useCancelTask() {
   const queryClient = useQueryClient();
   return useMutation<
@@ -439,7 +477,7 @@ export function useSteerTask() {
     },
     onSuccess: (result, { id }) => {
       if (result.outcome === "promoted") {
-        // The message became a follow-up task — the chain/list views changed.
+        // The message became a follow-up task, the chain/list views changed.
         queryClient.invalidateQueries({ queryKey: ["tasks"] });
         queryClient.invalidateQueries({ queryKey: ["sessions"] });
         queryClient.invalidateQueries({ queryKey: ["session"] });

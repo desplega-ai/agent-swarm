@@ -44,6 +44,7 @@ It does **not** stage or commit anything — it regenerates and reports. Commit 
 |---|---|
 | `build-and-push-server-*` + manifest | `ghcr.io/desplega-ai/agent-swarm:<version>` (amd64 + arm64) |
 | `build-and-push-worker-*` + manifest | `ghcr.io/desplega-ai/agent-swarm-worker:<version>` (amd64 + arm64) |
+| `build-and-push-ui` | `ghcr.io/desplega-ai/agent-swarm-ui:<version>` (amd64 + arm64), the dashboard served by nginx |
 | `publish-e2b-templates` | E2B release templates (`agent-swarm-api-<slug>`, worker/lead runtime) |
 | `create-git-tag` | Pushes git tag `v<version>` |
 | `publish-npm` | `@desplega.ai/agent-swarm@<version>` on npm (with provenance; skips if already published) |

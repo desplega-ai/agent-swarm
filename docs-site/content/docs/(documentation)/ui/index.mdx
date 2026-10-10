@@ -65,6 +65,19 @@ It is a **browser-storage-only** client: operator connections you enter (API URL
   Enter your API URL and key in the in-app connection panel, or open the dashboard with `?apiUrl=...&apiKey=...` query parameters to pre-fill a connection (the `onboard` wizard prints exactly such a URL). Your swarm's API must be reachable from your browser.
 </Callout>
 
+## Connect an outside app (ChatGPT, Claude, Codex, Cursor) [#connect-an-app]
+
+The agent-swarm.dev connector lets ChatGPT, Claude, Codex, and Cursor send and read tasks on your swarm as you. The connector gets a user token for you. You never copy or paste a token.
+
+1. On the connector page, choose your swarm's dashboard (by default the hosted [app.agent-swarm.dev](https://app.agent-swarm.dev)) and click **Continue to your swarm**. A new tab opens the dashboard's `/connect` page.
+2. Pick the connection to use if the dashboard has more than one. With no connection yet, add one first. The dashboard then returns you to `/connect`.
+3. Pick yourself from the list of people. A connection that uses your own `aswt_` token skips this step. The dashboard remembers your last choice for each connection.
+4. Confirm. The dashboard asks the swarm for a single-use code that expires in 10 minutes, then sends the tab back to the connector. The connector trades the code for a token and shows "All set".
+
+The token can do what you can do on the swarm, nothing more. The swarm's public API origin (`PUBLIC_MCP_BASE_URL`) must use `https://`. A loopback `http://localhost` origin also passes, for local development stacks only. The **Connect to ChatGPT** button on a person's **Tokens** tab starts the same flow.
+
+To mint a token by hand instead, open **People**, select yourself, and click **Mint token** on the **Tokens** tab. Copy the token when it is shown: it is shown only once. Revoke it from the same tab.
+
 ## Self-hosting
 
 The dashboard is a static single-page app (Vite + React) in [`apps/ui/`](https://github.com/desplega-ai/agent-swarm/tree/main/apps/ui) — there is no server component, so it can be served from any static host:
@@ -76,6 +89,25 @@ bun run build   # outputs apps/ui/dist/
 ```
 
 Deploy the `dist/` directory to your static host of choice (Vercel, Netlify, nginx, S3 + CDN, ...).
+
+Or run the published image. It serves the same build with nginx on port 8080 as a non-root user, answers `/healthz` for probes, and needs only `/tmp` writable:
+
+```bash
+docker run --rm --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges -p 8080:8080 ghcr.io/desplega-ai/agent-swarm-ui:<version>
+```
+
+Use the same `<version>` as your API image. The image takes no runtime configuration: `VITE_*` values are compiled in at build time, so enter the API URL and key in the connection panel.
+
+<Callout type="warn" title="Keep Pages off the dashboard origin">
+  The dashboard keeps connection keys in browser storage, and Pages (`/p/*`, `/@swarm/*`) run agent-authored scripts. Never serve Pages from the dashboard's origin, or a page script can read those keys.
+</Callout>
+
+Two layouts work:
+
+- **Separate origins** (simplest): dashboard on `app.example.com`, API on `api.example.com`. On the API, set `CORS_ALLOWED_ORIGINS=https://app.example.com` so the dashboard can call it, `APP_URL=https://app.example.com` so the Pages viewer may frame pages and swarm links open your dashboard, and `PUBLIC_MCP_BASE_URL=https://api.example.com`.
+- **Dashboard and JSON API on one origin**, for example behind an SSO proxy that should cover both with one session. On the dashboard host, route the prefix `/api/` (including the `/api/realtime` WebSocket upgrade) and the exact paths `/health` and `/status` to the API, and everything else to the dashboard. Keep `/p/`, `/@swarm/`, `/mcp`, `/mcp-user` and `/docs` on the API's own host, and keep `PUBLIC_MCP_BASE_URL` pointing there, because page links, OAuth redirects and MCP clients use it. The dashboard's Pages viewer loads pages from the connection URL, so it does not work in this layout; open pages through their links on the API host instead.
+
+The image only lets its own origin frame the dashboard (`frame-ancestors 'self'`), so embedding the dashboard in another site is not supported. The Helm chart and Compose examples do not deploy the dashboard image yet.
 
 For a custom dashboard origin, set `CORS_ALLOWED_ORIGINS` on the API. A custom list replaces the built-in hosted/dev defaults, so include every trusted dashboard origin you use. See the [CORS deployment guide](/docs/guides/kubernetes#cors).
 

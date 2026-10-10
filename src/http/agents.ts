@@ -1,6 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { isAlias } from "@desplega/model-catalog";
-import { ensure } from "@desplega.ai/business-use";
 import { z } from "zod";
 import {
   computeContentHash,
@@ -65,6 +64,7 @@ import {
   RuntimeInstanceSchema,
   VersionableFieldSchema,
 } from "../types";
+import { ensure } from "../utils/business-use";
 import {
   type ClaudeTransport,
   isClaudeBridgeEffective,
@@ -199,7 +199,17 @@ const setAgentHarnessProviderRoute = route({
   },
 });
 
-const LocalHarnessProviderSchema = z.enum(["claude", "codex", "pi", "opencode", "acp", "dsh"]);
+const LocalHarnessProviderSchema = z.enum([
+  "claude",
+  "codex",
+  "pi",
+  "opencode",
+  "acp",
+  "dsh",
+  "amp",
+  "cursor",
+  "grok",
+]);
 const AcpRuntimeConfigSchema = z
   .object({
     target: z.enum(ACP_TARGET_IDS),
@@ -1128,7 +1138,7 @@ export async function handleAgentsRest(
               })
             )[0]?.value ?? "");
       const allowedLevels =
-        harness_provider === "acp" || harness_provider === "dsh"
+        harness_provider === "acp"
           ? []
           : reasoningCapability(harness_provider, modelForValidation ?? "").levels;
       if (!allowedLevels.includes(reasoning_effort)) {

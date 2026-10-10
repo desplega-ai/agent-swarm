@@ -34,6 +34,7 @@ jobs:
       vendored_openapi: ${{ steps.check.outputs.vendored_openapi }}
       docker: ${{ steps.check.outputs.docker }}
       ui: ${{ steps.check.outputs.ui }}
+      ui_image: ${{ steps.check.outputs.ui_image }}
       templates_workflows: ${{ steps.check.outputs.templates_workflows }}
     steps:
       - name: Checkout repository
@@ -83,13 +84,13 @@ jobs:
           # install), and the dep-graph inputs (.dependency-cruiser.cjs, plugin/) are all
           # load-bearing for this job since the workspace migration. The Dockerfiles
           # feed the Bun version-pin check (check:bun-version).
-          LINT=$(match '^(src/|apps/evals/|package\.json$|bun\.lock|bunfig\.toml$|turbo\.json$|konsistent\.json$|tsconfig\.json$|biome\.json$|\.dependency-cruiser\.cjs$|plugin/opencode-plugins/|apps/(ui|templates-ui)/package\.json$|Dockerfile$|Dockerfile\.worker$|scripts/check-bun-version\.ts$|templates/extensions/|scripts/build-extension-(catalog|manifest-schema)\.ts$)')
+          LINT=$(match '^(src/|packages/(model-catalog|model-routing)/|apps/evals/|package\.json$|bun\.lock|bunfig\.toml$|turbo\.json$|konsistent\.json$|tsconfig\.json$|biome\.json$|\.dependency-cruiser\.cjs$|plugin/opencode-plugins/|apps/(ui|templates-ui)/package\.json$|Dockerfile$|Dockerfile\.worker$|Dockerfile\.ui$|scripts/check-bun-version\.ts$|\.text-columns\.json$|scripts/check-text-columns\.ts$|templates/extensions/|scripts/build-extension-(catalog|manifest-schema)\.ts$|scripts/(sync-telemetry-contract|gen-telemetry-docs)\.ts$|docs-site/content/docs/\(documentation\)/reference/telemetry\.mdx$)')
 
           # tests: src/ + scripts that tests import + lockfile/tsconfig + bunfig ([test]
           # preload + pathIgnorePatterns) + member manifests (root frozen install).
           # apps/ui/src/: the root run also globs apps/ui/**/*.test.tsx, so a ui-only
           # change can break it (a new `@/` import the root runner cannot resolve).
-          TEST=$(match '^(src/|scripts/|package\.json$|bun\.lock|bunfig\.toml$|tsconfig\.json$|apps/ui/src/|apps/(ui|templates-ui|evals)/package\.json$)')
+          TEST=$(match '^(src/|packages/(model-catalog|model-routing)/|scripts/|package\.json$|bun\.lock|bunfig\.toml$|tsconfig\.json$|apps/ui/src/|apps/(ui|templates-ui|evals)/package\.json$)')
 
           # pi-skills freshness: generator inputs + outputs.
           PI_SKILLS=$(match '^(plugin/commands/|plugin/pi-skills/|plugin/build-pi-skills\.ts$)')
@@ -113,7 +114,7 @@ jobs:
 
           # script SDK types freshness: source constants + generator + outputs +
           # allowlist/registry (generation validates SDK_ALLOWLIST against server.ts).
-          SCRIPT_TYPES=$(match '^(src/be/scripts/typecheck\.ts$|src/scripts-runtime/types/|src/scripts-runtime/sdk-allowlist\.ts$|scripts/bundle-script-types\.ts$|src/server\.ts$)')
+          SCRIPT_TYPES=$(match '^(src/be/scripts/typecheck\.ts$|src/scripts-runtime/|src/extensions/|scripts/bundle-(script|extension)-types\.ts$|src/server\.ts$)')
 
           # openapi freshness: routes, types, generator, version, generated artifacts.
           OPENAPI=$(match '^(src/http/|src/types\.ts$|scripts/generate-openapi\.ts$|openapi\.json$|docs-site/content/docs/api-reference/|package\.json$)')
@@ -129,10 +130,13 @@ jobs:
           # bun.lock + root overrides since the workspace migration.
           UI=$(match '^(apps/ui/|packages/ui-e2e/|bun\.lock|package\.json$|bunfig\.toml$)')
 
+          # dashboard image: everything Dockerfile.ui copies, plus its smoke test.
+          UI_IMAGE=$(match '^(Dockerfile\.ui$|apps/ui/|packages/model-catalog/|src/|apps/templates-ui/package\.json$|apps/evals/package\.json$|packages/model-routing/package\.json$|package\.json$|bun\.lock|bunfig\.toml$|\.dockerignore$|scripts/smoke-ui-image\.sh$)')
+
           # workflow template validation: content.md changes in templates/workflows/.
           TEMPLATES_WORKFLOWS=$(match '^(templates/workflows/|scripts/validate-template-workflows\.ts$|src/workflows/definition\.ts$|src/types\.ts$)')
 
-          for k in LINT TEST PI_SKILLS SEED_SKILLS SCRIPT_TYPES OPENAPI VENDORED_OPENAPI DOCKER UI TEMPLATES_WORKFLOWS; do
+          for k in LINT TEST PI_SKILLS SEED_SKILLS SCRIPT_TYPES OPENAPI VENDORED_OPENAPI DOCKER UI UI_IMAGE TEMPLATES_WORKFLOWS; do
             v=$(eval echo \$$k)
             key=$(echo "$k" | tr '[:upper:]' '[:lower:]')
             echo "${key}=${v}" >> $GITHUB_OUTPUT
@@ -179,17 +183,22 @@ jobs:
           echo "status=$([ $code -eq 0 ] && echo success || echo failure)" >> "$GITHUB_OUTPUT"
           exit $code
 
+      # tsc 5 stays the authority here. Local `tsc:check` (and the prek typecheck
+      # hook) run tsgo; the step below keeps the tsconfig tsgo-clean.
       - name: Run TypeScript type check
         id: tsc
         run: |
           start=$(date +%s%3N)
           set +e
-          bun run tsc:check
+          bun run tsc:check:tsc
           code=$?
           set -e
           echo "duration_ms=$(( $(date +%s%3N) - start ))" >> "$GITHUB_OUTPUT"
           echo "status=$([ $code -eq 0 ] && echo success || echo failure)" >> "$GITHUB_OUTPUT"
           exit $code
+
+      - name: Run TypeScript type check (tsgo)
+        run: bun run tsc:check
 
       - name: Check extension catalog and manifest schema freshness
         # templates/extensions/ is embedded as src/extensions/catalog.generated.json and
@@ -197,6 +206,11 @@ jobs:
         run: |
           bun run check:extension-catalog
           bun run check:extension-schema
+
+      # scripts/vendor/gitleaks/gitleaks.toml is converted to src/utils/secret-rules.generated.ts;
+      # the check also verifies the vendored body against its pinned sha256.
+      - name: Check generated secret rules freshness
+        run: bun run check:secret-rules
 
       - name: Run structural consistency lint
         id: structural-lint
@@ -365,6 +379,18 @@ jobs:
           echo "status=$([ $code -eq 0 ] && echo success || echo failure)" >> "$GITHUB_OUTPUT"
           exit $code
 
+      - name: Check DB TEXT-column classification
+        id: text-columns
+        run: |
+          start=$(date +%s%3N)
+          set +e
+          bun scripts/check-text-columns.ts
+          code=$?
+          set -e
+          echo "duration_ms=$(( $(date +%s%3N) - start ))" >> "$GITHUB_OUTPUT"
+          echo "status=$([ $code -eq 0 ] && echo success || echo failure)" >> "$GITHUB_OUTPUT"
+          exit $code
+
       - name: Check SDK tool registration
         id: sdk-tool-registration
         run: |
@@ -396,6 +422,15 @@ jobs:
       # (the version setup-bun installs in every job above).
       - name: Check Bun version pins
         run: bun run check:bun-version
+
+      # The vendored proxy event catalog must match its recorded sha256s (offline: the
+      # proxy repo is private), and the public telemetry docs table must be generated
+      # from it. See src/telemetry-contract/index.ts.
+      - name: Check vendored telemetry contract
+        run: bun run check:telemetry-contract
+
+      - name: Check telemetry docs are generated from the catalog
+        run: bun run check:telemetry-docs
 
       - name: Check realtime browser bundle
         run: bun run check:realtime-browser
@@ -439,6 +474,8 @@ jobs:
           DEPENDENCY_GRAPH_STATUS: ${{ steps.dependency-graph.outputs.status || 'skipped' }}
           AUDIT_COLUMNS_DURATION: ${{ steps.audit-columns.outputs.duration_ms || '0' }}
           AUDIT_COLUMNS_STATUS: ${{ steps.audit-columns.outputs.status || 'skipped' }}
+          TEXT_COLUMNS_DURATION: ${{ steps.text-columns.outputs.duration_ms || '0' }}
+          TEXT_COLUMNS_STATUS: ${{ steps.text-columns.outputs.status || 'skipped' }}
           SDK_TOOL_REGISTRATION_DURATION: ${{ steps.sdk-tool-registration.outputs.duration_ms || '0' }}
           SDK_TOOL_REGISTRATION_STATUS: ${{ steps.sdk-tool-registration.outputs.status || 'skipped' }}
           RBAC_COVERAGE_DURATION: ${{ steps.rbac-coverage.outputs.duration_ms || '0' }}
@@ -446,9 +483,9 @@ jobs:
         run: |
           set -euo pipefail
           if [ -z "$TOKEN" ]; then echo "SWARM_CI_TIMINGS_TOKEN not available; skipping"; exit 0; fi
-          BOUNDARIES_DURATION=$((STRUCTURAL_LINT_DURATION + DB_BOUNDARY_DURATION + TEST_SPAWN_SYNC_BOUNDARY_DURATION + API_KEY_BOUNDARY_DURATION + RBAC_BOUNDARY_DURATION + DEPENDENCY_GRAPH_DURATION + AUDIT_COLUMNS_DURATION + SDK_TOOL_REGISTRATION_DURATION + RBAC_COVERAGE_DURATION))
+          BOUNDARIES_DURATION=$((STRUCTURAL_LINT_DURATION + DB_BOUNDARY_DURATION + TEST_SPAWN_SYNC_BOUNDARY_DURATION + API_KEY_BOUNDARY_DURATION + RBAC_BOUNDARY_DURATION + DEPENDENCY_GRAPH_DURATION + AUDIT_COLUMNS_DURATION + TEXT_COLUMNS_DURATION + SDK_TOOL_REGISTRATION_DURATION + RBAC_COVERAGE_DURATION))
           BOUNDARIES_STATUS=success
-          for status in "$STRUCTURAL_LINT_STATUS" "$DB_BOUNDARY_STATUS" "$TEST_SPAWN_SYNC_BOUNDARY_STATUS" "$API_KEY_BOUNDARY_STATUS" "$RBAC_BOUNDARY_STATUS" "$DEPENDENCY_GRAPH_STATUS" "$AUDIT_COLUMNS_STATUS" "$SDK_TOOL_REGISTRATION_STATUS" "$RBAC_COVERAGE_STATUS"; do
+          for status in "$STRUCTURAL_LINT_STATUS" "$DB_BOUNDARY_STATUS" "$TEST_SPAWN_SYNC_BOUNDARY_STATUS" "$API_KEY_BOUNDARY_STATUS" "$RBAC_BOUNDARY_STATUS" "$DEPENDENCY_GRAPH_STATUS" "$AUDIT_COLUMNS_STATUS" "$TEXT_COLUMNS_STATUS" "$SDK_TOOL_REGISTRATION_STATUS" "$RBAC_COVERAGE_STATUS"; do
             if [ "$status" = failure ]; then BOUNDARIES_STATUS=failure; break; fi
             if [ "$status" = skipped ]; then BOUNDARIES_STATUS=skipped; fi
           done
@@ -618,11 +655,12 @@ jobs:
         run: |
           start=$(date +%s%3N)
           set +e
-          mkdir -p .bun-test-timings/next
+          mkdir -p .bun-test-timings/next .bun-test-results
           echo "timings snapshot: $(cat .bun-test-timings/snapshot-key.txt 2>/dev/null || echo none)"
           # shellcheck disable=SC2046
           bun run test:root -- --timeout 10000 --parallel=4 --shard=${{ matrix.shard }}/2 \
             --update-timings --timings=.bun-test-timings/next/${{ matrix.shard }}.json \
+            --reporter=junit --reporter-outfile=.bun-test-results/junit-${{ matrix.shard }}.xml \
             $(ls .bun-test-timings/*.json 2>/dev/null | sed 's/^/--timings=/')
           code=$?
           set -e
@@ -638,6 +676,51 @@ jobs:
           path: .bun-test-timings/next/${{ matrix.shard }}.json
           retention-days: 1
           if-no-files-found: ignore
+
+      # Per-test results for this shard (CI only: local `bun test` keeps the
+      # console reporter). The JUnit file is the full-fidelity record.
+      - name: Upload this shard's test results
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: unit-test-results-${{ matrix.shard }}
+          path: .bun-test-results/junit-${{ matrix.shard }}.xml
+          retention-days: 14
+          if-no-files-found: ignore
+
+      # Per-test durations, pass/fail and flake detection via the ci-metrics swarm
+      # script (`action: "tests"`; flake rules in agent-fs docs/ci-metrics.md).
+      # The payload is built without the secret; only the curl step sees it.
+      # Skipped on merge_group: the token never reaches a queued fork PR's code.
+      # Skipped on forks (no secret); never blocks the gate, and never retries.
+      - name: Build unit test results payload
+        id: test-results
+        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+        continue-on-error: true
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number || '' }}
+          REPORT: .bun-test-results/junit-${{ matrix.shard }}.xml
+        run: |
+          set -euo pipefail
+          if [ ! -s "$REPORT" ]; then echo "no JUnit report; skipping"; exit 0; fi
+          bun scripts/ci-unit-test-report.ts --junit "$REPORT" --out .bun-test-results/payload.json \
+            --shard ${{ matrix.shard }}/2 --wall-ms "${{ steps.tests.outputs.duration_ms || '0' }}" \
+            --status "${{ steps.tests.outputs.status || 'unknown' }}"
+          echo "payload=.bun-test-results/payload.json" >> "$GITHUB_OUTPUT"
+
+      - name: Report unit test results to ci-metrics
+        if: ${{ !cancelled() && github.event_name == 'pull_request' && steps.test-results.outputs.payload != '' }}
+        continue-on-error: true
+        env:
+          TOKEN: ${{ secrets.SWARM_CI_METRICS_TOKEN }}
+          PAYLOAD: ${{ steps.test-results.outputs.payload }}
+        run: |
+          set -euo pipefail
+          if [ -z "$TOKEN" ]; then echo "SWARM_CI_METRICS_TOKEN not available; skipping"; exit 0; fi
+          curl -sSf --max-time 60 -X POST https://api.desplega.agent-swarm.dev/api/x/script/JWCeFHIQUAQQ \
+            -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+            --data-binary "@$PAYLOAD" | jq -r '.result.markdown // empty' >> "$GITHUB_STEP_SUMMARY"
 
       # Each shard reports independently. See agent-fs docs/ci-timings.md.
       # Skipped on merge_group events and forks (no secret); never blocks the gate.
@@ -872,8 +955,11 @@ jobs:
         # The worker builds only the worker-slim target here (fast PR gate — it still
         # exercises the shared worker-base layers and the leaf block); the full target
         # is built and published on merge by docker-and-deploy.yml.
-        # `metric` legs load the built image into the local daemon and report its
-        # uncompressed size to the ci-metrics swarm script (sticky PR diff comment).
+        # `metric` legs load the built image into the local daemon (pull_request only)
+        # and report its uncompressed size to the ci-metrics swarm script (sticky PR
+        # diff comment). The worker-slim leg keeps `--bytecode` on: the size is diffed
+        # against main's published (bytecode) worker-slim image, so a non-bytecode PR
+        # build would show a fake ~130 MB delta.
         # See agent-fs docs/ci-metrics.md for the script contract.
         # `cache-from` reads the amd64 BuildKit cache docker-and-deploy.yml pushes to
         # GHCR on main (public packages, so fork PRs read it anonymously). Read-only:
@@ -915,7 +1001,9 @@ jobs:
           file: ./${{ matrix.dockerfile }}
           target: ${{ matrix.target }}
           push: false
-          load: ${{ matrix.metric != '' }}
+          # Only the image-size step below reads the loaded image, and it runs on
+          # pull_request only. merge_group runs skip the ~90s export + import.
+          load: ${{ matrix.metric != '' && github.event_name == 'pull_request' }}
           tags: test-image:latest
           cache-from: ${{ matrix.cache-from }}
 
@@ -985,6 +1073,33 @@ jobs:
             -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
             -d "$BODY" | jq -r '.result.markdown // empty' >> "$GITHUB_STEP_SUMMARY"
 
+  ui-image:
+    name: Dashboard Image
+    needs: detect-changes
+    if: needs.detect-changes.outputs.ui_image == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Build Docker image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: ./Dockerfile.ui
+          push: false
+          load: true
+          tags: test-ui-image:latest
+          cache-from: type=registry,ref=ghcr.io/desplega-ai/agent-swarm-ui:buildcache-ui
+
+      - name: Smoke test
+        run: bash scripts/smoke-ui-image.sh test-ui-image:latest
+
   ui-lint:
     name: UI Lint and Type Check
     needs: detect-changes
@@ -1045,6 +1160,11 @@ jobs:
           echo "duration_ms=$(( $(date +%s%3N) - start ))" >> "$GITHUB_OUTPUT"
           echo "status=$([ $code -eq 0 ] && echo success || echo failure)" >> "$GITHUB_OUTPUT"
           exit $code
+        working-directory: apps/ui
+
+      # tsc above is the authority; the prek ui-typecheck hook runs tsgo.
+      - name: Run TypeScript type check (tsgo)
+        run: bunx tsgo -b
         working-directory: apps/ui
 
       - name: Run UI E2E TypeScript type check
@@ -1139,6 +1259,9 @@ jobs:
       - name: Check harness plugin descriptor versions
         run: bun run check:plugin-versions
 
+      - name: Check Claude Code mod parser bundle
+        run: bun run check:claude-mod
+
   # Run on every PR and merge queue group, even when no migration files changed.
   # Use the event's exact base commit so the checker cannot skip checks if main moves.
   migration-conflict-check:
@@ -1158,9 +1281,50 @@ jobs:
           MIGRATION_BASE_REF: ${{ github.event_name == 'merge_group' && github.event.merge_group.base_sha || github.event.pull_request.base.sha }}
         run: bash scripts/check-migration-conflicts.sh
 
+  # Run on every PR and merge queue group: any path can carry a secret, and the
+  # scan takes seconds. Only commits the event adds are scanned, so
+  # secret-shaped lines already on main never block anyone.
+  secret-scan:
+    name: Secret Scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The scan range needs the base branch history.
+          fetch-depth: 0
+
+      - name: Self-test the scanner
+        run: bash scripts/gitleaks-selftest.sh
+
+      - name: Scan new commits
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          PUSH_SHA: ${{ github.sha }}
+        run: |
+          case "$EVENT_NAME" in
+            pull_request) range="origin/${BASE_REF:-main}..HEAD" ;;
+            merge_group) range="$MERGE_GROUP_BASE_SHA..HEAD" ;;
+            push)
+              # A new branch reports an all-zeros `before`; scan from main then.
+              if [ -z "$PUSH_BEFORE" ] || [ -z "${PUSH_BEFORE//0/}" ]; then
+                range="origin/main..$PUSH_SHA"
+              else
+                range="$PUSH_BEFORE..$PUSH_SHA"
+              fi
+              ;;
+            *) echo "::error::secret-scan: unhandled event $EVENT_NAME"; exit 1 ;;
+          esac
+          bash scripts/gitleaks.sh "$range"
+
   gate:
     name: Merge Gate
-    needs: [detect-changes, restore-timings, lint-and-typecheck, test, e2e-contract, pi-skills-freshness, seed-skills, script-types-freshness, openapi-freshness, vendored-openapi, docker-build, ui-lint, template-workflow-validation, operator-skill, migration-conflict-check]
+    needs: [detect-changes, restore-timings, lint-and-typecheck, test, e2e-contract, pi-skills-freshness, seed-skills, script-types-freshness, openapi-freshness, vendored-openapi, docker-build, ui-image, ui-lint, template-workflow-validation, operator-skill, migration-conflict-check, secret-scan]
     if: always()
     runs-on: ubuntu-latest
     # No checkout, no API calls; the job only inspects `needs` results.

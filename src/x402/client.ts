@@ -21,6 +21,7 @@
  *   console.log(client.getSpendingSummary());
  */
 
+import { AsyncLocalStorage } from "node:async_hooks";
 import { x402Client } from "@x402/core/client";
 import type { ClientEvmSigner } from "@x402/evm";
 import { toClientEvmSigner } from "@x402/evm";
@@ -115,10 +116,19 @@ export async function createX402Client(
   // Create spending tracker
   const spendingTracker = new SpendingTracker(config.maxAutoApprove, config.dailyLimit);
 
-  // Register a spending-limit hook that blocks over-budget payments.
-  // NOTE: This check has a TOCTOU race — concurrent requests could both pass the
-  // limit check before either records its payment. Acceptable for agent workloads
-  // (typically sequential), but not suitable for high-concurrency scenarios.
+  // Spending limits: reserve before the payment is created, then confirm it once
+  // created or release it if creation fails. `reserve()` checks the limits and
+  // holds the amount synchronously, so concurrent payments in this process can't
+  // all pass the daily check against the same remaining budget.
+  // NOTE: totals are still in memory, so they reset on restart and are not shared
+  // across processes.
+  //
+  // Each createPaymentPayload() call gets its own reservation slot. Settling the
+  // reservation around the whole call (rather than in the after/failure hooks)
+  // means a later before-hook that aborts or throws still releases it, and one
+  // call can never confirm or release another concurrent call's reservation.
+  const invocation = new AsyncLocalStorage<{ reservationId?: string }>();
+
   client.onBeforePaymentCreation(async (context) => {
     const { selectedRequirements } = context;
 
@@ -127,20 +137,32 @@ export async function createX402Client(
     const amountUsd = usdcToUsd(rawValue);
 
     const url = context.paymentRequired.resource?.url || "unknown";
-    const blockReason = spendingTracker.checkSpendingLimit(amountUsd, url);
+    const result = spendingTracker.reserve(amountUsd, url);
 
-    if (blockReason) {
-      return { abort: true, reason: blockReason };
+    if (!result.ok) {
+      return { abort: true, reason: result.reason };
+    }
+    const slot = invocation.getStore();
+    if (slot) {
+      slot.reservationId = result.id;
+    } else {
+      // Not reached through createPaymentPayload below; count it rather than leak a hold
+      spendingTracker.confirm(result.id);
     }
   });
 
-  // Track successful payments
-  client.onAfterPaymentCreation(async (context) => {
-    const rawValue = context.selectedRequirements.amount;
-    const amountUsd = usdcToUsd(rawValue);
-    const url = context.paymentRequired.resource?.url || "unknown";
-    spendingTracker.recordPayment(amountUsd, url);
-  });
+  const createPaymentPayload = client.createPaymentPayload.bind(client);
+  client.createPaymentPayload = async (paymentRequired) => {
+    const slot: { reservationId?: string } = {};
+    try {
+      const payload = await invocation.run(slot, () => createPaymentPayload(paymentRequired));
+      if (slot.reservationId !== undefined) spendingTracker.confirm(slot.reservationId);
+      return payload;
+    } catch (error) {
+      if (slot.reservationId !== undefined) spendingTracker.release(slot.reservationId);
+      throw error;
+    }
+  };
 
   // Wrap fetch with payment handling
   const paidFetch = wrapFetchWithPayment(globalThis.fetch, client);

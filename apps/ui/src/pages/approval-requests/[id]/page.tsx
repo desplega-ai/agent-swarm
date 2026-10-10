@@ -8,10 +8,10 @@ import {
   useCancelApprovalRequest,
   useRespondToApprovalRequest,
 } from "@/api/hooks/use-approval-requests";
+import { useWhoami } from "@/api/hooks/use-whoami";
 import type { ApprovalQuestion, ApprovalRequest } from "@/api/types";
 import { FadeIn } from "@/components/onboarding/fade-in";
 import type { StatusTone } from "@/components/shared/status-icon";
-import { UserChip } from "@/components/shared/user-chip";
 import {
   DetailPageBody,
   DetailPageRail,
@@ -22,17 +22,22 @@ import {
 } from "@/components/ui/detail-page-layout";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useCurrentUser } from "@/contexts/current-user-context";
-import { useUserLookup } from "@/hooks/use-user-name";
 import {
   answerHint,
   answerProgress,
+  claimedNameFor,
   formatApprovalAnswer,
+  hasAnswered,
   humanizeSeconds,
   isAnswered,
+  OPERATOR_RESPONDER,
+  quorumLabel,
+  respondErrorMessage,
 } from "@/lib/approval-format";
 import { type DetailShortcut, matchDetailShortcut } from "@/lib/approval-shortcuts";
 import { formatSmartTime } from "@/lib/utils";
 import { AnswerView } from "../components/answer-view";
+import { ApprovalVotes } from "../components/approval-votes";
 import {
   KeyHint,
   ShortcutSheet,
@@ -43,7 +48,8 @@ import {
 import { QuestionCard } from "../components/question-card";
 import { optionValues, QuestionField } from "../components/question-field";
 import { RequestHeader } from "../components/request-header";
-import { DISCARD_REASON, SubmitBar } from "../components/submit-bar";
+import { ResponderChip } from "../components/responder-chip";
+import { DISCARD_REASON, DiscardButton, SubmitBar } from "../components/submit-bar";
 
 /** Above this many questions, answered cards fold to one line. */
 const COMPACT_AFTER = 5;
@@ -101,7 +107,7 @@ function ApprovalRequestView({ request }: { request: ApprovalRequest }) {
   const respondMutation = useRespondToApprovalRequest();
   const cancelMutation = useCancelApprovalRequest();
   const { user } = useCurrentUser();
-  const lookupUser = useUserLookup();
+  const whoami = useWhoami(true);
   const reduceMotion = useReducedMotion();
   const finePointer = useFinePointer();
   const desktop = useMediaQuery("(min-width: 1024px)");
@@ -113,11 +119,30 @@ function ApprovalRequestView({ request }: { request: ApprovalRequest }) {
   const [collapsedOverride, setCollapsedOverride] = useState<Record<string, boolean>>({});
   const [cursors, setCursors] = useState<Record<string, number>>({});
   const [sheetOpen, setSheetOpen] = useState(false);
+  /** Set when this tab's answer was recorded but the policy needs more approvals. */
+  const [answeredHere, setAnsweredHere] = useState(false);
   const cards = useRef<(HTMLElement | null)[]>([]);
   const top = useRef<HTMLDivElement>(null);
 
   const questions = request.questions;
   const isPending = request.status === "pending";
+  // The server records the responder from the credential: the token's user,
+  // or `operator` for the shared key, whoever is picked in the switcher.
+  const myResponder =
+    whoami.data?.kind === "user"
+      ? (whoami.data.user?.id ?? null)
+      : whoami.data?.kind === "operator"
+        ? OPERATOR_RESPONDER
+        : null;
+  const answeredByMe = answeredHere || hasAnswered(request, myResponder);
+  // Pending and not yet answered from this credential: the form is live.
+  const editing = isPending && !answeredByMe;
+  const myVote = answeredByMe
+    ? (request.approvals?.find((vote) => vote.responder === myResponder) ??
+      request.approvals?.at(-1))
+    : undefined;
+  const shownResponses = isPending ? myVote?.responses : request.responses;
+  const quorum = quorumLabel(request.approvalProgress);
   const compact = questions.length > COMPACT_AFTER;
   const submitting = respondMutation.isPending;
   const progress = useMemo(() => answerProgress(questions, responses), [questions, responses]);
@@ -140,7 +165,7 @@ function ApprovalRequestView({ request }: { request: ApprovalRequest }) {
   );
 
   const isCollapsed = (question: ApprovalQuestion, index: number): boolean | null => {
-    if (isPending) {
+    if (editing) {
       if (!compact || !isAnswered(question, responses[question.id])) return null;
       return collapsedOverride[question.id] ?? index !== activeIndex;
     }
@@ -150,7 +175,7 @@ function ApprovalRequestView({ request }: { request: ApprovalRequest }) {
 
   const handleSubmit = async () => {
     // The ⌘/Ctrl+Enter shortcut reaches here too, so a discard in flight blocks it.
-    if (!isPending || submitting || cancelMutation.isPending) return;
+    if (!editing || submitting || cancelMutation.isPending) return;
     if (progress.blockedReason) {
       setAttempted(true);
       const firstBlocked = questions.findIndex((question) =>
@@ -164,15 +189,19 @@ function ApprovalRequestView({ request }: { request: ApprovalRequest }) {
       const result = await respondMutation.mutateAsync({
         id: request.id,
         responses,
-        // Attribute the answer to the picked identity ("Approved by …").
-        respondedBy: user?.email ?? user?.name ?? undefined,
+        // A display hint only: the server records who answered from the
+        // credential and stores this as the unverified `claimedRespondedBy`.
+        claimedRespondedBy: user?.email ?? user?.name ?? undefined,
       });
-      // Swap to the resolved view in place from the response: no refetch flash.
+      // A 200 is not a resolution: an `all` / `{ min: N }` request stays
+      // pending until enough approve. Either way, swap in the server's view
+      // from the response: no refetch flash.
+      if (result.approvalRequest.status === "pending") setAnsweredHere(true);
       queryClient.setQueryData(["approval-request", request.id], result);
       setActiveIndex(-1);
       top.current?.scrollIntoView({ block: "start", behavior: reduceMotion ? "auto" : "smooth" });
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to submit response");
+      setError(respondErrorMessage(e));
     }
   };
 
@@ -236,7 +265,7 @@ function ApprovalRequestView({ request }: { request: ApprovalRequest }) {
         return;
       }
     }
-    if (!isPending || submitting || !question) return false;
+    if (!editing || submitting || !question) return false;
     const values = optionValues(question);
     switch (action.type) {
       case "approve":
@@ -297,14 +326,14 @@ function ApprovalRequestView({ request }: { request: ApprovalRequest }) {
   useKeyboardShortcuts(matchDetailShortcut, onShortcut);
 
   const cardsList = questions.map((question, index) => {
-    const response = isPending ? responses[question.id] : request.responses?.[question.id];
+    const response = editing ? responses[question.id] : shownResponses?.[question.id];
     const collapsed = isCollapsed(question, index);
     const focused = index === activeIndex;
-    const showKeys = finePointer && isPending && index === targetIndex;
+    const showKeys = finePointer && editing && index === targetIndex;
     let tone: StatusTone;
     let label: string;
     let hint: string | null = null;
-    if (isPending) {
+    if (editing) {
       const answered = isAnswered(question, response);
       const touched = question.id in responses;
       hint = touched || attempted ? answerHint(question, response) : null;
@@ -333,7 +362,7 @@ function ApprovalRequestView({ request }: { request: ApprovalRequest }) {
         statusTone={tone}
         statusLabel={label}
         focused={focused}
-        beam={isPending && !submitting && index === firstOpenIndex}
+        beam={editing && !submitting && index === firstOpenIndex}
         collapsed={collapsed}
         onToggleCollapsed={() =>
           setCollapsedOverride((prev) => ({ ...prev, [question.id]: !collapsed }))
@@ -343,7 +372,7 @@ function ApprovalRequestView({ request }: { request: ApprovalRequest }) {
         keyHint={hintText ? <KeyHint className="px-1.5">{hintText}</KeyHint> : null}
         onActivate={() => setActiveIndex(index)}
       >
-        {isPending ? (
+        {editing ? (
           <QuestionField
             question={question}
             value={response}
@@ -363,12 +392,13 @@ function ApprovalRequestView({ request }: { request: ApprovalRequest }) {
   const main = (
     <AnimatePresence mode="wait" initial={false}>
       <motion.div
-        key={isPending ? "pending" : "resolved"}
+        key={editing ? "answering" : "answered"}
         exit={{ opacity: 0, transition: { duration: 0.12 } }}
         className="flex flex-col"
       >
         <FadeIn className="flex flex-col gap-3">
-          {compact && isPending ? (
+          <ApprovalVotes request={request} />
+          {compact && editing ? (
             <p className="text-xs text-muted-foreground">
               {questions.length} questions · answered ones fold away
               {finePointer ? (
@@ -397,8 +427,23 @@ function ApprovalRequestView({ request }: { request: ApprovalRequest }) {
           ) : null}
         </FadeIn>
         {/* Room for the fixed phone bar under the last card. */}
-        {isPending ? <div aria-hidden className="h-28 md:hidden" /> : null}
-        {isPending ? (
+        {editing ? <div aria-hidden className="h-28 md:hidden" /> : null}
+        {isPending && !editing ? (
+          <div className="mt-3 flex items-center gap-3 rounded-xl border border-border-subtle bg-muted/40 px-4 py-3">
+            <output className="block min-w-0 flex-1 text-xs text-muted-foreground">
+              Your approval is recorded{quorum ? ` (${quorum})` : ""}. The request stays pending
+              until the approvers policy is met.
+              {error ? <span className="block text-status-error-strong">{error}</span> : null}
+            </output>
+            <DiscardButton
+              request={request}
+              disabled={false}
+              discarding={cancelMutation.isPending}
+              onDiscard={() => void handleDiscard()}
+            />
+          </div>
+        ) : null}
+        {editing ? (
           <SubmitBar
             request={request}
             progress={progress}
@@ -422,9 +467,15 @@ function ApprovalRequestView({ request }: { request: ApprovalRequest }) {
         {request.resolvedBy ? (
           <QuickStat
             label="Resolved by"
-            value={<UserChip userRef={request.resolvedBy} user={lookupUser(request.resolvedBy)} />}
+            value={
+              <ResponderChip
+                responder={request.resolvedBy}
+                claimed={claimedNameFor(request, request.resolvedBy)}
+              />
+            }
           />
         ) : null}
+        {quorum ? <QuickStat label="Approvals" value={quorum} /> : null}
         {request.timeoutSeconds ? (
           <QuickStat label="Timeout" value={humanizeSeconds(request.timeoutSeconds)} />
         ) : null}

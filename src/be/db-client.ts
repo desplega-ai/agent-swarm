@@ -68,6 +68,9 @@ export interface DbClient extends DbExecutor {
    * really did occupy the driver and block the event loop, up to
    * `attemptSpinMs` per BUSY attempt. It excludes all lock waiting and all
    * backoff sleeping.
+   *
+   * `changes` counts only the rows the statement itself changed. Unlike
+   * `run`, it excludes rows touched by foreign-key actions.
    */
   runTimed(sql: string, params?: DbParam[]): Promise<{ changes: number; executionMs: number }>;
   /**
@@ -278,8 +281,14 @@ class BunSqliteClient implements DbClient {
     const result = await this.execute(
       sql,
       (db) => {
-        const run = db.query(sql).run(...params);
-        return { changes: run.changes };
+        db.query(sql).run(...params);
+        // bun:sqlite's `run().changes` also counts rows touched by foreign-key
+        // actions (an ON DELETE SET NULL child update counts as a change), so
+        // a DELETE on a self-referencing table reports up to twice the rows it
+        // removed. SQLite's changes() counts only the statement's own rows.
+        // Same connection, still inside the lock: nothing can run in between.
+        const own = db.query("SELECT changes() AS n").get() as { n: number } | null;
+        return { changes: own?.n ?? 0 };
       },
       (ms) => {
         executionMs += ms;

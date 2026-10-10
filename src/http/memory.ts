@@ -7,6 +7,18 @@ import { CANDIDATE_SET_MULTIPLIER } from "../be/memory/constants";
 import { listEdgesForAgent } from "../be/memory/edges-store";
 import { expandCandidatesWithGraph } from "../be/memory/graph-expansion";
 import { indexMemoryContent } from "../be/memory/index-content";
+import {
+  checkChunkIntegrity,
+  estimateTokens,
+  getMemoryChunks,
+  getPosteriorsByIds,
+  listMemoryKeys,
+  MEMORY_KEYS_DEFAULT_PREFIX,
+  MEMORY_KEYS_MAX_LIMIT,
+  posteriorMean,
+} from "../be/memory/key-browser";
+import { MemoryKeyError } from "../be/memory/key-guard";
+import { MEMORY_KEY_MAX_LENGTH } from "../be/memory/key-paths";
 import { refreshLinks } from "../be/memory/link-resolver";
 import { getLinksForMemory, type MemoryLinksResult } from "../be/memory/links-store";
 import {
@@ -16,6 +28,7 @@ import {
 } from "../be/memory/raters/retrieval";
 import { applyRating, ExplicitSelfDuplicateError } from "../be/memory/raters/store";
 import {
+  RATING_MODEL_MAX_LENGTH,
   type RatingEvent,
   REFERENCES_SOURCE_MAX_LENGTH,
   sanitizeReferencesSource,
@@ -26,10 +39,11 @@ import { getUsefulnessStats } from "../be/memory/usefulness-stats";
 import { shouldPersistAutomaticTaskMemory } from "../memory/automatic-task-gate";
 import { buildRecallQuery } from "../memory/recall-query";
 import { memoryRelevance, SIMILARITY_THRESHOLD } from "../prompts/memories";
-import { can } from "../rbac";
+import { can, type RbacPrincipal } from "../rbac";
 import { AgentMemorySchema, AgentMemoryScopeSchema, AgentMemorySourceSchema } from "../types";
 import { getRequestAuth } from "../utils/request-auth-context";
 import { scrubSecrets } from "../utils/secret-scrubber";
+import { rejectGuest } from "./request-principal";
 import { route } from "./route-def";
 import { jsonError, parseQueryParams } from "./utils";
 
@@ -56,6 +70,9 @@ const indexMemory = route({
   pattern: ["api", "memory", "index"],
   summary: "Ingest content into memory system (async embedding)",
   tags: ["Memory"],
+  // The gate only bites when the key that lands on the rows (here, `sourcePath`) sits under a
+  // lead-only /longterm root; every other ingest passes straight through.
+  rbac: { permission: "memory.write.consolidated" },
   body: z.object({
     agentId: z.string().optional(),
     content: z.string().min(1),
@@ -70,7 +87,13 @@ const indexMemory = route({
   }),
   responses: {
     202: { description: "Content queued for embedding", schema: IndexMemoryResponseSchema },
-    400: { description: "Validation error" },
+    400: {
+      description:
+        "Validation error, or a sourcePath under /longterm that is not an allowed memory key",
+    },
+    403: {
+      description: "sourcePath is under a lead-only /longterm root and the caller is not the lead",
+    },
   },
 });
 
@@ -86,6 +109,8 @@ const MemorySearchResultItemSchema = z.object({
   scope: AgentMemoryScopeSchema,
   tags: z.array(z.string()),
   accessCount: z.number(),
+  summary: z.string().nullable().optional(),
+  createdAt: z.string().optional(),
 });
 
 const searchMemory = route({
@@ -107,6 +132,14 @@ const searchMemory = route({
     limit: z.number().int().min(1).max(20).default(5),
     scope: z.enum(["agent", "swarm", "all"]).default("all"),
     source: z.enum(["manual", "file_index", "session_summary", "task_completion"]).optional(),
+    keyPrefix: z
+      .string()
+      .min(1)
+      .max(MEMORY_KEY_MAX_LENGTH)
+      .optional()
+      .describe(
+        "Only return memories whose key starts with this text (literal, case-sensitive), for example '/longterm/facts/'.",
+      ),
   }),
   responses: {
     200: {
@@ -203,15 +236,24 @@ const MemoryListResultItemSchema = z.object({
   chunkIndex: z.number(),
   totalChunks: z.number(),
   tags: z.array(z.string()),
+  key: z.string().nullable(),
+  updatedAt: z.string().nullable(),
+  rating: z.number().describe("Usefulness posterior mean alpha / (alpha + beta); 0.5 = no signal"),
 });
 
 const listMemory = route({
   method: "post",
   path: "/api/memory/list",
   pattern: ["api", "memory", "list"],
-  summary: "List or semantically search memories across all agents (debug/admin)",
+  summary: "List or semantically search memories (debug/admin)",
+  description:
+    "The operator key, a user, and the lead see every agent's memories. Any other agent (an `aseph_` session token, or the shared key with `X-Agent-ID`) sees only its own memories and swarm-scope memories.",
   tags: ["Memory"],
   auth: { apiKey: true },
+  rbac: {
+    ungated:
+      "read-only listing; the handler narrows an agent principal to its own and swarm-scope rows",
+  },
   body: z.object({
     query: z
       .string()
@@ -243,6 +285,136 @@ const listMemory = route({
       }),
     },
     400: { description: "Validation error" },
+  },
+});
+
+// Mirrors `MemoryKeySummary` (src/be/memory/key-browser.ts).
+const MemoryKeySummarySchema = z.object({
+  key: z.string(),
+  scope: AgentMemoryScopeSchema,
+  agentId: z.string().nullable(),
+  memoryId: z.string(),
+  name: z.string(),
+  source: AgentMemorySourceSchema,
+  chunkRows: z.number(),
+  totalChunks: z.number(),
+  complete: z.boolean(),
+  chars: z.number(),
+  estTokens: z.number(),
+  accessCount: z.number(),
+  lastAccessedAt: z.string().nullable(),
+  rating: z.number(),
+  alpha: z.number(),
+  beta: z.number(),
+  usefulRatings: z.number(),
+  notUsefulRatings: z.number(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+
+const listMemoryKeysRoute = route({
+  method: "get",
+  path: "/api/memory/keys",
+  pattern: ["api", "memory", "keys"],
+  summary:
+    "One aggregate row per keyed memory under a key prefix: chunks, usage, rating, estimated tokens (debug/admin)",
+  description:
+    "The operator key, a user, and the lead see every agent's memories. Any other agent sees only its own memories and swarm-scope memories.",
+  tags: ["Memory"],
+  auth: { apiKey: true },
+  query: z.object({
+    prefix: z
+      .string()
+      .min(1)
+      .max(MEMORY_KEY_MAX_LENGTH)
+      .default(MEMORY_KEYS_DEFAULT_PREFIX)
+      .describe("Literal, case-sensitive key prefix (default '/longterm/')."),
+    limit: z.coerce.number().int().min(1).max(MEMORY_KEYS_MAX_LIMIT).default(MEMORY_KEYS_MAX_LIMIT),
+  }),
+  responses: {
+    200: {
+      description:
+        "Keyed memories grouped by (key, scope, agentId). accessCount is summed over chunk rows; rating pools alpha/beta over chunk rows; estTokens = ceil(chars / 4)",
+      schema: z.object({
+        prefix: z.string(),
+        keys: z.array(MemoryKeySummarySchema),
+        truncated: z.boolean(),
+      }),
+    },
+    400: { description: "Validation error" },
+  },
+});
+
+const MemoryChunkSchema = z.object({
+  id: z.string(),
+  agentId: z.string().nullable(),
+  scope: AgentMemoryScopeSchema,
+  key: z.string().nullable(),
+  name: z.string(),
+  content: z.string(),
+  source: AgentMemorySourceSchema,
+  sourceTaskId: z.string().nullable(),
+  sourcePath: z.string().nullable(),
+  chunkIndex: z.number(),
+  totalChunks: z.number(),
+  tags: z.array(z.string()),
+  createdAt: z.string(),
+  updatedAt: z.string().nullable(),
+  accessedAt: z.string(),
+  expiresAt: z.string().nullable(),
+  accessCount: z.number(),
+  embeddingModel: z.string().nullable(),
+  rating: z.number(),
+  alpha: z.number(),
+  beta: z.number(),
+  version: z.number(),
+  estTokens: z.number(),
+});
+
+const getMemoryChunksRoute = route({
+  method: "get",
+  path: "/api/memory/chunks",
+  pattern: ["api", "memory", "chunks"],
+  summary:
+    "Every chunk row of one memory in chunkIndex order, with a chunk-integrity check (debug/admin). Does not count as an access",
+  description:
+    "Visibility matches the memory list: an agent other than the lead gets 404 for another agent's agent-scope memory.",
+  tags: ["Memory"],
+  auth: { apiKey: true },
+  query: z
+    .object({
+      memoryId: z.string().uuid().optional().describe("Any chunk row of the memory."),
+      key: z.string().min(1).max(MEMORY_KEY_MAX_LENGTH).optional(),
+      scope: AgentMemoryScopeSchema.optional(),
+      agentId: z
+        .string()
+        .optional()
+        .describe("Owner agent id; pass an empty string for rows without one."),
+    })
+    .refine((q) => q.memoryId || q.key, { message: "memoryId or key required" }),
+  responses: {
+    200: {
+      description: "Chunk rows and integrity findings",
+      schema: z.object({
+        key: z.string().nullable(),
+        scope: AgentMemoryScopeSchema,
+        agentId: z.string().nullable(),
+        chunks: z.array(MemoryChunkSchema),
+        estTokens: z.number(),
+        integrity: z.object({
+          ok: z.boolean(),
+          expectedChunks: z.number(),
+          presentIndexes: z.array(z.number()),
+          missingIndexes: z.array(z.number()),
+          duplicateIndexes: z.array(z.number()),
+          conflictingTotals: z.array(z.number()),
+          outOfRangeIds: z.array(z.string()),
+          issues: z.array(z.string()),
+        }),
+      }),
+    },
+    400: { description: "Validation error" },
+    404: { description: "Memory not found" },
   },
 });
 
@@ -375,11 +547,15 @@ const deleteMemoryById = route({
   path: "/api/memory/{id}",
   pattern: ["api", "memory", null],
   summary: "Delete a single memory by ID (debug/admin)",
+  description:
+    "The operator key and users may delete any memory. The lead may delete its own memories and swarm-scope memories. Any other agent may delete only its own agent-scope memories.",
   tags: ["Memory"],
   auth: { apiKey: true },
+  rbac: { permission: "memory.delete.any" },
   params: z.object({ id: z.string().uuid() }),
   responses: {
     200: { description: "Memory deleted", schema: z.object({ deleted: z.boolean() }) },
+    403: { description: "Caller may not delete this memory" },
     404: { description: "Memory not found" },
   },
 });
@@ -496,6 +672,15 @@ const RateEventSchema = z.object({
   reasoning: z.string().max(500).optional(),
   taskId: z.string().uuid().optional(),
   referencesSource: ReferencesSourceSchema.optional(),
+  model: z
+    .string()
+    .trim()
+    .min(1)
+    .max(RATING_MODEL_MAX_LENGTH)
+    .optional()
+    .describe(
+      'Optional. Model that produced an `llm` rating, as "<provider>/<model-id>" (e.g. "openrouter/deepseek/deepseek-v4.1-flash"). Stored in memory_rating.model for `llm` events and ignored for `explicit-self`.',
+    ),
 });
 
 const rateMemory = route({
@@ -593,6 +778,34 @@ const getMemoryEdges = route({
 
 // ─── Handler ─────────────────────────────────────────────────────────────────
 
+/**
+ * Who is calling, in the terms `can()` takes, for the key gate on ingestion. A bound identity (an
+ * `aseph_` session token) is honoured as is; otherwise the self-declared X-Agent-ID, the trust model
+ * `ensureCatalogWriter` and `ensureConfigAdmin` use. A request with neither is the shared key alone
+ * (operator), and `memory.write.consolidated` is lead-only, so it cannot reach the lead-only roots.
+ */
+async function ingestPrincipal(
+  req: IncomingMessage,
+  agentIdHeader: string | undefined,
+): Promise<RbacPrincipal> {
+  const auth = getRequestAuth(req);
+  if (auth?.kind === "user") return { kind: "user", userId: auth.userId };
+  if (auth?.kind === "guest") return { kind: "guest" };
+  const agentId = auth?.kind === "agent" ? auth.agentId : agentIdHeader;
+  if (agentId) {
+    const agent = await getAgentById(agentId);
+    return { kind: "agent", agentId, isLead: agent?.isLead ?? false };
+  }
+  if (auth?.kind === "operator") return { kind: "operator" };
+  return { kind: "agent", agentId: "", isLead: false };
+}
+
+/** Whose rows a memory list may show. `seesAll` lifts the own-or-swarm filter. */
+function memoryListViewer(principal: RbacPrincipal): { agentId: string; seesAll: boolean } {
+  const seesAll = can({ principal, verb: "memory.read.any", source: "http" }).allow;
+  return { agentId: principal.kind === "agent" ? principal.agentId : "", seesAll };
+}
+
 export async function handleMemory(
   req: IncomingMessage,
   res: ServerResponse,
@@ -601,6 +814,9 @@ export async function handleMemory(
 ): Promise<boolean> {
   // Page memory operations use the owner's scope. Authentication and audit retain the signed viewer.
   const myAgentId = getRequestAuth(req)?.page?.executionAgentId ?? callerAgentId;
+  if (pathSegments[0] === "api" && pathSegments[1] === "memory" && rejectGuest(req, res)) {
+    return true;
+  }
   if (indexMemory.match(req.method, pathSegments)) {
     const parsed = await indexMemory.parse(req, res, pathSegments, new URLSearchParams());
     if (!parsed) return true;
@@ -638,18 +854,31 @@ export async function handleMemory(
       (Array.isArray(headerContextKey) ? headerContextKey[0] : headerContextKey) ??
       undefined;
 
-    const { queued, memoryIds, edited } = await indexMemoryContent({
-      agentId: memoryAgentId,
-      content,
-      name,
-      scope,
-      source,
-      sourceTaskId,
-      sourcePath,
-      tags,
-      contextKey: resolvedContextKey,
-    });
+    let result: Awaited<ReturnType<typeof indexMemoryContent>>;
+    try {
+      result = await indexMemoryContent({
+        agentId: memoryAgentId,
+        content,
+        name,
+        scope,
+        source,
+        sourceTaskId,
+        sourcePath,
+        tags,
+        contextKey: resolvedContextKey,
+        // The caller, not the memory's owner (`agentId` in the body can name another agent).
+        writer: { principal: await ingestPrincipal(req, myAgentId), source: "http" },
+      });
+    } catch (err) {
+      // sourcePath doubles as the key, so it is held to the same checks as memory-store's `key`.
+      if (err instanceof MemoryKeyError) {
+        jsonError(res, err.message, err.reason === "forbidden" ? 403 : 400);
+        return true;
+      }
+      throw err;
+    }
 
+    const { queued, memoryIds, edited } = result;
     indexMemory.respond(res, 202, {
       queued,
       memoryIds,
@@ -667,7 +896,7 @@ export async function handleMemory(
     const parsed = await searchMemory.parse(req, res, pathSegments, new URLSearchParams());
     if (!parsed) return true;
 
-    const { query: originalQuery, intent, limit, scope, source } = parsed.body;
+    const { query: originalQuery, intent, limit, scope, source, keyPrefix } = parsed.body;
     const consumptionHeader = req.headers["x-memory-consumption"];
     const consumptionMode = Array.isArray(consumptionHeader)
       ? consumptionHeader[0]
@@ -691,12 +920,14 @@ export async function handleMemory(
         source,
         isLead: false,
         queryText: query,
+        keyPrefix,
       });
       // Default-on 1-hop memory_link neighbor expansion (disable with
       // MEMORY_GRAPH_EXPANSION=0|false).
       const expanded = await expandCandidatesWithGraph(candidates, myAgentId, {
         scope,
         source,
+        keyPrefix,
         isLead: false,
       });
       const resultLimit = Math.min(limit, 20);
@@ -772,6 +1003,8 @@ export async function handleMemory(
           scope: r.scope,
           tags: r.tags,
           accessCount: (r.accessCount ?? 0) + (consumedIdSet.has(r.id) ? 1 : 0),
+          summary: r.summary,
+          createdAt: r.createdAt,
         })),
       });
     } catch (err) {
@@ -787,6 +1020,9 @@ export async function handleMemory(
 
     const { query, agentId, scope, source, sourcePath, limit, offset } = parsed.body;
     const store = getMemoryStore();
+    // Humans and the lead see every agent's rows; any other agent sees its own
+    // rows plus swarm-scope rows (the store's non-lead scope conditions).
+    const viewer = memoryListViewer(await ingestPrincipal(req, myAgentId));
     const pageLimit = Math.min(limit, 100);
     const pathNeedle = sourcePath?.trim().toLowerCase();
     const matchesPath = (p: string | null) =>
@@ -801,10 +1037,10 @@ export async function handleMemory(
           4096,
           Math.max(offset + pageLimit, pageLimit) * CANDIDATE_SET_MULTIPLIER,
         );
-        let candidates = await store.search(queryEmbedding ?? new Float32Array(0), agentId ?? "", {
+        let candidates = await store.search(queryEmbedding ?? new Float32Array(0), viewer.agentId, {
           scope,
           limit: candidateLimit,
-          isLead: true,
+          isLead: viewer.seesAll,
           source,
           queryText: query.trim(),
         });
@@ -839,6 +1075,9 @@ export async function handleMemory(
             chunkIndex: r.chunkIndex,
             totalChunks: r.totalChunks,
             tags: r.tags,
+            key: r.key ?? null,
+            updatedAt: r.updatedAt ?? null,
+            rating: posteriorMean(r.alpha, r.beta),
           })),
           total: candidates.length,
           limit: pageLimit,
@@ -852,13 +1091,14 @@ export async function handleMemory(
         scope,
         limit: pageLimit,
         offset,
-        isLead: true,
+        isLead: viewer.seesAll,
         ownerAgentId: agentId,
         source,
         sourcePath: pathNeedle,
       };
-      const rows = await store.list(agentId ?? "", listOptions);
-      const total = await store.count(agentId ?? "", listOptions);
+      const rows = await store.list(viewer.agentId, listOptions);
+      const total = await store.count(viewer.agentId, listOptions);
+      const posteriors = await getPosteriorsByIds(rows.map((r) => r.id));
 
       listMemory.respond(res, 200, {
         results: rows.map((r) => ({
@@ -878,6 +1118,12 @@ export async function handleMemory(
           chunkIndex: r.chunkIndex,
           totalChunks: r.totalChunks,
           tags: r.tags,
+          key: r.key ?? null,
+          updatedAt: r.updatedAt ?? null,
+          rating: (() => {
+            const p = posteriors.get(r.id);
+            return p ? posteriorMean(p.alpha, p.beta) : 0.5;
+          })(),
         })),
         total,
         limit: pageLimit,
@@ -888,6 +1134,88 @@ export async function handleMemory(
       console.error("[memory-list] Error:", (err as Error).message);
       jsonError(res, "Memory list failed", 500);
     }
+    return true;
+  }
+
+  if (listMemoryKeysRoute.match(req.method, pathSegments)) {
+    const parsed = await listMemoryKeysRoute.parse(
+      req,
+      res,
+      pathSegments,
+      parseQueryParams(req.url || ""),
+    );
+    if (!parsed) return true;
+    const { prefix, limit } = parsed.query;
+    const viewer = memoryListViewer(await ingestPrincipal(req, myAgentId));
+    const { keys, truncated } = await listMemoryKeys({
+      prefix,
+      limit,
+      visibleToAgentId: viewer.seesAll ? undefined : viewer.agentId,
+    });
+    listMemoryKeysRoute.respond(res, 200, {
+      prefix,
+      keys: keys.map((k) => ({
+        ...k,
+        scope: AgentMemoryScopeSchema.parse(k.scope),
+        source: AgentMemorySourceSchema.parse(k.source),
+      })),
+      truncated,
+    });
+    return true;
+  }
+
+  if (getMemoryChunksRoute.match(req.method, pathSegments)) {
+    const parsed = await getMemoryChunksRoute.parse(
+      req,
+      res,
+      pathSegments,
+      parseQueryParams(req.url || ""),
+    );
+    if (!parsed) return true;
+    const { memoryId, key, scope, agentId } = parsed.query;
+    // Same visibility as the list: a hidden memory reads as not found.
+    const viewer = memoryListViewer(await ingestPrincipal(req, myAgentId));
+    const visibility = { visibleToAgentId: viewer.seesAll ? undefined : viewer.agentId };
+    const doc = memoryId
+      ? await getMemoryChunks({ memoryId }, visibility)
+      : await getMemoryChunks({ key: key as string, scope, agentId }, visibility);
+    if (!doc) {
+      jsonError(res, "Memory not found", 404);
+      return true;
+    }
+    const chunks = doc.chunks.map((c) => ({
+      id: c.id,
+      agentId: c.agentId,
+      scope: AgentMemoryScopeSchema.parse(c.scope),
+      key: c.key,
+      name: c.name,
+      content: c.content,
+      source: AgentMemorySourceSchema.parse(c.source),
+      sourceTaskId: c.sourceTaskId,
+      sourcePath: c.sourcePath,
+      chunkIndex: c.chunkIndex,
+      totalChunks: c.totalChunks,
+      tags: c.tags,
+      createdAt: c.createdAt,
+      updatedAt: c.updatedAt ?? null,
+      accessedAt: c.accessedAt,
+      expiresAt: c.expiresAt ?? null,
+      accessCount: c.accessCount ?? 0,
+      embeddingModel: c.embeddingModel ?? null,
+      rating: posteriorMean(c.alpha, c.beta),
+      alpha: c.alpha,
+      beta: c.beta,
+      version: c.version ?? 1,
+      estTokens: estimateTokens(c.content.length),
+    }));
+    getMemoryChunksRoute.respond(res, 200, {
+      key: doc.key,
+      scope: AgentMemoryScopeSchema.parse(doc.scope),
+      agentId: doc.agentId,
+      chunks,
+      estTokens: estimateTokens(chunks.reduce((sum, c) => sum + c.content.length, 0)),
+      integrity: checkChunkIntegrity(chunks),
+    });
     return true;
   }
 
@@ -997,6 +1325,21 @@ export async function handleMemory(
     if (!parsed) return true;
 
     const store = getMemoryStore();
+    const memory = await store.peek(parsed.params.id);
+    if (!memory) {
+      jsonError(res, "Memory not found", 404);
+      return true;
+    }
+    const decision = can({
+      principal: await ingestPrincipal(req, myAgentId),
+      verb: "memory.delete.any",
+      resource: { kind: "owned", ownerAgentId: memory.agentId, scope: memory.scope },
+      source: "http",
+    });
+    if (!decision.allow) {
+      jsonError(res, `Forbidden: ${decision.reason}`, 403);
+      return true;
+    }
     const deleted = await store.delete(parsed.params.id);
     if (!deleted) {
       jsonError(res, "Memory not found", 404);
@@ -1095,6 +1438,7 @@ export async function handleMemory(
           source: e.source,
           reasoning: e.reasoning,
           ...(e.referencesSource !== undefined ? { referencesSource: e.referencesSource } : {}),
+          ...(e.model !== undefined ? { model: e.model } : {}),
         }));
         const rateContextKeyHeader = req.headers["x-context-key"];
         const rateContextKey = Array.isArray(rateContextKeyHeader)

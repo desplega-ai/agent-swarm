@@ -1,6 +1,21 @@
-import { readFile, unlink, writeFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { randomUUID } from "node:crypto";
+import {
+  copyFile,
+  mkdir,
+  readFile,
+  realpath,
+  rename,
+  rmdir,
+  stat,
+  unlink,
+  utimes,
+  writeFile,
+} from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { promisify } from "node:util";
+import { deriveDefaultRoute, routeCredentialStatus, routeUnsetEnv } from "@desplega/model-routing";
 import { type Span, trace } from "@opentelemetry/api";
 import {
   type RunStopHookSessionSummaryOpts,
@@ -8,21 +23,27 @@ import {
 } from "../hooks/hook";
 import { isClaudeBridgeEffective, resolveClaudeTransport } from "../utils/claude-transport";
 import { getContextWindowSize } from "../utils/context-window";
-import { validateClaudeCredentials } from "../utils/credentials";
+import { CLAUDE_CREDENTIALS_HINT, validateClaudeCredentials } from "../utils/credentials";
+import { isEnvFlagEnabled } from "../utils/env-flag";
 import {
   parseStderrForErrors,
+  redactRateLimitEventLine,
   SessionErrorTracker,
   trackErrorFromJson,
 } from "../utils/error-tracker";
+import { withFileLock } from "../utils/file-lock";
 import { fetchInstalledMcpServers } from "../utils/mcp-server-fetcher";
 import { swarmRuntimeInstanceId } from "../utils/multi-runtime";
+import { getOpenRouterAttributionHeaders } from "../utils/openrouter-base-url";
 import {
   detachedProcessGroup,
   registerProcessGroup,
   terminateProcessGroup,
 } from "../utils/process-group";
 import { scrubSecrets } from "../utils/secret-scrubber";
+import { ClaudeBackgroundKeepalive } from "./claude-background-keepalive";
 import { normalizeClaudeMessage } from "./claude-session-events";
+import { resolveSlashSkillPrompt } from "./codex-skill-resolver";
 import { CTX_MODE_NUDGE_EVERY } from "./ctx-mode-env";
 import { buildOtelTraceparentEnv, isHarnessOtelEnabled } from "./otel-env";
 import { applyReasoningEffort, type ReasoningEffort } from "./reasoning-effort";
@@ -41,18 +62,49 @@ import type {
 
 /**
  * Predicate used by the worker boot loop and the credential-status endpoint.
- * The claude harness needs EITHER `CLAUDE_CODE_OAUTH_TOKEN` (preferred) or
- * `ANTHROPIC_API_KEY` — both are listed as missing when neither is present.
+ * The claude harness is ready when its default route (subscription, API key,
+ * gateway, Foundry, Bedrock, or Vertex; see `deriveDefaultRoute`) has every
+ * env var it needs. With no route at all, the two first-party credentials are
+ * listed as missing.
  */
 export function checkClaudeCredentials(env: Record<string, string | undefined>): CredStatus {
-  if (env.CLAUDE_CODE_OAUTH_TOKEN || env.ANTHROPIC_API_KEY) {
-    return { ready: true, missing: [], satisfiedBy: "env" };
+  const route = deriveDefaultRoute("claude", env);
+  if (!route) {
+    return {
+      ready: false,
+      missing: ["CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"],
+      hint: CLAUDE_CREDENTIALS_HINT,
+    };
   }
-  return {
-    ready: false,
-    missing: ["CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"],
-    hint: "Set either CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY (one is enough).",
-  };
+  const status = routeCredentialStatus(route, env);
+  if (status.ready) return { ready: true, missing: [], satisfiedBy: "env" };
+  return { ready: false, missing: status.missing, hint: status.hint };
+}
+
+/**
+ * `env` without the credentials its claude default route does not use. On a
+ * gateway or cloud route this drops `CLAUDE_CODE_OAUTH_TOKEN`: Claude Code
+ * 2.1.286 sends that token as `Authorization: Bearer` to ANTHROPIC_BASE_URL
+ * whenever no gateway key outranks it, and claude-bridge authenticates from it.
+ *
+ * Dropped keys are blanked, not deleted, so the `?? process.env` fallbacks in
+ * the binary/transport resolvers cannot bring them back. On routes that leave
+ * api.anthropic.com they are blanked even when `env` lacks them. Claude Code
+ * treats a blank token as unset (verified on 2.1.286).
+ */
+export function withClaudeRouteEnv(
+  env: Record<string, string | undefined>,
+): Record<string, string | undefined> {
+  const route = deriveDefaultRoute("claude", env);
+  if (!route) return env;
+  const firstParty = route.provider === "anthropic";
+  const unset = routeUnsetEnv("claude", route).filter((key) =>
+    firstParty ? env[key] : env[key] !== "",
+  );
+  if (unset.length === 0) return env;
+  const next = { ...env };
+  for (const key of unset) next[key] = "";
+  return next;
 }
 
 /** Task file data written to /tmp for hook to read */
@@ -262,62 +314,221 @@ function withClaudeBridgeAuthArgs(
   return [...argv];
 }
 
+const execFileAsync = promisify(execFile);
+
 /**
- * Pre-seed `~/.claude.json` so the per-project trust-dialog ("Quick safety
- * check: Is this a project you trust?") doesn't block on first run.
+ * Pre-seed `~/.claude.json` so Claude Code treats `dirs` as trusted. Untrusted
+ * workspaces make headless `claude -p` ignore `permissions.allow` from
+ * `.claude/settings.json`, and block the interactive trust dialog in tmux.
  *
- * Mirrors the onboarding-skip hack in `Dockerfile.worker` (which writes
- * `hasCompletedOnboarding` and `bypassPermissionsModeAccepted`). When the
- * resolved binary runs interactive claude inside tmux, claude does NOT
- * reliably auto-accept the dialog, so the pane can hang forever. Writing
- * `projects[cwd].hasTrustDialogAccepted = true` (and `hasCompletedProjectOnboarding`)
- * tells claude-code the cwd is pre-trusted.
- *
- * Idempotent (no-op when already true), read-merge-write (never clobbers
- * other keys), graceful on missing / malformed file.
+ * Read-merge-write: sets `projects[dir].hasTrustDialogAccepted`, keeps every
+ * other key, skips the write when nothing changes, and renames a temp file into
+ * place (mode preserved). A malformed file is backed up, not clobbered. The
+ * whole cycle runs under the `~/.claude.json.lock` mkdir lock Claude Code uses.
  *
  * Exported for unit testing.
  */
 export async function preseedClaudeTrustDialog(
-  cwd: string,
-  // Prefer `$HOME` over `homedir()` so callers in tests / sandboxed envs that
-  // override HOME get the override. Bun's `os.homedir()` caches the real
-  // passwd entry at process boot and ignores HOME mutations.
+  dirs: string[],
+  // Prefer `$HOME` over `homedir()`: Bun's `os.homedir()` ignores HOME mutations.
   homeDir: string = process.env.HOME ?? homedir(),
 ): Promise<void> {
   const claudeJsonPath = join(homeDir, ".claude.json");
-  let data: Record<string, unknown> = {};
-  try {
-    const raw = await readFile(claudeJsonPath, "utf-8");
-    const parsed = JSON.parse(raw);
-    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-      data = parsed as Record<string, unknown>;
+  const seed = async () => {
+    // A foreign writer (Claude Code itself) can still take over our mkdir lock,
+    // so confirm the write landed and redo it if an overwrite dropped our entries.
+    for (let attempt = 1; ; attempt++) {
+      await withClaudeJsonLock(claudeJsonPath, () => seedTrustLocked(claudeJsonPath, dirs));
+      if (await trustPersisted(claudeJsonPath, dirs)) return;
+      if (attempt >= CLAUDE_JSON_ATTEMPTS) {
+        throw new Error(
+          `trust entries for ${dirs.join(", ")} did not persist in ${claudeJsonPath}`,
+        );
+      }
     }
+  };
+  // Writers in this swarm exclude each other with a kernel flock, which a
+  // suspended or slow holder keeps and a dead one releases. No staleness
+  // threshold, so no second writer can enter a transaction that is still running.
+  const locked = await withFileLock(`${claudeJsonPath}.swarm-lock`, seed, {
+    waitMs: CLAUDE_JSON_LOCK_TIMEOUT_MS,
+  });
+  if (locked.acquired) return;
+  if (locked.reason === "busy") {
+    throw new Error(`timed out waiting for ${claudeJsonPath}.swarm-lock`);
+  }
+  // Fail closed: the mkdir lock is lease-based, so without the flock a paused
+  // writer can resume after a takeover and commit an older snapshot over a newer one.
+  throw new Error(
+    locked.reason === "unsupported"
+      ? `flock unavailable; not seeding trust in ${claudeJsonPath}`
+      : `cannot open ${claudeJsonPath}.swarm-lock: ${locked.error}`,
+  );
+}
+
+// Claude Code's own writer (proper-lockfile) takes `mkdir <file>.lock` and
+// treats a lock whose mtime is older than 10s as stale. We follow that protocol
+// so Claude Code and we exclude each other; our own writers are already
+// serialized by the flock above, so stale takeover only ever races Claude Code.
+const CLAUDE_JSON_LOCK_STALE_MS = 10_000;
+const CLAUDE_JSON_LOCK_RENEW_MS = 3_000;
+const CLAUDE_JSON_LOCK_TIMEOUT_MS = 15_000;
+const CLAUDE_JSON_ATTEMPTS = 5;
+
+async function withClaudeJsonLock<T>(claudeJsonPath: string, fn: () => Promise<T>): Promise<T> {
+  const lockPath = `${claudeJsonPath}.lock`;
+  const ino = await acquireClaudeJsonLock(lockPath, Date.now() + CLAUDE_JSON_LOCK_TIMEOUT_MS);
+  // Touch and remove the lock only while it is still the directory we created.
+  const ifOwned = async (act: () => Promise<unknown>) => {
+    const current = await stat(lockPath).catch(() => null);
+    if (current?.ino === ino) await act().catch(() => {});
+  };
+  const renew = setInterval(
+    () =>
+      void ifOwned(() => {
+        const now = new Date();
+        return utimes(lockPath, now, now);
+      }),
+    CLAUDE_JSON_LOCK_RENEW_MS,
+  );
+  renew.unref?.();
+  try {
+    return await fn();
+  } finally {
+    clearInterval(renew);
+    await ifOwned(() => rmdir(lockPath));
+  }
+}
+
+async function acquireClaudeJsonLock(lockPath: string, deadline: number): Promise<number> {
+  for (;;) {
+    try {
+      await mkdir(lockPath);
+      return (await stat(lockPath)).ino;
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code !== "EEXIST" && code !== "ENOENT") throw err; // ENOENT: removed under us
+    }
+    const seen = await stat(lockPath).catch(() => null);
+    if (!seen) continue; // lock vanished; retry the mkdir
+    if (Date.now() - seen.mtimeMs > CLAUDE_JSON_LOCK_STALE_MS) {
+      // rmdir only removes an empty directory; re-check identity right before so
+      // a lock that changed hands since we looked is left alone.
+      const again = await stat(lockPath).catch(() => null);
+      if (again?.ino === seen.ino && again.mtimeMs === seen.mtimeMs) {
+        await rmdir(lockPath).catch(() => {});
+      }
+      continue;
+    }
+    if (Date.now() > deadline) throw new Error(`timed out waiting for ${lockPath}`);
+    await new Promise((r) => setTimeout(r, 20 + Math.random() * 30));
+  }
+}
+
+async function trustPersisted(claudeJsonPath: string, dirs: string[]): Promise<boolean> {
+  try {
+    const parsed = JSON.parse(await readFile(claudeJsonPath, "utf-8"));
+    const projects = (parsed?.projects ?? {}) as Record<string, Record<string, unknown>>;
+    return dirs.every((d) => projects[d]?.hasTrustDialogAccepted === true);
   } catch {
-    // missing or malformed — start from {}
-    console.warn(
-      `\x1b[33m[claude]\x1b[0m Starting with empty .claude.json for trust pre-seed at ${claudeJsonPath}`,
-    );
+    return false;
+  }
+}
+
+async function seedTrustLocked(claudeJsonPath: string, dirs: string[]): Promise<void> {
+  let data: Record<string, unknown> = {};
+  let mode: number | undefined;
+  try {
+    mode = (await stat(claudeJsonPath)).mode & 0o777;
+    const parsed = JSON.parse(await readFile(claudeJsonPath, "utf-8"));
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new Error("not a JSON object");
+    }
+    data = parsed as Record<string, unknown>;
+  } catch (err) {
+    if (mode !== undefined) {
+      const backup = `${claudeJsonPath}.malformed-${Date.now()}`;
+      await copyFile(claudeJsonPath, backup);
+      console.warn(
+        scrubSecrets(
+          `\x1b[33m[claude]\x1b[0m ${claudeJsonPath} is unreadable (${err}); backed up to ${backup}`,
+        ),
+      );
+    }
   }
 
   const projects = (data.projects ?? {}) as Record<string, Record<string, unknown>>;
-  const existing = projects[cwd] ?? {};
-  if (existing.hasTrustDialogAccepted === true) {
-    // Already trusted — no-op, no write.
-    return;
+  let changed = false;
+  for (const dir of dirs) {
+    const existing = projects[dir] ?? {};
+    if (existing.hasTrustDialogAccepted === true) continue;
+    projects[dir] = {
+      ...existing,
+      hasTrustDialogAccepted: true,
+      hasCompletedProjectOnboarding: true,
+    };
+    changed = true;
   }
-
-  projects[cwd] = {
-    ...existing,
-    hasTrustDialogAccepted: true,
-    hasCompletedProjectOnboarding: true,
-  };
+  if (!changed) return;
   data.projects = projects;
 
-  await writeFile(claudeJsonPath, `${JSON.stringify(data, null, 2)}\n`);
+  const tmp = `${claudeJsonPath}.${process.pid}.${randomUUID()}.tmp`;
+  try {
+    await writeFile(tmp, `${JSON.stringify(data, null, 2)}\n`, { mode: mode ?? 0o600, flag: "wx" });
+    await rename(tmp, claudeJsonPath);
+  } catch (err) {
+    await unlink(tmp).catch(() => {});
+    throw err;
+  }
   console.log(
-    `\x1b[2m[claude]\x1b[0m Pre-seeded trust dialog acceptance for ${cwd} in ${claudeJsonPath}`,
+    scrubSecrets(
+      `\x1b[2m[claude]\x1b[0m Pre-seeded trust for ${dirs.join(", ")} in ${claudeJsonPath}`,
+    ),
   );
+}
+
+/**
+ * Directories Claude Code keys trust by for `cwd`: its real path, plus the main
+ * checkout when `cwd` is a git worktree. Non-repo cwds yield just the real path.
+ */
+export async function resolveClaudeTrustDirs(cwd: string): Promise<string[]> {
+  const dirs = [await realpath(cwd).catch(() => cwd)];
+  try {
+    // The first `worktree` entry is the primary checkout; a bare repo is marked
+    // `bare` and has no checkout. Metadata parents (`dirname(--git-common-dir)`)
+    // are not trusted: with --separate-git-dir they are unrelated paths.
+    const { stdout } = await execFileAsync("git", ["-C", cwd, "worktree", "list", "--porcelain"]);
+    const first = stdout.split("\n\n")[0]?.split("\n") ?? [];
+    const path = first.find((l) => l.startsWith("worktree "))?.slice("worktree ".length);
+    if (path && !first.includes("bare")) {
+      let main = path;
+      // With --separate-git-dir the entry is the git dir; the checkout is `core.worktree`.
+      const configured = await execFileAsync("git", [
+        "--git-dir",
+        path,
+        "config",
+        "--get",
+        "core.worktree",
+      ]).then(
+        (r) => r.stdout.trim(),
+        () => "",
+      );
+      if (configured) main = resolve(path, configured);
+      main = await realpath(main);
+      // A real checkout has a `.git` file or directory at its root.
+      if (
+        await stat(join(main, ".git")).then(
+          () => true,
+          () => false,
+        )
+      ) {
+        if (!dirs.includes(main)) dirs.push(main);
+      }
+    }
+  } catch {
+    // git missing or cwd is not a repo
+  }
+  return dirs;
 }
 
 /**
@@ -529,12 +740,36 @@ export function buildClaudeCodeRuntimeEnv(
   };
 }
 
+/**
+ * `ANTHROPIC_CUSTOM_HEADERS` ("Name: value" per line) with OpenRouter app
+ * attribution appended, when `ANTHROPIC_BASE_URL` points at openrouter.ai.
+ * The operator's lines are kept in order (they may carry gateway
+ * credentials); only lines naming one of our headers are replaced. Returns
+ * `{}` when nothing changes, so the inherited value stays byte-identical.
+ *
+ * Exported for unit testing.
+ */
+export function claudeOpenRouterAttributionEnv(env: Record<string, string | undefined>): {
+  ANTHROPIC_CUSTOM_HEADERS?: string;
+} {
+  const headers = getOpenRouterAttributionHeaders(env.ANTHROPIC_BASE_URL ?? "", env);
+  const names = new Set(Object.keys(headers).map((name) => name.toLowerCase()));
+  if (names.size === 0) return {};
+  const kept = (env.ANTHROPIC_CUSTOM_HEADERS ?? "").split("\n").filter((line) => {
+    const colon = line.indexOf(":");
+    const name = colon === -1 ? "" : line.slice(0, colon).trim().toLowerCase();
+    return line.trim() !== "" && !names.has(name);
+  });
+  const ours = Object.entries(headers).map(([name, value]) => `${name}: ${value}`);
+  return { ANTHROPIC_CUSTOM_HEADERS: [...kept, ...ours].join("\n") };
+}
+
 export function buildClaudeSessionEnvironment(
   config: ProviderSessionConfig,
   model: string,
   taskFilePath: string,
 ): { env: Record<string, string>; appliedReasoningEffort: ReasoningEffort | null } {
-  const sourceEnv = { ...(config.env || process.env) };
+  const sourceEnv = { ...withClaudeRouteEnv(config.env || process.env) };
   // Summaries run in the adapter process. Do not bypass Claude's OAuth filtering for hooks.
   delete sourceEnv.AGENT_SWARM_CLAUDE_OAUTH_TOKEN;
   const reasoningApplication = applyReasoningEffort("claude", model, config.reasoningEffort);
@@ -542,6 +777,7 @@ export function buildClaudeSessionEnvironment(
     env: {
       ENABLE_PROMPT_CACHING_1H: "1",
       ...sourceEnv,
+      ...claudeOpenRouterAttributionEnv(sourceEnv),
       ...buildClaudeCodeRuntimeEnv(sourceEnv),
       ...buildClaudeCodeOtelEnv(sourceEnv),
       ...(reasoningApplication.kind === "claude-env" ? reasoningApplication.env : {}),
@@ -571,8 +807,7 @@ export async function runClaudeSessionSummary(
       agentId: config.agentId,
       transcript: text,
       env: {
-        ...process.env,
-        ...config.env,
+        ...withClaudeRouteEnv({ ...process.env, ...config.env }),
         AGENT_SWARM_TASK_ID: config.taskId,
         MCP_BASE_URL: config.apiUrl,
         AGENT_SWARM_API_KEY: config.apiKey,
@@ -607,6 +842,45 @@ export function getSystemPromptFilePath(taskId: string): string {
   return `/tmp/agent-swarm-system-prompt-${taskId}.txt`;
 }
 
+/**
+ * Inline the runner's leading `/<skill>` command before the prompt reaches
+ * Claude Code.
+ *
+ * Claude Code expands `/<skill> <args>` into `<command-args>{args}</command-args>`
+ * plus the skill text, and appends `ARGUMENTS: {args}` when the skill has no
+ * `$ARGUMENTS` placeholder (a `$ARGUMENTS` placeholder only moves the second
+ * copy). The runner puts the whole task body — task text, context preamble,
+ * memories — in those args, so every task's first message carried it twice.
+ * Inlining the SKILL.md ourselves, with the resolver codex/opencode/dsh already
+ * use, keeps the skill text and sends the body once.
+ *
+ * Commands with no SKILL.md under `<home>/.claude/skills` pass through for
+ * Claude Code to expand natively. Exported for unit testing.
+ */
+export async function resolveClaudePrompt(
+  prompt: string,
+  home: string,
+  onInline?: (skillName: string) => void,
+): Promise<string> {
+  const resolved = await resolveSlashSkillPrompt(prompt, {
+    providerLabel: "claude",
+    skillsDir: join(home, ".claude", "skills"),
+    // Native expansion drops frontmatter too. It also matters for argv: the
+    // `-p` path passes the prompt as a positional, and a leading `---` is
+    // parsed as an unknown option.
+    stripFrontmatter: true,
+    emit: (event) => {
+      if (event.type === "raw_stderr") console.warn(event.content.trimEnd());
+    },
+    // Fires before the leading-dash fallback below; that fallback still loads
+    // the same skill through Claude Code's native expansion.
+    onInline,
+  });
+  // Any other leading dash would hit the same argv parse error; keep the
+  // native (duplicated but working) form instead.
+  return resolved.startsWith("-") ? prompt : resolved;
+}
+
 class ClaudeSession implements ProviderSession {
   private proc: ReturnType<typeof Bun.spawn>;
   private stdinWriter:
@@ -631,6 +905,8 @@ class ClaudeSession implements ProviderSession {
   private lastAssistantText = "";
   /** Per-session stream-json transcript used by the parent-owned session summarizer. */
   private transcript: string[];
+  /** Keeps the session heartbeat fresh while Claude idles on background tasks. */
+  private backgroundKeepalive: ClaudeBackgroundKeepalive;
   readonly deliverSteering?: (delivery: SteerDelivery) => Promise<SteerDeliveryResult>;
 
   constructor(
@@ -652,6 +928,7 @@ class ClaudeSession implements ProviderSession {
     this.contextWindowSize = getContextWindowSize(model);
     this.systemPromptFile = systemPromptFile;
     this.transcript = [`User: ${scrubSecrets(config.prompt)}`];
+    this.backgroundKeepalive = new ClaudeBackgroundKeepalive(config);
     const cmd = this.buildCommand();
 
     console.log(
@@ -830,19 +1107,21 @@ class ClaudeSession implements ProviderSession {
       for await (const chunk of stdout) {
         stdoutChunks++;
         const text = new TextDecoder().decode(chunk);
-        // Scrub before every log-egress point: file write, listener emit, and
-        // downstream pretty-print / session-logs push (all consume event.content).
-        logFileHandle.write(scrubSecrets(text));
 
         const combined = partialLine + text;
         const parts = combined.split("\n");
         partialLine = parts.pop() || "";
 
         for (const line of parts) {
+          // Scrub and redact before every log-egress point: file write,
+          // listener emit, and downstream pretty-print / session-logs push
+          // (all consume event.content). The file is written per complete
+          // line so a rate_limit_event is redacted as a whole JSON object.
+          logFileHandle.write(`${scrubSecrets(redactRateLimitEventLine(line))}\n`);
           const trimmed = line.trim();
           if (!trimmed) continue;
 
-          this.emit({ type: "raw_log", content: scrubSecrets(trimmed) });
+          this.emit({ type: "raw_log", content: scrubSecrets(redactRateLimitEventLine(trimmed)) });
           this.processJsonLine(trimmed, (cost) => {
             lastCost = cost;
           });
@@ -850,8 +1129,12 @@ class ClaudeSession implements ProviderSession {
       }
 
       // Handle remaining partial line
+      if (partialLine) logFileHandle.write(scrubSecrets(redactRateLimitEventLine(partialLine)));
       if (partialLine.trim()) {
-        this.emit({ type: "raw_log", content: scrubSecrets(partialLine.trim()) });
+        this.emit({
+          type: "raw_log",
+          content: scrubSecrets(redactRateLimitEventLine(partialLine.trim())),
+        });
         this.processJsonLine(partialLine.trim(), (cost) => {
           lastCost = cost;
         });
@@ -879,6 +1162,7 @@ class ClaudeSession implements ProviderSession {
     try {
       await Promise.all([stdoutPromise, stderrPromise]);
     } finally {
+      this.backgroundKeepalive.stop();
       this.closeStdin();
     }
     await logFileHandle.end();
@@ -931,6 +1215,7 @@ class ClaudeSession implements ProviderSession {
       rateLimitResetAt: this.errorTracker.getRateLimitResetAt(),
       rateLimitWindows: this.errorTracker.getRateLimitWindows(),
       modelRateLimit: this.errorTracker.getModelRateLimit(),
+      creditsRequired: this.errorTracker.getCreditsRequired(),
       appliedReasoningEffort: this.appliedReasoningEffort,
     };
   }
@@ -946,6 +1231,7 @@ class ClaudeSession implements ProviderSession {
       if (json.type === "result") {
         this.closeStdin();
       }
+      this.backgroundKeepalive.observe(json);
 
       const normalized = normalizeClaudeMessage(json, {
         taskId: this.config.taskId,
@@ -1027,7 +1313,15 @@ export class ClaudeAdapter implements ProviderAdapter {
 
     const model = config.model || "opus";
 
-    const sourceEnv = config.env || process.env;
+    const sourceEnv = withClaudeRouteEnv(config.env || process.env);
+    const sessionConfig: ProviderSessionConfig = {
+      ...config,
+      prompt: await resolveClaudePrompt(
+        config.prompt,
+        process.env.HOME ?? homedir(),
+        config.onPromptSkill,
+      ),
+    };
     const transport = resolveClaudeTransport(sourceEnv);
     const credType = validateClaudeCredentials(sourceEnv);
     console.log(`\x1b[2m[claude]\x1b[0m Using credential: ${credType}`);
@@ -1094,14 +1388,14 @@ export class ClaudeAdapter implements ProviderAdapter {
       );
     }
 
-    // Claude Bridge and its legacy compatibility path drive interactive
-    // `claude` in tmux, where the first-run trust dialog can block startup.
-    if (isInteractiveTmuxClaude) {
+    // Untrusted workspaces make Claude ignore `.claude/settings.json` permissions
+    // (headless) or block on the trust dialog (tmux), so seed trust for every session.
+    if (isEnvFlagEnabled("CLAUDE_TRUST_PRESEED", true, sourceEnv)) {
       try {
-        await preseedClaudeTrustDialog(config.cwd);
+        await preseedClaudeTrustDialog(await resolveClaudeTrustDirs(config.cwd));
       } catch (err) {
         console.warn(
-          `\x1b[33m[claude]\x1b[0m Failed to pre-seed trust dialog for ${config.cwd}: ${err}`,
+          `\x1b[33m[claude]\x1b[0m ${scrubSecrets(`Failed to pre-seed trust for ${config.cwd}: ${err}`)}`,
         );
       }
     }
@@ -1204,7 +1498,7 @@ export class ClaudeAdapter implements ProviderAdapter {
 
     if (transport === "sdk") {
       return claudeSdk!.createClaudeSdkSession({
-        config,
+        config: sessionConfig,
         model,
         taskFilePath,
         taskFileKey,
@@ -1219,7 +1513,7 @@ export class ClaudeAdapter implements ProviderAdapter {
     }
 
     return new ClaudeSession(
-      config,
+      sessionConfig,
       model,
       taskFilePath,
       taskFileKey,

@@ -1,12 +1,13 @@
 /**
- * The worker's harness CLI version (`claude --version` / `codex --version`),
+ * The worker's harness CLI version (`claude --version`, `codex --version`, or `pi --version`),
  * reported on register and used to key harness_model_support rows. Worker-safe
  * (no DB). Probed once per process; null when the CLI is missing or silent.
+ * An unprobed harness returns a blank string to clear stale registration data.
  */
 import { isUnknownModelError } from "./harness-model-error";
 import { scrubSecrets } from "./secret-scrubber";
 
-const CLI_BINARY: Record<string, string> = { claude: "claude", codex: "codex" };
+const CLI_BINARY: Record<string, string> = { claude: "claude", codex: "codex", pi: "pi" };
 const PROBE_TIMEOUT_MS = 10_000;
 const VERSION_RE = /\d+\.\d+\.\d+(?:[-+][\w.]+)?/;
 
@@ -18,7 +19,7 @@ export function parseCliVersion(output: string): string | null {
 
 export function probeHarnessCliVersion(harness: string): Promise<string | null> {
   const binary = CLI_BINARY[harness];
-  if (!binary) return Promise.resolve(null);
+  if (!binary) return Promise.resolve("");
   let pending = probed.get(harness);
   if (!pending) {
     pending = (async () => {
@@ -66,7 +67,8 @@ export async function reportHarnessModelOutcome(opts: {
   failureReason?: string;
   fetchImpl?: typeof fetch;
 }): Promise<void> {
-  if (!opts.model || !CLI_BINARY[opts.harness]) return;
+  // Only harnesses with verified unknown-model error classification report outcomes.
+  if (!opts.model || (opts.harness !== "claude" && opts.harness !== "codex")) return;
   const cliVersion = await cachedHarnessCliVersion(opts.harness);
   if (!cliVersion) return;
   const status =

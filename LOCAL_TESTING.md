@@ -46,6 +46,12 @@ Two RBAC suites spawn the **real** server as a subprocess (exception to the mini
 - `bun run test:root -- src/tests/rbac-wire-e2e.test.ts` — gate matrix over a real MCP handshake + HTTP, plus audit-trail fidelity. Runs in the default root test command (CI).
 - `RBAC_LIFECYCLE_E2E=1 bun run test:root -- src/tests/rbac-lifecycle-e2e.test.ts` — audit lifecycle (burst flush, SIGTERM drain, kill-switch, retention purge, boot-race, stdio). Env-gated, ~20s, multiple server boots; run on demand / pre-release. Skipped without the flag.
 
+`src/tests/claude-routes-e2e.test.ts` runs the **real** Claude Code CLI on each claude default route (gateway, Foundry, Bedrock, Vertex) through the credential gate and `ClaudeAdapter.createSession`, against fake endpoints from `src/tests/fixtures/fake-claude-routes.ts`. It uses the CLI binary that `@anthropic-ai/claude-agent-sdk` installs for the platform, so CI runs it; it skips when that optional package is missing. `CLAUDE_ROUTES_E2E_BINARY=<path>` tests another binary, and `CLAUDE_ROUTES_E2E_LOG=1` prints every request the fake servers received, auth redacted:
+
+```bash
+CLAUDE_ROUTES_E2E_LOG=1 bun run test:root -- src/tests/claude-routes-e2e.test.ts
+```
+
 ## Black-box E2E (bun run e2e)
 
 `bun run e2e` starts the real API on a free port with a fresh SQLite database.
@@ -162,16 +168,22 @@ Then render both profiles:
 bun run e2e:visuals /tmp/vis/legacy && bun run e2e:visuals /tmp/vis/v2
 ```
 
-Use `--harness claude,codex,pi,opencode,dsh` to add real worker legs after the contract layer.
+Use `--harness claude,codex,pi,opencode,dsh,cursor,amp,grok` to add real worker legs after the contract layer.
 Claude needs `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY`.
 Codex needs `CODEX_OAUTH` or `OPENAI_API_KEY`. Pi needs `OPENROUTER_API_KEY` or `ANTHROPIC_API_KEY`.
 Opencode needs `OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY`, or `OPENAI_API_KEY`.
-Override models with `E2E_MODEL_CLAUDE`, `E2E_MODEL_CODEX`, `E2E_MODEL_PI`, `E2E_MODEL_OPENCODE`, or `E2E_MODEL_DSH`.
+Override models with `E2E_MODEL_CLAUDE`, `E2E_MODEL_CODEX`, `E2E_MODEL_PI`, `E2E_MODEL_OPENCODE`, `E2E_MODEL_DSH`, `E2E_MODEL_CURSOR`, `E2E_MODEL_AMP`, or `E2E_MODEL_GROK`.
+Cursor needs `CURSOR_API_KEY` and defaults to `gpt-5.4-nano`, the cheapest model `Cursor.models.list()` offers.
+Amp needs `AMP_API_KEY` and a preinstalled `amp` executable (`AMP_BINARY`), and defaults to the `low` mode.
+Grok needs `XAI_API_KEY` and a preinstalled `grok` executable (`GROK_BINARY`), and defaults to `grok-build-0.1`, xAI's cheapest model. `E2E_MODEL_GROK=openrouter/deepseek/deepseek-v4.1-flash` runs it on `OPENROUTER_API_KEY` instead.
 Dsh defaults to `openrouter/deepseek/deepseek-v4.1-flash` and needs `OPENROUTER_API_KEY`.
-Provision `npm install --global @deepseek-ai/dsh@0.1.7-alpha.2` first, then run
+Provision `npm install --global @deepseek-ai/dsh@0.2.1-alpha.2` first, then run
 `DSH_BINARY=$(command -v dsh) bun run e2e --only health --harness dsh`.
 A native `E2E_MODEL_DSH=deepseek-flash` override instead requires `DEEPSEEK_API_KEY`.
 The nightly dsh leg installs that pin explicitly because its slim image omits dsh.
+Amp defaults to its cheapest mode, `low`, and needs `AMP_API_KEY` plus an `amp` executable
+(`AMP_BINARY=$(command -v amp) bun run e2e --only health --harness amp`). Each run creates one
+thread on ampcode.com and costs about a cent. The nightly workflow has no amp leg.
 Create a Codex blob with `bun scripts/e2e/codex-oauth-blob.ts /path/to/.codex/auth.json | gh secret set E2E_CODEX_OAUTH`.
 Use a dedicated Codex login for that blob. CI refresh rotates the token and can break a main login.
 The blob goes stale after its first refresh, about ten days after issue.
@@ -223,10 +235,11 @@ The static UI build still serves the dashboard unless `E2E_UI_URL` points at a d
 | `E2E_API_KEY` | Bearer for that API. Required with `E2E_API_URL`. |
 | `E2E_UI_URL` | Deployed dashboard to drive instead of the static build. Its origin must be on the API's `APP_URL` for the page preview iframe. |
 | `E2E_REMOTE_SEED=1` | Run the seed once against the remote API (idempotent, every name `e2e-` prefixed). Without it, seeded specs and id routes are skipped. |
+| `E2E_COMB_AGENT_FS_URL` | Local mode only: agent-fs 0.15.0+ server URL that turns on the Comb flow in `specs/comb.spec.ts`. The flow is skipped without it. |
 | `E2E_DEBUG=1` | Log the worker API and every `/api` response. |
 | `E2E_KEEP=1` | Local mode only: keep the DB, the log, and the seed manifest. |
 
-Specs tagged `@local` (none today) run only in local mode. They are for assertions on escape-hatch state such as stalled tasks.
+Specs tagged `@local` (`specs/comb.spec.ts`) run only in local mode. They are for assertions on escape-hatch state such as stalled tasks.
 
 ```bash
 PORT=3999 DATABASE_PATH=/tmp/e2e-remote.sqlite AGENT_SWARM_API_KEY=remotekey NODE_ENV=test \
@@ -464,18 +477,25 @@ ffmpeg -i /tmp/ui-tasks-1.5x.mp4 2>&1 | grep Duration
 
 `record start` has no speed or human flag; speed-up happens afterward. Keep `fps=30` to preserve steady 30 fps output rather than uneven frame drops at an inferred rate. `-an` disables audio because recordings have no audio track. The worker ships `ffmpeg` only, so duration checks use it rather than `ffprobe`.
 
-To share screenshots and recordings (PR body, review comment, Slack), upload them to the same agent-fs QA path and paste the signed URLs:
+Keep the originals on agent-fs under the same QA path. In a PR body or review comment, embed images and mp4s as GitHub user attachments: they never expire, and GitHub plays an mp4 inline. A presigned agent-fs URL downloads instead and dies after 7 days.
 
 ```bash
 agent-fs write qa/agent-swarm/$(date +%F)-<topic>/ui-tasks.png --file /tmp/ui-tasks.png -m "<what it shows>"
-agent-fs signed-url qa/agent-swarm/$(date +%F)-<topic>/ui-tasks.png --json   # 24h default, --expires-in up to 7d
 agent-fs write qa/agent-swarm/$(date +%F)-<topic>/ui-tasks-1.5x.mp4 --file /tmp/ui-tasks-1.5x.mp4 -m "<flow it demonstrates>"
-agent-fs signed-url qa/agent-swarm/$(date +%F)-<topic>/ui-tasks-1.5x.mp4 --json
+# Upload /tmp/ui-tasks.png and /tmp/ui-tasks-1.5x.mp4 with the github-attach skill (or the github-attach swarm script)
+# -> https://github.com/user-attachments/assets/<uuid>
 ```
 
 `agent-fs write --file` (or piped stdin) is the binary-safe path (CLI >= 0.7.1). `--content` is text-only and mangles PNGs.
 
-**PR requirement**: any PR touching `apps/ui/` or `apps/templates-ui/` must include `agent-browser` screenshots of the change running locally, embedded as `![caption](<signed-url>)`. Screenshots stay required for static/layout changes; interaction/flow changes (navigation, form, modal, drag, animation, or multi-step flow) also require a recording, linked as `[Watch the walkthrough](<signed-url>)`. Follow the `agent-browser` skill and the recipe above, using the same agent-fs upload and signed-URL delivery. This is a reviewer convention. No job in `.github/workflows/merge-gate.yml` checks it.
+| Content | Use |
+|---|---|
+| Image or GIF | GitHub user attachment. Fallback only when the token is a GitHub App token: `agent-fs signed-url <path> --inline --json` (expires in 7 days) |
+| Video (mp4) | GitHub user attachment on its own line, else an `agent-fs share-create` link. Never a presigned link |
+| Doc (plan, research, report) | `agent-fs share-create <path> --expires-in 604800` |
+| Durable `live.agent-fs.dev` path, swarm task links | Only under `## Swarm provenance` |
+
+**PR requirement**: any PR touching `apps/ui/` or `apps/templates-ui/` must fill `## Before / after` with `agent-browser` screenshots of the change running locally: a before (main) and after table of `![caption](<attachment-url>)`. Interaction/flow changes (navigation, form, modal, drag, animation, or multi-step flow) also need a recording, as an attachment mp4 on its own line. The PR Body check requires the section for those paths; the media itself is a reviewer convention.
 
 ### Port-conflict resolution
 

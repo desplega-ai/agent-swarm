@@ -6,7 +6,7 @@ import { StatusBadge } from "@/components/shared/status-badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useUserName } from "@/hooks/use-user-name";
-import { approvalRequestSource } from "@/lib/approval-format";
+import { approvalRequestSource, OPERATOR_RESPONDER, quorumLabel } from "@/lib/approval-format";
 import { type ListShortcut, matchListShortcut } from "@/lib/approval-shortcuts";
 import { cn, formatSmartTime } from "@/lib/utils";
 import { WRAP } from "./answer-view";
@@ -14,7 +14,7 @@ import { KeyHint, useFinePointer, useKeyboardShortcuts } from "./keyboard";
 
 const PAGE_SIZE = 50;
 const SOURCE_LABEL = { workflow: "Workflow", agent: "Agent", manual: "Manual" } as const;
-/** Desktop columns: request · status · questions · source · resolved by · created. */
+/** Desktop columns: request · status · questions · source · resolved by (or approvals so far) · created. */
 const COLUMNS =
   "md:grid md:grid-cols-[minmax(0,1fr)_120px_96px_90px_140px_110px] md:items-center md:gap-4";
 
@@ -38,6 +38,8 @@ function Row({
   linkRef: (el: HTMLAnchorElement | null) => void;
 }) {
   const pending = request.status === "pending";
+  // "1 of 2 approved": a pending `all` / `{ min: N }` request collecting answers.
+  const quorum = pending ? quorumLabel(request.approvalProgress) : null;
   return (
     <li>
       <Link
@@ -75,9 +77,18 @@ function Row({
             ·
           </span>
           <span>{SOURCE_LABEL[approvalRequestSource(request)]}</span>
-          <span className="hidden truncate md:block" title={request.resolvedBy ?? undefined}>
-            {resolverName ?? "—"}
-          </span>
+          {quorum ? (
+            <>
+              <span aria-hidden className="md:hidden">
+                ·
+              </span>
+              <span className="truncate font-medium text-foreground tabular-nums">{quorum}</span>
+            </>
+          ) : (
+            <span className="hidden truncate md:block" title={request.resolvedBy ?? undefined}>
+              {resolverName ?? "—"}
+            </span>
+          )}
           <span aria-hidden className="md:hidden">
             ·
           </span>
@@ -185,7 +196,11 @@ export function RequestList({
               key={request.id}
               request={request}
               resolverName={
-                request.resolvedBy ? (userName(request.resolvedBy) ?? request.resolvedBy) : null
+                request.resolvedBy === OPERATOR_RESPONDER
+                  ? "Operator key"
+                  : request.resolvedBy
+                    ? (userName(request.resolvedBy) ?? request.resolvedBy)
+                    : null
               }
               highlighted={index === highlight}
               onFocus={() => setHighlight(index)}

@@ -8,6 +8,7 @@ import {
   fixture as implementReview,
   soloFixture as implementReviewSolo,
 } from "./implement-review.ts";
+import { fixture as realDiffAgentFs } from "./real-diff-agent-fs.ts";
 import { fixture as scriptAuthoring } from "./script-authoring.ts";
 import { fixture as sqlAudit } from "./sql-audit.ts";
 import { fixture as toolRouting } from "./tool-routing.ts";
@@ -35,4 +36,5 @@ export const GRADER_FIXTURES: Readonly<Record<string, GraderFixture>> = {
   "capability-routing": capabilityRouting,
   "human-in-loop": humanInLoop,
   "human-in-loop-solo": humanInLoopSolo,
+  "real-diff-agent-fs": realDiffAgentFs,
 };

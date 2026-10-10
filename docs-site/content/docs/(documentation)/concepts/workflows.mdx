@@ -57,7 +57,7 @@ Jev is weak at counting. For a hybrid, count in a `script` and pass the number t
 
 ### SystemOne Decision
 
-A `system-one-decision` node (display name "SystemOne Decision") sends one `state` and a map of questions to a typed-decisions model and returns one validated answer per question. The model is Jev today (`model` defaults to it); the node name is not model-specific. It reaches the model through a `provider`: `typesafe` (the default), `openrouter`, or `laya`. Each provider needs its own global secret, `TYPESAFE_API_KEY`, `OPENROUTER_API_KEY`, or `LAYA_API_KEY`; `laya` also needs `LAYA_URL`, its server's base URL, as a global config value. The key is read on the server and never appears in a definition, a step output, or an error.
+A `system-one-decision` node (display name "SystemOne Decision") sends one `state` and a map of questions to a typed-decisions model and returns one validated answer per question. The model is Jev today (`model` defaults to it); the node name is not model-specific. It reaches the model through a `provider`: `typesafe` (the default), `openrouter`, `laya`, `openai` (the OpenAI Decisions API, `gpt-6-luna`), or `cloudflare` (Clef or Clef-flash on Workers AI). Each provider needs its own global secret, `TYPESAFE_API_KEY`, `OPENROUTER_API_KEY`, `LAYA_API_KEY`, `OPENAI_DECISIONS_API_KEY`, or `CLOUDFLARE_API_TOKEN`; `laya` also needs `LAYA_URL`, its server's base URL, and `cloudflare` needs `CLOUDFLARE_ACCOUNT_ID`, as global config values. The key is read on the server and never appears in a definition, a step output, or an error.
 
 ```json
 {
@@ -86,7 +86,7 @@ A `system-one-decision` node (display name "SystemOne Decision") sends one `stat
 }
 ```
 
-- `provider` is `typesafe` (default), `openrouter`, or `laya`, and must be a literal. `model` is that provider's own id (`jev-1.13.0` on `typesafe`, `typesafe/jev-1.13` on `openrouter`); unset means the provider's default. `laya` has no default and sends no `model`, because it silently ignores one it does not know. All three take the same request and return the same answers, so everything below holds on each, except that `laya`'s confidence is its `answer_confidence`, the top probability. There is no fallback: a node that names no provider does not switch to another when the TypeSafe key is missing.
+- `provider` is `typesafe` (default), `openrouter`, `laya`, `openai`, or `cloudflare`, and must be a literal. `model` is that provider's own id (`jev-1.13.0` on `typesafe`, `typesafe/jev-1.13` on `openrouter`, `gpt-6-luna` on `openai`, `clef` or `clef-flash` on `cloudflare`); unset means the provider's default. `laya` has no default and sends no `model`, because it silently ignores one it does not know. Every provider returns the same output, so everything below holds on each, except that `laya`'s confidence is its `answer_confidence`, the top probability. `openai` speaks its own request format, which the node translates; an OpenAI refusal of any question fails the step. `cloudflare` takes at most 64 questions per node. There is no fallback: a node that names no provider does not switch to another when the TypeSafe key is missing.
 - Question types are `noul` (probability that a claim is true), `choice` (2 to 255 named options), and `score` (2 to 10 ordered levels). `returns` repeats each question id and type, and a mismatch is rejected when the workflow is saved.
 - The output is `{ model, answers, usage }`, plus `routing: { model }` on `laya` (the checkpoint that answered). A downstream node reads `<alias>.answers.<question>.<field>` through an `inputs` mapping. A `noul` answer is `{ type, noul }` with no confidence. `choice` and `score` answers carry `probabilities` and `confidence`.
 - A low-confidence answer is still a success. To have a person review the uncertain ones, set `humanReview` (below). To route on a threshold yourself, put it in the next node, such as `property-match` or `code-match`, and route the uncertain band to `human-in-the-loop`.
@@ -114,7 +114,7 @@ Set `humanReview` to define a confidence band in the same node. An answer whose 
 
 #### Keys and preflight
 
-The swarm checks a `system-one-decision` node's key before first use. Set `TYPESAFE_API_KEY`, `OPENROUTER_API_KEY`, or `LAYA_API_KEY` as a global secret on the Secrets page (Settings > Secrets). For `laya`, also set `LAYA_URL` as a global config value (`set-config`, scope `global`). Every message names the key or config value for the node's provider.
+The swarm checks a `system-one-decision` node's key before first use. Set `TYPESAFE_API_KEY`, `OPENROUTER_API_KEY`, `LAYA_API_KEY`, `OPENAI_DECISIONS_API_KEY`, or `CLOUDFLARE_API_TOKEN` as a global secret on the Secrets page (Settings > Secrets). For `laya`, also set `LAYA_URL`, and for `cloudflare`, `CLOUDFLARE_ACCOUNT_ID` (the 32-character account id), as a global config value (`set-config`, scope `global`). `openai` never uses `OPENAI_API_KEY`. Every message names the key or config value for the node's provider.
 
 - **Saving a workflow** with a `system-one-decision` node whose key is missing succeeds and returns a warning: in the tool result message and `data.warnings` over MCP, and as `warnings` on the workflow body over HTTP. A save is not rejected, because definitions are also saved before a human has supplied the key and the key can change later.
 - **Starting a run** fails before any node executes when the key is missing. The run is recorded as `failed` with no steps and no request sent. Retrying a failed run is refused, and the run stays failed, while a node still to run needs a missing key.
@@ -240,15 +240,20 @@ The `next` field supports three formats:
         "id": "check-type",
         "type": "property-match",
         "label": "Check Event Type",
-        "config": { "property": "event", "match": "pull_request.opened" },
-        "next": { "match": "create-review", "no_match": null }
+        "inputs": { "event": "trigger.event" },
+        "config": {
+          "conditions": [{ "field": "event", "op": "eq", "value": "pull_request.opened" }],
+          "mode": "all"
+        },
+        "next": { "true": "create-review" }
       },
       {
         "id": "create-review",
         "type": "agent-task",
         "label": "Create Review Task",
+        "inputs": { "pr": "trigger.pull_request" },
         "config": {
-          "taskTemplate": "Review PR #{{input.number}}: {{input.title}}",
+          "template": "Review PR #{{pr.number}}: {{pr.title}}",
           "tags": ["review", "automated"],
           "priority": 60
         }
@@ -257,6 +262,8 @@ The `next` field supports three formats:
   }
 }
 ```
+
+The webhook payload supplies `event` and `pull_request`. A nonmatching event ends the branch because no `false` target is declared.
 
 ### Triggers
 
@@ -428,19 +435,22 @@ This is useful for fan-out patterns where some branches may fail but you still w
 
 ### Per-Step Retry
 
-Each node can define a `retryPolicy`:
+Each node can define a `retry` policy on the node itself (not inside `config`):
 
 ```json
 {
-  "retryPolicy": {
+  "retry": {
     "maxRetries": 3,
-    "backoff": "exponential",
-    "initialDelayMs": 1000
+    "strategy": "exponential",
+    "baseDelayMs": 1000,
+    "maxDelayMs": 60000
   }
 }
 ```
 
-Backoff strategies: `exponential`, `linear`, `static`. The poller detects failed steps and re-executes them according to the policy. Before a retry, the engine restores completed upstream outputs from step checkpoints, so declared inputs resolve to the same values as the original execution. Retrying a failed run also reconstructs the branch selected by each completed step and never revives a branch that was not taken.
+Backoff strategies: `exponential`, `linear`, `static`. The poller detects failed steps and re-executes them according to the policy.
+
+For an `agent-task` node, `retry` also covers a task that fails after dispatch, for example one the heartbeat fails with `superseded_workflow_task` after a worker restart. The engine detaches the failed task and the poller dispatches a fresh task for the same step. `onNodeFailure` applies only once `maxRetries` is spent. A cancelled task is never retried, and a node without `retry` behaves as before. Before a retry, the engine restores completed upstream outputs from step checkpoints, so declared inputs resolve to the same values as the original execution. Retrying a failed run also reconstructs the branch selected by each completed step and never revives a branch that was not taken.
 
 ### Per-Node Timeout
 
@@ -635,6 +645,12 @@ The engine uses **iteration-aware idempotency keys** to distinguish between loop
   "definition": {
     "nodes": [
       {
+        "id": "start",
+        "type": "agent-task",
+        "config": { "template": "Prepare the draft requirements" },
+        "next": "generate"
+      },
+      {
         "id": "generate",
         "type": "agent-task",
         "config": { "template": "Generate a draft" },
@@ -643,7 +659,12 @@ The engine uses **iteration-aware idempotency keys** to distinguish between loop
       {
         "id": "validate",
         "type": "validate",
-        "next": { "pass": "publish", "retry": "generate" }
+        "inputs": { "draft": "generate" },
+        "config": {
+          "targetNodeId": "draft",
+          "prompt": "Does the draft in taskOutput meet the requirements and read clearly?"
+        },
+        "next": { "pass": "publish", "fail": "generate" }
       },
       {
         "id": "publish",
@@ -655,7 +676,7 @@ The engine uses **iteration-aware idempotency keys** to distinguish between loop
 }
 ```
 
-In this example, the `validate` node routes back to `generate` on failure, creating a loop that continues until validation passes.
+The `start` node provides an entry outside the cycle. The `draft` input maps the generator output into the validator context. In this example, the `validate` node routes back to `generate` on failure, creating a loop that continues until validation passes.
 
 ## Related
 

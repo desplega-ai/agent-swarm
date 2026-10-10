@@ -9,6 +9,7 @@ import {
 } from "../be/db";
 import { getOAuthApp, upsertAuthorization, upsertOAuthApp } from "../be/db-queries/oauth";
 import {
+  deleteScriptConnection,
   getScriptApiConnectionDescriptors,
   getScriptConnectionById,
   listRelationalCredentialBindings,
@@ -716,5 +717,55 @@ describe("embedded connection auth", () => {
     } finally {
       server.stop(true);
     }
+  });
+});
+
+describe("deleteScriptConnection", () => {
+  test("removes the connection, its managed binding, and its derived inline secret", async () => {
+    createdConfigKeys.push("connection.deleteVendor.secret");
+    const connection = await upsertScriptConnection({
+      slug: "deleteVendor",
+      kind: "graphql",
+      baseUrl: "https://api.vendor.test/graphql",
+      allowedHosts: ["api.vendor.test"],
+      auth: { type: "bearer", secret: "example-delete-tok-123" },
+    });
+    createdConnectionIds.push(connection.id);
+    expect(await managedBindingFor(connection.id)).not.toBeNull();
+    expect(await getSwarmConfigs({ key: "connection.deleteVendor.secret" })).toHaveLength(1);
+
+    const deleted = await deleteScriptConnection(connection.id);
+
+    expect(deleted?.id).toBe(connection.id);
+    expect(await getScriptConnectionById(connection.id)).toBeNull();
+    expect(await managedBindingFor(connection.id)).toBeNull();
+    expect(await getSwarmConfigs({ key: "connection.deleteVendor.secret" })).toHaveLength(0);
+  });
+
+  test("keeps a shared configKey secret the connection does not own", async () => {
+    createdConfigKeys.push("SHARED_DELETE_VENDOR_KEY");
+    await upsertSwarmConfig({
+      scope: "global",
+      key: "SHARED_DELETE_VENDOR_KEY",
+      value: "example-shared-tok",
+      isSecret: true,
+    });
+    const connection = await upsertScriptConnection({
+      slug: "sharedDeleteVendor",
+      kind: "graphql",
+      baseUrl: "https://api.vendor.test/graphql",
+      allowedHosts: ["api.vendor.test"],
+      auth: { type: "bearer", configKey: "SHARED_DELETE_VENDOR_KEY" },
+    });
+    createdConnectionIds.push(connection.id);
+
+    expect((await deleteScriptConnection(connection.id))?.id).toBe(connection.id);
+
+    expect(await managedBindingFor(connection.id)).toBeNull();
+    expect(await getSwarmConfigs({ key: "SHARED_DELETE_VENDOR_KEY" })).toHaveLength(1);
+  });
+
+  test("returns null for an unknown id", async () => {
+    expect(await deleteScriptConnection("00000000-0000-4000-8000-000000000000")).toBeNull();
   });
 });

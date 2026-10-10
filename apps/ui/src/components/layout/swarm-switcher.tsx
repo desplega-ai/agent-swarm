@@ -20,6 +20,7 @@ import {
 import { SidebarMenu, SidebarMenuButton, SidebarMenuItem } from "@/components/ui/sidebar";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useConfig } from "@/hooks/use-config";
+import { SUPPORT_DISCORD_URL, SUPPORT_EMAIL } from "@/lib/task-support";
 import { cn } from "@/lib/utils";
 
 // Phase 2: cloud-mode menu link defaults. These are placeholders configurable
@@ -177,7 +178,35 @@ export function SwarmSwitcher() {
                   </a>
                 </DropdownMenuItem>
               </>
-            ) : null}
+            ) : (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem asChild>
+                  <a
+                    href={SUPPORT_DISCORD_URL}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-2 text-xs"
+                  >
+                    <LifeBuoy className="size-3.5 shrink-0" />
+                    <span>Join Discord</span>
+                    <ExternalLink className="ml-auto size-3 shrink-0 opacity-60" />
+                  </a>
+                </DropdownMenuItem>
+                <DropdownMenuItem asChild>
+                  <a
+                    href={`mailto:${SUPPORT_EMAIL}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-2 text-xs"
+                  >
+                    <LifeBuoy className="size-3.5 shrink-0" />
+                    <span>Email support</span>
+                    <ExternalLink className="ml-auto size-3 shrink-0 opacity-60" />
+                  </a>
+                </DropdownMenuItem>
+              </>
+            )}
           </DropdownMenuContent>
         </DropdownMenu>
       </SidebarMenuItem>

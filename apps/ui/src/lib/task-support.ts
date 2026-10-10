@@ -38,6 +38,11 @@ export function getLeadCredentialIssue(
   };
 }
 
+/**
+ * Whether a task offers "Get help" (the support dialog). Only failed tasks do,
+ * and only once the lead credential check rules credentials out: a missing
+ * credential gets its own popup. The dialog never opens on its own.
+ */
 export function shouldShowTaskFailureHelp(
   status: AgentTaskStatus,
   credentialCheckResolved: boolean,

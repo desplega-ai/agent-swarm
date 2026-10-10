@@ -7,6 +7,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { CurrentUserProvider } from "@/contexts/current-user-context";
 import { ConfigContext, useConfigProvider } from "@/hooks/use-config";
 import { ThemeProvider } from "@/hooks/use-theme";
+import { shouldPersistQuery } from "./query-persistence";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -61,6 +62,7 @@ export function Providers({ children }: { children: ReactNode }) {
         buster: `ui-${__APP_VERSION__}`,
         maxAge: 1000 * 60 * 60 * 6,
         persister: localStoragePersister,
+        dehydrateOptions: { shouldDehydrateQuery: shouldPersistQuery },
       }}
     >
       {content}

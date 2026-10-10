@@ -389,7 +389,7 @@ describe("/@swarm/api/* proxy", () => {
   test("proxy does NOT require a bearer header (cookie is the auth)", async () => {
     const id = await createPage();
     const exp = Math.floor(Date.now() / 1000) + 3600;
-    const token = await signPageSession({ pageId: id, exp });
+    const token = await signPageSession({ pageId: id, exp, op: true });
     // Send WITHOUT Authorization header — pure cookie auth.
     const res = await fetch(`${BASE}/@swarm/api/agents/${agentId}`, {
       headers: { Cookie: `page_session=${token}` },

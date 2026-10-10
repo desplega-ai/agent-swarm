@@ -433,7 +433,7 @@ export interface paths {
         put?: never;
         /**
          * Report agent liveness
-         * @description Refreshes the calling agent's status. Workers may send `X-Runtime-Instance-ID`, the per-boot identifier of the calling process. It is ignored unless MULTI_RUNTIME_ENABLED is set. With multi-runtime mode on, the header must identify a live runtime of this agent; an absent, unknown, offline, or foreign identifier makes the call a no-op instead of an error, so workers predating the flag keep running.
+         * @description Refreshes the calling agent's status. Workers may send `X-Runtime-Instance-ID`, the per-boot identifier of the calling process. It is ignored unless MULTI_RUNTIME_ENABLED is set. With multi-runtime mode on, the header must identify a live runtime of this agent; an absent, unknown, offline, or foreign identifier makes the call a no-op instead of an error, so workers predating the flag keep running. While the API is draining after SIGTERM, every response (this one included) carries `X-Swarm-Draining: 1`: workers hand off in-flight tasks and take no new work.
          */
         post: {
             parameters: {
@@ -2164,7 +2164,7 @@ export interface paths {
                         };
                     };
                 };
-                /** @description Invalid or disallowed SQL */
+                /** @description Invalid or disallowed SQL, including queries that read credential tables */
                 400: {
                     headers: {
                         [name: string]: unknown;
@@ -2264,9 +2264,9 @@ export interface paths {
                         capabilities?: string[];
                         maxTasks?: number;
                         /** @enum {string} */
-                        provider?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh";
+                        provider?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok";
                         /** @enum {string} */
-                        harness_provider?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh";
+                        harness_provider?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok";
                         runtimeInstanceId?: string;
                         modelTierOverrides?: {
                             [key: string]: {
@@ -2347,7 +2347,7 @@ export interface paths {
                 content: {
                     "application/json": {
                         /** @enum {string} */
-                        harness_provider: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh";
+                        harness_provider: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok";
                     };
                 };
             };
@@ -2467,7 +2467,7 @@ export interface paths {
                 content: {
                     "application/json": {
                         /** @enum {string} */
-                        harness_provider: "claude" | "codex" | "pi" | "opencode" | "acp" | "dsh";
+                        harness_provider: "claude" | "codex" | "pi" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok";
                         model?: string | null;
                         /** @default false */
                         allow_custom_model?: boolean;
@@ -2475,7 +2475,7 @@ export interface paths {
                         reasoning_effort?: "off" | "low" | "medium" | "high" | "xhigh" | "max" | null;
                         acp?: {
                             /** @enum {string} */
-                            target: "opencode" | "custom";
+                            target: "opencode" | "gemini" | "copilot" | "custom";
                             command?: string | null;
                             args?: string[];
                             envKeys?: string[];
@@ -3002,9 +3002,9 @@ export interface paths {
                             status: "idle" | "busy" | "offline" | "waiting_for_credentials";
                             missing: string[];
                             /** @enum {string|null} */
-                            provider: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | null;
+                            provider: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok" | null;
                             /** @enum {string|null} */
-                            harnessProvider: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | null;
+                            harnessProvider: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok" | null;
                             credStatus: components["schemas"]["AgentCredStatus"] | null;
                             lastCheckedAt: string;
                         };
@@ -3121,9 +3121,9 @@ export interface paths {
                                 status: "idle" | "busy" | "offline" | "waiting_for_credentials";
                                 missing: string[];
                                 /** @enum {string|null} */
-                                provider: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | null;
+                                provider: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok" | null;
                                 /** @enum {string|null} */
-                                harnessProvider: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | null;
+                                harnessProvider: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok" | null;
                                 credStatus: components["schemas"]["AgentCredStatus"] | null;
                                 lastCheckedAt: string;
                             }[];
@@ -3208,6 +3208,26 @@ export interface paths {
                                 responses: {
                                     [key: string]: unknown;
                                 } | null;
+                                /** @description Every accepted answer, in order. A request with an `all` or `{ min: N }` policy stays pending until enough approve. */
+                                approvals: {
+                                    /** @description Who answered, from the credential: a user id, or `operator` for the shared key. */
+                                    responder: string;
+                                    approved: boolean;
+                                    responses: {
+                                        [key: string]: unknown;
+                                    };
+                                    /** @description The `respondedBy` the client sent. Unverified; display only. */
+                                    claimedRespondedBy?: string;
+                                    respondedAt: string;
+                                }[] | null;
+                                /** @description Quorum progress while the request is pending; null once it is resolved. */
+                                approvalProgress: {
+                                    /** @description Approvals that count toward the policy so far. */
+                                    approved: number;
+                                    /** @description Approvals the policy needs before the request resolves. */
+                                    required: number;
+                                } | null;
+                                /** @description Who resolved the request, from the credential: a user id, `operator` for the shared key, or an agent id for a cancellation. */
                                 resolvedBy: string | null;
                                 resolvedAt: string | null;
                                 resolutionReason: string | null;
@@ -3230,6 +3250,14 @@ export interface paths {
                                 sourceTaskId: string | null;
                                 /** @enum {string} */
                                 status: "pending" | "approved" | "rejected" | "timeout" | "cancelled";
+                                /** @description Quorum progress while the request is pending; null once it is resolved. */
+                                approvalProgress: {
+                                    /** @description Approvals that count toward the policy so far. */
+                                    approved: number;
+                                    /** @description Approvals the policy needs before the request resolves. */
+                                    required: number;
+                                } | null;
+                                /** @description Who resolved the request, from the credential: a user id, `operator` for the shared key, or an agent id for a cancellation. */
                                 resolvedBy: string | null;
                                 resolvedAt: string | null;
                                 timeoutSeconds: number | null;
@@ -3342,6 +3370,26 @@ export interface paths {
                                 responses: {
                                     [key: string]: unknown;
                                 } | null;
+                                /** @description Every accepted answer, in order. A request with an `all` or `{ min: N }` policy stays pending until enough approve. */
+                                approvals: {
+                                    /** @description Who answered, from the credential: a user id, or `operator` for the shared key. */
+                                    responder: string;
+                                    approved: boolean;
+                                    responses: {
+                                        [key: string]: unknown;
+                                    };
+                                    /** @description The `respondedBy` the client sent. Unverified; display only. */
+                                    claimedRespondedBy?: string;
+                                    respondedAt: string;
+                                }[] | null;
+                                /** @description Quorum progress while the request is pending; null once it is resolved. */
+                                approvalProgress: {
+                                    /** @description Approvals that count toward the policy so far. */
+                                    approved: number;
+                                    /** @description Approvals the policy needs before the request resolves. */
+                                    required: number;
+                                } | null;
+                                /** @description Who resolved the request, from the credential: a user id, `operator` for the shared key, or an agent id for a cancellation. */
                                 resolvedBy: string | null;
                                 resolvedAt: string | null;
                                 resolutionReason: string | null;
@@ -3439,6 +3487,26 @@ export interface paths {
                                 responses: {
                                     [key: string]: unknown;
                                 } | null;
+                                /** @description Every accepted answer, in order. A request with an `all` or `{ min: N }` policy stays pending until enough approve. */
+                                approvals: {
+                                    /** @description Who answered, from the credential: a user id, or `operator` for the shared key. */
+                                    responder: string;
+                                    approved: boolean;
+                                    responses: {
+                                        [key: string]: unknown;
+                                    };
+                                    /** @description The `respondedBy` the client sent. Unverified; display only. */
+                                    claimedRespondedBy?: string;
+                                    respondedAt: string;
+                                }[] | null;
+                                /** @description Quorum progress while the request is pending; null once it is resolved. */
+                                approvalProgress: {
+                                    /** @description Approvals that count toward the policy so far. */
+                                    approved: number;
+                                    /** @description Approvals the policy needs before the request resolves. */
+                                    required: number;
+                                } | null;
+                                /** @description Who resolved the request, from the credential: a user id, `operator` for the shared key, or an agent id for a cancellation. */
                                 resolvedBy: string | null;
                                 resolvedAt: string | null;
                                 resolutionReason: string | null;
@@ -3485,7 +3553,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Submit a response to an approval request */
+        /**
+         * Submit a response to an approval request
+         * @description Only a person may answer: a user token, a page session signed for a user, or the shared key with no agent identity (recorded as `operator`). The responder is taken from the credential. When the request lists `approvers.users` or `approvers.roles`, a user must match one of them. A rejection resolves the request at once; approvals resolve it when the `any`, `all` or `{ min: N }` policy is met, and until then it stays pending with the answer recorded in `approvals`.
+         */
         post: {
             parameters: {
                 query?: never;
@@ -3501,12 +3572,13 @@ export interface paths {
                         responses: {
                             [key: string]: unknown;
                         };
+                        /** @description Unverified display name. Stored as `claimedRespondedBy` on the answer; never used as the responder. */
                         respondedBy?: string;
                     };
                 };
             };
             responses: {
-                /** @description Response recorded */
+                /** @description Response recorded. `status` stays `pending` while the policy needs more approvals. */
                 200: {
                     headers: {
                         [name: string]: unknown;
@@ -3549,6 +3621,26 @@ export interface paths {
                                 responses: {
                                     [key: string]: unknown;
                                 } | null;
+                                /** @description Every accepted answer, in order. A request with an `all` or `{ min: N }` policy stays pending until enough approve. */
+                                approvals: {
+                                    /** @description Who answered, from the credential: a user id, or `operator` for the shared key. */
+                                    responder: string;
+                                    approved: boolean;
+                                    responses: {
+                                        [key: string]: unknown;
+                                    };
+                                    /** @description The `respondedBy` the client sent. Unverified; display only. */
+                                    claimedRespondedBy?: string;
+                                    respondedAt: string;
+                                }[] | null;
+                                /** @description Quorum progress while the request is pending; null once it is resolved. */
+                                approvalProgress: {
+                                    /** @description Approvals that count toward the policy so far. */
+                                    approved: number;
+                                    /** @description Approvals the policy needs before the request resolves. */
+                                    required: number;
+                                } | null;
+                                /** @description Who resolved the request, from the credential: a user id, `operator` for the shared key, or an agent id for a cancellation. */
                                 resolvedBy: string | null;
                                 resolvedAt: string | null;
                                 resolutionReason: string | null;
@@ -3576,6 +3668,15 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
+                /** @description Caller is an agent, or is not one of the request's approvers */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
                 /** @description Not found */
                 404: {
                     headers: {
@@ -3585,7 +3686,7 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
-                /** @description Already resolved */
+                /** @description Already resolved, or this responder already answered */
                 409: {
                     headers: {
                         [name: string]: unknown;
@@ -3672,6 +3773,26 @@ export interface paths {
                                 responses: {
                                     [key: string]: unknown;
                                 } | null;
+                                /** @description Every accepted answer, in order. A request with an `all` or `{ min: N }` policy stays pending until enough approve. */
+                                approvals: {
+                                    /** @description Who answered, from the credential: a user id, or `operator` for the shared key. */
+                                    responder: string;
+                                    approved: boolean;
+                                    responses: {
+                                        [key: string]: unknown;
+                                    };
+                                    /** @description The `respondedBy` the client sent. Unverified; display only. */
+                                    claimedRespondedBy?: string;
+                                    respondedAt: string;
+                                }[] | null;
+                                /** @description Quorum progress while the request is pending; null once it is resolved. */
+                                approvalProgress: {
+                                    /** @description Approvals that count toward the policy so far. */
+                                    approved: number;
+                                    /** @description Approvals the policy needs before the request resolves. */
+                                    required: number;
+                                } | null;
+                                /** @description Who resolved the request, from the credential: a user id, `operator` for the shared key, or an agent id for a cancellation. */
                                 resolvedBy: string | null;
                                 resolvedAt: string | null;
                                 resolutionReason: string | null;
@@ -4890,6 +5011,168 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/comb/review-batches": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Send agent-fs comments to the swarm as one lead task
+         * @description Comb's 'Send to swarm'. The server reads each comment again from agent-fs with its bootstrap key, skips replies, resolved comments, and comments already sent, and creates ONE task for the lead. Each sent comment gets a `[comb:sent task=<id>]` reply from the swarm service account. A comment is sent at most once. When an earlier send lost its reply, the batch posts that reply again (`repaired`). Answers 404 while COMB_ENABLED is off.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        orgId: string;
+                        driveId: string;
+                        commentIds: string[];
+                        scopePath: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description No new task: the batch only posted missing 'sent' replies again */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            taskId: string | null;
+                            sent: string[];
+                            skipped: {
+                                id: string;
+                                /** @enum {string} */
+                                reason: "not-found" | "reply" | "resolved" | "already-sent";
+                                taskId?: string;
+                            }[];
+                            repaired: {
+                                id: string;
+                                taskId: string;
+                            }[];
+                        };
+                    };
+                };
+                /** @description Task created */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            taskId: string | null;
+                            sent: string[];
+                            skipped: {
+                                id: string;
+                                /** @enum {string} */
+                                reason: "not-found" | "reply" | "resolved" | "already-sent";
+                                taskId?: string;
+                            }[];
+                            repaired: {
+                                id: string;
+                                taskId: string;
+                            }[];
+                        };
+                    };
+                };
+                /** @description Invalid body, or not the swarm drive */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Caller cannot create tasks */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Comb is not enabled */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Nothing to send (every comment was skipped) */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            skipped: {
+                                id: string;
+                                /** @enum {string} */
+                                reason: "not-found" | "reply" | "resolved" | "already-sent";
+                                taskId?: string;
+                            }[];
+                        };
+                    };
+                };
+                /** @description Task creation blocked by an extension */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description agent-fs could not read a comment */
+                502: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description agent-fs or the swarm drive is not set up, or an operator disabled a Comb review template */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            skipped: {
+                                id: string;
+                                /** @enum {string} */
+                                reason: "not-found" | "reply" | "resolved" | "already-sent";
+                                taskId?: string;
+                            }[];
+                        };
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/tasks/{id}/context": {
         parameters: {
             query?: never;
@@ -5359,6 +5642,76 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/keys/report-seat-mismatch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Record that an API key's subscription seat cannot run a model family */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        keyType: string;
+                        keySuffix: string;
+                        keyIndex: number;
+                        /** @enum {string} */
+                        model: "fable" | "opus" | "sonnet" | "haiku";
+                        scope?: string;
+                        scopeId?: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Seat mismatch recorded */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @enum {boolean} */
+                            success: true;
+                            message: string;
+                        };
+                    };
+                };
+                /** @description Validation error */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/keys/available": {
         parameters: {
             query?: never;
@@ -5395,6 +5748,7 @@ export interface paths {
                             totalKeys: number;
                             modelBlockedIndices?: number[];
                             earliestModelResetAt?: string | null;
+                            seatBlockedIndices?: number[];
                             authFailureFence: number;
                         };
                     };
@@ -5486,6 +5840,8 @@ export interface paths {
                                 plan: string | null;
                                 /** @enum {string|null} */
                                 planSource: "manual" | "detected" | "estimated" | null;
+                                lastSeatMismatchAt: string | null;
+                                lastSeatMismatchModel: string | null;
                                 consecutiveAuthFailures: number;
                                 lastAuthFailureAt: string | null;
                                 modelLimits: {
@@ -6106,8 +6462,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Install a predefined extension from the catalog
-         * @description Installs the named template from `GET /api/extensions/catalog`. Inline bundles (`manifest`/`files`) are rejected with `inline_install_disabled`. Any authenticated agent can install a disabled draft owned by its agent ID. Workers can update only their own bundles; activation remains lead/operator-only.
+         * Install an extension from the catalog or an inline bundle
+         * @description Installs the named `template` from `GET /api/extensions/catalog`, or an inline `manifest` plus `files`. Inline bundles are rejected with `inline_install_disabled` unless `EXTENSION_ALLOW_INLINE_INSTALL` is on, and then only lead, operator, and dashboard-user callers may send them (workers get 403). Any authenticated agent can install a catalog draft owned by its agent ID. Workers can update only their own bundles. A new extension is always disabled; activation remains lead/operator-only.
          */
         post: operations["extensions_install"];
         delete?: never;
@@ -6297,7 +6653,7 @@ export interface paths {
         get: {
             parameters: {
                 query?: {
-                    itemType?: "page" | "workflow" | "schedule";
+                    itemType?: "page" | "workflow" | "schedule" | "agent-fs-path";
                     itemIds?: string;
                 };
                 header?: never;
@@ -6341,7 +6697,7 @@ export interface paths {
                 content: {
                     "application/json": {
                         /** @enum {string} */
-                        itemType: "page" | "workflow" | "schedule";
+                        itemType: "page" | "workflow" | "schedule" | "agent-fs-path";
                         itemId: string;
                         favorite: boolean;
                     };
@@ -6357,7 +6713,7 @@ export interface paths {
                         "application/json": {
                             favorite: boolean;
                             /** @enum {string} */
-                            itemType: "page" | "workflow" | "schedule";
+                            itemType: "page" | "workflow" | "schedule" | "agent-fs-path";
                             itemId: string;
                             row: components["schemas"]["UserFavorite"] | null;
                         };
@@ -7241,7 +7597,11 @@ export interface paths {
         /** Get a KV entry by key (namespace resolved from request headers) */
         get: {
             parameters: {
-                query?: never;
+                query?: {
+                    path?: string;
+                    offset?: number | null;
+                    limit?: number;
+                };
                 header?: never;
                 path: {
                     key: string;
@@ -7250,16 +7610,26 @@ export interface paths {
             };
             requestBody?: never;
             responses: {
-                /** @description KV entry */
+                /** @description KV entry (or a path/offset/limit view of it) */
                 200: {
                     headers: {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["KvEntry"];
+                        "application/json": components["schemas"]["KvEntry"] & {
+                            view?: {
+                                path: string;
+                                /** @enum {string} */
+                                type: "object" | "array" | "string" | "number" | "boolean" | "null";
+                                total?: number;
+                                offset?: number;
+                                returned?: number;
+                                nextOffset?: number | null;
+                            };
+                        };
                     };
                 };
-                /** @description Validation error or unresolvable namespace */
+                /** @description Validation error, unresolvable namespace, or invalid view path */
                 400: {
                     headers: {
                         [name: string]: unknown;
@@ -7544,7 +7914,11 @@ export interface paths {
         /** Get a KV entry by explicit namespace + key */
         get: {
             parameters: {
-                query?: never;
+                query?: {
+                    path?: string;
+                    offset?: number | null;
+                    limit?: number;
+                };
                 header?: never;
                 path: {
                     namespace: string;
@@ -7554,16 +7928,26 @@ export interface paths {
             };
             requestBody?: never;
             responses: {
-                /** @description KV entry */
+                /** @description KV entry (or a path/offset/limit view of it) */
                 200: {
                     headers: {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["KvEntry"];
+                        "application/json": components["schemas"]["KvEntry"] & {
+                            view?: {
+                                path: string;
+                                /** @enum {string} */
+                                type: "object" | "array" | "string" | "number" | "boolean" | "null";
+                                total?: number;
+                                offset?: number;
+                                returned?: number;
+                                nextOffset?: number | null;
+                            };
+                        };
                     };
                 };
-                /** @description Validation error or unresolvable namespace */
+                /** @description Validation error, unresolvable namespace, or invalid view path */
                 400: {
                     headers: {
                         [name: string]: unknown;
@@ -7885,8 +8269,17 @@ export interface paths {
                         };
                     };
                 };
-                /** @description Validation error */
+                /** @description Validation error, or a sourcePath under /longterm that is not an allowed memory key */
                 400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description sourcePath is under a lead-only /longterm root and the caller is not the lead */
+                403: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -7934,6 +8327,8 @@ export interface paths {
                         scope?: "agent" | "swarm" | "all";
                         /** @enum {string} */
                         source?: "manual" | "file_index" | "session_summary" | "task_completion";
+                        /** @description Only return memories whose key starts with this text (literal, case-sensitive), for example '/longterm/facts/'. */
+                        keyPrefix?: string;
                     };
                 };
             };
@@ -7960,6 +8355,8 @@ export interface paths {
                                 scope: "agent" | "swarm";
                                 tags: string[];
                                 accessCount: number;
+                                summary?: string | null;
+                                createdAt?: string;
                             }[];
                         };
                     };
@@ -8142,7 +8539,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** List or semantically search memories across all agents (debug/admin) */
+        /**
+         * List or semantically search memories (debug/admin)
+         * @description The operator key, a user, and the lead see every agent's memories. Any other agent (an `aseph_` session token, or the shared key with `X-Agent-ID`) sees only its own memories and swarm-scope memories.
+         */
         post: {
             parameters: {
                 query?: never;
@@ -8205,6 +8605,10 @@ export interface paths {
                                 chunkIndex: number;
                                 totalChunks: number;
                                 tags: string[];
+                                key: string | null;
+                                updatedAt: string | null;
+                                /** @description Usefulness posterior mean alpha / (alpha + beta); 0.5 = no signal */
+                                rating: number;
                             }[];
                             total: number;
                             limit: number;
@@ -8225,6 +8629,192 @@ export interface paths {
                 };
             };
         };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/memory/keys": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * One aggregate row per keyed memory under a key prefix: chunks, usage, rating, estimated tokens (debug/admin)
+         * @description The operator key, a user, and the lead see every agent's memories. Any other agent sees only its own memories and swarm-scope memories.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Literal, case-sensitive key prefix (default '/longterm/'). */
+                    prefix?: string;
+                    limit?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Keyed memories grouped by (key, scope, agentId). accessCount is summed over chunk rows; rating pools alpha/beta over chunk rows; estTokens = ceil(chars / 4) */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            prefix: string;
+                            keys: {
+                                key: string;
+                                /** @enum {string} */
+                                scope: "agent" | "swarm";
+                                agentId: string | null;
+                                memoryId: string;
+                                name: string;
+                                /** @enum {string} */
+                                source: "manual" | "file_index" | "session_summary" | "task_completion";
+                                chunkRows: number;
+                                totalChunks: number;
+                                complete: boolean;
+                                chars: number;
+                                estTokens: number;
+                                accessCount: number;
+                                lastAccessedAt: string | null;
+                                rating: number;
+                                alpha: number;
+                                beta: number;
+                                usefulRatings: number;
+                                notUsefulRatings: number;
+                                createdAt: string;
+                                updatedAt: string;
+                            }[];
+                            truncated: boolean;
+                        };
+                    };
+                };
+                /** @description Validation error */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/memory/chunks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Every chunk row of one memory in chunkIndex order, with a chunk-integrity check (debug/admin). Does not count as an access
+         * @description Visibility matches the memory list: an agent other than the lead gets 404 for another agent's agent-scope memory.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Any chunk row of the memory. */
+                    memoryId?: string;
+                    key?: string;
+                    scope?: "agent" | "swarm";
+                    /** @description Owner agent id; pass an empty string for rows without one. */
+                    agentId?: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Chunk rows and integrity findings */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            key: string | null;
+                            /** @enum {string} */
+                            scope: "agent" | "swarm";
+                            agentId: string | null;
+                            chunks: {
+                                id: string;
+                                agentId: string | null;
+                                /** @enum {string} */
+                                scope: "agent" | "swarm";
+                                key: string | null;
+                                name: string;
+                                content: string;
+                                /** @enum {string} */
+                                source: "manual" | "file_index" | "session_summary" | "task_completion";
+                                sourceTaskId: string | null;
+                                sourcePath: string | null;
+                                chunkIndex: number;
+                                totalChunks: number;
+                                tags: string[];
+                                createdAt: string;
+                                updatedAt: string | null;
+                                accessedAt: string;
+                                expiresAt: string | null;
+                                accessCount: number;
+                                embeddingModel: string | null;
+                                rating: number;
+                                alpha: number;
+                                beta: number;
+                                version: number;
+                                estTokens: number;
+                            }[];
+                            estTokens: number;
+                            integrity: {
+                                ok: boolean;
+                                expectedChunks: number;
+                                presentIndexes: number[];
+                                missingIndexes: number[];
+                                duplicateIndexes: number[];
+                                conflictingTotals: number[];
+                                outOfRangeIds: string[];
+                                issues: string[];
+                            };
+                        };
+                    };
+                };
+                /** @description Validation error */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Memory not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -8467,7 +9057,10 @@ export interface paths {
         };
         put?: never;
         post?: never;
-        /** Delete a single memory by ID (debug/admin) */
+        /**
+         * Delete a single memory by ID (debug/admin)
+         * @description The operator key and users may delete any memory. The lead may delete its own memories and swarm-scope memories. Any other agent may delete only its own agent-scope memories.
+         */
         delete: {
             parameters: {
                 query?: never;
@@ -8488,6 +9081,15 @@ export interface paths {
                         "application/json": {
                             deleted: boolean;
                         };
+                    };
+                };
+                /** @description Caller may not delete this memory */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
                 /** @description Memory not found */
@@ -8537,6 +9139,8 @@ export interface paths {
                             taskId?: string;
                             /** @description Optional external source ID this memory references. Free-form string, convention "<source>:<identifier>" (e.g. "github:owner/repo#N", "linear:KEY-N", "customer:<slug>", "slack:<channel>:<ts>", "agentmail:<thread-id>"). Pick any prefix that fits — no closed enum. When present, an edge from this memory to the external source is created/updated. */
                             referencesSource?: string;
+                            /** @description Optional. Model that produced an `llm` rating, as "<provider>/<model-id>" (e.g. "openrouter/deepseek/deepseek-v4.1-flash"). Stored in memory_rating.model for `llm` events and ignored for `explicit-self`. */
+                            model?: string;
                         }[];
                     };
                 };
@@ -9252,7 +9856,7 @@ export interface paths {
                         "application/json": {
                             tiers: {
                                 /** @enum {string} */
-                                provider: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh";
+                                provider: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok";
                                 /** @enum {string} */
                                 tier: "smol" | "regular" | "smart" | "ultra";
                                 key: string;
@@ -10245,7 +10849,7 @@ export interface paths {
         };
         /**
          * Identity + setup readiness + live activity for the swarm dashboard
-         * @description Single source of truth consumed by the UI home page. Identity comes from SWARM_* envs; setup milestones each emit `unverified | configured | verified`; automations report `running | needs_setup` from the same runtime preflight used at dispatch; activity counts agents alive in the last 5 min and tasks created in the last 24h; agent_fs reports whether AGENT_FS_API_URL is set; telemetry reports the effective ANONYMIZED_TELEMETRY opt-out state.
+         * @description Single source of truth consumed by the UI home page. Identity comes from SWARM_* envs; setup milestones each emit `unverified | configured | verified`; automations report `running | needs_setup` from the same runtime preflight used at dispatch; activity counts agents alive in the last 5 min and tasks created in the last 24h; agent_fs reports whether AGENT_FS_API_URL is set, plus the Comb settings (COMB_ENABLED, the browser-facing agent-fs URL, the shared org and drive ids, and the agent-fs user id of the swarm service account); telemetry reports the effective ANONYMIZED_TELEMETRY opt-out state.
          */
         get: {
             parameters: {
@@ -10281,10 +10885,10 @@ export interface paths {
                                 hint?: string;
                                 action_url?: string;
                                 /** @enum {string} */
-                                provider?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh";
+                                provider?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok";
                                 providers?: {
                                     /** @enum {string} */
-                                    provider: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh";
+                                    provider: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok";
                                     /** @enum {string} */
                                     state: "unverified" | "configured" | "verified";
                                     workers: number;
@@ -10301,6 +10905,14 @@ export interface paths {
                                 provider_id: string;
                                 capabilities: {
                                     [key: string]: unknown;
+                                };
+                                comb: {
+                                    enabled: boolean;
+                                    api_url: string | null;
+                                    live_url: string;
+                                    org_id: string | null;
+                                    drive_id: string | null;
+                                    service_user_id: string | null;
                                 };
                             };
                             automations: {
@@ -10379,7 +10991,7 @@ export interface paths {
                 content: {
                     "application/json": {
                         /** @enum {string} */
-                        provider: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh";
+                        provider: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok";
                     };
                 };
             };
@@ -10471,7 +11083,7 @@ export interface paths {
                                         /** @enum {string|null} */
                                         method: "api_key" | null;
                                         /** @enum {string|null} */
-                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "not_enabled" | "expired" | "unknown" | null;
+                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "endpoint" | "not_enabled" | "expired" | "unknown" | null;
                                     };
                                     name: {
                                         /** @enum {string} */
@@ -10481,7 +11093,7 @@ export interface paths {
                                         /** @enum {string|null} */
                                         method: "custom_name" | "default_name" | null;
                                         /** @enum {string|null} */
-                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "not_enabled" | "expired" | "unknown" | null;
+                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "endpoint" | "not_enabled" | "expired" | "unknown" | null;
                                     };
                                     ai: {
                                         /** @enum {string} */
@@ -10491,7 +11103,7 @@ export interface paths {
                                         /** @enum {string|null} */
                                         method: "claude_setup_token" | "claude_api_key" | "codex_device" | "codex_cli" | "openrouter" | "openai_gateway" | "deepseek" | "devin" | null;
                                         /** @enum {string|null} */
-                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "not_enabled" | "expired" | "unknown" | null;
+                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "endpoint" | "not_enabled" | "expired" | "unknown" | null;
                                     };
                                     agents: {
                                         /** @enum {string} */
@@ -10501,7 +11113,7 @@ export interface paths {
                                         /** @enum {string|null} */
                                         method: "cheap" | "optimal" | "max" | "mixed" | null;
                                         /** @enum {string|null} */
-                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "not_enabled" | "expired" | "unknown" | null;
+                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "endpoint" | "not_enabled" | "expired" | "unknown" | null;
                                     };
                                     memory: {
                                         /** @enum {string} */
@@ -10509,9 +11121,9 @@ export interface paths {
                                         /** Format: date-time */
                                         at: string | null;
                                         /** @enum {string|null} */
-                                        method: "openai" | "openrouter" | "vercel" | "custom" | "existing" | null;
+                                        method: "openai" | "openrouter" | "vercel" | "azure" | "custom" | "existing" | null;
                                         /** @enum {string|null} */
-                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "not_enabled" | "expired" | "unknown" | null;
+                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "endpoint" | "not_enabled" | "expired" | "unknown" | null;
                                     };
                                     integrations: {
                                         /** @enum {string} */
@@ -10521,7 +11133,7 @@ export interface paths {
                                         /** @enum {string|null} */
                                         method: "slack" | "github" | "gitlab" | "linear_oauth" | "jira_oauth" | null;
                                         /** @enum {string|null} */
-                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "not_enabled" | "expired" | "unknown" | null;
+                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "endpoint" | "not_enabled" | "expired" | "unknown" | null;
                                     };
                                     first_task: {
                                         /** @enum {string} */
@@ -10531,14 +11143,14 @@ export interface paths {
                                         /** @enum {string|null} */
                                         method: "suggestion" | "free_form" | null;
                                         /** @enum {string|null} */
-                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "not_enabled" | "expired" | "unknown" | null;
+                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "endpoint" | "not_enabled" | "expired" | "unknown" | null;
                                     };
                                 };
                             };
                             signals: {
                                 providers: {
                                     /** @enum {string} */
-                                    provider: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh";
+                                    provider: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok";
                                     /** @enum {string} */
                                     state: "unverified" | "configured" | "verified";
                                     workers: number;
@@ -10630,7 +11242,7 @@ export interface paths {
                         /** @enum {string} */
                         step: "connect" | "name" | "ai" | "agents" | "memory" | "integrations" | "first_task";
                         /** @enum {string} */
-                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "not_enabled" | "expired" | "unknown";
+                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "endpoint" | "not_enabled" | "expired" | "unknown";
                     } | {
                         /** @enum {string} */
                         action: "first_task";
@@ -10681,7 +11293,7 @@ export interface paths {
                                         /** @enum {string|null} */
                                         method: "api_key" | null;
                                         /** @enum {string|null} */
-                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "not_enabled" | "expired" | "unknown" | null;
+                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "endpoint" | "not_enabled" | "expired" | "unknown" | null;
                                     };
                                     name: {
                                         /** @enum {string} */
@@ -10691,7 +11303,7 @@ export interface paths {
                                         /** @enum {string|null} */
                                         method: "custom_name" | "default_name" | null;
                                         /** @enum {string|null} */
-                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "not_enabled" | "expired" | "unknown" | null;
+                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "endpoint" | "not_enabled" | "expired" | "unknown" | null;
                                     };
                                     ai: {
                                         /** @enum {string} */
@@ -10701,7 +11313,7 @@ export interface paths {
                                         /** @enum {string|null} */
                                         method: "claude_setup_token" | "claude_api_key" | "codex_device" | "codex_cli" | "openrouter" | "openai_gateway" | "deepseek" | "devin" | null;
                                         /** @enum {string|null} */
-                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "not_enabled" | "expired" | "unknown" | null;
+                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "endpoint" | "not_enabled" | "expired" | "unknown" | null;
                                     };
                                     agents: {
                                         /** @enum {string} */
@@ -10711,7 +11323,7 @@ export interface paths {
                                         /** @enum {string|null} */
                                         method: "cheap" | "optimal" | "max" | "mixed" | null;
                                         /** @enum {string|null} */
-                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "not_enabled" | "expired" | "unknown" | null;
+                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "endpoint" | "not_enabled" | "expired" | "unknown" | null;
                                     };
                                     memory: {
                                         /** @enum {string} */
@@ -10719,9 +11331,9 @@ export interface paths {
                                         /** Format: date-time */
                                         at: string | null;
                                         /** @enum {string|null} */
-                                        method: "openai" | "openrouter" | "vercel" | "custom" | "existing" | null;
+                                        method: "openai" | "openrouter" | "vercel" | "azure" | "custom" | "existing" | null;
                                         /** @enum {string|null} */
-                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "not_enabled" | "expired" | "unknown" | null;
+                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "endpoint" | "not_enabled" | "expired" | "unknown" | null;
                                     };
                                     integrations: {
                                         /** @enum {string} */
@@ -10731,7 +11343,7 @@ export interface paths {
                                         /** @enum {string|null} */
                                         method: "slack" | "github" | "gitlab" | "linear_oauth" | "jira_oauth" | null;
                                         /** @enum {string|null} */
-                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "not_enabled" | "expired" | "unknown" | null;
+                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "endpoint" | "not_enabled" | "expired" | "unknown" | null;
                                     };
                                     first_task: {
                                         /** @enum {string} */
@@ -10741,14 +11353,14 @@ export interface paths {
                                         /** @enum {string|null} */
                                         method: "suggestion" | "free_form" | null;
                                         /** @enum {string|null} */
-                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "not_enabled" | "expired" | "unknown" | null;
+                                        errorClass: "auth" | "network" | "timeout" | "dimension" | "model" | "endpoint" | "not_enabled" | "expired" | "unknown" | null;
                                     };
                                 };
                             };
                             signals: {
                                 providers: {
                                     /** @enum {string} */
-                                    provider: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh";
+                                    provider: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok";
                                     /** @enum {string} */
                                     state: "unverified" | "configured" | "verified";
                                     workers: number;
@@ -10825,7 +11437,7 @@ export interface paths {
                 content: {
                     "application/json": {
                         /** @enum {string} */
-                        preset: "openai" | "openrouter" | "vercel" | "custom" | "existing";
+                        preset: "openai" | "openrouter" | "vercel" | "azure" | "custom" | "existing";
                         /** Format: uri */
                         baseUrl?: string;
                         model?: string;
@@ -10848,7 +11460,7 @@ export interface paths {
                             latencyMs: number;
                             error?: string;
                             /** @enum {string} */
-                            errorClass?: "auth" | "network" | "timeout" | "dimension" | "model" | "not_enabled" | "expired" | "unknown";
+                            errorClass?: "auth" | "network" | "timeout" | "dimension" | "model" | "endpoint" | "not_enabled" | "expired" | "unknown";
                         };
                     };
                 };
@@ -12248,7 +12860,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Poll for triggers (tasks, mentions) */
+        /**
+         * Poll for triggers (tasks, mentions)
+         * @description While the API is draining after SIGTERM it dispatches nothing: the answer is `{ trigger: null }` and carries `X-Swarm-Draining: 1`, the signal for a worker to hand off in-flight tasks.
+         */
         get: {
             parameters: {
                 query?: never;
@@ -12287,6 +12902,7 @@ export interface paths {
                                 /** @enum {string} */
                                 type: "task_assigned";
                                 taskId: string;
+                                triggerSurface?: string;
                                 task: components["schemas"]["AgentTask"] & {
                                     attachments: {
                                         /** Format: uuid */
@@ -12465,7 +13081,7 @@ export interface paths {
                 query?: never;
                 header?: never;
                 path: {
-                    provider: "claude" | "claude-managed" | "codex" | "pi" | "opencode" | "devin" | "gemini" | "acp" | "dsh";
+                    provider: "claude" | "claude-managed" | "codex" | "pi" | "opencode" | "devin" | "gemini" | "acp" | "dsh" | "amp" | "cursor" | "grok";
                     model: string;
                     tokenClass: "input" | "cached_input" | "output" | "cache_write" | "cache_write_1h" | "web_search" | "runtime_hour" | "acu";
                 };
@@ -12493,7 +13109,7 @@ export interface paths {
                 query?: never;
                 header?: never;
                 path: {
-                    provider: "claude" | "claude-managed" | "codex" | "pi" | "opencode" | "devin" | "gemini" | "acp" | "dsh";
+                    provider: "claude" | "claude-managed" | "codex" | "pi" | "opencode" | "devin" | "gemini" | "acp" | "dsh" | "amp" | "cursor" | "grok";
                     model: string;
                     tokenClass: "input" | "cached_input" | "output" | "cache_write" | "cache_write_1h" | "web_search" | "runtime_hour" | "acu";
                 };
@@ -12556,7 +13172,7 @@ export interface paths {
                 query?: never;
                 header?: never;
                 path: {
-                    provider: "claude" | "claude-managed" | "codex" | "pi" | "opencode" | "devin" | "gemini" | "acp" | "dsh";
+                    provider: "claude" | "claude-managed" | "codex" | "pi" | "opencode" | "devin" | "gemini" | "acp" | "dsh" | "amp" | "cursor" | "grok";
                     model: string;
                     tokenClass: "input" | "cached_input" | "output" | "cache_write" | "cache_write_1h" | "web_search" | "runtime_hour" | "acu";
                 };
@@ -12608,7 +13224,7 @@ export interface paths {
                 query?: never;
                 header?: never;
                 path: {
-                    provider: "claude" | "claude-managed" | "codex" | "pi" | "opencode" | "devin" | "gemini" | "acp" | "dsh";
+                    provider: "claude" | "claude-managed" | "codex" | "pi" | "opencode" | "devin" | "gemini" | "acp" | "dsh" | "amp" | "cursor" | "grok";
                     model: string;
                     tokenClass: "input" | "cached_input" | "output" | "cache_write" | "cache_write_1h" | "web_search" | "runtime_hour" | "acu";
                     effectiveFrom: string;
@@ -12712,6 +13328,17 @@ export interface paths {
                     };
                     content: {
                         "application/json": components["schemas"]["SwarmRepo"];
+                    };
+                };
+                /** @description Only the lead, the operator or a user can change allowMerge */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                        };
                     };
                 };
                 /** @description Repo not found */
@@ -12856,6 +13483,17 @@ export interface paths {
                         };
                     };
                 };
+                /** @description Only the lead, the operator or a user can turn allowMerge on */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                        };
+                    };
+                };
                 /** @description Duplicate repo */
                 409: {
                     headers: {
@@ -12865,6 +13503,63 @@ export interface paths {
                         "application/json": {
                             error: string;
                         };
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/realtime/ticket": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Issue a one-shot dashboard realtime ticket */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description One-shot realtime ticket */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            ticket: string;
+                            expiresAt: number;
+                        };
+                    };
+                };
+                /** @description Comb presence is not allowed */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Comb is not enabled */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
             };
@@ -14269,7 +14964,11 @@ export interface paths {
         get: operations["script_connections_get"];
         put?: never;
         post?: never;
-        delete?: never;
+        /**
+         * Delete a script connection
+         * @description Hard-deletes the connection, its auto-managed credential binding, and any derived inline secret it owns.
+         */
+        delete: operations["script_connections_delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -14955,7 +15654,7 @@ export interface paths {
                         }[];
                         isError?: boolean;
                         /** @enum {string} */
-                        provider?: "claude" | "claude-managed" | "codex" | "pi" | "opencode" | "devin" | "gemini" | "acp" | "dsh";
+                        provider?: "claude" | "claude-managed" | "codex" | "pi" | "opencode" | "devin" | "gemini" | "acp" | "dsh" | "amp" | "cursor" | "grok";
                         createdAt?: number;
                     };
                 };
@@ -15352,7 +16051,7 @@ export interface paths {
                                      * @default mcp
                                      * @enum {string}
                                      */
-                                    source: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira";
+                                    source: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "azure-devops" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira" | "comb";
                                     taskType?: string;
                                     /** @default [] */
                                     tags: string[];
@@ -15371,7 +16070,7 @@ export interface paths {
                                     /** @enum {string} */
                                     effort?: "off" | "low" | "medium" | "high" | "xhigh" | "max";
                                     /** @enum {string} */
-                                    provider?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh";
+                                    provider?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok";
                                     requestedByUserId?: string;
                                     progress?: string;
                                     /** Format: date-time */
@@ -17247,6 +17946,23 @@ export interface paths {
                                     lastErrorAt?: string;
                                     lastSuccessAt?: string;
                                 };
+                                contextVersions?: {
+                                    at: string;
+                                    rowsDeleted: number;
+                                    batches: number;
+                                    durationMs: number;
+                                    dryRun: boolean;
+                                    cumulativeRowsDeleted: number;
+                                    /** @enum {string} */
+                                    outcome: "converged" | "budget_exhausted" | "error";
+                                    drained: boolean;
+                                    backlogRemaining: number;
+                                    batchSize: number;
+                                    slowestStatementMs: number;
+                                    lastError?: string;
+                                    lastErrorAt?: string;
+                                    lastSuccessAt?: string;
+                                };
                             };
                         };
                     };
@@ -17607,7 +18323,7 @@ export interface paths {
                                  * @default mcp
                                  * @enum {string}
                                  */
-                                source: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira";
+                                source: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "azure-devops" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira" | "comb";
                                 taskType?: string;
                                 /** @default [] */
                                 tags: string[];
@@ -17629,7 +18345,7 @@ export interface paths {
                                 /** @enum {string} */
                                 effort?: "off" | "low" | "medium" | "high" | "xhigh" | "max";
                                 /** @enum {string} */
-                                provider?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh";
+                                provider?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok";
                                 requestedByUserId?: string;
                                 progress?: string;
                                 /** Format: date-time */
@@ -17700,7 +18416,7 @@ export interface paths {
                         /** @description Non-unique asset directory namespace (for example shared/ or personal/<user-id>/drafts/). Runtime write boundaries normalize and validate the canonical form. */
                         key?: string;
                         /** @enum {string} */
-                        source?: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira";
+                        source?: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "azure-devops" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira" | "comb";
                         outputSchema?: {
                             [key: string]: unknown;
                         };
@@ -17851,7 +18567,7 @@ export interface paths {
                     } | {
                         claudeSessionId: string;
                         /** @enum {string} */
-                        provider?: "claude" | "codex" | "pi" | "claude-managed" | "opencode" | "acp" | "dsh";
+                        provider?: "claude" | "codex" | "pi" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok";
                         model?: string;
                         providerMeta?: {
                             /** @enum {string} */
@@ -18475,7 +19191,7 @@ export interface paths {
                 };
             };
             responses: {
-                /** @description Progress updated */
+                /** @description Progress updated; a no-op once the task is terminal */
                 200: {
                     headers: {
                         [name: string]: unknown;
@@ -18540,6 +19256,8 @@ export interface paths {
                         output?: string;
                         failureReason?: string;
                         force?: boolean;
+                        /** @enum {string} */
+                        provider?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok";
                     };
                 };
             };
@@ -18904,7 +19622,7 @@ export interface paths {
                 content: {
                     "application/json": {
                         /** @enum {string} */
-                        vcsProvider: "github" | "gitlab";
+                        vcsProvider: "github" | "gitlab" | "azure-devops";
                         vcsRepo: string;
                         vcsNumber: number;
                         /** Format: uri */
@@ -20614,6 +21332,203 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/users/{id}/connector-codes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create a single-use connect code for the agent-swarm.dev ChatGPT connector
+         * @description Returns a 10-minute single-use code and the connector URL that carries it. The connector trades the code for an MCP token at POST /api/connector/exchange.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        label?: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Connect code, its expiry and the connector URL */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            code: string;
+                            expiresAt: string;
+                            connectUrl: string;
+                        };
+                    };
+                };
+                /** @description The public API origin or CONNECTOR_CONNECT_URL is not HTTPS */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description User not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/connector/exchange": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Exchange a connect code for a user MCP token
+         * @description Unauthenticated: the single-use code is the credential. Rate limited per IP. Unknown, expired and used codes all return 404 code_invalid.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        code: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Minted MCP token for the code's user */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            token: string;
+                            userId: string;
+                            version: string;
+                        };
+                    };
+                };
+                /** @description Code unknown, malformed, expired or already used */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Request body too large */
+                413: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Rate limited */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/connector/discovery": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Public origins the agent-swarm.dev connector needs to find this swarm's dashboard
+         * @description Unauthenticated. Lets the connector turn an API origin into the dashboard URL that serves /connect. appUrl is omitted when APP_URL is not set or is not https.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Public API origin, dashboard origin and connector connect URL */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            apiUrl: string;
+                            appUrl?: string;
+                            connectUrl: string | null;
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/users/{id}/merge": {
         parameters: {
             query?: never;
@@ -21032,6 +21947,69 @@ export interface paths {
                     };
                 };
                 /** @description GitLab integration not configured */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/azure-devops/webhook": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Handle Azure DevOps service-hook events */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Event processed */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            created: boolean;
+                            taskId?: string;
+                            skipped?: boolean;
+                            reason?: string;
+                            extension?: {
+                                id: string;
+                                name: string;
+                            };
+                        };
+                    };
+                };
+                /** @description Invalid Basic auth credentials */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Azure DevOps integration not configured */
                 503: {
                     headers: {
                         [name: string]: unknown;
@@ -21782,7 +22760,7 @@ export interface paths {
                         type?: string;
                         /** @description Human-readable label for UI display */
                         label?: string;
-                        /** @description Executor-specific config. For agent-task: { template, outputSchema?, agentId?, routingReason?, routingNote?, tags?, priority?, dir?, vcsRepo?, model? }; configured agentId defaults routingReason to human_pinned. For script: { runtime, script, args?, timeout? }. For swarm-script: { scriptName, scope?, pinHash?, args?, fsMode?, timeoutMs? (1000-300000) }. For system-one-decision (typed decisions, Jev by default): { provider? ('typesafe' default | 'openrouter' | 'laya'; a literal, never a {{token}}), state, questions: { <id>: { type: 'noul'|'choice'|'score', instructions, criteria? } }, returns: { <id>: { type } }, model? (provider-specific; unset = the provider's default, and laya has none so it sends no model and picks its own checkpoint), timeoutMs?, maxRetries? (0-3), humanReview? { band: { min, max } (0-1, inclusive), approvers: { users?, roles?, policy }, title?, timeout?, notifications? } }; each provider needs its own global secret (TYPESAFE_API_KEY, OPENROUTER_API_KEY, or LAYA_API_KEY; laya also needs the global config LAYA_URL), and a save warns and a run fails before any node executes when one is missing; system-one-decision nodes must not set retry or validation.retry. With humanReview, an answer whose confidence is inside the band waits for a person (human-in-the-loop approval), and next must map ports { approved, rejected?, timeout? }. Agent-task templates and ordinary config values support {{interpolation}} from the node's inputs context, including trigger and declared upstream aliases. SECURITY: executable source for script/swarm-script nodes does not interpolate trigger.* or upstream node outputs; only input/workflow/swarm/run values are allowed in inline script source, and named swarm-script source is not workflow-interpolated. Pass dynamic values through config.args instead (inline script receives them as argv; swarm-script receives its args object). NOTE: config.outputSchema on agent-task nodes validates the AGENT's raw JSON output, while node-level outputSchema validates the EXECUTOR's return value ({taskId, taskOutput}). */
+                        /** @description Executor-specific config. For agent-task: { template, outputSchema?, agentId?, routingReason?, routingNote?, tags?, priority?, dir?, vcsRepo?, model? }; configured agentId defaults routingReason to human_pinned. For script: { runtime, script, args?, timeout? }. For swarm-script: { scriptName, scope?, pinHash?, args?, fsMode?, timeoutMs? (1000-300000) }. For system-one-decision (typed decisions, Jev by default): { provider? ('typesafe' default | 'openrouter' | 'laya'; a literal, never a {{token}}), state, questions: { <id>: { type: 'noul'|'choice'|'score', instructions, criteria? } }, returns: { <id>: { type } }, model? (provider-specific; unset = the provider's default, and laya has none so it sends no model and picks its own checkpoint), timeoutMs?, maxRetries? (0-3), humanReview? { band: { min, max } (0-1, inclusive), approvers: { users?, roles?, policy }, title?, timeout?, notifications? } }; each provider needs its own global secret (TYPESAFE_API_KEY, OPENROUTER_API_KEY, or LAYA_API_KEY; laya also needs the global config LAYA_URL), and a save warns and a run fails before any node executes when one is missing; system-one-decision nodes must not set retry or validation.retry. With humanReview, an answer whose confidence is inside the band waits for a person (human-in-the-loop approval), and next must map ports { approved, rejected?, timeout? }. Agent-task templates and ordinary config values support {{interpolation}} from the node's inputs context, including trigger and declared upstream aliases. SECURITY: executable source for script/swarm-script nodes does not interpolate trigger.* or upstream node outputs; only input/workflow/swarm/run values are allowed in inline script source, and named swarm-script source is not workflow-interpolated. Pass dynamic values through config.args instead (inline script receives them as argv, with runtime: "bash" running bash -c <script> ...args so args[0] is $0 and args[1] is $1; swarm-script receives its args object). NOTE: config.outputSchema on agent-task nodes validates the AGENT's raw JSON output, while node-level outputSchema validates the EXECUTOR's return value ({taskId, taskOutput}). */
                         config?: {
                             [key: string]: unknown;
                         };
@@ -22500,7 +23478,7 @@ export interface components {
              * @default mcp
              * @enum {string}
              */
-            source: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira";
+            source: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "azure-devops" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira" | "comb";
             /** @enum {string} */
             routingReason?: "skill" | "continuity" | "overflow" | "human_pinned" | "reroute_fault";
             /**
@@ -22542,7 +23520,7 @@ export interface components {
             slackProgressMessageTs?: string;
             slackTreeRootMessageTs?: string;
             /** @enum {string} */
-            vcsProvider?: "github" | "gitlab";
+            vcsProvider?: "github" | "gitlab" | "azure-devops";
             vcsRepo?: string;
             vcsEventType?: string;
             vcsNumber?: number;
@@ -22590,7 +23568,7 @@ export interface components {
             requestedByUserId?: string;
             swarmVersion?: string;
             /** @enum {string} */
-            provider?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh";
+            provider?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok";
             providerMeta?: {
                 [key: string]: unknown;
             };
@@ -22611,7 +23589,7 @@ export interface components {
             sourceAgentId?: string;
             role?: string;
             /** @enum {string} */
-            harnessProvider?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh";
+            harnessProvider?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok";
             /** @default [] */
             capabilities: string[];
             leadOnly?: boolean;
@@ -22657,7 +23635,7 @@ export interface components {
              * @default null
              * @enum {string|null}
              */
-            harnessProvider: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | null;
+            harnessProvider: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok" | null;
             reportedAt: number;
             /** @enum {string} */
             reasoningEffort?: "off" | "low" | "medium" | "high" | "xhigh" | "max";
@@ -22677,7 +23655,7 @@ export interface components {
         /** @default null */
         AgentAcpStatus: {
             /** @enum {string} */
-            target: "opencode" | "custom";
+            target: "opencode" | "gemini" | "copilot" | "custom";
             configOptions: ({
                 /** @enum {string} */
                 type: "select";
@@ -22732,9 +23710,9 @@ export interface components {
             /** Format: date-time */
             lastActivityAt?: string;
             /** @enum {string} */
-            provider?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh";
+            provider?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok";
             /** @enum {string|null} */
-            harnessProvider?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | null;
+            harnessProvider?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp" | "dsh" | "amp" | "cursor" | "grok" | null;
             credentialMissing?: string[] | null;
             credStatus?: components["schemas"]["AgentCredStatus"] | null;
             avatar?: {
@@ -22934,9 +23912,16 @@ export interface components {
             author?: string;
         };
         ExtensionInstallBody: {
-            /** @description Name of a predefined extension in the catalog (`GET /api/extensions/catalog`). */
-            template: string;
+            /** @description Name of a predefined extension in the catalog (`GET /api/extensions/catalog`). Mutually exclusive with `manifest` and `files`. */
+            template?: string;
+            manifest?: components["schemas"]["ExtensionManifest"] & unknown;
+            /** @description Inline bundle files keyed by relative path. Requires `manifest`. */
+            files?: {
+                [key: string]: string;
+            };
+            /** @description Handler priority. Lower values run first. */
             priority?: number;
+            /** @description Extension configuration. */
             config?: {
                 [key: string]: unknown;
             };
@@ -22984,7 +23969,7 @@ export interface components {
             id: string;
             userId?: string;
             /** @enum {string} */
-            itemType: "page" | "workflow" | "schedule";
+            itemType: "page" | "workflow" | "schedule" | "agent-fs-path";
             itemId: string;
             createdAt: string;
             lastUpdatedAt: string;
@@ -23248,7 +24233,7 @@ export interface components {
         };
         PricingRow: {
             /** @enum {string} */
-            provider: "claude" | "claude-managed" | "codex" | "pi" | "opencode" | "devin" | "gemini" | "acp" | "dsh";
+            provider: "claude" | "claude-managed" | "codex" | "pi" | "opencode" | "devin" | "gemini" | "acp" | "dsh" | "amp" | "cursor" | "grok";
             model: string;
             /** @enum {string} */
             tokenClass: "input" | "cached_input" | "output" | "cache_write" | "cache_write_1h" | "web_search" | "runtime_hour" | "acu";
@@ -23376,7 +24361,7 @@ export interface components {
              * @default harness
              * @enum {string}
              */
-            costSource: "harness" | "pricing-table" | "unpriced";
+            costSource: "harness" | "pricing-table" | "unpriced" | "estimated";
             harnessCostUsd?: number | null;
             cacheWrite5mTokens?: number | null;
             cacheWrite1hTokens?: number | null;
@@ -23420,6 +24405,9 @@ export interface components {
             version: number;
             isEnabled: boolean;
             systemDefault: boolean;
+            /** @description Confirmed invocations across all harnesses, at most one per runner session */
+            invocationCount: number;
+            lastInvokedAt: string | null;
             createdAt: string;
             lastUpdatedAt: string;
             lastFetchedAt: string | null;
@@ -23647,7 +24635,7 @@ export interface components {
             type: string;
             /** @description Human-readable label for UI display */
             label?: string;
-            /** @description Executor-specific config. For agent-task: { template, outputSchema?, agentId?, routingReason?, routingNote?, tags?, priority?, dir?, vcsRepo?, model? }; configured agentId defaults routingReason to human_pinned. For script: { runtime, script, args?, timeout? }. For swarm-script: { scriptName, scope?, pinHash?, args?, fsMode?, timeoutMs? (1000-300000) }. For system-one-decision (typed decisions, Jev by default): { provider? ('typesafe' default | 'openrouter' | 'laya'; a literal, never a {{token}}), state, questions: { <id>: { type: 'noul'|'choice'|'score', instructions, criteria? } }, returns: { <id>: { type } }, model? (provider-specific; unset = the provider's default, and laya has none so it sends no model and picks its own checkpoint), timeoutMs?, maxRetries? (0-3), humanReview? { band: { min, max } (0-1, inclusive), approvers: { users?, roles?, policy }, title?, timeout?, notifications? } }; each provider needs its own global secret (TYPESAFE_API_KEY, OPENROUTER_API_KEY, or LAYA_API_KEY; laya also needs the global config LAYA_URL), and a save warns and a run fails before any node executes when one is missing; system-one-decision nodes must not set retry or validation.retry. With humanReview, an answer whose confidence is inside the band waits for a person (human-in-the-loop approval), and next must map ports { approved, rejected?, timeout? }. Agent-task templates and ordinary config values support {{interpolation}} from the node's inputs context, including trigger and declared upstream aliases. SECURITY: executable source for script/swarm-script nodes does not interpolate trigger.* or upstream node outputs; only input/workflow/swarm/run values are allowed in inline script source, and named swarm-script source is not workflow-interpolated. Pass dynamic values through config.args instead (inline script receives them as argv; swarm-script receives its args object). NOTE: config.outputSchema on agent-task nodes validates the AGENT's raw JSON output, while node-level outputSchema validates the EXECUTOR's return value ({taskId, taskOutput}). */
+            /** @description Executor-specific config. For agent-task: { template, outputSchema?, agentId?, routingReason?, routingNote?, tags?, priority?, dir?, vcsRepo?, model? }; configured agentId defaults routingReason to human_pinned. For script: { runtime, script, args?, timeout? }. For swarm-script: { scriptName, scope?, pinHash?, args?, fsMode?, timeoutMs? (1000-300000) }. For system-one-decision (typed decisions, Jev by default): { provider? ('typesafe' default | 'openrouter' | 'laya'; a literal, never a {{token}}), state, questions: { <id>: { type: 'noul'|'choice'|'score', instructions, criteria? } }, returns: { <id>: { type } }, model? (provider-specific; unset = the provider's default, and laya has none so it sends no model and picks its own checkpoint), timeoutMs?, maxRetries? (0-3), humanReview? { band: { min, max } (0-1, inclusive), approvers: { users?, roles?, policy }, title?, timeout?, notifications? } }; each provider needs its own global secret (TYPESAFE_API_KEY, OPENROUTER_API_KEY, or LAYA_API_KEY; laya also needs the global config LAYA_URL), and a save warns and a run fails before any node executes when one is missing; system-one-decision nodes must not set retry or validation.retry. With humanReview, an answer whose confidence is inside the band waits for a person (human-in-the-loop approval), and next must map ports { approved, rejected?, timeout? }. Agent-task templates and ordinary config values support {{interpolation}} from the node's inputs context, including trigger and declared upstream aliases. SECURITY: executable source for script/swarm-script nodes does not interpolate trigger.* or upstream node outputs; only input/workflow/swarm/run values are allowed in inline script source, and named swarm-script source is not workflow-interpolated. Pass dynamic values through config.args instead (inline script receives them as argv, with runtime: "bash" running bash -c <script> ...args so args[0] is $0 and args[1] is $1; swarm-script receives its args object). NOTE: config.outputSchema on agent-task nodes validates the AGENT's raw JSON output, while node-level outputSchema validates the EXECUTOR's return value ({taskId, taskOutput}). */
             config: {
                 [key: string]: unknown;
             };
@@ -23808,7 +24796,7 @@ export interface components {
                     type?: string;
                     /** @description Human-readable label for UI display */
                     label?: string;
-                    /** @description Executor-specific config. For agent-task: { template, outputSchema?, agentId?, routingReason?, routingNote?, tags?, priority?, dir?, vcsRepo?, model? }; configured agentId defaults routingReason to human_pinned. For script: { runtime, script, args?, timeout? }. For swarm-script: { scriptName, scope?, pinHash?, args?, fsMode?, timeoutMs? (1000-300000) }. For system-one-decision (typed decisions, Jev by default): { provider? ('typesafe' default | 'openrouter' | 'laya'; a literal, never a {{token}}), state, questions: { <id>: { type: 'noul'|'choice'|'score', instructions, criteria? } }, returns: { <id>: { type } }, model? (provider-specific; unset = the provider's default, and laya has none so it sends no model and picks its own checkpoint), timeoutMs?, maxRetries? (0-3), humanReview? { band: { min, max } (0-1, inclusive), approvers: { users?, roles?, policy }, title?, timeout?, notifications? } }; each provider needs its own global secret (TYPESAFE_API_KEY, OPENROUTER_API_KEY, or LAYA_API_KEY; laya also needs the global config LAYA_URL), and a save warns and a run fails before any node executes when one is missing; system-one-decision nodes must not set retry or validation.retry. With humanReview, an answer whose confidence is inside the band waits for a person (human-in-the-loop approval), and next must map ports { approved, rejected?, timeout? }. Agent-task templates and ordinary config values support {{interpolation}} from the node's inputs context, including trigger and declared upstream aliases. SECURITY: executable source for script/swarm-script nodes does not interpolate trigger.* or upstream node outputs; only input/workflow/swarm/run values are allowed in inline script source, and named swarm-script source is not workflow-interpolated. Pass dynamic values through config.args instead (inline script receives them as argv; swarm-script receives its args object). NOTE: config.outputSchema on agent-task nodes validates the AGENT's raw JSON output, while node-level outputSchema validates the EXECUTOR's return value ({taskId, taskOutput}). */
+                    /** @description Executor-specific config. For agent-task: { template, outputSchema?, agentId?, routingReason?, routingNote?, tags?, priority?, dir?, vcsRepo?, model? }; configured agentId defaults routingReason to human_pinned. For script: { runtime, script, args?, timeout? }. For swarm-script: { scriptName, scope?, pinHash?, args?, fsMode?, timeoutMs? (1000-300000) }. For system-one-decision (typed decisions, Jev by default): { provider? ('typesafe' default | 'openrouter' | 'laya'; a literal, never a {{token}}), state, questions: { <id>: { type: 'noul'|'choice'|'score', instructions, criteria? } }, returns: { <id>: { type } }, model? (provider-specific; unset = the provider's default, and laya has none so it sends no model and picks its own checkpoint), timeoutMs?, maxRetries? (0-3), humanReview? { band: { min, max } (0-1, inclusive), approvers: { users?, roles?, policy }, title?, timeout?, notifications? } }; each provider needs its own global secret (TYPESAFE_API_KEY, OPENROUTER_API_KEY, or LAYA_API_KEY; laya also needs the global config LAYA_URL), and a save warns and a run fails before any node executes when one is missing; system-one-decision nodes must not set retry or validation.retry. With humanReview, an answer whose confidence is inside the band waits for a person (human-in-the-loop approval), and next must map ports { approved, rejected?, timeout? }. Agent-task templates and ordinary config values support {{interpolation}} from the node's inputs context, including trigger and declared upstream aliases. SECURITY: executable source for script/swarm-script nodes does not interpolate trigger.* or upstream node outputs; only input/workflow/swarm/run values are allowed in inline script source, and named swarm-script source is not workflow-interpolated. Pass dynamic values through config.args instead (inline script receives them as argv, with runtime: "bash" running bash -c <script> ...args so args[0] is $0 and args[1] is $1; swarm-script receives its args object). NOTE: config.outputSchema on agent-task nodes validates the AGENT's raw JSON output, while node-level outputSchema validates the EXECUTOR's return value ({taskId, taskOutput}). */
                     config?: {
                         [key: string]: unknown;
                     };
@@ -24065,7 +25053,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Inline bundle rejected or bundle validation failed */
+            /** @description Inline install disabled, invalid body (template and manifest/files are mutually exclusive), or bundle validation failed */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -24074,7 +25062,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Permission denied */
+            /** @description Permission denied, including inline bundles from workers */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -25150,6 +26138,50 @@ export interface operations {
                             };
                         };
                     };
+                };
+            };
+            /** @description Script connection not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    script_connections_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Script connection deleted */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        deleted: true;
+                        id: string;
+                    };
+                };
+            };
+            /** @description Only the lead agent can manage script connections */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
             /** @description Script connection not found */

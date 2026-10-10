@@ -106,6 +106,26 @@ export interface KvEntry<T = unknown> {
   expiresAt: number | null;
   createdAt: number;
   updatedAt: number;
+  /** Present only on a path/offset/limit read. */
+  view?: KvView;
+}
+
+export interface KvViewArgs {
+  /** Dot path into the JSON value, e.g. "outcome.data.rows" or "rows.3". */
+  path?: string;
+  /** First array item / object key / string char. Default 0. */
+  offset?: number;
+  /** Max items / keys / chars. Unbounded in scripts. */
+  limit?: number;
+}
+
+export interface KvView {
+  path: string;
+  type: "object" | "array" | "string" | "number" | "boolean" | "null";
+  total?: number;
+  offset?: number;
+  returned?: number;
+  nextOffset?: number | null;
 }
 
 export interface KvSdkSuccess<T, TStatus extends number = 200> {
@@ -165,7 +185,7 @@ export interface RoomDecoded {
 
 export interface SwarmSdk {
   // --- memory ---
-  memory_search(args: { query: string; intent: string; scope?: "all" | "agent" | "swarm"; limit?: number; source?: string }): Promise<unknown>;
+  memory_search(args: { query: string; intent: string; scope?: "all" | "agent" | "swarm"; limit?: number; source?: string; keyPrefix?: string }): Promise<unknown>;
   memory_get(args: { memoryId: string; intent: string }): Promise<unknown>;
   memory_rate(args: { id: string; useful: boolean; note?: string }): Promise<unknown>;
   // --- tasks ---
@@ -175,8 +195,9 @@ export interface SwarmSdk {
   task_defer(args: { taskId: string; delayMs?: number; runAt?: string; wakeOn?: { event: "task.completed" | "task.failed" | "settled"; taskId: string }; summary: string; note: string; checks?: string[] }): Promise<unknown>;
   task_poll(args?: Record<string, unknown>): Promise<unknown>;
   // --- kv ---
-  kv_get<T = unknown>(args: { key: string; namespace?: string }): Promise<KvSdkResponse<KvEntry<T>>>;
-  kv_getOrNull<T = unknown>(args: { key: string; namespace?: string }): Promise<KvEntry<T> | null>;
+  /** path/offset/limit return a view: \`value\` is the slice at a dot path (JSON strings count as JSON), paged over items/keys/chars; \`view\` describes it. */
+  kv_get<T = unknown>(args: { key: string; namespace?: string } & KvViewArgs): Promise<KvSdkResponse<KvEntry<T>>>;
+  kv_getOrNull<T = unknown>(args: { key: string; namespace?: string } & KvViewArgs): Promise<KvEntry<T> | null>;
   kv_set<T>(args: KvSetArgsBase & { value: T; valueType?: "json" }): Promise<KvSdkResponse<KvEntry<T>>>;
   kv_set(args: KvSetArgsBase & { value: string; valueType: "string" }): Promise<KvSdkResponse<KvEntry<string>>>;
   kv_set(args: KvSetArgsBase & { value: number | string; valueType: "integer" }): Promise<KvSdkResponse<KvEntry<number>>>;
@@ -238,7 +259,7 @@ export interface SwarmSdk {
 
   // --- write: memory ---
   memory_delete(args: { id: string }): Promise<unknown>;
-  memory_store(args: { content: string; name: string; scope?: "agent" | "swarm"; tags?: string[]; taskId?: string; intent?: string }): Promise<unknown>;
+  memory_store(args: { content: string; name: string; scope?: "agent" | "swarm"; tags?: string[]; taskId?: string; intent?: string; key?: string }): Promise<unknown>;
   memory_edit(args: {
     memoryId?: string;
     key?: string;
@@ -249,6 +270,7 @@ export interface SwarmSdk {
     newString?: string;
     intent: string;
     expectedVersion?: number;
+    newKey?: string;
   }): Promise<unknown>;
   inject_learning(args: { content: string; name?: string; scope?: "agent" | "swarm"; source?: string; tags?: string[] }): Promise<unknown>;
 
@@ -332,7 +354,7 @@ export interface SwarmSdk {
 
   // --- write: extensions ---
   extension_catalog(args?: Record<string, never>): Promise<unknown>;
-  extension_install(args: { template: string; priority?: number; config?: Record<string, unknown> }): Promise<unknown>;
+  extension_install(args: { template: string; priority?: number; config?: Record<string, unknown> } | { manifest: Record<string, unknown>; files: Record<string, string>; priority?: number; config?: Record<string, unknown> }): Promise<unknown>;
   extension_list(args?: { enabledOnly?: boolean }): Promise<unknown>;
   extension_delete(args: { id: string }): Promise<unknown>;
   extension_enable(args: { id: string }): Promise<unknown>;

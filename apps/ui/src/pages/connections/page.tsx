@@ -24,6 +24,7 @@ import { useMcpServers } from "@/api/hooks/use-mcp-servers";
 import {
   useCredentialBindings,
   useDeleteOAuthApp,
+  useDeleteScriptConnection,
   useDiscoverOAuthApp,
   useIntegrationsCatalog,
   useIntegrationsSurface,
@@ -3085,6 +3086,7 @@ export default function ConnectionsPage() {
   const { data: agents } = useAgents(false);
   const refreshConnection = useRefreshScriptConnection();
   const setEnabled = useSetScriptConnectionEnabled();
+  const deleteConnection = useDeleteScriptConnection();
   const defaultAgentId = useMemo(
     () => agents?.find((agent) => agent.isLead)?.id ?? agents?.[0]?.id,
     [agents],
@@ -3203,8 +3205,57 @@ export default function ConnectionsPage() {
         width: 140,
         valueFormatter: (params) => (params.value ? formatSmartTime(params.value) : ""),
       },
+      {
+        headerName: "",
+        colId: "delete",
+        width: 60,
+        sortable: false,
+        cellRenderer: (params: ICellRendererParams<ScriptConnection>) => {
+          const connection = params.data;
+          if (!connection) return null;
+          return (
+            <span onClick={(event) => event.stopPropagation()}>
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button size="icon-sm" variant="ghost" aria-label={`Delete ${connection.slug}`}>
+                    <Trash2 className="size-4" />
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Delete connection {connection.slug}?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      This permanently deletes the connection, its managed credential binding, and
+                      any inline secret it stores. Scripts that call{" "}
+                      {connection.kind === "mcp" ? "ctx.mcp" : "ctx.api"}.{connection.slug} stop
+                      working. Disable it instead to keep it.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                    <AlertDialogAction
+                      variant="destructive"
+                      onClick={async () => {
+                        try {
+                          await deleteConnection.mutateAsync(connection.id);
+                          toast.success(`Connection ${connection.slug} deleted`);
+                        } catch (error) {
+                          toastMutationError(error);
+                        }
+                      }}
+                      disabled={deleteConnection.isPending}
+                    >
+                      Delete
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            </span>
+          );
+        },
+      },
     ],
-    [refreshConnection, setEnabled, bindings],
+    [refreshConnection, setEnabled, deleteConnection, bindings],
   );
 
   const addTarget = NEW_PARAM_BY_TAB[activeTab];

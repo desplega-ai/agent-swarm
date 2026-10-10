@@ -1,4 +1,3 @@
-import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { generateObject, type LanguageModelUsage } from "ai";
 import { z } from "zod";
 import { lookupOpenrouterModel, priceUsage } from "../cost/pricing.ts";
@@ -12,6 +11,7 @@ import type {
   TokenTotals,
 } from "../types.ts";
 import type { JudgeLiveHandle } from "./live-registry.ts";
+import { createJudgeOpenRouter } from "./openrouter.ts";
 
 export const DEFAULT_JUDGE_MODEL = "deepseek/deepseek-v4-pro";
 
@@ -129,7 +129,7 @@ export async function judgeWithLlm(
 ): Promise<LlmVerdict & { raw: string; trace: JudgeTrace }> {
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) throw new Error("OPENROUTER_API_KEY is required for the LLM judge");
-  const openrouter = createOpenRouter({ apiKey });
+  const openrouter = createJudgeOpenRouter(apiKey);
   const model = input.model ?? process.env.EVAL_JUDGE_MODEL ?? DEFAULT_JUDGE_MODEL;
 
   // Attached before the call so the live view shows the judge as started.

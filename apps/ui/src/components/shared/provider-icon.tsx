@@ -1,6 +1,7 @@
 import type { ReactElement, SVGProps } from "react";
 import type { ProviderIconKey } from "@/lib/agent-runtime-models";
 import { cn } from "@/lib/utils";
+import { AmpMark } from "./amp-mark";
 
 type IconProps = Omit<SVGProps<SVGSVGElement>, "viewBox" | "fill" | "xmlns" | "children">;
 
@@ -55,6 +56,7 @@ const ICON_BY_PROVIDER: Record<ProviderIconKey, (p: IconProps) => ReactElement> 
   openai: OpenAIIcon,
   openrouter: OpenRouterIcon,
   "amazon-bedrock": AmazonBedrockIcon,
+  amp: AmpMark,
 };
 
 export interface ProviderIconProps extends IconProps {

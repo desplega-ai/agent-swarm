@@ -14,6 +14,7 @@ Complete reference for all environment variables used by Agent Swarm.
 | `API_KEY` | — | Legacy API key for server authentication (required unless `AGENT_SWARM_API_KEY` is set). See `AGENT_SWARM_API_KEY` above for the preferred, namespaced variable. |
 | `RBAC_ENABLED` | `true` | Gates REST requests authenticated with `aswt_` user tokens against RBAC role grants. Operator API-key requests and agent-authenticated calls are unaffected. Built-in roles and missing user assignments are seeded at boot. Set `false` to opt out. |
 | `EXTENSION_ALLOW_LEAD_ACTIVATION` | `true` | Allows trusted leads to enable, disable, and activate extension versions. Set `false` or `0` in the API deployment environment and restart every replica to reserve these operations for operators/dashboard users. Cannot be changed through swarm configuration APIs. Existing enabled extensions continue to run. See [extension trust and activation](/docs/guides/extensions#lead-activation-and-trust). |
+| `EXTENSION_ALLOW_INLINE_INSTALL` | `false` | Reloadable boolean. Lets lead agents, the operator, and dashboard users install an extension from an inline `manifest` plus `files` instead of only from the catalog. Off keeps installs catalog-only (`inline_install_disabled`). Workers are denied either way. Installs land disabled. See [inline install](/docs/guides/extensions#inline-install) |
 | `SCRIPTS_ONLY_MCP` | `false` (unset/off) | Experimental code-mode. Set to `true` on the API server and agent containers to expose only the eight script tools over MCP while keeping the full swarm SDK available through `script-run`. It can also be configured per agent/repository/global scope through `swarm_config`; see [Scripts-only mode](/docs/guides/scripts-only-mode). |
 | `MCP_BASE_URL` | `https://api.example-swarm.dev` | Internal/worker-facing API base — the URL workers, the UI, and the setup command use to reach the API server. In split deploys this may be an internal/cluster address. |
 | `PUBLIC_MCP_BASE_URL` | Falls back to `MCP_BASE_URL` | Public, browser/externally-reachable API origin used for OAuth redirect URIs and webhook URLs. Defaults to `MCP_BASE_URL` when unset; set it in split deploys where `MCP_BASE_URL` is an internal/cluster address that external providers (Linear, Jira, GitHub) can't reach. |
@@ -31,13 +32,15 @@ Complete reference for all environment variables used by Agent Swarm.
 | `SESSION_LOG_RETENTION_DAYS` | — (disabled) | Permanently delete `session_logs` rows older than this many whole days. Accepted range: 1–1,000,000. Leave unset to disable this table's sweep. Start with `DB_RETENTION_DRY_RUN=true`; deleted session transcripts cannot be restored without a backup. See [Database retention](/docs/guides/deployment#database-retention). |
 | `AGENT_LOG_RETENTION_DAYS` | — (disabled) | Permanently delete `agent_log` rows older than this many whole days. Accepted range: 1–1,000,000. Leave unset to disable this table's sweep. Deleted task and agent history cannot be restored without a backup. See [Database retention](/docs/guides/deployment#database-retention). |
 | `EVENTS_RETENTION_DAYS` | — (disabled) | Permanently delete `events` rows older than this many whole days. Accepted range: 1–1,000,000. Leave unset to disable this table's sweep. Event aggregates become retention-window totals, and deleted telemetry cannot be restored without a backup. See [Database retention](/docs/guides/deployment#database-retention). |
+| `CONTEXT_VERSIONS_KEEP_LATEST` | — (disabled) | Keep only this many newest `context_versions` rows per agent and field, and permanently delete the older ones. Accepted range: 1–1,000,000. The newest version of every field is never deleted, and age plays no part. Leave unset to disable this table's sweep. Deleted profile history cannot be restored without a backup. See [Database retention](/docs/guides/deployment#database-retention). |
 | `DB_RETENTION_DRY_RUN` | `false` | When `true` or `1`, report the exact number of rows each enabled retention policy would delete without deleting or vacuuming data. Only `true`, `false`, `1`, and `0` are accepted through configuration writes. Use dry run before every first production activation. |
 | `DB_RETENTION_TICK_BUDGET_MS` | `30000` | Wall-clock budget for one retention tick, shared across enabled tables. Accepted range: 1,000–300,000 ms. Read on every tick; out-of-range environment values fall back to the default. |
 | `DB_RETENTION_CATCHUP_INTERVAL_MS` | `60000` | Delay before another retention tick when at least one table remains undrained. Accepted range: 5,000–3,600,000 ms. The normal cadence returns to hourly after the backlog drains. |
 | `DB_RETENTION_MAX_STATEMENT_MS` | `250` | Target maximum driver execution time for one retention DELETE. Accepted range: 25–5,000 ms; the adaptive batch sizer tunes each table toward this ceiling. |
 | `ASSET_KEY_AUDIT_DISABLE_STARTUP_HARD_FAIL` | `false` | Temporary recovery switch. When `true`, the startup asset-namespace audit logs structural key failures instead of aborting the server. Repair the data and remove the switch before normal operation; mapping-drift warnings never abort startup. See [Asset Namespaces](/docs/guides/asset-namespaces#audit-and-rollout). |
 | `SQLITE_VEC_EXTENSION_PATH` | — | Path to `vec0.so` native extension for sqlite-vec vector search. Set automatically in the Docker image (`/app/extensions/vec0.so`). Only needed for non-Docker deployments. |
-| `SCRIPT_RUNTIME_DIR` | — | Directory holding the pre-built script-runtime bundles (`eval-harness.bundle.js`, `stdlib.bundle.js`, `swarm-sdk.bundle.js`, `zod.bundle.js`). Set automatically in the Docker image (`/app/scripts-runtime`). Required by the scripts runtime when running as a compiled binary, since the harness subprocess cannot read the binary's `/$bunfs/` virtual filesystem. |
+| `SCRIPT_EXECUTOR` | `native` | How the API server runs scripts. `native` spawns a sandboxed `bun` subprocess per run. `quickjs` (experimental) runs scripts in QuickJS (WASM) inside a pool of worker threads, with ~1 ms per-run overhead (against ~10 ms for `native` on Linux) and a smaller API surface. See [Scripts runtime § Executors](/docs/guides/scripts-runtime#executors). |
+| `SCRIPT_RUNTIME_DIR` | — | Directory holding the pre-built script-runtime bundles (`eval-harness.bundle.js`, `stdlib.bundle.js`, `swarm-sdk.bundle.js`, `zod.bundle.js`) and the `zod-esm/` sources that the `quickjs` executor bundles from. Set automatically in the Docker image (`/app/scripts-runtime`). Required by the scripts runtime when running as a compiled binary, since the harness subprocess cannot read the binary's `/$bunfs/` virtual filesystem. |
 | `TS_LIB_DIR` | — | Directory holding the TypeScript `lib.*.d.ts` files used by script typecheck. Set automatically in the Docker image (`/app/typescript-lib`). Required in compiled-binary mode so the TypeScript compiler can resolve the default lib. |
 | `MIGRATIONS_DIR` | — | Directory for packaged `.sql` migration files in compiled-binary mode. It is selected explicitly when `import.meta.dir` resolves inside Bun's `/$bunfs/` virtual filesystem, even if that directory can be read. Set automatically in the Docker image (`/app/migrations`); a missing or empty directory now stops a fresh database from booting without its baseline schema. Only needed for non-Docker compiled deployments. |
 | `SCRIPT_TYPES_DIR` | — | Directory whose `node_modules` holds the type declarations for the scripts SDK's bare imports (currently `zod`). Set automatically in the Docker image (`/app/script-types`). Required for script typecheck to resolve `zod` in compiled-binary mode, since the binary doesn't ship `node_modules`. |
@@ -53,8 +56,8 @@ Complete reference for all environment variables used by Agent Swarm.
 | `WORKFLOW_MAX_STEPS_PER_RUN` | `500` | Max total steps (across all nodes) allowed in a single workflow run before the engine's circuit breaker aborts it. |
 | `OPENAI_API_KEY` | — | Fallback key for memory embeddings (used when `EMBEDDING_API_KEY` is unset). |
 | `EMBEDDING_API_KEY` | — | API key for the embedding provider. Takes precedence over `OPENAI_API_KEY`. |
-| `EMBEDDING_API_BASE_URL` | — | Optional custom OpenAI-compatible base URL (e.g. Azure OpenAI, Together, vLLM, Ollama). Leave unset to hit `api.openai.com`. |
-| `EMBEDDING_MODEL` | `text-embedding-3-small` | Embedding model slug sent to the provider. |
+| `EMBEDDING_API_BASE_URL` | — | Optional custom OpenAI-compatible base URL (e.g. Azure OpenAI, Together, vLLM, Ollama). Leave unset to hit `api.openai.com`. Azure / Microsoft Foundry: `https://<resource>.services.ai.azure.com/openai/v1` (see [Embedding endpoints](/docs/architecture/memory#embedding-endpoints)). |
+| `EMBEDDING_MODEL` | `text-embedding-3-small` | Embedding model slug sent to the provider. On Azure, the embedding deployment name. |
 | `EMBEDDING_DIMENSIONS` | `512` | Vector dimensions requested from the model. Must match what the model supports. |
 | `MEMORY_RECENCY_HALF_LIFE_DAYS` | `14` | Optional global override for memory recency decay. When unset, recency defaults are source-aware: manual memories do not decay, `file_index` uses 180 days, `task_completion` uses 14 days, and `session_summary` uses 7 days. |
 | `MEMORY_HYBRID_SEARCH` | `1` (on) | Hybrid memory retrieval blends vector similarity with a full-text pass before reranking. Set to `0` or `false` to use vector-only search. |
@@ -66,17 +69,21 @@ Complete reference for all environment variables used by Agent Swarm.
 | `MEMORY_DEMOTION_FLOOR` | `1.0` | Floor for the Beta-Binomial usefulness multiplier applied during memory reranking (paired with `MEMORY_RATERS`). Default `1.0` disables demotion entirely; lower values (e.g. `0.5`) let poorly-rated memories sink below neutral relevance. |
 | `OPENROUTER_API_KEY` | — | Required for the Stop-hook session summarizer + LLM memory rater (calls go through the Vercel AI SDK against OpenRouter). When unset, both session-summary indexing and the `llm` rater are no-ops |
 | `OPENROUTER_BASE_URL` | `https://openrouter.ai/api/v1` | Optional OpenAI-compatible gateway for every OpenRouter consumer, including harness sessions, credential checks, memory/session summarizers, and raw-LLM or validation workflow nodes. The target is not required to be openrouter.ai — any gateway serving OpenRouter-compatible `GET /models` and `POST /chat/completions` works (see [Model Gateways](/docs/guides/provider-auth/model-gateways)). Trailing slashes are removed. Leave unset or blank for direct OpenRouter traffic. Also settable from Settings → Configuration. |
+| `OPENROUTER_APP_ATTRIBUTION` | `true` | Sends OpenRouter's app attribution headers (`HTTP-Referer`, `X-OpenRouter-Title`, `X-OpenRouter-Categories`) on requests that go straight to an `openrouter.ai` host, so the usage counts toward the Agent Swarm app. Gateways set through `OPENROUTER_BASE_URL` never receive them. Set to `false` or `0` to opt out. Read from each task's resolved config (see [App attribution](/docs/guides/provider-auth/model-gateways#app-attribution)). Also settable from Settings → Configuration. |
 | `MEMORY_RATERS` | `implicit-citation,explicit-self` | Comma-separated list of memory raters to enable (`noop`, `implicit-citation`, `explicit-self`, `llm`). Gates the server-side rating pass fired after task completion (`implicit-citation`) and worker-side gates: the Stop-hook's LLM-rating piggyback (`llm`) and the explicit self-rating tool hint (`explicit-self`). Unknown names are logged and skipped; unset enables citation ratings and self-rating hints on new and existing deployments. Set `MEMORY_RATERS=` explicitly to disable all raters. Deleting a swarm config override restores the deployment value, or the runtime default when unset. |
-| `MEMORY_RATER_MODEL` | Per credential kind, `openrouter/deepseek/deepseek-v4.1-flash`, `anthropic/claude-haiku-4-5`, `openai/gpt-6-luna`, `openai-codex/gpt-6-luna`, or `haiku` (Claude CLI) | Overrides the resolved model slug for the Stop-hook session-summarizer + LLM memory rater, across whichever credential (OpenRouter/Anthropic/OpenAI/Codex OAuth/Claude CLI) the shared `internal-ai` abstraction resolves. |
+| `MEMORY_RATER_MODEL` | Pinned per credential kind (`MEMORY_RATER_DEFAULT_MODEL`): `openrouter/deepseek/deepseek-v4.1-flash`, `anthropic/claude-haiku-4-5`, `openai/gpt-6-luna`, `openai-codex/gpt-6-luna`, or `haiku` (Claude CLI) | Overrides the resolved model slug for the Stop-hook session-summarizer + LLM memory rater, across whichever credential (OpenRouter/Anthropic/OpenAI/Codex OAuth/Claude CLI) the shared `internal-ai` abstraction resolves. The defaults are pinned for the rater only: they do not follow the general default models (e.g. workflow LLM nodes), so a bump there never swaps the judge. Each `llm` rating records the model that produced it in `memory_rating.model`. On the OpenRouter path `completeStructured` sends `tool_choice: "required"`, so the model must accept forced tool calls: OpenRouter answers 400 for `anthropic/claude-sonnet-5.5` (`tool_choice: type tool and any are not supported`) and for `qwen/qwen3.8-flash`, so neither can be the rater model there. |
 | `MEMORY_RATER_WEIGHTS` | `1.0` per rater | Optional `name:multiplier,...` overrides (e.g. `llm:0.5,implicit-citation:2`) applied to each rater's emitted rating weight before it's persisted. Unlisted raters use `1.0`; the final per-event weight is clamped to `[0, 1]`. |
 | `CAPABILITIES` | `core,task-pool,scripts,config,mcp,profiles,scheduling,memory,workflows,pages,metrics,kv,slack,tracker,skills,repo` | Comma-separated capability flags gating which MCP tool groups the API server registers. Disabled by default: `services`, `prompt-templates`, `messaging`, `swarm-x`, `agentmail`, `kapso`. Setting this **replaces** the default list (not additive) — include every capability you want. Can also be set as a global swarm-config entry, which takes precedence over the env var at server creation. Upgrade note: when an explicit env value is set and no swarm-config `CAPABILITIES` row exists, boot auto-seeds a row backfilling the previously always-registered groups (`core`, `config`, `scripts`, `mcp`, `slack`, `tracker`, `skills`, `repo`) so legacy lists don't silently lose those tools — edit or delete the seeded row to take full control. Note: this shapes the externally exposed MCP tool list only — it is not a feature kill-switch. The scripts SDK bridge always sees the full tool surface (governed by its own allowlist), and HTTP REST routes are generally not gated. See [MCP tools reference](/docs/reference/mcp-tools) for the tool-to-capability mapping. |
+| `SWARM_ENABLED_TOOLS` | unset | Optional MCP tool allowlist: comma-separated tool names (or a JSON array). When set, the API server registers exactly these tools on each agent MCP session, ignoring `CAPABILITIES` and `SCRIPTS_ONLY_MCP`. Unknown names are logged once and skipped; a blank or empty list is logged and ignored. Agent-scoped config beats global config, which beats this env var; changes apply on the next MCP session with no restart. The scripts SDK bridge is unaffected. See [Agent capabilities and tool allowlist](/docs/guides/agent-capabilities). |
 | `SKILL_FILES_MAX_COUNT` | `100` | Max number of files allowed in a single skill file-set upsert. |
 | `SKILL_FILES_MAX_FILE_BYTES` | `512000` (500 KB) | Max size in bytes for a single file within a skill file-set upsert. |
 | `SKILL_FILES_MAX_TOTAL_BYTES` | `10485760` (10 MB) | Max combined size in bytes for all files in a single skill file-set upsert. |
 | `BUDGET_ADMISSION_DISABLED` | `false` | Operator escape hatch — set to `true` at process boot to make budget admission always return allowed, bypassing the agent/global/user daily-spend budget gates on task claiming. |
 | `MULTI_RUNTIME_ENABLED` | `true` | Lets several worker processes serve one logical agent. Set consistently on the API server and every worker; runtimes sharing an `AGENT_ID` need compatible workspace state. The agent-scoped `AGENT_MAX_TASKS` setting remains the shared logical task limit. |
+| `API_DRAIN_MAX_MS` | `0` | Max wait (ms) for workers to hand off in-flight tasks after the API gets SIGTERM, while it still serves and dispatches nothing. Off by default (`0`, also for an unset, empty, or invalid value); set it for deploys that stop the API and the workers together. While it is on, an API-only restart also makes live workers hand off. Max `120000`. Keep the API stop grace period above this value. |
 | `HEARTBEAT_INTERVAL_MS` | `90000` | Heartbeat sweep interval (ms) |
 | `HEARTBEAT_CHECKLIST_DISABLE` | `false` | Set to `true` or `1` to disable the periodic `HEARTBEAT.md` checklist polling loop and the boot-triage task (separate from the infrastructure sweep). `false` and `0` keep it on. |
+| `HEARTBEAT_BOOT_TRIAGE_ALWAYS` | `false` | Set to `true` or `1` to create the boot-triage task on every restart. By default a clean boot (no interrupted, stalled, orphaned, or resume-less superseded tasks) only logs a one-line note and creates no Lead task. |
 | `HEARTBEAT_CHECKLIST_INTERVAL_MS` | `1800000` | Interval (ms) between `HEARTBEAT.md` checklist checks (default 30 min). `0` turns the recurring check off; boot triage still runs. |
 | `HEARTBEAT_DISABLE` | `false` | Set to `true` to disable the heartbeat module |
 | `HEARTBEAT_STALL_THRESHOLD_MIN` | `30` | Minutes before an in-progress task is considered stalled |
@@ -135,10 +142,14 @@ Which credentials you need depends on your selected harness provider:
 |----------|----------|---------|-------------|
 | `ANTHROPIC_API_KEY` | One of* | — | Anthropic API key for Claude models via pi-mono |
 | `OPENROUTER_API_KEY` | One of* | — | OpenRouter API key for multi-provider model access |
+| `GOOGLE_API_KEY` or `GEMINI_API_KEY` | When `MODEL_OVERRIDE` starts with `google/` | — | Google AI API key for direct Google models. Either name is accepted |
 | `OPENROUTER_BASE_URL` | No | `https://openrouter.ai/api/v1` | OpenAI-compatible gateway used for OpenRouter model and summarizer traffic. Any chat-completions gateway works — see [Model Gateways](/docs/guides/provider-auth/model-gateways) |
 | `BEDROCK_AUTH_MODE` | No | inferred from `MODEL_OVERRIDE` | Optional Bedrock mode override. `sdk` uses the AWS SDK credential chain; `bearer` requires `AWS_BEARER_TOKEN_BEDROCK`. Both probe credentials and enumerate models |
 | `AWS_BEARER_TOKEN_BEDROCK` | In Bedrock bearer mode | — | Bedrock API key required when `BEDROCK_AUTH_MODE=bearer` |
 | `AWS_REGION` | In either Bedrock mode | — | Required region for Bedrock credential probing and account-accurate model enumeration in SDK or bearer mode |
+| `PI_TOOL_DEFERRAL` | No | `false` | Reloadable boolean. Hides non-core swarm tools behind pi's `tool_search`. See [pi tool deferral](/docs/guides/harness-providers#pi-tool-deferral) |
+| `PI_CODEMODE` | No | `false` | Reloadable boolean. Adds pi's codemode tool, a bounded QuickJS sandbox in which the model's JavaScript calls swarm tools. See [pi codemode](/docs/guides/harness-providers#pi-codemode) |
+| `PI_CODEMODE_MODELS` | No | `false` | Reloadable boolean, effective only with `PI_CODEMODE`. Lets codemode scripts call pi's `models` API (`classify()`, `generateImages()`); the usage counts toward session cost. See [pi codemode](/docs/guides/harness-providers#pi-codemode) |
 
 \* At least one credential source is required (API key, `~/.pi/agent/auth.json`, or the AWS SDK default chain in Bedrock SDK mode). **Do not** pass `CLAUDE_CODE_OAUTH_TOKEN` when using pi-mono — it will override the configured provider. See [Harness Configuration](/docs/guides/harness-configuration) and [Harness Providers](/docs/guides/harness-providers#pi-mono-amazon-bedrock-auth) for details.
 
@@ -155,6 +166,26 @@ Which credentials you need depends on your selected harness provider:
 | `NODE_EXTRA_CA_CERTS` | No | — | Path to an extra CA certificate bundle, forwarded to the spawned Codex CLI subprocess so it trusts custom/corporate CAs on outbound HTTPS calls |
 
 Codex can also authenticate through `~/.codex/auth.json`, including ChatGPT OAuth restored from the swarm config store. See [Provider Auth: Codex OAuth](/docs/guides/provider-auth/codex-oauth).
+
+**Amp** (`HARNESS_PROVIDER=amp`):
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `AMP_API_KEY` | Yes | — | Amp access token (`sgamp_...`) from ampcode.com Settings → Security. The short-lived `amp login` session token is rejected |
+| `AMP_BINARY` | No | `amp` on `PATH` | Path to another trusted Amp CLI executable |
+
+See [Provider Auth: Amp](/docs/guides/provider-auth/amp) for the token, modes and cost tracking.
+
+**Grok** (`HARNESS_PROVIDER=grok`):
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `XAI_API_KEY` | One of the two | — | xAI API key from console.x.ai, for xAI models. SuperGrok subscription logins are not supported |
+| `OPENROUTER_API_KEY` | One of the two | — | OpenRouter key, for `openrouter/<id>` models |
+| `GROK_BINARY` | No | `grok` on `PATH` | Path to another trusted Grok CLI executable |
+| `GROK_MODELS_BASE_URL`, `GROK_MODELS_LIST_URL`, `GROK_XAI_API_BASE_URL` | No | — | The Grok CLI's endpoint overrides, passed through on the xAI route |
+
+See [Provider Auth: Grok](/docs/guides/provider-auth/grok) for models, isolation and cost tracking.
 
 **opencode** (`HARNESS_PROVIDER=opencode`):
 
@@ -285,7 +316,8 @@ Run the one-time `bunx @desplega.ai/agent-swarm claude-managed-setup` from your 
 | `GITHUB_BOT_NAME` | Bot name for @mentions (default: `agent-swarm-bot`) |
 | `GITHUB_BOT_ALIASES` | Comma-separated additional @mention aliases (e.g. `heysidekick,sidekick`) |
 | `GITHUB_EVENT_LABELS` | Comma-separated labels that trigger agent action on PR/issue label events (default: `swarm-review`) |
-| `GITHUB_APP_ID` | GitHub App ID (for bot reactions) |
+| `GITHUB_SKIP_NOOP_APPROVALS` | Set to `false` to notify the lead on every PR approval, including ones with no body and no open review items (default: `true`) |
+| `GITHUB_APP_ID` | GitHub App ID (for bot reactions; without an App, reactions fall back to `GITHUB_TOKEN`) |
 | `GITHUB_APP_PRIVATE_KEY` | GitHub App private key (base64-encoded) |
 | `GITHUB_DISABLE` | Set to `true` to disable GitHub |
 
@@ -297,9 +329,22 @@ Run the one-time `bunx @desplega.ai/agent-swarm claude-managed-setup` from your 
 | `GITLAB_URL` | GitLab instance URL (default: `https://gitlab.com`) |
 | `GITLAB_WEBHOOK_SECRET` | Shared secret for webhook verification |
 | `GITLAB_BOT_NAME` | Bot username for @mention detection (default: `agent-swarm-bot`) |
-| `GITLAB_EMAIL` | Git commit email for GitLab repos |
-| `GITLAB_NAME` | Git commit name for GitLab repos |
+| `GITLAB_EMAIL` | Git commit email for GitLab repos (default: `GITHUB_EMAIL`, then `worker-agent@desplega.ai`; not applied when `GITHUB_TOKEN` is set) |
+| `GITLAB_NAME` | Git commit name for GitLab repos (default: `GITHUB_NAME`, then `Worker Agent`; not applied when `GITHUB_TOKEN` is set) |
 | `GITLAB_DISABLE` | Set to `true` to disable GitLab integration |
+
+## Azure DevOps Integration
+
+| Variable | Description |
+|----------|-------------|
+| `AZURE_DEVOPS_TOKEN` | Personal Access Token (scope: Code, Read & write) for git, `az repos`, and API calls |
+| `AZURE_DEVOPS_ORG_URL` | Organization URL, e.g. `https://dev.azure.com/your-org` |
+| `AZURE_DEVOPS_WEBHOOK_SECRET` | Basic auth password the service-hook subscriptions send; enables the webhook endpoint |
+| `AZURE_DEVOPS_BOT_ID` | Identity GUID of the bot user for `@<GUID>` mentions (default: the PAT owner) |
+| `AZURE_DEVOPS_BOT_NAME` | Name for plain-text `@name` mentions (default: `agent-swarm-bot`) |
+| `AZURE_DEVOPS_EMAIL` | Git commit email for Azure Repos commits (default: `GITHUB_EMAIL`, then `worker-agent@desplega.ai`; not applied when `GITHUB_TOKEN` or `GITLAB_TOKEN` is set) |
+| `AZURE_DEVOPS_NAME` | Git commit name for Azure Repos commits (default: `GITHUB_NAME`, then `Worker Agent`; not applied when `GITHUB_TOKEN` or `GITLAB_TOKEN` is set) |
+| `AZURE_DEVOPS_DISABLE` | Set to `true` to disable the Azure DevOps integration |
 
 ## AgentMail Integration
 
@@ -422,9 +467,9 @@ Identity envs that brand the swarm and gate cloud-only UX. All are read on every
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `SWARM_CLOUD` | `false` | When `true`, marks the deployment as cloud-hosted. Surfaces Docs/Support/Billing items in the user-menu, suppresses the self-host marketing footer, and is sent as `metadata.is_cloud` (always present) on every telemetry event |
-| `SWARM_ORG_NAME` | `Swarm` | Sidebar header name. Also sent as `metadata.organization_name` on every telemetry event when set |
-| `SWARM_ORG_ID` | none | Stable org/tenant identifier exposed on `/status` as `identity.org_id` and sent as `metadata.organization_id` on every telemetry event when set. Set by the orchestrator on cloud deployments |
+| `SWARM_CLOUD` | `false` | When `true`, marks the deployment as cloud-hosted. Surfaces Docs/Support/Billing items in the user-menu, suppresses the self-host marketing footer, and is sent as `metadata.is_cloud` (always present) on every telemetry event and sets `context.deployment` |
+| `SWARM_ORG_NAME` | `Swarm` | Sidebar header name. Also sent as `metadata.organization_name` and `context.org_name` on every telemetry event when set |
+| `SWARM_ORG_ID` | none | Stable org/tenant identifier exposed on `/status` as `identity.org_id` and sent as `metadata.organization_id` and `context.org_id` on every telemetry event when set. Set by the orchestrator on cloud deployments. Self-host installs that leave it unset get a random `org_` ID instead |
 | `SWARM_ORG_LOGO_URL` | bundled `/logo.png` | Sidebar logo URL (any HTTPS URL). Falls back to the bundled logo if it fails to load |
 | `SWARM_BRAND_COLOR` | none | Tints the org name in the sidebar header (any CSS color, e.g. `#a855f7`) |
 | `SWARM_MARKETING_URL` | none | Self-host marketing footer link target. Suppressed when `SWARM_CLOUD=true` or `SWARM_HIDE_CLOUD_PROMO=true` |
@@ -437,6 +482,8 @@ Identity envs that brand the swarm and gate cloud-only UX. All are read on every
 |----------|-------------|
 | `AGENT_FS_API_URL` | Agent-fs API URL. When unset, the server uses `local-fs`; when set as env or global swarm config, it enables the persistent shared filesystem provider |
 | `AGENT_FS_LIVE_URL` | Agent-fs live host used to build shareable file links (`<AGENT_FS_LIVE_URL>/file/~/<org_id>/<drive_id>/<file_path>`). Falls back to the public `https://live.agent-fs.dev` host when unset; self-hosted agent-fs operators should override it |
+| `AGENT_FS_PUBLIC_URL` | Agent-fs URL that browsers use for [Comb](/docs/ui/comb). Defaults to `AGENT_FS_API_URL`; set it when the API reaches agent-fs on an internal hostname (e.g. `http://agent-fs:7433` in Docker Compose, where the browser needs `http://localhost:7433`). Must be an http(s) URL with no query string or fragment |
+| `COMB_ENABLED` | Turns on [Comb](/docs/ui/comb), the agent-fs review space in the dashboard (default `false`). No effect until `AGENT_FS_API_URL` is set. Saving it in swarm config reloads the API; the dashboard picks it up within one status poll (30 seconds at most) |
 | `API_AGENT_FS_API_KEY` | API-owned bootstrap/service API key for agent-fs. Used only by the API server to seed the swarm org/drive and invite/register agents |
 | `AGENT_FS_API_KEY` | Per-agent API key for agent-fs CLI/MCP access. Generated by the API server and stored as an agent-scoped secret; workers should not share the API bootstrap key |
 | `AGENT_FS_SHARED_ORG_ID` | Shared org ID for the swarm's agent-fs organization. Auto-created by the lead on first boot |
@@ -499,7 +546,7 @@ When a session is spawned, the runner splits the credential value by commas and 
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `ANONYMIZED_TELEMETRY` | `true` (enabled) | Set to `false` to disable anonymized telemetry. See [Telemetry](/docs/reference/telemetry) for details |
+| `ANONYMIZED_TELEMETRY` | `true` (enabled) | Set to `false` to disable anonymized telemetry. Events carry an org ID, the org name and the admin's email domain, and a pseudonymous user reference (never an email address); see [Identity context](/docs/reference/telemetry#identity-context) |
 | `DESPLEGA_TELEMETRY_ENV` | `production` | Explicit telemetry environment tag. Set to `development` or `test` for intentional non-production telemetry. |
 | `INSTALL_METHOD` | unset | Written automatically by the onboard wizard (`onboard_interactive` / `onboard_noninteractive`); not meant to be hand-set. Unset installs are attributed as `manual` (or `e2b` inside an E2B sandbox). |
 | `INSTALL_PRESET` | unset | Written automatically by the onboard wizard with the chosen preset (e.g. `solo`), when applicable. |

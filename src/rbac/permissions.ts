@@ -37,12 +37,22 @@ export const PERMISSIONS = {
     description: "Cancel a pending approval request.",
     namespace: "approval",
   },
+  "approval.respond": {
+    description:
+      "Approve or reject a pending approval request as a person. Agents never hold it; the request's approvers list still applies.",
+    namespace: "approval",
+  },
   "task.steer.any": {
     description: "Steer any task (beyond tasks the caller created).",
     namespace: "task",
   },
   "task.create.own": {
     description: "Create a task the caller owns.",
+    namespace: "task",
+  },
+  "task.requester.assign": {
+    description:
+      "Attribute a new task to a user other than the requester of the caller's own current task.",
     namespace: "task",
   },
   "task.read.own": {
@@ -82,13 +92,29 @@ export const PERMISSIONS = {
     description: "Edit a memory entry (own entries, or any scope as lead).",
     namespace: "memory",
   },
+  "memory.write.consolidated": {
+    description:
+      "Write or move a memory key under a lead-maintained /longterm root (company-story, entities, timeline).",
+    namespace: "memory",
+  },
+  "memory.read.any": {
+    description:
+      "List every agent's memories, beyond the caller's own and swarm-scoped entries (lead, operator, or user).",
+    namespace: "memory",
+  },
   "memory.delete.any": {
-    description: "Delete a memory entry (own entries, or swarm-scoped entries as lead).",
+    description:
+      "Delete a memory entry: own agent-scoped entries; swarm-scoped entries as lead, operator, or user; any entry as operator or user.",
     namespace: "memory",
   },
   "channel.delete": {
     description: "Delete a Slack channel.",
     namespace: "channel",
+  },
+  "repo.merge-policy.write": {
+    description:
+      "Change a repo's allowMerge guideline, which tells agents whether they may merge a PR themselves.",
+    namespace: "repo",
   },
   "integration.kapso.manage": {
     description: "Register or unregister a Kapso inbound number.",
@@ -220,6 +246,11 @@ export const PERMISSIONS = {
     description: "Update an MCP server the caller does not own.",
     namespace: "mcp-server",
   },
+  "mcp-server.stdio.write": {
+    description:
+      "Create an agent-scope stdio MCP server, or change or enable what a stdio server runs. A stdio server runs a command on the worker.",
+    namespace: "mcp-server",
+  },
   "mcp-server.read.secrets": {
     description: "Read resolved MCP server secret env/header values.",
     namespace: "mcp-server",
@@ -231,6 +262,10 @@ export const PERMISSIONS = {
   "kv.write.any": {
     description: "Write another agent's task:agent: KV namespace.",
     namespace: "kv",
+  },
+  "comb.presence": {
+    description: "Use dashboard presence rooms for Comb drives.",
+    namespace: "comb",
   },
   "page.delete.any": {
     description: "Delete a page the caller does not own.",
@@ -282,6 +317,11 @@ export const PERMISSIONS = {
   },
   "extension.activate": {
     description: "Enable, disable, or activate a version of a swarm extension.",
+    namespace: "extension",
+  },
+  "extension.install.inline": {
+    description:
+      "Install a swarm extension from an inline manifest and files instead of the catalog.",
     namespace: "extension",
   },
 } as const satisfies Record<string, { description: string; namespace: string }>;

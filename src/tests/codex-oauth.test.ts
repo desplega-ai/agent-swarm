@@ -355,6 +355,7 @@ describe("credentialsToAuthJson", () => {
       accountId: "c724a178-abc",
     };
 
+    const before = Date.now();
     const authJson = credentialsToAuthJson(creds);
     expect(authJson.auth_mode).toBe("chatgpt");
     expect(authJson.OPENAI_API_KEY).toBeNull();
@@ -362,7 +363,9 @@ describe("credentialsToAuthJson", () => {
     expect(authJson.tokens.refresh_token).toBe(creds.refresh);
     expect(authJson.tokens.account_id).toBe(creds.accountId);
     expect(authJson.tokens.id_token).toBe(creds.access);
-    expect(authJson.last_refresh).toBe(new Date(creds.expires).toISOString());
+    expect(Date.parse(authJson.last_refresh)).toBeGreaterThanOrEqual(before);
+    expect(Date.parse(authJson.last_refresh)).toBeLessThanOrEqual(Date.now());
+    expect(authJson.expires).toBe(creds.expires);
   });
 });
 

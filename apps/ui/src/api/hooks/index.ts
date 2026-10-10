@@ -100,7 +100,7 @@ export {
   useUninstallMcpServer,
   useUpdateMcpServer,
 } from "./use-mcp-servers";
-export { useDeleteMemory, useMemoryList } from "./use-memory";
+export { useDeleteMemory, useMemoryChunks, useMemoryKeys, useMemoryList } from "./use-memory";
 export type { MetricDefinitionsFilters } from "./use-metric-definitions";
 export {
   useCreateMetric,

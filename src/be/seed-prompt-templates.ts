@@ -15,6 +15,7 @@ import { getPromptTemplates, resetPromptTemplateToDefault, upsertPromptTemplate 
 // handler imports, but runner/session templates are only loaded by the worker. Importing them
 // here ensures all templates are available for the render endpoint and seeded to the DB.
 import "../prompts/session-templates";
+import "../comb/templates";
 import "../commands/templates";
 import "../tools/templates";
 

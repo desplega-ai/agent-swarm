@@ -1,183 +1,67 @@
 # Jira Interaction (Read + Outbound Push)
 
-The swarm has Jira OAuth connected but **no inbound sync** (unlike Linear). Every read or write is a direct API call against the Atlassian REST API v3.
+The swarm has Jira OAuth support but no inbound sync. Use Atlassian REST API v3 through script credential bindings.
 
-## TL;DR — minimum knowledge
+## Authentication: script credential binding
 
-1. Pull the access token from `oauth_tokens` (provider = `jira`).
-2. Hit `https://api.atlassian.com/ex/jira/<CLOUD_ID>/rest/api/3/...` — not your site hostname directly. 3LO bearer tokens only work via the `api.atlassian.com` proxy.
-3. Bodies for descriptions/comments must be in **ADF** (Atlassian Document Format), not plain text or markdown.
+Use the `swarm-scripts` skill and `script-run` (`args` first, `ctx` second) for every authenticated request. The API server resolves an OAuth authorization, refreshes it when needed, and substitutes `[REDACTED:JIRA_OAUTH_ACCESS_TOKEN]` in the request header only for the binding's allowed hosts. Never read credential tables, request a raw token from Lead, or copy a token into source, arguments, environment variables, logs, or task output.
 
-## Deployment constants
+Try the conventional binding key `JIRA_OAUTH_ACCESS_TOKEN` first, using `Authorization: Bearer [REDACTED:JIRA_OAUTH_ACCESS_TOKEN]` for `api.atlassian.com`. Do not ask Lead before the first try. `credential-bindings` is lead-only; workers cannot list bindings.
 
-- Site: `<your-site>.atlassian.net`
-- Cloud ID: `<cloud-id>`
-- Default project: `<PROJECT>`
-- Scopes on the stored token: confirm from `oauth_tokens.scope` before write operations
+On HTTP 401 with the conventional key, report the missing binding or authorization to Lead as a blocker. The fetch wrapper in `src/scripts-runtime/credential-broker/fetch-patch.ts` drops any header with an unresolved `[REDACTED:` placeholder, so a missing binding sends an unauthenticated request that yields 401, never a credential leak.
 
-If the cloudId ever changes, rediscover it:
-```bash
-curl -s -H "Authorization: Bearer $TOKEN" -H "Accept: application/json" \
-  https://api.atlassian.com/oauth/token/accessible-resources | jq '.'
-```
+Lead uses `credential-bindings` action `list` to check the binding. If missing, Lead registers/authorizes the provider and creates a binding visible to the agent with `configKey: "JIRA_OAUTH_ACCESS_TOKEN"`, `authKind: "oauth"`, `oauthAuthorizationId`, `allowedHosts: ["api.atlassian.com"]`, and `headerTemplate: "Authorization: Bearer [REDACTED:JIRA_OAUTH_ACCESS_TOKEN]"`.
 
-## Authentication
+An expiring authorization is refreshed server-side; a refresh failure, revoked/missing authorization, or persistent 401 needs Lead/user re-authorization through `credential-bindings` action `oauth-authorize-url`. Do not query expiry/token columns or loop on 401s.
 
-The OAuth token is in the swarm DB (`oauth_tokens`, provider = `jira`).
-
-```sql
--- via the db-query MCP tool
-SELECT accessToken, expiresAt, scope FROM oauth_tokens WHERE provider = 'jira';
-```
-
-**Always check `expiresAt` first.** Atlassian access tokens are short-lived (~1h). If expired, do NOT keep retrying — report it. Re-auth path:
-
-```
-<SWARM_API_BASE_URL>/api/trackers/jira/authorize
-```
-(User may need to remove the app and re-auth.)
+Supported implementation: `src/be/script-credential-broker.ts` loads scoped relational bindings and calls `resolveOAuthBindingToken` from `src/be/oauth-credential-bindings.ts`. The scripts runtime substitutes placeholders at egress for allowed hosts.
 
 ## Calling pattern
 
-Every endpoint below is relative to:
-```
-https://api.atlassian.com/ex/jira/<CLOUD_ID>/rest/api/3
+Allowed host: `api.atlassian.com`. Use the 3LO proxy `https://api.atlassian.com/ex/jira/<CLOUD_ID>/rest/api/3`, rather than the site hostname. Keep the site, cloud ID, and default project as deployment-specific values.
+
+Run this source with `script-run`, supplying non-secret `args`: `cloudId`, `path`, optional `method`, `query`, and `body`.
+
+```typescript
+export default async function (args, ctx) {
+  const url = new URL(`https://api.atlassian.com/ex/jira/${encodeURIComponent(args.cloudId)}/rest/api/3/${args.path}`);
+  for (const [key, value] of Object.entries(args.query ?? {})) {
+    url.searchParams.set(key, String(value));
+  }
+  const response = await fetch(url, {
+    method: args.method ?? "GET",
+    headers: {
+      Authorization: "Bearer [REDACTED:JIRA_OAUTH_ACCESS_TOKEN]",
+      Accept: "application/json",
+      ...(args.body ? { "Content-Type": "application/json" } : {}),
+    },
+    ...(args.body ? { body: JSON.stringify(args.body) } : {}),
+  });
+  if (!response.ok) throw new Error(`Jira HTTP ${response.status}: ${await response.text()}`);
+  return response.status === 204 ? { success: true } : await response.json();
+}
 ```
 
-Standard header set:
-```bash
--H "Authorization: Bearer $TOKEN"
--H "Accept: application/json"
--H "Content-Type: application/json"   # only on POST/PUT
-```
+Return only the issue/project fields needed for the task, never headers or credentials. To discover the cloud ID, use the same script header in a GET to `https://api.atlassian.com/oauth/token/accessible-resources`; select the authorized site's resource ID and confirm its scopes permit the intended operation.
 
 ## Common operations
 
-### 1. List projects
+Pass these paths and payloads to the script above. GET is the default.
 
-```bash
-curl -s -H "Authorization: Bearer $TOKEN" -H "Accept: application/json" \
-  "https://api.atlassian.com/ex/jira/$CLOUD_ID/rest/api/3/project/search" \
-  | jq '.values[] | {key, name, id, projectTypeKey}'
-```
+| Operation | Method and path | Query or body |
+|---|---|---|
+| List projects | GET `project/search` | Read `values` for keys, names, IDs |
+| Get project and issue types | GET `project/<PROJECT_KEY>` | Read `issueTypes` before creating issues |
+| Search issues | GET `search/jql` | `query: { jql: "project = <PROJECT> AND statusCategory != Done", fields: "summary,status,assignee,priority" }` |
+| Create issue | POST `issue` | `body: { fields: { project: { key: "<PROJECT>" }, summary: "Short title", issuetype: { name: "Task" }, description: <ADF_DOC> } }` |
+| Discover transitions | GET `issue/<KEY>/transitions` | Read `transitions` for the target status |
+| Transition issue | POST `issue/<KEY>/transitions` | `body: { transition: { id: "<TRANSITION_ID>" } }` |
+| Comment | POST `issue/<KEY>/comment` | `body: { body: <ADF_DOC> }` |
+| Find account | GET `user/search` | `query: { query: "<name-or-email>" }` |
+| Assign | PUT `issue/<KEY>/assignee` | `body: { accountId: "<ACCOUNT_ID>" }`; null unassigns |
+| Edit fields | PUT `issue/<KEY>` | `body: { fields: { summary: "New summary", labels: ["swarm"] } }` |
 
-### 2. Get a project (with issue types + lead)
-
-```bash
-curl -s -H "Authorization: Bearer $TOKEN" -H "Accept: application/json" \
-  "https://api.atlassian.com/ex/jira/$CLOUD_ID/rest/api/3/project/$PROJECT_KEY" \
-  | jq '{key, name, lead: .lead.displayName, issueTypes: [.issueTypes[] | {id, name, subtask}]}'
-```
-
-### 3. Search issues with JQL
-
-Use the **`/search/jql`** endpoint (the older `/search` is deprecated for cloud).
-
-```bash
-curl -s -G \
-  -H "Authorization: Bearer $TOKEN" -H "Accept: application/json" \
-  --data-urlencode 'jql=project = <PROJECT> AND statusCategory != Done' \
-  --data-urlencode 'fields=summary,status,assignee,priority' \
-  "https://api.atlassian.com/ex/jira/$CLOUD_ID/rest/api/3/search/jql" \
-  | jq '[.issues[] | {key, summary: .fields.summary, status: .fields.status.name, assignee: .fields.assignee.displayName}]'
-```
-
-### 4. Create an issue
-
-Description must be ADF. Minimal valid ADF:
-
-```bash
-curl -s -X POST \
-  -H "Authorization: Bearer $TOKEN" -H "Accept: application/json" -H "Content-Type: application/json" \
-  "https://api.atlassian.com/ex/jira/$CLOUD_ID/rest/api/3/issue" \
-  -d '{
-    "fields": {
-      "project": { "key": "<PROJECT>" },
-      "summary": "Short title",
-      "issuetype": { "name": "Task" },
-      "description": {
-        "type": "doc",
-        "version": 1,
-        "content": [
-          { "type": "paragraph", "content": [ { "type": "text", "text": "Body goes here." } ] }
-        ]
-      }
-    }
-  }'
-```
-
-Returns `{ id, key, self }` on success (HTTP 201). The `key` (e.g. `<PROJECT>-7`) is what humans use; URL is `https://<your-site>.atlassian.net/browse/<KEY>`.
-
-Available issue types are project-specific; list the project before creating issues.
-
-### 5. Transition issue status (e.g. → Done)
-
-Transitions are project- and workflow-specific. Always discover them first:
-
-```bash
-curl -s -H "Authorization: Bearer $TOKEN" -H "Accept: application/json" \
-  "https://api.atlassian.com/ex/jira/$CLOUD_ID/rest/api/3/issue/<KEY>/transitions" \
-  | jq '.transitions[] | {id, name, to: .to.name}'
-```
-
-Transition IDs are project-specific. Do not copy IDs between Jira projects; discover them for the issue you are about to update.
-
-Transition (returns HTTP 204 on success, no body):
-
-```bash
-curl -s -X POST \
-  -H "Authorization: Bearer $TOKEN" -H "Accept: application/json" -H "Content-Type: application/json" \
-  "https://api.atlassian.com/ex/jira/$CLOUD_ID/rest/api/3/issue/<KEY>/transitions" \
-  -d '{"transition":{"id":"<TRANSITION_ID>"}}'
-```
-
-### 6. Comment on an issue
-
-ADF body again:
-
-```bash
-curl -s -X POST \
-  -H "Authorization: Bearer $TOKEN" -H "Accept: application/json" -H "Content-Type: application/json" \
-  "https://api.atlassian.com/ex/jira/$CLOUD_ID/rest/api/3/issue/<KEY>/comment" \
-  -d '{
-    "body": {
-      "type": "doc", "version": 1,
-      "content": [ { "type": "paragraph", "content": [ { "type": "text", "text": "Update from the swarm." } ] } ]
-    }
-  }'
-```
-
-### 7. Assign an issue
-
-Atlassian Cloud uses **accountId**, not username. Find one via:
-
-```bash
-curl -s -G -H "Authorization: Bearer $TOKEN" -H "Accept: application/json" \
-  --data-urlencode 'query=<name-or-email>' \
-  "https://api.atlassian.com/ex/jira/$CLOUD_ID/rest/api/3/user/search" \
-  | jq '.[] | {accountId, displayName, emailAddress}'
-```
-
-Assign:
-```bash
-curl -s -X PUT \
-  -H "Authorization: Bearer $TOKEN" -H "Accept: application/json" -H "Content-Type: application/json" \
-  "https://api.atlassian.com/ex/jira/$CLOUD_ID/rest/api/3/issue/<KEY>/assignee" \
-  -d '{"accountId":"<ACCOUNT_ID>"}'
-```
-
-To unassign: `{"accountId": null}`.
-
-### 8. Edit fields on an existing issue
-
-```bash
-curl -s -X PUT \
-  -H "Authorization: Bearer $TOKEN" -H "Accept: application/json" -H "Content-Type: application/json" \
-  "https://api.atlassian.com/ex/jira/$CLOUD_ID/rest/api/3/issue/<KEY>" \
-  -d '{ "fields": { "summary": "New summary", "labels": ["swarm","auto"] } }'
-```
-
-Returns HTTP 204.
+Issue creation returns `{ id, key, self }` (201). The human URL is `https://<your-site>.atlassian.net/browse/<KEY>`. Transitions, assignment, and edits return 204 without a body.
 
 ## ADF cheat-sheet
 
@@ -195,50 +79,17 @@ If you need rich content, build it in a script — don't try to write deep ADF i
 
 ## Operational rules
 
-- **Token-expiry first.** Always check `expiresAt`. Don't loop on 401s.
-- **Use the proxy.** All authenticated calls go through `api.atlassian.com/ex/jira/<cloudId>/...`. Hitting `<your-site>.atlassian.net/rest/api/3/...` with a 3LO bearer token will fail.
-- **Discover transitions per issue** before transitioning — different projects/workflows have different IDs.
-- **Use `/search/jql`**, not the legacy `/search` (which is deprecated and may be removed).
-- **ADF is mandatory** for `description`, `comment`, and rich text fields. Plain strings will be rejected.
-- **Account IDs, not usernames** for assignment, mentions, and filters.
-- **Rate limits:** Atlassian rate-limits per app and per user. For bulk transitions/comments, sleep ~200–500 ms between calls.
-- **Don't leak tokens.** Never echo the access token to logs or Slack. Read it into an env var only.
+- Discover transitions per issue; IDs vary by project and workflow.
+- Use `/search/jql` for cloud searches.
+- Descriptions, comments, and rich text fields require ADF documents.
+- Assignment uses account IDs rather than usernames.
+- For bulk work use the `swarm-scripts` skill, handle pagination, and back off on 429 using `Retry-After`.
+- Check every response before reporting success. On 400 inspect `errorMessages`/`errors`; on 403 confirm scopes and issue permissions with Lead; on 404 verify the cloud ID, project, and issue key. On refresh failure or persistent 401 request re-authorization.
 
-## Error handling
+## Worked workflow: close an issue
 
-| Status | Likely cause | Action |
-|---|---|---|
-| 401 | Token expired/invalid | Check `expiresAt`. Notify user to re-auth. Don't retry. |
-| 403 | Missing scope, or restricted issue | Check the `scope` column. For `write:jira-work` operations, confirm scope is present. |
-| 404 | Wrong key, wrong cloudId, wrong project | Re-verify with a project list call. |
-| 400 | Body shape wrong (often ADF or required field) | Inspect `errorMessages` / `errors` in the response JSON. |
-| 429 | Rate-limited | Back off, retry after `Retry-After` seconds. |
+1. Run GET `issue/<KEY>/transitions` through the script and select the intended transition from the returned workflow.
+2. Run POST `issue/<KEY>/transitions` with the discovered transition ID.
+3. Confirm the 204 success before reporting the issue transitioned. For multiple issues, discover transitions for each issue and process pagination rather than assuming all workflows match.
 
-## Complete worked example: clean a project
-
-```bash
-TOKEN=$(db-query "SELECT accessToken FROM oauth_tokens WHERE provider='jira'")
-CLOUD_ID="<cloud-id>"
-PROJECT_KEY="<PROJECT>"
-
-# 1. List open issues in KAN
-curl -s -G -H "Authorization: Bearer $TOKEN" -H "Accept: application/json" \
-  --data-urlencode "jql=project = $PROJECT_KEY AND statusCategory != Done" \
-  --data-urlencode 'fields=summary,status' \
-  "https://api.atlassian.com/ex/jira/$CLOUD_ID/rest/api/3/search/jql" \
-  | jq -r '.issues[].key' > /tmp/keys.txt
-
-# 2. Transition each to Done using the transition ID discovered for this workflow
-for KEY in $(cat /tmp/keys.txt); do
-  curl -s -X POST \
-    -H "Authorization: Bearer $TOKEN" -H "Accept: application/json" -H "Content-Type: application/json" \
-    "https://api.atlassian.com/ex/jira/$CLOUD_ID/rest/api/3/issue/$KEY/transitions" \
-    -d '{"transition":{"id":"<DONE_TRANSITION_ID>"}}'
-  sleep 0.3
-done
-```
-
-## Notes for swarm sync (future)
-
-- The MCP tracker tools (`tracker-link-task`, `tracker-sync-status`, etc.) are designed for two-way sync mappings. Jira tracker support exists at the schema level but is not currently wired up to inbound webhooks. Until it is, all Jira interaction must go through this skill.
-- If/when inbound Jira webhooks land, this skill should add a "When to transition" section mirroring the Linear one.
+The MCP tracker tools manage sync mappings; they do not replace this authenticated Jira request path.

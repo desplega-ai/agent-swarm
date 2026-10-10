@@ -1,11 +1,12 @@
 import { Webhook } from "svix";
 
+import { isEnvFlagEnabled } from "../utils/env-flag";
+
 let initialized = false;
 let webhookSecret: string | null = null;
 
 export function isAgentMailEnabled(): boolean {
-  const disabled = process.env.AGENTMAIL_DISABLE;
-  if (disabled === "true" || disabled === "1") {
+  if (isEnvFlagEnabled("AGENTMAIL_DISABLE", false)) {
     return false;
   }
 
@@ -24,8 +25,8 @@ export function initAgentMail(): boolean {
   }
   initialized = true;
 
-  const disabled = process.env.AGENTMAIL_DISABLE;
-  if (disabled === "true" || disabled === "1") {
+  const disabled = isEnvFlagEnabled("AGENTMAIL_DISABLE", false);
+  if (disabled) {
     console.log("[AgentMail] Disabled via AGENTMAIL_DISABLE");
     return false;
   }

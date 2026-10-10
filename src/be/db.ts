@@ -10,6 +10,12 @@ import {
 import { realtimeBus } from "../realtime/bus";
 import { slackChannelFromContextKey } from "../tasks/slack-routing";
 import { _resolveIntegrationType, emitIntegrationConnected, telemetry } from "../telemetry";
+import { scheduleOrgDomainRecompute } from "../telemetry-identity";
+import {
+  emitTaskTelemetry,
+  type TaskTelemetryEvent,
+  type TaskTelemetryInput,
+} from "../telemetry-trigger";
 import type {
   ActiveSession,
   Agent,
@@ -141,8 +147,16 @@ import {
 } from "../utils/identity-field-budget";
 import { activeModelBlock, type ModelFamily } from "../utils/model-rate-limit-windows";
 import { getCurrentRequestUserId } from "../utils/request-auth-context";
-import { registerVolatileSecret, scrubSecrets } from "../utils/secret-scrubber";
-import { estimateClaudePlan, SUBSCRIPTION_KEY_TYPES } from "../utils/subscription-plans";
+import {
+  registerSensitiveKeyName,
+  type ScrubbedText,
+  scrubSecrets,
+} from "../utils/secret-scrubber";
+import {
+  estimateClaudePlan,
+  planAllowsModelFamily,
+  SUBSCRIPTION_KEY_TYPES,
+} from "../utils/subscription-plans";
 import { auditAssetKeys } from "./asset-key-audit";
 import { decryptSecret, encryptSecret, getEncryptionKey } from "./crypto";
 import { normalizeDate, normalizeDateRequired } from "./date-utils";
@@ -160,7 +174,12 @@ import {
   reservedRoleViolation,
   rowToAgent,
 } from "./db/agents";
-import { type ApprovalRequestListFilters, approvalRequestListClause } from "./db/approvals";
+import {
+  type ApprovalRequestListFilters,
+  type ApprovalVote,
+  approvalRequestListClause,
+  scrubApprovalVotesJson,
+} from "./db/approvals";
 import {
   computeContentHash,
   createContextVersion,
@@ -179,10 +198,18 @@ import {
   rowToAgentTaskSummary,
 } from "./db/tasks/read";
 import { configureTaskWriteDependencies, failTask } from "./db/tasks/write";
+import { scrubJsonValue } from "./scrub-json";
+import { openSealedJson, sealedJsonForDisplay, sealJson } from "./sealed-json";
+import { configSecretName, registerStoredSecret } from "./secret-registry";
 import { promotePendingSteeringForTask } from "./steering";
 import { isInternalConfigKey, isReservedConfigKey, reservedKeyError } from "./swarm-config-guard";
 import { emitTaskStarted } from "./task-lifecycle-events";
+import { defineWorkflowPayload, type WorkflowPayloadView } from "./workflow-replay";
 
+export {
+  refreshActiveSessionOnActivity,
+  SESSION_ACTIVITY_REFRESH_MIN_INTERVAL_MS,
+} from "./db/active-sessions";
 export {
   buildRoutingAffinityFromAgent,
   createAgent,
@@ -220,7 +247,14 @@ export {
   updateAgentStatus,
   updateAgentStatusFromCapacity,
 } from "./db/agents";
-export { type ApprovalRequestSummary, listApprovalRequestSummaries } from "./db/approvals";
+export { recordKeySeatMismatch } from "./db/api-keys";
+export {
+  type ApprovalRequestSummary,
+  type ApprovalVote,
+  getPendingApprovalVoteState,
+  listApprovalRequestSummaries,
+  recordApprovalVotes,
+} from "./db/approvals";
 export {
   computeContentHash,
   createContextVersion,
@@ -228,6 +262,7 @@ export {
   getContextVersionHistory,
   getLatestContextVersion,
 } from "./db/context-versions";
+export { getScriptRunExecutionArgs } from "./db/script-runs";
 
 configureAgentDependencies({
   createLogEntry: (entry) => createLogEntry(entry),
@@ -276,6 +311,7 @@ export {
   getTasksCount,
   hasNonTerminalRerouteDecisionChild,
   hasNonTerminalResumeChild,
+  isLinearTrackerContextKey,
   markFinalizedSlackRelaysDelivered,
   markSlackRelayAttempted,
   markSlackRelayDelivered,
@@ -298,6 +334,7 @@ export {
   getRecentlyCancelledTasksForAgent,
   overwriteTerminalTaskResultText,
   pauseTask,
+  recordTaskProviderIfUnset,
   resetOrphanedInProgressTasksForAgent,
   resumeTask,
   settleSupersededTaskDependents,
@@ -325,7 +362,6 @@ configureTaskReadDependencies({
   previewText: (text, maxChars) => previewText(text, maxChars),
 });
 
-type TaskTelemetryProps = Parameters<typeof telemetry.taskEvent>[1];
 type TaskTelemetryContext = {
   provider?: ProviderName;
   harnessVariant?: string;
@@ -341,23 +377,27 @@ function assetKeyPrefixPattern(input: string): string {
   return literalPrefixPattern(normalizeAssetKey(input));
 }
 
-function emitTaskLifecycleTelemetryAfterCommit(
-  event: string,
-  props: TaskTelemetryProps,
+function emitTaskLifecycleTelemetryAfterCommit<S extends TaskTelemetryEvent>(
+  event: S,
+  props: TaskTelemetryInput<S>,
   verify?: (task: AgentTask | null) => boolean,
+  actorUserId?: string | null,
 ): void {
   // afterCommit (not queueMicrotask): under an async client transaction,
   // microtasks drain before COMMIT, so the verify read could observe
   // uncommitted state. afterCommit runs strictly post-COMMIT/ROLLBACK.
   getDbClient().afterCommit(() => {
+    // `trigger_surface` is resolved (one read up the parent chain) and
+    // `source` renamed to `task_source` inside emitTaskTelemetry, so every
+    // lifecycle event of a task reports the same root surface.
     if (!verify) {
-      telemetry.taskEvent(event, props);
+      void emitTaskTelemetry(event, props, actorUserId);
       return;
     }
-    getTaskById(props.taskId)
+    getTaskById((props as { taskId: string }).taskId)
       .then((task) => {
         if (!verify(task)) return;
-        telemetry.taskEvent(event, props);
+        return emitTaskTelemetry(event, props, actorUserId);
       })
       .catch((err) =>
         console.error(
@@ -970,7 +1010,7 @@ export async function setSlackMessageTracking(
 export async function updateTaskVcs(
   taskId: string,
   vcs: {
-    vcsProvider: "github" | "gitlab";
+    vcsProvider: "github" | "gitlab" | "azure-devops";
     vcsRepo: string;
     vcsNumber: number;
     vcsUrl: string;
@@ -2148,7 +2188,7 @@ export async function createLogEntry(entry: {
       entry.eventType,
       entry.agentId ?? null,
       entry.taskId ?? null,
-      entry.oldValue ?? null,
+      entry.oldValue ? scrubSecrets(entry.oldValue) : null,
       entry.newValue ? scrubSecrets(entry.newValue) : null,
       metaJson ? scrubSecrets(metaJson) : null,
     ],
@@ -2777,7 +2817,8 @@ export async function createTaskExtended(
         assetKey,
         options?.agentId ?? null,
         options?.creatorAgentId ?? null,
-        task,
+        // Free text from every task source; scrub at the single INSERT.
+        scrubSecrets(task),
         status,
         options?.source ?? "mcp",
         options?.routingReason ?? null,
@@ -2890,6 +2931,8 @@ export async function createTaskExtended(
       priority: row.priority,
     },
     (task) => task !== null,
+    // The human who asked (a pseudonymous user_ref), null for system tasks.
+    row.requestedByUserId,
   );
 
   getDbClient().afterCommit(() => {
@@ -3847,7 +3890,11 @@ export async function postMessage(
 
   // Detect /task prefix - only create tasks when explicitly requested
   const isTaskMessage = content.trimStart().startsWith("/task ");
-  const messageContent = isTaskMessage ? content.replace(/^\s*\/task\s+/, "") : content;
+  // Scrubbed once here: the row, the task description built from it and the
+  // appended task-link UPDATE below all derive from this value.
+  const messageContent = scrubSecrets(
+    isTaskMessage ? content.replace(/^\s*\/task\s+/, "") : content,
+  );
 
   const row = await getDbClient().get<ChannelMessageRow>(
     `INSERT INTO channel_messages (id, channelId, agentId, content, replyToId, mentions, createdAt)
@@ -4561,7 +4608,7 @@ export async function createSessionLogs(logs: {
   lines: string[];
 }): Promise<void> {
   // Bounded batches, one short transaction each (reference shape:
-  // src/be/boot-scrub-logs.ts): worker log batches have unbounded line
+  // src/be/boot-scrub-sweep.ts): worker log batches have unbounded line
   // counts, and a single transaction across thousands of scrub+INSERT
   // iterations would hold the global write lock — and the event loop — for
   // the whole sweep. The regex scrub runs outside the transaction so only
@@ -4726,6 +4773,8 @@ export interface CreateSessionCostInput {
    *  - 'pricing-table'  — value recomputed by the API from `pricing` rows.
    *  - 'unpriced'       — recompute attempted but no matching pricing rows;
    *                       `totalCostUsd` is whatever the worker submitted.
+   *  - 'estimated'      — fallback token counts priced at an assumed model
+   *                       (amp with a failed thread export).
    */
   costSource?: SessionCostSource;
   harnessCostUsd?: number | null;
@@ -5514,12 +5563,12 @@ export async function createInboxMessage(
     [
       id,
       agentId,
-      content,
+      scrubSecrets(content),
       options?.source ?? "slack",
       options?.slackChannelId ?? null,
       options?.slackThreadTs ?? null,
       options?.slackUserId ?? null,
-      options?.matchedText ?? null,
+      options?.matchedText == null ? null : scrubSecrets(options.matchedText),
       now,
       now,
     ],
@@ -5595,7 +5644,7 @@ export async function markInboxMessageResponded(
   const now = new Date().toISOString();
   const row = await getDbClient().get<InboxMessageRow>(
     "UPDATE inbox_messages SET status = 'responded', responseText = ?, lastUpdatedAt = ? WHERE id = ? AND status IN ('unread', 'processing') RETURNING *",
-    [responseText, now, id],
+    [scrubSecrets(responseText), now, id],
   );
   return row ? rowToInboxMessage(row) : null;
 }
@@ -5992,10 +6041,10 @@ export async function createScheduledTask(data: CreateScheduledTaskData): Promis
       id,
       normalizeAssetKey(data.key ?? defaultAssetKey("schedule", id)),
       data.name,
-      data.description ?? null,
+      data.description == null ? null : scrubSecrets(data.description),
       data.cronExpression ?? null,
       data.intervalMs ?? null,
-      data.taskTemplate ?? null,
+      data.taskTemplate == null ? null : scrubSecrets(data.taskTemplate),
       data.taskType ?? null,
       JSON.stringify(data.tags ?? []),
       data.priority ?? 50,
@@ -6078,7 +6127,7 @@ export async function updateScheduledTask(
   }
   if (data.description !== undefined) {
     updates.push("description = ?");
-    params.push(data.description);
+    params.push(data.description == null ? null : scrubSecrets(data.description));
   }
   if (data.cronExpression !== undefined) {
     updates.push("cronExpression = ?");
@@ -6090,7 +6139,7 @@ export async function updateScheduledTask(
   }
   if (data.taskTemplate !== undefined) {
     updates.push("taskTemplate = ?");
-    params.push(data.taskTemplate);
+    params.push(data.taskTemplate == null ? null : scrubSecrets(data.taskTemplate));
   }
   if (data.taskType !== undefined) {
     updates.push("taskType = ?");
@@ -6134,7 +6183,7 @@ export async function updateScheduledTask(
   }
   if (data.lastErrorMessage !== undefined) {
     updates.push("lastErrorMessage = ?");
-    params.push(data.lastErrorMessage);
+    params.push(data.lastErrorMessage == null ? null : scrubSecrets(data.lastErrorMessage));
   }
   if (data.model !== undefined) {
     updates.push("model = ?");
@@ -6576,7 +6625,8 @@ export async function upsertSwarmConfig(data: {
   }
 
   if (config.isSecret) {
-    registerVolatileSecret(config.value, `config:${config.key}`);
+    registerStoredSecret(config.value, configSecretName(config.key));
+    registerSensitiveKeyName(config.key);
   }
 
   return config;
@@ -7346,12 +7396,17 @@ export async function createWorkflow(
   if (!row) throw new Error("Failed to create workflow");
   const workflow = rowToWorkflow(row);
   // afterCommit: a caller's transaction that rolls back must not report the workflow.
+  const requestUserId = getCurrentRequestUserId();
   getDbClient().afterCommit(() =>
-    telemetry.workflow("created", {
-      workflowId: workflow.id,
-      nodeCount: workflow.definition.nodes.length,
-      ...(source ? { source } : {}),
-    }),
+    telemetry.workflow(
+      "created",
+      {
+        workflowId: workflow.id,
+        nodeCount: workflow.definition.nodes.length,
+        ...(source ? { via: source } : {}),
+      },
+      { userId: requestUserId ?? null },
+    ),
   );
   return workflow;
 }
@@ -7572,11 +7627,13 @@ async function deleteWorkflowRows(id: string, source?: "api" | "mcp"): Promise<b
   const deleted = result.changes > 0;
   if (deleted) {
     // afterCommit: a caller's transaction that rolls back must not report the delete.
+    const requestUserId = getCurrentRequestUserId();
     getDbClient().afterCommit(() =>
-      telemetry.workflow("deleted", {
-        workflowId: id,
-        ...(source ? { source } : {}),
-      }),
+      telemetry.workflow(
+        "deleted",
+        { workflowId: id, ...(source ? { via: source } : {}) },
+        { userId: requestUserId ?? null },
+      ),
     );
   }
   return deleted;
@@ -7609,6 +7666,8 @@ type WorkflowRunRow = {
   triggerData: string | null;
   /** Absent from list rows: see `WORKFLOW_RUN_SUMMARY_COLUMNS`. */
   context?: string | null;
+  /** Sealed exact `context` (migration 201). Absent from list rows. */
+  context_replay?: string | null;
   error: string | null;
   created_by: string | null;
   startedAt: string;
@@ -7616,19 +7675,28 @@ type WorkflowRunRow = {
   finishedAt: string | null;
 };
 
-function rowToWorkflowRun(row: WorkflowRunRow): WorkflowRun {
-  return {
+/**
+ * `view` picks the `context` copy: `replay` (default) is the exact sealed value
+ * the engine resumes from; `display` is the scrubbed column for API, MCP and UI
+ * responses. See `src/be/workflow-replay.ts`.
+ */
+function rowToWorkflowRun(row: WorkflowRunRow, view: WorkflowPayloadView = "replay"): WorkflowRun {
+  const run: WorkflowRun = {
     id: row.id,
     workflowId: row.workflowId,
     status: row.status as WorkflowRunStatus,
     triggerData: row.triggerData ? JSON.parse(row.triggerData) : undefined,
-    context: row.context ? (JSON.parse(row.context) as Record<string, unknown>) : undefined,
+    context: undefined,
     error: row.error ?? undefined,
     createdBy: row.created_by ?? undefined,
     startedAt: normalizeDateRequired(row.startedAt),
     lastUpdatedAt: normalizeDateRequired(row.lastUpdatedAt),
     finishedAt: normalizeDate(row.finishedAt) ?? undefined,
   };
+  return defineWorkflowPayload(run, "context", row.context, row.context_replay, view, {
+    runId: row.id,
+    target: "its context",
+  });
 }
 
 export async function createWorkflowRun(data: {
@@ -7646,7 +7714,7 @@ export async function createWorkflowRun(data: {
       data.workflowId,
       data.triggerType ?? "manual",
       now,
-      data.triggerData ? JSON.stringify(data.triggerData) : null,
+      data.triggerData ? scrubJsonValue(data.triggerData) : null,
       data.createdBy ?? null,
     ],
   );
@@ -7654,15 +7722,19 @@ export async function createWorkflowRun(data: {
   return rowToWorkflowRun(row);
 }
 
-export async function getWorkflowRun(id: string): Promise<WorkflowRun | null> {
+export async function getWorkflowRun(
+  id: string,
+  view: WorkflowPayloadView = "replay",
+): Promise<WorkflowRun | null> {
   const row = await getDbClient().get<WorkflowRunRow>("SELECT * FROM workflow_runs WHERE id = ?", [
     id,
   ]);
-  return row ? rowToWorkflowRun(row) : null;
+  return row ? rowToWorkflowRun(row, view) : null;
 }
 
 function emitWorkflowTerminalTelemetry(run: WorkflowRun): void {
   if (run.status !== "completed" && run.status !== "failed") return;
+  const status = run.status;
 
   // afterCommit (not queueMicrotask): under an async client transaction,
   // microtasks drain before COMMIT, so the verify read below could observe
@@ -7672,9 +7744,9 @@ function emitWorkflowTerminalTelemetry(run: WorkflowRun): void {
   // crashing the process as an unhandled rejection.
   getDbClient().afterCommit(async () => {
     const latest = await getWorkflowRun(run.id);
-    if (!latest || latest.status !== run.status) return;
+    if (!latest || latest.status !== status) return;
     const steps = await getWorkflowRunStepsByRunId(run.id);
-    telemetry.workflow(run.status, {
+    telemetry.workflow(status, {
       workflowId: run.workflowId,
       durationMs: run.startedAt ? Date.now() - new Date(run.startedAt).getTime() : undefined,
       stepsCompleted: steps.filter((step) => step.status === "completed").length,
@@ -7699,12 +7771,15 @@ export async function updateWorkflowRun(
     params.push(data.status);
   }
   if (data.context !== undefined) {
-    updates.push("context = ?");
-    params.push(JSON.stringify(data.context));
+    // Resume/retry/recovery rebuild the live ctx (resolved `secret.*` inputs
+    // included, which are never re-resolved) from the sealed exact copy; the
+    // scrubbed column serves display and SQL filters.
+    updates.push("context = ?", "context_replay = ?");
+    params.push(scrubJsonValue(data.context), sealJson(data.context));
   }
   if (data.error !== undefined) {
     updates.push("error = ?");
-    params.push(data.error);
+    params.push(data.error === null ? null : scrubSecrets(data.error));
   }
   if (data.finishedAt !== undefined) {
     updates.push("finishedAt = ?");
@@ -7786,7 +7861,8 @@ export async function listWorkflowRuns(
        ORDER BY startedAt DESC, id DESC${pagination}`,
     params,
   );
-  return rows.map(rowToWorkflowRun);
+  // List rows are display-only (runs API, list-workflow-runs tool).
+  return rows.map((row) => rowToWorkflowRun(row, "display"));
 }
 
 export async function countWorkflowRuns(
@@ -7839,6 +7915,8 @@ type WorkflowRunStepRow = {
   status: string;
   input: string | null;
   output: string | null;
+  /** Sealed exact `output` (migration 201). */
+  output_replay: string | null;
   error: string | null;
   startedAt: string;
   finishedAt: string | null;
@@ -7850,15 +7928,19 @@ type WorkflowRunStepRow = {
   nextPort: string | null;
 };
 
-function rowToWorkflowRunStep(row: WorkflowRunStepRow): WorkflowRunStep {
-  return {
+/** `view` picks the `output` copy, as in `rowToWorkflowRun`. */
+function rowToWorkflowRunStep(
+  row: WorkflowRunStepRow,
+  view: WorkflowPayloadView = "replay",
+): WorkflowRunStep {
+  const step: WorkflowRunStep = {
     id: row.id,
     runId: row.runId,
     nodeId: row.nodeId,
     nodeType: row.nodeType,
     status: row.status as WorkflowRunStepStatus,
     input: row.input ? JSON.parse(row.input) : undefined,
-    output: row.output ? JSON.parse(row.output) : undefined,
+    output: undefined,
     error: row.error ?? undefined,
     startedAt: normalizeDateRequired(row.startedAt),
     finishedAt: normalizeDate(row.finishedAt) ?? undefined,
@@ -7869,6 +7951,10 @@ function rowToWorkflowRunStep(row: WorkflowRunStepRow): WorkflowRunStep {
     diagnostics: row.diagnostics ?? undefined,
     nextPort: row.nextPort ?? undefined,
   };
+  return defineWorkflowPayload(step, "output", row.output, row.output_replay, view, {
+    runId: row.runId,
+    target: `the output of step ${row.id} (node ${row.nodeId})`,
+  });
 }
 
 export async function createWorkflowRunStep(data: {
@@ -7889,7 +7975,7 @@ export async function createWorkflowRunStep(data: {
       data.nodeId,
       data.nodeType,
       now,
-      data.input ? JSON.stringify(data.input) : null,
+      data.input ? scrubJsonValue(data.input) : null,
       data.idempotencyKey ?? null,
     ],
   );
@@ -7927,12 +8013,14 @@ export async function updateWorkflowRunStep(
     params.push(data.status);
   }
   if (data.output !== undefined) {
-    updates.push("output = ?");
-    params.push(JSON.stringify(data.output));
+    // Scrubbed for display; dedup, convergence and recovery replay the sealed
+    // exact copy into downstream nodes.
+    updates.push("output = ?", "output_replay = ?");
+    params.push(scrubJsonValue(data.output), sealJson(data.output));
   }
   if (data.error !== undefined) {
     updates.push("error = ?");
-    params.push(data.error);
+    params.push(data.error === null ? null : scrubSecrets(data.error));
   }
   if (data.finishedAt !== undefined) {
     updates.push("finishedAt = ?");
@@ -7956,7 +8044,7 @@ export async function updateWorkflowRunStep(
   }
   if (data.diagnostics !== undefined) {
     updates.push("diagnostics = ?");
-    params.push(data.diagnostics);
+    params.push(scrubSecrets(data.diagnostics));
   }
   if (data.nextPort !== undefined) {
     updates.push("nextPort = ?");
@@ -7977,12 +8065,15 @@ export async function updateWorkflowRunStep(
   return row ? rowToWorkflowRunStep(row) : null;
 }
 
-export async function getWorkflowRunStepsByRunId(runId: string): Promise<WorkflowRunStep[]> {
+export async function getWorkflowRunStepsByRunId(
+  runId: string,
+  view: WorkflowPayloadView = "replay",
+): Promise<WorkflowRunStep[]> {
   const rows = await getDbClient().query<WorkflowRunStepRow>(
     "SELECT * FROM workflow_run_steps WHERE runId = ? ORDER BY startedAt ASC",
     [runId],
   );
-  return rows.map(rowToWorkflowRunStep);
+  return rows.map((row) => rowToWorkflowRunStep(row, view));
 }
 
 // --- Stuck Workflow Run Recovery ---
@@ -8050,7 +8141,7 @@ export async function getRetryableSteps(): Promise<WorkflowRunStep[]> {
        ORDER BY s.nextRetryAt ASC`,
     [now],
   );
-  return rows.map(rowToWorkflowRunStep);
+  return rows.map((row) => rowToWorkflowRunStep(row));
 }
 
 export async function getCompletedStepNodeIds(runId: string): Promise<string[]> {
@@ -9434,6 +9525,7 @@ export interface ApprovalRequest {
   approvers: unknown;
   status: "pending" | "approved" | "rejected" | "timeout" | "cancelled";
   responses: unknown | null;
+  approvals: ApprovalVote[] | null;
   resolvedBy: string | null;
   resolvedAt: string | null;
   resolutionReason: string | null;
@@ -9455,6 +9547,7 @@ interface ApprovalRequestRow {
   approvers: string;
   status: string;
   responses: string | null;
+  approvals: string | null;
   resolvedBy: string | null;
   resolvedAt: string | null;
   resolutionReason: string | null;
@@ -9477,7 +9570,9 @@ function rowToApprovalRequest(row: ApprovalRequestRow): ApprovalRequest {
     sourceTaskId: row.sourceTaskId,
     approvers: JSON.parse(row.approvers),
     status: row.status as ApprovalRequest["status"],
-    responses: row.responses ? JSON.parse(row.responses) : null,
+    // Sealed at rest: workflow recovery and HITL resume read the exact answer.
+    responses: row.responses ? openSealedJson(row.responses) : null,
+    approvals: row.approvals ? JSON.parse(row.approvals) : null,
     resolvedBy: row.resolvedBy,
     resolvedAt: normalizeDate(row.resolvedAt),
     resolutionReason: row.resolutionReason,
@@ -9532,14 +9627,14 @@ export async function createApprovalRequest(data: {
        RETURNING *`,
       [
         data.id,
-        data.title,
-        JSON.stringify(data.questions),
+        scrubSecrets(data.title),
+        scrubJsonValue(data.questions),
         data.workflowRunId ?? null,
         data.workflowRunStepId ?? null,
         data.sourceTaskId ?? null,
         JSON.stringify(data.approvers),
         status,
-        resolutionReason,
+        resolutionReason == null ? null : scrubSecrets(resolutionReason),
         status === "cancelled" ? now : null,
         data.timeoutSeconds ?? null,
         expiresAt,
@@ -9567,6 +9662,7 @@ export async function resolveApprovalRequest(
   data: {
     status: "approved" | "rejected" | "timeout";
     responses?: unknown;
+    approvals?: ApprovalVote[];
     resolvedBy?: string;
     resolutionReason?: string;
   },
@@ -9593,16 +9689,19 @@ export async function resolveApprovalRequest(
     : "";
   const row = await getDbClient().get<ApprovalRequestRow>(
     `UPDATE approval_requests
-       SET status = ?, responses = ?, resolvedBy = ?, resolutionReason = ?, resolvedAt = ?,
-           updatedAt = ?
+       SET status = ?, responses = ?, approvals = COALESCE(?, approvals), resolvedBy = ?,
+           resolutionReason = ?, resolvedAt = ?, updatedAt = ?
        WHERE id = ? AND status = 'pending'
          ${actionableWorkflowClause}
        RETURNING *`,
     [
       data.status,
-      data.responses ? JSON.stringify(data.responses) : null,
+      // Sealed, not scrubbed: recovery resumes the workflow from this answer,
+      // so it must stay byte-exact. Votes are diagnostic and get redacted.
+      data.responses ? sealJson(data.responses) : null,
+      data.approvals ? scrubApprovalVotesJson(data.approvals) : null,
       data.resolvedBy ?? null,
-      data.resolutionReason ?? null,
+      data.resolutionReason == null ? null : scrubSecrets(data.resolutionReason),
       now,
       now,
       id,
@@ -9623,7 +9722,7 @@ export async function cancelApprovalRequestById(
        SET status = 'cancelled', resolutionReason = ?, resolvedBy = ?, resolvedAt = ?, updatedAt = ?
        WHERE id = ? AND status = 'pending'
        RETURNING *`,
-    [data.reason, data.resolvedBy, now, now, id],
+    [scrubSecrets(data.reason), data.resolvedBy, now, now, id],
   );
   return row ? rowToApprovalRequest(row) : null;
 }
@@ -9638,7 +9737,7 @@ export async function cancelPendingApprovalRequestsForRun(
        SET status = 'cancelled', resolutionReason = ?, resolvedAt = ?, updatedAt = ?
        WHERE workflowRunId = ? AND status = 'pending'
        RETURNING *`,
-    [reason, now, now, workflowRunId],
+    [scrubSecrets(reason), now, now, workflowRunId],
   );
   return rows.map(rowToApprovalRequest);
 }
@@ -9786,7 +9885,7 @@ export interface StuckApprovalRun {
 }
 
 export async function getStuckApprovalRuns(): Promise<StuckApprovalRun[]> {
-  return getDbClient().query<StuckApprovalRun>(
+  const rows = await getDbClient().query<StuckApprovalRun>(
     `SELECT
         wr.id as runId,
         wrs.id as stepId,
@@ -9803,6 +9902,11 @@ export async function getStuckApprovalRuns(): Promise<StuckApprovalRun[]> {
         AND (ar.status IN ('approved', 'rejected', 'timeout')
              OR (ar.status = 'pending' AND ar.expiresAt IS NOT NULL AND ar.expiresAt < strftime('%Y-%m-%dT%H:%M:%fZ', 'now')))`,
   );
+  return rows.map((row) => ({
+    ...row,
+    approvalResponses:
+      row.approvalResponses === null ? null : JSON.stringify(openSealedJson(row.approvalResponses)),
+  }));
 }
 
 export async function getApprovalRequestByStepId(stepId: string): Promise<ApprovalRequest | null> {
@@ -10127,6 +10231,8 @@ type SkillRow = {
   version: number;
   isEnabled: number;
   systemDefault: number;
+  invocationCount: number;
+  lastInvokedAt: string | null;
   createdAt: string;
   lastUpdatedAt: string;
   lastFetchedAt: string | null;
@@ -10157,6 +10263,8 @@ function rowToSkill(row: SkillRow): Skill {
     version: row.version,
     isEnabled: row.isEnabled === 1,
     systemDefault: row.systemDefault === 1,
+    invocationCount: row.invocationCount,
+    lastInvokedAt: row.lastInvokedAt,
     createdAt: row.createdAt,
     lastUpdatedAt: row.lastUpdatedAt,
     lastFetchedAt: row.lastFetchedAt,
@@ -10668,7 +10776,7 @@ export interface SkillFilters {
  * which is replaced with an empty string so the row still satisfies `Skill`.
  */
 const SKILL_SLIM_COLUMNS =
-  "id, name, description, type, scope, ownerAgentId, sourceUrl, sourceRepo, sourcePath, sourceBranch, sourceHash, isComplex, allowedTools, model, effort, context, agent, disableModelInvocation, userInvocable, version, isEnabled, systemDefault, createdAt, lastUpdatedAt, lastFetchedAt, '' as content";
+  "id, name, description, type, scope, ownerAgentId, sourceUrl, sourceRepo, sourcePath, sourceBranch, sourceHash, isComplex, allowedTools, model, effort, context, agent, disableModelInvocation, userInvocable, version, isEnabled, systemDefault, invocationCount, lastInvokedAt, createdAt, lastUpdatedAt, lastFetchedAt, '' as content";
 
 export async function listSkills(filters?: SkillFilters): Promise<Skill[]> {
   const columns = filters?.includeContent === false ? SKILL_SLIM_COLUMNS : "*";
@@ -11387,6 +11495,10 @@ export interface ApiKeyStatus {
   /** Subscription plan id (`SUBSCRIPTION_PLANS`), when known. */
   plan: string | null;
   planSource: PlanSource | null;
+  /** When the CLI last rejected a model with `credits_required` on this key. */
+  lastSeatMismatchAt: string | null;
+  /** Model family of that rejection (`fable`, `opus`, ...). */
+  lastSeatMismatchModel: string | null;
   /** Auth failures in a row since the last success or clear. */
   consecutiveAuthFailures: number;
   lastAuthFailureAt: string | null;
@@ -11419,6 +11531,8 @@ export interface AvailableKeyIndicesResult {
   modelBlockedIndices: number[];
   /** ISO of the earliest resetsAt among modelBlockedIndices, or null when none. */
   earliestModelResetAt: string | null;
+  /** Indices excluded because the key's subscription plan cannot run the model family. */
+  seatBlockedIndices: number[];
   authFailureFence: number; // highest `authFailureSeq` among these rows
 }
 
@@ -11429,7 +11543,10 @@ export interface AvailableKeyIndicesResult {
  * When `modelFamily` has a weekly window (fable/opus/sonnet), a key whose
  * `rateLimitWindows` carries an active rejected window for that family is
  * excluded from `availableIndices` and reported in `modelBlockedIndices`
- * instead — the key itself stays `available` for every other model.
+ * instead — the key itself stays `available` for every other model. A key
+ * whose `plan` cannot run the family (`planAllowsModelFamily`) is excluded
+ * and reported in `seatBlockedIndices`, also when it is key-wide or
+ * model-window blocked; a seat block has no reset time.
  */
 export async function getAvailableKeyIndices(
   keyType: string,
@@ -11456,9 +11573,10 @@ export async function getAvailableKeyIndices(
     keyIndex: number;
     status: string;
     rateLimitWindows: string | null;
+    plan: string | null;
     authFailureSeq: number;
   }>(
-    `SELECT keyIndex, status, rateLimitWindows, authFailureSeq FROM api_key_status
+    `SELECT keyIndex, status, rateLimitWindows, plan, authFailureSeq FROM api_key_status
        WHERE keyType = ? AND scope = ? AND scopeId = ?`,
     [keyType, scope, effectiveScopeId],
   );
@@ -11489,15 +11607,27 @@ export async function getAvailableKeyIndices(
   }
   const modelBlockedSet = new Set(modelBlockedIndices);
 
+  // A seat block is a plan fact: report it even when the key is also key-wide
+  // or model-window blocked, or the temporary block hides it from admission
+  // and the fallback pick can select a key that cannot run the model.
+  const seatBlockedIndices: number[] = [];
+  if (modelFamily) {
+    for (const row of rows) {
+      if (!planAllowsModelFamily(row.plan, modelFamily)) seatBlockedIndices.push(row.keyIndex);
+    }
+  }
+  const seatBlockedSet = new Set(seatBlockedIndices);
+
   const availableIndices: number[] = [];
   for (let i = 0; i < totalKeys; i++) {
-    if (blockedIndices.has(i) || modelBlockedSet.has(i)) continue;
+    if (blockedIndices.has(i) || modelBlockedSet.has(i) || seatBlockedSet.has(i)) continue;
     availableIndices.push(i);
   }
 
   return {
     availableIndices,
     modelBlockedIndices,
+    seatBlockedIndices,
     earliestModelResetAt:
       earliestModelResetsAtSec !== undefined
         ? new Date(earliestModelResetsAtSec * 1000).toISOString()
@@ -12018,6 +12148,8 @@ export async function createUser(data: {
     ],
   );
   if (!row) throw new Error("Failed to create user");
+  // The org's email domain may come from this user (debounced, post-commit).
+  getDbClient().afterCommit(scheduleOrgDomainRecompute);
   return rowToUser(row);
 }
 
@@ -12090,6 +12222,7 @@ export async function updateUser(
     `UPDATE users SET ${sets.join(", ")} WHERE id = ? RETURNING *`,
     params,
   );
+  if (row) getDbClient().afterCommit(scheduleOrgDomainRecompute);
   return row ? rowToUser(row) : null;
 }
 
@@ -12178,6 +12311,33 @@ export async function deleteUser(id: string, replacementUserId?: string): Promis
     // Workflow context is persisted JSON rather than a relational column, but
     // it exposes the same requester identity to downstream interpolation. Keep
     // it consistent with workflow_runs.created_by inside this transaction.
+    // The sealed replay copy is what a resume reads, so rewrite it first, while
+    // the scrubbed column still matches the filter.
+    const sealedContexts = await tx.query<{ id: string; context_replay: string }>(
+      `SELECT id, context_replay FROM workflow_runs
+       WHERE context_replay IS NOT NULL
+         AND json_valid(context)
+         AND json_extract(context, '$.swarm.requestedByUserId') = ?`,
+      [id],
+    );
+    for (const row of sealedContexts) {
+      let context: Record<string, unknown>;
+      try {
+        context = openSealedJson(row.context_replay) as Record<string, unknown>;
+      } catch {
+        // Unreadable replay state fails the run on resume
+        // (WorkflowReplayStateError), so the stale id is never replayed.
+        continue;
+      }
+      const swarm = { ...(context.swarm as Record<string, unknown> | undefined) };
+      if (swarm.requestedByUserId !== id) continue;
+      if (replacementUserId) swarm.requestedByUserId = replacementUserId;
+      else delete swarm.requestedByUserId;
+      await tx.run("UPDATE workflow_runs SET context_replay = ? WHERE id = ?", [
+        sealJson({ ...context, swarm }),
+        row.id,
+      ]);
+    }
     if (replacementUserId) {
       await tx.run(
         `UPDATE workflow_runs
@@ -12199,6 +12359,7 @@ export async function deleteUser(id: string, replacementUserId?: string): Promis
     await reclassifyTaskHumanFree(reclassifySeedIds);
 
     const result = await tx.run("DELETE FROM users WHERE id = ?", [id]);
+    if (result.changes > 0) getDbClient().afterCommit(scheduleOrgDomainRecompute);
     return result.changes > 0;
   });
 }
@@ -13751,7 +13912,9 @@ function rowToScriptRun(row: ScriptRunRow): ScriptRun {
     agentId: row.agentId,
     scriptName: row.scriptName ?? undefined,
     source: row.source,
-    args: JSON.parse(row.args),
+    // Durable-run args are sealed replay state; callers get the redacted view.
+    // The supervisor reads the exact value via getScriptRunExecutionArgs.
+    args: sealedJsonForDisplay(row.args),
     kind: row.kind as ScriptRunKind,
     status: row.status as ScriptRunStatus,
     pid: row.pid ?? undefined,
@@ -13812,7 +13975,10 @@ export async function createScriptRun(data: {
       data.agentId,
       data.scriptName ?? null,
       data.source,
-      JSON.stringify(data.args ?? null),
+      // Sealed, not scrubbed: this is the run's execution input. The supervisor
+      // launches (and relaunches after a restart or pause) from it, so a
+      // redacted value would change what the script receives.
+      sealJson(data.args ?? null),
       data.idempotencyKey ?? null,
       data.requestedByUserId ?? null,
       data.createdBy ?? null,
@@ -13834,7 +14000,7 @@ export async function recordInlineScriptRun(data: {
   scriptName?: string;
   status: "completed" | "failed";
   output?: unknown;
-  error?: string;
+  error?: ScrubbedText;
   startedAt: string;
   finishedAt: string;
   requestedByUserId?: string;
@@ -13842,6 +14008,10 @@ export async function recordInlineScriptRun(data: {
   /** Set when this run originated from an external API endpoint (POST /api/x/script/<id>). */
   apiEndpointId?: string | null;
 }): Promise<ScriptRun> {
+  // The run already executed, so args and output are a record, not an input:
+  // redact them here so every caller is covered.
+  const args = scrubJsonValue(data.args ?? null);
+  const output = data.output === undefined ? null : scrubJsonValue(data.output);
   const row = await getDbClient().get<ScriptRunRow>(
     `INSERT INTO script_runs
         (id, agentId, scriptName, source, args, kind, status, output, error,
@@ -13853,9 +14023,9 @@ export async function recordInlineScriptRun(data: {
       data.agentId,
       data.scriptName ?? null,
       data.source,
-      JSON.stringify(data.args ?? null),
+      args,
       data.status,
-      data.output === undefined ? null : JSON.stringify(data.output),
+      output,
       data.error ?? null,
       data.startedAt,
       data.finishedAt,
@@ -13994,13 +14164,16 @@ function scriptRunUpdateSets(patch: ScriptRunPatch): {
     sets.push("finishedAt = ?");
     vals.push(patch.finishedAt);
   }
+  // Every script_runs UPDATE builds its SET list here, so this is the
+  // chokepoint for the output and error columns. Output is a record of the
+  // finished run (nothing re-reads it as input), so redaction is safe.
   if ("output" in patch) {
     sets.push("output = ?");
-    vals.push(patch.output === undefined ? null : JSON.stringify(patch.output));
+    vals.push(patch.output === undefined ? null : scrubJsonValue(patch.output));
   }
   if (patch.error !== undefined) {
     sets.push("error = ?");
-    vals.push(patch.error);
+    vals.push(patch.error === null ? null : scrubSecrets(patch.error));
   }
   if (patch.lastHeartbeatAt !== undefined) {
     sets.push("last_heartbeat_at = ?");
@@ -14095,7 +14268,11 @@ type ScriptRunJournalRow = {
   updated_by: string | null;
 };
 
-function rowToScriptRunJournalEntry(row: ScriptRunJournalRow): ScriptRunJournalEntry {
+function rowToScriptRunJournalEntry(
+  row: ScriptRunJournalRow,
+  view: "display" | "replay" = "display",
+): ScriptRunJournalEntry {
+  const open = view === "replay" ? openSealedJson : sealedJsonForDisplay;
   return {
     id: row.id,
     runId: row.runId,
@@ -14103,7 +14280,7 @@ function rowToScriptRunJournalEntry(row: ScriptRunJournalRow): ScriptRunJournalE
     stepType: row.stepType,
     config: JSON.parse(row.config),
     status: row.status as "completed" | "failed",
-    result: parseJsonColumn(row.result),
+    result: row.result === null ? undefined : open(row.result),
     error: row.error ?? undefined,
     startedAt: row.startedAt,
     completedAt: row.completedAt ?? undefined,
@@ -14111,6 +14288,10 @@ function rowToScriptRunJournalEntry(row: ScriptRunJournalRow): ScriptRunJournalE
   };
 }
 
+/**
+ * One journal step with its exact `result`, for the harness replay route only.
+ * Everything that shows a journal to a person uses listScriptRunJournalSteps.
+ */
 export async function getScriptRunJournalStep(
   runId: string,
   stepKey: string,
@@ -14119,7 +14300,7 @@ export async function getScriptRunJournalStep(
     "SELECT * FROM script_run_journal WHERE runId = ? AND stepKey = ?",
     [runId, stepKey],
   );
-  return row ? rowToScriptRunJournalEntry(row) : null;
+  return row ? rowToScriptRunJournalEntry(row, "replay") : null;
 }
 
 export async function upsertScriptRunJournalStep(data: {
@@ -14129,9 +14310,13 @@ export async function upsertScriptRunJournalStep(data: {
   config: unknown;
   status: "completed" | "failed";
   result?: unknown;
-  error?: string;
+  error?: ScrubbedText;
   durationMs?: number;
 }): Promise<void> {
+  // `config` is diagnostic only (the step GET never returns it), so it is
+  // redacted. `result` is sealed instead: the harness replays it verbatim as
+  // the step's return value on resume, so redaction would change what later
+  // steps see.
   await getDbClient().run(
     `INSERT OR IGNORE INTO script_run_journal
       (id, runId, stepKey, stepType, config, status, result, error, durationMs, completedAt)
@@ -14141,9 +14326,9 @@ export async function upsertScriptRunJournalStep(data: {
       data.runId,
       data.stepKey,
       data.stepType,
-      JSON.stringify(data.config ?? {}),
+      scrubJsonValue(data.config ?? {}),
       data.status,
-      data.result !== undefined ? JSON.stringify(data.result) : null,
+      data.result !== undefined ? sealJson(data.result) : null,
       data.error ?? null,
       data.durationMs ?? null,
     ],
@@ -14155,7 +14340,7 @@ export async function listScriptRunJournalSteps(runId: string): Promise<ScriptRu
     "SELECT * FROM script_run_journal WHERE runId = ? ORDER BY startedAt ASC",
     [runId],
   );
-  return rows.map(rowToScriptRunJournalEntry);
+  return rows.map((row) => rowToScriptRunJournalEntry(row));
 }
 
 export async function countScriptRunJournalSteps(runId: string): Promise<number> {

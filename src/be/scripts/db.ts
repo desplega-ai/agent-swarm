@@ -8,10 +8,10 @@ import type {
   ScriptScope,
   ScriptVersionRecord,
 } from "../../types";
-import { registerVolatileSecret } from "../../utils/secret-scrubber";
 import { generateBearerToken, generateShortId } from "../../utils/short-id";
 import { decryptSecret, encryptSecret, getEncryptionKey } from "../crypto";
 import { computeContentHash, getDbClient } from "../db";
+import { registerStoredSecret, scriptApiSecretName } from "../secret-registry";
 import { embedScript } from "./embeddings";
 
 type ScriptRow = Omit<ScriptRecord, "isScratch" | "typeChecked"> & {
@@ -517,7 +517,7 @@ export async function createScriptApi(args: {
         ],
       );
       if (!row) throw new Error("Failed to create script API endpoint");
-      if (token) registerVolatileSecret(token, `script-api:${id}`);
+      registerStoredSecret(token, scriptApiSecretName(id));
       return { ...rowToScriptApi(row), token };
     } catch (err) {
       if (isUniqueConstraintError(err) && attempt < 4) continue;
@@ -525,6 +525,30 @@ export async function createScriptApi(args: {
     }
   }
   throw new Error("Failed to allocate a unique script API endpoint id");
+}
+
+/**
+ * Every stored script API bearer token, decrypted, for the secret registry
+ * (src/be/secret-registry.ts). A row that fails to decrypt is counted, not thrown.
+ */
+export async function listStoredScriptApiSecrets(): Promise<{
+  secrets: { id: string; token: string }[];
+  failed: number;
+}> {
+  const rows = await getDbClient().query<{ id: string; bearerTokenEncrypted: string }>(
+    "SELECT id, bearerTokenEncrypted FROM script_apis WHERE bearerTokenEncrypted IS NOT NULL",
+  );
+  const secrets: { id: string; token: string }[] = [];
+  let failed = 0;
+  for (const row of rows) {
+    try {
+      const token = decryptSecret(row.bearerTokenEncrypted, getEncryptionKey());
+      if (token) secrets.push({ id: row.id, token });
+    } catch {
+      failed++;
+    }
+  }
+  return { secrets, failed };
 }
 
 export async function listScriptApisForScript(scriptId: string): Promise<ScriptApiRecord[]> {
@@ -554,7 +578,7 @@ export async function getScriptApiSecret(id: string): Promise<string | null> {
   );
   if (!row?.bearerTokenEncrypted) return null;
   const token = decryptSecret(row.bearerTokenEncrypted, getEncryptionKey());
-  registerVolatileSecret(token, `script-api:${id}`);
+  registerStoredSecret(token, scriptApiSecretName(id));
   return token;
 }
 
@@ -604,7 +628,7 @@ export async function rotateScriptApiSecret(
     [encrypted, updatedBy ?? null, id],
   );
   if (!row) return null;
-  registerVolatileSecret(token, `script-api:${id}`);
+  registerStoredSecret(token, scriptApiSecretName(id));
   return { ...rowToScriptApi(row), token };
 }
 

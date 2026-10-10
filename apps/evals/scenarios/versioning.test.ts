@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { hashScenario, normalizeSourceTokens } from "../src/scenario-hash.ts";
@@ -126,6 +126,56 @@ describe("hashScenario", () => {
     const before = hashScenario(base, { scenariosDir: dir });
     writeFileSync(join(dir, "fixtures", "sql-audit-history.sql"), "INSERT INTO t VALUES (2);\n");
     expect(hashScenario(base, { scenariosDir: dir })).not.toBe(before);
+  });
+
+  test("changes when a file under the scenario's own fixtures/<id>/ directory changes", () => {
+    const dir = mkdtempSync(join(tmpdir(), "scenario-hash-"));
+    mkdirSync(join(dir, "fixtures", base.id, "repo"), { recursive: true });
+    writeFileSync(join(dir, "fixtures", "sql-audit-history.sql"), "INSERT INTO t VALUES (1);\n");
+    writeFileSync(join(dir, `${base.id}.ts`), "export const x = 1;\n");
+    const hidden = join(dir, "fixtures", base.id, "repo", "hidden.test.ts.txt");
+    writeFileSync(hidden, "test one\n");
+    const before = hashScenario(base, { scenariosDir: dir });
+    writeFileSync(hidden, "test two\n");
+    expect(hashScenario(base, { scenariosDir: dir })).not.toBe(before);
+    writeFileSync(join(dir, "fixtures", base.id, "repo", "added.txt"), "new file\n");
+    expect(hashScenario(base, { scenariosDir: dir })).not.toBe(before);
+  });
+
+  test("rejects a symlink under the scenario's fixtures/<id>/ directory instead of following it", () => {
+    const dir = mkdtempSync(join(tmpdir(), "scenario-hash-"));
+    mkdirSync(join(dir, "fixtures", base.id), { recursive: true });
+    writeFileSync(join(dir, "fixtures", "sql-audit-history.sql"), "INSERT INTO t VALUES (1);\n");
+    writeFileSync(join(dir, `${base.id}.ts`), "export const x = 1;\n");
+    symlinkSync("/dev/zero", join(dir, "fixtures", base.id, "zero"));
+    expect(() => hashScenario(base, { scenariosDir: dir })).toThrow(/not a regular file/);
+  });
+
+  test("rejects a named fixture that is a symlink", () => {
+    const dir = mkdtempSync(join(tmpdir(), "scenario-hash-"));
+    mkdirSync(join(dir, "fixtures"));
+    writeFileSync(join(dir, `${base.id}.ts`), "export const x = 1;\n");
+    symlinkSync("/dev/zero", join(dir, "fixtures", "sql-audit-history.sql"));
+    expect(() => hashScenario(base, { scenariosDir: dir })).toThrow(/not a regular file/);
+  });
+
+  test("rejects a fixture over the per-file size limit without reading it", () => {
+    const dir = mkdtempSync(join(tmpdir(), "scenario-hash-"));
+    mkdirSync(join(dir, "fixtures"));
+    writeFileSync(join(dir, `${base.id}.ts`), "export const x = 1;\n");
+    writeFileSync(join(dir, "fixtures", "sql-audit-history.sql"), Buffer.alloc(1024 * 1024 + 1));
+    expect(() => hashScenario(base, { scenariosDir: dir })).toThrow(/per-file limit/);
+  });
+
+  test("rejects fixtures whose combined size is over the aggregate limit", () => {
+    const dir = mkdtempSync(join(tmpdir(), "scenario-hash-"));
+    mkdirSync(join(dir, "fixtures", base.id), { recursive: true });
+    writeFileSync(join(dir, "fixtures", "sql-audit-history.sql"), "INSERT INTO t VALUES (1);\n");
+    writeFileSync(join(dir, `${base.id}.ts`), "export const x = 1;\n");
+    for (let i = 0; i < 9; i++) {
+      writeFileSync(join(dir, "fixtures", base.id, `blob-${i}.bin`), Buffer.alloc(1024 * 1024));
+    }
+    expect(() => hashScenario(base, { scenariosDir: dir })).toThrow(/aggregate limit/);
   });
 
   test("changes when the scenario source changes, but not for comments or formatting", () => {

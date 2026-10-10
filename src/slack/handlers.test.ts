@@ -529,6 +529,28 @@ describe("Slack accepted-message acknowledgements", () => {
     });
   });
 
+  test("thread reply to the Lead opts out of the latest task's outputSchema", async () => {
+    await messageHandler!({
+      event: {
+        type: "message",
+        channel: "D_THREAD_SCHEMA_TEST",
+        thread_ts: "2100000001.000001",
+        ts: "2100000001.000002",
+        text: "<@U_SWARM_BOT> status?",
+        user: "U_HUMAN",
+      },
+      body: { event_id: "evt_thread_schema_optout_001" },
+      client,
+      say: mock(async () => {}),
+    });
+
+    expect(createTaskSpy).toHaveBeenCalledTimes(1);
+    expect(createTaskSpy.mock.calls[0]![1]).toMatchObject({
+      parentTaskId: completedTask.id,
+      inheritParentOutputSchema: false,
+    });
+  });
+
   test("direct steering wires its timestamp, reaction, and early exit", async () => {
     const source = await Bun.file(new URL("handlers.ts", import.meta.url)).text();
     expect(source).toContain("messageTimestamps: [msg.ts]");
@@ -559,6 +581,30 @@ describe("Slack accepted-message acknowledgements", () => {
       channel: "D_ASSISTANT_ACK_TEST",
       name: "eyes",
       timestamp: "2200000000.000002",
+    });
+  });
+
+  test("assistant thread reply opts out of the latest task's outputSchema", async () => {
+    await assistantMessageHandler!({
+      message: {
+        channel: "D_ASSISTANT_SCHEMA_TEST",
+        thread_ts: "2200000001.000001",
+        ts: "2200000001.000002",
+        text: "status?",
+        user: "U_HUMAN",
+      },
+      body: { event_id: "evt_assistant_schema_optout_001" },
+      client,
+      say: mock(async () => {}),
+      setStatus: mock(async () => {}),
+      setTitle: mock(async () => {}),
+      getThreadContext: mock(async () => ({})),
+    });
+
+    expect(createTaskSpy).toHaveBeenCalledTimes(1);
+    expect(createTaskSpy.mock.calls[0]![1]).toMatchObject({
+      parentTaskId: completedTask.id,
+      inheritParentOutputSchema: false,
     });
   });
 

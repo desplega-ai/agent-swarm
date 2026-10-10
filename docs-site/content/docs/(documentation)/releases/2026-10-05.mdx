@@ -1,0 +1,109 @@
+---
+title: "Release Notes — Week of September 28 to October 5, 2026"
+description: "Five releases let swarms make cheap workflow decisions with human review, run Claude and memory on enterprise clouds, and prove results on a public benchmark, across 190 merged commits."
+---
+
+Five releases shipped this week — v1.158.0 through v1.162.0 — across 190 merged commits. The through-line: swarms got cheaper and safer at deciding, they run where enterprises already run, and we started publishing evidence of how well they work. A note on scope: 14 commits landed on main after the v1.162.0 tag and ship in the next release; each is marked below.
+
+## Highlights
+
+### System-one decisions with human review
+
+A native `system-one-decision` workflow node routes branches through a fast, cheap model call — including via OpenRouter — instead of spinning up a full agent task. Routine routing and triage no longer need an agent in the loop. Provider keys are preflighted before the run starts, so a missing key fails at save time, not mid-run. And when the model's confidence lands inside a band you configure, the answer pauses for human review instead of guessing ([#1715](https://github.com/desplega-ai/agent-swarm/pull/1715)). Uncertain calls escalate to people by design, which is the answer to "who watches the agents" that actually ships. Setup walkthrough, including the laya provider: ([#1750](https://github.com/desplega-ai/agent-swarm/pull/1750)).
+
+### Claude on your gateway, Foundry, Bedrock or Vertex
+
+Claude workers now accept gateway, Microsoft Foundry, AWS Bedrock and Google Vertex routes ([#1816](https://github.com/desplega-ai/agent-swarm/pull/1816)). Pair them with the Azure / Foundry embeddings preset and Memory integration card so memory stays in the same cloud as the model ([#1836](https://github.com/desplega-ai/agent-swarm/pull/1836)). Enterprise swarms no longer route around their existing cloud commitments.
+
+### Azure DevOps integration
+
+A minimal Azure DevOps integration: Azure Repos plus PR service hooks ([#1812](https://github.com/desplega-ai/agent-swarm/pull/1812)). A follow-up acks partial payloads instead of returning 500 ([#1823](https://github.com/desplega-ai/agent-swarm/pull/1823)).
+
+### Live model catalog
+
+Model lists come from a live catalog instead of hard-coded tables, tiers resolve when a task is claimed, and a task whose model the assignee harness cannot run is rejected up front instead of failing mid-run ([#1691](https://github.com/desplega-ai/agent-swarm/pull/1691), [#1733](https://github.com/desplega-ai/agent-swarm/pull/1733), [#1764](https://github.com/desplega-ai/agent-swarm/pull/1764)).
+
+### Delegate from Claude Code with claude-mod
+
+claude-mod puts the swarm pane, a delegate tool, and live task logs inside Claude Code, so you can fan work out to the swarm without leaving your editor ([#1838](https://github.com/desplega-ai/agent-swarm/pull/1838)).
+
+### Public agent benchmark
+
+The evals app shipped as a public benchmark: a leaderboard with Pareto frontier and ranking table ([#1755](https://github.com/desplega-ai/agent-swarm/pull/1755)), scenario cards and a heatmap ([#1759](https://github.com/desplega-ai/agent-swarm/pull/1759)), and an analytics API for picking the best setup ([#1744](https://github.com/desplega-ai/agent-swarm/pull/1744)). Swarm scenarios — fan-out, worker recovery, implement-review, capability routing, human-in-loop — run against solo baselines ([#1745](https://github.com/desplega-ai/agent-swarm/pull/1745), [#1756](https://github.com/desplega-ai/agent-swarm/pull/1756)), with reasoning effort configurable per harness and model ([#1710](https://github.com/desplega-ai/agent-swarm/pull/1710)) and refusal-gated publishing ([#1761](https://github.com/desplega-ai/agent-swarm/pull/1761)).
+
+## Improvements
+
+**Workflows**
+
+- **Standard-webhooks verification** — webhook triggers verify `webhook-id`/`webhook-timestamp`/`webhook-signature` headers against the `whsec_` signing secret ([#1760](https://github.com/desplega-ai/agent-swarm/pull/1760)).
+- **Paged workflow runs** — `GET /api/workflows/{id}/runs` is paged and list rows drop run context ([#1699](https://github.com/desplega-ai/agent-swarm/pull/1699)).
+
+**Memory**
+
+- **Logical paths** — memories move and filter under `/longterm` via key, newKey, keyPrefix and path weight ([#1814](https://github.com/desplega-ai/agent-swarm/pull/1814)).
+- **Longterm key tree and whole-memory view** on `/memory` — on main after v1.162.0, ships in the next release ([#1856](https://github.com/desplega-ai/agent-swarm/pull/1856)).
+- **Count-based retention** for context_versions ([#1808](https://github.com/desplega-ai/agent-swarm/pull/1808)).
+
+**Slack and extensions**
+
+- **Native Slack working status** for the whole life of an ask ([#1770](https://github.com/desplega-ai/agent-swarm/pull/1770)).
+- **Opt-in inline extension install** for leads and operators ([#1828](https://github.com/desplega-ai/agent-swarm/pull/1828)).
+- **Deploy-awareness catalog extension** ([#1826](https://github.com/desplega-ai/agent-swarm/pull/1826)).
+
+**Harnesses and models**
+
+- **pi** — opt-in codemode ([#1731](https://github.com/desplega-ai/agent-swarm/pull/1731)) with a `PI_CODEMODE_MODELS` flag ([#1824](https://github.com/desplega-ai/agent-swarm/pull/1824)), installed MCP servers through pi's MCP extension ([#1730](https://github.com/desplega-ai/agent-swarm/pull/1730)), and non-core tools deferred behind tool_search ([#1729](https://github.com/desplega-ai/agent-swarm/pull/1729)).
+- **Codex CLI 0.159.0 with GPT-6.1 Sol** ([#1719](https://github.com/desplega-ai/agent-swarm/pull/1719)).
+- **OpenCode** emits assistant text so outputSchema validation works ([#1753](https://github.com/desplega-ai/agent-swarm/pull/1753)).
+- **Auth resilience** — seat-aware Claude OAuth key selection ([#1765](https://github.com/desplega-ai/agent-swarm/pull/1765)) and Codex pool login benching after 2 auth failures ([#1763](https://github.com/desplega-ai/agent-swarm/pull/1763)).
+
+**Dashboard**
+
+- **Contextual session panel** on every page ([#1688](https://github.com/desplega-ai/agent-swarm/pull/1688)).
+- **agent-fs review space** in the dashboard, off by default ([#1728](https://github.com/desplega-ai/agent-swarm/pull/1728)).
+- **Reference icon set for task status** — on main after v1.162.0, ships in the next release ([#1860](https://github.com/desplega-ai/agent-swarm/pull/1860)).
+- **Dev mode for version gates** ([#1726](https://github.com/desplega-ai/agent-swarm/pull/1726)).
+
+**Telemetry**
+
+- **schema_version 2 identity envelope** ([#1780](https://github.com/desplega-ai/agent-swarm/pull/1780)) and dashboard events honor the telemetry opt-out ([#1773](https://github.com/desplega-ai/agent-swarm/pull/1773)).
+
+**Docs**
+
+- **Multi-agent orchestration patterns guide** ([#1864](https://github.com/desplega-ai/agent-swarm/pull/1864)) and **team collaboration feature page** ([#1865](https://github.com/desplega-ai/agent-swarm/pull/1865)) — both on main after v1.162.0, ship in the next release.
+- **Workflow example configs and routing corrected** ([#1862](https://github.com/desplega-ai/agent-swarm/pull/1862)).
+
+## Bug Fixes
+
+**API performance and event-loop stalls**
+
+- **Slim task lists** — SQL projection, opt-in total and a timeline shape for `GET /api/tasks` ([#1697](https://github.com/desplega-ai/agent-swarm/pull/1697)); opt-in slim list rows for schedules and approvals ([#1703](https://github.com/desplega-ai/agent-swarm/pull/1703)).
+- **Batched lookups** — session steering and citation lookups ([#1704](https://github.com/desplega-ai/agent-swarm/pull/1704)) and profile-sync banner lookups ([#1701](https://github.com/desplega-ai/agent-swarm/pull/1701)); agent status counts now run in SQL ([#1716](https://github.com/desplega-ai/agent-swarm/pull/1716)).
+- **Event-loop stalls stopped** — KV range scans ([#1690](https://github.com/desplega-ai/agent-swarm/pull/1690)) and chunked app sync ([#1696](https://github.com/desplega-ai/agent-swarm/pull/1696)).
+- **SQLITE_BUSY** — the final attempt is capped at 250ms with stall reporting ([#1707](https://github.com/desplega-ai/agent-swarm/pull/1707)); pricing and RBAC seed once per DB handle ([#1695](https://github.com/desplega-ai/agent-swarm/pull/1695)).
+
+**Runner and shutdown**
+
+- **Graceful drain** — the API drains on SIGTERM so workers hand off while it still serves ([#1837](https://github.com/desplega-ai/agent-swarm/pull/1837)).
+- **Stuck slots** — worker slot freed when a provider session never settles ([#1820](https://github.com/desplega-ai/agent-swarm/pull/1820)).
+- **Output recovery** — fenced JSON recovered for schema-bound tasks ([#1833](https://github.com/desplega-ai/agent-swarm/pull/1833)); pi reprompts once on an empty final turn ([#1831](https://github.com/desplega-ai/agent-swarm/pull/1831)); Claude task body sent once ([#1815](https://github.com/desplega-ai/agent-swarm/pull/1815)).
+- **MCP and workflows** — unknown MCP session ids return 404 so clients reconnect ([#1822](https://github.com/desplega-ai/agent-swarm/pull/1822)); `node.retry` honored when an agent-task step fails ([#1832](https://github.com/desplega-ai/agent-swarm/pull/1832)).
+
+**Memory retrieval**
+
+- **One relevance scale** — every retrieval arm lands on one [0,1] scale with relevance-gated injection ([#1689](https://github.com/desplega-ai/agent-swarm/pull/1689)).
+- **Recall task content** instead of worker wrappers ([#1740](https://github.com/desplega-ai/agent-swarm/pull/1740)); rater model pinned and recorded per rating ([#1806](https://github.com/desplega-ai/agent-swarm/pull/1806)).
+- **On main after v1.162.0** — stale chunks removed on keyed delete ([#1857](https://github.com/desplega-ai/agent-swarm/pull/1857)) and key-only lookup resolves one visible document ([#1861](https://github.com/desplega-ai/agent-swarm/pull/1861)).
+
+**Tasks and heartbeat**
+
+- **Superseded tasks** — dependents re-pointed to the resume ([#1713](https://github.com/desplega-ai/agent-swarm/pull/1713), [#1664](https://github.com/desplega-ai/agent-swarm/pull/1664)); followUpConfig inheritance scoped to continuations ([#1680](https://github.com/desplega-ai/agent-swarm/pull/1680)).
+- **Heartbeat** — flag parsing and interval 0 honored ([#1711](https://github.com/desplega-ai/agent-swarm/pull/1711)); fresh installs no longer point at unseeded scripts ([#1714](https://github.com/desplega-ai/agent-swarm/pull/1714)).
+
+## Breaking Changes
+
+This week tightens behavior rather than removing APIs — these are requests that may now be refused:
+
+- **Task model validation** — a task whose model the assignee harness cannot run is rejected at creation ([#1764](https://github.com/desplega-ai/agent-swarm/pull/1764)). In v1.159.0+.
+- **Task write ownership** — `store-progress` refuses writes to another agent's task ([#1737](https://github.com/desplega-ai/agent-swarm/pull/1737)). In v1.159.0+.
+- **RBAC, on main after v1.162.0** — stdio MCP servers at agent scope ([#1851](https://github.com/desplega-ai/agent-swarm/pull/1851)), changing a repo's allowMerge ([#1852](https://github.com/desplega-ai/agent-swarm/pull/1852), [#1859](https://github.com/desplega-ai/agent-swarm/pull/1859)) and attributing a task to another user ([#1853](https://github.com/desplega-ai/agent-swarm/pull/1853)) now require a lead, operator or user. HTTP memory delete is gated and list is narrowed for agent callers ([#1855](https://github.com/desplega-ai/agent-swarm/pull/1855)).

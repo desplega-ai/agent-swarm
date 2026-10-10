@@ -73,6 +73,18 @@ export function parseModelLimitMessage(text: string): ModelFamily | undefined {
   return match[1]!.toLowerCase() as ModelFamily;
 }
 
+/**
+ * Text signal for a seat that cannot run the model. Matches the CLI's failure
+ * text for a `credits_required` rejection, e.g. "Fable 5.1 requires usage
+ * credits. Switch to another model to continue." A dot followed by a digit
+ * is allowed so a version number ("5.1") does not end the match.
+ */
+export function parseCreditsRequiredMessage(text: string): ModelFamily | undefined {
+  const match = text.match(/(Fable|Opus|Sonnet)(?:[^.]|\.(?=\d)){0,40}requires usage credits/i);
+  if (!match) return undefined;
+  return match[1]!.toLowerCase() as ModelFamily;
+}
+
 interface RateLimitWindowLike {
   status: string;
   resetsAt?: number;

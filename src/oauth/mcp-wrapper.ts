@@ -372,7 +372,7 @@ function formUrlEncodeComponent(value: string): string {
  * at each call site means a new sensitive field cannot forget one shape.
  */
 function redactSentCredentials(text: string, sent: Array<string | null | undefined>): string {
-  let out = scrubSecrets(text);
+  let out: string = scrubSecrets(text);
   for (const value of sent) {
     if (!value) continue;
     for (const shape of new Set([value, formUrlEncodeComponent(value)])) {

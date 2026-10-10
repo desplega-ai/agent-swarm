@@ -48,6 +48,7 @@ const GATE_HELPER_SPECIFIERS = [
   "kv-write-auth", // kv-set / kv-delete / kv-incr shared write guard
   "task-tool-ctx", // assertOwnsTask → task.read.own / task.cancel.own / task.action.own
   "workflows/approval-cancel", // cancelApprovalRequest → approval.cancel.any
+  "memory/key-guard", // assertKeyWritable → memory.write.consolidated (memory-store, memory-edit)
 ];
 
 /**
@@ -90,8 +91,6 @@ const UNGATED_TOOL_FILES: Record<string, string> = {
   "src/tools/memory-get.ts": PIN_REASON,
   "src/tools/memory-rate.ts": PIN_REASON,
   "src/tools/memory-search.ts": PIN_REASON,
-  "src/tools/memory-store.ts":
-    "writes only rows owned by the calling agent (same posture as the POST /api/memory/index route it wraps)",
   "src/tools/my-agent-info.ts": PIN_REASON,
   "src/tools/oauth-access-token.ts": PIN_REASON,
   "src/tools/poll-task.ts": PIN_REASON,
@@ -105,7 +104,6 @@ const UNGATED_TOOL_FILES: Record<string, string> = {
   "src/tools/register-agentmail-inbox.ts": PIN_REASON,
   "src/tools/register-service.ts": PIN_REASON,
   "src/tools/repos/get-repos.ts": PIN_REASON,
-  "src/tools/repos/update-repo.ts": PIN_REASON,
   "src/tools/request-human-input.ts": PIN_REASON,
   "src/tools/resolve-user.ts": PIN_REASON,
   "src/tools/schedules/create-schedule.ts": PIN_REASON,
@@ -237,7 +235,6 @@ const ROUTE_RBAC_BACKLOG: Record<string, string> = {
   "DELETE /api/active-sessions/by-task/{taskId}": BACKLOG_REASON,
   "DELETE /api/budgets/{scope}/{scopeId}": BACKLOG_REASON,
   "DELETE /api/mcp-oauth/{mcpServerId}": BACKLOG_REASON,
-  "DELETE /api/memory/{id}": BACKLOG_REASON,
   "DELETE /api/metrics/definitions/{id}": BACKLOG_REASON,
   "DELETE /api/oauth/refresh-locks/{key}": BACKLOG_REASON,
   "DELETE /api/pages/{id}": BACKLOG_REASON,
@@ -268,7 +265,6 @@ const ROUTE_RBAC_BACKLOG: Record<string, string> = {
   "POST /api/agentmail/webhook": BACKLOG_REASON,
   "POST /api/agents": BACKLOG_REASON,
   "POST /api/approval-requests": BACKLOG_REASON,
-  "POST /api/approval-requests/{id}/respond": BACKLOG_REASON,
   "POST /api/channel-activity/commit-cursors": BACKLOG_REASON,
   "POST /api/config/reload": BACKLOG_REASON,
   "POST /api/db-query": BACKLOG_REASON,
@@ -293,8 +289,6 @@ const ROUTE_RBAC_BACKLOG: Record<string, string> = {
   "POST /api/mcp-bridge": BACKLOG_REASON,
   "POST /api/mcp-oauth/{mcpServerId}/manual-client": BACKLOG_REASON,
   "POST /api/mcp-oauth/{mcpServerId}/refresh": BACKLOG_REASON,
-  "POST /api/memory/index": BACKLOG_REASON,
-  "POST /api/memory/list": BACKLOG_REASON,
   "POST /api/memory/rate": BACKLOG_REASON,
   "POST /api/memory/re-embed": BACKLOG_REASON,
   "POST /api/memory/search": BACKLOG_REASON,
@@ -309,7 +303,6 @@ const ROUTE_RBAC_BACKLOG: Record<string, string> = {
   "POST /api/prompt-templates/{id}/reset": BACKLOG_REASON,
   "POST /api/prompt-templates/preview": BACKLOG_REASON,
   "POST /api/prompt-templates/render": BACKLOG_REASON,
-  "POST /api/repos": BACKLOG_REASON,
   "POST /api/schedules": BACKLOG_REASON,
   "POST /api/schedules/{id}/run": BACKLOG_REASON,
   "POST /api/scripts/run": BACKLOG_REASON,
@@ -354,7 +347,6 @@ const ROUTE_RBAC_BACKLOG: Record<string, string> = {
   "PUT /api/metrics/definitions/{id}": BACKLOG_REASON,
   "PUT /api/pages/{id}": BACKLOG_REASON,
   "PUT /api/prompt-templates": BACKLOG_REASON,
-  "PUT /api/repos/{id}": BACKLOG_REASON,
   "PUT /api/schedules/{id}": BACKLOG_REASON,
   "PUT /api/tasks/{id}/session": BACKLOG_REASON,
   "PUT /api/workflows/{id}": BACKLOG_REASON,

@@ -4,6 +4,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ClaudeAdapter } from "../providers/claude-adapter";
 import type { ProviderSession, ProviderSessionConfig } from "../providers/types";
+import {
+  detachedProcessGroup,
+  listDescendantPids,
+  terminateProcessTree,
+} from "../utils/process-group";
 import { CHILD_PROCESS_TEST_BUDGET_MS } from "./test-proc";
 
 function processExists(pid: number): boolean {
@@ -189,6 +194,42 @@ describe("provider process groups", () => {
           }
         }
         await rm(dir, { recursive: true, force: true });
+      }
+    },
+    CHILD_PROCESS_TEST_BUDGET_MS,
+  );
+
+  test.skipIf(process.platform !== "linux")(
+    "terminateProcessTree also kills a descendant that left the process group",
+    async () => {
+      // `setsid` gives the sleep its own session, as Amp's shell tool does, so a
+      // group kill cannot reach it.
+      const proc = Bun.spawn(["sh", "-c", "setsid sleep 120 & wait"], {
+        stdin: "ignore",
+        stdout: "ignore",
+        stderr: "ignore",
+        detached: detachedProcessGroup,
+      });
+      let descendants: number[] = [];
+      try {
+        for (let i = 0; i < 100 && descendants.length === 0; i++) {
+          descendants = await listDescendantPids(proc.pid);
+          if (descendants.length === 0) await Bun.sleep(30);
+        }
+        expect(descendants.length).toBeGreaterThan(0);
+        expect(descendants).not.toContain(proc.pid);
+        await terminateProcessTree(proc.pid);
+        for (const pid of descendants) {
+          expect(await waitForProcessGone(pid, PROCESS_GONE_TIMEOUT_MS)).toBe(true);
+        }
+      } finally {
+        for (const pid of descendants) {
+          try {
+            process.kill(pid, "SIGKILL");
+          } catch {
+            // Already gone.
+          }
+        }
       }
     },
     CHILD_PROCESS_TEST_BUDGET_MS,

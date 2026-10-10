@@ -305,7 +305,9 @@ describe("Claude CLI shortnames (the tier defaults) take effort like the model t
     expect(reasoningCapability("claude", "sonnet")).toEqual(
       reasoningCapability("claude", "claude-sonnet-5-5"),
     );
-    expect(reasoningCapability("claude", "haiku").levels).toContain("off");
+    expect(reasoningCapability("claude", "haiku")).toEqual(
+      reasoningCapability("claude", "claude-haiku-5-5"),
+    );
     expect(reasoningCapability("claude", "fable").supported).toBe(true);
   });
 

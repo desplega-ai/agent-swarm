@@ -1,0 +1,218 @@
+import { describe, expect, test } from "bun:test";
+import { normalizeModelKey } from "../be/pricing-normalize";
+import { recomputeSessionCost } from "../http/session-cost-recompute";
+import { parseAmpThreadUsage } from "../providers/amp-adapter";
+import { ampPricingLookup as lookupFromSeed } from "./amp-pricing-helpers";
+
+describe("amp pricing", () => {
+  test("model keys: vendor prefixes and OpenAI snapshot dates collapse, Fireworks paths and Anthropic dates stay", () => {
+    expect(normalizeModelKey("amp", "openai/gpt-5-nano")).toBe("gpt-5-nano");
+    expect(normalizeModelKey("amp", "gpt-5-nano-2025-08-07")).toBe("gpt-5-nano");
+    expect(normalizeModelKey("amp", "Anthropic/claude-haiku-4-5-20251001")).toBe(
+      "claude-haiku-4-5-20251001",
+    );
+    expect(normalizeModelKey("amp", "accounts/fireworks/models/glm-5p3-flash")).toBe(
+      "accounts/fireworks/models/glm-5p3-flash",
+    );
+    // Only amp collapses dated ids.
+    expect(normalizeModelKey("codex", "gpt-5-nano-2025-08-07")).toBe("gpt-5-nano-2025-08-07");
+  });
+
+  test("the models Amp ran in live sessions price from the table", async () => {
+    // Real ids from `amp threads export`: low -> Fireworks GLM, a pin -> OpenAI snapshot,
+    // medium -> Opus 5.5, an Anthropic pin -> dated Haiku.
+    const thread = parseAmpThreadUsage({
+      messages: [
+        {
+          role: "assistant",
+          usage: {
+            model: "accounts/fireworks/models/glm-5p3-flash",
+            inputTokens: 0,
+            outputTokens: 4,
+            cacheReadInputTokens: 0,
+            cacheCreationInputTokens: 37260,
+          },
+        },
+        {
+          role: "assistant",
+          usage: {
+            model: "gpt-5-nano-2025-08-07",
+            inputTokens: 0,
+            outputTokens: 26,
+            cacheReadInputTokens: 0,
+            cacheCreationInputTokens: 41454,
+          },
+        },
+        {
+          role: "assistant",
+          usage: {
+            model: "claude-opus-5-5",
+            inputTokens: 4,
+            outputTokens: 5,
+            cacheReadInputTokens: 0,
+            cacheCreationInputTokens: 65602,
+          },
+        },
+        {
+          role: "assistant",
+          usage: {
+            model: "claude-haiku-4-5-20251001",
+            inputTokens: 10,
+            outputTokens: 43,
+            cacheReadInputTokens: 0,
+            cacheCreationInputTokens: 48654,
+          },
+        },
+      ],
+    });
+    const models = thread?.models ?? [];
+    expect(models).toHaveLength(4);
+    const result = await recomputeSessionCost(
+      {
+        provider: "amp",
+        model: "claude-opus-5-5",
+        harnessCostUsd: 0,
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+        models,
+        atEpochMs: Date.now(),
+      },
+      lookupFromSeed(),
+    );
+    expect(result.costSource).toBe("pricing-table");
+    const byModel = Object.fromEntries(
+      (result.modelBreakdown ?? []).map((m) => [m.model, m.costUsd]),
+    );
+    // USD per 1M tokens, from the vendored models.dev snapshot.
+    expect(byModel["accounts/fireworks/models/glm-5p3-flash"]).toBeCloseTo(
+      (37260 * 0.15 + 4 * 0.5) / 1e6,
+      9,
+    );
+    expect(byModel["gpt-5-nano-2025-08-07"]).toBeCloseTo((41454 * 0.05 + 26 * 0.4) / 1e6, 9);
+    // Anthropic bills the cache write at its own rate.
+    expect(byModel["claude-opus-5-5"]).toBeCloseTo((4 * 4 + 65602 * 5 + 5 * 20) / 1e6, 9);
+    expect(byModel["claude-haiku-4-5-20251001"]).toBeCloseTo(
+      (10 * 1 + 48654 * 1.25 + 43 * 5) / 1e6,
+      9,
+    );
+    expect(result.totalCostUsd).toBeCloseTo(
+      Object.values(byModel).reduce((sum, usd) => sum + usd, 0),
+      9,
+    );
+  });
+
+  test("a model the table does not know settles unpriced instead of free", async () => {
+    const usage = {
+      inputTokens: 100,
+      outputTokens: 10,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+    };
+    const result = await recomputeSessionCost(
+      {
+        provider: "amp",
+        model: "accounts/fireworks/models/not-in-the-table",
+        harnessCostUsd: 0,
+        ...usage,
+        models: [{ model: "accounts/fireworks/models/not-in-the-table", ...usage }],
+        atEpochMs: Date.now(),
+      },
+      lookupFromSeed(),
+    );
+    expect(result.costSource).toBe("unpriced");
+  });
+});
+
+describe("amp cost when the thread export failed", () => {
+  // The stream's totals, as the adapter sends them with no `models`.
+  const stream = {
+    inputTokens: 1000,
+    outputTokens: 200,
+    cacheReadTokens: 5000,
+    cacheWriteTokens: 3000,
+  };
+  const estimate = (model: string) =>
+    recomputeSessionCost(
+      { provider: "amp", model, harnessCostUsd: 0, ...stream, atEpochMs: Date.now() },
+      lookupFromSeed(),
+    );
+  const priced = async (model: string, usage: typeof stream) =>
+    (
+      await recomputeSessionCost(
+        {
+          provider: "amp",
+          model,
+          harnessCostUsd: 0,
+          ...usage,
+          models: [{ model, ...usage }],
+          atEpochMs: Date.now(),
+        },
+        lookupFromSeed(),
+      )
+    ).totalCostUsd;
+
+  test("a mode is priced at the model it is known to run, tagged estimated", async () => {
+    const low = await estimate("low");
+    expect(low.costSource).toBe("estimated");
+    // GLM bills cache creation as input, like the export parser.
+    expect(low.totalCostUsd).toBeCloseTo(
+      await priced("accounts/fireworks/models/glm-5p3-flash", {
+        ...stream,
+        inputTokens: stream.inputTokens + stream.cacheWriteTokens,
+        cacheWriteTokens: 0,
+      }),
+      12,
+    );
+    const medium = await estimate("medium");
+    expect(medium.costSource).toBe("estimated");
+    expect(medium.totalCostUsd).toBeCloseTo(await priced("claude-opus-5-5", stream), 12);
+    expect(medium.totalCostUsd).toBeGreaterThan(low.totalCostUsd);
+    // Measured live: high runs GPT-6 Astra, ultra runs Claude Fable 5.1.
+    expect((await estimate("high")).totalCostUsd).toBeCloseTo(
+      await priced("gpt-6-astra", {
+        ...stream,
+        inputTokens: stream.inputTokens + stream.cacheWriteTokens,
+        cacheWriteTokens: 0,
+      }),
+      12,
+    );
+    const ultra = await estimate("ultra");
+    expect(ultra.totalCostUsd).toBeCloseTo(await priced("claude-fable-5-1", stream), 12);
+    expect(ultra.totalCostUsd).toBeGreaterThan(medium.totalCostUsd);
+  });
+
+  test("a pin the table does not know falls back to the medium model, never $0", async () => {
+    const result = await estimate("openai/not-in-the-table");
+    expect(result.costSource).toBe("estimated");
+    expect(result.totalCostUsd).toBeCloseTo(await priced("claude-opus-5-5", stream), 12);
+  });
+});
+
+describe("amp cost Amp reports itself", () => {
+  test("Amp's billed dollars win over the token price and the estimate", async () => {
+    const usage = { inputTokens: 4, outputTokens: 4, cacheReadTokens: 0, cacheWriteTokens: 57568 };
+    const withExport = await recomputeSessionCost(
+      {
+        provider: "amp",
+        model: "medium",
+        harnessCostUsd: 0.47,
+        ...usage,
+        models: [{ model: "claude-opus-5-5", ...usage }],
+        atEpochMs: Date.now(),
+      },
+      lookupFromSeed(),
+    );
+    expect(withExport.costSource).toBe("harness");
+    expect(withExport.totalCostUsd).toBe(0.47);
+    // The breakdown is still the token price, below what Amp billed.
+    expect(withExport.modelBreakdown?.[0]?.costUsd).toBeLessThan(0.47);
+
+    const noExport = await recomputeSessionCost(
+      { provider: "amp", model: "medium", harnessCostUsd: 0.47, ...usage, atEpochMs: Date.now() },
+      lookupFromSeed(),
+    );
+    expect(noExport).toMatchObject({ costSource: "harness", totalCostUsd: 0.47 });
+  });
+});

@@ -82,7 +82,8 @@ const DENY = {
   leadOrTaskCreator: "requires lead agent or task creator",
   leadOrResourceOwner: "requires lead agent or resource owner",
   leadOrOwnNamespace: "requires lead agent or your own task:agent: namespace",
-  memoryOwnerOrLeadSwarm: "requires memory owner, or lead agent for swarm-scoped memories",
+  memoryDelete:
+    "requires operator or user, the lead for swarm-scoped memories, or the owner for agent-scoped memories",
 } as const;
 
 const skillMd = (name: string, description: string) =>
@@ -329,7 +330,7 @@ describe("MCP gate matrix", () => {
       { type: "agent", id: WORKER_B },
       "memory.delete.any",
       "deny",
-      DENY.memoryOwnerOrLeadSwarm,
+      DENY.memoryDelete,
       "mcp",
     );
 
@@ -342,13 +343,7 @@ describe("MCP gate matrix", () => {
       memoryId: m3,
     });
     expect(leadOnAgentScoped.structuredContent.success).toBe(false);
-    expectRow(
-      { type: "agent", id: LEAD },
-      "memory.delete.any",
-      "deny",
-      DENY.memoryOwnerOrLeadSwarm,
-      "mcp",
-    );
+    expectRow({ type: "agent", id: LEAD }, "memory.delete.any", "deny", DENY.memoryDelete, "mcp");
 
     const leadOnSwarmScoped = await mcpCall(base, LEAD, sidLead, "memory-delete", {
       memoryId: m2,

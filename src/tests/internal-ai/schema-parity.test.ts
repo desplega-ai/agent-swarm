@@ -4,7 +4,7 @@ import { SummaryWithRatingsSchema } from "../../be/memory/raters/llm.js";
 import { summaryToolSchema } from "../../utils/internal-ai/summarize-session.js";
 
 /**
- * 10 valid + 10 invalid fixtures. Both validators (zod via `safeParse`,
+ * Valid + invalid fixtures. Both validators (zod via `safeParse`,
  * typebox via `Value.Check`) must agree on every fixture.
  *
  * Note: zod's `SummaryWithRatingsSchema` defaults `ratings` to `[]` when
@@ -54,6 +54,24 @@ const VALID_CASES: unknown[] = [
     summary: "max-reason",
     ratings: [{ id: "m1", score: 0.5, reasoning: "x".repeat(500) }],
   },
+  // blank referencesSource: models emit "" for "no source". One blank value
+  // must not reject the whole summary; buildRatingsFromLlm drops the edge.
+  {
+    summary: "empty-ref",
+    ratings: [{ id: "m1", score: 0.5, reasoning: "ok", referencesSource: "" }],
+  },
+  {
+    summary: "whitespace-ref",
+    ratings: [{ id: "m1", score: 0.5, reasoning: "ok", referencesSource: "   " }],
+  },
+  // one blank among valid ratings.
+  {
+    summary: "mixed-refs",
+    ratings: [
+      { id: "m1", score: 0.9, reasoning: "ok", referencesSource: "linear:DES-1" },
+      { id: "m2", score: 0.1, reasoning: "ok", referencesSource: "" },
+    ],
+  },
 ];
 
 const INVALID_CASES: unknown[] = [
@@ -74,6 +92,12 @@ const INVALID_CASES: unknown[] = [
   { summary: "ok", ratings: [{ id: "m1", score: -0.1, reasoning: "x" }] },
   // rating with non-string id.
   { summary: "ok", ratings: [{ id: 7, score: 0.5, reasoning: "x" }] },
+  // referencesSource still bounded and typed: only blank became valid.
+  { summary: "ok", ratings: [{ id: "m1", score: 0.5, reasoning: "x", referencesSource: 7 }] },
+  {
+    summary: "ok",
+    ratings: [{ id: "m1", score: 0.5, reasoning: "x", referencesSource: "x".repeat(513) }],
+  },
 ];
 
 describe("schema-parity: SummaryWithRatingsSchema (zod) vs summaryToolSchema (typebox)", () => {

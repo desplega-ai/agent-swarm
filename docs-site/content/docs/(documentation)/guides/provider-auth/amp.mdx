@@ -1,0 +1,90 @@
+---
+title: Amp
+description: Run Agent Swarm workers on Sourcegraph's Amp CLI, get an AMP_API_KEY, and understand modes and cost
+---
+
+The `amp` harness runs [Amp](https://ampcode.com)'s CLI in execute mode
+(`amp -x --stream-json --stream-json-input`). Amp picks the model for each
+mode on its own servers and bills the thread to your Amp account. This page
+covers setup and the access token. The adapter internals are in
+[Harness Providers § Amp](/docs/guides/harness-providers#amp-amp).
+
+<Callout type="warn">
+**Every Amp thread is stored on ampcode.com.** Prompts, tool calls and tool
+output leave your infrastructure. Threads start with `--visibility private`,
+but Amp has no local-only mode. Amp's licence is proprietary
+([terms](https://ampcode.com/terms)).
+</Callout>
+
+## Get an access token
+
+The CLI accepts an access token, not the session that `amp login` stores. The
+session token expires within an hour and cannot be refreshed from an
+environment variable, so the CLI rejects it in `AMP_API_KEY`.
+
+1. Sign in at [ampcode.com](https://ampcode.com).
+2. Open **Settings → Security**
+   ([ampcode.com/settings/security#access-token](https://ampcode.com/settings/security#access-token)).
+3. Create an access token and copy it. It starts with `sgamp_`.
+4. Make sure the account or workspace has credits. Amp's
+   [pricing page](https://ampcode.com/docs/pricing) explains tiers and paid
+   credits. Without credits a session fails after it starts.
+
+Source: Amp's [execute mode docs](https://ampcode.com/docs/cli/execute-mode),
+checked 2026-10-05.
+
+## Configure the worker
+
+| Variable | Required | What it does |
+|---|---|---|
+| `HARNESS_PROVIDER=amp` | Yes | Selects the Amp adapter for the worker. |
+| `AMP_API_KEY` | Yes | The `sgamp_` access token. Store it as a secret in agent-scoped or global config, or in the worker environment. |
+| `AMP_BINARY` | No | Path to another trusted `amp` executable. Defaults to the one on `PATH`. |
+
+The full worker image ships the pinned CLI (`@ampcode/cli@0.0.1791604937-g4bfc2d`,
+SHA-512 verified, auto-update off). The slim image does not include it.
+
+To check the key, open the agent's Credentials tab or restart the worker. The
+live test runs `amp usage`, which reads the credit balance and runs no
+inference. A bad key fails with `Invalid or missing API key`. A missing key
+parks the worker in the credential wait.
+
+## Modes and models
+
+Amp has no model flag. A task's `modelTier` picks one of Amp's four modes, and
+Amp chooses the model behind it. Measured with `amp threads usage --details`
+on 2026-10-05, and matching [ampcode.com/modes](https://ampcode.com/modes):
+
+| `modelTier` | Amp mode | Agent model |
+|---|---|---|
+| `smol` | `low` | GLM-5.3 Flash |
+| `regular` | `medium` | Claude Opus 5.5 |
+| `smart` | `high` | GPT-6 Astra |
+| `ultra` | `ultra` | Claude Fable 5.1 |
+
+Amp re-routes modes as models change. A concrete `model` such as
+`anthropic/claude-haiku-4-5-20251001` or `openai/gpt-5-nano` pins that model
+on top of the `medium` mode's prompt and tools. Reasoning effort applies only
+to a pinned model.
+
+## Cost tracking
+
+The swarm records, in this order:
+
+1. **What Amp billed** (`costSource: 'harness'`). After the session the adapter
+   runs `amp threads usage <id> --details`, which runs no inference. Amp's
+   recorded cost covers the whole thread, including subagent threads and the
+   title requests that token counts miss. It is used only when every request
+   was billed through Amp.
+2. **Token price** (`costSource: 'pricing-table'`). When Amp's cost is missing,
+   or a request went through a linked provider such as a ChatGPT subscription
+   (Amp records $0 for those and the provider bills outside Amp), the API
+   prices the per-model tokens from `amp threads export <id>`.
+3. **Estimate** (`costSource: 'estimated'`). When the export is empty too, as
+   after some cancels, the stream's token totals are priced at the mode's
+   model from the table above. The row is never $0, so budget admission
+   still counts it.
+
+On short live threads the token price came out at 30 to 70% of what Amp
+billed, mostly because the export leaves out title requests. Prefer the
+harness figure when you compare spend.

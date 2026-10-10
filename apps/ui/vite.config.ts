@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import tailwindcss from "@tailwindcss/vite";
@@ -47,13 +48,45 @@ function plausibleAnalytics(): Plugin {
   };
 }
 
+/**
+ * Stamps a build id into index.html (`<meta name="app-build-id">`) and writes
+ * it to `version.json`, so an open tab can tell that a newer UI is deployed
+ * (`src/components/shared/app-update-prompt.tsx`). The id hashes the
+ * content-hashed asset names, so a redeploy with an identical bundle keeps the
+ * same id and open tabs are not told to reload for nothing.
+ */
+function buildVersionManifest(): Plugin {
+  let buildId: string | null = null;
+  return {
+    name: "build-version-manifest",
+    apply: "build",
+    transformIndexHtml: {
+      order: "post",
+      handler(_html, ctx) {
+        if (!ctx.bundle) return [];
+        const assetNames = Object.keys(ctx.bundle)
+          .filter((name) => name.endsWith(".js") || name.endsWith(".css"))
+          .sort();
+        buildId = createHash("sha256").update(assetNames.join("\n")).digest("hex").slice(0, 16);
+        return [
+          { tag: "meta", attrs: { name: "app-build-id", content: buildId }, injectTo: "head" },
+        ];
+      },
+    },
+    writeBundle(options) {
+      if (!buildId || !options.dir) return;
+      fs.writeFileSync(path.join(options.dir, "version.json"), `${JSON.stringify({ buildId })}\n`);
+    },
+  };
+}
+
 const allowedHosts =
   process.env.VITE_ALLOWED_HOSTS === "*"
     ? true
     : process.env.VITE_ALLOWED_HOSTS?.split(",").map((host) => host.trim());
 
 export default defineConfig({
-  plugins: [react(), tailwindcss(), plausibleAnalytics()],
+  plugins: [react(), tailwindcss(), plausibleAnalytics(), buildVersionManifest()],
   define: {
     __APP_VERSION__: JSON.stringify(packageJson.version ?? "0.0.0"),
   },

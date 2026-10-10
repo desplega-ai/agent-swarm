@@ -42,6 +42,8 @@ agent-browser close
 
 ## Recording
 
+Pass `record start` an absolute path (`/tmp/<topic>/raw.webm`). A relative path resolves against the agent-browser daemon's cwd, not yours, and fails with `ffmpeg write failed: Broken pipe` while `doctor` stays green.
+
 Default: record with `--cursor`, drive every supported pointer action (`click`, `mouse move`, `drag`) with `--human`, and ship the **1.5x video**. Keep the 1x original only if a reviewer asks for it. Human pointer movement follows an eased curve; use `--seed <n>` on `mouse move` to make the take reproducible instead of using a bare move.
 
 Open the page first, then record the interaction:
@@ -59,22 +61,27 @@ ffmpeg -y -i in.mp4 -filter:v "setpts=PTS/1.5,fps=30" -an \
 
 Speed-up is a post-process step: `record start` has no speed or human flag. Keep `fps=30` to preserve a steady 30 fps output rather than uneven frame drops at an inferred rate. `-an` disables audio because agent-browser recordings carry no audio track. The worker ships only `ffmpeg`, not `ffprobe`; inspect duration with `ffmpeg -i out-1.5x.mp4 2>&1 | grep Duration`.
 
-Add `--contact-sheet` to the start command for a timestamped PNG summary of visual changes. Recording needs `ffmpeg` on PATH; check `agent-browser doctor` before starting. Stop the recording before closing the browser so the video is saved. Upload the 1.5x file through the same agent-fs QA path as screenshots below, and link it in the PR body.
+Add `--contact-sheet` to the start command for a timestamped PNG summary of visual changes. Recording needs `ffmpeg` on PATH; check `agent-browser doctor` before starting. Stop the recording before closing the browser so the video is saved. Keep the 1.5x file on the same agent-fs QA path as screenshots below. In a PR, upload it as a GitHub user attachment and put the URL on its own line, so GitHub plays it inline.
 
 ## Step 3: share the screenshot through agent-fs
 
-Screenshots on the worker disk disappear with the task. Upload them to agent-fs under the qa path convention. Use `share-create` when a person needs to open the file, and `signed-url` for raw embeds such as an image in GitHub PR markdown. `--file` is binary-safe. `--content` is text-only and mangles PNGs.
+Screenshots on the worker disk disappear with the task. Upload them to agent-fs under the qa path convention: that copy is the durable original. Use `share-create` when a person needs to open the file. `--file` is binary-safe. `--content` is text-only and mangles PNGs.
 
 ```bash
 agent-fs write thoughts/<agent-id>/qa/<topic>-screenshots/<name>.png \
   --file /tmp/<name>.png -m "<what it shows>"
 agent-fs stat thoughts/<agent-id>/qa/<topic>-screenshots/<name>.png --json        # confirm size > 0
 agent-fs share-create thoughts/<agent-id>/qa/<topic>-screenshots/<name>.png --json
-agent-fs signed-url thoughts/<agent-id>/qa/<topic>-screenshots/<name>.png --json  # raw URL for embeds; 24h default, --expires-in up to 7d
 ```
 
-- Embed the signed URL as `![caption](<url>)` in the PR body, review comment, Linear comment, or Slack message.
+- **GitHub PR body or comment**: upload the PNG, GIF or mp4 as a GitHub user attachment with the `github-attach` skill and embed `![caption](https://github.com/user-attachments/assets/<uuid>)`. Attachments never expire and mp4s play inline. A UI PR puts a before (main) and after pair in the `## Before / after` table. Fallback for images only, when the GitHub token is an App token (`ghu_`/`ghs_`): `agent-fs signed-url <path> --inline --json` (expires in 7 days). Never a presigned URL for an mp4 or a doc: it downloads.
+- **Linear comment or Slack message**: paste the `share-create` link.
 - In `store-progress`, list the upload in the `attachments` field with `kind: "agent-fs"` and the path, and paste the `share-create` link for people who need to open the file.
 - If `agent-fs auth whoami` fails, report the local path, say the upload was skipped, and continue.
 
 The `artifacts` skill holds the full agent-fs recipe and the naming conventions.
+
+## Gotchas
+
+- `wait <selector>` waits for a VISIBLE match. When the first match is hidden it times out (about 25 s) even though the element exists. Wait on rendered text instead: `wait --text "<rendered text>"`.
+- Never run `pkill -f <pattern>` inside a Bash call: the pattern also matches the calling shell's command line and kills it. Record the PID when you start a background server (`echo $!`) and `kill <pid>`.

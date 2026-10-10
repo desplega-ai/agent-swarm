@@ -55,12 +55,18 @@ export function buildCitationUrl(citation: CitationInput): string | null {
     if (!ref.trim() || /:\/\//.test(ref)) return null;
     if (kind === "task") return citationHttpUrl(`${getAppUrl()}/tasks/${encodeURIComponent(ref)}`);
     if (kind === "page" || kind === "agent-fs") {
+      // Stored, so an agent-fs file keeps its live URL (`comb: false`). The
+      // dashboard maps it to Comb when it renders, so turning COMB_ENABLED off
+      // later leaves no dead dashboard links behind.
       return citationHttpUrl(
-        taskAttachmentDisplayUrl({
-          kind,
-          pageId: kind === "page" ? encodeURIComponent(ref) : undefined,
-          path: kind === "agent-fs" ? ref : undefined,
-        } as TaskAttachment),
+        taskAttachmentDisplayUrl(
+          {
+            kind,
+            pageId: kind === "page" ? encodeURIComponent(ref) : undefined,
+            path: kind === "agent-fs" ? ref : undefined,
+          } as TaskAttachment,
+          { comb: false },
+        ),
       );
     }
     // Memory/run routes and Slack workspace permalinks have no canonical builder here.

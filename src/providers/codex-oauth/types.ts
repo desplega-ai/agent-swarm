@@ -28,6 +28,8 @@ export type CodexAuthJson = {
     account_id: string;
   };
   last_refresh: string;
+  /** Swarm-only access-token expiry (milliseconds); native Codex files omit it. */
+  expires?: number;
 };
 
 type TokenResult =

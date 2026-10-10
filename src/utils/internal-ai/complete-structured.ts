@@ -20,7 +20,11 @@ import { complete } from "@earendil-works/pi-ai/compat";
 import { getBuiltinModel as getModel } from "@earendil-works/pi-ai/providers/all";
 import type { TSchema } from "typebox";
 import { z } from "zod";
-import { DEFAULT_OPENROUTER_BASE_URL, getOpenRouterBaseUrl } from "../openrouter-base-url.js";
+import {
+  DEFAULT_OPENROUTER_BASE_URL,
+  getOpenRouterAttributionHeaders,
+  getOpenRouterBaseUrl,
+} from "../openrouter-base-url.js";
 import { scrubSecrets } from "../secret-scrubber.js";
 import { type ResolvedCredential, resolveCredential } from "./credentials.js";
 import { parseModelStr } from "./models.js";
@@ -192,6 +196,17 @@ export async function defaultSpawnClaudeCli(
   }
 }
 
+/** Parsed output plus the model string that produced it. */
+export interface CompleteStructuredResult<TData> {
+  data: TData;
+  /**
+   * Model that served the call, as resolved from the credential
+   * (`provider/model-id`, or the `claude -p` alias such as `haiku`). Lets
+   * callers record which judge produced the output.
+   */
+  model: string;
+}
+
 /**
  * Run a structured-output completion. Returns the parsed object on success,
  * `null` on auth-missing or exhausted retries (errors logged, never thrown).
@@ -199,6 +214,18 @@ export async function defaultSpawnClaudeCli(
 export async function completeStructured<TZod extends z.ZodTypeAny>(
   opts: CompleteStructuredOptions<TZod>,
 ): Promise<z.infer<TZod> | null> {
+  const result = await completeStructuredWithModel(opts);
+  return result ? result.data : null;
+}
+
+/**
+ * Same as {@link completeStructured}, but also reports the model that served
+ * the call. Use it when the output must be attributable (e.g. `llm` memory
+ * ratings record their judge).
+ */
+export async function completeStructuredWithModel<TZod extends z.ZodTypeAny>(
+  opts: CompleteStructuredOptions<TZod>,
+): Promise<CompleteStructuredResult<z.infer<TZod>> | null> {
   const retries = opts.retries ?? 3;
   const callerTag = opts.callerTag ?? "<unset>";
 
@@ -254,7 +281,7 @@ export async function completeStructured<TZod extends z.ZodTypeAny>(
         }
         const validated = opts.zodSchema.safeParse(parsedJson);
         if (validated.success) {
-          return validated.data;
+          return { data: validated.data, model: cred.modelDefault };
         }
         lastErr = validated.error;
       } catch (err) {
@@ -296,10 +323,14 @@ export async function completeStructured<TZod extends z.ZodTypeAny>(
   // through a gateway (pi-ai's stream path uses `model.baseUrl` verbatim).
   // Resolved from the caller's session env when provided — swarm_config
   // overlays don't reach `process.env`.
-  const openRouterBaseUrl = getOpenRouterBaseUrl((opts.env ?? process.env) as NodeJS.ProcessEnv);
+  const env = opts.env ?? process.env;
+  const openRouterBaseUrl = getOpenRouterBaseUrl(env as NodeJS.ProcessEnv);
   if (provider === "openrouter" && openRouterBaseUrl !== DEFAULT_OPENROUTER_BASE_URL) {
     model = { ...model, baseUrl: openRouterBaseUrl };
   }
+  // pi-ai merges `options.headers` over the provider defaults.
+  const headers =
+    provider === "openrouter" ? getOpenRouterAttributionHeaders(model.baseUrl, env) : {};
 
   const completeFn = opts._complete ?? complete;
   const toolChoice =
@@ -325,7 +356,7 @@ export async function completeStructured<TZod extends z.ZodTypeAny>(
         },
         // pi-ai's ProviderStreamOptions type only allows known providers;
         // we pass the validated apiKey through verbatim.
-        { apiKey: cred.apiKey, signal: opts.signal, toolChoice } as Parameters<
+        { apiKey: cred.apiKey, signal: opts.signal, toolChoice, headers } as Parameters<
           typeof completeFn
         >[2],
       );
@@ -343,7 +374,7 @@ export async function completeStructured<TZod extends z.ZodTypeAny>(
           if (parsedText !== undefined) {
             const validatedText = opts.zodSchema.safeParse(parsedText);
             if (validatedText.success) {
-              return validatedText.data;
+              return { data: validatedText.data, model: cred.modelDefault };
             }
           }
         }
@@ -354,7 +385,7 @@ export async function completeStructured<TZod extends z.ZodTypeAny>(
 
       const validated = opts.zodSchema.safeParse(toolCall.arguments);
       if (validated.success) {
-        return validated.data;
+        return { data: validated.data, model: cred.modelDefault };
       }
       userPrompt = `${userPrompt}\n\nThe ${opts.toolName} arguments did not validate: ${validated.error.message}. Please retry with correct arguments.`;
       lastErr = validated.error;

@@ -1,5 +1,20 @@
+import { type ScrubbedText, scrubObject, scrubSecrets } from "../../utils/secret-scrubber";
 import { normalizeDate, normalizeDateRequired } from "../date-utils";
+import { breaksJsonValidity } from "../scrub-json";
 import { getDbClient } from "./runtime";
+
+/**
+ * One accepted answer to an approval request. `responder` comes from the
+ * request's credential (a user id, or "operator" for the shared key);
+ * `claimedRespondedBy` is the client's unverified `respondedBy`, kept for display only.
+ */
+export interface ApprovalVote {
+  responder: string;
+  approved: boolean;
+  responses: Record<string, unknown>;
+  claimedRespondedBy?: string;
+  respondedAt: string;
+}
 
 export interface ApprovalRequestListFilters {
   status?: string;
@@ -75,4 +90,57 @@ export async function listApprovalRequestSummaries(
     createdAt: normalizeDateRequired(row.createdAt),
     updatedAt: normalizeDateRequired(row.updatedAt),
   }));
+}
+
+/**
+ * The approvers policy and the answers collected so far, for the given pending
+ * requests only. The slim list reads this to show quorum progress without
+ * projecting the full rows.
+ */
+export async function getPendingApprovalVoteState(
+  ids: string[],
+): Promise<{ id: string; approvers: unknown; approvals: ApprovalVote[] | null }[]> {
+  if (ids.length === 0) return [];
+  const rows = await getDbClient().query<{
+    id: string;
+    approvers: string;
+    approvals: string | null;
+  }>(
+    `SELECT id, approvers, approvals FROM approval_requests
+       WHERE status = 'pending' AND id IN (${ids.map(() => "?").join(", ")})`,
+    ids,
+  );
+  return rows.map((row) => ({
+    id: row.id,
+    approvers: JSON.parse(row.approvers),
+    approvals: row.approvals ? JSON.parse(row.approvals) : null,
+  }));
+}
+
+/**
+ * Records the answers collected so far on a request that stays pending (an
+ * `all` or `{ min: N }` policy still short of its quorum). False when the row
+ * is no longer pending.
+ */
+export async function recordApprovalVotes(id: string, approvals: ApprovalVote[]): Promise<boolean> {
+  const row = await getDbClient().get<{ id: string }>(
+    `UPDATE approval_requests
+       SET approvals = ?, updatedAt = ?
+       WHERE id = ? AND status = 'pending'
+       RETURNING id`,
+    [scrubApprovalVotesJson(approvals), new Date().toISOString(), id],
+  );
+  return row !== null && row !== undefined;
+}
+
+/**
+ * Serializes votes for the `approvals` column with free-text answers scrubbed.
+ * Falls back to a per-value scrub when a redaction would break the JSON, so
+ * readers can always parse the column.
+ */
+export function scrubApprovalVotesJson(approvals: ApprovalVote[]): ScrubbedText {
+  const raw = JSON.stringify(approvals);
+  const scrubbed = scrubSecrets(raw);
+  if (!breaksJsonValidity(raw, scrubbed)) return scrubbed;
+  return JSON.stringify(scrubObject(approvals)) as ScrubbedText;
 }

@@ -17,6 +17,7 @@ import {
   updateWorkflowRun,
   updateWorkflowRunStep,
 } from "../be/db";
+import type { WaitStateRow } from "../types";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import {
   type ApprovalSlackClient,
@@ -26,7 +27,7 @@ import { shapeApprovalResolution } from "./approval-resolution";
 import { loadCompletedStepRouting } from "./completed-step-routing";
 import { FAILED_TASK_OUTPUT_PREFIX } from "./constants";
 import { getNextTargets } from "./definition";
-import { findReadyNodes, hasRunningStep, walkGraph } from "./engine";
+import { failRunOnUnreadableReplay, findReadyNodes, hasRunningStep, walkGraph } from "./engine";
 import type { WorkflowEventBus } from "./event-bus";
 import { workflowEventBus } from "./event-bus";
 import type { ExecutorRegistry } from "./executors/registry";
@@ -38,6 +39,7 @@ import {
   checkpointPortStepAndResolveSuccessors,
   completeTaskStepAndResolveSuccessors,
   failStepAndRunIfWaiting,
+  scheduleTaskStepRetry,
 } from "./task-step-routing";
 import { matchesFilter } from "./wait-filter";
 
@@ -87,7 +89,9 @@ export function setupWorkflowResumeListener(
     try {
       const event = data as TaskEvent;
       if (!event.workflowRunId || !event.workflowRunStepId) return;
-      await handleTaskFailure(event, event.failureReason ?? "Task failed", registry);
+      await handleTaskFailure(event, event.failureReason ?? "Task failed", registry, {
+        retryable: true,
+      });
     } catch (err) {
       console.error("[workflows] Handle task failure error:", err);
     }
@@ -98,7 +102,7 @@ export function setupWorkflowResumeListener(
     try {
       const event = data as TaskEvent;
       if (!event.workflowRunId || !event.workflowRunStepId) return;
-      await handleTaskFailure(event, "Task was cancelled", registry);
+      await handleTaskFailure(event, "Task was cancelled", registry, { retryable: false });
     } catch (err) {
       console.error("[workflows] Handle task cancellation error:", err);
     }
@@ -125,6 +129,23 @@ export function setupWorkflowResumeListener(
 }
 
 /**
+ * Run one live resume of a waiting step. A sealed replay copy that cannot be
+ * opened fails the step and its run now, instead of logging and leaving the
+ * run `waiting` until a recovery sweep. Any other error rethrows.
+ */
+async function failClosedOnUnreadableReplay(
+  runId: string,
+  stepId: string,
+  resume: () => Promise<void>,
+): Promise<void> {
+  try {
+    await resume();
+  } catch (err) {
+    if (!(await failRunOnUnreadableReplay(runId, err, stepId))) throw err;
+  }
+}
+
+/**
  * Resume a workflow after a linked task completes.
  *
  * 1. Verify run and step are in "waiting" state
@@ -133,6 +154,15 @@ export function setupWorkflowResumeListener(
  * 4. Find successors and continue the graph walk
  */
 async function resumeFromTaskCompletion(
+  event: TaskEvent,
+  registry: ExecutorRegistry,
+): Promise<void> {
+  await failClosedOnUnreadableReplay(event.workflowRunId!, event.workflowRunStepId!, () =>
+    resumeFromTaskCompletionUnguarded(event, registry),
+  );
+}
+
+async function resumeFromTaskCompletionUnguarded(
   event: TaskEvent,
   registry: ExecutorRegistry,
 ): Promise<void> {
@@ -213,7 +243,10 @@ export async function finalizeOrWait(runId: string): Promise<void> {
       if (run?.status === "waiting") await updateWorkflowRun(runId, { status: "running" });
       return;
     }
-    const hasWaiting = steps.some((s) => s.status === "waiting");
+    // A step queued for the retry poller is still live, like a waiting one.
+    const hasWaiting = steps.some(
+      (s) => s.status === "waiting" || (s.status === "failed" && s.nextRetryAt != null),
+    );
     if (hasWaiting) {
       await updateWorkflowRun(runId, { status: "waiting" });
     } else {
@@ -227,7 +260,10 @@ export async function finalizeOrWait(runId: string): Promise<void> {
 }
 
 /**
- * Handle task failure/cancellation — respects workflow's onNodeFailure config.
+ * Handle task failure/cancellation.
+ * A failed (never cancelled) task of an agent-task node with `retry` and
+ * attempts left is re-dispatched through the retry poller first.
+ * Otherwise the workflow's onNodeFailure config applies:
  * 'fail' (default): mark the entire run as failed.
  * 'continue': treat as completed with error output, let convergence proceed.
  */
@@ -235,6 +271,18 @@ async function handleTaskFailure(
   event: TaskEvent,
   reason: string,
   registry: ExecutorRegistry,
+  options: { retryable: boolean },
+): Promise<void> {
+  await failClosedOnUnreadableReplay(event.workflowRunId!, event.workflowRunStepId!, () =>
+    handleTaskFailureUnguarded(event, reason, registry, options),
+  );
+}
+
+async function handleTaskFailureUnguarded(
+  event: TaskEvent,
+  reason: string,
+  registry: ExecutorRegistry,
+  options: { retryable: boolean },
 ): Promise<void> {
   const run = await getWorkflowRun(event.workflowRunId!);
   if (!run || (run.status !== "waiting" && run.status !== "running")) return;
@@ -245,6 +293,23 @@ async function handleTaskFailure(
 
   const workflow = await getWorkflow(run.workflowId);
   if (!workflow) return;
+
+  if (options.retryable) {
+    const retry = await scheduleTaskStepRetry(
+      workflow.definition,
+      run.id,
+      step,
+      event.taskId,
+      reason,
+    );
+    if (retry === "scheduled") {
+      console.log(
+        `[workflows] Task ${event.taskId} failed; step ${step.nodeId} of run ${run.id} queued for retry ${step.retryCount + 1}`,
+      );
+      return;
+    }
+    if (retry === "not-claimed") return;
+  }
 
   const onFailure = workflow.definition.onNodeFailure ?? "fail";
 
@@ -515,6 +580,15 @@ async function resumeFromApprovalResolution(
   event: ApprovalEvent,
   registry: ExecutorRegistry,
 ): Promise<void> {
+  await failClosedOnUnreadableReplay(event.workflowRunId!, event.workflowRunStepId!, () =>
+    resumeFromApprovalResolutionUnguarded(event, registry),
+  );
+}
+
+async function resumeFromApprovalResolutionUnguarded(
+  event: ApprovalEvent,
+  registry: ExecutorRegistry,
+): Promise<void> {
   const run = await getWorkflowRun(event.workflowRunId!);
   if (!run || (run.status !== "waiting" && run.status !== "running")) return;
 
@@ -524,14 +598,16 @@ async function resumeFromApprovalResolution(
   const workflow = await getWorkflow(run.workflowId);
   if (!workflow) return;
 
-  const ctx = (run.context ?? {}) as Record<string, unknown>;
-
   if (event.status === "cancelled") {
     console.warn(
       `[workflows] approval ${event.requestId} is cancelled; step ${event.workflowRunStepId} stays waiting for the run cancel path`,
     );
     return;
   }
+
+  // Opens the sealed replay context: after the cancelled bail-out, which leaves
+  // the step to the run cancel path.
+  const ctx = (run.context ?? {}) as Record<string, unknown>;
 
   // Output and port for the approval status. A step parked by an executor other
   // than human-in-the-loop shapes its own (see shapeApprovalResolution).
@@ -616,7 +692,17 @@ export async function resumeWaitState(
   if (!result.updated || !result.row) return;
 
   const waitRow = result.row;
+  await failClosedOnUnreadableReplay(waitRow.workflowRunId, waitRow.workflowRunStepId, () =>
+    resumeClaimedWait(waitRow, status, cappedPayload, registry),
+  );
+}
 
+async function resumeClaimedWait(
+  waitRow: WaitStateRow,
+  status: "fired" | "timeout",
+  cappedPayload: unknown,
+  registry: ExecutorRegistry,
+): Promise<void> {
   // 2. Load the surrounding run + step. If anything has moved on (cancelled,
   // failed, retried, etc.), stay quiet.
   const run = await getWorkflowRun(waitRow.workflowRunId);

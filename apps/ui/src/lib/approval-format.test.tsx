@@ -7,7 +7,10 @@ import {
   describeApprovers,
   formatApprovalAnswer,
   formatRemaining,
+  hasAnswered,
   humanizeSeconds,
+  quorumLabel,
+  respondErrorMessage,
   sortApprovalRequests,
 } from "./approval-format";
 
@@ -229,5 +232,47 @@ describe("time, approvers and ordering", () => {
       { id: "newer", status: "pending" as const, createdAt: "2026-09-25T10:00:00Z", expiresAt },
     ];
     expect(sortApprovalRequests(rows, now).map((r) => r.id)).toEqual(["newer", "older"]);
+  });
+});
+
+describe("multi-approver progress and refusals", () => {
+  test("quorum label only for requests that need more than one approval", () => {
+    expect(quorumLabel({ approved: 1, required: 2 })).toBe("1 of 2 approved");
+    expect(quorumLabel({ approved: 0, required: 3 })).toBe("0 of 3 approved");
+    expect(quorumLabel({ approved: 0, required: 1 })).toBeNull();
+    expect(quorumLabel(null)).toBeNull();
+    expect(quorumLabel(undefined)).toBeNull();
+  });
+
+  test("hasAnswered matches the credential's responder, not a typed name", () => {
+    const request = {
+      approvals: [
+        {
+          responder: "operator",
+          approved: true,
+          responses: {},
+          claimedRespondedBy: "alice@example.com",
+          respondedAt: "2026-10-04T10:00:00Z",
+        },
+      ],
+    };
+    expect(hasAnswered(request, "operator")).toBe(true);
+    expect(hasAnswered(request, "alice@example.com")).toBe(false);
+    expect(hasAnswered(request, null)).toBe(false);
+    expect(hasAnswered({ approvals: null }, "operator")).toBe(false);
+  });
+
+  test("a 403 reads as a refusal; other errors keep the server's message", () => {
+    const refused = Object.assign(new Error("You are not one of this request's approvers"), {
+      status: 403,
+    });
+    expect(respondErrorMessage(refused)).toBe(
+      "You can't answer this request. You are not one of this request's approvers",
+    );
+    const repeat = Object.assign(new Error("You already answered this approval request"), {
+      status: 409,
+    });
+    expect(respondErrorMessage(repeat)).toBe("You already answered this approval request");
+    expect(respondErrorMessage("boom")).toBe("Failed to submit response");
   });
 });

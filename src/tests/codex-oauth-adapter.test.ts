@@ -29,12 +29,11 @@ describe("checkCodexCredentials — pool detection", () => {
     expect(result.satisfiedBy).toBe("side-effect-pending");
   });
 
-  it("returns ready when codex_oauth_0 env var present (pool)", () => {
+  it("returns ready when the loader recorded a pool slot", () => {
+    // Pool slots never reach env (they carry refresh tokens); the resolved-env
+    // loader records their count in CODEX_OAUTH_POOL_SLOTS instead.
     const result = checkCodexCredentials(
-      {
-        HOME: "/home/w",
-        codex_oauth_0: '{"access":"at","refresh":"rt","expires":0,"accountId":"a"}',
-      },
+      { HOME: "/home/w", CODEX_OAUTH_POOL_SLOTS: "3" },
       { fs: { existsSync: () => false } },
     );
     expect(result.ready).toBe(true);
@@ -42,18 +41,12 @@ describe("checkCodexCredentials — pool detection", () => {
     expect(result.hint).toMatch(/pool/i);
   });
 
-  it("returns ready when multiple pool slots present", () => {
+  it("not ready when the pool-slot count is zero", () => {
     const result = checkCodexCredentials(
-      {
-        HOME: "/home/w",
-        codex_oauth_0: "val0",
-        codex_oauth_1: "val1",
-        codex_oauth_2: "val2",
-      },
+      { HOME: "/home/w", CODEX_OAUTH_POOL_SLOTS: "0" },
       { fs: { existsSync: () => false } },
     );
-    expect(result.ready).toBe(true);
-    expect(result.satisfiedBy).toBe("side-effect-pending");
+    expect(result.ready).toBe(false);
   });
 
   it("returns not ready when no credentials present", () => {

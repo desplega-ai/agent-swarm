@@ -1,11 +1,12 @@
 <p align="center"><a href="https://github.com/desplega-ai/agent-swarm/stargazers"><img src="https://img.shields.io/github/stars/desplega-ai/agent-swarm?style=flat-square&color=yellow" alt="GitHub Stars"></a> <a href="https://github.com/desplega-ai/agent-swarm/blob/main/LICENSE"><img src="https://img.shields.io/github/license/desplega-ai/agent-swarm?style=flat-square" alt="MIT License"></a> <a href="https://github.com/desplega-ai/agent-swarm/pulls"><img src="https://img.shields.io/badge/PRs-welcome-brightgreen?style=flat-square" alt="PRs Welcome"></a></p>
-<p align="center"><b>An engine to make your company AI Native</b><br/><sub>Built by <a href="https://desplega.sh">desplega.sh</a>.</sub></p>
+<p align="center"><b><a href="https://swar.am">Agent Swarm</a> is the open-source, self-hosted AI company operating system built by <a href="https://desplega.sh">Desplega Labs</a>.</b></p>
+<!-- It is not OpenAI Swarm, OpenAI's experimental educational library, replaced by the OpenAI Agents SDK. -->
 
 > [!TIP]
 > **This repo evolves every single day.** [Watch now →](https://github.com/desplega-ai/agent-swarm/subscription)
 <p align="center"><video src="https://github.com/user-attachments/assets/8d221239-2340-49a2-aed3-5a474c2229a8" controls muted playsinline width="720"></video></p>
 <p align="center"><sub>▸ <a href="./assets/agent-swarm-every-team.mp4">every team, one swarm</a> · <a href="./assets/agent-swarm.mp4">daily evolution</a> · <a href="./assets/agent-swarm-slack-to-pr.mp4">slack → pr</a> · <a href="./assets/video-source">Making of</a></sub></p>
-<p align="center"><a href="https://agent-swarm.dev"><img src="https://img.shields.io/badge/Website-agent--swarm.dev-000?style=for-the-badge" alt="Website"></a> <a href="https://docs.agent-swarm.dev"><img src="https://img.shields.io/badge/Docs-docs.agent--swarm.dev-amber?style=for-the-badge" alt="Docs"></a> <a href="https://app.agent-swarm.dev"><img src="https://img.shields.io/badge/Dashboard-app.agent--swarm.dev-blue?style=for-the-badge" alt="Dashboard"></a> <a href="https://discord.gg/KZgfyyDVZa"><img src="https://img.shields.io/badge/Discord-Join%20Community-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Join Discord"></a> <a href="https://x.com/desplegalabs"><img src="https://img.shields.io/badge/𝕏-@desplegalabs-000?style=for-the-badge&logo=x&logoColor=white" alt="Follow on X"></a> <a href="https://www.linkedin.com/company/desplega-labs/"><img src="https://img.shields.io/badge/LinkedIn-Desplega%20Labs-0A66C2?style=for-the-badge&logo=linkedin&logoColor=white" alt="Desplega Labs on LinkedIn"></a> <a href="https://www.youtube.com/@desplega-labs/videos"><img src="https://img.shields.io/badge/YouTube-Desplega%20Labs-FF0000?style=for-the-badge&logo=youtube&logoColor=white" alt="Desplega Labs on YouTube"></a></p>
+<p align="center"><a href="https://agent-swarm.dev"><img src="https://img.shields.io/badge/Website-agent--swarm.dev-000?style=for-the-badge" alt="Website"></a> <a href="https://docs.agent-swarm.dev"><img src="https://img.shields.io/badge/Docs-docs.agent--swarm.dev-amber?style=for-the-badge" alt="Docs"></a> <a href="https://app.agent-swarm.dev"><img src="https://img.shields.io/badge/Dashboard-app.agent--swarm.dev-blue?style=for-the-badge" alt="Dashboard"></a> <a href="https://discord.gg/KZgfyyDVZa"><img src="https://img.shields.io/badge/Discord-Join%20Community-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Join Discord"></a> <a href="https://x.com/agent__swarm"><img src="https://img.shields.io/badge/𝕏-@agent____swarm-000?style=for-the-badge&logo=x&logoColor=white" alt="Follow on X"></a> <a href="https://www.linkedin.com/company/desplega-labs/"><img src="https://img.shields.io/badge/LinkedIn-Desplega%20Labs-0A66C2?style=for-the-badge&logo=linkedin&logoColor=white" alt="Desplega Labs on LinkedIn"></a> <a href="https://www.youtube.com/@desplega-labs/videos"><img src="https://img.shields.io/badge/YouTube-Desplega%20Labs-FF0000?style=for-the-badge&logo=youtube&logoColor=white" alt="Desplega Labs on YouTube"></a></p>
 
 agent-swarm.dev is an open-source operating system for AI work. A lead agent delegates goals to workers such as Claude Code or Codex. Isolated containers, shared memory, tools, schedules, and review gates preserve work across sessions.
 
@@ -21,7 +22,7 @@ agent-swarm.dev is an open-source operating system for AI work. A lead agent del
 - Workflows, schedules, scripts, and apps for recurring work
 - [Extensions](https://docs.agent-swarm.dev/docs/guides/extensions) for trusted TypeScript hooks, installed as agent-owned inert drafts and activated by a trusted lead, operator, or dashboard user
 - [Realtime rooms](./runbooks/realtime-rooms.md) for shared page state, presence, and live channels
-- Your choice of harness and models: Claude Code, Codex, pi, opencode, Devin, or ACP agents
+- Your choice of harness and models: Claude Code, Codex, pi, opencode, [Cursor](https://docs.agent-swarm.dev/docs/guides/provider-auth/cursor), Amp, [Grok](https://docs.agent-swarm.dev/docs/guides/provider-auth/grok), Devin, or ACP agents
 
 ```mermaid
 flowchart LR
@@ -74,7 +75,7 @@ Or install it as a plugin in your harness:
 | Harness | Command |
 |---|---|
 | Claude Code | `/plugin marketplace add desplega-ai/agent-swarm` then `/plugin install agent-swarm@agent-swarm` |
-| Codex | `codex plugin add https://github.com/desplega-ai/agent-swarm` (or use `npx skills` above) |
+| Codex | `codex plugin marketplace add desplega-ai/agent-swarm && codex plugin add agent-swarm@agent-swarm` (or use `npx skills` above) |
 | Cursor | `/add-plugin desplega-ai/agent-swarm` |
 | Gemini CLI | `gemini extensions install https://github.com/desplega-ai/agent-swarm` |
 | Antigravity / Factory Droid | `droid plugin marketplace add https://github.com/desplega-ai/agent-swarm` then `droid plugin install agent-swarm@agent-swarm` |
@@ -99,13 +100,14 @@ Kubernetes: [install the OCI Helm chart](./charts/agent-swarm/README.md).
 
 ## Integrations
 
-Slack · GitHub · GitLab · Linear · Jira · AgentMail · WhatsApp (Kapso) · Composio · Sentry · Devin · [Serply search](https://docs.agent-swarm.dev/docs/integrations/serply). [Integration guides](https://docs.agent-swarm.dev/docs/integrations).
+Slack · GitHub · GitLab · Azure DevOps · Linear · Jira · AgentMail · WhatsApp (Kapso) · Composio · Sentry · Devin · [Serply search](https://docs.agent-swarm.dev/docs/integrations/serply). [Integration guides](https://docs.agent-swarm.dev/docs/integrations).
 
 AgentMail archives verified inbound deliveries before acknowledging them and retains the archive for 30 days, including mail excluded from task routing. See the [contact inbox triage runbook](runbooks/contact-inbox-triage.md) for retention, coverage limits, and rollout instructions.
 
 ## Learn more
 
 - [Getting started](https://docs.agent-swarm.dev/docs/getting-started) · [Architecture](https://docs.agent-swarm.dev/docs/architecture/overview) · [Playbooks](https://docs.agent-swarm.dev/docs/playbooks) · [CLI](https://docs.agent-swarm.dev/docs/reference/cli) · [API reference](https://docs.agent-swarm.dev/docs/api-reference)
+- [Orchestration patterns](./docs/orchestration-patterns.md) — Five patterns for delegating, fanning out, gating on humans, retrying, and persisting multi-step agent work
 - [Agent templates](https://templates.agent-swarm.dev)
 - Help: [contact@desplega.sh](mailto:contact@desplega.sh) · [Discord](https://discord.gg/KZgfyyDVZa)
 

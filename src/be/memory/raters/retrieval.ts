@@ -1,7 +1,7 @@
-import { ensure } from "@desplega.ai/business-use";
 import { getDbClient } from "@/be/db";
 import type { MemoryRetrievalSource } from "@/be/memory/types";
 import type { AgentMemory } from "@/types";
+import { ensure } from "../../../utils/business-use";
 
 /**
  * Retrieval-bridge helper — appends `memory_retrieval` audit rows so

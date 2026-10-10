@@ -32,6 +32,9 @@ import type {
   ChannelMessage,
   ChannelsResponse,
   ClaudeRuntimeConfig,
+  CombReviewBatchInput,
+  CombReviewBatchResult,
+  CombSkippedComment,
   CreateUserInput,
   CredentialMissingAgent,
   CredentialMissingAgentsResponse,
@@ -197,6 +200,20 @@ export class AppApiError extends Error {
 }
 
 /**
+ * A refused answer to an approval request. `message` is the server's reason;
+ * `status` tells a 403 (this credential may not answer) from a 409 (already
+ * resolved, or this responder already answered).
+ */
+export class ApprovalRespondError extends Error {
+  readonly status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "ApprovalRespondError";
+    this.status = status;
+  }
+}
+
+/**
  * Inspect a non-OK Response. If the body matches the frozen
  * `{ error: "TriggerSchemaError", message, details }` contract, throw a
  * `TriggerSchemaApiError`. Otherwise throw a generic Error using `genericLabel`.
@@ -227,6 +244,22 @@ async function throwTriggerSchemaErrorIfMatch(res: Response, genericLabel: strin
     // fall through to the generic throw below
   }
   throw new Error(`${genericLabel}: ${res.status}`);
+}
+
+/**
+ * "Send to swarm" failed. A 409 or 503 carries why each comment was left out
+ * (an "already-sent" entry names its task when known).
+ */
+export class CombSendError extends Error {
+  readonly status: number;
+  readonly skipped: CombSkippedComment[];
+
+  constructor(message: string, status: number, skipped: CombSkippedComment[] = []) {
+    super(message);
+    this.name = "CombSendError";
+    this.status = status;
+    this.skipped = skipped;
+  }
 }
 
 /**
@@ -385,7 +418,16 @@ class ApiClient {
   async updateAgentRuntime(data: {
     id: string;
     repoId?: string;
-    harnessProvider: "claude" | "codex" | "pi" | "opencode" | "acp" | "dsh";
+    harnessProvider:
+      | "claude"
+      | "codex"
+      | "pi"
+      | "opencode"
+      | "acp"
+      | "dsh"
+      | "cursor"
+      | "amp"
+      | "grok";
     model: string | null;
     allowCustomModel?: boolean;
     /** `null` clears `REASONING_EFFORT_OVERRIDE`; omitted leaves it unchanged; a level sets it. */
@@ -806,6 +848,50 @@ class ApiClient {
     if (!res.ok) {
       const err = await res.json().catch(() => ({ error: "Failed to test connection" }));
       throw new Error(err.error || `Failed to test connection: ${res.status}`);
+    }
+    return res.json();
+  }
+
+  /**
+   * Invite an agent-fs user (by email) into the swarm's shared org and drive.
+   * The API runs the invite with its own bootstrap key. Only the email is sent.
+   */
+  async inviteAgentFsMember(data: {
+    email: string;
+    role: "viewer" | "editor" | "admin";
+  }): Promise<{ orgId: string; invited: boolean }> {
+    const url = `${this.getBaseUrl()}/api/fs/members/invite`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: this.getHeaders(),
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || `Failed to invite agent-fs member: ${res.status}`);
+    }
+    return res.json();
+  }
+
+  /**
+   * Comb "Send to swarm": one lead task for these agent-fs comments. The
+   * server reads each comment again and skips any that are resolved,
+   * replies, or already sent.
+   */
+  async sendCombReviewBatch(data: CombReviewBatchInput): Promise<CombReviewBatchResult> {
+    const url = `${this.getBaseUrl()}/api/comb/review-batches`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: this.getHeaders(),
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new CombSendError(
+        err.error || `Failed to send comments to the swarm: ${res.status}`,
+        res.status,
+        Array.isArray(err.skipped) ? err.skipped : [],
+      );
     }
     return res.json();
   }
@@ -1653,6 +1739,16 @@ class ApiClient {
     return res.json();
   }
 
+  async deleteScriptConnection(id: string): Promise<{ deleted: true; id: string }> {
+    const url = `${this.getBaseUrl()}/api/script-connections/${encodeURIComponent(id)}`;
+    const res = await fetch(url, { method: "DELETE", headers: this.getHeaders() });
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({ error: "Failed to delete connection" }));
+      throw new Error(error.error || `Failed to delete connection: ${res.status}`);
+    }
+    return res.json();
+  }
+
   async fetchCredentialBindings() {
     const url = `${this.getBaseUrl()}/api/credential-bindings`;
     const res = await fetch(url, { headers: this.getHeaders() });
@@ -2086,16 +2182,22 @@ class ApiClient {
     return res.json();
   }
 
+  /**
+   * The server records the responder from the credential (a user token's user,
+   * or `operator` for the shared key). `claimedRespondedBy` travels as the
+   * body's `respondedBy` and is stored only as an unverified display name.
+   * A 200 can leave the request `pending` while its policy needs more approvals.
+   */
   async respondToApprovalRequest(
     id: string,
     responses: Record<string, unknown>,
-    respondedBy?: string,
+    claimedRespondedBy?: string,
   ): Promise<{ approvalRequest: ApprovalRequest }> {
     const url = `${this.getBaseUrl()}/api/approval-requests/${id}/respond`;
     const res = await fetch(url, {
       method: "POST",
       headers: this.getHeaders(),
-      body: JSON.stringify({ responses, respondedBy }),
+      body: JSON.stringify({ responses, respondedBy: claimedRespondedBy }),
     });
     if (!res.ok) {
       const body = await res.json().catch(() => null);
@@ -2105,7 +2207,7 @@ class ApiClient {
         typeof (body as { error?: unknown }).error === "string"
           ? (body as { error: string }).error
           : `Failed to respond to approval request: ${res.status}`;
-      throw new Error(message);
+      throw new ApprovalRespondError(message, res.status);
     }
     return res.json();
   }
@@ -2664,6 +2766,26 @@ class ApiClient {
     return res.json();
   }
 
+  async listMemoryKeys(prefix: string): Promise<import("./types").MemoryKeysResponse> {
+    const url = `${this.getBaseUrl()}/api/memory/keys?prefix=${encodeURIComponent(prefix)}`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: "Failed to list memory keys" }));
+      throw new Error(err.error || `Failed to list memory keys: ${res.status}`);
+    }
+    return res.json();
+  }
+
+  async getMemoryChunks(memoryId: string): Promise<import("./types").MemoryChunksResponse> {
+    const url = `${this.getBaseUrl()}/api/memory/chunks?memoryId=${encodeURIComponent(memoryId)}`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: "Failed to load memory" }));
+      throw new Error(err.error || `Failed to load memory: ${res.status}`);
+    }
+    return res.json();
+  }
+
   async deleteMemory(id: string): Promise<{ deleted: boolean }> {
     const url = `${this.getBaseUrl()}/api/memory/${id}`;
     const res = await fetch(url, { method: "DELETE", headers: this.getHeaders() });
@@ -2698,6 +2820,31 @@ class ApiClient {
     if (res.status === 404) return null;
     if (!res.ok) throw new Error(`Failed to resolve whoami: ${res.status}`);
     return (await res.json()) as WhoamiResponse;
+  }
+
+  /**
+   * A one-shot ticket for the realtime socket (a browser WebSocket cannot send
+   * `Authorization`). Single use, 60 s. The error carries the HTTP `status`.
+   */
+  async fetchRealtimeTicket(): Promise<string> {
+    const res = await fetch(`${this.getBaseUrl()}/api/realtime/ticket`, {
+      method: "POST",
+      headers: this.getHeaders(),
+    });
+    if (!res.ok) {
+      throw Object.assign(new Error(`Failed to get a realtime ticket: ${res.status}`), {
+        status: res.status,
+      });
+    }
+    return ((await res.json()) as { ticket: string }).ticket;
+  }
+
+  /** The realtime socket URL for a ticket. The dev proxy forwards `/api` upgrades. */
+  realtimeSocketUrl(ticket: string): string {
+    const url = new URL(`${this.getBaseUrl() || window.location.origin}/api/realtime`);
+    url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+    url.searchParams.set("ticket", ticket);
+    return url.toString();
   }
 
   async listUsers(opts?: { recentEvents?: number }): Promise<User[]> {

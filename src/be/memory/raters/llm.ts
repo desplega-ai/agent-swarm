@@ -41,8 +41,12 @@ const RatingSchema = z.object({
   // Step-6 §6 — optional free-form external source ID. Q2 contract: ≤512
   // chars, no closed enum, no prefix parser. Sanitization (control-char
   // strip + NUL rejection) happens in `buildRatingsFromLlm` so a single
-  // bad rating drops the field rather than failing the whole batch.
-  referencesSource: z.string().min(1).max(REFERENCES_SOURCE_MAX_LENGTH).optional(),
+  // bad rating drops the field rather than failing the whole batch. No
+  // `.min(1)`: models emit `""` for "no source", and rejecting it here failed
+  // the whole summary and burned a retry. `buildRatingsFromLlm` treats an
+  // empty or whitespace-only value as no source. Keep `summaryToolSchema` in
+  // sync.
+  referencesSource: z.string().max(REFERENCES_SOURCE_MAX_LENGTH).optional(),
 });
 
 /**
@@ -156,20 +160,24 @@ export class LlmRater implements MemoryRater {
  * Mapping: `signal = 2 * score - 1` (0 → -1, 0.5 → 0, 1 → +1).
  * Weight = {@link LLM_RATER_WEIGHT} (0.8).
  * Source = `"llm"` (the HTTP rate endpoint enums `["llm", "explicit-self"]`).
+ * Model = the judge that produced the batch (from `summarizeSession`), stamped
+ * on every event so `memory_rating.model` records it; omitted when unknown.
  */
 export function buildRatingsFromLlm(
   ratings: LlmRating[],
   retrievals: { id: string }[],
+  model?: string,
 ): RatingEvent[] {
   const allowed = new Set(retrievals.map((r) => r.id));
   const events: RatingEvent[] = [];
   for (const r of ratings) {
     if (!allowed.has(r.id)) continue;
-    // Step-6 §6 — sanitize before propagation. If the LLM emits a NUL byte
-    // or an all-control-chars string, drop the edge but keep the rating
+    // Step-6 §6 — sanitize before propagation. If the LLM emits a NUL byte,
+    // an all-control-chars string, or an empty / whitespace-only string (its
+    // way of saying "no source"), drop the edge but keep the rating
     // (best-effort: the memory's own posterior still gets the signal).
     let cleanedReferencesSource: string | undefined;
-    if (r.referencesSource !== undefined) {
+    if (r.referencesSource !== undefined && r.referencesSource.trim() !== "") {
       const cleaned = sanitizeReferencesSource(r.referencesSource);
       if (cleaned !== null) {
         cleanedReferencesSource = cleaned;
@@ -184,6 +192,7 @@ export function buildRatingsFromLlm(
       ...(cleanedReferencesSource !== undefined
         ? { referencesSource: cleanedReferencesSource }
         : {}),
+      ...(model ? { model } : {}),
     });
   }
   return events;
@@ -371,6 +380,7 @@ export async function postRatings(opts: {
     source: e.source,
     ...(e.reasoning !== undefined ? { reasoning: e.reasoning } : {}),
     ...(e.referencesSource !== undefined ? { referencesSource: e.referencesSource } : {}),
+    ...(e.model !== undefined ? { model: e.model } : {}),
     ...(opts.taskId ? { taskId: opts.taskId } : {}),
   }));
   try {

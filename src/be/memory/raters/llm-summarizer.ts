@@ -11,15 +11,24 @@
  * No `bun:sqlite` / `src/be/db` imports. Boundary script enforces this.
  */
 import { z } from "zod";
-import { getOpenRouterBaseUrl } from "../../../utils/openrouter-base-url";
+import { MEMORY_RATER_DEFAULT_MODEL } from "../../../utils/internal-ai/models";
+import {
+  getOpenRouterAttributionHeaders,
+  getOpenRouterBaseUrl,
+} from "../../../utils/openrouter-base-url";
 import { type SummaryWithRatings, SummaryWithRatingsSchema } from "./llm";
 
 /**
- * Default model used when `MEMORY_RATER_MODEL` is unset. Gemini 3 Flash on
- * OpenRouter — the only Gemini 3 Flash variant published as of this PR (no
- * stable non-preview slug exists yet). CLAUDE.md project-wide default.
+ * Default model used when `MEMORY_RATER_MODEL` is unset: the OpenRouter slug of
+ * the pinned rater model. Derived from `MEMORY_RATER_DEFAULT_MODEL` so the
+ * rater default has one source of truth (this copy used to be a stale literal).
+ * The registry entry carries an `openrouter/` credential prefix that the chat
+ * completions API does not take.
  */
-export const DEFAULT_MEMORY_RATER_MODEL = "google/gemini-3-flash-preview";
+export const DEFAULT_MEMORY_RATER_MODEL = MEMORY_RATER_DEFAULT_MODEL.openrouter.replace(
+  /^openrouter\//,
+  "",
+);
 
 /**
  * `response_format.json_schema.name` sent to OpenRouter. Used by some
@@ -144,11 +153,13 @@ export async function runMemoryRater(opts: RunMemoryRaterOpts): Promise<RunMemor
   const model = opts.model ?? getMemoryRaterModel();
   const responseLogCap = opts.responseLogCap ?? 200;
 
+  const url = openRouterChatCompletionsUrl();
   let res: Response;
   try {
-    res = await fetchFn(openRouterChatCompletionsUrl(), {
+    res = await fetchFn(url, {
       method: "POST",
       headers: {
+        ...getOpenRouterAttributionHeaders(url),
         "Content-Type": "application/json",
         Authorization: `Bearer ${opts.apiKey}`,
       },

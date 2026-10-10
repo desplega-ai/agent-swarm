@@ -1,9 +1,11 @@
 import Editor from "@monaco-editor/react";
-import type { ReactNode } from "react";
+import { createContext, type ReactNode, useContext } from "react";
 import { Streamdown } from "streamdown";
+import { useCombLinks } from "@/hooks/use-comb-links";
 import { useTheme } from "@/hooks/use-theme";
 import { cn, normalizeNewlines } from "@/lib/utils";
 import { CopyButton } from "./copy-button";
+import { InAppOrExternalLink } from "./in-app-or-external-link";
 
 // Returns prettified JSON text if `text` parses to an object/array, else null.
 function tryPrettyJson(text: string): string | null {
@@ -58,7 +60,7 @@ export function MonacoCodeBlock({
    * Fill the parent's height and let Monaco own vertical scrolling. Use when
    * the block renders a whole file rather than a snippet: the default height
    * comes from the source newline count, which under `wordWrap` badly
-   * under-measures a long or minified single line — an 80px box with no way to
+   * under-measures a long or minified single line: an 80px box with no way to
    * reach the rest of the content.
    */
   fill?: boolean;
@@ -89,7 +91,7 @@ export function MonacoCodeBlock({
           minimap: { enabled: false },
           scrollBeyondLastLine: false,
           // Monaco's own scrollbars are disabled so the outer container is the
-          // single source of scroll truth — except in `fill` mode, where the
+          // single source of scroll truth, except in `fill` mode, where the
           // editor owns its viewport and must scroll itself.
           scrollbar: fill
             ? { vertical: "auto", horizontal: "auto", handleMouseWheel: true }
@@ -131,21 +133,29 @@ const STREAMDOWN_COMPONENTS = {
   pre({ children }: { children?: ReactNode }) {
     return <>{children}</>;
   },
-  // Markdown links always open in a new tab — markdown is rendered inside
-  // dialogs/panels where in-place navigation would lose state.
-  a({ children, href }: { children?: ReactNode; href?: string }) {
-    return (
-      <a
-        href={href}
-        target="_blank"
-        rel="noreferrer"
-        className="text-primary underline underline-offset-2 hover:opacity-80"
-      >
-        {children}
-      </a>
-    );
-  },
+  a: MarkdownLink,
 };
+
+/** The links one `MarkdownView` opens in the same tab (`sameTabHrefs`). */
+const SameTabHrefs = createContext<ReadonlySet<string> | null>(null);
+
+// Markdown links open in a new tab, because markdown renders inside dialogs and
+// panels where in-place navigation would lose state. Exceptions, in the same
+// tab: an agent-fs link opens the file in Comb while Comb is connected, and
+// the caller's `sameTabHrefs` (the task page's task id links).
+function MarkdownLink({ children, href }: { children?: ReactNode; href?: string }) {
+  const combTo = useCombLinks()(href);
+  const sameTab = useContext(SameTabHrefs);
+  return (
+    <InAppOrExternalLink
+      to={combTo ?? (href && sameTab?.has(href) ? href : null)}
+      href={href}
+      className="text-primary underline underline-offset-2 hover:opacity-80"
+    >
+      {children}
+    </InAppOrExternalLink>
+  );
+}
 
 /**
  * Markdown renderer used across the app. Wraps Streamdown with:
@@ -156,17 +166,23 @@ const STREAMDOWN_COMPONENTS = {
 export function MarkdownView({
   text,
   normalizeSoftBreaks = true,
+  sameTabHrefs,
 }: {
   text: string;
   /**
    * Whether single newlines are promoted to paragraph breaks (`normalizeNewlines`).
    * Correct for LLM/agent output, which routinely separates paragraphs with one
    * newline. WRONG for hand-authored documents (SKILL.md, schedule task
-   * templates) that hard-wrap prose at ~80 columns — there, promoting every
+   * templates) that hard-wrap prose at ~80 columns: there, promoting every
    * wrap point shatters each paragraph into one-line fragments. Pass `false`
    * for authored documents so standard markdown paragraph rules apply.
    */
   normalizeSoftBreaks?: boolean;
+  /**
+   * In-app paths that open in the same tab (exact `href` match), such as the
+   * task page's task id links. Every other link opens in a new tab.
+   */
+  sameTabHrefs?: ReadonlySet<string>;
 }) {
   const pretty = tryPrettyJson(text);
   const body =
@@ -175,5 +191,7 @@ export function MarkdownView({
       : normalizeSoftBreaks
         ? normalizeNewlines(text)
         : text;
-  return <Streamdown components={STREAMDOWN_COMPONENTS}>{body}</Streamdown>;
+  const markdown = <Streamdown components={STREAMDOWN_COMPONENTS}>{body}</Streamdown>;
+  if (!sameTabHrefs) return markdown;
+  return <SameTabHrefs.Provider value={sameTabHrefs}>{markdown}</SameTabHrefs.Provider>;
 }

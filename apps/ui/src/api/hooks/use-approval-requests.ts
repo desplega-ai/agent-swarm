@@ -42,12 +42,13 @@ export function useRespondToApprovalRequest() {
     mutationFn: ({
       id,
       responses,
-      respondedBy,
+      claimedRespondedBy,
     }: {
       id: string;
       responses: Record<string, unknown>;
-      respondedBy?: string;
-    }) => api.respondToApprovalRequest(id, responses, respondedBy),
+      /** Unverified display name; the server records the credential's identity. */
+      claimedRespondedBy?: string;
+    }) => api.respondToApprovalRequest(id, responses, claimedRespondedBy),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["approval-requests"] });
       queryClient.invalidateQueries({ queryKey: ["approval-request"] });

@@ -5,7 +5,6 @@ import { auditAssetKeys } from "../be/asset-key-audit";
 import { AssetKeyAuthorizationError, authorizeAssetKeyWrite } from "../be/asset-key-auth";
 import { resolveHttpAuditUserId } from "../be/audit-user";
 import {
-  getAgentById,
   getDb,
   getDbClient,
   getTaskById,
@@ -14,7 +13,7 @@ import {
   upsertAssetKeyMapping,
 } from "../be/db";
 import { getScriptById } from "../be/scripts/db";
-import { can, type RbacPrincipal, type RbacResource } from "../rbac";
+import { can, type RbacResource } from "../rbac";
 import {
   type AssetEntityType,
   AssetEntityTypeSchema,
@@ -23,6 +22,7 @@ import {
   AssetSummarySchema,
 } from "../types";
 import { getRequestAuth } from "../utils/request-auth-context";
+import { requestPrincipal } from "./request-principal";
 import { route } from "./route-def";
 import { jsonError } from "./utils";
 
@@ -176,18 +176,6 @@ const moveAssetRoute = route({
   },
 });
 
-async function assetMovePrincipal(
-  req: IncomingMessage,
-  myAgentId: string | undefined,
-): Promise<RbacPrincipal | null> {
-  const auth = getRequestAuth(req);
-  if (auth?.kind === "operator") return { kind: "operator" };
-  if (auth?.kind === "user") return { kind: "user", userId: auth.userId };
-  if (!myAgentId) return null;
-  const agent = await getAgentById(myAgentId);
-  return { kind: "agent", agentId: myAgentId, isLead: agent?.isLead ?? false };
-}
-
 async function canMutateTaskNamespace(
   task: { id: string; agentId: string | null; creatorAgentId?: string },
   myAgentId: string | undefined,
@@ -199,7 +187,7 @@ async function canMutateTaskNamespace(
     agentId: task.agentId,
     creatorAgentId: task.creatorAgentId,
   };
-  const principal = await assetMovePrincipal(req, myAgentId);
+  const principal = await requestPrincipal(req, myAgentId);
   if (!principal) return false;
   return can({ principal, verb: "task.fs.mutate", resource, source: "http" }).allow;
 }
@@ -209,7 +197,7 @@ async function canManageAppNamespace(
   req: IncomingMessage,
   myAgentId: string | undefined,
 ): Promise<boolean> {
-  const principal = await assetMovePrincipal(req, myAgentId);
+  const principal = await requestPrincipal(req, myAgentId);
   return (
     !!principal &&
     can({ principal, verb: "app.manage", resource: { kind: "app", appId: id }, source: "http" })
@@ -222,7 +210,7 @@ async function canManageScriptNamespace(
   req: IncomingMessage,
   myAgentId: string | undefined,
 ): Promise<boolean> {
-  const principal = await assetMovePrincipal(req, myAgentId);
+  const principal = await requestPrincipal(req, myAgentId);
   if (!principal) return false;
   if (principal.kind === "operator") return true;
   if (principal.kind !== "agent") return false;

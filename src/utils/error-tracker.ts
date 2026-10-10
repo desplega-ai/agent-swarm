@@ -96,6 +96,51 @@ export function parseRateLimitWindowTelemetry(
 }
 
 /**
+ * `rate_limit_info` fields that describe the seat's billing state (the
+ * `credits_required` payload). `scrubSecrets` does not match them, so they
+ * are dropped structurally before a log egress.
+ */
+const SEAT_PAYLOAD_FIELDS = [
+  "overageDisabledReason",
+  "canUserPurchaseCredits",
+  "hasChargeableSavedPaymentMethod",
+] as const;
+
+/**
+ * Returns a `rate_limit_event` message without the seat billing fields of
+ * its `rate_limit_info`. Any other message is returned unchanged. Error
+ * tracking reads the original message; only log egress uses the result.
+ */
+export function redactRateLimitEvent<T>(message: T): T {
+  if (!message || typeof message !== "object") return message;
+  const json = message as Record<string, unknown>;
+  if (json.type !== "rate_limit_event") return message;
+  const info = json.rate_limit_info;
+  if (!info || typeof info !== "object") return message;
+  if (!SEAT_PAYLOAD_FIELDS.some((field) => field in info)) return message;
+  const redactedInfo = { ...(info as Record<string, unknown>) };
+  for (const field of SEAT_PAYLOAD_FIELDS) delete redactedInfo[field];
+  return { ...json, rate_limit_info: redactedInfo } as T;
+}
+
+/**
+ * Line form of `redactRateLimitEvent` for the CLI's stream-json output. A
+ * line that is not a `rate_limit_event` with seat billing fields is returned
+ * byte for byte.
+ */
+export function redactRateLimitEventLine(line: string): string {
+  if (!line.includes('"rate_limit_event"')) return line;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(line);
+  } catch {
+    return line;
+  }
+  const redacted = redactRateLimitEvent(parsed);
+  return redacted === parsed ? line : JSON.stringify(redacted);
+}
+
+/**
  * Maximum cooldown horizon for a rate-limit reset. A weekly OAuth limit resets
  * up to ~7 days out, so the cap must be at least that or a weekly-limited key
  * gets re-clamped to a short cooldown and re-handed to a worker every few hours
@@ -186,6 +231,14 @@ export class SessionErrorTracker {
   private modelRateLimit:
     | { window: string; model: ModelFamily; resetAtMs: number; observedAt: string }
     | undefined;
+  /**
+   * Stashed `credits_required` rejection: the key's seat cannot run the
+   * session's model (e.g. "Fable 5.1 requires usage credits"). A seat fact,
+   * not a rate limit, so it never lands in `keyWideRejections`.
+   */
+  private creditsRequired:
+    | { observedAt: string; resetsAtMs?: number; overageDisabledReason?: string }
+    | undefined;
   private rateLimitWindows: RateLimitWindowTelemetry = {};
 
   /** Record an error from an assistant message with message.error field */
@@ -265,6 +318,21 @@ export class SessionErrorTracker {
         return;
       }
 
+      // Checked before the resetsAt validation: the observed event carries a
+      // resetsAt, but this branch must not depend on it.
+      if (info.errorCode === "credits_required") {
+        this.creditsRequired = {
+          observedAt,
+          resetsAtMs:
+            typeof info.resetsAt === "number" && Number.isFinite(info.resetsAt)
+              ? info.resetsAt * 1000
+              : undefined,
+          overageDisabledReason:
+            typeof info.overageDisabledReason === "string" ? info.overageDisabledReason : undefined,
+        };
+        return;
+      }
+
       const resetsAtSec = info.resetsAt;
       if (typeof resetsAtSec !== "number" || !Number.isFinite(resetsAtSec) || resetsAtSec <= 0) {
         console.warn(
@@ -341,6 +409,18 @@ export class SessionErrorTracker {
       model: this.modelRateLimit.model,
       resetAt: new Date(this.modelRateLimit.resetAtMs).toISOString(),
       observedAt: this.modelRateLimit.observedAt,
+    };
+  }
+
+  /**
+   * Returns the stashed `credits_required` rejection, or undefined if none was
+   * seen in this session. It never sets the key-wide reset time.
+   */
+  getCreditsRequired(): { observedAt: string; overageDisabledReason?: string } | undefined {
+    if (!this.creditsRequired) return undefined;
+    return {
+      observedAt: this.creditsRequired.observedAt,
+      overageDisabledReason: this.creditsRequired.overageDisabledReason,
     };
   }
 

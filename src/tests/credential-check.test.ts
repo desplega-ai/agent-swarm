@@ -1,6 +1,7 @@
 import { describe, expect, mock, test } from "bun:test";
 import {
   buildCredStatusReport,
+  CREDENTIAL_PROVIDER_CHECKERS,
   checkProviderCredentials,
   isBedrockMode,
   isCredCheckDisabled,
@@ -8,6 +9,7 @@ import {
   shouldRefreshBedrockStatus,
   validateProviderCredentials,
 } from "../commands/provider-credentials";
+import { ACP_TARGET_IDS } from "../providers/acp-target-catalog";
 import { checkClaudeCredentials } from "../providers/claude-adapter";
 import { checkClaudeManagedCredentials } from "../providers/claude-managed-adapter";
 import { checkCodexCredentials } from "../providers/codex-adapter";
@@ -230,6 +232,37 @@ describe("checkPiMonoCredentials", () => {
         )
       ).ready,
     ).toBe(false);
+  });
+
+  test("strict: MODEL_OVERRIDE=google/... accepts GEMINI_API_KEY", async () => {
+    const env = {
+      MODEL_OVERRIDE: "google/gemini-3-flash-preview",
+      GEMINI_API_KEY: "x",
+    };
+
+    const status = await checkPiMonoCredentials(env, {
+      homeDir: HOME,
+      fs: noFiles,
+    });
+
+    expect(status.ready).toBe(true);
+    expect(status.missing).toEqual([]);
+    expect(status.satisfiedBy).toBe("env");
+  });
+
+  test("strict: MODEL_OVERRIDE=google/... lists both Google credential options when missing", async () => {
+    const env = {
+      MODEL_OVERRIDE: "google/gemini-3-flash-preview",
+    };
+
+    const status = await checkPiMonoCredentials(env, {
+      homeDir: HOME,
+      fs: noFiles,
+    });
+
+    expect(status.ready).toBe(false);
+    expect(status.missing).toEqual(["GOOGLE_API_KEY", "GEMINI_API_KEY", AUTH]);
+    expect(status.hint).toContain("GOOGLE_API_KEY / GEMINI_API_KEY");
   });
 
   test("shortname `sonnet` accepts ANTHROPIC_API_KEY *or* OPENROUTER_API_KEY", async () => {
@@ -629,6 +662,54 @@ describe("checkOpencodeCredentials", () => {
   });
 });
 
+describe("ACP readiness", () => {
+  test.each(["typo", "", " \t "])("rejects unsupported target %j", async (target) => {
+    const status = await checkProviderCredentials("acp", {
+      ACP_TARGET: target,
+      ACP_TARGET_COMMAND: "custom-acp --stdio",
+    });
+    expect(status.ready).toBe(false);
+    expect(status.missing).toEqual(["ACP_TARGET"]);
+    expect(status.hint).toContain("ACP_TARGET");
+    for (const supported of ACP_TARGET_IDS) expect(status.hint).toContain(supported);
+  });
+
+  test.each([undefined, "custom"])("requires a command for target %s", async (target) => {
+    const status = await CREDENTIAL_PROVIDER_CHECKERS.acp({ ACP_TARGET: target });
+    expect(status.ready).toBe(false);
+    expect(status.missing).toEqual(["ACP_TARGET_COMMAND"]);
+    expect(status.hint).toContain("ACP_TARGET_COMMAND");
+    expect(status.hint).toContain("ACP_COMMAND");
+  });
+
+  test.each(["", " \t "])("rejects a blank custom command %j", async (command) => {
+    const status = await checkProviderCredentials("acp", {
+      ACP_TARGET: "custom",
+      ACP_TARGET_COMMAND: command,
+      ACP_COMMAND: "legacy-acp",
+    });
+    expect(status.ready).toBe(false);
+    expect(status.missing).toEqual(["ACP_TARGET_COMMAND"]);
+  });
+
+  test.each(["ACP_TARGET_COMMAND", "ACP_COMMAND"])("accepts a command from %s", async (key) => {
+    for (const target of [undefined, "custom"]) {
+      const status = await checkProviderCredentials("acp", {
+        ACP_TARGET: target,
+        [key]: "custom-acp --stdio",
+      });
+      expect(status).toEqual({ ready: true, missing: [], satisfiedBy: "sdk-delegated" });
+    }
+  });
+
+  test.each(
+    ACP_TARGET_IDS.filter((target) => target !== "custom"),
+  )("keeps preset %s ready without a custom command", async (target) => {
+    const status = await checkProviderCredentials("acp", { ACP_TARGET: target });
+    expect(status).toEqual({ ready: true, missing: [], satisfiedBy: "sdk-delegated" });
+  });
+});
+
 // ─── dispatcher ──────────────────────────────────────────────────────────────
 
 describe("checkProviderCredentials dispatcher", () => {
@@ -689,7 +770,7 @@ describe("checkProviderCredentials dispatcher", () => {
       ).ready,
     ).toBe(true);
 
-    const acpStatus = await checkProviderCredentials("acp", {});
+    const acpStatus = await checkProviderCredentials("acp", { ACP_TARGET: "opencode" });
     expect(acpStatus.ready).toBe(true);
     expect(acpStatus.satisfiedBy).toBe("sdk-delegated");
   });
@@ -856,6 +937,96 @@ describe("isCredCheckDisabled", () => {
 });
 
 describe("buildCredStatusReport", () => {
+  const HOME = "/home/worker";
+
+  for (const [provider, authPath] of [
+    ["pi", ".pi/agent/auth.json"],
+    ["opencode", ".local/share/opencode/auth.json"],
+  ] as const) {
+    test(`${provider}: auth.json gives a successful presence-only live test`, async () => {
+      const realFetch = globalThis.fetch;
+      const fetchMock = mock(async () => {
+        throw new Error("file credentials must not be sent to a provider endpoint");
+      });
+      globalThis.fetch = fetchMock as typeof fetch;
+      try {
+        for (const env of [{ HOME }, { HOME, OPENROUTER_API_KEY: "unused-key" }]) {
+          const snap = await buildCredStatusReport(
+            provider,
+            env,
+            { homeDir: HOME, fs: fsWith(new Set([`${HOME}/${authPath}`])) },
+            "boot",
+          );
+          expect(snap.ready).toBe(true);
+          expect(snap.satisfiedBy).toBe("file");
+          expect(snap.liveTest).toMatchObject({ ok: true, error: null, latency_ms: 0 });
+        }
+        expect(fetchMock).not.toHaveBeenCalled();
+      } finally {
+        globalThis.fetch = realFetch;
+      }
+    });
+
+    test(`${provider}: missing credentials do not become a successful live test`, async () => {
+      const snap = await buildCredStatusReport(
+        provider,
+        {},
+        { homeDir: HOME, fs: noFiles },
+        "boot",
+      );
+      expect(snap.ready).toBe(false);
+      expect(snap.liveTest).toBeNull();
+    });
+
+    for (const key of ["OPENROUTER_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY"] as const) {
+      test(`${provider}: ${key} still receives a live probe and reports its result`, async () => {
+        const realFetch = globalThis.fetch;
+        let responseStatus = 200;
+        const fetchMock = mock(async (_url: string | URL | Request, _init?: RequestInit) => {
+          return new Response("{}", { status: responseStatus });
+        });
+        globalThis.fetch = fetchMock as typeof fetch;
+        try {
+          const env = { [key]: "provider-key" };
+          const opts = { homeDir: HOME, fs: noFiles };
+          const success = await buildCredStatusReport(provider, env, opts, "boot");
+          expect(success.liveTest?.ok).toBe(true);
+          responseStatus = 401;
+          const failure = await buildCredStatusReport(provider, env, opts, "post_task");
+          expect(failure.ready).toBe(true);
+          expect(failure.liveTest?.ok).toBe(false);
+          expect(failure.liveTest?.error).toContain("HTTP 401");
+          expect(fetchMock).toHaveBeenCalledTimes(2);
+          expect(String(fetchMock.mock.calls[0]?.[0])).toMatch(/\/models$/);
+        } finally {
+          globalThis.fetch = realFetch;
+        }
+      });
+    }
+  }
+
+  test("pi: a Google model with only GEMINI_API_KEY gives a successful presence-only live test", async () => {
+    const realFetch = globalThis.fetch;
+    const fetchMock = mock(async () => {
+      throw new Error("a presence-only credential must not issue a live probe");
+    });
+    globalThis.fetch = fetchMock as typeof fetch;
+    try {
+      const snap = await buildCredStatusReport(
+        "pi",
+        { MODEL_OVERRIDE: "google/gemini-3-flash-preview", GEMINI_API_KEY: "google-key" },
+        { homeDir: HOME, fs: noFiles },
+        "boot",
+      );
+      expect(snap.ready).toBe(true);
+      expect(snap.satisfiedBy).toBe("env");
+      expect(snap.liveTest).toMatchObject({ ok: true, error: null, latency_ms: 0 });
+      expect(fetchMock).not.toHaveBeenCalled();
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
+
   test("not ready → no live test, snapshot mirrors presence check", async () => {
     const snap = await buildCredStatusReport("claude", {}, {}, "boot");
     expect(snap.ready).toBe(false);

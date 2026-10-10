@@ -32,6 +32,7 @@ export const DEFAULT_TIER_VALUES: Record<string, Record<ModelTier, string>> = {
     ultra: "openrouter/anthropic/claude-opus-5.5",
   },
   devin: { smol: "devin", regular: "devin", smart: "devin", ultra: "devin" },
+  amp: { smol: "low", regular: "medium", smart: "high", ultra: "ultra" },
 };
 
 const TIERS: ModelTier[] = ["smol", "regular", "smart", "ultra"];

@@ -32,6 +32,7 @@ export async function executeRawLlm(
     const provider = createOpenAI({
       baseURL: llmConfig.baseURL,
       apiKey: llmConfig.apiKey,
+      headers: llmConfig.headers,
     });
     const model = provider(llmConfig.model);
 

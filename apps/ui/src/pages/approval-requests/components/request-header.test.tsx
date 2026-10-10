@@ -9,6 +9,9 @@ import type { ApprovalRequest } from "../../../api/types";
 mock.module("@/components/shared/status-badge", () =>
   require("../../../components/shared/status-badge"),
 );
+mock.module("@/components/shared/task-status-icon", () =>
+  require("../../../components/shared/task-status-icon"),
+);
 mock.module("@/components/shared/status-icon", () =>
   require("../../../components/shared/status-icon"),
 );
@@ -17,6 +20,7 @@ mock.module("@/components/ui/tooltip", () => require("../../../components/ui/too
 mock.module("@/hooks/use-user-name", () => require("../../../hooks/use-user-name"));
 mock.module("@/hooks/use-copy-to-clipboard", () => require("../../../hooks/use-copy-to-clipboard"));
 mock.module("@/lib/approval-format", () => require("../../../lib/approval-format"));
+mock.module("@/lib/status-labels", () => require("../../../lib/status-labels"));
 mock.module("@/lib/utils", () => require("../../../lib/utils"));
 mock.module("@/components/kibo-ui/spinner", () => require("../../../components/kibo-ui/spinner"));
 mock.module("@/components/ui/spinner", () => require("../../../components/ui/spinner"));

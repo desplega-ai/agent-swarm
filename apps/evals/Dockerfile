@@ -24,8 +24,15 @@ COPY apps/ui/package.json ./apps/ui/
 COPY apps/templates-ui/package.json ./apps/templates-ui/
 COPY apps/evals/package.json ./apps/evals/
 COPY packages/model-catalog/package.json ./packages/model-catalog/
-RUN bun install --frozen-lockfile
+COPY packages/model-routing/package.json ./packages/model-routing/
+# Retry transient extraction failures with a clean dependency tree.
+RUN for attempt in 1 2 3; do \
+        bun install --frozen-lockfile && break; \
+        if [ "$attempt" -eq 3 ]; then exit 1; fi; \
+        rm -rf node_modules && sleep 2 || exit 1; \
+    done
 COPY packages/model-catalog ./packages/model-catalog
+COPY packages/model-routing ./packages/model-routing
 
 COPY apps/evals ./apps/evals
 COPY src/e2b ./src/e2b

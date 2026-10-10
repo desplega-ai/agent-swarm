@@ -196,6 +196,7 @@ import {
   registerTriggerWorkflowTool,
   registerUpdateWorkflowTool,
 } from "./tools/workflows";
+import { parseEnabledTools } from "./utils/enabled-tools";
 import { resolveScriptsOnlyMode } from "./utils/scripts-only-mode";
 
 // Every known capability, including the ones disabled by default. Exported for
@@ -293,18 +294,75 @@ export function isScriptsOnlyMcp(): boolean {
   return resolveScriptsOnlyMode({ env: process.env.SCRIPTS_ONLY_MCP });
 }
 
+const loggedToolAllowlistWarnings = new Set<string>();
+
+function warnToolAllowlistOnce(message: string): void {
+  if (loggedToolAllowlistWarnings.has(message)) return;
+  loggedToolAllowlistWarnings.add(message);
+  console.warn(message);
+}
+
+/**
+ * SWARM_ENABLED_TOOLS: an optional explicit allowlist for the externally
+ * exposed MCP surface. Returns undefined (capability-driven surface) when the
+ * value is unset, blank, or invalid. Never logs the raw value.
+ */
+function resolveToolAllowlist(value: string | undefined): string[] | undefined {
+  if (value === undefined) return undefined;
+  try {
+    const tools = parseEnabledTools(value);
+    if (!tools) {
+      warnToolAllowlistOnce("[MCP] SWARM_ENABLED_TOOLS is set but lists no tools; ignoring it");
+    }
+    return tools;
+  } catch {
+    warnToolAllowlistOnce("[MCP] Invalid SWARM_ENABLED_TOOLS; ignoring it");
+    return undefined;
+  }
+}
+
+/** Drop every registered tool the allowlist does not name; warn on unknown names. */
+function applyToolAllowlist(server: McpServer, allowlist: readonly string[]): void {
+  const tools = (server as unknown as { _registeredTools: Record<string, { remove(): void }> })
+    ._registeredTools;
+  const allowed = new Set(allowlist);
+  for (const [name, tool] of Object.entries(tools)) {
+    if (!allowed.has(name)) tool.remove();
+  }
+  const unknown = allowlist.filter((name) => !Object.hasOwn(tools, name));
+  if (unknown.length > 0) {
+    warnToolAllowlistOnce(
+      `[MCP] SWARM_ENABLED_TOOLS names unknown tools, ignoring them: ${unknown.join(", ")}`,
+    );
+  }
+}
+
 export async function createServer(
-  opts: { scriptsOnly?: boolean; fullSurface?: boolean; preloadedTools?: readonly string[] } = {},
+  opts: {
+    scriptsOnly?: boolean;
+    fullSurface?: boolean;
+    preloadedTools?: readonly string[];
+    /** Raw SWARM_ENABLED_TOOLS value for this session; defaults to the env. */
+    enabledTools?: string;
+  } = {},
 ) {
   // Reload env
   await loadGlobalConfigsIntoEnv(true);
 
+  // The tool allowlist replaces CAPABILITIES and SCRIPTS_ONLY_MCP when set.
+  // Full-surface consumers (the scripts SDK bridge) ignore it.
+  const toolAllowlist =
+    opts.fullSurface === true
+      ? undefined
+      : resolveToolAllowlist(opts.enabledTools ?? process.env.SWARM_ENABLED_TOOLS);
+
   // Capability flags shape the externally exposed MCP tool list only. Internal
   // full-surface consumers (the scripts SDK bridge, drift-check tests) pass
   // fullSurface to register every tool group regardless of CAPABILITIES.
+  // An allowlist also registers every group, then prunes to the listed names.
   // This shadows the module-level hasCapability for the registrations below.
   const hasCapability = (cap: CAPABILITIES_T): boolean =>
-    opts.fullSurface === true || getCapabilities().has(cap);
+    opts.fullSurface === true || toolAllowlist !== undefined || getCapabilities().has(cap);
 
   // Initialize database with WAL mode
   // Uses DATABASE_PATH env var for Docker volume compatibility (WAL needs .sqlite, .sqlite-wal, .sqlite-shm on same filesystem)
@@ -355,7 +413,7 @@ export async function createServer(
   // Scripts-only surface (experimental code-mode): register just the script
   // catalog tools and stop. script-connections / script-apis stay out — they
   // are lead-only security admin and excluded from the scripts SDK too.
-  if (opts.scriptsOnly ?? isScriptsOnlyMcp()) {
+  if (toolAllowlist === undefined && (opts.scriptsOnly ?? isScriptsOnlyMcp())) {
     registerScriptSearchTool(server);
     registerScriptRunTool(server);
     registerScriptUpsertTool(server);
@@ -392,7 +450,9 @@ export async function createServer(
     registerResolveUserTool(server);
     registerManageUserTool(server); // self-guards with lead check
 
-    // Debug tools (self-guard with lead check)
+    // Debug tools. Neither has a lead check: both are open to every
+    // authenticated agent. db-query refuses credential tables and its results
+    // are scrubbed; get-oauth-access-token returns tokens by design.
     registerDbQueryTool(server);
     registerGetOauthAccessTokenTool(server);
 
@@ -627,6 +687,8 @@ export async function createServer(
     registerListServicesTool(server);
     registerUpdateServiceStatusTool(server);
   }
+
+  if (toolAllowlist) applyToolAllowlist(server, toolAllowlist);
 
   return server;
 }

@@ -316,6 +316,51 @@ describe("Phase 3 — session cost recompute golden fixtures", () => {
     expectExact(expected, 0.00228);
   });
 
+  // Boot-seeded rows only: Cursor's own models have no models.dev entry.
+  test("cursor composer runs price from the seeded Composer rates", async () => {
+    const body = await postCost({
+      sessionId: "cursor-composer",
+      provider: "cursor",
+      model: "composer-2.5",
+      totalCostUsd: 0,
+      inputTokens: 4_198,
+      outputTokens: 22,
+      cacheReadTokens: 3_424,
+    });
+    const expected = (4_198 * 3 + 3_424 * 0.5 + 22 * 15) / 1_000_000;
+
+    expect(body.cost.costSource).toBe("pricing-table");
+    expect(body.cost.totalCostUsd).toBeGreaterThan(0);
+    expectExact(body.cost.totalCostUsd, expected);
+
+    const auto = await postCost({
+      sessionId: "cursor-auto",
+      provider: "cursor",
+      model: "default",
+      totalCostUsd: 0,
+      inputTokens: 1_000,
+      outputTokens: 10,
+    });
+    expect(auto.cost.costSource).toBe("unpriced");
+  });
+
+  // Boot-seeded rows only: grok rows project the models.dev xAI section.
+  test("grok runs price from the seeded xAI rates", async () => {
+    const body = await postCost({
+      sessionId: "grok-4-6",
+      provider: "grok",
+      model: "grok-4.6",
+      totalCostUsd: 0,
+      inputTokens: 2_000,
+      outputTokens: 300,
+      cacheReadTokens: 1_000,
+    });
+    const expected = (2_000 * 2 + 1_000 * 0.5 + 300 * 6) / 1_000_000;
+
+    expect(body.cost.costSource).toBe("pricing-table");
+    expectExact(body.cost.totalCostUsd, expected);
+  });
+
   test("legacy cache writes without a TTL split keep the 5m class", async () => {
     await seedModelRates("claude", "claude-legacy-cache-write", {
       input: 5,

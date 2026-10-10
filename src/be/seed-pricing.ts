@@ -104,6 +104,23 @@ const ANTHROPIC_SHORTNAME_PRICING_FALLBACKS: Record<string, ModelsDevCostBlock> 
   "claude-mythos-5-1": { input: 10, output: 50, cache_read: 0.25, cache_write: 12.5 },
 };
 
+/**
+ * Cursor's own models, which models.dev does not list. Rates are Cursor's
+ * published per-token prices (verified 2026-10-05):
+ * https://cursor.com/docs/models-and-pricing and https://cursor.com/blog/composer-2-5.
+ *
+ * Fast is Composer's default variant ("fast is the default option") and the
+ * adapter never sets the `fast` param, so these are the Composer 2.5 (Fast)
+ * rates. Cursor publishes no cache-write rate. `composer-2` is retired and
+ * Cursor reroutes it to Composer 2.5 (https://cursor.com/docs/sdk/typescript).
+ * `default` (Auto) has no rate of its own: it bills at the list price of the
+ * model each request is routed to, so it stays unpriced.
+ */
+const CURSOR_FIRST_PARTY_PRICING: Record<string, ModelsDevCostBlock> = {
+  "composer-2.5": { input: 3, output: 15, cache_read: 0.5 },
+  "composer-2": { input: 3, output: 15, cache_read: 0.5 },
+};
+
 export interface PricingSeedRow {
   provider: PricingProvider;
   model: string;
@@ -166,6 +183,55 @@ function projectCostBlock(
   return rows;
 }
 
+/** A projected row plus the models.dev id it came from, before normalized ids are collapsed. */
+interface SourcedSeedRow {
+  sourceId: string;
+  row: PricingSeedRow;
+}
+
+/** Whether `candidate` beats `current` as the source of a normalized `key`. */
+function outranksSource(candidate: string, current: string, key: string): boolean {
+  const a = candidate.toLowerCase();
+  const b = current.toLowerCase();
+  if ((a === key) !== (b === key)) return a === key;
+  return a > b;
+}
+
+/**
+ * `normalizeModelKey` can fold several models.dev ids onto one key: amp strips
+ * OpenAI's dated snapshots, so `gpt-4o`, `gpt-4o-2024-05-13`, `gpt-4o-2024-08-06`
+ * and `gpt-4o-2024-11-20` all become `amp|gpt-4o`, at different prices. The
+ * refresh writes every changed row at one `effective_from`, so two prices for
+ * one (provider, model, tokenClass) hit the pricing primary key and roll back
+ * the whole batch.
+ *
+ * Rule: one source id wins per (provider, normalized model), and all its token
+ * classes come from it. The id that is already canonical (the undated alias)
+ * wins; failing that, the greatest id, i.e. the newest dated snapshot. A source
+ * id repeated across catalog sections keeps its first row per token class.
+ */
+function collapseNormalizedIds(sourced: SourcedSeedRow[]): PricingSeedRow[] {
+  const modelKey = (row: PricingSeedRow) => `${row.provider}\u0000${row.model}`;
+  const winners = new Map<string, string>();
+  for (const { sourceId, row } of sourced) {
+    const current = winners.get(modelKey(row));
+    if (current === undefined || outranksSource(sourceId, current, row.model)) {
+      winners.set(modelKey(row), sourceId);
+    }
+  }
+
+  const seen = new Set<string>();
+  const rows: PricingSeedRow[] = [];
+  for (const { sourceId, row } of sourced) {
+    if (winners.get(modelKey(row)) !== sourceId) continue;
+    const rowKey = `${modelKey(row)}\u0000${row.tokenClass}`;
+    if (seen.has(rowKey)) continue;
+    seen.add(rowKey);
+    rows.push(row);
+  }
+  return rows;
+}
+
 /**
  * Build the full set of seed rows from a loaded models.dev cache.
  *
@@ -174,7 +240,10 @@ function projectCostBlock(
  * explicit and auditable.
  */
 export function buildModelsDevSeedRows(cache: ModelsDevCache): PricingSeedRow[] {
-  const rows: PricingSeedRow[] = [];
+  const sourced: SourcedSeedRow[] = [];
+  const add = (sourceId: string, projected: PricingSeedRow[]) => {
+    for (const row of projected) sourced.push({ sourceId, row });
+  };
 
   // ---- Anthropic / claude family ----------------------------------------
   // The 'claude' provider (local-CLI adapter) reports the model id as the
@@ -185,9 +254,7 @@ export function buildModelsDevSeedRows(cache: ModelsDevCache): PricingSeedRow[] 
   for (const [id, model] of Object.entries(anthropic)) {
     if (!model?.cost) continue;
     for (const provider of ["claude", "claude-managed"] as const) {
-      for (const row of projectCostBlock(provider, id, model.cost)) {
-        rows.push(row);
-      }
+      add(id, projectCostBlock(provider, id, model.cost));
     }
   }
   // Anthropic shortnames (opus/sonnet/haiku) → resolve to the current default.
@@ -197,9 +264,7 @@ export function buildModelsDevSeedRows(cache: ModelsDevCache): PricingSeedRow[] 
       (cache.anthropic ? ANTHROPIC_SHORTNAME_PRICING_FALLBACKS[fullId] : undefined);
     if (!cost) continue;
     for (const provider of ["claude", "claude-managed"] as const) {
-      for (const row of projectCostBlock(provider, shortname, cost)) {
-        rows.push(row);
-      }
+      add(shortname, projectCostBlock(provider, shortname, cost));
     }
   }
   // Pi-mono uses anthropic models via OpenRouter mirrors; project those too.
@@ -208,8 +273,17 @@ export function buildModelsDevSeedRows(cache: ModelsDevCache): PricingSeedRow[] 
       anthropic[fullId]?.cost ??
       (cache.anthropic ? ANTHROPIC_SHORTNAME_PRICING_FALLBACKS[fullId] : undefined);
     if (!cost) continue;
-    for (const row of projectCostBlock("pi", shortname, cost, { anthropicBilled: true })) {
-      rows.push(row);
+    add(shortname, projectCostBlock("pi", shortname, cost, { anthropicBilled: true }));
+  }
+
+  // ---- Amp (Anthropic, OpenAI, Google and Fireworks models by id) ---------
+  // Amp reports the model it routed a mode to, in the vendor's own id. Its
+  // cache-creation tokens are billed as input everywhere but Anthropic (the
+  // adapter moves them), so only Anthropic's `cache_write` rate is used.
+  for (const section of ["anthropic", "openai", "google", "fireworks-ai"]) {
+    for (const [id, model] of Object.entries(cache[section]?.models ?? {})) {
+      if (!model?.cost) continue;
+      add(id, projectCostBlock("amp", id, model.cost));
     }
   }
 
@@ -217,16 +291,37 @@ export function buildModelsDevSeedRows(cache: ModelsDevCache): PricingSeedRow[] 
   const openai = cache.openai?.models ?? {};
   for (const [id, model] of Object.entries(openai)) {
     if (!model?.cost) continue;
-    for (const row of projectCostBlock("codex", id, model.cost)) {
-      rows.push(row);
-    }
+    add(id, projectCostBlock("codex", id, model.cost));
     // Phase 2 fix — pi-mono can route to openai models through the
     // github-copilot proxy (`github-copilot/gpt-5.4`). The lookup helper
     // strips the prefix, so we seed the bare id under `pi` too. Without this
     // every gh-copilot-backed pi run fell through to `costSource='unpriced'`.
-    for (const row of projectCostBlock("pi", id, model.cost)) {
-      rows.push(row);
+    add(id, projectCostBlock("pi", id, model.cost));
+  }
+
+  // ---- Cursor (bare vendor ids through Cursor's hosted inference) --------
+  // Cursor bills the vendor's API rates for the models it hosts and names
+  // them by the vendor's own id (`gpt-5.4-nano`, `claude-sonnet-5-5`), so the
+  // vendor sections project as-is. Cursor's own models have no models.dev row;
+  // {@link CURSOR_FIRST_PARTY_PRICING} covers them in `buildPricingSeedRows`.
+  for (const vendor of ["openai", "anthropic", "google", "xai"] as const) {
+    for (const [id, model] of Object.entries(cache[vendor]?.models ?? {})) {
+      if (!model?.cost) continue;
+      add(id, projectCostBlock("cursor", id, model.cost, { anthropicBilled: false }));
     }
+  }
+
+  // ---- Grok CLI (bare xAI ids, billed at xAI's API rates via XAI_API_KEY) --
+  for (const [id, model] of Object.entries(cache.xai?.models ?? {})) {
+    if (!model?.cost) continue;
+    add(id, projectCostBlock("grok", id, model.cost, { anthropicBilled: false }));
+  }
+
+  // ---- DeepSeek direct API (dsh with DEEPSEEK_API_KEY, bare ids) ---------
+  const deepseek = cache.deepseek?.models ?? {};
+  for (const [id, model] of Object.entries(deepseek)) {
+    if (!model?.cost) continue;
+    add(id, projectCostBlock("dsh", id, model.cost));
   }
 
   // ---- OpenRouter passthrough (covers gemini + every opencode-routed model)
@@ -234,47 +329,60 @@ export function buildModelsDevSeedRows(cache: ModelsDevCache): PricingSeedRow[] 
   for (const [id, model] of Object.entries(openrouter)) {
     if (!model?.cost) continue;
     // opencode routes whatever model the user picks; we project them all.
-    for (const row of projectCostBlock("opencode", id, model.cost)) {
-      rows.push(row);
-    }
+    add(id, projectCostBlock("opencode", id, model.cost));
     // pi-mono also routes via OpenRouter when only OPENROUTER_API_KEY is set
     // (see src/providers/pi-mono-adapter.ts). Without this projection, pi runs
     // against non-anthropic models (e.g. deepseek/deepseek-v4-flash) fall
     // through to costSource='unpriced' even though the model is in the
     // models.dev snapshot.
-    for (const row of projectCostBlock("pi", id, model.cost, {
-      anthropicBilled: id.startsWith("anthropic/"),
-    })) {
-      rows.push(row);
-    }
+    add(
+      id,
+      projectCostBlock("pi", id, model.cost, {
+        anthropicBilled: id.startsWith("anthropic/"),
+      }),
+    );
+    // dsh routes `openrouter/<id>` models (all four tier defaults) through
+    // OpenRouter, so it bills at the same rates.
+    add(
+      id,
+      projectCostBlock("dsh", id, model.cost, {
+        anthropicBilled: id.startsWith("anthropic/"),
+      }),
+    );
+    // grok runs `openrouter/<id>` models as OpenAI-compatible BYOK models.
+    add(
+      id,
+      projectCostBlock("grok", id, model.cost, {
+        anthropicBilled: id.startsWith("anthropic/"),
+      }),
+    );
     // Gemini specifically: also project under the 'gemini' provider so
     // internal-ai callers that tag with provider='gemini' find a hit.
     if (id.startsWith("google/")) {
       const geminiKey = id.replace(/^google\//, "");
-      for (const row of projectCostBlock("gemini", geminiKey, model.cost)) {
-        rows.push(row);
-      }
+      add(geminiKey, projectCostBlock("gemini", geminiKey, model.cost));
       // Also store under the full openrouter id so the same row resolves
       // whether the caller passes "google/..." or the stripped name.
-      for (const row of projectCostBlock("gemini", id, model.cost)) {
-        rows.push(row);
-      }
+      add(id, projectCostBlock("gemini", id, model.cost));
     }
   }
 
-  return rows;
+  return collapseNormalizedIds(sourced);
 }
 
 /** Build the exact provider rows inserted by the boot-time pricing seeder. */
 export function buildPricingSeedRows(cache: ModelsDevCache | null): PricingSeedRow[] {
   const modelsdevRows = cache ? buildModelsDevSeedRows(cache) : [];
+  const cursorRows = Object.entries(CURSOR_FIRST_PARTY_PRICING).flatMap(([model, cost]) =>
+    projectCostBlock("cursor", model, cost, { anthropicBilled: false }),
+  );
   const manualRows = MANUAL_PRICING_OVERRIDES.map((override) => ({
     provider: override.provider,
     model: override.model,
     tokenClass: override.tokenClass,
     pricePerMillionUsd: override.pricePerMillionUsd,
   }));
-  return [...modelsdevRows, ...manualRows];
+  return [...modelsdevRows, ...cursorRows, ...manualRows];
 }
 
 /**

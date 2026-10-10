@@ -13,10 +13,10 @@
     "moduleResolution": "bundler",
     "allowImportingTsExtensions": true,
 
-    // Path aliases
-    "baseUrl": ".",
+    // Path aliases. No `baseUrl`: TS 7 (tsgo) removed it, and relative
+    // `paths` resolve against this file in both TS 5 and TS 7.
     "paths": {
-      "@/*": ["src/*"]
+      "@/*": ["./src/*"]
     },
     "verbatimModuleSyntax": true,
     "noEmit": true,
@@ -47,6 +47,9 @@
     "docs-site",
     "assets/video-source",
     "mockups",
+    // Claude Code mod: built against the `claude-code` types the engine lays
+    // beside it; checked with `claude plugin validate` and `bun run test:claude-mod`.
+    "claude-mod",
     // Bundled skill assets shipped verbatim to agents. Their imports describe
     // what an agent writes in /workspace, not this repo's layout, so they are
     // deliberately not typechecked here.

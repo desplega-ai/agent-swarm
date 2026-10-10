@@ -1,0 +1,29 @@
+# Agent Swarm dashboard (apps/ui) served by nginx
+
+FROM --platform=$BUILDPLATFORM oven/bun:1.4.0 AS builder
+
+WORKDIR /build
+
+COPY package.json bun.lock* bunfig.toml ./
+COPY apps/ui/package.json ./apps/ui/package.json
+COPY apps/templates-ui/package.json ./apps/templates-ui/package.json
+COPY apps/evals/package.json ./apps/evals/package.json
+COPY packages/model-catalog/package.json ./packages/model-catalog/package.json
+COPY packages/model-routing/package.json ./packages/model-routing/package.json
+RUN bun install --frozen-lockfile
+
+# apps/ui imports shared modules from the root src/.
+COPY packages/model-catalog/ ./packages/model-catalog/
+COPY src/ ./src/
+COPY apps/ui/ ./apps/ui/
+RUN cd apps/ui && bun run build
+
+FROM nginxinc/nginx-unprivileged:1.31.5-alpine@sha256:19c132c9ab02d3b783f478743dafc7a7f42e27aa7d2bdcbec1bb1128ca8f2a07
+
+COPY apps/ui/nginx.conf /etc/nginx/conf.d/default.conf
+COPY --from=builder /build/apps/ui/dist /usr/share/nginx/html
+
+EXPOSE 8080
+
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+  CMD wget -qO /dev/null http://127.0.0.1:8080/healthz || exit 1

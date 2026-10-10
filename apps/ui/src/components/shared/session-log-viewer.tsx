@@ -1,4 +1,3 @@
-import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   Activity,
   ArrowDown,
@@ -19,6 +18,7 @@ import {
 import { Highlight, themes } from "prism-react-renderer";
 import {
   type CSSProperties,
+  Fragment,
   memo,
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
@@ -33,27 +33,43 @@ import { Streamdown } from "streamdown";
 import { Spinner } from "@/components/kibo-ui/spinner";
 import "streamdown/styles.css";
 
-import type { ContextSnapshot, SessionLog, SteeringMessage } from "@/api/types";
+import type { AgentTaskStatus, ContextSnapshot, SessionLog, SteeringMessage } from "@/api/types";
 import { AnimatedReveal } from "@/components/shared/animated-reveal";
+import {
+  type EndSummary,
+  formatDur,
+  type SessionLogView,
+  type StreamRow,
+  summarizeActivity,
+  summarizeEnd,
+  summaryText,
+  type ToolEntry,
+  type ToolKind,
+  toMessageRows,
+} from "@/components/shared/session-log-messages";
 import {
   SubagentDetails,
   SubagentDot,
   SubagentStatus,
   SubagentWaterfall,
 } from "@/components/shared/subagent-waterfall";
+import { TaskStatusIcon } from "@/components/shared/task-status-icon";
 import { ToolResultImage } from "@/components/shared/tool-result-image";
+import { useLogScroll } from "@/components/shared/use-log-scroll";
 import { QueuedSteeringBox } from "@/components/steering/queued-steering-box";
 import {
   SteeringLine,
   steeringMessageTimestamp,
 } from "@/components/steering/steering-message-chips";
 import { Input } from "@/components/ui/input";
+import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { JsonTree } from "@/components/workflows/json-tree";
 import { useTheme } from "@/hooks/use-theme";
 import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
 import { formatTokens } from "@/lib/format-tokens";
+import { statusLabel } from "@/lib/status-labels";
 import { cn, normalizeNewlines } from "@/lib/utils";
 import {
   extractSubagentRuns,
@@ -64,72 +80,7 @@ import {
 } from "@/logs-parser";
 import { imageResultPreview } from "@/logs-parser/result-images";
 
-// --- Stream model ---
-
-type ToolKind = "mcp" | "bash" | "file" | "web" | "task" | "skill" | "other";
-
-interface ToolEntry {
-  id: string;
-  kind: ToolKind;
-  name: string;
-  server: string;
-  title: string;
-  detail: string;
-  input: string;
-  preview: string;
-  body: string;
-  ok: boolean;
-  hasResult: boolean;
-  durMs: number;
-}
-
-type StreamRow =
-  | { type: "compaction"; id: string; snapshot: ContextSnapshot }
-  | {
-      type: "steering";
-      id: string;
-      time: string;
-      iso: string;
-      message: SteeringMessage;
-      isNew: boolean;
-    }
-  | {
-      type: "agent";
-      id: string;
-      role: "assistant" | "user" | "system";
-      time: string;
-      iso: string;
-      md: string;
-      isNew: boolean;
-    }
-  | { type: "thinking"; id: string; time: string; iso: string; text: string; isNew: boolean }
-  | {
-      type: "meta";
-      id: string;
-      time: string;
-      iso: string;
-      block: ProviderMetaBlock;
-      isNew: boolean;
-    }
-  | {
-      type: "subagent";
-      id: string;
-      time: string;
-      iso: string;
-      run: SubagentRun;
-      isNew: boolean;
-    }
-  | {
-      type: "toolgroup";
-      id: string;
-      time: string;
-      iso: string;
-      tools: ToolEntry[];
-      names: string[];
-      durMs: number;
-      defaultOpen: boolean;
-      isNew: boolean;
-    };
+// --- Stream model (types and the Messages view: session-log-messages.ts) ---
 
 const FILE_TOOLS = new Set([
   "Read",
@@ -165,20 +116,7 @@ function fmtFull(iso: string): string {
   return d.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "medium" });
 }
 
-/** Human-friendly elapsed duration. 0/invalid → "" (renders nothing). */
-function formatDur(ms: number): string {
-  if (!ms || ms < 0) return "";
-  if (ms < 1000) return `${ms}ms`;
-  if (ms < 60000) {
-    const s = ms / 1000;
-    return `${s < 10 ? s.toFixed(1) : Math.round(s)}s`;
-  }
-  const m = Math.floor(ms / 60000);
-  const s = Math.round((ms % 60000) / 1000);
-  return `${m}m${s ? ` ${s}s` : ""}`;
-}
-
-// Providers without native skill/slash-command support (codex, opencode — see
+// Providers without native skill/slash-command support (codex, opencode: see
 // resolveSlashSkillPrompt in src/providers/codex-skill-resolver.ts) inline the
 // full SKILL.md body ahead of the turn's actual ask, joined by this literal
 // delimiter, before the prompt ever reaches the model. That's the text the
@@ -186,7 +124,7 @@ function formatDur(ms: number): string {
 // is dominated by skill boilerplate with the real task buried at the bottom.
 const SKILL_EXPANSION_DELIMITER = "\n\n---\n\nUser request: ";
 const SKILL_TITLE_RE = /^#\s+(.+)$/m;
-// Providers with native skill support (claude, pi) never rewrite the prompt —
+// Providers with native skill support (claude, pi) never rewrite the prompt:
 // the model receives the literal slash line and is expected to invoke the
 // Skill tool itself. Recognize that line so it can be labeled distinctly too.
 const SLASH_COMMAND_LINE_RE = /^\/([a-z0-9:_-]+)(?:\s+(.*))?$/;
@@ -362,7 +300,7 @@ function previewOf(body: string): string {
 }
 
 /** Normalize Unicode bullets at line-start to markdown lists, then paragraph-fix.
- * Fenced code blocks are split out and passed through verbatim — running the
+ * Fenced code blocks are split out and passed through verbatim: running the
  * single→double newline paragraph fix inside a ``` fence would double-space
  * every code line. Handles unclosed fences (streaming) by matching to EOL. */
 function tidyMarkdown(text: string): string {
@@ -598,7 +536,7 @@ function buildStream(
   isRunning?: boolean,
   /**
    * Steering messages to interleave. `pending` rows are filtered out by the
-   * caller — they live in the pinned tail box instead, since nothing has
+   * caller: they live in the pinned tail box instead, since nothing has
    * entered the session yet to timestamp them against.
    */
   steering: SteeringMessage[] = [],
@@ -677,7 +615,7 @@ function buildStream(
     }
 
     if (item.kind === "steer") {
-      // A user message landing mid-run always terminates the open tool group —
+      // A user message landing mid-run always terminates the open tool group:
       // it's a turn boundary in the reader's mental model, not another step.
       closeGroup();
       const id = `steer-${item.sm.id}`;
@@ -763,7 +701,7 @@ function buildStream(
           preview: res
             ? previewOf(body)
             : progress
-              ? `${progress.toolName ?? c.title} — still running${progressDuration ? `, ${progressDuration}` : ""}`
+              ? `${progress.toolName ?? c.title} · still running${progressDuration ? `, ${progressDuration}` : ""}`
               : "running…",
           body,
           ok: res ? !res.isError : true,
@@ -835,7 +773,7 @@ function buildStream(
   closeGroup();
   markLiveThinkingGroup(rows, isRunning);
 
-  // The trailing tool group (if the stream ends on one) stays open by default —
+  // The trailing tool group (if the stream ends on one) stays open by default:
   // this is committed here, not derived from a moving "last index", so a group
   // doesn't spontaneously collapse mid-read when the next event streams in.
   const last = rows[rows.length - 1];
@@ -865,6 +803,11 @@ function rowSearchText(row: StreamRow): string {
       return `steering ${row.message.mode} ${row.message.status} ${row.message.body}`;
     case "compaction":
       return "compaction";
+    case "activity":
+      // The filter finds a folded line by anything in the rows it holds.
+      return [summaryText(summarizeActivity(row)), ...row.rows.map(rowSearchText)].join(" ");
+    case "end":
+      return summaryText(summarizeEnd(row));
   }
 }
 
@@ -887,6 +830,10 @@ function outlineLabel(row: StreamRow): string {
       return `Steering · ${truncate(row.message.body.replace(/\s+/g, " ").trim(), 56)}`;
     case "compaction":
       return "Compaction";
+    case "activity":
+      return summaryText(summarizeActivity(row));
+    case "end":
+      return summaryText(summarizeEnd(row));
   }
 }
 
@@ -938,7 +885,7 @@ type TickTone = "agent" | "tool" | "user" | "muted";
 
 function rowTone(row: StreamRow): TickTone {
   if (row.type === "subagent") return "agent";
-  if (row.type === "toolgroup") return "tool";
+  if (row.type === "toolgroup" || row.type === "activity") return "tool";
   if (row.type === "agent") return row.role === "user" ? "user" : "agent";
   if (row.type === "steering") return "user";
   if (row.type === "thinking") return "agent";
@@ -1003,10 +950,10 @@ function CopyIconButton({
 // Agent output frequently embeds fenced code (```bash, ```json, …). Streamdown's
 // built-in CodeBlock renders a heavy, double-bordered box whose copy/download
 // controls fight the surrounding .prose-* styles (and didn't reliably work). We
-// override `code`/`pre` — the same pattern as markdown-view.tsx's Monaco
-// override, but lightweight (no editor instances, safe inside the virtualized
-// log) — to render one clean terminal-style block with a single working Copy
-// button and no download.
+// override `code`/`pre` to render one clean terminal-style block with a single
+// working Copy button and no download. Same pattern as markdown-view.tsx's
+// Monaco override, but lightweight: no editor instances, safe inside the
+// virtualized log.
 // Markdown fence label → Prism language id (Prism's bundled grammars use a few
 // different names; unknowns fall through and render as plain, uncolored code).
 const PRISM_LANG_ALIASES: Record<string, string> = {
@@ -1037,10 +984,10 @@ const LogCodeBlock = memo(function LogCodeBlock({
     <div className="sl-code group/code relative my-2 overflow-hidden rounded-lg border border-border/70 bg-muted/40">
       {lang ? (
         <div className="flex items-center justify-between gap-2 border-b border-border/50 bg-muted/50 py-1 pl-3 pr-1">
-          <span className="select-none font-mono text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+          <span className="select-none font-mono text-meta font-medium uppercase tracking-wider text-muted-foreground">
             {lang}
           </span>
-          <CopyIconButton text={value} label="Copy code" className="size-6" />
+          <CopyIconButton text={value} label="Copy code" className="hit-area size-6" />
         </div>
       ) : (
         <CopyIconButton
@@ -1099,7 +1046,7 @@ const LOG_MD_COMPONENTS = {
     }
     return <LogCodeBlock language={m?.[1] ?? ""} value={raw.replace(/\n$/, "")} />;
   },
-  // Our block brings its own container — unwrap Streamdown's <pre> so we don't
+  // Our block brings its own container: unwrap Streamdown's <pre> so we don't
   // nest a styled block inside a styled <pre>.
   pre({ children }: { children?: ReactNode }) {
     return <>{children}</>;
@@ -1158,7 +1105,7 @@ function ProviderStatusPill({ value }: { value: string }) {
   return (
     <span
       className={cn(
-        "rounded-full px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide",
+        "rounded-full px-1.5 py-0.5 text-meta font-medium uppercase tracking-wide",
         style.bg,
         style.text,
       )}
@@ -1215,10 +1162,10 @@ function ProviderStructuredOutputMeta({ block }: { block: ProviderMetaBlock }) {
       stats={taskStatus ? <ProviderStatusPill value={taskStatus} /> : undefined}
     >
       {summary && output && (
-        <p className="max-w-4xl text-[11.5px] leading-snug text-muted-foreground">{summary}</p>
+        <p className="max-w-4xl text-xs leading-snug text-muted-foreground">{summary}</p>
       )}
       {output && (
-        <div className="prose-chat prose-session-log max-w-4xl text-xs text-foreground/90">
+        <div className="prose-chat prose-session-log max-w-4xl text-xs text-foreground">
           <LogMarkdown>{output}</LogMarkdown>
         </div>
       )}
@@ -1286,7 +1233,7 @@ function MetaPanel({
         <span className="grid size-5 shrink-0 place-items-center rounded-md bg-background/60 text-muted-foreground">
           {icon}
         </span>
-        <span className="min-w-0 flex-1 truncate font-mono text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+        <span className="min-w-0 flex-1 truncate font-mono text-meta font-semibold uppercase tracking-wider text-muted-foreground">
           {title}
         </span>
         {badge}
@@ -1301,10 +1248,10 @@ function MetaStat({ label, value }: { label: string; value?: string }) {
   if (!value) return null;
   return (
     <span className="inline-flex min-w-0 items-baseline gap-1 rounded-md border border-border/60 bg-background/60 px-1.5 py-1">
-      <span className="font-mono text-[9px] uppercase tracking-wider text-muted-foreground">
+      <span className="font-mono text-meta uppercase tracking-wider text-muted-foreground">
         {label}
       </span>
-      <span className="truncate font-mono text-[11px] text-foreground">{value}</span>
+      <span className="truncate font-mono text-xs tabular-nums text-foreground">{value}</span>
     </span>
   );
 }
@@ -1318,14 +1265,14 @@ function RawDetails({ data }: { data: unknown }) {
         <button
           type="button"
           onClick={() => setOpen((value) => !value)}
-          className="inline-flex cursor-pointer items-center gap-1 rounded-md px-1 py-0.5 font-mono text-[10px] uppercase tracking-wider text-muted-foreground hover:bg-background/60 hover:text-foreground"
+          className="hit-area inline-flex cursor-pointer items-center gap-1 rounded-md px-1 py-0.5 font-mono text-meta uppercase tracking-wider text-muted-foreground hover:bg-background/60 hover:text-foreground"
         >
           <ChevronRight
             className={cn("size-3 transition-transform duration-200", open && "rotate-90")}
           />
           Raw
         </button>
-        <CopyIconButton text={text} label="Copy raw event" className="size-5" />
+        <CopyIconButton text={text} label="Copy raw event" className="hit-area size-5" />
       </div>
       <AnimatedReveal open={open} speed="fast">
         <JsonTree
@@ -1358,8 +1305,8 @@ function LowKeyMetaLine({
   const text = useMemo(() => safeJson(raw), [raw]);
   return (
     <div className="py-0.5">
-      <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
-        <span className="inline-flex size-4 shrink-0 items-center justify-center text-muted-foreground/75">
+      <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-meta text-muted-foreground">
+        <span className="inline-flex size-4 shrink-0 items-center justify-center text-muted-foreground">
           {icon}
         </span>
         {title && <span className="font-mono uppercase tracking-wider">{title}</span>}
@@ -1369,14 +1316,14 @@ function LowKeyMetaLine({
           <button
             type="button"
             onClick={() => setOpen((value) => !value)}
-            className="inline-flex cursor-pointer items-center gap-0.5 rounded px-1 py-0.5 font-mono text-[9.5px] uppercase tracking-wider text-muted-foreground/80 hover:bg-muted hover:text-foreground"
+            className="hit-area inline-flex cursor-pointer items-center gap-0.5 rounded px-1 py-0.5 font-mono text-meta uppercase tracking-wider text-muted-foreground hover:bg-muted hover:text-foreground"
           >
             <ChevronRight
               className={cn("size-2.5 transition-transform duration-200", open && "rotate-90")}
             />
             Raw
           </button>
-          <CopyIconButton text={text} label="Copy raw event" className="size-5" />
+          <CopyIconButton text={text} label="Copy raw event" className="hit-area size-5" />
         </span>
       </div>
       {children && <div className="ml-6 mt-1 space-y-1">{children}</div>}
@@ -1395,9 +1342,9 @@ function LowKeyMetaLine({
 function LowKeyStat({ label, value }: { label: string; value?: string }) {
   if (!value) return null;
   return (
-    <span className="inline-flex items-baseline gap-1 font-mono text-[10.5px] text-muted-foreground">
-      <span className="uppercase tracking-wider text-muted-foreground/75">{label}</span>
-      <span className="text-foreground/80">{value}</span>
+    <span className="inline-flex items-baseline gap-1 font-mono text-meta text-muted-foreground">
+      <span className="uppercase tracking-wider text-muted-foreground">{label}</span>
+      <span className="tabular-nums text-foreground">{value}</span>
     </span>
   );
 }
@@ -1438,7 +1385,7 @@ function ThinkingTokenGroupMeta({ block }: { block: ProviderMetaBlock }) {
       raw={block.data}
       stats={
         active ? (
-          <span className="shimmer-text font-mono text-[11px] font-medium">{text}</span>
+          <span className="shimmer-text font-mono text-meta font-medium">{text}</span>
         ) : undefined
       }
     />
@@ -1485,6 +1432,7 @@ function TurnUsageMeta({ block }: { block: ProviderMetaBlock }) {
             label="Reasoning"
             value={formatMaybeTokens(numberValue(usage.reasoning_output_tokens))}
           />
+          <LowKeyStat label="Steps" value={numberValue(block.data.steps)?.toString()} />
         </>
       }
     />
@@ -1546,17 +1494,17 @@ function HookRunRow({ hook }: { hook: HookRun }) {
   const output = stringValue(response?.output ?? response?.stdout);
   const ok = !response || outcome === "success" || exit === 0;
   return (
-    <div className="text-[11px] text-muted-foreground">
+    <div className="text-meta text-muted-foreground">
       <div className="flex min-w-0 items-center gap-2">
-        <span className="min-w-0 flex-1 truncate font-mono text-foreground/80">
+        <span className="min-w-0 flex-1 truncate font-mono text-foreground">
           {hook.hookName ?? stringValue(started?.hook_name) ?? "hook"}
         </span>
-        <span className="shrink-0 font-mono text-[10px]">{shortId(hook.hookId)}</span>
+        <span className="shrink-0 font-mono text-meta">{shortId(hook.hookId)}</span>
         {response && (
           <span
             className={cn(
-              "shrink-0 font-mono text-[10px] uppercase tracking-wide",
-              ok ? "text-status-success-strong/85" : "text-status-error-strong/85",
+              "shrink-0 font-mono text-meta uppercase tracking-wide",
+              ok ? "text-status-success-strong" : "text-status-error-strong",
             )}
           >
             {outcome ?? (ok ? "ok" : "error")}
@@ -1564,7 +1512,7 @@ function HookRunRow({ hook }: { hook: HookRun }) {
         )}
       </div>
       {output && (
-        <p className="mt-1 truncate text-[11px] leading-snug text-muted-foreground">
+        <p className="mt-1 truncate text-meta leading-snug text-muted-foreground">
           {output.replace(/\s+/g, " ")}
         </p>
       )}
@@ -1683,7 +1631,7 @@ function FileChangeMeta({ block }: { block: ProviderMetaBlock }) {
       raw={block.data}
       tone="muted"
       badge={
-        <span className="rounded-full bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+        <span className="rounded-full bg-muted px-1.5 py-0.5 font-mono text-meta tabular-nums text-muted-foreground">
           {changes.length || 1} {changes.length === 1 ? "file" : "files"}
         </span>
       }
@@ -1695,16 +1643,16 @@ function FileChangeMeta({ block }: { block: ProviderMetaBlock }) {
               key={`${change.path}-${index}`}
               className="flex min-w-0 items-center gap-2 rounded-md border border-border/60 bg-background/55 px-2 py-1"
             >
-              <span className="shrink-0 rounded bg-muted px-1 font-mono text-[9px] uppercase tracking-wide text-muted-foreground">
+              <span className="shrink-0 rounded bg-muted px-1 font-mono text-meta uppercase tracking-wide text-muted-foreground">
                 {change.kind ?? "change"}
               </span>
-              <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-foreground">
+              <span className="min-w-0 flex-1 truncate font-mono text-meta text-foreground">
                 {change.path}
               </span>
             </div>
           ))}
           {changes.length > 8 && (
-            <div className="px-1 font-mono text-[10px] text-muted-foreground">
+            <div className="px-1 font-mono text-meta tabular-nums text-muted-foreground">
               +{changes.length - 8} more files
             </div>
           )}
@@ -1768,7 +1716,7 @@ function GenericMetaBubble({ block }: { block: ProviderMetaBlock }) {
     failed: "error",
   };
   const tone = block.kind === "parse_error" ? "error" : (status && statusTone[status]) || "muted";
-  // A resolved item type drops the generic "Unknown" prefix — that literal word is
+  // A resolved item type drops the generic "Unknown" prefix: that literal word is
   // what reads as still-broken to a user even after the type/detail are correct.
   const title =
     block.kind === "unknown" && itemType
@@ -1791,7 +1739,7 @@ function GenericMetaBubble({ block }: { block: ProviderMetaBlock }) {
         status ? (
           <span className="inline-flex items-center gap-1.5">
             {durationMs ? (
-              <span className="font-mono text-[11px] text-muted-foreground">
+              <span className="font-mono text-meta tabular-nums text-muted-foreground">
                 {formatDur(durationMs)}
               </span>
             ) : null}
@@ -1862,9 +1810,9 @@ function RowShell({
   iso: string;
   flash?: boolean;
   isNew?: boolean;
-  /** Row streamed in while the viewer was following — slide in + light highlight. */
+  /** Row streamed in while the viewer was following: slide in + light highlight. */
   highlight?: boolean;
-  /** Delay (ms) before the entrance plays — drives the one-by-one staggered reveal. */
+  /** Delay (ms) before the entrance plays. Drives the one-by-one staggered reveal. */
   streamDelayMs?: number;
   children: ReactNode;
 }) {
@@ -1882,7 +1830,7 @@ function RowShell({
     >
       <Tooltip>
         <TooltipTrigger asChild>
-          <span className="cursor-help select-none pt-[3px] text-left font-mono text-[11px] tabular-nums text-muted-foreground">
+          <span className="cursor-help select-none pt-[3px] text-left font-mono text-meta tabular-nums text-muted-foreground">
             {time}
           </span>
         </TooltipTrigger>
@@ -1906,7 +1854,7 @@ function ResultSection({
   const [overflow, setOverflow] = useState(false);
   const preview = useMemo(() => imageResultPreview(body), [body]);
 
-  // Re-measure when the body changes (streaming results grow on refetch) — `body`
+  // Re-measure when the body changes (streaming results grow on refetch). `body`
   // is the intentional trigger even though the measurement reads the DOM, not it.
   // biome-ignore lint/correctness/useExhaustiveDependencies: re-measure on body change
   useLayoutEffect(() => {
@@ -1928,7 +1876,7 @@ function ResultSection({
         ref={wrapRef}
         className={cn("relative overflow-hidden", open ? "max-h-none" : "max-h-[11.5em]")}
       >
-        <pre className="m-0 whitespace-pre-wrap break-words px-2.5 pb-2 pt-1 font-mono text-[11.5px] leading-[1.6] text-foreground/85">
+        <pre className="m-0 whitespace-pre-wrap break-words px-2.5 pb-2 pt-1 font-mono text-xs leading-[1.6] text-foreground">
           {(preview && !open ? preview.text : body) || "(no output)"}
         </pre>
         {overflow && !open && (
@@ -1939,7 +1887,7 @@ function ResultSection({
         <button
           type="button"
           onClick={onToggle}
-          className="mx-2.5 mb-2 cursor-pointer text-[11px] font-semibold text-status-info-strong"
+          className="hit-area mx-2.5 mb-2 cursor-pointer text-meta font-semibold text-status-info-strong"
         >
           {open ? "Show less" : "Show full output"}
         </button>
@@ -1993,10 +1941,10 @@ function ToolRow({
             tool.title
           )}
         </span>
-        <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-muted-foreground">
+        <span className="min-w-0 flex-1 truncate font-mono text-meta text-muted-foreground">
           {tool.detail}
         </span>
-        <span className="shrink-0 font-mono text-[10.5px] text-muted-foreground">
+        <span className="shrink-0 font-mono text-meta text-muted-foreground">
           {tool.hasResult && (
             <span className={tool.ok ? "text-status-success-strong" : "text-status-error-strong"}>
               {tool.ok ? "✓ " : "✕ "}
@@ -2004,25 +1952,29 @@ function ToolRow({
           )}
           {tool.preview}
         </span>
-        {dur && <span className="shrink-0 font-mono text-[10px] text-muted-foreground">{dur}</span>}
+        {dur && (
+          <span className="shrink-0 font-mono text-meta tabular-nums text-muted-foreground">
+            {dur}
+          </span>
+        )}
       </button>
 
       <AnimatedReveal open={open} speed="fast">
         <div className="border-t border-border">
           {hasInput && (
             <>
-              <div className="flex items-center gap-1.5 px-2.5 pt-1.5 font-mono text-[9.5px] uppercase tracking-[0.1em] text-muted-foreground">
+              <div className="flex items-center gap-1.5 px-2.5 pt-1.5 font-mono text-meta uppercase tracking-[0.1em] text-muted-foreground">
                 <span>Input</span>
-                <CopyIconButton text={tool.input} className="ml-auto" label="Copy input" />
+                <CopyIconButton text={tool.input} className="hit-area ml-auto" label="Copy input" />
               </div>
-              <pre className="m-0 whitespace-pre-wrap break-words px-2.5 pb-2 pt-1 font-mono text-[11.5px] leading-[1.6] text-foreground/85">
+              <pre className="m-0 whitespace-pre-wrap break-words px-2.5 pb-2 pt-1 font-mono text-xs leading-[1.6] text-foreground">
                 {tool.input}
               </pre>
             </>
           )}
-          <div className="flex items-center gap-1.5 px-2.5 pt-1.5 font-mono text-[9.5px] uppercase tracking-[0.1em] text-muted-foreground">
+          <div className="flex items-center gap-1.5 px-2.5 pt-1.5 font-mono text-meta uppercase tracking-[0.1em] text-muted-foreground">
             <span>Result</span>
-            <CopyIconButton text={tool.body} className="ml-auto" label="Copy result" />
+            <CopyIconButton text={tool.body} className="hit-area ml-auto" label="Copy result" />
           </div>
           <ResultSection body={tool.body} open={outputOpen} onToggle={onToggleOutput} />
         </div>
@@ -2040,16 +1992,18 @@ function CompactionDivider({ snapshot }: { snapshot: ContextSnapshot }) {
   return (
     <div className="flex items-center gap-2 border-y border-status-active/20 bg-status-active/5 px-1 py-2">
       <Scissors className="size-3 shrink-0 text-status-active-strong" />
-      <span className="whitespace-nowrap font-mono text-[10px] font-semibold uppercase tracking-wider text-status-active-strong">
+      <span className="whitespace-nowrap font-mono text-meta font-semibold uppercase tracking-wider text-status-active-strong">
         {isAuto ? "Auto" : "Manual"} compaction
       </span>
       {preTokens != null && postTokens != null && (
-        <span className="font-mono text-[10px] text-muted-foreground">
+        <span className="font-mono text-meta tabular-nums text-muted-foreground">
           {formatTokens(preTokens)} → {formatTokens(postTokens)}
         </span>
       )}
       {percent != null && (
-        <span className="font-mono text-[10px] text-muted-foreground">({percent.toFixed(0)}%)</span>
+        <span className="font-mono text-meta tabular-nums text-muted-foreground">
+          ({percent.toFixed(0)}%)
+        </span>
       )}
       <div className="h-px flex-1 bg-status-active/20" />
     </div>
@@ -2063,9 +2017,15 @@ function CompactionDivider({ snapshot }: { snapshot: ContextSnapshot }) {
 const MinimapRail = memo(function MinimapRail({
   rows,
   onJump,
+  stickyHeight,
 }: {
   rows: StreamRow[];
   onJump: (index: number, row: StreamRow) => void;
+  /**
+   * Page mode: the rail sticks under the page's sticky bars and the log
+   * toolbar, at this CSS height, while the log scrolls past.
+   */
+  stickyHeight?: string;
 }) {
   const railRef = useRef<HTMLDivElement | null>(null);
   const [railH, setRailH] = useState(0);
@@ -2082,10 +2042,16 @@ const MinimapRail = memo(function MinimapRail({
 
   const gap = rows.length > 1 ? Math.max(0, Math.min(8, (railH - 12) / (rows.length - 1))) : 0;
 
-  return (
+  const rail = (
     <div
       ref={railRef}
-      className="relative hidden w-3 shrink-0 sm:block"
+      className={cn(
+        "relative w-3 shrink-0",
+        stickyHeight
+          ? "sticky top-[calc(var(--log-sticky-top,0px)+var(--log-toolbar-h,0px))] max-h-full"
+          : "hidden sm:block",
+      )}
+      style={stickyHeight ? { height: stickyHeight } : undefined}
       onMouseEnter={() => setOpen(true)}
       onMouseLeave={() => setOpen(false)}
       onFocus={() => setOpen(true)}
@@ -2107,7 +2073,7 @@ const MinimapRail = memo(function MinimapRail({
       </div>
       {open && (
         <div className="absolute right-0 top-0 z-20 max-h-full w-64 overflow-y-auto rounded-l-md border-l border-border bg-card shadow-xl">
-          <div className="sticky top-0 border-b border-border bg-card px-3 py-2 font-mono text-[9.5px] uppercase tracking-[0.1em] text-muted-foreground">
+          <div className="sticky top-0 border-b border-border bg-card px-3 py-2 font-mono text-meta uppercase tracking-[0.1em] text-muted-foreground">
             {rows.length} events · click to jump
           </div>
           {rows.map((row, i) => (
@@ -2117,7 +2083,7 @@ const MinimapRail = memo(function MinimapRail({
               onClick={() => onJump(i, row)}
               className="flex w-full cursor-pointer items-center gap-2 border-b border-border/40 px-3 py-1.5 text-left hover:bg-muted/50"
             >
-              <span className="shrink-0 font-mono text-[10px] text-muted-foreground">
+              <span className="shrink-0 font-mono text-meta tabular-nums text-muted-foreground">
                 {"time" in row ? row.time : ""}
               </span>
               <span className={cn("size-[7px] shrink-0 rounded-full", TONE_DOT[rowTone(row)])} />
@@ -2128,11 +2094,22 @@ const MinimapRail = memo(function MinimapRail({
       )}
     </div>
   );
+  if (!stickyHeight) return rail;
+  // Page mode: an absolute column spans the log body without adding to its
+  // height, and the rail sticks inside it.
+  return (
+    <div className="relative hidden w-3 shrink-0 sm:block">
+      <div className="absolute inset-0">{rail}</div>
+    </div>
+  );
 });
 
 // --- Main component ---
 
-const VIRTUALIZE_THRESHOLD = 120;
+const LOG_VIEW_OPTIONS = [
+  { value: "messages", label: "Messages" },
+  { value: "everything", label: "Everything" },
+] as const satisfies readonly { value: SessionLogView; label: string }[];
 
 // Staggered-reveal tuning: when a poll appends a small batch of new rows while
 // following, each row after the first is delayed by STAGGER_STEP_MS so they
@@ -2141,13 +2118,17 @@ const VIRTUALIZE_THRESHOLD = 120;
 const STAGGER_MAX_ROWS = 6;
 const STAGGER_STEP_MS = 100;
 
+/** The focus ring of the log's keyboard stop (the panel or the scroller). */
+const LOG_FOCUS_RING =
+  "outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/60";
+
 interface SessionLogViewerProps {
   logs: SessionLog[];
   compactionSnapshots?: ContextSnapshot[];
   className?: string;
   /**
    * Whether the underlying agent is still working. Drives the footer indicator.
-   * Omit when unknown — the footer shows a neutral event count rather than
+   * Omit when unknown: the footer shows a neutral event count rather than
    * claiming the session is complete.
    */
   isRunning?: boolean;
@@ -2155,10 +2136,53 @@ interface SessionLogViewerProps {
    * Steering messages for this task (≥1.122.1). Delivered / handled rows
    * interleave into the stream at `deliveredAt`; promoted / cancelled at
    * `createdAt`; still-`pending` ones pin to the tail box above the footer.
-   * Omit entirely when the feature is gated off — the viewer then behaves
+   * Omit entirely when the feature is gated off: the viewer then behaves
    * exactly as before.
    */
   steeringMessages?: SteeringMessage[];
+  /**
+   * Page mode. The caller's scroll container (the task page column) scrolls
+   * the log, so the viewer has no scroller of its own:
+   * - Rows flow at their natural height.
+   * - The toolbar, the minimap, the jump pill and the live footer stick
+   *   inside the caller's scroller.
+   * - The viewer never pins itself to the bottom on open. Follow mode starts
+   *   when the user scrolls to the end of the log.
+   *
+   * Pass `null` while the element mounts. Omit the prop to keep the viewer's
+   * own scroller. The caller sets `--log-sticky-top` and, if it has a bottom
+   * bar, `--log-sticky-bottom` on the scroller: the heights of its own sticky
+   * bars.
+   */
+  scrollElement?: HTMLElement | null;
+  /**
+   * The toolbar controls and the jump pill are 44 px touch targets (the task
+   * page's narrow layout). Row controls get a touch hit area either way.
+   */
+  touchTargets?: boolean;
+  /**
+   * Which rows show. "everything" (the default) is one row per event.
+   * "messages" keeps the messages and folds each run of tool and thinking
+   * rows into one line (`toMessageRows`).
+   */
+  view?: SessionLogView;
+  /**
+   * Shows the Messages / Everything switch in the toolbar. The caller owns
+   * the view. Without it, the toolbar keeps its "Logs" tab.
+   */
+  onViewChange?: (view: SessionLogView) => void;
+  /**
+   * The task status. When the session has ended, the footer names a failed
+   * or a cancelled end instead of "Session complete".
+   */
+  status?: AgentTaskStatus;
+  /**
+   * The run's cost, run time and turns, as text, for the Messages view's
+   * last end line. The task page passes its details rail's numbers, so the
+   * page shows one set. Without it, the end line shows the harness result's
+   * numbers.
+   */
+  endSummary?: EndSummary;
 }
 
 export function SessionLogViewer({
@@ -2167,6 +2191,12 @@ export function SessionLogViewer({
   className,
   isRunning,
   steeringMessages,
+  scrollElement,
+  touchTargets = false,
+  view = "everything",
+  onViewChange,
+  status,
+  endSummary,
 }: SessionLogViewerProps) {
   const safeLogs = logs ?? [];
   const messages = useMemo(() => parseSessionLogs(safeLogs), [safeLogs]);
@@ -2223,22 +2253,35 @@ export function SessionLogViewer({
     [messages, subagents, compactionSnapshots, newIds, isRunning, streamSteering],
   );
 
+  // Messages folds the rows before the filter, so a folded line matches by
+  // anything it holds.
+  const viewRows = useMemo(
+    () => (view === "messages" ? toMessageRows(rows, endSummary) : rows),
+    [rows, view, endSummary],
+  );
+
   const { searchParams, setParam } = useUrlSearchState();
   const query = readStringParam(searchParams, "logSearch");
   const setQuery = useCallback((value: string) => setParam("logSearch", value), [setParam]);
   const visibleRows = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return rows;
-    return rows.filter(
+    if (!q) return viewRows;
+    return viewRows.filter(
       (r) => r.type !== "compaction" && rowSearchText(r).toLowerCase().includes(q),
     );
-  }, [rows, query]);
+  }, [viewRows, query]);
 
-  const virtualize = visibleRows.length > VIRTUALIZE_THRESHOLD;
+  // The footer counts events: a folded activity line holds several.
+  const eventCount = useMemo(
+    () => visibleRows.reduce((n, r) => n + (r.type === "activity" ? r.rows.length : 1), 0),
+    [visibleRows],
+  );
 
   // Per-id collapse state, keyed by stable id so it survives refetch + recycling.
   const [groupToggle, setGroupToggle] = useState<Map<string, boolean>>(new Map());
   const [openSubagents, setOpenSubagents] = useState<Set<string>>(new Set());
+  // Messages view: open activity lines (closed by default).
+  const [openActivities, setOpenActivities] = useState<Set<string>>(new Set());
   const [openTools, setOpenTools] = useState<Set<string>>(new Set());
   const [openOutputs, setOpenOutputs] = useState<Set<string>>(new Set());
   const [flashId, setFlashId] = useState<string | null>(null);
@@ -2274,6 +2317,14 @@ export function SessionLogViewer({
     });
   }, []);
 
+  const toggleActivity = useCallback((id: string) => {
+    setOpenActivities((previous) => {
+      const next = new Set(previous);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }, []);
+
   const toggleOutput = useCallback((id: string) => {
     setOpenOutputs((prev) => {
       const next = new Set(prev);
@@ -2298,15 +2349,7 @@ export function SessionLogViewer({
     [],
   );
 
-  // --- Scroll plumbing (virtualizer + stick-to-bottom + jump pill) ---
-  const parentRef = useRef<HTMLDivElement | null>(null);
-  const contentRef = useRef<HTMLDivElement | null>(null);
-  const [atBottom, setAtBottom] = useState(true);
-  const atBottomRef = useRef(true);
-  const [pending, setPending] = useState(0);
-  const prevCount = useRef(0);
-  const didInit = useRef(false);
-
+  // --- Scroll plumbing (use-log-scroll.ts). The row height guesses live here. ---
   const estimateSize = useCallback(
     (index: number) => {
       const r = visibleRows[index];
@@ -2325,138 +2368,43 @@ export function SessionLogViewer({
           return openSubagents.has(r.id) ? 148 : 42;
         case "compaction":
           return 40;
+        case "activity":
+          return openActivities.has(r.id) ? 36 + 40 * r.rows.length : 36;
+        case "end":
+          return 36;
         default:
           return 64;
       }
     },
-    [visibleRows, openSubagents],
+    [visibleRows, openSubagents, openActivities],
   );
 
-  const virtualizer = useVirtualizer({
-    count: virtualize ? visibleRows.length : 0,
-    getScrollElement: () => parentRef.current,
+  const {
+    pageMode,
+    virtualize,
+    virtualizer,
+    parentRef,
+    contentRef,
+    toolbarRef,
+    tailRef,
+    atBottomRef,
+    stickyTail,
+    pending,
+    showJumpPill,
+    stickToBottom,
+    changeView,
+    scrollToRow,
+    pageStyle,
+    minimapStickyHeight,
+  } = useLogScroll({
+    scrollElement,
+    rows: visibleRows,
     estimateSize,
-    overscan: 14,
-    getItemKey: (i) => visibleRows[i]?.id ?? i,
+    isRunning,
+    view,
+    query,
+    onViewChange,
   });
-
-  useEffect(() => {
-    const el = parentRef.current;
-    if (!el) return;
-    const onScroll = () => {
-      const ab = el.scrollHeight - el.scrollTop - el.clientHeight < 72;
-      atBottomRef.current = ab;
-      setAtBottom(ab);
-      if (ab) setPending(0);
-    };
-    el.addEventListener("scroll", onScroll, { passive: true });
-    // Don't compute atBottom synchronously here: on first mount scrollTop is 0
-    // while content overflows, which would latch "not at bottom" and defeat the
-    // initial pin below. The pin establishes the at-bottom state; real scroll
-    // events take over from there.
-    return () => el.removeEventListener("scroll", onScroll);
-  }, []);
-
-  const stickToBottom = useCallback(
-    (behavior: ScrollBehavior = "auto") => {
-      const el = parentRef.current;
-      if (!el) return;
-      // User-initiated jumps glide; the auto-follow callers stay instant (they
-      // fire per content-growth frame — animating those would fight the
-      // stream). Reduced motion keeps everything instant.
-      if (
-        behavior === "smooth" &&
-        !(
-          typeof window !== "undefined" &&
-          window.matchMedia?.("(prefers-reduced-motion: reduce)").matches
-        )
-      ) {
-        // No scrollToIndex first — it snaps instantly and defeats the glide.
-        // The estimate can undershoot in virtualized mode; once the scroll
-        // lands, the keep-pinned effect snaps the last few px after the tail
-        // rows measure.
-        el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
-        setPending(0);
-        return;
-      }
-      // In virtualized mode getTotalSize() is an estimate until rows measure, so a
-      // bare scrollTop can undershoot the real bottom. scrollToIndex forces the
-      // tail to render + measure; the scrollTop assignment then lands flush.
-      if (virtualize && visibleRows.length > 0) {
-        virtualizer.scrollToIndex(visibleRows.length - 1, { align: "end" });
-      }
-      el.scrollTop = el.scrollHeight;
-      setPending(0);
-    },
-    [virtualize, virtualizer, visibleRows.length],
-  );
-
-  // Keep pinned to the bottom as content grows/measures (only when already there).
-  const totalSize = virtualize ? virtualizer.getTotalSize() : 0;
-  // biome-ignore lint/correctness/useExhaustiveDependencies: totalSize + visibleRows.length are intentional re-stick triggers — the effect reacts to content growth without reading them in the body.
-  useEffect(() => {
-    if (atBottomRef.current) requestAnimationFrame(() => stickToBottom());
-  }, [totalSize, visibleRows.length, stickToBottom]);
-
-  // Land at the newest event when the viewer first populates, and re-pin across
-  // a few frames while async content (virtualizer measurement, Streamdown,
-  // fonts) settles. Conventional log/chat behavior: opening a task drops you at
-  // the bottom whether the agent is still streaming or already finished — fixes
-  // both "doesn't auto-follow on open" and "completed task opens at the top".
-  const didInitialPin = useRef(false);
-  const hasRows = visibleRows.length > 0;
-  // biome-ignore lint/correctness/useExhaustiveDependencies: one-shot on first content; intentionally re-pins across frames without re-subscribing.
-  useLayoutEffect(() => {
-    if (didInitialPin.current || !hasRows) return;
-    didInitialPin.current = true;
-    atBottomRef.current = true;
-    setAtBottom(true);
-    const lastIndex = visibleRows.length - 1;
-    const landAtBottom = () => {
-      const el = parentRef.current;
-      if (!el) return;
-      if (virtualize && lastIndex >= 0) {
-        virtualizer.scrollToIndex(lastIndex, { align: "end" });
-      }
-      el.scrollTop = el.scrollHeight;
-    };
-    landAtBottom();
-    let frame = 0;
-    let raf = requestAnimationFrame(function settle() {
-      landAtBottom();
-      if (++frame < 12) raf = requestAnimationFrame(settle);
-    });
-    return () => cancelAnimationFrame(raf);
-  }, [hasRows]);
-
-  // Re-pin to the bottom whenever the content grows while we're in follow mode.
-  // The growth-stick effect above only reacts to row-count / virtualizer-total
-  // changes; it misses a row whose own height grows after it's added (streaming
-  // text, async markdown + Prism layout). Observing the content box catches all
-  // of those — this is what actually keeps the log auto-following.
-  useEffect(() => {
-    const content = contentRef.current;
-    if (!content || typeof ResizeObserver === "undefined") return;
-    const ro = new ResizeObserver(() => {
-      if (atBottomRef.current) stickToBottom();
-    });
-    ro.observe(content);
-    return () => ro.disconnect();
-  }, [stickToBottom]);
-
-  // Track newly-appended events for the "N new" pill when scrolled up.
-  useEffect(() => {
-    const cur = visibleRows.length;
-    if (!didInit.current) {
-      didInit.current = true;
-      prevCount.current = cur;
-      return;
-    }
-    if (cur > prevCount.current && !atBottomRef.current) {
-      setPending((p) => p + (cur - prevCount.current));
-    }
-    prevCount.current = cur;
-  }, [visibleRows.length]);
 
   const jumpTo = useCallback(
     (index: number, row: StreamRow) => {
@@ -2464,19 +2412,13 @@ export function SessionLogViewer({
       if (row.type === "subagent") {
         setOpenSubagents((previous) => new Set(previous).add(row.id));
       }
-      if (virtualize) {
-        virtualizer.scrollToIndex(index, { align: "center", behavior: "smooth" });
-      } else {
-        parentRef.current
-          ?.querySelector(`[data-row-id="${row.id}"]`)
-          ?.scrollIntoView({ block: "center", behavior: "smooth" });
-      }
+      scrollToRow(index, row.id);
       flashRow(row.id);
     },
-    [virtualize, virtualizer, flashRow, openGroup],
+    [scrollToRow, flashRow, openGroup],
   );
 
-  // Staggered reveal — when a poll appends a small batch of new rows while we're
+  // Staggered reveal: when a poll appends a small batch of new rows while we're
   // following the tail, give each row after the first an incremental
   // animation-delay so they cascade in one-by-one instead of popping in all at
   // once. Excluded: scrolled-up state and large/initial batches (appear at
@@ -2490,7 +2432,7 @@ export function SessionLogViewer({
       if (i > 0) m.set(r.id, i * STAGGER_STEP_MS);
     });
     return m;
-  }, [visibleRows]);
+  }, [visibleRows, atBottomRef]);
 
   const renderRow = useCallback(
     (row: StreamRow) => {
@@ -2530,7 +2472,7 @@ export function SessionLogViewer({
             streamDelayMs={streamDelayMs}
           >
             {(isUser || isSystem) && (
-              <span className="mb-0.5 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.04em] text-muted-foreground">
+              <span className="mb-0.5 flex items-center gap-1.5 text-meta font-semibold uppercase tracking-[0.04em] text-muted-foreground">
                 {isUser
                   ? slashCommand
                     ? `Task prompt · /${slashCommand.command}`
@@ -2591,9 +2533,9 @@ export function SessionLogViewer({
                 lifecycle, RowShell's gutter already owns the timestamp. */}
             <SteeringLine
               message={row.message}
-              className="text-[12.5px]"
+              className="text-xs"
               marker={
-                <span className="shrink-0 text-[10px] font-semibold uppercase tracking-[0.04em] text-primary">
+                <span className="shrink-0 text-meta font-semibold uppercase tracking-[0.04em] text-primary">
                   Steering
                 </span>
               }
@@ -2616,7 +2558,7 @@ export function SessionLogViewer({
             <button
               type="button"
               onClick={() => toggleSubagent(row.id)}
-              className="flex min-h-6 w-full min-w-0 cursor-pointer items-center gap-2 text-left"
+              className="hit-area flex min-h-6 w-full min-w-0 cursor-pointer items-center gap-2 text-left"
               aria-expanded={open}
             >
               <ChevronRight
@@ -2629,12 +2571,12 @@ export function SessionLogViewer({
               <span className="min-w-0 shrink truncate text-xs font-medium text-foreground">
                 {row.run.label}
               </span>
-              <span className="min-w-0 flex-1 truncate font-mono text-[10.5px] text-muted-foreground max-sm:hidden">
+              <span className="min-w-0 flex-1 truncate font-mono text-meta text-muted-foreground max-sm:hidden">
                 {row.run.agentType}
               </span>
               <SubagentStatus run={row.run} />
               {duration && (
-                <span className="shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground">
+                <span className="shrink-0 font-mono text-meta tabular-nums text-muted-foreground">
                   {duration}
                 </span>
               )}
@@ -2644,6 +2586,108 @@ export function SessionLogViewer({
                 <SubagentDetails run={row.run} />
               </div>
             </AnimatedReveal>
+          </RowShell>
+        );
+      }
+      if (row.type === "activity") {
+        // Messages view: one muted line for a run of tool and thinking rows.
+        // Open, it shows them with their own renderers, tools first-level
+        // (the line already counts them).
+        const open = openActivities.has(row.id);
+        const summary = summarizeActivity(row);
+        return (
+          <RowShell
+            time={row.time}
+            iso={row.iso}
+            flash={flash}
+            isNew={row.isNew}
+            highlight={row.isNew && atBottomRef.current}
+            streamDelayMs={streamDelayMs}
+          >
+            <button
+              type="button"
+              onClick={() => toggleActivity(row.id)}
+              aria-expanded={open}
+              className="hit-area flex w-full min-w-0 cursor-pointer items-center gap-2 py-0.5 text-left text-xs text-muted-foreground hover:text-foreground"
+            >
+              <ChevronRight
+                className={cn(
+                  "size-3 shrink-0 transition-transform duration-200",
+                  open && "rotate-90",
+                )}
+              />
+              <span className="shrink-0 font-medium">{summary.title}</span>
+              {summary.stats.map((stat) => (
+                <Fragment key={stat}>
+                  <span aria-hidden>·</span>
+                  <span className="shrink-0 font-mono tabular-nums">{stat}</span>
+                </Fragment>
+              ))}
+              {summary.names.length > 0 && (
+                <span className="ml-1 min-w-0 flex-1 truncate font-mono">
+                  {groupHeader(summary.names)}
+                </span>
+              )}
+            </button>
+            <AnimatedReveal open={open} speed="fast">
+              <div className="mt-1.5 flex flex-col gap-1.5 pl-0.5">
+                {row.rows.map((child) => (
+                  <Fragment key={child.id}>
+                    {child.type === "thinking" ? (
+                      <ThinkingRow text={child.text} />
+                    ) : child.type === "meta" ? (
+                      <ProviderMetaBubble block={child.block} />
+                    ) : child.type === "toolgroup" ? (
+                      child.tools.map((t) => (
+                        <ToolRow
+                          key={t.id}
+                          tool={t}
+                          open={openTools.has(t.id)}
+                          onToggle={() => toggleTool(t.id)}
+                          outputOpen={openOutputs.has(t.id)}
+                          onToggleOutput={() => toggleOutput(t.id)}
+                        />
+                      ))
+                    ) : null}
+                  </Fragment>
+                ))}
+              </div>
+            </AnimatedReveal>
+          </RowShell>
+        );
+      }
+      if (row.type === "end") {
+        // Messages view: the run result as one line. The answer itself is
+        // in the messages above it (and on the page's outcome card).
+        const summary = summarizeEnd(row);
+        return (
+          <RowShell
+            time={row.time}
+            iso={row.iso}
+            flash={flash}
+            isNew={row.isNew}
+            highlight={row.isNew && atBottomRef.current}
+            streamDelayMs={streamDelayMs}
+          >
+            <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 py-0.5 text-xs">
+              <TaskStatusIcon status={row.isError ? "failed" : "completed"} className="size-3.5" />
+              <span
+                className={cn(
+                  "font-medium",
+                  row.isError ? "text-status-error-strong" : "text-foreground",
+                )}
+              >
+                {summary.title}
+              </span>
+              {summary.stats.map((stat) => (
+                <Fragment key={stat}>
+                  <span aria-hidden className="text-muted-foreground">
+                    ·
+                  </span>
+                  <span className="font-mono tabular-nums text-muted-foreground">{stat}</span>
+                </Fragment>
+              ))}
+            </div>
           </RowShell>
         );
       }
@@ -2660,7 +2704,7 @@ export function SessionLogViewer({
           <button
             type="button"
             onClick={() => toggleGroup(row.id, open)}
-            className="flex w-full min-w-0 cursor-pointer items-center gap-2 py-0.5 text-left"
+            className="hit-area flex w-full min-w-0 cursor-pointer items-center gap-2 py-0.5 text-left"
           >
             <ChevronRight
               className={cn(
@@ -2668,13 +2712,15 @@ export function SessionLogViewer({
                 open && "rotate-90",
               )}
             />
-            <span className="shrink-0 text-[12.5px] font-semibold">
+            <span className="shrink-0 text-xs font-semibold">
               {row.tools.length} {row.tools.length === 1 ? "step" : "steps"}
             </span>
             {dur && (
-              <span className="shrink-0 font-mono text-[11px] text-muted-foreground">{dur}</span>
+              <span className="shrink-0 font-mono text-meta tabular-nums text-muted-foreground">
+                {dur}
+              </span>
             )}
-            <span className="min-w-0 flex-1 truncate font-mono text-[11.5px] text-muted-foreground">
+            <span className="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground">
               {groupHeader(row.names)}
             </span>
           </button>
@@ -2698,26 +2744,67 @@ export function SessionLogViewer({
     [
       flashId,
       isGroupOpen,
+      openActivities,
       openOutputs,
       openSubagents,
       openTools,
+      toggleActivity,
       toggleGroup,
       toggleOutput,
       toggleSubagent,
       toggleTool,
       staggerById,
+      atBottomRef,
     ],
   );
 
   const virtualItems = virtualizer.getVirtualItems();
 
+  // The view switch replaces the lone "Logs" tab. The tabs stay for the
+  // Agents view, and without a switch (other callers).
+  const showTabList = !onViewChange || subagents.length > 0;
+  // The log has one keyboard stop, with a visible ring. Page mode: the panel.
+  // The caller's scroller scrolls the log, and arrow keys on the panel
+  // scroll it. Own scroller: the scroller (a "Session log" region), and the
+  // panel leaves the Tab order. Without a tab list, the panel is not a tab
+  // panel: no trigger names it.
+  const logPanelProps = pageMode
+    ? showTabList
+      ? {}
+      : { role: "region", "aria-label": "Session log", "aria-labelledby": undefined }
+    : showTabList
+      ? { tabIndex: -1 }
+      : { role: undefined, "aria-labelledby": undefined, tabIndex: -1 };
+
+  const jumpPill = (
+    <button
+      type="button"
+      onClick={() => stickToBottom("smooth")}
+      aria-label="Scroll to latest"
+      className={cn(
+        "absolute bottom-4 left-1/2 z-10 inline-flex -translate-x-1/2 cursor-pointer items-center gap-2 rounded-full bg-primary px-3.5 py-[7px] text-xs font-semibold text-primary-foreground shadow-lg transition-[translate,opacity]",
+        pageMode && "bottom-0",
+        touchTargets && "min-h-11 px-4",
+        showJumpPill ? "translate-y-0 opacity-100" : "pointer-events-none translate-y-3 opacity-0",
+      )}
+    >
+      <ArrowDown className="size-3.5" />
+      {pending > 0 ? `${pending} new message${pending === 1 ? "" : "s"}` : null}
+    </button>
+  );
+
   return (
     <TooltipProvider delayDuration={250}>
       <div
         className={cn(
-          "flex min-h-0 flex-col overflow-hidden rounded-lg border border-border bg-card",
+          "flex min-h-0 flex-col rounded-lg border border-border bg-card",
+          // Page mode: `overflow-clip` keeps the rounded corners without making
+          // the card a scroll container, which would stop the toolbar and the
+          // footer from sticking in the caller's scroller.
+          pageMode ? "overflow-clip" : "overflow-hidden",
           className,
         )}
+        style={pageStyle}
       >
         <Tabs
           value={activeView}
@@ -2725,26 +2812,76 @@ export function SessionLogViewer({
           className="min-h-0 flex-1 gap-0"
         >
           {/* Toolbar */}
-          <div className="flex flex-wrap items-center gap-2 border-b border-border bg-muted/30 px-3 py-2">
-            <TabsList variant="line" className="h-[30px] shrink-0 rounded-none p-0">
-              <TabsTrigger value="logs" className="h-7 flex-none rounded-none px-2 text-xs">
-                Logs
-              </TabsTrigger>
-              {subagents.length > 0 && (
-                <TabsTrigger value="agents" className="h-7 flex-none rounded-none px-2 text-xs">
-                  Agents <span className="font-mono text-[10px]">({subagents.length})</span>
+          <div
+            ref={toolbarRef}
+            className={cn(
+              "flex flex-wrap items-center gap-2 border-b border-border bg-muted/30 px-3 py-2",
+              // Page mode: stick under the caller's sticky bar. The opaque card
+              // color under the same tint keeps rows from showing through.
+              pageMode &&
+                "sticky top-[var(--log-sticky-top,0px)] z-10 bg-card bg-linear-to-b from-muted/30 to-muted/30",
+            )}
+          >
+            {showTabList && (
+              <TabsList
+                variant="line"
+                className={cn("shrink-0 rounded-none p-0", touchTargets ? "h-11" : "h-[30px]")}
+              >
+                <TabsTrigger
+                  value="logs"
+                  className={cn(
+                    "flex-none rounded-none px-2 text-xs",
+                    touchTargets ? "h-11" : "h-7",
+                  )}
+                >
+                  Logs
                 </TabsTrigger>
-              )}
-            </TabsList>
+                {subagents.length > 0 && (
+                  <TabsTrigger
+                    value="agents"
+                    className={cn(
+                      "flex-none rounded-none px-2 text-xs",
+                      touchTargets ? "h-11" : "h-7",
+                    )}
+                  >
+                    Agents{" "}
+                    <span className="font-mono text-meta tabular-nums">({subagents.length})</span>
+                  </TabsTrigger>
+                )}
+              </TabsList>
+            )}
+            {onViewChange && activeView === "logs" && (
+              <SegmentedControl
+                size="sm"
+                aria-label="Log view"
+                value={view}
+                onValueChange={changeView}
+                options={LOG_VIEW_OPTIONS}
+                // Touch: 44 px options inside the control's border and padding.
+                className={cn(touchTargets && "h-12.5")}
+              />
+            )}
             {activeView === "logs" && (
-              <div className="relative ml-auto">
+              <div
+                className={cn(
+                  "relative ml-auto",
+                  // With the view switch, a phone gives the filter the rest of
+                  // the row, so the toolbar stays one row.
+                  onViewChange && "min-w-24 flex-1 sm:flex-none",
+                )}
+              >
                 <Search className="pointer-events-none absolute left-2 top-1/2 size-3 -translate-y-1/2 text-muted-foreground" />
                 <Input
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   placeholder="Filter…"
                   aria-label="Filter session log"
-                  className="h-[30px] w-40 pl-7 text-xs sm:w-52"
+                  // Touch: 16 px text, or iOS Safari zooms the page on focus.
+                  className={cn(
+                    "pl-7 sm:w-52",
+                    onViewChange ? "w-full" : "w-40",
+                    touchTargets ? "h-11 text-base" : "h-[30px] text-xs",
+                  )}
                 />
               </div>
             )}
@@ -2753,15 +2890,34 @@ export function SessionLogViewer({
           <TabsContent
             value="logs"
             forceMount
-            className="flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden"
+            className={cn(
+              "flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden",
+              pageMode && LOG_FOCUS_RING,
+            )}
+            {...logPanelProps}
           >
             {/* Body */}
             <div className="relative flex min-h-0 flex-1">
               <div
                 ref={parentRef}
-                className="min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden px-3 [overflow-anchor:none]"
+                className={cn(
+                  "min-h-0 min-w-0 flex-1 px-3",
+                  // Page mode: no scroller here. `overflow-x-clip` (not
+                  // `hidden`) leaves the y axis visible, so the body stays out
+                  // of the scroll chain.
+                  pageMode
+                    ? "overflow-x-clip"
+                    : cn(
+                        "overflow-y-auto overflow-x-hidden [overflow-anchor:none]",
+                        LOG_FOCUS_RING,
+                      ),
+                )}
+                {...(pageMode ? {} : { tabIndex: 0, role: "region", "aria-label": "Session log" })}
               >
-                <div ref={contentRef}>
+                {/* Page mode: keep the browser's scroll anchoring off the rows,
+                    as the own scroller does. The virtualizer corrects the
+                    scroll position itself when rows measure. */}
+                <div ref={contentRef} className={cn(pageMode && "[overflow-anchor:none]")}>
                   {visibleRows.length === 0 ? (
                     <div className="flex h-full items-center justify-center py-12 text-sm text-muted-foreground">
                       {rows.length === 0 ? "No session data" : "No matching events"}
@@ -2776,7 +2932,9 @@ export function SessionLogViewer({
                           top: 0,
                           left: 0,
                           width: "100%",
-                          transform: `translateY(${vi.start}px)`,
+                          // `start` counts from the scroller's top, the list
+                          // from its own (page mode offsets it by the margin).
+                          transform: `translateY(${vi.start - virtualizer.options.scrollMargin}px)`,
                         };
                         return (
                           <div
@@ -2801,34 +2959,42 @@ export function SessionLogViewer({
                     </div>
                   )}
                 </div>
+                {pageMode && (
+                  // Page mode: a zero-height anchor sticks the pill above the
+                  // stuck footer and the caller's bottom bar.
+                  <div className="sticky bottom-[calc(var(--log-sticky-bottom,0px)+var(--log-tail-h,0px)+1rem)] z-10 h-0">
+                    {jumpPill}
+                  </div>
+                )}
               </div>
 
               {/* Minimap rail */}
-              {visibleRows.length > 0 && <MinimapRail rows={visibleRows} onJump={jumpTo} />}
+              {visibleRows.length > 0 && (
+                <MinimapRail
+                  rows={visibleRows}
+                  onJump={jumpTo}
+                  stickyHeight={minimapStickyHeight}
+                />
+              )}
 
               {/* Jump-to-latest pill */}
-              <button
-                type="button"
-                onClick={() => stickToBottom("smooth")}
-                aria-label="Scroll to latest"
-                className={cn(
-                  "absolute bottom-4 left-1/2 z-10 inline-flex -translate-x-1/2 cursor-pointer items-center gap-2 rounded-full bg-primary px-3.5 py-[7px] text-[12.5px] font-semibold text-primary-foreground shadow-lg transition-[translate,opacity]",
-                  atBottom
-                    ? "pointer-events-none translate-y-3 opacity-0"
-                    : "translate-y-0 opacity-100",
-                )}
-              >
-                <ArrowDown className="size-3.5" />
-                {pending > 0 ? `${pending} new message${pending === 1 ? "" : "s"}` : null}
-              </button>
+              {!pageMode && jumpPill}
             </div>
 
-            {/* Queued steering — pinned between the stream and the footer. Rows
+            <div
+              ref={tailRef}
+              className={cn(
+                "shrink-0",
+                stickyTail && "sticky bottom-[var(--log-sticky-bottom,0px)] z-10 bg-card",
+              )}
+            >
+              {/* Queued steering, pinned between the stream and the footer. Rows
                   leave this box on their own as soon as the worker delivers them. */}
-            <QueuedSteeringBox messages={pendingSteering} />
+              <QueuedSteeringBox messages={pendingSteering} touchTargets={touchTargets} />
 
-            {/* Footer */}
-            <RunningFooter count={visibleRows.length} isRunning={isRunning} />
+              {/* Footer */}
+              <RunningFooter count={eventCount} isRunning={isRunning} status={status} />
+            </div>
           </TabsContent>
           {subagents.length > 0 && (
             <TabsContent value="agents" className="min-h-0 flex-1">
@@ -2843,7 +3009,7 @@ export function SessionLogViewer({
 
 // Reasoning block. Same collapsible-card shape as ToolRow (chevron · label ·
 // inline one-line preview, body behind a border-t) so thinking reads as part of
-// the same visual family — just recessed (muted surface, no accent color) to
+// the same visual family, just recessed (muted surface, no accent color) to
 // signal it's internal reasoning rather than output.
 function ThinkingRow({ text }: { text: string }) {
   const [open, setOpen] = useState(false);
@@ -2862,13 +3028,9 @@ function ThinkingRow({ text }: { text: string }) {
           )}
         />
         <Brain className="size-3 shrink-0 text-muted-foreground" />
-        <span className="shrink-0 text-[12px] font-medium italic text-muted-foreground">
-          Thinking
-        </span>
+        <span className="shrink-0 text-xs font-medium italic text-muted-foreground">Thinking</span>
         {!open && (
-          <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground/80">
-            {preview}
-          </span>
+          <span className="min-w-0 flex-1 truncate text-meta text-muted-foreground">{preview}</span>
         )}
       </button>
       <AnimatedReveal open={open} speed="fast">
@@ -2884,7 +3046,7 @@ function ThinkingRow({ text }: { text: string }) {
 
 /**
  * Renders a turn prompt whose harness inlined a full SKILL.md body ahead of
- * the actual ask (codex, opencode — see resolveSlashSkillPrompt). The skill
+ * the actual ask (codex, opencode: see resolveSlashSkillPrompt). The skill
  * body is collapsed by default so it doesn't bury the task brief the way the
  * raw "You" bubble did; the brief itself is always shown, unindented.
  */
@@ -2905,7 +3067,7 @@ function SkillPromptRow({ prompt }: { prompt: SkillPrompt }) {
             )}
           />
           <Sparkles className="size-3 shrink-0 text-status-info-strong" />
-          <span className="shrink-0 text-[12px] font-medium text-status-info-strong">
+          <span className="shrink-0 text-xs font-medium text-status-info-strong">
             Skill invoked · {prompt.skillTitle}
           </span>
         </button>
@@ -2918,7 +3080,7 @@ function SkillPromptRow({ prompt }: { prompt: SkillPrompt }) {
         </AnimatedReveal>
       </div>
       <div>
-        <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-[0.04em] text-muted-foreground">
+        <span className="mb-0.5 block text-meta font-semibold uppercase tracking-[0.04em] text-muted-foreground">
           Task prompt
         </span>
         <div className="prose-chat prose-session-log mt-[3px] break-words text-foreground">
@@ -2929,31 +3091,61 @@ function SkillPromptRow({ prompt }: { prompt: SkillPrompt }) {
   );
 }
 
-function RunningFooter({ count, isRunning }: { count: number; isRunning?: boolean }) {
+function RunningFooter({
+  count,
+  isRunning,
+  status,
+}: {
+  count: number;
+  isRunning?: boolean;
+  status?: AgentTaskStatus;
+}) {
+  // A session that ended without completing says how, in the status tone:
+  // error for failed, neutral for cancelled and superseded.
+  const endedWith = isRunning === false && status && status !== "completed" ? status : null;
   return (
-    <div className="flex items-center gap-2.5 border-t border-border bg-muted/20 px-3 py-2.5 text-[12.5px]">
-      {isRunning === true ? (
-        <>
-          <span className="sl-orb size-[9px] shrink-0 rounded-full bg-status-active" aria-hidden />
-          {/* Shimmer = the semantic liveness signal (DESIGN.md § Motion): this
-              footer is the one always-visible "agent is live" line per open
-              task, so it carries the treatment. */}
-          <span className="shimmer-text font-medium">Agent is working…</span>
-        </>
-      ) : isRunning === false ? (
-        <>
-          <span
-            className="grid size-4 shrink-0 place-items-center rounded-full bg-status-success/20 text-[10px] font-bold text-status-success-strong"
-            aria-hidden
-          >
-            ✓
-          </span>
-          <span className="text-muted-foreground">Session complete</span>
-        </>
-      ) : (
-        <span className="text-muted-foreground">Session log</span>
-      )}
-      <span className="ml-auto font-mono text-[11px] tabular-nums text-muted-foreground">
+    <div className="flex items-center gap-2.5 border-t border-border bg-muted/20 px-3 py-2.5 text-xs">
+      {/* A status region (`output` has the status role): the state is
+          announced when it changes (the agent finishes). The event count is
+          not: it changes on every poll. */}
+      <output aria-live="polite" className="flex min-w-0 items-center gap-2.5">
+        {isRunning === true ? (
+          <>
+            <span
+              className="sl-orb size-[9px] shrink-0 rounded-full bg-status-active"
+              aria-hidden
+            />
+            {/* Shimmer = the semantic liveness signal (DESIGN.md § Motion): this
+                footer is the one always-visible "agent is live" line per open
+                task, so it carries the treatment. */}
+            <span className="shimmer-text font-medium">Agent is working…</span>
+          </>
+        ) : endedWith ? (
+          <>
+            <TaskStatusIcon status={endedWith} />
+            <span
+              className={
+                endedWith === "failed" ? "text-status-error-strong" : "text-muted-foreground"
+              }
+            >
+              Session ended · {statusLabel(endedWith).toLowerCase()}
+            </span>
+          </>
+        ) : isRunning === false ? (
+          <>
+            <span
+              className="grid size-4 shrink-0 place-items-center rounded-full bg-status-success/20 text-meta font-bold text-status-success-strong"
+              aria-hidden
+            >
+              ✓
+            </span>
+            <span className="text-muted-foreground">Session complete</span>
+          </>
+        ) : (
+          <span className="text-muted-foreground">Session log</span>
+        )}
+      </output>
+      <span className="ml-auto font-mono text-meta tabular-nums text-muted-foreground">
         {count} {count === 1 ? "event" : "events"}
       </span>
     </div>

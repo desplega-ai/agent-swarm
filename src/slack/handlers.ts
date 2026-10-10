@@ -847,6 +847,9 @@ export function registerMessageHandler(app: App): void {
               slackTriggerMessageTs: msg.ts,
               slackUserId: msg.user,
               parentTaskId: latestTask?.id,
+              // A human message in the thread: never answer it in the latest
+              // thread task's structured-output contract.
+              inheritParentOutputSchema: false,
               requestedByUserId,
               contextKey: slackContextKey({ channelId: msg.channel, threadTs }),
             },

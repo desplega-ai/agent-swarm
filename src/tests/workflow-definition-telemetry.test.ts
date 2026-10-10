@@ -44,7 +44,7 @@ describe("workflow definition telemetry", () => {
     await removeTestDb();
   });
 
-  test("emits workflow.created with definition size and known source", async () => {
+  test("emits workflow.created with definition size and known interface (via)", async () => {
     const workflow = await createWorkflow(
       {
         name: "created telemetry",
@@ -65,7 +65,7 @@ describe("workflow definition telemetry", () => {
         props: {
           workflowId: workflow.id,
           nodeCount: 2,
-          source: "api",
+          via: "api",
         },
       },
     ]);
@@ -91,13 +91,13 @@ describe("workflow definition telemetry", () => {
         event: "deleted",
         props: {
           workflowId: workflow.id,
-          source: "mcp",
+          via: "mcp",
         },
       },
     ]);
   });
 
-  test("omits source for direct internal workflow mutations", async () => {
+  test("omits via for direct internal workflow mutations", async () => {
     const workflow = await createWorkflow({
       name: "internal telemetry",
       definition: { nodes: [] },

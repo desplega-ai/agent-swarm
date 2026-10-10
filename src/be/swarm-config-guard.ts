@@ -1,5 +1,7 @@
 import { normalizeSlackReactionShortcode } from "../slack/reaction-shortcode";
 import { ProviderNameSchema } from "../types";
+import { API_DRAIN_MAX_MS_LIMIT } from "../utils/api-drain";
+import { parseEnabledTools } from "../utils/enabled-tools";
 import { parseTaskToolManifest } from "../utils/task-tool-manifest";
 import { isTierConfigKey, validateTierConfigValue } from "./model-tier-keys";
 
@@ -167,6 +169,26 @@ function boundedIntegerValidators(
   );
 }
 
+/**
+ * Blank or an http(s) URL with no query string or fragment. Returns `invalid`
+ * for anything else. Blank is allowed: it is how an operator reverts to the
+ * key's fallback without deleting the row.
+ */
+function validateHttpBaseUrl(value: unknown, invalid: string): string | null {
+  if (typeof value !== "string") return invalid;
+  const trimmed = value.trim();
+  if (trimmed.length === 0) return null;
+
+  try {
+    const url = new URL(trimmed);
+    if (url.protocol !== "https:" && url.protocol !== "http:") return invalid;
+    if (url.search || url.hash) return invalid;
+  } catch {
+    return invalid;
+  }
+  return null;
+}
+
 function validateFloatRange(
   key: string,
   value: unknown,
@@ -191,6 +213,17 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
       return "Invalid TASK_TOOL_MANIFESTS (expected JSON with taskTypes and/or schedules maps, each selecting at most 16 known swarm tools)";
     }
   },
+  // MCP tool allowlist: comma-separated names or a JSON array of strings.
+  // Unknown names are accepted here and warned about at session init.
+  SWARM_ENABLED_TOOLS: (value) => {
+    try {
+      if (typeof value !== "string") throw new Error("Expected string");
+      parseEnabledTools(value);
+      return null;
+    } catch {
+      return "Invalid SWARM_ENABLED_TOOLS (expected comma-separated tool names or a JSON array of strings)";
+    }
+  },
   FEEDBACK_ENDPOINT: (value) => {
     if (typeof value !== "string") {
       return "Invalid FEEDBACK_ENDPOINT (must use HTTPS, or HTTP on a loopback host)";
@@ -213,28 +246,24 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
   // or a fragment would build a nonsense URL — reject those here rather than
   // letting workers fail one request at a time. Blank is meaningful and allowed:
   // it is how an operator reverts to openrouter.ai without deleting the row.
-  OPENROUTER_BASE_URL: (value) => {
-    const invalid =
-      "Invalid OPENROUTER_BASE_URL (must be an http(s) URL with no query string or fragment, e.g. https://api.example.com/v1 — leave blank for openrouter.ai)";
-    if (typeof value !== "string") return invalid;
-    const trimmed = value.trim();
-    if (trimmed.length === 0) return null;
-
-    try {
-      const url = new URL(trimmed);
-      if (url.protocol !== "https:" && url.protocol !== "http:") return invalid;
-      if (url.search || url.hash) return invalid;
-    } catch {
-      return invalid;
-    }
-    return null;
-  },
+  OPENROUTER_BASE_URL: (value) =>
+    validateHttpBaseUrl(
+      value,
+      "Invalid OPENROUTER_BASE_URL (must be an http(s) URL with no query string or fragment, e.g. https://api.example.com/v1. Leave blank for openrouter.ai)",
+    ),
+  // Browser-facing agent-fs URL for Comb. Blank falls back to AGENT_FS_API_URL.
+  AGENT_FS_PUBLIC_URL: (value) =>
+    validateHttpBaseUrl(
+      value,
+      "Invalid AGENT_FS_PUBLIC_URL (must be an http(s) URL with no query string or fragment, e.g. https://agent-fs.example.com. Leave blank to use AGENT_FS_API_URL)",
+    ),
   HARNESS_PROVIDER: (value) => {
     const parsed = ProviderNameSchema.safeParse(value);
     if (parsed.success) return null;
     return `Invalid HARNESS_PROVIDER value (must be one of: ${ProviderNameSchema.options.join(", ")})`;
   },
   ...enumValidator("CLAUDE_TRANSPORT", ["cli", "sdk"]),
+  ...enumValidator("SCRIPT_EXECUTOR", ["native", "quickjs"]),
   // fail: worker fails a task fast when every key has exhausted the task
   // model's weekly window (Fable/Opus/Sonnet). fallback: legacy random pick.
   ...enumValidator("MODEL_WINDOW_EXHAUSTED_POLICY", ["fail", "fallback"]),
@@ -287,11 +316,15 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
     "TASK_TOOL_PRELOAD_ENABLED",
     "PI_TOOL_DEFERRAL",
     "PI_CODEMODE",
+    "PI_CODEMODE_MODELS",
+    "OPENROUTER_APP_ATTRIBUTION",
+    "CURSOR_NATIVE_SYSTEM_PROMPT",
     "SLACK_DISABLE",
     "SLACK_RENDER_V2",
     "SLACK_RENDER_V2_DELEGATION",
     "GITHUB_DISABLE",
     "GITLAB_DISABLE",
+    "AZURE_DEVOPS_DISABLE",
     "LINEAR_DISABLE",
     "JIRA_DISABLE",
     "AGENTMAIL_DISABLE",
@@ -300,6 +333,7 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
     "RBAC_ENABLED",
     "SEED_AUTOMATIONS_ENABLED",
     "RBAC_AUDIT_DISABLED",
+    "EXTENSION_ALLOW_INLINE_INSTALL",
     "BUDGET_ADMISSION_DISABLED",
     "MCP_OAUTH_ALLOW_PRIVATE_HOSTS",
     "OTEL_TRACE_POLL",
@@ -307,8 +341,10 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
     "ANONYMIZED_TELEMETRY",
     "SWARM_HIDE_CLOUD_PROMO",
     "DB_QUERY_BOUNDED_ENABLED",
+    "CLAUDE_TRUST_PRESEED",
     "DB_RETENTION_DRY_RUN",
     "MODEL_AUTO_UPGRADE",
+    "COMB_ENABLED",
   ]),
   ...enumValidator("SLACK_MODE", ["socket", "http"]),
   ...enumValidator("SLACK_THREAD_STEERING", ["off", "lead", "all"]),
@@ -358,7 +394,14 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
   // sweep keep running for the default 30000ms.
   ...boundedIntegerValidatorsFor(DB_RETENTION_TUNING_BOUNDS),
   ...boundedIntegerValidators(
-    ["SESSION_LOG_RETENTION_DAYS", "AGENT_LOG_RETENTION_DAYS", "EVENTS_RETENTION_DAYS"],
+    [
+      "SESSION_LOG_RETENTION_DAYS",
+      "AGENT_LOG_RETENTION_DAYS",
+      "EVENTS_RETENTION_DAYS",
+      // A kept-version count, not days. The floor of 1 is what guarantees the
+      // sweep never deletes the newest version of any (agentId, field).
+      "CONTEXT_VERSIONS_KEEP_LATEST",
+    ],
     1,
     MAX_DB_RETENTION_DAYS,
   ),
@@ -368,6 +411,8 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
   ...integerValidators(["MODEL_LATEST_SOAK_DAYS"], 0),
   // 0 turns approval auto-cancellation off.
   ...integerValidators(["APPROVAL_REQUEST_AUTO_CANCELLATION_DAYS"], 0),
+  // 0 turns the shutdown drain off; the shutdown path clamps to the same limit.
+  ...boundedIntegerValidators(["API_DRAIN_MAX_MS"], 0, API_DRAIN_MAX_MS_LIMIT),
   // Below ~100 tokens the preamble can't fit a useful summary; above 20000
   // (~80k chars) it risks the SIGTERM-143 context-saturation failure mode
   // the cap exists to prevent (see context-preamble.ts).

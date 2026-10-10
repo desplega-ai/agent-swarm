@@ -8,6 +8,7 @@ import {
   createAgent,
   createScheduledTask,
   createTaskExtended,
+  createUser,
   createWorkflow,
   createWorkflowRun,
   createWorkflowRunStep,
@@ -26,8 +27,9 @@ import { handleTasks } from "../http/tasks";
 import { dispatchScheduleTarget } from "../scheduler/scheduler";
 import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
 import { createWorkerTaskFollowUp } from "../tasks/worker-follow-up";
-import { registerSendTaskTool } from "../tools/send-task";
+import { registerSendTaskTool, sendTaskHandler } from "../tools/send-task";
 import { registerTaskActionTool } from "../tools/task-action";
+import { userCtx } from "../tools/task-tool-ctx";
 import { markExtensionRequestOrigin } from "../tools/utils";
 import { workflowEventBus } from "../workflows/event-bus";
 import { AgentTaskExecutor } from "../workflows/executors/agent-task";
@@ -139,6 +141,7 @@ describe("extension task boundaries", () => {
     const client = getDbClient();
     await client.run("DELETE FROM agent_tasks");
     await client.run("DELETE FROM extensions");
+    await client.run("DELETE FROM users");
     await client.run("DELETE FROM agents");
   });
 
@@ -499,6 +502,35 @@ export default extension;
     });
     expect(compatible.status).toBe(201);
     expect(compatible.body.model).toBe("claude-opus-5-5");
+  });
+
+  test("user send-task rejects an extension that retargets the Lead assignment", async () => {
+    await createAgent({ name: "user-task-lead", isLead: true, status: "idle" });
+    const worker = await createAgent({ name: "user-task-worker", isLead: false, status: "idle" });
+    const user = await createUser({ name: "Extension Guard User" });
+    await installSource(
+      "retarget-user-task",
+      `import type { SwarmExtension } from "swarm-extension";
+const extension: SwarmExtension = (api) => {
+  api.on("pre.task.create", () => ({ action: "modify", data: { agentId: "${worker.id}" } }));
+};
+export default extension;
+`,
+    );
+
+    const result = await sendTaskHandler(
+      userCtx(user),
+      sendTaskArgs("extension must not retarget this user task"),
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.message).toBe(
+      "A pre.task.create extension cannot change the user task's Lead assignment.",
+    );
+    expect(
+      (await getDbClient().get<{ count: number }>("SELECT COUNT(*) AS count FROM agent_tasks"))
+        ?.count,
+    ).toBe(0);
   });
 
   test("extension tool calls derive their origin and skip the creating extension", async () => {

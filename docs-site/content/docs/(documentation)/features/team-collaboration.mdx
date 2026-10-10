@@ -1,0 +1,95 @@
+---
+title: Team Collaboration
+description: "How a team shares one Agent Swarm: shared memory, reusable skills, workplace integrations, self-hosted infrastructure, and access control."
+---
+
+One Agent Swarm deployment is shared by your whole team: people talk to it from Slack, Linear, GitHub and the other tools they already use, and every agent in the swarm works from the same memory, skills and task history. Work a person starts, work an agent delegates and work a schedule fires all land in one task graph the whole team can inspect. This page covers the five building blocks that make a swarm a team tool: shared company context, reusable skills, workplace integrations, self-hosted infrastructure, and access control.
+
+## Shared company context
+
+A swarm keeps several kinds of shared state, and each one is visible to every agent on the team.
+
+**Memory.** Agents store memories with an `agent` or `swarm` scope. Agent scope is visible only to the owner; swarm scope is visible to all agents. Memories come from session summaries, completed tasks, explicit `memory-store` calls and files under the shared or personal memory directories, and retrieval is vector search. The lead agent can also push a learning into every worker with `inject-learning`, so a fix discovered once becomes swarm-wide knowledge. See [Memory](/docs/architecture/memory).
+
+**Repositories.** Repositories are registered with the swarm and can be auto-cloned into every worker container at startup. Before each task the runner refreshes the repo and reads its `CLAUDE.md`, so every agent works against the same code with the same project instructions. See [Agents](/docs/architecture/agents).
+
+**Files.** `/workspace/shared` is one volume mounted into every agent, while `/workspace/personal` is per agent. On top of that, agent-fs provides a shared file drive: the API creates one shared org and drive at boot, each agent gets its own API key, and you can invite human members to the shared org. Tasks, workflows, schedules, pages, apps and scripts all carry an asset-namespace key of `shared/…` or `personal/<user-id>/…`; the `personal/` prefix records write ownership and is explicitly not a privacy boundary. See [Deployment](/docs/guides/deployment), [agent-fs co-deployment](/docs/guides/agent-fs-co-deployment) and [Asset namespaces](/docs/guides/asset-namespaces).
+
+**Task history.** Every task lives in one table with a parent task, a requester and a context key. Follow-up tasks inherit the parent's context: a bounded preamble from the parent chain is injected into the child, and sibling tasks sharing a context key show up in the worker's prompt. Any agent can read another agent's work with `get-tasks` and `get-task-details`, including outputs, failure reasons and logs. See [Task lifecycle](/docs/concepts/task-lifecycle).
+
+**People.** The swarm keeps a user registry where one person maps to many external identities — Slack, Linear, GitHub and GitLab IDs all resolve to a single user. When someone requests a task, their requester profile (role, notes and communication preferences) is injected into the agent's prompt, so agents adapt to who is asking. Per-user cost shows up on the dashboard's Usage page as "Cost by User", with background work listed as unattributed. See [Personalization](/docs/guides/personalization) and the [dashboard](/docs/ui).
+
+**Agent identity.** Each agent has persistent `soulMd`, `identityMd`, `toolsMd` and `claudeMd` files, edited with `update-profile` and versioned with `context-history` and `context-diff`, so an agent's persona and working notes survive across sessions. See [Agents](/docs/architecture/agents).
+
+On top of these, the swarm provides a key-value store, shared configuration, swarm-wide workflows and schedules, and MCP servers scoped per agent, per swarm or globally. See [Workflows](/docs/concepts/workflows) and [Scheduling](/docs/concepts/scheduling).
+
+**Team use case.** A support team keeps one shared agent-fs directory per customer account. Any agent, in any later session, reads the account's notes and transcripts before acting. The [per-customer working directories](/docs/playbooks/patterns/per-customer-working-directories) pattern contrasts this with swarm memory (general learnings), and the [proactive customer support](/docs/playbooks/proactive-customer-support) playbook builds on it.
+
+## Reusable skills
+
+A skill is a `SKILL.md` file — YAML frontmatter with a name and description, plus a markdown body of instructions — that teaches agents a repeatable procedure. Skills are what lets a team codify how work should be done once and have every agent do it that way.
+
+Any agent can create a personal skill, and it is auto-installed for that agent. Only the lead can create a swarm-scoped skill directly; a worker shares its skill by calling `skill-publish`, which opens a `skill-approval` task for the lead to review. Installing a skill for another agent and installing a skill from a remote GitHub repository are lead-only operations. The full tool set — `skill-create`, `skill-list`, `skill-search`, `skill-get`, `skill-install`, `skill-update`, `skill-publish` and more — is documented in the [MCP tools reference](/docs/reference/mcp-tools).
+
+An agent's effective skill set is its installed skills plus all built-in skills plus all swarm-scoped skills, with personal skills winning on a name clash. Workers poll for skill changes and hot-reload their local skill directories, and the same skills are written to every runtime's skill directory — so one skill works across workers running on Claude Code, Codex, pi and opencode. See [Harness configuration](/docs/guides/harness-configuration). Extensions can also bundle skills, created disabled and installed per agent; see [Extensions](/docs/guides/extensions).
+
+Scripts are the related reusable unit: named TypeScript scripts stored with agent or global scope that any agent or workflow node can find and run with `script-search` and `script-run`. See the [scripts runtime guide](/docs/guides/scripts-runtime).
+
+**Team use case.** In the [open-prompt showreel playbook](/docs/playbooks/open-prompt-showreel), the lead creates each `SKILL.md` at swarm scope and installs it on the maker agent, so the whole video-production workflow is available to the team. The [content generation playbook](/docs/playbooks/content-generation) includes a meta-workflow that scaffolds new skills the same way.
+
+## Workplace integrations
+
+Your team does not need to learn a new interface to work with the swarm. Thirteen integrations connect Agent Swarm to the tools where requests already arrive:
+
+- **Issue trackers:** [GitHub](/docs/integrations/github), [GitLab](/docs/integrations/gitlab), [Azure DevOps](/docs/integrations/azure-devops), [Linear](/docs/integrations/linear) and [Jira](/docs/integrations/jira). Assignment, mentions, review requests and labels create tasks; agents comment and open PRs or MRs back.
+- **Chat and email:** [Slack](/docs/integrations/slack), [AgentMail](/docs/integrations/agentmail) and [Kapso (WhatsApp)](/docs/integrations/kapso). A mention, DM, thread reply, email or WhatsApp message becomes a task, and agents reply in the same thread. With thread steering enabled, a Slack reply steers the running task instead of opening a new one.
+- **CRM and data:** [Salesforce](/docs/integrations/salesforce) registers Salesforce hosted MCP endpoints over OAuth, and [Composio](/docs/integrations/composio) — outbound only and labeled a prototype — exposes third-party app tools such as Gmail through Tool Router sessions and Connect Links.
+- **Observability and search:** [Sentry](/docs/integrations/sentry) ships `sentry-cli` in workers so an agent can pull a stacktrace and breadcrumbs with `/investigate-sentry-issue`; [Serply](/docs/integrations/serply) is an outbound search skill for Google web, news and scholar and does not create tasks from incoming events.
+- **Microsoft 365:** [Microsoft Graph](/docs/integrations/microsoft-graph) is outbound only, via scripts: Teams messages, Outlook mail, OneDrive and user profiles. There is no Teams bot and no inbound path.
+
+The [integrations index](/docs/integrations) lists all thirteen pages.
+
+Notion is not a built-in integration and there is no Notion page under integrations. It is reachable as one of seven OAuth presets for script connections (alongside Google, Slack, GitHub, Jira, Linear and Microsoft), which prefill an OAuth app so a script can call the Notion API with credentials that stay server-side. The [script connections guide](/docs/guides/script-connections) uses Notion as its worked example.
+
+**Team use case.** In the [feature development playbook](/docs/playbooks/feature-development), a request arrives in Slack or Linear, the lead routes it researcher → planner → coder → reviewer, and the reviewer merges on green CI. Hand-offs between agents go through agent-fs, so the whole pipeline runs on the integrations and shared context above.
+
+## Self-hosted team infrastructure
+
+One deployment serves the whole team, and you run it on your own infrastructure. Agent Swarm is MIT-licensed open source.
+
+**Deployment options.** The recommended path is Docker Compose: the example stack runs the API (SQLite, port 3013), the lead and the workers, with optional MinIO-backed agent-fs and an optional Caddy TLS profile. The onboard wizard — `bunx @desplega.ai/agent-swarm onboard` — generates the compose file and `.env` with presets for full, dev, content, research and solo setups. For Kubernetes there is a Helm chart: the API is a single-replica StatefulSet (SQLite), agent pools are StatefulSets with exactly one lead pool, and optional Litestream backups go to S3. Rootless Podman, a systemd bare-metal install under `/opt/agent-swarm`, and a local API with Docker workers are also documented. See [Deployment](/docs/guides/deployment), [Kubernetes](/docs/guides/kubernetes), [Podman rootless](/docs/guides/podman-rootless) and [Getting started](/docs/getting-started).
+
+**Dashboard.** The dashboard is not part of the compose stack. You can use the hosted dashboard at app.agent-swarm.dev — which is browser-only: requests go straight from the browser to your API and nothing is proxied or persisted on the hosted side — or self-host the static SPA. See the [dashboard docs](/docs/ui).
+
+**Sizing and runtimes.** Measured over a four-hour observability window, a 4 vCPU / 8 GiB host fits the API, the lead, one heavy worker and one to two light workers; 8 vCPU / 16 GiB fits the API, the lead, three heavy workers and two to four light ones. See [Resource sizing](/docs/guides/performance-resource-sizing). Workers can run on different runtimes — `claude` (Claude Code, the default), `codex`, `pi`, `opencode` (experimental), `devin`, `claude-managed` and `acp` — and a mixed-runtime swarm still shares the same skills, memory and task graph. See [Harness providers](/docs/guides/harness-providers).
+
+**SSO.** There is no built-in login page: self-hosters authenticate with a pre-shared API key. The documented SSO approach puts oauth2-proxy (with a generic OIDC provider such as Okta, Azure, Google or Keycloak) in front of the dashboard and API. In gate mode, all authenticated users share the operator key and there is no per-user identity at the API or MCP layer. Trusted-header mode forwards user and group headers, ready to be consumed when the app adds header-based attribution — nothing reads those headers today. There is no SAML, and the native OIDC environment variables in the examples are explicitly proposed, not yet implemented. See [Self-hosted SSO](/docs/guides/self-hosted-sso).
+
+**Secrets.** Secret configuration values — API tokens, OAuth credentials, credential pools — are encrypted at rest with AES-256-GCM. The encryption key comes from an environment variable, a key file, or is auto-generated on first boot; rotation is not yet supported. Scripts never see raw secrets: they see a redacted placeholder and the real value is injected at egress only for allow-listed hosts. One caveat: OAuth tokens in the token store are plaintext in v1. See [Secrets encryption](/docs/guides/secrets-encryption), the [credential broker](/docs/guides/scripts-credential-broker) and [Script connections](/docs/guides/script-connections).
+
+**Data location.** Everything lives in one SQLite file, with compose volumes for the database, logs, the shared workspace and each agent's personal workspace; agent-fs stores files in an S3-compatible bucket. The documented backup copies the database, WAL sidecars and the page-session secret, and the Helm chart adds Litestream replication to S3. Anonymized telemetry is on by default — it never sends task content, prompts, outputs, emails or names — and can be switched off. OpenTelemetry traces and metrics stay off until you set an exporter endpoint. See [Telemetry](/docs/reference/telemetry) and [Observability](/docs/guides/observability-opentelemetry).
+
+**Team use case.** Run the feature-development flow from the previous section entirely on your own compose stack: the example file already defines the lead, researcher, coder and reviewer containers sharing agent-fs, and each requester's spend shows under "Cost by User" on the dashboard.
+
+## Access control and permissions
+
+**Credentials.** The API accepts bearer tokens of exactly three kinds: the swarm key (the operator credential), user tokens issued per person, and short-lived agent session tokens. Workers share the swarm key; there are no per-agent long-lived keys.
+
+**One lead.** A swarm has exactly one lead agent — joining a second lead is rejected, and the Helm chart enforces one lead pool with one replica. The lead holds the privileged verbs: user management, editing other agents' profiles, injecting swarm-wide learnings, all Slack posting and channel tools, credential bindings and script connections, writing config and reading secrets, swarm and global skills, global scripts, and installing skills or MCP servers for other agents. Which tool groups exist on a worker at all is decided separately by its capabilities environment variable.
+
+**Users and roles.** Role-based access control ships with two built-in roles: `admin` (full access) and `requester` (create, read, cancel and act on their own tasks, plus their own files and favorites). Every new user is assigned `admin` by a database trigger. Enforcement is on by default via `RBAC_ENABLED` and gates only requests made with user tokens — operator-key and agent calls are not affected. A user acting on tasks is limited to tasks they requested. See [Environment variables](/docs/reference/environment-variables) and the [2026-07-13 release notes](/docs/releases/2026-07-13).
+
+State plainly what does not exist today:
+
+- There is no API or UI to assign roles: the attach/detach functions exist in code but are only called from tests and the `rbac bootstrap` CLI, so every user is an admin in practice. There are no custom roles beyond `admin` and `requester`, and agents are governed by the fixed lead and owner rules, not roles.
+- There is no SSO group-to-role mapping and no per-user identity behind SSO; SSO users share the operator key. There is no built-in login, native OIDC or SAML.
+- Approval requests accept an `approvers` field, but the respond endpoint does not enforce it — any authenticated caller can respond. Do not rely on named approvers being the only ones who can approve.
+- There are no per-agent long-lived API keys, no multi-tenant workspaces inside one swarm (one deployment is one swarm), no Slack per-channel allowlist, and no read privacy for `personal/` asset keys.
+
+**Audit.** Every permission decision — allow and deny, with principal, verb, resource and reason — is recorded in an audit log with a default 30-day retention that can be disabled. Identity changes are kept in a separate append-only log, and rows carry created-by and updated-by user columns.
+
+**Budgets and approvals.** Daily USD budgets can be set globally, per agent and per user; a task is refused at claim time when the budget is exceeded. For human oversight, agents call `request-human-input`, and workflows have a human-in-the-loop node that pauses until someone answers — Slack gets a notification with a button that opens the dashboard. See the [workflows concept page](/docs/concepts/workflows) and the [HITL gates pattern](/docs/playbooks/patterns/hitl-gates).
+
+**Inbound filters.** You can restrict who may start work from Slack by email domain or user ID, limit which Linear states trigger tasks, and filter AgentMail inboxes and sender domains. See the [Slack integration](/docs/integrations/slack).
+
+**Team use case.** Restrict who can start work from Slack to your company domain with `SLACK_ALLOWED_EMAIL_DOMAINS`, keep the lead as the only agent that can post to Slack or create credential bindings, and require lead approval — via the `skill-publish` approval task — before a worker's skill reaches the whole swarm.

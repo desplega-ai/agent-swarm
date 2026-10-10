@@ -27,7 +27,13 @@ import { InfoTip } from "@/components/ui/info-tip";
 import { Input } from "@/components/ui/input";
 import { SettingsRow } from "@/components/ui/settings-row";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { AutosaveScopeContext, useAutosave, useAutosaveScope } from "@/hooks/use-autosave";
+import {
+  AutosaveScopeContext,
+  type ContinueBlockerSetter,
+  useAutosave,
+  useAutosaveScope,
+} from "@/hooks/use-autosave";
+import { azureBaseUrl, azurePathHint } from "@/lib/azure-embeddings";
 import { modelDisplayName } from "@/lib/model-vendor";
 import { cn } from "@/lib/utils";
 import type { StepProps } from "../step-contract";
@@ -64,6 +70,15 @@ interface Preset {
   keyRule: SecretRule;
   /** Step 3 key this preset can reuse, when the server has it. */
   reuseKey?: ReuseKey;
+  /** Label of the model field. Default: "Model". */
+  modelLabel?: string;
+  /** The URL field takes something else than the base URL itself. */
+  url?: {
+    label: string;
+    placeholder: string;
+    /** The base URL the probe calls, from what the operator typed. */
+    resolve: (input: string) => string;
+  };
 }
 
 // R6: no Ollama preset. The stored vector size is fixed (EMBEDDING_DIMENSIONS).
@@ -118,6 +133,23 @@ const PRESETS: Preset[] = [
     keyRule: KEY_RULES.vercel,
   },
   {
+    id: "azure",
+    label: "Azure / Microsoft Foundry",
+    logo: "/integration-logos/microsoft.svg",
+    baseUrl: "",
+    // Deployment names are chosen per resource: no chips.
+    models: [],
+    modelLabel: "Deployment name",
+    url: {
+      label: "Resource",
+      placeholder: "my-resource or https://my-resource.services.ai.azure.com",
+      resolve: azureBaseUrl,
+    },
+    keyLabel: "Resource API key",
+    placeholder: "••••",
+    keyRule: {},
+  },
+  {
     id: "custom",
     label: "Custom",
     baseUrl: "",
@@ -138,7 +170,9 @@ function errorHint(errorClass: OnboardingErrorClass | undefined, dims: number): 
     case "auth":
       return "The key was rejected.";
     case "model":
-      return "The model was not found at this endpoint.";
+      return "The model or deployment was not found at this endpoint.";
+    case "endpoint":
+      return "The endpoint path was not found. Check the base URL.";
     case "dimension":
       return `The endpoint returned vectors of the wrong size. Memory stores ${dims} dims.`;
     case "network":
@@ -167,13 +201,43 @@ function isRetryable(outcome: Outcome): boolean {
   return !outcome.result.ok && errorClass !== undefined && RETRYABLE_CLASSES.has(errorClass);
 }
 
-/**
- * Step 5: embeddings. No Save button: once the fields are valid, the step
- * runs the test-and-save probe by itself (one embedding call; the API stores
- * the config only when it works). A typed key tests on paste or blur only,
- * never half-typed. A result shows only while the fields still match it.
- */
+/** Step 5: embeddings. */
 export function StepMemory({ onboarding, setContinueBlocker }: StepProps) {
+  return (
+    <EmbeddingsSetup
+      configured={onboarding.signals.embeddings.configured}
+      dimensions={onboarding.signals.embeddings.dimensions}
+      done={onboarding.state.steps.memory.status === "done"}
+      keySource="step 3"
+      setContinueBlocker={setContinueBlocker}
+    />
+  );
+}
+
+/**
+ * The embeddings form of `/setup` step 5 and the Memory integration. No Save
+ * button: once the fields are valid, it runs the test-and-save probe by itself
+ * (one embedding call; the API stores the config only when it works). A typed
+ * key tests on paste or blur only, never half-typed. A result shows only while
+ * the fields still match it.
+ */
+export function EmbeddingsSetup({
+  configured,
+  dimensions,
+  done = false,
+  keySource,
+  setContinueBlocker,
+}: {
+  /** The server already has an embeddings key. */
+  configured: boolean;
+  dimensions: number;
+  /** A probe already passed (the setup step is done). */
+  done?: boolean;
+  /** Where a reusable key comes from, as in "Reuse key from step 3". Default: saved. */
+  keySource?: string;
+  /** Holds the caller's Continue while a probe runs. */
+  setContinueBlocker: ContinueBlockerSetter;
+}) {
   const scope = useAutosaveScope(setContinueBlocker);
   const [preset, setPreset] = useState<Preset>(PRESETS[0]);
   const [baseUrl, setBaseUrl] = useState(preset.baseUrl);
@@ -187,17 +251,16 @@ export function StepMemory({ onboarding, setContinueBlocker }: StepProps) {
   const test = useTestOnboardingMemory();
   const presenceQ = useEnvPresence(["OPENAI_API_KEY", "OPENROUTER_API_KEY"]);
 
-  const { configured, dimensions } = onboarding.signals.embeddings;
-  const stepStatus = onboarding.state.steps.memory.status;
   const reuseKey =
     preset.reuseKey && presenceQ.data?.[preset.reuseKey] ? preset.reuseKey : undefined;
   const usingReuse = reuse && reuseKey !== undefined;
   const freeText = other || preset.models.length === 0;
 
-  const url = baseUrl.trim();
+  const url = preset.url ? preset.url.resolve(baseUrl) : baseUrl.trim();
   const modelId = model.trim();
   const key = apiKey.trim();
   const urlError = url ? baseUrlError(url) : null;
+  const urlHint = preset.url || urlError ? null : azurePathHint(url);
   const keyCheck = checkSecret(key, preset.keyRule);
   const keyProblem =
     keyCheck.problem && (keyBlurred || keyCheck.problemNow) ? keyCheck.problem : null;
@@ -299,7 +362,7 @@ export function StepMemory({ onboarding, setContinueBlocker }: StepProps) {
         ? { tone: "error", label: errorHint(result.errorClass, dimensions) }
         : shown?.kind === "request-error"
           ? { tone: "error", label: "Could not run the test." }
-          : stepStatus === "done" || result?.ok
+          : done || result?.ok
             ? { tone: "done", label: "Memory works" }
             : { tone: "none", label: "" };
 
@@ -358,7 +421,10 @@ export function StepMemory({ onboarding, setContinueBlocker }: StepProps) {
           })}
         </div>
 
-        <SettingsRow label="Model" htmlFor={freeText ? "memory-model" : undefined}>
+        <SettingsRow
+          label={preset.modelLabel ?? "Model"}
+          htmlFor={freeText ? "memory-model" : undefined}
+        >
           {preset.models.length > 0 ? (
             <div role="radiogroup" aria-label="Model" className="flex flex-wrap gap-2">
               {preset.models.map((m, i) => (
@@ -404,10 +470,18 @@ export function StepMemory({ onboarding, setContinueBlocker }: StepProps) {
         </SettingsRow>
 
         <SettingsRow
-          label="Base URL"
+          label={preset.url?.label ?? "Base URL"}
           htmlFor="memory-base-url"
           helper={
-            urlError ? <span className="text-status-error-strong">{urlError}</span> : undefined
+            urlError ? (
+              <span className="text-status-error-strong">{urlError}</span>
+            ) : urlHint ? (
+              <span className="text-status-warning-strong">{urlHint}</span>
+            ) : preset.url && url ? (
+              <span>
+                Calls <span className="break-all font-mono">{url}</span>
+              </span>
+            ) : undefined
           }
         >
           <Input
@@ -415,7 +489,7 @@ export function StepMemory({ onboarding, setContinueBlocker }: StepProps) {
             value={baseUrl}
             onChange={(e) => setBaseUrl(e.target.value)}
             onBlur={probe.commit}
-            placeholder="https://embeddings.example.com/v1"
+            placeholder={preset.url?.placeholder ?? "https://embeddings.example.com/v1"}
             spellCheck={false}
             aria-invalid={urlError ? true : undefined}
             className="font-mono"
@@ -448,7 +522,13 @@ export function StepMemory({ onboarding, setContinueBlocker }: StepProps) {
                 }}
                 onPaste={paste.onPaste}
                 autoComplete="new-password"
-                placeholder={usingReuse ? "Using the key from step 3" : preset.placeholder}
+                placeholder={
+                  usingReuse
+                    ? keySource
+                      ? `Using the key from ${keySource}`
+                      : "Using the saved key"
+                    : preset.placeholder
+                }
                 disabled={usingReuse}
                 invalid={Boolean(keyProblem)}
               />
@@ -463,7 +543,7 @@ export function StepMemory({ onboarding, setContinueBlocker }: StepProps) {
                 className={cn(usingReuse && SELECTED)}
               >
                 {usingReuse ? <Check /> : null}
-                Reuse key from step 3
+                {keySource ? `Reuse key from ${keySource}` : "Reuse saved key"}
               </Button>
             ) : null}
           </div>

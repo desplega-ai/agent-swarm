@@ -81,6 +81,13 @@ describe("handleCore auth middleware (route() auth.apiKey=false is honored)", ()
     expect(res.status).not.toBe(401);
   });
 
+  test("Azure DevOps webhook is still public", async () => {
+    const res = await fetch(`http://localhost:${port}/api/azure-devops/webhook`, {
+      method: "POST",
+    });
+    expect(res.status).not.toBe(401);
+  });
+
   test("AgentMail webhook is still public", async () => {
     const res = await fetch(`http://localhost:${port}/api/agentmail/webhook`, { method: "POST" });
     expect(res.status).not.toBe(401);

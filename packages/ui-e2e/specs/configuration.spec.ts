@@ -1,10 +1,46 @@
 import { expect, test } from "../fixtures";
 
 interface ConfigRow {
+  id: string;
   key: string;
   scope: string;
   value: string;
 }
+
+test("script executor selection persists and resets to native", async ({
+  page,
+  api,
+  clean,
+  seed,
+}) => {
+  test.skip(!seed, "remote run without seed");
+  await page.goto("/settings/configuration");
+  const executor = page.locator("#setting-SCRIPT_EXECUTOR").getByRole("combobox");
+  await expect(executor).toHaveText("Default (native)");
+
+  try {
+    await executor.click();
+    await page.getByRole("option", { name: "quickjs", exact: true }).click();
+    await expect(page.getByText("Saved SCRIPT_EXECUTOR", { exact: true })).toBeVisible();
+    await page.reload();
+    await expect(executor).toHaveText("quickjs");
+    const saved = await api.get<{ configs: ConfigRow[] }>("/api/config?scope=global");
+    expect(saved.configs.find((config) => config.key === "SCRIPT_EXECUTOR")?.value).toBe("quickjs");
+
+    await executor.click();
+    await page.getByRole("option", { name: "Default (native)", exact: true }).click();
+    await expect(page.getByText("Reset SCRIPT_EXECUTOR to its default")).toBeVisible();
+    await expect(executor).toHaveText("Default (native)");
+    const reset = await api.get<{ configs: ConfigRow[] }>("/api/config?scope=global");
+    expect(reset.configs.some((config) => config.key === "SCRIPT_EXECUTOR")).toBe(false);
+  } finally {
+    const { configs } = await api.get<{ configs: ConfigRow[] }>("/api/config?scope=global");
+    const config = configs.find((entry) => entry.key === "SCRIPT_EXECUTOR");
+    if (config) await api.delete(`/api/config/${config.id}`);
+  }
+
+  await clean.assertClean();
+});
 
 test("configuration flips STEERING_ENABLED and persists it", async ({ page, api, clean, seed }) => {
   test.skip(!seed, "remote run without seed");

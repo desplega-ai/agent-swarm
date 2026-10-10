@@ -2,7 +2,6 @@ import type { ColDef, ICellRendererParams, RowClickedEvent } from "ag-grid-commu
 import {
   Activity,
   BarChart3,
-  Brain,
   FileText,
   Quote,
   Search,
@@ -10,8 +9,7 @@ import {
   Trash2,
   TrendingUp,
 } from "lucide-react";
-import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Streamdown } from "streamdown";
+import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { useAgents } from "@/api/hooks/use-agents";
 import { useDeleteMemory, useMemoryList } from "@/api/hooks/use-memory";
 import { useMemoryUsefulness } from "@/api/hooks/use-memory-usefulness";
@@ -37,7 +35,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { InfoTip } from "@/components/ui/info-tip";
 import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/ui/page-header";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import { SegmentedControl } from "@/components/ui/segmented-control";
 import {
   Select,
   SelectContent,
@@ -45,20 +43,23 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet";
 import { StatPanel } from "@/components/ui/stat-panel";
 import { readNumberParam, readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
-import { formatSmartTime } from "@/lib/utils";
+import { formatTokens } from "@/lib/format-tokens";
+import { cn, formatSmartTime } from "@/lib/utils";
+import { LONGTERM_ROOT, LongtermView } from "./longterm-view";
+import { formatRating, type MemoryDeleteTarget, MemoryDetailSheet } from "./memory-detail-sheet";
 
 const ANY_AGENT = "__all__";
 const ANY_SCOPE: MemoryScopeFilter = "all";
 const ANY_SOURCE = "__any__";
+
+type MemoryView = "longterm" | "all";
+const DEFAULT_VIEW: MemoryView = "longterm";
+const VIEW_OPTIONS = [
+  { value: "longterm", label: "Longterm", tooltip: "Keyed memories under /longterm, by folder" },
+  { value: "all", label: "All memories", tooltip: "Every memory row, with search and filters" },
+] as const;
 
 const SOURCE_OPTIONS: { value: MemorySource; label: string }[] = [
   { value: "manual", label: "manual" },
@@ -77,6 +78,10 @@ function coerceMemorySource(value: string | null): string {
   return value && SOURCE_OPTIONS.some((option) => option.value === value) ? value : ANY_SOURCE;
 }
 
+function coerceMemoryView(value: string | null): MemoryView {
+  return value === "all" || value === "longterm" ? value : DEFAULT_VIEW;
+}
+
 function truncate(text: string, max = 120): string {
   const flat = text.replace(/\s+/g, " ").trim();
   return flat.length > max ? `${flat.slice(0, max)}…` : flat;
@@ -85,6 +90,8 @@ function truncate(text: string, max = 120): string {
 export default function MemoryPage() {
   const { data: agents } = useAgents();
   const { searchParams, setParam, setParams } = useUrlSearchState();
+  const view = coerceMemoryView(searchParams.get("view"));
+  const folderParam = readStringParam(searchParams, "folder", LONGTERM_ROOT);
   const queryParam = readStringParam(searchParams, "query");
   const pathParam = readStringParam(searchParams, "path");
   const agentIdParam = readStringParam(searchParams, "agentId", ANY_AGENT);
@@ -115,34 +122,18 @@ export default function MemoryPage() {
     [agentIdParam, page, pageSize, pathParam, queryParam, scopeParam, sourceParam],
   );
 
-  const { data, isLoading, isFetching, error } = useMemoryList(submitted);
+  const { data, isLoading, isFetching, error } = useMemoryList(submitted, view === "all");
 
-  const [selected, setSelected] = useState<MemoryEntry | null>(null);
-  const dismissedMemoryIdRef = useRef<string | null>(null);
-  const [deleteTarget, setDeleteTarget] = useState<MemoryEntry | null>(null);
+  // The detail sheet loads the memory by id, so a ?memoryId= deep link opens
+  // whether or not the row is on the current page or view.
+  const selectedId = searchParams.get("memoryId");
+  const [deleteTarget, setDeleteTarget] = useState<MemoryDeleteTarget | null>(null);
   const deleteMemory = useDeleteMemory();
 
-  const setMemoryIdParam = useCallback(
-    (memoryId: string | null) => {
-      setParam("memoryId", memoryId);
-    },
+  const openMemory = useCallback(
+    (memoryId: string | null) => setParam("memoryId", memoryId),
     [setParam],
   );
-
-  const selectMemory = useCallback(
-    (entry: MemoryEntry | null) => {
-      if (entry) dismissedMemoryIdRef.current = null;
-      setSelected(entry);
-      setMemoryIdParam(entry?.id ?? null);
-    },
-    [setMemoryIdParam],
-  );
-
-  const closeSelectedMemory = useCallback(() => {
-    dismissedMemoryIdRef.current = selected?.id ?? searchParams.get("memoryId");
-    setSelected(null);
-    setMemoryIdParam(null);
-  }, [searchParams, selected?.id, setMemoryIdParam]);
 
   useEffect(() => {
     setDraftQuery(queryParam);
@@ -206,10 +197,10 @@ export default function MemoryPage() {
     deleteMemory.mutate(id, {
       onSettled: () => {
         setDeleteTarget(null);
-        if (selected?.id === id) closeSelectedMemory();
+        if (selectedId === id) openMemory(null);
       },
     });
-  }, [closeSelectedMemory, deleteMemory, deleteTarget, selected]);
+  }, [deleteMemory, deleteTarget, openMemory, selectedId]);
 
   const agentName = useCallback(
     (id: string | null) => {
@@ -240,21 +231,41 @@ export default function MemoryPage() {
         field: "name",
         headerName: "Name",
         flex: 1,
-        minWidth: 180,
+        minWidth: 200,
         cellRenderer: (p: ICellRendererParams<MemoryEntry, string>) => (
-          <span className="font-medium">{p.value}</span>
+          <span className="flex items-center gap-1.5 min-w-0">
+            <span className="font-medium truncate">{p.value}</span>
+            {p.data && p.data.totalChunks > 1 && (
+              <Badge variant="outline" size="tag" className="shrink-0 font-mono">
+                chunk {p.data.chunkIndex + 1}/{p.data.totalChunks}
+              </Badge>
+            )}
+          </span>
         ),
+      },
+      {
+        field: "key",
+        headerName: "Key",
+        width: 220,
+        cellRenderer: (p: ICellRendererParams<MemoryEntry, string | null | undefined>) =>
+          p.value ? (
+            <span className="block truncate font-mono text-xs" title={p.value}>
+              {p.value}
+            </span>
+          ) : (
+            <span className="text-muted-foreground/40">—</span>
+          ),
       },
       {
         field: "agentId",
         headerName: "Agent",
-        width: 160,
+        width: 140,
         valueFormatter: (p) => agentName(p.value as string | null),
       },
       {
         field: "scope",
         headerName: "Scope",
-        width: 100,
+        width: 90,
         cellRenderer: (p: ICellRendererParams<MemoryEntry, string>) => (
           <Badge variant="outline" size="tag">
             {p.value}
@@ -264,7 +275,7 @@ export default function MemoryPage() {
       {
         field: "source",
         headerName: "Source",
-        width: 160,
+        width: 150,
         cellRenderer: (p: ICellRendererParams<MemoryEntry, string>) => (
           <Badge variant="outline" size="tag">
             {p.value}
@@ -272,29 +283,44 @@ export default function MemoryPage() {
         ),
       },
       {
-        field: "sourcePath",
-        headerName: "File",
-        width: 220,
-        cellRenderer: (p: ICellRendererParams<MemoryEntry, string | null>) =>
-          p.value ? (
-            <span className="font-mono text-xs text-muted-foreground" title={p.value}>
-              {p.value}
-            </span>
-          ) : (
-            <span className="text-muted-foreground/40">—</span>
-          ),
+        field: "accessCount",
+        headerName: "Usage",
+        width: 100,
+        type: "rightAligned",
       },
       {
-        field: "createdAt",
-        headerName: "Created",
-        width: 140,
+        field: "rating",
+        headerName: "Rating",
+        width: 90,
+        type: "rightAligned",
+        headerTooltip: "Usefulness posterior mean alpha / (alpha + beta). Muted = 0.5 prior",
+        cellRenderer: (p: ICellRendererParams<MemoryEntry, number | undefined>) => (
+          <span className={cn("tabular-nums", p.value === 0.5 && "text-muted-foreground/60")}>
+            {formatRating(p.value ?? undefined)}
+          </span>
+        ),
+      },
+      {
+        colId: "tokens",
+        headerName: "Tokens",
+        width: 90,
+        type: "rightAligned",
+        headerTooltip: "Estimated tokens of this row: ceil(chars / 4)",
+        valueGetter: (p) => (p.data ? Math.ceil(p.data.content.length / 4) : 0),
+        valueFormatter: (p) => (typeof p.value === "number" ? formatTokens(p.value) : ""),
+      },
+      {
+        colId: "updated",
+        headerName: "Updated",
+        width: 120,
+        valueGetter: (p) => p.data?.updatedAt ?? p.data?.createdAt ?? "",
         valueFormatter: (p) => (p.value ? formatSmartTime(p.value as string) : ""),
       },
       {
         field: "content",
         headerName: "Preview",
-        flex: 2,
-        minWidth: 240,
+        flex: 1,
+        minWidth: 200,
         cellRenderer: (p: ICellRendererParams<MemoryEntry, string>) => (
           <span className="text-muted-foreground">{truncate(p.value ?? "")}</span>
         ),
@@ -314,7 +340,7 @@ export default function MemoryPage() {
               aria-label={`Delete memory ${row.name}`}
               onClick={(e) => {
                 e.stopPropagation();
-                setDeleteTarget(row);
+                setDeleteTarget({ id: row.id, name: row.name, chunked: row.totalChunks > 1 });
               }}
             >
               <Trash2 className="h-3 w-3" />
@@ -331,257 +357,201 @@ export default function MemoryPage() {
     (event: RowClickedEvent<MemoryEntry>) => {
       const target = event.event?.target as HTMLElement | undefined;
       if (target?.closest("button")) return;
-      if (event.data) selectMemory(event.data);
+      if (event.data) openMemory(event.data.id);
     },
-    [selectMemory],
+    [openMemory],
   );
 
   const results = data?.results ?? [];
   const total = data?.total ?? 0;
 
-  // Auto-select the memory referenced by ?memoryId= once it appears in results.
-  const memoryIdParam = searchParams.get("memoryId");
-  useEffect(() => {
-    if (!memoryIdParam) {
-      dismissedMemoryIdRef.current = null;
-      return;
-    }
-    if (dismissedMemoryIdRef.current === memoryIdParam) return;
-    if (selected?.id === memoryIdParam) return;
-    const match = results.find((r) => r.id === memoryIdParam);
-    if (match) setSelected(match);
-  }, [memoryIdParam, selected?.id, results]);
-
   // Same stale-page correction as Tasks. Waits for the total, so a deep link
   // to page 3 is not reset to page 0 before the first response lands.
   const { page: listPage, stale: pageStale } = resolveListPage(page, pageSize, data?.total);
   useEffect(() => {
-    if (pageStale) setParam("page", listPage, { defaultValue: "0" });
-  }, [listPage, pageStale, setParam]);
+    if (view === "all" && pageStale) setParam("page", listPage, { defaultValue: "0" });
+  }, [listPage, pageStale, setParam, view]);
 
   return (
     <div className="flex flex-col flex-1 min-h-0 gap-4">
-      <PageHeader title="Memory" />
-
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="relative flex-1 min-w-[260px] max-w-md">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            placeholder="Natural-language query (leave empty to browse)"
-            value={draftQuery}
-            onChange={(e) => setDraftQuery(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") submit();
-            }}
-            className="pl-9"
+      <PageHeader
+        title="Memory"
+        action={
+          <SegmentedControl
+            aria-label="Memory view"
+            size="sm"
+            value={view}
+            options={VIEW_OPTIONS}
+            onValueChange={(next) => setParam("view", next, { defaultValue: DEFAULT_VIEW })}
           />
-        </div>
-
-        <div className="relative w-[240px]">
-          <FileText className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            placeholder="File path contains…"
-            value={draftPath}
-            onChange={(e) => setDraftPath(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") submit();
-            }}
-            className="pl-9"
-          />
-        </div>
-
-        <Select value={draftAgentId} onValueChange={setDraftAgentId}>
-          <SelectTrigger className="w-[180px]">
-            <SelectValue placeholder="Agent" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value={ANY_AGENT}>All agents</SelectItem>
-            {agents?.map((a) => (
-              <SelectItem key={a.id} value={a.id}>
-                {a.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-
-        <Select value={draftScope} onValueChange={(v) => setDraftScope(v as MemoryScopeFilter)}>
-          <SelectTrigger className="w-[130px]">
-            <SelectValue placeholder="Scope" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All scopes</SelectItem>
-            <SelectItem value="agent">Agent</SelectItem>
-            <SelectItem value="swarm">Swarm</SelectItem>
-          </SelectContent>
-        </Select>
-
-        <Select value={draftSource} onValueChange={setDraftSource}>
-          <SelectTrigger className="w-[170px]">
-            <SelectValue placeholder="Source" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value={ANY_SOURCE}>All sources</SelectItem>
-            {SOURCE_OPTIONS.map((s) => (
-              <SelectItem key={s.value} value={s.value}>
-                {s.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-
-        <Button
-          size="sm"
-          className="gap-1.5 bg-primary hover:bg-primary/90"
-          onClick={submit}
-          disabled={isFetching}
-        >
-          {isFetching ? <Spinner className="size-3.5" /> : <Search className="h-3.5 w-3.5" />}
-          Search
-        </Button>
-        <Button size="sm" variant="outline" onClick={clear}>
-          Clear
-        </Button>
-
-        <div className="flex items-center gap-2 ml-auto">
-          {data && (
-            <>
-              <Badge variant="outline" size="tag">
-                {data.mode}
-              </Badge>
-              <Badge variant="outline" size="tag">
-                {total} {data.mode === "semantic" ? "matches" : "memories"}
-              </Badge>
-              <Badge variant="outline" size="tag">
-                {results.length} shown
-              </Badge>
-            </>
-          )}
-          {error && (
-            <span className="text-sm text-status-error-strong truncate max-w-[280px]">
-              {error instanceof Error ? error.message : "Search failed"}
-            </span>
-          )}
-        </div>
-      </div>
+        }
+      />
 
       <UsefulnessSection />
 
-      <DataGrid
-        rowData={results}
-        columnDefs={columnDefs}
-        loading={isLoading || pageStale}
-        emptyMessage={
-          submitted.query ? "No matches for this query" : "No memories — try a different filter"
-        }
-        onRowClicked={onRowClicked}
-        getRowId={(p) => p.data.id}
-        pagination={false}
-      />
-
-      <ListPager
-        page={listPage}
-        pageSize={pageSize}
-        total={total}
-        pageSizeOptions={PAGE_SIZE_OPTIONS}
-        onPageChange={(next) => setParam("page", next, { defaultValue: "0" })}
-        onPageSizeChange={(size) =>
-          setParam("pageSize", String(size), {
-            defaultValue: String(DEFAULT_PAGE_SIZE),
-            reset: ["page"],
-          })
-        }
-        emptyLabel={data?.mode === "semantic" ? "0 matches" : "0 memories"}
-      />
-
-      <Sheet open={!!selected} onOpenChange={(open) => !open && closeSelectedMemory()}>
-        <SheetContent className="w-[640px] sm:max-w-[640px] p-0">
-          {selected && (
-            <div className="flex flex-col h-full">
-              <SheetHeader className="px-6 py-4 border-b border-border">
-                <SheetTitle className="flex items-center gap-2">
-                  <Brain className="h-4 w-4 text-muted-foreground" />
-                  {selected.name}
-                </SheetTitle>
-                <SheetDescription className="font-mono text-xs">{selected.id}</SheetDescription>
-                <div className="flex flex-wrap gap-1.5 pt-1">
-                  <Badge variant="outline" size="tag">
-                    {selected.scope}
-                  </Badge>
-                  <Badge variant="outline" size="tag">
-                    {selected.source}
-                  </Badge>
-                  {typeof selected.similarity === "number" && (
-                    <Badge variant="outline" size="tag">
-                      sim {selected.similarity.toFixed(3)}
-                    </Badge>
-                  )}
-                  {selected.tags.map((t) => (
-                    <Badge key={t} variant="outline" size="tag">
-                      {t}
-                    </Badge>
-                  ))}
-                </div>
-              </SheetHeader>
-
-              <ScrollArea className="flex-1 min-h-0">
-                <div className="px-6 py-4 space-y-4">
-                  <DetailRow label="Agent" value={agentName(selected.agentId)} />
-                  <DetailRow label="Created" value={formatSmartTime(selected.createdAt)} />
-                  <DetailRow label="Accessed" value={formatSmartTime(selected.accessedAt)} />
-                  <DetailRow label="Access count" value={String(selected.accessCount)} />
-                  {selected.expiresAt && (
-                    <DetailRow label="Expires" value={formatSmartTime(selected.expiresAt)} />
-                  )}
-                  {selected.embeddingModel && (
-                    <DetailRow label="Embedding model" value={selected.embeddingModel} />
-                  )}
-                  {selected.sourceTaskId && (
-                    <DetailRow label="Source task" value={selected.sourceTaskId} mono />
-                  )}
-                  {selected.sourcePath && (
-                    <DetailRow label="Source path" value={selected.sourcePath} mono />
-                  )}
-                  {selected.totalChunks > 1 && (
-                    <DetailRow
-                      label="Chunk"
-                      value={`${selected.chunkIndex + 1} of ${selected.totalChunks}`}
-                    />
-                  )}
-
-                  <div>
-                    <div className="text-xs uppercase tracking-wide text-muted-foreground mb-2">
-                      Content
-                    </div>
-                    <div className="rounded-md border border-border bg-muted/30 px-3 py-2 prose prose-sm dark:prose-invert max-w-none">
-                      <Streamdown>{selected.content}</Streamdown>
-                    </div>
-                  </div>
-                </div>
-              </ScrollArea>
-
-              <div className="border-t border-border px-6 py-3 flex justify-end">
-                <Button
-                  variant="destructive-outline"
-                  size="sm"
-                  className="gap-1.5"
-                  onClick={() => setDeleteTarget(selected)}
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                  Delete memory
-                </Button>
-              </div>
+      {view === "longterm" ? (
+        <LongtermView
+          folder={folderParam}
+          onFolderChange={(next) => setParam("folder", next, { defaultValue: LONGTERM_ROOT })}
+          onOpenMemory={openMemory}
+          agentName={agentName}
+        />
+      ) : (
+        <>
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="relative flex-1 min-w-[260px] max-w-md">
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                placeholder="Natural-language query (leave empty to browse)"
+                value={draftQuery}
+                onChange={(e) => setDraftQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") submit();
+                }}
+                className="pl-9"
+              />
             </div>
-          )}
-        </SheetContent>
-      </Sheet>
+
+            <div className="relative w-[240px]">
+              <FileText className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                placeholder="File path contains…"
+                value={draftPath}
+                onChange={(e) => setDraftPath(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") submit();
+                }}
+                className="pl-9"
+              />
+            </div>
+
+            <Select value={draftAgentId} onValueChange={setDraftAgentId}>
+              <SelectTrigger className="w-[180px]">
+                <SelectValue placeholder="Agent" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ANY_AGENT}>All agents</SelectItem>
+                {agents?.map((a) => (
+                  <SelectItem key={a.id} value={a.id}>
+                    {a.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            <Select value={draftScope} onValueChange={(v) => setDraftScope(v as MemoryScopeFilter)}>
+              <SelectTrigger className="w-[130px]">
+                <SelectValue placeholder="Scope" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All scopes</SelectItem>
+                <SelectItem value="agent">Agent</SelectItem>
+                <SelectItem value="swarm">Swarm</SelectItem>
+              </SelectContent>
+            </Select>
+
+            <Select value={draftSource} onValueChange={setDraftSource}>
+              <SelectTrigger className="w-[170px]">
+                <SelectValue placeholder="Source" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ANY_SOURCE}>All sources</SelectItem>
+                {SOURCE_OPTIONS.map((s) => (
+                  <SelectItem key={s.value} value={s.value}>
+                    {s.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            <Button
+              size="sm"
+              className="gap-1.5 bg-primary hover:bg-primary/90"
+              onClick={submit}
+              disabled={isFetching}
+            >
+              {isFetching ? <Spinner className="size-3.5" /> : <Search className="h-3.5 w-3.5" />}
+              Search
+            </Button>
+            <Button size="sm" variant="outline" onClick={clear}>
+              Clear
+            </Button>
+
+            <div className="flex items-center gap-2 ml-auto">
+              {data && (
+                <>
+                  <Badge variant="outline" size="tag">
+                    {data.mode}
+                  </Badge>
+                  <Badge variant="outline" size="tag">
+                    {total} {data.mode === "semantic" ? "matches" : "memories"}
+                  </Badge>
+                  <Badge variant="outline" size="tag">
+                    {results.length} shown
+                  </Badge>
+                </>
+              )}
+              {error && (
+                <span className="text-sm text-status-error-strong truncate max-w-[280px]">
+                  {error instanceof Error ? error.message : "Search failed"}
+                </span>
+              )}
+            </div>
+          </div>
+
+          <DataGrid
+            rowData={results}
+            columnDefs={columnDefs}
+            loading={isLoading || pageStale}
+            emptyMessage={
+              submitted.query ? "No matches for this query" : "No memories — try a different filter"
+            }
+            onRowClicked={onRowClicked}
+            getRowId={(p) => p.data.id}
+            pagination={false}
+          />
+
+          <ListPager
+            page={listPage}
+            pageSize={pageSize}
+            total={total}
+            pageSizeOptions={PAGE_SIZE_OPTIONS}
+            onPageChange={(next) => setParam("page", next, { defaultValue: "0" })}
+            onPageSizeChange={(size) =>
+              setParam("pageSize", String(size), {
+                defaultValue: String(DEFAULT_PAGE_SIZE),
+                reset: ["page"],
+              })
+            }
+            emptyLabel={data?.mode === "semantic" ? "0 matches" : "0 memories"}
+          />
+        </>
+      )}
+
+      <MemoryDetailSheet
+        memoryId={selectedId}
+        onClose={() => openMemory(null)}
+        agentName={agentName}
+        onDelete={setDeleteTarget}
+      />
 
       <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Delete Memory</AlertDialogTitle>
             <AlertDialogDescription>
-              Delete <strong>{deleteTarget?.name}</strong>? This removes the memory and its
-              embedding. This action cannot be undone.
+              {deleteTarget?.chunked ? (
+                <>
+                  Delete this chunk of <strong>{deleteTarget?.name}</strong>? This removes one chunk
+                  row and its embedding. The other chunks of the memory stay. This action cannot be
+                  undone.
+                </>
+              ) : (
+                <>
+                  Delete <strong>{deleteTarget?.name}</strong>? This removes the memory and its
+                  embedding. This action cannot be undone.
+                </>
+              )}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -592,15 +562,6 @@ export default function MemoryPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </div>
-  );
-}
-
-function DetailRow({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
-  return (
-    <div className="flex flex-col gap-0.5">
-      <div className="text-[10px] uppercase tracking-wide text-muted-foreground">{label}</div>
-      <div className={mono ? "font-mono text-xs break-all" : "text-sm"}>{value}</div>
     </div>
   );
 }
@@ -634,7 +595,7 @@ function UsefulnessSection() {
     <CollapsibleSection
       title={`Usefulness — last ${stats.windowDays}d`}
       icon={BarChart3}
-      defaultOpen
+      defaultOpen={false}
       persistKey="memory-usefulness-open"
       className="shrink-0"
       badge={

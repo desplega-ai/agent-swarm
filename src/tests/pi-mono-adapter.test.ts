@@ -2,6 +2,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, spyOn, test } from "b
 import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import * as piCodingAgent from "@earendil-works/pi-coding-agent";
+import { configureHttpResolver, resetHttpResolver } from "../prompts/resolver";
 import {
   createPiRuntimeAuth,
   extractPiAssistantText,
@@ -465,6 +466,16 @@ describe("createPiRuntimeAuth", () => {
       auth: { apiKey: "example-sk-google-runtime" },
     });
   });
+
+  test("passes GEMINI_API_KEY to pi google runtime auth", async () => {
+    const modelRuntime = await createPiRuntimeAuth({
+      GEMINI_API_KEY: "example-gemini-runtime",
+    });
+
+    await expect(modelRuntime.getAuth("google")).resolves.toMatchObject({
+      auth: { apiKey: "example-gemini-runtime" },
+    });
+  });
 });
 
 describe("Pi-mono event normalization", () => {
@@ -695,13 +706,24 @@ function autoRetryEnd(success: boolean, finalError?: string): AgentSessionEvent 
  * exception to catch at the agent-swarm layer.
  */
 function makeMockAgentSession(opts: {
+  /** Events replayed by the first `prompt()` call. */
   events?: AgentSessionEvent[];
+  /** Events replayed per `prompt()` call (index = call number); wins over `events`. */
+  turns?: AgentSessionEvent[][];
+  /** Text of every `prompt()` call, in order. */
+  promptCalls?: string[];
+  /** Zero-based `prompt()` call that throws instead of replaying events. */
+  throwOnCall?: number;
+  /** The first `prompt()` call waits for this before replaying events. */
+  holdFirstPrompt?: Promise<void>;
   throwError?: string;
   steerCalls?: string[];
   followUpCalls?: string[];
   steeringError?: string;
 }): AgentSession {
   const listeners: Array<(event: AgentSessionEvent) => void> = [];
+  const scripts = opts.turns ?? [opts.events ?? []];
+  let promptIndex = 0;
   return {
     sessionId: "mock-session-id",
     isStreaming: false,
@@ -713,8 +735,12 @@ function makeMockAgentSession(opts: {
         if (idx >= 0) listeners.splice(idx, 1);
       };
     },
-    async prompt() {
-      for (const event of opts.events ?? []) {
+    async prompt(text: string) {
+      const call = promptIndex++;
+      opts.promptCalls?.push(text);
+      if (call === 0) await opts.holdFirstPrompt;
+      if (opts.throwOnCall === call) throw new Error("prompt rejected");
+      for (const event of scripts[call] ?? []) {
         for (const l of listeners) l(event);
       }
       if (opts.throwError) throw new Error(opts.throwError);
@@ -764,6 +790,253 @@ async function runWithEvents(events: AgentSessionEvent[]): Promise<{
   const result = await session.waitForCompletion();
   return { events: emitted, result };
 }
+
+describe("PiMonoSession — empty final turn reprompt", () => {
+  const STORE_PROGRESS_OUTPUT = '{"result":"ok"}';
+  // Pi's thinking block; the text is a canary that must never reach a log line.
+  const THINKING_CANARY = "private-reasoning-canary";
+
+  function assistantEnd(
+    content: unknown[],
+    stopReason = "stop",
+    usage?: { output: number },
+  ): AgentSessionEvent {
+    return {
+      type: "message_end",
+      message: { role: "assistant", content, stopReason, ...(usage ? { usage } : {}) },
+    } as unknown as AgentSessionEvent;
+  }
+
+  const thinkingOnly = () => assistantEnd([{ type: "thinking", thinking: THINKING_CANARY }]);
+  const emptyContent = () => assistantEnd([]);
+
+  function toolStart(toolCallId: string, toolName: string, args: unknown): AgentSessionEvent {
+    return { type: "tool_execution_start", toolCallId, toolName, args } as AgentSessionEvent;
+  }
+
+  function toolEnd(toolCallId: string, toolName: string, isError = false): AgentSessionEvent {
+    return {
+      type: "tool_execution_end",
+      toolCallId,
+      toolName,
+      result: {},
+      isError,
+    } as AgentSessionEvent;
+  }
+
+  async function runTurns(
+    turns: AgentSessionEvent[][],
+    extra: { throwOnCall?: number } = {},
+  ): Promise<{ events: ProviderEvent[]; result: ProviderResult; promptCalls: string[] }> {
+    const promptCalls: string[] = [];
+    const logFile = join(
+      tmpLogDir,
+      `reprompt-${Date.now()}-${Math.random().toString(36).slice(2)}.log`,
+    );
+    const session = new PiMonoSession(
+      makeMockAgentSession({ turns, promptCalls, ...extra }),
+      makeSessionConfig(logFile),
+      false,
+    );
+    const events: ProviderEvent[] = [];
+    session.onEvent((e) => events.push(e));
+    const result = await session.waitForCompletion();
+    return { events, result, promptCalls };
+  }
+
+  const stderrLines = (events: ProviderEvent[]) =>
+    events.flatMap((e) => (e.type === "raw_stderr" ? [e.content] : []));
+
+  // The final turn carries only a thinking block, or nothing at all. pi ends the
+  // session cleanly on both, which left a schema-bound task without a result.
+  test.each([
+    ["a thinking-only", thinkingOnly],
+    ["an empty-content", emptyContent],
+  ])("%s final turn gets exactly one reprompt and output comes from the second turn", async (_, firstTurn) => {
+    const { result, promptCalls } = await runTurns([
+      [firstTurn()],
+      [successMessageEnd(STORE_PROGRESS_OUTPUT)],
+    ]);
+    expect(promptCalls).toHaveLength(2);
+    expect(promptCalls[0]).toBe("test prompt");
+    expect(promptCalls[1]).toContain("no text and no tool call");
+    expect(promptCalls[1]).toContain("store-progress");
+    expect(result.isError).toBe(false);
+    expect(result.exitCode).toBe(0);
+    expect(result.output).toBe(STORE_PROGRESS_OUTPUT);
+  });
+
+  test("an empty turn that follows tool calls is reprompted too", async () => {
+    const { result, promptCalls } = await runTurns([
+      [
+        assistantEnd([{ type: "toolCall", id: "t1", name: "get-task-details", arguments: {} }]),
+        toolStart("t1", "get-task-details", {}),
+        toolEnd("t1", "get-task-details"),
+        assistantEnd([{ type: "toolCall", id: "t2", name: "memory-search", arguments: {} }]),
+        toolStart("t2", "memory-search", {}),
+        toolEnd("t2", "memory-search"),
+        thinkingOnly(),
+      ],
+      [successMessageEnd(STORE_PROGRESS_OUTPUT)],
+    ]);
+    expect(promptCalls).toHaveLength(2);
+    expect(result.output).toBe(STORE_PROGRESS_OUTPUT);
+  });
+
+  test("an empty final turn leaves a diagnostic with stopReason and block types, never content", async () => {
+    const { events } = await runTurns([
+      [assistantEnd([{ type: "thinking", thinking: THINKING_CANARY }], "stop", { output: 365 })],
+      [successMessageEnd(STORE_PROGRESS_OUTPUT)],
+    ]);
+    const diagnostic = stderrLines(events).find((l) => l.includes("no text and no tool call ("));
+    expect(diagnostic).toContain("stopReason=stop");
+    expect(diagnostic).toContain("content=[thinking]");
+    expect(diagnostic).toContain("outputTokens=365");
+    expect(stderrLines(events).join("")).not.toContain(THINKING_CANARY);
+  });
+
+  test("a normal final text turn is not reprompted and emits no empty-turn diagnostic", async () => {
+    const { events, result, promptCalls } = await runTurns([[successMessageEnd("All done")]]);
+    expect(promptCalls).toEqual(["test prompt"]);
+    expect(result.output).toBe("All done");
+    expect(stderrLines(events)).toEqual([]);
+  });
+
+  test("a second empty turn after the reprompt is not reprompted again", async () => {
+    const { result, promptCalls } = await runTurns([
+      [thinkingOnly()],
+      [emptyContent()],
+      [thinkingOnly()],
+    ]);
+    expect(promptCalls).toHaveLength(2);
+    expect(result.exitCode).toBe(0);
+    expect(result.output).toBeUndefined();
+  });
+
+  // The reprompt asks for a store-progress call; after a terminal one has
+  // succeeded the task is already finished, so another turn is wasted at best.
+  test.each([
+    "completed",
+    "failed",
+  ])("no reprompt after a successful terminal store-progress call (status %s)", async (status) => {
+    const { promptCalls } = await runTurns([
+      [
+        toolStart("sp", "store-progress", { status }),
+        toolEnd("sp", "store-progress"),
+        emptyContent(),
+      ],
+    ]);
+    expect(promptCalls).toHaveLength(1);
+  });
+
+  test.each([
+    ["a progress-only call", { status: "in_progress" }, false],
+    ["a terminal call the server rejected", { status: "completed" }, true],
+  ])("still reprompts after %s", async (_, args, isError) => {
+    const { promptCalls } = await runTurns([
+      [
+        toolStart("sp", "store-progress", args),
+        toolEnd("sp", "store-progress", isError),
+        emptyContent(),
+      ],
+      [successMessageEnd(STORE_PROGRESS_OUTPUT)],
+    ]);
+    expect(promptCalls).toHaveLength(2);
+  });
+
+  test("a final turn that ends in a tool call is not reprompted", async () => {
+    const { promptCalls } = await runTurns([
+      [
+        assistantEnd(
+          [{ type: "toolCall", id: "t1", name: "store-progress", arguments: {} }],
+          "toolUse",
+        ),
+      ],
+    ]);
+    expect(promptCalls).toHaveLength(1);
+  });
+
+  test("an errored final turn fails the session without a reprompt", async () => {
+    const { result, promptCalls } = await runTurns([
+      [errorMessageEnd("provider returned error: 503")],
+    ]);
+    expect(promptCalls).toHaveLength(1);
+    expect(result.isError).toBe(true);
+  });
+
+  test("an aborted final turn is not reprompted", async () => {
+    const { promptCalls } = await runTurns([[assistantEnd([], "aborted")]]);
+    expect(promptCalls).toHaveLength(1);
+  });
+
+  test("abort() before the final turn lands suppresses the reprompt", async () => {
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const promptCalls: string[] = [];
+    const session = new PiMonoSession(
+      makeMockAgentSession({ turns: [[emptyContent()]], promptCalls, holdFirstPrompt: gate }),
+      makeSessionConfig(join(tmpLogDir, `reprompt-abort-${Date.now()}.log`)),
+      false,
+    );
+    await session.abort();
+    release();
+    await session.waitForCompletion();
+    expect(promptCalls).toHaveLength(1);
+  });
+
+  // Workers render the nudge template over HTTP. abort() can land while that
+  // request is pending, after the first guard check and before prompt().
+  test("abort() while the reprompt template is rendering does not start a new turn", async () => {
+    let releaseRender = () => {};
+    const renderGate = new Promise<void>((resolve) => {
+      releaseRender = resolve;
+    });
+    let renderStarted = () => {};
+    const renderRequested = new Promise<void>((resolve) => {
+      renderStarted = resolve;
+    });
+    const realFetch = globalThis.fetch;
+    const fetchSpy = spyOn(globalThis, "fetch").mockImplementation((async (
+      input: Parameters<typeof fetch>[0],
+      init?: Parameters<typeof fetch>[1],
+    ) => {
+      if (!String(input).endsWith("/api/prompt-templates/render")) return realFetch(input, init);
+      renderStarted();
+      await renderGate;
+      return Response.json({ text: "Please call store-progress.", skipped: false, unresolved: [] });
+    }) as unknown as typeof fetch);
+    configureHttpResolver("http://resolver.test", "test-key");
+    try {
+      const promptCalls: string[] = [];
+      const session = new PiMonoSession(
+        makeMockAgentSession({ turns: [[emptyContent()]], promptCalls }),
+        makeSessionConfig(join(tmpLogDir, `reprompt-abort-render-${Date.now()}.log`)),
+        false,
+      );
+      const events: ProviderEvent[] = [];
+      session.onEvent((e) => events.push(e));
+      await renderRequested;
+      await session.abort();
+      releaseRender();
+      await session.waitForCompletion();
+      expect(promptCalls).toHaveLength(1);
+      expect(stderrLines(events).some((l) => l.includes("sending one reprompt"))).toBe(false);
+    } finally {
+      resetHttpResolver();
+      fetchSpy.mockRestore();
+    }
+  });
+
+  test("a rejected reprompt keeps the original outcome instead of failing the session", async () => {
+    const { events, result, promptCalls } = await runTurns([[thinkingOnly()]], { throwOnCall: 1 });
+    expect(promptCalls).toHaveLength(2);
+    expect(result.isError).toBe(false);
+    expect(result.exitCode).toBe(0);
+    expect(stderrLines(events).some((l) => l.includes("empty-turn reprompt failed"))).toBe(true);
+  });
+});
 
 describe("PiMonoSession.deliverSteering", () => {
   test("steer mode calls the native steer API", async () => {

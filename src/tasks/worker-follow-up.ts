@@ -350,6 +350,9 @@ export async function createWorkerTaskFollowUp(args: {
       slackThreadTs: task.slackThreadTs,
       slackUserId: task.slackUserId,
       followUpConfig: changes.followUpConfig,
+      // The Lead reviews the worker's result here; it is not producing the
+      // worker's structured output, so it must not inherit that contract.
+      inheritParentOutputSchema: false,
     },
     { origin: "followUp" },
   );

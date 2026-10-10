@@ -42,6 +42,7 @@ type:ApiKeyStatus
 type:AppVersion
 type:ApprovalRequest
 type:ApprovalRequestSummary
+type:ApprovalVote
 type:AssetSummaryFilters
 type:AttributionByPersonRow
 type:AvailableKeyIndicesResult
@@ -106,6 +107,7 @@ value:KvTypeCollisionError
 value:MAX_EMPTY_POLLS
 value:NOT_EXTENSION_AGENT_SQL
 value:ReservedAgentRoleError
+value:SESSION_ACTIVITY_REFRESH_MIN_INTERVAL_MS
 value:SKILL_FILE_LIMITS
 value:UNATTRIBUTED_USER_ID
 value:__resetSqliteVecExtensionPathCacheForTests
@@ -326,6 +328,7 @@ value:getPageBySlug
 value:getPageVersion
 value:getPageVersions
 value:getPausedTasksForAgent
+value:getPendingApprovalVoteState
 value:getPendingEventWaitNames
 value:getPendingSlackRelayTasks
 value:getPendingSteeringForAgent
@@ -354,6 +357,7 @@ value:getScheduledTaskByName
 value:getScheduledTasks
 value:getScriptRun
 value:getScriptRunByIdempotencyKey
+value:getScriptRunExecutionArgs
 value:getScriptRunJournalStep
 value:getServiceByAgentAndName
 value:getServiceById
@@ -441,6 +445,7 @@ value:installSkill
 value:installSystemDefaultSkillsForAgent
 value:isAgentEligibleForTask
 value:isExtensionAgent
+value:isLinearTrackerContextKey
 value:isPendingSlackMessage
 value:isPoolAffinityEnforcementEnabled
 value:isSettledSlackMessage
@@ -498,13 +503,17 @@ value:postMessage
 value:promoteAbandonedDraftTasks
 value:promoteDraftTask
 value:reassociateSessionLogs
+value:recordApprovalVotes
 value:recordBudgetRefusalNotification
 value:recordInlineScriptRun
 value:recordKeyAuthFailure
 value:recordKeyRateLimitWindows
+value:recordKeySeatMismatch
 value:recordKeyUsage
 value:recordSlackMessage
+value:recordTaskProviderIfUnset
 value:recordTaskPullRequestAttachments
+value:refreshActiveSessionOnActivity
 value:refreshDraftTaskLease
 value:rejectTask
 value:releaseApprovalCancellationNotificationClaim
@@ -619,6 +628,7 @@ value:getTasksByStatus
 value:getTasksCount
 value:hasNonTerminalRerouteDecisionChild
 value:hasNonTerminalResumeChild
+value:isLinearTrackerContextKey
 value:markFinalizedSlackRelaysDelivered
 value:markSlackRelayAttempted
 value:markSlackRelayDelivered

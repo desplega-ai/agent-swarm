@@ -139,6 +139,19 @@ export function useSetScriptConnectionEnabled() {
   });
 }
 
+export function useDeleteScriptConnection() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.deleteScriptConnection(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["script-connections"] });
+      queryClient.invalidateQueries({ queryKey: ["script-connection"] });
+      queryClient.invalidateQueries({ queryKey: ["credential-bindings"] });
+      queryClient.invalidateQueries({ queryKey: ["script-type-defs"] });
+    },
+  });
+}
+
 export function useUpsertCredentialBinding() {
   const queryClient = useQueryClient();
   return useMutation({

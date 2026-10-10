@@ -3,17 +3,22 @@ import { z } from "zod";
 import { resolveTaskAuditUserId } from "../be/audit-user";
 import {
   type ApprovalRequest,
+  type ApprovalVote,
   createApprovalRequest,
   getAgentById,
   getApprovalRequestById,
   getDbClient,
+  getPendingApprovalVoteState,
   getWorkflowRun,
   getWorkflowRunStep,
   listApprovalRequestSummaries,
   listApprovalRequests,
+  recordApprovalVotes,
   resolveApprovalRequest,
 } from "../be/db";
-import type { RbacPrincipal } from "../rbac";
+import { findUserById } from "../be/users";
+import { can, type RbacPrincipal } from "../rbac";
+import type { User } from "../types";
 import { getRequestAuth } from "../utils/request-auth-context";
 import { cancelApprovalRequest } from "../workflows/approval-cancel";
 import { createApprovalFollowUpTask } from "../workflows/approval-notifications";
@@ -72,6 +77,27 @@ const NotificationChannelSchema = z.object({
 });
 type NotificationChannelShape = z.infer<typeof NotificationChannelSchema>;
 
+const ApprovalVoteSchema = z.object({
+  responder: z
+    .string()
+    .describe("Who answered, from the credential: a user id, or `operator` for the shared key."),
+  approved: z.boolean(),
+  responses: z.record(z.string(), z.unknown()),
+  claimedRespondedBy: z
+    .string()
+    .optional()
+    .describe("The `respondedBy` the client sent. Unverified; display only."),
+  respondedAt: z.string(),
+});
+
+const ApprovalProgressSchema = z
+  .object({
+    approved: z.number().int().describe("Approvals that count toward the policy so far."),
+    required: z.number().int().describe("Approvals the policy needs before the request resolves."),
+  })
+  .nullable()
+  .describe("Quorum progress while the request is pending; null once it is resolved.");
+
 const ApprovalRequestSchema = z.object({
   id: z.string(),
   title: z.string(),
@@ -82,7 +108,19 @@ const ApprovalRequestSchema = z.object({
   approvers: ApproversSchema,
   status: z.enum(["pending", "approved", "rejected", "timeout", "cancelled"]),
   responses: z.record(z.string(), z.unknown()).nullable(),
-  resolvedBy: z.string().nullable(),
+  approvals: z
+    .array(ApprovalVoteSchema)
+    .nullable()
+    .describe(
+      "Every accepted answer, in order. A request with an `all` or `{ min: N }` policy stays pending until enough approve.",
+    ),
+  approvalProgress: ApprovalProgressSchema,
+  resolvedBy: z
+    .string()
+    .nullable()
+    .describe(
+      "Who resolved the request, from the credential: a user id, `operator` for the shared key, or an agent id for a cancellation.",
+    ),
   resolvedAt: z.string().nullable(),
   resolutionReason: z.string().nullable(),
   timeoutSeconds: z.number().nullable(),
@@ -98,6 +136,7 @@ const ApprovalRequestSummarySchema = ApprovalRequestSchema.omit({
   questions: true,
   approvers: true,
   responses: true,
+  approvals: true,
   resolutionReason: true,
   notificationChannels: true,
 }).extend({ questionCount: z.number().int() });
@@ -105,19 +144,44 @@ const ApprovalRequestSummarySchema = ApprovalRequestSchema.omit({
 /**
  * Reshapes a DB `ApprovalRequest` row for `respond()` — identical values,
  * narrowed from the DB layer's `unknown` fields to the precise wire shape
- * (see comment above `ApproversSchema`). Not a behavior change: same object
- * contents, serialized the same way.
+ * (see comment above `ApproversSchema`), plus the derived `approvalProgress`.
  */
-function toApprovalRequestResponse(
+async function toApprovalRequestResponse(
   request: ApprovalRequest,
-): z.infer<typeof ApprovalRequestSchema> {
+): Promise<z.infer<typeof ApprovalRequestSchema>> {
+  const approvers = request.approvers as ApproversShape;
+  const approvals = request.approvals ?? null;
   return {
     ...request,
     questions: request.questions as ApprovalQuestion[],
-    approvers: request.approvers as ApproversShape,
+    approvers,
     responses: request.responses as Record<string, unknown> | null,
+    approvals,
+    approvalProgress:
+      request.status === "pending" ? await approvalProgress(approvers, approvals ?? []) : null,
     notificationChannels: request.notificationChannels as NotificationChannelShape[] | null,
   };
+}
+
+/** Slim rows plus `approvalProgress` for the pending ones (one extra read). */
+async function withApprovalProgress(
+  rows: Awaited<ReturnType<typeof listApprovalRequestSummaries>>,
+): Promise<z.infer<typeof ApprovalRequestSummarySchema>[]> {
+  const pendingIds = rows.filter((row) => row.status === "pending").map((row) => row.id);
+  const state = new Map(
+    (await getPendingApprovalVoteState(pendingIds)).map((entry) => [entry.id, entry]),
+  );
+  return Promise.all(
+    rows.map(async (row) => {
+      const entry = state.get(row.id);
+      return {
+        ...row,
+        approvalProgress: entry
+          ? await approvalProgress(entry.approvers as ApproversShape, entry.approvals ?? [])
+          : null,
+      };
+    }),
+  );
 }
 
 export async function getWorkflowApprovalUnavailableReason(
@@ -257,22 +321,32 @@ const respondRoute = route({
   path: "/api/approval-requests/{id}/respond",
   pattern: ["api", "approval-requests", null, "respond"],
   summary: "Submit a response to an approval request",
+  description:
+    "Only a person may answer: a user token, a page session signed for a user, or the shared key with no agent identity (recorded as `operator`). The responder is taken from the credential. When the request lists `approvers.users` or `approvers.roles`, a user must match one of them. A rejection resolves the request at once; approvals resolve it when the `any`, `all` or `{ min: N }` policy is met, and until then it stays pending with the answer recorded in `approvals`.",
   tags: ["ApprovalRequests"],
   params: z.object({ id: z.string().uuid() }),
   body: z.object({
     responses: z.record(z.string(), z.unknown()),
-    respondedBy: z.string().optional(),
+    respondedBy: z
+      .string()
+      .optional()
+      .describe(
+        "Unverified display name. Stored as `claimedRespondedBy` on the answer; never used as the responder.",
+      ),
   }),
   responses: {
     200: {
-      description: "Response recorded",
+      description:
+        "Response recorded. `status` stays `pending` while the policy needs more approvals.",
       schema: z.object({ approvalRequest: ApprovalRequestSchema }),
     },
     400: { description: "Validation error" },
+    403: { description: "Caller is an agent, or is not one of the request's approvers" },
     404: { description: "Not found" },
-    409: { description: "Already resolved" },
+    409: { description: "Already resolved, or this responder already answered" },
   },
   auth: { apiKey: true },
+  rbac: { permission: "approval.respond" },
 });
 
 const cancelRoute = route({
@@ -345,6 +419,12 @@ export async function handleApprovalRequests(
     const parsed = await respondRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
 
+    const responder = await approvalResponder(req);
+    if (!responder.ok) {
+      jsonError(res, responder.message, 403);
+      return true;
+    }
+
     const existing = await getApprovalRequestById(parsed.params.id);
     if (!existing) {
       jsonError(res, "Approval request not found", 404);
@@ -385,6 +465,12 @@ export async function handleApprovalRequests(
       return true;
     }
 
+    const approvers = existing.approvers as ApproversShape;
+    if (!isListedApprover(approvers, responder.responder)) {
+      jsonError(res, "You are not one of this request's approvers", 403);
+      return true;
+    }
+
     const questions = existing.questions as ApprovalQuestion[];
     const missingRequired = missingRequiredResponseIds(questions, parsed.body.responses);
     if (missingRequired.length > 0) {
@@ -404,15 +490,51 @@ export async function handleApprovalRequests(
       }
     }
 
-    const updated = await resolveApprovalRequest(
-      parsed.params.id,
-      {
-        status,
-        responses: parsed.body.responses,
-        resolvedBy: parsed.body.respondedBy,
-      },
-      { requireActionableWorkflow: true },
-    );
+    const responderId = responderKey(responder.responder);
+    const vote: ApprovalVote = {
+      responder: responderId,
+      approved: status === "approved",
+      responses: parsed.body.responses,
+      ...(parsed.body.respondedBy ? { claimedRespondedBy: parsed.body.respondedBy } : {}),
+      respondedAt: new Date().toISOString(),
+    };
+    // One write transaction (BEGIN IMMEDIATE) so concurrent answers to an
+    // `all` / `{ min: N }` request append in turn and never drop each other.
+    const outcome = await getDbClient().transaction(async () => {
+      const current = await getApprovalRequestById(parsed.params.id);
+      if (!current || current.status !== "pending") return { kind: "unavailable" as const };
+      const prior = current.approvals ?? [];
+      if (prior.some((v) => v.responder === responderId)) return { kind: "duplicate" as const };
+      const votes = [...prior, vote];
+      if (status === "rejected" || (await approvalQuorumMet(approvers, votes))) {
+        const resolved = await resolveApprovalRequest(
+          parsed.params.id,
+          { status, responses: parsed.body.responses, approvals: votes, resolvedBy: responderId },
+          { requireActionableWorkflow: true },
+        );
+        return resolved
+          ? { kind: "resolved" as const, request: resolved }
+          : { kind: "unavailable" as const };
+      }
+      const recorded = (await recordApprovalVotes(parsed.params.id, votes))
+        ? await getApprovalRequestById(parsed.params.id)
+        : null;
+      return recorded
+        ? { kind: "recorded" as const, request: recorded }
+        : { kind: "unavailable" as const };
+    });
+
+    if (outcome.kind === "duplicate") {
+      jsonError(res, "You already answered this approval request", 409);
+      return true;
+    }
+    if (outcome.kind === "recorded") {
+      respondRoute.respond(res, 200, {
+        approvalRequest: await toApprovalRequestResponse(outcome.request),
+      });
+      return true;
+    }
+    const updated = outcome.kind === "resolved" ? outcome.request : null;
 
     if (!updated) {
       const latest = await getApprovalRequestById(parsed.params.id);
@@ -428,22 +550,25 @@ export async function handleApprovalRequests(
       return true;
     }
 
-    // Emit event for workflow resume
-    if (updated.workflowRunId && updated.workflowRunStepId) {
-      workflowEventBus.emit("approval.resolved", {
-        requestId: updated.id,
-        status: updated.status,
-        responses: updated.responses,
-        workflowRunId: updated.workflowRunId,
-        workflowRunStepId: updated.workflowRunStepId,
-      });
-    }
+    // Emit for every answered request, workflow or standalone. Workflow resume
+    // ignores a payload without a run and step id, and the extension bridge
+    // (`post.approval.resolved`) needs the standalone ones.
+    workflowEventBus.emit("approval.resolved", {
+      requestId: updated.id,
+      status: updated.status,
+      responses: updated.responses,
+      workflowRunId: updated.workflowRunId ?? undefined,
+      workflowRunStepId: updated.workflowRunStepId ?? undefined,
+      sourceTaskId: updated.sourceTaskId ?? undefined,
+    });
 
     // For standalone (non-workflow) requests, create a follow-up task
     // so the requesting agent is notified of the human's response
     await createApprovalFollowUpTask(updated, "hitl.follow_up");
 
-    respondRoute.respond(res, 200, { approvalRequest: toApprovalRequestResponse(updated) });
+    respondRoute.respond(res, 200, {
+      approvalRequest: await toApprovalRequestResponse(updated),
+    });
     return true;
   }
 
@@ -464,7 +589,7 @@ export async function handleApprovalRequests(
       return true;
     }
     cancelRoute.respond(res, 200, {
-      approvalRequest: toApprovalRequestResponse(result.request),
+      approvalRequest: await toApprovalRequestResponse(result.request),
       alreadyCancelled: result.alreadyCancelled,
       runCancelled: result.runCancelled,
     });
@@ -482,7 +607,9 @@ export async function handleApprovalRequests(
       return true;
     }
 
-    getByIdRoute.respond(res, 200, { approvalRequest: toApprovalRequestResponse(request) });
+    getByIdRoute.respond(res, 200, {
+      approvalRequest: await toApprovalRequestResponse(request),
+    });
     return true;
   }
 
@@ -514,7 +641,9 @@ export async function handleApprovalRequests(
       createdBy,
     });
 
-    createRoute.respond(res, 201, { approvalRequest: toApprovalRequestResponse(request) });
+    createRoute.respond(res, 201, {
+      approvalRequest: await toApprovalRequestResponse(request),
+    });
     return true;
   }
 
@@ -531,14 +660,14 @@ export async function handleApprovalRequests(
     // Opt-in: API, MCP and script callers that don't ask keep the full rows.
     if (parsed.query.fields === "slim") {
       listRoute.respond(res, 200, {
-        approvalRequests: await listApprovalRequestSummaries(filters),
+        approvalRequests: await withApprovalProgress(await listApprovalRequestSummaries(filters)),
       });
       return true;
     }
 
     const requests = await listApprovalRequests(filters);
     listRoute.respond(res, 200, {
-      approvalRequests: requests.map(toApprovalRequestResponse),
+      approvalRequests: await Promise.all(requests.map(toApprovalRequestResponse)),
     });
     return true;
   }
@@ -560,6 +689,7 @@ async function approvalCancelPrincipal(
   const rawAgentId = req.headers["x-agent-id"];
   const agentId =
     auth?.kind === "agent" ? auth.agentId : Array.isArray(rawAgentId) ? rawAgentId[0] : rawAgentId;
+  if (auth?.kind === "guest") return { principal: { kind: "guest" }, resolvedBy: null };
   if (agentId) {
     const agent = await getAgentById(agentId);
     return {
@@ -568,4 +698,111 @@ async function approvalCancelPrincipal(
     };
   }
   return { principal: { kind: "operator" }, resolvedBy: "operator" };
+}
+
+type ApprovalResponder = { kind: "user"; user: User } | { kind: "operator" };
+
+const AGENT_RESPONSE_REFUSED =
+  "Agents cannot answer approval requests. A person must respond with a user token or the dashboard.";
+
+/**
+ * The person answering an approval request, taken from the credential and
+ * never from the request body. Every agent identity is refused: an `aseph_`
+ * session token, the shared key with an `X-Agent-ID`, and a page session with
+ * no signed-in user (page code is agent-authored, so it cannot vouch for a
+ * person). The shared key alone is the operator.
+ */
+async function approvalResponder(
+  req: IncomingMessage,
+): Promise<{ ok: true; responder: ApprovalResponder } | { ok: false; message: string }> {
+  const auth = getRequestAuth(req);
+  const rawAgentId = req.headers["x-agent-id"];
+  const headerAgentId = Array.isArray(rawAgentId) ? rawAgentId[0] : rawAgentId;
+
+  let principal: RbacPrincipal;
+  let responder: ApprovalResponder | null = null;
+  if (auth?.kind === "user") {
+    principal = { kind: "user", userId: auth.userId };
+    responder = { kind: "user", user: auth.user };
+  } else if (auth?.kind === "agent" || headerAgentId) {
+    const agentId = auth?.kind === "agent" ? auth.agentId : (headerAgentId ?? "");
+    const agent = agentId ? await getAgentById(agentId) : null;
+    principal = { kind: "agent", agentId, isLead: agent?.isLead ?? false };
+  } else if (auth?.page) {
+    return {
+      ok: false,
+      message: "A page session without a signed-in user cannot answer approval requests.",
+    };
+  } else {
+    principal = { kind: "operator" };
+    responder = { kind: "operator" };
+  }
+
+  const decision = can({ principal, verb: "approval.respond", source: "http" });
+  if (!decision.allow || !responder) return { ok: false, message: AGENT_RESPONSE_REFUSED };
+  return { ok: true, responder };
+}
+
+function responderKey(responder: ApprovalResponder): string {
+  return responder.kind === "user" ? responder.user.id : "operator";
+}
+
+function userMatchesListed(user: Pick<User, "id" | "email">, listed: string): boolean {
+  if (listed === user.id) return true;
+  return !!user.email && listed.toLowerCase() === user.email.toLowerCase();
+}
+
+/**
+ * Whether the responder may answer this request. With no `users` or `roles`
+ * listed, any person may. The operator key is the deployment's admin
+ * credential and may answer any request, counting as the single responder
+ * `operator`.
+ */
+export function isListedApprover(approvers: ApproversShape, responder: ApprovalResponder): boolean {
+  const users = approvers.users ?? [];
+  const roles = approvers.roles ?? [];
+  if (users.length === 0 && roles.length === 0) return true;
+  if (responder.kind === "operator") return true;
+  const { user } = responder;
+  if (users.some((listed) => userMatchesListed(user, listed))) return true;
+  return !!user.role && roles.includes(user.role);
+}
+
+/**
+ * How far the approving answers are toward the policy. `any`: one approval.
+ * `{ min: N }`: N distinct responders. `all`: every user in `approvers.users`
+ * (one approval when no users are listed, since roles cannot be enumerated).
+ */
+export async function approvalProgress(
+  approvers: ApproversShape,
+  votes: ApprovalVote[],
+): Promise<{ approved: number; required: number }> {
+  const approving = votes.filter((v) => v.approved);
+  const distinct = new Set(approving.map((v) => v.responder)).size;
+  const policy = approvers.policy;
+  if (policy === "any") return { approved: Math.min(distinct, 1), required: 1 };
+  if (policy === "all") {
+    const listed = approvers.users ?? [];
+    if (listed.length === 0) return { approved: Math.min(distinct, 1), required: 1 };
+    const approvingUsers: Pick<User, "id" | "email">[] = [];
+    for (const vote of approving) {
+      if (vote.responder === "operator") continue;
+      const user = await findUserById(vote.responder);
+      approvingUsers.push(user ?? { id: vote.responder });
+    }
+    const approved = listed.filter((entry) =>
+      approvingUsers.some((u) => userMatchesListed(u, entry)),
+    ).length;
+    return { approved, required: listed.length };
+  }
+  return { approved: Math.min(distinct, policy.min), required: policy.min };
+}
+
+/** Whether the approving answers satisfy the policy (see `approvalProgress`). */
+export async function approvalQuorumMet(
+  approvers: ApproversShape,
+  votes: ApprovalVote[],
+): Promise<boolean> {
+  const { approved, required } = await approvalProgress(approvers, votes);
+  return approved >= required;
 }
