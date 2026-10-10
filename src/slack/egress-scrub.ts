@@ -64,7 +64,7 @@ const INSTALLED = Symbol.for("agent-swarm.slack-egress-scrub");
 
 type PatchableProto = {
   apiCall: (method: string, options?: Args) => Promise<unknown>;
-  filesUploadV2: (options: object) => Promise<unknown>;
+  filesUploadV2: (options: Args) => Promise<unknown>;
   [INSTALLED]?: true;
 };
 
@@ -80,7 +80,7 @@ export function installSlackEgressScrub(): void {
   proto.apiCall = function (this: unknown, method: string, options?: Args) {
     return originalApiCall.call(this, method, scrubSlackWriteArgs(method, options));
   };
-  proto.filesUploadV2 = function (this: unknown, options: object) {
+  proto.filesUploadV2 = function (this: unknown, options: Args) {
     return originalUpload.call(this, scrubSlackUploadArgs(options));
   };
   proto[INSTALLED] = true;

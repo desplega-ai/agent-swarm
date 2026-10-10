@@ -71,6 +71,7 @@ Full rules: [runbooks/extensions.md](./runbooks/extensions.md).
 | `bun run start:http` | MCP HTTP server (port 3013) |
 | `bun run dev:http` | Hot reload, portless: `https://api.swarm.localhost:1355` |
 | `bun run lint:fix` | Lint & format with Biome |
+| `bun run lint:slop` | Anti-slop Oxlint rule subset (`oxlint.config.ts`, vendored plugin in `tools/oxlint/anti-slop/`) |
 | `bun run check` | Agent check loop: frozen install, Biome + tsgo + affected tests on your change |
 | `bun run tsc:check` | Type check with tsgo (`tsc:check:tsc` runs tsc 5, the CI authority) |
 | `bun run test:root` | Run root unit tests (`bun run test:root -- src/tests/<file>.test.ts` for one) |
@@ -325,6 +326,7 @@ Before opening the PR, mirror the rest of the gate (run from repo root):
 ```bash
 bun run check
 bun run lint           # whole lint scope; NOT lint:fix — CI runs `lint` (read-only)
+bun run lint:slop      # anti-slop Oxlint rule subset
 bun run tsc:check:tsc  # tsc 5, the CI authority (`tsc:check` runs tsgo)
 bun run test:root -- --parallel=4     # CI: 2 shards x --parallel=4, balanced by cached --timings
 bun run e2e                          # black-box contract suite: boots the API on a free port, no Docker, no LLM

@@ -33,7 +33,7 @@ function jsonResponse(body: unknown, status = 200): Response {
 }
 
 function accountToken(accountId: string): string {
-  const encode = (value: object) =>
+  const encode = (value: Record<string, unknown>) =>
     btoa(JSON.stringify(value)).replace(/=/g, "").replace(/\+/g, "-").replace(/\//g, "_");
   return `${encode({ alg: "none" })}.${encode({
     "https://api.openai.com/auth": { chatgpt_account_id: accountId },

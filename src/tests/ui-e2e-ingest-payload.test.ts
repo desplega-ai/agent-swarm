@@ -101,7 +101,11 @@ function propertyKeys(path: string[]): string[] {
   return Object.keys((current as { properties: Record<string, unknown> }).properties).sort();
 }
 
-function expectSchemaKeys(actual: object, path: string[], required: string[]): void {
+function expectSchemaKeys<Actual extends object>(
+  actual: Actual,
+  path: string[],
+  required: string[],
+): void {
   const actualKeys = Object.keys(actual).sort();
   expect(actualKeys).toEqual(required.slice().sort());
   expect(actualKeys.every((key) => propertyKeys(path).includes(key))).toBe(true);

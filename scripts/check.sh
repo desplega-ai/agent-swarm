@@ -3,8 +3,9 @@
 #
 #   1. bun install --frozen-lockfile
 #   2. Biome (read-only, like CI's `bun run lint`) on changed files it lints in CI
-#   3. tsgo on the root project, plus apps/ui when it changed
-#   4. test:root on the tests affected by the change (scripts/pre-push-tests.sh
+#   3. anti-slop Oxlint rules (`bun run lint:slop`, whole scope, about 5 s)
+#   4. tsgo on the root project, plus apps/ui when it changed
+#   5. test:root on the tests affected by the change (scripts/pre-push-tests.sh
 #      scoping, including its full-suite fallbacks)
 #
 # "Changed" means committed since the merge-base with origin/main, plus
@@ -40,6 +41,9 @@ if [[ -n "$lint_files" ]]; then
 else
   step "biome check: no changed files in scope, skipped"
 fi
+
+step "anti-slop rules (oxlint)"
+bun run lint:slop
 
 step "tsgo --noEmit (root)"
 bun run tsc:check

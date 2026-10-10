@@ -228,7 +228,7 @@ describe("ChatGPT connector codes", () => {
 
   type CodeBody = { code: string; expiresAt: string; connectUrl: string };
 
-  async function createCode(userId: string, body: object = {}): Promise<CodeBody> {
+  async function createCode(userId: string, body: Record<string, unknown> = {}): Promise<CodeBody> {
     const response = await authedFetch(`/api/users/${userId}/connector-codes`, {
       method: "POST",
       body: JSON.stringify(body),

@@ -84,7 +84,7 @@ jobs:
           # install), and the dep-graph inputs (.dependency-cruiser.cjs, plugin/) are all
           # load-bearing for this job since the workspace migration. The Dockerfiles
           # feed the Bun version-pin check (check:bun-version).
-          LINT=$(match '^(src/|packages/(model-catalog|model-routing)/|apps/evals/|package\.json$|bun\.lock|bunfig\.toml$|turbo\.json$|konsistent\.json$|tsconfig\.json$|biome\.json$|\.dependency-cruiser\.cjs$|plugin/opencode-plugins/|apps/(ui|templates-ui)/package\.json$|Dockerfile$|Dockerfile\.worker$|Dockerfile\.ui$|scripts/check-bun-version\.ts$|\.text-columns\.json$|scripts/check-text-columns\.ts$|templates/extensions/|scripts/build-extension-(catalog|manifest-schema)\.ts$|scripts/(sync-telemetry-contract|gen-telemetry-docs)\.ts$|docs-site/content/docs/\(documentation\)/reference/telemetry\.mdx$)')
+          LINT=$(match '^(src/|packages/(model-catalog|model-routing)/|apps/evals/|package\.json$|bun\.lock|bunfig\.toml$|turbo\.json$|konsistent\.json$|tsconfig\.json$|biome\.json$|oxlint\.config\.ts$|tools/oxlint/|\.dependency-cruiser\.cjs$|plugin/opencode-plugins/|apps/(ui|templates-ui)/package\.json$|Dockerfile$|Dockerfile\.worker$|Dockerfile\.ui$|scripts/check-bun-version\.ts$|\.text-columns\.json$|scripts/check-text-columns\.ts$|templates/extensions/|scripts/build-extension-(catalog|manifest-schema)\.ts$|scripts/(sync-telemetry-contract|gen-telemetry-docs)\.ts$|docs-site/content/docs/\(documentation\)/reference/telemetry\.mdx$)')
 
           # tests: src/ + scripts that tests import + lockfile/tsconfig + bunfig ([test]
           # preload + pathIgnorePatterns) + member manifests (root frozen install).
@@ -182,6 +182,12 @@ jobs:
           echo "duration_ms=$(( $(date +%s%3N) - start ))" >> "$GITHUB_OUTPUT"
           echo "status=$([ $code -eq 0 ] && echo success || echo failure)" >> "$GITHUB_OUTPUT"
           exit $code
+
+      # Vendored anti-slop Oxlint rules (tools/oxlint/anti-slop). Only the
+      # subset in oxlint.config.ts is on. `bun --bun` loads the TypeScript
+      # plugin, so the step does not depend on the runner's Node version.
+      - name: Run anti-slop rules (Oxlint)
+        run: bun run lint:slop
 
       # tsc 5 stays the authority here. Local `tsc:check` (and the prek typecheck
       # hook) run tsgo; the step below keeps the tsconfig tsgo-clean.

@@ -66,7 +66,7 @@ export interface CompleteStructuredOptions<TZod extends z.ZodTypeAny> {
     prompt: string,
     model: string,
     signal?: AbortSignal,
-    jsonSchema?: object,
+    jsonSchema?: Record<string, unknown>,
   ) => Promise<string>;
   /**
    * Bypass `resolveCredential` entirely — opencode auth path (and tests)
@@ -111,7 +111,7 @@ export async function defaultSpawnClaudeCli(
   prompt: string,
   model: string,
   signal?: AbortSignal,
-  jsonSchema?: object,
+  jsonSchema?: Record<string, unknown>,
 ): Promise<string> {
   // SWARM_USE_CLAUDE_BRIDGE mirrors the main claude adapter's subscription-pool
   // routing. Otherwise CLAUDE_BINARY may be a single binary, an absolute path,
@@ -260,7 +260,10 @@ export async function completeStructuredWithModel<TZod extends z.ZodTypeAny>(
     // The CLI flag alone is unreliable — claude sometimes asks "where's
     // the schema?" if the prompt doesn't reference one.
     // The pinned Claude executable validates schemas with Draft 7.
-    const jsonSchema = z.toJSONSchema(opts.zodSchema, { target: "draft-7" }) as object;
+    const jsonSchema = z.toJSONSchema(opts.zodSchema, { target: "draft-7" }) as Record<
+      string,
+      unknown
+    >;
     const schemaStr = JSON.stringify(jsonSchema);
     const claudeUserPrompt = `${opts.userPrompt}\n\nRespond with ONLY a JSON object (no prose, no code fences) matching this schema:\n${schemaStr}`;
     let lastErr: unknown = null;

@@ -38,13 +38,24 @@ stages = ["pre-push"]
 fail_fast = true
 
 [[repos.hooks]]
+id = "anti-slop-lint"
+name = "Anti-slop rules (Oxlint)"
+language = "system"
+entry = "bun run lint:slop"
+# Same CI "lint" domain, plus the Oxlint config and the vendored plugin.
+files = '^(src/|apps/evals/|package\.json$|bun\.lock|bunfig\.toml$|tsconfig\.json$|oxlint\.config\.ts$|tools/oxlint/)'
+pass_filenames = false
+stages = ["pre-push"]
+fail_fast = true
+
+[[repos.hooks]]
 id = "typecheck"
 name = "TypeScript type check"
 language = "system"
 entry = "bun run tsc:check"
 # Same CI "lint" domain (tsc:check is bundled in the lint-and-typecheck job).
 # tsc:check runs tsgo; CI keeps `tsc --noEmit` (tsc:check:tsc) as the authority.
-files = '^(src/|apps/evals/|package\.json$|bun\.lock|bunfig\.toml$|tsconfig\.json$|biome\.json$)'
+files = '^(src/|apps/evals/|tools/oxlint/|package\.json$|bun\.lock|bunfig\.toml$|tsconfig\.json$|biome\.json$)'
 pass_filenames = false
 stages = ["pre-push"]
 fail_fast = true

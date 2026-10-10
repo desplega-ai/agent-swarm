@@ -375,7 +375,7 @@ export async function dispatchPre<E extends PreEventName>(
   }
 
   let currentPayload = payload as unknown as Record<string, unknown>;
-  let mergedData: Record<string, unknown> = {};
+  const mergedData: Record<string, unknown> = {};
   let modified = false;
   for (const { loaded, handler } of handlersFor(event, opts)) {
     if (!isRegistered(loaded.record.id)) continue;
@@ -445,7 +445,7 @@ export async function dispatchPre<E extends PreEventName>(
           if (!validation.success) throw validation.error;
           data = definedObject(validation.data);
         }
-        mergedData = { ...mergedData, ...data };
+        Object.assign(mergedData, data);
         currentPayload = mergePayload(event, currentPayload, data);
         modified = true;
         await markSuccess(loaded);

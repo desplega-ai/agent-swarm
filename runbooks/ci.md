@@ -24,7 +24,7 @@ CI detects what changed and runs the matching jobs:
 
 | Job | Local equivalent | Common failure |
 |---|---|---|
-| **Lint and Type Check** | `bun run lint && bun run tsc:check:tsc && bun run tsc:check && bash scripts/check-db-boundary.sh && bash scripts/check-api-key-boundary.sh && bash scripts/check-rbac-boundary.sh && bash scripts/check-audit-columns.sh && bun scripts/check-text-columns.ts && bun run check:dep-graph && bun run check:bun-version && bun run check:extension-catalog && bun run check:extension-schema` | Worker code imported `bun:sqlite` or `src/be/db` — DB boundary violation (grep + dependency-cruiser graph rules); an inline `isLead` authz check in `src/tools/`/`src/http/` — RBAC boundary violation (use `can()` from `src/rbac/`); a new table without `created_by`/`updated_by` — add the columns or list the table in `.non-audit-tables` with a reason; a new TEXT column not classified in `.text-columns.json`; a Dockerfile `FROM oven/bun:<tag>` that does not match `package.json` `packageManager`; or an edit to `templates/extensions/` or `ExtensionManifestSchema` without regenerating the extension catalog and manifest schema. The job's path filter includes `templates/extensions/` |
+| **Lint and Type Check** | `bun run lint && bun run lint:slop && bun run tsc:check:tsc && bun run tsc:check && bash scripts/check-db-boundary.sh && bash scripts/check-api-key-boundary.sh && bash scripts/check-rbac-boundary.sh && bash scripts/check-audit-columns.sh && bun scripts/check-text-columns.ts && bun run check:dep-graph && bun run check:bun-version && bun run check:extension-catalog && bun run check:extension-schema` | Worker code imported `bun:sqlite` or `src/be/db` — DB boundary violation (grep + dependency-cruiser graph rules); an inline `isLead` authz check in `src/tools/`/`src/http/` — RBAC boundary violation (use `can()` from `src/rbac/`); a new table without `created_by`/`updated_by` — add the columns or list the table in `.non-audit-tables` with a reason; a new TEXT column not classified in `.text-columns.json`; a Dockerfile `FROM oven/bun:<tag>` that does not match `package.json` `packageManager`; or an edit to `templates/extensions/` or `ExtensionManifestSchema` without regenerating the extension catalog and manifest schema. The job's path filter includes `templates/extensions/` |
 | **Restore test timings** + **Run Tests (1/2, 2/2)** + **Save test timings** | `bun run test:root -- --parallel=4 --shard=1/2` and `--shard=2/2`. `restore-timings` resolves the latest per-file durations from the actions cache once and hands them to both shards as one artifact (two independent restores could pick different snapshots and split different file lists); `save-timings` merges the shards' `--update-timings` output into the next cache entry after a green matrix | New test or test that depends on undocumented setup; a hard-coded test port colliding under `--parallel` (use `getFreePort()` / `port: 0`, see [LOCAL_TESTING.md](../LOCAL_TESTING.md)) |
 | **Pi-Skills Freshness** | `bun run build:pi-skills` (must produce zero diff in `plugin/pi-skills/`) | Edited `plugin/commands/*.md` without rebuilding |
 | **Seeded Skills Check** | `bun run check:skill-sources && bun run check:ai-toolbox-skills && bun run check:skill-md && bun run check:seed-skill-files` | Edited a generated skill source without rebuilding its `SKILL.md`, drifted a vendored ai-toolbox skill from its manifest, left a seeded skill unwired, or introduced a delivery-path collision |
@@ -66,8 +66,9 @@ ui's dependency tree resolves from the **root** lockfile since the workspace mig
 
 1. `bun install --frozen-lockfile`
 2. Biome, read-only, on changed files in the CI lint scope (`src/`, `apps/evals/`, `apps/ui/`, `packages/ui-e2e/`, `packages/model-routing/`)
-3. tsgo on the root project, plus `apps/ui` (`tsgo -b`) when it changed
-4. `test:root` on the affected tests, using `scripts/pre-push-tests.sh` scoping and its full-suite fallbacks
+3. `bun run lint:slop`: the anti-slop Oxlint rules over the whole lint scope (about 5 s)
+4. tsgo on the root project, plus `apps/ui` (`tsgo -b`) when it changed
+5. `test:root` on the affected tests, using `scripts/pre-push-tests.sh` scoping and its full-suite fallbacks
 
 "Changed" means committed since the merge-base with `origin/main`, plus uncommitted and untracked edits. It stops at the first failure. It does not scan for secrets; the prek pre-push hooks own that.
 
@@ -81,6 +82,7 @@ Run this from the repo root before opening a PR. It mirrors merge-gate exactly f
 # Root project
 bun run check           # frozen install, Biome on changed files, tsgo, affected tests
 bun run lint            # whole lint scope; NOT lint:fix — CI fails on warnings, not just errors
+bun run lint:slop       # anti-slop Oxlint rule subset (oxlint.config.ts)
 bun run tsc:check:tsc   # tsc 5, the CI authority
 bun run test:root -- --parallel=4          # CI splits this into --shard=1/2 and --shard=2/2
 bun run check:bun-version

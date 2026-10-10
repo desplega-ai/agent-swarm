@@ -78,8 +78,10 @@ async function slackTask(
   return task.id;
 }
 
-const reconcile = (a: { channelId: string; threadTs: string }, extra?: object) =>
-  reconcileSlackSessionStatus({ ...a, client, ...extra });
+const reconcile = (
+  a: { channelId: string; threadTs: string },
+  extra?: Partial<Parameters<typeof reconcileSlackSessionStatus>[0]>,
+) => reconcileSlackSessionStatus({ ...a, client, ...extra });
 
 let warn: ReturnType<typeof spyOn>;
 

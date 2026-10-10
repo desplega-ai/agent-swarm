@@ -48,6 +48,9 @@ jobs:
           echo "status=$([ $code -eq 0 ] && echo success || echo failure)" >> "$GITHUB_OUTPUT"
           exit $code
 
+      - name: Run anti-slop rules (Oxlint)
+        run: bun run lint:slop
+
       # tsc 5, like the merge gate, so the nightly `tsc:check` timing baseline
       # stays comparable with PR runs.
       - name: Run TypeScript type check
