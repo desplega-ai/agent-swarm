@@ -85,10 +85,11 @@ class Connection extends Events {
       };
       socket.onerror = () => reject(new Error("Realtime connection failed"));
       socket.onmessage = (event) => {
-        const message = JSON.parse(event.data) as Frame;
+        const payload = JSON.parse(event.data);
+        const message = payload as Frame;
         if (message.seq) socket.send(JSON.stringify({ ack: message.seq }));
         if (message.type === "hello") this.me = message.me;
-        if (message.type === "room") this.rooms.get(message.name ?? "")?.receive(message as View);
+        if (message.type === "room") this.rooms.get(message.name ?? "")?.receive(payload as View);
         if (message.type === "presence")
           this.rooms.get(message.name ?? "")?.receivePresence(message.peers);
         if (message.type === "channel")
