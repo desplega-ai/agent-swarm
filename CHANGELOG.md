@@ -14,6 +14,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Dashboard: the `SCRIPT_EXECUTOR` setting (`native` or `quickjs`) is selectable on the configuration page (#2004).
 
 ### Changed
+- agent-fs bumped to 0.15.3.
 - Worker image: dsh, amp, claude-code, codex, copilot and grok bumped (#2007, #2022).
 - Docs: dreaming-v2 skill seed patches (#2006).
 
