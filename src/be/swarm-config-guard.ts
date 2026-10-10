@@ -267,6 +267,7 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
   // fail: worker fails a task fast when every key has exhausted the task
   // model's weekly window (Fable/Opus/Sonnet). fallback: legacy random pick.
   ...enumValidator("MODEL_WINDOW_EXHAUSTED_POLICY", ["fail", "fallback"]),
+  ...enumValidator("HEARTBEAT_CHECKLIST_GATE_MODE", ["shadow", "enforce"]),
   // Codex credits-exhausted cooldown (ms). Permissive on range here (positive
   // integer) — the worker clamps to [5m, 7d] via resolveCodexCreditsExhaustedCooldownMs.
   CODEX_CREDITS_EXHAUSTED_COOLDOWN_MS: (value) => {

@@ -1,4 +1,4 @@
-import { runScript } from "../../scripts-runtime/loader";
+import { type RunScriptOutput, runScript } from "../../scripts-runtime/loader";
 import type { ScriptRecord } from "../../types";
 import {
   getScriptApiConnectionDescriptors,
@@ -11,13 +11,21 @@ export function getSavedScriptOwnerAgentId(script: ScriptRecord): string | null 
   return script.scopeId ?? script.createdByAgentId;
 }
 
-/** Run a saved script with the selected agent's credential and connection bindings. */
-export async function runSavedScriptAsAgent(args: {
-  script: ScriptRecord;
-  input: unknown;
-  agentId: string;
-  timeoutMs?: number;
-}) {
+/**
+ * Run a saved script with the selected agent's credential and connection bindings.
+ * `signal` covers the whole call: an abort during credential setup means the
+ * script never starts, and an abort during execution kills it.
+ */
+export async function runSavedScriptAsAgent(
+  args: {
+    script: ScriptRecord;
+    input: unknown;
+    agentId: string;
+    timeoutMs?: number;
+    signal?: AbortSignal;
+  },
+  deps: { buildCredentials?: typeof buildScriptCredentialBindingsWithFailures } = {},
+) {
   // Touch before executing (not just after) so a scratch script that's already
   // stale when a run starts can't be reaped by the retention sweep while the
   // run — which may take up to the runtime's wall-clock ceiling — is in flight.
@@ -25,20 +33,30 @@ export async function runSavedScriptAsAgent(args: {
     ? await touchScratchScriptLastUsed(args.script.id)
     : null;
 
-  const credentials = await buildScriptCredentialBindingsWithFailures({
-    agentId: args.agentId,
-  });
-  const output = await runScript({
-    source: args.script.source,
-    args: args.input,
-    fsMode: args.script.fsMode,
-    agentId: args.agentId,
-    egressSecrets: credentials.egressSecrets,
-    failedBindings: credentials.failedBindings,
-    apiConnections: getScriptApiConnectionDescriptors({ agentId: args.agentId }),
-    mcpConnections: getScriptMcpConnectionDescriptors({ agentId: args.agentId }),
-    ...(args.timeoutMs ? { timeoutMs: args.timeoutMs } : {}),
-  });
+  const buildCredentials = deps.buildCredentials ?? buildScriptCredentialBindingsWithFailures;
+  const credentials = await buildCredentials({ agentId: args.agentId });
+  const output: RunScriptOutput = args.signal?.aborted
+    ? {
+        result: undefined,
+        stdout: "",
+        stderr: "aborted before execution started",
+        truncated: { stdout: false, stderr: false },
+        durationMs: 0,
+        exitCode: 1,
+        error: "killed",
+      }
+    : await runScript({
+        source: args.script.source,
+        args: args.input,
+        fsMode: args.script.fsMode,
+        agentId: args.agentId,
+        egressSecrets: credentials.egressSecrets,
+        failedBindings: credentials.failedBindings,
+        apiConnections: getScriptApiConnectionDescriptors({ agentId: args.agentId }),
+        mcpConnections: getScriptMcpConnectionDescriptors({ agentId: args.agentId }),
+        ...(args.timeoutMs ? { timeoutMs: args.timeoutMs } : {}),
+        ...(args.signal ? { signal: args.signal } : {}),
+      });
   if (output.exitCode === 0 && !output.error && !output.runtimeError) {
     await touchScratchScriptLastUsed(args.script.id);
   } else if (runStartTouch) {

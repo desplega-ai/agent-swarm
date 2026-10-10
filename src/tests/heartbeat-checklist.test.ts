@@ -18,14 +18,18 @@ import {
   startTask,
   updateAgentProfile,
 } from "../be/db";
+import { getScript, upsertScriptByName } from "../be/scripts/db";
+import { runSavedScriptAsAgent } from "../be/scripts/run-saved";
 import {
   checkHeartbeatChecklist,
   createBootTriageTask,
+  defaultChecklistGateRunner,
   gatherSystemStatus,
   getBootTriageFindings,
   isEffectivelyEmpty,
   runRebootSweep,
   setChecklistGateRunnerForTests,
+  setChecklistGateTimeoutMsForTests,
 } from "../heartbeat/heartbeat";
 
 // Side-effect import: register heartbeat templates (also done by heartbeat.ts,
@@ -384,6 +388,7 @@ describe("Heartbeat Checklist", () => {
 
     afterEach(() => {
       setChecklistGateRunnerForTests(null);
+      setChecklistGateTimeoutMsForTests(null);
       delete process.env.HEARTBEAT_CHECKLIST_GATE_SCRIPT;
       delete process.env.HEARTBEAT_CHECKLIST_GATE_MODE;
     });
@@ -484,6 +489,102 @@ describe("Heartbeat Checklist", () => {
 
       await checkHeartbeatChecklist();
 
+      const tasks = await checklistTasks();
+      expect(tasks).toHaveLength(1);
+      expect(tasks[0]!.tags).toContain("heartbeat-gate:error");
+    });
+
+    async function saveGlobalGateScript(name: string, source: string) {
+      await upsertScriptByName({
+        name,
+        scope: "global",
+        source,
+        description: "Heartbeat checklist gate fixture",
+        intent: "Exercise the checklist gate deadline",
+        signatureJson: JSON.stringify({ args: { type: "object" }, result: { type: "object" } }),
+        typeChecked: true,
+        embeddingMode: "skip",
+      });
+    }
+
+    for (const mode of ["shadow", "enforce"] as const) {
+      test(`${mode} mode: stalled credential setup hits the deadline and still creates the checklist`, async () => {
+        process.env.HEARTBEAT_CHECKLIST_GATE_MODE = mode;
+        process.env.HEARTBEAT_CHECKLIST_GATE_SCRIPT = "stalled-setup-gate";
+        await saveGlobalGateScript(
+          "stalled-setup-gate",
+          "export default function run() { return { quiet: true }; }",
+        );
+        setChecklistGateTimeoutMsForTests(200);
+        let releaseSetup: () => void = () => {};
+        const setupStarted = Promise.withResolvers<void>();
+        let run: Promise<unknown> | undefined;
+        setChecklistGateRunnerForTests((scriptName, leadAgentId, signal) => {
+          run = defaultChecklistGateRunner(scriptName, leadAgentId, signal, {
+            buildCredentials: () => {
+              setupStarted.resolve();
+              return new Promise((resolve) => {
+                releaseSetup = () => resolve({ egressSecrets: [], failedBindings: [] });
+              });
+            },
+          });
+          return run;
+        });
+        await seedLead();
+
+        const started = Date.now();
+        await checkHeartbeatChecklist();
+
+        expect(Date.now() - started).toBeLessThan(5_000);
+        await setupStarted.promise;
+        const tasks = await checklistTasks();
+        expect(tasks).toHaveLength(1);
+        expect(tasks[0]!.tags).toContain("heartbeat-gate:error");
+
+        // Setup finishing after the deadline must not start the script.
+        releaseSetup();
+        await expect(run!).rejects.toThrow("killed");
+      });
+    }
+
+    test("a script aborted during credential setup never starts", async () => {
+      await saveGlobalGateScript(
+        "never-starts-gate",
+        "export default function run() { return { quiet: true }; }",
+      );
+      const lead = await seedLead();
+      const script = (await getScript({ name: "never-starts-gate", scope: "global" }))!;
+      const controller = new AbortController();
+
+      const output = await runSavedScriptAsAgent(
+        { script, input: {}, agentId: lead.id, signal: controller.signal },
+        {
+          buildCredentials: async () => {
+            controller.abort();
+            return { egressSecrets: [], failedBindings: [] };
+          },
+        },
+      );
+
+      expect(output.error).toBe("killed");
+      expect(output.stderr).toBe("aborted before execution started");
+      expect(output.durationMs).toBe(0);
+    });
+
+    test("enforce mode: a script that outlives the deadline fails open through the real runner", async () => {
+      process.env.HEARTBEAT_CHECKLIST_GATE_MODE = "enforce";
+      process.env.HEARTBEAT_CHECKLIST_GATE_SCRIPT = "slow-gate";
+      await saveGlobalGateScript(
+        "slow-gate",
+        "export default async function run() { await new Promise((r) => setTimeout(r, 30_000)); return { quiet: true }; }",
+      );
+      setChecklistGateTimeoutMsForTests(1_500);
+      await seedLead();
+
+      const started = Date.now();
+      await checkHeartbeatChecklist();
+
+      expect(Date.now() - started).toBeLessThan(15_000);
       const tasks = await checklistTasks();
       expect(tasks).toHaveLength(1);
       expect(tasks[0]!.tags).toContain("heartbeat-gate:error");

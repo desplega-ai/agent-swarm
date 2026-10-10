@@ -553,6 +553,58 @@ Notes:
 
 ---
 
+## 5b. Checklist gate: skipping quiet Lead ticks
+
+The recurring `HEARTBEAT.md` checklist tick (`checkHeartbeatChecklist`) can ask a global script whether the tick needs the Lead before it creates the `heartbeat-checklist` task. Owner code: `runChecklistGate` and `defaultChecklistGateRunner` in `src/heartbeat/heartbeat.ts`, `runSavedScriptAsAgent` in `src/be/scripts/run-saved.ts`, and the `heartbeat.checklist.gate_findings` template in `src/heartbeat/templates.ts`. Boot triage never runs the gate.
+
+```mermaid
+flowchart TD
+  T[checklist tick] --> D{lead, non-empty HEARTBEAT.md,<br/>no active checklist task?}
+  D -- no --> X[return]
+  D -- yes --> G{HEARTBEAT_CHECKLIST_GATE_SCRIPT set?}
+  G -- no --> C[create checklist task]
+  G -- yes --> R[run gate under one 60s deadline]
+  R --> V{verdict}
+  V -- quiet + enforce --> S[skip: no task]
+  V -- quiet/wake/error + shadow --> CT[create task, tag heartbeat-gate:verdict,<br/>prompt unchanged]
+  V -- wake + enforce --> CF[create task, tag heartbeat-gate:wake,<br/>append Gate Findings when summary is set]
+  V -- error + enforce --> CE[create task, tag heartbeat-gate:error]
+```
+
+Pseudocode (current):
+
+```
+# checkHeartbeatChecklist, after the lead / HEARTBEAT.md / dedup checks:
+script = HEARTBEAT_CHECKLIST_GATE_SCRIPT (trimmed; empty = gate off, no tag)
+mode   = HEARTBEAT_CHECKLIST_GATE_MODE == "enforce" ? enforce : shadow   # anything else = shadow
+if script:
+  controller = AbortController()
+  verdict = race(
+    runner(script, lead.id, controller.signal),   # getScript(global) -> credential setup -> runScript as the Lead
+    after 60s: controller.abort(); error "gate timed out after 60000ms",
+  )
+  # The deadline covers script lookup AND credential setup (OAuth refresh can block),
+  # not just execution. The race returns at the deadline without waiting for the runner.
+  # Abort during credential setup: runSavedScriptAsAgent returns killed and never starts the script.
+  # Abort during execution: the executor kills the process group.
+  result {quiet: true}            -> quiet
+  result {quiet: false, summary?} -> wake (summary capped at 4000 chars)
+  throw, timeout, non-boolean quiet, missing script -> error (fails open)
+if verdict == quiet and mode == enforce: return        # the only path that skips a tick
+status = gatherSystemStatus()
+if mode == enforce and verdict == wake and summary:
+  status += resolveTemplate("heartbeat.checklist.gate_findings", {gate_summary: summary})
+create heartbeat-checklist task, tags += "heartbeat-gate:<verdict>" when the gate ran
+```
+
+Notes:
+
+- Shadow is the default. It never changes the prompt, so the Lead's own "all clear" or action stays an independent check on the gate's verdict. Compare tags against outcomes before switching to enforce.
+- Every failure fails open in both modes: the checklist task is created and tagged `heartbeat-gate:error`.
+- Both keys are read on every tick, so a config reload applies them without a restart. Config writes reject modes other than `shadow` and `enforce`.
+
+---
+
 ## Quick reference: env knobs
 
 All of these are read **dynamically** — `heartbeat.ts` exposes them as getter
@@ -594,6 +646,8 @@ Rollback switches accept `0`/`false` interchangeably (both parse through
 | `getUnassignedTaskIdsForAgent` eligibility-scan hard cap (rows/call) | 500 | `ELIGIBILITY_SCAN_CAP` |
 | `HEARTBEAT.md` checklist tick (restart required; `0` = recurring tick off, boot triage still runs) | 30 min | `HEARTBEAT_CHECKLIST_INTERVAL_MS` |
 | Checklist tick + boot triage kill switch (restart required; `true`/`1` = off, `false`/`0` = on) | off | `HEARTBEAT_CHECKLIST_DISABLE` |
+| Checklist gate script (§5b; global scope, empty = gate off) | unset | `HEARTBEAT_CHECKLIST_GATE_SCRIPT` |
+| Checklist gate mode (§5b; `shadow` tags only, `enforce` skips quiet ticks) | `shadow` | `HEARTBEAT_CHECKLIST_GATE_MODE` |
 
 ---
 

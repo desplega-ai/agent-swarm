@@ -369,6 +369,26 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         defaultValue: "true",
       },
       {
+        key: "HEARTBEAT_CHECKLIST_GATE_SCRIPT",
+        label: "Checklist gate script",
+        description:
+          "Name of a global script run as the Lead before each recurring checklist task. It returns { quiet: boolean, reason?, summary? }. A failure, a timeout (60s, credential setup included), or any other shape never skips a task. Leave empty to turn the gate off.",
+        kind: "string",
+        defaultValue: "",
+        placeholder: "heartbeat-gate",
+        docsUrl: `${DOCS}ui/configuration`,
+      },
+      {
+        key: "HEARTBEAT_CHECKLIST_GATE_MODE",
+        label: "Checklist gate mode",
+        description:
+          "shadow creates every checklist task and only tags it heartbeat-gate:<verdict>. enforce skips the task on a quiet verdict and adds the gate's summary to the task on a wake verdict.",
+        kind: "enum",
+        options: ["shadow", "enforce"],
+        defaultValue: "shadow",
+        docsUrl: `${DOCS}ui/configuration`,
+      },
+      {
         key: "POOL_AFFINITY_ENFORCEMENT",
         label: "Enforce pool affinity",
         description:

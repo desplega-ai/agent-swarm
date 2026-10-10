@@ -53,6 +53,22 @@ Goal: Review system status and your standing orders, take action if needed.
   category: "event",
 });
 
+// Appended to the checklist's system status when the checklist gate runs in
+// enforce mode and reports a wake verdict with a summary.
+registerTemplate({
+  eventType: "heartbeat.checklist.gate_findings",
+  header: "",
+  defaultBody: `## Gate Findings [auto-generated]
+{{gate_summary}}`,
+  variables: [
+    {
+      name: "gate_summary",
+      description: "The checklist gate script's `summary` of what changed since the last tick",
+    },
+  ],
+  category: "event",
+});
+
 // ============================================================================
 // Boot triage (one-off after container restart)
 // ============================================================================
