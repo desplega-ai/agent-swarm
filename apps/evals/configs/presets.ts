@@ -110,9 +110,12 @@ export const CONFIG_PRESETS: ConfigPreset[] = [
     id: "nightly-canary",
     label: "Nightly canary",
     description:
-      "Opus 5.5 + Codex 6 luna on the 9 public single-run scenarios, 3 repeats, $2 metered cap.",
+      "Opus 5.5 + Codex 6 luna on the 9 public single-run scenarios, 3 repeats, $4.50 metered cap.",
+    // 54 attempts. Measured on run-202610101239-cf30b8 (2026-10-10, codex metered on
+    // the deploy): $0.0685 metered per attempt (E2B + judge + luna tokens), so a full
+    // run is ~$3.70; the cap is that plus 20%. The old $2 cap stopped that run at 31/54.
     configIds: ["claude-opus-5.5", "codex-6-luna"],
-    runDefaults: { attemptsPerCell: 3, maxMeteredUsd: 2 },
+    runDefaults: { attemptsPerCell: 3, maxMeteredUsd: 4.5 },
     scenarioSet: "canary",
   },
   {
@@ -120,9 +123,11 @@ export const CONFIG_PRESETS: ConfigPreset[] = [
     label: "Weekly matrix",
     description:
       "Canary configs + Codex 6.1 sol + Codex 6 astra + DeepSeek V4.1 Flash on the whole suite (solo baselines and held-out included), 5 repeats, $37 metered cap.",
-    // Claude and Codex run on subscription, so the cap is mostly E2B time:
-    // ~375 attempts: E2B ~$19 (measured $0.02-0.10 each) + judge ~$11 (~$0.03
-    // each) + DeepSeek tokens ~$1 = ~$31, plus 20%.
+    // Claude and Codex run on subscription, so the cap is mostly E2B time and the
+    // judge: 400 attempts x $0.063 (suite-balanced, measured 2026-09-28..10-10) +
+    // DeepSeek tokens ~$1 = ~$26; at the canary's $0.0685 it is ~$27.4. Both fit
+    // with 20% to spare. With Codex metered (EVALS_SWARM_API_URL/KEY unset) astra
+    // and sol tokens alone add ~$135 and this cap stops the run early.
     configIds: [
       "claude-opus-5.5",
       "codex-6.1-sol",

@@ -67,7 +67,7 @@ export function publicSuiteScenarioIds(): string[] {
 }
 
 /**
- * Public scenarios too costly for the nightly canary's $2 cap: a real-diff run
+ * Public scenarios too costly for the nightly canary's cap: a real-diff run
  * installs and fixes a whole repo. They run in the weekly matrix only.
  */
 const CANARY_EXCLUDED_SCENARIO_IDS: readonly string[] = ["real-diff-agent-fs"];
@@ -76,7 +76,7 @@ const CANARY_EXCLUDED_SCENARIO_IDS: readonly string[] = ["real-diff-agent-fs"];
  * The nightly canary's scenarios (Phase 9): the public single-run scenarios. No
  * held-out scenario (those run in the weekly matrix only), no `-solo` baseline
  * (weekly too) and no real-diff scenario, so 3 repeats x 2 configs stay inside
- * the $2 run cap.
+ * the $4.50 run cap.
  */
 export function canarySuiteScenarioIds(): string[] {
   return publicSuiteScenarioIds().filter(

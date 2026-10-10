@@ -44,7 +44,8 @@ afterEach(() => {
   }
 });
 
-type Result = "passed" | "failed" | "error";
+/** "cancelled": closed by the cost cap before it ran, as the runner writes it. */
+type Result = "passed" | "failed" | "error" | "cancelled";
 interface CellSpec {
   configId: string;
   scenarioId: string;
@@ -89,6 +90,14 @@ async function seedRun(opts: {
         scenarioVersion: 1,
         suiteVersion: "1.0",
       });
+      if (result === "cancelled") {
+        await updateAttempt(db, id, {
+          status: "error",
+          exclusion: "cancelled",
+          error: "metered cost cap reached",
+        });
+        continue;
+      }
       await updateAttempt(db, id, {
         status: result,
         score: result === "passed" ? 0.9 : result === "failed" ? 0.2 : null,
@@ -181,6 +190,31 @@ describe("onRunFinished", () => {
     expect(text).toContain("3/3");
     expect((await getRun(db, "tonight"))?.summaryPostedAt).not.toBeNull();
     expect(h.started).toEqual([]);
+  });
+
+  test("a run the cost cap stopped posts one summary with the cancelled count and starts no rerun", async () => {
+    await seedBaseline([allPass("sql-audit"), allPass("sql-audit", LUNA)]);
+    await seedRun({
+      id: "tonight",
+      night: 10,
+      preset: "nightly-canary",
+      cells: [
+        { configId: OPUS, scenarioId: "sql-audit", results: ["passed", "passed", "cancelled"] },
+        {
+          configId: LUNA,
+          scenarioId: "sql-audit",
+          results: ["cancelled", "cancelled", "cancelled"],
+        },
+      ],
+    });
+    const h = harness();
+    await onRunFinished(h.deps, "tonight");
+    await onRunFinished(h.deps, "tonight");
+    expect(h.posts).toHaveLength(1);
+    expect(h.posts[0]).toContain("4 attempts were cancelled");
+    expect(h.posts[0]).not.toContain("PAGE");
+    expect(h.started).toEqual([]);
+    expect((await getRun(db, "tonight"))?.summaryPostedAt).not.toBeNull();
   });
 
   test("3 of 3 failures page at once and start no rerun", async () => {
@@ -474,7 +508,7 @@ async function seedRerunAttempts(
   runId: string,
   scenarioId: string,
   configId: string,
-  results: Result[],
+  results: Exclude<Result, "cancelled">[],
 ): Promise<void> {
   for (const [i, result] of results.entries()) {
     const id = `${runId}_${scenarioId}_${configId}_${i}_${seq++}`;

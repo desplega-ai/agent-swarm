@@ -281,7 +281,7 @@ describe("CONFIG_PRESETS (v7.7 item 1 — frozen contract)", () => {
       "codex-6-astra",
       "pi-deepseek-v4.1-flash",
     ]);
-    expect(nightly?.runDefaults).toEqual({ attemptsPerCell: 3, maxMeteredUsd: 2 });
+    expect(nightly?.runDefaults).toEqual({ attemptsPerCell: 3, maxMeteredUsd: 4.5 });
     expect(weekly?.runDefaults).toEqual({ attemptsPerCell: 5, maxMeteredUsd: 37 });
     for (const preset of CONFIG_PRESETS) {
       const plan = preset.runDefaults;
@@ -324,14 +324,17 @@ describe("CONFIG_PRESETS (v7.7 item 1 — frozen contract)", () => {
   });
 
   test("presetRunDefaults: first preset that sets a field wins; presets without a plan add nothing", () => {
-    expect(presetRunDefaults(["nightly-canary"])).toEqual({ attemptsPerCell: 3, maxMeteredUsd: 2 });
+    expect(presetRunDefaults(["nightly-canary"])).toEqual({
+      attemptsPerCell: 3,
+      maxMeteredUsd: 4.5,
+    });
     expect(presetRunDefaults(["budget", "weekly-matrix"])).toEqual({
       attemptsPerCell: 5,
       maxMeteredUsd: 37,
     });
     expect(presetRunDefaults(["nightly-canary", "weekly-matrix"])).toEqual({
       attemptsPerCell: 3,
-      maxMeteredUsd: 2,
+      maxMeteredUsd: 4.5,
     });
     expect(presetRunDefaults(["budget"])).toEqual({});
     expect(() => presetRunDefaults(["nope"])).toThrow('unknown preset "nope"');
