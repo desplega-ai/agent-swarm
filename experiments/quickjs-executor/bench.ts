@@ -3,6 +3,7 @@
  *
  *   bun experiments/quickjs-executor/bench.ts            # N=30, CONC=16
  *   N=50 CONC=8 bun experiments/quickjs-executor/bench.ts
+ *   QUICKJS_ONLY=1 SCRIPT_QUICKJS_POOL_SIZE=8 bun experiments/quickjs-executor/bench.ts
  *
  * For prod-like native numbers, point the native executor at prebuilt
  * runtime bundles (see the Dockerfile `scripts-runtime` step):
@@ -139,6 +140,19 @@ async function loopStall(executor: ScriptExecutor, name: string) {
 const fmt = (value: number) => (value < 10 ? value.toFixed(2) : value.toFixed(0)).padStart(7);
 const native = new NativeScriptExecutor();
 const quickjs = new QuickJSScriptExecutor();
+
+// Run in a fresh process for each pool size; the shared pool is fixed once created.
+if (process.env.QUICKJS_ONLY === "1") {
+  console.log(
+    `bun ${Bun.version} ${process.platform}/${process.arch} | pool=${process.env.SCRIPT_QUICKJS_POOL_SIZE ?? "4"}, concurrency=${CONC}, runs=${N * 10}`,
+  );
+  for (const name of ["trivial", "3 http calls", "zod argsSchema"]) {
+    await Promise.all(Array.from({ length: CONC }, () => run(quickjs, name)));
+    console.log(`${name}: ${(await throughput(quickjs, name, N * 10)).toFixed(1)} runs/s`);
+  }
+  server.stop(true);
+  process.exit(0);
+}
 
 for (const name of Object.keys(SCRIPTS)) {
   const a = JSON.stringify(await run(native, name));

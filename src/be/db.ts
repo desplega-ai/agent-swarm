@@ -198,6 +198,7 @@ import {
   rowToAgentTaskSummary,
 } from "./db/tasks/read";
 import { configureTaskWriteDependencies, failTask } from "./db/tasks/write";
+import { emitChildRunFinished, wakeParentsOfDeletedRuns } from "./db/workflow-runs";
 import { scrubJsonValue } from "./scrub-json";
 import { openSealedJson, sealedJsonForDisplay, sealJson } from "./sealed-json";
 import { configSecretName, registerStoredSecret } from "./secret-registry";
@@ -7614,7 +7615,8 @@ async function deleteWorkflowRows(id: string, source?: "api" | "mcp"): Promise<b
     `UPDATE agent_tasks SET workflowRunId = NULL, workflowRunStepId = NULL WHERE workflowRunId IN (SELECT id FROM workflow_runs WHERE workflowId = ?)`,
     [id],
   );
-  // 2. Delete steps (they reference runs)
+  // 2. Fail the parent steps of child runs about to go, then delete steps
+  await wakeParentsOfDeletedRuns(id);
   await client.run(
     `DELETE FROM workflow_run_steps WHERE runId IN (SELECT id FROM workflow_runs WHERE workflowId = ?)`,
     [id],
@@ -7673,6 +7675,8 @@ type WorkflowRunRow = {
   startedAt: string;
   lastUpdatedAt: string;
   finishedAt: string | null;
+  /** The `sub-workflow` step that started this run (migration 203). */
+  parentStepId?: string | null;
 };
 
 /**
@@ -7705,10 +7709,11 @@ export async function createWorkflowRun(data: {
   triggerType?: "schedule" | "manual" | "event" | "api";
   triggerData?: unknown;
   createdBy?: string;
+  parentStepId?: string;
 }): Promise<WorkflowRun> {
   const now = new Date().toISOString();
   const row = await getDbClient().get<WorkflowRunRow>(
-    `INSERT INTO workflow_runs (id, workflowId, triggerType, startedAt, triggerData, created_by) VALUES (?, ?, ?, ?, ?, ?) RETURNING *`,
+    `INSERT INTO workflow_runs (id, workflowId, triggerType, startedAt, triggerData, created_by, parentStepId) VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING *`,
     [
       data.id,
       data.workflowId,
@@ -7716,6 +7721,7 @@ export async function createWorkflowRun(data: {
       now,
       data.triggerData ? scrubJsonValue(data.triggerData) : null,
       data.createdBy ?? null,
+      data.parentStepId ?? null,
     ],
   );
   if (!row) throw new Error("Failed to create workflow run");
@@ -7804,6 +7810,7 @@ export async function updateWorkflowRun(
   if (data.status === "completed" || data.status === "failed") {
     emitWorkflowTerminalTelemetry(run);
   }
+  if (row.parentStepId) emitChildRunFinished(id, row.parentStepId, run.status);
   return run;
 }
 

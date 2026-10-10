@@ -17,6 +17,7 @@ import {
   updateWorkflowRun,
   updateWorkflowRunStep,
 } from "../be/db";
+import { getChildWorkflowRunId } from "../be/db/workflow-runs";
 import type { WaitStateRow } from "../types";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import {
@@ -31,6 +32,7 @@ import { failRunOnUnreadableReplay, findReadyNodes, hasRunningStep, walkGraph } 
 import type { WorkflowEventBus } from "./event-bus";
 import { workflowEventBus } from "./event-bus";
 import type { ExecutorRegistry } from "./executors/registry";
+import { childRunOutcome } from "./executors/sub-workflow";
 import { computeNextPort } from "./executors/wait";
 import { resolveForeachParent } from "./foreach-join";
 import { getSecretInputKeys } from "./input";
@@ -120,11 +122,23 @@ export function setupWorkflowResumeListener(
   };
   eventBus.on("approval.resolved", onApprovalResolved);
 
+  const onChildRunFinished = async (data: unknown) => {
+    try {
+      const { parentStepId } = data as { parentStepId?: string };
+      if (!parentStepId) return;
+      await resumeFromChildRun(parentStepId, registry);
+    } catch (err) {
+      console.error("[workflows] Resume from child workflow run failed:", err);
+    }
+  };
+  eventBus.on("workflow.child.finished", onChildRunFinished);
+
   return () => {
     eventBus.off("task.completed", onTaskCompleted);
     eventBus.off("task.failed", onTaskFailed);
     eventBus.off("task.cancelled", onTaskCancelled);
     eventBus.off("approval.resolved", onApprovalResolved);
+    eventBus.off("workflow.child.finished", onChildRunFinished);
   };
 }
 
@@ -763,6 +777,69 @@ async function resumeClaimedWait(
   } else {
     await finalizeOrWait(run.id);
   }
+}
+
+/**
+ * Resume a waiting `sub-workflow` step once its child run is terminal: a
+ * completed child completes the step, any other end (or a deleted child) fails
+ * the step and its run. Returns true when this call claimed the step. Safe to call repeatedly:
+ * the live event and the recovery sweep both route here.
+ */
+export async function resumeFromChildRun(
+  parentStepId: string,
+  registry: ExecutorRegistry,
+): Promise<boolean> {
+  const step = await getWorkflowRunStep(parentStepId);
+  if (!step || step.status !== "waiting" || step.nodeType !== "sub-workflow") return false;
+  const childId = await getChildWorkflowRunId(parentStepId);
+  const child = childId ? await getWorkflowRun(childId) : null;
+  // The child row exists before the step parks, so a missing one was deleted.
+  const outcome = child
+    ? childRunOutcome(child)
+    : { error: `Child workflow run of step ${parentStepId} was deleted` };
+  if (!outcome) return false;
+
+  let claimed = false;
+  await failClosedOnUnreadableReplay(step.runId, step.id, async () => {
+    const run = await getWorkflowRun(step.runId);
+    if (!run || (run.status !== "waiting" && run.status !== "running")) return;
+    const workflow = await getWorkflow(run.workflowId);
+    if (!workflow) return;
+
+    if ("error" in outcome) {
+      claimed = await failStepAndRunIfWaiting(step.id, run.id, outcome.error);
+      return;
+    }
+
+    const ctx = (run.context ?? {}) as Record<string, unknown>;
+    const routing = await checkpointPortStepAndResolveSuccessors(
+      workflow.definition,
+      run.id,
+      step.id,
+      step.nodeId,
+      outcome.output,
+      "success",
+      ctx,
+    );
+    if (!routing.claimed) return;
+    claimed = true;
+
+    if (routing.successors.length > 0) {
+      const secretKeys = getSecretInputKeys(workflow.input);
+      await walkGraph(
+        workflow.definition,
+        run.id,
+        ctx,
+        routing.successors,
+        registry,
+        workflow.id,
+        secretKeys,
+      );
+    } else {
+      await finalizeOrWait(run.id);
+    }
+  });
+  return claimed;
 }
 
 // ─── 64KB firedPayload cap ──────────────────────────────────────────────────

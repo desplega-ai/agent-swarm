@@ -984,7 +984,7 @@ describe("ValidateExecutor", () => {
 // ─── Registry Wiring ─────────────────────────────────────────
 
 describe("createExecutorRegistry", () => {
-  test("registers all 13 executors (9 instant + 4 async)", () => {
+  test("registers all 14 executors (9 instant + 5 async)", () => {
     const registry = createExecutorRegistry(mockDeps);
     const types = registry.types();
 
@@ -1001,7 +1001,8 @@ describe("createExecutorRegistry", () => {
     expect(types).toContain("foreach");
     expect(types).toContain("human-in-the-loop");
     expect(types).toContain("wait");
-    expect(types).toHaveLength(13);
+    expect(types).toContain("sub-workflow");
+    expect(types).toHaveLength(14);
   });
 
   test("instant executors have mode instant, async executors have mode async", () => {

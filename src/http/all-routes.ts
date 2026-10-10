@@ -55,6 +55,7 @@ import "./script-connection-proxy";
 import "./session-data";
 import "./sessions";
 import "./skills";
+import "./slack-inbound";
 import "./scripts";
 import "./mcp-bridge";
 import "./mcp-oauth";

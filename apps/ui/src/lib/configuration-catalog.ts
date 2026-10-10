@@ -1120,6 +1120,17 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         docsUrl: `${DOCS}ui/configuration#script-executor`,
       },
       {
+        key: "SCRIPT_QUICKJS_POOL_SIZE",
+        label: "QuickJS worker pool size",
+        description:
+          "Maximum QuickJS worker threads (1–32). More workers allow more concurrent runs and use more memory. Restart the API after changing this setting.",
+        kind: "number",
+        defaultValue: "4",
+        placeholder: "4",
+        restartRequired: true,
+        docsUrl: `${DOCS}ui/configuration#script-executor`,
+      },
+      {
         key: "SCRIPT_RUN_CONCURRENCY_CAP",
         label: "Script run concurrency cap",
         description:

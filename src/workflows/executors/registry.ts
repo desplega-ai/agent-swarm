@@ -8,6 +8,7 @@ import { NotifyExecutor } from "./notify";
 import { PropertyMatchExecutor } from "./property-match";
 import { RawLlmExecutor } from "./raw-llm";
 import { ScriptExecutor } from "./script";
+import { SubWorkflowExecutor } from "./sub-workflow";
 import { SwarmScriptExecutor } from "./swarm-script";
 import { SystemOneDecisionExecutor } from "./system-one-decision";
 import { ValidateExecutor } from "./validate";
@@ -81,6 +82,7 @@ export function createExecutorRegistry(deps: ExecutorDependencies): ExecutorRegi
   registry.register(new ForeachExecutor(deps));
   registry.register(new HumanInTheLoopExecutor(deps));
   registry.register(new WaitExecutor(deps));
+  registry.register(new SubWorkflowExecutor(deps, registry));
 
   return registry;
 }

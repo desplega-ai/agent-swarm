@@ -36,6 +36,7 @@ The engine includes 13 built-in executor types:
 | `validate` | Validate step output; can halt or trigger retry |
 | `human-in-the-loop` | Pause workflow for human approval or input via the dashboard |
 | `wait` | Pause for a fixed duration (`mode: "time"`) or until a workflow event matching an optional filter (`mode: "event"`); event mode supports `run` / `global` scope and an optional `timeoutMs` that routes to the `timeout` port |
+| `sub-workflow` | Run another workflow as a child run with explicit `inputs`, wait until it is terminal, and output its node outputs; a failed or cancelled child fails the node |
 
 Each executor has typed config and output schemas available via `GET /api/executor-types` (returns JSON Schemas via Zod v4 `z.toJSONSchema()`).
 

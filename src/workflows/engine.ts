@@ -54,6 +54,8 @@ function maxIterations(): number {
 export interface WorkflowExecutionOptions {
   requestedByUserId?: string;
   triggerType?: "schedule" | "manual" | "event" | "api";
+  /** Set when a `sub-workflow` step starts this run as its child. */
+  parentStepId?: string;
 }
 
 /**
@@ -133,6 +135,7 @@ export async function startWorkflowExecution(
       triggerType: options.triggerType ?? "manual",
       triggerData,
       createdBy: options.requestedByUserId,
+      parentStepId: options.parentStepId,
     });
     await updateWorkflowRun(runId, {
       status: "skipped",
@@ -149,6 +152,7 @@ export async function startWorkflowExecution(
     triggerType: options.triggerType ?? "manual",
     triggerData,
     createdBy: options.requestedByUserId,
+    parentStepId: options.parentStepId,
   });
   telemetry.workflow("started", {
     workflowId: workflow.id,
@@ -195,7 +199,7 @@ export async function startWorkflowExecution(
 
   const entryNodes = findEntryNodes(workflow.definition);
   const secretKeys = getSecretInputKeys(workflow.input);
-  await walkGraph(
+  const walk = walkGraph(
     workflow.definition,
     runId,
     ctx,
@@ -205,6 +209,13 @@ export async function startWorkflowExecution(
     secretKeys,
     options,
   );
+  // A child run walks on its own, outside the parent executor's timeout. Its
+  // terminal status wakes the parent step (`resumeFromChildRun`).
+  if (options.parentStepId) {
+    walk.catch((err) => console.error(`[workflows] Child workflow run ${runId} failed:`, err));
+    return runId;
+  }
+  await walk;
   return runId;
 }
 
@@ -939,6 +950,11 @@ async function runClaimedStep(
   // Check for async result
   if ("async" in result && (result as AsyncExecutorResult).async) {
     const waiting = await checkpointStepWaiting(runId, stepId, ctx);
+    // A child run that finished before the step parked had its event dropped.
+    if (waiting && (result as AsyncExecutorResult).waitFor === "workflow.child.finished") {
+      const { resumeFromChildRun } = await import("./resume");
+      await resumeFromChildRun(stepId, registry);
+    }
     return { outcome: waiting ? "waiting" : "completed", successors: [] };
   }
 

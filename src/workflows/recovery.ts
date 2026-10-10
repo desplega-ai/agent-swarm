@@ -12,6 +12,7 @@ import {
   resolveApprovalRequest,
   updateWorkflowRun,
 } from "../be/db";
+import { getSettledChildRunParentSteps } from "../be/db/workflow-runs";
 import type { WorkflowRunStep } from "../types";
 import { shapeApprovalResolution } from "./approval-resolution";
 import { loadCompletedStepRouting } from "./completed-step-routing";
@@ -24,7 +25,7 @@ import {
 } from "./engine";
 import type { ExecutorRegistry } from "./executors/registry";
 import { getSecretInputKeys } from "./input";
-import { finalizeOrWait, resumeWaitState } from "./resume";
+import { finalizeOrWait, resumeFromChildRun, resumeWaitState } from "./resume";
 import {
   checkpointPortStepAndResolveSuccessors,
   completeTaskStepAndResolveSuccessors,
@@ -55,6 +56,15 @@ export async function recoverIncompleteRuns(registry: ExecutorRegistry): Promise
 
   // --- Case 4: Waiting runs whose wait_states are overdue or already resolved ---
   recovered += await recoverWaitStates(registry);
+
+  // --- Case 5: Waiting sub-workflow steps whose child run already finished ---
+  for (const parentStepId of await getSettledChildRunParentSteps()) {
+    try {
+      if (await resumeFromChildRun(parentStepId, registry)) recovered++;
+    } catch (err) {
+      console.error(`[workflows] Failed to resume sub-workflow step ${parentStepId}:`, err);
+    }
+  }
 
   if (recovered > 0) {
     console.log(`[workflows] Recovered ${recovered} incomplete run(s)`);
