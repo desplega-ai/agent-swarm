@@ -205,16 +205,19 @@ A `sub-workflow` node runs another workflow as a child run and waits for it.
   `trigger` and `input` (which can hold resolved secrets) are left out. `error` is set when the child
   completed with a partial failure. Downstream: `inputs: { b: "build" }`, then
   `{{b.outputs.<childNodeId>.taskOutput}}`. The node routes on the `success` port.
-- A child that only has instant nodes finishes inside the step. Otherwise the step and the parent
-  run stay `waiting` until the child run is terminal, so the parent never completes while its child
-  is running, waiting on a human, or awaiting a retry.
+- The child run walks on its own, outside the parent executor's 30s timeout. The step and the
+  parent run stay `waiting` until the child run is terminal, so the parent never completes while its
+  child is running, waiting on a human, or awaiting a retry.
 - A child that fails, is cancelled, or is skipped (cooldown) fails the node and the parent run,
   whatever `onNodeFailure` says. Node `retry` reconnects to the same failed child, so it does not
   rerun it.
 - The child run stores the parent step in `workflow_runs.parentStepId` (unique). A re-executed step
   reconnects to that child instead of starting a second one. The child's terminal status emits
-  `workflow.child.finished` after commit, and the recovery sweep resumes any waiting step whose
-  child already finished, so a lost event or a restart does not strand the parent.
+  `workflow.child.finished` after commit. The engine rechecks the child once the step parks, and the
+  recovery sweep resumes any waiting step whose child already finished, so a lost event or a
+  restart does not strand the parent.
+- Deleting a workflow fails every waiting step that started one of its runs as a child. Recovery
+  also fails a waiting step whose child row is missing.
 - Recursion is rejected: a workflow cannot invoke itself or any workflow already running in its
   ancestor runs, and nesting stops at 16 levels below the root run (`MAX_SUB_WORKFLOW_DEPTH`). The
   checks run when the node executes, not when the definition is saved.

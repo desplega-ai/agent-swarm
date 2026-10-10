@@ -108,7 +108,8 @@ export class SubWorkflowExecutor extends BaseExecutor<
       return { status: "failed", error: `Workflow ${config.workflowId} is disabled` };
     }
 
-    // Instant-only children finish inside this call; async ones return waiting.
+    // Returns once the child run exists; the child walks on its own. A child
+    // that already ended (cooldown, readiness, input failure) settles here.
     const childRunId = await startWorkflowExecution(workflow, config.inputs ?? {}, this.registry, {
       requestedByUserId: meta.requestedByUserId,
       parentStepId: meta.stepId,

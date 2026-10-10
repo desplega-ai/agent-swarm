@@ -198,7 +198,7 @@ import {
   rowToAgentTaskSummary,
 } from "./db/tasks/read";
 import { configureTaskWriteDependencies, failTask } from "./db/tasks/write";
-import { emitChildRunFinished } from "./db/workflow-runs";
+import { emitChildRunFinished, wakeParentsOfDeletedRuns } from "./db/workflow-runs";
 import { scrubJsonValue } from "./scrub-json";
 import { openSealedJson, sealedJsonForDisplay, sealJson } from "./sealed-json";
 import { configSecretName, registerStoredSecret } from "./secret-registry";
@@ -7615,7 +7615,8 @@ async function deleteWorkflowRows(id: string, source?: "api" | "mcp"): Promise<b
     `UPDATE agent_tasks SET workflowRunId = NULL, workflowRunStepId = NULL WHERE workflowRunId IN (SELECT id FROM workflow_runs WHERE workflowId = ?)`,
     [id],
   );
-  // 2. Delete steps (they reference runs)
+  // 2. Fail the parent steps of child runs about to go, then delete steps
+  await wakeParentsOfDeletedRuns(id);
   await client.run(
     `DELETE FROM workflow_run_steps WHERE runId IN (SELECT id FROM workflow_runs WHERE workflowId = ?)`,
     [id],

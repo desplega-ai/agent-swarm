@@ -781,8 +781,8 @@ async function resumeClaimedWait(
 
 /**
  * Resume a waiting `sub-workflow` step once its child run is terminal: a
- * completed child completes the step, any other end fails the step and its
- * run. Returns true when this call claimed the step. Safe to call repeatedly:
+ * completed child completes the step, any other end (or a deleted child) fails
+ * the step and its run. Returns true when this call claimed the step. Safe to call repeatedly:
  * the live event and the recovery sweep both route here.
  */
 export async function resumeFromChildRun(
@@ -790,10 +790,13 @@ export async function resumeFromChildRun(
   registry: ExecutorRegistry,
 ): Promise<boolean> {
   const step = await getWorkflowRunStep(parentStepId);
-  if (!step || step.status !== "waiting") return false;
+  if (!step || step.status !== "waiting" || step.nodeType !== "sub-workflow") return false;
   const childId = await getChildWorkflowRunId(parentStepId);
   const child = childId ? await getWorkflowRun(childId) : null;
-  const outcome = child ? childRunOutcome(child) : null;
+  // The child row exists before the step parks, so a missing one was deleted.
+  const outcome = child
+    ? childRunOutcome(child)
+    : { error: `Child workflow run of step ${parentStepId} was deleted` };
   if (!outcome) return false;
 
   let claimed = false;

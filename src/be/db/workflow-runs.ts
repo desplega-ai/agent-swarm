@@ -42,15 +42,28 @@ export async function getWorkflowRunLineage(runId: string, maxDepth: number): Pr
   return rows.map((row) => row.workflowId);
 }
 
-/** Waiting `sub-workflow` steps whose child run is already terminal. */
+/** Waiting `sub-workflow` steps whose child run is terminal or deleted. */
 export async function getSettledChildRunParentSteps(): Promise<string[]> {
-  const rows = await getDbClient().query<{ parentStepId: string }>(
-    `SELECT c.parentStepId
-       FROM workflow_runs c
-       JOIN workflow_run_steps s ON s.id = c.parentStepId AND s.status = 'waiting'
-      WHERE c.status IN ('completed', 'failed', 'cancelled', 'skipped')`,
+  const rows = await getDbClient().query<{ id: string }>(
+    `SELECT s.id
+       FROM workflow_run_steps s
+       LEFT JOIN workflow_runs c ON c.parentStepId = s.id
+      WHERE s.status = 'waiting' AND s.nodeType = 'sub-workflow'
+        AND (c.id IS NULL OR c.status IN ('completed', 'failed', 'cancelled', 'skipped'))`,
   );
-  return rows.map((row) => row.parentStepId);
+  return rows.map((row) => row.id);
+}
+
+/**
+ * Before a workflow's runs are deleted, queue a wake-up for every step that
+ * started one of them as a child, so the step fails instead of waiting forever.
+ */
+export async function wakeParentsOfDeletedRuns(workflowId: string): Promise<void> {
+  const rows = await getDbClient().query<{ id: string; parentStepId: string }>(
+    "SELECT id, parentStepId FROM workflow_runs WHERE workflowId = ? AND parentStepId IS NOT NULL",
+    [workflowId],
+  );
+  for (const row of rows) emitAfterCommit(row.id, row.parentStepId);
 }
 
 /**
@@ -63,7 +76,10 @@ export function emitChildRunFinished(
   parentStepId: string,
   status: WorkflowRunStatus,
 ): void {
-  if (!TERMINAL_STATUSES.has(status)) return;
+  if (TERMINAL_STATUSES.has(status)) emitAfterCommit(childRunId, parentStepId);
+}
+
+function emitAfterCommit(childRunId: string, parentStepId: string): void {
   getDbClient().afterCommit(() => {
     import("../../workflows/event-bus")
       .then(({ workflowEventBus }) => {
