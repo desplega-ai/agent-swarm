@@ -22,12 +22,14 @@ Two kinds of sections:
 
 - Tracked items across all tracked sections: 10. Absolute maximum 20, only during a real surge.
 - Every tracked item states its lift trigger and a date. An item with no removal condition does not go in.
+- Write an age trigger as a calendar date (opened date + N days), never as a day count computed at check time. A floored age fires a day late.
+- Never arm a defer chain to re-check a tracked item. The next heartbeat already checks it. Defer only for work no scheduled pass owns.
 - Incident detail goes to memory: `memory-store` at `swarm` scope, one line of pointer stays in the runbook.
 - At or over the cap: prune before you add, or instead of adding.
 
 ## Handle a heartbeat-checklist task
 
-0. Quiet check. Take the fast path when three things hold: every failed, stalled or reboot-interrupted task in the system status was already named in the previous heartbeat-checklist task's output (newest completed one via `get-tasks`); no mention has gone unanswered since the last heartbeat; and no tracked item in the task's runbook snapshot is at or past its date. On the fast path, run the two step 3 scripts. If they report nothing the previous heartbeat had not already triaged, complete with one line citing the previous heartbeat task id and the counts, and skip steps 1, 2 and 4-7. Anything new means continue at step 1.
+0. Quiet check. Take the fast path when three things hold: every failed, stalled or reboot-interrupted task in the system status was already named in the previous heartbeat-checklist task's output (newest completed one via `get-tasks`); no mention has gone unanswered since the last heartbeat; and no tracked item in the task's runbook snapshot is at or past its date. On the fast path, run the two step 3 scripts. If they report nothing the previous heartbeat had not already triaged, complete with exactly one line, `Quiet. Same as <previousTaskId>: <N> failures (triaged), schedule-health <M>/<total>, controls ok.`, and skip steps 1, 2 and 4-7. A longer quiet output is a defect: no failure-set recap, no per-script bullets. Anything new means continue at step 1.
 1. Read the latest runbook. The snapshot in the task may be stale.
 2. Prune first. Check every tracked item against its lift trigger. Remove resolved, stale, and past-date items.
 3. Run the seeded scripts: `script-run` with name `schedule-health`, then `task-failure-audit`, both with `args: { days: 1, publishPage: false }`. They report failing schedules and failure clusters. Check any other standing order in the runbook yourself.
