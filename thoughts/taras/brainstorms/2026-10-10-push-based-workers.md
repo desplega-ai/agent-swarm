@@ -478,6 +478,67 @@ All 5 tasks completed with output `pong`.
 - **Stale agent state after terminate.** After `terminate()`, the agent still shows `idle` until the stale-runtime reaper runs. The supervisor must mark the runtime offline on terminate, or the warm-first rule will count a dead runtime as live.
 - **Exposure note.** The ngrok tunnel was up only for the E2B runs, with a random 48-hex API key, and was closed afterwards. A real setup needs a stable public API URL, which every E2B worker already needs today.
 
+## Follow-up topics (review round 2, 2026-10-10)
+
+Taras raised three topics after the spike. These are Claude's proposals. They are not decided yet.
+
+### Custom images
+
+- Fits the model as-is: `pool.image` is a pool field (Docker image, E2B template, k8s image).
+- Constraint: the image must contain the worker runtime (entrypoint, runner binary, harness CLIs). Two ways to satisfy it:
+  1. **Extend the base image** (`FROM ghcr.io/desplega-ai/agent-swarm-worker:slim`) and add tools. Works today, no code change.
+  2. **Bring any image, inject the runner.** The provider mounts or downloads the runner and a bootstrap script at start. Much more flexible, but the harness CLIs and their deps must also arrive at boot, which is slow and fragile. Not for v1.
+- E2B: a custom image becomes a template through `buildImageTemplate` (`src/e2b/dispatch.ts:566`, SDK `fromImage()`, no local Docker needed). The pool can store the image and build the template on first use.
+- **Proposal:** v1 supports option 1 only, and validates at first boot that the runner registered within a timeout (a clear "image lacks the swarm runner" error).
+
+### Warm runtimes
+
+Three different things hide behind "warm":
+1. **Warm for the same agent.** Already in the design: the `idle: N min` lifecycle keeps a runtime alive and it takes the next task. Only `per-task` pools pay boot every time.
+2. **Pre-booted runtimes bound to an agent** (`pool.minRuntimes`). The supervisor keeps N idle runtimes per agent ready. Simple, since the runtime boots with its `AGENT_ID` as today. Costs idle compute per agent.
+3. **Generic warm pool with late binding.** Runtimes boot without an agent and wait. On demand, the supervisor binds one to agent X, and the runtime then fetches X's profile, skills and config. Best for many agents sharing one pool with `per-task`. But most of the 89 boot calls are agent-specific, so late binding saves only infra start plus agent-independent setup, unless the boot bundle (#2048) makes binding a single call.
+- E2B pause/resume fits 2 and 3: boot once, pause (snapshot), resume in about 1 s on demand.
+- **Proposal:** v1 ships 1 (already designed) plus 2 (`minRuntimes`, default 0). Late binding (3) waits for #2048, because without a cheap bind step it saves little.
+- **Decided (Taras):** v1 ships idle reuse plus `minRuntimes`, and v1 supports custom images only when they extend the base worker image. Taras added: E2B runtimes must be kept alive on purpose, because E2B has auto-pause and runtime limits.
+
+### Keeping E2B runtimes alive
+
+Facts (E2B docs, 2026-10-10):
+- A sandbox runs until its timeout. The default action on timeout is `kill`. With `lifecycle.onTimeout: "pause"` it pauses instead, and `autoResume` wakes it on the next SDK call or inbound HTTP request.
+- `setTimeout()` can extend the timeout. The continuous running limit is **24 h on Pro and 1 h on Hobby**.
+- A pause plus resume **resets** the continuous limit.
+
+Consequences for workers:
+- `autoResume` does not help a worker. A worker only makes outbound calls (poll or socket) and receives no inbound request, so a paused worker never wakes by itself. The supervisor must resume it (`Sandbox.connect()`).
+- A pause freezes the process and drops its connections. In push mode that looks like a disconnect. Mid-task it breaks the harness's LLM stream.
+
+Proposal for the `e2b` provider and the supervisor:
+1. **Lease renewal.** Create sandboxes with a short timeout (for example 15 min). While the runtime is wanted, the supervisor renews it with `setTimeout()` (for example every 5 min). If the API or supervisor dies, the sandboxes expire on their own, so nothing leaks. This is the same idea as a k8s lease.
+2. **Planned rotation before the continuous limit.**
+   - Idle runtime near the cap: pause then resume to reset the limit, or terminate it and let demand re-provision.
+   - Busy runtime near the cap: drain it (no new tasks), provision a replacement, then terminate the old runtime when its task ends.
+   - Never pause a busy runtime.
+3. **Paused as a lifecycle state.** A pool can choose `idle: pause` for E2B instead of exit. Paused runtimes keep their memory and workspace. On demand, the supervisor resumes one (about 1 s) before it provisions a new one. This is the "pause instead of exit" option deferred earlier. E2B makes it cheap, so it can come right after v1.
+4. **Interface additions.** Optional `renew(handle, ttlSec)`, `pause(handle)` and `resume(handle)` on `RuntimeProvider`. A `maxContinuousSec` trait, set from pool config because it depends on the E2B tier (86400 on Pro, 3600 on Hobby).
+5. **Detect unplanned pause or kill.** If `status()` reports paused or gone while the supervisor expected `running`, use the "runtime died" path from the disconnect table. For paused, resume first if the runtime is still wanted.
+
+### Disconnects and dead runtimes
+
+Separate the cases, because each needs a different response:
+
+| Case | Signal | Response |
+|---|---|---|
+| Runtime died (container exit, OOM, sandbox TTL, per-task crash) | `provider.status()` = exited/failed in the reconcile loop, or Docker event | Mark the runtime row `offline` at once. Revoke its token. Hand its in-progress tasks (via `active_sessions.runtimeInstanceId`) to the existing crash recovery (`remediateCrashedWorkerTask`: resume task pinned to the same agent). Recompute demand, which may provision a replacement under the retry and circuit-breaker rules. |
+| Socket dropped, runtime alive (network blip) | ws close, provider says running | Grace period (for example 30 to 60 s). Reconnect re-runs `assignWork()`. Tasks keep running. No re-provision during the grace period. |
+| Runtime silent, provider says running (hung process) | No heartbeat or poll past the stall threshold | Existing stall thresholds apply. Then terminate it through the provider (the swarm owns it, so it can kill it), and continue as "runtime died". |
+| Remote controller disconnected | Controller socket closed | Its runtimes become `unknown`. Do not provision replacements during a grace period, to avoid duplicates. After the grace period, treat them as dead and fence them. |
+| Infra lost the runtime silently (host reboot) | `list()` no longer returns it | Same as "runtime died". `list()` also finds the opposite case: orphans with no row, which get killed. |
+
+- **Fencing:** revoking the runtime token is the fence. A zombie runtime that comes back after it was declared dead gets 401 on every call, so it cannot write progress for a task that was already superseded. `startTask` is already atomic, so two runtimes cannot both start the same task.
+- **Faster than today:** for swarm-owned runtimes, the provider tells us the runtime is dead in seconds. Today a dead worker waits for the 5/15/30 min stall thresholds. Static workers keep today's thresholds.
+- The spike already hit one gap: after `terminate()` the agent still looked `idle` until the reaper ran. The supervisor must mark the row offline itself on terminate and on detected death.
+- Heartbeat changes go with a same-PR update to `runbooks/heartbeat-crash-recovery.md`.
+
 ## Next Steps
 
 - `/create-plan` from this brainstorm. The open questions are resolved, so a separate `/research` pass is not needed.
