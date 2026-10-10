@@ -6,6 +6,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.168.0] - 2026-10-10
+
+### Added
+- Extensions: `slack-reply-gate` ships as a catalog template. It asks Jev (TypeSafe or OpenRouter) whether Lead should answer a Slack thread follow-up, defaults to shadow mode, and fails open (#2023).
+- Script connections: hard delete through the `delete` action on the `script-connections` MCP tool, `DELETE /api/script-connections/{id}`, and a confirm-gated button on `/connections`. It also removes the inline secret the connection minted (#2020).
+- Dashboard: the `SCRIPT_EXECUTOR` setting (`native` or `quickjs`) is selectable on the configuration page (#2004).
+
+### Changed
+- Worker image: dsh, amp, claude-code, codex, copilot and grok bumped (#2007, #2022).
+- Docs: dreaming-v2 skill seed patches (#2006).
+
+### Fixed
+- Heartbeat: a Claude session waiting on a background task keeps its heartbeat live instead of going stale after 15 minutes (#2017).
+- Scheduler: a script schedule records a `script_runs` row for each fire (#2021).
+- send-task: a script can send a task to its own agent (#2019).
+- UI: the page detail view fits a phone screen (#2018).
+
 ## [1.167.0] - 2026-10-09
 
 ### Added

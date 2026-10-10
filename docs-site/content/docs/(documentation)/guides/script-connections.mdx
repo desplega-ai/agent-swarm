@@ -34,8 +34,15 @@ egress — script code never holds a raw secret (see
 
 Management is **lead-only** (RBAC verb `script-connection.manage`) through the
 `script-connections` MCP tool: `list`, `upsert-openapi`, `upsert-mcp`,
-`upsert-graphql`, `refresh`, `disable`. Connections are scoped `global`
+`upsert-graphql`, `refresh`, `disable`, `delete`. Connections are scoped `global`
 (default), `agent`, or `repo`.
+
+`disable` keeps the connection in the registry. `delete` is permanent: it
+removes the connection, its managed credential binding, and the
+`connection.<slug>.secret` config row an inline secret minted. A shared
+`configKey` secret is left alone. The REST equivalent is
+`DELETE /api/script-connections/{id}`, and the dashboard's `/connections` page
+has a confirm-gated delete button.
 
 ### OpenAPI, by spec URL
 
