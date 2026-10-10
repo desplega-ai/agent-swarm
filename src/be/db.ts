@@ -6249,8 +6249,12 @@ export async function updateScheduledTask(
 }
 
 export async function deleteScheduledTask(id: string): Promise<boolean> {
-  const result = await getDbClient().run("DELETE FROM scheduled_tasks WHERE id = ?", [id]);
-  return result.changes > 0;
+  return await getDbClient().transaction(async (tx) => {
+    // Favorites carry no FK to the entity; drop every user's star with it.
+    await tx.run("DELETE FROM user_favorites WHERE itemType = 'schedule' AND itemId = ?", [id]);
+    const result = await tx.run("DELETE FROM scheduled_tasks WHERE id = ?", [id]);
+    return result.changes > 0;
+  });
 }
 
 /**
@@ -7624,7 +7628,9 @@ async function deleteWorkflowRows(id: string, source?: "api" | "mcp"): Promise<b
   // 3. Delete runs (they reference workflow)
   await client.run("DELETE FROM workflow_runs WHERE workflowId = ?", [id]);
   await reclassifyTaskHumanFree(linkedTaskIds);
-  // 4. Delete workflow
+  // 4. Delete every user's favorite of it (no FK to the workflow)
+  await client.run("DELETE FROM user_favorites WHERE itemType = 'workflow' AND itemId = ?", [id]);
+  // 5. Delete workflow
   const result = await client.run("DELETE FROM workflows WHERE id = ?", [id]);
   const deleted = result.changes > 0;
   if (deleted) {

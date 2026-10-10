@@ -1,5 +1,6 @@
 import type { LiveModelsCatalog } from "@/lib/agent-runtime-models";
 import { getConfig } from "@/lib/config";
+import { DASHBOARD_USER_HEADER, dashboardUserIdFor } from "../lib/dashboard-user";
 import type {
   AcpRuntimeConfig,
   AgentAvatar,
@@ -306,6 +307,12 @@ class ApiClient {
     };
     if (config.apiKey) {
       headers.Authorization = `Bearer ${config.apiKey}`;
+    }
+    // Per-user state (favorites) needs the picked dashboard user: the
+    // operator key alone names no person.
+    const dashboardUserId = dashboardUserIdFor(config);
+    if (dashboardUserId) {
+      headers[DASHBOARD_USER_HEADER] = dashboardUserId;
     }
     return headers;
   }

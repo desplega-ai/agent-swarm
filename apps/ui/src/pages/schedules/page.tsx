@@ -47,6 +47,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { useIsMobile } from "@/hooks/use-mobile";
 import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
 import { findModelOption, modelGroupsForSchedule } from "@/lib/agent-runtime-models";
+import { isRowNavigationSuppressed } from "@/lib/grid-row-click";
 import { matchesSearchTerms, searchText } from "@/lib/list-search";
 import { MODEL_TIER_OPTIONS, modelTierLabel } from "@/lib/model-tiers";
 import { cronTimezone, describeCron, formatInterval, scheduleCadence } from "@/lib/schedule-format";
@@ -402,7 +403,9 @@ export default function SchedulesPage() {
           return (
             <FavoriteButton
               favorite={schedule.favorite}
-              disabled={favoriteToggle.isPending}
+              disabled={
+                favoriteToggle.isPending && favoriteToggle.variables?.itemId === schedule.id
+              }
               onToggle={() =>
                 favoriteToggle.mutate({ itemId: schedule.id, favorite: !schedule.favorite })
               }
@@ -599,8 +602,7 @@ export default function SchedulesPage() {
   const onRowClicked = useCallback(
     (event: RowClickedEvent<ScheduledTaskSummary>) => {
       // Skip navigation when clicking interactive elements (switch, button, etc.)
-      const target = event.event?.target as HTMLElement | null;
-      if (target?.closest('a, [data-slot="switch"], button')) return;
+      if (isRowNavigationSuppressed(event.event?.target)) return;
       if (event.data) void navigate(`/schedules/${event.data.id}`);
     },
     [navigate],

@@ -1698,7 +1698,9 @@ export async function handleApps(
     }
     if (definitionNeedsRepair(res, app)) return true;
     const schema = app.definition.userConfig ?? {};
-    const owner = await resolveHttpFavoriteOwner(req, myAgentId);
+    // App settings stay in the shared operator scope for dashboard tabs; only
+    // favorites follow the picked dashboard user.
+    const owner = await resolveHttpFavoriteOwner(req, myAgentId, { dashboardUser: false });
     const stored = owner ? await getAppUserConfigValues(app.id, owner.scope) : {};
     getUserConfigRoute.respond(res, 200, { values: mergeUserConfigValues(schema, stored), schema });
     return true;
@@ -1730,7 +1732,7 @@ export async function handleApps(
       jsonError(res, "app does not define userConfig", 400);
       return true;
     }
-    const owner = await resolveHttpFavoriteOwner(req, myAgentId);
+    const owner = await resolveHttpFavoriteOwner(req, myAgentId, { dashboardUser: false });
     if (!owner) {
       jsonError(res, "userConfig is per-user; agents have no user scope", 403);
       return true;
