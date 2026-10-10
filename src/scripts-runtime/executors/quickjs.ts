@@ -1,3 +1,4 @@
+import { resolveQuickJSPoolSize } from "./quickjs-pool-config";
 import type { QuickJSWorkerMessage, QuickJSWorkerRequest } from "./quickjs-worker";
 import type { ExecutorInput, ExecutorOutput, ScriptExecutor, ScriptExecutorError } from "./types";
 
@@ -14,7 +15,7 @@ import type { ExecutorInput, ExecutorOutput, ScriptExecutor, ScriptExecutorError
 
 // Each worker keeps one QuickJS WASM module (~25 ms to load) and runs one job
 // at a time. Jobs beyond the pool size wait in a queue.
-const POOL_SIZE = 4;
+// Size is read when the shared pool is first created; changing it needs an API restart.
 // The worker enforces the wall clock itself. This margin only catches a
 // worker that stopped answering, for example a host call that never settles.
 const UNRESPONSIVE_GRACE_MS = 5_000;
@@ -121,7 +122,13 @@ export class QuickJSScriptExecutor implements ScriptExecutor {
     }
     if (input.signal?.aborted) return emptyOutput("killed");
 
-    sharedPool ??= new QuickJSWorkerPool(POOL_SIZE);
+    try {
+      sharedPool ??= new QuickJSWorkerPool(
+        resolveQuickJSPoolSize(process.env.SCRIPT_QUICKJS_POOL_SIZE),
+      );
+    } catch (error) {
+      return emptyOutput("executor_error", error instanceof Error ? error.message : String(error));
+    }
     const pool = sharedPool;
     const slot = await pool.acquire();
     if (input.signal?.aborted) {
