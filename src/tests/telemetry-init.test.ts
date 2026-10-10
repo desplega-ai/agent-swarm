@@ -78,6 +78,7 @@ describe("initTelemetry", () => {
     expect(writes).toEqual([
       { key: "telemetry_installation_id", value: id as string },
       { key: "telemetry_installed_at", value: installedAt as string },
+      { key: "telemetry_org_id", value: expect.stringMatching(/^org_[0-9a-f]{16}$/) },
     ]);
   });
 
@@ -96,7 +97,10 @@ describe("initTelemetry", () => {
     const id = _getInstallationIdForTests();
     expect(id).not.toBeNull();
     expect(id).toMatch(/^ephemeral_[0-9a-f]{16}$/);
-    expect(writes).toEqual([]);
+    // Only the org ID is written (the install ID could not be).
+    expect(writes).toEqual([
+      { key: "telemetry_org_id", value: expect.stringMatching(/^org_[0-9a-f]{16}$/) },
+    ]);
     // Config access is failing — nowhere durable to persist an anchor, so
     // leave it null rather than faking a fresh mint.
     expect(_getInstalledAtForTests()).toBeNull();
@@ -121,7 +125,10 @@ describe("initTelemetry", () => {
       // installed_at failure must not unwind and discard the installationId
       // write that already succeeded.
       expect(id).toMatch(/^install_[0-9a-f]{16}$/);
-      expect(writes).toEqual([{ key: "telemetry_installation_id", value: id as string }]);
+      expect(writes).toEqual([
+        { key: "telemetry_installation_id", value: id as string },
+        { key: "telemetry_org_id", value: expect.stringMatching(/^org_[0-9a-f]{16}$/) },
+      ]);
       // No fabricated/unpersisted anchor emitted this session.
       expect(_getInstalledAtForTests()).toBeNull();
     });
@@ -141,7 +148,10 @@ describe("initTelemetry", () => {
       // now() as a stand-in install date — that back-fills a wrong date
       // instead of an honestly-absent one. No write, no fabricated anchor.
       expect(_getInstallationIdForTests()).toBe(existing);
-      expect(writes).toEqual([]);
+      // No install-anchor write; the org ID is the only thing minted.
+      expect(writes).toEqual([
+        { key: "telemetry_org_id", value: expect.stringMatching(/^org_[0-9a-f]{16}$/) },
+      ]);
       expect(_getInstalledAtForTests()).toBeNull();
     });
 
@@ -163,7 +173,9 @@ describe("initTelemetry", () => {
       );
       expect(_getInstallationIdForTests()).toBe(existing);
       expect(_getInstalledAtForTests()).toBe(existingInstalledAt);
-      expect(writes).toEqual([]);
+      expect(writes).toEqual([
+        { key: "telemetry_org_id", value: expect.stringMatching(/^org_[0-9a-f]{16}$/) },
+      ]);
     });
   });
 
@@ -244,6 +256,7 @@ describe("initTelemetry", () => {
           return undefined;
         },
         async () => {},
+        { generateIfMissing: true },
       );
 
       telemetry.onboarding("step_completed", {
@@ -370,7 +383,9 @@ describe("initTelemetry", () => {
       { generateIfMissing: true },
     );
     expect(_getInstallationIdForTests()).toBe(existing);
-    expect(writesB).toEqual([]);
+    expect(writesB).toEqual([
+      { key: "telemetry_org_id", value: expect.stringMatching(/^org_[0-9a-f]{16}$/) },
+    ]);
   });
 
   describe("_resolveCloudMode (URL → is_cloud)", () => {
@@ -470,8 +485,9 @@ describe("initTelemetry", () => {
       process.env.E2B_SANDBOX_ID = "sbx_test123";
       await initTelemetry(
         "api-server",
-        async () => "install_e2b_test",
+        async (key) => (key === "telemetry_installation_id" ? "install_e2b_test" : undefined),
         async () => {},
+        { generateIfMissing: true },
       );
 
       track({ event: "server.started", properties: { port: 3013 } });
@@ -486,8 +502,9 @@ describe("initTelemetry", () => {
       delete process.env.E2B_SANDBOX_ID;
       await initTelemetry(
         "api-server",
-        async () => "install_no_e2b",
+        async (key) => (key === "telemetry_installation_id" ? "install_no_e2b" : undefined),
         async () => {},
+        { generateIfMissing: true },
       );
 
       track({ event: "test.event", properties: {} });
@@ -501,8 +518,9 @@ describe("initTelemetry", () => {
       process.env.E2B_SANDBOX_ID = "sbx_override_test";
       await initTelemetry(
         "api-server",
-        async () => "install_e2b_override",
+        async (key) => (key === "telemetry_installation_id" ? "install_e2b_override" : undefined),
         async () => {},
+        { generateIfMissing: true },
       );
 
       track({ event: "test.event", properties: { is_e2b: false } });
@@ -534,8 +552,9 @@ describe("initTelemetry", () => {
       process.env.MCP_BASE_URL = "https://agent-swarm-mcp.desplega.sh";
       await initTelemetry(
         "worker",
-        async () => "install_cloud_test",
+        async (key) => (key === "telemetry_installation_id" ? "install_cloud_test" : undefined),
         async () => {},
+        { generateIfMissing: true },
       );
 
       track({ event: "server.started", properties: { port: 3013 } });
@@ -553,8 +572,9 @@ describe("initTelemetry", () => {
       process.env.MCP_BASE_URL = "http://localhost:3013";
       await initTelemetry(
         "worker",
-        async () => "install_self_test",
+        async (key) => (key === "telemetry_installation_id" ? "install_self_test" : undefined),
         async () => {},
+        { generateIfMissing: true },
       );
 
       track({ event: "test.event", properties: {} });
@@ -569,8 +589,9 @@ describe("initTelemetry", () => {
       delete process.env.MCP_BASE_URL;
       await initTelemetry(
         "api-server",
-        async () => "install_no_url",
+        async (key) => (key === "telemetry_installation_id" ? "install_no_url" : undefined),
         async () => {},
+        { generateIfMissing: true },
       );
 
       track({ event: "test.event", properties: {} });
@@ -590,8 +611,10 @@ describe("initTelemetry", () => {
       process.env.SWARM_CLOUD = "true";
       await initTelemetry(
         "api-server",
-        async () => "install_hosted_cloud_test",
+        async (key) =>
+          key === "telemetry_installation_id" ? "install_hosted_cloud_test" : undefined,
         async () => {},
+        { generateIfMissing: true },
       );
 
       track({ event: "server.started", properties: { port: 3013 } });
@@ -611,8 +634,9 @@ describe("initTelemetry", () => {
       process.env.MCP_BASE_URL = "https://agent-swarm-mcp.desplega.sh";
       await initTelemetry(
         "worker",
-        async () => "install_override_test",
+        async (key) => (key === "telemetry_installation_id" ? "install_override_test" : undefined),
         async () => {},
+        { generateIfMissing: true },
       );
 
       track({
@@ -645,8 +669,9 @@ describe("initTelemetry", () => {
     test("includes the package version on every event and ignores caller overrides", async () => {
       await initTelemetry(
         "worker",
-        async () => "install_version_test",
+        async (key) => (key === "telemetry_installation_id" ? "install_version_test" : undefined),
         async () => {},
+        { generateIfMissing: true },
       );
 
       track({ event: "test.event", properties: { swarmVersion: "spoofed" } });
@@ -682,8 +707,9 @@ describe("initTelemetry", () => {
       process.env.NODE_ENV = "development";
       await initTelemetry(
         "api-server",
-        async () => "install_default_env",
+        async (key) => (key === "telemetry_installation_id" ? "install_default_env" : undefined),
         async () => {},
+        { generateIfMissing: true },
       );
 
       track({ event: "test.event", properties: {} });
@@ -698,8 +724,9 @@ describe("initTelemetry", () => {
       process.env.DESPLEGA_TELEMETRY_ENV = "development";
       await initTelemetry(
         "api-server",
-        async () => "install_explicit_env",
+        async (key) => (key === "telemetry_installation_id" ? "install_explicit_env" : undefined),
         async () => {},
+        { generateIfMissing: true },
       );
 
       track({ event: "test.event", properties: {} });
@@ -713,8 +740,9 @@ describe("initTelemetry", () => {
       process.env.NODE_ENV = "test";
       await initTelemetry(
         "api-server",
-        async () => "install_test_env",
+        async (key) => (key === "telemetry_installation_id" ? "install_test_env" : undefined),
         async () => {},
+        { generateIfMissing: true },
       );
 
       track({ event: "test.event", properties: {} });
@@ -915,8 +943,10 @@ describe("initTelemetry", () => {
     test("integration.connected emits only allowlisted provider values", async () => {
       await initTelemetry(
         "api-server",
-        async () => "install_integration_test",
+        async (key) =>
+          key === "telemetry_installation_id" ? "install_integration_test" : undefined,
         async () => {},
+        { generateIfMissing: true },
       );
 
       emitIntegrationConnected("code_repo", "https://github.com/desplega/agent-swarm", true);
@@ -935,8 +965,10 @@ describe("initTelemetry", () => {
     test("integration.connected omits a free-form PII-looking provider", async () => {
       await initTelemetry(
         "api-server",
-        async () => "install_integration_test",
+        async (key) =>
+          key === "telemetry_installation_id" ? "install_integration_test" : undefined,
         async () => {},
+        { generateIfMissing: true },
       );
 
       emitIntegrationConnected("other", "someone@example.com", false);

@@ -1,3 +1,5 @@
+import { isEnvFlagEnabled } from "../utils/env-flag";
+
 export const SLACK_MODES = ["socket", "http"] as const;
 export type SlackMode = (typeof SLACK_MODES)[number];
 
@@ -17,7 +19,7 @@ export function getSlackConfiguration(env: NodeJS.ProcessEnv = process.env): Sla
   if (mode === "http") missingCredentials.push("SLACK_SIGNING_SECRET");
 
   return {
-    disabled: env.SLACK_DISABLE === "true" || env.SLACK_DISABLE === "1",
+    disabled: isEnvFlagEnabled("SLACK_DISABLE", false, env),
     mode,
     missingCredentials: missingCredentials.filter((key) => !env[key]?.trim()),
   };

@@ -16,6 +16,7 @@ import { ClockIcon } from "@/components/icons/clock";
 import { ContactIcon } from "@/components/icons/contact";
 import { FileClockIcon } from "@/components/icons/file-clock";
 import { FileTextIcon } from "@/components/icons/file-text";
+import { FolderOpenIcon } from "@/components/icons/folder-open";
 import { GlobeIcon } from "@/components/icons/globe";
 import { HomeIcon } from "@/components/icons/home";
 import { LayoutGridIcon } from "@/components/icons/layout-grid";
@@ -43,9 +44,11 @@ import {
   SidebarRail,
 } from "@/components/ui/sidebar";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { navRequirementMet } from "@/lib/agent-fs/state";
 import { formatCost } from "@/lib/cost-format";
 import { isDemoMode } from "@/lib/deployment-config";
 import { cn, formatCompactNumber } from "@/lib/utils";
+import { CombSidebarPins } from "./comb-sidebar-pins";
 import { SwarmSwitcher } from "./swarm-switcher";
 
 /** The imperative surface every vendored animated icon exposes. */
@@ -63,10 +66,6 @@ interface NavItem {
   title: string;
   path: string;
   icon: AnimatedIconComponent;
-  children?: Array<{
-    title: string;
-    path: string;
-  }>;
   /** When set, item is shown as disabled with this tooltip when condition fails. */
   gate?: { minVersion: string };
   /**
@@ -75,6 +74,11 @@ interface NavItem {
    * keeps its plain icon + tooltip.
    */
   beta?: { tooltip: string };
+  /**
+   * Runtime switch: the item renders only when the named feature is on.
+   * `comb` reads `/status` `agent_fs.comb.enabled` (COMB_ENABLED + agent-fs).
+   */
+  requires?: "comb";
   /**
    * Declarative minimum role required to see this item. Purely a type-level
    * annotation for future RBAC — render logic does NOT consult it today, so
@@ -122,11 +126,13 @@ const navGroups: NavGroup[] = [
         icon: GlobeIcon,
         gate: { minVersion: "1.79.0" },
       },
+      { title: "Apps", path: "/apps", icon: LayoutGridIcon },
       {
-        title: "Apps",
-        path: "/apps",
-        icon: LayoutGridIcon,
-        beta: { tooltip: "Swarm Apps — experimental: agent-built internal apps" },
+        title: "Comb",
+        path: "/file",
+        icon: FolderOpenIcon,
+        beta: { tooltip: "Review agent-fs files with the swarm" },
+        requires: "comb",
       },
       { title: "Approvals", path: "/approval-requests", icon: ClipboardCheckIcon },
     ],
@@ -366,6 +372,8 @@ export function AppSidebar() {
   };
   const isGated = (item: NavItem) =>
     !!item.gate && gates[item.gate.minVersion]?.supported === false;
+  const isHidden = (item: NavItem) =>
+    isGated(item) || !navRequirementMet(item.requires, status?.agent_fs?.comb);
 
   // Live counts surfaced as right-aligned badges on existing nav items.
   // Gated entirely on API ≥1.82 — the backing queries don't even fire on
@@ -459,12 +467,8 @@ export function AppSidebar() {
                         const isActive =
                           item.path === "/"
                             ? location.pathname === "/"
-                            : location.pathname.startsWith(item.path) ||
-                              !!item.children?.some((child) =>
-                                location.pathname.startsWith(child.path),
-                              );
-                        const gated = isGated(item);
-                        if (gated) return null;
+                            : location.pathname.startsWith(item.path);
+                        if (isHidden(item)) return null;
                         const badge = badges[item.path];
                         return (
                           <SidebarMenuItem key={item.path}>
@@ -476,25 +480,8 @@ export function AppSidebar() {
                             />
                             {/* Live count — auto-hidden when icon-collapsed. */}
                             {badge != null && <SidebarMenuBadge>{badge}</SidebarMenuBadge>}
-                            {item.children && (
-                              <div className="ml-6 mt-1 flex flex-col gap-0.5 border-l border-sidebar-border pl-2">
-                                {item.children.map((child) => (
-                                  <NavLink
-                                    key={child.path}
-                                    to={child.path}
-                                    className={({ isActive: childActive }) =>
-                                      cn(
-                                        "rounded-sm px-2 py-1 text-sm transition-colors hover-linger",
-                                        childActive
-                                          ? "bg-sidebar-accent text-sidebar-accent-foreground"
-                                          : "text-sidebar-foreground/70 hover:bg-sidebar-accent/60 hover:text-sidebar-foreground",
-                                      )
-                                    }
-                                  >
-                                    {child.title}
-                                  </NavLink>
-                                ))}
-                              </div>
+                            {item.requires === "comb" && (
+                              <CombSidebarPins comb={status?.agent_fs?.comb} />
                             )}
                           </SidebarMenuItem>
                         );
@@ -513,8 +500,7 @@ export function AppSidebar() {
                         item.path === "/"
                           ? location.pathname === "/"
                           : location.pathname.startsWith(item.path);
-                      const gated = isGated(item);
-                      if (gated) return null;
+                      if (isHidden(item)) return null;
                       return (
                         <SidebarMenuItem key={item.path}>
                           <NavIconLink

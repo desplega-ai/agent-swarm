@@ -90,6 +90,9 @@ export function registerActionHandlers(app: App): void {
         routingSource: lead ? "engine_default" : undefined,
         source: "slack",
         parentTaskId: taskId,
+        // A human follow-up from the modal: never answer it in the original
+        // task's structured-output contract.
+        inheritParentOutputSchema: false,
         slackChannelId: originalTask.slackChannelId,
         slackThreadTs: originalTask.slackThreadTs,
         slackUserId: body.user.id,

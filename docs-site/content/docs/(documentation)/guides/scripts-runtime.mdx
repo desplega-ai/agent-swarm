@@ -255,6 +255,49 @@ Stack frames inside the harness or `node_modules` are stripped from the
 debugging). The user-script path is normalized to the basename
 `user-script.ts` — absolute tmpdir paths never leak.
 
+## Executors
+
+The `SCRIPT_EXECUTOR` environment variable on the API server selects how
+scripts run. The setting applies to every script run on that server.
+
+| Value | How it runs | Per-run overhead (Linux) |
+|---|---|---|
+| `native` (default) | A sandboxed `bun` subprocess with `ulimit` limits. Everything on this page applies. | ~10 ms (process spawn) |
+| `quickjs` (experimental) | QuickJS compiled to WASM, in a pool of worker threads inside the API process. | ~1 ms |
+
+`quickjs` suits short scripts that call the swarm or HTTP APIs, for example
+scripts that you [expose externally](/docs/guides/scripts-external-apis). It
+does not suit CPU-heavy scripts: an interpreter runs them 3-11x slower than
+Bun. A script that imports `zod` also pays ~10-25 ms per run to evaluate the
+zod code it uses, which can make it slower than `native`.
+
+The `quickjs` sandbox has no filesystem, no process APIs, and no network
+access except the host calls below. These are the differences from `native`:
+
+- **Available:** `ctx.swarm`, `ctx.api`, `ctx.mcp`, `ctx.stdlib.fetch`,
+  `ctx.stdlib.fetchJson`, `ctx.stdlib.table`, `ctx.stdlib.Redacted`,
+  `ctx.logger`, `console`, `fetch`, `Headers`, `Response`, `setTimeout`,
+  `clearTimeout`, and the `zod`, `stdlib`, and `swarm-sdk` imports.
+- **`fetch` is text-only.** A request body must be a string. A response
+  exposes `status`, `ok`, `headers`, `text()`, and `json()`. Streams, binary
+  bodies, and `AbortSignal` are not supported.
+- **Not available:** `ctx.stdlib.glob`, `ctx.stdlib.grep`, `process`,
+  `Buffer`, `URL`, `URLSearchParams`, `TextEncoder`, `TextDecoder`,
+  `AbortController`, `setInterval`, `crypto`, `structuredClone`, `atob`, and
+  `btoa`. The typecheck still accepts them, so a script that uses them passes
+  `script-upsert` and fails at run time.
+- **Top-level `await` is not supported.** Put the work inside the default
+  export.
+- **Limits:** `memoryMb` is the QuickJS heap limit (`error: "oom"`), and
+  `wallClockMs` bounds both synchronous code and awaited calls
+  (`error: "timeout"`). Runtime errors keep the `runtimeError` shape above,
+  with lines mapped back to `user-script.ts`.
+- **Host calls:** at most 16 host calls (`fetch`, `ctx.swarm`, `ctx.api`,
+  `ctx.mcp`) run at the same time for one script, and the rest wait. A run
+  can have at most 1024 host calls and timers in flight or waiting. When the
+  run ends, the executor aborts every host call that is still open, including
+  a `fetch` that the script did not await.
+
 ## Exposing a script externally
 
 A saved script can be opted in to a public HTTP endpoint —

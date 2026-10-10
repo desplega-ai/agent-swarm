@@ -17,7 +17,7 @@ Agent Swarm uses a **harness** abstraction to decouple task execution from the u
 | **pi-mono** | `pi` | Open-source coding agent by [@badlogic](https://github.com/badlogic/pi-mono). Supports multiple model backends |
 | **Devin** | `devin` | Cognition's Devin via the `/sessions` API — session executes in Devin's managed cloud, ACU-based cost tracking |
 | **Claude Managed Agents** | `claude-managed` | Anthropic's managed cloud sandbox — sessions execute outside the worker. Requires one-time setup CLI to create the Anthropic-side Agent + Environment |
-| **ACP (Agent Client Protocol)** | `acp` | Any [Agent Client Protocol](https://agentclientprotocol.com) agent, spawned as a subprocess and driven over stdio. No swarm-side model-provider credential — the target owns its own model auth. It does receive the worker's swarm API key as the swarm MCP bearer, same as every other spawned harness |
+| **ACP (Agent Client Protocol)** | `acp` | Any [Agent Client Protocol](https://agentclientprotocol.com) agent, spawned as a subprocess and driven over stdio. No swarm-side model-provider credential — the target owns its own model auth. It receives a session-scoped `aseph_` token as the swarm MCP bearer, granting that agent's swarm MCP access for up to 24 hours; point it only at a binary you trust |
 
 ## How It Works
 
@@ -264,7 +264,7 @@ pi-mono supports several authentication methods depending on which model provide
 | **Anthropic** | `ANTHROPIC_API_KEY` | Direct Anthropic API access |
 | **OpenRouter** | `OPENROUTER_API_KEY` | Access 100+ models via OpenRouter |
 | **OpenAI** | `OPENAI_API_KEY` | Direct OpenAI API access |
-| **Google** | `GOOGLE_API_KEY` | Direct Google AI API access (only honored when `MODEL_OVERRIDE` starts with `google/`) |
+| **Google** | `GOOGLE_API_KEY` or `GEMINI_API_KEY` | Direct Google AI API access (only honored when `MODEL_OVERRIDE` starts with `google/`) |
 | **Auth file** | `~/.pi/agent/auth.json` | Pre-configured auth file |
 
 At least one of these must be available. The Docker entrypoint validates this on startup. When `MODEL_OVERRIDE` starts with a provider prefix, only the matching key is required; when it's unset, any one of `ANTHROPIC_API_KEY` / `OPENROUTER_API_KEY` / `OPENAI_API_KEY` suffices.
@@ -278,7 +278,7 @@ At least one of these must be available. The Docker entrypoint validates this on
 | `OPENROUTER_API_KEY` | One of* | — | OpenRouter API key for multi-provider access |
 | `OPENROUTER_BASE_URL` | No | `https://openrouter.ai/api/v1` | Route OpenRouter model and session-summary traffic through an OpenAI-compatible gateway |
 | `OPENAI_API_KEY` | One of* | — | OpenAI API key for GPT models |
-| `GOOGLE_API_KEY` | When prefixed | — | Google AI API key — required only when `MODEL_OVERRIDE` uses a `google/` prefix |
+| `GOOGLE_API_KEY` or `GEMINI_API_KEY` | When prefixed | — | Google AI API key — required only when `MODEL_OVERRIDE` uses a `google/` prefix |
 
 \* At least one credential source is required (API key or `~/.pi/agent/auth.json`).
 
@@ -300,7 +300,7 @@ The prefix before the first `/` selects the provider and the matching credential
 | `anthropic/<id>` | `anthropic/claude-sonnet-4-6` ([Anthropic model IDs](https://platform.claude.com/docs/en/about-claude/models/overview)) | `ANTHROPIC_API_KEY` |
 | `openrouter/<id>` | `openrouter/moonshotai/kimi-k2.5` ([OpenRouter catalog](https://openrouter.ai/models)) | `OPENROUTER_API_KEY` |
 | `openai/<id>` | `openai/gpt-4o` | `OPENAI_API_KEY` |
-| `google/<id>` | `google/gemini-2.5-pro` | `GOOGLE_API_KEY` |
+| `google/<id>` | `google/gemini-2.5-pro` | `GOOGLE_API_KEY` or `GEMINI_API_KEY` |
 
 ### Reasoning / Effort
 
@@ -371,7 +371,7 @@ For full provider design rationale (why we don't `agents.create` at runtime, the
 
 `acp` drives any agent that speaks the [Agent Client Protocol](https://agentclientprotocol.com) — an open, editor-agnostic JSON-RPC protocol for driving coding agents over stdio. If your agent already has an ACP server mode (or you build one), you can run it as a swarm worker with no adapter code of your own. See the protocol's own [Get started → Agents](https://agentclientprotocol.com/get-started/agents) guide for what it takes for an agent to speak ACP.
 
-The dashboard offers a curated **OpenCode** preset and a free-form **Custom** target. ACP has no live steering (see the steering table in [Adding a Harness Provider](/docs/guides/harness-providers#live-task-steering) — ACP exposes a single in-flight `session/prompt` and the only interrupt is a full `session/cancel`).
+The dashboard offers curated **OpenCode**, **Gemini CLI**, and **GitHub Copilot CLI** presets and a free-form **Custom** target. ACP has no live steering (see the steering table in [Adding a Harness Provider](/docs/guides/harness-providers#live-task-steering) — ACP exposes a single in-flight `session/prompt` and the only interrupt is a full `session/cancel`).
 
 ### How it works
 
@@ -384,7 +384,7 @@ Because the target process owns its own model credentials, `acp` reports `ready:
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
 | `HARNESS_PROVIDER` | Yes | — | Must be set to `acp` |
-| `ACP_TARGET` | No | `custom` | `opencode` for the curated OpenCode preset, or `custom` for an operator-supplied command |
+| `ACP_TARGET` | No | `custom` | `opencode` or `gemini` for a curated preset, `copilot` for the GitHub Copilot CLI preset, or `custom` for an operator-supplied command |
 | `ACP_TARGET_COMMAND` | Custom only | — | Executable to spawn as the custom ACP agent (also accepts the shorter `ACP_COMMAND` alias). Must resolve on `$PATH` or be an absolute path |
 | `ACP_TARGET_ARGS` | No | — | Arguments to the target command. Accepts a JSON array (`["acp", "--flag"]`) or a plain whitespace-separated string |
 | `ACP_TARGET_ENV_KEYS` | No | `[]` | JSON array (or comma-separated list for hand-authored config) of environment/config keys explicitly allowed into a custom target process |
@@ -398,7 +398,7 @@ Use the dashboard runtime editor when possible. It updates the harness, `MODEL_O
 
 Any ACP-speaking agent works. A few starting points:
 
-<Tabs items={["opencode", "claude-code-acp", "Gemini CLI", "Custom"]}>
+<Tabs items={["opencode", "GitHub Copilot CLI", "claude-code-acp", "Gemini CLI", "Custom"]}>
   <Tab value="opencode">
     [opencode](https://opencode.ai) ships a built-in ACP server:
 
@@ -409,6 +409,37 @@ Any ACP-speaking agent works. A few starting points:
     ```
 
     The adapter applies `MODEL_OVERRIDE` through ACP's advertised `model` option. It also merges the model into `OPENCODE_CONFIG_CONTENT` before spawn as a fallback. OpenCode resolves its own model credentials from `~/.local/share/opencode/auth.json` or the preset's allowlisted provider env vars (`OPENROUTER_API_KEY`, `OPENAI_API_KEY`, etc.).
+  </Tab>
+  <Tab value="GitHub Copilot CLI">
+    [GitHub Copilot CLI](https://github.com/github/copilot-cli) runs as `copilot --acp`. The full worker image ships it, pinned. On a slim or custom image, install it first (`npm install -g @github/copilot`); the entrypoint fails boot with that hint when the binary is missing.
+
+    With a Copilot subscription, give it a token that has the **Copilot Requests** permission:
+
+    ```bash
+    HARNESS_PROVIDER=acp
+    ACP_TARGET=copilot
+    COPILOT_GITHUB_TOKEN=github_pat_...
+    MODEL_OVERRIDE=claude-sonnet-4.5   # optional; the CLI default otherwise
+    ```
+
+    Without one, bring your own model provider (BYOK). No GitHub login is needed:
+
+    ```bash
+    HARNESS_PROVIDER=acp
+    ACP_TARGET=copilot
+    COPILOT_PROVIDER_BASE_URL=https://openrouter.ai/api/v1
+    COPILOT_PROVIDER_API_KEY=sk-or-...
+    COPILOT_PROVIDER_MAX_PROMPT_TOKENS=200000
+    MODEL_OVERRIDE=google/gemini-3-flash-preview
+    ```
+
+    Set `COPILOT_PROVIDER_MAX_PROMPT_TOKENS` to the model's real context window. For a model it does not know, Copilot assumes a small budget, and the first turn (about 150k tokens of Copilot and swarm tool definitions) fails with "Static system messages and tool definitions exceed the model's usable context budget".
+
+    The preset forwards only `COPILOT_*` variables (`COPILOT_GITHUB_TOKEN`, every `COPILOT_PROVIDER_*` BYOK knob, `COPILOT_HOME`, `COPILOT_MODEL`) plus `GH_HOST` and the proxy variables. It never forwards the worker's `GITHUB_TOKEN` or `GH_TOKEN`: a git token without the Copilot Requests permission would fail Copilot auth. `MODEL_OVERRIDE` becomes `COPILOT_MODEL`. The adapter sets `COPILOT_AUTO_UPDATE=false`, so the pinned CLI is the one that runs.
+
+    Copilot CLI has no system-prompt flag. The adapter writes the swarm system prompt to `.github/instructions/agent-swarm.instructions.md` in a per-task directory outside the repo, and prepends that directory to `COPILOT_CUSTOM_INSTRUCTIONS_DIRS` (your own value is kept after it). Copilot reads it alongside the repo's own `AGENTS.md` and instructions; no repo file is written. The directory is removed when the session ends.
+
+    Copilot CLI is proprietary software under the [GitHub Copilot CLI License](https://github.com/github/copilot-cli/blob/main/LICENSE.md); the image keeps a copy at `/usr/share/doc/github-copilot-cli/LICENSE.md`. Its use is subject to the GitHub Terms of Service and Copilot terms.
   </Tab>
   <Tab value="claude-code-acp">
     Zed's [`claude-code-acp`](https://github.com/zed-industries/claude-code-acp) bridges Claude Code to ACP:
@@ -423,16 +454,16 @@ Any ACP-speaking agent works. A few starting points:
     Needs `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY` in the worker env. `ACP_TARGET_ENV_KEYS` explicitly forwards both supported credential options to the bridge process. This is a different code path from the swarm's native `HARNESS_PROVIDER=claude` adapter; prefer `claude` directly unless you specifically need the ACP transport.
   </Tab>
   <Tab value="Gemini CLI">
-    Gemini CLI has an experimental ACP mode:
+    [Gemini CLI](https://github.com/google-gemini/gemini-cli) has a curated preset that runs `gemini --acp` (the full worker image ships it):
 
     ```bash
     HARNESS_PROVIDER=acp
-    ACP_TARGET_COMMAND=gemini
-    ACP_TARGET_ARGS=["--experimental-acp"]
-    ACP_TARGET_ENV_KEYS=["GEMINI_API_KEY"]
+    ACP_TARGET=gemini
+    MODEL_OVERRIDE=gemini-3-flash-preview
+    GEMINI_API_KEY=...
     ```
 
-    Needs `GEMINI_API_KEY` in the worker env. If the installed Gemini CLI version expects another credential, add that key to `ACP_TARGET_ENV_KEYS` instead.
+    The preset forwards only Gemini's own auth and endpoint keys: `GEMINI_API_KEY`, `GOOGLE_API_KEY`, the Vertex AI set (`GOOGLE_GENAI_USE_VERTEXAI`, `GOOGLE_CLOUD_PROJECT`, `GOOGLE_CLOUD_LOCATION`, `GOOGLE_APPLICATION_CREDENTIALS`), `GOOGLE_GEMINI_BASE_URL`, `GOOGLE_VERTEX_BASE_URL` and `GEMINI_CLI_HOME`. The adapter writes the composed system prompt to a private temp file outside the task `cwd` and points `GEMINI_SYSTEM_MD` at it, so it replaces Gemini CLI's built-in prompt. Gemini CLI does not advertise an ACP `model` option, so `MODEL_OVERRIDE` reaches it as `GEMINI_MODEL` at spawn. The preset also sets `GEMINI_CLI_TRUST_WORKSPACE=true`, because a worker cannot answer the folder-trust prompt.
   </Tab>
   <Tab value="Custom">
     Any executable that speaks ACP over stdio (reads ndjson on stdin, writes ndjson on stdout) works without modification:
@@ -453,8 +484,8 @@ An ACP agent's *own* tools (file edit, shell, etc.) are whatever the target proc
 
 ### ACP Specifics
 
-- **The target receives the worker's swarm API key.** `newSession`'s swarm MCP server entry carries the worker's bearer as an `Authorization` header (see [How it works](#how-it-works) above) — the same credential every other spawned harness process receives (`claude`, `codex`, and the rest all pass their swarm bearer to the spawned CLI/subprocess the same way). `ACP_TARGET_COMMAND` is operator-configured and runs in the worker container as the worker; point it only at a binary you trust with that credential.
-- **No swarm-side credential gate.** The `acp` adapter has no `readyCheck` — the worker reports `ready: true` immediately. The Docker entrypoint does check the target binary at boot: it resolves the command the adapter would spawn (`opencode` for the preset, otherwise `ACP_TARGET_COMMAND` / `ACP_COMMAND`) and exits with `FATAL` if no target is configured or the executable is not on `$PATH`. Outside the Docker image, an unresolvable target still surfaces at session-spawn time (task fails with `ACP target failed during startup: ...`).
+- **The target receives a session-scoped `aseph_` token.** `newSession`'s swarm MCP server entry carries this token as an `Authorization` header (see [How it works](#how-it-works) above). The adapter mints it for the session's agent and task, with a 24-hour expiry, and fails closed if minting fails; it never falls back to the operator key. Session completion starts best-effort revocation. If revocation fails, the token remains valid until expiry. `ACP_TARGET_COMMAND` is operator-configured and runs in the worker container as the worker; point it only at a binary you trust with that agent's swarm MCP access for up to 24 hours.
+- **No swarm-side credential gate.** The `acp` adapter has no `readyCheck` — the worker reports `ready: true` immediately. The Docker entrypoint does check the target binary at boot: it resolves the command the adapter would spawn (`opencode`, `gemini` or `copilot` for a preset, otherwise `ACP_TARGET_COMMAND` / `ACP_COMMAND`) and exits with `FATAL` if no target is configured or the executable is not on `$PATH`. Outside the Docker image, an unresolvable target still surfaces at session-spawn time (task fails with `ACP target failed during startup: ...`).
 - **No live steering.** `deliverSteering` is not implemented; mid-run messages promote to follow-up tasks the same way an unsupported provider always handles them.
 - **No skill filesystem sync.** The generic worker image still seeds `~/.claude/skills`, `~/.opencode/skills`, etc. at boot, so a target that reads one of those directories natively (like opencode) still sees skills; a fully custom target sees whatever `ACP_SYSTEM_PROMPT_PATH` writes and nothing more.
 
@@ -519,6 +550,22 @@ The policy applies at task admission only. Worker boot, credential recovery, and
 
 Windows are independent. A model-scoped rejection never clears a key-wide rejection from the same session, and the reverse is also true: the worker reports both. Only a later non-rejected event for the same window clears a rejection. Stored window snapshots merge per window, and a snapshot never replaces one that was observed later (`lastSeenAt`), so an older `allowed` read cannot reopen an exhausted window. A structured rejection keeps the time its event was observed, so a rejection reported late cannot overwrite a recovery that another worker saw after it. Only a text-only rejection, which has no event, takes the report time.
 
+### Subscription seat limits
+
+The subscription plan of a key decides which model families it can run. A Claude Team standard seat (`claude_team_standard`) cannot run Fable. `GET /api/keys/available?model=fable` excludes those keys from the pick and lists them in `seatBlockedIndices`. A key with no plan, or a plan the swarm does not know, stays eligible.
+
+When no key in the pool can run the model, the task fails at once. The failure reason names the cause, for example `No CLAUDE_CODE_OAUTH_TOKEN key can run Fable: 9 keys are on a seat without Fable, 0 keys have the Fable window exhausted. Re-dispatch with another model or modelTier.` The swarm does not queue the task and does not change the model. `MODEL_WINDOW_EXHAUSTED_POLICY=fallback` does not apply to a seat block, because a seat block never resets.
+
+When the CLI rejects a model with `errorCode: "credits_required"` (for example `Fable 5.1 requires usage credits`), the worker records a seat mismatch, not a rate limit. The key `status` stays `available`. The key row gets `lastSeatMismatchAt` and `lastSeatMismatchModel`. For a Fable rejection, when `planSource` is not `manual`, the plan becomes `claude_team_standard` with `planSource: detected`. A rejection for another model changes no plan, because no plan in the map excludes that model. A `manual` plan is never changed; the server logs the contradiction instead.
+
+To correct the plan of a key, use the plan picker on the dashboard API keys page, or:
+
+```bash
+curl -X PATCH "$MCP_BASE_URL/api/keys/plan" \
+  -H "Authorization: Bearer $AGENT_SWARM_API_KEY" -H "Content-Type: application/json" \
+  -d '{"keyType":"CLAUDE_CODE_OAUTH_TOKEN","keySuffix":"TJAAA","plan":"claude_team_standard"}'
+```
+
 ### Codex OAuth Pool
 
 Codex workers support a **database-backed** multi-credential pool stored as `codex_oauth_0`, `codex_oauth_1`, ... in the swarm config store. Unlike the Claude comma-separated approach, Codex slots are provisioned via `codex-login` and persisted centrally so all workers can access them.
@@ -549,7 +596,7 @@ For the full provisioning guide, rate-limit detection details, and verification 
 
 ```bash
 # .env.docker
-HARNESS_PROVIDER=claude              # Optional — claude is the default
+HARNESS_PROVIDER=claude              # Optional — defaults to pi with OPENROUTER_API_KEY and neither ANTHROPIC_API_KEY nor CLAUDE_CODE_OAUTH_TOKEN; otherwise claude
 CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat-...
 API_KEY=your-api-key
 MCP_BASE_URL=http://host.docker.internal:3013

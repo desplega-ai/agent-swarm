@@ -84,6 +84,7 @@ docker-compose.desplega.yaml
 
 # bun test --timings scratch dir (CI restores it from the actions cache)
 .bun-test-timings/
+.bun-test-results/
 
 # Standalone black-box E2E reports
 e2e-results.json
@@ -101,3 +102,9 @@ packages/ui-e2e/artifacts.json
 # Python bytecode
 __pycache__/
 *.pyc
+
+# Claude Code lays the mod API types here when it loads this checkout as a plugin
+.claude-plugin/types/
+
+# Bun compile scratch files
+*.bun-build

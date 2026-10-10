@@ -1,26 +1,26 @@
 /**
- * Steering — shared presentation pieces for a single steering message.
+ * Steering: shared presentation pieces for a single steering message.
  *
  * Steering messages are user intent injected into an already-running task.
  * They surface in three places, and all three compose from here so the chip
  * and the body treatment can't drift:
  *
  *   1. Task detail → interleaved into the SESSION LOGS stream, positioned by
- *      `deliveredAt` — the moment the message actually entered the session.
+ *      `deliveredAt`, the moment the message actually entered the session.
  *   2. Task detail → the pinned "queued steering" bar at the tail of the log
  *      stream, for messages that are still `pending`.
  *   3. Sessions timeline → one row inside a task's `<ChainOfThought>` activity
  *      feed, positioned by `createdAt`.
  *
  * Density is the constraint: every one of those lists is made of single-line
- * rows, so `<SteeringLine>` is single-line too — marker, one combined
+ * rows, so `<SteeringLine>` is single-line too: marker, one combined
  * `mode · status` chip, the body truncated inline, and whatever timestamp the
  * host list already renders. The full body is one click (or one hover) away,
  * never a permanently expanded block.
  *
  * Status moves `pending → delivered → handled`, or terminates at `promoted`
  * (became a follow-up task) / `cancelled`. It updates off the 5s REST poll in
- * `useTaskSteeringMessages` — there is no websocket/SSE channel.
+ * `useTaskSteeringMessages`. There is no websocket/SSE channel.
  */
 
 import { useState } from "react";
@@ -30,7 +30,7 @@ import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn, formatSmartTime } from "@/lib/utils";
 
-/** Status-token classes per lifecycle state (no raw palette literals — lint gate). */
+/** Status-token classes per lifecycle state (no raw palette literals: lint gate). */
 export const STEERING_STATUS_CLASS: Record<SteeringStatus, string> = {
   pending: "border-status-pending/30 text-status-pending-strong",
   delivered: "border-status-info/30 text-status-info-strong",
@@ -41,7 +41,7 @@ export const STEERING_STATUS_CLASS: Record<SteeringStatus, string> = {
 
 const STEERING_STATUS_HINT: Record<SteeringStatus, string> = {
   pending: "Waiting for the worker to pick it up.",
-  delivered: "Handed to the harness — the agent hasn't acknowledged it yet.",
+  delivered: "Handed to the harness. The agent hasn't acknowledged it yet.",
   handled: "The agent acknowledged handling this message.",
   promoted: "Couldn't be delivered live, so it became a follow-up task.",
   cancelled: "Cancelled before delivery.",
@@ -51,7 +51,7 @@ const STEERING_STATUS_HINT: Record<SteeringStatus, string> = {
  * The timestamp a message should be sorted / displayed by.
  *
  * `delivered` / `handled` rows belong where they entered the session
- * (`deliveredAt`), not where the user typed them — that's what makes the
+ * (`deliveredAt`), not where the user typed them. That's what makes the
  * interleaved log stream read correctly. Everything else falls back to
  * `createdAt`.
  */
@@ -94,8 +94,8 @@ export interface SteeringChipProps {
  * One combined `queue · handled` chip. Two separate chips (mode + status) cost
  * horizontal room in these dense lists for no extra information, so they're
  * merged and the nuance moves into the tooltip: the status hint, the degrade
- * note when the harness downgraded the mode, the transition timestamp, and —
- * for `handled` — the agent's own note on how it incorporated the steering.
+ * note when the harness downgraded the mode, the transition timestamp, and
+ * (for `handled`) the agent's own note on how it incorporated the steering.
  */
 export function SteeringChip({ message, side = "top", className }: SteeringChipProps) {
   const modeLabel = message.mode === "steer" ? "interrupt" : "queue";
@@ -129,7 +129,7 @@ export function SteeringChip({ message, side = "top", className }: SteeringChipP
 export interface SteeringLineProps {
   message: SteeringMessage;
   /**
-   * Leading marker — the sessions activity feed passes an icon, the session-log
+   * Leading marker: the sessions activity feed passes an icon, the session-log
    * stream passes a "STEERING" text marker styled like its SYSTEM marker.
    */
   marker?: React.ReactNode;
@@ -140,13 +140,13 @@ export interface SteeringLineProps {
 
 /**
  * Single-line steering row. The body collapses whitespace and truncates; when
- * there is more to see it becomes a button — hover for the full text, click to
+ * there is more to see it becomes a button: hover for the full text, click to
  * expand it in place.
  */
 export function SteeringLine({ message, marker, trailing, className }: SteeringLineProps) {
   const [expanded, setExpanded] = useState(false);
   const oneLine = message.body.replace(/\s+/g, " ").trim();
-  // Cheap "there's more to see" heuristic — collapsed whitespace means the
+  // Cheap "there's more to see" heuristic: collapsed whitespace means the
   // rendered line already differs from the source, and long single lines get
   // clipped by `truncate` regardless of container width.
   const hasMore = oneLine.length > 72 || oneLine !== message.body.trim();
@@ -154,7 +154,7 @@ export function SteeringLine({ message, marker, trailing, className }: SteeringL
   const body = (
     <span
       className={cn(
-        "min-w-0 flex-1 text-foreground/90",
+        "min-w-0 flex-1 text-foreground",
         expanded ? "whitespace-pre-wrap break-words" : "truncate",
       )}
     >
@@ -197,7 +197,7 @@ export function SteeringLine({ message, marker, trailing, className }: SteeringL
       {message.promotedTaskId ? (
         <Link
           to={`/tasks/${message.promotedTaskId}`}
-          className="shrink-0 font-mono text-[10px] text-primary hover:underline"
+          className="shrink-0 font-mono text-meta text-primary hover:underline"
         >
           → #{message.promotedTaskId.slice(0, 8)}
         </Link>

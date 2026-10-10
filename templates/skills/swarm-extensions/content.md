@@ -4,15 +4,18 @@ An extension is a trusted TypeScript hook bundle that runs inside the swarm API 
 
 Do not use an extension for work that one task, one script, or one schedule can do.
 
-## Install only from the catalog
+## Two ways to install
 
-Extensions install only from the predefined catalog in the repo (`templates/extensions/<name>/`). Inline bundles are rejected with `inline_install_disabled`. To ship a new extension, open a PR that adds a template directory (see Bundle shape below); it becomes installable once that build is deployed.
+- **Catalog** (always on): a predefined extension in the repo (`templates/extensions/<name>/`), installed by name. Any authenticated agent can do it. To ship a catalog extension, open a PR that adds a template directory (see Bundle shape below); it becomes installable once that build is deployed.
+- **Inline** (opt-in): a `manifest` plus a `files` map in the install request, with no PR and no deploy. It is off unless an operator sets `EXTENSION_ALLOW_INLINE_INSTALL=true` (dashboard Settings > Configuration > Security & access, or the API environment). With the flag off the install fails with `inline_install_disabled`. With it on, only a lead, operator, or dashboard user may send an inline bundle; a worker gets 403 and stays catalog-only. An inline bundle runs as code in the API process once enabled, so write it as carefully as a catalog one.
+
+Both paths run the same validation and both land disabled.
 
 ## Tools
 
 `extension-catalog`, `extension-install` and `extension-list`. They are deferred. Load them with your harness tool search before the first call.
 
-`extension-catalog` lists the predefined extensions, the assets each declares, and whether it is installed. `extension-install` takes `{ template: "<name>" }` (plus optional `priority` and `config`), validates the bundle (manifest, imports, typecheck against the hook contract, script typecheck) and stores it. Any authenticated agent, including a worker, can install. Your agent is recorded as its owner in `createdByAgentId`; `extension-list` exposes that field. Always send your `X-Agent-ID` when using REST so ownership is attributed to you.
+`extension-catalog` lists the predefined extensions, the assets each declares, and whether it is installed. `extension-install` takes `{ template: "<name>" }` or, for an inline bundle, `{ manifest, files }` (plus optional `priority` and `config`). `template` and `manifest`/`files` are mutually exclusive. It validates the bundle (manifest, imports, typecheck against the hook contract, script typecheck) and stores it. Any authenticated agent, including a worker, can install a catalog template. Your agent is recorded as its owner in `createdByAgentId`; `extension-list` exposes that field. Always send your `X-Agent-ID` when using REST so ownership is attributed to you.
 
 Install also creates the `ext:<name>` agent and every asset the extension declares. Scripts are live and callable right away (scripts have no enabled state). Schedules, workflows, and skills are created disabled. A disabled workflow ignores its triggers and refuses manual triggers.
 
@@ -22,7 +25,7 @@ Workers may install subsequent versions only for their own extensions, and PATCH
 
 A new install is disabled and inert. A lead, operator, or dashboard user must enable it with `extension-enable` or `POST /api/extensions/{id}/enable`. Enabling turns its schedules, workflows, and skills on; disabling turns them off and remembers which ones you had turned off. Workers cannot enable, disable, or activate versions. Report the extension name and the required activation step.
 
-Installing a catalog template whose content changed stages a new version without activating it. Workers may stage updates while an extension is enabled, but cannot PATCH or change its live config/priority. Ask a lead or operator to make those changes. `EXTENSION_ALLOW_LEAD_ACTIVATION=false` restricts activation to operators/dashboard users.
+Installing a template or inline bundle whose content changed stages a new version without activating it. An operator or dashboard user reinstalling an enabled extension activates the new version immediately; a lead never does. Workers may stage updates while an extension is enabled, but cannot PATCH or change its live config/priority. Ask a lead or operator to make those changes. `EXTENSION_ALLOW_LEAD_ACTIVATION=false` restricts activation to operators/dashboard users.
 
 Uninstall (`extension-delete`, disabled extensions only) deletes the assets you never edited and detaches the ones you did, so your edits survive.
 
@@ -48,6 +51,10 @@ curl -s "$MCP_BASE_URL/api/extensions/type-defs" \
 | `pre.tool.call` | before an agent MCP tool call runs | `block(reason)` or `modify({ args })` |
 | `post.task.created`, `post.task.completed`, `post.task.failed`, `post.task.cancelled`, `post.task.superseded`, `post.task.progress` | after the change is committed | none |
 | `post.slack.message`, `post.tool.call` | after the message or tool call finished | none |
+| `post.approval.resolved` | after a person answers an approval request, workflow or standalone (not on timeout or cancel) | none |
+| `post.task.budgetRefused` | after a task is refused by a daily spend budget | none |
+| `post.email.received`, `post.kapso.message` | after an inbound AgentMail or Kapso message is received | none |
+| `post.vcs.event` | after a GitHub, GitLab, or Azure DevOps webhook event; `{ provider, kind, action, repo, number?, ... }` | none |
 
 `event.origin` on `pre.task.create` tells where the task comes from: `rest`, `app`, `mcp`, `slack`, `schedule`, `workflow`, `webhook`, `followUp`, or `extension:<name>`.
 
@@ -81,6 +88,25 @@ assets:
 A workflow file holds `name`, optional `description`, `definition`, and optional `triggers`, `cooldown`, `input`, and `triggerSchema`. Install validates the definition. A `swarm-script` node can call the extension's own scripts. A skill directory holds only `SKILL.md` and `files/**`; each file under `files/` becomes a skill file.
 
 A JSON manifest carries `"$schema": "../manifest.schema.json"` instead. After changing a template, run `bun run build:extension-catalog` and commit `src/extensions/catalog.generated.json`.
+
+### Inline bundle
+
+An inline install sends the same manifest as a JSON object, plus every file it references in `files`, keyed by bundle path:
+
+```json
+{
+  "manifest": {
+    "name": "require-ticket-ref",
+    "description": "Blocks REST and MCP tasks that do not name a ticket",
+    "version": "1.0.0",
+    "runtime": "api",
+    "assets": { "hooks": "hooks.ts" }
+  },
+  "files": { "hooks.ts": "import { block, type SwarmExtension } from \"swarm-extension\";\n..." }
+}
+```
+
+`files` must hold `assets.hooks`, each script `file`, each workflow `file`, and for each skill `dir` its `SKILL.md` plus any `files/**`. A file the manifest does not reference is rejected. Naming rules (`<name>-` prefixes, schedule scripts declared in `assets.scripts`) are the same as for a template. To change an inline extension, send the full bundle again under the same name; it adds a new version.
 
 Rules for `hooks.ts`:
 
@@ -145,5 +171,6 @@ export default extension;
 - Modifying fields the event does not allow. Read the `*Modify` type for that event.
 - Expecting the extension to run after install. Its hooks, schedules, workflows, and skills are off until a lead or operator enables it.
 - Expecting agents to see an extension skill after enable. Install it on each agent with `skill-install`.
-- Sending an inline `manifest`/`files` bundle. Install takes a catalog `template` name only.
+- Sending an inline `manifest`/`files` bundle as a worker, or without `EXTENSION_ALLOW_INLINE_INSTALL` on. Workers use a catalog `template`; with the flag off ask an operator to turn it on, or ship a catalog template.
+- Sending both `template` and `manifest`/`files`. Pick one.
 - Blocking tasks from every origin. Check `event.origin` so schedules, workflows, and follow-ups keep working unless you mean to block them.

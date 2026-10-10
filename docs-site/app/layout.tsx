@@ -61,8 +61,8 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: "summary_large_image",
-    site: "@desplegalabs",
-    creator: "@desplegalabs",
+    site: "@agent__swarm",
+    creator: "@agent__swarm",
     title: "agent-swarm.dev Documentation",
     description:
       "agent-swarm.dev docs for multi-agent orchestration, harness configuration, workflows, memory, MCP tools, and AI coding agent teams.",

@@ -110,6 +110,7 @@ export function ConnectionFormDialog({
                   variant="ghost"
                   className="shrink-0"
                   onClick={() => setShowKey(!showKey)}
+                  aria-label={showKey ? "Hide API key" : "Show API key"}
                 >
                   {showKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                 </Button>

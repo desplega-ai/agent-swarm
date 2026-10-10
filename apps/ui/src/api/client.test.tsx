@@ -4,7 +4,8 @@ mock.module("@/lib/config", () => ({
   getConfig: () => ({ apiUrl: "https://api.example.test", apiKey: "" }),
 }));
 
-const { api } = await import("./client");
+const { api, ApprovalRespondError } = await import("./client");
+type ApprovalRespondError = InstanceType<typeof ApprovalRespondError>;
 
 const originalFetch = globalThis.fetch;
 
@@ -23,6 +24,35 @@ describe("respondToApprovalRequest", () => {
     await expect(api.respondToApprovalRequest("request-id", {})).rejects.toThrow(
       "Required responses missing or invalid: reason",
     );
+  });
+
+  test("carries the status of a refused answer", async () => {
+    globalThis.fetch = async () =>
+      new Response(JSON.stringify({ error: "You are not one of this request's approvers" }), {
+        status: 403,
+        headers: { "Content-Type": "application/json" },
+      });
+
+    const error = await api.respondToApprovalRequest("request-id", {}).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ApprovalRespondError);
+    expect((error as ApprovalRespondError).status).toBe(403);
+    expect((error as ApprovalRespondError).message).toBe(
+      "You are not one of this request's approvers",
+    );
+  });
+
+  test("sends the picked name only as the unverified respondedBy claim", async () => {
+    let body: unknown;
+    globalThis.fetch = (async (_url: string, init?: RequestInit) => {
+      body = JSON.parse(String(init?.body));
+      return new Response(JSON.stringify({ approvalRequest: {} }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }) as typeof fetch;
+
+    await api.respondToApprovalRequest("request-id", { q1: true }, "taras@example.com");
+    expect(body).toEqual({ responses: { q1: true }, respondedBy: "taras@example.com" });
   });
 
   test("falls back to the response status when the body has no error", async () => {

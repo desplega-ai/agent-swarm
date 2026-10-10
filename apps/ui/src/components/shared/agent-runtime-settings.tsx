@@ -1,5 +1,5 @@
 import { nearestReasoningLevel } from "@desplega/model-catalog";
-import { AlertTriangle, ArrowUpCircle, Save } from "lucide-react";
+import { AlertTriangle, ArrowUpCircle, Info, Save } from "lucide-react";
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -78,6 +78,10 @@ const CREDENTIAL_KEYS = [
   "OPENAI_API_KEY",
   "OPENROUTER_API_KEY",
   "CODEX_OAUTH",
+  "DEEPSEEK_API_KEY",
+  "AMP_API_KEY",
+  "CURSOR_API_KEY",
+  "XAI_API_KEY",
 ];
 
 function configuredModel(configs: { key: string; value: string }[] | undefined): string {
@@ -144,7 +148,7 @@ function configuredAcpTarget(
   fallback: AcpTarget,
 ): AcpTarget {
   const target = configuredValue(configs, "ACP_TARGET");
-  return target === "opencode" || target === "custom" ? target : fallback;
+  return ACP_TARGET_CATALOG.some((entry) => entry.id === target) ? (target as AcpTarget) : fallback;
 }
 
 export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
@@ -355,6 +359,10 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
       ? !groups.find((g) => g.provider === modelOption.provider)?.enabled
       : false;
 
+  if (agent.harnessProvider && !isLocalHarness(agent.harnessProvider)) {
+    return <UnsupportedHarnessNotice agent={agent} configuredModel={model} />;
+  }
+
   if (!gate.supported) {
     return (
       <UnsupportedApiNotice
@@ -370,7 +378,7 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-start gap-3">
-        <div className="w-56 space-y-3">
+        <div className="w-full space-y-3 sm:w-56">
           <div className="space-y-1.5">
             <Label>Harness</Label>
             <Select value={harness} onValueChange={(v) => changeHarness(v as LocalHarnessProvider)}>
@@ -454,7 +462,7 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
         </div>
 
         {modelSelectionEnabled ? (
-          <div className="min-w-[260px] flex-1 space-y-1.5">
+          <div className="w-full min-w-0 flex-1 space-y-1.5 sm:w-auto sm:min-w-[260px]">
             <Label>Model</Label>
             {customMode ? (
               <Input value={model} onChange={(event) => changeModel(event.target.value)} />
@@ -750,7 +758,7 @@ function ReasoningEffortSegment({
       disabled={disabled}
       onClick={onClick}
       className={cn(
-        "flex h-9 items-center gap-1.5 px-3 text-xs font-medium transition-colors",
+        "flex h-9 shrink-0 items-center gap-1.5 px-3 text-xs font-medium whitespace-nowrap transition-colors",
         bordered && "border-l border-border",
         active
           ? "bg-primary text-primary-foreground"
@@ -782,7 +790,9 @@ function ReasoningEffortToggle({
   modelLabel,
 }: ReasoningEffortToggleProps) {
   return (
-    <div className="inline-flex w-fit overflow-hidden rounded-md border border-border">
+    // Seven segments are wider than a phone: the strip scrolls inside its own
+    // border instead of spilling out of the card.
+    <div className="inline-flex w-fit max-w-full overflow-x-auto overflow-y-hidden rounded-md border border-border [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
       <ReasoningEffortSegment
         active={value === ""}
         disabled={false}
@@ -845,7 +855,6 @@ function UnsupportedApiNotice({
   currentVersion: string | null;
   requiredVersion: string;
 }) {
-  const harness = isLocalHarness(agent.harnessProvider) ? agent.harnessProvider : null;
   return (
     <div className="space-y-3">
       <div className="flex items-start gap-2 rounded-md border border-status-info/30 bg-status-info/5 p-3 text-xs">
@@ -864,20 +873,67 @@ function UnsupportedApiNotice({
           </p>
         </div>
       </div>
-      <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
-        <span className="flex items-center gap-2">
-          <span className="text-muted-foreground">Harness:</span>
-          {harness ? <HarnessIcon harness={harness} className="h-4 w-4" /> : null}
-          <span>{harness ? HARNESS_LABEL[harness] : (agent.harnessProvider ?? "unknown")}</span>
-        </span>
-        <span className="flex items-center gap-2">
-          <span className="text-muted-foreground">Model:</span>
-          {modelOption ? (
-            <ProviderIcon provider={modelOption.providerId} className="h-4 w-4" />
-          ) : null}
-          <span>{modelOption ? modelOption.label : configured || "unset"}</span>
-        </span>
+      <ReadOnlyRuntimeSummary
+        agent={agent}
+        modelOption={modelOption}
+        configuredModel={configured}
+      />
+    </div>
+  );
+}
+
+/**
+ * The editor only knows the local harnesses. Any other harness (e.g. dsh) would
+ * otherwise render as "Claude", and saving would switch the agent to Claude.
+ */
+function UnsupportedHarnessNotice({
+  agent,
+  configuredModel,
+}: {
+  agent: Agent;
+  configuredModel: string;
+}) {
+  const label = HARNESS_LABEL[agent.harnessProvider ?? ""] ?? agent.harnessProvider;
+  return (
+    <div className="space-y-3">
+      <div className="flex items-start gap-2 rounded-md border border-status-info/30 bg-status-info/5 p-3 text-xs">
+        <Info className="mt-0.5 h-4 w-4 shrink-0 text-status-info-strong" />
+        <div className="space-y-1">
+          <p className="font-medium text-foreground">Runtime editor unavailable</p>
+          <p className="text-muted-foreground">
+            The dashboard cannot edit the {label} harness yet. Showing current settings read-only.
+          </p>
+        </div>
       </div>
+      <ReadOnlyRuntimeSummary agent={agent} modelOption={null} configuredModel={configuredModel} />
+    </div>
+  );
+}
+
+function ReadOnlyRuntimeSummary({
+  agent,
+  modelOption,
+  configuredModel: configured,
+}: {
+  agent: Agent;
+  modelOption: ModelOption | null;
+  configuredModel: string;
+}) {
+  const provider = agent.harnessProvider;
+  return (
+    <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
+      <span className="flex items-center gap-2">
+        <span className="text-muted-foreground">Harness:</span>
+        <HarnessIcon harness={provider} className="h-4 w-4" />
+        <span>{(provider && HARNESS_LABEL[provider]) ?? provider ?? "unknown"}</span>
+      </span>
+      <span className="flex items-center gap-2">
+        <span className="text-muted-foreground">Model:</span>
+        {modelOption ? (
+          <ProviderIcon provider={modelOption.providerId} className="h-4 w-4" />
+        ) : null}
+        <span>{modelOption ? modelOption.label : configured || "unset"}</span>
+      </span>
     </div>
   );
 }

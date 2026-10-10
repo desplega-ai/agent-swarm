@@ -1,6 +1,12 @@
 import type { Page } from "@playwright/test";
 import { expect, test } from "../fixtures";
 
+// The task page shows two columns from 60rem of page width. The chromium
+// project's Desktop Chrome device (1280x720) leaves 976 px once the sidebar
+// takes its share, just over that. The wide tests pin a wide window, so they
+// do not depend on that margin.
+test.use({ viewport: { width: 1440, height: 900 } });
+
 type SessionLogsResponse = { success: true; count: number };
 
 interface CodexLogSeed {
@@ -122,7 +128,7 @@ async function completeLiveMessage(
 
 async function openSessionLogs(page: Page, taskId: string, mobile = false) {
   await page.goto(`/tasks/${taskId}`);
-  if (mobile) await page.getByRole("tab", { name: "Session Logs" }).click();
+  if (mobile) await page.getByRole("tab", { name: "Log", exact: true }).click();
 }
 
 async function seedContextSnapshots(
@@ -198,6 +204,39 @@ test("Codex app-server logs render messages, deltas, and MCP results", async ({
   await clean.assertClean();
 });
 
+test("a finished task's log opens on Messages, with the tool call folded", async ({
+  page,
+  api,
+  seed,
+  clean,
+}, testInfo) => {
+  test.skip(!seed, "remote run without seed");
+  const logs = await seedCodexLogs(api, seed!.tasks.completed, testInfo.testId);
+  await page.goto(`/tasks/${seed!.tasks.completed}`);
+
+  const visible = { visible: true } as const;
+  await expect(page.getByRole("radio", { name: "Messages" }).filter(visible)).toBeChecked();
+  await expect(page.getByText(logs.secondMessage, { exact: true }).filter(visible)).toHaveCount(1);
+  // The MCP call is folded into one activity line until the line opens.
+  const toolButton = page.getByRole("button", { name: /e2e-mcp\.inspect/ }).filter(visible);
+  await expect(toolButton).toHaveCount(0);
+  await page
+    .getByRole("button", { name: /^Ran 1 tool/ })
+    .filter(visible)
+    .click();
+  await toolButton.click();
+  await expect(page.getByText(logs.mcpResult, { exact: true }).filter(visible)).toBeVisible();
+
+  // Everything shows every event, and the pick survives a reload.
+  await page.getByRole("radio", { name: "Everything" }).filter(visible).click();
+  await expect(page).toHaveURL(/[?&]logView=everything/);
+  await page.reload();
+  await expect(page.getByRole("radio", { name: "Everything" }).filter(visible)).toBeChecked();
+  await expect(toolButton).toBeVisible();
+
+  await clean.assertClean();
+});
+
 test("context usage keeps the latest complete measurement", async ({
   page,
   seed,
@@ -209,10 +248,15 @@ test("context usage keeps the latest complete measurement", async ({
   await page.goto(`/tasks/${seed!.tasks.inProgress}`);
 
   await expect(
-    page.getByText("191.5K / 1.1M", { exact: true }).filter({ visible: true }),
+    page.getByText("191.5K of 1.1M tokens", { exact: true }).filter({ visible: true }),
   ).toBeVisible();
-  await expect(page.getByText("18%", { exact: true }).filter({ visible: true })).toHaveCount(2);
-  await expect(page.getByText("191.5K / 200.0K", { exact: true })).toHaveCount(0);
+  // The rail draws the percent once, next to the bar, and the peak on the
+  // tokens line.
+  await expect(page.getByText("18%", { exact: true }).filter({ visible: true })).toHaveCount(1);
+  await expect(page.getByText("peak 18%", { exact: true }).filter({ visible: true })).toHaveCount(
+    1,
+  );
+  await expect(page.getByText("191.5K of 200K tokens", { exact: true })).toHaveCount(0);
 
   await clean.assertClean();
 });
@@ -236,15 +280,19 @@ test("context usage does not combine incomplete measurements", async ({
   await expect(
     page.getByText("Unavailable", { exact: true }).filter({ visible: true }),
   ).toBeVisible();
-  await expect(page.getByText("191.5K / 200.0K", { exact: true })).toHaveCount(0);
-  await expect(page.getByText("18%", { exact: true }).filter({ visible: true })).toHaveCount(1);
+  await expect(page.getByText("191.5K of 200K tokens", { exact: true })).toHaveCount(0);
+  // No usable measurement: no bar and no current percent, only the peak.
+  await expect(page.getByText("18%", { exact: true }).filter({ visible: true })).toHaveCount(0);
+  await expect(page.getByText("peak 18%", { exact: true }).filter({ visible: true })).toHaveCount(
+    1,
+  );
   await clean.assertClean();
 });
 
-test.describe("below the lg breakpoint", () => {
+test.describe("below the 60rem page-width switch (tabs layout)", () => {
   test.use({ viewport: { width: 900, height: 900 } });
 
-  test("Codex app-server messages render in the Session Logs tab", async ({
+  test("Codex app-server messages render in the Log tab", async ({
     page,
     api,
     seed,

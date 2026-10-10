@@ -1,6 +1,6 @@
 import pkg from "../../../../package.json";
 import { defaultAssetKey } from "../../../assets/key";
-import type { telemetry } from "../../../telemetry";
+import type { TaskTelemetryEvent, TaskTelemetryInput } from "../../../telemetry-trigger";
 import type {
   Agent,
   AgentLog,
@@ -42,10 +42,11 @@ type TaskWriteDependencies = {
     agentId: string | null,
     sourceTexts: Array<string | null | undefined>,
   ) => Promise<TaskAttachment[]>;
-  emitTaskLifecycleTelemetryAfterCommit: (
-    event: string,
-    props: Parameters<typeof telemetry.taskEvent>[1],
+  emitTaskLifecycleTelemetryAfterCommit: <S extends TaskTelemetryEvent>(
+    event: S,
+    props: TaskTelemetryInput<S>,
     verify?: (task: AgentTask | null) => boolean,
+    actorUserId?: string | null,
   ) => void;
   taskContextForTelemetry: (task: AgentTask) => {
     provider?: ProviderName;
@@ -86,7 +87,7 @@ export async function createTask(
       id,
       defaultAssetKey("task", id),
       agentId,
-      task,
+      scrubSecrets(task),
       "pending",
       source,
       options?.slackChannelId ?? null,
@@ -318,6 +319,22 @@ export async function updateTaskClaudeSessionId(
 }
 
 /**
+ * Records the harness that ran (or tried to run) a task when no session ever
+ * reported it. `provider` is otherwise written only by the session-init path,
+ * so a task whose harness failed to spawn kept `provider` NULL and looked like
+ * a task that never started. Never overwrites a provider already recorded.
+ */
+export async function recordTaskProviderIfUnset(
+  taskId: string,
+  provider: ProviderName,
+): Promise<void> {
+  await getDbClient().run("UPDATE agent_tasks SET provider = ? WHERE id = ? AND provider IS NULL", [
+    provider,
+    taskId,
+  ]);
+}
+
+/**
  * Sets or clears a task's display title (session rename). Trims the input and
  * normalizes an empty string to NULL (clear). Deliberately does NOT touch
  * `lastUpdatedAt` — a rename is not activity, and the sessions sidebar sorts
@@ -350,6 +367,8 @@ export async function completeTask(
     return null;
   }
 
+  // One scrubbed copy feeds both the stored row and the task.completed event.
+  const scrubbedOutput = output ? scrubSecrets(output) : output;
   const row = await getDbClient().transaction(async () => {
     const finishedAt = new Date().toISOString();
     // The status predicate re-checks the idempotency guard atomically: the
@@ -362,10 +381,10 @@ export async function completeTask(
     );
     if (!completed) return null;
 
-    if (output) {
+    if (scrubbedOutput) {
       completed = await getDbClient().get<AgentTaskRow>(
         "UPDATE agent_tasks SET output = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ? RETURNING *",
-        [scrubSecrets(output), id],
+        [scrubbedOutput, id],
       );
     }
     if (completed && options?.addTags?.length) {
@@ -426,7 +445,7 @@ export async function completeTask(
         .then(({ workflowEventBus }) => {
           workflowEventBus.emit("task.completed", {
             taskId: id,
-            output,
+            output: scrubbedOutput,
             agentId: row.agentId,
             workflowRunId: row.workflowRunId,
             workflowRunStepId: row.workflowRunStepId,
@@ -527,7 +546,7 @@ export async function failTask(
         .then(({ workflowEventBus }) => {
           workflowEventBus.emit("task.failed", {
             taskId: id,
-            failureReason: reason,
+            failureReason: scrubbedReason,
             agentId: row.agentId,
             workflowRunId: row.workflowRunId,
             workflowRunStepId: row.workflowRunStepId,
@@ -612,7 +631,7 @@ export async function cancelTask(id: string, reason?: string): Promise<AgentTask
   }
 
   const finishedAt = new Date().toISOString();
-  const cancelReason = reason ?? "Cancelled by user";
+  const cancelReason = scrubSecrets(reason ?? "Cancelled by user");
   // Status predicate re-checks the idempotency guard atomically (a racing
   // terminal transition can land during the await above).
   const row = await getDbClient().get<AgentTaskRow>(
@@ -643,7 +662,7 @@ export async function cancelTask(id: string, reason?: string): Promise<AgentTask
         agentId: row.agentId ?? undefined,
         oldValue: oldTask.status,
         newValue: "cancelled",
-        metadata: reason ? { reason } : undefined,
+        metadata: reason ? { reason: cancelReason } : undefined,
       });
     } catch {}
     getDbClient().afterCommit(() => {

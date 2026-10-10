@@ -19,6 +19,7 @@ afterAll(async () => {
 // sees exactly which task the panel creates and which components it renders.
 mock.module("@/lib/utils", () => require("../../lib/utils"));
 mock.module("@/lib/enter-submit", () => require("../../lib/enter-submit"));
+mock.module("@/hooks/use-object-url", () => require("../../hooks/use-object-url"));
 mock.module("@/components/ui/button", () => require("../ui/button"));
 mock.module("@/components/ui/input", () => require("../ui/input"));
 mock.module("@/components/ui/popover", () => require("../ui/popover"));

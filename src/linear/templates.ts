@@ -16,12 +16,17 @@ registerTemplate({
   header: "[Linear {{issue_identifier}}] {{issue_title}}",
   defaultBody: `Source: Linear (Agent Session)
 URL: {{issue_url}}{{session_section}}
-{{description_section}}`,
+{{request_section}}{{description_section}}`,
   variables: [
     { name: "issue_identifier", description: "Linear issue identifier (e.g. ENG-123)" },
     { name: "issue_title", description: "Issue title" },
     { name: "issue_url", description: "Issue URL on Linear" },
     { name: "session_section", description: "Session URL line or empty string" },
+    {
+      name: "request_section",
+      description:
+        "Comment that opened the session (with author when known), or empty string for assignment-triggered sessions",
+    },
     { name: "description_section", description: "Description section or empty string" },
   ],
   category: "event",
@@ -32,13 +37,18 @@ registerTemplate({
   header: "[Linear {{issue_identifier}}] Re-assigned: {{issue_title}}",
   defaultBody: `Source: Linear (Agent Session re-assignment)
 URL: {{issue_url}}{{session_section}}
-{{description_section}}
+{{request_section}}{{description_section}}
 This issue was previously tracked but the original task has completed. A new task has been created to handle the re-assignment.`,
   variables: [
     { name: "issue_identifier", description: "Linear issue identifier (e.g. ENG-123)" },
     { name: "issue_title", description: "Issue title" },
     { name: "issue_url", description: "Issue URL on Linear" },
     { name: "session_section", description: "Session URL line or empty string" },
+    {
+      name: "request_section",
+      description:
+        "Comment that opened the session (with author when known), or empty string for assignment-triggered sessions",
+    },
     { name: "description_section", description: "Description section or empty string" },
   ],
   category: "event",

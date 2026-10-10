@@ -33,6 +33,7 @@ import {
   preflightAutomation,
   renderAutomationTokens,
 } from "../be/automation-preflight";
+import * as dbModule from "../be/db";
 import {
   closeDb,
   createAgent,
@@ -58,6 +59,7 @@ import {
   startScheduler,
   stopScheduler,
 } from "../scheduler/scheduler";
+import * as scriptLoader from "../scripts-runtime/loader";
 import type { Workflow, WorkflowDefinition } from "../types";
 import { InProcessEventBus } from "../workflows/event-bus";
 import { BaseExecutor, type ExecutorResult } from "../workflows/executors/base";
@@ -146,6 +148,38 @@ async function saveGlobalScript(name: string, source: string) {
     agentId,
     typeChecked: true,
   });
+}
+
+type ScheduleScriptRunRow = {
+  agentId: string;
+  scriptName: string;
+  source: string;
+  kind: string;
+  status: string;
+  output: string | null;
+  error: string | null;
+  finishedAt: string | null;
+};
+
+async function scriptRunsFor(scriptName: string): Promise<ScheduleScriptRunRow[]> {
+  return getDbClient().query<ScheduleScriptRunRow>(
+    "SELECT agentId, scriptName, source, kind, status, output, error, finishedAt FROM script_runs WHERE scriptName = ?",
+    [scriptName],
+  );
+}
+
+type RunScriptOutput = Awaited<ReturnType<typeof scriptLoader.runScript>>;
+
+function fakeRunOutput(overrides: Partial<RunScriptOutput>): RunScriptOutput {
+  return {
+    result: undefined,
+    stdout: "",
+    stderr: "",
+    exitCode: 0,
+    durationMs: 1,
+    truncated: { stdout: false, stderr: false },
+    ...overrides,
+  } as RunScriptOutput;
 }
 
 beforeAll(async () => {
@@ -718,6 +752,11 @@ describe("dispatchScheduleTarget — script target", () => {
     const result = await dispatchScheduleTarget(schedule);
     expect(result.triggeredWorkflows).toBe(false);
     expect(result.task).toBeUndefined();
+
+    const runs = await scriptRunsFor("schedule-target-type-echo");
+    expect(runs).toHaveLength(1);
+    expect(runs[0]?.status).toBe("completed");
+    expect(JSON.parse(runs[0]?.output ?? "null")).toEqual({ received: { hello: "world" } });
   }, 15_000);
 
   skip("scheduled script runs receive ctx.api and ctx.mcp connections", async () => {
@@ -794,7 +833,104 @@ describe("dispatchScheduleTarget — script target", () => {
     });
 
     await expect(dispatchScheduleTarget(schedule)).rejects.toThrow();
+
+    const runs = await scriptRunsFor("schedule-target-type-throws");
+    expect(runs).toHaveLength(1);
+    expect(runs[0]?.status).toBe("failed");
+    expect(runs[0]?.error).toContain("boom");
   }, 15_000);
+});
+
+describe("dispatchScheduleTarget — script target records a script_runs row", () => {
+  async function scheduleFor(scriptName: string) {
+    await saveGlobalScript(scriptName, `export default async () => ({ ok: true });`);
+    return createScheduledTask({
+      name: `record-${scriptName}`,
+      intervalMs: 60_000,
+      targetType: "script",
+      scriptName,
+      createdByAgentId: agentId,
+    });
+  }
+
+  test("a completed scheduled run writes a completed inline row that points at the script version", async () => {
+    const scriptName = `record-ok-${crypto.randomUUID()}`;
+    const schedule = await scheduleFor(scriptName);
+    const run = spyOn(scriptLoader, "runScript").mockResolvedValue(
+      fakeRunOutput({ result: { polled: 3 } }),
+    );
+    try {
+      await dispatchScheduleTarget(schedule);
+    } finally {
+      run.mockRestore();
+    }
+
+    const runs = await scriptRunsFor(scriptName);
+    expect(runs).toHaveLength(1);
+    const row = runs[0];
+    expect(row?.kind).toBe("inline");
+    expect(row?.status).toBe("completed");
+    expect(row?.agentId).toBe(agentId);
+    expect(row?.finishedAt).toBeTruthy();
+    expect(row?.error).toBeNull();
+    expect(JSON.parse(row?.output ?? "null")).toEqual({ polled: 3 });
+    expect(row?.source).toContain(`'${scriptName}' v1`);
+    expect(row?.source).toContain(`by schedule '${schedule.name}'`);
+    expect(row?.source).not.toContain("export default");
+  });
+
+  test("a failed scheduled run writes a failed row and still throws", async () => {
+    const scriptName = `record-fail-${crypto.randomUUID()}`;
+    const schedule = await scheduleFor(scriptName);
+    const run = spyOn(scriptLoader, "runScript").mockResolvedValue(
+      fakeRunOutput({ exitCode: 1, stderr: "upstream 503" }),
+    );
+    try {
+      await expect(dispatchScheduleTarget(schedule)).rejects.toThrow("upstream 503");
+    } finally {
+      run.mockRestore();
+    }
+
+    const runs = await scriptRunsFor(scriptName);
+    expect(runs).toHaveLength(1);
+    expect(runs[0]?.status).toBe("failed");
+    expect(runs[0]?.error).toBe("upstream 503");
+  });
+
+  test("a runtime that throws before returning writes a failed row and rethrows", async () => {
+    const scriptName = `record-throw-${crypto.randomUUID()}`;
+    const schedule = await scheduleFor(scriptName);
+    const run = spyOn(scriptLoader, "runScript").mockRejectedValue(new Error("spawn failed"));
+    try {
+      await expect(dispatchScheduleTarget(schedule)).rejects.toThrow("spawn failed");
+    } finally {
+      run.mockRestore();
+    }
+
+    const runs = await scriptRunsFor(scriptName);
+    expect(runs.map((r) => [r.status, r.error])).toEqual([["failed", "spawn failed"]]);
+  });
+
+  test("a persistence error changes neither outcome", async () => {
+    const scriptName = `record-dberr-${crypto.randomUUID()}`;
+    const schedule = await scheduleFor(scriptName);
+    const record = spyOn(dbModule, "recordInlineScriptRun").mockRejectedValue(
+      new Error("database is locked"),
+    );
+    const run = spyOn(scriptLoader, "runScript")
+      .mockResolvedValueOnce(fakeRunOutput({ result: { ok: true } }))
+      .mockResolvedValueOnce(fakeRunOutput({ exitCode: 1, stderr: "real failure" }));
+    try {
+      const result = await dispatchScheduleTarget(schedule);
+      expect(result.triggeredWorkflows).toBe(false);
+      await expect(dispatchScheduleTarget(schedule)).rejects.toThrow("real failure");
+      expect(record).toHaveBeenCalledTimes(2);
+    } finally {
+      run.mockRestore();
+      record.mockRestore();
+    }
+    expect(await scriptRunsFor(scriptName)).toHaveLength(0);
+  });
 });
 
 // ─── HTTP route cross-field validation ────────────────────────────────────────

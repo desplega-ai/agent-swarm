@@ -118,7 +118,7 @@ export const CONFIGS: Record<string, Config> = {
 // ---------------------------------------------------------------------------
 // Cache
 // ---------------------------------------------------------------------------
-function loadCache(config: string): Map<string, Float32Array> {
+export function loadCache(config: string): Map<string, Float32Array> {
   const map = new Map<string, Float32Array>();
   const path = `${DATA_DIR}/emb/${config}.bin`;
   if (!existsSync(path)) return map;
@@ -136,7 +136,7 @@ function loadCache(config: string): Map<string, Float32Array> {
   return map;
 }
 
-function appendCache(config: string, entries: [string, Float32Array][]): void {
+export function appendCache(config: string, entries: [string, Float32Array][]): void {
   const parts: Buffer[] = [];
   for (const [hash, vec] of entries) {
     const head = Buffer.alloc(24);
@@ -302,7 +302,7 @@ async function embedAll(configName: string, role: Role, items: { id: string; tex
 // ---------------------------------------------------------------------------
 // Sets
 // ---------------------------------------------------------------------------
-async function itemsFor(
+export async function itemsFor(
   set: string,
 ): Promise<{ role: Role; items: { id: string; text: string }[] }> {
   if (set === "corpus" || set === "corpus-named") {

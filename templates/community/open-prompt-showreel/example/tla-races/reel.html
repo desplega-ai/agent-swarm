@@ -1,0 +1,805 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><style>html,body{margin:0;background:#000}canvas{display:block}</style></head>
+<body><canvas id="c"></canvas>
+<script>
+// TLA+ races reel. Deterministic: render(f) draws frame f from scratch (except particles, which are pure functions of f too).
+const qs = new URLSearchParams(location.search);
+const W = +qs.get("w") || 1920, H = +qs.get("h") || 1080;
+const PORT = H > W;
+const S = Math.min(W, H) / 1080;
+const FPS = 30, N = 720;
+const cv = document.getElementById("c");
+cv.width = W; cv.height = H;
+let ctx = cv.getContext("2d");
+const tmp = document.createElement("canvas"); tmp.width = W; tmp.height = H;
+const tctx = tmp.getContext("2d");
+
+// ---------- palette + type ----------
+const C = {
+  bg: "#07070a", ink: "#f3efe6", dim: "#77747c", faint: "#3a3940",
+  amber: "#f6a723", amberHi: "#ffd27a", red: "#ff4b4b", green: "#34e38a", cyan: "#7fd6ff",
+};
+const G = "SG", M = "JB", I = "IS"; // Space Grotesk, JetBrains Mono, Instrument Serif Italic
+const font = (fam, px, w = 400) => fam === I ? `italic ${px}px ${I}` : `${w} ${px}px ${fam}`;
+
+// ---------- math ----------
+const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
+const lerp = (a, b, t) => a + (b - a) * t;
+const prog = (f, a, b) => clamp((f - a) / (b - a));
+const eOutExpo = (t) => (t >= 1 ? 1 : 1 - Math.pow(2, -10 * t));
+const eInExpo = (t) => (t <= 0 ? 0 : Math.pow(2, 10 * t - 10));
+const eOutCubic = (t) => 1 - Math.pow(1 - t, 3);
+const eInCubic = (t) => t * t * t;
+const eIO = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
+const eOutBack = (t) => { const c1 = 1.9, c3 = c1 + 1; return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2); };
+const pulse = (f, f0, decay = 6) => (f < f0 ? 0 : Math.exp(-(f - f0) / decay));
+function rng(seed) { return () => { seed |= 0; seed = (seed + 0x6d2b79f5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
+const fmt = (n) => Math.round(n).toLocaleString("en-US");
+const num = (s) => +String(s).replace(/[^0-9]/g, "");
+function hexA(hex, a) { const n = parseInt(hex.slice(1), 16); return `rgba(${n >> 16},${(n >> 8) & 255},${n & 255},${a})`; }
+function mix(h1, h2, t) { const a = parseInt(h1.slice(1), 16), b = parseInt(h2.slice(1), 16); const c = (s) => Math.round(lerp((a >> s) & 255, (b >> s) & 255, t)); return `rgb(${c(16)},${c(8)},${c(0)})`; }
+
+// ---------- facts (injected) ----------
+let F, TILES, TRACE, STATES_TODAY, STATES_SIMPLE, VIEWS, GREENS, AMBERS;
+function initFacts(facts) {
+  F = facts;
+  const hb = F.hbFixes.filter((h) => h.state === "MERGED" && h.testOnMain);
+  TILES = [
+    ...hb.map((h) => ({ tag: `HEARTBEAT · BUG ${h.bug}`, title: h.bugTitle, pinned: "failing", end: "green", pr: h.pr, prState: "merged" })),
+    ...F.cx.filter((c, i) => F.cx.findIndex((x) => x.id === c.id) === i).map((c0) => {
+      const same = F.cx.filter((x) => x.id === c0.id), c = { ...c0, failing: same.some((x) => x.failing) };
+      const fl = F.flips.find((x) => x.id === c.id);
+      const end = !c.failing ? "green" : fl && fl.state === "OPEN" ? "amber" : "red";
+      return { tag: `WORKFLOWS · ${c.id}`, title: c.title, pinned: "test.failing", end, pr: fl ? fl.pr : null, prState: fl ? fl.state.toLowerCase() : null };
+    }),
+  ];
+  const b1 = hb.find((h) => h.bug === 1) || hb[0];
+  TRACE = { title: b1.bugTitle, inv: b1.invariant, steps: b1.trace, bug: b1.bug };
+  STATES_TODAY = num(F.heartbeat.states[0]);
+  STATES_SIMPLE = num(F.heartbeat.states[2]);
+  VIEWS = num(F.heartbeat.statusViews[2]);
+  GREENS = TILES.filter((t) => t.end === "green").length;
+  AMBERS = TILES.filter((t) => t.end === "amber").length;
+  buildTree();
+  buildGrid();
+}
+
+// ---------- state graph ----------
+const MAXD = 9;
+let NODES = [], EDGES = [], LEAF = -1;
+function buildTree() {
+  const r = rng(7);
+  NODES = [{ d: 0, p: -1, kids: [], j: 0 }];
+  let front = [0];
+  for (let d = 1; d <= MAXD; d++) {
+    const next = [];
+    for (const id of front) {
+      let k = d <= 2 ? 3 : [0, 1, 2, 2, 2, 3, 3, 4][Math.floor(r() * 8)];
+      if (d === MAXD) k = Math.min(k, 2);
+      for (let i = 0; i < k && NODES.length < 3600; i++) {
+        const n = { d, p: id, kids: [], j: r() };
+        NODES.push(n); NODES[id].kids.push(NODES.length - 1); next.push(NODES.length - 1);
+      }
+    }
+    front = next;
+  }
+  // radial layout by leaf count
+  const leaves = (i) => (NODES[i].leaves = NODES[i].kids.length ? NODES[i].kids.reduce((s, k) => s + leaves(k), 0) : 1);
+  leaves(0);
+  const place = (i, a0, a1) => {
+    const n = NODES[i]; n.a = (a0 + a1) / 2 + (n.d ? (n.j - 0.5) * 0.004 : 0);
+    n.r = n.d === 0 ? 0 : 58 * Math.pow(n.d, 0.93) * (1 + (n.j - 0.5) * 0.06);
+    let a = a0; for (const k of n.kids) { const span = ((a1 - a0) * NODES[k].leaves) / n.leaves; place(k, a, a + span); a += span; }
+  };
+  place(0, 0, Math.PI * 2);
+  NODES.forEach((n, i) => { n.x = Math.cos(n.a) * n.r; n.y = Math.sin(n.a) * n.r; n.birth = n.d === 0 ? 24 : 25 + (n.d - 1) * 15 + n.j * 13; if (n.p >= 0) EDGES.push([n.p, i, 0]); });
+  // cross edges: interleavings that converge on the same state
+  const byD = {}; NODES.forEach((n, i) => (byD[n.d] = byD[n.d] || []).push(i));
+  for (let d = 2; d < MAXD; d++) {
+    const arr = byD[d].slice().sort((a, b) => NODES[a].a - NODES[b].a);
+    for (let q = 0; q + 1 < arr.length; q++) {
+      const nb = NODES[arr[q + 1]];
+      if (r() < 0.22 && nb.kids.length) EDGES.push([arr[q], nb.kids[0], 1]);
+    }
+  }
+  // counterexample leaf: deepest leaf pointing up-right on screen at freeze
+  const rotF = rot(165);
+  let best = 1e9;
+  NODES.forEach((n, i) => { if (n.d === MAXD) { const s = Math.abs(Math.atan2(Math.sin(n.a + rotF + 0.55), Math.cos(n.a + rotF + 0.55))); if (s < best) { best = s; LEAF = i; } } });
+  PATH = []; for (let i = LEAF; i >= 0; i = NODES[i].p) PATH.unshift(i);
+}
+let PATH = [];
+const rot = (f) => 0.09 * (Math.min(f, 165) / FPS) - 0.35;
+
+// ---------- layout ----------
+const L = PORT
+  ? { treeX: W / 2, treeY: H * 0.545, fit: W * 0.37, textX: W / 2, align: "center", hexR: 128 * S }
+  : { treeX: W * 0.70, treeY: H * 0.52, fit: H * 0.42, textX: 128 * S, align: "left", hexR: 140 * S };
+
+// ---------- text ----------
+function parse(markup) { // "*word*" = accent
+  const out = []; let acc = false;
+  for (const raw of markup.split(" ")) {
+    let w = raw, a = acc;
+    if (w.startsWith("*")) { a = true; w = w.slice(1); acc = true; }
+    if (w.endsWith("*") || w.match(/\*[.,:!]$/)) { w = w.replace("*", ""); acc = false; }
+    out.push({ w, a });
+  }
+  return out;
+}
+function kinetic(markup, o) {
+  const f = o.f, size = o.size * S, lh = size * (o.lh || 1.08);
+  const words = parse(markup).map((t) => {
+    const fnt = t.a && o.accent !== false ? font(I, size * 1.14) : font(o.fam || G, size, o.weight || 500);
+    ctx.font = fnt; return { ...t, fnt, wd: ctx.measureText(t.w).width, sp: ctx.measureText(" ").width };
+  });
+  const maxW = (o.maxW || 1e9) * S, lines = [[]]; let lw = 0;
+  for (const w of words) { if (w.w === "|") { lines.push([]); lw = 0; continue; } if (lw + w.wd > maxW && lines.at(-1).length) { lines.push([]); lw = 0; } lines.at(-1).push(w); lw += w.wd + w.sp; }
+  let k = 0;
+  lines.forEach((line, li) => {
+    const tw = line.reduce((s, w, i) => s + w.wd + (i < line.length - 1 ? w.sp : 0), 0);
+    let x = o.align === "center" ? o.x - tw / 2 : o.x;
+    const y = o.y + li * lh;
+    for (const w of line) {
+      const s0 = o.start + k * (o.stagger ?? 3);
+      const pin = eOutExpo(prog(f, s0, s0 + 20));
+      const pout = o.end != null ? eInCubic(prog(f, o.end + k * 1.5, o.end + k * 1.5 + 10)) : 0;
+      if (pin > 0 && pout < 1) {
+        ctx.save();
+        ctx.beginPath(); ctx.rect(x - size, y - size * 1.02, w.wd + size * 2, size * 1.34); ctx.clip();
+        const dy = (1 - pin) * size * 0.95 - pout * size * 0.95;
+        const b = (1 - pin) * 9 + pout * 8;
+        if (b > 0.4) ctx.filter = `blur(${b.toFixed(1)}px)`;
+        ctx.globalAlpha = (o.alpha ?? 1) * pin * (1 - pout);
+        ctx.font = w.fnt; ctx.fillStyle = w.a ? o.accentColor || C.amber : o.color || C.ink;
+        ctx.textBaseline = "alphabetic";
+        ctx.fillText(w.w, x, y + dy);
+        ctx.restore();
+      }
+      x += w.wd + w.sp; k++;
+    }
+  });
+  return lines.length * lh;
+}
+function mono(text, x, y, o = {}) {
+  ctx.save(); ctx.font = font(M, (o.size || 14) * S, o.weight || 500);
+  ctx.fillStyle = o.color || C.dim; ctx.globalAlpha = o.alpha ?? 1; ctx.textAlign = o.align || "left";
+  if (o.track) ctx.letterSpacing = `${o.track * S}px`;
+  let t = text;
+  if (o.type != null) { const n = Math.floor(o.type); t = text.slice(0, n); }
+  ctx.fillText(t, x, y);
+  if (o.cursor && o.type != null && o.type < text.length + 6 && Math.floor(o.f / 4) % 2 === 0) {
+    const w = ctx.measureText(t).width, dx = o.align === "center" ? w / 2 : o.align === "right" ? 0 : w;
+    ctx.fillRect(x + dx + 3 * S, y - (o.size || 14) * S * 0.8, (o.size || 14) * S * 0.55, (o.size || 14) * S * 0.95);
+  }
+  ctx.restore();
+}
+
+// ---------- background / hud / texture ----------
+const grain = document.createElement("canvas"); grain.width = grain.height = 256;
+{ const g = grain.getContext("2d"), id = g.createImageData(256, 256), r = rng(3); for (let i = 0; i < id.data.length; i += 4) { const v = r() * 255; id.data[i] = id.data[i + 1] = id.data[i + 2] = v; id.data[i + 3] = 255; } g.putImageData(id, 0, 0); }
+function background(f, glowColor, gx, gy, gAmt) {
+  ctx.fillStyle = C.bg; ctx.fillRect(0, 0, W, H);
+  // dot grid, slow drift
+  const sp = 44 * S, ox = (f * 0.35) % sp, oy = (f * 0.18) % sp;
+  ctx.fillStyle = "rgba(255,255,255,0.045)";
+  for (let x = -sp + ox; x < W + sp; x += sp) for (let y = -sp + oy; y < H + sp; y += sp) ctx.fillRect(x, y, 1.6 * S, 1.6 * S);
+  const g = ctx.createRadialGradient(gx, gy, 0, gx, gy, Math.max(W, H) * 0.55);
+  g.addColorStop(0, hexA(glowColor, 0.16 * gAmt)); g.addColorStop(1, hexA(glowColor, 0));
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+}
+function finish(f) {
+  // vignette
+  const v = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.35, W / 2, H / 2, Math.max(W, H) * 0.75);
+  v.addColorStop(0, "rgba(0,0,0,0)"); v.addColorStop(1, "rgba(0,0,0,0.6)");
+  ctx.fillStyle = v; ctx.fillRect(0, 0, W, H);
+  // grain
+  ctx.save(); ctx.globalAlpha = 0.055; ctx.globalCompositeOperation = "overlay";
+  const r = rng(f * 13 + 1); const p = ctx.createPattern(grain, "repeat");
+  ctx.translate(-r() * 256, -r() * 256); ctx.fillStyle = p; ctx.fillRect(0, 0, W + 256, H + 256); ctx.restore();
+}
+const SECTIONS = [[0, "01", "SEARCH"], [180, "02", "COUNTEREXAMPLE"], [300, "03", "PINNED"], [420, "04", "FIXED"], [540, "05", "SIMPLER"], [645, "06", "AGENT SWARM"]];
+function hud(f) {
+  const a = eOutCubic(prog(f, 4, 22));
+  const m = 40 * S, top = 44 * S, bot = H - 36 * S;
+  ctx.save(); ctx.globalAlpha = a * 0.9;
+  mono("AGENT SWARM — TLA+ / RACES", m, top, { size: 12, track: 2.2, color: C.dim });
+  const sec = SECTIONS.filter((s) => f >= s[0]).at(-1);
+  const since = f - sec[0];
+  mono(`${sec[1]} / ${sec[2]}`, m, bot, { size: 12, track: 2.2, color: C.dim, type: since * 1.6 + 3 });
+  const s = Math.floor(f / FPS), fr = f % FPS;
+  const tc = `00:00:${String(s).padStart(2, "0")}:${String(fr).padStart(2, "0")}`;
+  mono(`REC  ${tc}`, W - m, top, { size: 12, track: 2.2, align: "right", color: C.dim });
+  ctx.fillStyle = C.red; ctx.globalAlpha = a * (Math.floor(f / 15) % 2 ? 0.35 : 1);
+  ctx.font = font(M, 12 * S, 500); ctx.letterSpacing = `${2.2 * S}px`;
+  const tw = ctx.measureText(`REC  ${tc}`).width;
+  ctx.beginPath(); ctx.arc(W - m - tw - 12 * S, top - 4.5 * S, 3.5 * S, 0, 7); ctx.fill();
+  // progress
+  ctx.globalAlpha = a * 0.9; const pw = 150 * S;
+  ctx.fillStyle = C.faint; ctx.fillRect(W - m - pw, bot - 4 * S, pw, 1.5 * S);
+  ctx.fillStyle = C.amber; ctx.fillRect(W - m - pw, bot - 4 * S, pw * (f / (N - 1)), 1.5 * S);
+  // provenance
+  mono(`facts read live · origin/main @ ${F.mainSha}`, W / 2, bot, { size: 11, track: 1.6, align: "center", color: C.faint, alpha: a });
+  // corner ticks
+  ctx.strokeStyle = hexA(C.ink, 0.22); ctx.lineWidth = 1.2 * S; const k = 14 * S, c = 22 * S;
+  for (const [x, y, sx, sy] of [[c, c, 1, 1], [W - c, c, -1, 1], [c, H - c, 1, -1], [W - c, H - c, -1, -1]]) {
+    ctx.beginPath(); ctx.moveTo(x, y + sy * k); ctx.lineTo(x, y); ctx.lineTo(x + sx * k, y); ctx.stroke();
+  }
+  ctx.restore();
+}
+function glitch(f, amt, seed) {
+  if (amt < 0.02) return;
+  tctx.clearRect(0, 0, W, H); tctx.drawImage(cv, 0, 0);
+  const r = rng(seed * 997 + f);
+  const n = Math.floor(4 + amt * 14);
+  for (let i = 0; i < n; i++) {
+    const y = r() * H, h = (6 + r() * 60) * S, dx = (r() - 0.5) * 140 * S * amt;
+    ctx.drawImage(tmp, 0, y, W, h, dx, y, W, h);
+  }
+  // chromatic split
+  ctx.save(); ctx.globalCompositeOperation = "lighter"; ctx.globalAlpha = 0.28 * amt;
+  ctx.drawImage(tmp, 7 * S * amt, 0); ctx.globalAlpha = 0.18 * amt; ctx.drawImage(tmp, -7 * S * amt, 0); ctx.restore();
+}
+
+// ---------- tree drawing ----------
+const DCOL = Array.from({ length: MAXD + 1 }, (_, d) => d < 5 ? mix("#ffd27a", "#f6a723", d / 5) : mix("#f6a723", "#e2551c", (d - 5) / 4));
+const NCOL = DCOL.map((c, d) => (d < 3 ? "#fff1cf" : c));
+function treeCam(f, zoomOverride) {
+  const front = clamp((f - 19) / 15, 0, MAXD);
+  const fitZoom = L.fit / (58 * Math.pow(MAXD + 0.5, 0.93));
+  const z = zoomOverride ?? L.fit / (58 * Math.pow(Math.max(1.4, front + 0.7), 0.93));
+  return { z: Math.max(z, fitZoom), rot: rot(f) };
+}
+function tp(n, cam, cx = L.treeX, cy = L.treeY) {
+  const c = Math.cos(cam.rot), s = Math.sin(cam.rot);
+  return [cx + (n.x * c - n.y * s) * cam.z, cy + (n.x * s + n.y * c) * cam.z];
+}
+function drawTree(f, o) {
+  const cam = o.cam, dim = o.dim ?? 1, birthOf = o.birth || ((n) => n.birth);
+  ctx.save(); ctx.globalCompositeOperation = "lighter";
+  ctx.lineCap = "round";
+  // edges
+  for (const [a, b, cross] of EDGES) {
+    const A = NODES[a], B = NODES[b];
+    const bb = birthOf(B), p = eOutCubic(prog(f, bb - 7, bb));
+    if (p <= 0) continue;
+    const [x1, y1] = o.pos ? o.pos(a) : tp(A, cam), [x2, y2] = o.pos ? o.pos(b) : tp(B, cam);
+    const flash = pulse(f, bb, 9);
+    const al = (cross ? 0.10 : 0.2 + 0.1 * (1 - B.d / MAXD)) * dim * (o.edgeAlpha ?? 1) + flash * 0.55 * dim;
+    if (al < 0.01) continue;
+    ctx.strokeStyle = flash > 0.2 ? mix(C.amber, "#fff3d6", flash * 0.7) : DCOL[B.d];
+    ctx.globalAlpha = al; ctx.lineWidth = (cross ? 0.7 : 1.1) * S * (o.lw ?? 1);
+    ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(lerp(x1, x2, p), lerp(y1, y2, p)); ctx.stroke();
+  }
+  // nodes
+  for (let i = 0; i < NODES.length; i++) {
+    const n = NODES[i], bb = birthOf(n);
+    if (f < bb) continue;
+    const [x, y] = o.pos ? o.pos(i) : tp(n, cam);
+    const fl = pulse(f, bb, 7), pop = eOutBack(prog(f, bb, bb + 8));
+    const rr = (n.d === 0 ? 5 : 1.5 + 1.2 * (1 - n.d / MAXD)) * S * pop * (1 + fl * 1.6) * (o.nodeScale ?? 1);
+    ctx.globalAlpha = clamp((0.55 + fl * 0.45) * dim * (o.nodeAlpha ?? 1));
+    ctx.fillStyle = fl > 0.25 ? "#fff1cf" : NCOL[n.d];
+    ctx.beginPath(); ctx.arc(x, y, rr, 0, 7); ctx.fill();
+  }
+  ctx.restore();
+}
+
+// ---------- scene 1: search (0-180) ----------
+function drawPath(f, cam) {
+  const pts = PATH.map((i) => tp(NODES[i], cam));
+  const p = eOutCubic(prog(f, 165, 174)) * (pts.length - 1);
+  ctx.save(); ctx.globalCompositeOperation = "lighter"; ctx.lineCap = "round"; ctx.lineJoin = "round";
+  for (const [lw, al] of [[10, 0.14], [4, 0.35], [2, 1]]) {
+    ctx.strokeStyle = C.red; ctx.globalAlpha = al; ctx.lineWidth = lw * S; ctx.beginPath();
+    ctx.moveTo(...pts[0]);
+    for (let i = 1; i <= Math.floor(p); i++) ctx.lineTo(...pts[i]);
+    const fi = Math.floor(p), fr = p - fi; if (fi + 1 < pts.length) ctx.lineTo(lerp(pts[fi][0], pts[fi + 1][0], fr), lerp(pts[fi][1], pts[fi + 1][1], fr));
+    ctx.stroke();
+  }
+  PATH.forEach((id, i) => { if (i <= p) { const [x, y] = pts[i]; ctx.fillStyle = C.red; ctx.globalAlpha = 1; ctx.beginPath(); ctx.arc(x, y, 3.2 * S, 0, 7); ctx.fill(); } });
+  const [lx, ly] = pts.at(-1), fp = prog(f, 173, 180);
+  if (fp > 0) {
+    for (let k = 0; k < 2; k++) { const q = clamp(fp * 1.3 - k * 0.3); ctx.strokeStyle = C.red; ctx.globalAlpha = (1 - q) * 0.9; ctx.lineWidth = 2 * S; ctx.beginPath(); ctx.arc(lx, ly, (8 + q * 60) * S, 0, 7); ctx.stroke(); }
+    ctx.globalAlpha = 1; ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(lx, ly, 5 * S, 0, 7); ctx.fill();
+  }
+  ctx.restore();
+  return pts;
+}
+function opener(f) {
+  if (f >= 30) return;
+  const word = "TLA+", size = (PORT ? 250 : 300) * S;
+  const col = eInExpo(prog(f, 17, 27)); // collapse into the root
+  ctx.save(); ctx.font = font(M, size, 700); ctx.textBaseline = "middle";
+  const tw = ctx.measureText(word).width;
+  const [rx, ry] = [L.treeX, L.treeY];
+  const cx = lerp(PORT ? W / 2 : W / 2, rx, col), cy = lerp(H / 2, ry, col);
+  ctx.translate(cx, cy); ctx.scale(1 - col * 0.97, 1 - col * 0.97);
+  let x = -tw / 2;
+  for (let i = 0; i < word.length; i++) {
+    const ch = word[i], cw = ctx.measureText(ch).width, s0 = i * 3, p = eOutExpo(prog(f, s0, s0 + 10));
+    ctx.save(); ctx.globalAlpha = p * (1 - col * 0.5);
+    if (p < 1) ctx.filter = `blur(${((1 - p) * 14).toFixed(1)}px)`;
+    ctx.fillStyle = i === 3 ? C.amber : C.ink;
+    ctx.fillText(ch, x, (1 - p) * size * 0.3); ctx.restore(); x += cw;
+  }
+  ctx.restore();
+  mono("A MODEL CHECKER · TLC", PORT ? W / 2 : W / 2, H / 2 + size * 0.52, { size: 14, track: 5, color: C.amber, align: "center", type: (f - 6) * 2, alpha: 1 - col });
+  if (col > 0.6) { ctx.save(); ctx.globalCompositeOperation = "lighter"; ctx.fillStyle = "#fff1cf"; ctx.globalAlpha = (col - 0.6) * 2.5; ctx.beginPath(); ctx.arc(rx, ry, 9 * S, 0, 7); ctx.fill(); ctx.restore(); }
+}
+function scene1(f) {
+  opener(f);
+  const cam = treeCam(f);
+  const freeze = f >= 165;
+  const dim = freeze ? lerp(1, 0.32, eOutCubic(prog(f, 165, 170))) : 1;
+  // beat pulse glow at tree center
+  const beat = f < 160 && f >= 30 ? pulse(f, Math.floor(f / 15) * 15, 8) : 0; // on the 120 BPM grid (beat = 15 frames, drop at 420)
+  const [rx, ry] = tp(NODES[0], cam);
+  ctx.save(); ctx.globalCompositeOperation = "lighter";
+  const gr = ctx.createRadialGradient(rx, ry, 0, rx, ry, 260 * S);
+  gr.addColorStop(0, hexA(C.amber, 0.10 + beat * 0.12)); gr.addColorStop(1, hexA(C.amber, 0));
+  ctx.fillStyle = gr; ctx.fillRect(0, 0, W, H); ctx.restore();
+  // ripple rings on each new depth
+  for (let d = 1; d <= MAXD; d++) {
+    const f0 = 25 + (d - 1) * 15, p = prog(f, f0, f0 + 24);
+    if (p <= 0 || p >= 1) continue;
+    ctx.save(); ctx.strokeStyle = C.amber; ctx.globalAlpha = (1 - p) * 0.35 * dim; ctx.lineWidth = 1.2 * S;
+    ctx.beginPath(); ctx.arc(rx, ry, 58 * Math.pow(d, 0.93) * cam.z * (0.9 + 0.2 * eOutCubic(p)), 0, 7); ctx.stroke(); ctx.restore();
+  }
+  drawTree(f, { cam, dim });
+  // counterexample path
+  if (f >= 165) {
+    const pts = drawPath(f, cam);
+    const [lx, ly] = pts.at(-1);
+    // label with leader
+    const la = eOutExpo(prog(f, 169, 178));
+    if (la > 0) {
+      const right = lx > W - 420 * S; const tx = lx + (right ? -40 : 70) * S, ty = ly - (right ? 64 : 50) * S;
+      ctx.save(); ctx.strokeStyle = C.red; ctx.globalAlpha = la; ctx.lineWidth = 1.2 * S;
+      ctx.beginPath(); ctx.moveTo(lx, ly); ctx.lineTo(lerp(lx, tx - 8 * S, la), lerp(ly, ty + 8 * S, la)); ctx.stroke(); ctx.restore();
+      mono(`${TRACE.inv} — VIOLATED`, tx, ty, { size: 17, weight: 700, color: C.red, track: 2, type: prog(f, 170, 178) * 30, cursor: true, f, align: right ? "right" : "left" });
+    }
+  }
+  if (false) {
+    const pts = PATH.map((i) => tp(NODES[i], cam));
+    const p = eOutCubic(prog(f, 165, 174)) * (pts.length - 1);
+    ctx.save(); ctx.globalCompositeOperation = "lighter"; ctx.lineCap = "round"; ctx.lineJoin = "round";
+    for (const [lw, al] of [[10, 0.14], [4, 0.35], [2, 1]]) {
+      ctx.strokeStyle = C.red; ctx.globalAlpha = al; ctx.lineWidth = lw * S; ctx.beginPath();
+      ctx.moveTo(...pts[0]);
+      for (let i = 1; i <= Math.floor(p); i++) ctx.lineTo(...pts[i]);
+      const fi = Math.floor(p), fr = p - fi; if (fi + 1 < pts.length) ctx.lineTo(lerp(pts[fi][0], pts[fi + 1][0], fr), lerp(pts[fi][1], pts[fi + 1][1], fr));
+      ctx.stroke();
+    }
+    PATH.forEach((id, i) => { if (i <= p) { const [x, y] = pts[i]; ctx.fillStyle = C.red; ctx.globalAlpha = 1; ctx.beginPath(); ctx.arc(x, y, 3.2 * S, 0, 7); ctx.fill(); } });
+    // leaf flare
+    const [lx, ly] = pts.at(-1), fp = prog(f, 173, 180);
+    if (fp > 0) {
+      for (let k = 0; k < 2; k++) { const q = clamp(fp * 1.3 - k * 0.3); ctx.strokeStyle = C.red; ctx.globalAlpha = (1 - q) * 0.9; ctx.lineWidth = 2 * S; ctx.beginPath(); ctx.arc(lx, ly, (8 + q * 60) * S, 0, 7); ctx.stroke(); }
+      ctx.globalAlpha = 1; ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(lx, ly, 5 * S, 0, 7); ctx.fill();
+    }
+    ctx.restore();
+    // label with leader
+    const la = eOutExpo(prog(f, 169, 178));
+    if (la > 0) {
+      const right = lx > W - 420 * S; const tx = lx + (right ? -40 : 70) * S, ty = ly - (right ? 64 : 50) * S;
+      ctx.save(); ctx.strokeStyle = C.red; ctx.globalAlpha = la; ctx.lineWidth = 1.2 * S;
+      ctx.beginPath(); ctx.moveTo(lx, ly); ctx.lineTo(lerp(lx, tx - 8 * S, la), lerp(ly, ty + 8 * S, la)); ctx.stroke(); ctx.restore();
+      mono(`${TRACE.inv} — VIOLATED`, tx, ty, { size: 17, weight: 700, color: C.red, track: 2, type: prog(f, 170, 178) * 30, cursor: true, f, align: right ? "right" : "left" });
+    }
+  }
+  // headline
+  const tOut = 158;
+  if (PORT) {
+    kinetic("A model checker | walks *every* interleaving.", { f, x: W / 2, y: H * 0.145, size: 70, weight: 600, align: "center", maxW: 900, start: 30, end: tOut, stagger: 4 });
+  } else {
+    kinetic("A model checker", { f, x: L.textX, y: H * 0.33, size: 88, weight: 600, start: 30, end: tOut, stagger: 4 });
+    kinetic("walks *every*", { f, x: L.textX, y: H * 0.33 + 96 * S, size: 88, weight: 600, start: 44, end: tOut + 3, stagger: 4 });
+    kinetic("interleaving.", { f, x: L.textX, y: H * 0.33 + 192 * S, size: 88, weight: 600, start: 54, end: tOut + 6, stagger: 4 });
+  }
+  // state counter (exponential)
+  const p = prog(f, 25, 155), k = 6.2;
+  const v = STATES_TODAY * (Math.exp(k * p) - 1) / (Math.exp(k) - 1);
+  const ca = eOutCubic(prog(f, 30, 44)) * (1 - eInCubic(prog(f, 166, 176)));
+  const cx = PORT ? W / 2 : L.textX, cy = PORT ? H * 0.925 : H * 0.8;
+  if (ca > 0) {
+    mono("REACHABLE STATES · HEARTBEAT MODEL", cx, cy - 58 * S, { size: 13, track: 2.4, color: C.amber, alpha: ca, align: PORT ? "center" : "left" });
+    ctx.save(); ctx.globalAlpha = ca; ctx.font = font(M, 58 * S, 600); ctx.fillStyle = C.ink; ctx.textAlign = PORT ? "center" : "left";
+    ctx.fillText(fmt(v), cx, cy); ctx.restore();
+    const done = pulse(f, 155, 10);
+    if (f >= 155) mono("EXHAUSTIVE", cx + (PORT ? 0 : 330 * S), cy + (PORT ? 30 : -6) * S, { size: 13, track: 2.4, color: C.amberHi, alpha: ca * (0.6 + done * 0.4), align: PORT ? "center" : "left", type: (f - 155) * 1.5 });
+  }
+}
+
+// ---------- scene 2: counterexample as a timeline (180-300) ----------
+function laneGeom() {
+  const x0 = PORT ? 110 * S : 330 * S, x1 = PORT ? W - 90 * S : W - 190 * S;
+  return PORT ? { x0, x1, hb: H * 0.5, ax: H * 0.635, wk: H * 0.77 } : { x0, x1, hb: H * 0.47, ax: H * 0.63, wk: H * 0.79 };
+}
+function laneOf(step) { if (/^Hb/.test(step)) return "hb"; if (/^(Age)$/.test(step)) return "ax"; return "wk"; }
+function scene2(f) {
+  const g = laneGeom(), steps = TRACE.steps, n = steps.length;
+  const xs = steps.map((_, i) => lerp(g.x0 + 60 * S, g.x1 - 40 * S, n === 1 ? 0 : i / (n - 1)));
+  const T0 = 195, stepF = (i) => T0 + i * 15;
+  const slam = stepF(n - 1);
+  const out = eInCubic(prog(f, 282, 296));
+  const fade = 1 - out;
+  // zoom-in punch from the tree (180-194)
+  if (f < 200) {
+    const zp = eInExpo(prog(f, 180, 191));
+    const cam = treeCam(179); const [lx, ly] = tp(NODES[LEAF], cam);
+    // draw the frozen tree once into the offscreen buffer, then zoom + blur it as a single image
+    if (f < 191) {
+    const live = ctx; tctx.setTransform(1, 0, 0, 1, 0, 0); tctx.clearRect(0, 0, W, H);
+    ctx = tctx; drawTree(179, { cam, dim: 0.32 * (1 - zp) }); drawPath(179, cam); ctx = live;
+    ctx.save(); ctx.translate(lx, ly); ctx.scale(1 + zp * 22, 1 + zp * 22); ctx.translate(-lx, -ly);
+    if (zp > 0.02) ctx.filter = `blur(${(zp * 3).toFixed(1)}px)`;
+    ctx.drawImage(tmp, 0, 0);
+    ctx.restore();
+    }
+    // red disc from the leaf fills the frame...
+    const dp = eInCubic(prog(f, 182, 190));
+    if (f < 192 && dp > 0) { ctx.save(); ctx.fillStyle = C.red; ctx.beginPath(); ctx.arc(lx, ly, dp * Math.hypot(W, H) * 1.05, 0, 7); ctx.fill(); ctx.restore(); }
+    // ...then squashes into the time axis
+    if (f >= 192) {
+      const sq = eOutExpo(prog(f, 192, 200)), hh = lerp(H, 2 * S, sq), yc = lerp(H / 2, g.ax, sq);
+      ctx.save(); ctx.fillStyle = C.red; ctx.fillRect(0, yc - hh / 2, W, hh); ctx.restore();
+    }
+  }
+  // ghost invariant name, outline type behind the lanes
+  {
+    const gp = eOutCubic(prog(f, 200, 240)), hit = f >= slam ? 0.6 + pulse(f, slam, 8) * 0.4 : 0;
+    ctx.save(); ctx.font = font(M, (PORT ? 118 : 250) * S, 800); ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.lineWidth = 1.5 * S; ctx.strokeStyle = hit ? C.red : C.ink; ctx.globalAlpha = fade * (0.05 * gp + hit * 0.07);
+    ctx.strokeText(TRACE.inv, W / 2 + (1 - gp) * 60 * S - (f - 200) * 0.6 * S, (g.hb + g.wk) / 2); ctx.restore();
+  }
+  // axis draws out from center
+  const ap = f < 199 ? 0 : 1;
+  ctx.save(); ctx.globalAlpha = fade;
+  const mid = (g.x0 + g.x1) / 2;
+  ctx.strokeStyle = C.red; ctx.lineWidth = 2 * S; ctx.globalAlpha = fade * 0.9;
+  ctx.beginPath(); ctx.moveTo(lerp(mid, g.x0, ap), g.ax); ctx.lineTo(lerp(mid, g.x1, ap), g.ax); ctx.stroke();
+  // tick marks
+  for (let i = 0; i <= 40; i++) { const x = lerp(g.x0, g.x1, i / 40); if (Math.abs(x - mid) > Math.abs(lerp(0, g.x1 - mid, ap))) continue; ctx.fillStyle = C.red; ctx.globalAlpha = fade * 0.4; ctx.fillRect(x, g.ax - (i % 5 ? 3 : 7) * S, 1 * S, (i % 5 ? 6 : 14) * S); }
+  mono("TIME →", g.x1, g.ax + 30 * S, { size: 11, track: 2, color: C.red, alpha: fade * ap * 0.8, align: "right" });
+  ctx.restore();
+  // lanes
+  const la = eOutExpo(prog(f, 196, 212)) * fade;
+  for (const [key, label, col] of [["hb", "HEARTBEAT", C.amber], ["wk", "WORKER", C.cyan]]) {
+    const y = g[key];
+    ctx.save(); ctx.globalAlpha = la * 0.35; ctx.strokeStyle = col; ctx.setLineDash([2 * S, 7 * S]); ctx.lineWidth = 1.2 * S;
+    ctx.beginPath(); ctx.moveTo(g.x0, y); ctx.lineTo(lerp(g.x0, g.x1, la), y); ctx.stroke(); ctx.restore();
+    mono(label, g.x0 - (PORT ? 0 : 30) * S, y + (PORT ? -36 : 6) * S, { size: 16, weight: 600, track: 3, color: col, alpha: la, align: PORT ? "left" : "right" });
+  }
+  // worker "live" bar from its first step to the playhead
+  const iStart = steps.findIndex((s) => laneOf(s) === "wk");
+  const head = lerp(xs[0], g.x1, eIO(prog(f, T0, 288)));
+  if (iStart >= 0 && f >= stepF(iStart)) {
+    const xa = xs[iStart], xb = Math.max(xa, head), xk = xs[n - 1];
+    ctx.save(); ctx.globalAlpha = fade; ctx.lineCap = "round";
+    // live part
+    ctx.strokeStyle = C.green; ctx.lineWidth = 5 * S; ctx.shadowColor = C.green; ctx.shadowBlur = 14 * S;
+    ctx.beginPath(); ctx.moveTo(xa, g.wk); ctx.lineTo(Math.min(xb, f >= slam ? xk : xb), g.wk); ctx.stroke();
+    // killed part
+    if (f >= slam && xb > xk) { ctx.strokeStyle = C.red; ctx.shadowColor = C.red; ctx.setLineDash([10 * S, 8 * S]); ctx.beginPath(); ctx.moveTo(xk, g.wk); ctx.lineTo(xb, g.wk); ctx.stroke(); }
+    ctx.restore();
+    // pulses travelling along the live bar
+    for (let k = 0; k < 4; k++) { const px = xa + (((f - stepF(iStart)) * 9 * S + k * 140 * S) % Math.max(1, (Math.min(xb, f >= slam ? xk : xb) - xa))); ctx.save(); ctx.globalAlpha = fade * 0.9; ctx.fillStyle = "#d9fff0"; ctx.beginPath(); ctx.arc(px, g.wk, 2.6 * S, 0, 7); ctx.fill(); ctx.restore(); }
+    mono(f >= slam + 4 ? "STILL RUNNING" : "RUNNING", xa, g.wk + 34 * S, { size: 12, track: 2.2, color: f >= slam + 4 ? C.red : C.green, alpha: fade * 0.85 });
+  }
+  // steps
+  steps.forEach((s, i) => {
+    const f0 = stepF(i), p = eOutBack(prog(f, f0, f0 + 10)), a = clamp(prog(f, f0, f0 + 6)) * fade;
+    if (a <= 0) return;
+    const lane = laneOf(s), y = g[lane], x = xs[i];
+    const col = lane === "hb" ? C.amber : lane === "wk" ? C.cyan : C.red;
+    const hit = pulse(f, f0, 6);
+    // stem to axis
+    ctx.save(); ctx.globalAlpha = a * 0.5; ctx.strokeStyle = col; ctx.lineWidth = 1 * S;
+    ctx.beginPath(); ctx.moveTo(x, g.ax); ctx.lineTo(x, lerp(g.ax, y, eOutCubic(prog(f, f0, f0 + 8)))); ctx.stroke(); ctx.restore();
+    // chip
+    ctx.save(); ctx.globalAlpha = a; ctx.font = font(M, 23 * S, 600);
+    const tw = ctx.measureText(s).width, pw = tw + 36 * S, ph = 50 * S;
+    ctx.translate(x, y); ctx.scale(p, p);
+    ctx.fillStyle = "#101014"; ctx.strokeStyle = col; ctx.lineWidth = 1.5 * S; ctx.shadowColor = col; ctx.shadowBlur = (8 + hit * 30) * S;
+    ctx.beginPath(); ctx.roundRect(-pw / 2, -ph / 2, pw, ph, 25 * S); ctx.fill(); ctx.shadowBlur = 0; ctx.stroke();
+    ctx.fillStyle = mix(col, "#ffffff", hit * 0.6); ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText(s, 0, 1 * S);
+    ctx.restore();
+    // index
+    mono(String(i + 1).padStart(2, "0"), x, g.ax + 30 * S, { size: 11, track: 1.5, color: C.dim, alpha: a, align: "center" });
+  });
+  // read arrow (heartbeat reads the task) and the slam
+  const iRead = steps.findIndex((s) => /Read/.test(s));
+  if (iRead >= 0) {
+    const f0 = stepF(iRead) + 4, p = eOutCubic(prog(f, f0, f0 + 9));
+    if (p > 0) { ctx.save(); ctx.globalAlpha = fade * 0.8; ctx.strokeStyle = C.amber; ctx.setLineDash([4 * S, 6 * S]); ctx.lineWidth = 1.4 * S; ctx.beginPath(); ctx.moveTo(xs[iRead], g.hb + 22 * S); ctx.lineTo(xs[iRead], lerp(g.hb + 22 * S, g.wk - 10 * S, p)); ctx.stroke(); ctx.restore(); }
+  }
+  if (f >= slam - 2) {
+    const x = xs[n - 1], p = eInExpo(prog(f, slam - 2, slam + 1));
+    ctx.save(); ctx.globalAlpha = fade; ctx.strokeStyle = C.red; ctx.lineWidth = 5 * S; ctx.shadowColor = C.red; ctx.shadowBlur = 20 * S; ctx.lineCap = "round";
+    ctx.beginPath(); ctx.moveTo(x, g.hb + 22 * S); ctx.lineTo(x, lerp(g.hb + 22 * S, g.wk, p)); ctx.stroke(); ctx.restore();
+    if (f >= slam) {
+      const q = prog(f, slam, slam + 18);
+      ctx.save(); ctx.globalAlpha = fade * (1 - q); ctx.strokeStyle = C.red; ctx.lineWidth = 3 * S; ctx.beginPath(); ctx.arc(x, g.wk, (10 + eOutCubic(q) * 160) * S, 0, 7); ctx.stroke(); ctx.restore();
+      // X mark
+      const xp = eOutBack(prog(f, slam, slam + 8)), xr = 22 * S * xp;
+      ctx.save(); ctx.globalAlpha = fade; ctx.strokeStyle = "#fff"; ctx.lineWidth = 4 * S; ctx.lineCap = "round"; ctx.shadowColor = C.red; ctx.shadowBlur = 24 * S;
+      ctx.beginPath(); ctx.moveTo(x - xr, g.wk - xr); ctx.lineTo(x + xr, g.wk + xr); ctx.moveTo(x + xr, g.wk - xr); ctx.lineTo(x - xr, g.wk + xr); ctx.stroke(); ctx.restore();
+      mono(`${TRACE.inv} VIOLATED`, x, g.wk + 70 * S, { size: 15, weight: 700, track: 2.4, color: C.red, alpha: fade, align: PORT ? "right" : "center", type: (f - slam) * 2.2, cursor: true, f });
+    }
+  }
+  // headline
+  const hx = PORT ? W / 2 : L.textX, al = PORT ? "center" : "left";
+  mono(`COUNTEREXAMPLE · BUG ${TRACE.bug} · ${steps.length} STEPS`, hx, PORT ? H * 0.16 : H * 0.17, { size: 16, track: 2.6, color: C.red, align: al, type: (f - 196) * 1.6, alpha: fade });
+  kinetic(TRACE.title.replace(/\blive\b/, "*live*") + ".", { f, x: hx, y: PORT ? H * 0.225 : H * 0.28, size: PORT ? 68 : 84, weight: 600, align: al, maxW: PORT ? 920 : 1500, start: 200, end: 280, stagger: 3, accentColor: C.green });
+}
+
+// ---------- scenes 3+4: tiles (300-560) ----------
+let GRID;
+function buildGrid() {
+  const n = TILES.length;
+  const cols = PORT ? 3 : Math.ceil(n / 2), rows = Math.ceil(n / cols);
+  const tall = PORT && rows > 3;
+  const tw = (PORT ? 300 : 306) * S, th = (tall ? 184 : PORT ? 206 : 200) * S, gap = (tall ? 18 : 22) * S;
+  const cy = tall ? H * 0.645 : PORT ? H * 0.615 : H * 0.62;
+  const top = cy - (rows * th + (rows - 1) * gap) / 2;
+  GRID = TILES.map((t, i) => {
+    const r = Math.floor(i / cols), inRow = Math.min(cols, n - r * cols), c = i % cols;
+    const rowW = inRow * tw + (inRow - 1) * gap;
+    return { x: W / 2 - rowW / 2 + c * (tw + gap), y: top + r * (th + gap), w: tw, h: th, t };
+  });
+}
+function wrap(text, fnt, maxW, maxLines) {
+  ctx.font = fnt; const words = text.split(" "), lines = [""];
+  for (const w of words) { const t = lines.at(-1) ? lines.at(-1) + " " + w : w; if (ctx.measureText(t).width > maxW && lines.at(-1)) lines.push(w); else lines[lines.length - 1] = t; }
+  if (lines.length > maxLines) { lines.length = maxLines; lines[maxLines - 1] = lines[maxLines - 1].replace(/\s*\S*$/, "") + "…"; }
+  return lines;
+}
+const scanX = (f) => { const l = GRID[0].x - 160 * S, r = Math.max(...GRID.map((g) => g.x + g.w)) + 160 * S; return lerp(l, r, eIO(prog(f, 420, 446))); };
+function tileFlipF(g) { const l = GRID[0].x - 160 * S, r = Math.max(...GRID.map((q) => q.x + q.w)) + 160 * S; const target = (g.x + g.w / 2 - l) / (r - l); // invert eIO numerically
+  let lo = 0, hi = 1; for (let k = 0; k < 20; k++) { const m = (lo + hi) / 2; if (eIO(m) < target) lo = m; else hi = m; } return 420 + lo * 26; }
+function tiles(f) {
+  const dz = 1 + 0.05 * prog(f, 300, 540) + pulse(f, 420, 10) * 0.02, dr = lerp(-0.012, 0.006, eIO(prog(f, 300, 540)));
+  ctx.save(); ctx.translate(W / 2, H * 0.6); ctx.rotate(dr); ctx.scale(dz, dz); ctx.translate(-W / 2, -H * 0.6);
+  GRID.forEach((g, i) => {
+    const t = g.t, f0 = 304 + i * 7;
+    const pin = eOutBack(prog(f, f0, f0 + 12)), a = clamp(prog(f, f0, f0 + 5));
+    if (a <= 0) return;
+    // collapse to center (540-560)
+    const cf = 538 + i * 1.2, cp = eInCubic(prog(f, cf, cf + 12));
+    if (cp >= 1) return;
+    const ff = tileFlipF(g), flipP = prog(f, ff, ff + 10);
+    const flipping = t.end === "green" && flipP > 0 && flipP < 1;
+    const after = f >= ff;
+    const state = !after ? "red" : t.end;
+    const col = state === "green" ? C.green : state === "amber" ? C.amber : C.red;
+    const cx = g.x + g.w / 2, cy = g.y + g.h / 2;
+    const tx = lerp(cx, L.treeX, cp), ty = lerp(cy, L.treeY, cp);
+    ctx.save();
+    ctx.translate(tx, ty + (1 - pin) * 30 * S);
+    const sy = t.end === "green" && flipP > 0 ? Math.abs(Math.cos(Math.PI * flipP)) : 1;
+    const sc = lerp(0.9, 1, pin) * (1 - cp);
+    const punch = 1 + pulse(f, ff, 5) * (t.end === "green" ? 0.06 : 0.02) * (after ? 1 : 0);
+    ctx.scale(sc * punch, sc * Math.max(0.02, sy) * punch);
+    ctx.globalAlpha = a * (1 - cp);
+    const x = -g.w / 2, y = -g.h / 2;
+    // red breath during the silence
+    const breath = f >= 400 && f < 420 ? 0.5 + 0.5 * Math.sin((f - 400) * 0.6) : 0;
+    ctx.fillStyle = state === "green" ? "#0c1812" : state === "amber" ? "#17130b" : "#150c0d";
+    ctx.shadowColor = col; ctx.shadowBlur = (state === "green" ? 36 : 18 + breath * 22) * S;
+    ctx.beginPath(); ctx.roundRect(x, y, g.w, g.h, 14 * S); ctx.fill(); ctx.shadowBlur = 0;
+    ctx.strokeStyle = col; ctx.lineWidth = 1.5 * S; ctx.globalAlpha = a * (state === "red" ? 0.75 + breath * 0.25 : 1);
+    if (state === "amber") ctx.setLineDash([6 * S, 5 * S]);
+    ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha = a;
+    const pad = 18 * S;
+    mono(t.tag, x + pad, y + pad + 12 * S, { size: 12, track: 2, color: state === "red" ? "#b98a8a" : col });
+    const lines = wrap(t.title, font(G, 19 * S, 500), g.w - pad * 2, 4);
+    ctx.font = font(G, 19 * S, 500); ctx.fillStyle = C.ink;
+    lines.forEach((ln, k) => ctx.fillText(ln, x + pad, y + pad + 48 * S + k * 24 * S));
+    // status line
+    const sl = y + g.h - pad;
+    let status, sc2 = col;
+    if (state === "red") status = `● ${t.pinned}`;
+    else if (state === "green") status = t.pr ? `✓ passing · #${t.pr} ${t.prState}` : "✓ passing on main";
+    else status = `◌ test.failing · fix #${t.pr} ${t.prState}`;
+    mono(status, x + pad, sl, { size: 13, weight: 600, color: sc2, type: after ? (f - ff) * 2.4 : 99, track: 0.5 });
+    ctx.restore();
+    // shockwave + particles on green flips
+    if (t.end === "green" && f >= ff + 5) {
+      const q = prog(f, ff + 5, ff + 35);
+      if (q < 1) {
+        ctx.save(); ctx.globalCompositeOperation = "lighter";
+        ctx.strokeStyle = C.green; ctx.globalAlpha = (1 - q) * 0.8; ctx.lineWidth = 2 * S;
+        ctx.beginPath(); ctx.roundRect(cx - g.w / 2 - q * 120 * S, cy - g.h / 2 - q * 120 * S, g.w + q * 240 * S, g.h + q * 240 * S, (14 + q * 60) * S); ctx.stroke();
+        const r = rng(i * 31 + 5);
+        for (let k = 0; k < 40; k++) {
+          const ang = r() * Math.PI * 2, sp = (80 + r() * 380) * S, life = 0.5 + r() * 0.5, qq = clamp(q / life);
+          if (qq >= 1) continue;
+          const d = sp * eOutCubic(qq);
+          ctx.globalAlpha = (1 - qq) * 0.9; ctx.fillStyle = r() < 0.3 ? "#eafff3" : C.green;
+          ctx.beginPath(); ctx.arc(cx + Math.cos(ang) * (g.w * 0.3 + d), cy + Math.sin(ang) * (g.h * 0.3 + d), (1.2 + r() * 2.2) * S, 0, 7); ctx.fill();
+        }
+        ctx.restore();
+      }
+    }
+  });
+  ctx.restore();
+  // scanline
+  if (f >= 414 && f < 450) {
+    const x = f < 420 ? GRID[0].x - 160 * S : scanX(f), a = f < 420 ? prog(f, 414, 420) : 1 - prog(f, 442, 450);
+    ctx.save(); ctx.globalCompositeOperation = "lighter";
+    const gr = ctx.createLinearGradient(x - 140 * S, 0, x, 0); gr.addColorStop(0, hexA(C.green, 0)); gr.addColorStop(1, hexA(C.green, 0.22 * a));
+    ctx.fillStyle = gr; ctx.fillRect(x - 140 * S, 0, 140 * S, H);
+    ctx.fillStyle = C.green; ctx.globalAlpha = a; ctx.fillRect(x - 1 * S, 0, 2 * S, H); ctx.restore();
+  }
+}
+function scene3(f) {
+  // bridge: the X travels into the first tile (290-306)
+  const hx = PORT ? W / 2 : W / 2, al = "center";
+  kinetic(PORT ? "Each race, pinned | as a *failing* test." : "Each race, pinned as a *failing* test.", { f, x: hx, y: PORT ? H * 0.2 : H * 0.215, size: PORT ? 64 : 80, weight: 600, align: al, maxW: PORT ? 900 : 1600, start: 306, end: 396, stagger: 3, accentColor: C.red });
+  const nFail = TILES.length, nTests = TILES.filter((t) => t.tag.startsWith("HEARTBEAT")).length + F.cx.length;
+  mono(`${nFail} COUNTEREXAMPLES → ${nTests} RED TESTS`, hx, PORT ? H * 0.2 + 150 * S : H * 0.215 + 56 * S, { size: 14, track: 2.6, color: "#c86a6a", align: al, type: (f - 330) * 1.4, alpha: 1 - prog(f, 396, 404) });
+}
+function scene4(f) {
+  const hx = W / 2;
+  kinetic(PORT ? "Then a fix PR | turns it *green.*" : "Then a fix PR turns it *green.*", { f, x: hx, y: PORT ? H * 0.2 : H * 0.215, size: PORT ? 64 : 80, weight: 600, align: "center", maxW: PORT ? 900 : 1600, start: 424, end: 532, stagger: 3, accentColor: C.green });
+  const t = AMBERS ? `${GREENS} FIXED ON MAIN · ${AMBERS} WITH A FIX PR IN REVIEW` : `ALL ${GREENS} FIXED ON MAIN`;
+  mono(t, hx, PORT ? H * 0.2 + 150 * S : H * 0.215 + 56 * S, { size: 14, track: 2.6, color: C.green, align: "center", type: (f - 448) * 1.6, cursor: true, f, alpha: 1 - prog(f, 530, 540) });
+}
+
+// ---------- scene 5: collapse to the simpler design (540-645) ----------
+function hexVerts(cx, cy, r, n, rotA = 0) { return Array.from({ length: n }, (_, i) => { const a = -Math.PI / 2 + (i * 2 * Math.PI) / n + rotA; return [cx + Math.cos(a) * r, cy + Math.sin(a) * r]; }); }
+function scene5(f) {
+  const cam = treeCam(999, L.fit / (58 * Math.pow(MAXD + 0.5, 0.93)));
+  cam.rot = rot(165) + (f - 540) * 0.004;
+  const birth = (n) => 552 + n.d * 2.6 + n.j * 3;
+  const V = hexVerts(L.treeX, L.treeY, L.hexR, VIEWS);
+  const pos = (i) => {
+    const n = NODES[i], [x, y] = tp(n, cam), s = 585 + (MAXD - n.d) * 2.2 + n.j * 6, e = eIO(prog(f, s, s + 26));
+    const [vx, vy] = V[i % VIEWS];
+    return [lerp(x, vx, e), lerp(y, vy, e)];
+  };
+  const imp = prog(f, 585, 628);
+  if (f < 645) {
+    // bloom behind
+    ctx.save(); ctx.globalCompositeOperation = "lighter";
+    const gr = ctx.createRadialGradient(L.treeX, L.treeY, 0, L.treeX, L.treeY, 520 * S);
+    gr.addColorStop(0, hexA(C.amber, 0.12 + pulse(f, 555, 10) * 0.25)); gr.addColorStop(1, hexA(C.amber, 0));
+    ctx.fillStyle = gr; ctx.fillRect(0, 0, W, H); ctx.restore();
+    drawTree(f, { cam, birth, pos, dim: 1, edgeAlpha: 1 - eOutCubic(imp) * 0.95, nodeAlpha: 1 - imp * 0.4 });
+  }
+  hexMark(f, V);
+  // numbers
+  const today = STATES_TODAY, simple = STATES_SIMPLE;
+  const rp = eIO(prog(f, 590, 628));
+  const v = Math.exp(lerp(Math.log(today), Math.log(simple), rp));
+  const a = eOutCubic(prog(f, 556, 572)) * (1 - eInCubic(prog(f, 640, 652)));
+  const cx = PORT ? W / 2 : L.textX, al = PORT ? "center" : "left";
+  const y0 = PORT ? H * 0.17 : H * 0.36;
+  mono("REACHABLE STATES · HEARTBEAT MODEL", cx, y0, { size: 13, track: 2.4, color: C.amber, alpha: a, align: al });
+  ctx.save(); ctx.globalAlpha = a; ctx.font = font(M, (PORT ? 92 : 104) * S, 600); ctx.fillStyle = rp > 0.98 ? mix(C.ink, C.amberHi, pulse(f, 628, 12)) : C.ink; ctx.textAlign = al;
+  ctx.fillText(fmt(v), cx, y0 + (PORT ? 100 : 112) * S); ctx.restore();
+  // before / after labels
+  const labA = 1 - eOutCubic(prog(f, 596, 606)), labB = eOutCubic(prog(f, 612, 624));
+  kinetic("today", { f, x: cx, y: y0 + (PORT ? 170 : 190) * S, size: 44, align: al, start: 562, end: 596, stagger: 2, alpha: a, color: C.dim });
+  kinetic("a *simpler* design, proposed.", { f, x: cx, y: y0 + (PORT ? 170 : 190) * S, size: 44, align: al, maxW: PORT ? 900 : 700, start: 606, end: 640, stagger: 3, alpha: a, color: C.dim });
+  // strike-through ghost of the old number
+  if (rp > 0.5) mono(`was ${fmt(today)}`, cx, y0 + (PORT ? 225 : 250) * S, { size: 15, track: 1.6, color: C.faint, alpha: a * prog(f, 618, 630), align: al });
+}
+// The Agent Swarm logo (apps/ui/public/logo.png == docs-site/public/logo.png == agent-swarm.dev/logo.png).
+// 512px source, #CE9010. Center hex is pointy-top; stroke midline radius 163.4px, stroke ~20.8px (measured).
+let LOGO = null;
+const LOGO_COL = "#ce9010", LOGO_MID = 163.4 / 512, LOGO_STROKE = 20.8 / 512;
+function markTarget() { return PORT ? { x: W / 2, y: H * 0.37, r: 94 * S } : { x: W / 2 - 362 * S, y: H * 0.47, r: 88 * S }; }
+function hexMark(f, V0) {
+  // the collapsed graph: VIEWS nodes on a ring; the ring settles onto the logo's center hex, then the honeycomb arrives
+  const ringP = eOutCubic(prog(f, 612, 640));
+  if (ringP <= 0) return;
+  const endP = eIO(prog(f, 638, 664));
+  const T = markTarget();
+  const cx = lerp(L.treeX, T.x, endP), cy = lerp(L.treeY, T.y, endP), r = lerp(L.hexR, T.r, endP);
+  const spin = eIO(prog(f, 638, 684)) * (Math.PI / 3);
+  const V = hexVerts(cx, cy, r, VIEWS, spin);
+  const D = T.r / LOGO_MID; // logo draw size at which its center hex == our ring
+  const mk = eOutCubic(prog(f, 660, 684)); // ring -> logo
+  const comb = eOutCubic(prog(f, 666, 690)); // honeycomb in
+  ctx.save(); ctx.lineJoin = "miter";
+  // ring: thin amber glow line thickening into the logo stroke weight and colour
+  const lw = lerp(lerp(2, 4, endP) * S, D * LOGO_STROKE, mk);
+  ctx.globalCompositeOperation = mk < 1 ? "lighter" : "source-over";
+  ctx.strokeStyle = mix(C.amber, LOGO_COL, mk); ctx.lineWidth = lw; ctx.shadowColor = C.amber; ctx.shadowBlur = 18 * S * (1 - mk);
+  ctx.globalAlpha = 1 - eInCubic(prog(f, 684, 692));
+  ctx.beginPath();
+  const segs = VIEWS * ringP;
+  for (let i = 0; i <= Math.floor(segs) && i < VIEWS; i++) {
+    const [x, y] = V[i]; if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  }
+  const fi = Math.floor(segs), fr = segs - fi;
+  if (fi < VIEWS) { const [x1, y1] = V[fi], [x2, y2] = V[(fi + 1) % VIEWS]; ctx.lineTo(lerp(x1, x2, fr), lerp(y1, y2, fr)); } else ctx.closePath();
+  ctx.stroke();
+  // nodes shrink into the corners
+  ctx.globalCompositeOperation = "lighter"; ctx.globalAlpha = 1;
+  ctx.shadowBlur = 24 * S; ctx.fillStyle = "#fff1cf";
+  V.forEach(([x, y], i) => { const pp = pulse(f, 600 + i * 3, 10); const rr = (5 + pp * 5) * S * (1 - mk); if (rr > 0.2) { ctx.beginPath(); ctx.arc(x, y, rr, 0, 7); ctx.fill(); } });
+  ctx.restore();
+  // the real logo: honeycomb cells grow in from the center hex, then the PNG takes over pixel-exact
+  if (LOGO && comb > 0) {
+    ctx.save(); ctx.globalCompositeOperation = "source-over";
+    // warm glow behind the mark
+    const g = ctx.createRadialGradient(T.x, T.y, 0, T.x, T.y, D * 0.9);
+    g.addColorStop(0, hexA(C.amber, 0.10 * comb)); g.addColorStop(1, hexA(C.amber, 0));
+    ctx.fillStyle = g; ctx.fillRect(T.x - D, T.y - D, 2 * D, 2 * D);
+    // reveal: circular clip expanding from the center
+    ctx.beginPath(); ctx.arc(T.x, T.y, D * 0.3 + D * 0.5 * comb, 0, 7); ctx.clip();
+    ctx.globalAlpha = comb; ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = "high";
+    const sc = 1 + (1 - comb) * 0.06;
+    ctx.drawImage(LOGO, T.x - (D * sc) / 2, T.y - (D * sc) / 2, D * sc, D * sc);
+    ctx.restore();
+  }
+  if (f < 640 && ringP > 0.3) mono(`${VIEWS} STATUS VIEWS`, L.treeX, L.treeY + 6 * S, { size: 12, track: 2.2, color: C.amberHi, align: "center", alpha: prog(f, 622, 630) * (1 - prog(f, 636, 644)) });
+}
+
+// ---------- scene 6: end card (645-720) ----------
+function scene6(f) {
+  const lx = PORT ? W / 2 : W / 2 - 190 * S, ly = PORT ? H * 0.575 : H * 0.47 + 36 * S;
+  const al = PORT ? "center" : "left";
+  // letters
+  const word = "Agent Swarm"; ctx.save(); ctx.font = font(G, 112 * S, 600); ctx.textBaseline = "alphabetic";
+  const tw = ctx.measureText(word).width; let x = PORT ? lx - tw / 2 : lx;
+  for (let i = 0; i < word.length; i++) {
+    const ch = word[i], cw = ctx.measureText(ch).width, s0 = 662 + i * 1.6, p = eOutExpo(prog(f, s0, s0 + 16));
+    ctx.save(); ctx.beginPath(); ctx.rect(x - 4, ly - 120 * S, cw + 8, 150 * S); ctx.clip();
+    ctx.globalAlpha = p; ctx.fillStyle = C.ink; if (p < 1) ctx.filter = `blur(${((1 - p) * 8).toFixed(1)}px)`;
+    ctx.fillText(ch, x, ly + (1 - p) * 110 * S); ctx.restore(); x += cw;
+  }
+  ctx.restore();
+  kinetic("Races found by a *model checker.*", { f, x: PORT ? W / 2 : lx + 4 * S, y: ly + 70 * S, size: 38, align: al, start: 674, stagger: 3, color: C.dim, maxW: PORT ? 900 : 1200 });
+  mono("AGENT-SWARM.DEV", PORT ? W / 2 : lx + 6 * S, ly + 124 * S, { size: 15, track: 4.5, color: C.amber, align: al, type: (f - 684) * 1.3 });
+  mono(`Music: ${F.music.credit} · Specs: specs/tla on main`, W / 2, H - 70 * S, { size: 11, track: 1, color: C.faint, align: "center", alpha: prog(f, 680, 690) });
+}
+
+// ---------- master ----------
+function shake(f) {
+  let a = pulse(f, 255, 5) * 16 + pulse(f, 420, 6) * 9 + pulse(f, 165, 3) * 4;
+  return [Math.sin(f * 2.3) * a * S, Math.cos(f * 3.1) * a * S];
+}
+function render(f) {
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1; ctx.filter = "none"; ctx.globalCompositeOperation = "source-over";
+  // backdrop glow by act
+  let gc = C.amber, gx = L.treeX, gy = L.treeY, ga = 1;
+  if (f >= 180 && f < 300) { gc = C.red; gx = W / 2; gy = H * 0.6; ga = 0.6 + pulse(f, 255, 10); }
+  if (f >= 300 && f < 420) { gc = C.red; gx = W / 2; gy = H * 0.62; ga = 0.55; }
+  if (f >= 420 && f < 540) { gc = C.green; gx = W / 2; gy = H * 0.62; ga = 0.5 + pulse(f, 420, 12) * 0.6; }
+  if (f >= 645) { gc = C.amber; gx = W / 2; gy = H * 0.5; ga = 1.1; }
+  if (f >= 405 && f < 420) ga *= 0.4;
+  background(f, gc, gx, gy, ga);
+  const [sx, sy] = shake(f);
+  ctx.save(); ctx.translate(sx, sy);
+  // global drop punch-in
+  const punch = 1 + pulse(f, 420, 8) * 0.035 + pulse(f, 255, 6) * 0.02;
+  ctx.translate(W / 2, H / 2); ctx.scale(punch, punch); ctx.translate(-W / 2, -H / 2);
+  if (f < 180) scene1(f);
+  if (f >= 180 && f < 300) scene2(f);
+  if (f >= 300 && f < 562) tiles(f);
+  if (f >= 300 && f < 420) scene3(f);
+  if (f >= 420 && f < 545) scene4(f);
+  if (f >= 540) scene5(f);
+  if (f >= 645) scene6(f);
+  ctx.restore();
+  // silence at 405-420: darken everything but the tiles glow; flash frames
+  
+  if (f >= 420 && f < 425) { ctx.fillStyle = hexA(C.green, 0.09 * (1 - prog(f, 420, 425))); ctx.fillRect(0, 0, W, H); }
+  if (f >= 555 && f < 561) { ctx.fillStyle = hexA(C.amberHi, 0.18 * (1 - prog(f, 555, 561))); ctx.fillRect(0, 0, W, H); }
+  glitch(f, (f >= 255 && f < 263 ? 1 - prog(f, 255, 263) : 0) + (f >= 420 && f < 424 ? 0.6 : 0) + (f >= 165 && f < 167 ? 0.5 : 0), 1);
+  hud(f);
+  finish(f);
+}
+window.__ready = (async () => {})();
+window.boot = async (facts, fonts, logo) => {
+  LOGO = new Image(); LOGO.src = logo; await LOGO.decode();
+  for (const [name, b64] of fonts) { const buf = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)); const ff = new FontFace(name, buf); await ff.load(); document.fonts.add(ff); }
+  initFacts(facts);
+  return { tiles: TILES.length, greens: GREENS, ambers: AMBERS, nodes: NODES.length, edges: EDGES.length, leafD: NODES[LEAF].d };
+};
+window.frame = (f) => { render(f); return cv.toDataURL("image/png"); };
+</script></body></html>

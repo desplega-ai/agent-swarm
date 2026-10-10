@@ -159,7 +159,14 @@ export function makeSwarmSDK(ctx: SwarmSdkContext): SwarmSDKInstance {
       }
     }
     if (!res.ok) {
-      const err = new Error(`swarm.sdk ${method} ${path}: ${res.status}`) as Error & {
+      // Keep the server's reason: a refused approval answer (403) says why.
+      const reason =
+        parsed &&
+        typeof parsed === "object" &&
+        typeof (parsed as { error?: unknown }).error === "string"
+          ? ` ${(parsed as { error: string }).error}`
+          : "";
+      const err = new Error(`swarm.sdk ${method} ${path}: ${res.status}${reason}`) as Error & {
         status?: number;
         response?: unknown;
       };
@@ -224,6 +231,10 @@ export function makeSwarmSDK(ctx: SwarmSdkContext): SwarmSDKInstance {
     list: (filters?: Filters) => call("GET", `/api/approval-requests${qs(filters)}`),
     get: (id: string) => call("GET", `/api/approval-requests/${enc(id)}`),
     create: (body: Body) => call("POST", "/api/approval-requests", body),
+    // Answers as the viewer's credential (no agent id, no page session), so
+    // the server records the viewer. A credential that may not answer gets a
+    // 403 whose reason reaches the page's error banner. A 200 can leave the
+    // request pending while an `all` / `{ min: N }` policy needs more approvals.
     respond: (id: string, body: Body) =>
       call("POST", `/api/approval-requests/${enc(id)}/respond`, body),
   };

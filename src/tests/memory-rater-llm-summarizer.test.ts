@@ -33,7 +33,8 @@ function makeOpenRouterResponse(content: string, init: ResponseInit = { status: 
 describe("getMemoryRaterModel", () => {
   test("returns the default when MEMORY_RATER_MODEL is unset", () => {
     expect(getMemoryRaterModel({})).toBe(DEFAULT_MEMORY_RATER_MODEL);
-    expect(DEFAULT_MEMORY_RATER_MODEL).toBe("google/gemini-3-flash-preview");
+    // The OpenRouter slug of the pinned rater model: one source of truth.
+    expect(DEFAULT_MEMORY_RATER_MODEL).toBe("deepseek/deepseek-v4.1-flash");
   });
 
   test("returns the env override when set", () => {

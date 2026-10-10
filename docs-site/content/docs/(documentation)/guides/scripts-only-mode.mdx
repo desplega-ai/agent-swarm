@@ -51,6 +51,11 @@ The tool surface changes on the agent's next MCP session initialization. The
 worker prompt changes on its next harness reconciliation (normally within ten
 seconds) or worker boot; in-flight sessions retain their existing prompt.
 
+To expose the script tools plus a handful of named tools, or any other exact
+tool list, use the `SWARM_ENABLED_TOOLS` allowlist instead. It overrides
+scripts-only mode when both are set; see
+[Agent capabilities and tool allowlist](/docs/guides/agent-capabilities).
+
 For a mixed fleet, use code-mode for strong models and keep the full tool
 surface for small models. PR #969 found that small models can lose delegation
 fidelity under code-mode even when parent tasks complete.

@@ -254,6 +254,51 @@ describe("/api/script-connections HTTP", () => {
     expect(await res.json()).toEqual({ error: "Only the lead can manage script connections." });
   });
 
+  test("DELETE removes a connection, its managed binding, and its inline secret", async () => {
+    const created = await dispatch("/api/script-connections", {
+      method: "POST",
+      agentId: leadAgentId,
+      body: {
+        kind: "openapi",
+        slug: "deleteHttpVendor",
+        baseUrl: "https://api.vendor.test",
+        allowedHosts: ["api.vendor.test"],
+        auth: { type: "bearer", secret: "example-http-delete-tok" },
+        openapiSpecJson: inlineOpenApiSpec(),
+      },
+    });
+    expect(created.status).toBe(200);
+    const { connection } = (await created.json()) as { connection: { id: string } };
+
+    const forbidden = await dispatch(`/api/script-connections/${connection.id}`, {
+      method: "DELETE",
+      agentId: workerAgentId,
+    });
+    expect(forbidden.status).toBe(403);
+
+    const res = await dispatch(`/api/script-connections/${connection.id}`, {
+      method: "DELETE",
+      agentId: leadAgentId,
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ deleted: true, id: connection.id });
+
+    const counts = await getDbClient().get<{ conns: number; bindings: number; secrets: number }>(
+      `SELECT
+         (SELECT COUNT(*) FROM script_connections WHERE id = ?) AS conns,
+         (SELECT COUNT(*) FROM script_credential_bindings WHERE managed_by_connection_id = ?) AS bindings,
+         (SELECT COUNT(*) FROM swarm_config WHERE key = 'connection.deleteHttpVendor.secret') AS secrets`,
+      [connection.id, connection.id],
+    );
+    expect(counts).toEqual({ conns: 0, bindings: 0, secrets: 0 });
+
+    const missing = await dispatch(`/api/script-connections/${connection.id}`, {
+      method: "DELETE",
+      agentId: leadAgentId,
+    });
+    expect(missing.status).toBe(404);
+  });
+
   test("list returns connections without secrets", async () => {
     await upsertSwarmConfig({
       scope: "global",

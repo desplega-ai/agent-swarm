@@ -21,7 +21,7 @@ description: Keep your docs fresh automatically, generate release notes from rea
 
 Keep your docs fresh automatically. Generate release notes from real commits. Produce release videos with [Remotion](https://www.remotion.dev/) + browser-automation captures, on the cadence you choose.
 
-<Mermaid chart={`flowchart LR
+<Mermaid title="Release automation: a daily cron checks for commits after the latest release. With none it skips; otherwise it updates docs and changelog, waits for CI, and the next run cuts the release. A separate on-demand path captures with qa-use and renders a release video with Remotion." chart={`flowchart LR
   C["Cron: daily"] --> Q{"Commits after latest<br/>released tag?"}
   Q -- no --> NO["No-op (skip)"]
   Q -- yes --> UD["Update docs +<br/>CHANGELOG + bump PR"]

@@ -5,7 +5,7 @@ description: Give each top account a persistent folder in agent-fs where agents 
 
 Give each top account a persistent folder in the shared filesystem ([agent-fs](https://github.com/desplega-ai/agent-fs)) where agents accumulate context across months — not just within a single session.
 
-<Mermaid chart={`flowchart LR
+<Mermaid title="Per-customer working directory: meeting transcripts, usage data and running notes all land in one agent-fs folder per account, which any agent in any session reads to produce a personalized report or briefing." chart={`flowchart LR
   M["Meeting transcript"] --> WD[("agent-fs:<br/>customers/&lt;account&gt;/")]
   U["Usage / behavior data"] --> WD
   N["Running notes +<br/>integration history"] --> WD

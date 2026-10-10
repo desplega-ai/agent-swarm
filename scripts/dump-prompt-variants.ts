@@ -37,6 +37,7 @@ import "../src/jira/templates";
 import "../src/agentmail/templates";
 import "../src/heartbeat/templates";
 import "../src/tools/templates";
+import "../src/comb/templates";
 
 // ─── Provider trait fixtures (mirrors src/providers/*-adapter.ts) ────────────
 

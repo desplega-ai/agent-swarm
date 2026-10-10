@@ -1,4 +1,5 @@
 import OpenAI from "openai";
+import { getOpenRouterAttributionHeaders } from "../../../utils/openrouter-base-url";
 import { DEFAULT_EMBEDDING_MODEL, EMBEDDING_DIMENSIONS } from "../constants";
 import type { EmbeddingProvider } from "../types";
 
@@ -34,11 +35,15 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
 
   private getClient(): OpenAI | null {
     if (!this.apiKey) return null;
-    if (!this.client)
+    if (!this.client) {
+      const baseURL = process.env.EMBEDDING_API_BASE_URL; // Optional custom base URL
       this.client = new OpenAI({
-        baseURL: process.env.EMBEDDING_API_BASE_URL, // Optional custom base URL
+        baseURL,
         apiKey: this.apiKey,
+        // Only an openrouter.ai base URL gets attribution; OpenAI and gateways get none.
+        defaultHeaders: getOpenRouterAttributionHeaders(baseURL ?? ""),
       });
+    }
     return this.client;
   }
 

@@ -16,7 +16,12 @@ import type { WorkflowRunStep } from "../types";
 import { shapeApprovalResolution } from "./approval-resolution";
 import { loadCompletedStepRouting } from "./completed-step-routing";
 import { FAILED_TASK_OUTPUT_PREFIX } from "./constants";
-import { findReadyNodes, isWorkflowRunActive, walkGraph } from "./engine";
+import {
+  failRunOnUnreadableReplay,
+  findReadyNodes,
+  isWorkflowRunActive,
+  walkGraph,
+} from "./engine";
 import type { ExecutorRegistry } from "./executors/registry";
 import { getSecretInputKeys } from "./input";
 import { finalizeOrWait, resumeWaitState } from "./resume";
@@ -24,6 +29,7 @@ import {
   checkpointPortStepAndResolveSuccessors,
   completeTaskStepAndResolveSuccessors,
   failStepAndRunIfWaiting,
+  scheduleTaskStepRetry,
 } from "./task-step-routing";
 
 /**
@@ -112,6 +118,7 @@ async function recoverRunningRuns(registry: ExecutorRegistry): Promise<number> {
       }
       recovered++;
     } catch (err) {
+      if (await failRunOnUnreadableReplay(runId, err)) continue;
       console.error(`[workflows] Failed to recover running run ${runId}:`, err);
     }
   }
@@ -171,6 +178,24 @@ async function recoverWaitingRuns(registry: ExecutorRegistry): Promise<number> {
       if (!run || run.status !== "waiting" || !workflow) continue;
 
       const taskCompleted = stuck.taskStatus === "completed";
+      if (stuck.taskStatus === "failed") {
+        // Same retry policy as the live task.failed handler: this sweep can
+        // reach a failed task first, and must not bypass the node's retry.
+        // `stuck` is a snapshot: the live handler and retry poller may have
+        // redriven the step to a new task since, so every claim below is
+        // fenced on `stuck.taskId` still being the task bound to the step.
+        const failedStep = await getWorkflowRunStep(stuck.stepId);
+        if (!failedStep) continue;
+        const retry = await scheduleTaskStepRetry(
+          workflow.definition,
+          stuck.runId,
+          failedStep,
+          stuck.taskId,
+          "Task failed (recovered)",
+        );
+        if (retry === "scheduled") recovered++;
+        if (retry !== "not-eligible") continue;
+      }
       if (!taskCompleted && (workflow.definition.onNodeFailure ?? "fail") === "fail") {
         // Preserve the fail-fast recovery policy for failed/cancelled tasks.
         // Claimed: this sweep runs on every heartbeat, so the live task.failed
@@ -178,7 +203,12 @@ async function recoverWaitingRuns(registry: ExecutorRegistry): Promise<number> {
         // would kill a run that is already advancing.
         const reason =
           stuck.taskStatus === "failed" ? "Task failed (recovered)" : "Task cancelled (recovered)";
-        const claimed = await failStepAndRunIfWaiting(stuck.stepId, stuck.runId, reason);
+        const claimed = await failStepAndRunIfWaiting(
+          stuck.stepId,
+          stuck.runId,
+          reason,
+          stuck.taskId,
+        );
         if (!claimed) continue;
         recovered++;
         continue;
@@ -202,6 +232,7 @@ async function recoverWaitingRuns(registry: ExecutorRegistry): Promise<number> {
         stepOutput,
         ctx,
         taskCompleted ? undefined : reason,
+        stuck.taskId,
       );
       if (!routing.claimed) continue;
       if (routing.foreachChild && !routing.joined) {
@@ -223,6 +254,7 @@ async function recoverWaitingRuns(registry: ExecutorRegistry): Promise<number> {
       }
       recovered++;
     } catch (err) {
+      if (await failRunOnUnreadableReplay(stuck.runId, err)) continue;
       console.error(`[workflows] Failed to recover waiting run ${stuck.runId}:`, err);
     }
   }
@@ -324,6 +356,7 @@ async function recoverApprovalWaitingRuns(registry: ExecutorRegistry): Promise<n
       }
       recovered++;
     } catch (err) {
+      if (await failRunOnUnreadableReplay(stuck.runId, err)) continue;
       console.error(`[workflows] Failed to recover approval-waiting run ${stuck.runId}:`, err);
     }
   }
@@ -366,6 +399,7 @@ async function recoverWaitStates(registry: ExecutorRegistry): Promise<number> {
       await resumeWaitState(stuck.waitId, resumeStatus, payload, registry);
       recovered++;
     } catch (err) {
+      if (await failRunOnUnreadableReplay(stuck.runId, err)) continue;
       console.error(`[workflows] Failed to recover wait-state ${stuck.waitId}:`, err);
     }
   }

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { SessionNotification } from "@agentclientprotocol/sdk";
-import { translateAcpSessionNotification } from "../providers/acp-swarm-events";
+import { acpReportedCostUsd, translateAcpSessionNotification } from "../providers/acp-swarm-events";
 
 function notification(update: SessionNotification["update"]): SessionNotification {
   return { sessionId: "session-1", update };
@@ -78,6 +78,7 @@ describe("translateAcpSessionNotification", () => {
           rawOutput: "ok",
           locations: undefined,
         },
+        isError: false,
       },
     ]);
   });
@@ -131,5 +132,21 @@ describe("translateAcpSessionNotification", () => {
         }),
       ).map((event) => event.type),
     ).toEqual(["progress", "custom"]);
+  });
+});
+
+// The adapter test owns the USD, absent, and non-USD paths end to end; these are
+// the amount and currency edge cases it does not reach.
+describe("acpReportedCostUsd", () => {
+  test("accepts lowercase USD and a zero amount, rejects invalid amounts and other updates", () => {
+    const usage = { sessionUpdate: "usage_update" as const, used: 1, size: 2 };
+    expect(acpReportedCostUsd({ ...usage, cost: { amount: 0, currency: "usd" } })).toBe(0);
+    expect(acpReportedCostUsd({ ...usage, cost: { amount: -1, currency: "USD" } })).toBeNull();
+    expect(
+      acpReportedCostUsd({ ...usage, cost: { amount: Number.NaN, currency: "USD" } }),
+    ).toBeNull();
+    expect(
+      acpReportedCostUsd({ sessionUpdate: "current_mode_update", currentModeId: "code" }),
+    ).toBeNull();
   });
 });

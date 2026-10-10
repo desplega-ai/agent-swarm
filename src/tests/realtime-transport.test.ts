@@ -13,6 +13,10 @@ type SocketHeaders = Record<string, string>;
 const dbPath = `/tmp/test-realtime-transport-${Date.now()}-${randomUUID()}.sqlite`;
 const apiKey = `realtime-test-${randomUUID()}`;
 const pageSecret = `realtime-page-secret-${randomUUID()}`;
+// Comb presence only opens for the configured drive while Comb is on.
+const combOrgId = randomUUID();
+const combDriveId = randomUUID();
+const combNamespace = `presence:comb:${combOrgId}:${combDriveId}`;
 let baseUrl = "";
 let socketUrl = "";
 let server: Subprocess;
@@ -88,6 +92,14 @@ async function createUserToken(name: string): Promise<{ id: string; token: strin
   const token = ((await minted.json()) as { plaintext?: string }).plaintext;
   expect(typeof token).toBe("string");
   return { id: userId!, token: token! };
+}
+
+async function issueTicket(token = apiKey): Promise<{ ticket: string; expiresAt: number }> {
+  const response = await api("POST", "/api/realtime/ticket", {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  expect(response.status).toBe(200);
+  return (await response.json()) as { ticket: string; expiresAt: number };
 }
 
 async function launchPageAsUser(pageId: string, token: string): Promise<string> {
@@ -193,10 +205,7 @@ function openSocket(
         waiter.reject(error);
       }
     });
-    handshakeTimer = setTimeout(
-      () => fail(new Error(`WebSocket handshake failed: ${target}`)),
-      5_000,
-    );
+    handshakeTimer = setTimeout(() => fail(new Error("WebSocket handshake failed")), 5_000);
   });
 }
 
@@ -274,6 +283,10 @@ beforeAll(async () => {
       JIRA_DISABLE: "true",
       AGENTMAIL_DISABLE: "true",
       OAUTH_KEEPALIVE_DISABLE: "true",
+      COMB_ENABLED: "true",
+      AGENT_FS_API_URL: "http://127.0.0.1:9",
+      AGENT_FS_DEFAULT_ORG_ID: combOrgId,
+      AGENT_FS_DEFAULT_DRIVE_ID: combDriveId,
     },
     stdout: "ignore",
     stderr: "ignore",
@@ -470,6 +483,10 @@ describe("realtime transport", () => {
         JIRA_DISABLE: "true",
         AGENTMAIL_DISABLE: "true",
         OAUTH_KEEPALIVE_DISABLE: "true",
+        COMB_ENABLED: "true",
+        AGENT_FS_API_URL: "http://127.0.0.1:9",
+        AGENT_FS_DEFAULT_ORG_ID: combOrgId,
+        AGENT_FS_DEFAULT_DRIVE_ID: combDriveId,
       },
       stdout: "ignore",
       stderr: "ignore",
@@ -544,6 +561,116 @@ describe("realtime transport", () => {
       const result = await join(client, 1, "agent-room", `task:agent:${agentId}`);
       expect(result.me.userId).toBe(agentId);
       expect(result.me.kind).toBe("agent");
+      // Creating a room in another agent's namespace is a write, so a worker is refused.
+      client.send({
+        id: 2,
+        op: "join",
+        name: "agent-room",
+        namespace: `task:agent:${randomUUID()}`,
+        schemaVersion: 1,
+      });
+      const denied = await client.next((frame) => frame.type === "error" && frame.id === 2);
+      expect(denied.error).toContain("require lead");
+    } finally {
+      await closeSocket(client);
+    }
+  });
+
+  test("uses one-shot dashboard tickets for Comb presence on the API alias", async () => {
+    const viewer = await createUserToken("Comb Realtime Viewer");
+    const operatorTicket = await issueTicket();
+    const userTicket = await issueTicket(viewer.token);
+    const aliasUrl = socketUrl.replace("/@swarm/realtime", "/api/realtime");
+    const operator = await openSocket({}, `${aliasUrl}?ticket=${operatorTicket.ticket}`);
+    const user = await openSocket({}, `${socketUrl}?ticket=${userTicket.ticket}`);
+    const namespace = combNamespace;
+    try {
+      const operatorHello = await operator.next((frame) => frame.type === "hello");
+      expect(operatorHello.me).toMatchObject({ kind: "guest" });
+      const userHello = await user.next((frame) => frame.type === "hello");
+      expect(userHello.me).toMatchObject({
+        userId: viewer.id,
+        name: "Comb Realtime Viewer",
+        kind: "user",
+      });
+
+      const operatorJoined = await join(operator, 1, "default", namespace);
+      await join(user, 2, "default", namespace);
+      user.send({
+        id: 3,
+        op: "presence",
+        name: "default",
+        namespace,
+        data: { file: { path: "notes.md" }, pointer: { line: 4 } },
+      });
+      await user.next((frame) => frame.type === "result" && frame.id === 3);
+      const shared = await operator.next(
+        (frame) =>
+          frame.type === "presence" &&
+          frame.namespace === namespace &&
+          Array.isArray(frame.peers) &&
+          frame.peers.some(
+            (peer: Frame) => peer.userId === viewer.id && peer.data?.file?.path === "notes.md",
+          ),
+      );
+      expect(shared.peers).toHaveLength(2);
+
+      operator.send({ id: 4, op: "update", name: "default", namespace });
+      const updateDenied = await operator.next((frame) => frame.type === "error" && frame.id === 4);
+      expect(updateDenied.error).toContain("only allow");
+      operator.send({ id: 5, op: "publish", name: "default", namespace, data: {} });
+      const publishDenied = await operator.next(
+        (frame) => frame.type === "error" && frame.id === 5,
+      );
+      expect(publishDenied.error).toContain("only allow");
+      operator.send({ id: 6, op: "join", name: "default", namespace: "comb:sent" });
+      const reservedDenied = await operator.next(
+        (frame) => frame.type === "error" && frame.id === 6,
+      );
+      expect(reservedDenied.error).toContain("reserved for Comb");
+      operator.send({ id: 7, op: "join", name: "another", namespace });
+      const roomDenied = await operator.next((frame) => frame.type === "error" && frame.id === 7);
+      expect(roomDenied.error).toContain("default room");
+      operator.send({
+        id: 8,
+        op: "join",
+        name: "default",
+        namespace: `presence:comb:${combOrgId}:${randomUUID()}`,
+      });
+      const driveDenied = await operator.next((frame) => frame.type === "error" && frame.id === 8);
+      expect(driveDenied.error).toContain("configured Comb drive");
+
+      await closeSocket(operator);
+      const left = await user.next(
+        (frame) =>
+          frame.type === "presence" &&
+          frame.namespace === namespace &&
+          Array.isArray(frame.peers) &&
+          !frame.peers.some((peer: Frame) => peer.userId === operatorJoined.me.userId),
+      );
+      expect(left.peers).toHaveLength(1);
+    } finally {
+      await closeSocket(operator);
+      await closeSocket(user);
+    }
+  });
+
+  test("refuses agent access to Comb presence namespaces", async () => {
+    const agentId = await registerAgent();
+    const client = await openSocket({
+      Authorization: `Bearer ${apiKey}`,
+      "X-Agent-ID": agentId,
+      Origin: baseUrl,
+    });
+    try {
+      client.send({
+        id: 1,
+        op: "join",
+        name: "default",
+        namespace: combNamespace,
+      });
+      const denied = await client.next((frame) => frame.type === "error" && frame.id === 1);
+      expect(denied.error).toContain("dashboard authentication");
     } finally {
       await closeSocket(client);
     }

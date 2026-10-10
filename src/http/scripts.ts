@@ -32,6 +32,7 @@ import {
 } from "../be/scripts/db";
 import { searchScripts } from "../be/scripts/embeddings";
 import { extractArgsJsonSchema } from "../be/scripts/extract-schema";
+import { refuseSourceWithSecrets } from "../be/scripts/source-secrets";
 import {
   scriptSdkTypesWithGeneratedApis,
   scriptStdlibTypesWithGeneratedApis,
@@ -649,6 +650,12 @@ export async function handleScripts(
       }
     }
 
+    const secretRefusal = refuseSourceWithSecrets(parsed.body.source);
+    if (secretRefusal) {
+      json(res, secretRefusal, 400);
+      return true;
+    }
+
     const typecheck = await typecheckScript(parsed.body.source, { agentId: agent.id });
     if (!typecheck.ok) {
       json(
@@ -715,6 +722,14 @@ export async function handleScripts(
     const runtimeInstanceId = ((h) => (Array.isArray(h) ? h[0] : h))(
       req.headers["x-runtime-instance-id"],
     );
+
+    // Inline source is saved as a scratch script and recorded on the run row:
+    // refuse an embedded secret before it executes or persists.
+    const secretRefusal = parsed.body.source ? refuseSourceWithSecrets(parsed.body.source) : null;
+    if (secretRefusal) {
+      json(res, secretRefusal, 400);
+      return true;
+    }
 
     let source = parsed.body.source;
     let fsMode = parsed.body.fsMode;

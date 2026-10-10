@@ -1,0 +1,482 @@
+[
+  {
+    "id": "cursor-01",
+    "taskId": "task-cursor-mcp",
+    "sessionId": "590ea1d7-ab13-42e0-84db-bc89c795aa8c",
+    "iteration": 1,
+    "cli": "cursor",
+    "content": "{\"type\":\"model\",\"provider\":\"cursor\",\"model\":{\"id\":\"gpt-5.4-nano\"},\"systemPrompt\":\"first-message\"}",
+    "lineNumber": 0,
+    "createdAt": "2026-10-05T11:44:35.910Z"
+  },
+  {
+    "id": "cursor-02",
+    "taskId": "task-cursor-mcp",
+    "sessionId": "590ea1d7-ab13-42e0-84db-bc89c795aa8c",
+    "iteration": 1,
+    "cli": "cursor",
+    "content": "{\"type\":\"status\",\"agent_id\":\"agent-57ff315c-85c9-4b88-8e13-93f17133bff2\",\"run_id\":\"run-10aeada2-8aba-476a-a4db-cf686d6bf406\",\"status\":\"RUNNING\"}",
+    "lineNumber": 1,
+    "createdAt": "2026-10-05T11:44:35.910Z"
+  },
+  {
+    "id": "cursor-03",
+    "taskId": "task-cursor-mcp",
+    "sessionId": "590ea1d7-ab13-42e0-84db-bc89c795aa8c",
+    "iteration": 1,
+    "cli": "cursor",
+    "content": "{\"type\":\"tool_call\",\"agent_id\":\"agent-57ff315c-85c9-4b88-8e13-93f17133bff2\",\"run_id\":\"run-10aeada2-8aba-476a-a4db-cf686d6bf406\",\"call_id\":\"call_CkoR6pP7dRIG8aHU28uDRTvT\\nfc_084cdb865ea009c2016ac38da3a44887d1a249308edc452139\",\"name\":\"mcp\",\"status\":\"running\",\"args\":{\"providerIdentifier\":\"agent-swarm\",\"toolName\":\"store-progress\",\"args\":{\"taskId\":\"task-cursor-mcp\",\"status\":\"completed\",\"output\":\"CURSOR-OK-E7RYVY\"}}}",
+    "lineNumber": 2,
+    "createdAt": "2026-10-05T11:44:35.910Z"
+  },
+  {
+    "id": "cursor-04",
+    "taskId": "task-cursor-mcp",
+    "sessionId": "590ea1d7-ab13-42e0-84db-bc89c795aa8c",
+    "iteration": 1,
+    "cli": "cursor",
+    "content": "{\"type\":\"tool_call\",\"agent_id\":\"agent-57ff315c-85c9-4b88-8e13-93f17133bff2\",\"run_id\":\"run-10aeada2-8aba-476a-a4db-cf686d6bf406\",\"call_id\":\"call_CkoR6pP7dRIG8aHU28uDRTvT\\nfc_084cdb865ea009c2016ac38da3a44887d1a249308edc452139\",\"name\":\"mcp\",\"status\":\"completed\",\"args\":{\"providerIdentifier\":\"agent-swarm\",\"toolName\":\"store-progress\",\"args\":{\"taskId\":\"task-cursor-mcp\",\"status\":\"completed\",\"output\":\"CURSOR-OK-E7RYVY\"}},\"result\":{\"status\":\"success\",\"value\":{\"content\":[{\"text\":{\"text\":\"Task \\\"task-cursor-mcp\\\" marked as completed.\\n\\n{\\n  \\\"yourAgentId\\\": \\\"7bc3b601-37d1-43eb-8c11-4899d72e5309\\\",\\n  \\\"task\\\": {\\n    \\\"id\\\": \\\"task-cursor-mcp\\\",\\n    \\\"status\\\": \\\"completed\\\",\\n    \\\"finishedAt\\\": \\\"2026-10-05T11:44:35.937Z\\\"\\n  }\\n}\"}}],\"isError\":false}}}",
+    "lineNumber": 0,
+    "createdAt": "2026-10-05T11:44:36.803Z"
+  },
+  {
+    "id": "cursor-05",
+    "taskId": "task-cursor-mcp",
+    "sessionId": "590ea1d7-ab13-42e0-84db-bc89c795aa8c",
+    "iteration": 1,
+    "cli": "cursor",
+    "content": "{\"type\":\"assistant\",\"agent_id\":\"agent-57ff315c-85c9-4b88-8e13-93f17133bff2\",\"run_id\":\"run-10aeada2-8aba-476a-a4db-cf686d6bf406\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"CUR\"}]}}",
+    "lineNumber": 1,
+    "createdAt": "2026-10-05T11:44:36.803Z"
+  },
+  {
+    "id": "cursor-06",
+    "taskId": "task-cursor-mcp",
+    "sessionId": "590ea1d7-ab13-42e0-84db-bc89c795aa8c",
+    "iteration": 1,
+    "cli": "cursor",
+    "content": "{\"type\":\"assistant\",\"agent_id\":\"agent-57ff315c-85c9-4b88-8e13-93f17133bff2\",\"run_id\":\"run-10aeada2-8aba-476a-a4db-cf686d6bf406\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"SOR\"}]}}",
+    "lineNumber": 2,
+    "createdAt": "2026-10-05T11:44:36.804Z"
+  },
+  {
+    "id": "cursor-07",
+    "taskId": "task-cursor-mcp",
+    "sessionId": "590ea1d7-ab13-42e0-84db-bc89c795aa8c",
+    "iteration": 1,
+    "cli": "cursor",
+    "content": "{\"type\":\"assistant\",\"agent_id\":\"agent-57ff315c-85c9-4b88-8e13-93f17133bff2\",\"run_id\":\"run-10aeada2-8aba-476a-a4db-cf686d6bf406\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"-\"}]}}",
+    "lineNumber": 3,
+    "createdAt": "2026-10-05T11:44:36.804Z"
+  },
+  {
+    "id": "cursor-08",
+    "taskId": "task-cursor-mcp",
+    "sessionId": "590ea1d7-ab13-42e0-84db-bc89c795aa8c",
+    "iteration": 1,
+    "cli": "cursor",
+    "content": "{\"type\":\"assistant\",\"agent_id\":\"agent-57ff315c-85c9-4b88-8e13-93f17133bff2\",\"run_id\":\"run-10aeada2-8aba-476a-a4db-cf686d6bf406\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"OK\"}]}}",
+    "lineNumber": 4,
+    "createdAt": "2026-10-05T11:44:36.804Z"
+  },
+  {
+    "id": "cursor-09",
+    "taskId": "task-cursor-mcp",
+    "sessionId": "590ea1d7-ab13-42e0-84db-bc89c795aa8c",
+    "iteration": 1,
+    "cli": "cursor",
+    "content": "{\"type\":\"assistant\",\"agent_id\":\"agent-57ff315c-85c9-4b88-8e13-93f17133bff2\",\"run_id\":\"run-10aeada2-8aba-476a-a4db-cf686d6bf406\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"-E\"}]}}",
+    "lineNumber": 5,
+    "createdAt": "2026-10-05T11:44:36.804Z"
+  },
+  {
+    "id": "cursor-10",
+    "taskId": "task-cursor-mcp",
+    "sessionId": "590ea1d7-ab13-42e0-84db-bc89c795aa8c",
+    "iteration": 1,
+    "cli": "cursor",
+    "content": "{\"type\":\"assistant\",\"agent_id\":\"agent-57ff315c-85c9-4b88-8e13-93f17133bff2\",\"run_id\":\"run-10aeada2-8aba-476a-a4db-cf686d6bf406\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"7\"}]}}",
+    "lineNumber": 6,
+    "createdAt": "2026-10-05T11:44:36.804Z"
+  },
+  {
+    "id": "cursor-11",
+    "taskId": "task-cursor-mcp",
+    "sessionId": "590ea1d7-ab13-42e0-84db-bc89c795aa8c",
+    "iteration": 1,
+    "cli": "cursor",
+    "content": "{\"type\":\"assistant\",\"agent_id\":\"agent-57ff315c-85c9-4b88-8e13-93f17133bff2\",\"run_id\":\"run-10aeada2-8aba-476a-a4db-cf686d6bf406\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"RY\"}]}}",
+    "lineNumber": 7,
+    "createdAt": "2026-10-05T11:44:36.804Z"
+  },
+  {
+    "id": "cursor-12",
+    "taskId": "task-cursor-mcp",
+    "sessionId": "590ea1d7-ab13-42e0-84db-bc89c795aa8c",
+    "iteration": 1,
+    "cli": "cursor",
+    "content": "{\"type\":\"assistant\",\"agent_id\":\"agent-57ff315c-85c9-4b88-8e13-93f17133bff2\",\"run_id\":\"run-10aeada2-8aba-476a-a4db-cf686d6bf406\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"V\"}]}}",
+    "lineNumber": 8,
+    "createdAt": "2026-10-05T11:44:36.804Z"
+  },
+  {
+    "id": "cursor-13",
+    "taskId": "task-cursor-mcp",
+    "sessionId": "590ea1d7-ab13-42e0-84db-bc89c795aa8c",
+    "iteration": 1,
+    "cli": "cursor",
+    "content": "{\"type\":\"assistant\",\"agent_id\":\"agent-57ff315c-85c9-4b88-8e13-93f17133bff2\",\"run_id\":\"run-10aeada2-8aba-476a-a4db-cf686d6bf406\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"Y\"}]}}",
+    "lineNumber": 9,
+    "createdAt": "2026-10-05T11:44:36.804Z"
+  },
+  {
+    "id": "cursor-14",
+    "taskId": "task-cursor-mcp",
+    "sessionId": "590ea1d7-ab13-42e0-84db-bc89c795aa8c",
+    "iteration": 1,
+    "cli": "cursor",
+    "content": "{\"type\":\"usage\",\"agent_id\":\"agent-57ff315c-85c9-4b88-8e13-93f17133bff2\",\"run_id\":\"run-10aeada2-8aba-476a-a4db-cf686d6bf406\",\"usage\":{\"inputTokens\":29145,\"outputTokens\":433,\"cacheReadTokens\":13824,\"cacheWriteTokens\":0,\"totalTokens\":43402,\"reasoningTokens\":346}}",
+    "lineNumber": 10,
+    "createdAt": "2026-10-05T11:44:36.804Z"
+  },
+  {
+    "id": "cursor-15",
+    "taskId": "task-cursor-mcp",
+    "sessionId": "590ea1d7-ab13-42e0-84db-bc89c795aa8c",
+    "iteration": 1,
+    "cli": "cursor",
+    "content": "{\"type\":\"status\",\"agent_id\":\"agent-57ff315c-85c9-4b88-8e13-93f17133bff2\",\"run_id\":\"run-10aeada2-8aba-476a-a4db-cf686d6bf406\",\"status\":\"FINISHED\"}",
+    "lineNumber": 11,
+    "createdAt": "2026-10-05T11:44:36.804Z"
+  },
+  {
+    "id": "cursor-16",
+    "taskId": "task-cursor-cancel",
+    "sessionId": "f9dca0d8-0498-4c06-bfa0-2cb693fdb520",
+    "iteration": 6,
+    "cli": "cursor",
+    "content": "{\"type\":\"model\",\"provider\":\"cursor\",\"model\":{\"id\":\"gpt-5.4-nano\"},\"systemPrompt\":\"first-message\"}",
+    "lineNumber": 0,
+    "createdAt": "2026-10-05T11:47:36.397Z"
+  },
+  {
+    "id": "cursor-17",
+    "taskId": "task-cursor-cancel",
+    "sessionId": "f9dca0d8-0498-4c06-bfa0-2cb693fdb520",
+    "iteration": 6,
+    "cli": "cursor",
+    "content": "{\"type\":\"status\",\"agent_id\":\"agent-c325ae39-4e05-42c8-8970-4421774f4302\",\"run_id\":\"run-a4060416-3867-4737-afbc-94c8cf3c1abb\",\"status\":\"RUNNING\"}",
+    "lineNumber": 1,
+    "createdAt": "2026-10-05T11:47:36.397Z"
+  },
+  {
+    "id": "cursor-18",
+    "taskId": "task-cursor-cancel",
+    "sessionId": "f9dca0d8-0498-4c06-bfa0-2cb693fdb520",
+    "iteration": 6,
+    "cli": "cursor",
+    "content": "{\"type\":\"assistant\",\"agent_id\":\"agent-c325ae39-4e05-42c8-8970-4421774f4302\",\"run_id\":\"run-a4060416-3867-4737-afbc-94c8cf3c1abb\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"Running\"}]}}",
+    "lineNumber": 2,
+    "createdAt": "2026-10-05T11:47:36.397Z"
+  },
+  {
+    "id": "cursor-19",
+    "taskId": "task-cursor-cancel",
+    "sessionId": "f9dca0d8-0498-4c06-bfa0-2cb693fdb520",
+    "iteration": 6,
+    "cli": "cursor",
+    "content": "{\"type\":\"assistant\",\"agent_id\":\"agent-c325ae39-4e05-42c8-8970-4421774f4302\",\"run_id\":\"run-a4060416-3867-4737-afbc-94c8cf3c1abb\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\" `\"}]}}",
+    "lineNumber": 3,
+    "createdAt": "2026-10-05T11:47:36.397Z"
+  },
+  {
+    "id": "cursor-20",
+    "taskId": "task-cursor-cancel",
+    "sessionId": "f9dca0d8-0498-4c06-bfa0-2cb693fdb520",
+    "iteration": 6,
+    "cli": "cursor",
+    "content": "{\"type\":\"assistant\",\"agent_id\":\"agent-c325ae39-4e05-42c8-8970-4421774f4302\",\"run_id\":\"run-a4060416-3867-4737-afbc-94c8cf3c1abb\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"sleep\"}]}}",
+    "lineNumber": 4,
+    "createdAt": "2026-10-05T11:47:36.397Z"
+  },
+  {
+    "id": "cursor-21",
+    "taskId": "task-cursor-cancel",
+    "sessionId": "f9dca0d8-0498-4c06-bfa0-2cb693fdb520",
+    "iteration": 6,
+    "cli": "cursor",
+    "content": "{\"type\":\"assistant\",\"agent_id\":\"agent-c325ae39-4e05-42c8-8970-4421774f4302\",\"run_id\":\"run-a4060416-3867-4737-afbc-94c8cf3c1abb\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\" \"}]}}",
+    "lineNumber": 5,
+    "createdAt": "2026-10-05T11:47:36.397Z"
+  },
+  {
+    "id": "cursor-22",
+    "taskId": "task-cursor-cancel",
+    "sessionId": "f9dca0d8-0498-4c06-bfa0-2cb693fdb520",
+    "iteration": 6,
+    "cli": "cursor",
+    "content": "{\"type\":\"assistant\",\"agent_id\":\"agent-c325ae39-4e05-42c8-8970-4421774f4302\",\"run_id\":\"run-a4060416-3867-4737-afbc-94c8cf3c1abb\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"120\"}]}}",
+    "lineNumber": 6,
+    "createdAt": "2026-10-05T11:47:36.397Z"
+  },
+  {
+    "id": "cursor-23",
+    "taskId": "task-cursor-cancel",
+    "sessionId": "f9dca0d8-0498-4c06-bfa0-2cb693fdb520",
+    "iteration": 6,
+    "cli": "cursor",
+    "content": "{\"type\":\"assistant\",\"agent_id\":\"agent-c325ae39-4e05-42c8-8970-4421774f4302\",\"run_id\":\"run-a4060416-3867-4737-afbc-94c8cf3c1abb\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"`\"}]}}",
+    "lineNumber": 7,
+    "createdAt": "2026-10-05T11:47:36.397Z"
+  },
+  {
+    "id": "cursor-24",
+    "taskId": "task-cursor-cancel",
+    "sessionId": "f9dca0d8-0498-4c06-bfa0-2cb693fdb520",
+    "iteration": 6,
+    "cli": "cursor",
+    "content": "{\"type\":\"assistant\",\"agent_id\":\"agent-c325ae39-4e05-42c8-8970-4421774f4302\",\"run_id\":\"run-a4060416-3867-4737-afbc-94c8cf3c1abb\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\" in\"}]}}",
+    "lineNumber": 8,
+    "createdAt": "2026-10-05T11:47:36.398Z"
+  },
+  {
+    "id": "cursor-25",
+    "taskId": "task-cursor-cancel",
+    "sessionId": "f9dca0d8-0498-4c06-bfa0-2cb693fdb520",
+    "iteration": 6,
+    "cli": "cursor",
+    "content": "{\"type\":\"assistant\",\"agent_id\":\"agent-c325ae39-4e05-42c8-8970-4421774f4302\",\"run_id\":\"run-a4060416-3867-4737-afbc-94c8cf3c1abb\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\" the\"}]}}",
+    "lineNumber": 9,
+    "createdAt": "2026-10-05T11:47:36.398Z"
+  },
+  {
+    "id": "cursor-26",
+    "taskId": "task-cursor-cancel",
+    "sessionId": "f9dca0d8-0498-4c06-bfa0-2cb693fdb520",
+    "iteration": 6,
+    "cli": "cursor",
+    "content": "{\"type\":\"assistant\",\"agent_id\":\"agent-c325ae39-4e05-42c8-8970-4421774f4302\",\"run_id\":\"run-a4060416-3867-4737-afbc-94c8cf3c1abb\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\" shell\"}]}}",
+    "lineNumber": 10,
+    "createdAt": "2026-10-05T11:47:36.398Z"
+  },
+  {
+    "id": "cursor-27",
+    "taskId": "task-cursor-cancel",
+    "sessionId": "f9dca0d8-0498-4c06-bfa0-2cb693fdb520",
+    "iteration": 6,
+    "cli": "cursor",
+    "content": "{\"type\":\"assistant\",\"agent_id\":\"agent-c325ae39-4e05-42c8-8970-4421774f4302\",\"run_id\":\"run-a4060416-3867-4737-afbc-94c8cf3c1abb\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\" and\"}]}}",
+    "lineNumber": 11,
+    "createdAt": "2026-10-05T11:47:36.398Z"
+  },
+  {
+    "id": "cursor-28",
+    "taskId": "task-cursor-cancel",
+    "sessionId": "f9dca0d8-0498-4c06-bfa0-2cb693fdb520",
+    "iteration": 6,
+    "cli": "cursor",
+    "content": "{\"type\":\"assistant\",\"agent_id\":\"agent-c325ae39-4e05-42c8-8970-4421774f4302\",\"run_id\":\"run-a4060416-3867-4737-afbc-94c8cf3c1abb\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\" waiting\"}]}}",
+    "lineNumber": 12,
+    "createdAt": "2026-10-05T11:47:36.398Z"
+  },
+  {
+    "id": "cursor-29",
+    "taskId": "task-cursor-cancel",
+    "sessionId": "f9dca0d8-0498-4c06-bfa0-2cb693fdb520",
+    "iteration": 6,
+    "cli": "cursor",
+    "content": "{\"type\":\"assistant\",\"agent_id\":\"agent-c325ae39-4e05-42c8-8970-4421774f4302\",\"run_id\":\"run-a4060416-3867-4737-afbc-94c8cf3c1abb\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\" for\"}]}}",
+    "lineNumber": 13,
+    "createdAt": "2026-10-05T11:47:36.398Z"
+  },
+  {
+    "id": "cursor-30",
+    "taskId": "task-cursor-cancel",
+    "sessionId": "f9dca0d8-0498-4c06-bfa0-2cb693fdb520",
+    "iteration": 6,
+    "cli": "cursor",
+    "content": "{\"type\":\"assistant\",\"agent_id\":\"agent-c325ae39-4e05-42c8-8970-4421774f4302\",\"run_id\":\"run-a4060416-3867-4737-afbc-94c8cf3c1abb\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\" it\"}]}}",
+    "lineNumber": 14,
+    "createdAt": "2026-10-05T11:47:36.398Z"
+  },
+  {
+    "id": "cursor-31",
+    "taskId": "task-cursor-cancel",
+    "sessionId": "f9dca0d8-0498-4c06-bfa0-2cb693fdb520",
+    "iteration": 6,
+    "cli": "cursor",
+    "content": "{\"type\":\"assistant\",\"agent_id\":\"agent-c325ae39-4e05-42c8-8970-4421774f4302\",\"run_id\":\"run-a4060416-3867-4737-afbc-94c8cf3c1abb\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\" to\"}]}}",
+    "lineNumber": 15,
+    "createdAt": "2026-10-05T11:47:36.398Z"
+  },
+  {
+    "id": "cursor-32",
+    "taskId": "task-cursor-cancel",
+    "sessionId": "f9dca0d8-0498-4c06-bfa0-2cb693fdb520",
+    "iteration": 6,
+    "cli": "cursor",
+    "content": "{\"type\":\"assistant\",\"agent_id\":\"agent-c325ae39-4e05-42c8-8970-4421774f4302\",\"run_id\":\"run-a4060416-3867-4737-afbc-94c8cf3c1abb\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\" complete\"}]}}",
+    "lineNumber": 16,
+    "createdAt": "2026-10-05T11:47:36.398Z"
+  },
+  {
+    "id": "cursor-33",
+    "taskId": "task-cursor-cancel",
+    "sessionId": "f9dca0d8-0498-4c06-bfa0-2cb693fdb520",
+    "iteration": 6,
+    "cli": "cursor",
+    "content": "{\"type\":\"assistant\",\"agent_id\":\"agent-c325ae39-4e05-42c8-8970-4421774f4302\",\"run_id\":\"run-a4060416-3867-4737-afbc-94c8cf3c1abb\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\",\"}]}}",
+    "lineNumber": 17,
+    "createdAt": "2026-10-05T11:47:36.398Z"
+  },
+  {
+    "id": "cursor-34",
+    "taskId": "task-cursor-cancel",
+    "sessionId": "f9dca0d8-0498-4c06-bfa0-2cb693fdb520",
+    "iteration": 6,
+    "cli": "cursor",
+    "content": "{\"type\":\"assistant\",\"agent_id\":\"agent-c325ae39-4e05-42c8-8970-4421774f4302\",\"run_id\":\"run-a4060416-3867-4737-afbc-94c8cf3c1abb\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\" then\"}]}}",
+    "lineNumber": 18,
+    "createdAt": "2026-10-05T11:47:36.398Z"
+  },
+  {
+    "id": "cursor-35",
+    "taskId": "task-cursor-cancel",
+    "sessionId": "f9dca0d8-0498-4c06-bfa0-2cb693fdb520",
+    "iteration": 6,
+    "cli": "cursor",
+    "content": "{\"type\":\"assistant\",\"agent_id\":\"agent-c325ae39-4e05-42c8-8970-4421774f4302\",\"run_id\":\"run-a4060416-3867-4737-afbc-94c8cf3c1abb\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\" I\"}]}}",
+    "lineNumber": 19,
+    "createdAt": "2026-10-05T11:47:36.398Z"
+  },
+  {
+    "id": "cursor-36",
+    "taskId": "task-cursor-cancel",
+    "sessionId": "f9dca0d8-0498-4c06-bfa0-2cb693fdb520",
+    "iteration": 6,
+    "cli": "cursor",
+    "content": "{\"type\":\"assistant\",\"agent_id\":\"agent-c325ae39-4e05-42c8-8970-4421774f4302\",\"run_id\":\"run-a4060416-3867-4737-afbc-94c8cf3c1abb\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"’ll\"}]}}",
+    "lineNumber": 20,
+    "createdAt": "2026-10-05T11:47:36.398Z"
+  },
+  {
+    "id": "cursor-37",
+    "taskId": "task-cursor-cancel",
+    "sessionId": "f9dca0d8-0498-4c06-bfa0-2cb693fdb520",
+    "iteration": 6,
+    "cli": "cursor",
+    "content": "{\"type\":\"assistant\",\"agent_id\":\"agent-c325ae39-4e05-42c8-8970-4421774f4302\",\"run_id\":\"run-a4060416-3867-4737-afbc-94c8cf3c1abb\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\" reply\"}]}}",
+    "lineNumber": 21,
+    "createdAt": "2026-10-05T11:47:36.398Z"
+  },
+  {
+    "id": "cursor-38",
+    "taskId": "task-cursor-cancel",
+    "sessionId": "f9dca0d8-0498-4c06-bfa0-2cb693fdb520",
+    "iteration": 6,
+    "cli": "cursor",
+    "content": "{\"type\":\"assistant\",\"agent_id\":\"agent-c325ae39-4e05-42c8-8970-4421774f4302\",\"run_id\":\"run-a4060416-3867-4737-afbc-94c8cf3c1abb\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\" `\"}]}}",
+    "lineNumber": 22,
+    "createdAt": "2026-10-05T11:47:36.398Z"
+  },
+  {
+    "id": "cursor-39",
+    "taskId": "task-cursor-cancel",
+    "sessionId": "f9dca0d8-0498-4c06-bfa0-2cb693fdb520",
+    "iteration": 6,
+    "cli": "cursor",
+    "content": "{\"type\":\"assistant\",\"agent_id\":\"agent-c325ae39-4e05-42c8-8970-4421774f4302\",\"run_id\":\"run-a4060416-3867-4737-afbc-94c8cf3c1abb\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"DONE\"}]}}",
+    "lineNumber": 23,
+    "createdAt": "2026-10-05T11:47:36.398Z"
+  },
+  {
+    "id": "cursor-40",
+    "taskId": "task-cursor-cancel",
+    "sessionId": "f9dca0d8-0498-4c06-bfa0-2cb693fdb520",
+    "iteration": 6,
+    "cli": "cursor",
+    "content": "{\"type\":\"assistant\",\"agent_id\":\"agent-c325ae39-4e05-42c8-8970-4421774f4302\",\"run_id\":\"run-a4060416-3867-4737-afbc-94c8cf3c1abb\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"`\"}]}}",
+    "lineNumber": 24,
+    "createdAt": "2026-10-05T11:47:36.398Z"
+  },
+  {
+    "id": "cursor-41",
+    "taskId": "task-cursor-cancel",
+    "sessionId": "f9dca0d8-0498-4c06-bfa0-2cb693fdb520",
+    "iteration": 6,
+    "cli": "cursor",
+    "content": "{\"type\":\"assistant\",\"agent_id\":\"agent-c325ae39-4e05-42c8-8970-4421774f4302\",\"run_id\":\"run-a4060416-3867-4737-afbc-94c8cf3c1abb\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\" and\"}]}}",
+    "lineNumber": 25,
+    "createdAt": "2026-10-05T11:47:36.398Z"
+  },
+  {
+    "id": "cursor-42",
+    "taskId": "task-cursor-cancel",
+    "sessionId": "f9dca0d8-0498-4c06-bfa0-2cb693fdb520",
+    "iteration": 6,
+    "cli": "cursor",
+    "content": "{\"type\":\"assistant\",\"agent_id\":\"agent-c325ae39-4e05-42c8-8970-4421774f4302\",\"run_id\":\"run-a4060416-3867-4737-afbc-94c8cf3c1abb\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\" record\"}]}}",
+    "lineNumber": 26,
+    "createdAt": "2026-10-05T11:47:36.398Z"
+  },
+  {
+    "id": "cursor-43",
+    "taskId": "task-cursor-cancel",
+    "sessionId": "f9dca0d8-0498-4c06-bfa0-2cb693fdb520",
+    "iteration": 6,
+    "cli": "cursor",
+    "content": "{\"type\":\"assistant\",\"agent_id\":\"agent-c325ae39-4e05-42c8-8970-4421774f4302\",\"run_id\":\"run-a4060416-3867-4737-afbc-94c8cf3c1abb\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\" the\"}]}}",
+    "lineNumber": 27,
+    "createdAt": "2026-10-05T11:47:36.398Z"
+  },
+  {
+    "id": "cursor-44",
+    "taskId": "task-cursor-cancel",
+    "sessionId": "f9dca0d8-0498-4c06-bfa0-2cb693fdb520",
+    "iteration": 6,
+    "cli": "cursor",
+    "content": "{\"type\":\"assistant\",\"agent_id\":\"agent-c325ae39-4e05-42c8-8970-4421774f4302\",\"run_id\":\"run-a4060416-3867-4737-afbc-94c8cf3c1abb\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\" completed\"}]}}",
+    "lineNumber": 28,
+    "createdAt": "2026-10-05T11:47:36.398Z"
+  },
+  {
+    "id": "cursor-45",
+    "taskId": "task-cursor-cancel",
+    "sessionId": "f9dca0d8-0498-4c06-bfa0-2cb693fdb520",
+    "iteration": 6,
+    "cli": "cursor",
+    "content": "{\"type\":\"assistant\",\"agent_id\":\"agent-c325ae39-4e05-42c8-8970-4421774f4302\",\"run_id\":\"run-a4060416-3867-4737-afbc-94c8cf3c1abb\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\" status\"}]}}",
+    "lineNumber": 29,
+    "createdAt": "2026-10-05T11:47:36.398Z"
+  },
+  {
+    "id": "cursor-46",
+    "taskId": "task-cursor-cancel",
+    "sessionId": "f9dca0d8-0498-4c06-bfa0-2cb693fdb520",
+    "iteration": 6,
+    "cli": "cursor",
+    "content": "{\"type\":\"assistant\",\"agent_id\":\"agent-c325ae39-4e05-42c8-8970-4421774f4302\",\"run_id\":\"run-a4060416-3867-4737-afbc-94c8cf3c1abb\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\".\"}]}}",
+    "lineNumber": 30,
+    "createdAt": "2026-10-05T11:47:36.398Z"
+  },
+  {
+    "id": "cursor-47",
+    "taskId": "task-cursor-cancel",
+    "sessionId": "f9dca0d8-0498-4c06-bfa0-2cb693fdb520",
+    "iteration": 6,
+    "cli": "cursor",
+    "content": "{\"type\":\"tool_call\",\"agent_id\":\"agent-c325ae39-4e05-42c8-8970-4421774f4302\",\"run_id\":\"run-a4060416-3867-4737-afbc-94c8cf3c1abb\",\"call_id\":\"call_NLiFJL9N2U2Jj6PLJktFgmnb\\nfc_06a2e038ec7cbc15016ac38df500f087d1b4f6dcdbf94b8cbe\",\"name\":\"shell\",\"status\":\"running\",\"args\":{\"command\":\"sleep 120\",\"workingDirectory\":\"/workspace/repo\",\"timeout\":130000}}",
+    "lineNumber": 31,
+    "createdAt": "2026-10-05T11:47:36.398Z"
+  },
+  {
+    "id": "cursor-48",
+    "taskId": "task-cursor-cancel",
+    "sessionId": "f9dca0d8-0498-4c06-bfa0-2cb693fdb520",
+    "iteration": 6,
+    "cli": "cursor",
+    "content": "{\"type\":\"status\",\"agent_id\":\"agent-c325ae39-4e05-42c8-8970-4421774f4302\",\"run_id\":\"run-a4060416-3867-4737-afbc-94c8cf3c1abb\",\"status\":\"CANCELLED\"}",
+    "lineNumber": 32,
+    "createdAt": "2026-10-05T11:47:36.398Z"
+  }
+]

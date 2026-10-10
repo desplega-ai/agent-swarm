@@ -1,0 +1,112 @@
+---
+title: Agent capabilities and tool allowlist
+description: How CAPABILITIES, the SWARM_ENABLED_TOOLS allowlist, scripts-only mode and task tool preloading decide which MCP tools an agent sees.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Every agent harness talks to the swarm through one MCP server at `/mcp`. Four
+settings shape the tool list that server registers for a session. They only
+change what the agent sees over MCP: HTTP routes and the scripts SDK
+(`ctx.swarm.*`) keep their own rules.
+
+| Setting | Unit | Default | What it does |
+| --- | --- | --- | --- |
+| `CAPABILITIES` | Tool group | Standard groups on, six off | Registers whole groups such as `core`, `memory`, `workflows` |
+| `SWARM_ENABLED_TOOLS` | Tool name | Unset | Registers exactly the named tools |
+| `SCRIPTS_ONLY_MCP` | Fixed set | `false` | Registers only the script catalog tools |
+| `TASK_TOOL_MANIFESTS` | Tool name | `{}` | Marks registered tools to load up front for a task; never adds or removes |
+
+## Agent capabilities
+
+`CAPABILITIES` is a comma-separated list of tool groups. The default enables
+`core`, `task-pool`, `scripts`, `config`, `mcp`, `profiles`, `scheduling`,
+`memory`, `workflows`, `pages`, `metrics`, `kv`, `slack`, `tracker`, `skills`
+and `repo`. `services`, `prompt-templates`, `messaging`, `swarm-x`, `agentmail`
+and `kapso` stay off until you list them. A value replaces the default list.
+The [MCP tools reference](/docs/reference/mcp-tools) maps each tool to its group.
+
+Use capabilities for coarse choices: turn a whole integration on or off.
+
+## Tool allowlist
+
+`SWARM_ENABLED_TOOLS` names individual tools. When it is set, the session gets
+exactly those tools and nothing else. It sits on top of capabilities: a listed
+tool registers even when its group is off, and an unlisted tool is dropped even
+when its group is on.
+
+```bash
+SWARM_ENABLED_TOOLS=get-tasks,get-task-details,store-progress,script-run,script-search
+```
+
+A JSON array of strings is accepted too: `["get-tasks","store-progress"]`.
+
+- **Unset** (the default): no change. The capability surface applies.
+- **Unknown names**: the server logs one warning naming them, skips them and
+  keeps the rest. A tool that is gated off at runtime (for example the steering
+  tools with `STEERING_ENABLED=false`) also counts as unknown.
+- **Blank or empty** (`""`, `" , "`, `[]`): the server logs once and behaves
+  as if the value were unset.
+- The server never logs the raw value, only the unknown tool names.
+
+There is no disabled list. To remove a few tools, list the ones you keep.
+
+### Scope and reloads
+
+Set it swarm-wide or for one agent. The value is resolved when an agent opens
+an MCP session, so a change applies on the agent's next session without a
+restart. In-flight sessions keep their tool list.
+
+| Priority | Source |
+| --- | --- |
+| 1 | Agent config row |
+| 2 | Global config row (the dashboard's **Settings → Configuration**) |
+| 3 | `SWARM_ENABLED_TOOLS` env var on the API server |
+| 4 | Unset: capability surface |
+
+A blank agent row resolves to "unset" for that agent, which lets one agent opt
+out of a swarm-wide allowlist.
+
+```bash
+curl -X PUT "$MCP_BASE_URL/api/config" \
+  -H "Authorization: Bearer $AGENT_SWARM_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"scope":"agent","scopeId":"<agentId>","key":"SWARM_ENABLED_TOOLS","value":"get-tasks,store-progress,script-run"}'
+```
+
+## Scripts-only mode
+
+`SCRIPTS_ONLY_MCP=true` registers only the script catalog tools. Agents do the
+rest of their work through `script-run`, where the full SDK is available. It
+also adds a code-mode note to the worker prompt. See
+[Scripts-only mode](/docs/guides/scripts-only-mode).
+
+The allowlist is the general form of this idea: scripts-only is one fixed list.
+When both are set, the allowlist decides the tool list. The worker prompt still
+follows `SCRIPTS_ONLY_MCP`, so include the script tools in the allowlist if you
+keep code-mode on.
+
+## How they combine
+
+| `SWARM_ENABLED_TOOLS` | `SCRIPTS_ONLY_MCP` | Registered tools |
+| --- | --- | --- |
+| Unset or empty | Off | Every tool in the enabled `CAPABILITIES` groups |
+| Unset or empty | On | The script catalog tools |
+| Set | Off or on | Exactly the listed tools that exist |
+
+Task tool preloading runs after this step. `TASK_TOOL_MANIFESTS` only marks
+tools that are already registered, so a manifest tool outside the allowlist is
+not loaded.
+
+<Callout type="info">
+The scripts SDK bridge (`/api/mcp-bridge`) builds its own full-surface server
+and ignores all three surface settings. Scripts keep the whole SDK allowlist,
+and the worker runner keeps talking to the API over plain HTTP.
+</Callout>
+
+## Choosing a setting
+
+- Turn an integration on or off for everyone: `CAPABILITIES`.
+- Give one agent, or a small model, a short exact tool list: `SWARM_ENABLED_TOOLS`
+  on that agent.
+- Move coordination into scripts with the code-mode prompt: `SCRIPTS_ONLY_MCP`.

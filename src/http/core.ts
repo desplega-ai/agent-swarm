@@ -1,6 +1,12 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { initAgentMail, resetAgentMail } from "../agentmail";
 import {
+  initAzureDevOps,
+  isAzureDevOpsEnabled,
+  resetAzureDevOps,
+  resetAzureDevOpsBotIdCache,
+} from "../azure-devops";
+import {
   getAgentById,
   getDbClient,
   getInboxSummary,
@@ -30,7 +36,7 @@ import {
   runWithoutRequestAuth,
   setRequestAuth,
 } from "../utils/request-auth-context";
-import { refreshSecretScrubberCache } from "../utils/secret-scrubber";
+import { refreshSecretScrubberCache, registerSensitiveKeyName } from "../utils/secret-scrubber";
 import { resolveHttpRequestAuth } from "./auth";
 import { generateOpenApiSpec, SCALAR_HTML } from "./openapi";
 import { findRoute, isPublicRoute, route, runtimeInstanceHeader } from "./route-def";
@@ -69,6 +75,9 @@ export async function loadGlobalConfigsIntoEnv(override = false): Promise<string
 
   for (const config of globalConfigs) {
     liveKeys.add(config.key);
+    // A secret row's name may match no sensitive-suffix rule; register it so
+    // the scrubber covers its env value and `KEY=value` dumps of it.
+    if (config.isSecret) registerSensitiveKeyName(config.key);
     if (override || !process.env[config.key]) {
       const previous = injectedEnvOriginals.get(config.key);
       injectedEnvOriginals.set(config.key, {
@@ -203,6 +212,12 @@ async function reloadGlobalConfigsAndIntegrationsInner(): Promise<ReloadConfigRe
   resetGitLab();
   initGitLab();
   if (isGitLabEnabled()) integrations.push("gitlab");
+
+  // Same reset-then-init as GitLab: the webhook secret is cached at init.
+  resetAzureDevOps();
+  resetAzureDevOpsBotIdCache();
+  initAzureDevOps();
+  if (isAzureDevOpsEnabled()) integrations.push("azure-devops");
 
   resetLinear();
   if (await initLinear()) integrations.push("linear");
@@ -348,7 +363,8 @@ const pingRoute = route({
     `Refreshes the calling agent's status. ${RUNTIME_HEADER_DOC} With multi-runtime mode on, ` +
     "the header must identify a live runtime of this agent; an absent, unknown, offline, or " +
     "foreign identifier makes the call a no-op instead of an error, so workers predating the " +
-    "flag keep running.",
+    "flag keep running. While the API is draining after SIGTERM, every response (this one " +
+    "included) carries `X-Swarm-Draining: 1`: workers hand off in-flight tasks and take no new work.",
   tags: ["Core"],
   auth: { apiKey: true, agentId: true },
   headers: runtimeInstanceHeader("refresh a runtime's liveness"),

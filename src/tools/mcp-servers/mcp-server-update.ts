@@ -1,6 +1,8 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
-import { getAgentById, getMcpServerById, updateMcpServer } from "@/be/db";
+import { getAgentById, type updateMcpServer } from "@/be/db";
+import { updateMcpServerChecked } from "@/be/mcp-server-checked-update";
+import { updateTouchesStdioExecution } from "@/be/mcp-server-stdio-gate";
 import { can } from "@/rbac";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 
@@ -10,7 +12,8 @@ export const registerMcpServerUpdateTool = (server: McpServer) => {
     {
       title: "Update MCP Server",
       annotations: { destructiveHint: false },
-      description: "Update an MCP server's configuration. Only the owner or lead can update.",
+      description:
+        "Update an MCP server's configuration. Only the owner or lead can update. Changing or enabling what a stdio server runs requires lead.",
       inputSchema: z.object({
         id: z.string().describe("ID of the MCP server to update"),
         name: z.string().optional().describe("New name"),
@@ -41,29 +44,6 @@ export const registerMcpServerUpdateTool = (server: McpServer) => {
       }
 
       try {
-        const existing = await getMcpServerById(args.id);
-        if (!existing) {
-          return toolErr("MCP server not found.", { data: { yourAgentId: requestInfo.agentId } });
-        }
-
-        // Only owner or lead can update
-        const agent = await getAgentById(requestInfo.agentId);
-        const decision = can({
-          principal: {
-            kind: "agent",
-            agentId: requestInfo.agentId,
-            isLead: agent?.isLead ?? false,
-          },
-          verb: "mcp-server.update.any",
-          resource: { kind: "owned", ownerAgentId: existing.ownerAgentId },
-          source: "mcp",
-        });
-        if (!decision.allow) {
-          return toolErr("Only the owning agent or lead can update this MCP server.", {
-            data: { yourAgentId: requestInfo.agentId },
-          });
-        }
-
         const updates: Parameters<typeof updateMcpServer>[1] = {};
         if (args.name !== undefined) updates.name = args.name;
         if (args.description !== undefined) updates.description = args.description;
@@ -78,11 +58,49 @@ export const registerMcpServerUpdateTool = (server: McpServer) => {
           updates.extraAuthorizeParams = args.extraAuthorizeParams;
         if (args.isEnabled !== undefined) updates.isEnabled = args.isEnabled;
 
-        const updated = await updateMcpServer(args.id, updates);
-        if (!updated) {
-          return toolErr("Update failed.", { data: { yourAgentId: requestInfo.agentId } });
+        // Both decisions read the server and the agent inside the write transaction, so a
+        // concurrent edit cannot change what the server runs between the decision and the write.
+        const agentId = requestInfo.agentId;
+        const result = await updateMcpServerChecked(args.id, updates, async (existing) => {
+          const agent = await getAgentById(agentId);
+          const principal = {
+            kind: "agent" as const,
+            agentId,
+            isLead: agent?.isLead ?? false,
+          };
+
+          // Only owner or lead can update
+          const decision = can({
+            principal,
+            verb: "mcp-server.update.any",
+            resource: { kind: "owned", ownerAgentId: existing.ownerAgentId },
+            source: "mcp",
+          });
+          if (!decision.allow) return "Only the owning agent or lead can update this MCP server.";
+
+          // The owner may edit a server, but not change or turn on the command a stdio one runs.
+          if (updateTouchesStdioExecution(existing, updates)) {
+            const stdioDecision = can({
+              principal,
+              verb: "mcp-server.stdio.write",
+              resource: { kind: "none" },
+              source: "mcp",
+            });
+            if (!stdioDecision.allow) {
+              return "Only lead agents can create or change stdio MCP servers.";
+            }
+          }
+          return null;
+        });
+
+        if (result.kind === "not-found") {
+          return toolErr("MCP server not found.", { data: { yourAgentId: requestInfo.agentId } });
+        }
+        if (result.kind === "refused") {
+          return toolErr(result.refusal, { data: { yourAgentId: requestInfo.agentId } });
         }
 
+        const updated = result.server;
         return toolOk(`Updated MCP server "${updated.name}" to version ${updated.version}.`, {
           data: { yourAgentId: requestInfo.agentId, server: updated },
         });

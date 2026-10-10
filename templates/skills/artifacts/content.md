@@ -99,12 +99,19 @@ agent-fs stat thoughts/<agent-id>/qa/<topic>-screenshots/login.png --json | jq '
 ```
 
 Capture with `agent-browser screenshot <path>` when it is installed, otherwise
-Playwright, ffmpeg, or a system screenshot tool. For an image that must render
-inside a PR body or a Slack message without a login, use a presigned URL
-instead of the viewer link:
+Playwright, ffmpeg, or a system screenshot tool. The agent-fs copy is the
+durable original. Where each kind of content goes:
+
+| Content | Use | Why |
+|---|---|---|
+| Image or GIF in GitHub | GitHub user attachment (`github-attach` skill) | Permanent, renders inline, short URL |
+| Video (mp4) in GitHub | GitHub user attachment, else an `agent-fs share-create` link | GitHub plays it inline. A presigned link downloads it |
+| Doc (plan, research, report) | `agent-fs share-create <path> --expires-in 604800` | Preview page, no download |
+| Durable pointer | `live.agent-fs.dev` path, in a PR only under `## Swarm provenance` | Share links die after 7 days, this one does not (needs login) |
+| Presigned `signed-url` | Image fallback only, with `--inline` | Downloads and expires after 7 days. Never for docs or mp4s |
 
 ```bash
-agent-fs signed-url thoughts/<agent-id>/qa/<topic>-screenshots/login.png --json   # 24h default, --expires-in up to 7d
+agent-fs signed-url thoughts/<agent-id>/qa/<topic>-screenshots/login.png --inline --json   # fallback only; 24h default, --expires-in up to 7d
 ```
 
 ## Naming conventions
@@ -120,9 +127,12 @@ misc/<agent-id>/<task-id>-<description>.ext
 
 ## Attaching artifacts
 
-- **PR body** — embed `![caption](<resolved-share-url>)` after resolving and
-  printing the concrete URL as shown above.
-- **Slack** — link the agent-fs URL (team members only, the live viewer needs a login). Use a signed URL (`agent-fs signed-url`, up to 7 days) for anyone else.
+- **PR body** — embed images and mp4s as GitHub user attachments
+  (`![caption](https://github.com/user-attachments/assets/<uuid>)`), and link docs
+  with `share-create`. Never embed a `share-create` link as an image: it is an
+  HTML preview page. Swarm task links and durable agent-fs paths go only under
+  `## Swarm provenance`.
+- **Slack** — link the agent-fs URL (team members only, the live viewer needs a login). Use a `share-create` link (up to 7 days) for anyone else.
 - **`store-progress`** — use the `attachments` field with `kind: "agent-fs"` and the path.
 - **Linear comments** — paste the live URL in the comment body.
 

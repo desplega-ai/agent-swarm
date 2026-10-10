@@ -11,6 +11,8 @@
  * the operator can always pick it on the dashboard.
  */
 
+import type { ModelFamily } from "./model-rate-limit-windows";
+
 export interface SubscriptionPlan {
   id: string;
   label: string;
@@ -18,6 +20,8 @@ export interface SubscriptionPlan {
   keyType: "CLAUDE_CODE_OAUTH_TOKEN" | "CODEX_OAUTH";
   /** Monthly list price in USD, billed monthly. */
   monthlyUsd: number;
+  /** Model families the plan cannot run. Absent means the plan runs every family. */
+  excludedModelFamilies?: readonly ModelFamily[];
 }
 
 /** List prices from claude.com/pricing and chatgpt.com/pricing, checked 2026-09-25. */
@@ -42,6 +46,9 @@ export const SUBSCRIPTION_PLANS: readonly SubscriptionPlan[] = [
     label: "Claude Team, standard seat",
     keyType: "CLAUDE_CODE_OAUTH_TOKEN",
     monthlyUsd: 25,
+    // The CLI rejects Fable on this seat with `errorCode: "credits_required"`
+    // ("Fable 5.1 requires usage credits"), observed 2026-09-30.
+    excludedModelFamilies: ["fable"],
   },
   {
     id: "claude_team_premium",
@@ -72,6 +79,21 @@ export const SUBSCRIPTION_KEY_TYPES: readonly string[] = ["CLAUDE_CODE_OAUTH_TOK
 
 export function isSubscriptionPlanId(id: string): boolean {
   return SUBSCRIPTION_PLANS.some((plan) => plan.id === id);
+}
+
+/**
+ * Whether a key on `plan` can run `family`. Fails open: a null plan, a plan
+ * id the map does not know, or an undefined family returns true. Returns
+ * false only when the plan record lists the family in `excludedModelFamilies`.
+ */
+export function planAllowsModelFamily(
+  plan: string | null | undefined,
+  family: ModelFamily | undefined,
+): boolean {
+  if (!plan || !family) return true;
+  const record = SUBSCRIPTION_PLANS.find((p) => p.id === plan);
+  if (!record?.excludedModelFamilies) return true;
+  return !record.excludedModelFamilies.includes(family);
 }
 
 /**

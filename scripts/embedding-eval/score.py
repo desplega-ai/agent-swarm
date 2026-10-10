@@ -28,7 +28,7 @@ ARM_LIMIT = 60  # searchHybrid overfetch for the pre-task recall call (limit 5 x
 TOP = 100
 RRF_K = 60
 BASELINE = "oai-3s@512"
-OUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "results")
+OUT_DIR = os.environ.get("EMBED_EVAL_OUT") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "results")
 
 # name -> (doc config, query config, corpus set, dims to test)
 MODELS = {
@@ -40,7 +40,21 @@ MODELS = {
     "qwen3-8b": ("qwen3-8b", "qwen3-8b", "corpus", [512, 1024, 4096]),
     "voyage-4": ("voyage-4", "voyage-4", "corpus", [1024]),
     "oai-3s-named": ("oai-3s", "oai-3s", "corpus-named", [512, 1536]),
+    # Local GGUF models (embed-local.ts). Vectors are stored raw at full width.
+    "nomic-v15": ("nomic-v15", "nomic-v15", "corpus", [256, 512, 768]),
+    "nomic-v15-ln": ("nomic-v15", "nomic-v15", "corpus", [256, 512, 768]),
+    "nomic-v15-noprefix": ("nomic-v15-noprefix", "nomic-v15-noprefix", "corpus", [512, 768]),
+    "gemma-300m": ("gemma-300m", "gemma-300m", "corpus", [256, 512, 768]),
+    "gemma-300m-noprefix": ("gemma-300m-noprefix", "gemma-300m-noprefix", "corpus", [512, 768]),
 }
+# Models whose card applies layer norm over the full vector before Matryoshka truncation.
+LAYER_NORM = {"nomic-v15-ln"}
+
+
+def layer_norm(mat):
+    std = mat.std(axis=1, keepdims=True)
+    std[std == 0] = 1.0
+    return ((mat - mat.mean(axis=1, keepdims=True)) / std).astype(np.float32)
 
 memories = read_json("memories.json")
 N = len(memories)
@@ -177,6 +191,8 @@ def run_models(only=None):
         assert doc_ids == [m["id"] for m in memories]
         q_ids, q_full, q_present = load_matrix(q_cfg, "queries")
         assert q_ids == [q["id"] for q in queries]
+        if name in LAYER_NORM:
+            doc_full, q_full = layer_norm(doc_full), layer_norm(q_full)
         for dims in dims_list:
             key = f"{name}@{dims}"
             print(f"scoring {key}", file=sys.stderr)

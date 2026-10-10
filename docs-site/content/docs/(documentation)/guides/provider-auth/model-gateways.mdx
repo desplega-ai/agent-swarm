@@ -1,6 +1,6 @@
 ---
 title: Model Gateways
-description: Route Agent Swarm harnesses through OpenRouter, OrcaRouter, or any OpenAI-compatible gateway
+description: Route Agent Swarm harnesses through LiteLLM, Microsoft Foundry, Bedrock, Vertex, OpenRouter, OrcaRouter, or any OpenAI-compatible gateway
 ---
 
 Agent Swarm's harness and its model gateway are separate choices. `HARNESS_PROVIDER` selects the coding agent that runs the task. Gateway settings tell that harness where to send model requests.
@@ -11,8 +11,8 @@ This page covers the stock worker image. A gateway that an upstream CLI supports
 
 | Gateway                         | Claude Code                                                                            | Codex                                                                | OpenCode                                                      | pi-mono                                                       | Devin            | Claude Managed   |
 | ------------------------------- | -------------------------------------------------------------------------------------- | -------------------------------------------------------------------- | ------------------------------------------------------------- | ------------------------------------------------------------- | ---------------- | ---------------- |
-| **OpenRouter**                  | Not yet supported: the worker rejects `ANTHROPIC_AUTH_TOKEN` before Claude Code starts | Custom image/config and a swarm-recognized Codex credential required | **Supported** with environment variables                      | **Supported** with environment variables                      | Not configurable | Not configurable |
-| **Ramp Router**                 | Not yet supported: same `ANTHROPIC_AUTH_TOKEN` credential gap                          | Custom image/config and a swarm-recognized Codex credential required | Not yet supported: Ramp's provider plugin is not in the image | Not yet supported: Ramp's provider plugin is not in the image | Not configurable | Not configurable |
+| **OpenRouter**                  | **Supported** with environment variables ([below](#claude-code-through-a-gateway-or-cloud-provider)) | Custom image/config and a swarm-recognized Codex credential required | **Supported** with environment variables                      | **Supported** with environment variables                      | Not configurable | Not configurable |
+| **Ramp Router**                 | Accepted by the credential gate; not tested end to end                                 | Custom image/config and a swarm-recognized Codex credential required | Not yet supported: Ramp's provider plugin is not in the image | Not yet supported: Ramp's provider plugin is not in the image | Not configurable | Not configurable |
 | **OrcaRouter**                  | Not supported by `OPENROUTER_BASE_URL`                                                 | Not supported by `OPENROUTER_BASE_URL`                               | **Supported**                                                 | **Supported**                                                 | Not configurable | Not configurable |
 | **OpenAI-compatible gateway**   | Not supported by `OPENROUTER_BASE_URL`                                                 | Not supported by `OPENROUTER_BASE_URL`                               | **Supported**                                                 | **Supported**                                                 | Not configurable | Not configurable |
 
@@ -73,20 +73,23 @@ AGENT_ID=your-worker-uuid
 
 Do not add `CLAUDE_CODE_OAUTH_TOKEN` to a pi worker. Keep only credentials used by the selected pi provider.
 
-### Claude Code: upstream-compatible, blocked in Agent Swarm
+### Claude Code
 
-OpenRouter documents an Anthropic-compatible endpoint for Claude Code:
+OpenRouter's Anthropic-compatible endpoint works as a Claude Code gateway. See [Claude Code through a gateway or cloud provider](#claude-code-through-a-gateway-or-cloud-provider) for the OpenRouter snippet.
 
-```bash
-ANTHROPIC_BASE_URL=https://openrouter.ai/api
-ANTHROPIC_AUTH_TOKEN=sk-or-...
-ANTHROPIC_API_KEY=
-ANTHROPIC_DEFAULT_SONNET_MODEL=~anthropic/claude-sonnet-latest
+### App attribution
+
+Requests sent straight to `openrouter.ai` carry OpenRouter's [app attribution](https://openrouter.ai/docs/app-attribution) headers, so the usage counts toward the Agent Swarm app on OpenRouter's rankings:
+
+```
+HTTP-Referer:            https://agent-swarm.dev
+X-OpenRouter-Title:      Agent Swarm
+X-OpenRouter-Categories: personal-agent,cloud-agent
 ```
 
-The base URL intentionally has no `/v1`; Claude Code appends it. OpenRouter also requires `ANTHROPIC_API_KEY` to be explicitly empty so it does not compete with the bearer token. See OpenRouter's [Claude Code integration guide](https://openrouter.ai/docs/guides/coding-agents/claude-code-integration).
+Every OpenRouter caller sends them: the pi-mono, OpenCode, dsh, grok and Claude Code harnesses, the memory rater and session summaries, workflow LLM nodes, the credential check, and the evals judges. Only an `openrouter.ai` host (or a subdomain) gets them. A gateway set through `OPENROUTER_BASE_URL`, an `EMBEDDING_API_BASE_URL`, or any other endpoint receives none. OpenCode also gets `X-Title: Agent Swarm`, which replaces its built-in `X-Title: opencode`.
 
-This setup does **not** work in Agent Swarm today. Both the boot credential check and the session validator accept only `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY`, so the worker parks or fails before Claude Code sees `ANTHROPIC_AUTH_TOKEN`. Setting `SWARM_USE_CLAUDE_BRIDGE=true` is not a workaround: the bridge requires Claude OAuth and deliberately removes gateway-related `ANTHROPIC_*` variables from its child process.
+Set `OPENROUTER_APP_ATTRIBUTION=false` (or `0`) to turn it off, for example to attribute the traffic to your own app instead. It is read from each task's resolved config, so a value saved under **Settings → Configuration** applies on the worker's next task.
 
 ### Codex: upstream-compatible, not in the stock image
 
@@ -108,6 +111,103 @@ The stock worker image bakes its own Codex config with the native provider and m
 An experimental derivative image therefore needs both the complete provider config and a credential state the swarm accepts, in addition to `OPENROUTER_API_KEY` in the worker process environment. Merely setting `OPENROUTER_API_KEY`, mounting the TOML block, or setting `OPENROUTER_BASE_URL` is not sufficient in the stock deployment. Do not disable the credential gate to hide this mismatch.
 
 See OpenRouter's [Codex CLI setup](https://openrouter.ai/blog/tutorials/codex-cli-openrouter/) for the upstream configuration. This path has not been smoke-tested with the stock Agent Swarm worker.
+
+## Claude Code through a gateway or cloud provider
+
+The claude harness passes its environment straight to Claude Code, so any endpoint Claude Code supports works without an Anthropic key. The worker derives one route from the environment, in this order:
+
+1. `CLAUDE_CODE_USE_FOUNDRY` (Microsoft Foundry)
+2. `CLAUDE_CODE_USE_BEDROCK` (Amazon Bedrock)
+3. `CLAUDE_CODE_USE_VERTEX` (Google Vertex AI)
+4. `ANTHROPIC_BASE_URL` pointing anywhere except `api.anthropic.com` (a gateway; it needs `ANTHROPIC_AUTH_TOKEN` or `ANTHROPIC_API_KEY`)
+5. `CLAUDE_CODE_OAUTH_TOKEN` (Claude subscription)
+6. `ANTHROPIC_API_KEY` (Anthropic API)
+
+The credential gate checks only the variables that route needs, so the worker leaves `waiting_for_credentials` as soon as they are set. On a gateway route, the live check calls the gateway's own `GET /v1/models` and never sends the gateway key to `api.anthropic.com`. Foundry, Bedrock, and Vertex have no free credential check, so the dashboard shows them as **configured** until a task runs.
+
+On any route other than the Claude subscription, the worker blanks `CLAUDE_CODE_OAUTH_TOKEN` in Claude Code's environment, so a subscription token set for other agents never reaches a gateway or cloud endpoint.
+
+### Choosing models
+
+Claude Code runs the swarm's model aliases (`opus`, `sonnet`, `haiku`). Map them to the names your endpoint serves:
+
+```bash
+ANTHROPIC_DEFAULT_OPUS_MODEL=<endpoint model id>
+ANTHROPIC_DEFAULT_SONNET_MODEL=<endpoint model id>
+ANTHROPIC_DEFAULT_HAIKU_MODEL=<endpoint model id>   # also used for background calls
+```
+
+To pin one model for an agent, set `MODEL_OVERRIDE` to the endpoint's model id instead. An id with a non-Anthropic provider prefix (for example `z-ai/glm-4.6`) is treated as another harness's model and ignored; use the `ANTHROPIC_DEFAULT_*_MODEL` variables for those.
+
+### LiteLLM
+
+```bash
+HARNESS_PROVIDER=claude
+ANTHROPIC_BASE_URL=http://litellm:4000
+ANTHROPIC_AUTH_TOKEN=sk-litellm-...      # or ANTHROPIC_API_KEY, sent as x-api-key
+ANTHROPIC_DEFAULT_OPUS_MODEL=claude-opus
+ANTHROPIC_DEFAULT_SONNET_MODEL=claude-sonnet
+ANTHROPIC_DEFAULT_HAIKU_MODEL=claude-haiku
+```
+
+The base URL has no `/v1`; Claude Code appends it. The model names are `model_name` aliases from your LiteLLM config, so they can point at non-Anthropic models.
+
+### OpenRouter
+
+```bash
+HARNESS_PROVIDER=claude
+ANTHROPIC_BASE_URL=https://openrouter.ai/api
+ANTHROPIC_AUTH_TOKEN=sk-or-...
+ANTHROPIC_API_KEY=
+ANTHROPIC_DEFAULT_SONNET_MODEL=~anthropic/claude-sonnet-latest
+```
+
+OpenRouter requires `ANTHROPIC_API_KEY` to be explicitly empty so it does not compete with the bearer token. See OpenRouter's [Claude Code integration guide](https://openrouter.ai/docs/guides/coding-agents/claude-code-integration).
+
+### Microsoft Foundry
+
+```bash
+HARNESS_PROVIDER=claude
+CLAUDE_CODE_USE_FOUNDRY=1
+ANTHROPIC_FOUNDRY_RESOURCE=my-resource   # or ANTHROPIC_FOUNDRY_BASE_URL
+ANTHROPIC_FOUNDRY_API_KEY=...            # omit to use Entra ID (DefaultAzureCredential)
+ANTHROPIC_DEFAULT_OPUS_MODEL=<deployment name>
+ANTHROPIC_DEFAULT_SONNET_MODEL=<deployment name>
+ANTHROPIC_DEFAULT_HAIKU_MODEL=<deployment name>
+```
+
+### Amazon Bedrock
+
+```bash
+HARNESS_PROVIDER=claude
+CLAUDE_CODE_USE_BEDROCK=1
+AWS_REGION=us-east-1                     # required; Claude Code does not read the region from ~/.aws/config
+AWS_BEARER_TOKEN_BEDROCK=...             # or any AWS credential chain source
+ANTHROPIC_DEFAULT_SONNET_MODEL=<inference profile id>
+```
+
+### Google Vertex AI
+
+```bash
+HARNESS_PROVIDER=claude
+CLAUDE_CODE_USE_VERTEX=1
+CLOUD_ML_REGION=us-east5
+ANTHROPIC_VERTEX_PROJECT_ID=my-project
+# Credentials: Application Default Credentials (GOOGLE_APPLICATION_CREDENTIALS or workload identity)
+```
+
+### CLIProxyAPI and other Anthropic-compatible proxies
+
+Any proxy that speaks the Anthropic Messages API is a gateway: set `ANTHROPIC_BASE_URL` and put the key the proxy expects in `ANTHROPIC_AUTH_TOKEN`. Headers the proxy needs go in `ANTHROPIC_CUSTOM_HEADERS` (one `Name: value` per line); the live check sends them too.
+
+<Callout type="warn">
+  Do not put a Claude Pro or Max subscription behind a proxy to share it across
+  users or agents. Anthropic's terms restrict how subscription credentials may be
+  used. A gateway in front of an Anthropic API key, Foundry, Bedrock, or Vertex is
+  the supported path.
+</Callout>
+
+A custom `ANTHROPIC_BASE_URL` requires a gateway key (`ANTHROPIC_AUTH_TOKEN` or `ANTHROPIC_API_KEY`). With only `CLAUDE_CODE_OAUTH_TOKEN` set, the worker stays in `waiting_for_credentials` and names the missing gateway key, because Claude Code would otherwise send the subscription token to that URL. To send subscription traffic through an egress proxy, leave `ANTHROPIC_BASE_URL` unset and use Claude Code's `HTTPS_PROXY` setting ([network configuration](https://code.claude.com/docs/en/network-config)).
 
 ## OpenAI-compatible gateways
 
@@ -152,7 +252,7 @@ MODEL_OVERRIDE=openrouter/moonshotai/kimi-k2.5
 
 The adapter writes the override to pi-mono's `~/.pi/agent/models.json` before its per-session model runtime loads. Clearing the variable reverts that file to whatever it held before the swarm wrote the override.
 
-`OPENROUTER_BASE_URL` does not affect Claude Code, Codex, Devin, or Claude Managed Agents. It also cannot adapt a Responses-only gateway into the chat-completions shape expected by these OpenRouter-backed paths.
+`OPENROUTER_BASE_URL` does not affect Claude Code, Codex, Devin, or Claude Managed Agents. Claude Code uses `ANTHROPIC_BASE_URL` instead ([above](#claude-code-through-a-gateway-or-cloud-provider)). It also cannot adapt a Responses-only gateway into the chat-completions shape expected by these OpenRouter-backed paths.
 
 ## OrcaRouter (api.orcarouter.ai)
 
@@ -194,7 +294,7 @@ Two details differ from OrcaRouter's own OpenCode and pi guides, which configure
 
 ## Ramp Router (router.com)
 
-Ramp Router is not supported by the stock Agent Swarm worker image today. The current Ramp CLI has dedicated integrations for Claude Code, Codex, OpenCode, and Pi, but each path hits a swarm-side gap.
+Ramp Router is not supported by the stock Agent Swarm worker image today, except for Claude Code, whose variables form a gateway route. The current Ramp CLI has dedicated integrations for Claude Code, Codex, OpenCode, and Pi; the other three hit a swarm-side gap.
 
 Ramp's [public API endpoint documentation](https://docs.router.com/docs/api/endpoint) names `https://api.router.com/v1`. Its current CLI instead configures coding agents against `https://router-api.ramp.com/v1`; the Claude Code integration removes `/v1` because Claude Code appends it. Follow the [Ramp CLI source and installer](https://github.com/ramp-public/ramp-cli) for coding-agent configuration rather than substituting `router.com` as the model API host.
 
@@ -210,7 +310,7 @@ No fixed model string is safe to copy into a Router deployment. Router returns t
 
 | Harness     | Ramp configuration                                                                                                                                                                                                                  | Agent Swarm gap                                                                                                                                                                         |
 | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Claude Code | `ANTHROPIC_BASE_URL=https://router-api.ramp.com`, `ANTHROPIC_AUTH_TOKEN=<router-key>`, `ANTHROPIC_CUSTOM_HEADERS='X-Gateway-Client: claude-code'`, `CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1`, and an empty `ANTHROPIC_API_KEY` | Agent Swarm does not accept `ANTHROPIC_AUTH_TOKEN` as a Claude credential                                                                                                               |
+| Claude Code | `ANTHROPIC_BASE_URL=https://router-api.ramp.com`, `ANTHROPIC_AUTH_TOKEN=<router-key>`, `ANTHROPIC_CUSTOM_HEADERS='X-Gateway-Client: claude-code'`, `CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1`, and an empty `ANTHROPIC_API_KEY` | None on the credential side: these variables form a gateway route. Not tested end to end |
 | Codex       | `[model_providers.ramp-router]` in `~/.codex/config.toml`, `base_url = "https://router-api.ramp.com/v1"`, `wire_api = "responses"`, plus command-based auth and `X-Gateway-Client = "codex"`                                        | The stock image does not contain this provider block, key file, generated model catalog, or Router hooks; the swarm credential gate also does not recognize the provider's command auth |
 | OpenCode    | Ramp's bundled local provider plugin in both `opencode.json` and `tui.json`; model string `ramp-router/<discovered-model-id>`                                                                                                       | The plugin is bundled inside `ramp-cli`, is not published as an independently installable npm package, and is not in the worker image                                                   |
 | pi-mono     | Ramp's bundled local provider package, Router auth entry, and `ramp-router-config.json`; provider `ramp-router` with a discovered model ID                                                                                          | The package and configuration are not in the worker image, and the swarm adapter has no Ramp provider path                                                                              |
@@ -228,13 +328,13 @@ Do not point `OPENROUTER_BASE_URL` at Ramp Router. Ramp's OpenCode and Pi integr
 
 Devin and Claude Managed Agents execute sessions in their vendors' clouds. Their adapters call vendor-managed session APIs directly and expose no model base-URL override. `OPENROUTER_BASE_URL`, `ANTHROPIC_BASE_URL`, and Codex provider files do not redirect them.
 
-If gateway routing is mandatory, choose a supported local harness. Today that means OpenCode or pi-mono with OpenRouter or another OpenAI-compatible gateway.
+If gateway routing is mandatory, choose a supported local harness: Claude Code with an Anthropic-compatible gateway or cloud provider, or OpenCode or pi-mono with OpenRouter or another OpenAI-compatible gateway.
 
 ## Troubleshooting
 
 ### The worker is waiting for credentials
 
-The selected harness did not find a credential type it recognizes. Check the support matrix before adding another variable. In particular, `ANTHROPIC_AUTH_TOKEN` alone is not a valid Agent Swarm Claude credential today.
+The selected harness did not find a credential type it recognizes. Check the support matrix before adding another variable. For Claude Code, the dashboard hint names the route the worker derived and the variable it still needs: `ANTHROPIC_AUTH_TOKEN` needs `ANTHROPIC_BASE_URL` next to it, Foundry needs `ANTHROPIC_FOUNDRY_RESOURCE`, Bedrock needs `AWS_REGION`, and Vertex needs `CLOUD_ML_REGION` and `ANTHROPIC_VERTEX_PROJECT_ID`.
 
 ### The gateway receives model-list requests but no inference
 

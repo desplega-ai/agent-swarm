@@ -426,10 +426,35 @@ export function json(res: ServerResponse, data: unknown, status = 200) {
   res.end(JSON.stringify(data));
 }
 
-/** Send error JSON response */
+/**
+ * Send error JSON response. The message is scrubbed here, at the egress
+ * chokepoint, because error strings often embed upstream responses or
+ * caught exception text that can carry credentials. Success bodies (`json`)
+ * are not scrubbed: some routes return secrets on purpose.
+ */
 export function jsonError(res: ServerResponse, error: string, status = 400) {
   res.writeHead(status, { "Content-Type": "application/json" });
-  res.end(JSON.stringify({ error }));
+  res.end(JSON.stringify({ error: scrubSecrets(error) }));
+}
+
+/**
+ * Write the top-level 500 for an exception no route handled. Logs and body
+ * are both scrubbed. If headers already went out, only end the response.
+ */
+export function writeUnhandledError(
+  res: ServerResponse,
+  err: unknown,
+  req?: Pick<IncomingMessage, "method" | "url">,
+) {
+  const message = err instanceof Error ? err.message : String(err);
+  console.error(
+    `[HTTP] ❌ ${req?.method ?? ""} ${safeRequestUrlForLog(req?.url)} → ${scrubSecrets(message)}`,
+  );
+  if (!res.headersSent) {
+    jsonError(res, message, 500);
+  } else if (!res.writableEnded) {
+    res.end();
+  }
 }
 
 /**

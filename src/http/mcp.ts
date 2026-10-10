@@ -14,6 +14,23 @@ export type McpSessionAgents = Record<string, string>;
 
 export const DEFAULT_MCP_TRANSPORT_IDLE_TIMEOUT_MS = 2 * 60 * 60 * 1000;
 
+// MCP spec: an unknown or terminated session id MUST get 404 so the client starts a new
+// session. Claude Code reconnects on 404, so redeploys and idle sweeps must not answer 400.
+export function respondNoMcpSession(res: ServerResponse, sessionId: string | undefined): true {
+  const notFound = Boolean(sessionId);
+  res.writeHead(notFound ? 404 : 400, { "Content-Type": "application/json" });
+  res.end(
+    JSON.stringify({
+      jsonrpc: "2.0",
+      error: notFound
+        ? { code: -32001, message: "Session not found" }
+        : { code: -32000, message: "Bad Request: No valid session ID provided" },
+      id: null,
+    }),
+  );
+  return true;
+}
+
 export function markMcpTransportActivity(
   sessionActivity: McpTransportActivity,
   sessionId: string | undefined,
@@ -227,6 +244,11 @@ export async function handleMcp(
       }
       const server = await createServer({
         preloadedTools,
+        // Agent row, then global row, then deployment env. A blank agent row
+        // resolves to "unset" for that agent.
+        enabledTools:
+          configs.find((config) => config.key === "SWARM_ENABLED_TOOLS")?.value ??
+          process.env.SWARM_ENABLED_TOOLS,
         scriptsOnly: resolveScriptsOnlyMode({
           env: process.env.SCRIPTS_ONLY_MCP,
           configValue,
@@ -234,15 +256,7 @@ export async function handleMcp(
       });
       await server.connect(transport);
     } else {
-      res.writeHead(400, { "Content-Type": "application/json" });
-      res.end(
-        JSON.stringify({
-          jsonrpc: "2.0",
-          error: { code: -32000, message: "Invalid session" },
-          id: null,
-        }),
-      );
-      return true;
+      return respondNoMcpSession(res, sessionId);
     }
 
     await transport.handleRequest(req, res, body);
@@ -256,9 +270,7 @@ export async function handleMcp(
       await transports[sessionId].handleRequest(req, res);
       return true;
     }
-    res.writeHead(400);
-    res.end("Invalid session");
-    return true;
+    return respondNoMcpSession(res, sessionId);
   }
 
   res.writeHead(405);

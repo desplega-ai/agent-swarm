@@ -29,18 +29,23 @@ Loading recurring operations upfront avoids repeated discovery while leaving les
 
 ## Large Result Handling
 
-Agent-facing MCP results are capped at 10,000 serialized UTF-8 bytes. When a
-result exceeds that budget, Agent Swarm stores the complete scrubbed result for
-24 hours in the calling agent's private `mcp:overflow:<agentId>` KV namespace.
-The bounded response keeps the largest fitting leading slice of an array, or a
-readable prose preview; scalar JSON is omitted as a complete unit rather than
-cut into invalid JSON. Both MCP result channels receive the same
-machine-readable `truncation` metadata and `kv-get` retrieval pointer.
+Agent-facing MCP results are capped at 10,000 UTF-8 bytes per channel: the
+text content and the JSON-encoded structured content must each fit, since
+every harness reads only one of them. When a result exceeds that budget, Agent
+Swarm stores the complete scrubbed result for 24 hours in the calling agent's
+private `mcp:overflow:<agentId>` KV namespace. The bounded response keeps the
+largest fitting leading slice of an array, or the largest prose or JSON preview
+that fits; structured scalar JSON is omitted as a complete unit rather than cut
+into invalid JSON. The text channel ends with one `Full value:` pointer, a
+`Shape:` outline of the stored value, and a `Retrieval:` call; the structured
+channel carries the same as a `truncation` object.
 
-`kv-get` returns the complete stored value, although the active harness may
-still apply its own display limit. For filtering or aggregation, fetch the
-value inside a script with `ctx.swarm.kv_get` and return only the derived
-answer. Script-internal `ctx.swarm.*` responses are not subject to the 10 KB
+`kv-get` without view arguments returns the complete stored value, although the
+active harness may still apply its own display limit. Pass `path` (a dot path
+such as `outcome.data.rows`), `offset`, and `limit` for a bounded page of the
+value instead; `view.nextOffset` says where the next page starts. For filtering
+or aggregation, fetch the value inside a script with `ctx.swarm.kv_get` (same
+arguments) and return only the derived answer. Script-internal `ctx.swarm.*` responses are not subject to the 10 KB
 model-context ceiling; see [Scripts runtime](/docs/guides/scripts-runtime) for
 that separate boundary.
 
@@ -107,6 +112,8 @@ Returns a list of tasks with various filters. Sorted by priority (desc) then las
 
 Send a task to a specific agent, create an unassigned task, or offer a task for acceptance.
 
+The authenticated user MCP exposes only task content and model controls. It assigns work directly to the online Lead and returns an error without creating a task when no Lead is online. Its surface does not expose task pool actions.
+
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `task` | string | Yes | Task description |
@@ -131,7 +138,7 @@ Send a task to a specific agent, create an unassigned task, or offer a task for 
 | `slackThreadTs` | string | No | Slack thread timestamp (auto-inherited if omitted) |
 | `slackUserId` | string | No | Slack user ID of the original requester (auto-inherited if omitted) |
 | `overrideSlackContext` | boolean | No | Set with both channel and thread fields for an intentional audited cross-channel handoff. Without it, routes conflicting with the parent or Slack context key are rejected. |
-| `requestedByUserId` | uuid | No | ID of the human user who originally requested this task chain. Auto-inherited from the caller's current task so attribution flows through multi-hop delegation (lead → worker → child tasks). |
+| `requestedByUserId` | uuid | No | ID of the human user who originally requested this task chain. Auto-inherited from the caller's current task so attribution flows through multi-hop delegation (lead → worker → child tasks). Only lead agents can name a user other than the requester of their current task. |
 | `followUpConfig` | object | No | Control the lead follow-up created when this task finishes. Use `disabled: true` to suppress it, or `onCompleted` / `onFailed` to inject outcome-specific instructions for long-running flows. |
 | `outputSchema` | object | No | JSON Schema the assignee's final output must satisfy. `store-progress` rejects a completion that doesn't match. Supported keywords: `type`, `required`, `properties`, `enum`, `const`, `items`; every nested schema under `properties`/`items` must itself be a plain object, or `send-task` rejects it at ingress. |
 
@@ -178,10 +185,10 @@ Cancel a task that is pending or in progress. Only the lead or task creator can 
 
 Send additional instructions to a task that is already running. Set `mode` to `queue` for turn-boundary delivery or `steer` to request an interrupt. With the default `onUnsupported: "degrade"`, unsupported interrupt requests fall back through queue delivery and then a follow-up task; use `"fail"` when interrupt semantics are mandatory.
 
-pi-mono and Claude Managed advertise both modes. Claude Code, Devin, opencode,
-and Codex advertise queue only. Codex delivers queued messages at the next
-`SessionStart`, `PostToolUse`, or `Stop` lifecycle hook; messages that are never
-picked up are promoted to follow-up tasks by the terminal sweep. See
+pi-mono, Claude Managed, Codex, and Cursor advertise both modes. Claude Code,
+Devin, opencode, and Amp advertise queue only. Amp delivers queued messages at
+the next tool result; messages that are never picked up are promoted to
+follow-up tasks by the terminal sweep. See
 [Steer a Running Task](/docs/guides/task-steering) for the capability matrix
 and lifecycle.
 
@@ -763,7 +770,7 @@ Create an approval request and return at once with the request ID and URL. The a
 | `questions` | array | Yes | Questions to ask the human |
 | `timeoutSeconds` | integer | No | Seconds until the request expires. After that it becomes `timeout` and the requesting agent gets a `hitl-follow-up` task. |
 
-Approval requests are accessible via the dashboard at `/approval-requests/{id}`. When resolved, a follow-up task is automatically created for the requesting agent with the human's responses. A request with no `timeoutSeconds` is cancelled after `APPROVAL_REQUEST_AUTO_CANCELLATION_DAYS` days (default 7) with no answer. An answer after the deadline is refused with 409.
+Approval requests are accessible via the dashboard at `/approval-requests/{id}`. Each question's `label` and `description` render there as markdown; a bare image URL on its own line in `description` shows as an image. The tool sends no Slack message, so share the URL yourself. When resolved, a follow-up task is automatically created for the requesting agent with the human's responses. A request with no `timeoutSeconds` is cancelled after `APPROVAL_REQUEST_AUTO_CANCELLATION_DAYS` days (default 7) with no answer. An answer after the deadline is refused with 409.
 
 ### cancel-approval-request
 
@@ -859,12 +866,15 @@ A Redis-like, namespaced key/value store. Calls auto-resolve namespace from your
 
 ### kv-get
 
-Read a key. Returns the entry or `null` if missing/expired. Namespace defaults to your current context.
+Read a key. Returns the entry or `null` if missing/expired. Namespace defaults to your current context. Any of `path`/`offset`/`limit` returns a bounded view (10 KB per channel) instead of the whole value.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `key` | string | Yes | Key to read |
 | `namespace` | string | No | Override the auto-resolved namespace |
+| `path` | string | No | Dot path into the JSON value (`outcome.data.rows`, `rows.3`; escape a dot inside a key as `\.`). String entries holding JSON count as JSON |
+| `offset` | number | No | First array item / object key / string character to return. Default 0 |
+| `limit` | number | No | Max items / keys / characters. The page also shrinks to fit the cap |
 
 ### kv-set
 
@@ -1016,7 +1026,7 @@ Manage MCP server definitions and installations. Servers are scoped (agent → s
 
 ### mcp-server-create
 
-Create a new MCP server definition. Agent-scope servers are auto-installed for the creating agent. Swarm/global scope requires lead.
+Create a new MCP server definition. Agent-scope servers are auto-installed for the creating agent. Swarm/global scope and stdio servers require lead.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -1054,7 +1064,7 @@ List MCP servers with optional filters.
 
 ### mcp-server-update
 
-Update an MCP server's configuration. Only the owner or lead can update.
+Update an MCP server's configuration. Only the owner or lead can update. Changing or enabling what a stdio server runs requires lead.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -1213,17 +1223,23 @@ installed state. The catalog (also `GET /api/extensions/catalog`) is the only in
 
 ### extension-install
 
-Install a predefined extension from the catalog by name. Inline bundles are rejected.
+Install an extension from the catalog by `template` name, or from an inline bundle
+(`manifest` plus `files`). The two forms are mutually exclusive. Inline bundles need
+`EXTENSION_ALLOW_INLINE_INSTALL=true` and a lead, operator, or dashboard-user caller;
+with the flag off the call fails with `inline_install_disabled`, and workers get 403.
 Install creates the extension, its `ext:<name>` agent, and every asset it declares
-(scripts, and disabled schedules). Any authenticated agent can install; the installing
-agent becomes its owner (`createdByAgentId`), and workers may install subsequent versions
-only for their own extensions, without activating them. A trusted lead can enable the new
-extension with `extension-enable`; operators and dashboard users can also activate it.
-Installation itself never enables an extension.
+(scripts, and disabled schedules, workflows and skills). Any authenticated agent can
+install from the catalog; the installing agent becomes its owner (`createdByAgentId`),
+and workers may install subsequent versions only for their own extensions, without
+activating them. A trusted lead can enable the new extension with `extension-enable`;
+operators and dashboard users can also activate it. Installation itself never enables
+an extension.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `template` | string | Yes | Name of a predefined extension from `extension-catalog` |
+| `template` | string | No | Name of a predefined extension from `extension-catalog`. Exclusive with `manifest`/`files` |
+| `manifest` | object | No | Inline bundle manifest. Requires `files` |
+| `files` | object | No | Inline bundle files keyed by relative path. Requires `manifest` |
 | `priority` | integer | No | Handler priority; lower values run first |
 | `config` | object | No | Extension configuration |
 
@@ -1250,7 +1266,7 @@ underscores, for example `ctx.swarm.extension_enable({ id })`.
 
 ### db-query
 
-Execute a read-only SQL query against the swarm database. Available to all authenticated agents — be aware results may include secrets (`oauth_tokens`, `configs`). Results are capped by the operator-configurable `DB_QUERY_MCP_MAX_ROWS` limit. Read-only enforcement also applies to fallback execution when bounded queries are disabled; write statements with `RETURNING` cannot bypass it.
+Execute a read-only SQL query against the swarm database. Available to all authenticated agents. Queries that read a credential table (`oauth_authorizations`, `oauth_apps`, `oauth_pending`, `user_tokens`, `session_tokens`, `script_apis`, `codex_oauth_device_flows`) are rejected, however the table is reached (alias, CTE, view, join or subquery). Secret-shaped values in results are redacted. Use `get-oauth-access-token` for OAuth tokens. Results are capped by the operator-configurable `DB_QUERY_MCP_MAX_ROWS` limit. Read-only enforcement also applies to fallback execution when bounded queries are disabled; write statements with `RETURNING` cannot bypass it.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -1281,6 +1297,7 @@ Search accumulated memories with natural language.
 | `query` | string | Yes | Natural language search query |
 | `scope` | string | No | `all`, `agent`, or `swarm` |
 | `source` | string | No | Filter by source type |
+| `keyPrefix` | string | No | Only memories whose key starts with this text, for example `/longterm/facts/`. Literal and case-sensitive; applied before the result cut |
 | `limit` | number | No | Max results (default: 10) |
 
 When called inside a task, `memory-search` may also return response-side `rateHint` nudges for manual and file-index memories so agents can call `memory_rate(...)` without looking up the signature separately.
@@ -1313,6 +1330,7 @@ the background. The caller always owns the row, for both scopes.
 | `tags` | string[] | No | Free-form tags, for example a repo name or a topic |
 | `taskId` | uuid | No | The task this learning came from |
 | `intent` | string | No | Why this is worth remembering. Kept in the audit trail |
+| `key` | string | No | Logical path such as `/longterm/facts/swarm-runtime/slug`, stored on every chunk. Lowercase segments, leading `/`. A `name` that starts with `/longterm/` is used as the key when `key` is absent. Fails if you already use that key in the scope. A key under `/longterm` must start with `/longterm/company-story`, `/longterm/entities/people`, `/longterm/entities/customers`, `/longterm/facts`, `/longterm/decisions`, `/longterm/workstreams` or `/longterm/timeline`; such a memory never expires and is protected from cleanup. `/longterm/company-story`, `/longterm/entities` and `/longterm/timeline` are lead-only. A memory with no key is inbox material |
 
 Returns `memoryIds`, `chunks`, and `queued`. Search first with `memory-search`
 when a similar memory may exist, then `memory-edit` it instead of storing a
@@ -1336,10 +1354,11 @@ shared visibility does not grant edit permission.
 | `newString` | string | No | Replacement string for `exact` mode; may be empty |
 | `intent` | string | Yes | Why you are editing the memory |
 | `expectedVersion` | number | No | Optional optimistic-concurrency guard |
+| `newKey` | string | No | Move the memory to this logical path on every chunk, keeping ID, rating posterior, access count and author. Alone it is a pure move (no content fields). Same allowed roots and lead-only roots as `memory-store`. Moving into `/longterm` clears the expiry on every chunk; moving out does not restore it |
 
 ### memory-delete
 
-Delete a memory by ID. Agents can delete their own memories; lead agents can also delete swarm-scoped memories.
+Delete a memory by ID. Agents can delete their own agent-scoped memories; only the lead can delete swarm-scoped memories. The same rule applies to `DELETE /api/memory/{id}`, which the script SDK's `memory_delete` calls.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -1409,7 +1428,7 @@ List registered repos with their guidelines (PR checks, merge policy, review gui
 
 ### update-repo
 
-Update a repo's configuration including guidelines.
+Update a repo's configuration including guidelines. Only the lead can change `allowMerge`: resend its current value to edit other guidelines.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|

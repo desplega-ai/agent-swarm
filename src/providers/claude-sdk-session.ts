@@ -13,6 +13,7 @@ import type { RunStopHookSessionSummaryOpts } from "../hooks/hook";
 import { getContextWindowSize } from "../utils/context-window";
 import {
   parseStderrForErrors,
+  redactRateLimitEvent,
   SessionErrorTracker,
   trackErrorFromJson,
 } from "../utils/error-tracker";
@@ -28,6 +29,7 @@ import {
   cleanupTaskFile,
   runClaudeSessionSummary,
 } from "./claude-adapter";
+import { ClaudeBackgroundKeepalive } from "./claude-background-keepalive";
 import type { ClaudeProtocolMessage } from "./claude-session-events";
 import { normalizeClaudeMessage } from "./claude-session-events";
 import type {
@@ -316,8 +318,11 @@ class ClaudeSdkSession implements ProviderSession {
   private acceptingInput = true;
   private errorTracker = new SessionErrorTracker();
   private shutdownPromise: Promise<void> | undefined;
+  /** Keeps the session heartbeat fresh while Claude idles on background tasks. */
+  private backgroundKeepalive: ClaudeBackgroundKeepalive;
 
   constructor(private options: CreateClaudeSdkSessionOptions) {
+    this.backgroundKeepalive = new ClaudeBackgroundKeepalive(options.config);
     this.model = options.model;
     this.contextWindowSize = getContextWindowSize(options.model);
     this.transcript = [`User: ${scrubSecrets(options.config.prompt)}`];
@@ -405,6 +410,7 @@ class ClaudeSdkSession implements ProviderSession {
 
   private handleMessage(message: SDKMessage): boolean {
     const json = message as unknown as ClaudeProtocolMessage;
+    this.backgroundKeepalive.observe(json);
     const normalized = normalizeClaudeMessage(json, {
       taskId: this.options.config.taskId,
       agentId: this.options.config.agentId,
@@ -495,7 +501,7 @@ class ClaudeSdkSession implements ProviderSession {
       });
 
       for await (const message of this.query) {
-        const scrubbed = scrubSecrets(JSON.stringify(message));
+        const scrubbed = scrubSecrets(JSON.stringify(redactRateLimitEvent(message)));
         log.write(`${scrubbed}\n`);
         this.emit({ type: "raw_log", content: scrubbed });
         const isResult = this.handleMessage(message);
@@ -513,6 +519,7 @@ class ClaudeSdkSession implements ProviderSession {
         this.emit({ type: "error", message, category: "sdk_transport" });
       }
     } finally {
+      this.backgroundKeepalive.stop();
       this.acceptingInput = false;
       this.input.close();
       if (this.aborted) {
@@ -581,6 +588,7 @@ class ClaudeSdkSession implements ProviderSession {
       rateLimitResetAt: this.errorTracker.getRateLimitResetAt(),
       rateLimitWindows: this.errorTracker.getRateLimitWindows(),
       modelRateLimit: this.errorTracker.getModelRateLimit(),
+      creditsRequired: this.errorTracker.getCreditsRequired(),
       appliedReasoningEffort: sessionEnvironment.appliedReasoningEffort,
     };
   }

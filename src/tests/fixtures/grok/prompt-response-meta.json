@@ -1,0 +1,36 @@
+{
+  "sessionId": "redacted",
+  "requestId": "redacted",
+  "promptId": "redacted",
+  "totalTokens": 25028,
+  "modelId": "grok-build-0.1",
+  "inputTokens": 24929,
+  "outputTokens": 8,
+  "cachedReadTokens": 24576,
+  "reasoningTokens": 91,
+  "usage": {
+    "inputTokens": 134378,
+    "outputTokens": 144,
+    "totalTokens": 134522,
+    "cachedReadTokens": 109504,
+    "cacheCreationTokens": 0,
+    "reasoningTokens": 1827,
+    "modelCalls": 6,
+    "apiDurationMs": 14319,
+    "costUsdTicks": 507168000,
+    "modelUsage": {
+      "grok-build-0.1": {
+        "inputTokens": 134378,
+        "outputTokens": 144,
+        "totalTokens": 134522,
+        "cachedReadTokens": 109504,
+        "cacheCreationTokens": 0,
+        "reasoningTokens": 1827,
+        "modelCalls": 6,
+        "apiDurationMs": 14319,
+        "costUsdTicks": 507168000
+      }
+    },
+    "numTurns": 6
+  }
+}

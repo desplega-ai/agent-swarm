@@ -891,14 +891,10 @@ describe("validateProviderCredentials — error scrubbing", () => {
     // The dashboard device login stores slots, not CODEX_OAUTH. The presence
     // check (`checkCodexCredentials`) already accepts them; the live test must
     // too, or the provider stays `configured` and onboarding never verifies.
+    // The slots never reach env; the resolved-env loader records their count.
     delete process.env.CODEX_OAUTH;
     delete process.env.OPENAI_API_KEY;
-    process.env.codex_oauth_0 = JSON.stringify({
-      access: "oai-access-token-from-device-login",
-      refresh: "oai-refresh",
-      expires: Date.now() + 3600_000,
-      accountId: "acct_123",
-    });
+    process.env.CODEX_OAUTH_POOL_SLOTS = "1";
     let fetchCalled = false;
     globalThis.fetch = (async () => {
       fetchCalled = true;
@@ -909,7 +905,7 @@ describe("validateProviderCredentials — error scrubbing", () => {
       expect(result.ok).toBe(true);
       expect(fetchCalled).toBe(false);
     } finally {
-      delete process.env.codex_oauth_0;
+      delete process.env.CODEX_OAUTH_POOL_SLOTS;
     }
   });
 

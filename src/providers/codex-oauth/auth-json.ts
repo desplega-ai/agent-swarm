@@ -2,7 +2,7 @@
  * Conversion utilities between CodexOAuthCredentials (our internal type)
  * and ~/.codex/auth.json (the format the Codex CLI reads natively).
  *
- * The Codex CLI expects auth.json in this exact format:
+ * The Codex CLI expects these native auth.json fields:
  * {
  *   "auth_mode": "chatgpt",
  *   "OPENAI_API_KEY": null,
@@ -14,6 +14,7 @@
  *   },
  *   "last_refresh": "<ISO 8601>"
  * }
+ * Swarm also writes optional `expires` metadata for lossless conversion.
  *
  * Note: `id_token` is set to the `access_token` value because the token
  * exchange endpoint doesn't return a separate `id_token`. This matches
@@ -23,7 +24,7 @@
  */
 
 import { codexPlanFromClaim } from "../../utils/subscription-plans.js";
-import { extractChatgptPlanType, extractChatgptUserId } from "./flow.js";
+import { decodeJwt, extractChatgptPlanType, extractChatgptUserId } from "./flow.js";
 import type { CodexAuthJson, CodexOAuthCredentials } from "./types.js";
 
 /**
@@ -96,15 +97,31 @@ export function credentialsToAuthJson(
       refresh_token: includeRefreshToken ? creds.refresh : "",
       account_id: creds.accountId,
     },
-    last_refresh: new Date(creds.expires).toISOString(),
+    last_refresh: new Date().toISOString(),
+    // Swarm-only metadata keeps opaque-token round trips lossless. Codex
+    // ignores this field and may drop it when it rewrites auth.json.
+    expires: creds.expires,
   };
 }
 
 export function authJsonToCredentials(auth: CodexAuthJson): CodexOAuthCredentials {
+  // A CLI refresh may replace the access token and discard our metadata.
+  // Prefer its JWT expiry, which describes the token actually in the file.
+  const exp = decodeJwt(auth.tokens.access_token)?.exp;
+  const jwtExpires = typeof exp === "number" ? exp * 1000 : NaN;
+  const expires =
+    Number.isFinite(jwtExpires) && jwtExpires >= 0
+      ? jwtExpires
+      : typeof auth.expires === "number" && Number.isFinite(auth.expires)
+        ? auth.expires
+        : new Date(auth.last_refresh).getTime();
+
   return {
     access: auth.tokens.access_token,
     refresh: auth.tokens.refresh_token,
-    expires: new Date(auth.last_refresh).getTime(),
+    // Legacy swarm files put expiry in last_refresh; keep that fallback
+    // only when neither the token nor the explicit metadata carries it.
+    expires,
     accountId: auth.tokens.account_id,
   };
 }

@@ -285,6 +285,16 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         restartRequired: true,
       },
       {
+        key: "API_DRAIN_MAX_MS",
+        label: "Shutdown drain cap",
+        description:
+          "When the API is stopped it keeps serving, dispatches no new work, and waits this long for workers to hand off their in-flight tasks before it closes. Off by default (0): set it for deploys that stop the API and the workers together. While it is on, any API restart makes live workers hand off their in-flight tasks. Keep the API's stop grace period above this value. Accepts 0 to 120000.",
+        kind: "number",
+        unit: "ms",
+        defaultValue: "0",
+        placeholder: "0",
+      },
+      {
         key: "HEARTBEAT_STALL_THRESHOLD_MIN",
         label: "Stall threshold",
         description: "Minutes without any task update before a task is classified as stalled.",
@@ -376,6 +386,16 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
     icon: Cpu,
     entries: [
       {
+        key: "CLAUDE_TRUST_PRESEED",
+        label: "Claude workspace trust pre-seed",
+        description:
+          "Mark the session workspace (and the main checkout, for git worktrees) as trusted in ~/.claude.json before each Claude session, so Claude Code does not ignore the repo's .claude/settings.json permissions.",
+        kind: "boolean",
+        defaultValue: "true",
+        restartRequired: false,
+        docsUrl: `${DOCS}guides/harness-providers`,
+      },
+      {
         key: "SWARM_DEV_MODE",
         label: "Dev mode",
         description:
@@ -431,6 +451,24 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         docsUrl: `${DOCS}guides/harness-providers`,
       },
       {
+        key: "CURSOR_NATIVE_SYSTEM_PROMPT",
+        label: "Cursor native system prompt",
+        description:
+          "cursor workers only. Pass the swarm prompt as Cursor's systemPrompt, replacing Cursor's own. Cursor enables this per account; when it rejects the option, the session falls back to carrying the prompt in the first message. Off by default (first-message path). Takes effect on the worker's next task.",
+        kind: "boolean",
+        defaultValue: "false",
+        docsUrl: `${DOCS}guides/harness-providers`,
+      },
+      {
+        key: "PI_CODEMODE_MODELS",
+        label: "pi codemode model access (pilot)",
+        description:
+          "pi workers only. Let codemode scripts call pi's models API: classifiers and image generation. Does nothing unless pi codemode is on. Model usage from scripts counts toward the session cost. Off by default. Takes effect on the worker's next task.",
+        kind: "boolean",
+        defaultValue: "false",
+        docsUrl: `${DOCS}guides/harness-providers`,
+      },
+      {
         key: "SCRIPTS_ONLY_MCP",
         label: "Scripts-only MCP",
         description:
@@ -457,6 +495,15 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         placeholder: "core,tasks,scripts,memory,workflows",
       },
       {
+        key: "SWARM_ENABLED_TOOLS",
+        label: "MCP tool allowlist",
+        description:
+          "Comma-separated MCP tool names to expose to workers. When set, workers see exactly these tools, ignoring the capability surface and scripts-only mode. Unknown names are logged and skipped; an empty list is ignored. Leave unset for the normal surface. Applies on each agent's next MCP session; an agent-scoped value overrides this one.",
+        kind: "string",
+        placeholder: "get-tasks,store-progress,script-run",
+        docsUrl: `${DOCS}guides/agent-capabilities`,
+      },
+      {
         key: "OPENROUTER_BASE_URL",
         label: "OpenAI-compatible model gateway",
         description:
@@ -465,6 +512,15 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         defaultValue: "https://openrouter.ai/api/v1",
         placeholder: "https://openrouter.ai/api/v1",
         docsUrl: `${DOCS}guides/provider-auth/model-gateways`,
+      },
+      {
+        key: "OPENROUTER_APP_ATTRIBUTION",
+        label: "OpenRouter app attribution",
+        description:
+          "Sends OpenRouter's app attribution headers (HTTP-Referer https://agent-swarm.dev, X-OpenRouter-Title Agent Swarm, X-OpenRouter-Categories personal-agent,cloud-agent) on requests that go straight to openrouter.ai, so the usage counts toward the Agent Swarm app. Gateways and other hosts never get them. Turn off to send no attribution, for example to credit your own OpenRouter app. Takes effect on each worker's next task; no restart.",
+        kind: "boolean",
+        defaultValue: "true",
+        docsUrl: `${DOCS}guides/provider-auth/model-gateways#app-attribution`,
       },
       {
         key: "WORKER_API_READY_TIMEOUT_SECONDS",
@@ -557,6 +613,15 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         kind: "number",
         unit: "days",
         placeholder: "30",
+        docsUrl: `${DOCS}guides/deployment#database-retention`,
+      },
+      {
+        key: "CONTEXT_VERSIONS_KEEP_LATEST",
+        label: "Context version retention",
+        description:
+          "Keep only this many newest context_versions rows per agent and field. The newest version is never deleted. Leave unset to disable this table's sweep. Deletion permanently removes older profile history.",
+        kind: "number",
+        placeholder: "100",
         docsUrl: `${DOCS}guides/deployment#database-retention`,
       },
       {
@@ -885,8 +950,9 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         key: "LINEAR_SWARM_READY_LABEL",
         label: "Linear swarm-ready label",
         description:
-          "Label that marks a Linear issue as ready for the swarm to pick up. Leave unset to skip label filtering.",
+          "Label that bypasses the workflow-state gate, so a labeled issue creates a task in any state. Defaults to `swarm-ready`.",
         kind: "string",
+        defaultValue: "swarm-ready",
         placeholder: "e.g. swarm-ready",
         docsUrl: `${DOCS}integrations/linear`,
       },
@@ -900,6 +966,23 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         defaultValue: "20000",
         placeholder: "20000",
         docsUrl: `${DOCS}ui/configuration`,
+      },
+      {
+        key: "COMB_ENABLED",
+        label: "Comb (beta)",
+        description: "Show the agent-fs review space in the dashboard. Needs agent-fs.",
+        kind: "boolean",
+        defaultValue: "false",
+        docsUrl: `${DOCS}ui/comb`,
+      },
+      {
+        key: "AGENT_FS_PUBLIC_URL",
+        label: "agent-fs public URL",
+        description:
+          "agent-fs URL that browsers use. Defaults to AGENT_FS_API_URL. Set it when the API reaches agent-fs on an internal hostname.",
+        kind: "string",
+        placeholder: "https://agent-fs.example.com",
+        docsUrl: `${DOCS}ui/comb#turn-on-comb`,
       },
     ],
   },
@@ -951,6 +1034,15 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         defaultValue: "false",
       },
       {
+        key: "EXTENSION_ALLOW_INLINE_INSTALL",
+        label: "Allow inline extension install",
+        description:
+          "Let lead agents, the operator, and dashboard users install an extension from a manifest and files sent in the request instead of the predefined catalog. Workers stay catalog-only. An enabled extension runs as trusted code in the API process, so leave this off unless you accept that. New installs arrive disabled and still need an explicit enable.",
+        kind: "boolean",
+        defaultValue: "false",
+        docsUrl: `${DOCS}guides/extensions`,
+      },
+      {
         key: "CORS_ALLOWED_ORIGINS",
         label: "Credentialed CORS allowlist",
         description:
@@ -996,6 +1088,16 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         defaultValue: "10000",
         placeholder: "10000",
         restartRequired: true,
+      },
+      {
+        key: "SCRIPT_EXECUTOR",
+        label: "Script executor",
+        description:
+          "Executor for server-side scripts. Native runs scripts in Bun subprocesses; QuickJS uses a smaller JavaScript sandbox. Applies to new runs after config reload.",
+        kind: "enum",
+        options: ["native", "quickjs"],
+        defaultValue: "native",
+        docsUrl: `${DOCS}ui/configuration#script-executor`,
       },
       {
         key: "SCRIPT_RUN_CONCURRENCY_CAP",

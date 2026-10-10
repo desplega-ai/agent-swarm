@@ -1,0 +1,96 @@
+---
+title: Claude Code Mod
+description: Delegate work to the swarm from a local Claude Code session, and watch your tasks and their live logs in a /swarm pane
+---
+
+The `agent-swarm` Claude Code plugin includes a mod: code that runs inside your Claude Code session. With it, Claude can send long, independent work to the swarm, and the result comes back into the session when the task finishes. A `/swarm` pane shows your tasks, their live session logs, and lets you start, steer, or cancel a task.
+
+The mod runs only in interactive Claude Code sessions on your machine. A headless `claude -p` run does not delegate or poll, and swarm workers do not load it.
+
+## Requirements
+
+- Claude Code 2.1.287 or later.
+- A swarm user token (`aswt_...`) and the URL of your swarm's API.
+
+## Install
+
+Run these commands in Claude Code:
+
+```text
+/plugin marketplace add desplega-ai/agent-swarm
+/plugin install agent-swarm@agent-swarm
+/reload-plugins
+```
+
+## Connect it to your swarm
+
+The mod reads your swarm URL and token from the `agent-swarm-user` MCP entry, the same entry the user MCP uses.
+
+1. In the dashboard, open **People**, select your user, and mint a token.
+2. Copy the **Claude Code** client snippet. It looks like this:
+
+```bash
+claude mcp add --transport http agent-swarm-user https://<your-api>/mcp-user --scope user --header "Authorization: Bearer aswt_..."
+```
+
+3. Run the snippet, then start a new Claude Code session.
+
+Without that entry, set the plugin options in `/config`: **Swarm API URL** (`swarmUrl`) and **Swarm user token** (`swarmToken`). The token is kept in secure storage.
+
+When the mod finds neither, `/swarm` shows a link to this page and the mod does nothing else.
+
+## Delegate from Claude
+
+The mod gives Claude a `delegate` tool. Claude uses it for long work that does not need your local files: research, a PR on a GitHub repository, a review, or a report. The tool returns at once with the task id.
+
+When the task finishes, a toast shows, and the result arrives as a new message once the session is idle. Claude then continues the work. A result longer than 20,000 characters is cut, with the task id for the rest.
+
+The status line under the prompt shows how many tasks of this session are running.
+
+## The /swarm pane
+
+Run `/swarm` to open or close the pane. The pane groups your tasks in three sections: **In progress** (with an animated scanner), **Queued**, and **Finished**. Tasks from this session are marked `you`.
+
+| Key | Action |
+| --- | --- |
+| `j` / `k`, arrows | Move between tasks |
+| `g` | Go to the first task |
+| `l`, Enter | Show the live session log of the task |
+| `h` | Back from the log to the list |
+| `n` | Send a new task to the swarm |
+| `f` | Search your tasks (words in the task text or an id prefix) |
+| `x` | Clear the search |
+| `s` | Steer the running task |
+| `c` | Cancel the task |
+| `y` | Send the result of a finished task to Claude |
+| `r` | Refresh |
+
+The log view polls the task's session log every 3 seconds. It formats the log with the same parser as the dashboard, so tool calls, tool results, and messages look the same for every harness.
+
+A task you start from the pane does not send its result to Claude. Press `y` on it when you want Claude to read it.
+
+### Toggle the pane with a shortcut
+
+Add a binding to `~/.claude/keybindings.json`:
+
+```json
+{
+  "bindings": [
+    { "context": "Chat", "bindings": { "ctrl+x w": "command:swarm" } }
+  ]
+}
+```
+
+## How it works
+
+- The mod calls the REST API with your user token, so it has the same permissions as your user. Plain HTTP has no session that an API deploy can drop.
+- It tags each task with `claude-code` and a tag for the session, then polls the task every 15 seconds.
+- The pane polls only while it is open.
+
+## Develop the mod
+
+The mod lives in [`claude-mod/`](https://github.com/desplega-ai/agent-swarm/tree/main/claude-mod).
+
+- `bun run build:claude-mod` bundles the dashboard parser (`apps/ui/src/logs-parser`) into `claude-mod/vendor/logs-parser.js`. CI fails when the bundle is stale.
+- `bun run test:claude-mod` runs the mod tests with `claude plugin test`. It needs the `claude` CLI.
+- `claude --plugin-dir .` loads your checkout as the plugin and reloads it when a file changes.

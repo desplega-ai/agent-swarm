@@ -63,7 +63,8 @@ export function AppHeader() {
         <Breadcrumbs />
       </div>
 
-      <div className="flex items-center gap-3">
+      {/* Tighter below sm so the breadcrumb keeps room on a phone. */}
+      <div className="flex items-center gap-1 sm:gap-3">
         {isHealthy && !stats.isError && stats.data?.devMode === true && (
           <Badge variant="outline" size="tag" title="Dev mode: UI version checks are bypassed">
             Dev
@@ -123,14 +124,15 @@ export function AppHeader() {
         <NotificationBell />
         <ContextPanelToggle />
 
-        {/* GitHub repo link */}
+        {/* GitHub repo link. Hidden below sm: the phone header needs the
+            room for the breadcrumb more than a repo link. */}
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
               asChild
               variant="ghost"
               size="icon"
-              className="size-8"
+              className="size-8 max-sm:hidden"
               aria-label="Open agent-swarm on GitHub"
             >
               <a

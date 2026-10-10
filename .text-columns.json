@@ -1,0 +1,3503 @@
+{
+  "_migrations": {
+    "name": {
+      "exempt": "migration file name"
+    },
+    "applied_at": {
+      "exempt": "timestamp"
+    },
+    "checksum": {
+      "exempt": "hash or digest"
+    }
+  },
+  "active_sessions": {
+    "id": {
+      "exempt": "identifier"
+    },
+    "agentId": {
+      "exempt": "identifier"
+    },
+    "taskId": {
+      "exempt": "identifier"
+    },
+    "triggerType": {
+      "exempt": "enum or fixed-format value"
+    },
+    "inboxMessageId": {
+      "exempt": "identifier"
+    },
+    "taskDescription": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "startedAt": {
+      "exempt": "timestamp"
+    },
+    "lastHeartbeatAt": {
+      "exempt": "timestamp"
+    },
+    "runnerSessionId": {
+      "exempt": "identifier"
+    },
+    "providerSessionId": {
+      "exempt": "identifier"
+    },
+    "runtimeInstanceId": {
+      "exempt": "identifier"
+    }
+  },
+  "agent_log": {
+    "id": {
+      "exempt": "identifier"
+    },
+    "eventType": {
+      "exempt": "enum or fixed-format value"
+    },
+    "agentId": {
+      "exempt": "identifier"
+    },
+    "taskId": {
+      "exempt": "identifier"
+    },
+    "oldValue": "scrubbed",
+    "newValue": "scrubbed",
+    "metadata": "scrubbed",
+    "createdAt": {
+      "exempt": "timestamp"
+    }
+  },
+  "agent_mcp_servers": {
+    "id": {
+      "exempt": "identifier"
+    },
+    "agentId": {
+      "exempt": "identifier"
+    },
+    "mcpServerId": {
+      "exempt": "identifier"
+    },
+    "installedAt": {
+      "exempt": "timestamp"
+    }
+  },
+  "agent_memory": {
+    "id": {
+      "exempt": "identifier"
+    },
+    "agentId": {
+      "exempt": "identifier"
+    },
+    "scope": {
+      "exempt": "enum or fixed-format value"
+    },
+    "name": "scrubbed",
+    "content": "scrubbed",
+    "summary": "scrubbed",
+    "source": {
+      "exempt": "enum or fixed-format value"
+    },
+    "sourceTaskId": {
+      "exempt": "identifier"
+    },
+    "sourcePath": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "tags": "scrubbed",
+    "createdAt": {
+      "exempt": "timestamp"
+    },
+    "accessedAt": {
+      "exempt": "timestamp"
+    },
+    "expiresAt": {
+      "exempt": "timestamp"
+    },
+    "embeddingModel": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "created_by": {
+      "exempt": "identifier"
+    },
+    "updated_by": {
+      "exempt": "identifier"
+    },
+    "contextKey": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "key": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "contentHash": {
+      "exempt": "hash or digest"
+    },
+    "updatedAt": {
+      "exempt": "timestamp"
+    }
+  },
+  "agent_memory_edge": {
+    "from_id": {
+      "exempt": "identifier"
+    },
+    "to_id": {
+      "exempt": "identifier"
+    },
+    "type": {
+      "exempt": "enum or fixed-format value"
+    },
+    "createdAt": {
+      "exempt": "timestamp"
+    }
+  },
+  "agent_memory_version": {
+    "id": {
+      "exempt": "identifier"
+    },
+    "memory_id": {
+      "exempt": "identifier"
+    },
+    "content": "scrubbed",
+    "contentHash": {
+      "exempt": "hash or digest"
+    },
+    "intent": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "operation": {
+      "exempt": "enum or fixed-format value"
+    },
+    "changedByAgentId": {
+      "exempt": "identifier"
+    },
+    "createdAt": {
+      "exempt": "timestamp"
+    },
+    "updatedAt": {
+      "exempt": "timestamp"
+    },
+    "created_by": {
+      "exempt": "identifier"
+    },
+    "updated_by": {
+      "exempt": "identifier"
+    }
+  },
+  "agent_skills": {
+    "id": {
+      "exempt": "identifier"
+    },
+    "agentId": {
+      "exempt": "identifier"
+    },
+    "skillId": {
+      "exempt": "identifier"
+    },
+    "installedAt": {
+      "exempt": "timestamp"
+    }
+  },
+  "agent_tasks": {
+    "id": {
+      "exempt": "identifier"
+    },
+    "agentId": {
+      "exempt": "identifier"
+    },
+    "creatorAgentId": {
+      "exempt": "identifier"
+    },
+    "task": "scrubbed",
+    "status": {
+      "exempt": "enum or fixed-format value"
+    },
+    "source": {
+      "exempt": "enum or fixed-format value"
+    },
+    "taskType": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "tags": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "dependsOn": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "offeredTo": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "offeredAt": {
+      "exempt": "timestamp"
+    },
+    "acceptedAt": {
+      "exempt": "timestamp"
+    },
+    "rejectionReason": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "slackChannelId": {
+      "exempt": "identifier"
+    },
+    "slackThreadTs": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "slackUserId": {
+      "exempt": "identifier"
+    },
+    "mentionMessageId": {
+      "exempt": "identifier"
+    },
+    "mentionChannelId": {
+      "exempt": "identifier"
+    },
+    "vcsProvider": {
+      "exempt": "enum or fixed-format value"
+    },
+    "vcsRepo": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "vcsEventType": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "vcsAuthor": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "vcsUrl": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "parentTaskId": {
+      "exempt": "identifier"
+    },
+    "claudeSessionId": {
+      "exempt": "identifier"
+    },
+    "agentmailInboxId": {
+      "exempt": "identifier"
+    },
+    "agentmailMessageId": {
+      "exempt": "identifier"
+    },
+    "agentmailThreadId": {
+      "exempt": "identifier"
+    },
+    "model": {
+      "exempt": "enum or fixed-format value"
+    },
+    "scheduleId": {
+      "exempt": "identifier"
+    },
+    "workflowRunId": {
+      "exempt": "identifier"
+    },
+    "workflowRunStepId": {
+      "exempt": "identifier"
+    },
+    "createdAt": {
+      "exempt": "timestamp"
+    },
+    "lastUpdatedAt": {
+      "exempt": "timestamp"
+    },
+    "finishedAt": {
+      "exempt": "timestamp"
+    },
+    "failureReason": "scrubbed",
+    "output": "scrubbed",
+    "progress": "scrubbed",
+    "notifiedAt": {
+      "exempt": "timestamp"
+    },
+    "dir": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "outputSchema": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "credentialKeySuffix": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "credentialKeyType": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "requestedByUserId": {
+      "exempt": "identifier"
+    },
+    "vcsNodeId": {
+      "exempt": "identifier"
+    },
+    "swarmVersion": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "contextKey": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "provider": {
+      "exempt": "enum or fixed-format value"
+    },
+    "providerMeta": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "followUpConfig": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "created_by": {
+      "exempt": "identifier"
+    },
+    "updated_by": {
+      "exempt": "identifier"
+    },
+    "harnessVariant": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "harnessVariantMeta": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "modelTier": {
+      "exempt": "enum or fixed-format value"
+    },
+    "slackProgressMessageTs": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "slackTreeRootMessageTs": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "effort": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "routingAffinity": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "key": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "title": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "slackTriggerMessageTs": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "routing_reason": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "routing_note": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "routing_source": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "deferredAt": {
+      "exempt": "timestamp"
+    },
+    "resolvedModel": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "modelSource": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "modelAlias": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    }
+  },
+  "agentmail_inbox_mappings": {
+    "id": {
+      "exempt": "identifier"
+    },
+    "inboxId": {
+      "exempt": "identifier"
+    },
+    "agentId": {
+      "exempt": "identifier"
+    },
+    "inboxEmail": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "createdAt": {
+      "exempt": "timestamp"
+    },
+    "created_by": {
+      "exempt": "identifier"
+    },
+    "updated_by": {
+      "exempt": "identifier"
+    }
+  },
+  "agents": {
+    "id": {
+      "exempt": "identifier"
+    },
+    "name": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "status": {
+      "exempt": "enum or fixed-format value"
+    },
+    "description": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "role": {
+      "exempt": "enum or fixed-format value"
+    },
+    "capabilities": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "claudeMd": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "soulMd": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "identityMd": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "setupScript": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "toolsMd": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "lastActivityAt": {
+      "exempt": "timestamp"
+    },
+    "createdAt": {
+      "exempt": "timestamp"
+    },
+    "lastUpdatedAt": {
+      "exempt": "timestamp"
+    },
+    "heartbeatMd": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "provider": {
+      "exempt": "enum or fixed-format value"
+    },
+    "credentialMissing": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "harness_provider": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "cred_status": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "created_by": {
+      "exempt": "identifier"
+    },
+    "updated_by": {
+      "exempt": "identifier"
+    },
+    "avatar": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "modelTierOverrides": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "harnessCliVersion": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    }
+  },
+  "api_key_status": {
+    "id": {
+      "exempt": "identifier"
+    },
+    "keyType": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "keySuffix": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "scope": {
+      "exempt": "enum or fixed-format value"
+    },
+    "scopeId": {
+      "exempt": "identifier"
+    },
+    "status": {
+      "exempt": "enum or fixed-format value"
+    },
+    "rateLimitedUntil": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "lastUsedAt": {
+      "exempt": "timestamp"
+    },
+    "lastRateLimitAt": {
+      "exempt": "timestamp"
+    },
+    "createdAt": {
+      "exempt": "timestamp"
+    },
+    "updatedAt": {
+      "exempt": "timestamp"
+    },
+    "name": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "provider": {
+      "exempt": "enum or fixed-format value"
+    },
+    "rateLimitWindows": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "plan": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "planSource": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "lastAuthFailureAt": {
+      "exempt": "timestamp"
+    },
+    "lastSeatMismatchAt": {
+      "exempt": "timestamp"
+    },
+    "lastSeatMismatchModel": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    }
+  },
+  "app_user_config": {
+    "id": {
+      "exempt": "identifier"
+    },
+    "appId": {
+      "exempt": "identifier"
+    },
+    "scope": {
+      "exempt": "enum or fixed-format value"
+    },
+    "values": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "createdAt": {
+      "exempt": "timestamp"
+    },
+    "updatedAt": {
+      "exempt": "timestamp"
+    }
+  },
+  "app_versions": {
+    "id": {
+      "exempt": "identifier"
+    },
+    "appId": {
+      "exempt": "identifier"
+    },
+    "snapshot": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "changedByAgentId": {
+      "exempt": "identifier"
+    },
+    "createdAt": {
+      "exempt": "timestamp"
+    }
+  },
+  "approval_requests": {
+    "id": {
+      "exempt": "identifier"
+    },
+    "title": "scrubbed",
+    "workflowRunId": {
+      "exempt": "identifier"
+    },
+    "workflowRunStepId": {
+      "exempt": "identifier"
+    },
+    "sourceTaskId": {
+      "exempt": "identifier"
+    },
+    "status": {
+      "exempt": "enum or fixed-format value"
+    },
+    "resolvedBy": {
+      "exempt": "identifier"
+    },
+    "resolutionReason": "scrubbed",
+    "created_by": {
+      "exempt": "identifier"
+    },
+    "updated_by": {
+      "exempt": "identifier"
+    },
+    "approvals": "scrubbed"
+  },
+  "apps": {
+    "id": {
+      "exempt": "identifier"
+    },
+    "name": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "description": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "definition": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "created_at": {
+      "exempt": "timestamp"
+    },
+    "updated_at": {
+      "exempt": "timestamp"
+    },
+    "key": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    }
+  },
+  "asset_key_history": {
+    "id": {
+      "exempt": "identifier"
+    },
+    "entity_type": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "entity_id": {
+      "exempt": "identifier"
+    },
+    "previous_key": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "new_key": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "changed_by": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "changed_at": {
+      "exempt": "timestamp"
+    }
+  },
+  "asset_key_mappings": {
+    "id": {
+      "exempt": "identifier"
+    },
+    "provider_id": {
+      "exempt": "identifier"
+    },
+    "provider_org_id": {
+      "exempt": "identifier"
+    },
+    "provider_drive_id": {
+      "exempt": "identifier"
+    },
+    "provider_key": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "key": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "source_entity_type": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "source_entity_id": {
+      "exempt": "identifier"
+    },
+    "created_at": {
+      "exempt": "timestamp"
+    },
+    "updated_at": {
+      "exempt": "timestamp"
+    },
+    "created_by": {
+      "exempt": "identifier"
+    },
+    "updated_by": {
+      "exempt": "identifier"
+    }
+  },
+  "budget_refusal_notifications": {
+    "task_id": {
+      "exempt": "identifier"
+    },
+    "date": {
+      "exempt": "timestamp"
+    },
+    "agent_id": {
+      "exempt": "identifier"
+    },
+    "cause": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "follow_up_task_id": {
+      "exempt": "identifier"
+    }
+  },
+  "budgets": {
+    "scope": {
+      "exempt": "enum or fixed-format value"
+    },
+    "scope_id": {
+      "exempt": "identifier"
+    },
+    "created_by": {
+      "exempt": "identifier"
+    },
+    "updated_by": {
+      "exempt": "identifier"
+    }
+  },
+  "channel_activity_cursors": {
+    "channelId": {
+      "exempt": "identifier"
+    },
+    "lastSeenTs": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "updatedAt": {
+      "exempt": "timestamp"
+    }
+  },
+  "channel_messages": {
+    "id": {
+      "exempt": "identifier"
+    },
+    "channelId": {
+      "exempt": "identifier"
+    },
+    "agentId": {
+      "exempt": "identifier"
+    },
+    "content": "scrubbed",
+    "replyToId": {
+      "exempt": "identifier"
+    },
+    "mentions": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "createdAt": {
+      "exempt": "timestamp"
+    },
+    "created_by": {
+      "exempt": "identifier"
+    },
+    "updated_by": {
+      "exempt": "identifier"
+    }
+  },
+  "channel_read_state": {
+    "agentId": {
+      "exempt": "identifier"
+    },
+    "channelId": {
+      "exempt": "identifier"
+    },
+    "lastReadAt": {
+      "exempt": "timestamp"
+    },
+    "processing_since": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    }
+  },
+  "channels": {
+    "id": {
+      "exempt": "identifier"
+    },
+    "name": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "description": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "type": {
+      "exempt": "enum or fixed-format value"
+    },
+    "createdBy": {
+      "exempt": "identifier"
+    },
+    "participants": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "createdAt": {
+      "exempt": "timestamp"
+    },
+    "created_by": {
+      "exempt": "identifier"
+    },
+    "updated_by": {
+      "exempt": "identifier"
+    }
+  },
+  "codex_oauth_device_flows": {
+    "flow_id": {
+      "exempt": "identifier"
+    },
+    "state": {
+      "exempt": "ciphertext"
+    }
+  },
+  "connector_codes": {
+    "code_hash": {
+      "exempt": "hash or digest"
+    },
+    "user_id": {
+      "exempt": "identifier"
+    },
+    "label": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "actor_kind": {
+      "exempt": "enum or fixed-format value"
+    },
+    "actor_id": {
+      "exempt": "identifier"
+    },
+    "created_at": {
+      "exempt": "timestamp"
+    },
+    "expires_at": {
+      "exempt": "timestamp"
+    },
+    "used_at": {
+      "exempt": "timestamp"
+    }
+  },
+  "context_versions": {
+    "id": {
+      "exempt": "identifier"
+    },
+    "agentId": {
+      "exempt": "identifier"
+    },
+    "field": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "content": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "changeSource": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "changedByAgentId": {
+      "exempt": "identifier"
+    },
+    "changeReason": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "contentHash": {
+      "exempt": "hash or digest"
+    },
+    "previousVersionId": {
+      "exempt": "identifier"
+    },
+    "createdAt": {
+      "exempt": "timestamp"
+    }
+  },
+  "deferred_task_wait_members": {
+    "scheduleId": {
+      "exempt": "identifier"
+    },
+    "taskId": {
+      "exempt": "identifier"
+    },
+    "created_at": {
+      "exempt": "timestamp"
+    },
+    "updated_at": {
+      "exempt": "timestamp"
+    },
+    "created_by": {
+      "exempt": "identifier"
+    },
+    "updated_by": {
+      "exempt": "identifier"
+    }
+  },
+  "deferred_task_waits": {
+    "scheduleId": {
+      "exempt": "identifier"
+    },
+    "eventName": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "status": {
+      "exempt": "enum or fixed-format value"
+    },
+    "firedBy": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "childTaskId": {
+      "exempt": "identifier"
+    },
+    "resolvedAt": {
+      "exempt": "timestamp"
+    },
+    "created_at": {
+      "exempt": "timestamp"
+    },
+    "updated_at": {
+      "exempt": "timestamp"
+    },
+    "created_by": {
+      "exempt": "identifier"
+    },
+    "updated_by": {
+      "exempt": "identifier"
+    },
+    "mode": {
+      "exempt": "enum or fixed-format value"
+    }
+  },
+  "events": {
+    "id": {
+      "exempt": "identifier"
+    },
+    "category": {
+      "exempt": "enum or fixed-format value"
+    },
+    "event": {
+      "exempt": "enum or fixed-format value"
+    },
+    "status": {
+      "exempt": "enum or fixed-format value"
+    },
+    "source": {
+      "exempt": "enum or fixed-format value"
+    },
+    "agentId": {
+      "exempt": "identifier"
+    },
+    "taskId": {
+      "exempt": "identifier"
+    },
+    "sessionId": {
+      "exempt": "identifier"
+    },
+    "parentEventId": {
+      "exempt": "identifier"
+    },
+    "data": "scrubbed",
+    "createdAt": {
+      "exempt": "timestamp"
+    }
+  },
+  "extension_assets": {
+    "id": {
+      "exempt": "identifier"
+    },
+    "extensionId": {
+      "exempt": "identifier"
+    },
+    "kind": {
+      "exempt": "enum or fixed-format value"
+    },
+    "assetId": {
+      "exempt": "identifier"
+    },
+    "name": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "seededHash": {
+      "exempt": "hash or digest"
+    },
+    "created_by": {
+      "exempt": "identifier"
+    },
+    "updated_by": {
+      "exempt": "identifier"
+    },
+    "createdAt": {
+      "exempt": "timestamp"
+    },
+    "updatedAt": {
+      "exempt": "timestamp"
+    }
+  },
+  "extension_files": {
+    "id": {
+      "exempt": "identifier"
+    },
+    "extensionId": {
+      "exempt": "identifier"
+    },
+    "path": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "content": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "contentHash": {
+      "exempt": "hash or digest"
+    },
+    "created_by": {
+      "exempt": "identifier"
+    },
+    "updated_by": {
+      "exempt": "identifier"
+    }
+  },
+  "extension_runs": {
+    "id": {
+      "exempt": "identifier"
+    },
+    "extensionId": {
+      "exempt": "identifier"
+    },
+    "event": {
+      "exempt": "enum or fixed-format value"
+    },
+    "action": {
+      "exempt": "enum or fixed-format value"
+    },
+    "message": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "agentId": {
+      "exempt": "identifier"
+    },
+    "subject": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "createdAt": {
+      "exempt": "timestamp"
+    }
+  },
+  "extension_versions": {
+    "id": {
+      "exempt": "identifier"
+    },
+    "extensionId": {
+      "exempt": "identifier"
+    },
+    "manifestJson": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "filesJson": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "contentHash": {
+      "exempt": "hash or digest"
+    },
+    "changedByAgentId": {
+      "exempt": "identifier"
+    },
+    "changedAt": {
+      "exempt": "timestamp"
+    },
+    "changeReason": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "created_by": {
+      "exempt": "identifier"
+    },
+    "updated_by": {
+      "exempt": "identifier"
+    }
+  },
+  "extensions": {
+    "id": {
+      "exempt": "identifier"
+    },
+    "name": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "description": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "runtime": {
+      "exempt": "enum or fixed-format value"
+    },
+    "manifestJson": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "contentHash": {
+      "exempt": "hash or digest"
+    },
+    "configJson": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "status": {
+      "exempt": "enum or fixed-format value"
+    },
+    "lastError": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "agentId": {
+      "exempt": "identifier"
+    },
+    "createdByAgentId": {
+      "exempt": "identifier"
+    },
+    "created_by": {
+      "exempt": "identifier"
+    },
+    "updated_by": {
+      "exempt": "identifier"
+    },
+    "createdAt": {
+      "exempt": "timestamp"
+    },
+    "updatedAt": {
+      "exempt": "timestamp"
+    }
+  },
+  "harness_model_support": {
+    "harness": {
+      "exempt": "enum or fixed-format value"
+    },
+    "cliVersion": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "modelId": {
+      "exempt": "identifier"
+    },
+    "status": {
+      "exempt": "enum or fixed-format value"
+    },
+    "error": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    }
+  },
+  "human_free_reclassify_queue": {
+    "taskId": {
+      "exempt": "identifier"
+    },
+    "scope": {
+      "exempt": "enum or fixed-format value"
+    }
+  },
+  "inbox_item_state": {
+    "id": {
+      "exempt": "identifier"
+    },
+    "userId": {
+      "exempt": "identifier"
+    },
+    "itemType": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "itemId": {
+      "exempt": "identifier"
+    },
+    "status": {
+      "exempt": "enum or fixed-format value"
+    },
+    "snoozeUntil": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "dismissedAt": {
+      "exempt": "timestamp"
+    },
+    "doneAt": {
+      "exempt": "timestamp"
+    },
+    "createdAt": {
+      "exempt": "timestamp"
+    },
+    "lastUpdatedAt": {
+      "exempt": "timestamp"
+    },
+    "created_by": {
+      "exempt": "identifier"
+    },
+    "updated_by": {
+      "exempt": "identifier"
+    },
+    "readAt": {
+      "exempt": "timestamp"
+    }
+  },
+  "inbox_messages": {
+    "id": {
+      "exempt": "identifier"
+    },
+    "agentId": {
+      "exempt": "identifier"
+    },
+    "content": "scrubbed",
+    "source": {
+      "exempt": "enum or fixed-format value"
+    },
+    "status": {
+      "exempt": "enum or fixed-format value"
+    },
+    "slackChannelId": {
+      "exempt": "identifier"
+    },
+    "slackThreadTs": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "slackUserId": {
+      "exempt": "identifier"
+    },
+    "matchedText": "scrubbed",
+    "delegatedToTaskId": {
+      "exempt": "identifier"
+    },
+    "responseText": "scrubbed",
+    "createdAt": {
+      "exempt": "timestamp"
+    },
+    "lastUpdatedAt": {
+      "exempt": "timestamp"
+    },
+    "created_by": {
+      "exempt": "identifier"
+    },
+    "updated_by": {
+      "exempt": "identifier"
+    }
+  },
+  "kv_entries": {
+    "namespace": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "key": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "value": {
+      "exempt": "byte-exact KV contract: scripts store hashes and payloads that must round-trip"
+    },
+    "value_type": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "created_by": {
+      "exempt": "identifier"
+    },
+    "updated_by": {
+      "exempt": "identifier"
+    }
+  },
+  "mcp_servers": {
+    "id": {
+      "exempt": "identifier"
+    },
+    "name": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "description": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "scope": {
+      "exempt": "enum or fixed-format value"
+    },
+    "ownerAgentId": {
+      "exempt": "identifier"
+    },
+    "transport": {
+      "exempt": "enum or fixed-format value"
+    },
+    "command": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "args": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "url": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "headers": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "envConfigKeys": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "headerConfigKeys": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "createdAt": {
+      "exempt": "timestamp"
+    },
+    "lastUpdatedAt": {
+      "exempt": "timestamp"
+    },
+    "authMethod": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "created_by": {
+      "exempt": "identifier"
+    },
+    "updated_by": {
+      "exempt": "identifier"
+    },
+    "extraAuthorizeParams": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    }
+  },
+  "memory_link": {
+    "id": {
+      "exempt": "identifier"
+    },
+    "from_memory_id": {
+      "exempt": "identifier"
+    },
+    "linkType": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "targetKind": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "targetId": {
+      "exempt": "identifier"
+    },
+    "resolver": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "sourceText": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "metadata": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "createdAt": {
+      "exempt": "timestamp"
+    },
+    "updatedAt": {
+      "exempt": "timestamp"
+    }
+  },
+  "memory_rating": {
+    "id": {
+      "exempt": "identifier"
+    },
+    "memoryId": {
+      "exempt": "identifier"
+    },
+    "taskId": {
+      "exempt": "identifier"
+    },
+    "source": {
+      "exempt": "enum or fixed-format value"
+    },
+    "reasoning": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "createdAt": {
+      "exempt": "timestamp"
+    },
+    "contextKey": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "model": {
+      "exempt": "enum or fixed-format value"
+    }
+  },
+  "memory_retrieval": {
+    "id": {
+      "exempt": "identifier"
+    },
+    "taskId": {
+      "exempt": "identifier"
+    },
+    "agentId": {
+      "exempt": "identifier"
+    },
+    "sessionId": {
+      "exempt": "identifier"
+    },
+    "memoryId": {
+      "exempt": "identifier"
+    },
+    "retrievedAt": {
+      "exempt": "timestamp"
+    },
+    "contextKey": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "intent": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "eventType": {
+      "exempt": "enum or fixed-format value"
+    },
+    "retrievalId": {
+      "exempt": "identifier"
+    },
+    "retrievalSource": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    }
+  },
+  "metric_versions": {
+    "id": {
+      "exempt": "identifier"
+    },
+    "metricId": {
+      "exempt": "identifier"
+    },
+    "snapshot": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "changedByAgentId": {
+      "exempt": "identifier"
+    },
+    "createdAt": {
+      "exempt": "timestamp"
+    },
+    "created_by": {
+      "exempt": "identifier"
+    },
+    "updated_by": {
+      "exempt": "identifier"
+    }
+  },
+  "metrics": {
+    "id": {
+      "exempt": "identifier"
+    },
+    "agentId": {
+      "exempt": "identifier"
+    },
+    "slug": {
+      "exempt": "enum or fixed-format value"
+    },
+    "title": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "description": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "definition": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "createdAt": {
+      "exempt": "timestamp"
+    },
+    "updatedAt": {
+      "exempt": "timestamp"
+    },
+    "created_by": {
+      "exempt": "identifier"
+    },
+    "updated_by": {
+      "exempt": "identifier"
+    }
+  },
+  "model_alias_resolutions": {
+    "alias": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "previousModel": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "newModel": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    }
+  },
+  "model_catalog": {
+    "provider": {
+      "exempt": "enum or fixed-format value"
+    },
+    "modelId": {
+      "exempt": "identifier"
+    },
+    "name": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "family": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "releaseDate": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "reasoningOptions": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "pricing": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "status": {
+      "exempt": "enum or fixed-format value"
+    },
+    "providerName": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    }
+  },
+  "model_catalog_meta": {
+    "etag": {
+      "exempt": "hash or digest"
+    },
+    "lastModified": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    }
+  },
+  "model_catalog_overlay": {
+    "provider": {
+      "exempt": "enum or fixed-format value"
+    },
+    "modelId": {
+      "exempt": "identifier"
+    },
+    "name": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "family": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "releaseDate": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "reasoningOptions": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "pricing": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "status": {
+      "exempt": "enum or fixed-format value"
+    },
+    "reason": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "verifiedBy": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "created_by": {
+      "exempt": "identifier"
+    },
+    "updated_by": {
+      "exempt": "identifier"
+    }
+  },
+  "oauth_apps": {
+    "id": {
+      "exempt": "identifier"
+    },
+    "provider": {
+      "exempt": "enum or fixed-format value"
+    },
+    "displayName": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "clientId": {
+      "exempt": "identifier"
+    },
+    "clientSecret": {
+      "exempt": "credential store: the value must round-trip byte-exact"
+    },
+    "authorizeUrl": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "tokenUrl": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "revocationUrl": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "userinfoUrl": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "redirectUri": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "scopes": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "scopeSeparator": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "tokenAuthStyle": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "tokenBodyFormat": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "extraParamsJson": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "source": {
+      "exempt": "enum or fixed-format value"
+    },
+    "mcpServerId": {
+      "exempt": "identifier"
+    },
+    "metadata": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "createdAt": {
+      "exempt": "timestamp"
+    },
+    "updatedAt": {
+      "exempt": "timestamp"
+    }
+  },
+  "oauth_authorizations": {
+    "id": {
+      "exempt": "identifier"
+    },
+    "appId": {
+      "exempt": "identifier"
+    },
+    "label": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "userId": {
+      "exempt": "identifier"
+    },
+    "accountEmail": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "identityJson": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "accessToken": {
+      "exempt": "credential store: the value must round-trip byte-exact"
+    },
+    "refreshToken": {
+      "exempt": "credential store: the value must round-trip byte-exact"
+    },
+    "tokenType": {
+      "exempt": "enum or fixed-format value"
+    },
+    "expiresAt": {
+      "exempt": "timestamp"
+    },
+    "scope": {
+      "exempt": "enum or fixed-format value"
+    },
+    "status": {
+      "exempt": "enum or fixed-format value"
+    },
+    "lastErrorMessage": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "lastRefreshedAt": {
+      "exempt": "timestamp"
+    },
+    "connectedByUserId": {
+      "exempt": "identifier"
+    },
+    "createdAt": {
+      "exempt": "timestamp"
+    },
+    "updatedAt": {
+      "exempt": "timestamp"
+    }
+  },
+  "oauth_pending": {
+    "state": {
+      "exempt": "enum or fixed-format value"
+    },
+    "appId": {
+      "exempt": "identifier"
+    },
+    "label": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "flow": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "codeVerifier": {
+      "exempt": "credential store: the value must round-trip byte-exact"
+    },
+    "nonce": {
+      "exempt": "ciphertext"
+    },
+    "redirectUri": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "finalRedirect": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "userId": {
+      "exempt": "identifier"
+    },
+    "contextJson": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "createdAt": {
+      "exempt": "timestamp"
+    }
+  },
+  "oauth_refresh_locks": {
+    "lockKey": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "owner": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "expiresAt": {
+      "exempt": "timestamp"
+    },
+    "createdAt": {
+      "exempt": "timestamp"
+    },
+    "updatedAt": {
+      "exempt": "timestamp"
+    }
+  },
+  "page_versions": {
+    "id": {
+      "exempt": "identifier"
+    },
+    "pageId": {
+      "exempt": "identifier"
+    },
+    "snapshot": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "changedByAgentId": {
+      "exempt": "identifier"
+    },
+    "createdAt": {
+      "exempt": "timestamp"
+    },
+    "created_by": {
+      "exempt": "identifier"
+    },
+    "updated_by": {
+      "exempt": "identifier"
+    }
+  },
+  "pages": {
+    "id": {
+      "exempt": "identifier"
+    },
+    "agentId": {
+      "exempt": "identifier"
+    },
+    "slug": {
+      "exempt": "enum or fixed-format value"
+    },
+    "title": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "description": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "contentType": {
+      "exempt": "enum or fixed-format value"
+    },
+    "authMode": {
+      "exempt": "enum or fixed-format value"
+    },
+    "passwordHash": {
+      "exempt": "hash or digest"
+    },
+    "body": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "needsCredentials": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "createdAt": {
+      "exempt": "timestamp"
+    },
+    "updatedAt": {
+      "exempt": "timestamp"
+    },
+    "created_by": {
+      "exempt": "identifier"
+    },
+    "updated_by": {
+      "exempt": "identifier"
+    },
+    "key": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    }
+  },
+  "permission_audit": {
+    "id": {
+      "exempt": "identifier"
+    },
+    "ts": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "principalType": {
+      "exempt": "enum or fixed-format value"
+    },
+    "principalId": {
+      "exempt": "identifier"
+    },
+    "originatorUserId": {
+      "exempt": "identifier"
+    },
+    "verb": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "resourceType": {
+      "exempt": "enum or fixed-format value"
+    },
+    "resourceId": {
+      "exempt": "identifier"
+    },
+    "decision": {
+      "exempt": "enum or fixed-format value"
+    },
+    "reason": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "source": {
+      "exempt": "enum or fixed-format value"
+    }
+  },
+  "pricing": {
+    "provider": {
+      "exempt": "enum or fixed-format value"
+    },
+    "model": {
+      "exempt": "enum or fixed-format value"
+    },
+    "token_class": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "created_by": {
+      "exempt": "identifier"
+    },
+    "updated_by": {
+      "exempt": "identifier"
+    }
+  },
+  "principal_roles": {
+    "id": {
+      "exempt": "identifier"
+    },
+    "principalType": {
+      "exempt": "enum or fixed-format value"
+    },
+    "principalId": {
+      "exempt": "identifier"
+    },
+    "roleId": {
+      "exempt": "identifier"
+    },
+    "createdAt": {
+      "exempt": "timestamp"
+    },
+    "created_by": {
+      "exempt": "identifier"
+    },
+    "updated_by": {
+      "exempt": "identifier"
+    }
+  },
+  "prompt_template_history": {
+    "id": {
+      "exempt": "identifier"
+    },
+    "templateId": {
+      "exempt": "identifier"
+    },
+    "body": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "state": {
+      "exempt": "enum or fixed-format value"
+    },
+    "changedBy": {
+      "exempt": "identifier"
+    },
+    "changedAt": {
+      "exempt": "timestamp"
+    },
+    "changeReason": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "created_by": {
+      "exempt": "identifier"
+    },
+    "updated_by": {
+      "exempt": "identifier"
+    }
+  },
+  "prompt_templates": {
+    "id": {
+      "exempt": "identifier"
+    },
+    "eventType": {
+      "exempt": "enum or fixed-format value"
+    },
+    "scope": {
+      "exempt": "enum or fixed-format value"
+    },
+    "scopeId": {
+      "exempt": "identifier"
+    },
+    "state": {
+      "exempt": "enum or fixed-format value"
+    },
+    "body": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "createdBy": {
+      "exempt": "identifier"
+    },
+    "createdAt": {
+      "exempt": "timestamp"
+    },
+    "updatedAt": {
+      "exempt": "timestamp"
+    },
+    "created_by": {
+      "exempt": "identifier"
+    },
+    "updated_by": {
+      "exempt": "identifier"
+    }
+  },
+  "role_permissions": {
+    "roleId": {
+      "exempt": "identifier"
+    },
+    "verb": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "createdAt": {
+      "exempt": "timestamp"
+    },
+    "created_by": {
+      "exempt": "identifier"
+    },
+    "updated_by": {
+      "exempt": "identifier"
+    }
+  },
+  "roles": {
+    "id": {
+      "exempt": "identifier"
+    },
+    "name": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "description": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "createdAt": {
+      "exempt": "timestamp"
+    },
+    "lastUpdatedAt": {
+      "exempt": "timestamp"
+    },
+    "created_by": {
+      "exempt": "identifier"
+    },
+    "updated_by": {
+      "exempt": "identifier"
+    }
+  },
+  "routing_decisions": {
+    "task_id": {
+      "exempt": "identifier"
+    },
+    "selected_agent_id": {
+      "exempt": "identifier"
+    },
+    "captured_at": {
+      "exempt": "timestamp"
+    },
+    "worker_statuses": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "continuity_candidates": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "created_by": {
+      "exempt": "identifier"
+    },
+    "updated_by": {
+      "exempt": "identifier"
+    }
+  },
+  "runtime_instances": {
+    "id": {
+      "exempt": "identifier"
+    },
+    "agent_id": {
+      "exempt": "identifier"
+    },
+    "status": {
+      "exempt": "enum or fixed-format value"
+    },
+    "metadata": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "last_seen_at": {
+      "exempt": "timestamp"
+    },
+    "created_at": {
+      "exempt": "timestamp"
+    },
+    "updated_at": {
+      "exempt": "timestamp"
+    },
+    "created_by": {
+      "exempt": "identifier"
+    },
+    "updated_by": {
+      "exempt": "identifier"
+    }
+  },
+  "scheduled_tasks": {
+    "id": {
+      "exempt": "identifier"
+    },
+    "name": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "description": "scrubbed",
+    "cronExpression": {
+      "exempt": "enum or fixed-format value"
+    },
+    "taskTemplate": "scrubbed",
+    "taskType": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "tags": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "targetAgentId": {
+      "exempt": "identifier"
+    },
+    "lastRunAt": {
+      "exempt": "timestamp"
+    },
+    "nextRunAt": {
+      "exempt": "timestamp"
+    },
+    "createdByAgentId": {
+      "exempt": "identifier"
+    },
+    "timezone": {
+      "exempt": "enum or fixed-format value"
+    },
+    "lastErrorAt": {
+      "exempt": "timestamp"
+    },
+    "lastErrorMessage": "scrubbed",
+    "model": {
+      "exempt": "enum or fixed-format value"
+    },
+    "modelTier": {
+      "exempt": "enum or fixed-format value"
+    },
+    "scheduleType": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "targetType": {
+      "exempt": "enum or fixed-format value"
+    },
+    "workflowId": {
+      "exempt": "identifier"
+    },
+    "scriptName": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "scriptArgs": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "createdAt": {
+      "exempt": "timestamp"
+    },
+    "lastUpdatedAt": {
+      "exempt": "timestamp"
+    },
+    "created_by": {
+      "exempt": "identifier"
+    },
+    "updated_by": {
+      "exempt": "identifier"
+    },
+    "key": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "params": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "requiredParams": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "requires": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "parentTaskId": {
+      "exempt": "identifier"
+    },
+    "requestedRunAt": {
+      "exempt": "timestamp"
+    }
+  },
+  "script_apis": {
+    "id": {
+      "exempt": "identifier"
+    },
+    "scriptId": {
+      "exempt": "identifier"
+    },
+    "agentId": {
+      "exempt": "identifier"
+    },
+    "authMode": {
+      "exempt": "enum or fixed-format value"
+    },
+    "bearerTokenEncrypted": {
+      "exempt": "ciphertext"
+    },
+    "label": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "lastUsedAt": {
+      "exempt": "timestamp"
+    },
+    "createdAt": {
+      "exempt": "timestamp"
+    },
+    "created_by": {
+      "exempt": "identifier"
+    },
+    "updated_by": {
+      "exempt": "identifier"
+    }
+  },
+  "script_connections": {
+    "id": {
+      "exempt": "identifier"
+    },
+    "slug": {
+      "exempt": "enum or fixed-format value"
+    },
+    "display_name": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "kind": {
+      "exempt": "enum or fixed-format value"
+    },
+    "scope": {
+      "exempt": "enum or fixed-format value"
+    },
+    "scope_id": {
+      "exempt": "identifier"
+    },
+    "base_url": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "base_url_source": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "allowed_hosts_json": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "credential_binding_id": {
+      "exempt": "identifier"
+    },
+    "openapi_spec_source_kind": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "openapi_spec_source": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "openapi_spec_json": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "openapi_spec_etag": {
+      "exempt": "hash or digest"
+    },
+    "openapi_spec_fetched_at": {
+      "exempt": "timestamp"
+    },
+    "mcp_server_id": {
+      "exempt": "identifier"
+    },
+    "generated_types": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "generated_runtime_json": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "generated_at": {
+      "exempt": "timestamp"
+    },
+    "generation_error": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "created_at": {
+      "exempt": "timestamp"
+    },
+    "updated_at": {
+      "exempt": "timestamp"
+    },
+    "created_by": {
+      "exempt": "identifier"
+    },
+    "updated_by": {
+      "exempt": "identifier"
+    },
+    "auth_type": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "auth_config_key": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "auth_authorization_id": {
+      "exempt": "identifier"
+    },
+    "auth_param_name": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "auth_template_override": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "auth_hosts_override_json": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    }
+  },
+  "script_credential_bindings": {
+    "id": {
+      "exempt": "identifier"
+    },
+    "config_key": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "allowed_hosts_json": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "header_template": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "query_template": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "scope": {
+      "exempt": "enum or fixed-format value"
+    },
+    "scope_id": {
+      "exempt": "identifier"
+    },
+    "source": {
+      "exempt": "enum or fixed-format value"
+    },
+    "created_at": {
+      "exempt": "timestamp"
+    },
+    "updated_at": {
+      "exempt": "timestamp"
+    },
+    "created_by": {
+      "exempt": "identifier"
+    },
+    "updated_by": {
+      "exempt": "identifier"
+    },
+    "auth_kind": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "oauth_authorization_id": {
+      "exempt": "identifier"
+    },
+    "managed_by_connection_id": {
+      "exempt": "identifier"
+    }
+  },
+  "script_embeddings": {
+    "scriptId": {
+      "exempt": "identifier"
+    },
+    "embeddingModel": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "embeddedText": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "embeddedAt": {
+      "exempt": "timestamp"
+    }
+  },
+  "script_run_journal": {
+    "id": {
+      "exempt": "identifier"
+    },
+    "runId": {
+      "exempt": "identifier"
+    },
+    "stepKey": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "stepType": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "config": "scrubbed",
+    "status": {
+      "exempt": "enum or fixed-format value"
+    },
+    "result": {
+      "sealed": "the harness replays it verbatim as the step return, so upsertScriptRunJournalStep seals it. Readers: getScriptRunJournalStep (replay route, exact), listScriptRunJournalSteps (redacted)"
+    },
+    "error": "scrubbed",
+    "startedAt": {
+      "exempt": "timestamp"
+    },
+    "completedAt": {
+      "exempt": "timestamp"
+    },
+    "created_by": {
+      "exempt": "identifier"
+    },
+    "updated_by": {
+      "exempt": "identifier"
+    }
+  },
+  "script_runs": {
+    "id": {
+      "exempt": "identifier"
+    },
+    "agentId": {
+      "exempt": "identifier"
+    },
+    "scriptName": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "source": {
+      "exempt": "executable source, stored and served byte-exact. Writers refuse a source that embeds a registered secret value or matches a gitleaks rule (src/be/scripts/source-secrets.ts: script-upsert, inline script-run, durable launch); rows written before the check are left as they are"
+    },
+    "args": {
+      "sealed": "createScriptRun seals durable-run args (the supervisor relaunches from the exact value); recordInlineScriptRun stores scrubbed JSON. Readers: getScriptRunExecutionArgs (exact), rowToScriptRun (redacted)"
+    },
+    "status": {
+      "exempt": "enum or fixed-format value"
+    },
+    "startedAt": {
+      "exempt": "timestamp"
+    },
+    "finishedAt": {
+      "exempt": "timestamp"
+    },
+    "output": "scrubbed",
+    "error": "scrubbed",
+    "last_heartbeat_at": {
+      "exempt": "timestamp"
+    },
+    "idempotencyKey": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "requestedByUserId": {
+      "exempt": "identifier"
+    },
+    "created_by": {
+      "exempt": "identifier"
+    },
+    "updated_by": {
+      "exempt": "identifier"
+    },
+    "kind": {
+      "exempt": "enum or fixed-format value"
+    },
+    "apiEndpointId": {
+      "exempt": "identifier"
+    }
+  },
+  "script_versions": {
+    "id": {
+      "exempt": "identifier"
+    },
+    "scriptId": {
+      "exempt": "identifier"
+    },
+    "source": {
+      "exempt": "executable source, stored and served byte-exact. Writers refuse a source that embeds a registered secret value or matches a gitleaks rule (src/be/scripts/source-secrets.ts: script-upsert, inline script-run, durable launch); rows written before the check are left as they are"
+    },
+    "description": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "intent": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "signatureJson": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "contentHash": {
+      "exempt": "hash or digest"
+    },
+    "changedByAgentId": {
+      "exempt": "identifier"
+    },
+    "changedAt": {
+      "exempt": "timestamp"
+    },
+    "changeReason": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "created_by": {
+      "exempt": "identifier"
+    },
+    "updated_by": {
+      "exempt": "identifier"
+    }
+  },
+  "scripts": {
+    "id": {
+      "exempt": "identifier"
+    },
+    "name": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "scope": {
+      "exempt": "enum or fixed-format value"
+    },
+    "scopeId": {
+      "exempt": "identifier"
+    },
+    "source": {
+      "exempt": "executable source, stored and served byte-exact. Writers refuse a source that embeds a registered secret value or matches a gitleaks rule (src/be/scripts/source-secrets.ts: script-upsert, inline script-run, durable launch); rows written before the check are left as they are"
+    },
+    "description": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "intent": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "signatureJson": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "contentHash": {
+      "exempt": "hash or digest"
+    },
+    "fsMode": {
+      "exempt": "enum or fixed-format value"
+    },
+    "createdByAgentId": {
+      "exempt": "identifier"
+    },
+    "createdAt": {
+      "exempt": "timestamp"
+    },
+    "updatedAt": {
+      "exempt": "timestamp"
+    },
+    "argsJsonSchema": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "created_by": {
+      "exempt": "identifier"
+    },
+    "updated_by": {
+      "exempt": "identifier"
+    },
+    "key": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    }
+  },
+  "seed_state": {
+    "kind": {
+      "exempt": "enum or fixed-format value"
+    },
+    "key": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "seededHash": {
+      "exempt": "hash or digest"
+    },
+    "seededAt": {
+      "exempt": "timestamp"
+    }
+  },
+  "services": {
+    "id": {
+      "exempt": "identifier"
+    },
+    "agentId": {
+      "exempt": "identifier"
+    },
+    "name": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "description": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "url": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "healthCheckPath": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "status": {
+      "exempt": "enum or fixed-format value"
+    },
+    "script": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "cwd": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "interpreter": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "args": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "env": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "metadata": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "createdAt": {
+      "exempt": "timestamp"
+    },
+    "lastUpdatedAt": {
+      "exempt": "timestamp"
+    },
+    "created_by": {
+      "exempt": "identifier"
+    },
+    "updated_by": {
+      "exempt": "identifier"
+    }
+  },
+  "session_costs": {
+    "id": {
+      "exempt": "identifier"
+    },
+    "sessionId": {
+      "exempt": "identifier"
+    },
+    "taskId": {
+      "exempt": "identifier"
+    },
+    "agentId": {
+      "exempt": "identifier"
+    },
+    "model": {
+      "exempt": "enum or fixed-format value"
+    },
+    "costSource": {
+      "exempt": "enum or fixed-format value"
+    },
+    "createdAt": {
+      "exempt": "timestamp"
+    },
+    "modelBreakdown": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    }
+  },
+  "session_logs": {
+    "id": {
+      "exempt": "identifier"
+    },
+    "taskId": {
+      "exempt": "identifier"
+    },
+    "sessionId": {
+      "exempt": "identifier"
+    },
+    "cli": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "content": "scrubbed",
+    "createdAt": {
+      "exempt": "timestamp"
+    }
+  },
+  "session_tokens": {
+    "id": {
+      "exempt": "identifier"
+    },
+    "tokenHash": {
+      "exempt": "hash or digest"
+    },
+    "tokenPreview": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "agentId": {
+      "exempt": "identifier"
+    },
+    "taskId": {
+      "exempt": "identifier"
+    },
+    "expiresAt": {
+      "exempt": "timestamp"
+    },
+    "revokedAt": {
+      "exempt": "timestamp"
+    },
+    "createdAt": {
+      "exempt": "timestamp"
+    },
+    "lastUsedAt": {
+      "exempt": "timestamp"
+    }
+  },
+  "skill_files": {
+    "id": {
+      "exempt": "identifier"
+    },
+    "skillId": {
+      "exempt": "identifier"
+    },
+    "path": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "content": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "mimeType": {
+      "exempt": "enum or fixed-format value"
+    },
+    "createdAt": {
+      "exempt": "timestamp"
+    },
+    "lastUpdatedAt": {
+      "exempt": "timestamp"
+    },
+    "created_by": {
+      "exempt": "identifier"
+    },
+    "updated_by": {
+      "exempt": "identifier"
+    }
+  },
+  "skill_invocations": {
+    "id": {
+      "exempt": "identifier"
+    },
+    "skillId": {
+      "exempt": "identifier"
+    },
+    "skillName": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "agentId": {
+      "exempt": "identifier"
+    },
+    "taskId": {
+      "exempt": "identifier"
+    },
+    "sessionId": {
+      "exempt": "identifier"
+    },
+    "harness": {
+      "exempt": "enum or fixed-format value"
+    },
+    "via": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "eventId": {
+      "exempt": "identifier"
+    },
+    "createdAt": {
+      "exempt": "timestamp"
+    }
+  },
+  "skills": {
+    "id": {
+      "exempt": "identifier"
+    },
+    "name": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "description": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "content": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "type": {
+      "exempt": "enum or fixed-format value"
+    },
+    "scope": {
+      "exempt": "enum or fixed-format value"
+    },
+    "ownerAgentId": {
+      "exempt": "identifier"
+    },
+    "sourceUrl": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "sourceRepo": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "sourcePath": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "sourceBranch": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "sourceHash": {
+      "exempt": "hash or digest"
+    },
+    "allowedTools": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "model": {
+      "exempt": "enum or fixed-format value"
+    },
+    "effort": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "context": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "agent": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "createdAt": {
+      "exempt": "timestamp"
+    },
+    "lastUpdatedAt": {
+      "exempt": "timestamp"
+    },
+    "lastFetchedAt": {
+      "exempt": "timestamp"
+    },
+    "created_by": {
+      "exempt": "identifier"
+    },
+    "updated_by": {
+      "exempt": "identifier"
+    },
+    "lastInvokedAt": {
+      "exempt": "timestamp"
+    }
+  },
+  "slack_messages": {
+    "id": {
+      "exempt": "identifier"
+    },
+    "context_key": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "channel_id": {
+      "exempt": "identifier"
+    },
+    "thread_ts": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "ts": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "kind": {
+      "exempt": "enum or fixed-format value"
+    },
+    "task_id": {
+      "exempt": "identifier"
+    },
+    "permalink": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "finalized_at": {
+      "exempt": "timestamp"
+    },
+    "created_at": {
+      "exempt": "timestamp"
+    },
+    "updated_at": {
+      "exempt": "timestamp"
+    },
+    "created_by": {
+      "exempt": "identifier"
+    },
+    "updated_by": {
+      "exempt": "identifier"
+    },
+    "conclusion_kind": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "deferral_resolved_at": {
+      "exempt": "timestamp"
+    },
+    "deferral_abandoned_at": {
+      "exempt": "timestamp"
+    },
+    "delivery_abandoned_at": {
+      "exempt": "timestamp"
+    },
+    "delivery_last_error": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    }
+  },
+  "slack_relay_obligations": {
+    "task_id": {
+      "exempt": "identifier"
+    },
+    "delivered_at": {
+      "exempt": "timestamp"
+    },
+    "last_attempt_at": {
+      "exempt": "timestamp"
+    },
+    "created_at": {
+      "exempt": "timestamp"
+    },
+    "updated_at": {
+      "exempt": "timestamp"
+    },
+    "created_by": {
+      "exempt": "identifier"
+    },
+    "updated_by": {
+      "exempt": "identifier"
+    }
+  },
+  "slack_render_v2_state": {
+    "activated_at": {
+      "exempt": "timestamp"
+    },
+    "created_at": {
+      "exempt": "timestamp"
+    },
+    "updated_at": {
+      "exempt": "timestamp"
+    },
+    "created_by": {
+      "exempt": "identifier"
+    },
+    "updated_by": {
+      "exempt": "identifier"
+    },
+    "delegation_activated_at": {
+      "exempt": "timestamp"
+    }
+  },
+  "swarm_config": {
+    "id": {
+      "exempt": "identifier"
+    },
+    "scope": {
+      "exempt": "enum or fixed-format value"
+    },
+    "scopeId": {
+      "exempt": "identifier"
+    },
+    "key": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "value": {
+      "exempt": "credential store: the value must round-trip byte-exact"
+    },
+    "envPath": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "description": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "createdAt": {
+      "exempt": "timestamp"
+    },
+    "lastUpdatedAt": {
+      "exempt": "timestamp"
+    },
+    "created_by": {
+      "exempt": "identifier"
+    },
+    "updated_by": {
+      "exempt": "identifier"
+    }
+  },
+  "swarm_repos": {
+    "id": {
+      "exempt": "identifier"
+    },
+    "url": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "name": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "clonePath": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "defaultBranch": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "createdAt": {
+      "exempt": "timestamp"
+    },
+    "lastUpdatedAt": {
+      "exempt": "timestamp"
+    },
+    "guidelines": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "created_by": {
+      "exempt": "identifier"
+    },
+    "updated_by": {
+      "exempt": "identifier"
+    },
+    "hooks": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    }
+  },
+  "task_attachments": {
+    "id": {
+      "exempt": "identifier"
+    },
+    "task_id": {
+      "exempt": "identifier"
+    },
+    "agent_id": {
+      "exempt": "identifier"
+    },
+    "name": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "kind": {
+      "exempt": "enum or fixed-format value"
+    },
+    "url": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "path": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "page_id": {
+      "exempt": "identifier"
+    },
+    "mime_type": {
+      "exempt": "enum or fixed-format value"
+    },
+    "sha256": {
+      "exempt": "hash or digest"
+    },
+    "intent": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "description": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "created_at": {
+      "exempt": "timestamp"
+    },
+    "agent_fs_org_id": {
+      "exempt": "identifier"
+    },
+    "agent_fs_drive_id": {
+      "exempt": "identifier"
+    },
+    "created_by": {
+      "exempt": "identifier"
+    },
+    "updated_by": {
+      "exempt": "identifier"
+    },
+    "provider_id": {
+      "exempt": "identifier"
+    },
+    "provider_key": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "capabilities": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    }
+  },
+  "task_citations": {
+    "task_id": {
+      "exempt": "identifier"
+    },
+    "kind": {
+      "exempt": "enum or fixed-format value"
+    },
+    "ref": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "label": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "quote": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "resolved_url": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "verified": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "created_at": {
+      "exempt": "timestamp"
+    },
+    "updated_at": {
+      "exempt": "timestamp"
+    },
+    "created_by": {
+      "exempt": "identifier"
+    },
+    "updated_by": {
+      "exempt": "identifier"
+    }
+  },
+  "task_context_snapshots": {
+    "id": {
+      "exempt": "identifier"
+    },
+    "taskId": {
+      "exempt": "identifier"
+    },
+    "agentId": {
+      "exempt": "identifier"
+    },
+    "sessionId": {
+      "exempt": "identifier"
+    },
+    "eventType": {
+      "exempt": "enum or fixed-format value"
+    },
+    "compactTrigger": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "createdAt": {
+      "exempt": "timestamp"
+    },
+    "contextFormula": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    }
+  },
+  "task_steering_messages": {
+    "id": {
+      "exempt": "identifier"
+    },
+    "task_id": {
+      "exempt": "identifier"
+    },
+    "body": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "mode": {
+      "exempt": "enum or fixed-format value"
+    },
+    "status": {
+      "exempt": "enum or fixed-format value"
+    },
+    "delivered_mode": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "source": {
+      "exempt": "enum or fixed-format value"
+    },
+    "created_by_kind": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "created_by_user_id": {
+      "exempt": "identifier"
+    },
+    "created_by_agent_id": {
+      "exempt": "identifier"
+    },
+    "promoted_task_id": {
+      "exempt": "identifier"
+    },
+    "created_at": {
+      "exempt": "timestamp"
+    },
+    "delivered_at": {
+      "exempt": "timestamp"
+    },
+    "handled_at": {
+      "exempt": "timestamp"
+    },
+    "handled_note": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    }
+  },
+  "task_templates": {
+    "id": {
+      "exempt": "identifier"
+    },
+    "title": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "description": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "prompt": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "kind": {
+      "exempt": "enum or fixed-format value"
+    },
+    "payload": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "category": {
+      "exempt": "enum or fixed-format value"
+    },
+    "tags": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "createdAt": {
+      "exempt": "timestamp"
+    },
+    "created_by": {
+      "exempt": "identifier"
+    },
+    "updated_by": {
+      "exempt": "identifier"
+    }
+  },
+  "tracker_agent_mapping": {
+    "id": {
+      "exempt": "identifier"
+    },
+    "provider": {
+      "exempt": "enum or fixed-format value"
+    },
+    "agentId": {
+      "exempt": "identifier"
+    },
+    "externalUserId": {
+      "exempt": "identifier"
+    },
+    "agentName": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "createdAt": {
+      "exempt": "timestamp"
+    }
+  },
+  "tracker_sync": {
+    "id": {
+      "exempt": "identifier"
+    },
+    "provider": {
+      "exempt": "enum or fixed-format value"
+    },
+    "entityType": {
+      "exempt": "enum or fixed-format value"
+    },
+    "providerEntityType": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "swarmId": {
+      "exempt": "identifier"
+    },
+    "externalId": {
+      "exempt": "identifier"
+    },
+    "externalIdentifier": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "externalUrl": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "lastSyncedAt": {
+      "exempt": "timestamp"
+    },
+    "lastSyncOrigin": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "lastDeliveryId": {
+      "exempt": "identifier"
+    },
+    "syncDirection": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "createdAt": {
+      "exempt": "timestamp"
+    }
+  },
+  "user_external_ids": {
+    "kind": {
+      "exempt": "enum or fixed-format value"
+    },
+    "externalId": {
+      "exempt": "identifier"
+    },
+    "userId": {
+      "exempt": "identifier"
+    },
+    "createdAt": {
+      "exempt": "timestamp"
+    },
+    "created_by": {
+      "exempt": "identifier"
+    },
+    "updated_by": {
+      "exempt": "identifier"
+    }
+  },
+  "user_favorites": {
+    "id": {
+      "exempt": "identifier"
+    },
+    "favoriteScope": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "userId": {
+      "exempt": "identifier"
+    },
+    "itemType": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "itemId": {
+      "exempt": "identifier"
+    },
+    "createdAt": {
+      "exempt": "timestamp"
+    },
+    "lastUpdatedAt": {
+      "exempt": "timestamp"
+    },
+    "created_by": {
+      "exempt": "identifier"
+    },
+    "updated_by": {
+      "exempt": "identifier"
+    }
+  },
+  "user_identity_events": {
+    "id": {
+      "exempt": "identifier"
+    },
+    "userId": {
+      "exempt": "identifier"
+    },
+    "eventType": {
+      "exempt": "enum or fixed-format value"
+    },
+    "actor": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "beforeJson": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "afterJson": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "createdAt": {
+      "exempt": "timestamp"
+    }
+  },
+  "user_tokens": {
+    "id": {
+      "exempt": "identifier"
+    },
+    "userId": {
+      "exempt": "identifier"
+    },
+    "label": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "tokenHash": {
+      "exempt": "hash or digest"
+    },
+    "tokenPreview": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "createdAt": {
+      "exempt": "timestamp"
+    },
+    "lastUsedAt": {
+      "exempt": "timestamp"
+    },
+    "revokedAt": {
+      "exempt": "timestamp"
+    },
+    "created_by": {
+      "exempt": "identifier"
+    },
+    "updated_by": {
+      "exempt": "identifier"
+    }
+  },
+  "users": {
+    "id": {
+      "exempt": "identifier"
+    },
+    "name": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "email": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "role": {
+      "exempt": "enum or fixed-format value"
+    },
+    "notes": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "emailAliases": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "preferredChannel": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "timezone": {
+      "exempt": "enum or fixed-format value"
+    },
+    "metadata": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "status": {
+      "exempt": "enum or fixed-format value"
+    },
+    "createdAt": {
+      "exempt": "timestamp"
+    },
+    "lastUpdatedAt": {
+      "exempt": "timestamp"
+    },
+    "created_by": {
+      "exempt": "identifier"
+    },
+    "updated_by": {
+      "exempt": "identifier"
+    }
+  },
+  "wait_states": {
+    "id": {
+      "exempt": "identifier"
+    },
+    "workflowRunId": {
+      "exempt": "identifier"
+    },
+    "workflowRunStepId": {
+      "exempt": "identifier"
+    },
+    "mode": {
+      "exempt": "enum or fixed-format value"
+    },
+    "eventName": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "status": {
+      "exempt": "enum or fixed-format value"
+    },
+    "eventScope": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    }
+  },
+  "workflow_run_steps": {
+    "id": {
+      "exempt": "identifier"
+    },
+    "runId": {
+      "exempt": "identifier"
+    },
+    "nodeId": {
+      "exempt": "identifier"
+    },
+    "nodeType": {
+      "exempt": "enum or fixed-format value"
+    },
+    "status": {
+      "exempt": "enum or fixed-format value"
+    },
+    "input": "scrubbed",
+    "output": "scrubbed",
+    "output_replay": {
+      "sealed": "updateWorkflowRunStep seals the exact output that rehydration, dedup, convergence and recovery replay into downstream nodes; the boot sweep seals legacy rows before redacting output. Readers: step replay view (exact, the default), runs API and get-workflow-run (display, the scrubbed output column)"
+    },
+    "error": "scrubbed",
+    "startedAt": {
+      "exempt": "timestamp"
+    },
+    "finishedAt": {
+      "exempt": "timestamp"
+    },
+    "nextRetryAt": {
+      "exempt": "timestamp"
+    },
+    "idempotencyKey": {
+      "exempt": "byte-exact idempotency key (runId:nodeId:iteration) behind a UNIQUE index"
+    },
+    "diagnostics": "scrubbed",
+    "nextPort": {
+      "exempt": "routing port name read back byte-exact to pick successors"
+    },
+    "created_by": {
+      "exempt": "identifier"
+    },
+    "updated_by": {
+      "exempt": "identifier"
+    }
+  },
+  "workflow_runs": {
+    "id": {
+      "exempt": "identifier"
+    },
+    "workflowId": {
+      "exempt": "identifier"
+    },
+    "status": {
+      "exempt": "enum or fixed-format value"
+    },
+    "triggerData": "scrubbed",
+    "context": "scrubbed",
+    "context_replay": {
+      "sealed": "updateWorkflowRun seals the exact ctx that resume, retry and recovery rebuild from (resolved secret.* inputs included); the boot sweep seals legacy rows before redacting context. Readers: getWorkflowRun replay view (exact, the default), runs API and get-workflow-run (display, the scrubbed context column)"
+    },
+    "error": "scrubbed",
+    "startedAt": {
+      "exempt": "timestamp"
+    },
+    "lastUpdatedAt": {
+      "exempt": "timestamp"
+    },
+    "finishedAt": {
+      "exempt": "timestamp"
+    },
+    "created_by": {
+      "exempt": "identifier"
+    },
+    "updated_by": {
+      "exempt": "identifier"
+    },
+    "triggerType": {
+      "exempt": "enum or fixed-format value"
+    }
+  },
+  "workflow_versions": {
+    "id": {
+      "exempt": "identifier"
+    },
+    "workflowId": {
+      "exempt": "identifier"
+    },
+    "snapshot": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "changedByAgentId": {
+      "exempt": "identifier"
+    },
+    "createdAt": {
+      "exempt": "timestamp"
+    },
+    "created_by": {
+      "exempt": "identifier"
+    },
+    "updated_by": {
+      "exempt": "identifier"
+    }
+  },
+  "workflows": {
+    "id": {
+      "exempt": "identifier"
+    },
+    "name": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "description": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "definition": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "triggers": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "cooldown": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "input": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "createdByAgentId": {
+      "exempt": "identifier"
+    },
+    "createdAt": {
+      "exempt": "timestamp"
+    },
+    "lastUpdatedAt": {
+      "exempt": "timestamp"
+    },
+    "triggerSchema": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "dir": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "vcs_repo": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "created_by": {
+      "exempt": "identifier"
+    },
+    "updated_by": {
+      "exempt": "identifier"
+    },
+    "key": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "params": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "requiredParams": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "requires": {
+      "pending": "unassigned: no batch yet scrubs this writer"
+    }
+  }
+}

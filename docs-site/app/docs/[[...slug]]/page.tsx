@@ -1,5 +1,6 @@
 import { source } from "@/lib/source";
-import { DocsPage, DocsBody, DocsTitle, DocsDescription } from "fumadocs-ui/layouts/docs/page";
+import { DocsBody, DocsTitle, DocsDescription } from "fumadocs-ui/layouts/docs/page";
+import { DocsPage } from "@/components/docs-page";
 import { notFound } from "next/navigation";
 import { getMDXComponents } from "@/mdx-components";
 import type { Metadata } from "next";
@@ -45,7 +46,8 @@ export async function generateMetadata(props: {
 }): Promise<Metadata> {
   const params = await props.params;
   const page = source.getPage(params.slug);
-  if (!page) notFound();
+  // The page component calls notFound() for an unknown slug; this only names the tab.
+  if (!page) return { title: "Page not found" };
 
   const title = page.data.title;
   const description = page.data.description;

@@ -1,5 +1,4 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { ensure } from "@desplega.ai/business-use";
 import { z } from "zod";
 import { AssetKeyAuthorizationError, authorizeAssetKeyWrite } from "../be/asset-key-auth";
 import { resolveHttpAuditUserId } from "../be/audit-user";
@@ -26,6 +25,7 @@ import {
   markSteeringHandled,
   pauseTask,
   promoteDraftTask,
+  recordTaskProviderIfUnset,
   resumeTask,
   settleSupersededTaskDependents,
   supersedeTask,
@@ -72,8 +72,10 @@ import {
   splitLegacyModelAlias,
   TaskAttachmentSchema,
 } from "../types";
+import { ensure } from "../utils/business-use";
 import { getRequestAuth } from "../utils/request-auth-context";
 import { scrubSecrets } from "../utils/secret-scrubber";
+import { rejectGuest } from "./request-principal";
 import { route } from "./route-def";
 import { jsonError, parseBody } from "./utils";
 
@@ -542,7 +544,10 @@ const updateTaskProgressRoute = route({
   params: z.object({ id: z.string() }),
   body: z.object({ progress: z.string().min(1) }),
   responses: {
-    200: { description: "Progress updated", schema: z.object({ success: z.literal(true) }) },
+    200: {
+      description: "Progress updated; a no-op once the task is terminal",
+      schema: z.object({ success: z.literal(true) }),
+    },
     403: { description: "Task is assigned to another agent" },
     404: { description: "Task not found" },
   },
@@ -560,6 +565,8 @@ const finishTask = route({
     output: z.string().optional(),
     failureReason: z.string().optional(),
     force: z.boolean().optional(),
+    /** Harness that ran the task. Recorded only when no session reported one (spawn failure). */
+    provider: ProviderNameSchema.optional(),
   }),
   auth: { apiKey: true, agentId: true },
   responses: {
@@ -651,7 +658,7 @@ const updateTaskVcsRoute = route({
   tags: ["Tasks"],
   params: z.object({ id: z.string() }),
   body: z.object({
-    vcsProvider: z.enum(["github", "gitlab"]),
+    vcsProvider: z.enum(["github", "gitlab", "azure-devops"]),
     vcsRepo: z.string(),
     vcsNumber: z.number().int().positive(),
     vcsUrl: z.string().url(),
@@ -707,6 +714,8 @@ async function canSteerTask(
   } else if (auth?.kind === "user") {
     principal = { kind: "user", userId: auth.userId };
     verb = "task.steer.own";
+  } else if (auth?.kind === "guest") {
+    return false;
   } else {
     if (!myAgentId) return false;
     const agent = await getAgentById(myAgentId);
@@ -744,6 +753,8 @@ async function canActOnOwnTask(
     principal = { kind: "operator" };
   } else if (auth?.kind === "user") {
     principal = { kind: "user", userId: auth.userId };
+  } else if (auth?.kind === "guest") {
+    return false;
   } else {
     if (!myAgentId) return false;
     const agent = await getAgentById(myAgentId);
@@ -766,6 +777,7 @@ async function resolveTaskWritePrincipal(
 ): Promise<RbacPrincipal> {
   const auth = getRequestAuth(req);
   if (auth?.kind === "user") return { kind: "user", userId: auth.userId };
+  if (auth?.kind === "guest") return { kind: "guest" };
   const agentId = auth?.kind === "agent" ? auth.agentId : myAgentId;
   if (!agentId) return { kind: "operator" };
   const agent = await getAgentById(agentId);
@@ -781,6 +793,9 @@ export async function handleTasks(
   queryParams: URLSearchParams,
   myAgentId: string | undefined,
 ): Promise<boolean> {
+  if (pathSegments[0] === "api" && pathSegments[1] === "tasks" && rejectGuest(req, res)) {
+    return true;
+  }
   if (listTasks.match(req.method, pathSegments)) {
     const parsed = await listTasks.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
@@ -882,7 +897,15 @@ export async function handleTasks(
     let requestedByUserId = trustedUserId ?? undefined;
     const trustBodyRequestedByUserId = process.env.TRUST_BODY_REQUESTED_BY_USER_ID !== "false";
     if (trustBodyRequestedByUserId && !requestedByUserId && parsed.body.requestedByUserId) {
-      const candidate = await findUserById(parsed.body.requestedByUserId);
+      // A worker on the shared key is not the operator: its X-Agent-ID names it, so the body
+      // hint is dropped like it is when the worker has a requester of its own.
+      const mayAssign = can({
+        principal: await resolveTaskWritePrincipal(req, myAgentId),
+        verb: "task.requester.assign",
+        resource: { kind: "none" },
+        source: "http",
+      }).allow;
+      const candidate = mayAssign ? await findUserById(parsed.body.requestedByUserId) : null;
       if (candidate) requestedByUserId = candidate.id;
     }
 
@@ -1423,7 +1446,11 @@ export async function handleTasks(
         source: "http",
       });
       if (!decision.allow) return 403;
-      await updateTaskProgress(parsed.params.id, parsed.body.progress);
+      // A harness keeps streaming after the agent finishes the task; its
+      // late progress must not overwrite a terminal task's last line.
+      if (!isTerminalTaskStatus(task.status)) {
+        await updateTaskProgress(parsed.params.id, parsed.body.progress);
+      }
       return 200;
     });
 
@@ -1515,6 +1542,10 @@ export async function handleTasks(
         }
 
         const wasPaused = task.wasPaused;
+
+        if (parsed.body.provider && !task.provider) {
+          await recordTaskProviderIfUnset(parsed.params.id, parsed.body.provider);
+        }
 
         let updatedTask: typeof task;
         if (parsed.body.status === "completed") {

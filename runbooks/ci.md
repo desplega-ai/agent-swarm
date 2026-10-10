@@ -9,7 +9,7 @@ The main workflows in `.github/workflows/`:
 | Workflow | When | Purpose |
 |---|---|---|
 | `merge-gate.yml` | PR → `main` | **The gate.** All jobs below must pass for merge. |
-| `pr-body.yml` | PR → `main` (opened, edited, reopened, synchronize, labeled, unlabeled). Merge queue. | **PR Body** check: the description must fill every required section of `.github/pull_request_template.md` (a `fix:` title adds Repro and Setup; Urgency needs exactly one checked box). Local equivalent: `bun scripts/check-pr-body.ts --title "<title>" --body-file <file>`. Fix by editing the title or description (no push needed). Skipped (reports success) for Dependabot, `release:` titles, the `skip-pr-body-check` label, and merge-queue entries. No path filter, so the check always reports. After a pass on a same-repo PR, the **Route by urgency** job (not required) requests a review: `asap` from tarasyarema plus one PR comment, `this week` from desplega-bot. It skips work that is already done, and it cannot request a review from the PR author. |
+| `pr-body.yml` | PR → `main` (opened, edited, reopened, synchronize, labeled, unlabeled). Merge queue. | **PR Body** check: the description must fill every required section of `.github/pull_request_template.md` (the `**Why:**` and `**Risk:**` lines; a `fix:` title adds Repro; a diff touching `apps/ui/` or `apps/templates-ui/` adds Before / after, from the PR's file list; Change outline may be skipped only for a low-risk diff of 50 lines or fewer; Urgency needs exactly one checked box; above about 300 prose words it warns, never fails). Bodies authored by desplega-bot must carry `## Swarm provenance` and fail on internal identifiers outside it (`src/utils/pr-body-leaks.ts`). Dashboard, agent-fs and Slack permalinks and swarm task refs pass only inside that section; Slack ids, ts values and private-chat quotes fail everywhere. The log names the category, never the text. Local equivalent: `bun scripts/check-pr-body.ts --title "<title>" --body-file <file>`. Fix by editing the title or description (no push needed). Skipped (reports success) for Dependabot, `release:` titles, the `skip-pr-body-check` label, and merge-queue entries. No path filter, so the check always reports. After a pass on a same-repo PR, the **Route by urgency** job (not required) requests a review: `asap` from tarasyarema plus one PR comment, `this week` from desplega-bot. It skips work that is already done, and it cannot request a review from the PR author. The **Label by risk** job keeps the `risk:high` label in sync with the body's `**Risk:**` line (label only, no ping). |
 | `ci.yml` | Nightly cron `41 2 * * *` UTC on `main`. Manual dispatch. No push trigger: the merge queue already ran the gate on every tree that lands on `main`. | Lint + tsc + test (subset of merge-gate). Seeds the `bun-test-timings-*` cache the gate's test shards restore, and reports the `main` ci-timings baseline. |
 | `ui-e2e.yml` | PR touching `apps/ui/`, `packages/ui-e2e/`, `scripts/e2e/`, `src/http/`, `src/be/`, `bun.lock`, `package.json`, `bunfig.toml`. Push → `main` on the same paths. Nightly cron `0 3 * * *` UTC. Manual dispatch. | Playwright UI suite (`bun run e2e:ui`) in 2 shards against a seeded API per worker. Uploads artifacts to agent-fs and ingests into the UI E2E tracker for every same-repo event. **Informational**, not a required check: merged HTML report artifact (`ui-e2e-html-report`) plus one sticky PR comment (`<!-- ui-e2e -->`). See [LOCAL_TESTING.md § UI E2E](../LOCAL_TESTING.md#ui-e2e-bun-run-e2eui). |
 | `docker-and-deploy.yml` | Push → `main` | Build images (API + worker-full + worker-slim, each amd64+arm64 with multi-arch manifest merges; slim publishes as `:slim` / `:{VERSION}-slim` / `:sha-*-slim`), publish release E2B templates, deploy, and publish npm/GitHub releases (only when `package.json` `version` changed). Not part of PR gate — see [release.md](./release.md). |
@@ -24,15 +24,17 @@ CI detects what changed and runs the matching jobs:
 
 | Job | Local equivalent | Common failure |
 |---|---|---|
-| **Lint and Type Check** | `bun run lint && bun run tsc:check && bash scripts/check-db-boundary.sh && bash scripts/check-api-key-boundary.sh && bash scripts/check-rbac-boundary.sh && bash scripts/check-audit-columns.sh && bun run check:dep-graph && bun run check:bun-version && bun run check:extension-catalog && bun run check:extension-schema` | Worker code imported `bun:sqlite` or `src/be/db` — DB boundary violation (grep + dependency-cruiser graph rules); an inline `isLead` authz check in `src/tools/`/`src/http/` — RBAC boundary violation (use `can()` from `src/rbac/`); a new table without `created_by`/`updated_by` — add the columns or list the table in `.non-audit-tables` with a reason; a Dockerfile `FROM oven/bun:<tag>` that does not match `package.json` `packageManager`; or an edit to `templates/extensions/` or `ExtensionManifestSchema` without regenerating the extension catalog and manifest schema. The job's path filter includes `templates/extensions/` |
+| **Lint and Type Check** | `bun run lint && bun run tsc:check:tsc && bun run tsc:check && bash scripts/check-db-boundary.sh && bash scripts/check-api-key-boundary.sh && bash scripts/check-rbac-boundary.sh && bash scripts/check-audit-columns.sh && bun scripts/check-text-columns.ts && bun run check:dep-graph && bun run check:bun-version && bun run check:extension-catalog && bun run check:extension-schema` | Worker code imported `bun:sqlite` or `src/be/db` — DB boundary violation (grep + dependency-cruiser graph rules); an inline `isLead` authz check in `src/tools/`/`src/http/` — RBAC boundary violation (use `can()` from `src/rbac/`); a new table without `created_by`/`updated_by` — add the columns or list the table in `.non-audit-tables` with a reason; a new TEXT column not classified in `.text-columns.json`; a Dockerfile `FROM oven/bun:<tag>` that does not match `package.json` `packageManager`; or an edit to `templates/extensions/` or `ExtensionManifestSchema` without regenerating the extension catalog and manifest schema. The job's path filter includes `templates/extensions/` |
 | **Restore test timings** + **Run Tests (1/2, 2/2)** + **Save test timings** | `bun run test:root -- --parallel=4 --shard=1/2` and `--shard=2/2`. `restore-timings` resolves the latest per-file durations from the actions cache once and hands them to both shards as one artifact (two independent restores could pick different snapshots and split different file lists); `save-timings` merges the shards' `--update-timings` output into the next cache entry after a green matrix | New test or test that depends on undocumented setup; a hard-coded test port colliding under `--parallel` (use `getFreePort()` / `port: 0`, see [LOCAL_TESTING.md](../LOCAL_TESTING.md)) |
 | **Pi-Skills Freshness** | `bun run build:pi-skills` (must produce zero diff in `plugin/pi-skills/`) | Edited `plugin/commands/*.md` without rebuilding |
 | **Seeded Skills Check** | `bun run check:skill-sources && bun run check:ai-toolbox-skills && bun run check:skill-md && bun run check:seed-skill-files` | Edited a generated skill source without rebuilding its `SKILL.md`, drifted a vendored ai-toolbox skill from its manifest, left a seeded skill unwired, or introduced a delivery-path collision |
+| **Secret Scan** | `bash scripts/gitleaks-selftest.sh && bash scripts/gitleaks.sh` (also the prek `gitleaks` pre-push hook) | A commit in the PR adds a secret-shaped line. Runs on every PR, ungated. Scans only the commits the PR adds, with a pinned, checksum-verified gitleaks and `--redact`. Remove the value and rewrite the commit. For an intentional fixture, build it at runtime (`"AKIA" + ...`) or add an inline `gitleaks:allow` comment; do not widen `.gitleaks.toml`. `SKIP=gitleaks` is fine if the download host is down; `--no-verify` is still forbidden |
 | **Operator Skill Check** | `bun run check:operator-skill` | Missing public skill, invalid frontmatter, untracked GitHub target, or documentation URL without HTTP 200 after three HEAD attempts. Runs on every PR because any tracked target can disappear. Documentation outages can fail this check. |
 | **Script SDK Types Freshness** | `bun run check:script-types` (regenerates `src/scripts-runtime/types/*.d.ts`, must produce zero diff) | Edited `src/be/scripts/typecheck.ts` (the source of truth) without `bun run build:script-types`, or edited the generated `.d.ts` files directly (never do that) |
 | **OpenAPI Spec Freshness** | `bun run docs:openapi` (must produce zero diff in `openapi.json` AND `docs-site/content/docs/api-reference/`) | Edited an HTTP route or bumped `package.json` `version` without regenerating |
 | **Raw matchRoute check** | `! grep -rn 'matchRoute(' src/http/ --include='*.ts' \| grep -v 'route-def.ts' \| grep -v 'utils.ts'` | Used `matchRoute` directly instead of the `route()` factory |
 | **Docker Build (Dockerfile + Dockerfile.worker slim target + apps/evals/Dockerfile)** | `docker build -f Dockerfile . && docker build -f Dockerfile.worker --target worker-slim . && docker build -f apps/evals/Dockerfile .` | Broken multi-stage build, missing file in the worker context, evals image drifting from the root workspace lockfile. NOTE: the PR gate builds only the worker's `worker-slim` target (fast); `worker-full` is only built on merge by `docker-and-deploy.yml` — if you touched full-only stages (`worker-full-base` / `worker-full`), build the full target locally before merging. The api + worker-slim legs also report uncompressed image sizes to the **ci-metrics** swarm script (sticky "Docker image sizes" PR comment diffing vs main; baseline refreshed by `docker-and-deploy.yml`'s `report-metrics` job; contract doc: `agent-fs cat docs/ci-metrics.md`; secret: `SWARM_CI_METRICS_TOKEN`). Reporting is `continue-on-error` — it can never block the gate |
+| **Dashboard Image** | `docker build -f Dockerfile.ui -t test-ui-image:latest . && bash scripts/smoke-ui-image.sh test-ui-image:latest` | Broken dashboard build, or nginx serving the wrong status, MIME type or headers, or logging a connection key. Runs when `Dockerfile.ui`, `apps/ui/`, `packages/model-catalog/`, `src/` or the workspace manifests change. |
 
 ### When `apps/ui/` or `packages/ui-e2e/` changed (or root `bun.lock` / `package.json` / `bunfig.toml`)
 
@@ -40,9 +42,11 @@ ui's dependency tree resolves from the **root** lockfile since the workspace mig
 
 | Job | Local equivalent (run from `apps/ui/`) |
 |---|---|
-| **UI Lint and Type Check** | `bun install --frozen-lockfile && bun run lint && bunx tsc -b`, then from the repo root `bun run e2e:ui:tsc && bunx biome check packages/ui-e2e` |
+| **UI Lint and Type Check** | `bun install --frozen-lockfile && bun run lint && bunx tsc -b && bunx tsgo -b`, then from the repo root `bun run e2e:ui:tsc && bunx biome check packages/ui-e2e` |
 
 > **Note:** CI uses `tsc -b` (project-references build mode), **not** `tsc --noEmit`. Use `tsc -b` locally to match.
+
+> **tsc vs tsgo:** `bun run tsc:check` and the prek `typecheck` / `ui-typecheck` hooks run `tsgo` (TypeScript 7 native, `@typescript/native-preview`, pinned), about 7x faster. CI keeps TypeScript 5 as the authority (`bun run tsc:check:tsc`, `bunx tsc -b`) and runs tsgo next to it so the tsconfigs stay tsgo-clean. TypeScript 5 stays installed because `scripts/check-promise-sinks.ts` and `scripts/check-floating-promises.ts` use its compiler API. TS 7 removed `baseUrl`: write `paths` relative to the tsconfig (`"./src/*"`).
 
 ### ui-e2e.yml secrets and variables
 
@@ -56,88 +60,40 @@ ui's dependency tree resolves from the **root** lockfile since the workspace mig
 | `UI_E2E_INGEST_BEARER` | secret | Taras | tracker ingest bearer | Ingest skipped |
 | `UI_E2E_TRACKER_URL` | repository variable | Taras | sticky comment tracker link | No tracker link in the comment |
 
-## HOL plugin scanner
+## The local check loop
 
-[`plugin-scanner.yml`](../.github/workflows/plugin-scanner.yml) runs on pushes and
-pull requests with read-only repository access. It pins HOL's Action to
-`46ad86451b45941cd853a03ee6ccdb55f3dbee28` (v1.2.683), which installs
-`plugin-scanner==3.0.181` with a verified wheel digest, PyPI provenance, and locked
-runtime dependencies. The job summary reports the score; its
-`plugin-scanner-report` artifact contains every finding as JSON for 30 days.
+`bun run check` (`scripts/check.sh`) is the inner loop. Run it before every push:
 
-The scan is advisory while findings are reviewed. `min_score: 0` allows report
-collection below the HOL catalog maintainer's **80/100** threshold; a green job
-does not mean the plugin qualifies for listing. Installation, scanning, and
-artifact failures still fail the job. PR comments, submissions, network-enabled
-analysis, SARIF upload, and repository-owned suppressions are disabled. The
-optional Cisco analyzer is not installed by the Action's default installation.
+1. `bun install --frozen-lockfile`
+2. Biome, read-only, on changed files in the CI lint scope (`src/`, `apps/evals/`, `apps/ui/`, `packages/ui-e2e/`, `packages/model-routing/`)
+3. tsgo on the root project, plus `apps/ui` (`tsgo -b`) when it changed
+4. `test:root` on the affected tests, using `scripts/pre-push-tests.sh` scoping and its full-suite fallbacks
 
-### Scope and baseline
+"Changed" means committed since the merge-base with `origin/main`, plus uncommitted and untracked edits. It stops at the first failure. It does not scan for secrets; the prek pre-push hooks own that.
 
-The default profile at repository root reproduced the catalog's **52/100** on
-`c3da9506891abcd4d095626734118526e602109e`: 675 high, 20 medium, 5 low, and 5
-informational findings. Auto-detection found Claude, Codex, Gemini, and Kimi
-packages sharing that root. Claude, Codex, and Gemini each run the common checks
-over the monorepo, so most findings occur three times.
-
-After pinning the two actions, the same local scan scores **57/100** with 699
-findings: 675 high, 14 medium, 5 low, and 5 informational. Exactly six
-`GITHUB_ACTION_UNPINNED` findings disappear; no findings are added or suppressed.
-The catalog threshold remains unmet.
-
-| Rule | Findings before action pinning | Severity | Paths / interpretation |
-|---|---:|---|---|
-| `HARDCODED_SECRET` | 636 | high | 212 locations, each reported three times: 185 in tests/fixtures, 10 in docs/history, 17 elsewhere. These counts classify paths, not whether a credential is real. |
-| `DANGEROUS_DYNAMIC_EXECUTION` | 27 | high | Nine matches across seven files, including `src/workflows/wait-filter.ts`, `src/workflows/executors/code-match.ts`, and test/smoke fixtures. |
-| `SHELL_INJECTION_PATTERN` | 9 | high | `src/commands/codex-login.ts`, `src/utils/internal-ai/complete-structured.ts`, `src/tests/package-publish.test.ts`. Requires review of inputs and actual process APIs. |
-| `RISKY_APPROVAL_DEFAULT` | 9 | medium | `src/be/seed-skills/bundled-files.generated.json` and two historical plans under `thoughts/taras/plans/`. |
-| `GITHUB_ACTION_UNPINNED` | 6 | medium | Two refs in `merge-gate.yml`, each reported three times. Both are now pinned. |
-| `SECURITY_MD_MISSING` | 4 | low | Root `SECURITY.md`, reported once per ecosystem. |
-| `GITHUB_ACTIONS_UNTRUSTED_CHECKOUT` | 3 | high | `slack-visuals-publish.yml`: the scanner searches the whole file for a trigger, checkout, and head-ref expression without connecting the expression to a checkout step. This workflow deliberately checks out the base branch. |
-| `DEPENDENCY_LOCKFILE_MISSING` | 3 | medium | Root `pyproject.toml`, a deployment cache workaround with no declared Python dependencies. |
-| `MARKETPLACE_SOURCE_INVALID` | 1 | medium | `.agents/plugins/marketplace.json`. |
-| `MARKETPLACE_UNSAFE_SOURCE` | 1 | medium | `.agents/plugins/marketplace.json`. |
-| `KIMI_INTERFACE_INVALID` | 1 | low | Scanner reports `plugin.json`; the actual manifest is `.kimi-plugin/plugin.json`. |
-| `PLUGIN_JSON_INTERFACE_ASSET_PRIVACYPOLICYURL` | 1 | info | `.codex-plugin/plugin.json`. |
-| `PLUGIN_JSON_INTERFACE_ASSET_TERMSOFSERVICEURL` | 1 | info | `.codex-plugin/plugin.json`. |
-| `PLUGIN_JSON_INTERFACE_ASSET_COMPOSERICON` | 1 | info | `.codex-plugin/plugin.json`. |
-| `PLUGIN_JSON_INTERFACE_ASSET_SCREENSHOTS` | 1 | info | `.codex-plugin/plugin.json`. |
-| `CODEXIGNORE_MISSING` | 1 | info | Root `.codexignore`. |
-
-Keep `plugin_dir: .` for catalog comparability. Pointing only at `skills/` would
-omit manifests, referenced assets, and repository workflows. This scanner's
-baseline suppresses entire rule IDs; `ignore_paths` suppresses all findings in
-matching paths. Neither justifies hiding all server code or all secret findings
-before reviewing them. Any later scoped report must document the installable
-package boundary and retain the full repository report for comparison.
-
-To inspect a downloaded report without counting nested copies twice:
-
-```bash
-jq '.summary.findings, {score, raw_score, effective_score, ecosystems}' plugin-scanner.json
-jq '.findings | group_by(.ruleId) | map({rule: .[0].ruleId, count: length}) | sort_by(-.count)' plugin-scanner.json
-jq -r '.findings[] | [.ruleId, .severity, .filePath, (.lineNumber // "")] | @tsv' plugin-scanner.json
-```
+In Claude Code, the repo's `.claude/settings.json` also runs `biome format --write` on each edited file in that scope (`scripts/claude-format-on-edit.sh`). The hook always exits 0, so it never blocks an edit.
 
 ## The full local pre-push command
 
-Run this from the repo root before every push. It mirrors merge-gate exactly for the most common path (root code changes, possibly `apps/ui/`):
+Run this from the repo root before opening a PR. It mirrors merge-gate exactly for the most common path (root code changes, possibly `apps/ui/`):
 
 ```bash
 # Root project
-bun install --frozen-lockfile
-bun run lint            # NOT lint:fix — CI fails on warnings, not just errors
-bun run tsc:check
+bun run check           # frozen install, Biome on changed files, tsgo, affected tests
+bun run lint            # whole lint scope; NOT lint:fix — CI fails on warnings, not just errors
+bun run tsc:check:tsc   # tsc 5, the CI authority
 bun run test:root -- --parallel=4          # CI splits this into --shard=1/2 and --shard=2/2
 bun run check:bun-version
 bash scripts/check-db-boundary.sh
 bash scripts/check-api-key-boundary.sh
 bash scripts/check-rbac-boundary.sh
 bash scripts/check-audit-columns.sh
+bun scripts/check-text-columns.ts
 bun run check:rbac-coverage
 bun run check:openapi-response-coverage
 bun run check:dep-graph
 bun run check:operator-skill
+bash scripts/gitleaks.sh                   # secret scan of commits since origin/main
 
 # Drift checks (run if you touched the relevant files)
 bun run build:pi-skills && git diff --quiet plugin/pi-skills/ || echo "pi-skills drift — commit the regenerated files"
@@ -152,6 +108,7 @@ bun run check:extension-schema  || echo "extension manifest schema drift — run
 # PR gate builds the worker's slim target; build the full target too if you
 # touched worker-full-base / worker-full stages.
 docker build -f Dockerfile . && docker build -f Dockerfile.worker --target worker-slim . && docker build -f apps/evals/Dockerfile .
+bun run docker:build:ui && bash scripts/smoke-ui-image.sh agent-swarm-ui:latest
 
 # ui (if you touched apps/ui/ — or root bun.lock/package.json/bunfig.toml, since ui deps resolve from the root lock)
 ( cd apps/ui && bun install --frozen-lockfile && bun run lint && bunx tsc -b )
@@ -173,10 +130,11 @@ docker build -f Dockerfile . && docker build -f Dockerfile.worker --target worke
 8. **`tsc --noEmit` passed locally but `tsc -b` failed in ui.** The build-mode check catches project-reference issues `--noEmit` misses. Use `tsc -b` locally.
 9. **Docker build cache mismatch.** Local Docker pulled a cached layer that CI doesn't have. Run `docker build --no-cache -f Dockerfile.worker .` if a clean local build is suspicious.
 10. **Audit-column failure.** You added a migration creating a table without `created_by`/`updated_by` (`scripts/check-audit-columns.sh`). Add the columns, or register the table in `.non-audit-tables` with a comment naming where attribution actually lives.
-11. **Tool classification failure.** You registered a new MCP tool without adding it to `CORE_TOOLS`/`DEFERRED_TOOLS` in `src/tools/tool-config.ts` (`src/tests/tool-annotations.test.ts` fails in `test:root`).
-12. **Bun version pin drift.** You bumped `packageManager` in `package.json` (or one Dockerfile) without the others. `bun run check:bun-version` lists every pin that disagrees: `Dockerfile`, `Dockerfile.worker` (builder `FROM` + the runtime `bun.sh/install` pin), `apps/evals/Dockerfile`. CI installs whatever `packageManager` says (`setup-bun` with `bun-version-file: package.json`), so the pin IS the CI version.
-13. **Test port collision under `--parallel`.** A test bound a literal port and another file in the same shard bound the same one; the loser reports `Server did not start within 60000ms` or `EADDRINUSE`. Use `listenOnFreePort()` / `getFreePort()` from `src/tests/test-net.ts`.
-14. **Test spawnSync boundary violation.** A test called `Bun.spawnSync` / `spawnSync` / `execSync` / `execFileSync` (`scripts/check-test-spawn-sync.sh`). A blocked event loop cannot time a hung child out. Use `runChild()` / `expectChildOk()` from `src/tests/test-proc.ts` and pass `CHILD_PROCESS_TEST_BUDGET_MS` as the test's timeout argument.
+11. **TEXT-column classification failure.** A migration added a TEXT column that `.text-columns.json` does not list, or an entry names a column that no longer exists (`scripts/check-text-columns.ts`). Classify it as `"scrubbed"` (every writer scrubs it), `{"exempt": "<reason>"}` or `{"pending": "<tracking note>"}`. See [secret-scrubbing.md § TEXT columns](./secret-scrubbing.md#text-columns).
+12. **Tool classification failure.** You registered a new MCP tool without adding it to `CORE_TOOLS`/`DEFERRED_TOOLS` in `src/tools/tool-config.ts` (`src/tests/tool-annotations.test.ts` fails in `test:root`).
+13. **Bun version pin drift.** You bumped `packageManager` in `package.json` (or one Dockerfile) without the others. `bun run check:bun-version` lists every pin that disagrees: `Dockerfile`, `Dockerfile.worker` (builder `FROM` + the runtime `bun.sh/install` pin), `apps/evals/Dockerfile`, `Dockerfile.ui`. CI installs whatever `packageManager` says (`setup-bun` with `bun-version-file: package.json`), so the pin IS the CI version.
+14. **Test port collision under `--parallel`.** A test bound a literal port and another file in the same shard bound the same one; the loser reports `Server did not start within 60000ms` or `EADDRINUSE`. Use `listenOnFreePort()` / `getFreePort()` from `src/tests/test-net.ts`.
+15. **Test spawnSync boundary violation.** A test called `Bun.spawnSync` / `spawnSync` / `execSync` / `execFileSync` (`scripts/check-test-spawn-sync.sh`). A blocked event loop cannot time a hung child out. Use `runChild()` / `expectChildOk()` from `src/tests/test-proc.ts` and pass `CHILD_PROCESS_TEST_BUDGET_MS` as the test's timeout argument.
 
 ## Bun version
 

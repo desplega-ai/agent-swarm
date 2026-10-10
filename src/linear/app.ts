@@ -1,6 +1,7 @@
 import { getOAuthApp, upsertOAuthApp } from "../be/db-queries/oauth";
 import { onAuthorizationRefreshed } from "../oauth/ensure-token";
 import { getPublicMcpBaseUrl } from "../utils/constants";
+import { isEnvFlagEnabled } from "../utils/env-flag";
 import { resetLinearClient } from "./client";
 import { initLinearOutboundSync, teardownLinearOutboundSync } from "./outbound";
 
@@ -8,8 +9,7 @@ let initialized = false;
 let unsubscribeRefresh: (() => void) | null = null;
 
 export function isLinearEnabled(): boolean {
-  const disabled = process.env.LINEAR_DISABLE;
-  if (disabled === "true" || disabled === "1") return false;
+  if (isEnvFlagEnabled("LINEAR_DISABLE", false)) return false;
   const enabled = process.env.LINEAR_ENABLED;
   if (enabled === "false" || enabled === "0") return false;
   return !!process.env.LINEAR_CLIENT_ID;

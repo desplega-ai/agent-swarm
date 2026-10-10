@@ -1,0 +1,124 @@
+---
+title: Azure DevOps Integration
+description: Connect Azure Repos so a bot mention in a pull request creates a swarm task, and workers clone, push, and open PRs with git and the az CLI
+---
+
+Agent Swarm supports Azure Repos alongside GitHub and GitLab. Service hooks turn bot mentions in pull requests into swarm tasks, and workers reach Azure Repos with `git` and the `az` CLI, both authenticated with one Personal Access Token (PAT).
+
+This first version covers **Azure Repos and pull request service hooks**. Azure Boards (work items), Microsoft Entra ID service principals, and a dashboard card come later.
+
+## 1. Create a bot user and its PAT
+
+Create a dedicated Azure DevOps user for the swarm, for example `agent-swarm-bot`, and mint the PAT as that user, not as a person. The swarm then shows up in Azure DevOps as a peer: its pushes, PRs, and comments carry its own name, and you control its access the way you control any teammate's.
+
+1. Add the user to your organization and give it **Basic** access.
+2. Add it to each project the swarm works in, with **Contributors** permissions on the repositories.
+3. Signed in as that user, go to **User settings > Personal access tokens > New Token**.
+4. Select the scope **Code: Read & write**. It covers clone, push, pull requests, PR comments, and comment likes. Add work item scopes later, when Boards support lands.
+
+Mentions are matched against the PAT owner, so `@agent-swarm-bot` in a PR is what triggers the swarm.
+
+As with GitHub and GitLab, anyone who can comment on a pull request in a connected repository can trigger the swarm with a mention. Give the bot user access only to repositories where you accept that.
+
+## 2. Configure the swarm
+
+Set these as swarm config values (secret where marked) or as environment variables on the API server and the workers:
+
+```bash
+# Required: API + worker access (secret)
+AZURE_DEVOPS_TOKEN=your-bot-pat
+AZURE_DEVOPS_ORG_URL=https://dev.azure.com/your-org
+
+# Required for webhooks: the Basic auth password service hooks send (secret)
+AZURE_DEVOPS_WEBHOOK_SECRET=a-long-random-string
+
+# Optional: identity GUID of the bot (default: the identity that owns the PAT)
+AZURE_DEVOPS_BOT_ID=00000000-0000-0000-0000-000000000000
+
+# Optional: name for plain-text @mentions (default: agent-swarm-bot)
+AZURE_DEVOPS_BOT_NAME=agent-swarm-bot
+
+# Optional: git commit identity for Azure Repos
+AZURE_DEVOPS_EMAIL=agent-swarm-bot@your-company.com
+AZURE_DEVOPS_NAME=Agent Swarm Bot
+
+# Optional: turn the integration off on the API and the workers
+AZURE_DEVOPS_DISABLE=true
+```
+
+Workers read swarm config at boot, so restart them after you add the token.
+
+## 3. Create the service hooks
+
+In the Azure DevOps project, go to **Project settings > Service hooks > Create subscription**, pick **Web Hooks**, and create one subscription per event:
+
+| Trigger | Filters |
+|---------|---------|
+| **Pull request created** | Repository and branch: optional |
+| **Pull request commented on** | Repository and branch: optional |
+
+On the action page of each subscription:
+
+- **URL**: `https://your-server.com/api/azure-devops/webhook` (must be HTTPS)
+- **Basic authentication username**: any value, for example `agent-swarm`
+- **Basic authentication password**: the value of `AZURE_DEVOPS_WEBHOOK_SECRET`
+- **Resource details to send**: **All**
+- **Resource version**: for **Pull request commented on**, pick **2.0**. Version 1.0 sends only the comment, without the pull request. The swarm answers it with `{"created":false}`, logs a warning, and creates no task. For **Pull request created**, keep the default, **1.0**.
+
+Use **Test** on the subscription to check the connection. The test payload has no bot mention, so the swarm answers `{"created":false}`.
+
+## Supported events
+
+| Event | What happens |
+|-------|-------------|
+| PR created with a bot mention in the description | Creates a task for the lead agent |
+| New PR comment with a bot mention | Creates a task with the comment as context, linked to any active task for the same PR, and likes the comment as an acknowledgement |
+
+Mentions work in two forms. A mention picked from the identity picker is stored as `@<GUID>` and matches the bot's identity. A typed `@agent-swarm-bot` matches `AZURE_DEVOPS_BOT_NAME`. The swarm ignores comments written by the bot itself, system comments, and edits to existing comments, so fixing a typo does not create a second task.
+
+<Callout type="warn">
+The bot is the identity that owns `AZURE_DEVOPS_TOKEN`, unless you set `AZURE_DEVOPS_BOT_ID`. The swarm ignores PRs and comments from that identity. If you mint the PAT under your own account, as is common in a test setup, your own mentions never trigger the swarm. Test from another account.
+</Callout>
+
+## Workers
+
+The full worker image ships the Azure CLI with the `azure-devops` extension. At boot, `docker-entrypoint.sh`:
+
+- adds a git credential helper for `dev.azure.com` and `*.visualstudio.com` that reads `AZURE_DEVOPS_TOKEN` from the environment, so the token is never written to disk;
+- exports `AZURE_DEVOPS_EXT_PAT` and the default organization for `az`, so no `az devops login` is needed.
+
+The slim image has no `az`; `git` access to Azure Repos still works there.
+
+| Operation | GitHub (`gh`) | Azure DevOps |
+|---|---|---|
+| Clone | `gh repo clone` | `git clone https://dev.azure.com/org/project/_git/repo` |
+| Create PR | `gh pr create` | `az repos pr create --project <p> --repository <r> --source-branch <b>` |
+| View PR | `gh pr view` | `az repos pr show --id <n>` |
+| Comment on PR | `gh pr comment` | `az devops invoke --area git --resource pullRequestThreads --route-parameters project=<p> repositoryId=<r> pullRequestId=<n> --http-method POST --in-file <json> --api-version 7.1` |
+
+`az repos` has no comment command, so comments go through `az devops invoke` with a JSON body such as `{"comments":[{"content":"Done, see the latest push."}],"status":1}`. Tasks created from Azure DevOps events include this recipe.
+
+Tasks store the repository as its HTTPS clone URL, for example `https://dev.azure.com/org/project/_git/repo`, so a worker can clone a repository that is not registered with the swarm.
+
+## Workflow triggers
+
+Azure DevOps events can trigger [workflows](/docs/concepts/workflows):
+
+- `azure-devops.pull_request.created`
+- `azure-devops.pull_request.commented`
+
+## Troubleshooting
+
+| Symptom | Cause |
+|---------|-------|
+| **Test** on a subscription returns `{"created":false}` | Expected. The test payload has no bot mention. |
+| Deliveries fail with `401 {"error":"Invalid credentials"}` | The Basic authentication password does not match `AZURE_DEVOPS_WEBHOOK_SECRET`. |
+| Deliveries fail with `503` | `AZURE_DEVOPS_WEBHOOK_SECRET` is not set on the API server, or `AZURE_DEVOPS_DISABLE=true`. |
+| A mention returns `{"created":false}` and no task appears | The author is the bot identity, usually the PAT owner. Mention from another account. |
+| Every comment returns `{"created":false}` and the API logs `required resource fields are missing` | The comment subscription uses resource version 1.0. Edit it and pick 2.0. |
+
+## Related
+
+- [GitLab Integration](/docs/integrations/gitlab) — the integration this one is modeled on
+- [Environment Variables](/docs/reference/environment-variables) — Azure DevOps configuration variables
+- [Workflows](/docs/concepts/workflows) — automate actions on Azure DevOps events

@@ -3,6 +3,12 @@ import { expect, test } from "../fixtures";
 const TASK_PROMPT = "e2e in-progress task";
 const SEEDED_LOG_LINE = "Hello from the e2e seed";
 
+// The task page shows two columns from 60rem of page width. The chromium
+// project's Desktop Chrome device (1280x720) leaves 976 px once the sidebar
+// takes its share, just over that. The wide tests pin a wide window, so they
+// do not depend on that margin.
+test.use({ viewport: { width: 1440, height: 900 } });
+
 test("tasks list opens the seeded task and its session logs", async ({ page, seed, clean }) => {
   test.skip(!seed, "remote run without seed");
   await page.goto("/tasks");
@@ -14,24 +20,28 @@ test("tasks list opens the seeded task and its session logs", async ({ page, see
   await row.getByText(TASK_PROMPT).click();
   await expect(page).toHaveURL(`/tasks/${seed!.tasks.inProgress}`);
 
-  await expect(page.getByText(TASK_PROMPT).filter({ visible: true })).toBeVisible();
-  // The detail page renders both the `lg:hidden` tab layout and the `lg:grid` rail
-  // layout, so text assertions filter to the visible copy. At 1440px the rail shows
-  // the session logs inline; the "Session Logs" tab only exists below lg.
+  // The breadcrumb shows the same title, so match the heading role: plain text
+  // matches two elements once both have rendered (a strict-mode violation).
+  await expect(page.getByRole("heading", { level: 1, name: TASK_PROMPT })).toBeVisible();
+  // The detail page renders both the narrow tab layout and the wide two-column
+  // layout (switched by the page's own width), so text assertions filter to the
+  // visible copy. At 1440px the center column shows the session logs inline; the
+  // "Log" tab only shows in the narrow layout.
   await expect(page.getByText(SEEDED_LOG_LINE).filter({ visible: true })).toBeVisible();
 
   await clean.assertClean();
 });
 
-test.describe("below the lg breakpoint", () => {
+test.describe("below the 60rem page-width switch (tabs layout)", () => {
   test.use({ viewport: { width: 900, height: 900 } });
 
-  test("session logs open from the Session Logs tab", async ({ page, seed, clean }) => {
+  test("session logs open from the Log tab", async ({ page, seed, clean }) => {
     test.skip(!seed, "remote run without seed");
     await page.goto(`/tasks/${seed!.tasks.inProgress}`);
 
-    await expect(page.getByText(TASK_PROMPT).filter({ visible: true })).toBeVisible();
-    await page.getByRole("tab", { name: "Session Logs" }).click();
+    await expect(page.getByRole("heading", { level: 1, name: TASK_PROMPT })).toBeVisible();
+    // A running task opens on Log. The click keeps the test valid if the default changes.
+    await page.getByRole("tab", { name: "Log", exact: true }).click();
     await expect(page.getByText(SEEDED_LOG_LINE).filter({ visible: true })).toBeVisible();
 
     await clean.assertClean();

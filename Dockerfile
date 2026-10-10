@@ -17,8 +17,15 @@ COPY apps/ui/package.json ./apps/ui/package.json
 COPY apps/templates-ui/package.json ./apps/templates-ui/package.json
 COPY apps/evals/package.json ./apps/evals/package.json
 COPY packages/model-catalog/package.json ./packages/model-catalog/package.json
-RUN bun install --frozen-lockfile
+COPY packages/model-routing/package.json ./packages/model-routing/package.json
+# Retry transient extraction failures with a clean dependency tree.
+RUN for attempt in 1 2 3; do \
+        bun install --frozen-lockfile && break; \
+        if [ "$attempt" -eq 3 ]; then exit 1; fi; \
+        rm -rf node_modules && sleep 2 || exit 1; \
+    done
 COPY packages/model-catalog/ ./packages/model-catalog/
+COPY packages/model-routing/ ./packages/model-routing/
 
 # Copy source files
 COPY src/ ./src/
@@ -52,6 +59,13 @@ RUN mkdir -p scripts-runtime script-workflows-runtime && \
       --target bun --no-splitting \
       --outfile ./scripts-runtime/extensions-contract.bundle.js
 
+# Stage zod's ESM sources (~1 MB of .js) for the opt-in quickjs script
+# executor (SCRIPT_EXECUTOR=quickjs). It bundles each script with Bun.build,
+# and only the real ESM sources tree-shake: a script that uses z.object and
+# z.string().email() bundles to ~87 KB, but ~340 KB against zod.bundle.js.
+RUN mkdir -p scripts-runtime/zod-esm && cd node_modules/zod && \
+    find . -name '*.js' -print0 | tar --null -cf - -T - | tar -xf - -C /build/scripts-runtime/zod-esm
+
 # Copy TypeScript lib .d.ts files for script typecheck in compiled binary mode.
 # The compiled binary embeds .js modules in /$bunfs/ but not .d.ts files, so
 # the TypeScript compiler can't load the default lib (Error, Number, etc.) without
@@ -69,7 +83,9 @@ RUN mkdir -p script-types/node_modules && cd node_modules && \
       | tar -xf - -C /build/script-types/node_modules
 
 # Compile HTTP server to standalone binary
-RUN bun build ./src/http.ts --compile --compile-exec-argv='--expose-gc' --outfile ./agent-swarm-api
+# The quickjs executor's worker thread is a separate entrypoint inside the binary.
+RUN bun build ./src/http.ts ./src/scripts-runtime/executors/quickjs-worker.ts \
+      --compile --compile-exec-argv='--expose-gc' --outfile ./agent-swarm-api
 
 # Stage 2: Minimal runtime image
 FROM debian:bookworm-slim

@@ -1,0 +1,340 @@
+// Ported from agent-fs `live/src/lib/dom-text-space.ts` (agent-fs commit
+// 08e7d89). Adaptations: the walker also skips `data-comb-skip` elements and
+// Streamdown chrome (`isSkippedElement`), text viewer rows (`data-comb-row`)
+// end with exactly one "\n", `offsetToLineEnd` is new, the walk joins the
+// text once (no `endsWith` on a growing string), `pointToOffset` looks text
+// nodes up in a map and binary-searches element boundaries (syntax
+// highlighting makes one text node per token), and `anchorFromRange` comes
+// from live/ `MarkdownViewer.tsx` (`targetFromDom`, with the line range fix
+// described there). `rehypeSourceLines` lives in `rehype-source-lines.ts`.
+//
+// Relative imports only: `bun:test` runs this from the repo root.
+
+import {
+  type AnchorQuote,
+  type AnchorResolution,
+  captureQuote,
+  type TextSpace,
+} from "./comment-anchor";
+
+/**
+ * A TextSpace over rendered DOM text (the markdown preview, the text viewer
+ * rows). Blocks are separated by "\n" so a quote taken across paragraphs
+ * matches the way `Selection.toString()` reports it, and elements stamped with
+ * `data-line-start`/`data-line-end` (see `rehypeSourceLines`) map offsets back
+ * to source lines.
+ */
+export interface DomTextSpace extends TextSpace {
+  lineRangeToOffsets: NonNullable<TextSpace["lineRangeToOffsets"]>;
+  offsetToLine: NonNullable<TextSpace["offsetToLine"]>;
+  /** Last source line of the innermost block at an offset (`offsetToLine` gives the first). */
+  offsetToLineEnd(offset: number): number | null;
+  /** DOM Range for [start, end) offsets. */
+  toRange(start: number, end: number): Range | null;
+  /**
+   * DOM Ranges that cover [start, end) and nothing else: one Range per run of
+   * text with no skipped content inside it. The CSS Highlight API paints
+   * every text node in a Range, so one Range over several text viewer rows
+   * would also paint their line numbers (`data-comb-skip`). Use these to paint.
+   */
+  toRanges(start: number, end: number): Range[];
+  /** Text offset of a DOM boundary point (e.g. a Selection range edge). */
+  pointToOffset(node: Node, offset: number): number | null;
+  /** Blocks (elements carrying source lines) intersecting [start, end). */
+  blocksFor(start: number, end: number): HTMLElement[];
+}
+
+const BLOCK_TAGS = new Set([
+  "P",
+  "H1",
+  "H2",
+  "H3",
+  "H4",
+  "H5",
+  "H6",
+  "LI",
+  "BLOCKQUOTE",
+  "PRE",
+  "TR",
+  "TD",
+  "TH",
+  "DIV",
+  "DT",
+  "DD",
+  "UL",
+  "OL",
+  "TABLE",
+  "HR",
+  "BR",
+]);
+// Chrome and embedded UI (copy buttons, diagrams) aren't document text.
+const SKIP_TAGS = new Set(["BUTTON", "SVG", "svg", "SCRIPT", "STYLE"]);
+// Streamdown chrome (streamdown 2.5 `data-streamdown` values). With
+// `controls={false}` most of it never renders, but it is not document text.
+const SKIP_STREAMDOWN = new Set([
+  "code-block-header",
+  "code-block-actions",
+  "mermaid-block-actions",
+  "table-fullscreen",
+  "image-fallback",
+]);
+
+/**
+ * Elements whose text is not document text: buttons and other chrome,
+ * `aria-hidden` decoration, anything marked `data-comb-skip` (the text viewer
+ * gutter, notices), and Streamdown's own UI.
+ */
+export function isSkippedElement(el: Element): boolean {
+  if (SKIP_TAGS.has(el.tagName)) return true;
+  if (el.getAttribute("aria-hidden") === "true") return true;
+  if (el.hasAttribute("data-comb-skip")) return true;
+  const streamdown = el.getAttribute("data-streamdown");
+  return streamdown !== null && SKIP_STREAMDOWN.has(streamdown);
+}
+
+interface Segment {
+  node: Text;
+  start: number;
+  /** Skipped content (a gutter, a button) comes between this text and the text before it. */
+  afterSkip: boolean;
+}
+
+interface Block {
+  el: HTMLElement;
+  start: number;
+  end: number;
+  lineStart: number;
+  lineEnd: number;
+}
+
+/**
+ * Marks a text viewer row (one source line). A row ends with exactly one
+ * "\n", blank rows included, so the text viewer's text space is the file's
+ * own text (with LF line ends) and a quote is a verbatim substring of it.
+ */
+export const TEXT_ROW_ATTR = "data-comb-row";
+
+/**
+ * The text space of `root`. A block may hold its text in any number of inline
+ * elements: a highlighted code row or fence has one text node per token, and
+ * the space reads them in document order as one run of text.
+ */
+export function buildDomTextSpace(root: HTMLElement): DomTextSpace {
+  // The text is collected in parts and joined once. Reading the end of a
+  // string built with `+=` (`endsWith`) makes V8 flatten it every time, which
+  // cost 190 ms for a 7,000-line file. `length` and `last` track the end.
+  const parts: string[] = [];
+  let length = 0;
+  let last = "";
+  const append = (s: string) => {
+    parts.push(s);
+    length += s.length;
+    last = s[s.length - 1];
+  };
+  /** A block starts or ends: separate it from text before it with one "\n". */
+  const breakLine = () => {
+    if (length > 0 && last !== "\n") append("\n");
+  };
+  // Every text node in document order, and each one's start offset by node.
+  const segments: Segment[] = [];
+  const segmentStart = new Map<Text, number>();
+  const blocks: Block[] = [];
+  // Set when the walk skips an element: the next text starts a new paint run.
+  let skipped = false;
+
+  const walk = (node: Node) => {
+    if (node.nodeType === Node.TEXT_NODE) {
+      const data = (node as Text).data;
+      if (data) {
+        segments.push({ node: node as Text, start: length, afterSkip: skipped });
+        segmentStart.set(node as Text, length);
+        skipped = false;
+        append(data);
+      }
+      return;
+    }
+    if (node.nodeType !== Node.ELEMENT_NODE) return;
+    const el = node as HTMLElement;
+    if (isSkippedElement(el)) {
+      skipped = true;
+      return;
+    }
+    const isBlock = BLOCK_TAGS.has(el.tagName);
+    if (isBlock) breakLine();
+    const start = length;
+    for (let child = el.firstChild; child; child = child.nextSibling) walk(child);
+    const ls = el.getAttribute("data-line-start");
+    const le = el.getAttribute("data-line-end");
+    if (ls && le) {
+      blocks.push({ el, start, end: length, lineStart: Number(ls), lineEnd: Number(le) });
+    }
+    if (el.hasAttribute(TEXT_ROW_ATTR)) append("\n");
+    else if (isBlock) breakLine();
+  };
+  walk(root);
+  const text = parts.join("");
+
+  const segmentAt = (offset: number): number => {
+    // Last segment starting at or before `offset`.
+    let lo = 0;
+    let hi = segments.length - 1;
+    if (hi < 0 || segments[0].start > offset) return -1;
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      if (segments[mid].start <= offset) lo = mid;
+      else hi = mid - 1;
+    }
+    return lo;
+  };
+
+  const toPoint = (offset: number, isEnd: boolean): [Text, number] | null => {
+    const i = segmentAt(offset);
+    if (i < 0) return segments.length ? [segments[0].node, 0] : null;
+    const seg = segments[i];
+    const within = offset - seg.start;
+    if (within <= seg.node.data.length) {
+      // An end offset exactly at a segment start belongs to the previous one.
+      if (isEnd && within === 0 && i > 0) {
+        const prev = segments[i - 1];
+        return [prev.node, prev.node.data.length];
+      }
+      return [seg.node, within];
+    }
+    // Offset falls on a block separator: snap forward (start) or back (end).
+    if (isEnd) return [seg.node, seg.node.data.length];
+    const next = segments[i + 1];
+    return next ? [next.node, 0] : [seg.node, seg.node.data.length];
+  };
+
+  const innermost = (list: Block[]) =>
+    list.filter((b) => !list.some((o) => o !== b && b.el.contains(o.el)));
+
+  const toRange = (start: number, end: number): Range | null => {
+    const a = toPoint(start, false);
+    const b = toPoint(end, true);
+    if (!a || !b) return null;
+    const range = document.createRange();
+    range.setStart(a[0], a[1]);
+    range.setEnd(b[0], b[1]);
+    return range;
+  };
+
+  return {
+    text,
+    toRange,
+    toRanges(start, end) {
+      if (end <= start) return [];
+      // Split at every text that follows skipped content. A split falls
+      // between two text nodes, so no character is left out.
+      const cuts = [start];
+      const last = segmentAt(end - 1);
+      for (let i = segmentAt(start) + 1; i <= last; i++) {
+        if (segments[i].afterSkip && segments[i].start > start) cuts.push(segments[i].start);
+      }
+      cuts.push(end);
+      const ranges: Range[] = [];
+      for (let i = 0; i + 1 < cuts.length; i++) {
+        const range = toRange(cuts[i], cuts[i + 1]);
+        if (range && !range.collapsed) ranges.push(range);
+      }
+      return ranges;
+    },
+    pointToOffset(node, offset) {
+      if (node.nodeType === Node.TEXT_NODE) {
+        const start = segmentStart.get(node as Text);
+        if (start !== undefined) return start + Math.min(offset, (node as Text).data.length);
+      }
+      // Element boundary (e.g. triple-click): the first text after the point.
+      const probe = document.createRange();
+      try {
+        probe.setStart(node, offset);
+      } catch {
+        return null;
+      }
+      probe.collapse(true);
+      // Segments are in document order: a binary search finds the first one at
+      // or after the point (a highlighted file has thousands, one per token).
+      let lo = 0;
+      let hi = segments.length;
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if (probe.comparePoint(segments[mid].node, 0) >= 0) hi = mid;
+        else lo = mid + 1;
+      }
+      return lo < segments.length ? segments[lo].start : text.length;
+    },
+    lineRangeToOffsets(a, b) {
+      const hits = innermost(blocks.filter((bl) => bl.lineStart <= b && bl.lineEnd >= a));
+      if (!hits.length) return null;
+      return [Math.min(...hits.map((h) => h.start)), Math.max(...hits.map((h) => h.end))];
+    },
+    offsetToLine(offset) {
+      const hits = innermost(blocks.filter((bl) => bl.start <= offset && offset < bl.end));
+      return hits.length ? hits[0].lineStart : null;
+    },
+    offsetToLineEnd(offset) {
+      const hits = innermost(blocks.filter((bl) => bl.start <= offset && offset < bl.end));
+      return hits.length ? hits[0].lineEnd : null;
+    },
+    blocksFor(start, end) {
+      return innermost(
+        blocks.filter((bl) => bl.start < Math.max(end, start + 1) && bl.end > start),
+      ).map((b) => b.el);
+    },
+  };
+}
+
+/** The anchor of a new comment: what `comment-add` stores next to the body. */
+export interface NewCommentAnchor {
+  quote?: AnchorQuote;
+  lineStart?: number;
+  lineEnd?: number;
+  /** The selected text, first 200 characters (live/ sends it for older clients). */
+  quotedContent: string;
+}
+
+/**
+ * Anchor data for a new comment on a DOM range in `space`: the quote with
+ * context from the rendered text, and the source lines of the blocks it spans.
+ * Null when the range holds no document text.
+ */
+export function anchorFromRange(space: DomTextSpace, range: Range): NewCommentAnchor | null {
+  let start = space.pointToOffset(range.startContainer, range.startOffset);
+  let end = space.pointToOffset(range.endContainer, range.endOffset);
+  if (start == null || end == null || end <= start) return null;
+  const quote = captureQuote(space.text, start, end);
+  if (!quote) return null;
+  // The lines cover the trimmed quote (`captureQuote` trims the same way):
+  // from the first block's start line to the LAST block's end line. live/
+  // takes `offsetToLine(end - 1)`, which gives the start line of a multi-line
+  // block, or no line when the selection ends at the start of the next block
+  // (a block separator). live/ has the same bug: fix it upstream too.
+  while (start < end && /\s/.test(space.text[start])) start++;
+  while (end > start && /\s/.test(space.text[end - 1])) end--;
+  const lineStart = space.offsetToLine(start) ?? undefined;
+  const lineEnd = space.offsetToLineEnd(end - 1) ?? undefined;
+  return {
+    quote,
+    lineStart,
+    lineEnd: lineStart != null ? Math.max(lineStart, lineEnd ?? lineStart) : undefined,
+    quotedContent: quote.exact.slice(0, 200),
+  };
+}
+
+/** A text space that may know the end line of the block at an offset (a `DomTextSpace` does). */
+export type AnchorSpace = TextSpace & { offsetToLineEnd?: (offset: number) => number | null };
+
+/**
+ * live/'s `withLines` reports a quote's end line as `offsetToLine(end - 1)`:
+ * the START line of a multi-line block (a paragraph over lines 3-5 shows as
+ * L3). With a space that knows block end lines, the range ends at the last
+ * block's end line, like the range stored at capture (`anchorFromRange`).
+ * Line-placed resolutions keep their own range. Fix upstream in live/ too.
+ */
+export function withBlockLineEnd(space: AnchorSpace, r: AnchorResolution): AnchorResolution {
+  if (!space.offsetToLineEnd || r.method === "lines" || r.start == null || r.end == null) return r;
+  const blockEnd = space.offsetToLineEnd(Math.max(r.start, r.end - 1));
+  return blockEnd != null && (r.lineEnd == null || blockEnd > r.lineEnd)
+    ? { ...r, lineEnd: blockEnd }
+    : r;
+}

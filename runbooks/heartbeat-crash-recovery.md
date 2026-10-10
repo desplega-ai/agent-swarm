@@ -8,6 +8,8 @@ Queue-pickup liveness alarm: `src/queue-stall-alarm.ts`.
 
 ---
 
+Heartbeat-checklist and boot-triage deduplication only count tasks outside `TERMINAL_TASK_STATUSES` (`completed`, `failed`, `cancelled`, `superseded`). The reboot retry-child guard uses the same exclusion. A superseded task therefore never blocks a new checklist, boot triage, or retry.
+
 ## 1. The heartbeat sweep (every ~90s)
 
 `runHeartbeatSweep` → `codeLevelTriage` runs on `DEFAULT_INTERVAL_MS` (90s, env `HEARTBEAT_INTERVAL_MS`):
@@ -18,7 +20,7 @@ flowchart TD
   expire --> detect["detectAndRemediateStalledTasks()"]
   detect --> repair["repairSupersededWithoutResume()<br/>superseded, no resume child,<br/>finished 1m-24h ago → create resume<br/>+ settle dependents left on a superseded task"]
   repair --> health["checkWorkerHealth()<br/>busy ↔ idle (skips offline)"]
-  health --> cleanup["cleanupStaleResources()<br/>stale sessions (30m), reviewing,<br/>inbox, mentions, workflow runs,<br/>+ approval timeout + auto-cancel sweeps<br/>+ reaper: escalate unreclaimed pinned resumes (§3)<br/>+ escalateStarvedPoolTasks: zero-eligible-agent pool tasks (§4)"]
+  health --> cleanup["cleanupStaleResources()<br/>stale sessions (30m), reviewing,<br/>inbox, mentions, workflow runs,<br/>+ approval timeout + auto-cancel sweeps<br/>+ reaper: escalate unreclaimed pinned resumes (§3)<br/>+ escalateStarvedPoolTasks: zero-eligible-agent pool tasks (§4)<br/>+ expired connector codes"]
   cleanup --> assign["autoAssignPoolTasks()<br/>per-task: first idle worker satisfying<br/>isAgentEligibleForTask (§4) and<br/>poolTaskRunsOnHarness — else leave queued"]
 
   boot["Server boot (once)"] --> reboot["runRebootSweep()<br/>in_progress claimed after boot → skip<br/>else: no session OR pre-boot stale session<br/>→ failTask + retry child<br/>(pinned to original agent when recoverable, §4)<br/>never-started dependents re-pointed to the retry"]
@@ -26,10 +28,11 @@ flowchart TD
 
 - **Reboot sweep liveness predicate** (`runRebootSweep`, boot epoch parsed from `globalThis.__runId` = `run_<epochMs>`), evaluated per `in_progress` task in this order:
   1. **Claimed after boot → skip.** A task with `lastUpdatedAt >= bootEpoch - 5s` is skipped before any session lookup. `claimTask` / `startTask` stamp `lastUpdatedAt` at the `in_progress` transition and the API is the sole DB writer, so a post-boot value proves the claim (or a live worker's write) happened after this process started. It cannot be a pre-boot orphan. This is what keeps a task alive when its worker is still inside a slow provider spawn (opencode cold start exceeds the 5s sweep delay). If the task later goes quiet, the regular stalled-task sweep still covers it.
-  2. **Session live → skip.** A session is "live, skip" if `lastHeartbeatAt >= bootEpoch - 5s`, **or** if its heartbeat is younger than `STALL_THRESHOLD_STALE_HEARTBEAT_MIN` (15 min). Workers run in their own containers and outlive an API restart, and sessions heartbeat on tool calls only, so a live worker inside a long model call has no post-boot heartbeat in the first 5s. Only a session stale by the classifier's own threshold is treated as dead → auto-fail + retry child; fresher ones are left to the stalled-task sweep.
+  2. **Session live → skip.** A session is "live, skip" if `lastHeartbeatAt >= bootEpoch - 5s`, **or** if its heartbeat is younger than `STALL_THRESHOLD_STALE_HEARTBEAT_MIN` (15 min). Workers run in their own containers and outlive an API restart, and a session's heartbeat only moves on tool activity or provider output (§2 note), so a live worker inside a long model call that has not streamed yet has no post-boot heartbeat in the first 5s. Only a session stale by the classifier's own threshold is treated as dead → auto-fail + retry child; fresher ones are left to the stalled-task sweep.
   3. If `__runId` is missing/unparseable, both checks fall back to the legacy behavior (session exists → skip, no claim-time check). Never more aggressive than before.
 - **Reboot sweep dependents.** `failTask` normally cascade-fails every non-terminal task whose `dependsOn` names the failed task (`cascadeFailDependents`, reason `Blocked dependency <id8> was failed`). The reboot sweep calls it with `cascadeDependents: false` and settles the dependents itself once the retry decision is made: each never-started dependent (`draft`/`backlog`/`unassigned`/`offered`/`reviewing`/`pending`) has the swept id in `dependsOn` replaced by the retry child's id and waits on the retry (`task_dependency_repointed` log row). The dependent keeps its row, so agent, Slack fields, `followUpConfig`, priority and parent are unchanged. Anything still depending on the swept task afterwards — no retry was created (skip-type task, invalid affinity, a non-terminal child already existed, retry creation threw), or a dependent that already started — cascade-fails exactly as before. Already-terminal dependents are never touched. Every other `failTask` caller cascades as today.
 - **Worker side** (`src/commands/runner.ts`): the worker registers its active session (POST `/api/active-sessions`, keyed on the per-task runner session id) *before* it starts the provider spawn, and fills in the provider session id on `session_init`. So the window in which an `in_progress` task has no session row is one HTTP round trip, not the whole spawn. On spawn failure the worker fails the task and then removes the row.
+- **Worker slot reconciliation** (`reconcileActiveTasks` in `src/commands/runner.ts`, every main-loop iteration): a task the server holds as `cancelled` gets its session aborted. Every `RUNNER_TASK_RECONCILE_INTERVAL_MS` (default 30s) the worker also reads each active task's status; a task already terminal server-side (for example failed by the stalled-task sweep) gets its session aborted. A session that has not settled 10s after any abort is settled by the runner (`runner exited without result: ...`), so `checkCompletedProcesses` frees the slot. For a task that was terminal server-side the worker sends no `/finish` and no credential or model outcome, so the server's output and failureReason stand. The slot frees at most interval + grace after the server marks the task terminal.
 - The **boot-triage seed script** (`src/be/seed-scripts/catalog/boot-triage.ts`) mirrors this logic: it flags `in_progress` tasks that are on an offline agent OR whose session's `lastHeartbeatAt` is older than `stuckMinutes` ago (no fresh session heartbeat).
 - `autoAssignPoolTasks` and `claimTask`/`assignUnassignedTaskPending` are gated by the **routing-affinity eligibility check** (§4, `isAgentEligibleForTask`) — a pooled task tagged with a `routingAffinity` snapshot (from a resume/retry, or an explicit `requiredCapabilities` on a fresh `send-task`) can only go to a role/capability-matching agent. Untagged tasks are unaffected — assignment stays open to any idle (non-lead) worker, exactly as before. The pool paths (`autoAssignPoolTasks` and the poll auto-claim scan) also apply `poolTaskRunsOnHarness(task, harness)` (`src/be/model-validation.ts`): a task that pins a `model` the worker's harness cannot run is skipped for that worker and waits for a compatible one ([model-tiers.md § Harness compatibility](./model-tiers.md)). `autoAssignPoolTasks` **does** skip idle workers whose `emptyPollCount >= MAX_EMPTY_POLLS` (the poll gate) — assigning to them would just have them exit on their next poll. The filter reads `emptyPollCount` off the rows `getIdleWorkersWithCapacity()` already returns (no per-worker re-query). Note the poll gate is cleared on a genuine `waiting_for_credentials -> ready` recovery (`updateAgentCredentialState`) and on re-register, but **not** by routine post-task `ready:true` credential reports.
 - `checkWorkerHealth` only flips `busy↔idle` (it pre-filters `offline`) and never sets `offline`. A successful `/api/poll` dispatch updates the agent to `busy` in the same transaction that starts a pre-assigned task or claims a pool task; the worker-only `poll-task` tool does the same for its direct pending-task path. The heartbeat sweep remains the reconciliation backstop for any other task-state transition that leaves `agents.status` stale. Leads can become `busy` while running a directly assigned task, but remain structurally excluded from pool assignment (`getIdleWorkersWithCapacity` and the pool dispatch query filter `isLead=0`). `offline` has two writers: the graceful `POST /close` handler (`src/http/core.ts`), and — only when `MULTI_RUNTIME_ENABLED` is enabled — the stale-runtime expiry in §1a. With the flag explicitly off, a hard-crashed (SIGKILL) worker is still never auto-offlined.
@@ -92,6 +95,10 @@ routes to a workflow port. The counts land in `staleCleanup.approvalTimedOut`
 and `staleCleanup.approvalAutoCancelled` and add to `stale_cleanup=` in the
 sweep log line.
 
+The last cleanup step deletes `connector_codes` rows that expired more than
+1 hour ago (`deleteExpiredConnectorCodes` in `src/be/connector-codes.ts`). The
+count lands in `staleCleanup.connectorCodes` and adds to `stale_cleanup=`.
+
 ## 1a. Runtime liveness (`MULTI_RUNTIME_ENABLED` only)
 
 With multi-runtime mode enabled, one logical agent may be served by several
@@ -126,9 +133,9 @@ is never expired):
 - Expiry retires stale runtimes and marks any agent with no live runtime left
   `offline`. It deliberately does **not** delete active sessions: runtime
   liveness answers "may this process acquire NEW work?", not "is its current
-  work dead?". Sessions are heartbeated by tool activity only (§2 note), so a
-  healthy worker inside a long model call or shell command can be quiet past
-  the runtime cutoff — and runtime rows freeze entirely while the flag is off,
+  work dead?". A session's heartbeat only moves on tool activity or provider output (§2 note), so a
+  healthy worker inside a long shell command or a model call that is not
+  streaming can be quiet past the runtime cutoff — and runtime rows freeze entirely while the flag is off,
   so re-enabling it must not read every healthy worker as crashed. Crash
   classification stays owned by the stalled-task classifier (§2 Case B:
   session heartbeat **and** task both past its stronger threshold), which
@@ -147,9 +154,9 @@ delayed ping from a retired or unknown runtime cannot resurrect it.
 
 Startup session cleanup is disabled in this mode: several processes share one
 agent id, and a booting worker has no evidence that distinguishes its crashed
-predecessor's session from a live-but-quiet sibling's (sessions heartbeat on
-tool activity only, and a live worker's runtime may have no row at all during
-the activation window). A crashed boot's task is reclaimed by the stalled-task
+predecessor's session from a live-but-quiet sibling's (a session's heartbeat
+only moves on tool activity or provider output, and a live worker's runtime may
+have no row at all during the activation window). A crashed boot's task is reclaimed by the stalled-task
 classifier (§2 Case B) once both its session heartbeat and the task go stale;
 the sweep's stale-session cleanup backstops leftover rows. With the flag off,
 boot cleanup keeps its legacy behavior (one process per agent, so every
@@ -179,13 +186,26 @@ flowchart TD
 ```
 
 - Candidate set = `getStalledInProgressTasks(STALL_THRESHOLD_NO_SESSION_MIN)` → `status='in_progress' AND lastUpdatedAt > 5m`. Tasks in `pending`/`offered` are **not** seen by this sweep. A candidate with a pending steering message newer than `STEERING_STALL_GRACE_MIN` is deferred for that sweep; once the bounded grace expires, normal classification and remediation resume.
-- An **active_session** = one worker-*run* process for a task (`active_sessions`, `UNIQUE(taskId)`), created lazily *after* the provider process spawns, heartbeated by **tool activity** (throttled ~5s; no wall-clock ping between tool calls). "No active session" is AND-gated with `lastUpdatedAt > 5m`, so it means *"no live run **and** no task progress in 5 min."* It can false-positive on a long-but-quiet live worker; the resume-generation budget (`MAX_RESUME_GENERATIONS`) bounds the blast radius.
+- An **active_session** = one worker-*run* process for a task (`active_sessions`, `UNIQUE(taskId)`), created lazily *after* the provider process spawns, kept alive by two inputs to `active_sessions.lastHeartbeatAt`: **tool activity** (`PUT /api/active-sessions/heartbeat/{taskId}`, throttled ~5s worker-side) and **provider output** (`POST /api/session-logs` with a `taskId`: `refreshActiveSessionOnActivity` refreshes that task's own session row, at most once per 30s, via a `lastHeartbeatAt < cutoff` guard on the UPDATE). Provider output covers every harness and a long reasoning stream with no tool calls; it is task-scoped, so it never refreshes another task's session. The one wall-clock ping is scoped to background work: a Claude session (CLI or SDK transport) that has at least one non-ambient task in its latest `system/background_tasks_changed` set PUTs the heartbeat every 60s (`ClaudeBackgroundKeepalive`, `src/providers/claude-background-keepalive.ts`), so a turn that ended waiting on a `run_in_background` job stays live; the ping stops when the set empties, the session ends, or the session has emitted nothing for 2h. Any other silent worker (no tool call, no output, no background task) still goes stale. "No active session" is AND-gated with `lastUpdatedAt > 5m`, so it means *"no live run **and** no task progress in 5 min."* It can false-positive on a long-but-quiet live worker; the resume-generation budget (`MAX_RESUME_GENERATIONS`) bounds the blast radius.
 - The classifier emits `no-session`, `stale-session`, or `fresh-stalled` only after a task crosses its existing threshold. Extensions cannot change thresholds or classify a healthy task as stalled.
 - `decideRemediation` keeps the default recovery policy. It selects `fail` for workflow steps, excluded task types, existing resume children, and exhausted resume budgets. It otherwise selects `supersede-resume`. A fresh-session stall defaults to `record`.
 - `pre.heartbeat.remediate` receives the task, optional session, classification, proposed action, reason, and age values before any remediation write. An extension can select `supersede-resume`, `fail`, or `record`. A block records the stalled task and an `extensionSkipped` finding, then performs no remediation during that sweep. An invalid action logs a scrubbed warning and keeps the original proposal.
 - Thresholds (env-overridable): `STALL_THRESHOLD_NO_SESSION_MIN=5` (`HEARTBEAT_STALL_NO_SESSION_MIN`), `STALL_THRESHOLD_STALE_HEARTBEAT_MIN=15`, `STALL_THRESHOLD_MINUTES=30`, `STEERING_STALL_GRACE_MIN=5` (`HEARTBEAT_STEERING_GRACE_MIN`), `STALE_CLEANUP_THRESHOLD_MINUTES=30`.
 
-Task creation records the origin of each routing reason as `routingSource`: `declared` for a caller-supplied reason, `engine_default` for reasons chosen by recovery, scheduling, integration, or other engine paths. Historical rows remain unknown (SQL NULL, omitted from task responses). MCP `send-task` calls with an explicit `agentId` require a `routingNote` of at least 10 characters after trim and at most 200 characters; REST creation keeps notes optional.
+Task creation records each routing reason's origin as `routingSource`.
+Caller-supplied reasons use `declared`.
+Recovery, scheduling, integration, and other engine routes use `engine_default`.
+Historical rows remain unknown (SQL NULL, omitted from task responses).
+Owner MCP `send-task` calls with an explicit `agentId` require a trimmed `routingNote` of 10 to 200 characters.
+REST creation keeps notes optional.
+
+Authenticated `/mcp-user` sends create `pending` tasks assigned directly to an online Lead, with `engine_default` attribution.
+A busy Lead keeps these tasks queued until capacity returns.
+Poll checks capacity and the requester's budget before starting each task.
+The send call creates no task when no Lead is online.
+User arguments and extensions cannot change the Lead assignment or convert it into an offer.
+This assignment adds no inherited Lead-only affinity, so the Lead can delegate child tasks to workers.
+The user MCP exposes no backlog actions.
 
 ## 3. Protected resume routing heuristic (`remediateCrashedWorkerTask` / shutdown → `createResumeFollowUp` → reaper)
 
@@ -208,6 +228,14 @@ A pin **never reclaimed within `HEARTBEAT_RESUME_PIN_GRACE_MIN`** (the agent tha
 ### Pseudocode (current)
 
 ```text
+# session.lastHeartbeatAt (the only session-liveness input) is written by:
+#   PUT  /api/active-sessions/heartbeat/{taskId}   tool activity
+#   POST /api/session-logs {taskId}                provider output, any harness;
+#        UPDATE active_sessions SET lastHeartbeatAt = now
+#        WHERE taskId = {taskId} AND lastHeartbeatAt < now - 30s   # task-scoped, throttled
+#   PUT  /api/active-sessions/heartbeat/{taskId}   every 60s while a Claude session has live
+#        non-ambient background tasks and emitted output within the last 2h
+
 # stalled-task detector, after pending-steering grace:
 if task has pending steering newer than STEERING_STALL_GRACE_MIN:
     defer this sweep
@@ -465,6 +493,66 @@ A task's `followUpConfig` (its creator's `onCompleted` / `onFailed` / `disabled`
 
 ---
 
+## 5a. API drain: handoff before the API stops
+
+On a deploy the orchestrator stops the API and the workers together. A worker's SIGTERM handoff (`POST /api/tasks/{id}/supersede`, reason `graceful_shutdown`) then runs after the API is gone, fails, and leaves the task `in_progress` for the heartbeat sweep (`crash_recovery`) or the reboot sweep. The drain moves the handoff earlier, while the API still serves. Owner code: `src/be/api-drain.ts`, `src/utils/api-drain.ts`, `shutdown()` in `src/http/index.ts`, and the drain handling in `src/commands/runner.ts`.
+
+```mermaid
+sequenceDiagram
+  participant O as Orchestrator
+  participant A as API
+  participant W as Worker (task in flight)
+  O->>A: SIGTERM
+  A->>A: stop scheduler, heartbeat, queue alarm<br/>draining = true, snapshot live in_progress tasks
+  W->>A: POST /ping (every loop iteration)
+  A-->>W: 204 + X-Swarm-Draining: 1
+  W->>A: POST /api/tasks/{id}/supersede (graceful_shutdown)
+  A-->>W: 200 resumed (resume follow-up pinned to the agent)
+  W->>W: abort session, mark task server-terminal, take no new work
+  A->>A: snapshot tasks all left in_progress (or API_DRAIN_MAX_MS passed)
+  A->>A: close as before (transports, HTTP server, DB), exit 0
+  O->>W: SIGTERM (no in-flight tasks: exits at once)
+```
+
+Pseudocode (current):
+
+```
+# API, on SIGTERM / SIGINT, after stopping scheduler / heartbeat / queue alarm:
+cap = API_DRAIN_MAX_MS (default 0 = skip the whole drain; unset, empty, or invalid also means 0; max 120000)
+draining = true                                # process-local; a new API process starts false
+ids = in_progress tasks whose agent is not offline and whose agents.lastUpdatedAt is < 30s old
+loop until count(ids still in_progress) == 0 or cap passed: sleep 500ms
+# then the existing shutdown sequence
+
+# While draining:
+#   /api/poll          -> {trigger: null}  (no offer, assignment, pool claim, channel_activity)
+#   poll-task (MCP)    -> "draining", not an empty poll
+#   task-action claim / accept -> refused
+#   every HTTP response carries X-Swarm-Draining: 1
+#   creating tasks, supersede, store-progress and the rest keep working
+
+# Worker main loop, every iteration:
+draining = ping answered with X-Swarm-Draining: 1      # 5xx or no answer keeps the last state
+if draining:
+  for each active task whose session has not settled, up to 3 calls per task:
+    supersede(task, graceful_shutdown)
+    resumed | workflow-failed -> task.serverTerminalStatus = ..., abort session  # slot freed, no finish call
+    alreadyFinished | rejected -> leave the session on its normal path; never retried
+    call failed (5xx, network) -> task keeps running; the SIGTERM handler is still the fallback
+  skip polling                                            # takes no new work
+else: poll as usual                                       # also the path against an API that never drains
+# SIGTERM handler is unchanged except it skips tasks already server-terminal.
+```
+
+Notes:
+
+- The wait only covers tasks held by workers that pinged in the last 30s. A silent worker's tasks belong to the heartbeat sweep.
+- Workers older than this feature ignore the header, so the API waits the full cap when one holds a task.
+- The drain is opt-in. Enabled, it also fires on an API-only restart (pm2, a Helm roll of the API Deployment, `docker restart`): live workers supersede their in-flight tasks, which would otherwise keep running. Set it only where the API and the workers stop together.
+- `API_DRAIN_MAX_MS` plus the API's close time must stay under the orchestrator's stop grace period for the API.
+
+---
+
 ## Quick reference: env knobs
 
 All of these are read **dynamically** — `heartbeat.ts` exposes them as getter
@@ -492,12 +580,14 @@ Rollback switches accept `0`/`false` interchangeably (both parse through
 | Stale-resource cleanup | 30 min | `HEARTBEAT_STALE_CLEANUP_MIN` |
 | Runtime liveness window (§1a) | 5 min | `RUNTIME_STALE_THRESHOLD_MIN` |
 | Same-agent liveness window | 30s | `WORKER_LIVENESS_WINDOW_SECONDS` |
+| Worker active-task reconcile cadence (worker env, read at worker start) | 30s | `RUNNER_TASK_RECONCILE_INTERVAL_MS` |
 | Resume-generation cap | 3 | `HEARTBEAT_MAX_RESUME_GENERATIONS` |
 | Resume-pin grace, reaper (`0` = off) | 10 min | `HEARTBEAT_RESUME_PIN_GRACE_MIN` |
 | Same-agent crash pin, rollback (`0` = off) | on | `HEARTBEAT_PIN_CRASH_RESUME` |
 | Same-agent graceful-shutdown pin, rollback (`0` = off) | on | `HEARTBEAT_PIN_GRACEFUL_RESUME` |
 | Routing-affinity pool eligibility gate, rollback (`0` = off) | on | `POOL_AFFINITY_ENFORCEMENT` |
 | Pool-starvation escalation grace | 15 min | `POOL_AFFINITY_ESCALATION_MIN` |
+| API drain cap on SIGTERM (§5a; opt-in, `0` = off, max 120s) | off (`0`) | `API_DRAIN_MAX_MS` |
 | `autoAssignPoolTasks` pool-scan page size | 50 | `HEARTBEAT_POOL_SCAN_BATCH_SIZE` |
 | `autoAssignPoolTasks` pool-scan hard cap (rows/sweep) | 500 | `HEARTBEAT_POOL_SCAN_CAP` |
 | `getUnassignedTaskIdsForAgent` eligibility-scan page size | 25 | `ELIGIBILITY_SCAN_BATCH_SIZE` |

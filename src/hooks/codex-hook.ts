@@ -13,9 +13,14 @@
  *
  *   - SessionStart / PostToolUse → `hookSpecificOutput.additionalContext`
  *     (verified to reach the model at codex-cli 0.146.0; PreToolUse drops
- *     additionalContext upstream, so it is deliberately not registered).
+ *     additionalContext upstream, so it never carries steering).
  *   - Stop → `{"decision":"block","reason":...}` so a session about to end
  *     still receives the message and continues to act on it.
+ *
+ * PreToolUse runs the PR body leak guard (`pr-body-guard.ts`) in every
+ * session mode, app-server included. A block exits with code 2 and writes
+ * the reason to stderr, which codex-cli 0.160.0 turns into
+ * "Command blocked by PreToolUse hook: <reason>".
  *
  * One-shot guarantee: a message is included in hook output only after its
  * `/delivered` POST succeeded, so a message is injected at most once. A
@@ -28,12 +33,16 @@ import type { SteeringMessage } from "../types";
 import { getApiKey } from "../utils/api-key";
 import { getMcpBaseUrl } from "../utils/constants";
 import { isSteeringEnabled } from "../utils/steering-enabled";
+import { guardGhPrBody, type PrBodyGuardDeps } from "./pr-body-guard";
 
 const FETCH_TIMEOUT_MS = 5_000;
 
 export interface CodexHookMessage {
   hook_event_name?: string;
   stop_hook_active?: boolean;
+  cwd?: string;
+  tool_name?: string;
+  tool_input?: unknown;
 }
 
 export interface CodexHookConfig {
@@ -144,12 +153,27 @@ export async function handleCodexHookEvent(
   };
 }
 
+/** PreToolUse: the PR body leak guard's block reason, or null to allow the call. */
+export async function codexPreToolUseBlock(
+  msg: CodexHookMessage,
+  deps?: PrBodyGuardDeps,
+): Promise<string | null> {
+  if (msg.hook_event_name !== "PreToolUse") return null;
+  return guardGhPrBody(msg.tool_input, msg.cwd ?? process.cwd(), deps);
+}
+
 /** stdin/stdout entry point used by the `codex-hook` CLI command. */
 export async function handleCodexHook(): Promise<void> {
   let msg: CodexHookMessage;
   try {
     msg = (await Bun.stdin.json()) as CodexHookMessage;
   } catch {
+    return;
+  }
+  const block = await codexPreToolUseBlock(msg);
+  if (block) {
+    console.error(block);
+    process.exitCode = 2;
     return;
   }
   try {

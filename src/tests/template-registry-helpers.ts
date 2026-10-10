@@ -17,6 +17,7 @@
 export async function restoreAllTemplateDefinitions(): Promise<void> {
   const ts = Date.now();
   await import(`../agentmail/templates?t=${ts}`);
+  await import(`../comb/templates?t=${ts}`);
   await import(`../commands/templates?t=${ts}`);
   await import(`../github/templates?t=${ts}`);
   await import(`../gitlab/templates?t=${ts}`);

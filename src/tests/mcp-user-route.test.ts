@@ -9,17 +9,20 @@ import {
 import type { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import {
   closeDb,
+  completeTask,
   createAgent,
   createTaskExtended,
   createUser,
   getDbClient,
   getTaskById,
   initDb,
+  startTask,
 } from "../be/db";
 import { type IdentityActor, mintToken, revokeToken } from "../be/users";
 import { handleCore } from "../http/core";
 import { handleMcp } from "../http/mcp";
 import { handleMcpUser } from "../http/mcp-user";
+import { handlePoll } from "../http/poll";
 import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-mcp-user-route.sqlite";
@@ -80,6 +83,7 @@ beforeEach(async () => {
   await client.run("DELETE FROM user_tokens");
   await client.run("DELETE FROM agent_tasks");
   await client.run("DELETE FROM users");
+  await client.run("DELETE FROM agents");
 });
 
 function endpoint(path = "/mcp-user"): string {
@@ -123,6 +127,32 @@ async function mcpPost(
   const text = await response.text();
   const payload = text ? parseMcpPayload(text) : null;
   return { response, payload, text };
+}
+
+async function callPoll(agentId: string): Promise<{
+  status: number;
+  body: { trigger: { type: string; [key: string]: unknown } | null } | { error: string };
+}> {
+  let status = 200;
+  let bodyStr = "";
+  const req = {
+    method: "GET",
+    url: "/api/poll",
+    headers: { "x-agent-id": agentId },
+  } as unknown as Parameters<typeof handlePoll>[0];
+  const res = {
+    setHeader() {},
+    writeHead(code: number) {
+      status = code;
+    },
+    end(body?: string) {
+      bodyStr = body ?? "";
+    },
+  } as unknown as Parameters<typeof handlePoll>[1];
+
+  const handled = await handlePoll(req, res, ["api", "poll"], new URLSearchParams(), agentId);
+  if (!handled) throw new Error("handlePoll did not handle the request");
+  return { status, body: bodyStr ? JSON.parse(bodyStr) : { trigger: null } };
 }
 
 async function initialize(
@@ -237,7 +267,7 @@ describe("/mcp-user auth and tool surface", () => {
     expect(response.status).toBe(401);
   });
 
-  test("valid active-user token initializes and tools/list returns exactly the 6 task tools", async () => {
+  test("valid active-user token initializes and exposes the narrow send-task schema", async () => {
     const user = await createUser({ name: "Active User" });
     const token = (await mintToken(user.id, "active", ACTOR)).plaintext;
     const sessionId = await initialize(token);
@@ -250,23 +280,106 @@ describe("/mcp-user auth and tool surface", () => {
     );
 
     expect(response.status).toBe(200);
-    const result = payload as { result: { tools: Array<{ name: string }> } };
+    const result = payload as {
+      result: {
+        tools: Array<{ name: string; inputSchema: { properties?: Record<string, unknown> } }>;
+      };
+    };
     const names = result.result.tools.map((tool) => tool.name).sort();
     expect(names).toEqual(
-      [
-        "cancel-task",
-        "get-task-details",
-        "get-tasks",
-        "send-task",
-        "steer-task",
-        "task-action",
-      ].sort(),
+      ["cancel-task", "get-task-details", "get-tasks", "send-task", "steer-task"].sort(),
+    );
+    const sendTask = result.result.tools.find((tool) => tool.name === "send-task");
+    expect(Object.keys(sendTask?.inputSchema.properties ?? {}).sort()).toEqual(
+      ["model", "modelTier", "outputSchema", "priority", "tags", "task", "taskType"].sort(),
     );
   });
 
-  test("send-task over /mcp-user records requestedByUserId and get-tasks returns only that user's tasks", async () => {
+  test("send-task assigns user work to the Lead with internal routing proof", async () => {
+    const lead = await createAgent({
+      id: "10000000-0000-4000-8000-000000000001",
+      name: "User MCP Lead",
+      isLead: true,
+      status: "idle",
+    });
+    const user = await createUser({ name: "Lead Requester" });
+    const token = (await mintToken(user.id, "lead-route", ACTOR)).plaintext;
+    const sessionId = await initialize(token);
+    await notifyInitialized(token, sessionId);
+
+    const { response, payload } = await mcpPost(
+      token,
+      {
+        jsonrpc: "2.0",
+        id: 3,
+        method: "tools/call",
+        params: { name: "send-task", arguments: { task: "route this through the lead" } },
+      },
+      sessionId,
+    );
+
+    expect(response.status).toBe(200);
+    const result = payload as { result: { structuredContent: { task: { id: string } } } };
+    const task = await getTaskById(result.result.structuredContent.task.id);
+    expect(task).toMatchObject({
+      status: "pending",
+      agentId: lead.id,
+      requestedByUserId: user.id,
+      routingReason: "skill",
+      routingSource: "engine_default",
+      routingNote: "User MCP ingress assigns new work to the Lead for delegation.",
+    });
+    expect(task?.offeredTo).toBeUndefined();
+    expect(task?.routingAffinity).toBeUndefined();
+  });
+
+  test("send-task queues for a busy Lead and poll starts it after capacity returns", async () => {
+    const lead = await createAgent({
+      id: "10000000-0000-4000-8000-000000000002",
+      name: "Busy User MCP Lead",
+      isLead: true,
+      status: "idle",
+      maxTasks: 1,
+    });
+    const activeTask = await createTaskExtended("existing lead work", { agentId: lead.id });
+    expect((await startTask(activeTask.id))?.status).toBe("in_progress");
+    const user = await createUser({ name: "Busy Lead Requester" });
+    const token = (await mintToken(user.id, "busy-lead-route", ACTOR)).plaintext;
+    const sessionId = await initialize(token);
+    await notifyInitialized(token, sessionId);
+
+    const { payload } = await mcpPost(
+      token,
+      {
+        jsonrpc: "2.0",
+        id: 3,
+        method: "tools/call",
+        params: { name: "send-task", arguments: { task: "wait for the busy lead" } },
+      },
+      sessionId,
+    );
+
+    const result = payload as { result: { structuredContent: { task: { id: string } } } };
+    const task = await getTaskById(result.result.structuredContent.task.id);
+    expect(task).toMatchObject({ status: "pending", agentId: lead.id });
+
+    const blockedPoll = await callPoll(lead.id);
+    expect(blockedPoll.status).toBe(200);
+    if ("error" in blockedPoll.body) throw new Error("unexpected poll error");
+    expect(blockedPoll.body.trigger).toBeNull();
+    expect((await getTaskById(task!.id))?.status).toBe("pending");
+
+    await completeTask(activeTask.id, "capacity returned");
+    const readyPoll = await callPoll(lead.id);
+    expect(readyPoll.status).toBe(200);
+    if ("error" in readyPoll.body) throw new Error("unexpected poll error");
+    expect(readyPoll.body.trigger?.type).toBe("task_assigned");
+    expect((readyPoll.body.trigger as { taskId: string }).taskId).toBe(task?.id);
+    expect((await getTaskById(task!.id))?.status).toBe("in_progress");
+  });
+
+  test("send-task refuses with no Lead and creates no task", async () => {
     const user = await createUser({ name: "Task Requester" });
-    const otherUser = await createUser({ name: "Other Task Requester" });
     const token = (await mintToken(user.id, "task", ACTOR)).plaintext;
     const sessionId = await initialize(token);
     await notifyInitialized(token, sessionId);
@@ -283,9 +396,81 @@ describe("/mcp-user auth and tool surface", () => {
     );
 
     expect(response.status).toBe(200);
-    const result = payload as { result: { structuredContent: { task: { id: string } } } };
-    const taskId = result.result.structuredContent.task.id;
-    expect((await getTaskById(taskId))?.requestedByUserId).toBe(user.id);
+    const result = payload as {
+      result: { isError?: boolean; structuredContent: { success: boolean; message: string } };
+    };
+    expect(result.result.isError).toBe(true);
+    expect(result.result.structuredContent).toMatchObject({
+      success: false,
+      message: "No online Lead is available. Start or register a Lead before sending a task.",
+    });
+    expect(
+      (await getDbClient().get<{ count: number }>("SELECT COUNT(*) AS count FROM agent_tasks"))
+        ?.count,
+    ).toBe(0);
+  });
+
+  test("send-task refuses with only an offline Lead and creates no task", async () => {
+    await createAgent({
+      id: "10000000-0000-4000-8000-000000000004",
+      name: "Offline User MCP Lead",
+      isLead: true,
+      status: "offline",
+    });
+    const user = await createUser({ name: "Offline Lead Requester" });
+    const token = (await mintToken(user.id, "offline-lead", ACTOR)).plaintext;
+    const sessionId = await initialize(token);
+    await notifyInitialized(token, sessionId);
+
+    const { payload } = await mcpPost(
+      token,
+      {
+        jsonrpc: "2.0",
+        id: 3,
+        method: "tools/call",
+        params: { name: "send-task", arguments: { task: "do not queue without a Lead" } },
+      },
+      sessionId,
+    );
+
+    const result = payload as {
+      result: { isError?: boolean; structuredContent: { success: boolean; message: string } };
+    };
+    expect(result.result.isError).toBe(true);
+    expect(result.result.structuredContent.success).toBe(false);
+    expect(
+      (await getDbClient().get<{ count: number }>("SELECT COUNT(*) AS count FROM agent_tasks"))
+        ?.count,
+    ).toBe(0);
+  });
+
+  test("send-task preserves requester ownership and get-tasks filters foreign work", async () => {
+    const lead = await createAgent({ name: "Ownership Lead", isLead: true, status: "idle" });
+    const user = await createUser({ name: "Task Requester" });
+    const otherUser = await createUser({ name: "Other Task Requester" });
+    const token = (await mintToken(user.id, "task-ownership", ACTOR)).plaintext;
+    const sessionId = await initialize(token);
+    await notifyInitialized(token, sessionId);
+
+    const sent = await mcpPost(
+      token,
+      {
+        jsonrpc: "2.0",
+        id: 3,
+        method: "tools/call",
+        params: { name: "send-task", arguments: { task: "owned user mcp task" } },
+      },
+      sessionId,
+    );
+    const sentResult = sent.payload as {
+      result: { structuredContent: { task: { id: string } } };
+    };
+    const taskId = sentResult.result.structuredContent.task.id;
+    expect(await getTaskById(taskId)).toMatchObject({
+      status: "pending",
+      agentId: lead.id,
+      requestedByUserId: user.id,
+    });
     const foreignTask = await createTaskExtended("foreign user mcp task", {
       requestedByUserId: otherUser.id,
     });
@@ -310,6 +495,63 @@ describe("/mcp-user auth and tool surface", () => {
     expect(ids).toContain(taskId);
     expect(ids).not.toContain(foreignTask.id);
     expect(listResult.result.structuredContent.tasks).toHaveLength(1);
+  });
+
+  test("send-task ignores injected routing fields and keeps internal routing authoritative", async () => {
+    const lead = await createAgent({
+      id: "10000000-0000-4000-8000-000000000003",
+      name: "Authoritative User MCP Lead",
+      isLead: true,
+      status: "idle",
+    });
+    const attacker = await createAgent({
+      id: "20000000-0000-4000-8000-000000000001",
+      name: "Injected Target",
+      isLead: false,
+      status: "idle",
+    });
+    const user = await createUser({ name: "Injection Requester" });
+    const foreignUser = await createUser({ name: "Foreign Requester" });
+    const token = (await mintToken(user.id, "routing-injection", ACTOR)).plaintext;
+    const sessionId = await initialize(token);
+    await notifyInitialized(token, sessionId);
+
+    const { response, payload } = await mcpPost(
+      token,
+      {
+        jsonrpc: "2.0",
+        id: 3,
+        method: "tools/call",
+        params: {
+          name: "send-task",
+          arguments: {
+            task: "keep server routing authoritative",
+            agentId: attacker.id,
+            routingReason: "human_pinned",
+            routingNote: "Injected routing note must not survive.",
+            offerMode: false,
+            leadOnly: true,
+            allowDuplicate: true,
+            requestedByUserId: foreignUser.id,
+          },
+        },
+      },
+      sessionId,
+    );
+
+    expect(response.status).toBe(200);
+    const result = payload as { result: { structuredContent: { task: { id: string } } } };
+    const task = await getTaskById(result.result.structuredContent.task.id);
+    expect(task).toMatchObject({
+      status: "pending",
+      agentId: lead.id,
+      requestedByUserId: user.id,
+      routingReason: "skill",
+      routingSource: "engine_default",
+      routingNote: "User MCP ingress assigns new work to the Lead for delegation.",
+    });
+    expect(task?.offeredTo).toBeUndefined();
+    expect(task?.routingAffinity?.leadOnly).not.toBe(true);
   });
 
   test("owner /mcp initialize requires a known X-Agent-ID", async () => {
@@ -402,5 +644,138 @@ describe("/mcp-user auth and tool surface", () => {
     const result = payload as { result: { tools: Array<{ name: string }> } };
     const names = result.result.tools.map((tool) => tool.name);
     expect(names).toContain("send-task");
+  });
+});
+
+describe("MCP unknown-session handling (spec: 404 so clients re-initialize)", () => {
+  const UNKNOWN_SESSION = "00000000-0000-4000-8000-0000000000aa";
+  const NOT_FOUND_BODY = {
+    jsonrpc: "2.0",
+    error: { code: -32001, message: "Session not found" },
+    id: null,
+  };
+  const NO_SESSION_BODY = {
+    jsonrpc: "2.0",
+    error: { code: -32000, message: "Bad Request: No valid session ID provided" },
+    id: null,
+  };
+  const toolsList = { jsonrpc: "2.0", id: 2, method: "tools/list", params: {} };
+
+  async function userToken(): Promise<string> {
+    const user = await createUser({ name: "Session 404 User" });
+    return (await mintToken(user.id, "s404", ACTOR)).plaintext;
+  }
+
+  async function agentHeaders(): Promise<Record<string, string>> {
+    const agent = await createAgent({ name: "Session 404 Agent", isLead: false, status: "idle" });
+    return { "X-Agent-ID": agent.id };
+  }
+
+  async function bareRequest(
+    method: "GET" | "DELETE",
+    path: string,
+    headers: Record<string, string>,
+  ): Promise<{ status: number; contentType: string | null; json: unknown }> {
+    const response = await fetch(endpoint(path), { method, headers });
+    return {
+      status: response.status,
+      contentType: response.headers.get("content-type"),
+      json: await response.json(),
+    };
+  }
+
+  test("/mcp-user POST with unknown session id returns 404 and -32001", async () => {
+    const token = await userToken();
+    const { response, payload } = await mcpPost(token, toolsList, UNKNOWN_SESSION);
+    expect(response.status).toBe(404);
+    expect(response.headers.get("content-type")).toContain("application/json");
+    expect(payload).toEqual(NOT_FOUND_BODY);
+  });
+
+  test("/mcp-user GET and DELETE with unknown session id return 404", async () => {
+    const token = await userToken();
+    for (const method of ["GET", "DELETE"] as const) {
+      const result = await bareRequest(method, "/mcp-user", {
+        Authorization: `Bearer ${token}`,
+        "mcp-session-id": UNKNOWN_SESSION,
+      });
+      expect(result.status).toBe(404);
+      expect(result.contentType).toContain("application/json");
+      expect(result.json).toEqual(NOT_FOUND_BODY);
+    }
+  });
+
+  test("/mcp-user POST without session id and non-initialize body returns 400 with SDK wording", async () => {
+    const token = await userToken();
+    const { response, payload } = await mcpPost(token, toolsList);
+    expect(response.status).toBe(400);
+    expect(payload).toEqual(NO_SESSION_BODY);
+  });
+
+  test("/mcp-user GET and DELETE without session id return 400 with JSON body", async () => {
+    const token = await userToken();
+    for (const method of ["GET", "DELETE"] as const) {
+      const result = await bareRequest(method, "/mcp-user", { Authorization: `Bearer ${token}` });
+      expect(result.status).toBe(400);
+      expect(result.json).toEqual(NO_SESSION_BODY);
+    }
+  });
+
+  test("/mcp-user initialize still works", async () => {
+    const token = await userToken();
+    const sessionId = await initialize(token);
+    expect(sessionId.length).toBeGreaterThan(0);
+  });
+
+  test("/mcp POST with unknown session id returns 404 and -32001", async () => {
+    const headers = await agentHeaders();
+    const { response, payload } = await mcpPost(
+      API_KEY,
+      toolsList,
+      UNKNOWN_SESSION,
+      "/mcp",
+      headers,
+    );
+    expect(response.status).toBe(404);
+    expect(response.headers.get("content-type")).toContain("application/json");
+    expect(payload).toEqual(NOT_FOUND_BODY);
+  });
+
+  test("/mcp GET and DELETE with unknown session id return 404", async () => {
+    const headers = await agentHeaders();
+    for (const method of ["GET", "DELETE"] as const) {
+      const result = await bareRequest(method, "/mcp", {
+        Authorization: `Bearer ${API_KEY}`,
+        "mcp-session-id": UNKNOWN_SESSION,
+        ...headers,
+      });
+      expect(result.status).toBe(404);
+      expect(result.json).toEqual(NOT_FOUND_BODY);
+    }
+  });
+
+  test("/mcp POST without session id and non-initialize body returns 400 with SDK wording", async () => {
+    const headers = await agentHeaders();
+    const { response, payload } = await mcpPost(API_KEY, toolsList, undefined, "/mcp", headers);
+    expect(response.status).toBe(400);
+    expect(payload).toEqual(NO_SESSION_BODY);
+  });
+
+  test("/mcp GET and DELETE without session id return 400 with JSON body", async () => {
+    const headers = await agentHeaders();
+    for (const method of ["GET", "DELETE"] as const) {
+      const result = await bareRequest(method, "/mcp", {
+        Authorization: `Bearer ${API_KEY}`,
+        ...headers,
+      });
+      expect(result.status).toBe(400);
+      expect(result.json).toEqual(NO_SESSION_BODY);
+    }
+  });
+
+  test("/mcp initialize still works", async () => {
+    const headers = await agentHeaders();
+    const sessionId = await initialize(API_KEY, "/mcp", headers);
+    expect(sessionId.length).toBeGreaterThan(0);
   });
 });

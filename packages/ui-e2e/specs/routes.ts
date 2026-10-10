@@ -43,6 +43,8 @@ export const routes: Route[] = [
   { path: "/memory", name: "memory" },
   { path: "/pages", name: "pages" },
   { path: "/apps", name: "apps" },
+  // The E2E API has no agent-fs, so Comb renders its "Comb is off" state.
+  { path: "/file", name: "comb" },
   { path: "/agents/:id", name: "agents-id", needs: "agent" },
   { path: "/tasks/:id", name: "tasks-id", needs: "task" },
   { path: "/sessions/:rootTaskId", name: "sessions-root-task-id", needs: "task" },

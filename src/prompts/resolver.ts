@@ -132,7 +132,7 @@ async function resolveTemplateViaHttp(
  * Fallback: resolve from code defaults only (no DB, no HTTP).
  * Used when both DB and HTTP are unavailable.
  */
-function resolveTemplateFromCode(
+export function resolveTemplateFromCode(
   eventType: string,
   variables: Record<string, unknown>,
 ): ResolveResult {

@@ -119,6 +119,7 @@ export class ValidateExecutor extends BaseExecutor<
       const provider = createOpenAI({
         baseURL: llmConfig.baseURL,
         apiKey: llmConfig.apiKey,
+        headers: llmConfig.headers,
       });
 
       const { object } = await generateObject({

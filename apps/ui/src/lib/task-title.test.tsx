@@ -32,4 +32,41 @@ describe("taskListTitle", () => {
   test("leaves ordinary prompts alone", () => {
     expect(taskListTitle({ task: "Summarize the week" })).toBe("Summarize the week");
   });
+
+  test("a Slack prompt reads as the question, with no mention tokens", () => {
+    const task = `<@U08NR6QD6CS|Taras>: <@U0A3YMSRKJB> (that's you) what are the events we support via the extensions of the swarm?
+
+<thread_context>
+Thread in #swarm-dev (3 earlier messages)
+- Taras: we should make the extension system the default way to hook into the swarm
+</thread_context>
+
+Reply in the thread.`;
+    expect(taskListTitle({ task })).toBe(
+      "What are the events we support via the extensions of the swarm?",
+    );
+  });
+
+  test("a thread block before the message is skipped", () => {
+    expect(
+      taskListTitle({
+        task: "<thread_context>\n<@U1|Ana>: it broke\n</thread_context>\n\n<@U1|Ana>: can <@U2|Bo> fix <#C1|ops>?",
+      }),
+    ).toBe("Can @Bo fix #ops?");
+  });
+
+  test("an unknown mention reads as @someone", () => {
+    expect(taskListTitle({ task: "<@U9> (unknown user) asked for a summary" })).toBe(
+      "@someone asked for a summary",
+    );
+  });
+
+  test("capitalizes a plain first word only", () => {
+    expect(taskListTitle({ task: "fix the login page" })).toBe("Fix the login page");
+    expect(taskListTitle({ task: "https://example.com/x is down" })).toBe(
+      "https://example.com/x is down",
+    );
+    expect(taskListTitle({ task: "taskListTitle drops tags" })).toBe("taskListTitle drops tags");
+    expect(taskListTitle({ task: "src/lib is untested" })).toBe("src/lib is untested");
+  });
 });

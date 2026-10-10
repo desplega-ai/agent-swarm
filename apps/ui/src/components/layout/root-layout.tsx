@@ -15,8 +15,10 @@ import { NameConnectionModal } from "@/components/shared/name-connection-modal";
 import { OrganizationNameDialog } from "@/components/shared/organization-name-dialog";
 import { LeadCredentialDialog } from "@/components/support/lead-credential-dialog";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
+import { AgentFsProvider } from "@/contexts/agent-fs-context";
 import { useCurrentUser } from "@/contexts/current-user-context";
 import { useConfig } from "@/hooks/use-config";
+import { MAIN_GUTTER } from "@/lib/main-gutter";
 import { cn } from "@/lib/utils";
 import { AppFooter } from "./app-footer";
 import { AppHeader } from "./app-header";
@@ -53,7 +55,7 @@ export function RootLayout() {
   // The unified Home (`/`) owns its own internal padding so the full-bleed
   // canvas can reach the content-area edges; every other route gets the
   // standard gutter.
-  const mainPadding = pathname === "/" ? "p-0" : "p-4 md:p-6";
+  const mainPadding = pathname === "/" ? "p-0" : MAIN_GUTTER;
 
   // No connection yet: the full-page `/setup` flow starts at step 1 (connect)
   // and returns here after connecting.
@@ -63,41 +65,55 @@ export function RootLayout() {
 
   return (
     <StatusProvider pollIntervalMs={30_000}>
-      <ContextPanelProvider>
-        <SidebarProvider className="h-svh max-w-full overflow-hidden">
-          <AppSidebar />
-          <SidebarInset className="min-w-0">
-            <AppHeader />
-            {/* Below lg the main column is the scroll container so pages that
-              flow naturally (detail pages, forms) can scroll; at lg+ it goes
-              back to overflow-hidden and pages own their scroll regions
-              (pinned headers, grid-internal scrolling). */}
-            <main
-              className={cn(
-                "flex flex-1 flex-col min-h-0 min-w-0 overflow-x-hidden overflow-y-auto lg:overflow-hidden",
-                mainPadding,
-              )}
-            >
-              <ErrorBoundary>
-                <Suspense fallback={<HiveLoadingScreen />}>
-                  <Outlet />
-                </Suspense>
-              </ErrorBoundary>
-            </main>
-            <AppFooter />
-          </SidebarInset>
-          {/* Contextual session panel: a flex sibling of the inset, so the page
-            stays interactive while the user gives feedback. */}
-          <ContextSessionPanel />
-        </SidebarProvider>
-      </ContextPanelProvider>
-      <CommandMenu />
-      <OnboardingRedirect />
-      <IdentityGate />
-      <NameConnectionModal />
-      <OrganizationNameDialog key={`organization:${config.apiUrl}`} />
-      <LeadCredentialDialog key={config.apiUrl} />
-      <FeedbackDialog key={`feedback:${config.apiUrl}`} />
+      <AgentFsProvider>
+        <ContextPanelProvider>
+          {/* The first Tab stop: it moves focus past the sidebar and the
+              header to the page content (the browser focuses the target,
+              which has tabIndex -1). Off screen until it has focus. */}
+          <a
+            href="#main-content"
+            className="fixed top-3 left-3 z-50 -translate-y-[calc(100%+1rem)] rounded-md border border-border bg-background px-3 py-2 text-sm font-medium text-foreground shadow-sm outline-none focus:translate-y-0 focus-visible:ring-2 focus-visible:ring-ring/60"
+          >
+            Skip to content
+          </a>
+          <SidebarProvider className="h-svh max-w-full overflow-hidden">
+            <AppSidebar />
+            <SidebarInset className="min-w-0">
+              <AppHeader />
+              {/* The page's one `main` landmark (the inset is a div). Below lg
+                the main column is the scroll container so pages that flow
+                naturally (detail pages, forms) can scroll; at lg+ it goes
+                back to overflow-hidden and pages own their scroll regions
+                (pinned headers, grid-internal scrolling). */}
+              <main
+                id="main-content"
+                tabIndex={-1}
+                className={cn(
+                  "flex flex-1 flex-col min-h-0 min-w-0 overflow-x-hidden overflow-y-auto lg:overflow-hidden outline-none",
+                  mainPadding,
+                )}
+              >
+                <ErrorBoundary>
+                  <Suspense fallback={<HiveLoadingScreen />}>
+                    <Outlet />
+                  </Suspense>
+                </ErrorBoundary>
+              </main>
+              <AppFooter />
+            </SidebarInset>
+            {/* Contextual session panel: a flex sibling of the inset, so the page
+              stays interactive while the user gives feedback. */}
+            <ContextSessionPanel />
+          </SidebarProvider>
+        </ContextPanelProvider>
+        <CommandMenu />
+        <OnboardingRedirect />
+        <IdentityGate />
+        <NameConnectionModal />
+        <OrganizationNameDialog key={`organization:${config.apiUrl}`} />
+        <LeadCredentialDialog key={config.apiUrl} />
+        <FeedbackDialog key={`feedback:${config.apiUrl}`} />
+      </AgentFsProvider>
     </StatusProvider>
   );
 }

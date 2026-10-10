@@ -288,7 +288,7 @@ export function rowToAgentTask(row: AgentTaskRow): AgentTask {
     slackReplySent: !!row.slackReplySent,
     slackProgressMessageTs: row.slackProgressMessageTs ?? undefined,
     slackTreeRootMessageTs: row.slackTreeRootMessageTs ?? undefined,
-    vcsProvider: (row.vcsProvider as "github" | "gitlab" | null) ?? undefined,
+    vcsProvider: (row.vcsProvider as "github" | "gitlab" | "azure-devops" | null) ?? undefined,
     vcsRepo: row.vcsRepo ?? undefined,
     vcsEventType: row.vcsEventType ?? undefined,
     vcsNumber: row.vcsNumber ?? undefined,
@@ -1161,7 +1161,9 @@ export type ExistingTrackerContextWork = {
 
 const LINEAR_TRACKER_CONTEXT_KEY_PREFIX = "task:trackers:linear:";
 
-function isLinearTrackerContextKey(contextKey: string | null | undefined): contextKey is string {
+export function isLinearTrackerContextKey(
+  contextKey: string | null | undefined,
+): contextKey is string {
   return !!contextKey && contextKey.startsWith(LINEAR_TRACKER_CONTEXT_KEY_PREFIX);
 }
 
@@ -1170,28 +1172,51 @@ function isLinearTrackerContextKey(contextKey: string | null | undefined): conte
  *
  * Active means any non-terminal task. A completed task with persisted VCS PR/MR
  * metadata is also treated as existing work because the task can be complete
- * while the PR is still awaiting review/merge.
+ * while the PR is still awaiting review/merge. Delegation excludes the tracker
+ * root and all its descendants from both lookups.
  */
 export async function findExistingLinearTrackerContextWork(
   contextKey: string | null | undefined,
+  delegatingParentTaskId?: string,
 ): Promise<ExistingTrackerContextWork | null> {
   if (!isLinearTrackerContextKey(contextKey)) return null;
 
+  const lineageCte = `WITH RECURSIVE
+    ancestors(id, parentTaskId) AS (
+      SELECT id, parentTaskId FROM agent_tasks WHERE id = ? AND contextKey = ?
+      UNION
+      SELECT parent.id, parent.parentTaskId FROM agent_tasks parent
+      JOIN ancestors child ON parent.id = child.parentTaskId
+      WHERE parent.contextKey = ?
+    ),
+    lineage(id) AS (
+      SELECT id FROM ancestors
+      WHERE parentTaskId IS NULL OR parentTaskId NOT IN (SELECT id FROM ancestors)
+      UNION
+      SELECT child.id FROM agent_tasks child
+      JOIN lineage parent ON child.parentTaskId = parent.id
+    )`;
+  const lineageParams = [delegatingParentTaskId ?? null, contextKey, contextKey];
+
   const activeRow = await getDbClient().get<AgentTaskRow>(
-    `SELECT * FROM agent_tasks
+    `${lineageCte}
+     SELECT * FROM agent_tasks
        WHERE contextKey = ?
+       AND id NOT IN (SELECT id FROM lineage)
        AND status NOT IN ('completed', 'failed', 'cancelled', 'superseded')
        ORDER BY lastUpdatedAt DESC
        LIMIT 1`,
-    [contextKey],
+    [...lineageParams, contextKey],
   );
   if (activeRow) {
     return { task: rowToAgentTask(activeRow), reason: "active_task" };
   }
 
   const linkedPrRow = await getDbClient().get<AgentTaskRow>(
-    `SELECT * FROM agent_tasks
+    `${lineageCte}
+     SELECT * FROM agent_tasks
        WHERE contextKey = ?
+       AND id NOT IN (SELECT id FROM lineage)
        AND status = 'completed'
        AND vcsProvider IS NOT NULL
        AND vcsRepo IS NOT NULL
@@ -1199,7 +1224,7 @@ export async function findExistingLinearTrackerContextWork(
        AND vcsUrl IS NOT NULL
        ORDER BY lastUpdatedAt DESC
        LIMIT 1`,
-    [contextKey],
+    [...lineageParams, contextKey],
   );
   if (linkedPrRow) {
     return { task: rowToAgentTask(linkedPrRow), reason: "linked_open_pr" };

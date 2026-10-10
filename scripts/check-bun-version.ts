@@ -30,6 +30,11 @@ const PINS: Pin[] = [
     what: "runtime bun.sh/install pin",
   },
   { file: "apps/evals/Dockerfile", pattern: FROM_OVEN_BUN, what: "FROM oven/bun tag" },
+  {
+    file: "Dockerfile.ui",
+    pattern: /^FROM --platform=\$BUILDPLATFORM oven\/bun:([^\s]+)/gm,
+    what: "FROM oven/bun tag",
+  },
 ];
 
 async function readPackageManagerVersion(): Promise<string> {

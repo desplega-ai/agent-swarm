@@ -16,7 +16,7 @@ A *harness provider* is the runtime that actually drives an LLM: it owns the sub
 
 For an operator-facing comparison of the install choices, see the [Provider Capability Matrix](/docs/guides/provider-capability-matrix).
 
-**Supported today:** `claude` (Anthropic Claude Code CLI), `pi` (pi-mono, in-process via `@earendil-works/pi-coding-agent`), `codex` (a fresh Codex app-server inside each isolated task subprocess), `devin` (Cognition Devin via `/sessions`), `claude-managed` (Anthropic Managed Agents. Sessions execute in Anthropic's cloud sandbox), `opencode` (in-process [`@opencode-ai/sdk`](https://opencode.ai) server with SSE event mapping. Experimental rollout across DES-295 to DES-299), `acp` (a curated OpenCode preset or a custom [Agent Client Protocol](https://agentclientprotocol.com) command).
+**Supported today:** `claude` (Anthropic Claude Code CLI), `pi` (pi-mono, in-process via `@earendil-works/pi-coding-agent`), `codex` (a fresh Codex app-server inside each isolated task subprocess), `devin` (Cognition Devin via `/sessions`), `claude-managed` (Anthropic Managed Agents. Sessions execute in Anthropic's cloud sandbox), `opencode` (in-process [`@opencode-ai/sdk`](https://opencode.ai) server with SSE event mapping. Experimental rollout across DES-295 to DES-299), `acp` (a curated OpenCode or GitHub Copilot CLI preset, or a custom [Agent Client Protocol](https://agentclientprotocol.com) command).
 
 ---
 
@@ -175,14 +175,17 @@ The runner consumes these events (not the provider's native ones) to post progre
 
 | File | Transport | Auth |
 |---|---|---|
-| [`src/providers/claude-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/claude-adapter.ts) | `Bun.spawn` of `claude` CLI with `--output-format stream-json`, JSONL stdout parsing | `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY` |
+| [`src/providers/claude-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/claude-adapter.ts) | `Bun.spawn` of `claude` CLI with `--output-format stream-json`, JSONL stdout parsing | `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY`, or a gateway / Foundry / Bedrock / Vertex route ([Model Gateways](/docs/guides/provider-auth/model-gateways#claude-code-through-a-gateway-or-cloud-provider)) |
 | [`src/providers/pi-mono-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/pi-mono-adapter.ts) | In-process via `createAgentSession` from `@earendil-works/pi-coding-agent`; no subprocess | `ANTHROPIC_API_KEY` / `OPENROUTER_API_KEY` / `~/.pi/agent/auth.json` — or, when `BEDROCK_AUTH_MODE=sdk` or `MODEL_OVERRIDE=amazon-bedrock/*`, AWS SDK default chain (probed via `ListFoundationModels`; see [pi-mono + Amazon Bedrock](#pi-mono-amazon-bedrock-auth) below) |
 | [`src/providers/codex-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/codex-adapter.ts) | Parent adapter spawns `src/commands/codex-session-runner.ts`. The child starts one `codex app-server`, then bridges JSON-RPC notifications and requests to normalized events and controls over bidirectional JSONL. | `OPENAI_API_KEY` or ChatGPT OAuth stored in `swarm_config.codex_oauth` (see §6) |
 | [`src/providers/claude-managed-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/claude-managed-adapter.ts) | Anthropic SDK `client.beta.sessions.events.stream` (SSE); session executes in Anthropic's managed cloud sandbox, worker is a thin relay | `ANTHROPIC_API_KEY` plus pre-existing `MANAGED_AGENT_ID` + `MANAGED_ENVIRONMENT_ID` from one-time `claude-managed-setup` CLI (see §13) |
 | [`src/providers/devin-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/devin-adapter.ts) | Cognition Devin v3 REST API; worker polls the remote session | `DEVIN_API_KEY` + `DEVIN_ORG_ID` |
 | [`src/providers/opencode-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/opencode-adapter.ts) | In-process `@opencode-ai/sdk` server with SSE event mapping | Provider-specific API key, commonly `OPENROUTER_API_KEY` |
-| [`src/providers/acp-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/acp-adapter.ts) | `Bun.spawn` of the selected OpenCode preset or custom target, driven over stdio with `@agentclientprotocol/sdk`'s ndjson `ClientSideConnection` | The ACP target owns its model auth and receives a session-scoped `aseph_` token as the swarm MCP bearer |
-| [`src/providers/dsh-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/dsh-adapter.ts) | Preinstalled DeepSeek Harness CLI, headless JSON over stdin/stdout | `OPENROUTER_API_KEY` for `openrouter/` models; `DEEPSEEK_API_KEY` for native IDs. No MCP, steering, resume, or cost/context telemetry |
+| [`src/providers/acp-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/acp-adapter.ts) | `Bun.spawn` of the selected OpenCode, Gemini CLI or Copilot preset, or a custom target, driven over stdio with `@agentclientprotocol/sdk`'s ndjson `ClientSideConnection`. The OpenCode preset injects a configured `OPENROUTER_BASE_URL` into `OPENCODE_CONFIG_CONTENT` as `provider.openrouter.options.baseURL`, alongside the model fallback. | The ACP target owns its model auth and receives a session-scoped `aseph_` token as the swarm MCP bearer |
+| [`src/providers/dsh-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/dsh-adapter.ts) | Preinstalled DeepSeek Harness CLI, headless JSON over stdin/stdout | `OPENROUTER_API_KEY` for `openrouter/` models; `DEEPSEEK_API_KEY` for native IDs. Swarm MCP via an inserted `dsh-mcp-client`, cost/context from step usage, reasoning effort; no steering or native resume |
+| [`src/providers/amp-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/amp-adapter.ts) | Preinstalled Amp CLI (`amp -x --stream-json --stream-json-input`), Claude-compatible JSONL over stdin/stdout | `AMP_API_KEY` (an access token from ampcode.com). Swarm MCP via a per-task `--mcp-config`, system prompt via a per-task plugin mode, queued steering, tokens priced from the `amp` rows; every thread is stored on ampcode.com |
+| [`src/providers/grok-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/grok-adapter.ts) | Preinstalled xAI Grok CLI as an ACP server (`grok agent --no-leader stdio`), driven by the shared ACP client in `acp-adapter.ts` | `XAI_API_KEY`, or `OPENROUTER_API_KEY` for `openrouter/<id>` models (see [Grok](/docs/guides/provider-auth/grok)). Fresh `GROK_HOME` per session with Claude/Cursor compat off, swarm MCP via `session/new`, system prompt appended via `_meta.rules`, cost from xAI's billed `costUsdTicks`, effort via `--reasoning-effort`, no steering |
+| [`src/providers/cursor-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/cursor-adapter.ts) | In-process `@cursor/sdk` local runtime (`Agent.create` + `agent.send`); the agent loop and tools run in the worker, inference on Cursor's hosted models | `CURSOR_API_KEY` (user or service-account key; see [Cursor](/docs/guides/provider-auth/cursor) for plans and key creation). Swarm MCP over HTTP with the per-task headers, steer + queue steering, token cost priced from vendor rates, reasoning effort via the model's own params. The swarm prompt rides in the first message unless the account has `systemPrompt` access (`CURSOR_NATIVE_SYSTEM_PROMPT=true`) |
 
 ACP session tokens identify the session's agent and task. On the HTTP config routes, non-lead session tokens receive masked secrets and cannot write or delete config; changing `X-Agent-ID` cannot grant lead permissions. The secret scrubber redacts `aseph_` tokens in logs. Session completion starts revocation without waiting for its response. Each revoke request has a five-second timeout and logs HTTP, network, or timeout failures. If revocation fails, the token remains valid until its 24-hour expiry.
 
@@ -216,6 +219,8 @@ Running tasks can receive more input through the optional `ProviderSession.deliv
 | `devin` | `queue` | `queued` | The message API accepts working sessions but does not guarantee interruption. |
 | `claude` | `queue` | `queued` | Raw CLI stream-json can queue only. |
 | `codex` | `steer`, `queue` | `steered` or `queued` | The per-task app-server receives native `turn/steer`. Queued input starts after the active turn ends. See below. |
+| `cursor` | `steer`, `queue` | `steered` or `queued` | `run.steer()` reaches the in-flight run; a message the SDK reverts to a follow-up, and every queued one, starts the next run on the same agent. |
+| `amp` | `queue` | `queued` | No interrupt primitive. Queued input is appended to the next tool result; see [Amp](#amp-amp). |
 | `acp` | none | n/a | ACP exposes a single in-flight `session/prompt`; the only interrupt is `session/cancel` (a full abort), so no steering mode is advertised. |
 
 The static `PROVIDER_STEER_CAPABILITIES` map drives `supportedSteerModes` in task responses and `onUnsupported: "fail"` admission. It must match `adapter.traits.steerModes ?? []`. `src/tests/provider-steering-capabilities.test.ts` iterates every name in `ProviderNameSchema`, constructs its adapter, and fails with the provider name if the two drift.
@@ -244,7 +249,7 @@ The worker does not use a shared app-server daemon. It does not resume native Co
 
 `src/hooks/codex-hook.ts` still supports legacy `codex exec` sessions. The worker image registers the hook for `SessionStart`, `PostToolUse`, and `Stop` through `/etc/codex/requirements.toml`. It polls pending steering messages, marks each one delivered, and injects the rendered envelope through hook output.
 
-App-server sessions set `SWARM_CODEX_APP_SERVER=1`. The hook returns before it polls in that mode. The worker then remains the only steering transport. `PreToolUse` remains disabled because Codex drops its `additionalContext`.
+App-server sessions set `SWARM_CODEX_APP_SERVER=1`. The hook returns before it polls in that mode. The worker then remains the only steering transport. `PreToolUse` carries no steering because Codex drops its `additionalContext`. The image registers it for the PR body leak guard, which runs in every session mode and blocks `gh pr create|edit` on a public repo with exit code 2.
 
 For user-facing modes, degradation, entry points, and message states, see [Steer a running task](/docs/guides/task-steering).
 
@@ -392,6 +397,8 @@ Tasks may carry an optional JSON Schema on `outputSchema` that the agent's final
 
 The primary enforcement point is the MCP `store-progress` tool: a non-conforming output fails the tool call and the agent is asked to retry. For providers that return direct `providerOutput` to the runner, `ensureTaskFinished()` now performs the same JSON-parse + schema-validation check before persisting `task.output`; if validation fails, the task is marked failed instead of silently storing invalid structured output.
 
+**pi empty final turn.** If a pi session's final assistant turn has no text and no tool call, the adapter sends one in-session reprompt asking the model to finish (call `store-progress` if the task needs a result), then waits for idle again. It never reprompts more than once per session, and not after an error, an abort, or a successful terminal `store-progress` call. The prompt text is the `task.nudge.empty_final_turn` template. Each empty turn also writes a session-log line with its `stopReason` and content block types. When provider output fails `outputSchema` validation and the fallback also fails, `failureReason` keeps the validation error.
+
 ### Reasoning / effort control
 
 `PATCH /api/agents/{id}/runtime` accepts an optional `reasoning_effort` field — a normalized, closed enum `off | low | medium | high | xhigh | max` — persisted like `MODEL_OVERRIDE` as the agent-scoped `swarm_config` key `REASONING_EFFORT_OVERRIDE`. The runner resolves it independently of the model/`modelTier` axis and populates `ProviderSessionConfig.reasoningEffort`; when unset, every adapter behaves exactly as it does today (no fleet-wide default is injected). `minimal` remains excluded because Codex `*-codex` models reject it. `max` is capability-gated and Codex-only: non-Codex harnesses filter it even when an upstream model snapshot advertises it.
@@ -404,10 +411,101 @@ The primary enforcement point is the MCP `store-progress` tool: a non-conforming
 | `codex` | `model_reasoning_effort` config field | `off` maps to `'none'`; `max` passes through for capability-advertising models such as GPT-5.6. `show_raw_agent_reasoning` stays pinned `false` regardless of the effort level — higher effort costs reasoning tokens (visible via `reasoning_output_tokens` cost telemetry) but produces no visible reasoning trace in the dashboard. `*-codex` (non-`max`) models reject `xhigh`; `*-codex-max` models accept it. |
 | `pi` | `thinkingLevel` session option | Top-level sibling of `model` on `CreateAgentSessionOptions`; pi's native vocabulary already includes `off`. |
 | `opencode` | Provider-keyed `options` in the per-task `opencode.json` | `anthropic/*` models: `thinking.budgetTokens` (an internal numeric translation, not a user-facing knob). `openrouter/*` models: `reasoning.effort`. OpenAI-compatible models: `reasoningEffort`. `off` omits reasoning keys entirely (a noop application) — Opencode has no explicit off switch. |
+| `amp` | `reasoningEffort` on the per-task plugin agent (`off` maps to `none`) | Amp's CLI has no effort flag (`--effort` is rejected). Effort applies only to a pinned `provider/model` (for example `openai/gpt-5-nano`), judged by the catalog like pi and opencode; a mode (`low`..`ultra`) names no model in advance, so it takes none. |
 
 Each adapter reports the level it actually applied via `ProviderResult.appliedReasoningEffort` (`null` when `applyReasoningEffort()` returned a capability-rejected noop). The runner forwards that into `agents.cred_status.latestModel.reasoningEffort`, which the dashboard surfaces in the agent runtime editor, the harness credential-status tooltip, and the agents-list Model column (a compact `[|||]`-style badge — more bars mean higher effort).
 
 See [`thoughts/taras/research/2026-05-26-agent-reasoning-effort-runtime-control.md`](https://github.com/desplega-ai/agent-swarm/blob/main/thoughts/taras/research/2026-05-26-agent-reasoning-effort-runtime-control.md) for the full cross-harness normalization derivation.
+
+### Amp (`amp`)
+
+Set `HARNESS_PROVIDER=amp` and `AMP_API_KEY` (an `sgamp_` access token from
+ampcode.com Settings → Security; see [Provider Auth: Amp](/docs/guides/provider-auth/amp))
+in the worker environment or agent-scoped config. The adapter runs
+Amp's CLI in execute mode, `amp -x --stream-json --stream-json-input`, with the
+prompt as the first stdin message. The full worker image pins the CLI
+(`@ampcode/cli@0.0.1791604937-g4bfc2d`, SHA-512 verified, auto-update off); the
+slim image does not include it. `AMP_BINARY` selects another trusted executable.
+Amp's licence is proprietary ([terms](https://ampcode.com/terms)): confirm it
+before publishing an image that contains the binary.
+
+**Every Amp thread is stored on ampcode.com.** Prompts, tool calls and tool
+output leave your infrastructure, and Amp's own storage is outside any model
+vendor's retention setting. The adapter starts threads with `--visibility
+private`, but there is no local-only mode.
+
+- **Models.** Amp has no model flag. `modelTier` maps onto its four built-in
+  modes: smol `low`, regular `medium`, smart `high`, ultra `ultra`. Amp chooses the model per
+  mode on its server; measured 2026-10-05, `low` ran GLM-5.3 Flash, `medium` Claude Opus 5.5,
+  `high` GPT-6 Astra and `ultra` Claude Fable 5.1. A concrete `model` is a `provider/model` id
+  (`openai/gpt-5-nano`, `anthropic/claude-haiku-4-5-20251001`), pinned through the
+  per-task plugin agent on top of the `medium` mode's prompt and tools. Anything
+  else is rejected at send-task, agent runtime and session start. Send-task and
+  the agent runtime also reject a pin whose provider Amp does not run (measured
+  2026-10-05: `anthropic`, `openai`, `vertexai`, `xai`, `fireworks`, `baseten`)
+  and an `anthropic`/`openai` model missing from the catalog;
+  `allowCustomModel: true` skips both checks for a provider or model Amp added
+  later.
+- **Swarm MCP.** The per-task `--mcp-config` file (mode `0600`, removed with the
+  temporary directory) carries the swarm URL and the five per-task headers. The
+  session fails when Amp's `init` event does not list the server, or lists it as
+  anything but `connected`, `connecting` or `pending`. Amp can emit `init` before
+  the connection settles (a server that answered after 3 seconds was still
+  `connecting`), so a connection that never settles is not caught at startup; a
+  refused connection reads `reconnecting` and fails.
+- **Tool search.** `hasToolSearch` is `true`. Amp reaches MCP tools through its
+  own `tool_search` and `code_exec`, with underscored names. Exposing all 131 swarm tools
+  directly (excluding both) raised the first request from about 37k to about 98k input
+  tokens, so the default is kept and the prompt names the call shape.
+- **Tokens and cost.** The stream carries per-request usage but no model and no
+  USD. After the session the adapter reads two things, neither of which runs
+  inference. `amp threads usage <id> --details` gives what Amp billed for the
+  whole thread, subagent threads included; it is posted as the harness cost
+  (`costSource: 'harness'`, like Devin's ACUs) when every request was billed
+  through Amp. `amp threads export <id>` gives the model of each request and
+  Amp's context window; the API prices those tokens from the `amp` rows
+  (Anthropic, OpenAI, Google and Fireworks models.dev sections) for the
+  per-model breakdown, and as the total when Amp's cost is missing or a
+  request went through a linked provider (a ChatGPT subscription records $0
+  in Amp). Amp reports uncached prompt tokens as
+  `cache_creation_input_tokens` for every vendor; the adapter keeps them as
+  cache writes for Anthropic models and moves them to input for the rest.
+  When the export is empty too, the stream totals are priced at the mode's
+  model and tagged `estimated`, never $0. A model missing from the table
+  settles `unpriced`.
+- **Steering.** `steerModes: ["queue"]`. A queued steer goes to a per-task
+  inbox directory, and the plugin's `tool.result` hook appends it to the next
+  tool result, so the model reads it mid-turn (verified live during a
+  `sleep 25` shell call). Amp's own stdin queue would hold it until the turn
+  ends, usually after the task has finished. A steer that no tool result
+  carries goes to stdin at the turn end and starts another turn; each message is
+  claimed by an atomic rename, so only one path carries it. A steer reports
+  `delivered` only on a consumption receipt: the next assistant message after
+  the hook handed it to Amp, or Amp's echo of the stdin message. If Amp exits,
+  a stdin write fails or input closes first, it reports `undeliverable` and the
+  runner promotes it to a follow-up task (at-least-once: a crash right after the
+  model read it can repeat it). Amp emits `result` only when stdin closes, so
+  the adapter ends input at the first top-level assistant message with no tool
+  call and nothing queued; a steer after that is refused and promoted too.
+- **Failed results.** A `result` event ends input at once, so an early
+  failure (an unknown pin fails within seconds) does not wait on a watchdog.
+  Amp's `error` text (`Unknown model provider: x`) becomes the failure reason.
+- **Cancel and failure.** Process-tree termination on every stop (cancel, MCP
+  failure, stdin failure, the exit watchdog): Amp runs shell commands in a session of
+  its own, so the group kill alone left `sleep` running. The adapter lists the
+  descendants first, then kills them, and the session settles only after that.
+- **Credentials.** The worker live test runs `amp usage` (credit balance, no
+  inference, 5 second limit). A bogus key fails with `Invalid or missing API
+  key`; no key parks the worker in the credential wait.
+- **Skills and notes.** Amp reads `~/.claude/skills`, `~/.agents/skills` and
+  every `CLAUDE.md` from the working directory upward, so `nativeSkillDiscovery`
+  is true and the agent notes need no injection.
+- **Settings.** Per task: `amp.updates.mode: "disabled"`, no Amp co-author or
+  thread trailer on commits (`amp.git.commit.*`), notifications off, and
+  `amp.dangerouslyAllowAll` (the worker container is the sandbox).
+
+Not covered: installed MCP servers from the `mcp-servers` catalog are not
+forwarded, and there is no native resume (follow-ups use the context preamble).
 
 ---
 
@@ -682,7 +780,7 @@ If the runner reuses an existing repo clone that has local changes, `ensureRepoF
   Template resolution goes over HTTP (`configureHttpResolver(apiUrl, apiKey)` at `runner.ts:2206`) to obey the API/worker DB boundary. Prompt files under `src/prompts/` must remain pure — no `bun:sqlite` or `src/be/db` imports. Enforced by `scripts/check-db-boundary.sh`.
 </Callout>
 
-Swarm tool-discovery guidance follows the adapter's `hasToolSearch` trait (false when omitted). Claude Code sets it to true for native ToolSearch. Codex, OpenCode, ACP, Claude Managed, Devin, and dsh set it to false. pi sets it to the value of `PI_TOOL_DEFERRAL` (below); MCP-enabled sessions receive guidance that swarm tools are already in the tool list. This trait changes prompt text only, not tool registration.
+Swarm tool-discovery guidance follows the adapter's `hasToolSearch` trait (false when omitted). Claude Code sets it to true for native ToolSearch. Codex, OpenCode, ACP, Claude Managed, Devin, and dsh set it to false. Amp sets it to true and gets its own text (`system.agent.tool_discovery.amp`): its MCP tools sit behind its own `tool_search` and `code_exec`, with dashes turned into underscores (`store-progress` is `store_progress`). pi sets it to the value of `PI_TOOL_DEFERRAL` (below); MCP-enabled sessions receive guidance that swarm tools are already in the tool list. This trait changes prompt text only, not tool registration.
 
 ### pi tool deferral
 
@@ -698,10 +796,10 @@ The flag defaults to `false`. Loading a deferred tool changes the tool set mid-s
 
 ### pi codemode
 
-`PI_CODEMODE=true` adds pi's codemode tool: a QuickJS sandbox inside the worker process in which the model's JavaScript calls tools (`await tools.get_task_details({ taskId })`) in any order or in parallel and returns only the result. The adapter uses `createCodemodeExtension({ mode: "on", models: false })` and `+codemode`:
+`PI_CODEMODE=true` adds pi's codemode tool: a QuickJS sandbox inside the worker process in which the model's JavaScript calls tools (`await tools.get_task_details({ taskId })`) in any order or in parallel and returns only the result. The adapter uses `createCodemodeExtension({ mode: "on", models })` and `+codemode`:
 
 - `mode: "on"` keeps every declared tool declared, so lifecycle tools (`store-progress`, `send-task`, …) are still called directly. `mode: "only"` is never used.
-- `models: false` keeps model calls out of scripts, where they would bypass the session's cost accounting.
+- `models` is `false` unless `PI_CODEMODE_MODELS=true` (default off, ignored while `PI_CODEMODE` is off). When on, scripts get pi's `models` API: `models.classify()` for classifier models and `models.generateImages()` for image models, plus the model catalog. Their usage counts toward the session cost: pi 1.0 puts a script's `models.*` usage on the `codemode` tool result and `getSessionStats()` sums it, which the adapter reports as the session's cost. `src/tests/providers/pi-cost.test.ts` proves that chain.
 - Scripts receive a tool's `structuredContent` when the tool declares an `outputSchema`, which every swarm tool does.
 - Nested calls go through pi's tool pipeline, so the swarm `tool_call` hooks (cancellation, loop detection) still see them.
 - `createBoundedCodemodeExtension` caps each script: a 120 s deadline (pi's default is none, and it also overrides a longer `timeout_ms` in the script's `// @options` line), 32 nested tool calls, and 4 running at once. Hitting a limit, or cancelling the task, aborts the sandbox signal, which interrupts the QuickJS worker and fails the codemode call.
@@ -713,6 +811,7 @@ The flag is the only switch: when it is on, every pi session gets codemode, what
 - **Claude** — CLI flag: `cmd.push("--append-system-prompt", this.config.systemPrompt)` at [`claude-adapter.ts:245–247`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/claude-adapter.ts).
 - **Codex** — written into `AGENTS.md` in `cwd` inside a `<swarm_system_prompt>` block. The Codex SDK has no `--append-system-prompt` equivalent; this file is the only channel. Entry: `writeCodexAgentsMd(config.cwd, config.systemPrompt)` at [`codex-adapter.ts:761`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/codex-adapter.ts); implementation at [`codex-agents-md.ts:56–119`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/codex-agents-md.ts). If an `AGENTS.md` exists, the block is prepended; otherwise stacked atop any `CLAUDE.md`. Cleanup in the session `finally` at `codex-adapter.ts:738`.
 - **Pi** — SDK parameter: `new DefaultResourceLoader({ appendSystemPrompt: [config.systemPrompt], extensionFactories, ... })` passed via `CreateAgentSessionOptions` in [`pi-mono-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/pi-mono-adapter.ts). The adapter must `await resourceLoader.reload()` first: `createAgentSession` only reloads a loader it builds itself, and an unloaded loader contributes no appended prompt and no extensions. The adapter's `SettingsManager` sets `projectTrusted: false`, because the cwd is a task repo clone: the repo's `.pi/extensions`, packages, settings and `SYSTEM.md` never load into the worker process.
+- **Amp** — Amp has no system-prompt flag. The adapter writes a per-task plugin (`$XDG_CONFIG_HOME/amp/plugins/agent-swarm.ts`, in a temporary directory) that registers one agent mode extending the selected built-in mode, with the swarm prompt as its `instructions` (appended to Amp's own prompt). The prompt is embedded as a JSON literal, never as code. Spawned with `-m agent-swarm`. Live verified; nothing is written to the repository or baked into the image.
 
 ### What this means for a new provider
 
@@ -741,6 +840,8 @@ Skills are the swarm's portable procedural knowledge — reusable markdown files
     ```
 
     See [`claude-adapter.ts:601`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/claude-adapter.ts).
+
+    The runner's first prompt is still inlined before it reaches the CLI (`resolveClaudePrompt`). Claude Code's native expansion puts the slash args in `<command-args>` and again after `ARGUMENTS:`, and the runner's args carry the whole task body, so native expansion would send the body twice.
   </Tab>
   <Tab value="Prefixed slash-commands">
     **Pi.** Pi-mono supports skills but namespaces them:
@@ -943,7 +1044,7 @@ Tool-loop detection (`src/hooks/tool-loop-detection.ts::checkToolLoop`) is reusa
 
 Skills are the swarm's portable procedural knowledge (`/review-pr`, `/implement-issue`, etc.). Each provider handles them differently:
 
-- **Claude**: native slash-commands, so `formatCommand(name) => "/" + name` (`claude-adapter.ts` L601).
+- **Claude**: native slash-commands, so `formatCommand(name) => "/" + name` (`claude-adapter.ts` L601). `createSession` still inlines a leading `/<name>` from `~/.claude/skills/<name>/SKILL.md` (frontmatter stripped) so the task body in the args is not sent twice; commands without a SKILL.md there expand natively.
 - **Pi**: prefixed, `formatCommand(name) => "/skill:" + name` (`pi-mono-adapter.ts` L541); resolved from `~/.pi/agent/skills/<name>/SKILL.md`.
 - **Codex**: no native skills support → [`src/providers/codex-skill-resolver.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/codex-skill-resolver.ts) intercepts a leading `/<name>` in the prompt, reads `${CODEX_SKILLS_DIR ?? ~/.codex/skills}/<name>/SKILL.md`, and inlines it before calling `thread.runStreamed`. The system prompt is delivered by writing `AGENTS.md` into `cwd` (see [`codex-agents-md.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/codex-agents-md.ts)).
 - **OpenCode**: no native `SKILL.md` support → uses the same inline resolver, reads `${OPENCODE_SKILLS_DIR ?? ~/.opencode/skills}/<name>/SKILL.md`, and inlines it before calling `client.session.prompt`.
@@ -1004,6 +1105,73 @@ Existing analogs: `src/tests/codex-*.test.ts`, `src/tests/claude-*.test.ts`, `sr
 
 ---
 
+### Swarm readiness: what a provider must do before it is a worker
+
+Spawning the CLI and returning its final text is not enough. Each item below
+was missed by the dsh adapter and found only by running real tasks
+(2026-10-01). Ship each one with the adapter, or document the gap in this guide
+and in [`runbooks/harness-providers.md`](https://github.com/desplega-ai/agent-swarm/blob/main/runbooks/harness-providers.md).
+
+| Requirement | What to check |
+|---|---|
+| Swarm MCP | The session reaches `${MCP_BASE_URL}/mcp` with `Authorization`, `X-Agent-ID`, `X-Source-Task-Id`, `X-Context-Key` and `X-Runtime-Instance-ID`, and `traits.hasMcp` is `true`. A session that starts without the swarm tools fails instead of running on. With no MCP client, keep `hasMcp: false` and document why. |
+| Failure path | An agent can end a task `failed` (`store-progress` with `status: "failed"`, or a harness-level signal without MCP). An abnormal turn end exits non-zero. |
+| Sandbox | The agent can write `/workspace/shared`, `/workspace/personal` and `/tmp`. A cwd-only write sandbox blocks cross-agent handoff. |
+| Provider recorded | `agent_tasks.provider` is set for every task, including spawn failures (the runner sends `provider` on `/finish`). |
+| Cost and context | `context_usage` per model call, `CostData` with `provider`, routing prefixes in `src/be/pricing-normalize.ts`, and seed rows in `src/be/seed-pricing.ts` so the default tier models price as `pricing-table`. |
+| Model observability | The session log names the model called, or at least the model configured. |
+| Reasoning effort | `config.reasoningEffort` maps to the harness's real setting; the harness is in `REASONING_HARNESSES` and offers only levels it honours. |
+| Dashboard logs | A logs-parser adapter in `apps/ui/src/logs-parser/adapters.ts`, tested on real persisted rows. Without it every row renders as `UNKNOWN`. |
+| Runtime editor | The harness is in `LOCAL_HARNESSES` and `isLocalHarness`, with model groups and effort levels in `apps/ui/src/lib/agent-runtime-models.ts`. |
+
+### How to QA a new harness
+
+Unit tests prove the adapter builds the right command, not that the harness can
+do swarm work. Run this on the deployed swarm before the harness takes general
+worker duty.
+
+**Setup.** Pick a low-usage worker with no in-flight tasks. Record its
+`harness_provider`, `MODEL_OVERRIDE`, `REASONING_EFFORT_OVERRIDE` and
+`AGENT_MAX_TASKS` (`GET /api/agents/<id>/runtime` and agent-scoped config).
+Switch it with `PATCH /api/agents/<id>/runtime` or the Runtime editor, add the
+harness credentials as agent-scoped config, and pin each scenario to it
+(`routingReason: human_pinned`).
+
+**Gates on every task:**
+
+- `agent_tasks.provider` is the new harness, spawn failures included. NULL or another harness means a silent fallback.
+- `agent_tasks.model` matches the request, and the session log names the model.
+- The dashboard renders the session with no `UNKNOWN` rows.
+- A `session_costs` row exists with `costSource: pricing-table`, and the task shows context usage.
+
+**Scenarios:**
+
+| # | Scenario | Pass when |
+|---|---|---|
+| 1 | Smoke: reply with a sentinel string | Exact sentinel, completed |
+| 2 | Write a file under `/workspace/shared`, return its sha256 | File exists, digest matches |
+| 3 | Pure compute (sum of primes below 10000) | Correct value |
+| 4 | Read the repo and cite a file and line | Correct citation |
+| 5 | `modelTier`, then an explicit `model` | Row model and logged model match each |
+| 6 | Model whose credential is missing | `failed` fast with a clear reason, `provider` set |
+| 7 | Call MCP tools (`memory-search`, `store-progress`) | Calls succeed |
+| 8 | Impossible task (read a missing file) | Status `failed`, not `completed` |
+| 9 | Cancel a long `sleep` | `cancelled`, agent idle again, no orphan process |
+| 10 | More tasks than `AGENT_MAX_TASKS` | Extra task rejected at capacity |
+| 11 | Large output with unicode | Intact |
+| 12 | Follow-up via `parentTaskId` | Parent context carried |
+| 13 | Steer a running task | Matches the advertised `steerModes` |
+
+**Bar for general worker duty.** Scenarios 1, 2, 3, 6, 7, 8 and 9 pass, plus
+every gate. A harness that fails 2, 7 or 8 is limited to read-only or
+self-contained work: it cannot hand off through `/workspace/shared`, report
+progress, or fail a task. Scenarios 5 and 10 to 13 may pass as a documented
+degrade.
+
+**Restore.** Put the agent back on the recorded values with the same `PATCH`,
+remove the test credentials, and confirm its next task records the original
+provider.
+
 ## 9. Codex OAuth: the full reference flow
 
 This is documented separately because it is the most involved integration.
@@ -1036,11 +1204,13 @@ This is documented separately because it is the most involved integration.
 
 **Key files:** `src/providers/codex-oauth/{flow.ts,storage.ts,auth-json.ts,pkce.ts,types.ts}`, `src/commands/codex-login.ts`, `docker-entrypoint.sh` L13–71, adapter fallback `codex-adapter.ts` L810–844.
 
-The shape conversion (our flat `{access, refresh, expires, accountId}` → Codex CLI's `{auth_mode: "chatgpt", tokens: {...}}`) lives in `credentialsToAuthJson()` at [`src/providers/codex-oauth/auth-json.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/codex-oauth/auth-json.ts) L37–49.
+The shape conversion (our flat `{access, refresh, expires, accountId}` → Codex CLI's `{auth_mode: "chatgpt", tokens: {...}}`) lives in `credentialsToAuthJson()` at [`src/providers/codex-oauth/auth-json.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/codex-oauth/auth-json.ts).
+
+Generated files record the current time in `last_refresh`, separately from the access token's expiry. A Swarm-only `expires` field preserves the expiry in milliseconds for opaque-token round trips. When reading a file, the access token's JWT `exp` takes precedence, including after the CLI refreshes the token and rewrites the file without Swarm metadata. The reader falls back to `expires`, then to the historical expiry-in-`last_refresh` format for legacy files without a usable JWT expiry.
 
 See also: [Codex OAuth setup guide](/docs/guides/provider-auth/codex-oauth).
 
-#### Boot-time credential restoration: precedence and the standalone fallback
+### Boot-time credential restoration: precedence and the standalone fallback
 
 `docker-entrypoint.sh`'s Codex auth path 1 (L209–273) tries, in order, the first non-empty value from:
 
@@ -1096,7 +1266,10 @@ Manual verification:
 | Docker bootstrap | `docker-entrypoint.sh`, `Dockerfile.worker` |
 | Hooks (optional) | `src/hooks/*`, `src/providers/<foo>-swarm-events.ts` |
 | Skills resolver (if provider lacks native support) | `src/providers/<foo>-skill-resolver.ts` |
-| Models / pricing (optional) | `src/providers/<foo>-models.ts` |
+| Models / pricing | `src/providers/<foo>-models.ts`, `src/be/seed-pricing.ts`, `src/be/pricing-normalize.ts` |
+| Reasoning effort | `packages/model-catalog/src/reasoning.ts`, `src/providers/reasoning-effort.ts` |
+| Dashboard logs | `apps/ui/src/logs-parser/adapters.ts`, `apps/ui/src/logs-parser/index.ts` |
+| Runtime editor | `apps/ui/src/lib/agent-runtime-models.ts` |
 | Tests | `src/tests/<foo>-*.test.ts` |
 | Integrations UI (optional) | `ui/src/lib/integrations-catalog.ts` |
 | Docs | `CLAUDE.md`, `README.md`, this guide, [Harness Configuration](/docs/guides/harness-configuration) |

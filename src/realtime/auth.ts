@@ -1,6 +1,7 @@
 import type { IncomingMessage } from "node:http";
 import { getAgentById, getTaskById } from "../be/db";
 import { getUserGrant } from "../be/rbac-roles";
+import { getCombConfig } from "../comb/config";
 import { mcpOverflowAuthError } from "../kv-overflow";
 import { reservedNamespaceError } from "../kv-reserved-namespaces";
 import { can, isRbacEnabled } from "../rbac";
@@ -23,6 +24,20 @@ export type ResolvedRoomNamespace = {
   namespace: string;
   source: "page" | "explicit" | "task" | "agent";
 };
+
+export type RoomNamespaceOperation =
+  | "join"
+  | "leave"
+  | "update"
+  | "change"
+  | "reset"
+  | "presence"
+  | "subscribe"
+  | "unsubscribe"
+  | "publish";
+
+const COMB_PRESENCE_NAMESPACE = /^presence:comb:[A-Za-z0-9_-]{1,64}:[A-Za-z0-9_-]{1,64}$/;
+const COMB_PRESENCE_OPERATIONS = new Set<RoomNamespaceOperation>(["join", "leave", "presence"]);
 
 function pageNamespace(pageId: string): string | null {
   try {
@@ -86,14 +101,61 @@ export function roomRequestInfo(
 export async function authorizeRoomNamespace(
   namespace: string,
   info: RoomAuthorizationInfo,
-  write: boolean,
+  access: boolean | RoomNamespaceOperation,
 ): Promise<string | null> {
   const overflowError = mcpOverflowAuthError(namespace, info.agentId);
   if (overflowError) return overflowError;
 
+  if (namespace.startsWith("presence:comb:")) {
+    if (!COMB_PRESENCE_NAMESPACE.test(namespace)) {
+      return "invalid Comb presence namespace";
+    }
+    // Presence is for the swarm's shared Comb drive only, and only while Comb is on.
+    const comb = getCombConfig();
+    if (!comb.enabled) return "Comb is off";
+    if (
+      !comb.orgId ||
+      !comb.driveId ||
+      namespace !== `presence:comb:${comb.orgId}:${comb.driveId}`
+    ) {
+      return "Comb presence is only available for the configured Comb drive";
+    }
+    if (info.pageId || info.agentId || (!info.isOperator && !info.userId)) {
+      return "Comb presence requires dashboard authentication";
+    }
+    if (typeof access !== "string" || !COMB_PRESENCE_OPERATIONS.has(access)) {
+      return "Comb presence rooms only allow join, leave, and presence";
+    }
+
+    const principal = info.isOperator
+      ? ({ kind: "operator" } as const)
+      : ({ kind: "user", userId: info.userId! } as const);
+    if (
+      !can({
+        principal,
+        verb: "comb.presence",
+        resource: { kind: "kv-namespace", namespace },
+        source: info.callOrigin === "mcp" ? "mcp" : "http",
+      }).allow
+    ) {
+      return "Comb presence requires the comb.presence permission";
+    }
+    if (info.userId && isRbacEnabled()) {
+      const grant = await getUserGrant(info.userId);
+      if (!grant.grantsAll && !grant.verbs.has("comb.presence")) {
+        return "Comb presence requires the comb.presence permission";
+      }
+    }
+    return null;
+  }
+
   const reservedError = reservedNamespaceError(namespace);
   if (reservedError) return reservedError;
 
+  const write =
+    typeof access === "boolean"
+      ? access
+      : ["update", "change", "reset", "presence", "publish"].includes(access);
   if (!write) return null;
 
   if (info.userId && !info.isOperator && isRbacEnabled()) {

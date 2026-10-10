@@ -292,10 +292,12 @@ describe("Linear — backward compatibility", () => {
       issue_title: "Fix login bug",
       issue_url: "https://linear.app/team/issue/ENG-123",
       session_section: "\nSession: https://linear.app/session/abc",
+      request_section: "",
       description_section: "\nDescription:\nUsers cannot login with SSO\n",
     });
 
     expect(result.skipped).toBe(false);
+    expect(result.unresolved).toEqual([]);
 
     const expected = `[Linear ENG-123] Fix login bug
 
@@ -308,6 +310,60 @@ Users cannot login with SSO
 `;
 
     expect(result.text).toBe(expected);
+  });
+
+  test("linear.issue.assigned places the triggering comment before the description", () => {
+    const result = resolveTemplate("linear.issue.assigned", {
+      issue_identifier: "ENG-123",
+      issue_title: "Fix login bug",
+      issue_url: "https://linear.app/team/issue/ENG-123",
+      session_section: "\nSession: https://linear.app/session/abc",
+      request_section:
+        "\nRequest (comment that opened this session) from Jane Doe:\nWhich SSO providers are affected?\n",
+      description_section: "\nDescription:\nUsers cannot login with SSO\n",
+    });
+
+    expect(result.unresolved).toEqual([]);
+    expect(result.text).toBe(`[Linear ENG-123] Fix login bug
+
+Source: Linear (Agent Session)
+URL: https://linear.app/team/issue/ENG-123
+Session: https://linear.app/session/abc
+
+Request (comment that opened this session) from Jane Doe:
+Which SSO providers are affected?
+
+Description:
+Users cannot login with SSO
+`);
+  });
+
+  test("linear.issue.reassigned carries the request section, empty when absent", () => {
+    const base = {
+      issue_identifier: "ENG-123",
+      issue_title: "Fix login bug",
+      issue_url: "https://linear.app/team/issue/ENG-123",
+      session_section: "",
+      description_section: "\nDescription:\nUsers cannot login with SSO\n",
+    };
+    const withRequest = resolveTemplate("linear.issue.reassigned", {
+      ...base,
+      request_section: "\nRequest (comment that opened this session):\nPlease retry\n",
+    });
+    expect(withRequest.unresolved).toEqual([]);
+    expect(withRequest.text).toContain(
+      "URL: https://linear.app/team/issue/ENG-123\n\nRequest (comment that opened this session):\nPlease retry\n\nDescription:\nUsers cannot login with SSO\n",
+    );
+
+    const withoutRequest = resolveTemplate("linear.issue.reassigned", {
+      ...base,
+      request_section: "",
+    });
+    expect(withoutRequest.unresolved).toEqual([]);
+    expect(withoutRequest.text).not.toContain("Request (comment");
+    expect(withoutRequest.text).toContain(
+      "URL: https://linear.app/team/issue/ENG-123\n\nDescription:\nUsers cannot login with SSO\n",
+    );
   });
 
   test("linear.issue.followup produces expected output", () => {

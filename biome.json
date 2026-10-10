@@ -13,10 +13,15 @@
       "!src/be/seed-scripts/catalog",
       "!src/be/modelsdev-cache.json",
       "!src/extensions/catalog.generated.json",
+      "!src/telemetry-contract/catalog.json",
+      "!src/telemetry-contract/types.gen.ts",
+      "!src/utils/secret-rules.generated.ts",
       "!templates/extensions/manifest.schema.json",
       "!packages/ui-e2e/reporter/ui-e2e-ingest.v1.schema.json",
       "!mockups",
+      "!claude-mod/vendor/logs-parser.js",
       "!talks",
+      "!templates/community/open-prompt-showreel/example/tla-races/reel.html",
       "!!docs-site/public/openapi.d.ts"
     ]
   },
@@ -70,11 +75,28 @@
   },
   "overrides": [
     {
-      "includes": ["**/*.test.ts", "**/*.test.tsx", "src/tests/**"],
+      "includes": ["**/*.test.ts", "**/*.test.tsx", "src/tests/**", "claude-mod/tests/**"],
       "linter": {
         "rules": {
           "suspicious": {
             "noExplicitAny": "off"
+          }
+        }
+      }
+    },
+    {
+      "includes": ["src/**", "!src/utils/business-use.ts"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@desplega.ai/business-use": "Import from src/utils/business-use.ts instead: its ensure() scrubs secrets from event data before it leaves the process."
+                }
+              }
+            }
           }
         }
       }

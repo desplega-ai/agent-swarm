@@ -47,6 +47,7 @@ import type {
   BetaManagedAgentsAgentThreadContextCompactedEvent,
   BetaManagedAgentsAgentToolResultEvent,
   BetaManagedAgentsAgentToolUseEvent,
+  BetaManagedAgentsRedactedBlock,
   BetaManagedAgentsSessionErrorEvent,
   BetaManagedAgentsSessionStatusIdleEvent,
   BetaManagedAgentsSessionStatusTerminatedEvent,
@@ -56,7 +57,7 @@ import type {
   BetaManagedAgentsSession as Session,
   BetaManagedAgentsSessionEvent as SessionEvent,
 } from "@anthropic-ai/sdk/resources/beta/sessions";
-import type { SkillCreateResponse as Skill } from "@anthropic-ai/sdk/resources/beta/skills";
+import type { BetaSkill as Skill } from "@anthropic-ai/sdk/resources/beta/skills";
 
 import { checkToolLoop } from "../hooks/tool-loop-detection";
 import {
@@ -175,6 +176,32 @@ export function normalizeRepoUrl(vcsRepo: string): string {
     return vcsRepo;
   }
   return `https://github.com/${vcsRepo}`;
+}
+
+/** Stands in for an `agent.message` block that Anthropic model policy withheld. */
+const REDACTED_BLOCK_PLACEHOLDER = "[content redacted by Anthropic model policy]";
+
+/**
+ * Render one `agent.message` content block as text. A `redacted` block carries
+ * no text, so it becomes a visible placeholder instead of vanishing: a message
+ * that was withheld in full must not read as an empty reply.
+ */
+function agentMessageBlockText(
+  block: BetaManagedAgentsTextBlock | BetaManagedAgentsRedactedBlock,
+): string {
+  switch (block.type) {
+    case "text":
+      return block.text;
+    case "redacted":
+      return REDACTED_BLOCK_PLACEHOLDER;
+    default: {
+      // Compile-time signal when the SDK adds a block type; at runtime an
+      // unknown block contributes no text (the raw event is still logged).
+      const _unknown: never = block;
+      void _unknown;
+      return "";
+    }
+  }
 }
 
 /**
@@ -470,7 +497,7 @@ class ClaudeManagedSession implements ProviderSession {
     switch (event.type) {
       case "agent.message": {
         const msg = event as BetaManagedAgentsAgentMessageEvent;
-        const text = msg.content.map((block) => block.text).join("");
+        const text = msg.content.map(agentMessageBlockText).join("");
         if (text) {
           this.emit({ type: "message", role: "assistant", content: text });
           assistantText = text;
@@ -510,6 +537,7 @@ class ClaudeManagedSession implements ProviderSession {
           // passing through an empty string here is fine.
           toolName: "",
           result: { content: tr.content ?? [], isError: tr.is_error ?? false },
+          isError: tr.is_error ?? false,
         });
         return { terminal: false, isError: false };
       }
@@ -520,6 +548,7 @@ class ClaudeManagedSession implements ProviderSession {
           toolCallId: tr.mcp_tool_use_id,
           toolName: "",
           result: { content: tr.content ?? [], isError: tr.is_error ?? false },
+          isError: tr.is_error ?? false,
         });
         return { terminal: false, isError: false };
       }

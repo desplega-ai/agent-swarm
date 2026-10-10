@@ -22,7 +22,7 @@ description: Run recurring DORA metrics reports for any Git repository. The swar
 
 This is the DORA Metrics home for recurring software-delivery performance reports. It mirrors the Code Health report pattern: a small runner, a static D3 report, and one stable Page URL that updates in place.
 
-<Mermaid chart={`flowchart LR
+<Mermaid title="DORA metrics: a Lead prompt sets up a worker workspace that collects git tags, commits and PR titles, joins them in report.mjs into DORA metrics, and publishes a stable D3 Page. A weekly cron reruns it." chart={`flowchart LR
   LP["Lead prompt<br/>repo + branch + tag pattern"] --> WR["Worker workspace<br/>/workspace/dora-metrics"]
   WR --> GT["Git tags<br/>deployment events"]
   WR --> GC["Git commits<br/>lead-time samples"]

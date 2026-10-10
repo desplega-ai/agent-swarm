@@ -711,6 +711,27 @@ describe("Tasks", () => {
     expect(body.alreadyFinished).toBe(true);
   });
 
+  test("POST /api/tasks/:id/finish — records the provider of a task whose harness never started", async () => {
+    const agentId = randomUUID();
+    expect((await post("/api/agents", { agentId, body: { name: "SpawnFailWorker" } })).status).toBe(
+      201,
+    );
+    const created = await post("/api/tasks", {
+      agentId: ids.leadAgent,
+      body: { task: "Spawn failure provider test", agentId, routingReason: "human_pinned" },
+    });
+    const taskId = created.body.id as string;
+    expect((await get("/api/poll", { agentId })).body.trigger?.taskId).toBe(taskId);
+
+    const finished = await post(`/api/tasks/${taskId}/finish`, {
+      agentId,
+      body: { status: "failed", failureReason: "Spawn failed: no binary", provider: "dsh" },
+    });
+    expect(finished.status).toBe(200);
+    expect(finished.body.task.status).toBe("failed");
+    expect(finished.body.task.provider).toBe("dsh");
+  });
+
   test("POST /api/tasks/:id/finish — terminal retries reject, no-op, or force text only", async () => {
     const agentId = randomUUID();
     const registered = await post("/api/agents", {

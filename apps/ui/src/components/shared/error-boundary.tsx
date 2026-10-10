@@ -3,17 +3,8 @@ import { Component, type ErrorInfo, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-
-const CHUNK_RELOAD_KEY = "chunk-reload";
-
-function isChunkLoadError(error: Error): boolean {
-  const msg = error.message;
-  return (
-    msg.includes("Failed to fetch dynamically imported module") ||
-    msg.includes("Failed to load module script") ||
-    (msg.includes("Loading chunk") && msg.includes("failed"))
-  );
-}
+import { isChunkLoadError } from "@/lib/app-version";
+import { reportStaleChunk, StaleVersionNotice } from "./app-update-prompt";
 
 interface ErrorBoundaryProps {
   children: ReactNode;
@@ -36,27 +27,23 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
   }
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+    // A chunk from an older deploy is gone: offer a reload, never crash or
+    // reload on our own.
     if (isChunkLoadError(error)) {
-      const key = `${CHUNK_RELOAD_KEY}:${window.location.pathname}`;
-      const alreadyReloaded = sessionStorage.getItem(key);
-      if (!alreadyReloaded) {
-        sessionStorage.setItem(key, Date.now().toString());
-        window.location.reload();
-        return;
-      }
+      reportStaleChunk();
+      return;
     }
     console.error("ErrorBoundary caught:", error, errorInfo);
   }
 
   handleReset = () => {
     this.setState({ hasError: false, error: null });
-    // Clear any chunk-reload flag so a future deploy can retry
-    sessionStorage.removeItem(`${CHUNK_RELOAD_KEY}:${window.location.pathname}`);
   };
 
   render() {
     if (this.state.hasError) {
       if (this.props.fallback) return this.props.fallback;
+      if (isChunkLoadError(this.state.error)) return <StaleVersionNotice />;
 
       return (
         <div className="flex min-h-[60vh] items-center justify-center p-6">

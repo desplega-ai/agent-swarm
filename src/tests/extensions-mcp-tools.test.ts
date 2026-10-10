@@ -177,6 +177,7 @@ beforeEach(async () => {
   await stopExtensionRuntime();
   await getDbClient().run("DELETE FROM extensions");
   await useFixtureCatalog(["minimal", "post-logger"]);
+  delete process.env.EXTENSION_ALLOW_INLINE_INSTALL;
 });
 
 describe("extension MCP HTTP proxy tools", () => {
@@ -186,6 +187,7 @@ describe("extension MCP HTTP proxy tools", () => {
       export default async (_args: unknown, ctx: ScriptContext) => {
         await ctx.swarm.extension_catalog({});
         await ctx.swarm.extension_install({ template: "minimal", config: { label: "a" } });
+        await ctx.swarm.extension_install({ manifest: {}, files: { "hooks.ts": "" } });
         const id = "00000000-0000-4000-8000-000000000001";
         await ctx.swarm.extension_enable({ id });
         await ctx.swarm.extension_activate_version({ id, version: 1 });
@@ -288,6 +290,32 @@ describe("extension MCP HTTP proxy tools", () => {
       meta(leadId),
     )) as ToolResult;
     expect(enabledOnly.structuredContent).toMatchObject({ success: true, extensions: [] });
+  });
+
+  test("extension-install sends an inline bundle only for leads and only with the flag on", async () => {
+    const tools = buildToolServer();
+    const bundle = await loadBundleFixture("minimal");
+    const inline = { manifest: bundle.manifest, files: bundle.files };
+
+    const off = (await tools.install.handler(inline, meta(leadId))) as ToolResult;
+    expect(off.isError).toBe(true);
+    expect(JSON.stringify(off.structuredContent)).toContain("inline_install_disabled");
+
+    process.env.EXTENSION_ALLOW_INLINE_INSTALL = "true";
+    const worker = (await tools.install.handler(inline, meta(workerId))) as ToolResult;
+    expect(worker.isError).toBe(true);
+    expect(JSON.stringify(worker.structuredContent)).toContain("Forbidden");
+    expect(await getDbClient().query("SELECT id FROM extensions")).toEqual([]);
+
+    const lead = (await tools.install.handler(inline, meta(leadId))) as ToolResult;
+    expect(lead.isError).toBe(false);
+    expect(lead.structuredContent).toMatchObject({
+      success: true,
+      name: "minimal",
+      createdByAgentId: leadId,
+      enabled: false,
+      status: "disabled",
+    });
   });
 
   test("extension-install rejects templates missing from the catalog", async () => {

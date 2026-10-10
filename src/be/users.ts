@@ -20,6 +20,7 @@
  */
 
 import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { scheduleOrgDomainRecompute } from "../telemetry-identity";
 import type { User } from "../types";
 import { getDbClient } from "./db";
 
@@ -369,6 +370,8 @@ export async function findOrCreateUserByEmail(
     await recordIdentityEvent(id, "identity_added", actor, null, { email, name });
     return rowToUser(row);
   });
+  // The org's email domain may come from this user (debounced, post-commit).
+  getDbClient().afterCommit(scheduleOrgDomainRecompute);
 
   return { user: created, created: true };
 }
@@ -453,6 +456,7 @@ export async function mintToken(
   userId: string,
   label: string | null,
   actor: IdentityActor,
+  options: { source?: string } = {},
 ): Promise<{ tokenId: string; plaintext: string }> {
   // 24 base62 chars from 24 random bytes (~143 bits of entropy).
   const plaintext = `${TOKEN_PREFIX}${base62(randomBytes(24))}`;
@@ -467,7 +471,12 @@ export async function mintToken(
        VALUES (?, ?, ?, ?, ?, ?)`,
       [tokenId, userId, label, hash, preview, now],
     );
-    await recordIdentityEvent(userId, "token_minted", actor, null, { tokenId, label, preview });
+    await recordIdentityEvent(userId, "token_minted", actor, null, {
+      tokenId,
+      label,
+      preview,
+      ...(options.source ? { source: options.source } : {}),
+    });
   });
 
   return { tokenId, plaintext };

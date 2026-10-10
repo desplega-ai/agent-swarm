@@ -4,12 +4,12 @@
 @custom-variant dark (&:is(.dark *));
 
 @theme {
-  /* shadcn/ui Zinc theme — light base with amber primary */
+  /* shadcn/ui Zinc theme, light base with amber primary */
   --color-background: oklch(1 0 0);
   --color-foreground: oklch(0.141 0.005 285.823);
   --color-card: oklch(1 0 0);
   --color-card-foreground: oklch(0.141 0.005 285.823);
-  /* Recessed surface — one step off `card`, used for tool-call rows in the
+  /* Recessed surface, one step off `card`, used for tool-call rows in the
      session-log viewer so nested blocks read as layered, not flat. */
   --color-surface: oklch(0.985 0.0015 286);
   --color-popover: oklch(1 0 0);
@@ -20,7 +20,7 @@
   --color-secondary-foreground: oklch(0.21 0.006 285.885);
   --color-muted: oklch(0.967 0.001 286.375);
   --color-muted-foreground: oklch(0.552 0.016 285.938);
-  /* Accent is the interactive hover/highlight fill — one step darker than
+  /* Accent is the interactive hover/highlight fill, one step darker than
      muted (zinc-100 → ~zinc-150): at zinc-100 on a white field the hover was
      a 3% lightness step, effectively invisible. Muted stays zinc-100 for
      quiet resting surfaces. */
@@ -30,7 +30,7 @@
   --color-destructive-foreground: oklch(0.985 0 0);
   --color-border: oklch(0.92 0.004 286.32);
   /* Subtle tier of the two-tier line system: separators, row rules, grid
-     lines. Structural outlines (cards, inputs) stay on `border` — the full
+     lines. Structural outlines (cards, inputs) stay on `border`, the full
      stop keeps the affordance read. */
   --color-border-subtle: oklch(0.945 0.003 286);
   --color-input: oklch(0.92 0.004 286.32);
@@ -51,12 +51,12 @@
   --color-sidebar-border: oklch(0.945 0.003 286);
   --color-sidebar-ring: oklch(0.555 0.163 48.998);
 
-  /* Semantic status tokens — light mode. PALE SET (2026-08-06, Taras-approved
+  /* Semantic status tokens, light mode. PALE SET (2026-08-06, Taras-approved
      board): same hues as the original Tailwind-500 stops, ~40% less chroma,
-     lifted lightness — status reads as a quiet annotation on the zinc field,
+     lifted lightness, status reads as a quiet annotation on the zinc field,
      not a saturated shout. Canonical token = fill; `-strong` = text emphasis
      on neutral surfaces (darker, contrast-safe); `-foreground` = text ON the
-     fill — dark now, because the fills are pale. */
+     fill, dark now, because the fills are pale. */
   --color-status-success: oklch(0.74 0.1 163);
   --color-status-success-strong: oklch(0.5 0.09 163);
   --color-status-success-foreground: oklch(0.21 0.006 285.885);
@@ -69,6 +69,11 @@
   --color-status-info: oklch(0.74 0.09 235);
   --color-status-info-strong: oklch(0.5 0.09 240);
   --color-status-info-foreground: oklch(0.21 0.006 285.885);
+  /* Solid stops for the status icons (`TaskStatusIcon`): the filled completed
+     disc and the amber in-progress ring. Saturated on purpose, they carry a
+     16px glyph, not a text or fill surface, so they sit outside the pale set. */
+  --color-status-success-solid: oklch(0.627 0.194 149.2);
+  --color-status-active-solid: oklch(0.666 0.179 58.318);
   --color-status-pending: oklch(0.84 0.1 95);
   --color-status-pending-strong: oklch(0.55 0.09 90);
   --color-status-pending-foreground: oklch(0.21 0.006 285.885);
@@ -86,13 +91,13 @@
   --color-status-neutral-strong: oklch(0.48 0.014 286);
   --color-status-neutral-foreground: oklch(0.21 0.006 285.885);
 
-  /* Action-type tokens — light mode
+  /* Action-type tokens, light mode
      Source: components/workflows/action-node.tsx L18-L72 and
              components/workflows/condition-node.tsx L17-L50.
      Light values match the *-500 stops used for borders/handles;
      dark values match the *-400 stops used for text. The /10 alpha
      fills used as backgrounds are emitted as Tailwind opacity utilities
-     (e.g. `bg-action-webhook/10`) — no separate -bg token needed. */
+     (e.g. `bg-action-webhook/10`), no separate -bg token needed. */
   --color-action-agent-task: oklch(0.606 0.25 292.717);       /* violet-500 */
   --color-action-script: oklch(0.715 0.143 215.221);          /* cyan-500 */
   --color-action-notify: oklch(0.704 0.14 182.503);           /* teal-500 */
@@ -100,14 +105,28 @@
   --color-action-create-task: oklch(0.585 0.233 277.117);     /* indigo-500 */
   --color-action-send-message: oklch(0.656 0.241 354.308);    /* pink-500 */
   --color-action-delegate-to-agent: oklch(0.627 0.265 303.9); /* purple-500 */
-  --color-action-foreach: oklch(0.768 0.233 130.85);          /* lime-500 — fan-out */
-  --color-action-swarm-script: oklch(0.696 0.17 162.48);      /* emerald-500 — catalog script */
-  --color-action-default: oklch(0.623 0.214 259.815);         /* blue-500 — fallback action */
-  --color-action-property-match: oklch(0.769 0.188 70.08);    /* amber-500 — condition */
-  --color-action-code-match: oklch(0.795 0.184 86.047);       /* yellow-500 — condition */
-  --color-action-raw-llm: oklch(0.685 0.169 237.323);         /* sky-500 — condition */
+  --color-action-foreach: oklch(0.768 0.233 130.85);          /* lime-500, fan-out */
+  --color-action-swarm-script: oklch(0.696 0.17 162.48);      /* emerald-500, catalog script */
+  --color-action-default: oklch(0.623 0.214 259.815);         /* blue-500, fallback action */
+  --color-action-property-match: oklch(0.769 0.188 70.08);    /* amber-500, condition */
+  --color-action-code-match: oklch(0.795 0.184 86.047);       /* yellow-500, condition */
+  --color-action-raw-llm: oklch(0.685 0.169 237.323);         /* sky-500, condition */
 
-  /* Motion — the two named curves of the motion doctrine (DESIGN.md § Motion).
+  /* Comb presence: one color per person (lib/comb/presence.ts `peerColor`),
+     for avatars, pointers, and selections. No orange, amber (the brand
+     voice), or yellow. Fills take `peer-foreground` text: at least 4.5:1 in
+     both themes and 3:1 against the page (lib/comb/presence.test.ts). */
+  --color-peer-1: oklch(0.52 0.16 25);
+  --color-peer-2: oklch(0.52 0.16 350);
+  --color-peer-3: oklch(0.52 0.16 320);
+  --color-peer-4: oklch(0.52 0.16 290);
+  --color-peer-5: oklch(0.52 0.16 260);
+  --color-peer-6: oklch(0.52 0.1 230);
+  --color-peer-7: oklch(0.52 0.08 190);
+  --color-peer-8: oklch(0.52 0.14 150);
+  --color-peer-foreground: oklch(0.985 0 0);
+
+  /* Motion, the two named curves of the motion doctrine (DESIGN.md § Motion).
      swift: the iOS-sheet curve, for large surfaces (sheets, drawers).
      snappy: fast-start ease-out, for small user-initiated UI (menus, reveals). */
   --ease-swift: cubic-bezier(0.32, 0.72, 0, 1);
@@ -117,7 +136,15 @@
   --font-sans: "Space Grotesk", sans-serif;
   --font-mono: "Space Mono", monospace;
 
-  /* Border radius — shadcn/ui default, except `xl` tuned 12px → 10px so
+  /* Type scale (DESIGN.md §3). With Tailwind's `lg`, `sm` and `xs` these
+     make the named five steps: lg 18, sm 14, data 13, xs 12, meta 11 px.
+     `data` is for values and log text, `meta` for the smallest labels. */
+  --text-data: 0.8125rem;
+  --text-data--line-height: calc(1.25 / 0.8125);
+  --text-meta: 0.6875rem;
+  --text-meta--line-height: calc(1 / 0.6875);
+
+  /* Border radius, shadcn/ui default, except `xl` tuned 12px → 10px so
      cards read tighter and more technical; controls stay 8px, tags 6px. */
   --radius-sm: 0.375rem;
   --radius-md: 0.5rem;
@@ -130,7 +157,7 @@
  * Scoped to `.dark` ONLY (values reach descendants through custom-property
  * inheritance). Do NOT widen this to `.dark *`: stamping the variables onto
  * every element would override the inherited values of any scoped theme
- * wrapper (`[data-theme="..."]` — see `src/lib/themes.ts`), which is how
+ * wrapper (`[data-theme="..."]`, see `src/lib/themes.ts`), which is how
  * swarm apps carry a per-app preset. */
 .dark {
   --color-background: oklch(0.141 0.005 285.823);
@@ -168,8 +195,8 @@
   --color-sidebar-border: oklch(1 0 0 / 8%);
   --color-sidebar-ring: oklch(0.769 0.188 70.08);
 
-  /* Semantic status tokens — dark mode. PALE SET (2026-08-06): same hues as
-     the old *-400 stops with chroma pulled down — glows, not neon. `-strong`
+  /* Semantic status tokens, dark mode. PALE SET (2026-08-06): same hues as
+     the old *-400 stops with chroma pulled down, glows, not neon. `-strong`
      collapses to the canonical value as before (text and fill share the stop
      in dark). Foregrounds stay dark-on-fill. */
   --color-status-success: oklch(0.78 0.1 163);
@@ -184,6 +211,8 @@
   --color-status-info: oklch(0.78 0.09 235);
   --color-status-info-strong: oklch(0.78 0.09 235);
   --color-status-info-foreground: oklch(0.21 0.006 285.885);
+  --color-status-success-solid: oklch(0.723 0.219 149.6);
+  --color-status-active-solid: oklch(0.769 0.188 70.08);
   --color-status-pending: oklch(0.86 0.09 95);
   --color-status-pending-strong: oklch(0.86 0.09 95);
   --color-status-pending-foreground: oklch(0.21 0.006 285.885);
@@ -197,7 +226,7 @@
   --color-status-neutral-strong: oklch(0.72 0.012 286);
   --color-status-neutral-foreground: oklch(0.21 0.006 285.885);
 
-  /* Action-type tokens — dark mode (lighter *-400 stops for legibility) */
+  /* Action-type tokens, dark mode (lighter *-400 stops for legibility) */
   --color-action-agent-task: oklch(0.702 0.183 293.541);      /* violet-400 */
   --color-action-script: oklch(0.789 0.154 211.53);           /* cyan-400 */
   --color-action-notify: oklch(0.777 0.152 181.912);          /* teal-400 */
@@ -211,6 +240,16 @@
   --color-action-property-match: oklch(0.828 0.189 84.429);   /* amber-400 */
   --color-action-code-match: oklch(0.852 0.199 91.936);       /* yellow-400 */
   --color-action-raw-llm: oklch(0.746 0.16 232.661);          /* sky-400 */
+
+  --color-peer-1: oklch(0.79 0.12 25);
+  --color-peer-2: oklch(0.79 0.13 350);
+  --color-peer-3: oklch(0.79 0.13 320);
+  --color-peer-4: oklch(0.79 0.11 290);
+  --color-peer-5: oklch(0.79 0.1 260);
+  --color-peer-6: oklch(0.79 0.13 230);
+  --color-peer-7: oklch(0.79 0.13 190);
+  --color-peer-8: oklch(0.79 0.13 150);
+  --color-peer-foreground: oklch(0.141 0.005 285.823);
 }
 
 :root {
@@ -223,7 +262,7 @@
 /* Tailwind v4 leaves colorless `border-*` utilities on `currentColor`, which
  * renders near-black hairlines in light mode and ignores theme presets.
  * Default every border to the themed token instead (the standard shadcn v4
- * base rule) — explicit `border-<color>` utilities still win. */
+ * base rule), explicit `border-<color>` utilities still win. */
 /*
  * Touch hit slop (WCAG 2.2 2.5.8): on coarse pointers, an invisible ::after
  * grows a small control's hit area to --hit-size (40px by default) without
@@ -297,7 +336,7 @@ summary {
   cursor: pointer;
 }
 
-/* Exception (Taras): the global sidebar keeps the pre-rule feel — nav
+/* Exception (Taras): the global sidebar keeps the pre-rule feel, nav
  * anchors stay pointer natively, but its buttons (group labels, toggles,
  * menu buttons) keep the default arrow. The rail (the collapse/expand
  * border strip) is carved back out: it looks like inert chrome, so it
@@ -307,12 +346,12 @@ summary {
   cursor: default;
 }
 
-/* Hover linger — the Linear hover: enter instantly, release softly. A pure
+/* Hover linger, the Linear hover: enter instantly, release softly. A pure
  * TIMING modifier: it sets duration/easing/delay only, so it composes with
  * whatever `transition-property` the element already declares
  * (`transition-colors`, `transition-[width,height,padding,...]`). The base
  * rule owns the EXIT (slight delay, then a soft fade); the :hover rule zeroes
- * both so entering is immediate. Un-layered on purpose — it must outrank the
+ * both so entering is immediate. Un-layered on purpose, it must outrank the
  * duration set by Tailwind's layered transition utilities.
  * Do not put this on anything that transitions `transform` (press scale must
  * stay instant in both directions) or on keyboard-driven highlights. */
@@ -327,40 +366,42 @@ summary {
   transition-delay: 0s;
 }
 
-/* Button motion — the per-property split that lets one control obey two
+/* Button motion, the per-property split that lets one control obey two
  * timing rules at once (DESIGN.md § Motion):
  *   - colors follow the linger rule: hover states land instantly, release
  *     through a 50ms delay + 200ms snappy fade;
  *   - transform (the press scale) is its own channel: pressing is FAST
  *     (100ms), releasing eases back slightly slower (200ms), and neither
- *     direction ever inherits the linger delay — a lagging press reads as a
+ *     direction ever inherits the linger delay, a lagging press reads as a
  *     broken button.
  * Property order is significant: the duration/delay lists below map
  * positionally onto `transition-property`. Un-layered, like `.hover-linger`,
  * so it outranks Tailwind's layered transition utilities. `button.tsx` owns
  * WHAT changes (variant colors, active:scale); this block owns only WHEN. */
 [data-slot="button"] {
-  transition-property: color, background-color, border-color, transform;
+  /* Tailwind v4's `active:scale-*` writes the standalone `scale` property,
+   * not `transform`, so both are listed or the press snaps untimed. */
+  transition-property: color, background-color, border-color, transform, scale;
   transition-timing-function: var(--ease-snappy);
   transition-duration: 200ms;
-  transition-delay: 50ms, 50ms, 50ms, 0s;
+  transition-delay: 50ms, 50ms, 50ms, 0s, 0s;
 }
 
 [data-slot="button"]:hover {
-  transition-duration: 0s, 0s, 0s, 200ms;
+  transition-duration: 0s, 0s, 0s, 200ms, 200ms;
   transition-delay: 0s;
 }
 
 [data-slot="button"]:active {
-  transition-duration: 0s, 0s, 0s, 100ms;
+  transition-duration: 0s, 0s, 0s, 100ms, 100ms;
   transition-delay: 0s;
 }
 
-/* Sidebar menu-button motion — same per-property split as Button, tuned for
+/* Sidebar menu-button motion, same per-property split as Button, tuned for
  * the icon-collapse gesture. `.hover-linger` must NOT sit on these buttons:
  * their transition list includes width/height/padding, and the linger's 50ms
  * rest delay made every row trail the rail's width animation ("laggy").
- * Colors keep the linger feel; layout properties ride the rail — same 200ms
+ * Colors keep the linger feel; layout properties ride the rail, same 200ms
  * and the same swift curve as the sidebar container, zero delay. */
 [data-sidebar="menu-button"] {
   transition-property: color, background-color, width, height, padding;
@@ -373,6 +414,16 @@ summary {
 [data-sidebar="menu-button"]:hover {
   transition-duration: 0s, 0s, 200ms, 200ms, 200ms;
   transition-delay: 0s;
+}
+
+/* Theme switch, set by use-theme.ts for the one frame the dark class or
+ * preset flips, so the new palette lands at once instead of smearing through
+ * each control's own color transition. */
+.theme-switching,
+.theme-switching *,
+.theme-switching *::before,
+.theme-switching *::after {
+  transition: none !important;
 }
 
 /* Scrollbar */
@@ -394,7 +445,7 @@ summary {
   background: var(--color-muted-foreground);
 }
 
-/* Shimmer text — used by the inline "chain of thought" indicator on
+/* Shimmer text, used by the inline "chain of thought" indicator on
  * in-progress agent turns. A linear gradient slides across the text via
  * background-clip:text, giving a subtle "live / streaming" pulse. */
 .shimmer-text {
@@ -420,7 +471,7 @@ summary {
   }
 }
 
-/* Shimmer bar — sibling of .shimmer-text for block surfaces (e.g. live task
+/* Shimmer bar, sibling of .shimmer-text for block surfaces (e.g. live task
  * bars on the activity timeline). A soft highlight sweeps across the element
  * to signal "running right now". Host must be positioned. */
 .shimmer-bar::after {
@@ -450,7 +501,7 @@ summary {
   }
 }
 
-/* Session-log viewer motion — entrance for newly streamed rows, a jump-to
+/* Session-log viewer motion, entrance for newly streamed rows, a jump-to
  * highlight flash, and the "agent is working" orb pulse. Transform/opacity and
  * box-shadow only (no layout thrash); all disabled under reduced-motion. */
 @keyframes sl-enter {
@@ -481,7 +532,7 @@ summary {
   animation: sl-flash 1.3s ease-out;
 }
 
-/* Streamed-in highlight — a row that arrives while the viewer is following the
+/* Streamed-in highlight, a row that arrives while the viewer is following the
  * tail slides in and gets a brief, light primary glow that settles. Folds in
  * the sl-enter motion so only one `animation` runs on the element. */
 @keyframes sl-stream {
@@ -528,6 +579,63 @@ summary {
   .sl-orb {
     animation: none;
   }
+}
+
+/* Comb comment passages (components/comb/comment-highlights.tsx). The CSS
+ * Custom Highlight API paints text ranges. `-moved` marks a passage found
+ * after the text changed. `-pending` marks an `@swarm` comment not sent yet
+ * (the info tone of the `@swarm` chip). `-active` is the selected or hovered
+ * thread and the passage a new comment is written on. Browsers without the
+ * API get the `-fallback` classes on the blocks instead. */
+::highlight(comb-comment) {
+  background-color: color-mix(in oklch, var(--color-primary) 16%, transparent);
+}
+::highlight(comb-comment-moved) {
+  background-color: color-mix(in oklch, var(--color-status-warning) 24%, transparent);
+  text-decoration: underline dotted var(--color-status-warning-strong);
+}
+::highlight(comb-comment-pending) {
+  background-color: color-mix(in oklch, var(--color-status-info) 28%, transparent);
+  text-decoration: underline dashed var(--color-status-info-strong);
+}
+::highlight(comb-comment-active) {
+  background-color: color-mix(in oklch, var(--color-primary) 34%, transparent);
+}
+.comb-comment-fallback {
+  background-color: color-mix(in oklch, var(--color-primary) 10%, transparent);
+}
+.comb-comment-fallback-pending {
+  background-color: color-mix(in oklch, var(--color-status-info) 14%, transparent);
+}
+.comb-comment-fallback-active {
+  background-color: color-mix(in oklch, var(--color-primary) 22%, transparent);
+}
+
+/* Comb presence: other people's selections in their color
+ * (components/comb/presence-layer.tsx). One highlight per palette slot. */
+::highlight(comb-peer-1) {
+  background-color: color-mix(in oklch, var(--color-peer-1) 26%, transparent);
+}
+::highlight(comb-peer-2) {
+  background-color: color-mix(in oklch, var(--color-peer-2) 26%, transparent);
+}
+::highlight(comb-peer-3) {
+  background-color: color-mix(in oklch, var(--color-peer-3) 26%, transparent);
+}
+::highlight(comb-peer-4) {
+  background-color: color-mix(in oklch, var(--color-peer-4) 26%, transparent);
+}
+::highlight(comb-peer-5) {
+  background-color: color-mix(in oklch, var(--color-peer-5) 26%, transparent);
+}
+::highlight(comb-peer-6) {
+  background-color: color-mix(in oklch, var(--color-peer-6) 26%, transparent);
+}
+::highlight(comb-peer-7) {
+  background-color: color-mix(in oklch, var(--color-peer-7) 26%, transparent);
+}
+::highlight(comb-peer-8) {
+  background-color: color-mix(in oklch, var(--color-peer-8) 26%, transparent);
 }
 
 /* Chat message markdown prose */
@@ -621,7 +729,7 @@ summary {
   font-size: 0.95em;
 }
 
-/* Session log prose — tighter than chat */
+/* Session log prose, tighter than chat */
 .prose-session-log {
   font-size: 0.8rem;
   line-height: 1.5;
@@ -629,7 +737,12 @@ summary {
 .prose-session-log pre {
   max-height: 24rem;
 }
-/* Keep bullet/number lists compact — collapse the per-item <p> margins that
+/* Inline code in the log is never under the meta size (11 px): 0.8em of the
+ * 0.8rem log prose is 10.24 px. */
+.prose-session-log code {
+  font-size: max(0.8em, var(--text-meta));
+}
+/* Keep bullet/number lists compact, collapse the per-item <p> margins that
  * "loose" markdown lists (blank line between items) would otherwise inject,
  * so agent summaries render as tight lists instead of widely-spaced blocks. */
 .prose-session-log :is(ul, ol) {
@@ -648,7 +761,7 @@ summary {
 
 /* Session-log fenced code blocks (LogCodeBlock). These scoped selectors outrank
  * the generic `.prose-* pre` rules above (extra class = higher specificity), so
- * the inner <pre> is reset flat — no background, no radius, no double padding —
+ * the inner <pre> is reset flat, no background, no radius, no double padding,
  * and the single clean container around it owns the styling. Color is left to
  * inherit so code reads as foreground in messages and muted in thinking blocks. */
 .prose-chat pre.sl-code-pre,
@@ -664,12 +777,12 @@ summary {
   line-height: 1.6;
 }
 
-/* Document-scale markdown prose — SKILL.md content, schedule task templates,
+/* Document-scale markdown prose, SKILL.md content, schedule task templates,
  * and any other long-form authored document rendered in a card. Roomier than
  * `.prose-chat`: real heading hierarchy, visible list markers, and table
  * chrome, so a document reads like a document rather than a chat bubble.
- * (Streamdown's own utility classes aren't emitted by our Tailwind build —
- * it isn't a scanned `@source` — so list markers and blockquote rules have to
+ * (Streamdown's own utility classes aren't emitted by our Tailwind build,
+ * it isn't a scanned `@source`, so list markers and blockquote rules have to
  * come from here, same as the chat/session-log prose classes above.) */
 .prose-doc {
   font-size: 0.875rem;
@@ -762,4 +875,146 @@ summary {
 .prose-doc th {
   background: var(--color-muted);
   font-weight: 600;
+}
+
+/* Streamdown frames each table in its own bordered scroll box. Inside it, drop
+ * the table margin and the outer cell borders, so the frame is not drawn twice. */
+.prose-doc [data-streamdown="table-wrapper"] table {
+  margin: 0;
+  border-style: hidden;
+}
+
+/* Streamdown fenced code blocks, on every page that renders markdown with
+ * Streamdown. Its own layout leans on utility classes our Tailwind build never
+ * emits (`-mt-10`, `text-[var(--sdm-c)]`, ...), so unstyled it stacks an empty
+ * header band, a separate toolbar row and a second bordered card around a
+ * prose `pre`. These rules rebuild it as one container, matching LogCodeBlock:
+ * a slim header row (language + toolbar) when the fence names a language, a
+ * toolbar in the top-right corner when it does not. Plain fences
+ * (drafts, prose) soft-wrap; fences with a language keep horizontal scroll. */
+[data-streamdown="code-block"] {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin: 0.5rem 0;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid color-mix(in oklch, var(--color-border) 70%, transparent);
+  border-radius: 0.5rem;
+  background: color-mix(in oklch, var(--color-muted) 40%, transparent);
+}
+
+[data-streamdown="code-block-header"] {
+  display: flex;
+  align-items: center;
+  height: 2rem;
+  padding: 0 5rem 0 0.75rem;
+  border-bottom: 1px solid color-mix(in oklch, var(--color-border) 50%, transparent);
+  background: color-mix(in oklch, var(--color-muted) 50%, transparent);
+  color: var(--color-muted-foreground);
+  font-family: "Space Mono", monospace;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  user-select: none;
+}
+[data-streamdown="code-block-header"] > span {
+  margin: 0;
+}
+[data-streamdown="code-block"]:is([data-language=""], :not([data-language]))
+  > [data-streamdown="code-block-header"] {
+  display: none;
+}
+
+[data-streamdown="code-block"] > div:has(> [data-streamdown="code-block-actions"]) {
+  position: absolute;
+  top: 0;
+  right: 0.25rem;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  height: 2rem;
+  margin: 0;
+  pointer-events: none;
+}
+[data-streamdown="code-block-actions"] {
+  display: flex;
+  align-items: center;
+  gap: 0.125rem;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  pointer-events: auto;
+}
+[data-streamdown="code-block-actions"] button {
+  display: inline-flex;
+  padding: 0.25rem;
+  border-radius: 0.25rem;
+  color: var(--color-muted-foreground);
+  cursor: pointer;
+}
+[data-streamdown="code-block-actions"] button:hover {
+  background: var(--color-muted);
+  color: var(--color-foreground);
+}
+[data-streamdown="code-block-actions"] svg {
+  width: 14px;
+  height: 14px;
+}
+/* No header row: the toolbar sits in the top-right corner of the code, on its
+ * own surface, and a float reserves its spot so the first line wraps around
+ * it instead of running underneath. */
+[data-streamdown="code-block"]:is([data-language=""], :not([data-language]))
+  [data-streamdown="code-block-actions"] {
+  margin-top: 0.25rem;
+  border-radius: 0.375rem;
+  background: color-mix(in oklch, var(--color-background) 85%, transparent);
+  backdrop-filter: blur(4px);
+}
+[data-streamdown="code-block"]:is([data-language=""], :not([data-language]))
+  > [data-streamdown="code-block-body"]::before {
+  content: "";
+  float: right;
+  width: 3.25rem;
+  height: 1.25rem;
+}
+
+[data-streamdown="code-block-body"] {
+  margin: 0;
+  padding: 0.5rem 0.75rem;
+  overflow-x: auto;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+[data-streamdown="code-block"] pre {
+  margin: 0;
+  padding: 0;
+  overflow: visible;
+  border-radius: 0;
+  background: transparent;
+  color: var(--color-foreground);
+  font-family: "Space Mono", monospace;
+  font-size: 12px;
+  line-height: 1.6;
+}
+[data-streamdown="code-block"] code {
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+  font-family: inherit;
+  font-size: inherit;
+}
+[data-streamdown="code-block"]:is([data-language=""], :not([data-language])) pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+/* Shiki token colors arrive as CSS variables on each token span. */
+[data-streamdown="code-block"] code span {
+  color: var(--sdm-c, inherit);
+}
+.dark [data-streamdown="code-block"] code span {
+  color: var(--shiki-dark, var(--sdm-c, inherit));
 }

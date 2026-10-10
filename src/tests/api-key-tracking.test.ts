@@ -8,14 +8,22 @@ import {
   clearKeyRateLimit,
   closeDb,
   getAvailableKeyIndices,
+  getDbClient,
   getKeyStatuses,
+  getKv,
   initDb,
   markKeyRateLimited,
+  recordKeyAuthFailure,
   recordKeyRateLimitWindows,
   recordKeyUsage,
+  setApiKeyPlan,
 } from "../be/db";
 import type { CredentialSelection } from "../utils/credentials";
-import { resolveCredentialPools, selectCredential } from "../utils/credentials";
+import {
+  ModelWindowExhaustedError,
+  resolveCredentialPools,
+  selectCredential,
+} from "../utils/credentials";
 
 // ─── Credential Selection Unit Tests ────────────────────────────────────────
 
@@ -240,6 +248,258 @@ describe("API key tracking DB queries", () => {
     await recordKeyUsage("OPENAI_API_KEY", "oai02", 1, null);
     const cleared = await clearKeyRateLimit("OPENAI_API_KEY", "oai02");
     expect(cleared).toBe(false);
+  });
+
+  const codexStatus = async (keySuffix: string) =>
+    (await getKeyStatuses("CODEX_OAUTH")).find((s) => s.keySuffix === keySuffix)!;
+  const DAY_MS = 24 * 60 * 60 * 1000;
+  /** The fence a runner reads with its key draw, or codex-login before its credential write. */
+  const readFence = async () => (await getAvailableKeyIndices("CODEX_OAUTH", 1)).authFailureFence;
+  const clearWithFence = async (keySuffix: string, authFence: number, keyIndex?: number) =>
+    clearKeyRateLimit("CODEX_OAUTH", keySuffix, "global", null, {
+      clearAuthBench: true,
+      authFence,
+      keyIndex,
+    });
+
+  test("recordKeyAuthFailure: 1 failure counts but does not bench", async () => {
+    const result = await recordKeyAuthFailure("CODEX_OAUTH", "cdx01", 0);
+    expect(result).toEqual({ consecutiveAuthFailures: 1, benched: false, rateLimitedUntil: null });
+
+    const row = await codexStatus("cdx01");
+    expect(row.consecutiveAuthFailures).toBe(1);
+    expect(row.lastAuthFailureAt).not.toBeNull();
+    expect(row.status).toBe("available");
+    const { availableIndices } = await getAvailableKeyIndices("CODEX_OAUTH", 3);
+    expect(availableIndices).toContain(0);
+  });
+
+  test("recordKeyAuthFailure: 2 failures in a row bench for 365 days", async () => {
+    const result = await recordKeyAuthFailure("CODEX_OAUTH", "cdx01", 0);
+    expect(result.consecutiveAuthFailures).toBe(2);
+    expect(result.benched).toBe(true);
+
+    const row = await codexStatus("cdx01");
+    expect(row.status).toBe("rate_limited");
+    expect(row.rateLimitedUntil).toBe(result.rateLimitedUntil);
+    expect(Math.abs(Date.parse(row.rateLimitedUntil!) - (Date.now() + 365 * DAY_MS))).toBeLessThan(
+      60_000,
+    );
+    expect(row.lastRateLimitAt).not.toBeNull();
+
+    const marker = await getKv("codex-auth-watch", "bench:cdx01");
+    expect(marker).not.toBeNull();
+    expect(marker!.value).toMatchObject({
+      keyIndex: 0,
+      keyType: "CODEX_OAUTH",
+      benchedUntil: row.rateLimitedUntil,
+      source: "report-auth-failure",
+    });
+
+    const { availableIndices } = await getAvailableKeyIndices("CODEX_OAUTH", 3);
+    expect(availableIndices).not.toContain(0);
+  });
+
+  test("recordKeyAuthFailure only extends an existing longer bench", async () => {
+    const farUntil = new Date(Date.now() + 400 * DAY_MS).toISOString();
+    await markKeyRateLimited("CODEX_OAUTH", "cdx02", 1, farUntil);
+    await recordKeyAuthFailure("CODEX_OAUTH", "cdx02", 1);
+    const result = await recordKeyAuthFailure("CODEX_OAUTH", "cdx02", 1);
+    expect(result.benched).toBe(true);
+    expect(result.rateLimitedUntil).toBe(farUntil);
+    expect((await codexStatus("cdx02")).rateLimitedUntil).toBe(farUntil);
+  });
+
+  test("a success between auth failures resets the run", async () => {
+    await recordKeyAuthFailure("CODEX_OAUTH", "cdx03", 2);
+    await clearWithFence("cdx03", await readFence());
+    const result = await recordKeyAuthFailure("CODEX_OAUTH", "cdx03", 2);
+    expect(result.benched).toBe(false);
+
+    const row = await codexStatus("cdx03");
+    expect(row.status).toBe("available");
+    expect(row.consecutiveAuthFailures).toBe(1);
+  });
+
+  test("clearKeyRateLimit without clearAuthBench cannot lift an auth bench", async () => {
+    const cleared = await clearKeyRateLimit("CODEX_OAUTH", "cdx01");
+    expect(cleared).toBe(false);
+    expect((await codexStatus("cdx01")).status).toBe("rate_limited");
+  });
+
+  test("clearKeyRateLimit with clearAuthBench but no fence cannot lift an auth bench", async () => {
+    const cleared = await clearKeyRateLimit("CODEX_OAUTH", "cdx01", "global", null, {
+      clearAuthBench: true,
+    });
+    expect(cleared).toBe(false);
+    const row = await codexStatus("cdx01");
+    expect(row.status).toBe("rate_limited");
+    expect(row.consecutiveAuthFailures).toBe(2);
+  });
+
+  test("clearKeyRateLimit with clearAuthBench and a current fence lifts an auth bench", async () => {
+    const cleared = await clearWithFence("cdx01", await readFence());
+    expect(cleared).toBe(true);
+
+    const row = await codexStatus("cdx01");
+    expect(row.status).toBe("available");
+    expect(row.rateLimitedUntil).toBeNull();
+    expect(row.consecutiveAuthFailures).toBe(0);
+    expect(await getKv("codex-auth-watch", "bench:cdx01")).toBeNull();
+  });
+
+  test("clearKeyRateLimit without clearAuthBench still clears a plain rate limit", async () => {
+    const until = new Date(Date.now() + 300_000).toISOString();
+    await markKeyRateLimited("CODEX_OAUTH", "cdx04", 3, until);
+    const cleared = await clearKeyRateLimit("CODEX_OAUTH", "cdx04");
+    expect(cleared).toBe(true);
+    expect((await codexStatus("cdx04")).status).toBe("available");
+  });
+
+  test("an ordinary rate limit and its expiry do not undo an auth bench", async () => {
+    await recordKeyAuthFailure("CODEX_OAUTH", "cdx05", 4);
+    const benched = await recordKeyAuthFailure("CODEX_OAUTH", "cdx05", 4);
+    expect(benched.benched).toBe(true);
+
+    const expired = new Date(Date.now() - 1_000).toISOString();
+    await markKeyRateLimited("CODEX_OAUTH", "cdx05", 4, expired);
+
+    const row = await codexStatus("cdx05");
+    expect(row.status).toBe("rate_limited");
+    expect(row.rateLimitedUntil).toBe(benched.rateLimitedUntil);
+    const { availableIndices } = await getAvailableKeyIndices("CODEX_OAUTH", 5);
+    expect(availableIndices).not.toContain(4);
+    expect((await codexStatus("cdx05")).status).toBe("rate_limited");
+  });
+
+  test("an expired stored auth bench does not auto-clear", async () => {
+    await recordKeyAuthFailure("CODEX_OAUTH", "cdx06", 1);
+    expect((await recordKeyAuthFailure("CODEX_OAUTH", "cdx06", 1)).benched).toBe(true);
+    const past = new Date(Date.now() - 60_000).toISOString();
+    await getDbClient().run(
+      `UPDATE api_key_status SET rateLimitedUntil = ? WHERE keyType = 'CODEX_OAUTH' AND keySuffix = 'cdx06'`,
+      [past],
+    );
+
+    const { availableIndices } = await getAvailableKeyIndices("CODEX_OAUTH", 5);
+    expect(availableIndices).not.toContain(1);
+    const row = await codexStatus("cdx06");
+    expect(row.status).toBe("rate_limited");
+    expect(row.rateLimitedUntil).toBe(past);
+    expect(row.consecutiveAuthFailures).toBe(2);
+    expect(await getKv("codex-auth-watch", "bench:cdx06")).not.toBeNull();
+  });
+
+  test("each auth failure gets a higher server-side order than the last fence", async () => {
+    const before = await readFence();
+    await recordKeyAuthFailure("CODEX_OAUTH", "seq01", 4);
+    const afterFirst = await readFence();
+    await recordKeyAuthFailure("CODEX_OAUTH", "seq02", 4);
+    expect(afterFirst).toBeGreaterThan(before);
+    expect(await readFence()).toBeGreaterThan(afterFirst);
+  });
+
+  test("two runners: a late success fenced before the other runner's failures keeps the bench", async () => {
+    // Runner A draws the key (reads the fence) and later succeeds. Worker clocks play no
+    // part: whatever A's clock says, only the server-side order decides.
+    const fenceA = await readFence();
+    // Runner B then fails twice on the same login and benches it.
+    await recordKeyAuthFailure("CODEX_OAUTH", "cdx07", 2);
+    expect((await recordKeyAuthFailure("CODEX_OAUTH", "cdx07", 2)).benched).toBe(true);
+    // A's success reset lands last.
+    expect(await clearWithFence("cdx07", fenceA)).toBe(false);
+    let row = await codexStatus("cdx07");
+    expect(row.status).toBe("rate_limited");
+    expect(row.consecutiveAuthFailures).toBe(2);
+    expect(await getKv("codex-auth-watch", "bench:cdx07")).not.toBeNull();
+
+    // A success from a task drawn after the failures still lifts it.
+    expect(await clearWithFence("cdx07", await readFence())).toBe(true);
+    row = await codexStatus("cdx07");
+    expect(row.status).toBe("available");
+    expect(row.consecutiveAuthFailures).toBe(0);
+  });
+
+  test("a clock rollback (restart or skew) cannot reorder a success before later failures", async () => {
+    const staleFence = await readFence();
+    // The failures are recorded while every clock in the process reads an hour earlier.
+    const realNow = Date.now;
+    Date.now = () => realNow() - 3_600_000;
+    try {
+      await recordKeyAuthFailure("CODEX_OAUTH", "cdx09", 4);
+      await recordKeyAuthFailure("CODEX_OAUTH", "cdx09", 4);
+    } finally {
+      Date.now = realNow;
+    }
+    expect(await readFence()).toBeGreaterThan(staleFence);
+    expect(await clearWithFence("cdx09", staleFence)).toBe(false);
+    const row = await codexStatus("cdx09");
+    expect(row.status).toBe("rate_limited");
+    expect(row.consecutiveAuthFailures).toBe(2);
+  });
+
+  test("a stale success does not reset a count below the threshold", async () => {
+    const staleFence = await readFence();
+    await recordKeyAuthFailure("CODEX_OAUTH", "cdx08", 3);
+    await clearWithFence("cdx08", staleFence);
+    expect((await codexStatus("cdx08")).consecutiveAuthFailures).toBe(1);
+  });
+
+  test("a late re-login clear keeps failures recorded after the credential write", async () => {
+    // The login was benched before the re-login.
+    await recordKeyAuthFailure("CODEX_OAUTH", "rel01", 1);
+    await recordKeyAuthFailure("CODEX_OAUTH", "rel01", 1);
+    // codex-login reads the fence, then stores the fresh credentials.
+    const fence = await readFence();
+    // Two tasks fail on the fresh login before the clear request lands.
+    await recordKeyAuthFailure("CODEX_OAUTH", "rel01", 1);
+    await recordKeyAuthFailure("CODEX_OAUTH", "rel01", 1);
+    await clearWithFence("rel01", fence, 1);
+    const row = await codexStatus("rel01");
+    expect(row.status).toBe("rate_limited");
+    expect(row.consecutiveAuthFailures).toBe(4);
+    expect(await getKv("codex-auth-watch", "bench:rel01")).not.toBeNull();
+  });
+
+  test("a re-login clear lifts the bench recorded before the credential write", async () => {
+    await recordKeyAuthFailure("CODEX_OAUTH", "rel02", 2);
+    await recordKeyAuthFailure("CODEX_OAUTH", "rel02", 2);
+    expect(await clearWithFence("rel02", await readFence(), 2)).toBe(true);
+    const row = await codexStatus("rel02");
+    expect(row.status).toBe("available");
+    expect(row.consecutiveAuthFailures).toBe(0);
+    expect(await getKv("codex-auth-watch", "bench:rel02")).toBeNull();
+  });
+
+  test("a slot re-login with a different account retires the previous login's bench", async () => {
+    await recordKeyAuthFailure("CODEX_OAUTH", "old01", 0);
+    await recordKeyAuthFailure("CODEX_OAUTH", "old01", 0);
+    expect(await getKv("codex-auth-watch", "bench:old01")).not.toBeNull();
+
+    const cleared = await clearWithFence("new01", await readFence(), 0);
+    expect(cleared).toBe(true);
+    await recordKeyUsage("CODEX_OAUTH", "new01", 0, null);
+
+    const old = await codexStatus("old01");
+    expect(old.status).toBe("available");
+    expect(old.rateLimitedUntil).toBeNull();
+    expect(old.consecutiveAuthFailures).toBe(0);
+    expect(await getKv("codex-auth-watch", "bench:old01")).toBeNull();
+    const { availableIndices } = await getAvailableKeyIndices("CODEX_OAUTH", 5);
+    expect(availableIndices).toContain(0);
+  });
+
+  test("a clear without keyIndex leaves other logins at the same index alone", async () => {
+    await recordKeyAuthFailure("CODEX_OAUTH", "old02", 3);
+    await recordKeyAuthFailure("CODEX_OAUTH", "old02", 3);
+    await clearWithFence("new02", await readFence());
+    expect((await codexStatus("old02")).status).toBe("rate_limited");
+  });
+
+  test("an ordinary rate limit longer than the auth bench still applies", async () => {
+    const farUntil = new Date(Date.now() + 500 * DAY_MS).toISOString();
+    await markKeyRateLimited("CODEX_OAUTH", "cdx05", 4, farUntil);
+    expect((await codexStatus("cdx05")).rateLimitedUntil).toBe(farUntil);
   });
 
   test("recordKeyRateLimitWindows persists latest provider windows", async () => {
@@ -473,6 +733,113 @@ describe("API key tracking DB queries", () => {
       );
       const recovered = await getAvailableKeyIndices(KEY_TYPE, 1, "agent", scopeId, "fable");
       expect(recovered.availableIndices).toEqual([0]);
+    });
+
+    describe("seat filtering", () => {
+      // Own scope so the rows above do not leak into these counts.
+      const scope = "agent";
+      const scopeId = "seat-filter";
+
+      beforeAll(async () => {
+        await recordKeyUsage(KEY_TYPE, "seat0", 0, null, scope, scopeId);
+        await setApiKeyPlan(KEY_TYPE, "seat0", "claude_team_standard");
+        await recordKeyUsage(KEY_TYPE, "seat1", 1, null, scope, scopeId);
+      });
+
+      test("a claude_team_standard key is seat-blocked for fable", async () => {
+        const result = await getAvailableKeyIndices(KEY_TYPE, 2, scope, scopeId, "fable");
+        expect(result.availableIndices).toEqual([1]);
+        expect(result.seatBlockedIndices).toEqual([0]);
+      });
+
+      test("the same key is available for opus and for no model", async () => {
+        const opus = await getAvailableKeyIndices(KEY_TYPE, 2, scope, scopeId, "opus");
+        expect(opus.availableIndices).toEqual([0, 1]);
+        expect(opus.seatBlockedIndices).toEqual([]);
+        const none = await getAvailableKeyIndices(KEY_TYPE, 2, scope, scopeId);
+        expect(none.availableIndices).toEqual([0, 1]);
+        expect(none.seatBlockedIndices).toEqual([]);
+      });
+
+      test("a key with no plan is available for fable", async () => {
+        const result = await getAvailableKeyIndices(KEY_TYPE, 2, scope, scopeId, "fable");
+        expect(result.availableIndices).toContain(1);
+        expect(result.seatBlockedIndices).not.toContain(1);
+      });
+
+      test("a rate-limited standard-seat key stays seat-blocked", async () => {
+        const otherScopeId = "seat-filter-rl";
+        await recordKeyUsage(KEY_TYPE, "seat2", 0, null, scope, otherScopeId);
+        await setApiKeyPlan(KEY_TYPE, "seat2", "claude_team_standard");
+        await markKeyRateLimited(
+          KEY_TYPE,
+          "seat2",
+          0,
+          new Date(Date.now() + 3600_000).toISOString(),
+          scope,
+          otherScopeId,
+        );
+        const result = await getAvailableKeyIndices(KEY_TYPE, 1, scope, otherScopeId, "fable");
+        expect(result.availableIndices).toEqual([]);
+        expect(result.seatBlockedIndices).toEqual([0]);
+        expect(result.modelBlockedIndices).toEqual([]);
+
+        // Admission must not fall back to the key-wide-blocked seat.
+        await expect(
+          resolveCredentialPools(
+            { CLAUDE_CODE_OAUTH_TOKEN: "tok-seat2" },
+            {
+              provider: "claude",
+              model: "claude-fable-5-1",
+              availableIndicesMap: { CLAUDE_CODE_OAUTH_TOKEN: result },
+              enforceModelCapacity: true,
+            },
+          ),
+        ).rejects.toBeInstanceOf(ModelWindowExhaustedError);
+      });
+
+      test("a Fable-window-blocked standard-seat key stays seat-blocked", async () => {
+        const otherScopeId = "seat-filter-window";
+        await recordKeyUsage(KEY_TYPE, "seat3", 0, null, scope, otherScopeId);
+        await setApiKeyPlan(KEY_TYPE, "seat3", "claude_team_standard");
+        await recordKeyRateLimitWindows(
+          KEY_TYPE,
+          "seat3",
+          0,
+          {
+            seven_day_overage_included: {
+              status: "rejected",
+              resetsAt: Math.floor(Date.now() / 1000) + 3600,
+              lastSeenAt: new Date().toISOString(),
+            },
+          },
+          scope,
+          otherScopeId,
+        );
+        const result = await getAvailableKeyIndices(KEY_TYPE, 1, scope, otherScopeId, "fable");
+        expect(result.availableIndices).toEqual([]);
+        expect(result.modelBlockedIndices).toEqual([0]);
+        expect(result.seatBlockedIndices).toEqual([0]);
+
+        // The window-block fallback policy never applies to a seat block.
+        await expect(
+          resolveCredentialPools(
+            { CLAUDE_CODE_OAUTH_TOKEN: "tok-seat3", MODEL_WINDOW_EXHAUSTED_POLICY: "fallback" },
+            {
+              provider: "claude",
+              model: "claude-fable-5-1",
+              availableIndicesMap: { CLAUDE_CODE_OAUTH_TOKEN: result },
+              enforceModelCapacity: true,
+            },
+          ),
+        ).rejects.toBeInstanceOf(ModelWindowExhaustedError);
+      });
+
+      test("earliestModelResetAt stays null when only seat blocks exist", async () => {
+        const result = await getAvailableKeyIndices(KEY_TYPE, 2, scope, scopeId, "fable");
+        expect(result.seatBlockedIndices).toEqual([0]);
+        expect(result.earliestModelResetAt).toBeNull();
+      });
     });
   });
 });

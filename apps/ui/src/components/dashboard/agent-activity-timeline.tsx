@@ -18,6 +18,7 @@ import type { AgentTask, AgentTaskStatus, AgentWithTasks } from "@/api/types";
 import { Spinner } from "@/components/kibo-ui/spinner";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
 import { EmptyState } from "@/components/shared/empty-state";
+import { TaskStatusIcon } from "@/components/shared/task-status-icon";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useIsMobile } from "@/hooks/use-mobile";
@@ -181,29 +182,6 @@ function statusBarClass(status: AgentTaskStatus): string {
       return "border-status-warning bg-status-warning/75 text-status-warning-foreground";
     default:
       return "border-status-neutral bg-status-neutral/75 text-status-neutral-foreground";
-  }
-}
-
-/** Saturated status fill, for use on surfaces where tinted text would wash out. */
-function statusDotClass(status: AgentTaskStatus): string {
-  switch (status) {
-    case "completed":
-      return "bg-status-success";
-    case "failed":
-      return "bg-status-error";
-    case "in_progress":
-      return "bg-status-active";
-    case "paused":
-    case "reviewing":
-      return "bg-status-paused";
-    case "pending":
-      return "bg-status-pending";
-    case "offered":
-      return "bg-status-info";
-    case "superseded":
-      return "bg-status-warning";
-    default:
-      return "bg-status-neutral";
   }
 }
 
@@ -1294,8 +1272,9 @@ export function AgentActivityTimeline() {
                         {/* Tooltip surface is inverted (`bg-foreground
                             text-background`), so every token in here is keyed to
                             `background`, not `foreground`. A `StatusBadge` would
-                            wash out for the same reason — a saturated dot reads
-                            on both themes. */}
+                            wash out for the same reason — the icon's `inverse`
+                            surface uses the saturated stops, which read on
+                            both themes. */}
                         <TooltipContent side="top" align="start" className="max-w-80">
                           <div className="space-y-2">
                             <div className="space-y-1">
@@ -1303,11 +1282,10 @@ export function AgentActivityTimeline() {
                                 {taskTitle(task)}
                               </div>
                               <div className="flex items-center gap-1.5 text-[10px]">
-                                <span
-                                  className={cn(
-                                    "h-2 w-2 shrink-0 rounded-full",
-                                    statusDotClass(task.status),
-                                  )}
+                                <TaskStatusIcon
+                                  status={task.status}
+                                  surface="inverse"
+                                  className="size-3.5"
                                 />
                                 <span className="font-medium uppercase tracking-wide">
                                   {task.status.replace(/_/g, " ")}

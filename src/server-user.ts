@@ -27,11 +27,6 @@ import {
   steerTaskOutputSchema,
   steerTaskUserInputSchema,
 } from "./tools/steer-task";
-import {
-  taskActionHandler,
-  taskActionInputSchema,
-  taskActionOutputSchema,
-} from "./tools/task-action";
 import { userCtx } from "./tools/task-tool-ctx";
 import { createToolRegistrar, type SwarmToolResult, toolErr } from "./tools/utils";
 import { ModelTierSchema, type User } from "./types";
@@ -121,7 +116,7 @@ export function createUserServer(user: User): McpServer {
     title: "Send a task",
     annotations: { destructiveHint: false },
     rbac: permission("task.create.own"),
-    description: "Creates an unassigned task requested by the authenticated user.",
+    description: "Sends a task from the authenticated user to the online Lead.",
     inputSchema: userSendTaskInputSchema,
     outputSchema: sendTaskOutputSchema,
   };
@@ -129,11 +124,11 @@ export function createUserServer(user: User): McpServer {
     const denied = await maybeDenyUserToolAdmission(user, "send-task", sendTaskConfig);
     if (denied) return denied;
     return sendTaskHandler(userCtx(user, info.sessionId), {
+      ...args,
       offerMode: false,
       leadOnly: false,
       allowDuplicate: false,
       overrideSlackContext: false,
-      ...args,
     });
   });
 
@@ -192,19 +187,6 @@ export function createUserServer(user: User): McpServer {
       return steerTaskHandler(userCtx(user, info.sessionId), args);
     });
   }
-
-  const taskActionConfig = {
-    title: "Task Pool Action",
-    description: "Move one of your tasks to or from backlog.",
-    rbac: permission("task.action.own"),
-    inputSchema: taskActionInputSchema,
-    outputSchema: taskActionOutputSchema,
-  };
-  registerTool("task-action", taskActionConfig, async (args, info, _meta) => {
-    const denied = await maybeDenyUserToolAdmission(user, "task-action", taskActionConfig);
-    if (denied) return denied;
-    return taskActionHandler(userCtx(user, info.sessionId), args);
-  });
 
   return server;
 }

@@ -590,6 +590,31 @@ describe("script connections", () => {
       // 184 alters agents and agent_tasks, which this migration-112-only fixture
       // does not create.
       markMigrationApplied(database, "184_model_catalog.sql");
+      // 186 alters api_key_status, which this migration-112-only fixture does not create.
+      markMigrationApplied(database, "186_api_key_seat_mismatch.sql");
+      // 185 alters api_key_status, which this migration-112-only fixture does not create.
+      markMigrationApplied(database, "185_api_key_auth_failures.sql");
+      // 190 alters memory_rating, which this migration-112-only fixture does not create.
+      markMigrationApplied(database, "190_memory_rating_model.sql");
+      // 194 cleans agent_memory, which this migration-112-only fixture does not create.
+      markMigrationApplied(database, "194_memory_orphan_chunks.sql");
+      // 191 indexes context_versions, which this migration-112-only fixture does not create.
+      markMigrationApplied(database, "191_context_versions_previous_index.sql");
+      // 192 rebuilds user_favorites, which this migration-112-only fixture does not create.
+      markMigrationApplied(database, "192_favorites_agent_fs_path.sql");
+      // 195 alters approval_requests, which this migration-112-only fixture does not create.
+      markMigrationApplied(database, "195_approval_request_approvals.sql");
+      // 196 alters skills, which this migration-112-only fixture does not create.
+      markMigrationApplied(database, "196_skill_invocations.sql");
+      // 198 rebuilds permission_audit, which this migration-112-only fixture does not create.
+      markMigrationApplied(database, "198_permission_audit_guest.sql");
+      // 200 backfills agent_memory, which this migration-112-only fixture does not create.
+      markMigrationApplied(database, "200_backfill_auto_memory_expiry.sql");
+      // 201 alters workflow_runs and workflow_run_steps, which this
+      // migration-112-only fixture does not create.
+      markMigrationApplied(database, "201_workflow_replay_columns.sql");
+      // 202 moves rows out of kv_entries, which this migration-112-only fixture does not create.
+      markMigrationApplied(database, "202_codex_oauth_device_flows.sql");
 
       const id = crypto.randomUUID();
       const now = new Date().toISOString();

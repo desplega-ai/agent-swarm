@@ -55,6 +55,7 @@ import {
 } from "./codex-app-server";
 import { computeCodexCostUsd, getCodexContextWindow, resolveCodexModel } from "./codex-models";
 import { credentialsToAuthJson } from "./codex-oauth/auth-json.js";
+import { hasCodexOAuthPoolSlots } from "./codex-oauth/env-keys.js";
 import { codexUserHome } from "./codex-oauth/home.js";
 import { CodexOAuthRefreshError, getValidCodexOAuth } from "./codex-oauth/storage.js";
 import { resolveCodexPrompt } from "./codex-skill-resolver";
@@ -146,6 +147,8 @@ export type ThreadEvent =
       usage?: Usage;
     }
   | { type: "turn.interrupted"; usage?: Usage }
+  /** Latest single-request usage: a context-window snapshot, not billable usage. */
+  | { type: "context.updated"; usage: Usage; contextWindow?: number }
   | { type: "error"; message: string; codexErrorInfo?: string | null; willRetry?: boolean };
 
 interface CodexThread {
@@ -210,9 +213,10 @@ export function checkCodexCredentials(
       hint: "Credential present in env; entrypoint will materialise ~/.codex/auth.json on next boot.",
     };
   }
-  // Pool credentials: codex_oauth_0, codex_oauth_1, ... loaded from swarm_config
-  // into the resolved env. Runner materialises auth.json per-task from the pool.
-  if (Object.keys(env).some((k) => /^codex_oauth_\d+$/.test(k))) {
+  // Pool credentials (codex_oauth_0, codex_oauth_1, ...) stay out of env; the
+  // resolved-env loader records only their count. Runner materialises
+  // auth.json per-task from the pool.
+  if (hasCodexOAuthPoolSlots(env)) {
     return {
       ready: true,
       missing: [],
@@ -392,16 +396,15 @@ export async function resolveCodexAuthMode(
  * Build the `failureReason` for a pool-slot OAuth revalidation failure
  * (see `resolveCodexAuthMode` above).
  *
- * Wording matters: when the failure is a rejected refresh whose body
- * indicates the credential is dead (invalid_grant, reused, revoked), the
- * upstream error body is embedded verbatim so the EXISTING
- * `codex-auth-expiry-watch` script's `DEAD_TOKEN_LIKE` patterns (which match
- * on substrings like "refresh token was already used" / "log out and sign in
- * again") still catch it with zero script changes. A lock-wait timeout is
- * transient/retryable — its wording is deliberately distinct so the watch
- * does NOT bench a slot over a temporary contention blip.
+ * Wording matters: every variant carries `[auth-error]`, but the runner's
+ * `isCodexAuthFailureReason` counts only a confirmed refresh rejection toward
+ * the auth-failure bench (2 in a row). A lock-wait timeout ("waiting for the
+ * refresh lock") and any other thrown error (refresh-lock HTTP or network
+ * failure, config-store persistence failure: "not a confirmed auth
+ * rejection") are excluded as transient, so an outage does NOT bench a
+ * healthy login.
  */
-function buildPoolRevalidationFailureReason(err: unknown, slot: number): string {
+export function buildPoolRevalidationFailureReason(err: unknown, slot: number): string {
   if (err instanceof CodexOAuthRefreshError) {
     if (err.reason === "lock_timeout") {
       return `[auth-error] Codex pool slot ${slot} [...${err.keySuffix}] revalidation failed: timed out waiting for the refresh lock — transient, will retry on next task.`;
@@ -409,7 +412,7 @@ function buildPoolRevalidationFailureReason(err: unknown, slot: number): string 
     return `[auth-error] Codex pool slot ${slot} [...${err.keySuffix}] revalidation failed: refresh rejected (${err.status ?? "unknown status"} ${err.body ?? ""}) — credential likely revoked; re-run codex-login for this slot.`;
   }
   const message = err instanceof Error ? err.message : String(err);
-  return `[auth-error] Codex pool slot ${slot} revalidation failed: ${message}`;
+  return `[auth-error] Codex pool slot ${slot} revalidation failed (not a confirmed auth rejection, transient): ${message}`;
 }
 
 /**
@@ -832,8 +835,25 @@ class AppServerCodexThread implements CodexThread {
         }
         break;
       case "thread/tokenUsage/updated": {
-        const tokenUsage = params.tokenUsage as { total?: unknown } | undefined;
+        const tokenUsage = params.tokenUsage as
+          | { total?: unknown; last?: unknown; modelContextWindow?: unknown }
+          | undefined;
+        // `total` is cumulative for the thread and drives cost accounting at
+        // turn end. `last` is the most recent model request, which is the
+        // only figure that reflects what currently sits in the context window.
         this.latestTotalUsage = normalizeUsage(tokenUsage?.total);
+        const last = normalizeUsage(tokenUsage?.last);
+        if (last) {
+          push({
+            type: "context.updated",
+            usage: last,
+            contextWindow:
+              typeof tokenUsage?.modelContextWindow === "number" &&
+              tokenUsage.modelContextWindow > 0
+                ? tokenUsage.modelContextWindow
+                : undefined,
+          });
+        }
         break;
       }
       case "error": {
@@ -1393,6 +1413,9 @@ export class CodexSession implements ProviderSession {
       case "turn.interrupted":
         this.accountUsage(event.usage);
         break;
+      case "context.updated":
+        this.emitContextUsage(event.usage, event.contextWindow ?? this.contextWindow);
+        break;
       case "error": {
         const { message } = this.formatTerminalError(event.message, event.codexErrorInfo);
         if (event.willRetry === true) {
@@ -1419,7 +1442,12 @@ export class CodexSession implements ProviderSession {
             this.accumulatedUsage.reasoning_output_tokens + usage.reasoning_output_tokens,
         }
       : usage;
+    // No context_usage here: a turn's usage sums every model request in the
+    // turn, so it measures consumption, not window occupancy. Context comes
+    // from the per-request `context.updated` snapshots instead.
+  }
 
+  private emitContextUsage(usage: Usage, contextWindow: number): void {
     // Codex input tokens already include the cached read and write subsets.
     // Passing either subset again would inflate context usage.
     const contextUsed = computeContextUsedUnified({
@@ -1431,8 +1459,8 @@ export class CodexSession implements ProviderSession {
     this.emit({
       type: "context_usage",
       contextUsedTokens: contextUsed,
-      contextTotalTokens: this.contextWindow,
-      contextPercent: clampContextPercent(contextUsed, this.contextWindow) ?? 0,
+      contextTotalTokens: contextWindow,
+      contextPercent: clampContextPercent(contextUsed, contextWindow) ?? 0,
       outputTokens: usage.output_tokens,
       contextFormula: CONTEXT_FORMULA,
     });
@@ -1558,8 +1586,11 @@ export class CodexSession implements ProviderSession {
       // prompt doesn't begin with a recognized slash command (or the skill
       // file is missing), this returns the prompt unchanged and emits a
       // `raw_stderr` warning in the latter case.
-      const resolvedPrompt = await resolveCodexPrompt(this.config.prompt, this.skillsDir, (event) =>
-        this.emit(event),
+      const resolvedPrompt = await resolveCodexPrompt(
+        this.config.prompt,
+        this.skillsDir,
+        (event) => this.emit(event),
+        this.config.onPromptSkill,
       );
 
       // Reset + seed the transcript buffer so the session-end summarizer has
@@ -1859,7 +1890,7 @@ export class CodexSession implements ProviderSession {
     }
 
     if (wantRatings && result.ratings && result.ratings.length > 0) {
-      const ratingEvents = _buildRatings(result.ratings, retrievals);
+      const ratingEvents = _buildRatings(result.ratings, retrievals, result.model);
       if (ratingEvents.length > 0) {
         await _postRatings({
           apiUrl,

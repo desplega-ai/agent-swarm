@@ -28,6 +28,7 @@ import type { SwarmToolResult } from "../tools/utils";
 
 const agentId = "aaaa0000-0000-4000-8000-000000000901";
 const otherId = "bbbb0000-0000-4000-8000-000000000902";
+const leadId = "cccc0000-0000-4000-8000-000000000903";
 const server = new McpServer({ name: "input-regressions", version: "1.0.0" });
 for (const register of [
   registerAcceptSteerTool,
@@ -82,6 +83,7 @@ beforeAll(async () => {
   initDb(":memory:");
   await createAgent({ id: agentId, name: "Schema worker", isLead: false, status: "idle" });
   await createAgent({ id: otherId, name: "Other schema worker", isLead: false, status: "idle" });
+  await createAgent({ id: leadId, name: "Schema lead", isLead: true, status: "idle" });
 });
 afterAll(() => {
   closeDb();
@@ -312,11 +314,13 @@ test("send-task accepts actual registry user IDs without UUID hyphens", async ()
     email: "schema-requester@example.test",
   });
   expect(user.id).toMatch(/^[a-f0-9]{32}$/);
-  const result = await call("send-task", {
-    task: "requester preservation",
-    requestedByUserId: user.id,
-    allowDuplicate: true,
-  });
+  // Naming a requester is the lead's call; the worker rule is covered in send-task-requester-gate.
+  const result = await call(
+    "send-task",
+    { task: "requester preservation", requestedByUserId: user.id, allowDuplicate: true },
+    undefined,
+    leadId,
+  );
   expect(result.structuredContent?.success).toBe(true);
   const created = result.structuredContent?.task as { id: string };
   expect((await getTaskById(created.id))?.requestedByUserId).toBe(user.id);
@@ -326,11 +330,12 @@ test("send-task rejects unknown requester IDs without creating a task", async ()
   const before = await getDbClient().get<{ count: number }>(
     "SELECT COUNT(*) AS count FROM agent_tasks",
   );
-  const result = await call("send-task", {
-    task: "unknown requester",
-    requestedByUserId: "f".repeat(32),
-    allowDuplicate: true,
-  });
+  const result = await call(
+    "send-task",
+    { task: "unknown requester", requestedByUserId: "f".repeat(32), allowDuplicate: true },
+    undefined,
+    leadId,
+  );
   expect(result.structuredContent?.success).toBe(false);
   expect(result.structuredContent?.message).toContain("existing registered user");
   expect(

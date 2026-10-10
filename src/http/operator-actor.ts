@@ -48,6 +48,10 @@ export function getOperatorActor(req: IncomingMessage, res: ServerResponse): Ide
   if (auth?.kind === "operator") {
     return { kind: "operator", id: auth.fingerprint };
   }
+  if (auth?.kind === "guest") {
+    jsonError(res, "Forbidden", 403);
+    return null;
+  }
 
   const rawKey = extractBearer(req);
   const swarmKey = getApiKey();

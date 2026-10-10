@@ -1,5 +1,5 @@
 import { Check, Copy, ExternalLink, LifeBuoy, Mail } from "lucide-react";
-import { useState } from "react";
+import type { RefObject } from "react";
 import type { AgentTask } from "@/api/types";
 import { MarkdownView } from "@/components/shared/markdown-view";
 import { Button } from "@/components/ui/button";
@@ -13,9 +13,10 @@ import {
 } from "@/components/ui/dialog";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
 import { useLeadCredentialIssue } from "@/hooks/use-lead-credential-issue";
-import { SUPPORT_DISCORD_URL, SUPPORT_EMAIL, shouldShowTaskFailureHelp } from "@/lib/task-support";
+import { SUPPORT_DISCORD_URL, SUPPORT_EMAIL } from "@/lib/task-support";
 
-function buildDiagnostics(task: AgentTask, apiVersion: string | null): string {
+/** The plain-text summary that "Copy diagnostics" puts on the clipboard. */
+export function buildDiagnostics(task: AgentTask, apiVersion: string | null): string {
   return [
     "Agent Swarm task diagnostics",
     `Task: ${task.id}`,
@@ -26,23 +27,43 @@ function buildDiagnostics(task: AgentTask, apiVersion: string | null): string {
   ].join("\n");
 }
 
-export function TaskFailureHelpDialog({ task }: { task: AgentTask }) {
-  const { issue, resolved, apiVersion } = useLeadCredentialIssue();
-  const [dismissedTaskId, setDismissedTaskId] = useState<string | null>(null);
+/**
+ * Support options for a failed task. It opens only from "Get help", never on
+ * its own. `shouldShowTaskFailureHelp` decides whether a task offers it.
+ */
+export function TaskFailureHelpDialog({
+  task,
+  open,
+  onOpenChange,
+  returnFocus,
+}: {
+  task: AgentTask;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  /**
+   * Gets focus when the dialog closes. A button outside the dialog opens it
+   * (there is no DialogTrigger), so the caller names the opener: the button,
+   * or the trigger of the menu that held the item.
+   */
+  returnFocus?: RefObject<HTMLElement | null>;
+}) {
+  const { apiVersion } = useLeadCredentialIssue();
   const { copied, copy } = useCopyToClipboard();
-  const shouldShow = shouldShowTaskFailureHelp(task.status, resolved, issue);
-  const open = shouldShow && dismissedTaskId !== task.id;
   const diagnostics = buildDiagnostics(task, apiVersion);
   const emailHref = `mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent("Agent Swarm task failed")}&body=${encodeURIComponent(diagnostics)}`;
 
   return (
-    <Dialog
-      open={open}
-      onOpenChange={(nextOpen) => {
-        if (!nextOpen) setDismissedTaskId(task.id);
-      }}
-    >
-      <DialogContent>
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent
+        onCloseAutoFocus={
+          returnFocus
+            ? (event) => {
+                event.preventDefault();
+                returnFocus.current?.focus();
+              }
+            : undefined
+        }
+      >
         <DialogHeader>
           <div className="flex items-center gap-2 text-status-error-strong">
             <LifeBuoy className="size-5" aria-hidden="true" />

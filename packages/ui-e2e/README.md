@@ -52,7 +52,7 @@ Two tsconfigs cover the two runtimes: `tsconfig.json` (Node, `specs`, `fixtures`
 |---|---|---|
 | `swarm` | worker | `{ apiUrl, apiKey, manifest }`. Remote mode returns the env target and skips the spawn. |
 | `seed` | test | The manifest, or `null` in a remote run without `E2E_REMOTE_SEED=1`. Guard with `test.skip(!seed, ...)`. |
-| `api` | test | `get`, `post`, `put` against the worker API with the bearer. |
+| `api` | test | `get`, `post`, `put`, `delete` against the worker API with the bearer. |
 | `clean` | test, auto | Collects console errors and `/api` responses with status 400 or higher. `assertClean()` fails with both lists. |
 | `storageState` | test | Pre-writes `agent-swarm-connections` (the active connection), `swarm:v1:<apiUrl>:current-user` (the identity), and a freshly dismissed `swarm:feedback-popup:v1:<apiUrl>:<userId>` so no dialog blocks the dashboard. |
 

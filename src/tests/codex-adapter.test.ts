@@ -167,6 +167,66 @@ function makeFakeAppServer(
   };
 }
 
+// Cost JSON (minus durationMs) the pre-split adapter (origin/main 97deb6c6)
+// produced for the notification sequence in the "unchanged by the context
+// split" test.
+const PRE_SPLIT_COST_JSON =
+  '{"sessionId":"","taskId":"","agentId":"agent-test","totalCostUsd":0.3675,"inputTokens":390000,"outputTokens":7500,"reasoningOutputTokens":1900,"cacheReadTokens":320000,"cacheWriteTokens":3000,"numTurns":2,"model":"gpt-5.4","isError":false,"provider":"codex"}';
+
+type AppServerTokenUsage = {
+  total: Record<string, number>;
+  last?: Record<string, number>;
+  modelContextWindow?: number | null;
+};
+
+function breakdown(input: number, cached: number, output: number, reasoning = 0, cacheWrite = 0) {
+  return {
+    inputTokens: input,
+    cachedInputTokens: cached,
+    cacheWriteInputTokens: cacheWrite,
+    outputTokens: output,
+    reasoningOutputTokens: reasoning,
+    totalTokens: input + output,
+  };
+}
+
+/**
+ * Run an app-server session where each turn sends one
+ * `thread/tokenUsage/updated` notification per model request. The first turn
+ * is the initial prompt; later turns are queued follow-ups.
+ */
+async function runAppServerTurns(
+  turns: AppServerTokenUsage[][],
+): Promise<{ emitted: ProviderEvent[]; result: ProviderResult }> {
+  const threadId = "thread-token-usage";
+  let turnNumber = 0;
+  const fake = makeFakeAppServer((method, _params, emit) => {
+    if (method === "thread/start") return { thread: { id: threadId } };
+    if (method !== "turn/start") throw new Error(`Unexpected method: ${method}`);
+    const turnId = `turn-${++turnNumber}`;
+    const updates = turns[turnNumber - 1] ?? [];
+    queueMicrotask(() => {
+      emit("turn/started", { threadId, turn: { id: turnId, status: "inProgress" } });
+      for (const tokenUsage of updates) {
+        emit("thread/tokenUsage/updated", { threadId, turnId, tokenUsage });
+      }
+      emit("turn/completed", { threadId, turn: { id: turnId, status: "completed", error: null } });
+    });
+    return { turn: { id: turnId } };
+  });
+  const session = await new CodexAdapter({
+    bypassSubprocess: true,
+    appServerFactory: () => fake.client as never,
+  }).createSession(testConfig({ taskId: "", apiUrl: "", apiKey: "" }));
+  const emitted: ProviderEvent[] = [];
+  session.onEvent((event) => emitted.push(event));
+  for (let i = 1; i < turns.length; i++) {
+    await session.deliverSteering?.({ mode: "queue", text: `follow-up ${i}` });
+  }
+  const result = await session.waitForCompletion();
+  return { emitted, result };
+}
+
 /**
  * Because `CodexSession` is not exported, we load the module source and
  * instantiate it via `eval` of a small helper module. This is brittle but
@@ -431,6 +491,88 @@ describe("Codex app-server session", () => {
     ).toMatchObject({ toolName: "Write" });
   });
 
+  test("context follows the latest request, not the turn's summed usage", async () => {
+    // Two requests in one turn. The cumulative total (1.3M input) exceeds the
+    // 1.05M gpt-5.4 window; neither single request does.
+    const { emitted } = await runAppServerTurns([
+      [
+        {
+          total: breakdown(600_000, 500_000, 1_000),
+          last: breakdown(600_000, 500_000, 1_000),
+        },
+        {
+          total: breakdown(1_300_000, 1_100_000, 3_000),
+          last: breakdown(700_000, 600_000, 2_000),
+        },
+      ],
+    ]);
+
+    const snapshots = emitted.filter((event) => event.type === "context_usage");
+    expect(snapshots.map((event) => event.contextUsedTokens)).toEqual([601_000, 702_000]);
+    for (const snapshot of snapshots) {
+      expect(snapshot.contextUsedTokens).toBeLessThanOrEqual(702_000);
+      expect(snapshot.contextTotalTokens).toBe(1_050_000);
+      expect(snapshot.contextPercent).toBeLessThan(100);
+      expect(snapshot.contextFormula).toBe("input-cache-output");
+    }
+    expect(snapshots.at(-1)?.contextPercent).toBeCloseTo((702_000 / 1_050_000) * 100, 6);
+  });
+
+  test("per-turn cost and usage totals are unchanged by the context split", async () => {
+    // `last` and `modelContextWindow` must not move cost or usage totals.
+    const { result } = await runAppServerTurns([
+      [
+        {
+          total: breakdown(120_000, 90_000, 2_000, 500, 1_000),
+          last: breakdown(120_000, 90_000, 2_000, 500, 1_000),
+          modelContextWindow: 258_400,
+        },
+        {
+          total: breakdown(250_000, 200_000, 5_000, 1_200, 2_500),
+          last: breakdown(130_000, 110_000, 3_000, 700, 1_500),
+          modelContextWindow: 258_400,
+        },
+      ],
+      [
+        {
+          total: breakdown(390_000, 320_000, 7_500, 1_900, 3_000),
+          last: breakdown(140_000, 120_000, 2_500, 700, 500),
+          modelContextWindow: 258_400,
+        },
+      ],
+    ]);
+
+    const { durationMs: _durationMs, ...cost } = result.cost ?? ({} as Record<string, unknown>);
+    expect(JSON.stringify(cost)).toBe(PRE_SPLIT_COST_JSON);
+  });
+
+  test("modelContextWindow from the app-server wins over the models.dev fallback", async () => {
+    const { emitted } = await runAppServerTurns([
+      [
+        {
+          total: breakdown(50_000, 40_000, 1_000),
+          last: breakdown(50_000, 40_000, 1_000),
+          modelContextWindow: 258_400,
+        },
+        {
+          total: breakdown(110_000, 90_000, 2_000),
+          last: breakdown(60_000, 50_000, 1_000),
+          modelContextWindow: null,
+        },
+      ],
+    ]);
+
+    const snapshots = emitted.filter((event) => event.type === "context_usage");
+    expect(snapshots).toHaveLength(2);
+    expect(snapshots[0]).toMatchObject({ contextUsedTokens: 51_000, contextTotalTokens: 258_400 });
+    expect(snapshots[0]?.contextPercent).toBeCloseTo((51_000 / 258_400) * 100, 6);
+    // A null window falls back to the models.dev window for the model.
+    expect(snapshots[1]).toMatchObject({
+      contextUsedTokens: 61_000,
+      contextTotalTokens: 1_050_000,
+    });
+  });
+
   test("abort uses turn/interrupt and scrubs complete provider events", async () => {
     const requests: string[] = [];
     const fake = makeFakeAppServer((method, _params, emit) => {
@@ -550,6 +692,13 @@ describe("Codex app-server session", () => {
               outputTokens: 9,
               reasoningOutputTokens: 6,
             },
+            last: {
+              inputTokens: 30,
+              cachedInputTokens: 11,
+              cacheWriteInputTokens: 4,
+              outputTokens: 4,
+              reasoningOutputTokens: 2,
+            },
           },
         });
         emit("turn/completed", {
@@ -581,9 +730,10 @@ describe("Codex app-server session", () => {
     expect(
       emitted.find((event) => event.type === "custom" && event.name === "codex.reasoning"),
     ).toMatchObject({ data: { text: "First thought\nSecond thought" } });
-    expect(emitted.find((event) => event.type === "context_usage")).toMatchObject({
-      contextUsedTokens: 53,
-    });
+    // Context comes from `last` (30 + 4), not the turn total (44 + 9).
+    expect(emitted.filter((event) => event.type === "context_usage")).toEqual([
+      expect.objectContaining({ contextUsedTokens: 34 }),
+    ]);
   });
 
   test("keeps failed-turn usage and treats retrying errors as diagnostics", async () => {
@@ -702,6 +852,10 @@ describe("CodexSession event mapping", () => {
       { type: "turn.started" },
       { type: "item.completed", item: agentMsg as ThreadItem },
       {
+        type: "context.updated",
+        usage: { input_tokens: 100, cached_input_tokens: 25, output_tokens: 50 },
+      },
+      {
         type: "turn.completed",
         usage: { input_tokens: 100, cached_input_tokens: 25, output_tokens: 50 },
       },
@@ -808,15 +962,9 @@ describe("CodexSession event mapping", () => {
     }
   });
 
-  test("Phase 9: chatty turn uses the models.dev context window under the unified formula", async () => {
-    // Phase 9 deliberately swapped Codex's per-adapter peak-proxy formula
-    // (`(input - cached) + output`) for the unified `input + output` formula
-    // shared with every other provider. The trade-off: a chatty Codex turn
-    // — where `input_tokens` is the SUM across every model call in the turn
-    // — over-reports compared to the peak-proxy variant. The clamp at 100%
-    // keeps the gauge sensible; downstream consumers reading the new
-    // `contextFormula='input-cache-output'` tag know it's apples-to-apples
-    // across providers. Numbers below are from the verify-plan transcript.
+  test("a chatty turn's summed usage is billed but never reported as context", async () => {
+    // A turn's usage sums every model request in it, so it can exceed the
+    // window. Only `context.updated` (one request) may become context_usage.
     const agentMsg: AgentMessageItem = {
       id: "msg-1",
       type: "agent_message",
@@ -829,9 +977,9 @@ describe("CodexSession event mapping", () => {
       {
         type: "turn.completed",
         usage: {
-          input_tokens: 357142, // total exceeded the old hardcoded 200k window
-          cached_input_tokens: 278912, // most of input is cache reuse
-          output_tokens: 2156,
+          input_tokens: 4_850_000, // summed across the turn, above the 1.05M window
+          cached_input_tokens: 4_700_000,
+          output_tokens: 54_343,
         },
       },
     ];
@@ -843,22 +991,14 @@ describe("CodexSession event mapping", () => {
 
     const { emitted } = await runSessionWithFakeThread(events, config);
 
-    const contextUsage = emitted.find((e) => e.type === "context_usage");
-    expect(contextUsage).toBeDefined();
-    if (contextUsage && contextUsage.type === "context_usage") {
-      // Phase 9 unified: input + output = 357142 + 2156 = 359298.
-      expect(contextUsage.contextUsedTokens).toBe(359298);
-      expect(contextUsage.contextTotalTokens).toBe(1_050_000);
-      expect(contextUsage.contextPercent).toBeCloseTo((359298 / 1_050_000) * 100, 6);
-      expect(contextUsage.contextFormula).toBe("input-cache-output");
-    }
+    expect(emitted.some((e) => e.type === "context_usage")).toBe(false);
 
     // Cost still uses the full input_tokens — billing semantics are
     // preserved (cached portion gets the cached rate, uncached gets full).
     const resultEvent = emitted.findLast((e) => e.type === "result");
     if (resultEvent && resultEvent.type === "result") {
-      expect(resultEvent.cost.inputTokens).toBe(357142);
-      expect(resultEvent.cost.cacheReadTokens).toBe(278912);
+      expect(resultEvent.cost.inputTokens).toBe(4_850_000);
+      expect(resultEvent.cost.cacheReadTokens).toBe(4_700_000);
       expect(resultEvent.cost.totalCostUsd).toBeGreaterThan(0);
     }
   });

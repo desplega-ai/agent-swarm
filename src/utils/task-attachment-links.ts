@@ -1,5 +1,5 @@
 import type { TaskAttachment } from "../types";
-import { buildAgentFsLiveUrl, getAppUrl } from "./constants";
+import { buildAgentFsLiveUrl, buildCombFileUrl, getAppUrl } from "./constants";
 
 function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
@@ -23,19 +23,25 @@ export function taskAttachmentFetchCommand(
   return `curl -s -H "Authorization: Bearer \${AGENT_SWARM_API_KEY:-$API_KEY}" -H "X-Agent-ID: $AGENT_ID" "${url}" --create-dirs -o ${outPath}`;
 }
 
-export function taskAttachmentDisplayUrl(attachment: TaskAttachment): string {
+/**
+ * The link a human (Slack, prompts, citations) sees for an attachment. An
+ * agent-fs file links to the dashboard (Comb) when Comb is on and `APP_URL` is
+ * set, else to the agent-fs live UI, else to the raw `agent-fs:<path>`.
+ * `comb: false` skips the dashboard link.
+ */
+export function taskAttachmentDisplayUrl(
+  attachment: TaskAttachment,
+  opts: { comb?: boolean } = {},
+): string {
   if (attachment.kind === "url") return attachment.url ?? "";
   if (attachment.kind === "page") {
     return attachment.pageId ? `${getAppUrl()}/pages/${attachment.pageId}` : "page:";
   }
 
   if (attachment.providerId === "agent-fs" || attachment.kind === "agent-fs") {
-    const liveUrl = buildAgentFsLiveUrl({
-      path: attachment.path,
-      orgId: attachment.orgId,
-      driveId: attachment.driveId,
-    });
-    return liveUrl ?? `agent-fs:${attachment.path ?? ""}`;
+    const file = { path: attachment.path, orgId: attachment.orgId, driveId: attachment.driveId };
+    const combUrl = opts.comb === false ? null : buildCombFileUrl(file);
+    return combUrl ?? buildAgentFsLiveUrl(file) ?? `agent-fs:${attachment.path ?? ""}`;
   }
 
   if (attachment.providerId === "local-fs" || attachment.kind === "shared-fs") {

@@ -51,6 +51,7 @@ import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/ui/page-header";
 import { Skeleton } from "@/components/ui/skeleton";
 import { getConfig } from "@/lib/config";
+import { cn } from "@/lib/utils";
 import { JsonPageRenderer } from "./json-page-renderer";
 import { RoomInspector } from "./room-inspector";
 
@@ -184,7 +185,12 @@ function PageIframe({
       // lets agent-emitted forms POST. We deliberately do NOT include
       // `allow-top-navigation` to prevent runaway-redirect attacks.
       sandbox="allow-scripts allow-forms allow-same-origin allow-popups"
-      className="w-full h-[calc(100vh-6rem)] rounded-md border border-border bg-background"
+      className={cn(
+        "w-full h-[calc(100vh-6rem)] rounded-md border border-border bg-background",
+        // Below md the frame bleeds through `<main>`'s gutter to the screen
+        // edges, so a phone gives the page its full width.
+        "max-md:-mx-4 max-md:w-[calc(100%+2rem)] max-md:max-w-none max-md:rounded-none max-md:border-x-0",
+      )}
     />
   );
 }
@@ -425,7 +431,7 @@ export default function ArtifactPage() {
   let body: React.ReactNode;
   if (data.contentType === "application/json") {
     body = (
-      <div className="rounded-md border border-border bg-background p-6 min-h-[200px]">
+      <div className="rounded-md border border-border bg-background p-4 md:p-6 min-h-[200px]">
         <div className="mb-4 flex items-center gap-2 text-[10px] uppercase tracking-wide text-muted-foreground">
           <Braces className="size-3" />
           <span>JSON-rendered page</span>
@@ -495,6 +501,9 @@ export default function ArtifactPage() {
   return (
     <div className="flex flex-1 flex-col min-h-0 gap-4">
       <PageHeader
+        // Below sm the actions take their own row under a full-width
+        // description; side by side they squeezed it to one word per line.
+        className="max-sm:flex-col max-sm:items-stretch"
         title={data.title}
         description={data.description ?? undefined}
         action={
@@ -564,7 +573,7 @@ function PageHeaderActions({
   // "Open" keeps whatever filter the page is showing.
   const href = getPageHtmlUrl(id) + frameQuery;
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex flex-wrap items-center gap-2">
       <FavoriteButton favorite={favorite} disabled={favoriteDisabled} onToggle={onToggleFavorite} />
       <Button asChild variant="outline" size="sm" title="Open the API-served URL in a new tab">
         <a href={href} target="_blank" rel="noreferrer">

@@ -20,8 +20,8 @@ import {
   terminateProcessGroup,
 } from "../utils/process-group";
 import { scrubSecrets } from "../utils/secret-scrubber";
-import { translateAcpSessionNotification } from "./acp-swarm-events";
-import { resolveAcpTarget } from "./acp-targets";
+import { acpReportedCostUsd, translateAcpSessionNotification } from "./acp-swarm-events";
+import { type AcpTargetProfile, resolveAcpTarget } from "./acp-targets";
 import type {
   CostData,
   ProviderAdapter,
@@ -33,7 +33,15 @@ import type {
 } from "./types";
 
 type EventListener = (event: ProviderEvent) => void;
+/** Providers that run on this ACP client. */
+export type AcpProviderName = "acp" | "grok";
 const ACP_LOG_MAX_CHARS = 30_000;
+/**
+ * How long an abort waits after `session/cancel` for the prompt to answer
+ * `cancelled`. That answer carries the turn's usage (Grok's `_meta.usage`),
+ * so killing the process first would drop the session's cost row.
+ */
+const ACP_CANCEL_SETTLE_MS = 3_000;
 const ACP_LOG_FIELD_MAX_CHARS = 12_000;
 const ACP_LOG_PREVIEW_MAX_CHARS = 10_000;
 const CREDENTIAL_HEADER_NAMES = new Set([
@@ -147,7 +155,13 @@ function boundedAcpLogScalar(value: unknown): unknown {
 }
 
 class SwarmAcpClient implements Client {
-  constructor(private readonly emit: (event: ProviderEvent) => void) {}
+  /** Latest cumulative USD cost the target reported for the session. */
+  reportedCostUsd: number | null = null;
+
+  constructor(
+    private readonly emit: (event: ProviderEvent) => void,
+    private readonly target?: AcpTargetProfile,
+  ) {}
 
   async requestPermission(params: RequestPermissionRequest): Promise<RequestPermissionResponse> {
     const selected =
@@ -160,8 +174,10 @@ class SwarmAcpClient implements Client {
 
   async sessionUpdate(params: SessionNotification): Promise<void> {
     this.emit({ type: "raw_log", content: serializeAcpLog(params) });
+    const costUsd = acpReportedCostUsd(params.update);
+    if (costUsd !== null) this.reportedCostUsd = costUsd;
     for (const event of translateAcpSessionNotification(params)) {
-      this.emit(event);
+      this.emit(this.target?.rewriteEvent?.(event) ?? event);
     }
   }
 }
@@ -184,9 +200,12 @@ class ACPSession implements ProviderSession {
 
   constructor(
     private readonly connection: ClientSideConnection,
+    private readonly client: SwarmAcpClient,
     private readonly process: Bun.Subprocess<"pipe", "pipe", "pipe">,
     private readonly config: ProviderSessionConfig,
     sessionId: string,
+    private readonly providerName: AcpProviderName,
+    private readonly target: AcpTargetProfile,
     providerMeta?: Record<string, unknown>,
     ephemeralTokenId?: string,
   ) {
@@ -196,7 +215,7 @@ class ACPSession implements ProviderSession {
       this.completionResolve = resolve;
     });
     void this.consumeStderr();
-    this.emit({ type: "session_init", sessionId, provider: "acp", providerMeta });
+    this.emit({ type: "session_init", sessionId, provider: providerName, providerMeta });
     void this.runPrompt();
   }
 
@@ -216,6 +235,7 @@ class ACPSession implements ProviderSession {
     this.aborted = true;
     try {
       await this.connection.cancel({ sessionId: this.sessionId });
+      await Promise.race([this.completionPromise, Bun.sleep(ACP_CANCEL_SETTLE_MS)]);
     } catch (err) {
       this.emit({
         type: "error",
@@ -279,8 +299,10 @@ class ACPSession implements ProviderSession {
           },
         }),
       });
+      const context = this.target.promptContext?.(response._meta, this.config.model);
+      if (context) this.emit(context);
       const isError = response.stopReason === "refusal" || response.stopReason === "cancelled";
-      const cost = this.buildCostData(isError, response.usage);
+      const cost = this.buildCostData(isError, response.usage, response._meta);
       result = {
         exitCode: isError ? 1 : 0,
         sessionId: this.sessionId,
@@ -291,7 +313,7 @@ class ACPSession implements ProviderSession {
       };
       this.emit({ type: "result", cost, output: this.output, isError });
     } catch (err) {
-      const message = scrubSecrets(formatError(err));
+      const message = describeTargetError(this.target, scrubSecrets(formatError(err)));
       this.emit({ type: "error", message, category: "protocol" });
       result = {
         exitCode: 1,
@@ -315,7 +337,11 @@ class ACPSession implements ProviderSession {
         const { done, value } = await reader.read();
         if (done) break;
         if (value.length > 0) {
-          this.emit({ type: "raw_stderr", content: scrubSecrets(decoder.decode(value)) });
+          // Targets such as Grok color their tracing output; the log view shows text.
+          this.emit({
+            type: "raw_stderr",
+            content: scrubSecrets(Bun.stripANSI(decoder.decode(value))),
+          });
         }
       }
     } catch {
@@ -323,12 +349,19 @@ class ACPSession implements ProviderSession {
     }
   }
 
-  private buildCostData(isError: boolean, usage?: Usage | null): CostData {
+  private buildCostData(
+    isError: boolean,
+    usage?: Usage | null,
+    responseMeta?: Record<string, unknown> | null,
+  ): CostData {
+    const targetCost = this.target.promptCost?.(responseMeta, this.config.model);
     return {
       sessionId: this.sessionId,
       taskId: this.config.taskId,
       agentId: this.config.agentId,
-      totalCostUsd: 0,
+      // A swarm session sends one prompt, so the target's cumulative session
+      // cost is the task's total. No USD report keeps 0 and the row unpriced.
+      totalCostUsd: this.client.reportedCostUsd ?? 0,
       inputTokens: usage?.inputTokens,
       outputTokens: usage?.outputTokens,
       cacheReadTokens: usage?.cachedReadTokens ?? undefined,
@@ -337,7 +370,8 @@ class ACPSession implements ProviderSession {
       numTurns: 1,
       model: this.config.model,
       isError,
-      provider: "acp",
+      provider: this.providerName,
+      ...targetCost,
     };
   }
 
@@ -353,8 +387,15 @@ class ACPSession implements ProviderSession {
   }
 }
 
+export interface ACPAdapterOptions {
+  /** Provider recorded on session_init and cost rows. Defaults to `acp`. */
+  providerName?: AcpProviderName;
+  /** A fixed target profile. Defaults to the `ACP_TARGET` resolution. */
+  target?: AcpTargetProfile;
+}
+
 export class ACPAdapter implements ProviderAdapter {
-  readonly name = "acp";
+  readonly name: AcpProviderName;
 
   readonly traits: ProviderTraits = {
     hasMcp: true,
@@ -362,27 +403,43 @@ export class ACPAdapter implements ProviderAdapter {
     hasLocalEnvironment: true,
   };
 
+  constructor(private readonly options: ACPAdapterOptions = {}) {
+    this.name = options.providerName ?? "acp";
+  }
+
   async createSession(config: ProviderSessionConfig): Promise<ProviderSession> {
-    const target = resolveAcpTarget(config);
+    const target = this.options.target ?? resolveAcpTarget(config);
     await target.writeSystemPromptArtifact(config);
-    const command = target.command(config);
-    const proc = registerProcessGroup(
-      Bun.spawn(command, {
-        cwd: config.cwd,
-        detached: detachedProcessGroup,
-        env: target.env(config),
-        stdin: "pipe",
-        stdout: "pipe",
-        stderr: "pipe",
-      }),
-    );
+    const cleanupArtifact = async () => {
+      try {
+        await target.cleanupSystemPromptArtifact?.(config);
+      } catch (err) {
+        console.warn(`\x1b[33m[acp]\x1b[0m System prompt cleanup failed: ${formatError(err)}`);
+      }
+    };
+    let proc: Bun.Subprocess<"pipe", "pipe", "pipe">;
+    try {
+      proc = registerProcessGroup(
+        Bun.spawn(target.command(config), {
+          cwd: config.cwd,
+          detached: detachedProcessGroup,
+          env: target.env(config),
+          stdin: "pipe",
+          stdout: "pipe",
+          stderr: "pipe",
+        }),
+      );
+    } catch (err) {
+      await cleanupArtifact();
+      throw err;
+    }
 
     let session: ACPSession | null = null;
     const preSessionEvents: ProviderEvent[] = [];
     const client = new SwarmAcpClient((event) => {
       if (session) session.emitFromAcp(event);
       else preSessionEvents.push(event);
-    });
+    }, target);
     const stream = ndJsonStream(fileSinkWritableStream(proc.stdin), proc.stdout);
     const connection = new ClientSideConnection(() => client, stream);
 
@@ -415,7 +472,9 @@ export class ACPAdapter implements ProviderAdapter {
       // (mcp/connect, mcp/message, mcp/disconnect) instead of a network hop -- the
       // shape for an ACP agent with no network route to the swarm API. Gated on
       // `mcpCapabilities.acp` and UNSTABLE; not adopted here.
+      const sessionMeta = target.sessionMeta?.(config);
       const newSession = await connection.newSession({
+        ...(sessionMeta ? { _meta: sessionMeta } : {}),
         cwd: config.cwd,
         mcpServers: [
           {
@@ -439,9 +498,12 @@ export class ACPAdapter implements ProviderAdapter {
       );
       session = new ACPSession(
         connection,
+        client,
         proc,
         config,
         newSession.sessionId,
+        this.name,
+        target,
         {
           target: target.target,
           configOptions: sanitizeAcpConfigOptions(configOptions),
@@ -449,6 +511,7 @@ export class ACPAdapter implements ProviderAdapter {
         ephemeralToken.tokenId,
       );
       for (const event of preSessionEvents) session.emitFromAcp(event);
+      void session.waitForCompletion().finally(cleanupArtifact);
       return session;
     } catch (err) {
       // Revoke the ephemeral token before re-throwing if ACPSession has not yet
@@ -458,7 +521,10 @@ export class ACPAdapter implements ProviderAdapter {
         void revokeAcpSessionToken(config.apiUrl, config.apiKey, ephemeralToken.tokenId);
       }
       await terminateProcessGroup(proc.pid);
-      throw new Error(`ACP target failed during startup: ${scrubSecrets(formatError(err))}`);
+      await cleanupArtifact();
+      throw new Error(
+        `ACP target failed during startup: ${describeTargetError(target, scrubSecrets(formatError(err)))}`,
+      );
     }
   }
 
@@ -592,6 +658,10 @@ export function toAcpMcpServers(
     );
   }
   return servers;
+}
+
+function describeTargetError(target: AcpTargetProfile, message: string): string {
+  return target.describeError?.(message) ?? message;
 }
 
 function formatError(err: unknown): string {

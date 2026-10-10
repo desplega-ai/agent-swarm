@@ -6,7 +6,12 @@ import { resolveUserByToken } from "@/be/users";
 import { createUserServer } from "@/server-user";
 import type { User } from "@/types";
 import { setRequestAuth } from "@/utils/request-auth-context";
-import { closeIdleMcpTransports, type McpTransportActivity, markMcpTransportActivity } from "./mcp";
+import {
+  closeIdleMcpTransports,
+  type McpTransportActivity,
+  markMcpTransportActivity,
+  respondNoMcpSession,
+} from "./mcp";
 
 function unauthorized(res: ServerResponse): true {
   res.writeHead(401, { "Content-Type": "application/json" });
@@ -91,15 +96,7 @@ export async function handleMcpUser(
       const server = createUserServer(user);
       await server.connect(transport);
     } else {
-      res.writeHead(400, { "Content-Type": "application/json" });
-      res.end(
-        JSON.stringify({
-          jsonrpc: "2.0",
-          error: { code: -32000, message: "Invalid session" },
-          id: null,
-        }),
-      );
-      return true;
+      return respondNoMcpSession(res, sessionId);
     }
 
     await transport.handleRequest(req, res, body);
@@ -113,9 +110,7 @@ export async function handleMcpUser(
       await transports[sessionId].handleRequest(req, res);
       return true;
     }
-    res.writeHead(400);
-    res.end("Invalid session");
-    return true;
+    return respondNoMcpSession(res, sessionId);
   }
 
   res.writeHead(405);

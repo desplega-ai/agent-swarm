@@ -11,7 +11,7 @@ export const registerMemoryDeleteTool = (server: McpServer) => {
     {
       title: "Delete a memory",
       description:
-        "Delete a specific memory by its ID. Agents can delete their own memories; lead agents can also delete swarm-scoped memories.",
+        "Delete a specific memory by its ID. Agents can delete their own agent-scoped memories; only the lead can delete swarm-scoped memories.",
       annotations: { destructiveHint: true },
 
       inputSchema: z.object({
@@ -35,7 +35,7 @@ export const registerMemoryDeleteTool = (server: McpServer) => {
         });
       }
 
-      // Permission check: own memories or lead can delete swarm-scoped
+      // Permission check: own agent-scoped memories, or the lead for swarm-scoped ones
       const agent = await getAgentById(requestInfo.agentId);
       const decision = can({
         principal: {
@@ -49,7 +49,7 @@ export const registerMemoryDeleteTool = (server: McpServer) => {
       });
       if (!decision.allow) {
         return toolErr(
-          "Permission denied. You can only delete your own memories, or swarm memories if you are the lead.",
+          "Permission denied. You can only delete your own agent-scoped memories; only the lead can delete swarm memories.",
           { data: { yourAgentId: requestInfo.agentId } },
         );
       }

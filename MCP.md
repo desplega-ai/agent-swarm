@@ -300,7 +300,7 @@ Sends a task to a specific agent, creates an unassigned task for the pool, or of
 | `slackThreadTs` | `string` | No | - | Slack thread timestamp. Required with slackChannelId for thread-level updates. |
 | `slackUserId` | `string` | No | - | Slack user ID of the original requester. |
 | `overrideSlackContext` | `boolean` | No | false | Explicitly route this task's Slack updates to a different channel/thread than its parent/contextKey. Requires slackChannelId AND slackThreadTs. Use only for deliberate cross-channel dispatch (e.g. escalation to another human's DM); logged for audit. Without this flag, a slackChannelId/slackThreadTs that disagrees with the parent task or inherited contextKey is rejected — omit the three Slack fields to inherit them from the parent as a unit instead. |
-| `requestedByUserId` | `string` | No | - | Registered requester ID (32 lowercase hexadecimal characters). When omitted, inherited from the caller's current task so the attribution flows through multi-hop delegation automatically. |
+| `requestedByUserId` | `string` | No | - | Registered requester ID (32 lowercase hexadecimal characters). When omitted, inherited from the caller's current task so the attribution flows through multi-hop delegation automatically. Only lead agents can name a user other than the requester of their current task. |
 | `followUpConfig` | `unknown` | No | - | Control the lead follow-up created when this task finishes. When to use `followUpConfig`: set `disabled: true` when you'll wait for this task to complete inline and no follow-up is needed; set `onCompleted` / `onFailed` with specific instructions when you need to follow up effectively on a particular outcome of a long-running flow; for normal one-shot tasks, leave it unset because defaults are fine. It is most valuable for long-running / complex flows. |
 | `outputSchema` | `object` | No | - | Optional JSON Schema the assignee's final output must satisfy. store-progress rejects a completion that does not match. Supported keywords: type, required, properties, enum, const, items. |
 
@@ -392,7 +392,7 @@ Create, update, delete, or list user profiles in the user registry. Identities a
 
 **Execute database query**
 
-Execute a read-only SQL query against the swarm database (SQLite). Available to all authenticated agents — be aware results may include secrets (oauth_tokens, configs). Runs in a short-lived child process with a wall-clock budget by default (fails gracefully with a timeout or a 429-style concurrency error rather than freezing); results capped at a default row count (operator-configurable via `DB_QUERY_MCP_MAX_ROWS`) regardless of how many the query matched. See the sql parameter's description for which tables are unsafe to read whole, and the db-query-guidance skill for config knobs.
+Execute a read-only SQL query against the swarm database (SQLite). Available to all authenticated agents. Queries that read credential tables (OAuth authorizations, apps and pending flows, user and session tokens, script API bearers, Codex device-login state) are rejected, and secret-shaped values in results are redacted. Runs in a short-lived child process with a wall-clock budget by default (fails gracefully with a timeout or a 429-style concurrency error rather than freezing); results capped at a default row count (operator-configurable via `DB_QUERY_MCP_MAX_ROWS`) regardless of how many the query matched. See the sql parameter's description for which tables are unsafe to read whole, and the db-query-guidance skill for config knobs.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
@@ -427,7 +427,7 @@ Acknowledge a live steering message after you have incorporated it into your cur
 
 **Steer Task**
 
-Send a message to a task that is already running. `mode:"steer"` is honored on pi and claude-managed; claude, devin, opencode and codex support queue only (codex delivery lands at the next tool-call boundary via its lifecycle hooks). Pass `onUnsupported:"fail"` to get an error instead of a downgrade.
+Send a message to a task that is already running. `mode:"steer"` is honored on pi, claude-managed, codex and cursor; claude, devin, opencode and amp support queue only (amp delivery lands at the next tool result). Pass `onUnsupported:"fail"` to get an error instead of a downgrade.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
@@ -610,8 +610,8 @@ Lead-only registry management for scripts ctx.api/ctx.mcp connections. Supports 
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `action` | `list \| upsert-openapi \| upsert-mcp \| upsert-graphql \| refresh \| disable` | Yes | - | List, create/update, refresh, or disable a script connection. |
-| `id` | `string` | No | - | Existing connection ID for update, refresh, or disable. |
+| `action` | `list \| upsert-openapi \| upsert-mcp \| upsert-graphql \| refresh \| disable \| delete` | Yes | - | List, create/update, refresh, disable, or delete a script connection. delete is permanent: it removes the connection, its managed credential binding, and any inline secret it owns. |
+| `id` | `string` | No | - | Existing connection ID for update, refresh, disable, or delete. |
 | `slug` | `string` | No | - | Stable script namespace slug exposed under ctx.api or ctx.mcp. |
 | `displayName` | `string` | No | - | Human-readable connection name. |
 | `scope` | `global \| agent \| repo` | No | - | Connection visibility scope. |
@@ -726,7 +726,9 @@ Activate a stored extension version, reloading it if enabled. Requires a lead, o
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `template` | `string` | Yes | - | Name of a predefined extension from extension-catalog. |
+| `template` | `string` | No | - | Name of a predefined extension from extension-catalog. Mutually exclusive with manifest and files. |
+| `manifest` | `unknown` | No | - | Inline bundle manifest. Requires files. Needs EXTENSION_ALLOW_INLINE_INSTALL and a lead, operator, or dashboard-user caller. |
+| `files` | `object` | No | - | Inline bundle files keyed by relative path. Requires manifest. |
 | `priority` | `number` | No | - | Handler priority. Lower values run first. |
 | `config` | `object` | No | - | Extension configuration. |
 
@@ -797,7 +799,7 @@ Capability: `mcp` (enabled by default)
 
 **Create MCP Server**
 
-Create a new MCP server definition. Agent-scope servers are auto-installed for the creating agent. Swarm/global scope requires lead.
+Create a new MCP server definition. Agent-scope servers are auto-installed for the creating agent. Swarm/global scope and stdio servers require lead.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
@@ -817,7 +819,7 @@ Create a new MCP server definition. Agent-scope servers are auto-installed for t
 
 **Update MCP Server**
 
-Update an MCP server's configuration. Only the owner or lead can update.
+Update an MCP server's configuration. Only the owner or lead can update. Changing or enabling what a stdio server runs requires lead.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
@@ -960,7 +962,7 @@ List registered repos with their guidelines (PR checks, merge policy, review gui
 
 **Update Repo**
 
-Update a repo's configuration including guidelines (PR checks, merge policy, review guidance). The lead uses this to set guidelines after asking the user. Pass null for guidelines to clear them.
+Update a repo's configuration including guidelines (PR checks, merge policy, review guidance). The lead uses this to set guidelines after asking the user. Pass null for guidelines to clear them. Only the lead can change allowMerge: resend its current value to edit other guidelines.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
@@ -1146,6 +1148,7 @@ Search your accumulated memories using natural language. Returns summaries with 
 | `scope` | `all \| agent \| swarm` | No | "all" | Search scope: 'all' (own + swarm), 'agent' (own only), 'swarm' (shared only). |
 | `limit` | `number` | No | 10 | Max results to return. |
 | `source` | `manual \| file_index \| session_summary \| task_completion` | No | - | Filter by memory source type. |
+| `keyPrefix` | `string` | No | - | Only return memories whose key starts with this text, for example '/longterm/facts/' or '/longterm/entities/people/'. Matched literally, case-sensitive. Include the trailing '/' to stay inside one folder. |
 
 ### memory-store
 
@@ -1156,11 +1159,12 @@ Store a learning as a searchable memory: a fix, a pattern, a gotcha, a fact abou
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `content` | `string` | Yes | - | The memory body. Markdown is fine. State the fact, the context it applies to, and the evidence. |
-| `name` | `string` | No | - | Short title used in search results and the UI. Defaults to the first non-empty content line (up to 200 characters). |
+| `name` | `string` | No | - | Short title used in search results and the UI. Defaults to the first non-empty content line (up to 200 characters). A name that starts with /longterm/ is also used as the key when no key is given. |
 | `scope` | `agent \| swarm` | No | "agent" | 'agent' (default): only you can recall it. 'swarm': every agent can recall it. |
 | `tags` | `unknown` | No | - | Free-form tags as an array or a comma-separated string, for example a repo name or a topic. |
 | `taskId` | `uuid` | No | - | The task this learning came from, when there is one. |
 | `intent` | `string` | No | - | Why this is worth remembering. Kept in the audit trail. |
+| `key` | `string` | No | - | Optional logical path for this memory, for example '/longterm/facts/swarm-runtime/sqlite-busy-retry'. Lowercase segments joined by '/', starting with '/'. Search it with memory-search keyPrefix and move it with memory-edit newKey. Fails when you already have a memory with this key in this scope. A key under /longterm marks the memory as curated: it never expires and is protected from cleanup. It must start with /longterm/company-story, /longterm/entities/people, /longterm/entities/customers, /longterm/facts, /longterm/decisions, /longterm/workstreams or /longterm/timeline. Paths under /longterm/company-story, /longterm/entities and /longterm/timeline are lead-only. Defaults to an auto key, which makes the memory inbox material. |
 
 ### memory-get
 
@@ -1178,7 +1182,7 @@ Retrieve the full content of a specific memory by its ID. Use memory-search to f
 
 **Edit a memory**
 
-Edit a single memory in place while preserving its ID, usefulness posterior, and audit history. Two modes: 'replace' overwrites the entire content (requires `content`); 'exact' performs a surgical find-and-replace of `oldString` with `newString` within the existing content (fails if `oldString` is missing or ambiguous). Use 'replace' for full rewrites, 'exact' for targeted edits. Agents can edit their own memories; lead agents can edit any scope.
+Edit a single memory in place while preserving its ID, usefulness posterior, and audit history. Two modes: 'replace' overwrites the entire content (requires `content`); 'exact' performs a surgical find-and-replace of `oldString` with `newString` within the existing content (fails if `oldString` is missing or ambiguous). Use 'replace' for full rewrites, 'exact' for targeted edits. Pass `newKey` alone to move the memory to another logical path (every chunk, same ID, posterior, access counts and author). A move into /longterm also clears the expiry. Agents can edit their own memories; lead agents can edit any scope.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
@@ -1191,12 +1195,13 @@ Edit a single memory in place while preserving its ID, usefulness posterior, and
 | `newString` | `string` | No | - | Replacement for oldString. Required for 'exact' mode. Can be empty to delete. |
 | `intent` | `string` | Yes | - | Why you are editing this memory. |
 | `expectedVersion` | `number` | No | - | - |
+| `newKey` | `string` | No | - | Move the memory to this logical path, for example '/longterm/facts/swarm-runtime/slug'. Alone it is a pure move: omit content/oldString/newString. Fails when the key is already used in this scope by the same owner. Moving into /longterm marks the memory as curated on every chunk: it stops expiring and is protected from cleanup, and moving it out later does not bring the expiry back. A key under /longterm must start with /longterm/company-story, /longterm/entities/people, /longterm/entities/customers, /longterm/facts, /longterm/decisions, /longterm/workstreams or /longterm/timeline. Paths under /longterm/company-story, /longterm/entities and /longterm/timeline are lead-only. |
 
 ### memory-delete
 
 **Delete a memory**
 
-Delete a specific memory by its ID. Agents can delete their own memories; lead agents can also delete swarm-scoped memories.
+Delete a specific memory by its ID. Agents can delete their own agent-scoped memories; only the lead can delete swarm-scoped memories.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
@@ -1458,7 +1463,7 @@ Cancel a running or waiting workflow run. Cancels all non-terminal steps and the
 
 **Request human input**
 
-Create an approval request and return at once with the request id and URL. The answer arrives later as a hitl-follow-up task. Supports multiple question types: approval (yes/no), text, single-select, multi-select, and boolean. Returns the request ID and URL for the human to respond.
+Create an approval request and return at once with the request id and URL. The answer arrives later as a hitl-follow-up task. Supports multiple question types: approval (yes/no), text, single-select, multi-select, and boolean. Returns the request ID and URL for the human to respond. The dashboard renders each label and description as markdown: put long content in description, fence code with a language, and put an image URL alone on its own line to show it. No Slack message is sent; share the URL yourself.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
@@ -1792,12 +1797,15 @@ Capability: `kv` (enabled by default)
 
 **KV Get**
 
-Read a key from the swarm KV store. Returns the entry or null if missing/expired. Namespace defaults to your current context (Slack thread / PR / Linear issue when invoked from a task; otherwise your agent scratchpad).
+Read a key from the swarm KV store. Returns the entry or null if missing/expired. Namespace defaults to your current context (Slack thread / PR / Linear issue when invoked from a task; otherwise your agent scratchpad). Without path/offset/limit the whole value comes back unbounded. With any of them you get a bounded view (≤10KB per channel): `path` is a dot path into a JSON value (string entries holding JSON, such as spilled tool results, count as JSON; numeric segments index arrays, e.g. `outcome.data.rows` or `rows.3`; escape a dot inside a key as `\.`), and `offset`/`limit` page the array items, object keys, or string characters found there. The result's `view.nextOffset` says where the next page starts.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `key` | `unknown` | Yes | - | KV key (≤512 chars, [a-zA-Z0-9._:/-]). |
 | `namespace` | `unknown` | No | - | Optional explicit namespace. Defaults to the caller's contextKey. |
+| `path` | `string` | No | - | Dot path into the JSON value, e.g. "outcome.data.rows" or "rows.3". "" is the whole value. A dot inside a key is escaped as "\.". |
+| `offset` | `number` | No | - | First array item / object key / string char to return. Default 0. |
+| `limit` | `number` | No | - | Max items / keys / chars to return; the page also shrinks to fit the cap. |
 
 ### kv-set
 

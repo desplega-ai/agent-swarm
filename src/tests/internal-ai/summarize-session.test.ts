@@ -11,7 +11,7 @@ Tool[Edit]: input={"file":"/tmp/x","old":"a","new":"b"} output="ok"
 Assistant: Done.`.padEnd(200, "x");
 
 describe("summarizeSession", () => {
-  test("pass-through: injected _completeStructured result is returned verbatim", async () => {
+  test("pass-through: injected _completeStructured data is returned with the resolved model", async () => {
     const fake: z.infer<typeof SummaryWithRatingsSchema> = {
       summary: "Learned: X uses Y",
       ratings: [{ id: "mem-1", score: 0.9, reasoning: "very useful" }],
@@ -23,9 +23,25 @@ describe("summarizeSession", () => {
       taskContext: { sourceTaskId: "task-1", agentId: "agent-1" },
       apiUrl: "http://localhost:3013",
       apiKey: "k",
-      _completeStructured: (async () => fake) as any,
+      _completeStructured: (async () => ({
+        data: fake,
+        model: "openrouter/deepseek/deepseek-v4.1-flash",
+      })) as any,
     });
-    expect(result).toEqual(fake);
+    expect(result).toEqual({ ...fake, model: "openrouter/deepseek/deepseek-v4.1-flash" });
+  });
+
+  test("returns null when _completeStructured resolves no result", async () => {
+    const result = await summarizeSession({
+      harness: "pi",
+      transcript: LONG_TRANSCRIPT,
+      retrievals: [],
+      taskContext: { sourceTaskId: "task-1", agentId: "agent-1" },
+      apiUrl: "http://localhost:3013",
+      apiKey: "k",
+      _completeStructured: (async () => null) as any,
+    });
+    expect(result).toBeNull();
   });
 
   test("retrievals are injected into the userPrompt via buildSummaryWithRatingsPrompt", async () => {
@@ -39,7 +55,7 @@ describe("summarizeSession", () => {
       apiKey: "k",
       _completeStructured: (async (opts: { userPrompt: string }) => {
         capturedUserPrompt = opts.userPrompt;
-        return { summary: "x", ratings: [] };
+        return { data: { summary: "x", ratings: [] }, model: "m" };
       }) as any,
     });
     expect(capturedUserPrompt).toContain("mem-abc");
@@ -62,7 +78,7 @@ describe("summarizeSession", () => {
       apiKey: "k",
       _completeStructured: (async (opts: { userPrompt: string }) => {
         capturedUserPrompt = opts.userPrompt;
-        return { summary: "x", ratings: [] };
+        return { data: { summary: "x", ratings: [] }, model: "m" };
       }) as any,
     });
     expect(capturedUserPrompt).toContain("Task: do the thing");
@@ -79,7 +95,7 @@ describe("summarizeSession", () => {
       apiKey: "k",
       _completeStructured: (async () => {
         invocations++;
-        return { summary: "x", ratings: [] };
+        return { data: { summary: "x", ratings: [] }, model: "m" };
       }) as any,
     });
     expect(result).toBeNull();
@@ -97,7 +113,7 @@ describe("summarizeSession", () => {
       apiKey: "k",
       _completeStructured: (async (opts: { callerTag?: string }) => {
         capturedTag = opts.callerTag ?? "";
-        return { summary: "x", ratings: [] };
+        return { data: { summary: "x", ratings: [] }, model: "m" };
       }) as any,
     });
     expect(capturedTag).toBe("session-summary:pi");

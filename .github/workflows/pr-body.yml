@@ -29,11 +29,13 @@ jobs:
       !startsWith(github.event.pull_request.title, 'release:') &&
       !contains(github.event.pull_request.labels.*.name, 'skip-pr-body-check')
     runs-on: ubuntu-latest
-    # Checkout only; GITHUB_TOKEN needs nothing else.
+    # Checkout, plus reading the PR's file list; GITHUB_TOKEN needs nothing else.
     permissions:
       contents: read
+      pull-requests: read
     outputs:
       urgency: ${{ steps.check.outputs.urgency }}
+      risk: ${{ steps.check.outputs.risk }}
 
     steps:
       - name: Checkout repository
@@ -46,13 +48,65 @@ jobs:
         with:
           bun-version-file: package.json
 
+      - name: List changed files
+        # A UI change requires the Before / after section.
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+        run: gh api --paginate "repos/$REPO/pulls/$PR/files" --jq '.[].filename' > "$RUNNER_TEMP/changed-files.txt"
+
       - name: Check PR body against the template
         id: check
         env:
           # Pass title and body through env, never inline ${{ }} in the script.
           PR_TITLE: ${{ github.event.pull_request.title }}
           PR_BODY: ${{ github.event.pull_request.body }}
-        run: bun scripts/check-pr-body.ts
+          # Bot-authored bodies also get the leak check and need Swarm provenance; contributors do not.
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          PR_CHANGED_FILES_FILE: ${{ runner.temp }}/changed-files.txt
+          # A low-risk diff of 50 lines or fewer may skip the Change outline.
+          # Expressions have no arithmetic, so the shell adds them.
+          PR_ADDITIONS: ${{ github.event.pull_request.additions }}
+          PR_DELETIONS: ${{ github.event.pull_request.deletions }}
+        run: PR_CHANGED_LINES=$(( ${PR_ADDITIONS:-0} + ${PR_DELETIONS:-0} )) bun scripts/check-pr-body.ts
+
+  label:
+    name: Label by risk
+    needs: pr-body
+    # Keeps the risk:high label in sync with the body's **Risk:** line. Label
+    # only: review pings stay driven by urgency. Runs no PR code. Fork PRs get
+    # a read-only token, so they are skipped.
+    if: >-
+      needs.pr-body.result == 'success' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      pull-requests: write
+
+    steps:
+      - name: Add or remove risk:high
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          RISK: ${{ needs.pr-body.outputs.risk }}
+          HAS_LABEL: ${{ contains(github.event.pull_request.labels.*.name, 'risk:high') }}
+        run: |
+          set -euo pipefail
+          if [ "$RISK" = "high" ] && [ "$HAS_LABEL" != "true" ]; then
+            # 422 when the label exists already.
+            gh api "repos/$REPO/labels" -f name="risk:high" -f color=B60205 \
+              -f description="Risk: high in the PR body. Read every deep row." --silent 2>/dev/null || true
+            gh api -X POST "repos/$REPO/issues/$PR/labels" -f "labels[]=risk:high" --silent
+            echo "Added risk:high."
+          elif [ "$RISK" != "high" ] && [ "$HAS_LABEL" = "true" ]; then
+            gh api -X DELETE "repos/$REPO/issues/$PR/labels/risk%3Ahigh" --silent
+            echo "Removed risk:high."
+          else
+            echo "Label already matches risk=$RISK."
+          fi
 
   route:
     name: Route by urgency

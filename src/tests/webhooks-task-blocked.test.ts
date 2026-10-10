@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { TaskCreationBlockedError } from "../tasks/errors";
+import azureDevOpsCreatedSample from "./fixtures/azure-devops/pull-request-created.json";
 
 // A pre.task.create extension block must ack the delivery (200, skipped) and
 // still emit the delivery's workflow events; any other error stays a 500.
@@ -19,6 +20,7 @@ function failingHandler(): Promise<never> {
 
 const realGithub = await import("../github");
 const realGitlab = await import("../gitlab");
+const realAzureDevOps = await import("../azure-devops");
 mock.module("../github", () => ({
   ...realGithub,
   isGitHubEnabled: () => true,
@@ -30,6 +32,12 @@ mock.module("../gitlab", () => ({
   isGitLabEnabled: () => true,
   verifyGitLabWebhook: () => true,
   handleIssue: failingHandler,
+}));
+mock.module("../azure-devops", () => ({
+  ...realAzureDevOps,
+  isAzureDevOpsEnabled: () => true,
+  verifyAzureDevOpsWebhook: () => true,
+  handlePullRequestCreated: failingHandler,
 }));
 
 const { handleWebhooks } = await import("../http/webhooks");
@@ -67,6 +75,14 @@ const gitlabIssue = JSON.stringify({
   object_attributes: { action: "open", iid: 3, title: "hi" },
   project: { path_with_namespace: "acme/repo" },
 });
+const azureDevOpsPullRequest = JSON.stringify({
+  ...azureDevOpsCreatedSample,
+  resourceVersion: "2.0",
+  resource: {
+    ...azureDevOpsCreatedSample.resource,
+    description: `@${realAzureDevOps.AZURE_DEVOPS_BOT_NAME} please review`,
+  },
+});
 
 const cases = [
   {
@@ -74,14 +90,21 @@ const cases = [
     path: ["api", "github", "webhook"],
     body: githubIssue,
     headers: { "x-github-event": "issues", "x-hub-signature-256": "sha256=x" },
-    event: "github.issue.opened",
+    events: ["github.issue.opened"],
   },
   {
     name: "GitLab",
     path: ["api", "gitlab", "webhook"],
     body: gitlabIssue,
     headers: { "x-gitlab-token": "t" },
-    event: "gitlab.issue.open",
+    events: ["gitlab.issue.opened", "gitlab.issue.open"],
+  },
+  {
+    name: "Azure DevOps",
+    path: ["api", "azure-devops", "webhook"],
+    body: azureDevOpsPullRequest,
+    headers: { authorization: "Basic test" },
+    events: ["azure-devops.pull_request.created"],
   },
 ];
 
@@ -113,7 +136,7 @@ describe("webhook task creation blocked by extension", () => {
         reason: "sender not allowed",
         extension: { id: "ext-1", name: "gate" },
       });
-      expect(emitted).toEqual([c.event]);
+      expect(emitted).toEqual(c.events);
     });
 
     test(`${c.name}: a non-blocked handler error still returns 500`, async () => {

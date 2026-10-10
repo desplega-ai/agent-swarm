@@ -4,10 +4,11 @@ import {
   type Server,
   type ServerResponse,
 } from "node:http";
-import { ensure, initialize } from "@desplega.ai/business-use";
 import type { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { getEnabledCapabilities, hasCapability } from "@/server";
 import { initAgentMail } from "../agentmail";
+import { initAzureDevOps } from "../azure-devops";
+import { drainApi, isApiDraining } from "../be/api-drain";
 import {
   closeDb,
   emitBuiltInIntegrationConnectedOnce,
@@ -25,6 +26,7 @@ import {
   stopAuditWriter,
 } from "../be/rbac-audit";
 import { startScratchScriptGc, stopScratchScriptGc } from "../be/scripts/retention";
+import { loadSecretRegistry } from "../be/secret-registry";
 import { seedLegacyCapabilitiesConfig } from "../be/seed-capabilities";
 import {
   loadEnabledExtensions,
@@ -52,7 +54,10 @@ import { startScriptRunSupervisor, stopScriptRunSupervisor } from "../script-wor
 import { getServerSessionsProcessed } from "../server-runtime-counters";
 import { startSlackApp, stopSlackApp } from "../slack";
 import { initTelemetry, telemetry } from "../telemetry";
+import { startTelemetryTicker } from "../telemetry-snapshot";
+import { API_DRAINING_HEADER } from "../utils/api-drain";
 import { getApiKey } from "../utils/api-key";
+import { ensure, initialize } from "../utils/business-use";
 import { getMcpBaseUrl } from "../utils/constants";
 import { isEnvFlagEnabled } from "../utils/env-flag";
 import { scrubSecrets } from "../utils/secret-scrubber";
@@ -66,6 +71,7 @@ import { handleAssets } from "./assets";
 import { handleBudgets } from "./budgets";
 import { handleCodexOAuthDevice } from "./codex-oauth-device";
 import { handleCodexOAuthKeepWarm } from "./codex-oauth-keep-warm";
+import { handleComb } from "./comb";
 import { handleConfig } from "./config";
 import { handleContext } from "./context";
 import { handleCore, loadGlobalConfigsIntoEnv } from "./core";
@@ -103,7 +109,7 @@ import { handlePagesPublic } from "./pages-public";
 import { handlePoll } from "./poll";
 import { handlePricing } from "./pricing";
 import { handlePromptTemplates } from "./prompt-templates";
-import { handleRealtimeAsset } from "./realtime";
+import { handleRealtimeAsset, handleRealtimeTicket } from "./realtime";
 import { handleRepos } from "./repos";
 import { handleRooms } from "./rooms";
 import { describeRequestRoute } from "./route-def";
@@ -129,6 +135,7 @@ import {
   setCorsHeaders,
   warnIfCorsAllowsAnyOrigin,
   wireHttpSpanLifecycle,
+  writeUnhandledError,
 } from "./utils";
 import { handleWebhooks } from "./webhooks";
 import { handleWorkflowEvents } from "./workflow-events";
@@ -317,6 +324,8 @@ const httpServer = createHttpServer(async (req, res) => {
     // nest under it instead of attaching to the root with no parent.
     const handleRequest = async () => {
       setCorsHeaders(req, res);
+      // Tells polling workers to hand off in-flight tasks while this API still serves.
+      if (isApiDraining()) res.setHeader(API_DRAINING_HEADER, "1");
 
       const queryParams = parseQueryParams(req.url || "");
       const myAgentId = req.headers["x-agent-id"] as string | undefined;
@@ -347,15 +356,17 @@ const httpServer = createHttpServer(async (req, res) => {
         () => handleApps(req, res, pathSegments, queryParams, myAgentId),
         () => handleConfig(req, res, pathSegments, queryParams),
         () => handleFs(req, res, pathSegments, queryParams, myAgentId),
+        () => handleComb(req, res, pathSegments, queryParams, myAgentId),
         () => handleKv(req, res, pathSegments, queryParams),
         () => handleRooms(req, res, pathSegments, queryParams),
+        () => handleRealtimeTicket(req, res, pathSegments, queryParams),
         () => handleRealtimeAsset(req, res),
         () => handleIntegrations(req, res, pathSegments, queryParams),
         () => handlePromptTemplates(req, res, pathSegments, queryParams),
         () => handleDbQuery(req, res, pathSegments, queryParams),
         () => handleMetrics(req, res, pathSegments, queryParams, myAgentId),
         () => handleModelsCatalog(req, res, pathSegments, queryParams),
-        () => handleRepos(req, res, pathSegments, queryParams),
+        () => handleRepos(req, res, pathSegments, queryParams, myAgentId),
         () => handleSkills(req, res, pathSegments, queryParams, myAgentId),
         () => handleScriptConnections(req, res, pathSegments, queryParams, myAgentId),
         () => handleScriptConnectionProxy(req, res, pathSegments, queryParams, myAgentId),
@@ -406,16 +417,7 @@ const httpServer = createHttpServer(async (req, res) => {
           span.recordException(err);
           span.setStatus({ code: 2, message: err instanceof Error ? err.message : String(err) });
         }
-        const message = err instanceof Error ? err.message : String(err);
-        console.error(
-          `[HTTP] ❌ ${req.method} ${safeRequestUrlForLog(req.url)} → ${scrubSecrets(message)}`,
-        );
-        if (!res.headersSent) {
-          res.writeHead(500, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ error: message }));
-        } else if (!res.writableEnded) {
-          res.end();
-        }
+        writeUnhandledError(res, err, req);
       }
     };
 
@@ -467,6 +469,10 @@ async function shutdown() {
 
   // Stop the out-of-band queue alarm before disconnecting its Slack notifier.
   stopQueueStallAlarm();
+
+  // Dispatch has stopped. Keep serving, bounded, while workers hand off their
+  // in-flight tasks; new work waits for the next API (see src/be/api-drain.ts).
+  await drainApi();
 
   // Stop durable script workflow subprocesses
   await stopScriptRunSupervisor();
@@ -584,6 +590,22 @@ try {
 }
 warnIfCorsAllowsAnyOrigin();
 
+// Register every stored secret (config secrets of all scopes, OAuth and MCP
+// OAuth credentials, script API tokens) with the scrubber before listen, so
+// egress and the boot retro-sweep below can redact values not touched since
+// the last restart. Non-fatal: a decrypt failure only loses redaction coverage.
+try {
+  const loaded = await loadSecretRegistry();
+  console.log(
+    `[secret-registry] registered config=${loaded.config} oauth=${loaded.oauth} scriptApi=${loaded.scriptApi} failed=${loaded.failed}`,
+  );
+} catch (err) {
+  console.error(
+    "[secret-registry] load failed (non-fatal):",
+    scrubSecrets(err instanceof Error ? err.message : String(err)),
+  );
+}
+
 // Upgrade seed: explicit CAPABILITIES env values that predate capability
 // gating get the previously always-registered groups backfilled into a
 // global swarm_config row (operator-editable; skipped when a row exists).
@@ -683,15 +705,17 @@ httpServer
     // The api-server is the sole authority for the install identity — pass
     // generateIfMissing so it mints a new install ID on first boot. Workers
     // must NOT mint (see src/commands/runner.ts).
-    await initTelemetry(
-      "api-server",
-      async (key) => (await getSwarmConfigs({ scope: "global", key }))?.[0]?.value,
-      async (key, value) => {
-        await upsertSwarmConfig({ scope: "global", key, value });
-      },
-      { generateIfMissing: true },
-    );
+    const telemetryGetConfig = async (key: string) =>
+      (await getSwarmConfigs({ scope: "global", key }))?.[0]?.value;
+    const telemetrySetConfig = async (key: string, value: string) => {
+      await upsertSwarmConfig({ scope: "global", key, value });
+    };
+    await initTelemetry("api-server", telemetryGetConfig, telemetrySetConfig, {
+      generateIfMissing: true,
+    });
     telemetry.server("started", { port });
+    // Org email domain (hourly + on user changes) and the daily org.snapshot.
+    startTelemetryTicker({ getConfig: telemetryGetConfig, setConfig: telemetrySetConfig });
     if (process.env.GITHUB_TOKEN) {
       await emitBuiltInIntegrationConnectedOnce("github");
     }
@@ -715,6 +739,9 @@ httpServer
 
     // Initialize GitLab webhook handler (if configured)
     initGitLab();
+
+    // Initialize Azure DevOps service-hook handler (if configured)
+    initAzureDevOps();
 
     // Initialize AgentMail webhook handler (if configured)
     initAgentMail();
@@ -799,13 +826,13 @@ httpServer
         console.error("[boot-reembed-scripts] startup backfill failed (non-fatal):", err);
       });
 
-    // One-time scrub: retroactively redact any session_logs rows containing
-    // sensitive patterns that pre-date the defense-in-depth scrub layer.
-    // Idempotent, tracked via seed_state.
-    import("../be/boot-scrub-logs")
-      .then(({ runBootScrubLogs }) => runBootScrubLogs())
+    // Versioned retro-sweep: once per SCRUBBER_RULES_VERSION, redact stored
+    // rows (logs, tasks, memory, events, workflow steps) that pre-date the
+    // current scrubber rules. Idempotent and resumable, tracked via seed_state.
+    import("../be/boot-scrub-sweep")
+      .then(({ runBootScrubSweep }) => runBootScrubSweep())
       .catch((err) => {
-        console.error("[boot-scrub-logs] startup scrub failed (non-fatal):", err);
+        console.error("[boot-scrub-sweep] startup scrub failed (non-fatal):", err);
       });
   })
   .on("error", (err) => {

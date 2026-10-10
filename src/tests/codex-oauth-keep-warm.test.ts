@@ -255,6 +255,35 @@ describe("POST /api/oauth/keep-warm/codex", () => {
     expect(body.results).toEqual([]);
   });
 
+  it("loads slots through MCP_BASE_URL, not the public base URL", async () => {
+    const savedMcp = process.env.MCP_BASE_URL;
+    const savedPublic = process.env.PUBLIC_MCP_BASE_URL;
+    process.env.MCP_BASE_URL = "http://swarm-internal.example.test:3013";
+    process.env.PUBLIC_MCP_BASE_URL = "https://swarm-public.example.test";
+    installMockTransport(new Map());
+    const transport = globalThis.fetch;
+    const requested: string[] = [];
+    globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+      requested.push(typeof url === "string" ? url : url.toString());
+      return transport(url, init);
+    }) as typeof fetch;
+
+    try {
+      const { req, res, captured } = fakeReqRes();
+      await handleCodexOAuthKeepWarm(req, res, ["api", "oauth", "keep-warm", "codex"]);
+
+      expect(captured.status).toBe(200);
+      const configLoad = requested.find((u) => u.includes("/api/config/resolved"));
+      expect(configLoad).toBeDefined();
+      expect(new URL(configLoad as string).origin).toBe("http://swarm-internal.example.test:3013");
+    } finally {
+      if (savedMcp === undefined) delete process.env.MCP_BASE_URL;
+      else process.env.MCP_BASE_URL = savedMcp;
+      if (savedPublic === undefined) delete process.env.PUBLIC_MCP_BASE_URL;
+      else process.env.PUBLIC_MCP_BASE_URL = savedPublic;
+    }
+  });
+
   it("does not match unrelated paths", async () => {
     const { req, res } = fakeReqRes();
     const handled = await handleCodexOAuthKeepWarm(req, res, [

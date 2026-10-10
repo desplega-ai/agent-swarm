@@ -1,31 +1,35 @@
 /**
- * Steering — the single free-text composer that reaches an already-running
+ * Steering: the single free-text composer that reaches an already-running
  * task. Shared by the task-detail page and the sessions surface so the two
  * can't drift; both render the same `ComposerDock` with a Queue/Interrupt
  * segmented control wired into its action row.
  *
- * Decision 14 — mode is always explicit, **Queue is preselected**. There is no
+ * Decision 14: mode is always explicit, **Queue is preselected**. There is no
  * server-side auto-detection.
  *
- * Decision 16 — mode support is advertised before the user picks. The
+ * Decision 16: mode support is advertised before the user picks. The
  * available modes come from the task's derived `supportedSteerModes`
  * (server-side `PROVIDER_STEER_CAPABILITIES`):
  *   - `["steer","queue"]` → both segments live (pi / claude-managed)
  *   - `["queue"]`         → Interrupt disabled with a reason (claude / devin / opencode)
  *   - `[]`                → no toggle at all; the send action is labelled for
- *                           what actually happens — a follow-up task (codex)
+ *                           what actually happens: a follow-up task (codex)
  *
  * Attachments are deliberately absent: steering carries text only. The
- * attachment path stays on `SessionComposer`'s `createTask` branch.
+ * attachment path stays on `TaskComposer`'s follow-up branch.
  *
  * The draft can be **controlled** (`value` + `onValueChange`). Callers that
- * swap this component in and out — `SessionComposer` flips between the
- * task-creation dock and this one as the leaf task's status changes — must use
- * the controlled form, otherwise the internal draft dies with the unmount and
- * the user loses whatever they had typed.
+ * swap this component in and out (`TaskComposer` flips between the follow-up
+ * dock and this one as the target task's status changes) must use the
+ * controlled form, otherwise the internal draft dies with the unmount and the
+ * user loses whatever they had typed.
+ *
+ * A message the harness cannot take becomes a follow-up task ("promoted"). Its
+ * toast has an Open action that goes to that task.
  */
 
 import { useCallback, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { useSteerTask } from "@/api/hooks/use-tasks";
 import type { AgentTaskStatus, SteerMode, SteerResult } from "@/api/types";
@@ -42,8 +46,8 @@ export interface SteerComposerProps {
   providerLabel?: string;
   /**
    * Status of the target task. Pre-start tasks (`pending` / `unassigned` /
-   * `offered`) accept steering — the message queues and is delivered when the
-   * session begins — but there is no running turn to interrupt, so the server
+   * `offered`) accept steering (the message queues and is delivered when the
+   * session begins), but there is no running turn to interrupt, so the server
    * degrades `steer` → `queue`. We say so up front instead of letting the user
    * pick a mode that silently won't happen.
    */
@@ -58,10 +62,12 @@ export interface SteerComposerProps {
   fullWidth?: boolean;
   /** Extra action-row buttons, passed to `ComposerDock`. */
   extraActions?: React.ReactNode;
+  /** A bottom bar: one line until used, 44 px controls. See `ComposerDock`. */
+  bar?: boolean;
   className?: string;
 }
 
-/** Statuses where the task has no live session yet — steering can only queue. */
+/** Statuses where the task has no live session yet: steering can only queue. */
 const PRE_START_STATUSES = new Set<AgentTaskStatus>([
   "pending",
   "unassigned",
@@ -73,13 +79,13 @@ const PRE_START_STATUSES = new Set<AgentTaskStatus>([
 function describeOutcome(result: SteerResult): string {
   switch (result.outcome) {
     case "steered":
-      return "Interrupted — delivered into the running turn.";
+      return "Interrupted. Delivered into the running turn.";
     case "queued":
       return result.degradedFrom === "steer"
-        ? "Queued — this harness can't interrupt, so it lands at the next turn boundary."
-        : "Queued — lands at the next turn boundary.";
+        ? "Queued. This harness can't interrupt, so it lands at the next turn boundary."
+        : "Queued. It lands at the next turn boundary.";
     case "promoted":
-      return "This harness can't be steered — created a follow-up task instead.";
+      return "This harness can't be steered. Created a follow-up task instead.";
   }
 }
 
@@ -94,9 +100,11 @@ export function SteerComposer({
   autoFocus,
   fullWidth,
   extraActions,
+  bar,
   className,
 }: SteerComposerProps) {
   const { userId } = useCurrentUser();
+  const navigate = useNavigate();
   const steerTask = useSteerTask();
   const [internalDraft, setInternalDraft] = useState("");
   const [mode, setMode] = useState<SteerMode>("queue");
@@ -122,7 +130,7 @@ export function SteerComposer({
   const harness = providerLabel ?? "this harness";
 
   // Guard against a stale selection if the task's provider ever changes under
-  // us (task moves to a different agent) — never submit an unsupported mode.
+  // us (task moves to a different agent): never submit an unsupported mode.
   const effectiveMode: SteerMode = canInterrupt ? mode : "queue";
 
   const submit = () => {
@@ -137,7 +145,18 @@ export function SteerComposer({
       },
       {
         onSuccess: (result) => {
-          toast.success(describeOutcome(result));
+          const promotedTaskId = result.promotedTaskId;
+          toast.success(
+            describeOutcome(result),
+            promotedTaskId
+              ? {
+                  action: {
+                    label: "Open",
+                    onClick: () => void navigate(`/tasks/${promotedTaskId}`),
+                  },
+                }
+              : undefined,
+          );
           setDraft("");
         },
       },
@@ -145,7 +164,7 @@ export function SteerComposer({
   };
 
   const routeLabel = !hasLiveDelivery
-    ? `${harness} can't be steered — this creates a follow-up task`
+    ? `${harness} can't be steered: this creates a follow-up task`
     : notStarted
       ? "Queues until the session starts"
       : effectiveMode === "steer"
@@ -180,6 +199,7 @@ export function SteerComposer({
       sendLabel={hasLiveDelivery ? "Send" : "Create follow-up task"}
       autoFocus={autoFocus}
       extraActions={extraActions}
+      bar={bar}
       modeControl={
         hasLiveDelivery ? (
           <SteerModeToggle
@@ -188,10 +208,12 @@ export function SteerComposer({
             canInterrupt={canInterrupt}
             interruptDisabledReason={
               notStarted
-                ? "This task hasn't started — your message will queue until the session begins."
-                : `Interrupt isn't supported on ${harness} — messages queue at the next turn boundary.`
+                ? "This task hasn't started. Your message queues until the session begins."
+                : `Interrupt isn't supported on ${harness}. Messages queue at the next turn boundary.`
             }
             disabled={!userId || steerTask.isPending}
+            // 44 px options: the control's 2 px padding and border sit outside them.
+            className={bar ? "h-12.5" : undefined}
           />
         ) : null
       }

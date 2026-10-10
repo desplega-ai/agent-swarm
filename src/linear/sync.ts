@@ -447,6 +447,55 @@ async function resolveLinearActor(
   return undefined;
 }
 
+const REQUEST_SECTION_LABEL = "Request (comment that opened this session)";
+const REQUEST_THREAD_LABEL = "Request (comment thread that opened this session)";
+const PRIMARY_DIRECTIVE_THREAD_RE =
+  /<primary-directive-thread\b[^>]*>([\s\S]*?)<\/primary-directive-thread>/;
+
+/**
+ * Build the "Request" section from the comment that opened an AgentSession.
+ *
+ * Linear's `created` event carries `agentSession.comment`, the ROOT comment of
+ * the thread the session is attached to. For a top-level @mention that root is
+ * the triggering comment. For a mention in a reply (`previousComments` is
+ * non-empty) the trigger is a later reply, so we use the thread block of the
+ * top-level `promptContext` string instead, falling back to the root comment.
+ * `creator` is the human who opened the session, i.e. the mention author.
+ * Returns "" for assignment/delegation-triggered sessions, which carry no comment.
+ */
+export function buildSessionRequestSection(
+  event: Record<string, unknown>,
+  authorName: string,
+): string {
+  const session = event.agentSession as Record<string, unknown> | undefined;
+  const comment = session?.comment as { body?: unknown } | null | undefined;
+  const rootBody = typeof comment?.body === "string" ? comment.body.trim() : "";
+  if (!rootBody) return "";
+
+  const from = authorName ? ` from ${authorName}` : "";
+  const isReplyMention = Array.isArray(event.previousComments) && event.previousComments.length > 0;
+  if (isReplyMention && typeof event.promptContext === "string") {
+    const thread = event.promptContext.match(PRIMARY_DIRECTIVE_THREAD_RE)?.[1]?.trim();
+    if (thread) return `\n${REQUEST_THREAD_LABEL}${from}:\n${thread}\n`;
+  }
+  const label = isReplyMention ? REQUEST_THREAD_LABEL : REQUEST_SECTION_LABEL;
+  return `\n${label}${from}:\n${rootBody}\n`;
+}
+
+/**
+ * A customized (DB-overridden) `linear.issue.assigned` / `.reassigned` body
+ * written before `{{request_section}}` existed would silently drop the
+ * comment. When the resolved text lacks the section, insert it right after
+ * the header so the human's request always reaches the task.
+ */
+export function ensureRequestSection(text: string, requestSection: string): string {
+  if (!requestSection || text.includes(requestSection.trim())) return text;
+  const block = requestSection.trim();
+  const headerEnd = text.indexOf("\n\n");
+  if (headerEnd === -1) return `${text}\n\n${block}\n`;
+  return `${text.slice(0, headerEnd)}\n\n${block}${text.slice(headerEnd)}`;
+}
+
 /**
  * Handle AgentSession events from Linear.
  * These are fired when an issue is assigned to the Linear agent integration,
@@ -565,6 +614,7 @@ export async function handleAgentSessionEvent(event: Record<string, unknown>): P
   const lead = await findLeadAgent();
 
   const sessionSection = sessionUrl ? `\nSession: ${sessionUrl}` : "";
+  const requestSection = buildSessionRequestSection(event, actorName);
   const descriptionSection = issueDescription ? `\nDescription:\n${issueDescription}\n` : "";
   const templateName = existing ? "linear.issue.reassigned" : "linear.issue.assigned";
   const templateResult = resolveTemplate(templateName, {
@@ -572,12 +622,14 @@ export async function handleAgentSessionEvent(event: Record<string, unknown>): P
     issue_title: issueTitle,
     issue_url: issueUrl,
     session_section: sessionSection,
+    request_section: requestSection,
     description_section: descriptionSection,
   });
 
   if (templateResult.skipped) {
     return;
   }
+  const taskText = ensureRequestSection(templateResult.text, requestSection);
 
   const contextKey = linearContextKey({ issueIdentifier });
   const existingContextWork = await findExistingLinearTrackerContextWork(contextKey);
@@ -613,7 +665,7 @@ export async function handleAgentSessionEvent(event: Record<string, unknown>): P
   }
 
   const task = await createTaskWithSiblingAwareness(
-    templateResult.text,
+    taskText,
     {
       agentId: lead?.id ?? "",
       routingReason: lead ? "skill" : undefined,

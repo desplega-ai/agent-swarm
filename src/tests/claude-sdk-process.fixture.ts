@@ -1,3 +1,5 @@
+import { rename } from "node:fs/promises";
+
 const mode = process.env.CLAUDE_SDK_FIXTURE_MODE;
 const stateFile = process.env.CLAUDE_SDK_FIXTURE_STATE_FILE;
 const sessionId = "11111111-1111-4111-8111-111111111111";
@@ -11,6 +13,15 @@ if (process.argv.includes("--version")) {
 if (!mode || !stateFile) {
   console.error("CLAUDE_SDK_FIXTURE_MODE and CLAUDE_SDK_FIXTURE_STATE_FILE are required");
   process.exit(2);
+}
+
+// The test polls for the state file and parses it as soon as it exists.
+// Bun.write creates the file before filling it, so write-then-rename keeps
+// the reader from ever seeing an empty file.
+async function writeStateFile(path: string, state: Record<string, unknown>): Promise<void> {
+  const temporaryPath = `${path}.tmp`;
+  await Bun.write(temporaryPath, JSON.stringify(state));
+  await rename(temporaryPath, path);
 }
 
 function writeMessage(message: Record<string, unknown>): void {
@@ -145,7 +156,7 @@ if (mode === "cancel") {
     stdout: "ignore",
     stderr: "ignore",
   });
-  await Bun.write(stateFile, JSON.stringify({ fixturePid: process.pid, childPid: child.pid }));
+  await writeStateFile(stateFile, { fixturePid: process.pid, childPid: child.pid });
 }
 
 async function handleLine(line: string): Promise<boolean> {
@@ -191,7 +202,7 @@ async function handleLine(line: string): Promise<boolean> {
   }
 
   if (mode !== "queue" || userMessages.length < 3) return false;
-  await Bun.write(stateFile, JSON.stringify({ argv, userMessages }));
+  await writeStateFile(stateFile, { argv, userMessages });
   for (let index = 0; index < userMessages.length; index++) {
     const turn = index + 1;
     writeMessage(assistantMessage(`accepted:${userMessages[index]}`, turn));

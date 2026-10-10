@@ -41,6 +41,8 @@ services:
       retries: 20
     restart: unless-stopped
 
+  # Bucket versioning gives agent-fs content diffs and revert (Comb's
+  # "Review changes"). agent-fs checks it once at startup, so it runs here first.
   minio-init:
     image: pgsty/minio:RELEASE.2026-08-04T00-00-00Z@sha256:b6bfe7239bfc83fb90d31612d9704d86039dd714f7904b3f1ad68f211e602372
     depends_on:
@@ -49,12 +51,13 @@ services:
     entrypoint: >
       /bin/sh -c "
       mc alias set local http://minio:9000 minioadmin minioadmin &&
-      mc mb --ignore-existing local/agentfs
+      mc mb --ignore-existing local/agentfs &&
+      mc version enable local/agentfs
       "
 
   agent-fs:
     container_name: so-agent-fs
-    image: ghcr.io/desplega-ai/agent-fs:0.15.0
+    image: ghcr.io/desplega-ai/agent-fs:0.15.3
     platform: linux/amd64
     depends_on:
       minio-init:

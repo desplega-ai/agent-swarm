@@ -2,8 +2,9 @@ import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test
 import { unlink } from "node:fs/promises";
 import { closeDb, getActivePricingRow, getDbClient, getLogsByEventType, initDb } from "../be/db";
 import { getModelsCatalog, resetModelsCatalogForTests } from "../be/models-catalog";
-import type { ModelsDevCache } from "../be/modelsdev-cache";
+import { loadModelsDevCache, type ModelsDevCache } from "../be/modelsdev-cache";
 import { refreshPricingFromModelsDev } from "../be/pricing-refresh";
+import { buildModelsDevSeedRows, buildPricingSeedRows } from "../be/seed-pricing";
 
 const TEST_DB_PATH = "./test-pricing-refresh.sqlite";
 
@@ -101,13 +102,14 @@ describe("models.dev runtime pricing refresh", () => {
        VALUES ('codex', 'gpt-refresh-test', 'input', 0, 1, 0, 0)`,
     );
 
+    // codex, pi, cursor and amp each project the OpenAI rows: 4 providers x 2 token classes.
     const first = await refreshPricingFromModelsDev({
       now: 1_000,
       fetchImpl: async () => responseFor(openAiCache(2, 8), '"etag-1"'),
     });
     expect(first.status).toBe("refreshed");
-    expect(first.candidateRows).toBe(4);
-    expect(first.inserted).toBe(4);
+    expect(first.candidateRows).toBe(8);
+    expect(first.inserted).toBe(8);
     expect(first.unchanged).toBe(0);
 
     const activeChanged = await getActivePricingRow("codex", "gpt-refresh-test", "input", 1_000);
@@ -119,7 +121,7 @@ describe("models.dev runtime pricing refresh", () => {
       fetchImpl: async () => responseFor(openAiCache(2, 8), '"etag-2"'),
     });
     expect(second.inserted).toBe(0);
-    expect(second.unchanged).toBe(4);
+    expect(second.unchanged).toBe(8);
 
     const rows = await getDbClient().query<{ effective_from: number }>(
       `SELECT effective_from FROM pricing
@@ -200,6 +202,74 @@ describe("models.dev runtime pricing refresh", () => {
     expect(rows.map((row) => row.effective_from)).toEqual([2_000, 3_000]);
   });
 
+  test("refreshes when dated snapshots collapse onto one amp key at different prices", async () => {
+    // models.dev's live gpt-4o family. Amp strips the dated suffix, so all four
+    // land on amp|gpt-4o; the 2024-05-13 snapshot is priced higher. Its key
+    // comes first, as upstream serves it, so a first-wins builder would pick it.
+    const cache: ModelsDevCache = {
+      openai: {
+        models: {
+          "gpt-4o-2024-05-13": { cost: { input: 5, output: 15 } },
+          "gpt-4o": { cost: { input: 2.5, output: 10, cache_read: 1.25 } },
+          "gpt-4o-2024-08-06": { cost: { input: 2.5, output: 10, cache_read: 1.25 } },
+          "gpt-4o-2024-11-20": { cost: { input: 2.5, output: 10, cache_read: 1.25 } },
+        },
+      },
+    };
+
+    const result = await refreshPricingFromModelsDev({
+      now: 1_000,
+      fetchImpl: async () => responseFor(cache, '"etag-collapse"'),
+    });
+
+    expect(result.status).toBe("refreshed");
+    expect(await getLogsByEventType("pricing.refresh.failed")).toHaveLength(0);
+    // The undated alias wins every token class.
+    expect((await getActivePricingRow("amp", "gpt-4o", "input", 1_000))?.pricePerMillionUsd).toBe(
+      2.5,
+    );
+    expect((await getActivePricingRow("amp", "gpt-4o", "output", 1_000))?.pricePerMillionUsd).toBe(
+      10,
+    );
+    expect(
+      (await getActivePricingRow("amp", "gpt-4o", "cached_input", 1_000))?.pricePerMillionUsd,
+    ).toBe(1.25);
+    // Providers that keep the dated id still price each snapshot on its own.
+    expect(
+      (await getActivePricingRow("codex", "gpt-4o-2024-05-13", "input", 1_000))?.pricePerMillionUsd,
+    ).toBe(5);
+  });
+
+  test("picks the newest dated snapshot when no undated alias exists", () => {
+    const rows = buildModelsDevSeedRows({
+      openai: {
+        models: {
+          "gpt-x-2025-08-07": { cost: { input: 2, output: 8 } },
+          "gpt-x-2025-01-01": { cost: { input: 1, output: 4 } },
+        },
+      },
+    }).filter((row) => row.provider === "amp");
+
+    expect(rows).toEqual([
+      { provider: "amp", model: "gpt-x", tokenClass: "input", pricePerMillionUsd: 2 },
+      { provider: "amp", model: "gpt-x", tokenClass: "output", pricePerMillionUsd: 8 },
+    ]);
+  });
+
+  test("the vendored models.dev snapshot yields one row per (provider, model, tokenClass)", () => {
+    const cache = loadModelsDevCache();
+    expect(cache).not.toBeNull();
+    const rows = buildPricingSeedRows(cache);
+    const seen = new Set<string>();
+    const duplicates: string[] = [];
+    for (const row of rows) {
+      const key = `${row.provider}|${row.model}|${row.tokenClass}`;
+      if (seen.has(key)) duplicates.push(key);
+      seen.add(key);
+    }
+    expect(duplicates).toEqual([]);
+  });
+
   test("writes scrubbed audit log entries for successful refreshes", async () => {
     await refreshPricingFromModelsDev({
       now: 1_000,
@@ -208,7 +278,7 @@ describe("models.dev runtime pricing refresh", () => {
 
     const logs = await getLogsByEventType("pricing.refresh");
     expect(logs).toHaveLength(1);
-    expect(logs[0]?.newValue).toContain("inserted=4");
+    expect(logs[0]?.newValue).toContain("inserted=8");
     expect(logs[0]?.metadata).toContain('"etag":"\\"etag-log\\""');
   });
 });

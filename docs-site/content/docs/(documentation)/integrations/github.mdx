@@ -97,7 +97,12 @@ These events still emit to the internal `workflowEventBus` for workflow triggers
 
 ## Bot Reactions
 
-If GitHub App credentials are provided (`GITHUB_APP_ID` and `GITHUB_APP_PRIVATE_KEY`), the bot can react to comments and issues with emoji to acknowledge receipt.
+When someone pings the swarm from GitHub, the webhook reacts with 👀 on the item that pinged it as soon as it creates the task. The reaction authenticates in this order:
+
+1. **GitHub App** — when `GITHUB_APP_ID` and `GITHUB_APP_PRIVATE_KEY` are set and the event carries an installation id. The reaction appears as the bot.
+2. **`GITHUB_TOKEN`** — a personal access token, for deployments that use a plain webhook and no App. The reaction appears as the token's user. The token needs permission to write issues and pull requests on the repo (classic PAT: `repo`, or `public_repo` for public repos).
+3. **Neither** — the reaction is skipped. Task creation is never blocked by a reaction failure.
+
 
 Automated replies to inline PR review threads must use the bot identity configured by `GITHUB_TOKEN`, not a user's OAuth connection. Agents verify the authenticated `gh` login before posting and append `<!-- agent-swarm:review-ack -->` so swarm-authored acknowledgements have explicit machine-readable provenance.
 
@@ -109,7 +114,7 @@ Supported event types:
 - **Issue/PR comments** — 👀 added to the comment
 - **PR review comments** (inline) — 👀 added to the review comment
 - **PR reviews** (body) — 👀 added via GraphQL (REST does not support review reactions)
-- **Issues/PRs** (assigned or labeled) — 👀 added to the issue or PR itself
+- **Issues/PRs** (opened, edited, assigned, review requested, or labeled) — 👀 added to the issue or PR itself
 
 ## Worker Git Configuration
 

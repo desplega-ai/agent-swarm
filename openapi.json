@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Agent Swarm API",
-    "version": "1.159.0",
+    "version": "1.168.0",
     "description": "Multi-agent orchestration API for Claude Code, Codex, and Gemini CLI. Enables task distribution, agent communication, and service discovery.\n\nMCP tools are documented separately in [MCP.md](./MCP.md)."
   },
   "servers": [
@@ -165,12 +165,14 @@
               "ui",
               "github",
               "gitlab",
+              "azure-devops",
               "agentmail",
               "system",
               "schedule",
               "workflow",
               "linear",
-              "jira"
+              "jira",
+              "comb"
             ],
             "default": "mcp"
           },
@@ -285,7 +287,8 @@
             "type": "string",
             "enum": [
               "github",
-              "gitlab"
+              "gitlab",
+              "azure-devops"
             ]
           },
           "vcsRepo": {
@@ -443,7 +446,10 @@
               "claude-managed",
               "opencode",
               "acp",
-              "dsh"
+              "dsh",
+              "amp",
+              "cursor",
+              "grok"
             ]
           },
           "providerMeta": {
@@ -514,7 +520,10 @@
               "claude-managed",
               "opencode",
               "acp",
-              "dsh"
+              "dsh",
+              "amp",
+              "cursor",
+              "grok"
             ]
           },
           "capabilities": {
@@ -662,6 +671,9 @@
               "opencode",
               "acp",
               "dsh",
+              "amp",
+              "cursor",
+              "grok",
               null
             ],
             "default": null
@@ -743,6 +755,8 @@
             "type": "string",
             "enum": [
               "opencode",
+              "gemini",
+              "copilot",
               "custom"
             ]
           },
@@ -993,7 +1007,10 @@
               "claude-managed",
               "opencode",
               "acp",
-              "dsh"
+              "dsh",
+              "amp",
+              "cursor",
+              "grok"
             ]
           },
           "harnessProvider": {
@@ -1010,6 +1027,9 @@
               "opencode",
               "acp",
               "dsh",
+              "amp",
+              "cursor",
+              "grok",
               null
             ]
           },
@@ -1842,19 +1862,35 @@
             "type": "string",
             "minLength": 1,
             "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
-            "description": "Name of a predefined extension in the catalog (`GET /api/extensions/catalog`)."
+            "description": "Name of a predefined extension in the catalog (`GET /api/extensions/catalog`). Mutually exclusive with `manifest` and `files`."
+          },
+          "manifest": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ExtensionManifest"
+              },
+              {
+                "description": "Inline bundle manifest. Requires `files`. Accepted only when `EXTENSION_ALLOW_INLINE_INSTALL` is on and the caller is a lead, operator, or dashboard user."
+              }
+            ]
+          },
+          "files": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Inline bundle files keyed by relative path. Requires `manifest`."
           },
           "priority": {
-            "type": "integer"
+            "type": "integer",
+            "description": "Handler priority. Lower values run first."
           },
           "config": {
             "type": "object",
-            "additionalProperties": {}
+            "additionalProperties": {},
+            "description": "Extension configuration."
           }
         },
-        "required": [
-          "template"
-        ],
         "additionalProperties": false
       },
       "ExtensionCatalogItem": {
@@ -2049,7 +2085,8 @@
             "enum": [
               "page",
               "workflow",
-              "schedule"
+              "schedule",
+              "agent-fs-path"
             ]
           },
           "itemId": {
@@ -3138,7 +3175,10 @@
               "devin",
               "gemini",
               "acp",
-              "dsh"
+              "dsh",
+              "amp",
+              "cursor",
+              "grok"
             ]
           },
           "model": {
@@ -3553,7 +3593,8 @@
             "enum": [
               "harness",
               "pricing-table",
-              "unpriced"
+              "unpriced",
+              "estimated"
             ],
             "default": "harness"
           },
@@ -3761,6 +3802,16 @@
           "systemDefault": {
             "type": "boolean"
           },
+          "invocationCount": {
+            "type": "integer",
+            "description": "Confirmed invocations across all harnesses, at most one per runner session"
+          },
+          "lastInvokedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "createdAt": {
             "type": "string"
           },
@@ -3798,6 +3849,8 @@
           "version",
           "isEnabled",
           "systemDefault",
+          "invocationCount",
+          "lastInvokedAt",
           "createdAt",
           "lastUpdatedAt",
           "lastFetchedAt"
@@ -4589,7 +4642,7 @@
           "config": {
             "type": "object",
             "additionalProperties": {},
-            "description": "Executor-specific config. For agent-task: { template, outputSchema?, agentId?, routingReason?, routingNote?, tags?, priority?, dir?, vcsRepo?, model? }; configured agentId defaults routingReason to human_pinned. For script: { runtime, script, args?, timeout? }. For swarm-script: { scriptName, scope?, pinHash?, args?, fsMode?, timeoutMs? (1000-300000) }. For system-one-decision (typed decisions, Jev by default): { provider? ('typesafe' default | 'openrouter' | 'laya'; a literal, never a {{token}}), state, questions: { <id>: { type: 'noul'|'choice'|'score', instructions, criteria? } }, returns: { <id>: { type } }, model? (provider-specific; unset = the provider's default, and laya has none so it sends no model and picks its own checkpoint), timeoutMs?, maxRetries? (0-3), humanReview? { band: { min, max } (0-1, inclusive), approvers: { users?, roles?, policy }, title?, timeout?, notifications? } }; each provider needs its own global secret (TYPESAFE_API_KEY, OPENROUTER_API_KEY, or LAYA_API_KEY; laya also needs the global config LAYA_URL), and a save warns and a run fails before any node executes when one is missing; system-one-decision nodes must not set retry or validation.retry. With humanReview, an answer whose confidence is inside the band waits for a person (human-in-the-loop approval), and next must map ports { approved, rejected?, timeout? }. Agent-task templates and ordinary config values support {{interpolation}} from the node's inputs context, including trigger and declared upstream aliases. SECURITY: executable source for script/swarm-script nodes does not interpolate trigger.* or upstream node outputs; only input/workflow/swarm/run values are allowed in inline script source, and named swarm-script source is not workflow-interpolated. Pass dynamic values through config.args instead (inline script receives them as argv; swarm-script receives its args object). NOTE: config.outputSchema on agent-task nodes validates the AGENT's raw JSON output, while node-level outputSchema validates the EXECUTOR's return value ({taskId, taskOutput})."
+            "description": "Executor-specific config. For agent-task: { template, outputSchema?, agentId?, routingReason?, routingNote?, tags?, priority?, dir?, vcsRepo?, model? }; configured agentId defaults routingReason to human_pinned. For script: { runtime, script, args?, timeout? }. For swarm-script: { scriptName, scope?, pinHash?, args?, fsMode?, timeoutMs? (1000-300000) }. For system-one-decision (typed decisions, Jev by default): { provider? ('typesafe' default | 'openrouter' | 'laya'; a literal, never a {{token}}), state, questions: { <id>: { type: 'noul'|'choice'|'score', instructions, criteria? } }, returns: { <id>: { type } }, model? (provider-specific; unset = the provider's default, and laya has none so it sends no model and picks its own checkpoint), timeoutMs?, maxRetries? (0-3), humanReview? { band: { min, max } (0-1, inclusive), approvers: { users?, roles?, policy }, title?, timeout?, notifications? } }; each provider needs its own global secret (TYPESAFE_API_KEY, OPENROUTER_API_KEY, or LAYA_API_KEY; laya also needs the global config LAYA_URL), and a save warns and a run fails before any node executes when one is missing; system-one-decision nodes must not set retry or validation.retry. With humanReview, an answer whose confidence is inside the band waits for a person (human-in-the-loop approval), and next must map ports { approved, rejected?, timeout? }. Agent-task templates and ordinary config values support {{interpolation}} from the node's inputs context, including trigger and declared upstream aliases. SECURITY: executable source for script/swarm-script nodes does not interpolate trigger.* or upstream node outputs; only input/workflow/swarm/run values are allowed in inline script source, and named swarm-script source is not workflow-interpolated. Pass dynamic values through config.args instead (inline script receives them as argv, with runtime: \"bash\" running bash -c <script> ...args so args[0] is $0 and args[1] is $1; swarm-script receives its args object). NOTE: config.outputSchema on agent-task nodes validates the AGENT's raw JSON output, while node-level outputSchema validates the EXECUTOR's return value ({taskId, taskOutput})."
           },
           "next": {
             "anyOf": [
@@ -5038,7 +5091,7 @@
                     "config": {
                       "type": "object",
                       "additionalProperties": {},
-                      "description": "Executor-specific config. For agent-task: { template, outputSchema?, agentId?, routingReason?, routingNote?, tags?, priority?, dir?, vcsRepo?, model? }; configured agentId defaults routingReason to human_pinned. For script: { runtime, script, args?, timeout? }. For swarm-script: { scriptName, scope?, pinHash?, args?, fsMode?, timeoutMs? (1000-300000) }. For system-one-decision (typed decisions, Jev by default): { provider? ('typesafe' default | 'openrouter' | 'laya'; a literal, never a {{token}}), state, questions: { <id>: { type: 'noul'|'choice'|'score', instructions, criteria? } }, returns: { <id>: { type } }, model? (provider-specific; unset = the provider's default, and laya has none so it sends no model and picks its own checkpoint), timeoutMs?, maxRetries? (0-3), humanReview? { band: { min, max } (0-1, inclusive), approvers: { users?, roles?, policy }, title?, timeout?, notifications? } }; each provider needs its own global secret (TYPESAFE_API_KEY, OPENROUTER_API_KEY, or LAYA_API_KEY; laya also needs the global config LAYA_URL), and a save warns and a run fails before any node executes when one is missing; system-one-decision nodes must not set retry or validation.retry. With humanReview, an answer whose confidence is inside the band waits for a person (human-in-the-loop approval), and next must map ports { approved, rejected?, timeout? }. Agent-task templates and ordinary config values support {{interpolation}} from the node's inputs context, including trigger and declared upstream aliases. SECURITY: executable source for script/swarm-script nodes does not interpolate trigger.* or upstream node outputs; only input/workflow/swarm/run values are allowed in inline script source, and named swarm-script source is not workflow-interpolated. Pass dynamic values through config.args instead (inline script receives them as argv; swarm-script receives its args object). NOTE: config.outputSchema on agent-task nodes validates the AGENT's raw JSON output, while node-level outputSchema validates the EXECUTOR's return value ({taskId, taskOutput})."
+                      "description": "Executor-specific config. For agent-task: { template, outputSchema?, agentId?, routingReason?, routingNote?, tags?, priority?, dir?, vcsRepo?, model? }; configured agentId defaults routingReason to human_pinned. For script: { runtime, script, args?, timeout? }. For swarm-script: { scriptName, scope?, pinHash?, args?, fsMode?, timeoutMs? (1000-300000) }. For system-one-decision (typed decisions, Jev by default): { provider? ('typesafe' default | 'openrouter' | 'laya'; a literal, never a {{token}}), state, questions: { <id>: { type: 'noul'|'choice'|'score', instructions, criteria? } }, returns: { <id>: { type } }, model? (provider-specific; unset = the provider's default, and laya has none so it sends no model and picks its own checkpoint), timeoutMs?, maxRetries? (0-3), humanReview? { band: { min, max } (0-1, inclusive), approvers: { users?, roles?, policy }, title?, timeout?, notifications? } }; each provider needs its own global secret (TYPESAFE_API_KEY, OPENROUTER_API_KEY, or LAYA_API_KEY; laya also needs the global config LAYA_URL), and a save warns and a run fails before any node executes when one is missing; system-one-decision nodes must not set retry or validation.retry. With humanReview, an answer whose confidence is inside the band waits for a person (human-in-the-loop approval), and next must map ports { approved, rejected?, timeout? }. Agent-task templates and ordinary config values support {{interpolation}} from the node's inputs context, including trigger and declared upstream aliases. SECURITY: executable source for script/swarm-script nodes does not interpolate trigger.* or upstream node outputs; only input/workflow/swarm/run values are allowed in inline script source, and named swarm-script source is not workflow-interpolated. Pass dynamic values through config.args instead (inline script receives them as argv, with runtime: \"bash\" running bash -c <script> ...args so args[0] is $0 and args[1] is $1; swarm-script receives its args object). NOTE: config.outputSchema on agent-task nodes validates the AGENT's raw JSON output, while node-level outputSchema validates the EXECUTOR's return value ({taskId, taskOutput})."
                     },
                     "next": {
                       "anyOf": [
@@ -6146,7 +6199,7 @@
     "/ping": {
       "post": {
         "summary": "Report agent liveness",
-        "description": "Refreshes the calling agent's status. Workers may send `X-Runtime-Instance-ID`, the per-boot identifier of the calling process. It is ignored unless MULTI_RUNTIME_ENABLED is set. With multi-runtime mode on, the header must identify a live runtime of this agent; an absent, unknown, offline, or foreign identifier makes the call a no-op instead of an error, so workers predating the flag keep running.",
+        "description": "Refreshes the calling agent's status. Workers may send `X-Runtime-Instance-ID`, the per-boot identifier of the calling process. It is ignored unless MULTI_RUNTIME_ENABLED is set. With multi-runtime mode on, the header must identify a live runtime of this agent; an absent, unknown, offline, or foreign identifier makes the call a no-op instead of an error, so workers predating the flag keep running. While the API is draining after SIGTERM, every response (this one included) carries `X-Swarm-Draining: 1`: workers hand off in-flight tasks and take no new work.",
         "tags": [
           "Core"
         ],
@@ -9587,7 +9640,7 @@
             }
           },
           "400": {
-            "description": "Invalid or disallowed SQL",
+            "description": "Invalid or disallowed SQL, including queries that read credential tables",
             "content": {
               "application/json": {
                 "schema": {
@@ -9668,7 +9721,10 @@
                       "claude-managed",
                       "opencode",
                       "acp",
-                      "dsh"
+                      "dsh",
+                      "amp",
+                      "cursor",
+                      "grok"
                     ]
                   },
                   "harness_provider": {
@@ -9681,7 +9737,10 @@
                       "claude-managed",
                       "opencode",
                       "acp",
-                      "dsh"
+                      "dsh",
+                      "amp",
+                      "cursor",
+                      "grok"
                     ]
                   },
                   "runtimeInstanceId": {
@@ -9970,7 +10029,10 @@
                       "claude-managed",
                       "opencode",
                       "acp",
-                      "dsh"
+                      "dsh",
+                      "amp",
+                      "cursor",
+                      "grok"
                     ]
                   }
                 },
@@ -10186,7 +10248,10 @@
                       "pi",
                       "opencode",
                       "acp",
-                      "dsh"
+                      "dsh",
+                      "amp",
+                      "cursor",
+                      "grok"
                     ]
                   },
                   "model": {
@@ -10222,6 +10287,8 @@
                         "type": "string",
                         "enum": [
                           "opencode",
+                          "gemini",
+                          "copilot",
                           "custom"
                         ]
                       },
@@ -11285,6 +11352,9 @@
                         "opencode",
                         "acp",
                         "dsh",
+                        "amp",
+                        "cursor",
+                        "grok",
                         null
                       ]
                     },
@@ -11302,6 +11372,9 @@
                         "opencode",
                         "acp",
                         "dsh",
+                        "amp",
+                        "cursor",
+                        "grok",
                         null
                       ]
                     },
@@ -11421,6 +11494,9 @@
                               "opencode",
                               "acp",
                               "dsh",
+                              "amp",
+                              "cursor",
+                              "grok",
                               null
                             ]
                           },
@@ -11438,6 +11514,9 @@
                               "opencode",
                               "acp",
                               "dsh",
+                              "amp",
+                              "cursor",
+                              "grok",
                               null
                             ]
                           },
@@ -11843,11 +11922,69 @@
                           ],
                           "additionalProperties": {}
                         },
+                        "approvals": {
+                          "type": [
+                            "array",
+                            "null"
+                          ],
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "responder": {
+                                "type": "string",
+                                "description": "Who answered, from the credential: a user id, or `operator` for the shared key."
+                              },
+                              "approved": {
+                                "type": "boolean"
+                              },
+                              "responses": {
+                                "type": "object",
+                                "additionalProperties": {}
+                              },
+                              "claimedRespondedBy": {
+                                "type": "string",
+                                "description": "The `respondedBy` the client sent. Unverified; display only."
+                              },
+                              "respondedAt": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "responder",
+                              "approved",
+                              "responses",
+                              "respondedAt"
+                            ]
+                          },
+                          "description": "Every accepted answer, in order. A request with an `all` or `{ min: N }` policy stays pending until enough approve."
+                        },
+                        "approvalProgress": {
+                          "type": [
+                            "object",
+                            "null"
+                          ],
+                          "properties": {
+                            "approved": {
+                              "type": "integer",
+                              "description": "Approvals that count toward the policy so far."
+                            },
+                            "required": {
+                              "type": "integer",
+                              "description": "Approvals the policy needs before the request resolves."
+                            }
+                          },
+                          "required": [
+                            "approved",
+                            "required"
+                          ],
+                          "description": "Quorum progress while the request is pending; null once it is resolved."
+                        },
                         "resolvedBy": {
                           "type": [
                             "string",
                             "null"
-                          ]
+                          ],
+                          "description": "Who resolved the request, from the credential: a user id, `operator` for the shared key, or an agent id for a cancellation."
                         },
                         "resolvedAt": {
                           "type": [
@@ -11921,6 +12058,8 @@
                         "approvers",
                         "status",
                         "responses",
+                        "approvals",
+                        "approvalProgress",
                         "resolvedBy",
                         "resolvedAt",
                         "resolutionReason",
@@ -12180,11 +12319,69 @@
                                 ],
                                 "additionalProperties": {}
                               },
+                              "approvals": {
+                                "type": [
+                                  "array",
+                                  "null"
+                                ],
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "responder": {
+                                      "type": "string",
+                                      "description": "Who answered, from the credential: a user id, or `operator` for the shared key."
+                                    },
+                                    "approved": {
+                                      "type": "boolean"
+                                    },
+                                    "responses": {
+                                      "type": "object",
+                                      "additionalProperties": {}
+                                    },
+                                    "claimedRespondedBy": {
+                                      "type": "string",
+                                      "description": "The `respondedBy` the client sent. Unverified; display only."
+                                    },
+                                    "respondedAt": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "responder",
+                                    "approved",
+                                    "responses",
+                                    "respondedAt"
+                                  ]
+                                },
+                                "description": "Every accepted answer, in order. A request with an `all` or `{ min: N }` policy stays pending until enough approve."
+                              },
+                              "approvalProgress": {
+                                "type": [
+                                  "object",
+                                  "null"
+                                ],
+                                "properties": {
+                                  "approved": {
+                                    "type": "integer",
+                                    "description": "Approvals that count toward the policy so far."
+                                  },
+                                  "required": {
+                                    "type": "integer",
+                                    "description": "Approvals the policy needs before the request resolves."
+                                  }
+                                },
+                                "required": [
+                                  "approved",
+                                  "required"
+                                ],
+                                "description": "Quorum progress while the request is pending; null once it is resolved."
+                              },
                               "resolvedBy": {
                                 "type": [
                                   "string",
                                   "null"
-                                ]
+                                ],
+                                "description": "Who resolved the request, from the credential: a user id, `operator` for the shared key, or an agent id for a cancellation."
                               },
                               "resolvedAt": {
                                 "type": [
@@ -12258,6 +12455,8 @@
                               "approvers",
                               "status",
                               "responses",
+                              "approvals",
+                              "approvalProgress",
                               "resolvedBy",
                               "resolvedAt",
                               "resolutionReason",
@@ -12308,11 +12507,33 @@
                                   "cancelled"
                                 ]
                               },
+                              "approvalProgress": {
+                                "type": [
+                                  "object",
+                                  "null"
+                                ],
+                                "properties": {
+                                  "approved": {
+                                    "type": "integer",
+                                    "description": "Approvals that count toward the policy so far."
+                                  },
+                                  "required": {
+                                    "type": "integer",
+                                    "description": "Approvals the policy needs before the request resolves."
+                                  }
+                                },
+                                "required": [
+                                  "approved",
+                                  "required"
+                                ],
+                                "description": "Quorum progress while the request is pending; null once it is resolved."
+                              },
                               "resolvedBy": {
                                 "type": [
                                   "string",
                                   "null"
-                                ]
+                                ],
+                                "description": "Who resolved the request, from the credential: a user id, `operator` for the shared key, or an agent id for a cancellation."
                               },
                               "resolvedAt": {
                                 "type": [
@@ -12352,6 +12573,7 @@
                               "workflowRunStepId",
                               "sourceTaskId",
                               "status",
+                              "approvalProgress",
                               "resolvedBy",
                               "resolvedAt",
                               "timeoutSeconds",
@@ -12570,11 +12792,69 @@
                           ],
                           "additionalProperties": {}
                         },
+                        "approvals": {
+                          "type": [
+                            "array",
+                            "null"
+                          ],
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "responder": {
+                                "type": "string",
+                                "description": "Who answered, from the credential: a user id, or `operator` for the shared key."
+                              },
+                              "approved": {
+                                "type": "boolean"
+                              },
+                              "responses": {
+                                "type": "object",
+                                "additionalProperties": {}
+                              },
+                              "claimedRespondedBy": {
+                                "type": "string",
+                                "description": "The `respondedBy` the client sent. Unverified; display only."
+                              },
+                              "respondedAt": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "responder",
+                              "approved",
+                              "responses",
+                              "respondedAt"
+                            ]
+                          },
+                          "description": "Every accepted answer, in order. A request with an `all` or `{ min: N }` policy stays pending until enough approve."
+                        },
+                        "approvalProgress": {
+                          "type": [
+                            "object",
+                            "null"
+                          ],
+                          "properties": {
+                            "approved": {
+                              "type": "integer",
+                              "description": "Approvals that count toward the policy so far."
+                            },
+                            "required": {
+                              "type": "integer",
+                              "description": "Approvals the policy needs before the request resolves."
+                            }
+                          },
+                          "required": [
+                            "approved",
+                            "required"
+                          ],
+                          "description": "Quorum progress while the request is pending; null once it is resolved."
+                        },
                         "resolvedBy": {
                           "type": [
                             "string",
                             "null"
-                          ]
+                          ],
+                          "description": "Who resolved the request, from the credential: a user id, `operator` for the shared key, or an agent id for a cancellation."
                         },
                         "resolvedAt": {
                           "type": [
@@ -12648,6 +12928,8 @@
                         "approvers",
                         "status",
                         "responses",
+                        "approvals",
+                        "approvalProgress",
                         "resolvedBy",
                         "resolvedAt",
                         "resolutionReason",
@@ -12682,6 +12964,7 @@
     "/api/approval-requests/{id}/respond": {
       "post": {
         "summary": "Submit a response to an approval request",
+        "description": "Only a person may answer: a user token, a page session signed for a user, or the shared key with no agent identity (recorded as `operator`). The responder is taken from the credential. When the request lists `approvers.users` or `approvers.roles`, a user must match one of them. A rejection resolves the request at once; approvals resolve it when the `any`, `all` or `{ min: N }` policy is met, and until then it stays pending with the answer recorded in `approvals`.",
         "tags": [
           "ApprovalRequests"
         ],
@@ -12712,7 +12995,8 @@
                     "additionalProperties": {}
                   },
                   "respondedBy": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "Unverified display name. Stored as `claimedRespondedBy` on the answer; never used as the responder."
                   }
                 },
                 "required": [
@@ -12724,7 +13008,7 @@
         },
         "responses": {
           "200": {
-            "description": "Response recorded",
+            "description": "Response recorded. `status` stays `pending` while the policy needs more approvals.",
             "content": {
               "application/json": {
                 "schema": {
@@ -12895,11 +13179,69 @@
                           ],
                           "additionalProperties": {}
                         },
+                        "approvals": {
+                          "type": [
+                            "array",
+                            "null"
+                          ],
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "responder": {
+                                "type": "string",
+                                "description": "Who answered, from the credential: a user id, or `operator` for the shared key."
+                              },
+                              "approved": {
+                                "type": "boolean"
+                              },
+                              "responses": {
+                                "type": "object",
+                                "additionalProperties": {}
+                              },
+                              "claimedRespondedBy": {
+                                "type": "string",
+                                "description": "The `respondedBy` the client sent. Unverified; display only."
+                              },
+                              "respondedAt": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "responder",
+                              "approved",
+                              "responses",
+                              "respondedAt"
+                            ]
+                          },
+                          "description": "Every accepted answer, in order. A request with an `all` or `{ min: N }` policy stays pending until enough approve."
+                        },
+                        "approvalProgress": {
+                          "type": [
+                            "object",
+                            "null"
+                          ],
+                          "properties": {
+                            "approved": {
+                              "type": "integer",
+                              "description": "Approvals that count toward the policy so far."
+                            },
+                            "required": {
+                              "type": "integer",
+                              "description": "Approvals the policy needs before the request resolves."
+                            }
+                          },
+                          "required": [
+                            "approved",
+                            "required"
+                          ],
+                          "description": "Quorum progress while the request is pending; null once it is resolved."
+                        },
                         "resolvedBy": {
                           "type": [
                             "string",
                             "null"
-                          ]
+                          ],
+                          "description": "Who resolved the request, from the credential: a user id, `operator` for the shared key, or an agent id for a cancellation."
                         },
                         "resolvedAt": {
                           "type": [
@@ -12973,6 +13315,8 @@
                         "approvers",
                         "status",
                         "responses",
+                        "approvals",
+                        "approvalProgress",
                         "resolvedBy",
                         "resolvedAt",
                         "resolutionReason",
@@ -13001,6 +13345,16 @@
               }
             }
           },
+          "403": {
+            "description": "Caller is an agent, or is not one of the request's approvers",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "404": {
             "description": "Not found",
             "content": {
@@ -13012,7 +13366,7 @@
             }
           },
           "409": {
-            "description": "Already resolved",
+            "description": "Already resolved, or this responder already answered",
             "content": {
               "application/json": {
                 "schema": {
@@ -13234,11 +13588,69 @@
                           ],
                           "additionalProperties": {}
                         },
+                        "approvals": {
+                          "type": [
+                            "array",
+                            "null"
+                          ],
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "responder": {
+                                "type": "string",
+                                "description": "Who answered, from the credential: a user id, or `operator` for the shared key."
+                              },
+                              "approved": {
+                                "type": "boolean"
+                              },
+                              "responses": {
+                                "type": "object",
+                                "additionalProperties": {}
+                              },
+                              "claimedRespondedBy": {
+                                "type": "string",
+                                "description": "The `respondedBy` the client sent. Unverified; display only."
+                              },
+                              "respondedAt": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "responder",
+                              "approved",
+                              "responses",
+                              "respondedAt"
+                            ]
+                          },
+                          "description": "Every accepted answer, in order. A request with an `all` or `{ min: N }` policy stays pending until enough approve."
+                        },
+                        "approvalProgress": {
+                          "type": [
+                            "object",
+                            "null"
+                          ],
+                          "properties": {
+                            "approved": {
+                              "type": "integer",
+                              "description": "Approvals that count toward the policy so far."
+                            },
+                            "required": {
+                              "type": "integer",
+                              "description": "Approvals the policy needs before the request resolves."
+                            }
+                          },
+                          "required": [
+                            "approved",
+                            "required"
+                          ],
+                          "description": "Quorum progress while the request is pending; null once it is resolved."
+                        },
                         "resolvedBy": {
                           "type": [
                             "string",
                             "null"
-                          ]
+                          ],
+                          "description": "Who resolved the request, from the credential: a user id, `operator` for the shared key, or an agent id for a cancellation."
                         },
                         "resolvedAt": {
                           "type": [
@@ -13312,6 +13724,8 @@
                         "approvers",
                         "status",
                         "responses",
+                        "approvals",
+                        "approvalProgress",
                         "resolvedBy",
                         "resolvedAt",
                         "resolutionReason",
@@ -14975,7 +15389,7 @@
     "/api/oauth/keep-warm/codex": {
       "post": {
         "summary": "Locked keep-warm refresh sweep across all Codex OAuth pool slots",
-        "description": "Enumerates codex_oauth_* slots and refreshes any older than ~7 days through the same locked getValidCodexOAuth path used at task time. Skips slots already benched by codex-auth-expiry-watch.",
+        "description": "Enumerates codex_oauth_* slots and refreshes any older than ~7 days through the same locked getValidCodexOAuth path used at task time. Skips slots with a codex-auth-watch bench marker (auth-failure bench or codex-auth-expiry-watch).",
         "tags": [
           "OAuth"
         ],
@@ -15112,6 +15526,353 @@
                   },
                   "required": [
                     "results"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/comb/review-batches": {
+      "post": {
+        "summary": "Send agent-fs comments to the swarm as one lead task",
+        "description": "Comb's 'Send to swarm'. The server reads each comment again from agent-fs with its bootstrap key, skips replies, resolved comments, and comments already sent, and creates ONE task for the lead. Each sent comment gets a `[comb:sent task=<id>]` reply from the swarm service account. A comment is sent at most once. When an earlier send lost its reply, the batch posts that reply again (`repaired`). Answers 404 while COMB_ENABLED is off.",
+        "tags": [
+          "Comb"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "orgId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "driveId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "commentIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "minItems": 1,
+                    "maxItems": 50
+                  },
+                  "scopePath": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 1024
+                  }
+                },
+                "required": [
+                  "orgId",
+                  "driveId",
+                  "commentIds",
+                  "scopePath"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "No new task: the batch only posted missing 'sent' replies again",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "taskId": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "sent": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "skipped": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "reason": {
+                            "type": "string",
+                            "enum": [
+                              "not-found",
+                              "reply",
+                              "resolved",
+                              "already-sent"
+                            ]
+                          },
+                          "taskId": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "reason"
+                        ]
+                      }
+                    },
+                    "repaired": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "taskId": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "taskId"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "taskId",
+                    "sent",
+                    "skipped",
+                    "repaired"
+                  ]
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Task created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "taskId": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "sent": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "skipped": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "reason": {
+                            "type": "string",
+                            "enum": [
+                              "not-found",
+                              "reply",
+                              "resolved",
+                              "already-sent"
+                            ]
+                          },
+                          "taskId": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "reason"
+                        ]
+                      }
+                    },
+                    "repaired": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "taskId": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "taskId"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "taskId",
+                    "sent",
+                    "skipped",
+                    "repaired"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid body, or not the swarm drive",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Caller cannot create tasks",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Comb is not enabled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Nothing to send (every comment was skipped)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "skipped": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "reason": {
+                            "type": "string",
+                            "enum": [
+                              "not-found",
+                              "reply",
+                              "resolved",
+                              "already-sent"
+                            ]
+                          },
+                          "taskId": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "reason"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "skipped"
+                  ]
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Task creation blocked by an extension",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "agent-fs could not read a comment",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "agent-fs or the swarm drive is not set up, or an operator disabled a Comb review template",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "skipped": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "reason": {
+                            "type": "string",
+                            "enum": [
+                              "not-found",
+                              "reply",
+                              "resolved",
+                              "already-sent"
+                            ]
+                          },
+                          "taskId": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "reason"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "skipped"
                   ]
                 }
               }
@@ -15647,6 +16408,115 @@
         }
       }
     },
+    "/api/keys/report-auth-failure": {
+      "post": {
+        "summary": "Record an auth failure for a pooled key; bench it after 2 in a row",
+        "tags": [
+          "API Keys"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "keyType": {
+                    "type": "string"
+                  },
+                  "keySuffix": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 10
+                  },
+                  "keyIndex": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "taskId": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "scope": {
+                    "type": "string"
+                  },
+                  "scopeId": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "keyType",
+                  "keySuffix",
+                  "keyIndex"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Failure recorded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "consecutiveAuthFailures": {
+                      "type": "integer"
+                    },
+                    "benched": {
+                      "type": "boolean"
+                    },
+                    "rateLimitedUntil": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "consecutiveAuthFailures",
+                    "benched",
+                    "rateLimitedUntil"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/keys/report-rate-limit-windows": {
       "post": {
         "summary": "Record provider-emitted rate-limit window telemetry for an API key",
@@ -15727,6 +16597,110 @@
         "responses": {
           "200": {
             "description": "Rate-limit window telemetry recorded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/keys/report-seat-mismatch": {
+      "post": {
+        "summary": "Record that an API key's subscription seat cannot run a model family",
+        "tags": [
+          "API Keys"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "keyType": {
+                    "type": "string"
+                  },
+                  "keySuffix": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 10
+                  },
+                  "keyIndex": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "model": {
+                    "type": "string",
+                    "enum": [
+                      "fable",
+                      "opus",
+                      "sonnet",
+                      "haiku"
+                    ]
+                  },
+                  "scope": {
+                    "type": "string"
+                  },
+                  "scopeId": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "keyType",
+                  "keySuffix",
+                  "keyIndex",
+                  "model"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Seat mismatch recorded",
             "content": {
               "application/json": {
                 "schema": {
@@ -15867,12 +16841,22 @@
                         "string",
                         "null"
                       ]
+                    },
+                    "seatBlockedIndices": {
+                      "type": "array",
+                      "items": {
+                        "type": "integer"
+                      }
+                    },
+                    "authFailureFence": {
+                      "type": "integer"
                     }
                   },
                   "required": [
                     "success",
                     "availableIndices",
-                    "totalKeys"
+                    "totalKeys",
+                    "authFailureFence"
                   ]
                 }
               }
@@ -16063,6 +17047,27 @@
                               null
                             ]
                           },
+                          "lastSeatMismatchAt": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "lastSeatMismatchModel": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "consecutiveAuthFailures": {
+                            "type": "integer"
+                          },
+                          "lastAuthFailureAt": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
                           "modelLimits": {
                             "type": "array",
                             "items": {
@@ -16118,6 +17123,10 @@
                           "rateLimitWindows",
                           "plan",
                           "planSource",
+                          "lastSeatMismatchAt",
+                          "lastSeatMismatchModel",
+                          "consecutiveAuthFailures",
+                          "lastAuthFailureAt",
                           "modelLimits",
                           "createdAt",
                           "updatedAt"
@@ -16390,6 +17399,17 @@
                   },
                   "scopeId": {
                     "type": "string"
+                  },
+                  "clearAuthBench": {
+                    "type": "boolean"
+                  },
+                  "keyIndex": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "authFence": {
+                    "type": "integer",
+                    "minimum": 0
                   }
                 },
                 "required": [
@@ -17288,8 +18308,8 @@
     "/api/extensions/install": {
       "post": {
         "operationId": "extensions_install",
-        "summary": "Install a predefined extension from the catalog",
-        "description": "Installs the named template from `GET /api/extensions/catalog`. Inline bundles (`manifest`/`files`) are rejected with `inline_install_disabled`. Any authenticated agent can install a disabled draft owned by its agent ID. Workers can update only their own bundles; activation remains lead/operator-only.",
+        "summary": "Install an extension from the catalog or an inline bundle",
+        "description": "Installs the named `template` from `GET /api/extensions/catalog`, or an inline `manifest` plus `files`. Inline bundles are rejected with `inline_install_disabled` unless `EXTENSION_ALLOW_INLINE_INSTALL` is on, and then only lead, operator, and dashboard-user callers may send them (workers get 403). Any authenticated agent can install a catalog draft owned by its agent ID. Workers can update only their own bundles. A new extension is always disabled; activation remains lead/operator-only.",
         "tags": [
           "Extensions"
         ],
@@ -17472,7 +18492,7 @@
             }
           },
           "400": {
-            "description": "Inline bundle rejected or bundle validation failed",
+            "description": "Inline install disabled, invalid body (template and manifest/files are mutually exclusive), or bundle validation failed",
             "content": {
               "application/json": {
                 "schema": {
@@ -17482,7 +18502,7 @@
             }
           },
           "403": {
-            "description": "Permission denied",
+            "description": "Permission denied, including inline bundles from workers",
             "content": {
               "application/json": {
                 "schema": {
@@ -18275,7 +19295,8 @@
               "enum": [
                 "page",
                 "workflow",
-                "schedule"
+                "schedule",
+                "agent-fs-path"
               ]
             },
             "required": false,
@@ -18353,7 +19374,8 @@
                     "enum": [
                       "page",
                       "workflow",
-                      "schedule"
+                      "schedule",
+                      "agent-fs-path"
                     ]
                   },
                   "itemId": {
@@ -18389,7 +19411,8 @@
                       "enum": [
                         "page",
                         "workflow",
-                        "schedule"
+                        "schedule",
+                        "agent-fs-path"
                       ]
                     },
                     "itemId": {
@@ -19562,21 +20585,102 @@
             "required": true,
             "name": "key",
             "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "required": false,
+            "name": "path",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
+            },
+            "required": false,
+            "name": "offset",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "exclusiveMinimum": 0
+            },
+            "required": false,
+            "name": "limit",
+            "in": "query"
           }
         ],
         "responses": {
           "200": {
-            "description": "KV entry",
+            "description": "KV entry (or a path/offset/limit view of it)",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/KvEntry"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/KvEntry"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "view": {
+                          "type": "object",
+                          "properties": {
+                            "path": {
+                              "type": "string"
+                            },
+                            "type": {
+                              "type": "string",
+                              "enum": [
+                                "object",
+                                "array",
+                                "string",
+                                "number",
+                                "boolean",
+                                "null"
+                              ]
+                            },
+                            "total": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "offset": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "returned": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "nextOffset": {
+                              "type": [
+                                "integer",
+                                "null"
+                              ],
+                              "minimum": 0
+                            }
+                          },
+                          "required": [
+                            "path",
+                            "type"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
           },
           "400": {
-            "description": "Validation error or unresolvable namespace",
+            "description": "Validation error, unresolvable namespace, or invalid view path",
             "content": {
               "application/json": {
                 "schema": {
@@ -19972,21 +21076,102 @@
             "required": true,
             "name": "key",
             "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "required": false,
+            "name": "path",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
+            },
+            "required": false,
+            "name": "offset",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "exclusiveMinimum": 0
+            },
+            "required": false,
+            "name": "limit",
+            "in": "query"
           }
         ],
         "responses": {
           "200": {
-            "description": "KV entry",
+            "description": "KV entry (or a path/offset/limit view of it)",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/KvEntry"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/KvEntry"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "view": {
+                          "type": "object",
+                          "properties": {
+                            "path": {
+                              "type": "string"
+                            },
+                            "type": {
+                              "type": "string",
+                              "enum": [
+                                "object",
+                                "array",
+                                "string",
+                                "number",
+                                "boolean",
+                                "null"
+                              ]
+                            },
+                            "total": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "offset": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "returned": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "nextOffset": {
+                              "type": [
+                                "integer",
+                                "null"
+                              ],
+                              "minimum": 0
+                            }
+                          },
+                          "required": [
+                            "path",
+                            "type"
+                          ]
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }
           },
           "400": {
-            "description": "Validation error or unresolvable namespace",
+            "description": "Validation error, unresolvable namespace, or invalid view path",
             "content": {
               "application/json": {
                 "schema": {
@@ -20490,7 +21675,17 @@
             }
           },
           "400": {
-            "description": "Validation error",
+            "description": "Validation error, or a sourcePath under /longterm that is not an allowed memory key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "sourcePath is under a lead-only /longterm root and the caller is not the lead",
             "content": {
               "application/json": {
                 "schema": {
@@ -20551,6 +21746,12 @@
                       "session_summary",
                       "task_completion"
                     ]
+                  },
+                  "keyPrefix": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200,
+                    "description": "Only return memories whose key starts with this text (literal, case-sensitive), for example '/longterm/facts/'."
                   }
                 },
                 "required": [
@@ -20625,6 +21826,15 @@
                           },
                           "accessCount": {
                             "type": "number"
+                          },
+                          "summary": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "createdAt": {
+                            "type": "string"
                           }
                         },
                         "required": [
@@ -20867,7 +22077,8 @@
     },
     "/api/memory/list": {
       "post": {
-        "summary": "List or semantically search memories across all agents (debug/admin)",
+        "summary": "List or semantically search memories (debug/admin)",
+        "description": "The operator key, a user, and the lead see every agent's memories. Any other agent (an `aseph_` session token, or the shared key with `X-Agent-ID`) sees only its own memories and swarm-scope memories.",
         "tags": [
           "Memory"
         ],
@@ -21035,6 +22246,22 @@
                             "items": {
                               "type": "string"
                             }
+                          },
+                          "key": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "updatedAt": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "rating": {
+                            "type": "number",
+                            "description": "Usefulness posterior mean alpha / (alpha + beta); 0.5 = no signal"
                           }
                         },
                         "required": [
@@ -21053,7 +22280,10 @@
                           "sourcePath",
                           "chunkIndex",
                           "totalChunks",
-                          "tags"
+                          "tags",
+                          "key",
+                          "updatedAt",
+                          "rating"
                         ]
                       }
                     },
@@ -21087,6 +22317,503 @@
           },
           "400": {
             "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/memory/keys": {
+      "get": {
+        "summary": "One aggregate row per keyed memory under a key prefix: chunks, usage, rating, estimated tokens (debug/admin)",
+        "description": "The operator key, a user, and the lead see every agent's memories. Any other agent sees only its own memories and swarm-scope memories.",
+        "tags": [
+          "Memory"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200,
+              "default": "/longterm/",
+              "description": "Literal, case-sensitive key prefix (default '/longterm/')."
+            },
+            "required": false,
+            "description": "Literal, case-sensitive key prefix (default '/longterm/').",
+            "name": "prefix",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2000,
+              "default": 2000
+            },
+            "required": false,
+            "name": "limit",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Keyed memories grouped by (key, scope, agentId). accessCount is summed over chunk rows; rating pools alpha/beta over chunk rows; estTokens = ceil(chars / 4)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "prefix": {
+                      "type": "string"
+                    },
+                    "keys": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "key": {
+                            "type": "string"
+                          },
+                          "scope": {
+                            "type": "string",
+                            "enum": [
+                              "agent",
+                              "swarm"
+                            ]
+                          },
+                          "agentId": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "memoryId": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "source": {
+                            "type": "string",
+                            "enum": [
+                              "manual",
+                              "file_index",
+                              "session_summary",
+                              "task_completion"
+                            ]
+                          },
+                          "chunkRows": {
+                            "type": "number"
+                          },
+                          "totalChunks": {
+                            "type": "number"
+                          },
+                          "complete": {
+                            "type": "boolean"
+                          },
+                          "chars": {
+                            "type": "number"
+                          },
+                          "estTokens": {
+                            "type": "number"
+                          },
+                          "accessCount": {
+                            "type": "number"
+                          },
+                          "lastAccessedAt": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "rating": {
+                            "type": "number"
+                          },
+                          "alpha": {
+                            "type": "number"
+                          },
+                          "beta": {
+                            "type": "number"
+                          },
+                          "usefulRatings": {
+                            "type": "number"
+                          },
+                          "notUsefulRatings": {
+                            "type": "number"
+                          },
+                          "createdAt": {
+                            "type": "string"
+                          },
+                          "updatedAt": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "key",
+                          "scope",
+                          "agentId",
+                          "memoryId",
+                          "name",
+                          "source",
+                          "chunkRows",
+                          "totalChunks",
+                          "complete",
+                          "chars",
+                          "estTokens",
+                          "accessCount",
+                          "lastAccessedAt",
+                          "rating",
+                          "alpha",
+                          "beta",
+                          "usefulRatings",
+                          "notUsefulRatings",
+                          "createdAt",
+                          "updatedAt"
+                        ]
+                      }
+                    },
+                    "truncated": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "prefix",
+                    "keys",
+                    "truncated"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/memory/chunks": {
+      "get": {
+        "summary": "Every chunk row of one memory in chunkIndex order, with a chunk-integrity check (debug/admin). Does not count as an access",
+        "description": "Visibility matches the memory list: an agent other than the lead gets 404 for another agent's agent-scope memory.",
+        "tags": [
+          "Memory"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Any chunk row of the memory."
+            },
+            "required": false,
+            "description": "Any chunk row of the memory.",
+            "name": "memoryId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "required": false,
+            "name": "key",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "agent",
+                "swarm"
+              ]
+            },
+            "required": false,
+            "name": "scope",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Owner agent id; pass an empty string for rows without one."
+            },
+            "required": false,
+            "description": "Owner agent id; pass an empty string for rows without one.",
+            "name": "agentId",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Chunk rows and integrity findings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "key": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "scope": {
+                      "type": "string",
+                      "enum": [
+                        "agent",
+                        "swarm"
+                      ]
+                    },
+                    "agentId": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "chunks": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "agentId": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "scope": {
+                            "type": "string",
+                            "enum": [
+                              "agent",
+                              "swarm"
+                            ]
+                          },
+                          "key": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "content": {
+                            "type": "string"
+                          },
+                          "source": {
+                            "type": "string",
+                            "enum": [
+                              "manual",
+                              "file_index",
+                              "session_summary",
+                              "task_completion"
+                            ]
+                          },
+                          "sourceTaskId": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "sourcePath": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "chunkIndex": {
+                            "type": "number"
+                          },
+                          "totalChunks": {
+                            "type": "number"
+                          },
+                          "tags": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "createdAt": {
+                            "type": "string"
+                          },
+                          "updatedAt": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "accessedAt": {
+                            "type": "string"
+                          },
+                          "expiresAt": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "accessCount": {
+                            "type": "number"
+                          },
+                          "embeddingModel": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "rating": {
+                            "type": "number"
+                          },
+                          "alpha": {
+                            "type": "number"
+                          },
+                          "beta": {
+                            "type": "number"
+                          },
+                          "version": {
+                            "type": "number"
+                          },
+                          "estTokens": {
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "agentId",
+                          "scope",
+                          "key",
+                          "name",
+                          "content",
+                          "source",
+                          "sourceTaskId",
+                          "sourcePath",
+                          "chunkIndex",
+                          "totalChunks",
+                          "tags",
+                          "createdAt",
+                          "updatedAt",
+                          "accessedAt",
+                          "expiresAt",
+                          "accessCount",
+                          "embeddingModel",
+                          "rating",
+                          "alpha",
+                          "beta",
+                          "version",
+                          "estTokens"
+                        ]
+                      }
+                    },
+                    "estTokens": {
+                      "type": "number"
+                    },
+                    "integrity": {
+                      "type": "object",
+                      "properties": {
+                        "ok": {
+                          "type": "boolean"
+                        },
+                        "expectedChunks": {
+                          "type": "number"
+                        },
+                        "presentIndexes": {
+                          "type": "array",
+                          "items": {
+                            "type": "number"
+                          }
+                        },
+                        "missingIndexes": {
+                          "type": "array",
+                          "items": {
+                            "type": "number"
+                          }
+                        },
+                        "duplicateIndexes": {
+                          "type": "array",
+                          "items": {
+                            "type": "number"
+                          }
+                        },
+                        "conflictingTotals": {
+                          "type": "array",
+                          "items": {
+                            "type": "number"
+                          }
+                        },
+                        "outOfRangeIds": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "issues": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      },
+                      "required": [
+                        "ok",
+                        "expectedChunks",
+                        "presentIndexes",
+                        "missingIndexes",
+                        "duplicateIndexes",
+                        "conflictingTotals",
+                        "outOfRangeIds",
+                        "issues"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "key",
+                    "scope",
+                    "agentId",
+                    "chunks",
+                    "estTokens",
+                    "integrity"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Memory not found",
             "content": {
               "application/json": {
                 "schema": {
@@ -21510,6 +23237,7 @@
     "/api/memory/{id}": {
       "delete": {
         "summary": "Delete a single memory by ID (debug/admin)",
+        "description": "The operator key and users may delete any memory. The lead may delete its own memories and swarm-scope memories. Any other agent may delete only its own agent-scope memories.",
         "tags": [
           "Memory"
         ],
@@ -21544,6 +23272,16 @@
                   "required": [
                     "deleted"
                   ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Caller may not delete this memory",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -21826,6 +23564,12 @@
                           "minLength": 1,
                           "maxLength": 512,
                           "description": "Optional external source ID this memory references. Free-form string, convention \"<source>:<identifier>\" (e.g. \"github:owner/repo#N\", \"linear:KEY-N\", \"customer:<slug>\", \"slack:<channel>:<ts>\", \"agentmail:<thread-id>\"). Pick any prefix that fits — no closed enum. When present, an edge from this memory to the external source is created/updated."
+                        },
+                        "model": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 200,
+                          "description": "Optional. Model that produced an `llm` rating, as \"<provider>/<model-id>\" (e.g. \"openrouter/deepseek/deepseek-v4.1-flash\"). Stored in memory_rating.model for `llm` events and ignored for `explicit-self`."
                         }
                       },
                       "required": [
@@ -23012,7 +24756,10 @@
                               "claude-managed",
                               "opencode",
                               "acp",
-                              "dsh"
+                              "dsh",
+                              "amp",
+                              "cursor",
+                              "grok"
                             ]
                           },
                           "tier": {
@@ -24838,7 +26585,7 @@
     "/status": {
       "get": {
         "summary": "Identity + setup readiness + live activity for the swarm dashboard",
-        "description": "Single source of truth consumed by the UI home page. Identity comes from SWARM_* envs; setup milestones each emit `unverified | configured | verified`; automations report `running | needs_setup` from the same runtime preflight used at dispatch; activity counts agents alive in the last 5 min and tasks created in the last 24h; agent_fs reports whether AGENT_FS_API_URL is set; telemetry reports the effective ANONYMIZED_TELEMETRY opt-out state.",
+        "description": "Single source of truth consumed by the UI home page. Identity comes from SWARM_* envs; setup milestones each emit `unverified | configured | verified`; automations report `running | needs_setup` from the same runtime preflight used at dispatch; activity counts agents alive in the last 5 min and tasks created in the last 24h; agent_fs reports whether AGENT_FS_API_URL is set, plus the Comb settings (COMB_ENABLED, the browser-facing agent-fs URL, the shared org and drive ids, and the agent-fs user id of the swarm service account); telemetry reports the effective ANONYMIZED_TELEMETRY opt-out state.",
         "tags": [
           "Status"
         ],
@@ -24950,7 +26697,10 @@
                               "claude-managed",
                               "opencode",
                               "acp",
-                              "dsh"
+                              "dsh",
+                              "amp",
+                              "cursor",
+                              "grok"
                             ]
                           },
                           "providers": {
@@ -24968,7 +26718,10 @@
                                     "claude-managed",
                                     "opencode",
                                     "acp",
-                                    "dsh"
+                                    "dsh",
+                                    "amp",
+                                    "cursor",
+                                    "grok"
                                   ]
                                 },
                                 "state": {
@@ -25039,13 +26792,57 @@
                         "capabilities": {
                           "type": "object",
                           "additionalProperties": {}
+                        },
+                        "comb": {
+                          "type": "object",
+                          "properties": {
+                            "enabled": {
+                              "type": "boolean"
+                            },
+                            "api_url": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            },
+                            "live_url": {
+                              "type": "string"
+                            },
+                            "org_id": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            },
+                            "drive_id": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            },
+                            "service_user_id": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "enabled",
+                            "api_url",
+                            "live_url",
+                            "org_id",
+                            "drive_id",
+                            "service_user_id"
+                          ]
                         }
                       },
                       "required": [
                         "configured",
                         "base_url",
                         "provider_id",
-                        "capabilities"
+                        "capabilities",
+                        "comb"
                       ]
                     },
                     "automations": {
@@ -25251,7 +27048,10 @@
                       "claude-managed",
                       "opencode",
                       "acp",
-                      "dsh"
+                      "dsh",
+                      "amp",
+                      "cursor",
+                      "grok"
                     ]
                   }
                 },
@@ -25429,6 +27229,7 @@
                                     "timeout",
                                     "dimension",
                                     "model",
+                                    "endpoint",
                                     "not_enabled",
                                     "expired",
                                     "unknown",
@@ -25484,6 +27285,7 @@
                                     "timeout",
                                     "dimension",
                                     "model",
+                                    "endpoint",
                                     "not_enabled",
                                     "expired",
                                     "unknown",
@@ -25545,6 +27347,7 @@
                                     "timeout",
                                     "dimension",
                                     "model",
+                                    "endpoint",
                                     "not_enabled",
                                     "expired",
                                     "unknown",
@@ -25602,6 +27405,7 @@
                                     "timeout",
                                     "dimension",
                                     "model",
+                                    "endpoint",
                                     "not_enabled",
                                     "expired",
                                     "unknown",
@@ -25644,6 +27448,7 @@
                                     "openai",
                                     "openrouter",
                                     "vercel",
+                                    "azure",
                                     "custom",
                                     "existing",
                                     null
@@ -25660,6 +27465,7 @@
                                     "timeout",
                                     "dimension",
                                     "model",
+                                    "endpoint",
                                     "not_enabled",
                                     "expired",
                                     "unknown",
@@ -25718,6 +27524,7 @@
                                     "timeout",
                                     "dimension",
                                     "model",
+                                    "endpoint",
                                     "not_enabled",
                                     "expired",
                                     "unknown",
@@ -25773,6 +27580,7 @@
                                     "timeout",
                                     "dimension",
                                     "model",
+                                    "endpoint",
                                     "not_enabled",
                                     "expired",
                                     "unknown",
@@ -25829,7 +27637,10 @@
                                   "claude-managed",
                                   "opencode",
                                   "acp",
-                                  "dsh"
+                                  "dsh",
+                                  "amp",
+                                  "cursor",
+                                  "grok"
                                 ]
                               },
                               "state": {
@@ -26214,6 +28025,7 @@
                           "timeout",
                           "dimension",
                           "model",
+                          "endpoint",
                           "not_enabled",
                           "expired",
                           "unknown"
@@ -26411,6 +28223,7 @@
                                     "timeout",
                                     "dimension",
                                     "model",
+                                    "endpoint",
                                     "not_enabled",
                                     "expired",
                                     "unknown",
@@ -26466,6 +28279,7 @@
                                     "timeout",
                                     "dimension",
                                     "model",
+                                    "endpoint",
                                     "not_enabled",
                                     "expired",
                                     "unknown",
@@ -26527,6 +28341,7 @@
                                     "timeout",
                                     "dimension",
                                     "model",
+                                    "endpoint",
                                     "not_enabled",
                                     "expired",
                                     "unknown",
@@ -26584,6 +28399,7 @@
                                     "timeout",
                                     "dimension",
                                     "model",
+                                    "endpoint",
                                     "not_enabled",
                                     "expired",
                                     "unknown",
@@ -26626,6 +28442,7 @@
                                     "openai",
                                     "openrouter",
                                     "vercel",
+                                    "azure",
                                     "custom",
                                     "existing",
                                     null
@@ -26642,6 +28459,7 @@
                                     "timeout",
                                     "dimension",
                                     "model",
+                                    "endpoint",
                                     "not_enabled",
                                     "expired",
                                     "unknown",
@@ -26700,6 +28518,7 @@
                                     "timeout",
                                     "dimension",
                                     "model",
+                                    "endpoint",
                                     "not_enabled",
                                     "expired",
                                     "unknown",
@@ -26755,6 +28574,7 @@
                                     "timeout",
                                     "dimension",
                                     "model",
+                                    "endpoint",
                                     "not_enabled",
                                     "expired",
                                     "unknown",
@@ -26811,7 +28631,10 @@
                                   "claude-managed",
                                   "opencode",
                                   "acp",
-                                  "dsh"
+                                  "dsh",
+                                  "amp",
+                                  "cursor",
+                                  "grok"
                                 ]
                               },
                               "state": {
@@ -26981,6 +28804,7 @@
                       "openai",
                       "openrouter",
                       "vercel",
+                      "azure",
                       "custom",
                       "existing"
                     ]
@@ -27043,6 +28867,7 @@
                         "timeout",
                         "dimension",
                         "model",
+                        "endpoint",
                         "not_enabled",
                         "expired",
                         "unknown"
@@ -29063,6 +30888,7 @@
     "/api/poll": {
       "get": {
         "summary": "Poll for triggers (tasks, mentions)",
+        "description": "While the API is draining after SIGTERM it dispatches nothing: the answer is `{ trigger: null }` and carries `X-Swarm-Draining: 1`, the signal for a worker to hand off in-flight tasks.",
         "tags": [
           "Poll"
         ],
@@ -29162,6 +30988,9 @@
                               ]
                             },
                             "taskId": {
+                              "type": "string"
+                            },
+                            "triggerSurface": {
                               "type": "string"
                             },
                             "task": {
@@ -29513,7 +31342,10 @@
                 "devin",
                 "gemini",
                 "acp",
-                "dsh"
+                "dsh",
+                "amp",
+                "cursor",
+                "grok"
               ]
             },
             "required": true,
@@ -29595,7 +31427,10 @@
                 "devin",
                 "gemini",
                 "acp",
-                "dsh"
+                "dsh",
+                "amp",
+                "cursor",
+                "grok"
               ]
             },
             "required": true,
@@ -29710,7 +31545,10 @@
                 "devin",
                 "gemini",
                 "acp",
-                "dsh"
+                "dsh",
+                "amp",
+                "cursor",
+                "grok"
               ]
             },
             "required": true,
@@ -29793,7 +31631,10 @@
                 "devin",
                 "gemini",
                 "acp",
-                "dsh"
+                "dsh",
+                "amp",
+                "cursor",
+                "grok"
               ]
             },
             "required": true,
@@ -29974,6 +31815,24 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SwarmRepo"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Only the lead, the operator or a user can change allowMerge",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
                 }
               }
             }
@@ -30211,6 +32070,24 @@
               }
             }
           },
+          "403": {
+            "description": "Only the lead, the operator or a user can turn allowMerge on",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
           "409": {
             "description": "Duplicate repo",
             "content": {
@@ -30225,6 +32102,63 @@
                   "required": [
                     "error"
                   ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/realtime/ticket": {
+      "post": {
+        "summary": "Issue a one-shot dashboard realtime ticket",
+        "tags": [
+          "Rooms"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "One-shot realtime ticket",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ticket": {
+                      "type": "string"
+                    },
+                    "expiresAt": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "ticket",
+                    "expiresAt"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Comb presence is not allowed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Comb is not enabled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -35314,6 +37248,77 @@
             }
           }
         }
+      },
+      "delete": {
+        "operationId": "script_connections_delete",
+        "summary": "Delete a script connection",
+        "description": "Hard-deletes the connection, its auto-managed credential binding, and any derived inline secret it owns.",
+        "tags": [
+          "Script Connections"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Script connection deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "deleted": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "id": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "deleted",
+                    "id"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Only the lead agent can manage script connections",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Script connection not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/script-connections/{id}/refresh": {
@@ -39610,7 +41615,10 @@
                       "devin",
                       "gemini",
                       "acp",
-                      "dsh"
+                      "dsh",
+                      "amp",
+                      "cursor",
+                      "grok"
                     ]
                   },
                   "createdAt": {
@@ -40482,12 +42490,14 @@
                                       "ui",
                                       "github",
                                       "gitlab",
+                                      "azure-devops",
                                       "agentmail",
                                       "system",
                                       "schedule",
                                       "workflow",
                                       "linear",
-                                      "jira"
+                                      "jira",
+                                      "comb"
                                     ],
                                     "default": "mcp"
                                   },
@@ -40561,7 +42571,10 @@
                                       "claude-managed",
                                       "opencode",
                                       "acp",
-                                      "dsh"
+                                      "dsh",
+                                      "amp",
+                                      "cursor",
+                                      "grok"
                                     ]
                                   },
                                   "requestedByUserId": {
@@ -44756,6 +46769,71 @@
                             "batchSize",
                             "slowestStatementMs"
                           ]
+                        },
+                        "contextVersions": {
+                          "type": "object",
+                          "properties": {
+                            "at": {
+                              "type": "string"
+                            },
+                            "rowsDeleted": {
+                              "type": "number"
+                            },
+                            "batches": {
+                              "type": "number"
+                            },
+                            "durationMs": {
+                              "type": "number"
+                            },
+                            "dryRun": {
+                              "type": "boolean"
+                            },
+                            "cumulativeRowsDeleted": {
+                              "type": "number"
+                            },
+                            "outcome": {
+                              "type": "string",
+                              "enum": [
+                                "converged",
+                                "budget_exhausted",
+                                "error"
+                              ]
+                            },
+                            "drained": {
+                              "type": "boolean"
+                            },
+                            "backlogRemaining": {
+                              "type": "number"
+                            },
+                            "batchSize": {
+                              "type": "number"
+                            },
+                            "slowestStatementMs": {
+                              "type": "number"
+                            },
+                            "lastError": {
+                              "type": "string"
+                            },
+                            "lastErrorAt": {
+                              "type": "string"
+                            },
+                            "lastSuccessAt": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "at",
+                            "rowsDeleted",
+                            "batches",
+                            "durationMs",
+                            "dryRun",
+                            "cumulativeRowsDeleted",
+                            "outcome",
+                            "drained",
+                            "backlogRemaining",
+                            "batchSize",
+                            "slowestStatementMs"
+                          ]
                         }
                       }
                     }
@@ -45752,12 +47830,14 @@
                                   "ui",
                                   "github",
                                   "gitlab",
+                                  "azure-devops",
                                   "agentmail",
                                   "system",
                                   "schedule",
                                   "workflow",
                                   "linear",
-                                  "jira"
+                                  "jira",
+                                  "comb"
                                 ],
                                 "default": "mcp"
                               },
@@ -45840,7 +47920,10 @@
                                   "claude-managed",
                                   "opencode",
                                   "acp",
-                                  "dsh"
+                                  "dsh",
+                                  "amp",
+                                  "cursor",
+                                  "grok"
                                 ]
                               },
                               "requestedByUserId": {
@@ -46061,12 +48144,14 @@
                       "ui",
                       "github",
                       "gitlab",
+                      "azure-devops",
                       "agentmail",
                       "system",
                       "schedule",
                       "workflow",
                       "linear",
-                      "jira"
+                      "jira",
+                      "comb"
                     ]
                   },
                   "outputSchema": {
@@ -46313,7 +48398,10 @@
                           "claude-managed",
                           "opencode",
                           "acp",
-                          "dsh"
+                          "dsh",
+                          "amp",
+                          "cursor",
+                          "grok"
                         ]
                       },
                       "model": {
@@ -47161,7 +49249,7 @@
         },
         "responses": {
           "200": {
-            "description": "Progress updated",
+            "description": "Progress updated; a no-op once the task is terminal",
             "content": {
               "application/json": {
                 "schema": {
@@ -47246,6 +49334,22 @@
                   },
                   "force": {
                     "type": "boolean"
+                  },
+                  "provider": {
+                    "type": "string",
+                    "enum": [
+                      "claude",
+                      "codex",
+                      "pi",
+                      "devin",
+                      "claude-managed",
+                      "opencode",
+                      "acp",
+                      "dsh",
+                      "amp",
+                      "cursor",
+                      "grok"
+                    ]
                   }
                 },
                 "required": [
@@ -47762,7 +49866,8 @@
                     "type": "string",
                     "enum": [
                       "github",
-                      "gitlab"
+                      "gitlab",
+                      "azure-devops"
                     ]
                   },
                   "vcsRepo": {
@@ -50733,6 +52838,228 @@
         }
       }
     },
+    "/api/users/{id}/connector-codes": {
+      "post": {
+        "summary": "Create a single-use connect code for the agent-swarm.dev ChatGPT connector",
+        "description": "Returns a 10-minute single-use code and the connector URL that carries it. The connector trades the code for an MCP token at POST /api/connector/exchange.",
+        "tags": [
+          "Users"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "label": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Connect code, its expiry and the connector URL",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "expiresAt": {
+                      "type": "string"
+                    },
+                    "connectUrl": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "expiresAt",
+                    "connectUrl"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The public API origin or CONNECTOR_CONNECT_URL is not HTTPS",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "User not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/connector/exchange": {
+      "post": {
+        "summary": "Exchange a connect code for a user MCP token",
+        "description": "Unauthenticated: the single-use code is the credential. Rate limited per IP. Unknown, expired and used codes all return 404 code_invalid.",
+        "tags": [
+          "Users"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "code": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256
+                  }
+                },
+                "required": [
+                  "code"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Minted MCP token for the code's user",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "token": {
+                      "type": "string"
+                    },
+                    "userId": {
+                      "type": "string"
+                    },
+                    "version": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "token",
+                    "userId",
+                    "version"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Code unknown, malformed, expired or already used",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Request body too large",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/connector/discovery": {
+      "get": {
+        "summary": "Public origins the agent-swarm.dev connector needs to find this swarm's dashboard",
+        "description": "Unauthenticated. Lets the connector turn an API origin into the dashboard URL that serves /connect. appUrl is omitted when APP_URL is not set or is not https.",
+        "tags": [
+          "Users"
+        ],
+        "responses": {
+          "200": {
+            "description": "Public API origin, dashboard origin and connector connect URL",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "apiUrl": {
+                      "type": "string"
+                    },
+                    "appUrl": {
+                      "type": "string"
+                    },
+                    "connectUrl": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "apiUrl",
+                    "connectUrl"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/users/{id}/merge": {
       "post": {
         "summary": "Merge another user into this one — moves identities + email aliases, deletes source",
@@ -51408,6 +53735,78 @@
           },
           "503": {
             "description": "GitLab integration not configured",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/azure-devops/webhook": {
+      "post": {
+        "summary": "Handle Azure DevOps service-hook events",
+        "tags": [
+          "Webhooks"
+        ],
+        "responses": {
+          "200": {
+            "description": "Event processed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "created": {
+                      "type": "boolean"
+                    },
+                    "taskId": {
+                      "type": "string"
+                    },
+                    "skipped": {
+                      "type": "boolean"
+                    },
+                    "reason": {
+                      "type": "string"
+                    },
+                    "extension": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "name"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "created"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid Basic auth credentials",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Azure DevOps integration not configured",
             "content": {
               "application/json": {
                 "schema": {
@@ -52827,7 +55226,7 @@
                   "config": {
                     "type": "object",
                     "additionalProperties": {},
-                    "description": "Executor-specific config. For agent-task: { template, outputSchema?, agentId?, routingReason?, routingNote?, tags?, priority?, dir?, vcsRepo?, model? }; configured agentId defaults routingReason to human_pinned. For script: { runtime, script, args?, timeout? }. For swarm-script: { scriptName, scope?, pinHash?, args?, fsMode?, timeoutMs? (1000-300000) }. For system-one-decision (typed decisions, Jev by default): { provider? ('typesafe' default | 'openrouter' | 'laya'; a literal, never a {{token}}), state, questions: { <id>: { type: 'noul'|'choice'|'score', instructions, criteria? } }, returns: { <id>: { type } }, model? (provider-specific; unset = the provider's default, and laya has none so it sends no model and picks its own checkpoint), timeoutMs?, maxRetries? (0-3), humanReview? { band: { min, max } (0-1, inclusive), approvers: { users?, roles?, policy }, title?, timeout?, notifications? } }; each provider needs its own global secret (TYPESAFE_API_KEY, OPENROUTER_API_KEY, or LAYA_API_KEY; laya also needs the global config LAYA_URL), and a save warns and a run fails before any node executes when one is missing; system-one-decision nodes must not set retry or validation.retry. With humanReview, an answer whose confidence is inside the band waits for a person (human-in-the-loop approval), and next must map ports { approved, rejected?, timeout? }. Agent-task templates and ordinary config values support {{interpolation}} from the node's inputs context, including trigger and declared upstream aliases. SECURITY: executable source for script/swarm-script nodes does not interpolate trigger.* or upstream node outputs; only input/workflow/swarm/run values are allowed in inline script source, and named swarm-script source is not workflow-interpolated. Pass dynamic values through config.args instead (inline script receives them as argv; swarm-script receives its args object). NOTE: config.outputSchema on agent-task nodes validates the AGENT's raw JSON output, while node-level outputSchema validates the EXECUTOR's return value ({taskId, taskOutput})."
+                    "description": "Executor-specific config. For agent-task: { template, outputSchema?, agentId?, routingReason?, routingNote?, tags?, priority?, dir?, vcsRepo?, model? }; configured agentId defaults routingReason to human_pinned. For script: { runtime, script, args?, timeout? }. For swarm-script: { scriptName, scope?, pinHash?, args?, fsMode?, timeoutMs? (1000-300000) }. For system-one-decision (typed decisions, Jev by default): { provider? ('typesafe' default | 'openrouter' | 'laya'; a literal, never a {{token}}), state, questions: { <id>: { type: 'noul'|'choice'|'score', instructions, criteria? } }, returns: { <id>: { type } }, model? (provider-specific; unset = the provider's default, and laya has none so it sends no model and picks its own checkpoint), timeoutMs?, maxRetries? (0-3), humanReview? { band: { min, max } (0-1, inclusive), approvers: { users?, roles?, policy }, title?, timeout?, notifications? } }; each provider needs its own global secret (TYPESAFE_API_KEY, OPENROUTER_API_KEY, or LAYA_API_KEY; laya also needs the global config LAYA_URL), and a save warns and a run fails before any node executes when one is missing; system-one-decision nodes must not set retry or validation.retry. With humanReview, an answer whose confidence is inside the band waits for a person (human-in-the-loop approval), and next must map ports { approved, rejected?, timeout? }. Agent-task templates and ordinary config values support {{interpolation}} from the node's inputs context, including trigger and declared upstream aliases. SECURITY: executable source for script/swarm-script nodes does not interpolate trigger.* or upstream node outputs; only input/workflow/swarm/run values are allowed in inline script source, and named swarm-script source is not workflow-interpolated. Pass dynamic values through config.args instead (inline script receives them as argv, with runtime: \"bash\" running bash -c <script> ...args so args[0] is $0 and args[1] is $1; swarm-script receives its args object). NOTE: config.outputSchema on agent-task nodes validates the AGENT's raw JSON output, while node-level outputSchema validates the EXECUTOR's return value ({taskId, taskOutput})."
                   },
                   "next": {
                     "anyOf": [

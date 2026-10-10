@@ -21,6 +21,7 @@ import {
 } from "../be/onboarding";
 import { assertUrlSafe, publicEndpointSsrfOptions } from "../oauth/mcp-wrapper";
 import { ProviderNameSchema } from "../types";
+import { getOpenRouterAttributionHeaders } from "../utils/openrouter-base-url";
 import { ensureConfigAdmin } from "./config";
 import { scheduleIntegrationsReload } from "./core";
 import { route } from "./route-def";
@@ -128,10 +129,27 @@ function memoryErrorStatus(error: unknown): number | undefined {
   return Number.isInteger(status) && status >= 100 && status <= 599 ? status : undefined;
 }
 
+/**
+ * A 404 names the model or deployment only when the provider says so: OpenAI
+ * answers `model_not_found`, Azure `DeploymentNotFound`. A bare 404 (Azure's
+ * `Resource not found`, a proxy page) means the path itself does not exist.
+ */
+function notFoundNamesModel(error: unknown): boolean {
+  if (typeof error !== "object" || error === null) return false;
+  const { code, type, error: body } = error as { code?: unknown; type?: unknown; error?: unknown };
+  const bodyMessage =
+    typeof body === "object" && body !== null ? (body as { message?: unknown }).message : undefined;
+  const text = [code, type, bodyMessage]
+    .filter((part): part is string => typeof part === "string")
+    .join(" ")
+    .toLowerCase();
+  return text.includes("model") || text.includes("deployment");
+}
+
 function classifyMemoryError(error: unknown): OnboardingErrorClass {
   const status = memoryErrorStatus(error);
   if (status === 401 || status === 403) return "auth";
-  if (status === 404) return "model";
+  if (status === 404) return notFoundNamesModel(error) ? "model" : "endpoint";
   if (status === 408) return "timeout";
   const text =
     error instanceof Error
@@ -157,7 +175,9 @@ function memoryErrorMessage(errorClass: OnboardingErrorClass, status?: number): 
     case "auth":
       return `The endpoint rejected the key${statusSuffix}.`;
     case "model":
-      return `The endpoint could not find the embedding model${statusSuffix}.`;
+      return `The endpoint could not find the embedding model or deployment${statusSuffix}.`;
+    case "endpoint":
+      return `The endpoint path was not found${statusSuffix}. Check the base URL.`;
     case "timeout":
       return "The endpoint timed out.";
     case "network":
@@ -236,6 +256,7 @@ async function handleMemoryProbe(body: OnboardingMemoryRequest): Promise<Onboard
     const client = new OpenAI({
       baseURL: endpoint.toString(),
       apiKey,
+      defaultHeaders: getOpenRouterAttributionHeaders(endpoint.toString()),
       timeout: 15_000,
       maxRetries: 0,
       fetchOptions: { redirect: "manual" },

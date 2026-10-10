@@ -145,4 +145,25 @@ describe("recomputeSessionCost — pure branch behavior", () => {
     expect(result.totalCostUsd).toBe(42);
     expect(result.modelBreakdown).toEqual(models);
   });
+
+  test("acp keeps a target-reported USD cost as harness without any acp rate", async () => {
+    const result = await recomputeSessionCost(
+      { ...BASE, provider: "acp", model: "openrouter/some-model", harnessCostUsd: 0.0345 },
+      lookupFrom({}),
+    );
+    expect(result).toEqual({
+      totalCostUsd: 0.0345,
+      costSource: "harness",
+      modelBreakdown: undefined,
+    });
+  });
+
+  test("acp with no reported cost stays unpriced", async () => {
+    const result = await recomputeSessionCost(
+      { ...BASE, provider: "acp", model: "openrouter/some-model", harnessCostUsd: 0 },
+      lookupFrom({}),
+    );
+    expect(result.costSource).toBe("unpriced");
+    expect(result.totalCostUsd).toBe(0);
+  });
 });

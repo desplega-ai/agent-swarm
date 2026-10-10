@@ -16,6 +16,7 @@
  *   task:agentmail:{threadId}
  *   task:trackers:github:{owner}:{repo}:{issue|pr}:{number}
  *   task:trackers:gitlab:{projectId}:{mr|issue}:{iid}
+ *   task:trackers:azure-devops:{repositoryId}:pr:{pullRequestId}
  *   task:trackers:linear:{issueIdentifier}        (e.g. DES-42 — case preserved)
  *   task:trackers:jira:{issueIdentifier}          (e.g. PROJ-123 — case preserved)
  *   task:schedule:{scheduleId}
@@ -39,7 +40,7 @@ const SEPARATOR = ":";
 
 export type ContextKeyFamily = "slack" | "agentmail" | "trackers" | "schedule" | "workflow";
 
-export type TrackerProvider = "github" | "gitlab" | "linear" | "jira";
+export type TrackerProvider = "github" | "gitlab" | "azure-devops" | "linear" | "jira";
 
 export type ParsedContextKey =
   | { family: "slack"; parts: { channelId: string; threadTs: string } }
@@ -53,6 +54,11 @@ export type ParsedContextKey =
       family: "trackers";
       subFamily: "gitlab";
       parts: { projectId: string; kind: "mr" | "issue"; iid: number };
+    }
+  | {
+      family: "trackers";
+      subFamily: "azure-devops";
+      parts: { repositoryId: string; kind: "pr"; pullRequestId: number };
     }
   | {
       family: "trackers";
@@ -136,6 +142,20 @@ export function gitlabContextKey(input: {
     );
   }
   return ["task", "trackers", "gitlab", projectId, kind, iid].join(SEPARATOR);
+}
+
+export function azureDevOpsContextKey(input: {
+  repositoryId: string;
+  pullRequestId: number;
+}): string {
+  const repositoryId = assertSafePart(input.repositoryId, "repositoryId");
+  const pullRequestId = assertSafePart(input.pullRequestId, "pullRequestId");
+  if (!/^\d+$/.test(pullRequestId)) {
+    throw new Error(
+      `context-key: azure-devops "pullRequestId" must be a positive integer (got ${JSON.stringify(pullRequestId)})`,
+    );
+  }
+  return ["task", "trackers", "azure-devops", repositoryId, "pr", pullRequestId].join(SEPARATOR);
 }
 
 export function linearContextKey(input: { issueIdentifier: string }): string {
@@ -270,6 +290,23 @@ export function parseContextKey(key: string): ParsedContextKey {
           family: "trackers",
           subFamily: "gitlab",
           parts: { projectId, kind, iid },
+        };
+      }
+      if (subFamily === "azure-devops") {
+        if (parts.length !== 6 || parts[4] !== "pr") {
+          throw new Error(`context-key: malformed azure-devops key: ${JSON.stringify(key)}`);
+        }
+        const idStr = parts[5] as string;
+        const pullRequestId = Number.parseInt(idStr, 10);
+        if (!Number.isFinite(pullRequestId)) {
+          throw new Error(
+            `context-key: malformed azure-devops pullRequestId "${idStr}": ${JSON.stringify(key)}`,
+          );
+        }
+        return {
+          family: "trackers",
+          subFamily: "azure-devops",
+          parts: { repositoryId: parts[3] as string, kind: "pr", pullRequestId },
         };
       }
       if (subFamily === "linear") {

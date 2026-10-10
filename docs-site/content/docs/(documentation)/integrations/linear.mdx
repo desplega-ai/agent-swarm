@@ -112,7 +112,10 @@ LINEAR_ALLOWED_STATES=unstarted,started,completed,canceled
 # Only trigger when actively in progress
 LINEAR_ALLOWED_STATES=started
 
-# Open the gate completely (skip everything → only label override works)
+# Accept every workflow state (the full Linear enum)
+LINEAR_ALLOWED_STATES=triage,backlog,unstarted,started,completed,canceled
+
+# Close the gate: no workflow state creates a task — only the swarm-ready label override does
 LINEAR_ALLOWED_STATES=
 ```
 

@@ -1,10 +1,12 @@
-import { beforeEach, describe, expect, mock, test } from "bun:test";
-import type { Counter } from "@opentelemetry/api";
+import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
+import type { Counter, Tracer } from "@opentelemetry/api";
 import {
   _injectCountersForTests,
+  _injectTracerForTests,
   recordSessionCost,
   scrubOtelException,
   scrubOtelStatus,
+  startSpan,
 } from "../otel-impl";
 
 const SECRET = "ghp_1234567890abcdefghijklmnopqrstuv";
@@ -127,5 +129,68 @@ describe("otel-impl exception / status scrubbing", () => {
     });
 
     expect(status.message).toBe("worker failed with token [REDACTED:github_token]");
+  });
+});
+
+describe("otel-impl span attribute scrubbing", () => {
+  // Built at runtime so no secret-shaped literal lands in the repo.
+  const spanSecret = `gh${"p"}_${"W".repeat(36)}`;
+
+  function recordingTracer() {
+    const startAttributes: Array<Record<string, unknown> | undefined> = [];
+    const setCalls: Array<[string, unknown]> = [];
+    const setManyCalls: Array<Record<string, unknown>> = [];
+    const span = {
+      setAttribute: (key: string, value: unknown) => {
+        setCalls.push([key, value]);
+        return span;
+      },
+      setAttributes: (attrs: Record<string, unknown>) => {
+        setManyCalls.push(attrs);
+        return span;
+      },
+      addEvent: () => span,
+      recordException: () => {},
+      setStatus: () => span,
+      end: () => {},
+    };
+    const tracer = {
+      startSpan: (_name: string, options?: { attributes?: Record<string, unknown> }) => {
+        startAttributes.push(options?.attributes);
+        return span;
+      },
+    } as unknown as Tracer;
+    return { tracer, startAttributes, setCalls, setManyCalls };
+  }
+
+  afterEach(() => {
+    _injectTracerForTests(undefined);
+  });
+
+  test("setAttribute scrubs a string value and keeps the context", () => {
+    const rec = recordingTracer();
+    _injectTracerForTests(rec.tracer);
+    startSpan("task").setAttribute("task.text", `deploy with ${spanSecret} now`);
+
+    const [key, value] = rec.setCalls[0]!;
+    expect(key).toBe("task.text");
+    expect(String(value)).not.toContain(spanSecret);
+    expect(String(value)).toContain("[REDACTED:");
+    expect(String(value)).toContain("deploy with");
+  });
+
+  test("start attributes and setAttributes scrub strings and string arrays", () => {
+    const rec = recordingTracer();
+    _injectTracerForTests(rec.tracer);
+    const span = startSpan("task", { "task.text": `x ${spanSecret}`, "task.count": 2 });
+    span.setAttributes({ "tool.args": [`--token ${spanSecret}`, "--verbose"] });
+
+    const start = rec.startAttributes[0]!;
+    expect(JSON.stringify(start)).not.toContain(spanSecret);
+    expect(String(start["task.text"])).toContain("[REDACTED:");
+    expect(start["task.count"]).toBe(2);
+    const many = rec.setManyCalls[0]!;
+    expect(JSON.stringify(many)).not.toContain(spanSecret);
+    expect((many["tool.args"] as string[])[1]).toBe("--verbose");
   });
 });

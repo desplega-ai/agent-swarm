@@ -153,11 +153,36 @@ export const DEFAULT_MODEL_TIER_MAP: Record<ProviderName, Record<ModelTier, stri
     smart: "openrouter/deepseek/deepseek-v4-pro-0813",
     ultra: "openrouter/anthropic/claude-opus-5.5",
   },
+  // Bare Cursor model ids (`Cursor.models.list()`); reasoning effort rides in
+  // the model's own params (see src/providers/cursor-adapter.ts).
+  cursor: {
+    smol: "gpt-5.4-mini",
+    regular: "claude-sonnet-5-5",
+    smart: "claude-opus-5-5",
+    ultra: "claude-fable-5-1",
+  },
   devin: {
     smol: "devin",
     regular: "devin",
     smart: "devin",
     ultra: "devin",
+  },
+  // Amp picks the model server-side per mode, so the tiers map onto its four
+  // built-in modes. `low` is the cheapest (GLM-5.3 Flash when verified live).
+  amp: {
+    smol: "low",
+    regular: "medium",
+    smart: "high",
+    ultra: "ultra",
+  },
+  // xAI's text models as `grok models` lists them for an API key, cheapest
+  // first: grok-build-0.1 ($1/$2 per 1M), grok-4.3 ($1.25/$2.50), then the
+  // grok-4.6/4.7 frontier pair ($2/$6).
+  grok: {
+    smol: "grok-build-0.1",
+    regular: "grok-4.3",
+    smart: "grok-4.6",
+    ultra: "grok-4.7",
   },
   // ACP has no portable tier-to-model mapping. Operators may set an explicit
   // MODEL_OVERRIDE, which the adapter applies through an advertised `model`
@@ -357,12 +382,14 @@ export const AgentTaskSourceSchema = z.enum([
   "ui",
   "github",
   "gitlab",
+  "azure-devops",
   "agentmail",
   "system",
   "schedule",
   "workflow",
   "linear",
   "jira",
+  "comb",
 ]);
 export type AgentTaskSource = z.infer<typeof AgentTaskSourceSchema>;
 
@@ -393,6 +420,9 @@ export const ProviderNameSchema = z.enum([
   "opencode",
   "acp",
   "dsh",
+  "amp",
+  "cursor",
+  "grok",
 ]);
 export type ProviderName = z.infer<typeof ProviderNameSchema>;
 
@@ -484,6 +514,15 @@ export const PROVIDER_STEER_CAPABILITIES: Record<ProviderName, SteerMode[]> = {
   // Advertise nothing rather than promise semantics we can't honor.
   acp: [],
   dsh: [],
+  // `--stream-json-input` queues a stdin message until the running turn ends
+  // (verified live); there is no interrupt primitive, so queue only.
+  amp: ["queue"],
+  // `run.steer()` reaches the in-flight run; a message the SDK reverts to a
+  // follow-up, and every queued one, starts the next run on the same agent.
+  cursor: ["steer", "queue"],
+  // Grok runs on the ACP client: one `session/prompt` turn, interrupted only
+  // by `session/cancel`. No Grok surface (ACP or headless) exposes a steer.
+  grok: [],
 };
 
 export type DevinProviderMeta = {
@@ -504,6 +543,9 @@ export type ProviderMetaMap = {
   opencode: NoProviderMeta;
   acp: NoProviderMeta;
   dsh: NoProviderMeta;
+  amp: NoProviderMeta;
+  cursor: NoProviderMeta;
+  grok: NoProviderMeta;
 };
 
 export const FollowUpConfigSchema = z
@@ -591,8 +633,8 @@ export const AgentTaskSchema = z
     slackProgressMessageTs: z.string().optional(),
     slackTreeRootMessageTs: z.string().optional(),
 
-    // VCS metadata (GitHub / GitLab — provider-agnostic)
-    vcsProvider: z.enum(["github", "gitlab"]).optional(),
+    // VCS metadata (GitHub / GitLab / Azure DevOps — provider-agnostic)
+    vcsProvider: z.enum(["github", "gitlab", "azure-devops"]).optional(),
     vcsRepo: z.string().optional(),
     vcsEventType: z.string().optional(),
     vcsNumber: z.number().int().optional(),
@@ -749,7 +791,7 @@ export const CreateTaskOptionsSchema = z.object({
    * this boundary must not let a caller silently persist a mismatch.
    */
   overrideSlackContext: z.boolean().optional(),
-  vcsProvider: z.enum(["github", "gitlab"]).optional(),
+  vcsProvider: z.enum(["github", "gitlab", "azure-devops"]).optional(),
   vcsRepo: z.string().optional(),
   vcsEventType: z.string().optional(),
   vcsNumber: z.number().int().optional(),
@@ -1044,7 +1086,7 @@ export type InboxItemState = z.infer<typeof InboxItemStateSchema>;
 // User Favorites (principal-scoped stars for app navigation)
 // ============================================================================
 
-export const FavoriteItemTypeSchema = z.enum(["page", "workflow", "schedule"]);
+export const FavoriteItemTypeSchema = z.enum(["page", "workflow", "schedule", "agent-fs-path"]);
 export type FavoriteItemType = z.infer<typeof FavoriteItemTypeSchema>;
 
 export const UserFavoriteSchema = z
@@ -1279,7 +1321,7 @@ export type AcpSessionConfigOption = z.infer<typeof AcpSessionConfigOptionSchema
 
 export const AgentAcpStatusSchema = z
   .object({
-    target: z.enum(["opencode", "custom"]),
+    target: z.enum(["opencode", "gemini", "copilot", "custom"]),
     configOptions: z.array(AcpSessionConfigOptionSchema),
     reportedAt: z.number(),
   })
@@ -1530,7 +1572,12 @@ export type SessionLog = z.infer<typeof SessionLogSchema>;
 // Session Cost Types (aggregated cost data per session)
 // Migration 063 widened the set to include 'unpriced' for cases where the API
 // recompute path couldn't find pricing rows for the (provider, model, token_class).
-export const SessionCostSourceSchema = z.enum(["harness", "pricing-table", "unpriced"]);
+export const SessionCostSourceSchema = z.enum([
+  "harness",
+  "pricing-table",
+  "unpriced",
+  "estimated",
+]);
 export type SessionCostSource = z.infer<typeof SessionCostSourceSchema>;
 
 export const SessionCostModelBreakdownSchema = z
@@ -1574,6 +1621,8 @@ export const SessionCostSchema = z
     //   'unpriced'       — the API tried to recompute but the (provider, model)
     //                      had no matching pricing rows; totalCostUsd is whatever
     //                      the worker submitted (often 0).
+    //   'estimated'      — the API priced fallback token counts at an assumed
+    //                      model (amp with a failed thread export).
     costSource: SessionCostSourceSchema.default("harness"),
     // Migration 128: adapter-reported amount retained for reconciliation only.
     harnessCostUsd: z.number().nullable().optional(),
@@ -2033,7 +2082,7 @@ export const WorkflowNodeSchema = z
           "For system-one-decision (typed decisions, Jev by default): { provider? ('typesafe' default | 'openrouter' | 'laya'; a literal, never a {{token}}), state, questions: { <id>: { type: 'noul'|'choice'|'score', instructions, criteria? } }, returns: { <id>: { type } }, model? (provider-specific; unset = the provider's default, and laya has none so it sends no model and picks its own checkpoint), timeoutMs?, maxRetries? (0-3), humanReview? { band: { min, max } (0-1, inclusive), approvers: { users?, roles?, policy }, title?, timeout?, notifications? } }; each provider needs its own global secret (TYPESAFE_API_KEY, OPENROUTER_API_KEY, or LAYA_API_KEY; laya also needs the global config LAYA_URL), and a save warns and a run fails before any node executes when one is missing; system-one-decision nodes must not set retry or validation.retry. With humanReview, an answer whose confidence is inside the band waits for a person (human-in-the-loop approval), and next must map ports { approved, rejected?, timeout? }. " +
           "Agent-task templates and ordinary config values support {{interpolation}} from the node's inputs context, including trigger and declared upstream aliases. " +
           "SECURITY: executable source for script/swarm-script nodes does not interpolate trigger.* or upstream node outputs; only input/workflow/swarm/run values are allowed in inline script source, and named swarm-script source is not workflow-interpolated. " +
-          "Pass dynamic values through config.args instead (inline script receives them as argv; swarm-script receives its args object). " +
+          'Pass dynamic values through config.args instead (inline script receives them as argv, with runtime: "bash" running bash -c <script> ...args so args[0] is $0 and args[1] is $1; swarm-script receives its args object). ' +
           "NOTE: config.outputSchema on agent-task nodes validates the AGENT's raw JSON output, " +
           "while node-level outputSchema validates the EXECUTOR's return value ({taskId, taskOutput}).",
       ),
@@ -3125,15 +3174,50 @@ export const ExtensionRunSchema = z
   .openapi("ExtensionRun");
 export type ExtensionRun = z.infer<typeof ExtensionRunSchema>;
 
+/**
+ * An extension install names exactly one source: a catalog `template`, or an inline
+ * `manifest` with its `files`. Shared by the HTTP body and the `extension-install` tool input.
+ */
+export function checkExtensionInstallSource(
+  body: { template?: unknown; manifest?: unknown; files?: unknown },
+  ctx: z.RefinementCtx,
+): void {
+  const inline = body.manifest !== undefined || body.files !== undefined;
+  if (body.template !== undefined && inline) {
+    ctx.addIssue({
+      code: "custom",
+      message: "template is mutually exclusive with manifest and files",
+    });
+  } else if (body.template === undefined && !inline) {
+    ctx.addIssue({ code: "custom", message: "provide either template, or manifest with files" });
+  } else if (inline && body.manifest === undefined) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["manifest"],
+      message: "manifest is required with files",
+    });
+  } else if (inline && body.files === undefined) {
+    ctx.addIssue({ code: "custom", path: ["files"], message: "files is required with manifest" });
+  }
+}
+
 export const ExtensionInstallBodySchema = z
   .object({
-    template: ExtensionNameSchema.describe(
-      "Name of a predefined extension in the catalog (`GET /api/extensions/catalog`).",
+    template: ExtensionNameSchema.optional().describe(
+      "Name of a predefined extension in the catalog (`GET /api/extensions/catalog`). Mutually exclusive with `manifest` and `files`.",
     ),
-    priority: z.number().int().optional(),
-    config: z.record(z.string(), z.unknown()).optional(),
+    manifest: ExtensionManifestSchema.optional().describe(
+      "Inline bundle manifest. Requires `files`. Accepted only when `EXTENSION_ALLOW_INLINE_INSTALL` is on and the caller is a lead, operator, or dashboard user.",
+    ),
+    files: z
+      .record(z.string(), z.string())
+      .optional()
+      .describe("Inline bundle files keyed by relative path. Requires `manifest`."),
+    priority: z.number().int().optional().describe("Handler priority. Lower values run first."),
+    config: z.record(z.string(), z.unknown()).optional().describe("Extension configuration."),
   })
   .strict()
+  .superRefine(checkExtensionInstallSource)
   .openapi("ExtensionInstallBody");
 export type ExtensionInstallBody = z.infer<typeof ExtensionInstallBodySchema>;
 
@@ -3212,6 +3296,11 @@ export const SkillSchema = z
     version: z.number(),
     isEnabled: z.boolean(),
     systemDefault: z.boolean(),
+    invocationCount: z
+      .number()
+      .int()
+      .describe("Confirmed invocations across all harnesses, at most one per runner session"),
+    lastInvokedAt: z.string().nullable(),
     createdAt: z.string(),
     lastUpdatedAt: z.string(),
     lastFetchedAt: z.string().nullable(),
@@ -3399,6 +3488,9 @@ export const PricingProviderSchema = z.enum([
   // `costSource: 'unpriced'`. Accepted here so the row is recorded at all.
   "acp",
   "dsh",
+  "amp",
+  "cursor",
+  "grok",
 ]);
 export type PricingProvider = z.infer<typeof PricingProviderSchema>;
 

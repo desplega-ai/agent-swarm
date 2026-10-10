@@ -89,7 +89,7 @@ type TestInlineComment = {
 };
 
 function makeReviewEvent(opts: {
-  state: "changes_requested" | "commented";
+  state: "approved" | "changes_requested" | "commented";
   body: string | null;
   installationId?: number;
   prUserLogin?: string;
@@ -394,5 +394,151 @@ describe("inline review comment surfacing", () => {
       "SELECT COUNT(*) AS n FROM agent_tasks",
     ))!.n;
     expect(taskCountAfter).toBe(1);
+  });
+});
+
+// ── No-op approvals ──
+
+type ActionItemsFixture = {
+  threads?: { isResolved: boolean; isOutdated: boolean }[];
+  reviews?: { state: string; submittedAt: string; author: { login: string } }[];
+};
+
+function mockFetchForApproval(fixture: ActionItemsFixture | "error"): ReturnType<typeof spyOn> {
+  return spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+    const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+    if (!url.endsWith("/graphql")) return commentsResponse([]);
+    if (fixture === "error") return new Response("Bad Gateway", { status: 502 });
+    return new Response(
+      JSON.stringify({
+        data: {
+          repository: {
+            pullRequest: {
+              reviewThreads: { pageInfo: { hasNextPage: false }, nodes: fixture.threads ?? [] },
+              reviews: { pageInfo: { hasNextPage: false }, nodes: fixture.reviews ?? [] },
+            },
+          },
+        },
+      }),
+      { status: 200, headers: { "Content-Type": "application/json" } },
+    );
+  });
+}
+
+const APPROVED_BY_REVIEWER = {
+  state: "APPROVED",
+  submittedAt: "2026-01-02T00:00:00Z",
+  author: { login: "reviewer" },
+};
+
+describe("no-op approved reviews", () => {
+  test("empty-body approval with no open review items: task is skipped", async () => {
+    const fetchSpy = mockFetchForApproval({
+      threads: [
+        { isResolved: true, isOutdated: false },
+        { isResolved: false, isOutdated: true },
+      ],
+      reviews: [
+        {
+          state: "CHANGES_REQUESTED",
+          submittedAt: "2026-01-01T00:00:00Z",
+          author: { login: "reviewer" },
+        },
+        APPROVED_BY_REVIEWER,
+      ],
+    });
+
+    const result = await handlePullRequestReview(
+      makeReviewEvent({ state: "approved", body: null, installationId: 123 }),
+    );
+
+    expect(fetchSpy.mock.calls.some(([input]) => String(input).endsWith("/graphql"))).toBe(true);
+    fetchSpy.mockRestore();
+
+    expect(result.created).toBe(false);
+  });
+
+  test("approval with a body: task is created without querying review items", async () => {
+    const fetchSpy = mockFetchForApproval({ reviews: [APPROVED_BY_REVIEWER] });
+
+    const result = await handlePullRequestReview(
+      makeReviewEvent({
+        state: "approved",
+        body: "LGTM, can you also bump the version?",
+        installationId: 123,
+      }),
+    );
+
+    expect(fetchSpy.mock.calls.some(([input]) => String(input).endsWith("/graphql"))).toBe(false);
+    fetchSpy.mockRestore();
+
+    expect(result.created).toBe(true);
+    expect(await getLastTaskText()).toContain("can you also bump the version?");
+  });
+
+  test("empty-body approval with 1 unresolved thread: task is created with the counts", async () => {
+    const fetchSpy = mockFetchForApproval({
+      threads: [{ isResolved: false, isOutdated: false }],
+      reviews: [APPROVED_BY_REVIEWER],
+    });
+
+    const result = await handlePullRequestReview(
+      makeReviewEvent({ state: "approved", body: null, installationId: 123 }),
+    );
+    fetchSpy.mockRestore();
+
+    expect(result.created).toBe(true);
+    expect(await getLastTaskText()).toContain(
+      "Still open on the PR: 1 unresolved review thread(s), 0 outstanding change request(s)",
+    );
+  });
+
+  test("empty-body approval with another reviewer's outstanding CHANGES_REQUESTED: task is created", async () => {
+    const fetchSpy = mockFetchForApproval({
+      reviews: [
+        {
+          state: "CHANGES_REQUESTED",
+          submittedAt: "2026-01-01T00:00:00Z",
+          author: { login: "other" },
+        },
+        APPROVED_BY_REVIEWER,
+      ],
+    });
+
+    const result = await handlePullRequestReview(
+      makeReviewEvent({ state: "approved", body: null, installationId: 123 }),
+    );
+    fetchSpy.mockRestore();
+
+    expect(result.created).toBe(true);
+    expect(await getLastTaskText()).toContain("1 outstanding change request(s)");
+  });
+
+  test("empty-body approval when review items cannot be fetched: task is created", async () => {
+    const fetchSpy = mockFetchForApproval("error");
+
+    const result = await handlePullRequestReview(
+      makeReviewEvent({ state: "approved", body: null, installationId: 123 }),
+    );
+    fetchSpy.mockRestore();
+
+    expect(result.created).toBe(true);
+  });
+
+  test("GITHUB_SKIP_NOOP_APPROVALS=false: empty-body approval still creates a task", async () => {
+    const previous = process.env.GITHUB_SKIP_NOOP_APPROVALS;
+    process.env.GITHUB_SKIP_NOOP_APPROVALS = "false";
+    const fetchSpy = mockFetchForApproval({ reviews: [APPROVED_BY_REVIEWER] });
+
+    try {
+      const result = await handlePullRequestReview(
+        makeReviewEvent({ state: "approved", body: null, installationId: 123 }),
+      );
+      expect(result.created).toBe(true);
+    } finally {
+      fetchSpy.mockRestore();
+      if (previous === undefined) delete process.env.GITHUB_SKIP_NOOP_APPROVALS;
+      else process.env.GITHUB_SKIP_NOOP_APPROVALS = previous;
+    }
   });
 });

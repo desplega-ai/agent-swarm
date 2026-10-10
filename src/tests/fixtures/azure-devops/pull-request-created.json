@@ -1,0 +1,88 @@
+{
+  "id": "a0a0a0a0-bbbb-cccc-dddd-e1e1e1e1e1e1",
+  "eventType": "git.pullrequest.created",
+  "publisherId": "tfs",
+  "scope": "all",
+  "message": {
+    "text": "Jamal Hartnett created a new pull request",
+    "html": "Jamal Hartnett created a new pull request",
+    "markdown": "Jamal Hartnett created a new pull request"
+  },
+  "detailedMessage": {
+    "text": "Jamal Hartnett created a new pull request\r\n\r\n- Merge status: Succeeded\r\n- Merge commit: 6666aa(https://dev.azure.com/fabrikam/DefaultCollection/_apis/repos/git/repositories/b1b1b1b1-cccc-dddd-eeee-f2f2f2f2f2f2/commits/6666aaaa677bb7cccccdd88eeeeeee999999eeee)\r\n",
+    "html": "Jamal Hartnett created a new pull request\r\n<ul>\r\n- Merge status: Succeeded</br>\r\n- Merge commit: <a href=\"https://dev.azure.com/fabrikam/DefaultCollection/_apis/repos/git/repositories/b1b1b1b1-cccc-dddd-eeee-f2f2f2f2f2f2/commits/6666aaaa677bb7cccccdd88eeeeeee999999eeee\">6666aa</a></br>\r\n</ul>",
+    "markdown": "Jamal Hartnett created a new pull request\r\n\r\n+ Merge status: Succeeded\r\n+ Merge commit: [6666aa](https://dev.azure.com/fabrikam/DefaultCollection/_apis/repos/git/repositories/b1b1b1b1-cccc-dddd-eeee-f2f2f2f2f2f2/commits/6666aaaa677bb7cccccdd88eeeeeee999999eeee)\r\n"
+  },
+  "resource": {
+    "repository": {
+      "id": "b1b1b1b1-cccc-dddd-eeee-f2f2f2f2f2f2",
+      "name": "Fabrikam",
+      "url": "https://dev.azure.com/fabrikam/DefaultCollection/_apis/repos/git/repositories/b1b1b1b1-cccc-dddd-eeee-f2f2f2f2f2f2",
+      "project": {
+        "id": "f5f5f5f5-aaaa-bbbb-cccc-d6d6d6d6d6d6",
+        "name": "Fabrikam",
+        "url": "https://dev.azure.com/fabrikam/DefaultCollection/_apis/projects/abcd-1234-efgh-5678",
+        "state": "wellFormed"
+      },
+      "defaultBranch": "refs/heads/main",
+      "remoteUrl": "https://dev.azure.com/fabrikam/DefaultCollection/_git/Fabrikam"
+    },
+    "pullRequestId": 1,
+    "status": "active",
+    "createdBy": {
+      "id": "11bb11bb-cc22-dd33-ee44-55ff55ff55ff",
+      "displayName": "Jamal Hartnett",
+      "uniqueName": "fabrikamfiber4@hotmail.com",
+      "url": "https://dev.azure.com/fabrikam/_apis/Identities/11bb11bb-cc22-dd33-ee44-55ff55ff55ff",
+      "imageUrl": "https://dev.azure.com/fabrikam/DefaultCollection/_api/_common/identityImage?id=11bb11bb-cc22-dd33-ee44-55ff55ff55ff"
+    },
+    "creationDate": "2024-06-17T11:22:33.456789Z",
+    "title": "my first pull request",
+    "description": " - test2\r\n",
+    "sourceRefName": "refs/heads/mytopic",
+    "targetRefName": "refs/heads/main",
+    "mergeStatus": "succeeded",
+    "mergeId": "a6a6a6a6-bbbb-cccc-dddd-e7e7e7e7e7e7",
+    "lastMergeSourceCommit": {
+      "commitId": "4444eeee455ff5aaaaabb66ccccccccc7777cccc",
+      "url": "https://dev.azure.com/fabrikam/DefaultCollection/_apis/repos/git/repositories/b1b1b1b1-cccc-dddd-eeee-f2f2f2f2f2f2/commits/4444eeee455ff5aaaaabb66ccccccccc7777cccc"
+    },
+    "lastMergeTargetCommit": {
+      "commitId": "5555ffff566aa6bbbbbcc77ddddddd888888dddd",
+      "url": "https://dev.azure.com/fabrikam/DefaultCollection/_apis/repos/git/repositories/b1b1b1b1-cccc-dddd-eeee-f2f2f2f2f2f2/commits/5555ffff566aa6bbbbbcc77ddddddd888888dddd"
+    },
+    "lastMergeCommit": {
+      "commitId": "6666aaaa677bb7cccccdd88eeeeeee999999eeee",
+      "url": "https://dev.azure.com/fabrikam/DefaultCollection/_apis/repos/git/repositories/b1b1b1b1-cccc-dddd-eeee-f2f2f2f2f2f2/commits/6666aaaa677bb7cccccdd88eeeeeee999999eeee"
+    },
+    "reviewers": [
+      {
+        "reviewerUrl": null,
+        "vote": 0,
+        "id": "22cc22cc-dd33-ee44-ff55-66aa66aa66aa",
+        "displayName": "[Mobile]\\Mobile Team",
+        "uniqueName": "azure-devops:///Classification/TeamProject/22cc22cc-dd33-ee44-ff55-66aa66aa66aa\\Mobile Team",
+        "url": "https://dev.azure.com/fabrikam/_apis/Identities/22cc22cc-dd33-ee44-ff55-66aa66aa66aa",
+        "imageUrl": "https://dev.azure.com/fabrikam/DefaultCollection/_api/_common/identityImage?id=22cc22cc-dd33-ee44-ff55-66aa66aa66aa",
+        "isContainer": true
+      }
+    ],
+    "url": "https://dev.azure.com/fabrikam/DefaultCollection/_apis/repos/git/repositories/b1b1b1b1-cccc-dddd-eeee-f2f2f2f2f2f2/pullRequests/1"
+  },
+  "resourceVersion": "2.0",
+  "resourceContainers": {
+    "collection": {
+      "id": "b1b1b1b1-cccc-dddd-eeee-f2f2f2f2f2f2",
+      "baseUrl": "https://dev.azure.com/fabrikam/"
+    },
+    "account": {
+      "id": "bbbb1b1b-cc2c-dd3d-ee4e-ffffff5f5f5f",
+      "baseUrl": "https://dev.azure.com/fabrikam/"
+    },
+    "project": {
+      "id": "00aa00aa-bb11-cc22-dd33-44ee44ee44ee",
+      "baseUrl": "https://dev.azure.com/fabrikam/"
+    }
+  },
+  "createdDate": "2024-09-19T13:03:27.2879096Z"
+}

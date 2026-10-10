@@ -8,7 +8,7 @@
 #   worker-slim  (target)        — worker-base + repo artifacts. For CI + E2E.
 #   worker-full-base             — worker-base + dev toolchain, Playwright
 #                                  Chromium + agent-browser, postgres/redis,
-#                                  glab, context-mode plugins
+#                                  glab, az (azure-devops), context-mode plugins
 #   worker-full  (target, LAST)  — worker-full-base + repo artifacts. Default
 #                                  build; published as :latest.
 #
@@ -37,8 +37,15 @@ COPY apps/ui/package.json ./apps/ui/package.json
 COPY apps/templates-ui/package.json ./apps/templates-ui/package.json
 COPY apps/evals/package.json ./apps/evals/package.json
 COPY packages/model-catalog/package.json ./packages/model-catalog/package.json
-RUN bun install --frozen-lockfile
+COPY packages/model-routing/package.json ./packages/model-routing/package.json
+# Retry transient extraction failures with a clean dependency tree.
+RUN for attempt in 1 2 3; do \
+        bun install --frozen-lockfile && break; \
+        if [ "$attempt" -eq 3 ]; then exit 1; fi; \
+        rm -rf node_modules && sleep 2 || exit 1; \
+    done
 COPY packages/model-catalog/ ./packages/model-catalog/
+COPY packages/model-routing/ ./packages/model-routing/
 COPY src/ ./src/
 COPY plugin/opencode-plugins/lib/memory-raters.ts ./plugin/opencode-plugins/lib/memory-raters.ts
 COPY templates/ ./templates/
@@ -121,7 +128,7 @@ RUN if ! gh extension install github/gh-stack; then \
     fi
 
 # Install Claude CLI (pinned version — bump ARG to update)
-ARG CLAUDE_CODE_VERSION=2.1.285
+ARG CLAUDE_CODE_VERSION=2.1.296
 USER root
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache \
     npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} \
@@ -135,7 +142,7 @@ ENV PATH="/home/worker/.local/bin:$PATH"
 # Install pi-mono CLI (alternative harness, selected via HARNESS_PROVIDER=pi)
 # PI_PACKAGE_DIR tells pi-mono where to find its package.json at runtime
 # (needed because bun --compile makes process.execPath resolve to the binary location)
-ARG PI_CODING_AGENT_VERSION=0.99.1
+ARG PI_CODING_AGENT_VERSION=1.1.0
 USER root
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache \
     npm install -g @earendil-works/pi-coding-agent@${PI_CODING_AGENT_VERSION} \
@@ -147,7 +154,7 @@ ENV PI_PACKAGE_DIR=/usr/lib/node_modules/@earendil-works/pi-coding-agent
 # Install Codex CLI (alternative harness, selected via HARNESS_PROVIDER=codex)
 # Pinned version must match direct @openai/codex in package.json. Enforced by
 # scripts/check-codex-default-model.sh and the CI merge gate.
-ARG CODEX_VERSION=0.159.2
+ARG CODEX_VERSION=0.162.1
 USER root
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache \
     npm install -g @openai/codex@${CODEX_VERSION} \
@@ -184,10 +191,10 @@ RUN mkdir -p /home/worker/.codex && \
 # The installer drops the binary at ~/.opencode/bin/opencode and only modifies
 # ~/.bashrc — non-interactive shells (entrypoint, gosu drops) miss that PATH
 # update, so we extend ENV PATH explicitly.
-ARG OPENCODE_VERSION=1.18.33
+ARG OPENCODE_VERSION=1.18.35
 RUN curl -fsSL https://opencode.ai/install | VERSION=${OPENCODE_VERSION} bash
 ENV PATH="/home/worker/.opencode/bin:$PATH"
-ARG OPENCODE_SDK_VERSION=1.18.33
+ARG OPENCODE_SDK_VERSION=1.18.35
 USER root
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache \
     npm install -g @opencode-ai/sdk@${OPENCODE_SDK_VERSION} \
@@ -223,7 +230,7 @@ ARG SKILLS_CLI_VERSION
 # agent-fs version pins BOTH the skill source tag (here) and the CLI in
 # /opt/global-deps (below). Bump with `bun run bump:agent-fs` so the chart,
 # Compose, and docs pins move in lockstep with this ARG.
-ARG AGENT_FS_VERSION=0.15.0
+ARG AGENT_FS_VERSION=0.15.3
 RUN npx -y skills@${SKILLS_CLI_VERSION} add desplega-ai/agent-fs@v${AGENT_FS_VERSION} --skill agent-fs -g -a claude-code -y \
     && test -e /home/worker/.claude/skills/agent-fs/SKILL.md \
     && rm -rf /home/worker/.npm
@@ -262,9 +269,13 @@ RUN mkdir -p /home/worker/.claude/commands /home/worker/.claude/agents \
 # hooks are "managed, trusted by policy" (developers.openai.com/codex/hooks), so
 # they run without the per-hook trusted_hash review that user-level hooks.json
 # needs — codex silently skips untrusted hooks, which in a headless worker means
-# steering would never deliver. PreToolUse is deliberately absent: codex drops
-# its additionalContext (openai/codex#19385). Runtime no-ops unless
-# STEERING_ENABLED reaches the codex env (live-reconciled by the runner).
+# steering would never deliver. PreToolUse carries no steering (codex drops its
+# additionalContext, openai/codex#19385); it runs only the PR body leak guard,
+# which blocks `gh pr create|edit` on public repos with exit code 2. Its
+# `^Bash$` matcher keeps other tools from spawning the CLI (codex reports shell
+# and unified exec calls as Bash). Steering
+# no-ops unless STEERING_ENABLED reaches the codex env (live-reconciled by the
+# runner).
 # Root-owned on purpose: it's the admin-enforced layer (and /etc needs root).
 USER root
 RUN mkdir -p /etc/codex && printf '%s\n' \
@@ -273,6 +284,12 @@ RUN mkdir -p /etc/codex && printf '%s\n' \
   '' \
   '[[hooks.SessionStart]]' \
   '[[hooks.SessionStart.hooks]]' \
+  'type = "command"' \
+  'command = "/usr/local/bin/agent-swarm codex-hook"' \
+  '' \
+  '[[hooks.PreToolUse]]' \
+  'matcher = "^Bash$"' \
+  '[[hooks.PreToolUse.hooks]]' \
   'type = "command"' \
   'command = "/usr/local/bin/agent-swarm codex-hook"' \
   '' \
@@ -476,6 +493,28 @@ RUN curl -fsSL "https://gitlab.com/api/v4/projects/gitlab-org%2Fcli/packages/gen
     && dpkg -i /tmp/glab.deb \
     && rm /tmp/glab.deb
 
+# Install the Azure CLI (az) + azure-devops extension for Azure Repos.
+# ~600 MB uncompressed, ~130 MB compressed (the .deb bundles its own Python
+# under /opt/az), so it lives here and not in worker-base. The extension goes
+# to a system path so the worker user finds it at runtime without a
+# root-owned ~/.azure; HOME and
+# AZURE_CONFIG_DIR are redirected so the build leaves nothing in /home/worker.
+# Auth is env-only (AZURE_DEVOPS_EXT_PAT, exported by docker-entrypoint.sh).
+ARG AZURE_CLI_VERSION=2.90.0
+ARG AZURE_DEVOPS_EXTENSION_VERSION=1.0.8
+ENV AZURE_EXTENSION_DIR=/opt/az/azcliextensions \
+    AZURE_CORE_COLLECT_TELEMETRY=false
+RUN curl -fsSL https://packages.microsoft.com/keys/microsoft.asc \
+      -o /usr/share/keyrings/microsoft.asc \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/microsoft.asc] https://packages.microsoft.com/repos/azure-cli/ $(. /etc/os-release && echo "$VERSION_CODENAME") main" \
+      > /etc/apt/sources.list.d/azure-cli.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends "azure-cli=${AZURE_CLI_VERSION}-1~$(. /etc/os-release && echo "$VERSION_CODENAME")" \
+    && export HOME=/root AZURE_CONFIG_DIR=/tmp/azure-config \
+    && az extension add --name azure-devops --version "${AZURE_DEVOPS_EXTENSION_VERSION}" --yes \
+    && az extension show --name azure-devops --query version --output tsv \
+    && rm -rf /var/lib/apt/lists/* /tmp/azure-config /root/.azure
+
 # Playwright browsers live in a system path so they're shared across users at
 # runtime AND so the install doesn't pollute /home/worker (which would force a
 # multi-GB chown layer). The ENV is also read by Playwright at runtime.
@@ -532,8 +571,8 @@ RUN case "$TARGETARCH" in \
 # Keep dsh and its transitive lifecycle scripts out of the shared root install.
 # Verify the pinned npm release tarball before installing without lifecycle hooks.
 # Bump the version and its SHA-512 pin together.
-ARG DSH_VERSION=0.1.7-alpha.2
-ARG DSH_SHA512=b97b96a1bc26a4dcea14e4c53fad6481fd1a1fc23353d2d63c5f5058251fbf90ceb60b659beebecc7bd031ba047b46c26a2b6e97ad724af52a77898c35179dcf
+ARG DSH_VERSION=0.2.1-alpha.2
+ARG DSH_SHA512=0a4444d2e00e83695d2f65697c5e1c351b25d7bf021f99ccfbc62494fae5319979967d0a8557dde36749b919603976669298b3091beb552f0b00bf8629f824d3
 RUN curl -fsSL "https://registry.npmjs.org/@deepseek-ai/dsh/-/dsh-${DSH_VERSION}.tgz" -o /tmp/dsh.tgz \
     && echo "${DSH_SHA512}  /tmp/dsh.tgz" | sha512sum -c - \
     && HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
@@ -541,6 +580,92 @@ RUN curl -fsSL "https://registry.npmjs.org/@deepseek-ai/dsh/-/dsh-${DSH_VERSION}
     && ln -sf /opt/dsh/node_modules/.bin/dsh /usr/local/bin/dsh \
     && dsh --help >/dev/null \
     && rm -rf /tmp/dsh.tgz /tmp/npm-cache /root/.npm /root/.cache
+
+# Amp CLI (ampcode.com). The npm platform package is one standalone binary, so
+# fetch it directly and verify the pinned SHA-512 instead of running npm. Updates
+# stay off: the per-task settings the adapter writes set amp.updates.mode to
+# "disabled". Bump AMP_VERSION, both SHA-512 pins and AMP_PACKAGE in
+# src/providers/amp-adapter.ts together. The vendor licence is proprietary
+# (https://ampcode.com/terms): confirm it before publishing this image.
+ARG AMP_VERSION=0.0.1791604937-g4bfc2d
+ARG AMP_SHA512_AMD64=9563d264226de242512c8dba6cda0ff70e59ca6bf04ffabf397a1ef45f3e78b8f61e3b4cff55d51c06bf9b76750ac702ed6c73e50c1aa6fc1c30fead82f5fc54
+ARG AMP_SHA512_ARM64=34b7f2bf447afe956c8cd7be739873348b0acf3e3f7953b831c262a554d99262dc23bc81740f238557d808dead3dd9bf8f451120ea99a127df9e3e1b5cb8d559
+RUN case "$TARGETARCH" in \
+      amd64) amp_platform=linux-x64; amp_sha512="$AMP_SHA512_AMD64" ;; \
+      arm64) amp_platform=linux-arm64; amp_sha512="$AMP_SHA512_ARM64" ;; \
+      *) echo "Unsupported amp architecture: $TARGETARCH" >&2; exit 1 ;; \
+    esac \
+    && curl -fsSL "https://registry.npmjs.org/@ampcode/cli-${amp_platform}/-/cli-${amp_platform}-${AMP_VERSION}.tgz" -o /tmp/amp.tgz \
+    && echo "${amp_sha512}  /tmp/amp.tgz" | sha512sum -c - \
+    && tar -xzf /tmp/amp.tgz -C /usr/local/bin --strip-components=1 package/amp \
+    && chmod 0755 /usr/local/bin/amp \
+    && HOME=/root /usr/local/bin/amp --version >/dev/null \
+    && rm -rf /tmp/amp.tgz /root/.cache /root/.config
+# The cursor harness runs @cursor/sdk in-process; the compiled worker binary
+# carries its JS. Its native helpers (ripgrep, tree-sitter) ship in a platform
+# package the binary cannot embed, so install it here and point the SDK at it.
+# Bump CURSOR_SDK_VERSION with package.json and src/providers/cursor-adapter.ts.
+ARG CURSOR_SDK_VERSION=1.0.37
+RUN case "$TARGETARCH" in \
+      amd64) cursor_platform="linux-x64" ;; \
+      arm64) cursor_platform="linux-arm64" ;; \
+      *) echo "Unsupported cursor SDK architecture: $TARGETARCH" >&2; exit 1 ;; \
+    esac \
+    && HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
+      --prefix /opt/cursor-sdk --ignore-scripts --no-audit --no-fund \
+      "@cursor/sdk-${cursor_platform}@${CURSOR_SDK_VERSION}" \
+    && ln -s "/opt/cursor-sdk/node_modules/@cursor/sdk-${cursor_platform}" /opt/cursor-sdk/platform \
+    && /opt/cursor-sdk/platform/bin/rg --version >/dev/null \
+    && test -f /opt/cursor-sdk/platform/vendor/tree-sitter/index.js \
+    && rm -rf /tmp/npm-cache /root/.npm /root/.cache
+ENV CURSOR_RIPGREP_PATH=/opt/cursor-sdk/platform/bin/rg \
+    CURSOR_TREE_SITTER_VENDOR_DIR=/opt/cursor-sdk/platform/vendor
+
+# Gemini CLI (Apache-2.0) for HARNESS_PROVIDER=acp with ACP_TARGET=gemini; the
+# adapter launches `gemini --acp`. Its own prefix keeps the ~100 MB install out
+# of the shared global-deps layer. Lifecycle scripts are not needed for ACP.
+ARG GEMINI_CLI_VERSION=0.63.0
+RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
+      --prefix /opt/gemini-cli --ignore-scripts --no-audit --no-fund \
+      "@google/gemini-cli@${GEMINI_CLI_VERSION}" \
+    && ln -sf /opt/gemini-cli/node_modules/.bin/gemini /usr/local/bin/gemini \
+    && test "$(HOME=/tmp/gemini-home gemini --version)" = "${GEMINI_CLI_VERSION}" \
+    && rm -rf /tmp/npm-cache /tmp/gemini-home /root/.npm /root/.cache /root/.gemini
+# GitHub Copilot CLI, the `copilot` ACP target (HARNESS_PROVIDER=acp,
+# ACP_TARGET=copilot; `copilot --acp`). Proprietary: its LICENSE.md allows
+# redistributing unmodified copies as part of an application that does more
+# than the CLI, with that licence included. npm keeps LICENSE.md in the
+# package dir; the copy under /usr/share/doc makes it easy to find. The adapter
+# sets COPILOT_AUTO_UPDATE=false, so the pinned binary is the one that runs.
+ARG COPILOT_CLI_VERSION=1.0.95
+RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
+      --prefix /opt/copilot-cli --no-audit --no-fund "@github/copilot@${COPILOT_CLI_VERSION}" \
+    && ln -sf /opt/copilot-cli/node_modules/.bin/copilot /usr/local/bin/copilot \
+    && mkdir -p /usr/share/doc/github-copilot-cli \
+    && cp /opt/copilot-cli/node_modules/@github/copilot/LICENSE.md /usr/share/doc/github-copilot-cli/LICENSE.md \
+    && HOME=/root COPILOT_AUTO_UPDATE=false copilot --version | grep -F "${COPILOT_CLI_VERSION}" \
+    && rm -rf /tmp/npm-cache /root/.npm /root/.cache /root/.copilot
+
+# Grok CLI (xAI, Apache-2.0). Its npm platform package carries one
+# brotli-compressed native binary that the wrapper's postinstall unpacks (and
+# then writes ~/.grok config). Fetch the platform package directly, verify the
+# pinned SHA-512 and unpack it with node's zlib instead. The adapter disables
+# the auto-updater per session (GROK_DISABLE_AUTOUPDATER). Bump GROK_VERSION
+# and both pins together.
+ARG GROK_VERSION=1.0.50
+ARG GROK_SHA512_AMD64=8920205e02c02568ad380ff248b11759b44307d7349108a81d27589976877f22280084ad34700461ff5e78593283e663c6858ef181ccb794879c0e570b0a4954
+ARG GROK_SHA512_ARM64=19e2259e83351190e114e69b640ed7705a52ff4c02a4eca5d754e561142cbbebcb8bd1f962cb0979e0c0c0979b737fd8cf18989d783854b1ecbc17811f812967
+RUN case "$TARGETARCH" in \
+      amd64) grok_platform=linux-x64; grok_sha512="$GROK_SHA512_AMD64" ;; \
+      arm64) grok_platform=linux-arm64; grok_sha512="$GROK_SHA512_ARM64" ;; \
+      *) echo "Unsupported grok architecture: $TARGETARCH" >&2; exit 1 ;; \
+    esac \
+    && curl -fsSL "https://registry.npmjs.org/@xai-official/grok-${grok_platform}/-/grok-${grok_platform}-${GROK_VERSION}.tgz" -o /tmp/grok.tgz \
+    && echo "${grok_sha512}  /tmp/grok.tgz" | sha512sum -c - \
+    && tar -xzf /tmp/grok.tgz -C /tmp --strip-components=2 package/bin/grok.br \
+    && node -e 'const fs=require("fs"),zlib=require("zlib");fs.writeFileSync(process.argv[2],zlib.brotliDecompressSync(fs.readFileSync(process.argv[1])),{mode:0o755})' /tmp/grok.br /usr/local/bin/grok \
+    && GROK_HOME=/tmp/grok-home GROK_DISABLE_AUTOUPDATER=1 /usr/local/bin/grok --version | grep -q "^grok ${GROK_VERSION} " \
+    && rm -rf /tmp/grok.tgz /tmp/grok.br /tmp/grok-home /root/.cache /root/.grok
 
 # Full-image global npm tools, staged in a SEPARATE dir from worker-base's
 # /opt/global-deps so its layer is never rewritten. Same overrides rationale
@@ -560,7 +685,7 @@ RUN mkdir -p /opt/global-deps-full && cat > /opt/global-deps-full/package.json <
     "@sentry/cli": "3.3.4",
     "@desplega.ai/localtunnel": "2.2.0",
     "@desplega.ai/claude-bridge": "0.2.2",
-    "agent-browser": "0.38.1",
+    "agent-browser": "0.39.0",
     "playwright": "1.58.0"
   },
   "overrides": {

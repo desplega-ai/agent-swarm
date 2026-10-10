@@ -23,7 +23,7 @@ description: Topic mining, blog posts, social posts, memes, comparison and how-t
 
 Data-driven content production with quality gates that reject low-depth content before it ships.
 
-<Mermaid chart={`flowchart LR
+<Mermaid title="Content pipeline: a weekly topic miner feeds a topic table, the strategist picks a topic, the writer drafts, and a reviewer on a different model rejects back to the writer or passes to human editing, then PR, publish and discoverability optimization." chart={`flowchart LR
   TM["gsc-topic-miner<br/>(weekly)"] --> TS[("topic supply<br/>table")]
   TS --> CS["Content Strategist<br/>pick next topic"]
   CS --> CW["Content Writer<br/>draft TSX"]

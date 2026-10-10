@@ -14,6 +14,7 @@ All images are multi-arch (`linux/amd64` + `linux/arm64`) and published to GitHu
 | `ghcr.io/desplega-ai/agent-swarm` | `Dockerfile` | API server — compiled binary, migrations, script runtimes. Small by design (~400 MB). |
 | `ghcr.io/desplega-ai/agent-swarm-worker` | `Dockerfile.worker` (target `worker-full`) | Full worker — all four harnesses plus the complete dev environment (see below). |
 | `ghcr.io/desplega-ai/agent-swarm-worker:slim` | `Dockerfile.worker` (target `worker-slim`) | Slim worker for CI and E2E — all four harnesses, none of the heavy extras. |
+| `ghcr.io/desplega-ai/agent-swarm-ui` | `Dockerfile.ui` | Dashboard — the static `apps/ui` build served by unprivileged nginx on port 8080. Tagged `{VERSION}` and `sha-{GIT_SHA}` only (no `latest`). |
 
 ### Tag scheme
 
@@ -46,6 +47,7 @@ To build locally:
 bun run docker:build:worker        # full  -> agent-swarm-worker:latest
 bun run docker:build:worker:slim   # slim  -> agent-swarm-worker:slim
 bun run docker:build:api           # API   -> agent-swarm-api:latest
+bun run docker:build:ui            # UI    -> agent-swarm-ui:latest
 ```
 
 ## E2B sandbox templates
@@ -71,4 +73,4 @@ Templates are public. See the [E2B provider guide](/docs/guides/e2b-provider-smo
 
 ## Where publishing happens
 
-`.github/workflows/docker-and-deploy.yml` on pushes to `main`: builds and pushes all three image variants per-arch, merges multi-arch manifests, deploys the production compose, notifies Swarm Cloud of new digests, and — on version bumps — publishes E2B templates, the npm package, the git tag, and the GitHub release. PRs only build the API image, the **slim** worker target, and the evals image as a merge-gate check (`.github/workflows/merge-gate.yml`).
+`.github/workflows/docker-and-deploy.yml` on pushes to `main`: builds and pushes all three image variants per-arch, merges multi-arch manifests, builds and pushes the dashboard image for both platforms in one job, deploys the production compose, notifies Swarm Cloud of new digests, and — on version bumps — publishes E2B templates, the npm package, the git tag, and the GitHub release. PRs only build the API image, the **slim** worker target, and the evals image as a merge-gate check (`.github/workflows/merge-gate.yml`), plus the dashboard image with a smoke test when its inputs change. A UI-only commit to `main` does not trigger the workflow, so it gets no `sha-` dashboard image; the next release publishes `{VERSION}`.

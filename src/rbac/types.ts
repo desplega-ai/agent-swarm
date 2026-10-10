@@ -8,6 +8,12 @@
 import type { PermissionVerb } from "./permissions";
 
 export type RbacPrincipal =
+  | RbacRulePrincipal
+  /** Password-page viewer with no user identity. `can()` denies every verb. */
+  | { kind: "guest" };
+
+/** The principals a legacy rule evaluates. `can()` denies a guest before any rule runs. */
+export type RbacRulePrincipal =
   | { kind: "agent"; agentId: string; isLead: boolean }
   | { kind: "user"; userId: string }
   /** Shared swarm key (operator bearer). */

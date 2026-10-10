@@ -15,7 +15,7 @@ import { useSession } from "@/api/hooks/use-sessions";
 import { useSkill } from "@/api/hooks/use-skills";
 import { useTask } from "@/api/hooks/use-tasks";
 import { useUser } from "@/api/hooks/use-users";
-import { useWorkflow } from "@/api/hooks/use-workflows";
+import { useWorkflow, useWorkflowRun } from "@/api/hooks/use-workflows";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -24,6 +24,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useCurrentUser } from "@/contexts/current-user-context";
 import { INTEGRATIONS } from "@/lib/integrations-catalog";
+import { taskListTitle } from "@/lib/task-title";
 import { cn, sessionDisplayTitle } from "@/lib/utils";
 
 const routeLabels: Record<string, string> = {
@@ -59,6 +60,7 @@ const routeLabels: Record<string, string> = {
   keys: "API Keys",
   "api-keys": "API Keys",
   pages: "Pages",
+  file: "Comb",
   people: "People",
   unmapped: "Unmapped",
 };
@@ -84,7 +86,7 @@ const HEX32_REGEX = /^[0-9a-f]{32}$/i;
  * casing can't produce ("mcp-servers" → "MCP Servers", "keys" → "API Keys"). */
 function humanizeSegment(segment: string): string {
   // Malformed percent escapes ("/%", "/apps/%ZZ") make decodeURIComponent
-  // throw — and the header renders OUTSIDE the route error boundary, so an
+  // throw, and the header renders OUTSIDE the route error boundary, so an
   // uncaught URIError here would take down the whole shell. Show the raw
   // segment instead.
   let decoded = segment;
@@ -122,7 +124,9 @@ function isEntityId(segment: string | undefined): boolean {
 
 export function Breadcrumbs() {
   const location = useLocation();
-  const segments = location.pathname.split("/").filter(Boolean);
+  const pathSegments = location.pathname.split("/").filter(Boolean);
+  // Comb (`/file/~/<org>/<drive>/<path>`) draws its own path trail in the page.
+  const segments = pathSegments[0] === "file" ? pathSegments.slice(0, 1) : pathSegments;
   // Home shows the greeting in the breadcrumb slot (there is no trail to
   // draw and no in-page h1 anymore). Called before the early return so hook
   // order stays stable across routes.
@@ -154,6 +158,9 @@ export function Breadcrumbs() {
   const { data: agentMeta } = useAgent(idFor("agents"));
   const { data: taskMeta } = useTask(idFor("tasks"));
   const { data: workflowMeta } = useWorkflow(idFor("workflows"));
+  // A run has no name of its own; label it by its workflow, not its id.
+  const { data: workflowRunMeta } = useWorkflowRun(idFor("workflow-runs"));
+  const { data: runWorkflowMeta } = useWorkflow(workflowRunMeta?.workflowId ?? "");
   const { data: scheduleMeta } = useScheduledTask(idFor("schedules"));
   const { data: scriptRunMeta } = useScriptRun(idFor("script-runs"));
   const { data: scriptMeta } = useScript(idFor("scripts"));
@@ -192,26 +199,28 @@ export function Breadcrumbs() {
             : parent === "agents"
               ? agentMeta?.name
               : parent === "tasks"
-                ? taskMeta?.task
+                ? taskMeta && taskListTitle(taskMeta)
                 : parent === "workflows"
                   ? workflowMeta?.name
-                  : parent === "schedules"
-                    ? scheduleMeta?.name
-                    : parent === "scripts"
-                      ? scriptMeta?.name
-                      : parent === "script-runs"
-                        ? scriptRunMeta?.run.scriptName
-                        : parent === "skills"
-                          ? skillMeta?.name
-                          : parent === "mcp-servers"
-                            ? mcpServerMeta?.name
-                            : parent === "repos"
-                              ? repoMeta?.name
-                              : parent === "approval-requests"
-                                ? approvalMeta?.title
-                                : parent === "connections"
-                                  ? connectionMeta?.slug
-                                  : undefined
+                  : parent === "workflow-runs"
+                    ? runWorkflowMeta && `Run of ${runWorkflowMeta.name}`
+                    : parent === "schedules"
+                      ? scheduleMeta?.name
+                      : parent === "scripts"
+                        ? scriptMeta?.name
+                        : parent === "script-runs"
+                          ? scriptRunMeta?.run.scriptName
+                          : parent === "skills"
+                            ? skillMeta?.name
+                            : parent === "mcp-servers"
+                              ? mcpServerMeta?.name
+                              : parent === "repos"
+                                ? repoMeta?.name
+                                : parent === "approval-requests"
+                                  ? approvalMeta?.title
+                                  : parent === "connections"
+                                    ? connectionMeta?.slug
+                                    : undefined
     : undefined;
 
   // `/apps/:id/p/<page>` — one app page. The literal `p` segment is not a
@@ -307,7 +316,12 @@ export function Breadcrumbs() {
           Home
         </Link>
         {crumbs.map((crumb) => (
-          <span key={crumb.path} className="flex items-center gap-1 min-w-0">
+          // Only the leaf gives up width: a long task title used to squeeze
+          // the "Tasks" crumb to nothing ("Home > > Fix the…").
+          <span
+            key={crumb.path}
+            className={cn("flex items-center gap-1", crumb.isLast ? "min-w-0" : "shrink-0")}
+          >
             <ChevronRight className="size-3 shrink-0" />
             {crumb.isLast ? (
               <span className="text-foreground font-medium truncate">{crumb.label}</span>

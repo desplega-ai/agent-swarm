@@ -12,6 +12,8 @@ import {
   shouldCreateTaskFromLinearEvent,
 } from "../linear/gate";
 import {
+  buildSessionRequestSection,
+  ensureRequestSection,
   handleAgentSessionEvent,
   handleIssueDelete,
   handleIssueUpdate,
@@ -214,6 +216,111 @@ describe("handleAgentSessionEvent", () => {
     expect(task!.taskType).toBe("linear-issue");
     expect(task!.task).toContain("[Linear ENG-100]");
     expect(task!.task).toContain("Fix login bug");
+  });
+
+  test("created event: task body carries the comment that opened the session", async () => {
+    const event = {
+      type: "AgentSessionEvent",
+      action: "created",
+      agentSession: {
+        id: "session-comment-001",
+        issue: {
+          id: "issue-agent-session-comment-001",
+          identifier: "ENG-130",
+          title: "Write the newsletter",
+          url: "https://linear.app/team/issue/ENG-130",
+          description: "Weekly newsletter draft",
+        },
+        creator: { id: "user-001", name: "Jane Doe" },
+        comment: {
+          id: "comment-001",
+          body: "@agentswarm what are the hot topics worth looking over?",
+          userId: "user-001",
+        },
+      },
+    };
+
+    await handleAgentSessionEvent(event);
+
+    const sync = await getTrackerSyncByExternalId(
+      "linear",
+      "task",
+      "issue-agent-session-comment-001",
+    );
+    const task = await getTaskById(sync!.swarmId);
+    expect(task!.task).toContain(
+      "Request (comment that opened this session) from Jane Doe:\n@agentswarm what are the hot topics worth looking over?\n",
+    );
+    expect(task!.task).toContain("Description:\nWeekly newsletter draft");
+    expect(task!.task.indexOf("Request (comment")).toBeLessThan(task!.task.indexOf("Description:"));
+  });
+
+  test("created event without a comment keeps the assignment-only body", async () => {
+    const event = {
+      type: "AgentSessionEvent",
+      action: "created",
+      agentSession: {
+        id: "session-no-comment-001",
+        issue: {
+          id: "issue-agent-session-no-comment-001",
+          identifier: "ENG-131",
+          title: "Delegated issue",
+          url: "https://linear.app/team/issue/ENG-131",
+          description: "Do the delegated thing",
+        },
+        comment: null,
+      },
+    };
+
+    await handleAgentSessionEvent(event);
+
+    const sync = await getTrackerSyncByExternalId(
+      "linear",
+      "task",
+      "issue-agent-session-no-comment-001",
+    );
+    const task = await getTaskById(sync!.swarmId);
+    expect(task!.task).not.toContain("Request (comment");
+    expect(task!.task).toContain("URL: https://linear.app/team/issue/ENG-131\n\nDescription:");
+  });
+
+  test("ensureRequestSection inserts the request into a customized body that lacks it", () => {
+    const section = "\nRequest (comment that opened this session):\nPlease look\n";
+    const overridden = "[Linear ENG-1] Title\n\nCustom body\nDescription:\nx\n";
+    expect(ensureRequestSection(overridden, section)).toBe(
+      "[Linear ENG-1] Title\n\nRequest (comment that opened this session):\nPlease look\n\nCustom body\nDescription:\nx\n",
+    );
+    // Already present (default template) → unchanged; empty section → unchanged.
+    const withSection = `[Linear ENG-1] Title\n\nBody${section}`;
+    expect(ensureRequestSection(withSection, section)).toBe(withSection);
+    expect(ensureRequestSection(overridden, "")).toBe(overridden);
+  });
+
+  test("buildSessionRequestSection: top-level mention, reply mention, no comment", () => {
+    const comment = { body: "  root comment  " };
+    expect(buildSessionRequestSection({ agentSession: { comment } }, "Jane")).toBe(
+      "\nRequest (comment that opened this session) from Jane:\nroot comment\n",
+    );
+    expect(buildSessionRequestSection({ agentSession: { comment } }, "")).toBe(
+      "\nRequest (comment that opened this session):\nroot comment\n",
+    );
+    // Reply mention: agentSession.comment is the thread root, so use the
+    // thread block from promptContext, which includes the triggering reply.
+    const replyEvent = {
+      agentSession: { comment },
+      previousComments: [{ body: "root comment" }],
+      promptContext:
+        '<issue identifier="ENG-1"><title>T</title></issue>\n<primary-directive-thread comment-id="c1"><comment author="Jane">root comment</comment><comment author="Jane">@agentswarm please summarize</comment></primary-directive-thread>',
+    };
+    expect(buildSessionRequestSection(replyEvent, "Jane")).toBe(
+      '\nRequest (comment thread that opened this session) from Jane:\n<comment author="Jane">root comment</comment><comment author="Jane">@agentswarm please summarize</comment>\n',
+    );
+    expect(buildSessionRequestSection({ ...replyEvent, promptContext: undefined }, "Jane")).toBe(
+      "\nRequest (comment thread that opened this session) from Jane:\nroot comment\n",
+    );
+    expect(buildSessionRequestSection({ agentSession: { comment: { body: "  " } } }, "J")).toBe("");
+    expect(buildSessionRequestSection({ agentSession: { comment: null } }, "J")).toBe("");
+    expect(buildSessionRequestSection({}, "J")).toBe("");
   });
 
   test("skips when already-tracked issue has an active task", async () => {

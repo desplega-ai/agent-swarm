@@ -81,6 +81,7 @@ export function ConfigDetailDialog({
                       variant="ghost"
                       className="h-7 w-7"
                       onClick={() => setShowValue(!showValue)}
+                      aria-label={showValue ? "Hide value" : "Show value"}
                     >
                       {showValue ? (
                         <EyeOff className="h-3.5 w-3.5" />
@@ -89,7 +90,13 @@ export function ConfigDetailDialog({
                       )}
                     </Button>
                   )}
-                  <Button size="icon" variant="ghost" className="h-7 w-7" onClick={handleCopy}>
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className="h-7 w-7"
+                    onClick={handleCopy}
+                    aria-label={copied ? "Copied" : "Copy value"}
+                  >
                     {copied ? (
                       <Check className="h-3.5 w-3.5 text-status-success-strong" />
                     ) : (

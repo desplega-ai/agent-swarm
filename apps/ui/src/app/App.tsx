@@ -1,4 +1,5 @@
 import { RouterProvider } from "react-router-dom";
+import { AppUpdateWatcher } from "@/components/shared/app-update-prompt";
 import { Toaster } from "@/components/ui/sonner";
 import { isDemoMode } from "@/lib/deployment-config";
 import { Providers } from "./providers";
@@ -19,6 +20,7 @@ export default function App() {
         </aside>
       ) : null}
       <Toaster position="bottom-right" />
+      <AppUpdateWatcher />
     </Providers>
   );
 }

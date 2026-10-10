@@ -86,6 +86,26 @@ declare module "swarm-sdk" {
     expiresAt: number | null;
     createdAt: number;
     updatedAt: number;
+    /** Present only on a path/offset/limit read. */
+    view?: KvView;
+  }
+
+  export interface KvViewArgs {
+    /** Dot path into the JSON value, e.g. "outcome.data.rows" or "rows.3". */
+    path?: string;
+    /** First array item / object key / string char. Default 0. */
+    offset?: number;
+    /** Max items / keys / chars. Unbounded in scripts. */
+    limit?: number;
+  }
+
+  export interface KvView {
+    path: string;
+    type: "object" | "array" | "string" | "number" | "boolean" | "null";
+    total?: number;
+    offset?: number;
+    returned?: number;
+    nextOffset?: number | null;
   }
 
   export interface KvSdkSuccess<T, TStatus extends number = 200> {
@@ -157,6 +177,7 @@ declare module "swarm-sdk" {
       scope?: "all" | "agent" | "swarm";
       limit?: number;
       source?: string;
+      keyPrefix?: string;
     }): Promise<unknown>;
     memory_get(args: { memoryId: string; intent: string }): Promise<unknown>;
     memory_rate(args: { id: string; useful: boolean; note?: string }): Promise<unknown>;
@@ -175,14 +196,13 @@ declare module "swarm-sdk" {
     }): Promise<unknown>;
     task_poll(args?: Record<string, unknown>): Promise<unknown>;
     // --- kv ---
-    kv_get<T = unknown>(args: {
-      key: string;
-      namespace?: string;
-    }): Promise<KvSdkResponse<KvEntry<T>>>;
-    kv_getOrNull<T = unknown>(args: {
-      key: string;
-      namespace?: string;
-    }): Promise<KvEntry<T> | null>;
+    /** path/offset/limit return a view: `value` is the slice at a dot path (JSON strings count as JSON), paged over items/keys/chars; `view` describes it. */
+    kv_get<T = unknown>(
+      args: { key: string; namespace?: string } & KvViewArgs,
+    ): Promise<KvSdkResponse<KvEntry<T>>>;
+    kv_getOrNull<T = unknown>(
+      args: { key: string; namespace?: string } & KvViewArgs,
+    ): Promise<KvEntry<T> | null>;
     kv_set<T>(
       args: KvSetArgsBase & { value: T; valueType?: "json" },
     ): Promise<KvSdkResponse<KvEntry<T>>>;
@@ -374,6 +394,7 @@ declare module "swarm-sdk" {
       tags?: string[];
       taskId?: string;
       intent?: string;
+      key?: string;
     }): Promise<unknown>;
     memory_edit(args: {
       memoryId?: string;
@@ -385,6 +406,7 @@ declare module "swarm-sdk" {
       newString?: string;
       intent: string;
       expectedVersion?: number;
+      newKey?: string;
     }): Promise<unknown>;
     inject_learning(args: {
       content: string;
@@ -516,11 +538,16 @@ declare module "swarm-sdk" {
 
     // --- write: extensions ---
     extension_catalog(args?: Record<string, never>): Promise<unknown>;
-    extension_install(args: {
-      template: string;
-      priority?: number;
-      config?: Record<string, unknown>;
-    }): Promise<unknown>;
+    extension_install(
+      args:
+        | { template: string; priority?: number; config?: Record<string, unknown> }
+        | {
+            manifest: Record<string, unknown>;
+            files: Record<string, string>;
+            priority?: number;
+            config?: Record<string, unknown>;
+          },
+    ): Promise<unknown>;
     extension_list(args?: { enabledOnly?: boolean }): Promise<unknown>;
     extension_delete(args: { id: string }): Promise<unknown>;
     extension_enable(args: { id: string }): Promise<unknown>;

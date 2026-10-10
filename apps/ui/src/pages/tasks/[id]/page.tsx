@@ -1,37 +1,16 @@
+import { useQueryClient } from "@tanstack/react-query";
+import { ArrowLeft, CheckCircle2, Tag, Terminal } from "lucide-react";
 import {
-  Activity,
-  AlertTriangle,
-  ArrowLeft,
-  Ban,
-  Box,
-  Calendar,
-  CheckCircle2,
-  ChevronLeft,
-  ChevronRight,
-  Clock,
-  Cpu,
-  DollarSign,
-  ExternalLink,
-  FolderOpen,
-  GitBranch,
-  Github,
-  Gitlab,
-  GitPullRequest,
-  Hash,
-  Key,
-  Link2,
-  Pause,
-  Play,
-  Scissors,
-  Tag,
-  Terminal,
-  Timer,
-  User,
-  Zap,
-} from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+  type CSSProperties,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
+import { toast } from "sonner";
 import {
   renderTaskCitationSources,
   renderTaskCitations,
@@ -41,224 +20,190 @@ import "streamdown/styles.css";
 import { useAgents } from "@/api/hooks/use-agents";
 import { useSessionCosts } from "@/api/hooks/use-costs";
 import { useFeatureGate } from "@/api/hooks/use-feature-gate";
+import { useSession } from "@/api/hooks/use-sessions";
 import { useSteeringEnabled } from "@/api/hooks/use-stats";
 import {
-  useCancelTask,
-  usePauseTask,
-  useResumeTask,
   useTask,
   useTaskContext,
   useTaskSessionLogs,
   useTaskSteeringMessages,
 } from "@/api/hooks/use-tasks";
 import { useUsers } from "@/api/hooks/use-users";
-import type {
-  AgentLog,
-  ClaudeProviderMeta,
-  DevinProviderMeta,
-  ProviderName,
-  SessionCost,
-  TaskContextResponse,
-} from "@/api/types";
-import { AgentLink } from "@/components/shared/agent-link";
-import { CollapsibleDescription } from "@/components/shared/collapsible-description";
+import type { AgentLog, AgentTask, AgentTaskStatus } from "@/api/types";
+import { AgentAvatar } from "@/components/shared/agent-avatar";
 import { CollapsibleSection } from "@/components/shared/collapsible-section";
-import { CostSourceBadge, costDriftPercent } from "@/components/shared/cost-source-badge";
 import { MarkdownView } from "@/components/shared/markdown-view";
-import { SessionId } from "@/components/shared/session-id";
+import { ModelLabel } from "@/components/shared/model-logo";
+import { REASONING_EFFORT_LABEL } from "@/components/shared/reasoning-effort-icon";
+import type { SessionLogView } from "@/components/shared/session-log-messages";
 import { SessionLogViewer } from "@/components/shared/session-log-viewer";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { TaskAttachmentsSection } from "@/components/shared/task-attachments-section";
 import { TaskCitationsSection } from "@/components/shared/task-citations-section";
+import { TaskComposer } from "@/components/shared/task-composer";
+import { TaskStatusIcon } from "@/components/shared/task-status-icon";
 import { CollapsibleComposerDock } from "@/components/steering/collapsible-composer-dock";
-import { SteerComposer } from "@/components/steering/steer-composer";
 import { TaskFailureHelpDialog } from "@/components/support/task-failure-help-dialog";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { DetailPageSection } from "@/components/ui/detail-page-layout";
-import { MiddleTruncation } from "@/components/ui/middle-truncation";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useLocalToggle } from "@/hooks/use-local-toggle";
 import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
-import { findLatestUsableContextSnapshot } from "@/lib/context-display";
-import { formatCost } from "@/lib/cost-format";
-import { formatDurationMs } from "@/lib/format-duration-ms";
-import { formatTokens } from "@/lib/format-tokens";
+import { MAIN_BLEED, MAIN_BLEED_Y, MAIN_GUTTER_X } from "@/lib/main-gutter";
 import { modelTierLabel } from "@/lib/model-tiers";
-import { progressBarTone } from "@/lib/percent-progress-tone";
-import { statusTextClass } from "@/lib/status-tone";
-import { taskIsRunning } from "@/lib/task-activity";
+import { parseStructuredOutput } from "@/lib/structured-output";
+import { TERMINAL_STATUSES, taskIsRunning } from "@/lib/task-activity";
+import { linkTaskIds } from "@/lib/task-links";
 import { describeModelResolution, taskDisplayModel } from "@/lib/task-model-resolution";
-import { cn, formatRelativeTime, formatSmartTime } from "@/lib/utils";
+import { canSteerTask } from "@/lib/task-steer";
+import { taskListTitle } from "@/lib/task-title";
+import { cn, formatRelativeTime } from "@/lib/utils";
+import { directChildren, SpawnedTasks } from "./spawned-tasks";
+import {
+  TaskActions,
+  TaskActionsMenu,
+  TaskFailureCallout,
+  TaskPrimaryAction,
+  useTaskActions,
+} from "./task-actions";
+import { TaskDetailsRail, taskRunSummary, taskRunTime } from "./task-details-rail";
+import { TaskEffortMark } from "./task-effort-mark";
+import { TaskSourceLine } from "./task-source-line";
+import {
+  STICKY_BAR_HEIGHT,
+  scrollToTop,
+  TaskStickyBar,
+  useHeroScrolledPast,
+} from "./task-sticky-bar";
+import { useElementHeight } from "./use-element-height";
 
-const TASK_DETAIL_TABS = new Set(["details", "outcome", "logs"]);
-const TERMINAL_TASK_STATUSES = new Set(["completed", "failed", "cancelled", "superseded"]);
+/** The narrow layout's tabs. The `?tab=` values predate the labels: Log is `logs`. */
+const TASK_DETAIL_TABS = new Set(["outcome", "logs", "details"]);
 
-function coerceTaskDetailTab(value: string): string {
-  return TASK_DETAIL_TABS.has(value) ? value : "details";
+/** The focus ring of a narrow tab panel (the panel itself is a Tab stop). */
+const PANEL_FOCUS_RING = "focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/60";
+
+function coerceTaskDetailTab(value: string, fallback: string): string {
+  return TASK_DETAIL_TABS.has(value) ? value : fallback;
 }
 
-function readStoredRailCollapsed(): boolean {
-  if (typeof window === "undefined") return true;
-  const stored = window.localStorage.getItem("agent-swarm-task-rail-collapsed-v2");
-  return stored === null ? true : stored === "1";
+/**
+ * The narrow layout's first tab: a finished task opens on its outcome, a
+ * running or paused one on its log, and one that has not started on its
+ * details.
+ */
+function defaultTaskTab(status: AgentTaskStatus | undefined): string {
+  if (status && TERMINAL_STATUSES.has(status)) return "outcome";
+  if (status === "in_progress" || status === "paused") return "logs";
+  return "details";
 }
 
-function logDotColor(eventType: string, newValue?: string): string {
-  if (eventType === "task_status_change") {
-    switch (newValue) {
-      case "completed":
-        return "bg-status-success";
-      case "failed":
-      case "cancelled":
-        return "bg-status-error";
-      case "superseded":
-        return "bg-status-neutral";
-      case "in_progress":
-        return "bg-status-active";
-      default:
-        return "bg-primary/60";
-    }
-  }
-  if (eventType === "task_created") return "bg-status-paused";
-  if (eventType === "task_progress") return "bg-muted-foreground/40";
-  return "bg-primary/60";
+/**
+ * The log's first view: a finished task opens on its messages, any other on
+ * every event. `?logView=` keeps the reader's pick.
+ */
+function defaultLogView(status: AgentTaskStatus | undefined): SessionLogView {
+  return status && TERMINAL_STATUSES.has(status) ? "messages" : "everything";
 }
 
-function renderLogContent(log: AgentLog): React.ReactNode {
-  switch (log.eventType) {
-    case "task_created":
-      return <span className="text-xs font-medium">Task created</span>;
-    case "task_status_change":
-      return (
-        <span className="text-xs">
-          {log.oldValue && (
-            <span className={cn("font-medium", statusTextClass(log.oldValue))}>{log.oldValue}</span>
-          )}
-          {log.oldValue && <span className="text-muted-foreground"> → </span>}
-          <span className={cn("font-semibold", statusTextClass(log.newValue))}>{log.newValue}</span>
-        </span>
-      );
-    case "task_progress":
-      return (
-        <p className="text-xs text-muted-foreground italic line-clamp-2">
-          {log.newValue ?? "Progress update"}
-        </p>
-      );
-    case "task_offered":
-      return <span className="text-xs font-medium">Offered to agent</span>;
-    case "task_accepted":
-      return <span className="text-xs font-medium text-status-success-strong">Accepted</span>;
-    case "task_rejected":
-      return <span className="text-xs font-medium text-status-error-strong">Rejected</span>;
-    case "task_claimed":
-      return <span className="text-xs font-medium text-status-success-strong">Claimed</span>;
-    case "task_released":
-      return <span className="text-xs font-medium">Released</span>;
+function coerceLogView(value: string, fallback: SessionLogView): SessionLogView {
+  return value === "messages" || value === "everything" ? value : fallback;
+}
+
+/**
+ * Task title as the page heading, at most two lines. A clamped title shows
+ * in full in a tooltip. "View full prompt" (the source line) has the whole
+ * prompt for keyboard users.
+ */
+function TaskHeading({ title }: { title: string }) {
+  const [heading, setHeading] = useState<HTMLHeadingElement | null>(null);
+  const [clamped, setClamped] = useState(false);
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    if (!heading) return;
+    const measure = () => setClamped(heading.scrollHeight > heading.clientHeight + 1);
+    const observer = new ResizeObserver(measure);
+    observer.observe(heading);
+    measure();
+    return () => observer.disconnect();
+  }, [heading]);
+  return (
+    // Stays mounted: only `open` follows the clamp.
+    <Tooltip open={clamped && open} onOpenChange={setOpen}>
+      <TooltipTrigger asChild>
+        <h1
+          // A new title is a new heading, measured again: a 2-line and a
+          // 3-line title clamp to the same height, so no resize fires.
+          key={title}
+          ref={setHeading}
+          className="line-clamp-2 text-lg font-semibold leading-snug text-balance break-words"
+        >
+          {title}
+        </h1>
+      </TooltipTrigger>
+      <TooltipContent side="bottom" align="start" className="max-w-lg text-left text-pretty">
+        {title}
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
+/**
+ * What a task with no session log waits for, in one line. The hero owns the
+ * actions (Cancel, Resume). `draft` is the transient "attachments still
+ * uploading" state.
+ */
+function describeWaiting(
+  task: { status: AgentTaskStatus; createdAt: string },
+  names: { agent: string | null; offeredTo: string | null },
+): string {
+  switch (task.status) {
+    case "pending":
+    case "unassigned":
+      return `Waiting for ${names.agent ?? "an agent"} to pick this up. Queued ${formatRelativeTime(task.createdAt)}.`;
+    case "offered":
+    case "reviewing":
+      return `Offered to ${names.offeredTo ?? "an agent"}. Waiting for an answer.`;
+    case "backlog":
+      return "In the backlog.";
+    case "paused":
+      return "Paused.";
+    case "draft":
+      return "Uploading attachments…";
+    case "in_progress":
+      return "Waiting for the first session log.";
     default:
-      return (
-        <>
-          <span className="text-xs font-medium">{log.eventType.replace(/_/g, " ")}</span>
-          {log.newValue && <p className="text-xs text-muted-foreground truncate">{log.newValue}</p>}
-        </>
-      );
+      return "This task finished without a session log.";
   }
 }
 
-function LogTimeline({ logs }: { logs: AgentLog[] }) {
-  return (
-    <div className="space-y-0">
-      {logs.map((log, i) => (
-        <div key={log.id} className="flex gap-3 text-sm">
-          {/* Rail column — vertical 1px line connecting status-colored dots; mirrors brand-kit `.tl-rail` (preview/task-detail.html). */}
-          <div className="flex flex-col items-center">
-            <div
-              className={cn(
-                "h-2 w-2 rounded-full mt-[5px] shrink-0",
-                logDotColor(log.eventType, log.newValue ?? undefined),
-              )}
-            />
-            {i < logs.length - 1 && <div className="flex-1 w-px bg-border mt-[2px]" />}
-          </div>
-          <div className="pb-3 min-w-0">
-            {renderLogContent(log)}
-            <p className="text-[10px] text-muted-foreground/60 mt-0.5">
-              {formatRelativeTime(log.createdAt)}
-            </p>
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function MetaRow({
-  icon: Icon,
-  label,
-  children,
-}: {
-  icon: React.ElementType;
-  label: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="flex items-start gap-3 py-1.5">
-      <div className="flex items-center gap-2 w-24 shrink-0">
-        <Icon className="h-3.5 w-3.5 text-muted-foreground" />
-        <span className="text-xs text-muted-foreground">{label}</span>
-      </div>
-      {/* flex-1 gives middle-truncated values a definite width to fit. */}
-      <div className="text-sm min-w-0 flex-1">{children}</div>
-    </div>
-  );
-}
-
-/** Try to parse structured output JSON ({status, output, summary}). */
-function parseStructuredOutput(raw: string): { output?: string; summary?: string } | null {
-  try {
-    const parsed = JSON.parse(raw);
-    if (
-      typeof parsed === "object" &&
-      parsed !== null &&
-      ("output" in parsed || "summary" in parsed)
-    )
-      return parsed as { output?: string; summary?: string };
-  } catch {
-    // Not JSON — fall through.
-  }
-  return null;
-}
-
+/**
+ * Task ids in the answer link to their pages, in the same tab, like the
+ * spawned task rows. `taskIds` are the ids the page knows.
+ */
 function StructuredOutputContent({
   raw,
   maxH,
   citations = [],
+  taskIds,
 }: {
   raw: string;
   maxH: string;
   citations?: TaskCitation[];
+  taskIds: readonly string[];
 }) {
+  const taskLinks = new Set(taskIds.map((taskId) => `/tasks/${taskId}`));
   const structured = parseStructuredOutput(raw);
   if (!structured) {
     return (
-      <div className={`text-sm leading-relaxed overflow-auto text-foreground/80 ${maxH}`}>
-        <MarkdownView text={renderTaskCitations(raw, citations, "markdown")} />
+      <div className={`text-sm leading-relaxed overflow-auto text-foreground ${maxH}`}>
+        <MarkdownView
+          text={linkTaskIds(renderTaskCitations(raw, citations, "markdown"), taskIds)}
+          sameTabHrefs={taskLinks}
+        />
       </div>
     );
   }
@@ -266,24 +211,32 @@ function StructuredOutputContent({
     <div className={`space-y-3 overflow-auto ${maxH}`}>
       {structured.summary && (
         <div>
-          <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+          <span className="text-meta font-semibold text-muted-foreground uppercase tracking-wider">
             Summary
           </span>
-          <div className="mt-1 text-sm leading-relaxed text-foreground/80">
+          <div className="mt-1 text-sm leading-relaxed text-foreground">
             <MarkdownView
-              text={renderTaskCitations(structured.summary, citations, "markdown", false)}
+              text={linkTaskIds(
+                renderTaskCitations(structured.summary, citations, "markdown", false),
+                taskIds,
+              )}
+              sameTabHrefs={taskLinks}
             />
           </div>
         </div>
       )}
       {structured.output && (
         <div>
-          <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+          <span className="text-meta font-semibold text-muted-foreground uppercase tracking-wider">
             Output
           </span>
-          <div className="mt-1 text-sm leading-relaxed text-foreground/80">
+          <div className="mt-1 text-sm leading-relaxed text-foreground">
             <MarkdownView
-              text={renderTaskCitations(structured.output, citations, "markdown", false)}
+              text={linkTaskIds(
+                renderTaskCitations(structured.output, citations, "markdown", false),
+                taskIds,
+              )}
+              sameTabHrefs={taskLinks}
             />
           </div>
         </div>
@@ -295,333 +248,209 @@ function StructuredOutputContent({
   );
 }
 
-// Below this, harness-vs-recomputed divergence is rounding noise; above it,
-// worth a visible warning next to the cost.
-const DRIFT_HINT_THRESHOLD_PCT = 2;
-
-function TaskCostSection({
-  costs,
-  isLoading,
-  provider,
-  providerMeta,
-}: {
-  costs: SessionCost[] | undefined;
-  isLoading: boolean;
-  provider?: ProviderName;
-  providerMeta?: DevinProviderMeta | ClaudeProviderMeta | Record<string, never>;
-}) {
-  const isDevin = provider === "devin";
-  const devinMeta = isDevin ? (providerMeta as DevinProviderMeta | undefined) : undefined;
-
-  const stats = useMemo(() => {
-    if (!costs || costs.length === 0) return null;
-    const totalCost = costs.reduce((sum, c) => sum + c.totalCostUsd, 0);
-    const hasHarnessCosts = costs.every((c) => c.harnessCostUsd != null);
-    const harnessCost = hasHarnessCosts
-      ? costs.reduce((sum, c) => sum + (c.harnessCostUsd ?? 0), 0)
-      : null;
-    const inputTokens = costs.reduce((sum, c) => sum + c.inputTokens, 0);
-    const outputTokens = costs.reduce((sum, c) => sum + c.outputTokens, 0);
-    const cacheReadTokens = costs.reduce((sum, c) => sum + c.cacheReadTokens, 0);
-    const cacheWriteTokens = costs.reduce((sum, c) => sum + (c.cacheWriteTokens ?? 0), 0);
-    const totalDurationMs = costs.reduce((sum, c) => sum + c.durationMs, 0);
-    const totalTurns = costs.reduce((sum, c) => sum + (c.numTurns ?? 0), 0);
-    const models = [...new Set(costs.map((c) => c.model))];
-    // Phase 12b — collapse the per-row costSource into a single badge for
-    // the aggregate. If every row agrees, show that. If they differ, show
-    // 'harness' (the weakest claim) so we don't over-state precision.
-    const sources = new Set(costs.map((c) => c.costSource));
-    const aggregateCostSource = sources.size === 1 ? Array.from(sources)[0] : ("harness" as const);
-    return {
-      totalCost,
-      harnessCost,
-      inputTokens,
-      outputTokens,
-      cacheReadTokens,
-      cacheWriteTokens,
-      totalDurationMs,
-      totalTurns,
-      models,
-      sessions: costs.length,
-      costSource: aggregateCostSource,
-    };
-  }, [costs]);
-
-  if (isLoading) {
-    return (
-      <DetailPageSection title="Session Cost">
-        <div className="space-y-2">
-          <Skeleton className="h-3 w-20" />
-          <Skeleton className="h-3 w-28" />
-          <Skeleton className="h-3 w-24" />
-        </div>
-      </DetailPageSection>
-    );
+/**
+ * Focuses the message box that shows. The wide layout's box is in the column,
+ * so it scrolls into view first. The narrow layout's box is in the bottom
+ * bar, which is always in view.
+ */
+function focusVisibleComposer(wideBox: HTMLElement | null, narrowBar: HTMLElement | null) {
+  const shown = (element: HTMLElement | null) => !!element && element.getClientRects().length > 0;
+  const box = shown(wideBox) ? wideBox : shown(narrowBar) ? narrowBar : null;
+  const textarea = box?.querySelector("textarea");
+  if (!box || !textarea) return;
+  if (box === wideBox) {
+    const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    box.scrollIntoView({ block: "center", behavior: reduce ? "auto" : "smooth" });
   }
-
-  if (!stats) return null;
-
-  const acuCostUsd = devinMeta?.acuCostUsd ?? 2.25;
-  const acusConsumed = isDevin ? stats.totalCost / acuCostUsd : 0;
-  const driftPercent = costDriftPercent(stats.harnessCost, stats.totalCost) ?? 0;
-
-  return (
-    <DetailPageSection title="Session Cost">
-      <div className="space-y-1">
-        <MetaRow icon={DollarSign} label="Cost">
-          <span className="text-xs font-semibold inline-flex items-center gap-1.5">
-            {formatCost(stats.totalCost, { precision: 4 })}
-            <CostSourceBadge
-              source={stats.costSource}
-              harnessCostUsd={stats.harnessCost}
-              totalCostUsd={stats.totalCost}
-            />
-            {driftPercent > DRIFT_HINT_THRESHOLD_PCT ? (
-              <span className="text-[10px] font-medium text-status-warning-strong">
-                Δ {driftPercent.toFixed(1)}%
-              </span>
-            ) : null}
-          </span>
-        </MetaRow>
-        {isDevin ? (
-          <MetaRow icon={Zap} label="ACUs">
-            <span className="text-xs font-mono">{acusConsumed.toFixed(2)}</span>
-          </MetaRow>
-        ) : (
-          <>
-            <MetaRow icon={Zap} label="Tokens">
-              <span className="text-xs font-mono">
-                {formatTokens(stats.inputTokens)} in / {formatTokens(stats.outputTokens)} out
-              </span>
-            </MetaRow>
-            {(stats.cacheReadTokens > 0 || stats.cacheWriteTokens > 0) && (
-              <MetaRow icon={Zap} label="Cache">
-                <span className="text-xs font-mono">
-                  {formatTokens(stats.cacheReadTokens)} read /{" "}
-                  {formatTokens(stats.cacheWriteTokens)} write
-                </span>
-              </MetaRow>
-            )}
-          </>
-        )}
-        <MetaRow icon={Timer} label="Duration">
-          <span className="text-xs">{formatDurationMs(stats.totalDurationMs)}</span>
-        </MetaRow>
-        {!isDevin && (
-          <MetaRow icon={Hash} label="Turns">
-            <span className="text-xs">
-              {stats.totalTurns.toLocaleString()}
-              {stats.sessions > 1 ? ` (${stats.sessions} sessions)` : ""}
-            </span>
-          </MetaRow>
-        )}
-        <MetaRow icon={Cpu} label="Model">
-          <span className="text-xs font-mono">{stats.models.join(", ")}</span>
-        </MetaRow>
-      </div>
-    </DetailPageSection>
-  );
-}
-
-function TaskContextSection({
-  context,
-  isLoading,
-  provider,
-  providerMeta,
-  costs,
-}: {
-  context: TaskContextResponse | undefined;
-  isLoading: boolean;
-  provider?: ProviderName;
-  providerMeta?: DevinProviderMeta | ClaudeProviderMeta | Record<string, never>;
-  costs?: SessionCost[];
-}) {
-  const isDevin = provider === "devin";
-  const devinMeta = isDevin ? (providerMeta as DevinProviderMeta | undefined) : undefined;
-
-  if (isDevin) {
-    const maxAcuLimit = devinMeta?.maxAcuLimit;
-    const acuCostUsd = devinMeta?.acuCostUsd ?? 2.25;
-    const totalCost = costs?.reduce((sum, c) => sum + c.totalCostUsd, 0) ?? 0;
-    const acusConsumed = totalCost / acuCostUsd;
-
-    if (!maxAcuLimit) return null;
-
-    const percent = Math.min((acusConsumed / maxAcuLimit) * 100, 100);
-
-    return (
-      <>
-        <Separator className="my-2" />
-        <div className="space-y-1">
-          <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
-            ACU Budget
-          </span>
-          <div className="flex items-center gap-2 py-1">
-            <Progress value={percent} className={cn("h-1.5 flex-1", progressBarTone(percent))} />
-            <span className="text-[10px] font-mono text-muted-foreground shrink-0">
-              {percent.toFixed(0)}%
-            </span>
-          </div>
-          <MetaRow icon={Zap} label="Used">
-            <span className="text-xs font-mono">
-              {acusConsumed.toFixed(2)} / {maxAcuLimit} ACUs
-            </span>
-          </MetaRow>
-        </div>
-      </>
-    );
-  }
-
-  if (isLoading) {
-    return (
-      <>
-        <Separator className="my-2" />
-        <div className="space-y-1.5">
-          <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
-            Context Usage
-          </span>
-          <div className="space-y-2">
-            <Skeleton className="h-2 w-full rounded-full" />
-            <Skeleton className="h-3 w-24" />
-            <Skeleton className="h-3 w-20" />
-          </div>
-        </div>
-      </>
-    );
-  }
-
-  if (!context || context.summary.snapshotCount === 0) return null;
-
-  const { summary } = context;
-  const latestUsageSnapshot = findLatestUsableContextSnapshot(context.snapshots);
-
-  return (
-    <>
-      <Separator className="my-2" />
-      <div className="space-y-1">
-        <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
-          Context Usage
-        </span>
-        {latestUsageSnapshot ? (
-          <>
-            <div className="flex items-center gap-2 py-1">
-              <Progress
-                value={latestUsageSnapshot.contextPercent}
-                className={cn("h-1.5 flex-1", progressBarTone(latestUsageSnapshot.contextPercent))}
-              />
-              <span className="text-[10px] font-mono text-muted-foreground shrink-0">
-                {latestUsageSnapshot.contextPercent.toFixed(0)}%
-              </span>
-            </div>
-            <MetaRow icon={Cpu} label="Used">
-              <span className="flex flex-col items-start gap-1 font-mono text-xs">
-                <span className="whitespace-nowrap">
-                  {formatTokens(latestUsageSnapshot.contextUsedTokens)} /{" "}
-                  {formatTokens(latestUsageSnapshot.contextTotalTokens)}
-                </span>
-                {latestUsageSnapshot.contextFormula &&
-                  latestUsageSnapshot.contextFormula !== "unknown" && (
-                    <Badge
-                      variant="outline"
-                      size="tag"
-                      className="text-muted-foreground"
-                      title={`Computed via formula: ${latestUsageSnapshot.contextFormula}`}
-                    >
-                      {latestUsageSnapshot.contextFormula}
-                    </Badge>
-                  )}
-              </span>
-            </MetaRow>
-          </>
-        ) : (
-          <MetaRow icon={Cpu} label="Current">
-            <span className="text-xs text-muted-foreground">Unavailable</span>
-          </MetaRow>
-        )}
-        {summary.peakContextPercent != null && (
-          <MetaRow icon={Activity} label="Peak">
-            <span className="text-xs font-mono">{summary.peakContextPercent.toFixed(0)}%</span>
-          </MetaRow>
-        )}
-        {summary.compactionCount > 0 && (
-          <MetaRow icon={Scissors} label="Compactions">
-            <span className="text-xs font-mono">{summary.compactionCount}</span>
-          </MetaRow>
-        )}
-      </div>
-    </>
-  );
+  textarea.focus({ preventScroll: true });
 }
 
 export default function TaskDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { data: task, isLoading } = useTask(id!);
-  const { data: sessionLogs } = useTaskSessionLogs(id!);
+  const { data: task, isLoading, isFetchedAfterMount, isStale } = useTask(id!);
+  // A finished task's log, context and steering rows are frozen history: read
+  // them once, with no poll and no refetch on window focus or reconnect
+  // (`staleTime: Infinity`). Until the task itself loads, hold the poll too,
+  // so a finished task never gets a second read. `undefined` keeps each
+  // hook's live cadence.
+  const taskLive = !!task && !TERMINAL_STATUSES.has(task.status);
+  const liveReads = taskLive
+    ? undefined
+    : task
+      ? { refetchInterval: false as const, staleTime: Number.POSITIVE_INFINITY }
+      : { refetchInterval: false as const };
+  const { data: sessionLogs, isLoading: sessionLogsLoading } = useTaskSessionLogs(id!, liveReads);
   const { data: agents } = useAgents();
   const { data: users } = useUsers();
   const { data: costs, isLoading: costsLoading } = useSessionCosts({ taskId: id });
-  const { data: contextData, isLoading: contextLoading } = useTaskContext(id!);
-  // Steering (≥1.122.1) — soft-degrade against older API servers, which 404
+  const { data: contextData, isLoading: contextLoading } = useTaskContext(id!, liveReads);
+  // Steering (≥1.122.1), soft-degrade against older API servers, which 404
   // both `/steer` and `/steering-messages`.
   const steerGate = useFeatureGate("1.122.1");
   const { data: steeringEnabled = true } = useSteeringEnabled();
   const { data: steeringMessages } = useTaskSteeringMessages(id!, {
     enabled: steerGate.supported && steeringEnabled,
+    ...liveReads,
   });
+  // The tasks this one started (≥1.76.0): `GET /api/sessions/{id}` returns
+  // every descendant for any task id. Children can join late (a follow-up, a
+  // retry), so it keeps its slow poll after the task finishes.
+  const sessionsGate = useFeatureGate("1.76.0");
+  const { data: session } = useSession(sessionsGate.supported ? id : undefined);
+  // A task that finishes while the page is open gets one last read: the final
+  // log lines and context snapshot can land after the previous poll. An
+  // invalidation refetches even under `staleTime: Infinity`.
+  const queryClient = useQueryClient();
+  const wasLiveRef = useRef(false);
+  useEffect(() => {
+    const wasLive = wasLiveRef.current;
+    wasLiveRef.current = taskLive;
+    if (!wasLive || taskLive || !task) return;
+    for (const part of ["session-logs", "context", "steering-messages"]) {
+      void queryClient.invalidateQueries({ queryKey: ["task", task.id, part] });
+    }
+  }, [taskLive, task, queryClient]);
   // Composer dock is collapsible on this page only (the sessions surface is a
-  // chat — its composer always stays put). Default expanded.
+  // chat, its composer always stays put). Default expanded.
   const [composerCollapsed, setComposerCollapsed] = useLocalToggle(
     "tasks:steer-composer-collapsed",
     false,
   );
-  // Draft is owned by the page, not the composer. Two reasons: the mobile and
-  // desktop layouts each mount their own <SteerComposer>, and the composer
-  // itself unmounts whenever the task leaves a steerable status. Holding the
-  // text here means crossing the `lg` breakpoint — or a status flip that
-  // hides and later restores the dock — doesn't eat what the user typed.
-  const [steerDraft, setSteerDraft] = useState("");
-  const cancelTask = useCancelTask();
-  const pauseTask = usePauseTask();
-  const resumeTask = useResumeTask();
+  // The draft is owned by the page, not the composer. The narrow and wide
+  // layouts each mount their own <TaskComposer>, and the wide box moves when
+  // the task finishes (the steer box under the log, the follow-up box under
+  // the outcome). Holding the text here means crossing the 60rem layout
+  // switch, a status flip, or a narrow tab switch does not eat what the user
+  // typed.
+  const [draft, setDraft] = useState("");
+  // The support dialog opens only from "Get help", and gives focus back to it
+  // (or to the "..." trigger of the menu that held it) when it closes.
+  const [helpOpen, setHelpOpen] = useState(false);
+  const helpOpener = useRef<HTMLElement | null>(null);
+  // A draft and an open dialog belong to one task: Retry and the spawned task
+  // links move this page to another task id.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reset on a new task id only.
+  useEffect(() => {
+    setDraft("");
+    setHelpOpen(false);
+  }, [id]);
   const { searchParams, setParam } = useUrlSearchState();
-  // A finished task is opened for its result, so its mobile default tab is
-  // Outcome; a live one opens on Details.
-  const defaultTab = task && TERMINAL_TASK_STATUSES.has(task.status) ? "outcome" : "details";
-  const activeTab = coerceTaskDetailTab(readStringParam(searchParams, "tab", defaultTab));
-  const railParam = readStringParam(searchParams, "rail");
-  const railCollapsed =
-    railParam === "expanded" ? false : railParam === "collapsed" ? true : readStoredRailCollapsed();
+  // The narrow layout's first tab and the log's first view follow the status
+  // the page opened with: the first one fetched after the page mounted, or a
+  // cached one that is still fresh. The cache keeps a task for hours (it
+  // persists in localStorage), so a task that finished while the reader was
+  // away must not open on its log. Until the fresh status arrives, the
+  // defaults follow the cached one, and a pick (a tab or a view) keeps them.
+  // A status change after that (the task finishes while the page is open)
+  // does not move the reader to another tab or view.
+  const [openedWith, setOpenedWith] = useState<{ id: string; status: AgentTaskStatus } | null>(
+    null,
+  );
+  const statusFresh = isFetchedAfterMount || !isStale;
+  useEffect(() => {
+    if (task && statusFresh && openedWith?.id !== task.id) {
+      setOpenedWith({ id: task.id, status: task.status });
+    }
+  }, [task, statusFresh, openedWith]);
+  const openedStatus = task && openedWith?.id === task.id ? openedWith.status : task?.status;
+  const keepOpenedStatus = useCallback(() => {
+    if (!task) return;
+    setOpenedWith((prev) => (prev?.id === task.id ? prev : { id: task.id, status: task.status }));
+  }, [task]);
+  const defaultTab = defaultTaskTab(openedStatus);
+  const activeTab = coerceTaskDetailTab(
+    readStringParam(searchParams, "tab", defaultTab),
+    defaultTab,
+  );
   const setActiveTab = useCallback(
-    (tab: string) => setParam("tab", coerceTaskDetailTab(tab), { defaultValue: defaultTab }),
-    [setParam, defaultTab],
+    (tab: string) => {
+      keepOpenedStatus();
+      setParam("tab", coerceTaskDetailTab(tab, defaultTab), { defaultValue: defaultTab });
+    },
+    [setParam, defaultTab, keepOpenedStatus],
   );
-  const setRailCollapsed = useCallback(
-    (collapsed: boolean) => setParam("rail", collapsed ? "collapsed" : "expanded"),
-    [setParam],
+  // Messages or Everything, shared by both layouts' logs.
+  const logViewFallback = defaultLogView(openedStatus);
+  const logView = coerceLogView(
+    readStringParam(searchParams, "logView", logViewFallback),
+    logViewFallback,
   );
-  const toggleRailCollapsed = useCallback(
-    () => setRailCollapsed(!railCollapsed),
-    [railCollapsed, setRailCollapsed],
+  const setLogView = useCallback(
+    (view: SessionLogView) => {
+      keepOpenedStatus();
+      setParam("logView", view, { defaultValue: logViewFallback });
+    },
+    [setParam, logViewFallback, keepOpenedStatus],
   );
-  const agentName = useMemo(() => {
-    if (!task?.agentId || !agents) return null;
-    return agents.find((a) => a.id === task.agentId)?.name ?? null;
-  }, [task, agents]);
-  // Phase 3: read-only "Requested by" lookup. `useUsers()` is shared cache —
+  // The wide layout's compact bar shows once the hero scrolls out of the
+  // center column. The column is the page's one scroller: the log flows in it.
+  const {
+    past: heroScrolledPast,
+    scroller: centerScroller,
+    scrollerRef: centerScrollerRef,
+    sentinelRef: heroEndRef,
+  } = useHeroScrolledPast();
+  // The wide layout's live message box sticks to the bottom of the column. Its
+  // height goes to the log as `--log-sticky-bottom`.
+  const [composerHeight, composerRef] = useElementHeight();
+  // The narrow layout scrolls as one: the hero scrolls away, and the tabs
+  // and the bottom bar stick. Their heights go to the log as
+  // `--log-sticky-top` and `--log-sticky-bottom`.
+  const [narrowScroller, setNarrowScroller] = useState<HTMLElement | null>(null);
+  const [narrowHeroHeight, narrowHeroRef] = useElementHeight();
+  const [narrowTabsHeight, narrowTabsRef] = useElementHeight();
+  const [narrowBarHeight, narrowBarRef, narrowBar] = useElementHeight();
+  // A tab switch while the tabs are stuck shows the new tab from its top,
+  // right under the tabs. With the hero still in view, nothing moves.
+  const shownTabRef = useRef(activeTab);
+  useLayoutEffect(() => {
+    if (shownTabRef.current === activeTab) return;
+    shownTabRef.current = activeTab;
+    if (narrowScroller && narrowScroller.scrollTop > narrowHeroHeight) {
+      narrowScroller.scrollTop = narrowHeroHeight;
+    }
+  }, [activeTab, narrowScroller, narrowHeroHeight]);
+  // "Follow up" focuses the message box: the wide layout's box under the
+  // outcome, or the narrow layout's bottom bar, which every tab shows.
+  const wideFollowUpBoxRef = useRef<HTMLDivElement | null>(null);
+  const requestFollowUp = useCallback(
+    () => focusVisibleComposer(wideFollowUpBoxRef.current, narrowBar),
+    [narrowBar],
+  );
+  const actions = useTaskActions(task, {
+    onFollowUp: requestFollowUp,
+    onGetHelp: (opener) => {
+      helpOpener.current = opener;
+      setHelpOpen(true);
+    },
+  });
+  const announceFollowUp = useCallback(
+    (created: AgentTask) => {
+      toast.success("Follow-up task created.", {
+        action: { label: "Open", onClick: () => void navigate(`/tasks/${created.id}`) },
+      });
+    },
+    [navigate],
+  );
+  const agentNames = useMemo(
+    () => new Map((agents ?? []).map((agent) => [agent.id, agent.name])),
+    [agents],
+  );
+  const agentName = task?.agentId ? (agentNames.get(task.agentId) ?? null) : null;
+  // Phase 3: read-only "Requested by" lookup. `useUsers()` is shared cache,
   // the identity boot modal already populated it.
   const requestedByUserName = useMemo(() => {
     if (!task?.requestedByUserId || !users) return null;
     return users.find((u) => u.id === task.requestedByUserId)?.name ?? null;
   }, [task, users]);
-
-  // Phase 17 — collapsible right rail (Activity feed). The URL is the primary
-  // source for shareable state; localStorage remains the fallback preference
-  // when the `rail` query param is absent.
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    window.localStorage.setItem("agent-swarm-task-rail-collapsed-v2", railCollapsed ? "1" : "0");
-  }, [railCollapsed]);
+  // The log's end line shows the rail's cost, run time and turns, so the page
+  // has one set of numbers. With no cost rows, the end line keeps the
+  // harness result's numbers.
+  const endSummary = useMemo(
+    () => (task ? (taskRunSummary(task, costs) ?? undefined) : undefined),
+    [task, costs],
+  );
 
   if (isLoading) {
     return (
@@ -633,297 +462,93 @@ export default function TaskDetailPage() {
     );
   }
 
-  if (!task) {
+  if (!task || !actions) {
     return <p className="text-muted-foreground">Task not found.</p>;
   }
 
-  const isTerminal = TERMINAL_TASK_STATUSES.has(task.status);
-  const canCancel = !isTerminal && task.status !== "paused";
-  const canPause = task.status === "in_progress";
-  const canResume = task.status === "paused";
+  const isTerminal = TERMINAL_STATUSES.has(task.status);
 
-  // Steering reaches a running task directly, and a `pending` one by queueing:
-  // the server holds the message and delivers it when the session starts.
-  // Everything else falls back to the existing follow-up-task paths.
-  const canSteer =
-    steerGate.supported &&
-    steeringEnabled &&
-    (task.status === "in_progress" || task.status === "pending");
+  // Steering reaches any assignee (`canSteerTask`). A finished task gets the
+  // follow-up box instead.
+  const canSteer = steerGate.supported && steeringEnabled && canSteerTask(task);
 
   const isFailed = task.status === "failed";
   const isCompleted = task.status === "completed";
   const hasSessionLogs = sessionLogs && sessionLogs.length > 0;
   const hasOutput = !!task.output;
-  const hasEvents = task.logs && task.logs.length > 0;
   const hasAttachments = !!(task.attachments && task.attachments.length > 0);
+  // The agent an Activity event is about. An offer's log row carries the
+  // creator, so the offer names its target from the task instead.
+  const eventAgentName = (log: AgentLog): string | null => {
+    const agentId = log.eventType === "task_offered" ? task.offeredTo : log.agentId;
+    return agentId ? (agentNames.get(agentId) ?? null) : null;
+  };
+  const offeredToName = task.offeredTo ? (agentNames.get(task.offeredTo) ?? null) : null;
+  const waiting = describeWaiting(task, { agent: agentName, offeredTo: offeredToName });
 
-  // LEFT RAIL — meta info + SCM card + Dependencies + Progress + Context budget +
-  // Session Cost. Mirrors brand-kit `preview/task-detail.html` left column
-  // (meta-row + .scm-card + .csec-deps + .csec-ctx). Phase 17 moved Session Cost
-  // here from the right rail so the user sees cost stats without scrolling the
-  // Activity feed; right rail now hosts only the Activity timeline.
-  const leftRailContent = (
-    <div className="space-y-1">
-      {task.agentId && (
-        <MetaRow icon={User} label="Agent">
-          <Link to={`/agents/${task.agentId}`} className="text-primary hover:underline text-xs">
-            {agentName ?? `${task.agentId.slice(0, 8)}...`}
-          </Link>
-        </MetaRow>
-      )}
-      {task.creatorAgentId && task.creatorAgentId !== task.agentId && (
-        <MetaRow icon={User} label="Created by">
-          <AgentLink agentId={task.creatorAgentId} />
-        </MetaRow>
-      )}
-      {task.requestedByUserId && (
-        <MetaRow icon={User} label="Requested by">
-          <span className="text-xs">
-            {requestedByUserName ?? `${task.requestedByUserId.slice(0, 8)}…`}
-          </span>
-        </MetaRow>
-      )}
-      <MetaRow icon={Calendar} label="Created">
-        <span className="text-xs">{formatSmartTime(task.createdAt)}</span>
-      </MetaRow>
-      {task.finishedAt && (
-        <MetaRow icon={Clock} label="Finished">
-          <span className="text-xs">{formatSmartTime(task.finishedAt)}</span>
-        </MetaRow>
-      )}
-      {task.swarmVersion && (
-        <MetaRow icon={Tag} label="Swarm version">
-          <span
-            className="text-xs font-mono text-muted-foreground"
-            title={`agent-swarm ${task.swarmVersion} at task creation`}
-          >
-            v{task.swarmVersion}
-          </span>
-        </MetaRow>
-      )}
-      {task.parentTaskId && (
-        <MetaRow icon={Link2} label="Parent">
-          <Link
-            to={`/tasks/${task.parentTaskId}`}
-            className="text-primary hover:underline font-mono text-xs"
-          >
-            #{task.parentTaskId.slice(0, 8)}
-          </Link>
-        </MetaRow>
-      )}
-      {task.dir && (
-        <MetaRow icon={FolderOpen} label="Dir">
-          <MiddleTruncation className="text-xs font-mono">{task.dir}</MiddleTruncation>
-        </MetaRow>
-      )}
-      {task.claudeSessionId && (
-        <MetaRow icon={Terminal} label="Session">
-          <SessionId
-            sessionId={task.claudeSessionId}
-            provider={task.provider}
-            providerMeta={task.providerMeta}
-          />
-        </MetaRow>
-      )}
-      {task.credentialKeySuffix && (
-        <MetaRow icon={Key} label="API Key">
-          <Link to="/settings/api-keys" className="text-primary hover:underline font-mono text-xs">
-            {task.credentialKeyType === "CLAUDE_CODE_OAUTH_TOKEN"
-              ? "OAuth"
-              : task.credentialKeyType === "ANTHROPIC_API_KEY"
-                ? "Anthropic"
-                : task.credentialKeyType === "OPENROUTER_API_KEY"
-                  ? "OpenRouter"
-                  : (task.credentialKeyType ?? "Key")}{" "}
-            ...{task.credentialKeySuffix}
-          </Link>
-        </MetaRow>
-      )}
-      {task.workflowRunId && (
-        <MetaRow icon={Box} label="Workflow">
-          <Link
-            to={`/workflow-runs/${task.workflowRunId}`}
-            className="text-primary hover:underline font-mono text-xs"
-          >
-            #{task.workflowRunId.slice(0, 8)}
-          </Link>
-        </MetaRow>
-      )}
-
-      {(task.vcsProvider || task.vcsRepo || task.vcsUrl || task.vcsEventType || task.vcsAuthor) && (
-        <>
-          <Separator className="my-2" />
-          <div className="space-y-1.5">
-            <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
-              Source Control
-            </span>
-            <div className="rounded-md border border-border/50 px-3 py-2.5 space-y-2">
-              {/* Row 1: Provider icon + repo name */}
-              <div className="flex items-center gap-2">
-                {task.vcsProvider === "github" ? (
-                  <Github className="h-4 w-4 shrink-0" />
-                ) : task.vcsProvider === "gitlab" ? (
-                  <Gitlab className="h-4 w-4 shrink-0" />
-                ) : task.vcsProvider ? (
-                  <Link2 className="h-4 w-4 shrink-0" />
-                ) : null}
-                {task.vcsRepo && (
-                  <span className="text-xs font-mono text-foreground whitespace-nowrap truncate">
-                    {task.vcsRepo}
-                  </span>
-                )}
-                {task.vcsAuthor && (
-                  <span className="text-xs text-muted-foreground flex items-center gap-1 ml-auto">
-                    <User className="h-3 w-3" />
-                    {task.vcsAuthor}
-                  </span>
-                )}
-              </div>
-              {/* Row 2: PR/MR link */}
-              {task.vcsUrl && task.vcsNumber && (
-                <a
-                  href={task.vcsUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center gap-1.5 text-xs text-primary hover:underline"
-                >
-                  <GitPullRequest className="h-3.5 w-3.5 shrink-0" />
-                  <span className="font-mono">#{task.vcsNumber}</span>
-                  <ExternalLink className="h-3 w-3 shrink-0 text-muted-foreground" />
-                </a>
-              )}
-              {task.vcsUrl && !task.vcsNumber && (
-                <a
-                  href={task.vcsUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center gap-1.5 text-xs text-primary hover:underline font-mono truncate"
-                >
-                  <Link2 className="h-3.5 w-3.5 shrink-0" />
-                  <MiddleTruncation>{task.vcsUrl}</MiddleTruncation>
-                  <ExternalLink className="h-3 w-3 shrink-0 text-muted-foreground" />
-                </a>
-              )}
-            </div>
-          </div>
-        </>
-      )}
-
-      {task.dependsOn && task.dependsOn.length > 0 && (
-        <>
-          <Separator className="my-2" />
-          <div className="space-y-1.5">
-            <div className="flex items-center gap-1.5">
-              <GitBranch className="h-3 w-3 text-muted-foreground" />
-              <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
-                Dependencies ({task.dependsOn.length})
-              </span>
-            </div>
-            {task.dependsOn.map((depId) => (
-              <Link
-                key={depId}
-                to={`/tasks/${depId}`}
-                className="flex items-center gap-1.5 text-xs text-primary hover:underline font-mono"
-              >
-                #{depId.slice(0, 8)}
-              </Link>
-            ))}
-          </div>
-        </>
-      )}
-
-      {/* The last progress line ("Running script") is stale once the task
-          ends; the outcome carries the result. */}
-      {task.progress && !isTerminal && (
-        <>
-          <Separator className="my-2" />
-          <div className="space-y-1">
-            <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
-              Progress
-            </span>
-            <p className="text-xs text-muted-foreground whitespace-pre-wrap leading-relaxed max-h-32 overflow-auto">
-              {task.progress}
-            </p>
-          </div>
-        </>
-      )}
-
-      <TaskContextSection
-        context={contextData}
-        isLoading={contextLoading}
-        provider={task.provider}
-        providerMeta={task.providerMeta}
-        costs={costs}
-      />
-
-      {/* Phase 17 — Session Cost moved from right rail to left rail. The right
-          rail now hosts only the Activity timeline (which gets a sticky header
-          + scrollable body), while cost stats live alongside the other static
-          meta rows on the left so the user sees them without scrolling the
-          activity feed. */}
-      <TaskCostSection
-        costs={costs}
-        isLoading={costsLoading}
-        provider={task.provider}
-        providerMeta={task.providerMeta}
-      />
-    </div>
+  // The tasks this task started, and the ids the answer may mention.
+  const chain = session?.chain ?? [];
+  const spawned = directChildren(task.id, chain);
+  const knownTaskIds = [...chain.map((t) => t.id), task.parentTaskId].filter(
+    (taskId): taskId is string => !!taskId && taskId !== task.id,
+  );
+  const spawnedTasks = (
+    <SpawnedTasks tasks={spawned} agentNameFor={(agentId) => agentNames.get(agentId) ?? null} />
   );
 
-  // RIGHT RAIL — Activity timeline only (Phase 17 moved Session Cost to the
-  // left rail). Phase 18 — restructured the sticky-heading pattern:
-  //
-  // The aside is the scroll container (overflow-y-auto). The Activity heading
-  // is a `position: sticky top-0` direct child of a bare wrapper div (no
-  // <DetailPageRail>/<section> in between). Two changes from Phase 17 fix the
-  // coverage bug where timeline rows showed above the pinned heading:
-  //
-  //   1. Removed the `<DetailPageRail>` (`flex flex-col`) and `<section>`
-  //      wrappers around the sticky h4. Sticky inside `flex` items can mis-
-  //      pin in some scroll-with-padding configurations; the bare div gives
-  //      the h4 an unambiguous block-flow containing block whose bounds match
-  //      the aside content area exactly.
-  //   2. The aside's vertical padding (`py-3`) was moved off the top — the
-  //      h4 owns its own `pt-3 pb-3` padding instead, with `-mx-3` extending
-  //      its bg-background to the aside edges. This removes the transparent
-  //      `mb-2.5` gap between heading and timeline that previously let rows
-  //      scroll into view immediately under the heading. `pr-10` reserves
-  //      room for the collapse chevron.
-  //
-  // bg-background is the rail's actual surface (no `bg-card` on the aside —
-  // it inherits from the page <body>'s background, which is bg-background).
-  // z-30 keeps the heading above both the timeline rows (no z) and the
-  // chevron toggle (z-20), so the heading visually covers everything that
-  // scrolls past it.
-  const rightRailContent = hasEvents ? (
-    <div>
-      <h4 className="sticky top-0 z-30 bg-background -mx-3 px-3 pt-3 pb-3 pr-10 font-mono font-bold text-[10px] uppercase tracking-[0.08em] text-muted-foreground border-b border-border">
-        <Activity className="h-3 w-3 inline-block mr-1 -mt-0.5 text-muted-foreground" />
-        Activity ({task.logs!.length})
-      </h4>
-      <div className="pt-3">
-        <LogTimeline logs={task.logs!} />
-      </div>
-    </div>
+  // Who, where from, when, cost, context, Activity and the technical ids. The
+  // wide layout shows it as the right rail, the narrow one in its Details tab.
+  const detailsRail = (
+    <TaskDetailsRail
+      task={task}
+      agentName={agentName}
+      requestedByName={requestedByUserName}
+      agentNameFor={eventAgentName}
+      costs={costs}
+      costsLoading={costsLoading}
+      context={contextData}
+      contextLoading={contextLoading}
+    />
+  );
+
+  // A failed task's error, always open, with Retry and Get help. "Failed
+  // after" names the rail's run time, so the two never disagree.
+  const failureCallout = isFailed ? (
+    <TaskFailureCallout model={actions} duration={taskRunTime(task, costs)} />
   ) : null;
 
+  // THE MESSAGE BOX, one per layout tree, on the one draft. A finished task
+  // follows up: a child task for the same agent (a Slack task answers in the
+  // same thread). A live task steers. Any other task has no box.
+  const composerProps = isTerminal
+    ? {
+        targetTask: task,
+        canSteer: false,
+        followUpAgentId: task.agentId ?? undefined,
+        routeLabel: task.agentId ? `Routes to ${agentName ?? "the same agent"}` : undefined,
+        value: draft,
+        onValueChange: setDraft,
+        onCreated: announceFollowUp,
+        fullWidth: true,
+        className: "px-0 pt-0 pb-0",
+      }
+    : canSteer
+      ? {
+          targetTask: task,
+          canSteer: true,
+          followUpAgentId: task.agentId ?? undefined,
+          value: draft,
+          onValueChange: setDraft,
+          fullWidth: true,
+          className: "px-0 pt-0 pb-0",
+        }
+      : null;
+
+  // Narrow: the Outcome tab. The bottom bar holds the message box, so the
+  // tab has none.
   const outcomeContent = (
     <div className="space-y-2">
-      {isFailed && task.failureReason && (
-        <CollapsibleSection
-          variant="card"
-          title="Failure Reason"
-          icon={AlertTriangle}
-          iconColor="text-status-error-strong"
-          borderColor="border-status-error/30"
-          bgColor="bg-status-error/5"
-          defaultOpen
-        >
-          <div className="text-sm text-status-error-strong/80 leading-relaxed max-h-64 overflow-auto">
-            <MarkdownView text={task.failureReason ?? ""} />
-          </div>
-        </CollapsibleSection>
-      )}
+      {failureCallout}
 
       {hasOutput && (
         <CollapsibleSection
@@ -933,12 +558,15 @@ export default function TaskDetailPage() {
           iconColor={isCompleted ? "text-status-success-strong" : "text-muted-foreground"}
           borderColor={isCompleted ? "border-status-success/30" : "border-border"}
           bgColor={isCompleted ? "bg-status-success/5" : "bg-muted/20"}
+          headerClassName="min-h-11"
+          heading="h2"
           defaultOpen
         >
           <StructuredOutputContent
             citations={task.citations}
             raw={task.output ?? ""}
             maxH="max-h-[60vh]"
+            taskIds={knownTaskIds}
           />
         </CollapsibleSection>
       )}
@@ -951,10 +579,12 @@ export default function TaskDetailPage() {
           <p className="text-xs">No output available</p>
         </div>
       )}
+
+      {spawnedTasks}
     </div>
   );
 
-  // STEERING — no longer its own box above the logs. Delivered/handled rows
+  // STEERING, no longer its own box above the logs. Delivered/handled rows
   // interleave into the SESSION LOGS stream at `deliveredAt`, promoted/
   // cancelled at `createdAt`, and still-pending ones pin to the tail box above
   // the "Agent is working…" footer. `undefined` when gated off, which makes
@@ -963,342 +593,335 @@ export default function TaskDetailPage() {
     steerGate.supported && steeringEnabled ? (steeringMessages ?? []) : undefined;
   const hasSteering = (steeringForViewer?.length ?? 0) > 0;
 
-  // Render the viewer whenever there's anything to show — steering-only is a
+  // Render the viewer whenever there's anything to show, steering-only is a
   // real state right after the first message is queued but before the harness
   // has written any session log lines.
   const showLogViewer = hasSessionLogs || hasSteering;
 
-  const sessionLogsContent = showLogViewer ? (
-    <SessionLogViewer
-      logs={sessionLogs ?? []}
-      compactionSnapshots={contextData?.snapshots}
-      isRunning={taskIsRunning(task.status)}
-      steeringMessages={steeringForViewer}
-      className="flex-1 min-h-0"
-    />
-  ) : (
-    <div className="flex-1 flex items-center justify-center min-h-0">
-      <div className="text-center text-muted-foreground">
-        <Terminal className="h-8 w-8 mx-auto mb-2 opacity-30" />
-        <p className="text-xs">No session data available</p>
+  // Each layout passes its scroller as `scrollElement` (the wide column, the
+  // narrow root), so the log flows in the page scroller with no scroller of
+  // its own. `null` until the scroller mounts. The narrow layout asks for
+  // 44 px toolbar controls. The log has no visible title, so its h2 is for
+  // screen readers only.
+  const renderSessionLogs = (scrollElement: HTMLElement | null, touchTargets = false) => (
+    <>
+      <h2 className="sr-only">Session log</h2>
+      {renderSessionLogBody(scrollElement, touchTargets)}
+    </>
+  );
+  const renderSessionLogBody = (scrollElement: HTMLElement | null, touchTargets: boolean) =>
+    showLogViewer ? (
+      <SessionLogViewer
+        logs={sessionLogs ?? []}
+        compactionSnapshots={contextData?.snapshots}
+        isRunning={taskIsRunning(task.status)}
+        steeringMessages={steeringForViewer}
+        scrollElement={scrollElement}
+        touchTargets={touchTargets}
+        view={logView}
+        onViewChange={setLogView}
+        status={task.status}
+        endSummary={endSummary}
+      />
+    ) : sessionLogsLoading ? (
+      // Do not claim "no session log" before the read answers.
+      <Skeleton className="h-12 w-full shrink-0 rounded-lg" />
+    ) : (
+      // One line that says what the task waits for. Only a running task keeps
+      // the full height free for logs that are coming; any other gives it to
+      // the cards above.
+      <div
+        className={cn(
+          "flex items-center gap-3 rounded-lg border border-dashed border-border px-4 py-3",
+          taskIsRunning(task.status) ? "flex-1 min-h-40 justify-center" : "shrink-0",
+        )}
+      >
+        <TaskStatusIcon status={task.status} />
+        <p className="text-sm text-muted-foreground">{waiting}</p>
+      </div>
+    );
+
+  // The wide layout's live message box: it steers the task, as before. It
+  // sits under the log, folded or open.
+  const steerComposer =
+    composerProps && !isTerminal ? (
+      <CollapsibleComposerDock
+        collapsed={composerCollapsed}
+        onCollapsedChange={setComposerCollapsed}
+        collapsedLabel={
+          task.supportedSteerModes && task.supportedSteerModes.length === 0
+            ? "Add a follow-up for this task"
+            : task.status === "pending"
+              ? "Send a message to the queued task"
+              : task.status === "paused"
+                ? "Send a message to the paused task"
+                : "Send a message to the running task"
+        }
+      >
+        <TaskComposer {...composerProps} />
+      </CollapsibleComposerDock>
+    ) : null;
+
+  const headerTitle = taskListTitle(task);
+  // The server records the model it resolved when the task was claimed
+  // (`resolvedModel`, with the layer in `modelSource`). Older tasks and
+  // unclaimed ones fall back to the requested `model`, then to whatever the
+  // session_costs entries report.
+  const displayModel = taskDisplayModel(task) ?? costs?.[0]?.model;
+  const creatorName =
+    task.creatorAgentId && task.creatorAgentId !== task.agentId
+      ? (agentNames.get(task.creatorAgentId) ?? null)
+      : null;
+
+  // HERO CHIPS: status, model (with the effort icon when the task sets one)
+  // and agent, then the tags as plain text. The harness, type, priority and
+  // source are in Technical details. In the wide layout the model chip takes
+  // focus and its tooltip has the exact model id. The narrow layout shows the
+  // plain chip: a 44 px focus target would not fit the chip row, a hover
+  // tooltip would cover the tabs under it, and Details lists the model id.
+  const modelBadge = displayModel ? (
+    <>
+      <ModelLabel model={displayModel} />
+      <TaskEffortMark effort={task.effort} className="text-muted-foreground" />
+    </>
+  ) : task.modelTier ? (
+    <>
+      {modelTierLabel(task.modelTier)} tier
+      <TaskEffortMark effort={task.effort} className="text-muted-foreground" />
+    </>
+  ) : null;
+  // `outline-none`: the chips show the Badge's amber focus ring only, not the
+  // browser outline on top of it.
+  const modelChipClass = "h-6 max-w-full min-w-0 gap-1.5 px-2 outline-none";
+  const wideModelChip = displayModel ? (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Badge variant="outline" tabIndex={0} className={modelChipClass}>
+          {modelBadge}
+        </Badge>
+      </TooltipTrigger>
+      <TooltipContent side="bottom" align="start" className="text-left">
+        <div className="font-mono">{displayModel}</div>
+        {describeModelResolution(task).map((line) => (
+          <div key={line}>{line}</div>
+        ))}
+        {task.effort ? <div>Effort: {REASONING_EFFORT_LABEL[task.effort]}</div> : null}
+      </TooltipContent>
+    </Tooltip>
+  ) : modelBadge ? (
+    <Badge variant="outline" className={modelChipClass}>
+      {modelBadge}
+    </Badge>
+  ) : null;
+  const narrowModelChip = modelBadge ? (
+    <Badge variant="outline" className={modelChipClass}>
+      {modelBadge}
+    </Badge>
+  ) : null;
+  const agentChip = task.agentId ? (
+    <Badge variant="outline" asChild className="h-6 max-w-full gap-1.5 pr-2 pl-0.5 outline-none">
+      <Link to={`/agents/${task.agentId}`}>
+        <AgentAvatar
+          agentId={task.agentId}
+          agentName={agentName}
+          size="xs"
+          className="h-4.5 w-4.5 shadow-none"
+        />
+        <span className="sr-only">Agent: </span>
+        <span className="min-w-0 truncate">{agentName ?? `${task.agentId.slice(0, 8)}…`}</span>
+      </Link>
+    </Badge>
+  ) : null;
+  const renderTagsLine = (className?: string) =>
+    task.tags && task.tags.length > 0 ? (
+      <span
+        className={cn(
+          "ml-1 inline-flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground",
+          className,
+        )}
+      >
+        <Tag aria-hidden className="size-3.5 shrink-0" />
+        <span className="sr-only">Tags: </span>
+        <span className="min-w-0 truncate">{task.tags.join(", ")}</span>
+      </span>
+    ) : null;
+  const sourceLine = (
+    <TaskSourceLine task={task} requestedByName={requestedByUserName} creatorName={creatorName} />
+  );
+
+  // WIDE HERO: the title, where the task came from, and the chips, with the
+  // actions right of the title.
+  const wideHero = (
+    <div className="grid shrink-0 grid-cols-[minmax(0,1fr)_auto] gap-x-6 gap-y-2.5">
+      {/* The page's one heading. The breadcrumb truncates the title (and
+          collapses to a few characters on a phone), so it cannot carry it. */}
+      <div className="min-w-0">
+        <TaskHeading title={headerTitle} />
+      </div>
+      <TaskActions model={actions} className="row-span-3 self-start justify-end" />
+      {sourceLine}
+      <div className="flex flex-wrap items-center gap-2">
+        <StatusBadge status={task.status} size="md" />
+        {wideModelChip}
+        {agentChip}
+        {renderTagsLine()}
       </div>
     </div>
   );
 
-  const steerComposer = canSteer ? (
-    <CollapsibleComposerDock
-      collapsed={composerCollapsed}
-      onCollapsedChange={setComposerCollapsed}
-      collapsedLabel={
-        task.supportedSteerModes && task.supportedSteerModes.length === 0
-          ? "Add a follow-up for this task"
-          : task.status === "pending"
-            ? "Send a message to the queued task"
-            : "Send a message to the running task"
-      }
-    >
-      <SteerComposer
-        taskId={task.id}
-        supportedSteerModes={task.supportedSteerModes}
-        providerLabel={task.provider}
-        taskStatus={task.status}
-        value={steerDraft}
-        onValueChange={setSteerDraft}
-        fullWidth
-        className="px-0 pt-0 pb-0"
-      />
-    </CollapsibleComposerDock>
-  ) : null;
-
-  // HERO — status badge + tags / priority / source / provider / model badges +
-  // collapsible description + action buttons. Rendered inside the center column
-  // on desktop (lg+) and above the Tabs on mobile/tablet (<lg). Same JSX in both
-  // places — single-use; not extractable per the "appears in 2+ places" rule.
-  const secondaryChips = [
-    task.taskType ? (
-      <Badge key="type" variant="outline" size="tag">
-        {task.taskType}
-      </Badge>
-    ) : null,
-    task.priority !== undefined ? (
-      <Badge
-        key="priority"
-        variant="outline"
-        className="text-[9px] px-1.5 py-0 h-5 font-mono leading-none items-center"
-      >
-        P{task.priority}
-      </Badge>
-    ) : null,
-    ...(task.tags ?? []).map((tag) => (
-      <Badge key={`tag-${tag}`} variant="outline" size="tag">
-        {tag}
-      </Badge>
-    )),
-    task.source ? (
-      <Badge key="source" variant="outline" size="tag">
-        {task.source}
-      </Badge>
-    ) : null,
-    task.effort ? (
-      <Badge
-        key="effort"
-        variant="outline"
-        className="text-[9px] px-1.5 py-0 h-5 font-mono leading-none items-center gap-1"
-      >
-        <Zap className="h-2.5 w-2.5" />
-        effort: {task.effort}
-      </Badge>
-    ) : null,
-  ].filter((chip) => chip !== null);
-
-  const heroBlock = (
-    // Phase 17 — generous padding around the badges/description/actions block
-    // ("the task details part on top of the logs"). Brand kit's
-    // `preview/task-detail.html` `.header { padding: 14px 18px 12px }` informs
-    // the new px-4/py-4 values; the `space-y-3` opens up vertical breathing
-    // between badge row → description → action row.
-    <div className="space-y-3 px-4 pt-4 pb-5 shrink-0">
-      <div className="flex items-center gap-2 flex-wrap">
-        <StatusBadge status={task.status} size="md" />
-        {task.provider && (
-          <Badge
-            variant="outline"
-            className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase"
-          >
-            {task.provider}
-            {task.harnessVariant ? (
-              <span className="opacity-60">
-                {" · "}
-                {task.harnessVariant === "bridge"
-                  ? `bridge${task.harnessVariantMeta?.version ? ` ${task.harnessVariantMeta.version}` : ""}`
-                  : `stock${task.harnessVariantMeta?.version ? ` ${task.harnessVariantMeta.version}` : ""}`}
-              </span>
-            ) : task.harnessVariantMeta?.version ? (
-              <span className="opacity-60">
-                {" · "}
-                {task.harnessVariantMeta.version}
-              </span>
-            ) : null}
-            {task.providerMeta &&
-            "transport" in task.providerMeta &&
-            task.providerMeta.transport === "sdk" ? (
-              <span className="opacity-60" title="Ran through the Claude Agent SDK transport">
-                {" · "}
-                sdk
-              </span>
-            ) : null}
-          </Badge>
-        )}
-        {(() => {
-          // The server records the model it resolved when the task was claimed
-          // (`resolvedModel`, with the layer in `modelSource`). Older tasks and
-          // unclaimed ones fall back to the requested `model`, then to whatever
-          // the session_costs entries report.
-          const displayModel = taskDisplayModel(task) ?? costs?.[0]?.model;
-          if (displayModel) {
-            const badge = (
-              <Badge
-                variant="outline"
-                className="text-[9px] px-1.5 py-0 h-5 font-mono leading-none items-center"
-              >
-                {displayModel}
-              </Badge>
-            );
-            const lines = describeModelResolution(task);
-            if (lines.length === 0) return badge;
-            return (
-              <Tooltip>
-                <TooltipTrigger asChild>{badge}</TooltipTrigger>
-                <TooltipContent side="bottom" align="start">
-                  {lines.map((line) => (
-                    <div key={line}>{line}</div>
-                  ))}
-                </TooltipContent>
-              </Tooltip>
-            );
-          }
-          return task.modelTier ? (
-            <Badge
-              variant="outline"
-              className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center"
-            >
-              tier: {modelTierLabel(task.modelTier)}
-            </Badge>
-          ) : null;
-        })()}
-        {/* Routing metadata (type, priority, tags, source, effort) sits
-            behind one "+N" chip: eight equal-weight chips pushed the task
-            text to the fourth row on a phone. */}
-        {secondaryChips.length > 0 ? (
-          <Popover>
-            <PopoverTrigger asChild>
-              <button
-                type="button"
-                className="rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
-                aria-label={`Show ${secondaryChips.length} more task labels`}
-              >
-                <Badge variant="outline" size="tag" className="hover:bg-accent">
-                  +{secondaryChips.length}
-                </Badge>
-              </button>
-            </PopoverTrigger>
-            <PopoverContent align="start" className="w-auto max-w-xs p-2">
-              <div className="flex flex-wrap gap-1.5">{secondaryChips}</div>
-            </PopoverContent>
-          </Popover>
-        ) : null}
+  // NARROW HERO: compact, and it scrolls away. A back arrow and the "..."
+  // menu (every action but the message box), then the title, the source
+  // line, status and model. The agent is in Details. The tags truncate on the
+  // chip row instead of wrapping to a second one.
+  const narrowHero = (
+    <div className="flex flex-col gap-1 pb-3">
+      <div className="-mx-2 flex items-center justify-between gap-2">
+        <Button
+          variant="ghost"
+          asChild
+          className="h-11 gap-1.5 px-2 text-muted-foreground hover:text-foreground"
+        >
+          <Link to="/tasks">
+            <ArrowLeft />
+            Tasks
+          </Link>
+        </Button>
+        <TaskActionsMenu model={actions} />
       </div>
-      <CollapsibleDescription text={task.task} collapsedClassName="line-clamp-3 lg:line-clamp-1" />
-      <div className="flex items-center gap-2">
-        {(canCancel || canPause || canResume) && (
-          <div className="flex items-center gap-1.5 shrink-0">
-            {canPause && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => pauseTask.mutate(task.id)}
-                disabled={pauseTask.isPending}
-              >
-                <Pause className="h-3 w-3 mr-1" />
-                Pause
-              </Button>
-            )}
-            {canResume && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => resumeTask.mutate(task.id)}
-                disabled={resumeTask.isPending}
-              >
-                <Play className="h-3 w-3 mr-1" />
-                Resume
-              </Button>
-            )}
-            {canCancel && (
-              <AlertDialog>
-                <AlertDialogTrigger asChild>
-                  <Button variant="destructive-outline" size="sm">
-                    <Ban className="h-3 w-3 mr-1" />
-                    Cancel
-                  </Button>
-                </AlertDialogTrigger>
-                <AlertDialogContent>
-                  <AlertDialogHeader>
-                    <AlertDialogTitle>Cancel Task</AlertDialogTitle>
-                    <AlertDialogDescription>
-                      Are you sure you want to cancel this task? This action cannot be undone.
-                    </AlertDialogDescription>
-                  </AlertDialogHeader>
-                  <AlertDialogFooter>
-                    <AlertDialogCancel>Keep Task</AlertDialogCancel>
-                    <AlertDialogAction
-                      variant="destructive"
-                      onClick={() =>
-                        cancelTask.mutate({ id: task.id, reason: "Cancelled from dashboard" })
-                      }
-                    >
-                      Cancel Task
-                    </AlertDialogAction>
-                  </AlertDialogFooter>
-                </AlertDialogContent>
-              </AlertDialog>
-            )}
-          </div>
-        )}
+      <TaskHeading title={headerTitle} />
+      {sourceLine}
+      <div className="flex min-w-0 items-center gap-2">
+        <StatusBadge status={task.status} size="md" />
+        {narrowModelChip}
+        {renderTagsLine("min-w-16 flex-1 basis-0")}
       </div>
     </div>
   );
 
   return (
-    <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
-      <TaskFailureHelpDialog task={task} />
-      {/* Breadcrumb — fixed at top across all breakpoints */}
-      <div className="px-1 pb-2 shrink-0">
-        <button
-          type="button"
-          onClick={() => navigate("/tasks")}
-          className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
-        >
-          <ArrowLeft className="h-3 w-3" /> Back to Tasks
-        </button>
-      </div>
+    // The layout follows the page's own width, not the window's: a docked
+    // context panel or an open sidebar can leave a wide window with a narrow
+    // page.
+    <div className="@container flex flex-col flex-1 min-h-0">
+      {isFailed ? (
+        <TaskFailureHelpDialog
+          task={task}
+          open={helpOpen}
+          onOpenChange={setHelpOpen}
+          returnFocus={helpOpener}
+        />
+      ) : null}
 
-      {/* Mobile / tablet (<lg): hero above tabs. Tabs hold left-rail meta in
-          Details (with right-rail Activity + Cost merged in so nothing is lost),
-          Outcome card, and Session Logs. Below lg the 3-column grid does not
-          fit; we fall back to the previous tabbed layout, extended to include
-          the right-rail content. */}
-      <div className="lg:hidden flex flex-col flex-1 min-h-0">
-        {heroBlock}
-        <Separator className="shrink-0" />
-        <Tabs
-          value={activeTab}
-          onValueChange={setActiveTab}
-          className="flex flex-col flex-1 min-h-0"
-        >
-          <TabsList className="shrink-0 mx-1 mt-2">
-            <TabsTrigger value="details">Details</TabsTrigger>
-            <TabsTrigger value="outcome">Outcome</TabsTrigger>
-            <TabsTrigger value="logs">Session Logs</TabsTrigger>
-          </TabsList>
-          <TabsContent value="details" className="flex-1 overflow-y-auto px-1 py-3 space-y-4">
-            {leftRailContent}
-            {rightRailContent}
-          </TabsContent>
-          <TabsContent value="outcome" className="flex-1 overflow-y-auto px-1 py-3">
-            {outcomeContent}
-          </TabsContent>
-          <TabsContent value="logs" className="flex flex-col flex-1 min-h-0 px-1 py-3 gap-3">
-            {sessionLogsContent}
-            {steerComposer}
-          </TabsContent>
-        </Tabs>
-      </div>
-
-      {/* Desktop (lg+): 3-column meta-rail layout per
-          ~/Downloads/swarm-design-system/preview/task-detail.html and
-          preview/detail-page-template.html. Both rails at 280px (canonical
-          brand-kit width). The left meta-sidebar remains page-specific (no
-          other detail page has dense meta data); the right rail comes from
-          the <DetailPageBody> contract. Phase 17 — the right rail collapses
-          to a 36px gutter (just the toggle button) so the center column can
-          take the freed width. State persists in localStorage. */}
+      {/* Narrow (under 60rem of page width): one scroller from under the app
+          header to the window bottom (it bleeds into <main>'s padding). The
+          hero scrolls away. The tabs stick to the top and the message box to
+          the bottom, on every tab. The log flows in this scroller: the tabs
+          and bar heights go to it as CSS variables, so its toolbar sticks
+          under the tabs. */}
       <div
+        ref={setNarrowScroller}
+        style={
+          {
+            "--log-sticky-top": `${narrowTabsHeight}px`,
+            "--log-sticky-bottom": `${narrowBarHeight}px`,
+          } as CSSProperties
+        }
         className={cn(
-          // The rail collapse animates the grid track itself (browsers tween
-          // grid-template-columns) — swift, like every rail (DESIGN.md § Motion).
-          "hidden lg:grid flex-1 min-h-0 overflow-hidden",
-          "transition-[grid-template-columns] duration-200 ease-swift motion-reduce:transition-none",
-          railCollapsed ? "lg:grid-cols-[280px_1fr_36px]" : "lg:grid-cols-[280px_1fr_280px]",
+          "@min-[60rem]:hidden flex min-h-0 flex-1 flex-col overflow-y-auto [scrollbar-gutter:stable]",
+          MAIN_BLEED,
         )}
       >
-        {/* Left rail — meta info + SCM card + Dependencies + Progress + Context budget + Session Cost */}
-        <aside className="border-r border-border py-3 px-1 pr-3 overflow-y-auto min-h-0">
-          {leftRailContent}
-        </aside>
-
-        {/* Center — hero (badges + description + actions) + Failure / Output cards + SessionLogViewer */}
-        <section className="flex flex-col min-h-0 overflow-hidden">
-          {heroBlock}
-          <Separator className="shrink-0" />
-          {/* Phase 17 — bumped padding from py-3 px-3 gap-2 to py-4 px-4 gap-3
-              to match brand-kit `.body { padding: 14px 18px }` and give the
-              SessionLogViewer + Failure / Output cards more breathing room. */}
-          <div className="flex flex-col flex-1 min-h-0 overflow-hidden py-4 px-4 gap-3">
-            {isFailed && task.failureReason && (
-              <CollapsibleSection
-                variant="card"
-                title="Failure Reason"
-                icon={AlertTriangle}
-                iconColor="text-status-error-strong"
-                borderColor="border-status-error/30"
-                bgColor="bg-status-error/5"
-              >
-                <div className="text-sm text-status-error-strong/80 leading-relaxed max-h-48 overflow-auto">
-                  <MarkdownView text={task.failureReason ?? ""} />
-                </div>
-              </CollapsibleSection>
+        <div ref={narrowHeroRef} className={MAIN_GUTTER_X}>
+          {narrowHero}
+        </div>
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 gap-0">
+          <div
+            ref={narrowTabsRef}
+            className={cn(
+              "sticky top-0 z-20 border-b border-border-subtle bg-background py-2",
+              MAIN_GUTTER_X,
             )}
+          >
+            <TabsList className="w-full group-data-[orientation=horizontal]/tabs:h-auto">
+              <TabsTrigger value="outcome" className="h-11">
+                Outcome
+              </TabsTrigger>
+              <TabsTrigger value="logs" className="h-11">
+                Log
+              </TabsTrigger>
+              <TabsTrigger value="details" className="h-11">
+                Details
+              </TabsTrigger>
+            </TabsList>
+          </div>
+          {/* Each panel is a Tab stop (Radix), so it shows the focus ring. */}
+          <TabsContent value="outcome" className={cn("py-3", MAIN_GUTTER_X, PANEL_FOCUS_RING)}>
+            {outcomeContent}
+          </TabsContent>
+          <TabsContent
+            value="logs"
+            className={cn("flex flex-col py-3", MAIN_GUTTER_X, PANEL_FOCUS_RING)}
+          >
+            {renderSessionLogs(narrowScroller, true)}
+          </TabsContent>
+          <TabsContent value="details" className={cn("py-3", MAIN_GUTTER_X, PANEL_FOCUS_RING)}>
+            {detailsRail}
+          </TabsContent>
+        </Tabs>
+        {composerProps ? (
+          // `env(safe-area-inset-bottom)` keeps the box above the home
+          // indicator when the page runs edge to edge.
+          <div
+            ref={narrowBarRef}
+            className={cn(
+              "sticky bottom-0 z-20 border-t border-border bg-background pt-2 pb-[calc(env(safe-area-inset-bottom)+0.5rem)]",
+              MAIN_GUTTER_X,
+            )}
+          >
+            <TaskComposer {...composerProps} bar />
+          </div>
+        ) : null}
+      </div>
+
+      {/* Wide: a scrolling center column and the details rail. The grid
+          bleeds into <main>'s vertical padding, so the column scrolls from
+          under the app header down to the window edge and the log gets those
+          pixels. */}
+      <div
+        className={cn(
+          "hidden @min-[60rem]:grid flex-1 min-h-0 grid-cols-[minmax(0,1fr)_300px]",
+          MAIN_BLEED_Y,
+        )}
+      >
+        {/* The column is the only scroller. The log flows in it, and its
+            toolbar, minimap and live footer stick under the bar and above the
+            message box: both heights go to the log as CSS variables. */}
+        <section
+          ref={centerScrollerRef}
+          style={
+            {
+              "--log-sticky-top": STICKY_BAR_HEIGHT,
+              "--log-sticky-bottom": `${composerHeight}px`,
+            } as CSSProperties
+          }
+          className="relative min-h-0 overflow-y-auto [scrollbar-gutter:stable]"
+        >
+          <TaskStickyBar
+            visible={heroScrolledPast}
+            title={headerTitle}
+            status={task.status}
+            model={displayModel}
+            effort={task.effort}
+            action={<TaskPrimaryAction model={actions} />}
+            onTitleClick={() => scrollToTop(centerScroller)}
+          />
+          <div className="flex flex-col gap-3 pt-6 pr-6 pb-3">
+            <div className="pb-2">
+              {wideHero}
+              <div ref={heroEndRef} aria-hidden className="h-px" />
+            </div>
+            <Separator />
+            {failureCallout}
 
             {hasOutput && (
               <CollapsibleSection
@@ -1308,76 +931,50 @@ export default function TaskDetailPage() {
                 iconColor={isCompleted ? "text-status-success-strong" : "text-muted-foreground"}
                 borderColor={isCompleted ? "border-status-success/30" : "border-border"}
                 bgColor={isCompleted ? "bg-status-success/5" : "bg-muted/20"}
+                heading="h2"
+                // A finished task is opened for its result; keep it collapsed
+                // while the task runs so the live log stays in view.
+                defaultOpen={isTerminal}
               >
+                {/* No height cap: the column scrolls. */}
                 <StructuredOutputContent
                   citations={task.citations}
                   raw={task.output ?? ""}
-                  maxH="max-h-48"
+                  maxH=""
+                  taskIds={knownTaskIds}
                 />
               </CollapsibleSection>
             )}
 
             <TaskAttachmentsSection taskId={task.id} attachments={task.attachments} />
             <TaskCitationsSection output={task.output ?? ""} citations={task.citations ?? []} />
+            {spawnedTasks}
+            {/* FOLLOW UP: a finished task gets the message box right under
+                its outcome. */}
+            {composerProps && isTerminal ? (
+              <div ref={wideFollowUpBoxRef} className="shrink-0">
+                <TaskComposer {...composerProps} />
+              </div>
+            ) : null}
 
-            {sessionLogsContent}
-
-            {steerComposer}
+            {renderSessionLogs(centerScroller)}
+            {steerComposer ? (
+              // The message box sticks to the bottom of the column. `-my-3
+              // py-3` moves the column gap and the bottom padding into the
+              // sticky box: the stuck box keeps both, and the scroll height
+              // does not change.
+              <div ref={composerRef} className="sticky bottom-0 z-10 -my-3 bg-background py-3">
+                {steerComposer}
+              </div>
+            ) : null}
           </div>
         </section>
 
-        {/* Right rail — Activity timeline (sticky header). Collapsible: when
-            collapsed, only the toggle chevron shows; click to re-expand.
-            Phase 18 — moved `py-3` off the aside (the sticky h4 now owns the
-            top zone via its own `pt-3 -mx-3 px-3 bg-background`); kept `pb-3`
-            so the timeline still gets bottom breathing room. */}
         <aside
-          className={cn(
-            "border-l border-border min-h-0 relative",
-            railCollapsed ? "overflow-hidden" : "overflow-y-auto pb-3 px-3",
-          )}
+          aria-label="Task details"
+          className="min-h-0 overflow-y-auto border-l border-border py-6 pl-5"
         >
-          {/* Phase 19 — chevron must paint above the sticky Activity heading
-              (z-30 from Phase 18). Bumped to z-40 so the toggle stays visible
-              while the heading still covers timeline rows scrolling past it.
-              The h4's `pr-10` reserves visual room for the chevron so they
-              don't overlap horizontally even with the higher z-index. */}
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                type="button"
-                onClick={toggleRailCollapsed}
-                aria-label={railCollapsed ? "Expand activity rail" : "Collapse activity rail"}
-                className={cn(
-                  "absolute z-40 top-2 h-6 w-6 inline-flex cursor-pointer items-center justify-center rounded-md border border-border bg-background text-muted-foreground hover:bg-accent hover:text-foreground transition-colors",
-                  railCollapsed ? "left-1/2 -translate-x-1/2" : "right-2",
-                )}
-              >
-                {railCollapsed ? (
-                  <ChevronLeft className="h-3.5 w-3.5" />
-                ) : (
-                  <ChevronRight className="h-3.5 w-3.5" />
-                )}
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="left">
-              {railCollapsed ? "Activity" : "Collapse activity"}
-            </TooltipContent>
-          </Tooltip>
-          {/* Fade the timeline while the grid track tweens — without this the
-              content pops out a frame before the column starts shrinking. */}
-          <AnimatePresence initial={false}>
-            {!railCollapsed && (
-              <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0, transition: { duration: 0.12 } }}
-                transition={{ duration: 0.15 }}
-              >
-                {rightRailContent}
-              </motion.div>
-            )}
-          </AnimatePresence>
+          {detailsRail}
         </aside>
       </div>
     </div>

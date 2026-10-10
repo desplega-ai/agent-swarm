@@ -10,8 +10,9 @@ ENV EVALS_PORT=4801 \
 # Build with the repo root as context:
 #   docker build -f apps/evals/Dockerfile .
 #
-# The eval runner imports root src/e2b helpers and the models.dev pricing
-# snapshot, so the image needs those repo-root files in addition to evals/.
+# The eval runner imports root src/e2b helpers, the codex ChatGPT OAuth helpers
+# (src/swarm/codex-auth.ts) and the models.dev pricing snapshot, so the image
+# needs those repo-root files in addition to evals/.
 #
 # evals is a member of the root Bun workspace: its deps are recorded ONLY in the
 # root bun.lock (there is no evals/bun.lock anymore). Install at the workspace
@@ -23,12 +24,20 @@ COPY apps/ui/package.json ./apps/ui/
 COPY apps/templates-ui/package.json ./apps/templates-ui/
 COPY apps/evals/package.json ./apps/evals/
 COPY packages/model-catalog/package.json ./packages/model-catalog/
-RUN bun install --frozen-lockfile
+COPY packages/model-routing/package.json ./packages/model-routing/
+# Retry transient extraction failures with a clean dependency tree.
+RUN for attempt in 1 2 3; do \
+        bun install --frozen-lockfile && break; \
+        if [ "$attempt" -eq 3 ]; then exit 1; fi; \
+        rm -rf node_modules && sleep 2 || exit 1; \
+    done
 COPY packages/model-catalog ./packages/model-catalog
+COPY packages/model-routing ./packages/model-routing
 
 COPY apps/evals ./apps/evals
 COPY src/e2b ./src/e2b
 COPY src/utils ./src/utils
+COPY src/providers/codex-oauth ./src/providers/codex-oauth
 COPY src/be/modelsdev-cache.json ./src/be/modelsdev-cache.json
 
 WORKDIR /app/apps/evals

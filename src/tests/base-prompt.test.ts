@@ -1135,6 +1135,19 @@ describe("getBasePrompt: harness tool discovery", () => {
     expect(result).toContain("Swarm tools are already in your tool list.");
   });
 
+  test("amp gets its own guidance: tool_search plus code_exec, underscored names", async () => {
+    const result = await getBasePrompt({
+      ...minimalArgs,
+      provider: "amp",
+      traits: { ...localTraits, hasToolSearch: true },
+    });
+    expect(result).not.toContain(deferred);
+    expect(result).not.toContain("Swarm tools are already in your tool list.");
+    expect(result).toContain("`tool_search` and `code_exec`");
+    expect(result).toContain("`store-progress` is `store_progress`");
+    expect(result).toContain('import { store_progress } from "agent-swarm"');
+  });
+
   test("omitted tool-search capability defaults to direct tools", async () => {
     const result = await getBasePrompt({ ...minimalArgs, traits: localTraits });
     expect(result).not.toContain(deferred);

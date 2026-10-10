@@ -21,7 +21,7 @@ import { isEnvFlagEnabled } from "../utils/env-flag";
 import { getDbClient } from "./db";
 
 type AuditRow = {
-  principalType: "agent" | "user" | "operator";
+  principalType: "agent" | "user" | "operator" | "guest";
   principalId: string | null;
   originatorUserId: string | null;
   verb: string;
@@ -61,6 +61,7 @@ function principalIdOf(principal: RbacCheck["principal"]): string | null {
     case "user":
       return principal.userId;
     case "operator":
+    case "guest":
       return null;
   }
 }

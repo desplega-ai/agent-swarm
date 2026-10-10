@@ -11,6 +11,7 @@
  * tracking.
  */
 
+import { scrubSecrets } from "../utils/secret-scrubber";
 import {
   createSession,
   type DevinSessionResponse,
@@ -234,9 +235,12 @@ class DevinSession implements ProviderSession {
   // -------------------------------------------------------------------------
 
   private emit(event: ProviderEvent): void {
+    // Devin messages and structured output are model-authored free text.
+    // Scrub the complete event once at the log and listener egress boundary.
+    const scrubbed = JSON.parse(scrubSecrets(JSON.stringify(event))) as ProviderEvent;
     try {
       this.logFileHandle.write(
-        `${JSON.stringify({ ...event, timestamp: new Date().toISOString() })}\n`,
+        `${JSON.stringify({ ...scrubbed, timestamp: new Date().toISOString() })}\n`,
       );
     } catch {
       // Log writer failure must not break the event stream.
@@ -244,13 +248,13 @@ class DevinSession implements ProviderSession {
     if (this.listeners.length > 0) {
       for (const listener of this.listeners) {
         try {
-          listener(event);
+          listener(scrubbed);
         } catch {
           // Swallow listener errors.
         }
       }
     } else {
-      this.eventQueue.push(event);
+      this.eventQueue.push(scrubbed);
     }
   }
 
@@ -336,7 +340,7 @@ class DevinSession implements ProviderSession {
     // in pollMessages() in a format the viewer understands.
     try {
       this.logFileHandle.write(
-        `${JSON.stringify({ type: "raw_log", content: JSON.stringify(response), timestamp: new Date().toISOString() })}\n`,
+        `${JSON.stringify({ type: "raw_log", content: scrubSecrets(JSON.stringify(response)), timestamp: new Date().toISOString() })}\n`,
       );
     } catch {
       // Log writer failure must not break the event stream.

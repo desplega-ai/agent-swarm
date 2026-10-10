@@ -907,3 +907,44 @@ describe("script MCP connections", () => {
     }
   });
 });
+
+describe("script-connections MCP delete", () => {
+  test("lead deletes a connection and its inline secret; unknown id and non-lead fail", async () => {
+    const lead = await createAgent({ name: "mcp-delete-lead", isLead: true, status: "idle" });
+    const worker = await createAgent({ name: "mcp-delete-worker", isLead: false, status: "idle" });
+    const connection = await upsertScriptConnection({
+      slug: "mcpDeleteVendor",
+      kind: "graphql",
+      baseUrl: "https://api.vendor.test/graphql",
+      allowedHosts: ["api.vendor.test"],
+      auth: { type: "bearer", secret: "example-mcp-delete-tok" },
+    });
+
+    const denied = (await scriptConnectionsTool().handler(
+      { action: "delete", id: connection.id },
+      meta(worker.id),
+    )) as ToolResult;
+    expect(denied.structuredContent.success).toBe(false);
+    expect(await getScriptConnectionById(connection.id)).not.toBeNull();
+
+    const result = (await scriptConnectionsTool().handler(
+      { action: "delete", id: connection.id },
+      meta(lead.id),
+    )) as ToolResult;
+    expect(result.structuredContent.success).toBe(true);
+    expect(result.structuredContent.connections.map((c) => c.id)).not.toContain(connection.id);
+    expect(await getScriptConnectionById(connection.id)).toBeNull();
+    const secretRow = await getDbClient().get<{ key: string }>(
+      "SELECT key FROM swarm_config WHERE key = ?",
+      ["connection.mcpDeleteVendor.secret"],
+    );
+    expect(secretRow).toBeNull();
+
+    const again = (await scriptConnectionsTool().handler(
+      { action: "delete", id: connection.id },
+      meta(lead.id),
+    )) as ToolResult;
+    expect(again.structuredContent.success).toBe(false);
+    expect(again.structuredContent.message).toContain("not found");
+  });
+});

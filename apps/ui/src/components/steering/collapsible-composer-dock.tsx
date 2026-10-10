@@ -1,12 +1,12 @@
 /**
- * Steering — collapsible shell around the task-detail composer dock.
+ * Steering: collapsible shell around the task-detail composer dock.
  *
  * The task-detail page is log-dominated: on short viewports the composer eats
  * height the user would rather give to SESSION LOGS. This wraps it in a slim
  * toggle bar so the dock can be folded away and restored, with the preference
  * persisted per-deployment via `useLocalToggle`.
  *
- * Deliberately NOT used on the sessions surface — that page is a chat, where
+ * Deliberately NOT used on the sessions surface: that page is a chat, where
  * a permanently visible composer is the point.
  */
 
@@ -42,9 +42,9 @@ export function CollapsibleComposerDock({
         )}
       >
         <MessageSquareShare className="size-3 shrink-0" aria-hidden="true" />
-        <span className="font-mono text-[10px] uppercase tracking-[0.08em]">Message</span>
+        <span className="font-mono text-meta uppercase tracking-[0.08em]">Message</span>
         {collapsed ? (
-          <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground/80">
+          <span className="min-w-0 flex-1 truncate text-meta text-muted-foreground">
             {collapsedLabel}
           </span>
         ) : null}

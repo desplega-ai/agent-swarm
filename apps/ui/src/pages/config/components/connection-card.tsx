@@ -82,6 +82,7 @@ export function ConnectionCard({
                 variant="outline"
                 className="h-8 w-8 border-border/60"
                 onClick={onEdit}
+                aria-label={`Edit connection ${connection.name}`}
               >
                 <Pencil className="h-3.5 w-3.5" />
               </Button>
@@ -91,6 +92,7 @@ export function ConnectionCard({
                 variant="destructive-outline"
                 className="h-8 w-8"
                 onClick={onDelete}
+                aria-label={`Delete connection ${connection.name}`}
               >
                 <Trash2 className="h-3.5 w-3.5" />
               </Button>

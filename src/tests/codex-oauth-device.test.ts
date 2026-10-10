@@ -1,15 +1,8 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { createServer, type Server } from "node:http";
 import { decryptSecret, encryptSecret, getEncryptionKey } from "../be/crypto";
-import {
-  closeDb,
-  getDbClient,
-  getKv,
-  getSwarmConfigs,
-  initDb,
-  upsertKv,
-  upsertSwarmConfig,
-} from "../be/db";
+import { closeDb, getDbClient, getSwarmConfigs, initDb, upsertSwarmConfig } from "../be/db";
+import { getCodexDeviceFlow, upsertCodexDeviceFlow } from "../be/db/codex-oauth-device-flows";
 import type { OnboardingState } from "../be/onboarding";
 import { handleCodexOAuthDevice } from "../http/codex-oauth-device";
 import { handleCore } from "../http/core";
@@ -97,7 +90,7 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
-  await getDbClient().run("DELETE FROM kv_entries");
+  await getDbClient().run("DELETE FROM codex_oauth_device_flows");
   await getDbClient().run("DELETE FROM swarm_config");
   fetchImpl = async () => {
     throw new Error("Unexpected fetch");
@@ -221,8 +214,8 @@ describe("Codex device HTTP routes", () => {
 
     const started = await startFlow();
     expect(Number.isNaN(Date.parse(started.expiresAt))).toBe(false);
-    const encrypted = await getKv("codex-oauth-device", started.flowId);
-    expect(encrypted?.value).not.toContain("device-auth-full");
+    const encrypted = await getCodexDeviceFlow(started.flowId);
+    expect(encrypted?.state).not.toContain("device-auth-full");
 
     const poll = await request(`/api/codex-oauth/device/${started.flowId}/poll`);
     expect(await poll.json()).toEqual({ status: "complete", slot: 1 });
@@ -318,17 +311,15 @@ describe("Codex device HTTP routes", () => {
     const secondResponse = await request(path);
     const secondBody = await secondResponse.json();
     const callsBeforeRelease = { pollCalls, exchangeCalls };
-    const entry = await getKv("codex-oauth-device", started.flowId);
-    const state = JSON.parse(decryptSecret(String(entry!.value), getEncryptionKey())) as Record<
+    const entry = await getCodexDeviceFlow(started.flowId);
+    const state = JSON.parse(decryptSecret(entry!.state, getEncryptionKey())) as Record<
       string,
       unknown
     >;
     state.pollLeaseExpiresAt = Date.now() - 1;
-    await upsertKv({
-      namespace: "codex-oauth-device",
-      key: started.flowId,
-      value: encryptSecret(JSON.stringify(state), getEncryptionKey()),
-      valueType: "string",
+    await upsertCodexDeviceFlow({
+      flowId: started.flowId,
+      state: encryptSecret(JSON.stringify(state), getEncryptionKey()),
       expiresAt: Number(state.expiresAt),
     });
     releaseExchange();
@@ -359,19 +350,17 @@ describe("Codex device HTTP routes", () => {
     }) as typeof fetch;
 
     const started = await startFlow();
-    const entry = await getKv("codex-oauth-device", started.flowId);
-    const state = JSON.parse(decryptSecret(String(entry!.value), getEncryptionKey())) as Record<
+    const entry = await getCodexDeviceFlow(started.flowId);
+    const state = JSON.parse(decryptSecret(entry!.state, getEncryptionKey())) as Record<
       string,
       unknown
     >;
     state.lastPolledAt = Date.now() - 10_000;
     state.pollLeaseId = crypto.randomUUID();
     state.pollLeaseExpiresAt = Date.now() - 1;
-    await upsertKv({
-      namespace: "codex-oauth-device",
-      key: started.flowId,
-      value: encryptSecret(JSON.stringify(state), getEncryptionKey()),
-      valueType: "string",
+    await upsertCodexDeviceFlow({
+      flowId: started.flowId,
+      state: encryptSecret(JSON.stringify(state), getEncryptionKey()),
       expiresAt: Number(state.expiresAt),
     });
 
@@ -380,9 +369,9 @@ describe("Codex device HTTP routes", () => {
     });
     expect(pollCalls).toBe(1);
 
-    const recovered = await getKv("codex-oauth-device", started.flowId);
+    const recovered = await getCodexDeviceFlow(started.flowId);
     const recoveredState = JSON.parse(
-      decryptSecret(String(recovered!.value), getEncryptionKey()),
+      decryptSecret(recovered!.state, getEncryptionKey()),
     ) as Record<string, unknown>;
     expect(recoveredState.pollLeaseId).toBeNull();
     expect(recoveredState.pollLeaseExpiresAt).toBeNull();
@@ -403,17 +392,15 @@ describe("Codex device HTTP routes", () => {
     }) as typeof fetch;
 
     const started = await startFlow();
-    const entry = await getKv("codex-oauth-device", started.flowId);
-    const state = JSON.parse(decryptSecret(String(entry!.value), getEncryptionKey())) as Record<
+    const entry = await getCodexDeviceFlow(started.flowId);
+    const state = JSON.parse(decryptSecret(entry!.state, getEncryptionKey())) as Record<
       string,
       unknown
     >;
     state.expiresAt = Date.now() - 1;
-    await upsertKv({
-      namespace: "codex-oauth-device",
-      key: started.flowId,
-      value: encryptSecret(JSON.stringify(state), getEncryptionKey()),
-      valueType: "string",
+    await upsertCodexDeviceFlow({
+      flowId: started.flowId,
+      state: encryptSecret(JSON.stringify(state), getEncryptionKey()),
       expiresAt: Number(state.expiresAt),
     });
 
@@ -482,8 +469,7 @@ describe("Codex device HTTP routes", () => {
     }) as typeof fetch;
     await getDbClient().run(
       `CREATE TRIGGER fail_device_flow_write
-       BEFORE INSERT ON kv_entries
-       WHEN NEW.namespace = 'codex-oauth-device'
+       BEFORE INSERT ON codex_oauth_device_flows
        BEGIN
          SELECT RAISE(ABORT, 'forced local write failure');
        END`,

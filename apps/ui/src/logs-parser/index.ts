@@ -3,6 +3,8 @@ import {
   normalizeAnthropic,
   normalizeClaudeManaged,
   normalizeCodex,
+  normalizeCursor,
+  normalizeDsh,
   normalizeOpencode,
 } from "./adapters";
 import {
@@ -47,6 +49,12 @@ const ADAPTERS: Record<string, Adapter> = {
   pi: normalizeAnthropic,
   codex: normalizeCodex,
   opencode: normalizeOpencode,
+  dsh: normalizeDsh,
+  // Amp's `--stream-json` is Claude Code-compatible: assistant, user, system and result events.
+  amp: normalizeAnthropic,
+  cursor: normalizeCursor,
+  // Grok runs on the ACP client, so its session logs are ACP updates.
+  grok: normalizeAcp,
 };
 
 export function normalizeSessionLogs(logs: SessionLogRecord[]): TranscriptParseResult {

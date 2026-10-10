@@ -23,9 +23,11 @@ Not every harness can interrupt. Task responses include `supportedSteerModes`, a
 | opencode | `queue` | `queued` |
 | Devin | `queue` | `queued` |
 | Claude Code | `queue` | `queued` |
-| Codex | `queue` | `queued` (delivered by Codex lifecycle hooks at the next tool-call boundary) |
+| Codex | `steer`, `queue` | `steered` (native `turn/steer` on the per-task app-server) |
+| Cursor | `steer`, `queue` | `steered` (`run.steer()` on the in-flight run) |
+| Amp | `queue` | `queued` (appended to the next tool result) |
 
-Claude Code queue delivery additionally depends on a supported stock CLI invocation. See [Harness Providers: Claude queue-steering gate](/docs/guides/harness-providers#claude-queue-steering-gate). Codex delivery is harness-side: the worker image registers managed Codex hooks that inject queued messages into the running session; there is no mid-turn interrupt. See [Harness Providers: Codex harness-side delivery](/docs/guides/harness-providers#codex-harness-side-delivery-codex-hook).
+Claude Code queue delivery additionally depends on a supported stock CLI invocation. See [Harness Providers: Claude queue-steering gate](/docs/guides/harness-providers#claude-queue-steering-gate). Codex steers the active turn through its per-task app-server and starts queued messages after that turn ends; legacy `codex exec` sessions still use hook delivery. See [Harness Providers: Live task steering](/docs/guides/harness-providers#live-task-steering). Amp has no interrupt primitive: a queued message is appended to the next tool result, so the model reads it mid-turn.
 
 ## Enable steering
 

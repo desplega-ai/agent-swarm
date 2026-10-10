@@ -1,0 +1,952 @@
+diff --git a/packages/core/src/ops/append.ts b/packages/core/src/ops/append.ts
+index 4c5c95a..74469f5 100644
+--- a/packages/core/src/ops/append.ts
++++ b/packages/core/src/ops/append.ts
+@@ -9,16 +9,18 @@ import { NotFoundError } from "../errors.js";
+ import { detectMimeType } from "./mime.js";
+ import { indexFile } from "../search/fts.js";
+ import { scheduleEmbedding } from "../search/pipeline.js";
++import { normalizePath } from "./paths.js";
+ 
+ export async function append(
+   ctx: OpContext,
+   params: AppendParams
+ ): Promise<AppendResult> {
+-  const s3Key = getS3Key(ctx.orgId, ctx.driveId, params.path);
++  const path = normalizePath(params.path);
++  const s3Key = getS3Key(ctx.orgId, ctx.driveId, path);
+ 
+   // Optimistic concurrency check before reading current content.
+   if (params.expectedVersion !== undefined) {
+-    await assertExpectedVersion(ctx, params.path, params.expectedVersion);
++    await assertExpectedVersion(ctx, path, params.expectedVersion);
+   }
+ 
+   // 1. Get current content
+@@ -28,8 +30,8 @@ export async function append(
+     currentContent = new TextDecoder().decode(result.body);
+   } catch (err: any) {
+     if (err?.name === "NoSuchKey" || err?.$metadata?.httpStatusCode === 404) {
+-      throw new NotFoundError(`File not found: ${params.path}`, {
+-        path: params.path,
++      throw new NotFoundError(`File not found: ${path}`, {
++        path,
+       });
+     }
+     throw err;
+@@ -38,14 +40,14 @@ export async function append(
+   // 2. Append and write back
+   const newContent = currentContent + params.content;
+   const size = Buffer.byteLength(newContent);
+-  const contentType = detectMimeType(params.path);
++  const contentType = detectMimeType(path);
+   const contentHash = createHash("sha256").update(newContent).digest("hex");
+ 
+   const s3Result = await ctx.s3.putObject(s3Key, newContent, undefined, contentType);
+ 
+   // 3. Create version
+   const version = await createVersion(ctx, {
+-    path: params.path,
++    path,
+     s3VersionId: s3Result.versionId ?? "",
+     operation: "append",
+     message: params.message,
+@@ -56,11 +58,11 @@ export async function append(
+   });
+ 
+   // FTS5 index (sync)
+-  indexFile(ctx.db, { path: params.path, driveId: ctx.driveId, content: newContent });
++  indexFile(ctx.db, { path, driveId: ctx.driveId, content: newContent });
+ 
+   // Embedding index (async)
+   scheduleEmbedding(ctx.db, ctx.embeddingProvider ?? null, {
+-    path: params.path,
++    path,
+     driveId: ctx.driveId,
+     content: newContent,
+   });
+diff --git a/packages/core/src/ops/cat.ts b/packages/core/src/ops/cat.ts
+index 18c1d42..d902323 100644
+--- a/packages/core/src/ops/cat.ts
++++ b/packages/core/src/ops/cat.ts
+@@ -2,6 +2,7 @@ import type { OpContext, CatParams, CatResult } from "./types.js";
+ import { getS3Key } from "./versioning.js";
+ import { NotFoundError, ValidationError } from "../errors.js";
+ import { decodeIndexableText, detectMimeType } from "./mime.js";
++import { normalizePath } from "./paths.js";
+ 
+ const DEFAULT_LIMIT = 200;
+ 
+@@ -9,17 +10,18 @@ export async function cat(
+   ctx: OpContext,
+   params: CatParams
+ ): Promise<CatResult> {
+-  const s3Key = getS3Key(ctx.orgId, ctx.driveId, params.path);
++  const path = normalizePath(params.path);
++  const s3Key = getS3Key(ctx.orgId, ctx.driveId, path);
+ 
+   let body: Uint8Array;
+   try {
+     const result = await ctx.s3.getObject(s3Key);
+     body = result.body;
+-    const contentType = result.contentType ?? detectMimeType(params.path);
++    const contentType = result.contentType ?? detectMimeType(path);
+     const content = decodeIndexableText(body, contentType);
+     if (content === null) {
+       throw new ValidationError(
+-        `File is not readable as text: ${params.path}`,
++        `File is not readable as text: ${path}`,
+         {
+           field: "path",
+           suggestion: "Use `agent-fs download` or `agent-fs signed-url` for binary files",
+@@ -43,8 +45,8 @@ export async function cat(
+     };
+   } catch (err: any) {
+     if (err?.name === "NoSuchKey" || err?.$metadata?.httpStatusCode === 404) {
+-      throw new NotFoundError(`File not found: ${params.path}`, {
+-        path: params.path,
++      throw new NotFoundError(`File not found: ${path}`, {
++        path,
+       });
+     }
+     throw err;
+diff --git a/packages/core/src/ops/comment.ts b/packages/core/src/ops/comment.ts
+index 4e214da..8ccf66a 100644
+--- a/packages/core/src/ops/comment.ts
++++ b/packages/core/src/ops/comment.ts
+@@ -235,6 +235,7 @@ export async function commentAdd(
+       field: "path",
+     });
+   }
++  path = normalizePath(path);
+ 
+   const mentionUserIds = params.mentions
+     ? resolveMentions(ctx, params.mentions)
+@@ -247,11 +248,11 @@ export async function commentAdd(
+     .from(schema.fileVersions)
+     .where(
+       and(
+-        eq(schema.fileVersions.path, normalizePath(path)),
++        eq(schema.fileVersions.path, path),
+         eq(schema.fileVersions.driveId, ctx.driveId)
+       )
+     )
+-    .orderBy(desc(schema.fileVersions.id))
++    .orderBy(desc(schema.fileVersions.version))
+     .limit(1)
+     .get();
+ 
+@@ -327,7 +328,7 @@ export async function commentList(
+   ];
+ 
+   if (params.path) {
+-    conditions.push(eq(schema.comments.path, params.path));
++    conditions.push(eq(schema.comments.path, normalizePath(params.path)));
+   }
+ 
+   if (params.pathPrefix !== undefined) {
+diff --git a/packages/core/src/ops/cp.ts b/packages/core/src/ops/cp.ts
+index 24bc763..55798bb 100644
+--- a/packages/core/src/ops/cp.ts
++++ b/packages/core/src/ops/cp.ts
+@@ -8,18 +8,25 @@ import {
+ import { detectMimeType } from "./mime.js";
+ import { indexBytesForSearch } from "./search-index.js";
+ import { invalidateDriveGlobListings } from "./glob-cache.js";
++import { normalizePath } from "./paths.js";
++import { ValidationError } from "../errors.js";
+ 
+ export async function cp(
+   ctx: OpContext,
+   params: CpParams
+ ): Promise<CpResult> {
+-  const fromKey = getS3Key(ctx.orgId, ctx.driveId, params.from);
+-  const toKey = getS3Key(ctx.orgId, ctx.driveId, params.to);
++  const from = normalizePath(params.from);
++  const to = normalizePath(params.to);
++  if (from === to) {
++    throw new ValidationError("Source and destination are the same path");
++  }
++  const fromKey = getS3Key(ctx.orgId, ctx.driveId, from);
++  const toKey = getS3Key(ctx.orgId, ctx.driveId, to);
+ 
+   // Optimistic concurrency: caller asserts the head of the *destination*.
+   // Pass `expectedVersion: 0` for "must not exist".
+   if (params.expectedVersion !== undefined) {
+-    await assertExpectedVersion(ctx, params.to, params.expectedVersion);
++    await assertExpectedVersion(ctx, to, params.expectedVersion);
+   }
+ 
+   // 1. Copy in S3
+@@ -32,21 +39,21 @@ export async function cp(
+   // Fetch destination bytes once for both content hash + FTS5 indexing.
+   const obj = await ctx.s3.getObject(toKey);
+   const contentHash = createHash("sha256").update(obj.body).digest("hex");
+-  const contentType = head.contentType ?? obj.contentType ?? detectMimeType(params.to);
++  const contentType = head.contentType ?? obj.contentType ?? detectMimeType(to);
+ 
+   // 3. Create version on new path
+   const version = await createVersion(ctx, {
+-    path: params.to,
++    path: to,
+     s3VersionId: copyResult.versionId ?? "",
+     operation: "write",
+-    message: `Copied from ${params.from}`,
++    message: `Copied from ${from}`,
+     size: head.size,
+     etag: copyResult.etag,
+     contentType,
+     contentHash,
+   });
+ 
+-  indexBytesForSearch(ctx, params.to, obj.body, contentType);
++  indexBytesForSearch(ctx, to, obj.body, contentType);
+ 
+-  return { from: params.from, to: params.to, version };
++  return { from, to, version };
+ }
+diff --git a/packages/core/src/ops/diff.ts b/packages/core/src/ops/diff.ts
+index f9c2a01..b80cb6c 100644
+--- a/packages/core/src/ops/diff.ts
++++ b/packages/core/src/ops/diff.ts
+@@ -4,18 +4,20 @@ import { schema } from "../db/index.js";
+ import type { OpContext, DiffParams, DiffResult, DiffChange } from "./types.js";
+ import { getS3Key } from "./versioning.js";
+ import { NotFoundError } from "../errors.js";
++import { normalizePath } from "./paths.js";
+ 
+ export async function diff(
+   ctx: OpContext,
+   params: DiffParams
+ ): Promise<DiffResult> {
++  const path = normalizePath(params.path);
+   // Get version records
+   const v1Record = ctx.db
+     .select()
+     .from(schema.fileVersions)
+     .where(
+       and(
+-        eq(schema.fileVersions.path, params.path),
++        eq(schema.fileVersions.path, path),
+         eq(schema.fileVersions.driveId, ctx.driveId),
+         eq(schema.fileVersions.version, params.v1)
+       )
+@@ -27,7 +29,7 @@ export async function diff(
+     .from(schema.fileVersions)
+     .where(
+       and(
+-        eq(schema.fileVersions.path, params.path),
++        eq(schema.fileVersions.path, path),
+         eq(schema.fileVersions.driveId, ctx.driveId),
+         eq(schema.fileVersions.version, params.v2)
+       )
+@@ -36,8 +38,8 @@ export async function diff(
+ 
+   if (!v1Record || !v2Record) {
+     throw new NotFoundError(
+-      `Version ${!v1Record ? params.v1 : params.v2} not found for ${params.path}`,
+-      { path: params.path }
++      `Version ${!v1Record ? params.v1 : params.v2} not found for ${path}`,
++      { path }
+     );
+   }
+ 
+@@ -47,7 +49,7 @@ export async function diff(
+   // without versioning skips the doomed version-handle fetch and falls back to
+   // the stored `diffSummary` below — it must never throw UnsupportedOperation.
+   if (ctx.s3.capabilities.versioning && v1Record.s3VersionId && v2Record.s3VersionId) {
+-    const s3Key = getS3Key(ctx.orgId, ctx.driveId, params.path);
++    const s3Key = getS3Key(ctx.orgId, ctx.driveId, path);
+ 
+     try {
+       const [content1, content2] = await Promise.all([
+@@ -59,8 +61,8 @@ export async function diff(
+       const text2 = new TextDecoder().decode(content2.body);
+ 
+       const patch = structuredPatch(
+-        params.path,
+-        params.path,
++        path,
++        path,
+         text1,
+         text2
+       );
+@@ -86,7 +88,7 @@ export async function diff(
+ 
+       return { changes };
+     } catch (err) {
+-      console.warn(`[diff] S3 content fetch failed for ${params.path}, falling back to diffSummary:`, err);
++      console.warn(`[diff] S3 content fetch failed for ${path}, falling back to diffSummary:`, err);
+     }
+   }
+ 
+diff --git a/packages/core/src/ops/edit.ts b/packages/core/src/ops/edit.ts
+index e40b933..b4367de 100644
+--- a/packages/core/src/ops/edit.ts
++++ b/packages/core/src/ops/edit.ts
+@@ -9,17 +9,19 @@ import { NotFoundError, EditConflictError } from "../errors.js";
+ import { detectMimeType } from "./mime.js";
+ import { indexFile } from "../search/fts.js";
+ import { scheduleEmbedding } from "../search/pipeline.js";
++import { normalizePath } from "./paths.js";
+ 
+ export async function edit(
+   ctx: OpContext,
+   params: EditParams
+ ): Promise<EditResult> {
+-  const s3Key = getS3Key(ctx.orgId, ctx.driveId, params.path);
++  const path = normalizePath(params.path);
++  const s3Key = getS3Key(ctx.orgId, ctx.driveId, path);
+ 
+   // Optimistic concurrency: check head version matches expectedVersion
+   // before any S3 mutation (avoids edit-on-stale-read).
+   if (params.expectedVersion !== undefined) {
+-    await assertExpectedVersion(ctx, params.path, params.expectedVersion);
++    await assertExpectedVersion(ctx, path, params.expectedVersion);
+   }
+ 
+   // 1. Get current content
+@@ -29,8 +31,8 @@ export async function edit(
+     body = result.body;
+   } catch (err: any) {
+     if (err?.name === "NoSuchKey" || err?.$metadata?.httpStatusCode === 404) {
+-      throw new NotFoundError(`File not found: ${params.path}`, {
+-        path: params.path,
++      throw new NotFoundError(`File not found: ${path}`, {
++        path,
+       });
+     }
+     throw err;
+@@ -42,18 +44,18 @@ export async function edit(
+   const occurrences = content.split(params.old_string).length - 1;
+   if (occurrences === 0) {
+     throw new EditConflictError(
+-      `old_string not found in ${params.path}`,
++      `old_string not found in ${path}`,
+       {
+-        path: params.path,
++        path,
+         suggestion: "Verify the exact text you want to replace",
+       }
+     );
+   }
+   if (occurrences > 1) {
+     throw new EditConflictError(
+-      `old_string found ${occurrences} times in ${params.path}, expected exactly 1`,
++      `old_string found ${occurrences} times in ${path}, expected exactly 1`,
+       {
+-        path: params.path,
++        path,
+         suggestion: "Provide more surrounding context to make the match unique",
+       }
+     );
+@@ -62,7 +64,7 @@ export async function edit(
+   // 3. Replace and write back
+   const newContent = content.replace(params.old_string, params.new_string);
+   const size = Buffer.byteLength(newContent);
+-  const contentType = detectMimeType(params.path);
++  const contentType = detectMimeType(path);
+   const contentHash = createHash("sha256").update(newContent).digest("hex");
+ 
+   const s3Result = await ctx.s3.putObject(s3Key, newContent, undefined, contentType);
+@@ -74,7 +76,7 @@ export async function edit(
+   });
+ 
+   const version = await createVersion(ctx, {
+-    path: params.path,
++    path,
+     s3VersionId: s3Result.versionId ?? "",
+     operation: "edit",
+     message: params.message,
+@@ -86,14 +88,14 @@ export async function edit(
+   });
+ 
+   // FTS5 index (sync)
+-  indexFile(ctx.db, { path: params.path, driveId: ctx.driveId, content: newContent });
++  indexFile(ctx.db, { path, driveId: ctx.driveId, content: newContent });
+ 
+   // Embedding index (async)
+   scheduleEmbedding(ctx.db, ctx.embeddingProvider ?? null, {
+-    path: params.path,
++    path,
+     driveId: ctx.driveId,
+     content: newContent,
+   });
+ 
+-  return { version, path: params.path, changes: 1 };
++  return { version, path, changes: 1 };
+ }
+diff --git a/packages/core/src/ops/fts.ts b/packages/core/src/ops/fts.ts
+index 06fffad..193bb9a 100644
+--- a/packages/core/src/ops/fts.ts
++++ b/packages/core/src/ops/fts.ts
+@@ -1,5 +1,6 @@
+ import type { OpContext } from "./types.js";
+ import { ftsQuery, type FtsMatch } from "../search/fts.js";
++import { withLeadingSlash } from "./paths.js";
+ 
+ export interface FtsParams {
+   pattern: string;
+@@ -24,7 +25,7 @@ export async function fts(
+   const results = ftsQuery(ctx.db, {
+     pattern: params.pattern,
+     driveId: ctx.driveId,
+-    pathPrefix: params.path,
++    pathPrefix: params.path ? withLeadingSlash(params.path) : undefined,
+   });
+ 
+   const matches = results.map((r) => ({
+diff --git a/packages/core/src/ops/log.ts b/packages/core/src/ops/log.ts
+index 1d04ceb..9ce8cf1 100644
+--- a/packages/core/src/ops/log.ts
++++ b/packages/core/src/ops/log.ts
+@@ -1,19 +1,21 @@
+ import { eq, and, desc } from "drizzle-orm";
+ import { schema } from "../db/index.js";
+ import type { OpContext, LogParams, LogResult } from "./types.js";
++import { normalizePath } from "./paths.js";
+ 
+ export async function log(
+   ctx: OpContext,
+   params: LogParams
+ ): Promise<LogResult> {
+   const limit = params.limit ?? 50;
++  const path = normalizePath(params.path);
+ 
+   const rows = ctx.db
+     .select()
+     .from(schema.fileVersions)
+     .where(
+       and(
+-        eq(schema.fileVersions.path, params.path),
++        eq(schema.fileVersions.path, path),
+         eq(schema.fileVersions.driveId, ctx.driveId)
+       )
+     )
+diff --git a/packages/core/src/ops/mv.ts b/packages/core/src/ops/mv.ts
+index 411182b..07ca60c 100644
+--- a/packages/core/src/ops/mv.ts
++++ b/packages/core/src/ops/mv.ts
+@@ -11,18 +11,25 @@ import { schema } from "../db/index.js";
+ import { decodeIndexableText, detectMimeType } from "./mime.js";
+ import { clearSearchData } from "./search-index.js";
+ import { invalidateDriveGlobListings } from "./glob-cache.js";
++import { normalizePath } from "./paths.js";
++import { ValidationError } from "../errors.js";
+ 
+ export async function mv(
+   ctx: OpContext,
+   params: MvParams
+ ): Promise<MvResult> {
+-  const fromKey = getS3Key(ctx.orgId, ctx.driveId, params.from);
+-  const toKey = getS3Key(ctx.orgId, ctx.driveId, params.to);
++  const from = normalizePath(params.from);
++  const to = normalizePath(params.to);
++  if (from === to) {
++    throw new ValidationError("Source and destination are the same path");
++  }
++  const fromKey = getS3Key(ctx.orgId, ctx.driveId, from);
++  const toKey = getS3Key(ctx.orgId, ctx.driveId, to);
+ 
+   // Optimistic concurrency: caller asserts the head of the *source* file.
+   // If something else has bumped the source between read and mv, fail loudly.
+   if (params.expectedVersion !== undefined) {
+-    await assertExpectedVersion(ctx, params.from, params.expectedVersion);
++    await assertExpectedVersion(ctx, from, params.expectedVersion);
+   }
+ 
+   // 1. Copy to new location
+@@ -36,14 +43,14 @@ export async function mv(
+   // existing search metadata should move with it.
+   const obj = await ctx.s3.getObject(toKey);
+   const contentHash = createHash("sha256").update(obj.body).digest("hex");
+-  const contentType = head.contentType ?? obj.contentType ?? detectMimeType(params.to);
++  const contentType = head.contentType ?? obj.contentType ?? detectMimeType(to);
+ 
+   // 3. Create version on new path
+   const version = await createVersion(ctx, {
+-    path: params.to,
++    path: to,
+     s3VersionId: copyResult.versionId ?? "",
+     operation: "write",
+-    message: params.message ?? `Moved from ${params.from}`,
++    message: params.message ?? `Moved from ${from}`,
+     size: head.size,
+     etag: copyResult.etag,
+     contentType,
+@@ -55,30 +62,30 @@ export async function mv(
+ 
+   // 5. Mark old path as deleted
+   await createVersion(ctx, {
+-    path: params.from,
++    path: from,
+     s3VersionId: "",
+     operation: "delete",
+-    message: `Moved to ${params.to}`,
++    message: `Moved to ${to}`,
+   });
+ 
+-  removeFromIndex(ctx.db, { path: params.from, driveId: ctx.driveId });
++  removeFromIndex(ctx.db, { path: from, driveId: ctx.driveId });
+   const content = decodeIndexableText(obj.body, contentType);
+   if (content === null) {
+-    clearSearchData(ctx, params.to);
++    clearSearchData(ctx, to);
+   } else {
+-    indexFile(ctx.db, { path: params.to, driveId: ctx.driveId, content });
++    indexFile(ctx.db, { path: to, driveId: ctx.driveId, content });
+     // Update chunk paths in-place (vectors stay the same).
+     ctx.db
+       .update(schema.contentChunks)
+-      .set({ filePath: params.to })
++      .set({ filePath: to })
+       .where(
+         and(
+-          eq(schema.contentChunks.filePath, params.from),
++          eq(schema.contentChunks.filePath, from),
+           eq(schema.contentChunks.driveId, ctx.driveId)
+         )
+       )
+       .run();
+   }
+ 
+-  return { from: params.from, to: params.to, version };
++  return { from, to, version };
+ }
+diff --git a/packages/core/src/ops/paths.ts b/packages/core/src/ops/paths.ts
+index 43696ed..81da21c 100644
+--- a/packages/core/src/ops/paths.ts
++++ b/packages/core/src/ops/paths.ts
+@@ -25,6 +25,11 @@ export function normalizePrefix(path: string): string {
+   return p;
+ }
+ 
++/** Ensure a search prefix starts with `/`; keep the rest as given. */
++export function withLeadingSlash(path: string): string {
++  return path.startsWith("/") ? path : "/" + path;
++}
++
+ /** Strip leading `/` for S3 key construction. */
+ export function stripLeadingSlash(path: string): string {
+   return path.startsWith("/") ? path.slice(1) : path;
+@@ -42,8 +47,8 @@ export function stripLeadingSlash(path: string): string {
+  * Rejects a `.` or `..` segment on either separator (a backslash is a
+  * separator on Windows hosts) and NUL bytes. Names that merely contain dots
+  * (`a..b`, `.hidden`, `file..`) are fine. This is deliberately not folded into
+- * {@link normalizePath}: most ops build their key straight from the raw path
+- * and never call it, and on S3 an existing `a/../b` key is legal data.
++ * {@link normalizePath}: validation and canonicalization are separate steps,
++ * and on S3 an existing `a/../b` key is legal data.
+  */
+ export function assertPathInsideDrive(path: string): void {
+   if (path.includes("\u0000")) {
+diff --git a/packages/core/src/ops/recent.ts b/packages/core/src/ops/recent.ts
+index 59d62a0..a0997cc 100644
+--- a/packages/core/src/ops/recent.ts
++++ b/packages/core/src/ops/recent.ts
+@@ -1,6 +1,7 @@
+ import { eq, and, desc, gte, like } from "drizzle-orm";
+ import { schema } from "../db/index.js";
+ import type { OpContext, RecentParams, RecentResult } from "./types.js";
++import { withLeadingSlash } from "./paths.js";
+ 
+ export async function recent(
+   ctx: OpContext,
+@@ -15,10 +16,11 @@ export async function recent(
+     .$dynamic();
+ 
+   if (params.path) {
++    const prefix = withLeadingSlash(params.path);
+     query = query.where(
+       and(
+         eq(schema.fileVersions.driveId, ctx.driveId),
+-        like(schema.fileVersions.path, params.path + "%")
++        like(schema.fileVersions.path, prefix + "%")
+       )
+     );
+   }
+diff --git a/packages/core/src/ops/reindex.ts b/packages/core/src/ops/reindex.ts
+index 4317877..58b0623 100644
+--- a/packages/core/src/ops/reindex.ts
++++ b/packages/core/src/ops/reindex.ts
+@@ -6,6 +6,7 @@ import { indexFileEmbeddings } from "../search/pipeline.js";
+ import { indexFile } from "../search/fts.js";
+ import { clearSearchData } from "./search-index.js";
+ import { decodeIndexableText, detectMimeType } from "./mime.js";
++import { normalizePrefix } from "./paths.js";
+ 
+ export interface ReindexParams {
+   path?: string;
+@@ -34,7 +35,7 @@ export async function reindex(
+ 
+   if (params.path) {
+     const { like } = await import("drizzle-orm");
+-    const prefix = params.path.endsWith("/") ? params.path : params.path + "/";
++    const prefix = normalizePrefix(params.path);
+     conditions.push(like(schema.files.path, prefix + "%"));
+   }
+ 
+diff --git a/packages/core/src/ops/revert.ts b/packages/core/src/ops/revert.ts
+index 30552f1..95e72b9 100644
+--- a/packages/core/src/ops/revert.ts
++++ b/packages/core/src/ops/revert.ts
+@@ -11,11 +11,13 @@ import { NotFoundError, AgentFSError } from "../errors.js";
+ import { assertCapability } from "../storage/capabilities.js";
+ import { detectMimeType } from "./mime.js";
+ import { indexBytesForSearch } from "./search-index.js";
++import { normalizePath } from "./paths.js";
+ 
+ export async function revert(
+   ctx: OpContext,
+   params: RevertParams
+ ): Promise<RevertResult> {
++  const path = normalizePath(params.path);
+   // Capability gate: a backend without object versioning can never retrieve
+   // old content by version handle, so fail fast with a typed, friendly error
+   // rather than a raw S3/FS error later. (The narrower VERSIONING_REQUIRED
+@@ -25,7 +27,7 @@ export async function revert(
+   // Optimistic concurrency: head must match expectedVersion before
+   // a new revert version is created on top of it.
+   if (params.expectedVersion !== undefined) {
+-    await assertExpectedVersion(ctx, params.path, params.expectedVersion);
++    await assertExpectedVersion(ctx, path, params.expectedVersion);
+   }
+ 
+   // 1. Find the target version
+@@ -34,7 +36,7 @@ export async function revert(
+     .from(schema.fileVersions)
+     .where(
+       and(
+-        eq(schema.fileVersions.path, params.path),
++        eq(schema.fileVersions.path, path),
+         eq(schema.fileVersions.driveId, ctx.driveId),
+         eq(schema.fileVersions.version, params.version)
+       )
+@@ -43,8 +45,8 @@ export async function revert(
+ 
+   if (!targetVersion) {
+     throw new NotFoundError(
+-      `Version ${params.version} not found for ${params.path}`,
+-      { path: params.path }
++      `Version ${params.version} not found for ${path}`,
++      { path }
+     );
+   }
+ 
+@@ -57,9 +59,9 @@ export async function revert(
+   }
+ 
+   // 2. Get the old content from S3 using versionId
+-  const s3Key = getS3Key(ctx.orgId, ctx.driveId, params.path);
++  const s3Key = getS3Key(ctx.orgId, ctx.driveId, path);
+   const oldContent = await ctx.s3.getObject(s3Key, targetVersion.s3VersionId);
+-  const contentType = detectMimeType(params.path);
++  const contentType = detectMimeType(path);
+ 
+   // 3. Write it as the new current version
+   const s3Result = await ctx.s3.putObject(s3Key, oldContent.body, undefined, contentType);
+@@ -68,7 +70,7 @@ export async function revert(
+ 
+   // 4. Create version record
+   const version = await createVersion(ctx, {
+-    path: params.path,
++    path,
+     s3VersionId: s3Result.versionId ?? "",
+     operation: "revert",
+     message: `Reverted to version ${params.version}`,
+@@ -78,7 +80,7 @@ export async function revert(
+     contentHash,
+   });
+ 
+-  indexBytesForSearch(ctx, params.path, oldContent.body, contentType);
++  indexBytesForSearch(ctx, path, oldContent.body, contentType);
+ 
+   return { version, revertedTo: params.version };
+ }
+diff --git a/packages/core/src/ops/rm.ts b/packages/core/src/ops/rm.ts
+index b085ddd..81ebd05 100644
+--- a/packages/core/src/ops/rm.ts
++++ b/packages/core/src/ops/rm.ts
+@@ -9,16 +9,18 @@ import {
+ } from "./versioning.js";
+ import { removeFromIndex } from "../search/fts.js";
+ import { publishDriveEvent } from "../events/bus.js";
++import { normalizePath } from "./paths.js";
+ 
+ export async function rm(
+   ctx: OpContext,
+   params: RmParams
+ ): Promise<RmResult> {
+-  const s3Key = getS3Key(ctx.orgId, ctx.driveId, params.path);
++  const path = normalizePath(params.path);
++  const s3Key = getS3Key(ctx.orgId, ctx.driveId, path);
+ 
+   // Optimistic concurrency: assert the head version we are deleting.
+   if (params.expectedVersion !== undefined) {
+-    await assertExpectedVersion(ctx, params.path, params.expectedVersion);
++    await assertExpectedVersion(ctx, path, params.expectedVersion);
+   }
+ 
+   // 1. Delete from S3 (creates delete marker if versioning enabled)
+@@ -26,13 +28,13 @@ export async function rm(
+ 
+   // 2. Create version record
+   await createVersion(ctx, {
+-    path: params.path,
++    path,
+     s3VersionId: "",
+     operation: "delete",
+   });
+ 
+   // 3. Remove from FTS5 index
+-  removeFromIndex(ctx.db, { path: params.path, driveId: ctx.driveId });
++  removeFromIndex(ctx.db, { path, driveId: ctx.driveId });
+ 
+   // 4. Remove chunks + vectors
+   const oldChunks = ctx.db
+@@ -40,7 +42,7 @@ export async function rm(
+     .from(schema.contentChunks)
+     .where(
+       and(
+-        eq(schema.contentChunks.filePath, params.path),
++        eq(schema.contentChunks.filePath, path),
+         eq(schema.contentChunks.driveId, ctx.driveId)
+       )
+     )
+@@ -56,7 +58,7 @@ export async function rm(
+       .delete(schema.contentChunks)
+       .where(
+         and(
+-          eq(schema.contentChunks.filePath, params.path),
++          eq(schema.contentChunks.filePath, path),
+           eq(schema.contentChunks.driveId, ctx.driveId)
+         )
+       )
+@@ -69,7 +71,7 @@ export async function rm(
+     .from(schema.comments)
+     .where(
+       and(
+-        eq(schema.comments.path, params.path),
++        eq(schema.comments.path, path),
+         eq(schema.comments.driveId, ctx.driveId),
+         isNull(schema.comments.parentId),
+         eq(schema.comments.isDeleted, false)
+@@ -82,7 +84,7 @@ export async function rm(
+     .set({ isDeleted: true, updatedAt: now })
+     .where(
+       and(
+-        eq(schema.comments.path, params.path),
++        eq(schema.comments.path, path),
+         eq(schema.comments.driveId, ctx.driveId)
+       )
+     )
+@@ -101,5 +103,5 @@ export async function rm(
+     });
+   }
+ 
+-  return { path: params.path, deleted: true };
++  return { path, deleted: true };
+ }
+diff --git a/packages/core/src/ops/sql.ts b/packages/core/src/ops/sql.ts
+index dce7622..a38ec8d 100644
+--- a/packages/core/src/ops/sql.ts
++++ b/packages/core/src/ops/sql.ts
+@@ -150,25 +150,6 @@ function findFileByPath(
+   return row ?? null;
+ }
+ 
+-/**
+- * Look up a file by drive path, tolerant of the leading-`/` inconsistency:
+- * `write` stores `params.path` verbatim (never normalized), so a row's
+- * `path` may or may not have kept the `/` the original caller sent, while
+- * `collectBindings` always normalizes its input to `/foo` before calling
+- * here. Try the given (normalized) path first, then the other convention —
+- * this is the only op that does an exact-match lookup against a normalized
+- * path, so it's the only place that needs to bridge the two forms.
+- */
+-function findFile(
+-  ctx: OpContext,
+-  path: string
+-): { path: string; size: number } | null {
+-  const exact = findFileByPath(ctx, path);
+-  if (exact) return exact;
+-  const alt = path.startsWith("/") ? path.slice(1) : "/" + path;
+-  return findFileByPath(ctx, alt);
+-}
+-
+ function collectBindings(ctx: OpContext, params: SqlParams): Binding[] {
+   const bindings: Binding[] = [];
+   const usedNames = new Set<string>();
+@@ -200,7 +181,7 @@ function collectBindings(ctx: OpContext, params: SqlParams): Binding[] {
+       );
+     }
+ 
+-    const file = findFile(ctx, path);
++    const file = findFileByPath(ctx, path);
+     if (!file) {
+       throw new NotFoundError(`File not found: ${path}`, { path });
+     }
+@@ -230,7 +211,7 @@ function collectBindings(ctx: OpContext, params: SqlParams): Binding[] {
+     if (seenPaths.has(path)) continue;
+     seenPaths.add(path);
+ 
+-    const file = findFile(ctx, path);
++    const file = findFileByPath(ctx, path);
+     if (!file) continue;
+ 
+     let name = `doc_${docIdx++}`;
+diff --git a/packages/core/src/ops/stat.ts b/packages/core/src/ops/stat.ts
+index e97a88a..fa9de27 100644
+--- a/packages/core/src/ops/stat.ts
++++ b/packages/core/src/ops/stat.ts
+@@ -3,12 +3,14 @@ import { schema } from "../db/index.js";
+ import type { OpContext, StatParams, StatResult } from "./types.js";
+ import { getS3Key } from "./versioning.js";
+ import { NotFoundError } from "../errors.js";
++import { normalizePath } from "./paths.js";
+ 
+ export async function stat(
+   ctx: OpContext,
+   params: StatParams
+ ): Promise<StatResult> {
+-  const s3Key = getS3Key(ctx.orgId, ctx.driveId, params.path);
++  const path = normalizePath(params.path);
++  const s3Key = getS3Key(ctx.orgId, ctx.driveId, path);
+ 
+   // Check S3
+   let s3Head;
+@@ -24,8 +26,8 @@ export async function stat(
+       err?.name === "NoSuchKey" ||
+       err?.$metadata?.httpStatusCode === 404
+     ) {
+-      throw new NotFoundError(`File not found: ${params.path}`, {
+-        path: params.path,
++      throw new NotFoundError(`File not found: ${path}`, {
++        path,
+       });
+     }
+     throw err;
+@@ -37,14 +39,14 @@ export async function stat(
+     .from(schema.files)
+     .where(
+       and(
+-        eq(schema.files.path, params.path),
++        eq(schema.files.path, path),
+         eq(schema.files.driveId, ctx.driveId)
+       )
+     )
+     .get();
+ 
+   return {
+-    path: params.path,
++    path,
+     size: s3Head.size,
+     contentType: s3Head.contentType,
+     author: dbFile?.author ?? "unknown",
+diff --git a/packages/core/src/ops/tail.ts b/packages/core/src/ops/tail.ts
+index 661c678..680dff2 100644
+--- a/packages/core/src/ops/tail.ts
++++ b/packages/core/src/ops/tail.ts
+@@ -1,6 +1,7 @@
+ import type { OpContext, TailParams, CatResult } from "./types.js";
+ import { getS3Key } from "./versioning.js";
+ import { NotFoundError } from "../errors.js";
++import { normalizePath } from "./paths.js";
+ 
+ const DEFAULT_LINES = 20;
+ 
+@@ -8,7 +9,8 @@ export async function tail(
+   ctx: OpContext,
+   params: TailParams
+ ): Promise<CatResult> {
+-  const s3Key = getS3Key(ctx.orgId, ctx.driveId, params.path);
++  const path = normalizePath(params.path);
++  const s3Key = getS3Key(ctx.orgId, ctx.driveId, path);
+   const n = params.lines ?? DEFAULT_LINES;
+ 
+   let body: Uint8Array;
+@@ -17,8 +19,8 @@ export async function tail(
+     body = result.body;
+   } catch (err: any) {
+     if (err?.name === "NoSuchKey" || err?.$metadata?.httpStatusCode === 404) {
+-      throw new NotFoundError(`File not found: ${params.path}`, {
+-        path: params.path,
++      throw new NotFoundError(`File not found: ${path}`, {
++        path,
+       });
+     }
+     throw err;
+diff --git a/packages/core/src/ops/write.ts b/packages/core/src/ops/write.ts
+index 9afd5d3..77783b9 100644
+--- a/packages/core/src/ops/write.ts
++++ b/packages/core/src/ops/write.ts
+@@ -12,6 +12,7 @@ import { ValidationError } from "../errors.js";
+ import { requireDriveRole } from "../identity/rbac.js";
+ import { recordOp } from "../telemetry.js";
+ import { indexBytesForSearch, indexTextForSearch } from "./search-index.js";
++import { normalizePath } from "./paths.js";
+ 
+ /** Max file size: 10 MB. Protects SQLite FTS indexing and embedding costs. */
+ const MAX_FILE_SIZE = 10 * 1024 * 1024;
+@@ -58,7 +59,8 @@ async function writeInternal(
+   params: WriteRawParams & { indexableText?: string },
+   opts: { maxSize: number }
+ ): Promise<WriteResult> {
+-  const s3Key = getS3Key(ctx.orgId, ctx.driveId, params.path);
++  const path = normalizePath(params.path);
++  const s3Key = getS3Key(ctx.orgId, ctx.driveId, path);
+   const bytes = params.bytes;
+   const size = bytes.byteLength;
+ 
+@@ -81,7 +83,7 @@ async function writeInternal(
+   if (params.expectedVersion !== undefined) {
+     const currentVersion = await assertExpectedVersion(
+       ctx,
+-      params.path,
++      path,
+       params.expectedVersion
+     );
+ 
+@@ -90,11 +92,11 @@ async function writeInternal(
+     // The server is the source of truth for hash, so this safely handles
+     // FUSE-driven `touch`/idempotent-rewrite traffic.
+     if (currentVersion > 0) {
+-      const headHash = await getHeadContentHash(ctx, params.path);
++      const headHash = await getHeadContentHash(ctx, path);
+       if (headHash !== null && headHash === contentHash) {
+         return {
+           version: currentVersion,
+-          path: params.path,
++          path,
+           size,
+           contentHash,
+           deduped: true,
+@@ -104,12 +106,12 @@ async function writeInternal(
+   }
+ 
+   // 1. Write to S3
+-  const contentType = detectMimeType(params.path);
++  const contentType = detectMimeType(path);
+   const s3Result = await ctx.s3.putObject(s3Key, bytes, undefined, contentType);
+ 
+   // 2. Create version record
+   const version = await createVersion(ctx, {
+-    path: params.path,
++    path,
+     s3VersionId: s3Result.versionId ?? "",
+     operation: "write",
+     message: params.message,
+@@ -120,10 +122,10 @@ async function writeInternal(
+   });
+ 
+   if (params.indexableText !== undefined) {
+-    indexTextForSearch(ctx, params.path, params.indexableText);
++    indexTextForSearch(ctx, path, params.indexableText);
+   } else {
+-    indexBytesForSearch(ctx, params.path, bytes, contentType);
++    indexBytesForSearch(ctx, path, bytes, contentType);
+   }
+ 
+-  return { version, path: params.path, size, contentHash, deduped: false };
++  return { version, path, size, contentHash, deduped: false };
+ }

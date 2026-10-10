@@ -22,6 +22,7 @@ interface ApiFixture {
   get<T>(path: string): Promise<T>;
   post<T>(path: string, body: unknown): Promise<T>;
   put<T>(path: string, body: unknown): Promise<T>;
+  delete<T>(path: string): Promise<T>;
 }
 
 interface CleanFixture {
@@ -276,7 +277,11 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
     { auto: true },
   ],
   api: async ({ swarm }, use) => {
-    const request = async <T>(method: "GET" | "POST" | "PUT", path: string, body?: unknown) => {
+    const request = async <T>(
+      method: "GET" | "POST" | "PUT" | "DELETE",
+      path: string,
+      body?: unknown,
+    ) => {
       const response = await fetch(`${swarm.apiUrl}${path}`, {
         method,
         headers: {
@@ -292,6 +297,7 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
       get: <T>(path: string) => request<T>("GET", path),
       post: <T>(path: string, body: unknown) => request<T>("POST", path, body),
       put: <T>(path: string, body: unknown) => request<T>("PUT", path, body),
+      delete: <T>(path: string) => request<T>("DELETE", path),
     });
   },
 });

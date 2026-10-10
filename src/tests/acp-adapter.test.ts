@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
-import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Usage } from "@agentclientprotocol/sdk";
@@ -22,7 +22,12 @@ import {
   sanitizeAcpConfigOptions,
   toAcpMcpServers,
 } from "../providers/acp-adapter";
-import { AcpTargetResolutionError, resolveAcpTarget } from "../providers/acp-targets";
+import {
+  AcpTargetResolutionError,
+  COPILOT_INSTRUCTIONS_FILE,
+  copilotInstructionsDir,
+  resolveAcpTarget,
+} from "../providers/acp-targets";
 import type { ProviderEvent, ProviderSessionConfig } from "../providers/types";
 import { listenOnFreePort } from "./test-net";
 
@@ -59,20 +64,29 @@ function baseConfig(overrides: Partial<ProviderSessionConfig> = {}): ProviderSes
 
 /**
  * Start a minimal swarm API stub that handles POST /api/sessions/tokens and
- * DELETE /api/sessions/tokens/:id. Returns the server and its base URL.
- * The caller is responsible for closing the server.
+ * DELETE /api/sessions/tokens/:id. Returns its base URL and `close()`, which
+ * the caller must await. The adapter revokes a minted token fire-and-forget,
+ * so closing before that DELETE lands fails it and leaks a revoke warning
+ * into a later test.
  */
 async function startTokenStubServer(
   tokenId: string,
   plaintext: string,
-): Promise<{ server: Server; apiUrl: string }> {
+): Promise<{ apiUrl: string; close: () => Promise<void> }> {
+  let minted = false;
+  let resolveRevoked!: () => void;
+  const revoked = new Promise<void>((resolve) => {
+    resolveRevoked = resolve;
+  });
   const stub = createServer(async (req: IncomingMessage, res: ServerResponse) => {
     if (req.method === "POST" && req.url === "/api/sessions/tokens") {
+      minted = true;
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ tokenId, plaintext }));
     } else if (req.method === "DELETE" && req.url?.startsWith("/api/sessions/tokens/")) {
       res.writeHead(204);
       res.end();
+      resolveRevoked();
     } else {
       res.writeHead(404);
       res.end();
@@ -80,7 +94,13 @@ async function startTokenStubServer(
   });
   await new Promise<void>((resolve) => stub.listen(0, "127.0.0.1", resolve));
   const addr = stub.address() as import("net").AddressInfo;
-  return { server: stub, apiUrl: `http://127.0.0.1:${addr.port}` };
+  const close = async () => {
+    // A minted token is always revoked; wait for it, bounded so a failed test
+    // still tears down.
+    if (minted) await Promise.race([revoked, Bun.sleep(5_000)]);
+    await new Promise<void>((resolve) => stub.close(() => resolve()));
+  };
+  return { apiUrl: `http://127.0.0.1:${addr.port}`, close };
 }
 
 describe("ACPAdapter", () => {
@@ -300,7 +320,7 @@ new AgentSideConnection((connection) => new FakeAgent(connection), stream);
 `,
     );
 
-    const { server: tokenStub, apiUrl } = await startTokenStubServer(
+    const { close: closeTokenStub, apiUrl } = await startTokenStubServer(
       "stub-token-id",
       "aseph_stubtokenfortest1234567890",
     );
@@ -498,7 +518,7 @@ new AgentSideConnection((connection) => new FakeAgent(connection), stream);
         closeDb();
       }
     } finally {
-      await new Promise<void>((resolve) => tokenStub.close(() => resolve()));
+      await closeTokenStub();
     }
   });
 
@@ -532,8 +552,317 @@ new AgentSideConnection((connection) => new FakeAgent(connection), stream);
       ),
     ).toMatchObject({
       OPENAI_API_KEY: "example-test-key",
-      OPENCODE_CONFIG_CONTENT: JSON.stringify({ theme: "dark", model: "opencode/model" }),
+      OPENCODE_CONFIG_CONTENT: JSON.stringify({
+        theme: "dark",
+        model: "opencode/model",
+        provider: {
+          openrouter: {
+            options: {
+              headers: {
+                "HTTP-Referer": "https://agent-swarm.dev",
+                "X-OpenRouter-Title": "Agent Swarm",
+                "X-OpenRouter-Categories": "personal-agent,cloud-agent",
+                "X-Title": "Agent Swarm",
+              },
+            },
+          },
+        },
+      }),
     });
+  });
+
+  test("OpenCode preset merges the OpenRouter gateway with model and provider config", () => {
+    const config = baseConfig({
+      model: " openrouter/openai/gpt-4o-mini ",
+      env: {
+        ACP_TARGET: "opencode",
+        OPENROUTER_BASE_URL: " http://127.0.0.1:8080/api/v1/ ",
+        OPENCODE_CONFIG_CONTENT: JSON.stringify({
+          theme: "dark",
+          provider: { openrouter: { options: { apiKey: "dummy" } } },
+        }),
+      },
+    });
+    const env = resolveAcpTarget(config).env(config);
+    expect(JSON.parse(env.OPENCODE_CONFIG_CONTENT!)).toEqual({
+      theme: "dark",
+      model: "openrouter/openai/gpt-4o-mini",
+      provider: {
+        openrouter: { options: { apiKey: "dummy", baseURL: "http://127.0.0.1:8080/api/v1" } },
+      },
+    });
+  });
+
+  test("OpenCode preset omits gateway override for unset, blank, or default URL", () => {
+    for (const url of [undefined, "", "https://openrouter.ai/api/v1/"]) {
+      const config = baseConfig({
+        env: { ACP_TARGET: "opencode", OPENROUTER_BASE_URL: url },
+      });
+      const env = resolveAcpTarget(config).env(config);
+      const content = JSON.parse(env.OPENCODE_CONFIG_CONTENT!);
+      expect(content).toEqual({
+        model: config.model,
+        provider: {
+          openrouter: {
+            options: {
+              headers: {
+                "HTTP-Referer": "https://agent-swarm.dev",
+                "X-OpenRouter-Title": "Agent Swarm",
+                "X-OpenRouter-Categories": "personal-agent,cloud-agent",
+                "X-Title": "Agent Swarm",
+              },
+            },
+          },
+        },
+      });
+      expect(content.provider.openrouter.options.baseURL).toBeUndefined();
+    }
+  });
+
+  test("OpenCode preset adds attribution headers to OPENCODE_CONFIG_CONTENT for an OpenRouter host", () => {
+    const config = baseConfig({
+      model: "",
+      env: {
+        ACP_TARGET: "opencode",
+        OPENROUTER_BASE_URL: "https://openrouter.ai/api/v1",
+        OPENCODE_CONFIG_CONTENT: JSON.stringify({
+          theme: "dark",
+          provider: { openrouter: { options: { headers: { "X-Custom": "preserved" } } } },
+        }),
+      },
+    });
+    const env = resolveAcpTarget(config).env(config);
+    expect(JSON.parse(env.OPENCODE_CONFIG_CONTENT!)).toEqual({
+      theme: "dark",
+      provider: {
+        openrouter: {
+          options: {
+            headers: {
+              "X-Custom": "preserved",
+              "HTTP-Referer": "https://agent-swarm.dev",
+              "X-OpenRouter-Title": "Agent Swarm",
+              "X-OpenRouter-Categories": "personal-agent,cloud-agent",
+              "X-Title": "Agent Swarm",
+            },
+          },
+        },
+      },
+    });
+  });
+
+  test("OpenCode preset leaves OPENCODE_CONFIG_CONTENT unchanged when attribution is disabled", () => {
+    const content = JSON.stringify({
+      theme: "dark",
+      provider: { openrouter: { options: { headers: { "X-Custom": "preserved" } } } },
+    });
+    const config = baseConfig({
+      model: "",
+      env: {
+        ACP_TARGET: "opencode",
+        OPENROUTER_BASE_URL: "https://openrouter.ai/api/v1",
+        OPENROUTER_APP_ATTRIBUTION: "false",
+        OPENCODE_CONFIG_CONTENT: content,
+      },
+    });
+    expect(resolveAcpTarget(config).env(config).OPENCODE_CONFIG_CONTENT).toBe(content);
+  });
+
+  test("OpenCode preset injects gateway even without a model fallback", () => {
+    const config = baseConfig({
+      model: "",
+      env: { ACP_TARGET: "opencode", OPENROUTER_BASE_URL: "http://127.0.0.1:8080/api/v1" },
+    });
+    const env = resolveAcpTarget(config).env(config);
+    expect(JSON.parse(env.OPENCODE_CONFIG_CONTENT!).provider.openrouter.options.baseURL).toBe(
+      "http://127.0.0.1:8080/api/v1",
+    );
+  });
+
+  test("Gemini preset supplies command, credentials, trust, and a model environment fallback", () => {
+    const config = baseConfig({
+      model: "gemini-3-flash-preview",
+      env: {
+        PATH: "/bin",
+        HOME: "/home/test",
+        ACP_TARGET: "gemini",
+        GEMINI_API_KEY: "example-test-key",
+        GOOGLE_GENAI_USE_VERTEXAI: "true",
+        GOOGLE_CLOUD_PROJECT: "example-project",
+        OPENAI_API_KEY: "not-for-gemini",
+      },
+    });
+    const target = resolveAcpTarget(config);
+
+    expect(target.target).toBe("gemini");
+    expect(target.command(config)).toEqual(["gemini", "--acp"]);
+    const env = target.env(config);
+    expect(env).toMatchObject({
+      GEMINI_API_KEY: "example-test-key",
+      GOOGLE_GENAI_USE_VERTEXAI: "true",
+      GOOGLE_CLOUD_PROJECT: "example-project",
+      GEMINI_CLI_TRUST_WORKSPACE: "true",
+      GEMINI_MODEL: "gemini-3-flash-preview",
+    });
+    expect(env.OPENAI_API_KEY).toBeUndefined();
+    // No artifact written for this config, so the built-in prompt stays.
+    expect(env.GEMINI_SYSTEM_MD).toBeUndefined();
+  });
+
+  test("Gemini preset writes the system prompt outside the cwd and points GEMINI_SYSTEM_MD at it", async () => {
+    const cwd = mkdtempSync(join(tmpdir(), "acp-gemini-cwd-"));
+    try {
+      const config = baseConfig({
+        cwd,
+        systemPrompt: "You are a swarm worker.",
+        env: { PATH: "/bin", ACP_TARGET: "gemini" },
+      });
+      const target = resolveAcpTarget(config);
+      await target.writeSystemPromptArtifact(config);
+      const path = target.env(config).GEMINI_SYSTEM_MD;
+
+      expect(path).toBeDefined();
+      expect(path!.startsWith(cwd)).toBe(false);
+      expect(await Bun.file(path!).text()).toBe("You are a swarm worker.");
+      // A second session gets its own file.
+      const other = baseConfig({ cwd, systemPrompt: "other", env: config.env });
+      await target.writeSystemPromptArtifact(other);
+      expect(target.env(other).GEMINI_SYSTEM_MD).not.toBe(path);
+      rmSync(join(path!, ".."), { recursive: true, force: true });
+      rmSync(join(target.env(other).GEMINI_SYSTEM_MD!, ".."), { recursive: true, force: true });
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
+  test("Gemini preset keeps the built-in prompt when the swarm prompt is empty", async () => {
+    const config = baseConfig({ systemPrompt: "  ", env: { PATH: "/bin", ACP_TARGET: "gemini" } });
+    const target = resolveAcpTarget(config);
+    await target.writeSystemPromptArtifact(config);
+
+    expect(target.env(config).GEMINI_SYSTEM_MD).toBeUndefined();
+  });
+
+  test("Copilot preset forwards its own credentials, pins the model, and never forwards GITHUB_TOKEN", () => {
+    const config = baseConfig({
+      model: "openai/gpt-5.2",
+      env: {
+        PATH: "/bin",
+        HOME: "/home/test",
+        ACP_TARGET: "copilot",
+        COPILOT_GITHUB_TOKEN: "example-copilot-token",
+        COPILOT_PROVIDER_BASE_URL: "https://llm.example/v1",
+        COPILOT_PROVIDER_API_KEY: "example-provider-key",
+        COPILOT_CUSTOM_INSTRUCTIONS_DIRS: "/opt/team-instructions",
+        GITHUB_TOKEN: "example-git-token",
+        GH_TOKEN: "example-gh-token",
+      },
+    });
+    const target = resolveAcpTarget(config);
+
+    expect(target.target).toBe("copilot");
+    expect(target.command(config)).toEqual(["copilot", "--acp"]);
+    const env = target.env(config);
+    expect(env).toMatchObject({
+      COPILOT_GITHUB_TOKEN: "example-copilot-token",
+      COPILOT_PROVIDER_BASE_URL: "https://llm.example/v1",
+      COPILOT_PROVIDER_API_KEY: "example-provider-key",
+      COPILOT_MODEL: "openai/gpt-5.2",
+      COPILOT_AUTO_UPDATE: "false",
+      COPILOT_CUSTOM_INSTRUCTIONS_DIRS: `${copilotInstructionsDir(config)},/opt/team-instructions`,
+    });
+    // The worker's git token lacks the Copilot Requests permission and would
+    // shadow a BYOK or COPILOT_GITHUB_TOKEN setup.
+    expect(env.GITHUB_TOKEN).toBeUndefined();
+    expect(env.GH_TOKEN).toBeUndefined();
+  });
+
+  test("Copilot preset delivers the system prompt outside the repo and removes it after the session", async () => {
+    const cwd = makeTempDir();
+    const binDir = makeTempDir();
+    const captureFile = join(binDir, "capture.json");
+    const agentPath = join(binDir, "fake-copilot-acp.ts");
+    const sdkPath = join(process.cwd(), "node_modules/@agentclientprotocol/sdk/dist/acp.js");
+    const repoAgentsMd = "# Repo rules\nKeep this file as is.\n";
+    await Bun.write(join(cwd, "AGENTS.md"), repoAgentsMd);
+    await Bun.write(
+      agentPath,
+      `
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { Readable, Writable } from "node:stream";
+import { AgentSideConnection, PROTOCOL_VERSION, ndJsonStream } from "${sdkPath}";
+class FakeCopilot {
+  constructor(connection) { this.connection = connection; }
+  async initialize() {
+    return { protocolVersion: PROTOCOL_VERSION, agentCapabilities: { loadSession: false } };
+  }
+  async newSession() {
+    const dir = process.env.COPILOT_CUSTOM_INSTRUCTIONS_DIRS.split(",")[0];
+    await Bun.write(${JSON.stringify(captureFile)}, JSON.stringify({
+      argv: process.argv.slice(2),
+      dir,
+      instructions: readFileSync(join(dir, ${JSON.stringify(COPILOT_INSTRUCTIONS_FILE)}), "utf8"),
+      model: process.env.COPILOT_MODEL,
+    }));
+    return { sessionId: "copilot-session-1" };
+  }
+  async prompt(params) {
+    await this.connection.sessionUpdate({
+      sessionId: params.sessionId,
+      update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "done" }, messageId: "m1" },
+    });
+    return { stopReason: "end_turn" };
+  }
+  async cancel() {}
+}
+const stream = ndJsonStream(Writable.toWeb(process.stdout), Readable.toWeb(process.stdin));
+new AgentSideConnection((connection) => new FakeCopilot(connection), stream);
+`,
+    );
+    const copilotStub = join(binDir, "copilot");
+    await Bun.write(copilotStub, `#!/bin/sh\nexec "${process.execPath}" "${agentPath}" "$@"\n`);
+    chmodSync(copilotStub, 0o755);
+    mkdirSync(join(binDir, "home"));
+
+    const { close: closeTokenStub, apiUrl } = await startTokenStubServer(
+      "copilot-token-id",
+      "example-aseph_x",
+    );
+    try {
+      const config = baseConfig({
+        cwd,
+        apiUrl,
+        model: "openai/gpt-5.2",
+        systemPrompt: "You are a swarm worker.",
+        env: {
+          PATH: `${binDir}:${process.env.PATH ?? ""}`,
+          HOME: join(binDir, "home"),
+          ACP_TARGET: "copilot",
+        },
+      });
+      const session = await new ACPAdapter().createSession(config);
+      const result = await session.waitForCompletion();
+      expect(result.isError).toBe(false);
+
+      const captured = JSON.parse(await Bun.file(captureFile).text()) as {
+        argv: string[];
+        dir: string;
+        instructions: string;
+        model: string;
+      };
+      expect(captured.argv).toEqual(["--acp"]);
+      expect(captured.dir).toBe(copilotInstructionsDir(config));
+      expect(captured.dir.startsWith(cwd)).toBe(false);
+      expect(captured.instructions).toBe('---\napplyTo: "**"\n---\n\nYou are a swarm worker.\n');
+      expect(captured.model).toBe("openai/gpt-5.2");
+      expect(await Bun.file(join(cwd, "AGENTS.md")).text()).toBe(repoAgentsMd);
+
+      const deadline = Date.now() + 2_000;
+      while (existsSync(captured.dir) && Date.now() < deadline) await Bun.sleep(10);
+      expect(existsSync(captured.dir)).toBe(false);
+    } finally {
+      await closeTokenStub();
+    }
   });
 
   test("custom target passes through only explicitly named env and supports a model env fallback", () => {
@@ -829,6 +1158,129 @@ new AgentSideConnection((connection) => new FakeAgent(connection), stream);
       warning.mockRestore();
       revokeResponse?.end();
       await new Promise<void>((resolve) => swarmServer.close(() => resolve()));
+    }
+  });
+
+  // Live OpenCode 1.18.34: two turns in one session reported cost 0.0172435 and
+  // then 0.03449, so `cost.amount` is cumulative per session, as the SDK says.
+  test.each<{
+    name: string;
+    costs: Array<{ amount: number; currency: string } | null>;
+    totalCostUsd: number;
+    costSource: string;
+  }>([
+    {
+      name: "cumulative USD reports keep the latest amount",
+      costs: [{ amount: 0.01, currency: "USD" }, null, { amount: 0.025, currency: "USD" }],
+      totalCostUsd: 0.025,
+      costSource: "harness",
+    },
+    {
+      name: "an absent cost stays unpriced",
+      costs: [null],
+      totalCostUsd: 0,
+      costSource: "unpriced",
+    },
+    {
+      name: "a non-USD cost stays unpriced",
+      costs: [{ amount: 0.02, currency: "EUR" }],
+      totalCostUsd: 0,
+      costSource: "unpriced",
+    },
+  ])("$name", async ({ costs, totalCostUsd, costSource }) => {
+    const cwd = makeTempDir();
+    const agentPath = join(cwd, "fake-acp-cost-agent.ts");
+    const sdkPath = join(process.cwd(), "node_modules/@agentclientprotocol/sdk/dist/acp.js");
+    await Bun.write(
+      agentPath,
+      `
+import { Readable, Writable } from "node:stream";
+import { AgentSideConnection, PROTOCOL_VERSION, ndJsonStream } from "${sdkPath}";
+class FakeAgent {
+  constructor(connection) { this.connection = connection; }
+  async initialize() {
+    return { protocolVersion: PROTOCOL_VERSION, agentCapabilities: { loadSession: false } };
+  }
+  async newSession() { return { sessionId: "cost-session-1" }; }
+  async prompt(params) {
+    for (const cost of ${JSON.stringify(costs)}) {
+      await this.connection.sessionUpdate({
+        sessionId: params.sessionId,
+        update: { sessionUpdate: "usage_update", used: 10, size: 100, ...(cost ? { cost } : {}) },
+      });
+    }
+    return { stopReason: "end_turn", usage: { inputTokens: 10, outputTokens: 2, totalTokens: 12 } };
+  }
+  async cancel() {}
+}
+const stream = ndJsonStream(Writable.toWeb(process.stdout), Readable.toWeb(process.stdin));
+new AgentSideConnection((connection) => new FakeAgent(connection), stream);
+`,
+    );
+    const { close: closeTokenStub, apiUrl } = await startTokenStubServer(
+      "stub-token-id",
+      "aseph_stubtokenfortest1234567890",
+    );
+    try {
+      const session = await new ACPAdapter().createSession(
+        baseConfig({
+          cwd,
+          apiUrl,
+          env: {
+            PATH: process.env.PATH ?? "",
+            HOME: process.env.HOME ?? "",
+            ACP_TARGET_COMMAND: "bun",
+            ACP_TARGET_ARGS: JSON.stringify([agentPath]),
+          },
+        }),
+      );
+      const events: ProviderEvent[] = [];
+      session.onEvent((event) => events.push(event));
+      const result = await session.waitForCompletion();
+      expect(result.cost?.totalCostUsd).toBe(totalCostUsd);
+
+      // The raw usage_update log keeps whatever the target reported.
+      const loggedCosts = events
+        .filter(
+          (event): event is Extract<ProviderEvent, { type: "raw_log" }> => event.type === "raw_log",
+        )
+        .map((event) => JSON.parse(event.content) as { update?: Record<string, unknown> })
+        .filter((entry) => entry.update?.sessionUpdate === "usage_update")
+        .map((entry) => entry.update?.cost ?? null);
+      expect(loggedCosts).toEqual(costs);
+
+      initDb(":memory:");
+      const agent = await createAgent({ name: "ACP USD cost", isLead: false, status: "idle" });
+      const server = createServer(async (req, res) => {
+        const handled = await handleSessionData(
+          req,
+          res,
+          getPathSegments(req.url ?? ""),
+          parseQueryParams(req.url ?? ""),
+          agent.id,
+        );
+        if (!handled) {
+          res.writeHead(404);
+          res.end();
+        }
+      });
+      try {
+        const task = await createTaskExtended("ACP USD cost test");
+        const port = await listenOnFreePort(server);
+        const response = await fetch(`http://127.0.0.1:${port}/api/session-costs`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ...result.cost, agentId: agent.id, taskId: task.id }),
+        });
+        expect(response.status).toBe(201);
+        const { cost } = await response.json();
+        expect(cost).toMatchObject({ totalCostUsd, costSource });
+      } finally {
+        await new Promise<void>((resolve) => server.close(() => resolve()));
+        closeDb();
+      }
+    } finally {
+      await closeTokenStub();
     }
   });
 });

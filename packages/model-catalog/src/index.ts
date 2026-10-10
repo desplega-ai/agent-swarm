@@ -9,12 +9,17 @@ export {
   harnessModelIds,
   harnessModelMismatch,
   isHarnessCatalogModel,
+  isHarnessModelJudged,
   modelFamilyKey,
+  normalizeGrokModel,
 } from "./harness-models.ts";
 export { type ModelsDevOverlay, mergeCatalog } from "./merge.ts";
 export { type AliasSourceModel, buildClaudeAliasMap, resolveClaudeAlias } from "./model-alias.ts";
 export {
   claudeCatalogModelId,
+  cursorCatalogRef,
+  dshCatalogRef,
+  grokCatalogRef,
   isReasoningHarness,
   nearestReasoningLevel,
   REASONING_EFFORT_LEVELS,

@@ -157,6 +157,25 @@ export function runContext(event: keyof SwarmEventMap, payload: unknown): RunCon
     case "post.slack.message":
       subject = `channel ${stringField(payload, "channelId") ?? "?"}: ${snippet(field(payload, "text"), 60)}`;
       break;
+    case "post.approval.resolved":
+      subject = `approval ${stringField(payload, "requestId") ?? "?"}: ${stringField(payload, "status") ?? "?"}`;
+      break;
+    case "post.task.budgetRefused":
+      agentId = stringField(payload, "agentId");
+      subject = `task ${stringField(payload, "task", "id") ?? "?"}: ${stringField(payload, "cause") ?? "?"} budget`;
+      break;
+    // Ids only: an email subject or a WhatsApp text is personal content.
+    case "post.email.received":
+      subject = `inbox ${stringField(payload, "inboxId") ?? "?"}: thread ${stringField(payload, "threadId") ?? "?"}`;
+      break;
+    case "post.kapso.message":
+      subject = `number ${stringField(payload, "phoneNumberId") ?? "?"}: message ${stringField(payload, "messageId") ?? "?"}`;
+      break;
+    case "post.vcs.event": {
+      const number = field(payload, "number");
+      subject = `${stringField(payload, "provider") ?? "?"} ${stringField(payload, "kind") ?? "?"}.${stringField(payload, "action") ?? "?"}: ${stringField(payload, "repo") ?? "?"}${typeof number === "number" ? `#${number}` : ""}`;
+      break;
+    }
     case "pre.heartbeat.remediate":
       agentId = stringField(payload, "task", "agentId");
       subject = `task ${stringField(payload, "task", "id") ?? "?"} ${stringField(payload, "classification") ?? ""} -> ${stringField(payload, "proposedAction") ?? ""}`;
