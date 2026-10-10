@@ -225,8 +225,9 @@ const updatePageRoute = route({
 /**
  * POST /api/pages/:id/feedback — turn the element comments collected by the
  * in-page feedback overlay (`?__swarm-feedback`, see
- * `src/artifact-sdk/feedback-overlay.ts`) into one task for the lead. The
- * overlay reaches this route through the `/@swarm/api/*` page proxy, which
+ * `src/artifact-sdk/feedback-overlay.ts`) into one task for the lead. In the
+ * dashboard the SPA calls it with its bearer for the page it shows. A page
+ * opened directly reaches it through the `/@swarm/api/*` page proxy, which
  * pins `X-Page-Id` to the cookie's page, so a page can only file feedback on
  * itself. Guest (password) sessions are refused by the proxy allowlist.
  */

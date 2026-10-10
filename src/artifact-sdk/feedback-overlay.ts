@@ -3,8 +3,11 @@
 // Served only when the request carries `?__swarm-feedback` (the dashboard's
 // "Feedback" toggle sets it, see apps/ui/src/pages/pages/[id]/page.tsx). The
 // viewer picks elements on the page, leaves a comment on each, and sends the
-// batch to `POST /@swarm/api/pages/:id/feedback`, which creates one task for
-// the lead (src/http/pages.ts).
+// batch to `POST /api/pages/:id/feedback`, which creates one task for the lead
+// (src/http/pages.ts). Inside the dashboard the parent SPA sends it with its
+// bearer (postMessage bridge), so the page never gets a viewer session for
+// this. Opened directly, the overlay falls back to the `/@swarm/api` proxy,
+// which needs an existing page session.
 //
 // Pure DOM, zero deps, rendered inside a shadow root so page CSS (and the
 // Tailwind Play CDN) cannot restyle it. Draft comments persist in
@@ -321,6 +324,56 @@ const FEEDBACK_OVERLAY_JS = `
     var detail = body && body.error ? ': ' + body.error : '';
     return 'Sending failed (' + status + detail + ').';
   }
+  // Inside the dashboard, the parent SPA sends the comments with its own
+  // bearer (apps/ui/src/pages/pages/[id]/feedback-bridge.ts), so the page
+  // needs no viewer session. Elsewhere, fall back to the cookie-gated proxy.
+  var bridge = null;
+  var pending = {};
+  var requestSeq = 0;
+  window.addEventListener('message', function (e) {
+    if (e.source !== window.parent || window.parent === window) return;
+    var data = e.data;
+    if (!data || typeof data !== 'object') return;
+    if (data.type === 'swarm-feedback:host') {
+      bridge = { target: e.source, origin: e.origin };
+      return;
+    }
+    if (data.type === 'swarm-feedback:result' && pending[data.requestId]) {
+      var done = pending[data.requestId];
+      delete pending[data.requestId];
+      done(data);
+    }
+  });
+  function sendViaBridge(payload) {
+    return new Promise(function (resolve, reject) {
+      var requestId = 'fb' + (++requestSeq);
+      var timer = setTimeout(function () {
+        delete pending[requestId];
+        reject({ message: 'The dashboard did not answer. Try again.' });
+      }, 30000);
+      pending[requestId] = function (data) {
+        clearTimeout(timer);
+        if (data.ok) resolve({ url: data.taskUrl });
+        else reject({ message: 'Sending failed: ' + (data.error || 'unknown error') });
+      };
+      bridge.target.postMessage({ type: 'swarm-feedback:send', requestId: requestId, payload: payload }, bridge.origin);
+    });
+  }
+  function sendViaProxy(payload) {
+    return fetch('/@swarm/api/pages/' + encodeURIComponent(pageId) + '/feedback', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }).then(function (res) {
+      return res.text().then(function (text) {
+        var body = null;
+        try { body = text ? JSON.parse(text) : null; } catch (e) {}
+        if (!res.ok) throw { message: errorMessage(res.status, body) };
+        return { url: body && body.task_url };
+      });
+    });
+  }
   function send(note) {
     if (state.sending || state.comments.length === 0) return;
     state.sending = true;
@@ -333,23 +386,11 @@ const FEEDBACK_OVERLAY_JS = `
       }),
     };
     if (note && note.trim()) payload.note = note.trim();
-    fetch('/@swarm/api/pages/' + encodeURIComponent(pageId) + '/feedback', {
-      method: 'POST',
-      credentials: 'same-origin',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    }).then(function (res) {
-      return res.text().then(function (text) {
-        var body = null;
-        try { body = text ? JSON.parse(text) : null; } catch (e) {}
-        if (!res.ok) throw { message: errorMessage(res.status, body) };
-        return body;
-      });
-    }).then(function (body) {
+    (bridge ? sendViaBridge(payload) : sendViaProxy(payload)).then(function (result) {
       state.comments = [];
       save();
       state.noteDraft = '';
-      state.status = { ok: true, taskId: body && body.taskId, url: body && body.task_url };
+      state.status = { ok: true, url: result && result.url };
     }).catch(function (err) {
       state.status = { ok: false, message: (err && err.message) || 'Sending failed.' };
     }).then(function () {
@@ -466,6 +507,9 @@ const FEEDBACK_OVERLAY_JS = `
   function mount() {
     document.documentElement.appendChild(host);
     render();
+    if (window.parent !== window) {
+      try { window.parent.postMessage({ type: 'swarm-feedback:hello' }, '*'); } catch (e) {}
+    }
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', mount);
   else mount();

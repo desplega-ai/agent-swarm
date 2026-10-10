@@ -3001,6 +3001,26 @@ export interface PageMetadata {
   body: string;
 }
 
+/** Body of `POST /api/pages/:id/feedback`, as collected by the in-page feedback overlay. */
+export interface PageFeedbackPayload {
+  pageUrl?: string;
+  note?: string;
+  comments: Array<{
+    selector: string;
+    comment: string;
+    tagName?: string;
+    text?: string;
+    html?: string;
+  }>;
+}
+
+export interface PageFeedbackResult {
+  taskId: string;
+  status: string;
+  agentId: string | null;
+  task_url: string;
+}
+
 /**
  * Public view-count payload — the page-public JSON path doesn't expose
  * `viewCount` (it would imply re-rendering every time view_count changes,

@@ -53,6 +53,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { Skeleton } from "@/components/ui/skeleton";
 import { getConfig } from "@/lib/config";
 import { cn } from "@/lib/utils";
+import { usePageFeedbackBridge } from "./feedback-bridge";
 import { JsonPageRenderer } from "./json-page-renderer";
 import { RoomInspector } from "./room-inspector";
 
@@ -402,6 +403,12 @@ export default function ArtifactPage() {
     retry: false,
   });
   const pageId = needsSlugResolve ? resolvedPage?.id : id;
+  usePageFeedbackBridge({
+    pageId,
+    enabled: feedbackOn,
+    apiOrigin: new URL(getAbsoluteApiUrl()).origin,
+    iframeRef,
+  });
   const { data: pageRow } = usePage(pageId);
   const favoriteToggle = useFavoriteToggle("page");
 
@@ -468,16 +475,7 @@ export default function ArtifactPage() {
   } else {
     switch (data.authMode) {
       case "public":
-        // Feedback posts through the cookie-gated `/@swarm/api` proxy, so a
-        // public page needs the launch-minted session like an authed one.
-        body = feedbackOn ? (
-          <AuthedHtmlFrame
-            id={pageId!}
-            title={data.title}
-            frameQuery={frameQuery}
-            iframeRef={iframeRef}
-          />
-        ) : (
+        body = (
           <PublicHtmlFrame
             id={pageId!}
             title={data.title}
@@ -554,7 +552,7 @@ export default function ArtifactPage() {
             onExportPdf={handleExportPdf}
             feedback={
               // HTML only (JSON pages render in the SPA), and not for password
-              // pages: their guest session cannot create tasks.
+              // pages: the unlocked frame keeps the URL it was opened with.
               data.contentType === "text/html" && data.authMode !== "password"
                 ? { on: feedbackOn, onToggle: toggleFeedback }
                 : undefined

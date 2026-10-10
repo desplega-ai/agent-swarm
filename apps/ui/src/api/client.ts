@@ -81,6 +81,8 @@ import type {
   OAuthAuthorization,
   OAuthAuthorizeUrlResult,
   OAuthPreset,
+  PageFeedbackPayload,
+  PageFeedbackResult,
   PageListItem,
   PageMetadata,
   PagesListResponse,
@@ -3224,6 +3226,30 @@ class ApiClient {
       credentials: "include",
     });
     if (!res.ok) throw new Error(`launchPage ${id}: ${res.status}`);
+  }
+
+  /**
+   * Send the feedback overlay's element comments for a page (bearer-authed).
+   * The page iframe hands the comments to the SPA over postMessage, so the
+   * page itself never needs a viewer session to submit them.
+   */
+  async sendPageFeedback(id: string, payload: PageFeedbackPayload): Promise<PageFeedbackResult> {
+    const url = `${this.getBaseUrl()}/api/pages/${encodeURIComponent(id)}/feedback`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: this.getHeaders(),
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      let detail = "";
+      try {
+        detail = ((await res.json()) as { error?: string }).error ?? "";
+      } catch {
+        /* ignore */
+      }
+      throw new Error(`sendPageFeedback ${id}: ${res.status}${detail ? ` (${detail})` : ""}`);
+    }
+    return res.json();
   }
 
   /**

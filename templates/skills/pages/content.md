@@ -435,8 +435,10 @@ element.
 If you get a `page-feedback` task: read the page with `GET /api/pages/:id`,
 change it with `PUT /api/pages/:id`, and report which comments you applied.
 
-Limits: signed-in dashboard sessions only. Password-page guests get 403. A
-direct `/p/:id` visit with no page session gets 401. The overlay is hidden in
+Inside the dashboard, the dashboard sends the comments with its own
+credentials, so the page gets no extra session. A direct `/p/:id` visit sends
+through the `/@swarm/api` proxy: it needs a signed-in page session (no
+session gets 401, password-page guests get 403). The overlay is hidden in
 print. Do not add your own UI under the `swarm-feedback-root` element name.
 
 ## View counter
