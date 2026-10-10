@@ -3012,6 +3012,9 @@ export interface PageFeedbackPayload {
     text?: string;
     html?: string;
   }>;
+  /** Session-panel context key, `task:ui:page:<id or slug>:<uuid>`. */
+  contextKey?: string;
+  requestedByUserId?: string;
 }
 
 export interface PageFeedbackResult {

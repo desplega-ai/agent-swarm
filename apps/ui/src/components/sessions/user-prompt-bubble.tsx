@@ -53,7 +53,9 @@ export function UserPromptBubble({
           className={cn(
             "rounded-2xl rounded-tr-sm bg-muted px-4 py-2.5",
             "text-sm leading-relaxed text-foreground/95",
-            "whitespace-pre-wrap break-words text-left min-w-0",
+            // `wrap-anywhere`, not `break-words`: a long URL or id must shrink
+            // the bubble's min-content width, or it overflows a narrow panel.
+            "whitespace-pre-wrap wrap-anywhere text-left min-w-0",
           )}
         >
           {/* The contextual panel's page-context footer is for the lead, not the reader. */}

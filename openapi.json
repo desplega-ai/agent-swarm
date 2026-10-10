@@ -2816,6 +2816,212 @@
           "definition"
         ]
       },
+      "SteerResult": {
+        "type": "object",
+        "properties": {
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "steered",
+              "queued",
+              "promoted"
+            ]
+          },
+          "steeringMessageId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "promotedTaskId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "effectiveMode": {
+            "type": "string",
+            "enum": [
+              "steer",
+              "queue"
+            ]
+          },
+          "degradedFrom": {
+            "type": "string",
+            "enum": [
+              "steer",
+              "queue"
+            ]
+          }
+        },
+        "required": [
+          "outcome",
+          "effectiveMode"
+        ]
+      },
+      "SteeringMessage": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "taskId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "body": {
+            "type": "string",
+            "minLength": 1
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "steer",
+              "queue"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "delivered",
+              "handled",
+              "promoted",
+              "cancelled"
+            ]
+          },
+          "deliveredMode": {
+            "type": "string",
+            "enum": [
+              "steer",
+              "queue"
+            ]
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "ui",
+              "mcp",
+              "script",
+              "slack",
+              "api"
+            ]
+          },
+          "senderLabel": {
+            "type": "string"
+          },
+          "createdByKind": {
+            "type": "string",
+            "enum": [
+              "user",
+              "agent",
+              "system"
+            ]
+          },
+          "createdByUserId": {
+            "type": "string"
+          },
+          "createdByAgentId": {
+            "type": "string"
+          },
+          "promotedTaskId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "deliveredAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "handledAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "handledNote": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "taskId",
+          "body",
+          "mode",
+          "status",
+          "source",
+          "createdByKind",
+          "createdAt"
+        ]
+      },
+      "AgentLog": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "eventType": {
+            "type": "string",
+            "enum": [
+              "agent_joined",
+              "agent_status_change",
+              "agent_left",
+              "task_created",
+              "task_status_change",
+              "task_progress",
+              "task_steering",
+              "task_offered",
+              "task_accepted",
+              "task_rejected",
+              "task_claimed",
+              "task_claim_rejected_affinity",
+              "task_dispatch_rejected_affinity",
+              "task_authorization_rejected",
+              "task_recovery_authorization",
+              "task_dependency_repointed",
+              "task_released",
+              "task_deferred_wait_woke",
+              "task_follow_up_suppressed",
+              "task_citation_check_refused",
+              "channel_message",
+              "service_registered",
+              "service_unregistered",
+              "service_status_change",
+              "budget.upserted",
+              "budget.deleted",
+              "pricing.inserted",
+              "pricing.deleted",
+              "pricing.refresh",
+              "pricing.refresh.failed",
+              "task_superseded",
+              "slack_delivery"
+            ]
+          },
+          "agentId": {
+            "type": "string"
+          },
+          "taskId": {
+            "type": "string"
+          },
+          "oldValue": {
+            "type": "string"
+          },
+          "newValue": {
+            "type": "string"
+          },
+          "metadata": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "eventType",
+          "createdAt"
+        ]
+      },
       "Page": {
         "type": "object",
         "properties": {
@@ -4187,76 +4393,6 @@
           "installedAt"
         ]
       },
-      "AgentLog": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "eventType": {
-            "type": "string",
-            "enum": [
-              "agent_joined",
-              "agent_status_change",
-              "agent_left",
-              "task_created",
-              "task_status_change",
-              "task_progress",
-              "task_steering",
-              "task_offered",
-              "task_accepted",
-              "task_rejected",
-              "task_claimed",
-              "task_claim_rejected_affinity",
-              "task_dispatch_rejected_affinity",
-              "task_authorization_rejected",
-              "task_recovery_authorization",
-              "task_dependency_repointed",
-              "task_released",
-              "task_deferred_wait_woke",
-              "task_follow_up_suppressed",
-              "task_citation_check_refused",
-              "channel_message",
-              "service_registered",
-              "service_unregistered",
-              "service_status_change",
-              "budget.upserted",
-              "budget.deleted",
-              "pricing.inserted",
-              "pricing.deleted",
-              "pricing.refresh",
-              "pricing.refresh.failed",
-              "task_superseded",
-              "slack_delivery"
-            ]
-          },
-          "agentId": {
-            "type": "string"
-          },
-          "taskId": {
-            "type": "string"
-          },
-          "oldValue": {
-            "type": "string"
-          },
-          "newValue": {
-            "type": "string"
-          },
-          "metadata": {
-            "type": "string"
-          },
-          "createdAt": {
-            "type": "string",
-            "format": "date-time"
-          }
-        },
-        "required": [
-          "id",
-          "eventType",
-          "createdAt"
-        ]
-      },
       "Service": {
         "type": "object",
         "properties": {
@@ -4342,142 +4478,6 @@
           "script",
           "createdAt",
           "lastUpdatedAt"
-        ]
-      },
-      "SteerResult": {
-        "type": "object",
-        "properties": {
-          "outcome": {
-            "type": "string",
-            "enum": [
-              "steered",
-              "queued",
-              "promoted"
-            ]
-          },
-          "steeringMessageId": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "promotedTaskId": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "effectiveMode": {
-            "type": "string",
-            "enum": [
-              "steer",
-              "queue"
-            ]
-          },
-          "degradedFrom": {
-            "type": "string",
-            "enum": [
-              "steer",
-              "queue"
-            ]
-          }
-        },
-        "required": [
-          "outcome",
-          "effectiveMode"
-        ]
-      },
-      "SteeringMessage": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "taskId": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "body": {
-            "type": "string",
-            "minLength": 1
-          },
-          "mode": {
-            "type": "string",
-            "enum": [
-              "steer",
-              "queue"
-            ]
-          },
-          "status": {
-            "type": "string",
-            "enum": [
-              "pending",
-              "delivered",
-              "handled",
-              "promoted",
-              "cancelled"
-            ]
-          },
-          "deliveredMode": {
-            "type": "string",
-            "enum": [
-              "steer",
-              "queue"
-            ]
-          },
-          "source": {
-            "type": "string",
-            "enum": [
-              "ui",
-              "mcp",
-              "script",
-              "slack",
-              "api"
-            ]
-          },
-          "senderLabel": {
-            "type": "string"
-          },
-          "createdByKind": {
-            "type": "string",
-            "enum": [
-              "user",
-              "agent",
-              "system"
-            ]
-          },
-          "createdByUserId": {
-            "type": "string"
-          },
-          "createdByAgentId": {
-            "type": "string"
-          },
-          "promotedTaskId": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "createdAt": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "deliveredAt": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "handledAt": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "handledNote": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "taskId",
-          "body",
-          "mode",
-          "status",
-          "source",
-          "createdByKind",
-          "createdAt"
         ]
       },
       "TaskTemplate": {
@@ -29012,6 +29012,2416 @@
         }
       }
     },
+    "/api/tasks": {
+      "get": {
+        "summary": "List tasks with filters",
+        "description": "Returns tasks with the full `task` text replaced by a bounded `taskPreview` and completion/integration blobs dropped by default — list views only need the preview. Pass `fields=full` to restore the full `AgentTask`, or `fields=timeline` for the narrow shape the dashboard timeline draws. Fetch a single task in full via `GET /api/tasks/{id}`. `total` (the filtered row count, ignoring limit/offset) is computed only with `includeTotal=true`.",
+        "tags": [
+          "Tasks"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "status",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "agentId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "scheduleId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 255,
+              "description": "Non-unique asset directory namespace (for example shared/ or personal/<user-id>/drafts/). Runtime write boundaries normalize and validate the canonical form."
+            },
+            "required": false,
+            "description": "Non-unique asset directory namespace (for example shared/ or personal/<user-id>/drafts/). Runtime write boundaries normalize and validate the canonical form.",
+            "name": "key",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 255,
+              "description": "Non-unique asset directory namespace (for example shared/ or personal/<user-id>/drafts/). Runtime write boundaries normalize and validate the canonical form."
+            },
+            "required": false,
+            "description": "Non-unique asset directory namespace (for example shared/ or personal/<user-id>/drafts/). Runtime write boundaries normalize and validate the canonical form.",
+            "name": "keyPrefix",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "search",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "true",
+                "false"
+              ]
+            },
+            "required": false,
+            "name": "includeHeartbeat",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "required": false,
+            "name": "createdAfter",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "required": false,
+            "name": "createdBefore",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "source",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": false,
+            "name": "requestedByUserId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "lastUpdatedAt",
+                "createdAt"
+              ]
+            },
+            "required": false,
+            "name": "orderBy",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "required": false,
+            "name": "limit",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "required": false,
+            "name": "offset",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "full",
+                "slim",
+                "timeline"
+              ]
+            },
+            "required": false,
+            "name": "fields",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "true",
+                "false"
+              ]
+            },
+            "required": false,
+            "name": "includeTotal",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated task list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "tasks": {
+                      "anyOf": [
+                        {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/components/schemas/AgentTask"
+                          }
+                        },
+                        {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string",
+                                "format": "uuid"
+                              },
+                              "key": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 255,
+                                "description": "Non-unique asset directory namespace (for example shared/ or personal/<user-id>/drafts/). Runtime write boundaries normalize and validate the canonical form."
+                              },
+                              "agentId": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "creatorAgentId": {
+                                "type": "string"
+                              },
+                              "task": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "title": {
+                                "type": "string"
+                              },
+                              "status": {
+                                "type": "string",
+                                "enum": [
+                                  "draft",
+                                  "backlog",
+                                  "unassigned",
+                                  "offered",
+                                  "reviewing",
+                                  "pending",
+                                  "in_progress",
+                                  "paused",
+                                  "completed",
+                                  "failed",
+                                  "cancelled",
+                                  "superseded"
+                                ]
+                              },
+                              "source": {
+                                "type": "string",
+                                "enum": [
+                                  "mcp",
+                                  "slack",
+                                  "api",
+                                  "ui",
+                                  "github",
+                                  "gitlab",
+                                  "azure-devops",
+                                  "agentmail",
+                                  "system",
+                                  "schedule",
+                                  "workflow",
+                                  "linear",
+                                  "jira",
+                                  "comb"
+                                ],
+                                "default": "mcp"
+                              },
+                              "taskType": {
+                                "type": "string",
+                                "maxLength": 50
+                              },
+                              "tags": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                },
+                                "default": []
+                              },
+                              "priority": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 100,
+                                "default": 50
+                              },
+                              "dependsOn": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                },
+                                "default": []
+                              },
+                              "offeredTo": {
+                                "type": "string"
+                              },
+                              "acceptedAt": {
+                                "type": "string",
+                                "format": "date-time"
+                              },
+                              "parentTaskId": {
+                                "type": "string"
+                              },
+                              "scheduleId": {
+                                "type": "string"
+                              },
+                              "model": {
+                                "type": "string"
+                              },
+                              "modelTier": {
+                                "type": "string",
+                                "enum": [
+                                  "smol",
+                                  "regular",
+                                  "smart",
+                                  "ultra"
+                                ]
+                              },
+                              "resolvedModel": {
+                                "type": "string"
+                              },
+                              "modelSource": {
+                                "type": "string"
+                              },
+                              "modelAlias": {
+                                "type": "string"
+                              },
+                              "effort": {
+                                "type": "string",
+                                "enum": [
+                                  "off",
+                                  "low",
+                                  "medium",
+                                  "high",
+                                  "xhigh",
+                                  "max"
+                                ]
+                              },
+                              "provider": {
+                                "type": "string",
+                                "enum": [
+                                  "claude",
+                                  "codex",
+                                  "pi",
+                                  "devin",
+                                  "claude-managed",
+                                  "opencode",
+                                  "acp",
+                                  "dsh",
+                                  "amp",
+                                  "cursor",
+                                  "grok"
+                                ]
+                              },
+                              "requestedByUserId": {
+                                "type": "string"
+                              },
+                              "progress": {
+                                "type": "string"
+                              },
+                              "createdAt": {
+                                "type": "string",
+                                "format": "date-time"
+                              },
+                              "lastUpdatedAt": {
+                                "type": "string",
+                                "format": "date-time"
+                              },
+                              "finishedAt": {
+                                "type": "string",
+                                "format": "date-time"
+                              },
+                              "peakContextPercent": {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 100
+                              },
+                              "totalCostUsd": {
+                                "type": "number",
+                                "minimum": 0
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "key",
+                              "agentId",
+                              "task",
+                              "status",
+                              "createdAt",
+                              "lastUpdatedAt"
+                            ]
+                          }
+                        },
+                        {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string",
+                                "format": "uuid"
+                              },
+                              "agentId": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "parentTaskId": {
+                                "type": "string"
+                              },
+                              "task": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "title": {
+                                "type": "string"
+                              },
+                              "status": {
+                                "type": "string",
+                                "enum": [
+                                  "draft",
+                                  "backlog",
+                                  "unassigned",
+                                  "offered",
+                                  "reviewing",
+                                  "pending",
+                                  "in_progress",
+                                  "paused",
+                                  "completed",
+                                  "failed",
+                                  "cancelled",
+                                  "superseded"
+                                ]
+                              },
+                              "createdAt": {
+                                "type": "string",
+                                "format": "date-time"
+                              },
+                              "lastUpdatedAt": {
+                                "type": "string",
+                                "format": "date-time"
+                              },
+                              "finishedAt": {
+                                "type": "string",
+                                "format": "date-time"
+                              },
+                              "peakContextTokens": {
+                                "type": "integer",
+                                "minimum": 0
+                              },
+                              "totalCostUsd": {
+                                "type": "number",
+                                "minimum": 0
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "agentId",
+                              "task",
+                              "status",
+                              "createdAt",
+                              "lastUpdatedAt"
+                            ]
+                          }
+                        }
+                      ]
+                    },
+                    "total": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "tasks"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error (e.g. unknown status token)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Create a new task",
+        "tags": [
+          "Tasks"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "task": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "agentId": {
+                    "type": "string"
+                  },
+                  "routingReason": {
+                    "type": "string",
+                    "enum": [
+                      "skill",
+                      "continuity",
+                      "overflow",
+                      "human_pinned",
+                      "reroute_fault"
+                    ]
+                  },
+                  "routingNote": {
+                    "type": "string",
+                    "maxLength": 200
+                  },
+                  "taskType": {
+                    "type": "string"
+                  },
+                  "tags": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "priority": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 100
+                  },
+                  "dependsOn": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "offeredTo": {
+                    "type": "string"
+                  },
+                  "dir": {
+                    "type": "string"
+                  },
+                  "parentTaskId": {
+                    "type": "string"
+                  },
+                  "key": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 255,
+                    "description": "Non-unique asset directory namespace (for example shared/ or personal/<user-id>/drafts/). Runtime write boundaries normalize and validate the canonical form."
+                  },
+                  "source": {
+                    "type": "string",
+                    "enum": [
+                      "mcp",
+                      "slack",
+                      "api",
+                      "ui",
+                      "github",
+                      "gitlab",
+                      "azure-devops",
+                      "agentmail",
+                      "system",
+                      "schedule",
+                      "workflow",
+                      "linear",
+                      "jira",
+                      "comb"
+                    ]
+                  },
+                  "outputSchema": {
+                    "type": "object",
+                    "additionalProperties": {}
+                  },
+                  "contextKey": {
+                    "type": "string"
+                  },
+                  "requestedByUserId": {
+                    "type": "string"
+                  },
+                  "model": {
+                    "type": "string",
+                    "description": "Concrete model override for this task, interpreted by the assignee's harness/provider. The model must run on the assignee's harness (an Anthropic model on a Claude agent, an OpenAI model on a Codex agent); a mismatch is rejected."
+                  },
+                  "modelTier": {
+                    "type": "string",
+                    "enum": [
+                      "smol",
+                      "regular",
+                      "smart",
+                      "ultra"
+                    ]
+                  },
+                  "allowCustomModel": {
+                    "type": "boolean"
+                  },
+                  "effort": {
+                    "type": "string",
+                    "enum": [
+                      "off",
+                      "low",
+                      "medium",
+                      "high",
+                      "xhigh",
+                      "max"
+                    ]
+                  },
+                  "draft": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "task"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Task created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentTask"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error, an unknown `model` (set `allowCustomModel` to store a custom id), or agentId/offeredTo targets an extension identity",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Task creation blocked by an extension",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "extension": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "name"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "extension"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/tasks/{id}/promote-draft": {
+      "post": {
+        "summary": "Promote a draft task out of the pre-dispatch draft state",
+        "description": "Transitions a `draft` task (#1240 — created with attachments still uploading) to its normal dispatch-eligible status: `offered` if it was offered to an agent, `pending` if it has an owning agent (the common case — UI-composer tasks default to Lead), otherwise `unassigned`. Called by the UI composer once its attachment upload batch settles, whether every file uploaded, some failed, or all failed — a draft must never be stranded by an upload error. Idempotent: calling it on a task that already left `draft` returns the current task unchanged rather than erroring, so a retried request is safe.",
+        "tags": [
+          "Tasks"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Task promoted (or already out of draft)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentTask"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Caller does not own this task",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Task not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/tasks/{id}/session": {
+      "put": {
+        "summary": "Update provider session ID and harness metadata for a task",
+        "tags": [
+          "Tasks"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "claudeSessionId": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "provider": {
+                        "type": "string",
+                        "enum": [
+                          "devin"
+                        ]
+                      },
+                      "model": {
+                        "type": "string"
+                      },
+                      "providerMeta": {
+                        "type": "object",
+                        "properties": {
+                          "sessionUrl": {
+                            "type": "string"
+                          },
+                          "maxAcuLimit": {
+                            "type": "number"
+                          },
+                          "acuCostUsd": {
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "sessionUrl"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "claudeSessionId",
+                      "provider",
+                      "providerMeta"
+                    ]
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "claudeSessionId": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "provider": {
+                        "type": "string",
+                        "enum": [
+                          "claude",
+                          "codex",
+                          "pi",
+                          "claude-managed",
+                          "opencode",
+                          "acp",
+                          "dsh",
+                          "amp",
+                          "cursor",
+                          "grok"
+                        ]
+                      },
+                      "model": {
+                        "type": "string"
+                      },
+                      "providerMeta": {
+                        "type": "object",
+                        "properties": {
+                          "transport": {
+                            "type": "string",
+                            "enum": [
+                              "cli",
+                              "sdk"
+                            ]
+                          }
+                        }
+                      },
+                      "harnessVariant": {
+                        "type": "string"
+                      },
+                      "harnessVariantMeta": {
+                        "type": "object",
+                        "additionalProperties": {}
+                      }
+                    },
+                    "required": [
+                      "claudeSessionId"
+                    ]
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Session ID updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentTask"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Task not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/tasks/{id}/cancel": {
+      "post": {
+        "summary": "Cancel a pending or in-progress task",
+        "tags": [
+          "Tasks"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Task cancelled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "task": {
+                      "$ref": "#/components/schemas/AgentTask"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "task"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Cannot cancel terminal task",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Agent caller is neither a lead nor the task creator",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Task not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/tasks/{id}/steer": {
+      "post": {
+        "summary": "Deliver a steering message to a running task",
+        "tags": [
+          "Tasks"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "message": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "mode": {
+                    "type": "string",
+                    "enum": [
+                      "steer",
+                      "queue"
+                    ],
+                    "default": "queue"
+                  },
+                  "onUnsupported": {
+                    "type": "string",
+                    "enum": [
+                      "degrade",
+                      "fail"
+                    ],
+                    "default": "degrade"
+                  },
+                  "source": {
+                    "type": "string",
+                    "enum": [
+                      "ui",
+                      "mcp",
+                      "script",
+                      "slack",
+                      "api"
+                    ]
+                  },
+                  "requestedByUserId": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "message"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Steering accepted (see `outcome` for what actually happened)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SteerResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Caller cannot steer this task",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Task not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Requested mode unsupported by the target harness and onUnsupported=fail",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/tasks/{id}/steering-messages": {
+      "get": {
+        "summary": "List steering messages for a task",
+        "tags": [
+          "Tasks"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Steering messages",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "messages": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/SteeringMessage"
+                      }
+                    }
+                  },
+                  "required": [
+                    "messages"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Task not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/steering-messages": {
+      "get": {
+        "summary": "List pending steering messages for the current worker",
+        "tags": [
+          "Tasks"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "taskId",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Pending steering messages",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "messages": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/SteeringMessage"
+                      }
+                    }
+                  },
+                  "required": [
+                    "messages"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing X-Agent-ID header",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Agent not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/steering-messages/{id}/delivered": {
+      "post": {
+        "summary": "Mark a steering message delivered",
+        "tags": [
+          "Tasks"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "mode": {
+                    "type": "string",
+                    "enum": [
+                      "steer",
+                      "queue"
+                    ]
+                  }
+                },
+                "required": [
+                  "mode"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Steering message delivery recorded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "message": {
+                      "$ref": "#/components/schemas/SteeringMessage"
+                    }
+                  },
+                  "required": [
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing X-Agent-ID header or validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Steering message task is assigned to another agent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Agent or steering message not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/steering-messages/{id}/handled": {
+      "post": {
+        "summary": "Mark a steering message handled",
+        "description": "Optionally accepts a JSON body `{ note?: string }` — a short acceptance note describing how the steering was incorporated, persisted as `handledNote`.",
+        "tags": [
+          "Tasks"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Steering message acknowledgement recorded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "message": {
+                      "$ref": "#/components/schemas/SteeringMessage"
+                    }
+                  },
+                  "required": [
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing X-Agent-ID header or validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Steering message task is assigned to another agent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Agent or steering message not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/steering-messages/{id}/undeliverable": {
+      "post": {
+        "summary": "Promote an undeliverable steering message",
+        "tags": [
+          "Tasks"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "reason": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "reason"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Steering message promoted to a follow-up task",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "message": {
+                      "$ref": "#/components/schemas/SteeringMessage"
+                    },
+                    "promotedTaskId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing X-Agent-ID header or validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Steering message task is assigned to another agent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Agent or steering message not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/tasks/{id}": {
+      "get": {
+        "summary": "Get task details with logs and attachments",
+        "description": "Returns the full `AgentTask` row decorated with `logs` (capped by `logsLimit`) and `attachments` (pointer-based artifacts stored on the task, ordered by `created_at`).",
+        "tags": [
+          "Tasks"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000
+            },
+            "required": false,
+            "name": "logsLimit",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Task with logs and attachments",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/AgentTask"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "isLeadTask": {
+                          "type": "boolean"
+                        },
+                        "supportedSteerModes": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "enum": [
+                              "steer",
+                              "queue"
+                            ]
+                          }
+                        },
+                        "logs": {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/components/schemas/AgentLog"
+                          }
+                        },
+                        "attachments": {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/components/schemas/TaskAttachment"
+                          }
+                        },
+                        "citations": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "index": {
+                                "type": "integer",
+                                "minimum": 1
+                              },
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "task",
+                                  "memory",
+                                  "github",
+                                  "slack",
+                                  "agent-fs",
+                                  "page",
+                                  "script-run",
+                                  "url"
+                                ]
+                              },
+                              "ref": {
+                                "type": "string",
+                                "maxLength": 2048
+                              },
+                              "label": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "quote": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "general": {
+                                "type": "boolean"
+                              },
+                              "resolvedUrl": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "verified": {
+                                "type": "string",
+                                "enum": [
+                                  "true",
+                                  "false",
+                                  "unchecked"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "index",
+                              "kind",
+                              "ref",
+                              "resolvedUrl",
+                              "verified"
+                            ]
+                          }
+                        }
+                      },
+                      "required": [
+                        "isLeadTask",
+                        "supportedSteerModes",
+                        "logs",
+                        "attachments",
+                        "citations"
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Task not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/tasks/{id}/progress": {
+      "post": {
+        "summary": "Update task progress text",
+        "tags": [
+          "Tasks"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "progress": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "progress"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Progress updated; a no-op once the task is terminal",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    }
+                  },
+                  "required": [
+                    "success"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Task is assigned to another agent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Task not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/tasks/{id}/finish": {
+      "post": {
+        "summary": "Mark task as completed or failed (runner endpoint)",
+        "tags": [
+          "Tasks"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "completed",
+                      "failed"
+                    ]
+                  },
+                  "output": {
+                    "type": "string"
+                  },
+                  "failureReason": {
+                    "type": "string"
+                  },
+                  "force": {
+                    "type": "boolean"
+                  },
+                  "provider": {
+                    "type": "string",
+                    "enum": [
+                      "claude",
+                      "codex",
+                      "pi",
+                      "devin",
+                      "claude-managed",
+                      "opencode",
+                      "acp",
+                      "dsh",
+                      "amp",
+                      "cursor",
+                      "grok"
+                    ]
+                  }
+                },
+                "required": [
+                  "status"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Task finished",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "alreadyFinished": {
+                      "type": "boolean"
+                    },
+                    "task": {
+                      "$ref": "#/components/schemas/AgentTask"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "wasNoOp": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "wasForcedOverwrite": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "alreadyFinished",
+                    "task"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not assigned to this agent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Task not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Differing terminal result text was discarded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "task": {
+                      "$ref": "#/components/schemas/AgentTask"
+                    },
+                    "alreadyFinished": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "message",
+                    "task",
+                    "alreadyFinished",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/paused-tasks": {
+      "get": {
+        "summary": "Get paused tasks for this agent",
+        "tags": [
+          "Tasks"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paused task list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "tasks": {
+                      "type": "array",
+                      "items": {
+                        "allOf": [
+                          {
+                            "$ref": "#/components/schemas/AgentTask"
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "attachments": {
+                                "type": "array",
+                                "items": {
+                                  "$ref": "#/components/schemas/TaskAttachment"
+                                }
+                              }
+                            },
+                            "required": [
+                              "attachments"
+                            ]
+                          }
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "tasks"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/tasks/{id}/pause": {
+      "post": {
+        "summary": "Pause an in-progress task",
+        "tags": [
+          "Tasks"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Task paused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "task": {
+                      "$ref": "#/components/schemas/AgentTask"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "task"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Task not in_progress",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Task belongs to another agent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Task not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/tasks/{id}/resume": {
+      "post": {
+        "summary": "Resume a paused task",
+        "tags": [
+          "Tasks"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Task resumed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "task": {
+                      "$ref": "#/components/schemas/AgentTask"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "task"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Task not paused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Task belongs to another agent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Task not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/tasks/{id}/supersede": {
+      "post": {
+        "summary": "Supersede an in-progress task (terminate + spawn resume follow-up)",
+        "description": "Marks the original task `superseded` (terminal) and creates a fresh `taskType=\"resume\"` follow-up so a worker can pick up the work in a new provider session. Workflow-step tasks (those with `workflowRunStepId`) are carved out: the original is marked `failed` with reason `superseded_workflow_task` and no follow-up is created — the workflow engine's retry/failure policy applies.",
+        "tags": [
+          "Tasks"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "reason": {
+                    "type": "string",
+                    "enum": [
+                      "graceful_shutdown",
+                      "context_limits",
+                      "manual_supersede",
+                      "crash_recovery"
+                    ]
+                  }
+                },
+                "required": [
+                  "reason"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Task superseded (or workflow-failed)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "alreadyFinished",
+                        "workflow-failed",
+                        "resumed"
+                      ]
+                    },
+                    "task": {
+                      "anyOf": [
+                        {
+                          "$ref": "#/components/schemas/AgentTask"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "resumeTaskId": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "resumeTaskStatus": {
+                      "type": "string",
+                      "enum": [
+                        "draft",
+                        "backlog",
+                        "unassigned",
+                        "offered",
+                        "reviewing",
+                        "pending",
+                        "in_progress",
+                        "paused",
+                        "completed",
+                        "failed",
+                        "cancelled",
+                        "superseded"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "kind",
+                    "task",
+                    "resumeTaskId"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Task not in_progress",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Task belongs to another agent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Task not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/tasks/{id}/vcs": {
+      "patch": {
+        "summary": "Update VCS (PR/MR) info for a task",
+        "tags": [
+          "Tasks"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "vcsProvider": {
+                    "type": "string",
+                    "enum": [
+                      "github",
+                      "gitlab",
+                      "azure-devops"
+                    ]
+                  },
+                  "vcsRepo": {
+                    "type": "string"
+                  },
+                  "vcsNumber": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0
+                  },
+                  "vcsUrl": {
+                    "type": "string",
+                    "format": "uri"
+                  }
+                },
+                "required": [
+                  "vcsProvider",
+                  "vcsRepo",
+                  "vcsNumber",
+                  "vcsUrl"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "VCS info updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentTask"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Task not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/tasks/{id}/title": {
+      "patch": {
+        "summary": "Set or clear a task's display title (session rename)",
+        "description": "Sets a human-facing display title override on a task. The sessions UI only reads this from root tasks (session list items), but titles on child tasks are harmless. Pass `title: null` (or an empty string) to clear the override and fall back to the task prompt.",
+        "tags": [
+          "Tasks"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "title": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "maxLength": 120
+                  }
+                },
+                "required": [
+                  "title"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Title updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "task": {
+                      "$ref": "#/components/schemas/AgentTask"
+                    }
+                  },
+                  "required": [
+                    "task"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Task not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/pages": {
       "post": {
         "summary": "Create a new page",
@@ -29778,6 +32188,13 @@
                     },
                     "minItems": 1,
                     "maxItems": 50
+                  },
+                  "contextKey": {
+                    "type": "string",
+                    "maxLength": 300
+                  },
+                  "requestedByUserId": {
+                    "type": "string"
                   }
                 },
                 "required": [
@@ -29822,7 +32239,7 @@
             }
           },
           "400": {
-            "description": "Invalid body",
+            "description": "Invalid body, or a context key for another page",
             "content": {
               "application/json": {
                 "schema": {
@@ -48076,2416 +50493,6 @@
                     "recentTaskDelegations",
                     "activeSwarmTasks"
                   ]
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/tasks": {
-      "get": {
-        "summary": "List tasks with filters",
-        "description": "Returns tasks with the full `task` text replaced by a bounded `taskPreview` and completion/integration blobs dropped by default — list views only need the preview. Pass `fields=full` to restore the full `AgentTask`, or `fields=timeline` for the narrow shape the dashboard timeline draws. Fetch a single task in full via `GET /api/tasks/{id}`. `total` (the filtered row count, ignoring limit/offset) is computed only with `includeTotal=true`.",
-        "tags": [
-          "Tasks"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "parameters": [
-          {
-            "schema": {
-              "type": "string"
-            },
-            "required": false,
-            "name": "status",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string"
-            },
-            "required": false,
-            "name": "agentId",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string"
-            },
-            "required": false,
-            "name": "scheduleId",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 255,
-              "description": "Non-unique asset directory namespace (for example shared/ or personal/<user-id>/drafts/). Runtime write boundaries normalize and validate the canonical form."
-            },
-            "required": false,
-            "description": "Non-unique asset directory namespace (for example shared/ or personal/<user-id>/drafts/). Runtime write boundaries normalize and validate the canonical form.",
-            "name": "key",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 255,
-              "description": "Non-unique asset directory namespace (for example shared/ or personal/<user-id>/drafts/). Runtime write boundaries normalize and validate the canonical form."
-            },
-            "required": false,
-            "description": "Non-unique asset directory namespace (for example shared/ or personal/<user-id>/drafts/). Runtime write boundaries normalize and validate the canonical form.",
-            "name": "keyPrefix",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string"
-            },
-            "required": false,
-            "name": "search",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "enum": [
-                "true",
-                "false"
-              ]
-            },
-            "required": false,
-            "name": "includeHeartbeat",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "format": "date-time"
-            },
-            "required": false,
-            "name": "createdAfter",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "format": "date-time"
-            },
-            "required": false,
-            "name": "createdBefore",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string"
-            },
-            "required": false,
-            "name": "source",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "minLength": 1
-            },
-            "required": false,
-            "name": "requestedByUserId",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "enum": [
-                "lastUpdatedAt",
-                "createdAt"
-              ]
-            },
-            "required": false,
-            "name": "orderBy",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": [
-                "integer",
-                "null"
-              ]
-            },
-            "required": false,
-            "name": "limit",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": [
-                "integer",
-                "null"
-              ]
-            },
-            "required": false,
-            "name": "offset",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "enum": [
-                "full",
-                "slim",
-                "timeline"
-              ]
-            },
-            "required": false,
-            "name": "fields",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "enum": [
-                "true",
-                "false"
-              ]
-            },
-            "required": false,
-            "name": "includeTotal",
-            "in": "query"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Paginated task list",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "tasks": {
-                      "anyOf": [
-                        {
-                          "type": "array",
-                          "items": {
-                            "$ref": "#/components/schemas/AgentTask"
-                          }
-                        },
-                        {
-                          "type": "array",
-                          "items": {
-                            "type": "object",
-                            "properties": {
-                              "id": {
-                                "type": "string",
-                                "format": "uuid"
-                              },
-                              "key": {
-                                "type": "string",
-                                "minLength": 1,
-                                "maxLength": 255,
-                                "description": "Non-unique asset directory namespace (for example shared/ or personal/<user-id>/drafts/). Runtime write boundaries normalize and validate the canonical form."
-                              },
-                              "agentId": {
-                                "type": [
-                                  "string",
-                                  "null"
-                                ]
-                              },
-                              "creatorAgentId": {
-                                "type": "string"
-                              },
-                              "task": {
-                                "type": "string",
-                                "minLength": 1
-                              },
-                              "title": {
-                                "type": "string"
-                              },
-                              "status": {
-                                "type": "string",
-                                "enum": [
-                                  "draft",
-                                  "backlog",
-                                  "unassigned",
-                                  "offered",
-                                  "reviewing",
-                                  "pending",
-                                  "in_progress",
-                                  "paused",
-                                  "completed",
-                                  "failed",
-                                  "cancelled",
-                                  "superseded"
-                                ]
-                              },
-                              "source": {
-                                "type": "string",
-                                "enum": [
-                                  "mcp",
-                                  "slack",
-                                  "api",
-                                  "ui",
-                                  "github",
-                                  "gitlab",
-                                  "azure-devops",
-                                  "agentmail",
-                                  "system",
-                                  "schedule",
-                                  "workflow",
-                                  "linear",
-                                  "jira",
-                                  "comb"
-                                ],
-                                "default": "mcp"
-                              },
-                              "taskType": {
-                                "type": "string",
-                                "maxLength": 50
-                              },
-                              "tags": {
-                                "type": "array",
-                                "items": {
-                                  "type": "string"
-                                },
-                                "default": []
-                              },
-                              "priority": {
-                                "type": "integer",
-                                "minimum": 0,
-                                "maximum": 100,
-                                "default": 50
-                              },
-                              "dependsOn": {
-                                "type": "array",
-                                "items": {
-                                  "type": "string"
-                                },
-                                "default": []
-                              },
-                              "offeredTo": {
-                                "type": "string"
-                              },
-                              "acceptedAt": {
-                                "type": "string",
-                                "format": "date-time"
-                              },
-                              "parentTaskId": {
-                                "type": "string"
-                              },
-                              "scheduleId": {
-                                "type": "string"
-                              },
-                              "model": {
-                                "type": "string"
-                              },
-                              "modelTier": {
-                                "type": "string",
-                                "enum": [
-                                  "smol",
-                                  "regular",
-                                  "smart",
-                                  "ultra"
-                                ]
-                              },
-                              "resolvedModel": {
-                                "type": "string"
-                              },
-                              "modelSource": {
-                                "type": "string"
-                              },
-                              "modelAlias": {
-                                "type": "string"
-                              },
-                              "effort": {
-                                "type": "string",
-                                "enum": [
-                                  "off",
-                                  "low",
-                                  "medium",
-                                  "high",
-                                  "xhigh",
-                                  "max"
-                                ]
-                              },
-                              "provider": {
-                                "type": "string",
-                                "enum": [
-                                  "claude",
-                                  "codex",
-                                  "pi",
-                                  "devin",
-                                  "claude-managed",
-                                  "opencode",
-                                  "acp",
-                                  "dsh",
-                                  "amp",
-                                  "cursor",
-                                  "grok"
-                                ]
-                              },
-                              "requestedByUserId": {
-                                "type": "string"
-                              },
-                              "progress": {
-                                "type": "string"
-                              },
-                              "createdAt": {
-                                "type": "string",
-                                "format": "date-time"
-                              },
-                              "lastUpdatedAt": {
-                                "type": "string",
-                                "format": "date-time"
-                              },
-                              "finishedAt": {
-                                "type": "string",
-                                "format": "date-time"
-                              },
-                              "peakContextPercent": {
-                                "type": "number",
-                                "minimum": 0,
-                                "maximum": 100
-                              },
-                              "totalCostUsd": {
-                                "type": "number",
-                                "minimum": 0
-                              }
-                            },
-                            "required": [
-                              "id",
-                              "key",
-                              "agentId",
-                              "task",
-                              "status",
-                              "createdAt",
-                              "lastUpdatedAt"
-                            ]
-                          }
-                        },
-                        {
-                          "type": "array",
-                          "items": {
-                            "type": "object",
-                            "properties": {
-                              "id": {
-                                "type": "string",
-                                "format": "uuid"
-                              },
-                              "agentId": {
-                                "type": [
-                                  "string",
-                                  "null"
-                                ]
-                              },
-                              "parentTaskId": {
-                                "type": "string"
-                              },
-                              "task": {
-                                "type": "string",
-                                "minLength": 1
-                              },
-                              "title": {
-                                "type": "string"
-                              },
-                              "status": {
-                                "type": "string",
-                                "enum": [
-                                  "draft",
-                                  "backlog",
-                                  "unassigned",
-                                  "offered",
-                                  "reviewing",
-                                  "pending",
-                                  "in_progress",
-                                  "paused",
-                                  "completed",
-                                  "failed",
-                                  "cancelled",
-                                  "superseded"
-                                ]
-                              },
-                              "createdAt": {
-                                "type": "string",
-                                "format": "date-time"
-                              },
-                              "lastUpdatedAt": {
-                                "type": "string",
-                                "format": "date-time"
-                              },
-                              "finishedAt": {
-                                "type": "string",
-                                "format": "date-time"
-                              },
-                              "peakContextTokens": {
-                                "type": "integer",
-                                "minimum": 0
-                              },
-                              "totalCostUsd": {
-                                "type": "number",
-                                "minimum": 0
-                              }
-                            },
-                            "required": [
-                              "id",
-                              "agentId",
-                              "task",
-                              "status",
-                              "createdAt",
-                              "lastUpdatedAt"
-                            ]
-                          }
-                        }
-                      ]
-                    },
-                    "total": {
-                      "type": "integer"
-                    }
-                  },
-                  "required": [
-                    "tasks"
-                  ]
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Validation error (e.g. unknown status token)",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        }
-      },
-      "post": {
-        "summary": "Create a new task",
-        "tags": [
-          "Tasks"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "task": {
-                    "type": "string",
-                    "minLength": 1
-                  },
-                  "agentId": {
-                    "type": "string"
-                  },
-                  "routingReason": {
-                    "type": "string",
-                    "enum": [
-                      "skill",
-                      "continuity",
-                      "overflow",
-                      "human_pinned",
-                      "reroute_fault"
-                    ]
-                  },
-                  "routingNote": {
-                    "type": "string",
-                    "maxLength": 200
-                  },
-                  "taskType": {
-                    "type": "string"
-                  },
-                  "tags": {
-                    "type": "array",
-                    "items": {
-                      "type": "string"
-                    }
-                  },
-                  "priority": {
-                    "type": "integer",
-                    "minimum": 0,
-                    "maximum": 100
-                  },
-                  "dependsOn": {
-                    "type": "array",
-                    "items": {
-                      "type": "string"
-                    }
-                  },
-                  "offeredTo": {
-                    "type": "string"
-                  },
-                  "dir": {
-                    "type": "string"
-                  },
-                  "parentTaskId": {
-                    "type": "string"
-                  },
-                  "key": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 255,
-                    "description": "Non-unique asset directory namespace (for example shared/ or personal/<user-id>/drafts/). Runtime write boundaries normalize and validate the canonical form."
-                  },
-                  "source": {
-                    "type": "string",
-                    "enum": [
-                      "mcp",
-                      "slack",
-                      "api",
-                      "ui",
-                      "github",
-                      "gitlab",
-                      "azure-devops",
-                      "agentmail",
-                      "system",
-                      "schedule",
-                      "workflow",
-                      "linear",
-                      "jira",
-                      "comb"
-                    ]
-                  },
-                  "outputSchema": {
-                    "type": "object",
-                    "additionalProperties": {}
-                  },
-                  "contextKey": {
-                    "type": "string"
-                  },
-                  "requestedByUserId": {
-                    "type": "string"
-                  },
-                  "model": {
-                    "type": "string",
-                    "description": "Concrete model override for this task, interpreted by the assignee's harness/provider. The model must run on the assignee's harness (an Anthropic model on a Claude agent, an OpenAI model on a Codex agent); a mismatch is rejected."
-                  },
-                  "modelTier": {
-                    "type": "string",
-                    "enum": [
-                      "smol",
-                      "regular",
-                      "smart",
-                      "ultra"
-                    ]
-                  },
-                  "allowCustomModel": {
-                    "type": "boolean"
-                  },
-                  "effort": {
-                    "type": "string",
-                    "enum": [
-                      "off",
-                      "low",
-                      "medium",
-                      "high",
-                      "xhigh",
-                      "max"
-                    ]
-                  },
-                  "draft": {
-                    "type": "boolean"
-                  }
-                },
-                "required": [
-                  "task"
-                ]
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "Task created",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AgentTask"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Validation error, an unknown `model` (set `allowCustomModel` to store a custom id), or agentId/offeredTo targets an extension identity",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Task creation blocked by an extension",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    },
-                    "extension": {
-                      "type": "object",
-                      "properties": {
-                        "id": {
-                          "type": "string"
-                        },
-                        "name": {
-                          "type": "string"
-                        }
-                      },
-                      "required": [
-                        "id",
-                        "name"
-                      ]
-                    }
-                  },
-                  "required": [
-                    "error",
-                    "extension"
-                  ]
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/tasks/{id}/promote-draft": {
-      "post": {
-        "summary": "Promote a draft task out of the pre-dispatch draft state",
-        "description": "Transitions a `draft` task (#1240 — created with attachments still uploading) to its normal dispatch-eligible status: `offered` if it was offered to an agent, `pending` if it has an owning agent (the common case — UI-composer tasks default to Lead), otherwise `unassigned`. Called by the UI composer once its attachment upload batch settles, whether every file uploaded, some failed, or all failed — a draft must never be stranded by an upload error. Idempotent: calling it on a task that already left `draft` returns the current task unchanged rather than erroring, so a retried request is safe.",
-        "tags": [
-          "Tasks"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "parameters": [
-          {
-            "schema": {
-              "type": "string"
-            },
-            "required": true,
-            "name": "id",
-            "in": "path"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Task promoted (or already out of draft)",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AgentTask"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Caller does not own this task",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Task not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/tasks/{id}/session": {
-      "put": {
-        "summary": "Update provider session ID and harness metadata for a task",
-        "tags": [
-          "Tasks"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "parameters": [
-          {
-            "schema": {
-              "type": "string"
-            },
-            "required": true,
-            "name": "id",
-            "in": "path"
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "anyOf": [
-                  {
-                    "type": "object",
-                    "properties": {
-                      "claudeSessionId": {
-                        "type": "string",
-                        "minLength": 1
-                      },
-                      "provider": {
-                        "type": "string",
-                        "enum": [
-                          "devin"
-                        ]
-                      },
-                      "model": {
-                        "type": "string"
-                      },
-                      "providerMeta": {
-                        "type": "object",
-                        "properties": {
-                          "sessionUrl": {
-                            "type": "string"
-                          },
-                          "maxAcuLimit": {
-                            "type": "number"
-                          },
-                          "acuCostUsd": {
-                            "type": "number"
-                          }
-                        },
-                        "required": [
-                          "sessionUrl"
-                        ]
-                      }
-                    },
-                    "required": [
-                      "claudeSessionId",
-                      "provider",
-                      "providerMeta"
-                    ]
-                  },
-                  {
-                    "type": "object",
-                    "properties": {
-                      "claudeSessionId": {
-                        "type": "string",
-                        "minLength": 1
-                      },
-                      "provider": {
-                        "type": "string",
-                        "enum": [
-                          "claude",
-                          "codex",
-                          "pi",
-                          "claude-managed",
-                          "opencode",
-                          "acp",
-                          "dsh",
-                          "amp",
-                          "cursor",
-                          "grok"
-                        ]
-                      },
-                      "model": {
-                        "type": "string"
-                      },
-                      "providerMeta": {
-                        "type": "object",
-                        "properties": {
-                          "transport": {
-                            "type": "string",
-                            "enum": [
-                              "cli",
-                              "sdk"
-                            ]
-                          }
-                        }
-                      },
-                      "harnessVariant": {
-                        "type": "string"
-                      },
-                      "harnessVariantMeta": {
-                        "type": "object",
-                        "additionalProperties": {}
-                      }
-                    },
-                    "required": [
-                      "claudeSessionId"
-                    ]
-                  }
-                ]
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Session ID updated",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AgentTask"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Task not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/tasks/{id}/cancel": {
-      "post": {
-        "summary": "Cancel a pending or in-progress task",
-        "tags": [
-          "Tasks"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "parameters": [
-          {
-            "schema": {
-              "type": "string"
-            },
-            "required": true,
-            "name": "id",
-            "in": "path"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Task cancelled",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "success": {
-                      "type": "boolean",
-                      "enum": [
-                        true
-                      ]
-                    },
-                    "task": {
-                      "$ref": "#/components/schemas/AgentTask"
-                    }
-                  },
-                  "required": [
-                    "success",
-                    "task"
-                  ]
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Cannot cancel terminal task",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Agent caller is neither a lead nor the task creator",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Task not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/tasks/{id}/steer": {
-      "post": {
-        "summary": "Deliver a steering message to a running task",
-        "tags": [
-          "Tasks"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "parameters": [
-          {
-            "schema": {
-              "type": "string"
-            },
-            "required": true,
-            "name": "id",
-            "in": "path"
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "message": {
-                    "type": "string",
-                    "minLength": 1
-                  },
-                  "mode": {
-                    "type": "string",
-                    "enum": [
-                      "steer",
-                      "queue"
-                    ],
-                    "default": "queue"
-                  },
-                  "onUnsupported": {
-                    "type": "string",
-                    "enum": [
-                      "degrade",
-                      "fail"
-                    ],
-                    "default": "degrade"
-                  },
-                  "source": {
-                    "type": "string",
-                    "enum": [
-                      "ui",
-                      "mcp",
-                      "script",
-                      "slack",
-                      "api"
-                    ]
-                  },
-                  "requestedByUserId": {
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "message"
-                ]
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Steering accepted (see `outcome` for what actually happened)",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SteerResult"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Validation error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Caller cannot steer this task",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Task not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Requested mode unsupported by the target harness and onUnsupported=fail",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/tasks/{id}/steering-messages": {
-      "get": {
-        "summary": "List steering messages for a task",
-        "tags": [
-          "Tasks"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "parameters": [
-          {
-            "schema": {
-              "type": "string"
-            },
-            "required": true,
-            "name": "id",
-            "in": "path"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Steering messages",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "messages": {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/components/schemas/SteeringMessage"
-                      }
-                    }
-                  },
-                  "required": [
-                    "messages"
-                  ]
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Task not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/steering-messages": {
-      "get": {
-        "summary": "List pending steering messages for the current worker",
-        "tags": [
-          "Tasks"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "parameters": [
-          {
-            "schema": {
-              "type": "string"
-            },
-            "required": false,
-            "name": "taskId",
-            "in": "query"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Pending steering messages",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "messages": {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/components/schemas/SteeringMessage"
-                      }
-                    }
-                  },
-                  "required": [
-                    "messages"
-                  ]
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Missing X-Agent-ID header",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Agent not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/steering-messages/{id}/delivered": {
-      "post": {
-        "summary": "Mark a steering message delivered",
-        "tags": [
-          "Tasks"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "parameters": [
-          {
-            "schema": {
-              "type": "string"
-            },
-            "required": true,
-            "name": "id",
-            "in": "path"
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "mode": {
-                    "type": "string",
-                    "enum": [
-                      "steer",
-                      "queue"
-                    ]
-                  }
-                },
-                "required": [
-                  "mode"
-                ]
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Steering message delivery recorded",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "message": {
-                      "$ref": "#/components/schemas/SteeringMessage"
-                    }
-                  },
-                  "required": [
-                    "message"
-                  ]
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Missing X-Agent-ID header or validation error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Steering message task is assigned to another agent",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Agent or steering message not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/steering-messages/{id}/handled": {
-      "post": {
-        "summary": "Mark a steering message handled",
-        "description": "Optionally accepts a JSON body `{ note?: string }` — a short acceptance note describing how the steering was incorporated, persisted as `handledNote`.",
-        "tags": [
-          "Tasks"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "parameters": [
-          {
-            "schema": {
-              "type": "string"
-            },
-            "required": true,
-            "name": "id",
-            "in": "path"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Steering message acknowledgement recorded",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "message": {
-                      "$ref": "#/components/schemas/SteeringMessage"
-                    }
-                  },
-                  "required": [
-                    "message"
-                  ]
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Missing X-Agent-ID header or validation error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Steering message task is assigned to another agent",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Agent or steering message not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/steering-messages/{id}/undeliverable": {
-      "post": {
-        "summary": "Promote an undeliverable steering message",
-        "tags": [
-          "Tasks"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "parameters": [
-          {
-            "schema": {
-              "type": "string"
-            },
-            "required": true,
-            "name": "id",
-            "in": "path"
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "reason": {
-                    "type": "string",
-                    "minLength": 1
-                  }
-                },
-                "required": [
-                  "reason"
-                ]
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Steering message promoted to a follow-up task",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "message": {
-                      "$ref": "#/components/schemas/SteeringMessage"
-                    },
-                    "promotedTaskId": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "message"
-                  ]
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Missing X-Agent-ID header or validation error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Steering message task is assigned to another agent",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Agent or steering message not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/tasks/{id}": {
-      "get": {
-        "summary": "Get task details with logs and attachments",
-        "description": "Returns the full `AgentTask` row decorated with `logs` (capped by `logsLimit`) and `attachments` (pointer-based artifacts stored on the task, ordered by `created_at`).",
-        "tags": [
-          "Tasks"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "parameters": [
-          {
-            "schema": {
-              "type": "string"
-            },
-            "required": true,
-            "name": "id",
-            "in": "path"
-          },
-          {
-            "schema": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 1000
-            },
-            "required": false,
-            "name": "logsLimit",
-            "in": "query"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Task with logs and attachments",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "allOf": [
-                    {
-                      "$ref": "#/components/schemas/AgentTask"
-                    },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "isLeadTask": {
-                          "type": "boolean"
-                        },
-                        "supportedSteerModes": {
-                          "type": "array",
-                          "items": {
-                            "type": "string",
-                            "enum": [
-                              "steer",
-                              "queue"
-                            ]
-                          }
-                        },
-                        "logs": {
-                          "type": "array",
-                          "items": {
-                            "$ref": "#/components/schemas/AgentLog"
-                          }
-                        },
-                        "attachments": {
-                          "type": "array",
-                          "items": {
-                            "$ref": "#/components/schemas/TaskAttachment"
-                          }
-                        },
-                        "citations": {
-                          "type": "array",
-                          "items": {
-                            "type": "object",
-                            "properties": {
-                              "index": {
-                                "type": "integer",
-                                "minimum": 1
-                              },
-                              "kind": {
-                                "type": "string",
-                                "enum": [
-                                  "task",
-                                  "memory",
-                                  "github",
-                                  "slack",
-                                  "agent-fs",
-                                  "page",
-                                  "script-run",
-                                  "url"
-                                ]
-                              },
-                              "ref": {
-                                "type": "string",
-                                "maxLength": 2048
-                              },
-                              "label": {
-                                "type": [
-                                  "string",
-                                  "null"
-                                ]
-                              },
-                              "quote": {
-                                "type": [
-                                  "string",
-                                  "null"
-                                ]
-                              },
-                              "general": {
-                                "type": "boolean"
-                              },
-                              "resolvedUrl": {
-                                "type": [
-                                  "string",
-                                  "null"
-                                ]
-                              },
-                              "verified": {
-                                "type": "string",
-                                "enum": [
-                                  "true",
-                                  "false",
-                                  "unchecked"
-                                ]
-                              }
-                            },
-                            "required": [
-                              "index",
-                              "kind",
-                              "ref",
-                              "resolvedUrl",
-                              "verified"
-                            ]
-                          }
-                        }
-                      },
-                      "required": [
-                        "isLeadTask",
-                        "supportedSteerModes",
-                        "logs",
-                        "attachments",
-                        "citations"
-                      ]
-                    }
-                  ]
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Task not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/tasks/{id}/progress": {
-      "post": {
-        "summary": "Update task progress text",
-        "tags": [
-          "Tasks"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "parameters": [
-          {
-            "schema": {
-              "type": "string"
-            },
-            "required": true,
-            "name": "id",
-            "in": "path"
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "progress": {
-                    "type": "string",
-                    "minLength": 1
-                  }
-                },
-                "required": [
-                  "progress"
-                ]
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Progress updated; a no-op once the task is terminal",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "success": {
-                      "type": "boolean",
-                      "enum": [
-                        true
-                      ]
-                    }
-                  },
-                  "required": [
-                    "success"
-                  ]
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Task is assigned to another agent",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Task not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/tasks/{id}/finish": {
-      "post": {
-        "summary": "Mark task as completed or failed (runner endpoint)",
-        "tags": [
-          "Tasks"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "parameters": [
-          {
-            "schema": {
-              "type": "string"
-            },
-            "required": true,
-            "name": "id",
-            "in": "path"
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "status": {
-                    "type": "string",
-                    "enum": [
-                      "completed",
-                      "failed"
-                    ]
-                  },
-                  "output": {
-                    "type": "string"
-                  },
-                  "failureReason": {
-                    "type": "string"
-                  },
-                  "force": {
-                    "type": "boolean"
-                  },
-                  "provider": {
-                    "type": "string",
-                    "enum": [
-                      "claude",
-                      "codex",
-                      "pi",
-                      "devin",
-                      "claude-managed",
-                      "opencode",
-                      "acp",
-                      "dsh",
-                      "amp",
-                      "cursor",
-                      "grok"
-                    ]
-                  }
-                },
-                "required": [
-                  "status"
-                ]
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Task finished",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "success": {
-                      "type": "boolean",
-                      "enum": [
-                        true
-                      ]
-                    },
-                    "alreadyFinished": {
-                      "type": "boolean"
-                    },
-                    "task": {
-                      "$ref": "#/components/schemas/AgentTask"
-                    },
-                    "message": {
-                      "type": "string"
-                    },
-                    "wasNoOp": {
-                      "type": "boolean",
-                      "enum": [
-                        true
-                      ]
-                    },
-                    "wasForcedOverwrite": {
-                      "type": "boolean",
-                      "enum": [
-                        true
-                      ]
-                    }
-                  },
-                  "required": [
-                    "success",
-                    "alreadyFinished",
-                    "task"
-                  ]
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Invalid status",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Not assigned to this agent",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Task not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "Differing terminal result text was discarded",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "success": {
-                      "type": "boolean",
-                      "enum": [
-                        false
-                      ]
-                    },
-                    "message": {
-                      "type": "string"
-                    },
-                    "task": {
-                      "$ref": "#/components/schemas/AgentTask"
-                    },
-                    "alreadyFinished": {
-                      "type": "boolean",
-                      "enum": [
-                        true
-                      ]
-                    },
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "success",
-                    "message",
-                    "task",
-                    "alreadyFinished",
-                    "error"
-                  ]
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/paused-tasks": {
-      "get": {
-        "summary": "Get paused tasks for this agent",
-        "tags": [
-          "Tasks"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Paused task list",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "tasks": {
-                      "type": "array",
-                      "items": {
-                        "allOf": [
-                          {
-                            "$ref": "#/components/schemas/AgentTask"
-                          },
-                          {
-                            "type": "object",
-                            "properties": {
-                              "attachments": {
-                                "type": "array",
-                                "items": {
-                                  "$ref": "#/components/schemas/TaskAttachment"
-                                }
-                              }
-                            },
-                            "required": [
-                              "attachments"
-                            ]
-                          }
-                        ]
-                      }
-                    }
-                  },
-                  "required": [
-                    "tasks"
-                  ]
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/tasks/{id}/pause": {
-      "post": {
-        "summary": "Pause an in-progress task",
-        "tags": [
-          "Tasks"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "parameters": [
-          {
-            "schema": {
-              "type": "string"
-            },
-            "required": true,
-            "name": "id",
-            "in": "path"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Task paused",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "success": {
-                      "type": "boolean",
-                      "enum": [
-                        true
-                      ]
-                    },
-                    "task": {
-                      "$ref": "#/components/schemas/AgentTask"
-                    }
-                  },
-                  "required": [
-                    "success",
-                    "task"
-                  ]
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Task not in_progress",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Task belongs to another agent",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Task not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/tasks/{id}/resume": {
-      "post": {
-        "summary": "Resume a paused task",
-        "tags": [
-          "Tasks"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "parameters": [
-          {
-            "schema": {
-              "type": "string"
-            },
-            "required": true,
-            "name": "id",
-            "in": "path"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Task resumed",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "success": {
-                      "type": "boolean",
-                      "enum": [
-                        true
-                      ]
-                    },
-                    "task": {
-                      "$ref": "#/components/schemas/AgentTask"
-                    }
-                  },
-                  "required": [
-                    "success",
-                    "task"
-                  ]
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Task not paused",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Task belongs to another agent",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Task not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/tasks/{id}/supersede": {
-      "post": {
-        "summary": "Supersede an in-progress task (terminate + spawn resume follow-up)",
-        "description": "Marks the original task `superseded` (terminal) and creates a fresh `taskType=\"resume\"` follow-up so a worker can pick up the work in a new provider session. Workflow-step tasks (those with `workflowRunStepId`) are carved out: the original is marked `failed` with reason `superseded_workflow_task` and no follow-up is created — the workflow engine's retry/failure policy applies.",
-        "tags": [
-          "Tasks"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "parameters": [
-          {
-            "schema": {
-              "type": "string"
-            },
-            "required": true,
-            "name": "id",
-            "in": "path"
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "reason": {
-                    "type": "string",
-                    "enum": [
-                      "graceful_shutdown",
-                      "context_limits",
-                      "manual_supersede",
-                      "crash_recovery"
-                    ]
-                  }
-                },
-                "required": [
-                  "reason"
-                ]
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Task superseded (or workflow-failed)",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "success": {
-                      "type": "boolean",
-                      "enum": [
-                        true
-                      ]
-                    },
-                    "kind": {
-                      "type": "string",
-                      "enum": [
-                        "alreadyFinished",
-                        "workflow-failed",
-                        "resumed"
-                      ]
-                    },
-                    "task": {
-                      "anyOf": [
-                        {
-                          "$ref": "#/components/schemas/AgentTask"
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "resumeTaskId": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    },
-                    "resumeTaskStatus": {
-                      "type": "string",
-                      "enum": [
-                        "draft",
-                        "backlog",
-                        "unassigned",
-                        "offered",
-                        "reviewing",
-                        "pending",
-                        "in_progress",
-                        "paused",
-                        "completed",
-                        "failed",
-                        "cancelled",
-                        "superseded"
-                      ]
-                    }
-                  },
-                  "required": [
-                    "success",
-                    "kind",
-                    "task",
-                    "resumeTaskId"
-                  ]
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Task not in_progress",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Task belongs to another agent",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Task not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/tasks/{id}/vcs": {
-      "patch": {
-        "summary": "Update VCS (PR/MR) info for a task",
-        "tags": [
-          "Tasks"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "parameters": [
-          {
-            "schema": {
-              "type": "string"
-            },
-            "required": true,
-            "name": "id",
-            "in": "path"
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "vcsProvider": {
-                    "type": "string",
-                    "enum": [
-                      "github",
-                      "gitlab",
-                      "azure-devops"
-                    ]
-                  },
-                  "vcsRepo": {
-                    "type": "string"
-                  },
-                  "vcsNumber": {
-                    "type": "integer",
-                    "exclusiveMinimum": 0
-                  },
-                  "vcsUrl": {
-                    "type": "string",
-                    "format": "uri"
-                  }
-                },
-                "required": [
-                  "vcsProvider",
-                  "vcsRepo",
-                  "vcsNumber",
-                  "vcsUrl"
-                ]
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "VCS info updated",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AgentTask"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Task not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/tasks/{id}/title": {
-      "patch": {
-        "summary": "Set or clear a task's display title (session rename)",
-        "description": "Sets a human-facing display title override on a task. The sessions UI only reads this from root tasks (session list items), but titles on child tasks are harmless. Pass `title: null` (or an empty string) to clear the override and fall back to the task prompt.",
-        "tags": [
-          "Tasks"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "parameters": [
-          {
-            "schema": {
-              "type": "string"
-            },
-            "required": true,
-            "name": "id",
-            "in": "path"
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "title": {
-                    "type": [
-                      "string",
-                      "null"
-                    ],
-                    "maxLength": 120
-                  }
-                },
-                "required": [
-                  "title"
-                ]
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Title updated",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "task": {
-                      "$ref": "#/components/schemas/AgentTask"
-                    }
-                  },
-                  "required": [
-                    "task"
-                  ]
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Task not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }

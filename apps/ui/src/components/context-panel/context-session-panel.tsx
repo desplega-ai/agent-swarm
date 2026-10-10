@@ -102,7 +102,7 @@ export function ContextPanelToggle() {
 }
 
 export function ContextSessionPanel() {
-  const { open, setOpen } = useContextPanel();
+  const { open, setOpen, focusedSession } = useContextPanel();
   const pageCtx = usePageContext();
   const canDock = useMediaQuery(DOCK_QUERY);
   const isWide = useMediaQuery(WIDE_QUERY);
@@ -120,6 +120,9 @@ export function ContextSessionPanel() {
       storageNamespace={config.apiUrl}
       screenshotTarget={pageColumn}
       onClose={() => setOpen(false)}
+      initialSelection={
+        focusedSession?.pageKey === pageCtx.pageKey ? focusedSession.rootTaskId : undefined
+      }
     />
   );
 

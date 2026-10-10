@@ -36,7 +36,7 @@ import {
   Printer,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Link, useParams, useSearchParams } from "react-router-dom";
+import { Link, useLocation, useParams, useSearchParams } from "react-router-dom";
 import { api } from "@/api/client";
 import { useFavoriteToggle } from "@/api/hooks/use-favorites";
 import { useFeatureGate } from "@/api/hooks/use-feature-gate";
@@ -52,8 +52,10 @@ import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/ui/page-header";
 import { Skeleton } from "@/components/ui/skeleton";
 import { getConfig } from "@/lib/config";
+import { getPageContext } from "@/lib/page-context";
 import { cn } from "@/lib/utils";
 import { usePageFeedbackBridge } from "./feedback-bridge";
+import { FeedbackConfirmDialog } from "./feedback-confirm-dialog";
 import { JsonPageRenderer } from "./json-page-renderer";
 import { RoomInspector } from "./room-inspector";
 
@@ -403,8 +405,10 @@ export default function ArtifactPage() {
     retry: false,
   });
   const pageId = needsSlugResolve ? resolvedPage?.id : id;
-  usePageFeedbackBridge({
+  const { pathname } = useLocation();
+  const feedbackBridge = usePageFeedbackBridge({
     pageId,
+    pageKey: getPageContext({ pathname })?.pageKey,
     enabled: feedbackOn,
     apiOrigin: new URL(getAbsoluteApiUrl()).origin,
     iframeRef,
@@ -527,6 +531,7 @@ export default function ArtifactPage() {
           </Button>
         </div>
         <div className="flex-1 min-h-0 overflow-auto p-4">{body}</div>
+        <FeedbackConfirmDialog bridge={feedbackBridge} />
       </div>
     );
   }
@@ -563,6 +568,7 @@ export default function ArtifactPage() {
       <PageSlugLine id={pageId!} />
       <RoomInspector key={pageId} pageId={pageId!} />
       {body}
+      <FeedbackConfirmDialog bridge={feedbackBridge} />
     </div>
   );
 }

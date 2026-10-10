@@ -38,6 +38,7 @@ import { issuePageSessionCookie } from "../utils/page-session";
 import { getRequestAuth } from "../utils/request-auth-context";
 import { resolveHttpFavoriteOwner } from "./favorite-owner";
 import { route } from "./route-def";
+import { resolveTaskRequester } from "./tasks";
 import {
   BODY_TOO_LARGE,
   enforceContentLengthCap,
@@ -250,6 +251,14 @@ const pageFeedbackRoute = route({
     pageUrl: z.string().max(2000).optional(),
     note: z.string().trim().max(4000).optional(),
     comments: z.array(PageFeedbackCommentSchema).min(1).max(50),
+    /**
+     * Session context key from the dashboard's contextual session panel,
+     * `task:ui:page:<page id or slug>:<uuid>`. Lets the task show up as a
+     * session for this page. Defaults to a fresh key under the page id.
+     */
+    contextKey: z.string().max(300).optional(),
+    /** Requester hint, same rules as `POST /api/tasks` (TRUST_BODY_REQUESTED_BY_USER_ID). */
+    requestedByUserId: z.string().optional(),
   }),
   responses: {
     201: {
@@ -261,7 +270,7 @@ const pageFeedbackRoute = route({
         task_url: z.string(),
       }),
     },
-    400: { description: "Invalid body" },
+    400: { description: "Invalid body, or a context key for another page" },
     403: { description: "Page session is scoped to a different page" },
     404: { description: "Page not found" },
     413: { description: "Payload too large" },
@@ -481,6 +490,35 @@ function withShareUrls<T extends { id: string; slug: string }>(
 async function pageEditCounter(pageId: string): Promise<number> {
   const versions = await getPageVersions(pageId);
   return versions.length > 0 ? versions[0]!.version + 1 : 1;
+}
+
+/**
+ * Viewer and page-supplied text sits inside a `<page_feedback>` block in the
+ * task prompt. Defuse any tag of that name so the text cannot close the block
+ * early and pose as instructions.
+ */
+function defuseFeedbackTags(value: string): string {
+  return value.replace(/<(\/?page_feedback)/gi, "‹$1");
+}
+
+/**
+ * Session context key for a feedback task, matching the dashboard's
+ * contextual session panel (`apps/ui/src/lib/page-context.ts`): page key
+ * `task:ui:page:<ref>` plus a per-session uuid. `ref` is whatever the SPA
+ * route used, so it may be the page id or its slug. Returns null for a key
+ * that names anything else.
+ */
+function feedbackContextKey(page: Page, requested: string | undefined): string | null {
+  if (requested === undefined) return `task:ui:page:${page.id}:${randomUUID()}`;
+  const match = /^task:ui:page:([^:]+):[0-9a-f-]{36}$/i.exec(requested);
+  if (!match) return null;
+  let ref: string;
+  try {
+    ref = decodeURIComponent(match[1]!);
+  } catch {
+    return null;
+  }
+  return ref === page.id || ref === page.slug ? requested : null;
 }
 
 /** Render the overlay's element comments as a numbered markdown list for the task prompt. */
@@ -853,22 +891,36 @@ export async function handlePages(
       return true;
     }
 
+    const contextKey = feedbackContextKey(page, parsed.body.contextKey);
+    if (!contextKey) {
+      jsonError(res, "contextKey must be task:ui:page:<this page's id or slug>:<uuid>", 400);
+      return true;
+    }
+
     const note = parsed.body.note;
     const taskPrompt = resolveTemplate("task.page.feedback", {
       page_id: page.id,
       page_title: page.title,
       page_slug: page.slug,
       page_agent_id: page.agentId,
-      page_url: parsed.body.pageUrl || `${getApiBaseUrl()}/p/${page.id}`,
-      note_section: note ? `\nOverall note from the viewer:\n${note}\n` : "",
-      comments: formatFeedbackComments(parsed.body.comments),
+      page_url: defuseFeedbackTags(parsed.body.pageUrl || `${getApiBaseUrl()}/p/${page.id}`),
+      note_section: note ? `\nOverall note from the viewer:\n${defuseFeedbackTags(note)}\n` : "",
+      comments: defuseFeedbackTags(formatFeedbackComments(parsed.body.comments)),
     });
     const lead = await getLeadAgent();
-    const requestedByUserId = (await resolveHttpAuditUserId(req, myAgentId)) ?? undefined;
+    const requestedByUserId = await resolveTaskRequester(
+      req,
+      myAgentId,
+      parsed.body.requestedByUserId,
+    );
     const task = await createTaskWithSiblingAwareness(
       taskPrompt.text,
       {
-        source: "api",
+        // A `ui` root task with a page context key is what the dashboard's
+        // contextual session panel lists, so the feedback shows up there as
+        // a session about this page.
+        source: "ui",
+        contextKey,
         agentId: lead?.id,
         routingReason: lead ? "skill" : undefined,
         routingSource: lead ? "engine_default" : undefined,

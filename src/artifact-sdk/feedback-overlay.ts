@@ -347,10 +347,11 @@ const FEEDBACK_OVERLAY_JS = `
   function sendViaBridge(payload) {
     return new Promise(function (resolve, reject) {
       var requestId = 'fb' + (++requestSeq);
+      // The dashboard asks the viewer to confirm, so allow time for that.
       var timer = setTimeout(function () {
         delete pending[requestId];
         reject({ message: 'The dashboard did not answer. Try again.' });
-      }, 30000);
+      }, 600000);
       pending[requestId] = function (data) {
         clearTimeout(timer);
         if (data.ok) resolve({ url: data.taskUrl });
@@ -493,7 +494,7 @@ const FEEDBACK_OVERLAY_JS = `
       });
       row.appendChild(clear);
     }
-    var sendBtn = el('button', 'primary', state.sending ? 'Sending…' : 'Send to swarm');
+    var sendBtn = el('button', 'primary', state.sending ? (bridge ? 'Confirm in the dashboard…' : 'Sending…') : 'Send to swarm');
     sendBtn.type = 'button';
     sendBtn.disabled = state.sending || state.comments.length === 0;
     sendBtn.addEventListener('click', function () { send(state.noteDraft); });

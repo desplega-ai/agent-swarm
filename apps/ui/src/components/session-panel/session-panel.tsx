@@ -61,11 +61,16 @@ export interface SessionPanelProps {
   onClose?: () => void;
   title?: string;
   className?: string;
+  /**
+   * Session (root task id) to select on mount, saved as the last selection.
+   * Used to land on a session created elsewhere, e.g. a page feedback send.
+   */
+  initialSelection?: string;
 }
 
 export function SessionPanel(props: SessionPanelProps) {
   // Remount per page key so selection, drafts and the new-session key follow the page.
-  return <SessionPanelBody key={props.pageKey} {...props} />;
+  return <SessionPanelBody key={`${props.pageKey}:${props.initialSelection ?? ""}`} {...props} />;
 }
 
 const defaultScreenshotTarget = () => document.body;
@@ -81,12 +86,17 @@ function defaultStorage(): SelectionStorage | null {
 function useLastSelection(
   storage: SelectionStorage | null,
   storageKey: string,
+  initial?: string,
 ): [string, (next: string) => void] {
   const [value, setValue] = useState<string>(() => {
     try {
+      if (initial) {
+        storage?.setItem(storageKey, initial);
+        return initial;
+      }
       return storage?.getItem(storageKey) ?? NEW_SESSION;
     } catch {
-      return NEW_SESSION;
+      return initial ?? NEW_SESSION;
     }
   });
   const set = useCallback(
@@ -113,11 +123,12 @@ function SessionPanelBody({
   onClose,
   title = "Session about this page",
   className,
+  initialSelection,
 }: SessionPanelProps) {
   const { userId } = useCurrentUser();
   const store = storage === undefined ? defaultStorage() : storage;
   const storageKey = `session-panel:last:${storageNamespace ? `${storageNamespace}:` : ""}${pageKey}`;
-  const [selected, setSelected] = useLastSelection(store, storageKey);
+  const [selected, setSelected] = useLastSelection(store, storageKey, initialSelection);
   const [newContextKey, setNewContextKey] = useState(() => newSessionContextKey(pageKey));
 
   // Search and order are server-side, the same `q` the Sessions sidebar sends.
