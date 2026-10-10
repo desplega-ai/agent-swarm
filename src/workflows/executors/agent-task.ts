@@ -83,7 +83,7 @@ export class AgentTaskExecutor extends BaseExecutor<
         async: true,
         waitFor: "task.completed",
         correlationId: existingTask.id,
-      } as unknown as ExecutorResult<AgentTaskOutput>;
+      } as ExecutorResult<AgentTaskOutput>;
     }
 
     // 2. Inherit workflow-level dir/vcsRepo when node config doesn't specify them
@@ -154,6 +154,6 @@ export class AgentTaskExecutor extends BaseExecutor<
       async: true,
       waitFor: "task.completed",
       correlationId: task.id,
-    } as unknown as ExecutorResult<AgentTaskOutput>;
+    } as ExecutorResult<AgentTaskOutput>;
   }
 }

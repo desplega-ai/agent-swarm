@@ -323,6 +323,7 @@ function resolveToolAllowlist(value: string | undefined): string[] | undefined {
 
 /** Drop every registered tool the allowlist does not name; warn on unknown names. */
 function applyToolAllowlist(server: McpServer, allowlist: readonly string[]): void {
+  // oxlint-disable-next-line anti-slop/no-chained-type-assertions -- the MCP SDK keeps its tool registry private.
   const tools = (server as unknown as { _registeredTools: Record<string, { remove(): void }> })
     ._registeredTools;
   const allowed = new Set(allowlist);

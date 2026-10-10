@@ -127,7 +127,7 @@ export class SubWorkflowExecutor extends BaseExecutor<
         async: true,
         waitFor: "workflow.child.finished",
         correlationId: child.id,
-      } as unknown as ExecutorResult<SubWorkflowOutput>;
+      } as ExecutorResult<SubWorkflowOutput>;
     }
     if ("error" in outcome) return { status: "failed", error: outcome.error };
     return { status: "success", output: outcome.output, nextPort: "success" };

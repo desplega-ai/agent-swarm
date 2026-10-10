@@ -1196,7 +1196,7 @@ export async function handleUsers(
       ] as const;
       for (const field of PROFILE_FIELDS) {
         if (parsed.body[field] === undefined) continue;
-        const beforeVal = (before as unknown as Record<string, unknown>)[field] ?? null;
+        const beforeVal = (before as Record<string, unknown>)[field] ?? null;
         const afterVal = parsed.body[field] ?? null;
         // Cheap deep-equal via JSON — fields are scalar strings or object/null.
         if (JSON.stringify(beforeVal) === JSON.stringify(afterVal)) continue;

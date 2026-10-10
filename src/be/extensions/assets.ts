@@ -694,7 +694,7 @@ const ADAPTERS: { [K in ExtensionAssetKind]: Adapter<Extract<Plan, { kind: K }>>
 };
 
 function adapterFor(kind: ExtensionAssetKind): Adapter<Plan> {
-  return ADAPTERS[kind] as unknown as Adapter<Plan>;
+  return ADAPTERS[kind] as Adapter<Plan>;
 }
 
 /** Scripts first (schedules and swarm-script nodes call them), skills last. */

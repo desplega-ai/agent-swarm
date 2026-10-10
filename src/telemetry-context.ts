@@ -127,6 +127,7 @@ let specsByEvent: Map<string, Record<string, CatalogPropertySpec>> | null = null
 
 function catalogSpecs(event: string): Record<string, CatalogPropertySpec> | undefined {
   if (!specsByEvent) {
+    // oxlint-disable-next-line anti-slop/no-chained-type-assertions -- generated catalog; its JSON literal types do not match the spec type.
     const file = catalog as unknown as {
       events: Array<{
         product: string;

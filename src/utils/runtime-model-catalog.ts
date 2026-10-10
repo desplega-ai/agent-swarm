@@ -38,7 +38,7 @@ export interface RuntimeCatalogProvider {
 
 export type RuntimeCatalog = Record<string, RuntimeCatalogProvider | undefined>;
 
-const SNAPSHOT = modelsDevSnapshot as unknown as RuntimeCatalog;
+const SNAPSHOT = modelsDevSnapshot as RuntimeCatalog;
 
 /** Default freshness window for the worker-side HTTP pull. */
 export const RUNTIME_CATALOG_TTL_MS = 10 * 60_000;

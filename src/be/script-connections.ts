@@ -1468,7 +1468,7 @@ function parseOpenapiSpecBody(body: string): unknown {
   try {
     return JSON.parse(body);
   } catch (jsonErr) {
-    const yaml = (Bun as unknown as { YAML?: { parse(input: string): unknown } }).YAML;
+    const yaml = (Bun as { YAML?: { parse(input: string): unknown } }).YAML;
     if (!yaml) {
       throw new Error(
         `OpenAPI spec response was not valid JSON. JSON specs only unless Bun.YAML.parse is available: ${

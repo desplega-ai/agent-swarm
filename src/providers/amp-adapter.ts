@@ -537,7 +537,7 @@ class AmpSession implements ProviderSession {
   }
 
   private get stdin(): AmpStdin {
-    return this.proc.stdin as unknown as AmpStdin;
+    return this.proc.stdin as AmpStdin;
   }
 
   private async writeInput(text: string): Promise<void> {

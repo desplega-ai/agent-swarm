@@ -105,7 +105,9 @@ const slackManifestRoute = route({
 export function createIntegrationsHandler(deps: TestConnectionDeps = {}) {
   const buildClient =
     deps.buildClient ??
-    ((apiKey: string) => new Anthropic({ apiKey }) as unknown as ClaudeManagedTestClient);
+    ((apiKey: string) =>
+      // oxlint-disable-next-line anti-slop/no-chained-type-assertions -- the SDK client is a superset of this narrow test seam.
+      new Anthropic({ apiKey }) as unknown as ClaudeManagedTestClient);
 
   return async function handleIntegrations(
     req: IncomingMessage,

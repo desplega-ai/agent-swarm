@@ -1692,9 +1692,9 @@ export class PiMonoAdapter implements ProviderAdapter {
     try {
       const sessionManager = SessionManager.create(this.lastCwd);
       // SessionManager stores sessions as files — check if the session exists
-      const sessions = await (
-        sessionManager as unknown as { list(): Promise<Array<{ id: string }>> }
-      ).list?.();
+      // oxlint-disable-next-line anti-slop/no-chained-type-assertions -- pi declares list() as static, so this optional call finds nothing.
+      const listable = sessionManager as unknown as { list?(): Promise<Array<{ id: string }>> };
+      const sessions = await listable.list?.();
       return sessions?.some((s) => s.id === sessionId) ?? false;
     } catch {
       return false;

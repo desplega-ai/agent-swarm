@@ -63,6 +63,7 @@ export function decodeApp(row: AppDbRow): AppRecord {
       id: row.id,
       name: row.name,
       ...(row.description === null ? {} : { description: row.description }),
+      // oxlint-disable-next-line anti-slop/no-chained-type-assertions -- invalid JSON keeps the raw string; definitionError flags it.
       definition: row.definition as unknown as AppRecord["definition"],
       definitionError: [invalidJsonIssue(error)],
       createdAt: row.created_at,

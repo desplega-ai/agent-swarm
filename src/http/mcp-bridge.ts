@@ -66,6 +66,7 @@ export async function invokeToolInProcess(args: {
   }
 
   const server = await getBridgeServer();
+  // oxlint-disable-next-line anti-slop/no-chained-type-assertions -- the MCP SDK keeps its tool registry private.
   const tools = (server as unknown as { _registeredTools: ToolRegistry })._registeredTools;
   const tool = tools[args.toolName];
   if (!tool) {

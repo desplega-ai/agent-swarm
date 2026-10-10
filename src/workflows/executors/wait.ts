@@ -93,7 +93,7 @@ export class WaitExecutor extends BaseExecutor<typeof WaitConfigSchema, typeof W
         async: true,
         waitFor: "wait.fired",
         correlationId: existing.id,
-      } as unknown as ExecutorResult<WaitOutput>;
+      } as ExecutorResult<WaitOutput>;
     }
 
     // 2. Mode-specific creation.
@@ -113,7 +113,7 @@ export class WaitExecutor extends BaseExecutor<typeof WaitConfigSchema, typeof W
         async: true,
         waitFor: "wait.fired",
         correlationId: waitId,
-      } as unknown as ExecutorResult<WaitOutput>;
+      } as ExecutorResult<WaitOutput>;
     }
 
     // Event mode: validate the filter at executor-init time (so a bad workflow
@@ -149,7 +149,7 @@ export class WaitExecutor extends BaseExecutor<typeof WaitConfigSchema, typeof W
       async: true,
       waitFor: "wait.fired",
       correlationId: waitId,
-    } as unknown as ExecutorResult<WaitOutput>;
+    } as ExecutorResult<WaitOutput>;
   }
 }
 

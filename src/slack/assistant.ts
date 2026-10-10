@@ -102,7 +102,7 @@ export function createAssistant(): Assistant {
 
       try {
         // Cast to access fields — Bolt's message union type is complex
-        const msg = message as unknown as Record<string, unknown>;
+        const msg: Record<string, unknown> = { ...message };
         const threadTs = (msg.thread_ts as string) || message.ts;
         const channelId = message.channel;
         statusThread = { channelId, threadTs };

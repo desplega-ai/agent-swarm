@@ -423,7 +423,7 @@ export class SwarmClient {
  */
 function unwrapTask(res: Record<string, unknown>): SwarmTask {
   if (typeof res.task === "object" && res.task !== null) return res.task as SwarmTask;
-  return res as unknown as SwarmTask;
+  return res as SwarmTask;
 }
 
 function normalizeTask(raw: SwarmTask): SwarmTask {

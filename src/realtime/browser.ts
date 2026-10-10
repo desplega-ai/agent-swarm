@@ -88,8 +88,7 @@ class Connection extends Events {
         const message = JSON.parse(event.data) as Frame;
         if (message.seq) socket.send(JSON.stringify({ ack: message.seq }));
         if (message.type === "hello") this.me = message.me;
-        if (message.type === "room")
-          this.rooms.get(message.name ?? "")?.receive(message as unknown as View);
+        if (message.type === "room") this.rooms.get(message.name ?? "")?.receive(message as View);
         if (message.type === "presence")
           this.rooms.get(message.name ?? "")?.receivePresence(message.peers);
         if (message.type === "channel")

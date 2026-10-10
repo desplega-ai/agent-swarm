@@ -18,5 +18,13 @@ export default defineConfig({
     "anti-slop/no-object-parameters": "error",
     "anti-slop/no-unknown-type-aliases": "error",
     "anti-slop/no-widen-then-assert": "error",
+    "anti-slop/no-chained-type-assertions": "error",
   },
+  overrides: [
+    {
+      // Test doubles cast partial fakes on purpose. Production code only, for now.
+      files: ["src/tests/**", "**/*.test.ts", "**/*.test.tsx", "packages/ui-e2e/specs/**"],
+      rules: { "anti-slop/no-chained-type-assertions": "off" },
+    },
+  ],
 });

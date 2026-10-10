@@ -559,8 +559,7 @@ export class OpencodeSession implements ProviderSession {
         // so the dashboard's Activity timeline mirrors what other providers
         // emit. We fire tool_start the first time we see a tool part (any
         // status); tool_end fires once when state transitions to "completed".
-        const props = (ev as unknown as { properties: { sessionID?: string; part?: unknown } })
-          .properties;
+        const props = (ev as { properties: { sessionID?: string; part?: unknown } }).properties;
         if (props.sessionID !== this._sessionId) break;
         const part = props.part as
           | {

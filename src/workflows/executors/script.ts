@@ -98,7 +98,7 @@ export class ScriptExecutor extends BaseExecutor<
         return {
           status: "failed",
           error: result.stderr || `Script exited with code ${result.exitCode}`,
-          output: result as unknown as z.infer<typeof ScriptOutputSchema>,
+          output: result as z.infer<typeof ScriptOutputSchema>,
         };
       }
 

@@ -409,7 +409,7 @@ class ClaudeSdkSession implements ProviderSession {
   }
 
   private handleMessage(message: SDKMessage): boolean {
-    const json = message as unknown as ClaudeProtocolMessage;
+    const json = message as ClaudeProtocolMessage;
     this.backgroundKeepalive.observe(json);
     const normalized = normalizeClaudeMessage(json, {
       taskId: this.options.config.taskId,

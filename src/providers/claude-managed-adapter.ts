@@ -37,8 +37,6 @@
 
 import Anthropic from "@anthropic-ai/sdk";
 // Real type usages (the Phase 1 imports become non-decorative as of this phase).
-import type { BetaManagedAgentsAgent as Agent } from "@anthropic-ai/sdk/resources/beta/agents";
-import type { BetaEnvironment as Environment } from "@anthropic-ai/sdk/resources/beta/environments";
 import type {
   BetaManagedAgentsAgentMCPToolResultEvent,
   BetaManagedAgentsAgentMCPToolUseEvent,
@@ -57,7 +55,6 @@ import type {
   BetaManagedAgentsSession as Session,
   BetaManagedAgentsSessionEvent as SessionEvent,
 } from "@anthropic-ai/sdk/resources/beta/sessions";
-import type { BetaSkill as Skill } from "@anthropic-ai/sdk/resources/beta/skills";
 
 import { checkToolLoop } from "../hooks/tool-loop-detection";
 import {
@@ -106,13 +103,6 @@ export function checkClaudeManagedCredentials(env: Record<string, string | undef
     hint: "Run `bun run src/cli.tsx claude-managed-setup` once to provision MANAGED_AGENT_ID and MANAGED_ENVIRONMENT_ID, then set ANTHROPIC_API_KEY and MCP_BASE_URL (must be HTTPS-public).",
   };
 }
-
-// Re-export the type aliases at module level so adjacent files / tests can use
-// the short names without re-discovering the long Beta-prefixed ones. Kept on
-// `void` lines so unused-import lints stay quiet for the type imports above.
-void (null as unknown as Agent);
-void (null as unknown as Environment);
-void (null as unknown as Skill);
 
 /**
  * Required env vars validated at construction time. Listing them in one place
@@ -677,7 +667,7 @@ class ClaudeManagedSession implements ProviderSession {
           events: [
             {
               type: "user.message",
-              content: this.userMessageContent as unknown as Record<string, unknown>[],
+              content: this.userMessageContent,
             },
           ],
         });
@@ -857,6 +847,7 @@ export class ClaudeManagedAdapter implements ProviderAdapter {
       // our narrower `ManagedAgentsClient` interface (which exists for
       // testability) but TypeScript can't infer that without us spelling out
       // every method signature on both sides.
+      // oxlint-disable-next-line anti-slop/no-chained-type-assertions -- see the comment above.
       this.client = new Anthropic({ apiKey: this.apiKey }) as unknown as ManagedAgentsClient;
     }
   }

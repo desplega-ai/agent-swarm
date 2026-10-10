@@ -151,15 +151,13 @@ async function runWithTimeout<T>(fn: () => T): Promise<T | null> {
         // the user fn doesn't crash the runtime) and resolve to a sentinel
         // that the caller treats as "no-match". We wrap in a marker object
         // so the outer `await` can't unwrap a Thenable for us.
-        if (
-          v !== null &&
-          typeof v === "object" &&
-          typeof (v as { then?: unknown }).then === "function"
-        ) {
-          (v as unknown as Promise<unknown>).catch(() => {});
+        const then =
+          v !== null && typeof v === "object" ? (v as { then?: unknown }).then : undefined;
+        if (typeof then === "function") {
+          then.call(v, undefined, () => {});
           settled = true;
           clearTimeout(timer);
-          resolve({ __asyncRejected: true } as unknown as T);
+          resolve({ __asyncRejected: true } as T);
           return;
         }
         if (settled) return;

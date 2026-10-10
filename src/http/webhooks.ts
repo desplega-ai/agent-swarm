@@ -335,7 +335,7 @@ export async function handleWebhooks(
       // Emit workflow trigger event for matching event types
       switch (eventType) {
         case "pull_request": {
-          const pr = body as unknown as PullRequestEvent;
+          const pr = body as PullRequestEvent;
           workflowEventBus.emit(`github.pull_request.${pr.action}`, {
             repo: pr.repository.full_name,
             number: pr.pull_request.number,
@@ -350,7 +350,7 @@ export async function handleWebhooks(
           break;
         }
         case "issues": {
-          const iss = body as unknown as IssueEvent;
+          const iss = body as IssueEvent;
           workflowEventBus.emit(`github.issue.${iss.action}`, {
             repo: iss.repository.full_name,
             number: iss.issue.number,
@@ -360,7 +360,7 @@ export async function handleWebhooks(
           break;
         }
         case "issue_comment": {
-          const ic = body as unknown as CommentEvent;
+          const ic = body as CommentEvent;
           workflowEventBus.emit("github.issue_comment.created", {
             repo: ic.repository.full_name,
             number: ic.issue?.number,
@@ -369,7 +369,7 @@ export async function handleWebhooks(
           break;
         }
         case "pull_request_review": {
-          const prr = body as unknown as PullRequestReviewEvent;
+          const prr = body as PullRequestReviewEvent;
           workflowEventBus.emit("github.pull_request_review.submitted", {
             repo: prr.repository.full_name,
             number: prr.pull_request.number,
@@ -415,7 +415,7 @@ export async function handleWebhooks(
     }
     const rawBody = Buffer.concat(chunks).toString();
 
-    let body: Record<string, unknown>;
+    let body: unknown;
     try {
       body = JSON.parse(rawBody);
     } catch {
@@ -424,7 +424,7 @@ export async function handleWebhooks(
       return true;
     }
 
-    const objectKind = body.object_kind as string | undefined;
+    const objectKind = (body as { object_kind?: string }).object_kind;
     console.log(`[GitLab] Received ${objectKind} event`);
 
     let result: WebhookDispatchResult = { created: false };
@@ -433,13 +433,13 @@ export async function handleWebhooks(
       result = await runBlockableHandler("GitLab", async () => {
         switch (objectKind) {
           case "merge_request":
-            return await handleMergeRequest(body as unknown as MergeRequestEvent);
+            return await handleMergeRequest(body as MergeRequestEvent);
           case "issue":
-            return await handleGitLabIssue(body as unknown as GitLabIssueEvent);
+            return await handleGitLabIssue(body as GitLabIssueEvent);
           case "note":
-            return await handleNote(body as unknown as NoteEvent);
+            return await handleNote(body as NoteEvent);
           case "pipeline":
-            return await handlePipeline(body as unknown as PipelineEvent);
+            return await handlePipeline(body as PipelineEvent);
           default:
             console.log(`[GitLab] Ignoring unsupported event type: ${objectKind}`);
             return { created: false };
@@ -449,7 +449,7 @@ export async function handleWebhooks(
       // Emit workflow trigger events for GitLab
       switch (objectKind) {
         case "merge_request": {
-          const mr = body as unknown as MergeRequestEvent;
+          const mr = body as MergeRequestEvent;
           const action = mr.object_attributes.action;
           const workflowAction = gitlabWorkflowActionName(action);
           const eventPayload = {
@@ -469,7 +469,7 @@ export async function handleWebhooks(
           break;
         }
         case "issue": {
-          const iss = body as unknown as GitLabIssueEvent;
+          const iss = body as GitLabIssueEvent;
           const action = iss.object_attributes.action;
           const workflowAction = gitlabWorkflowActionName(action);
           const eventPayload = {
@@ -485,7 +485,7 @@ export async function handleWebhooks(
           break;
         }
         case "note": {
-          const note = body as unknown as NoteEvent;
+          const note = body as NoteEvent;
           workflowEventBus.emit("gitlab.note.created", {
             repo: note.project.path_with_namespace,
             number: note.merge_request?.iid ?? note.issue?.iid,
@@ -494,7 +494,7 @@ export async function handleWebhooks(
           break;
         }
         case "pipeline": {
-          const pl = body as unknown as PipelineEvent;
+          const pl = body as PipelineEvent;
           workflowEventBus.emit(`gitlab.pipeline.${pl.object_attributes.status}`, {
             repo: pl.project.path_with_namespace,
             number: pl.merge_request?.iid,
@@ -539,7 +539,7 @@ export async function handleWebhooks(
     }
     const rawBody = Buffer.concat(chunks).toString();
 
-    let body: Record<string, unknown>;
+    let body: unknown;
     try {
       body = JSON.parse(rawBody);
     } catch {
@@ -548,7 +548,7 @@ export async function handleWebhooks(
       return true;
     }
 
-    const eventType = body.eventType as string | undefined;
+    const eventType = (body as { eventType?: string }).eventType;
     console.log(`[AzureDevOps] Received ${eventType} event`);
 
     let result: WebhookDispatchResult = { created: false };
@@ -557,9 +557,9 @@ export async function handleWebhooks(
       result = await runBlockableHandler("AzureDevOps", async () => {
         switch (eventType) {
           case "git.pullrequest.created":
-            return await handlePullRequestCreated(body as unknown as PullRequestCreatedEvent);
+            return await handlePullRequestCreated(body as PullRequestCreatedEvent);
           case "ms.vss-code.git-pullrequest-comment-event":
-            return await handlePullRequestCommented(body as unknown as PullRequestCommentedEvent);
+            return await handlePullRequestCommented(body as PullRequestCommentedEvent);
           default:
             console.log(`[AzureDevOps] Ignoring unsupported event type: ${eventType}`);
             return { created: false };
@@ -569,7 +569,7 @@ export async function handleWebhooks(
       // Emit workflow trigger events for Azure DevOps
       switch (eventType) {
         case "git.pullrequest.created": {
-          const pr = createdPullRequestOf(body as unknown as PullRequestCreatedEvent);
+          const pr = createdPullRequestOf(body as PullRequestCreatedEvent);
           if (!pr) break;
           workflowEventBus.emit("azure-devops.pull_request.created", {
             repo: canonicalAzureDevOpsRepoUrl(pr.repository.remoteUrl),
@@ -582,7 +582,7 @@ export async function handleWebhooks(
           break;
         }
         case "ms.vss-code.git-pullrequest-comment-event": {
-          const payload = commentedPayloadOf(body as unknown as PullRequestCommentedEvent);
+          const payload = commentedPayloadOf(body as PullRequestCommentedEvent);
           if (!payload) break;
           const { pullRequest: pr, comment } = payload;
           workflowEventBus.emit("azure-devops.pull_request.commented", {

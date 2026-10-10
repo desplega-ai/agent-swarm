@@ -374,7 +374,7 @@ export async function dispatchPre<E extends PreEventName>(
     return { action: "continue" };
   }
 
-  let currentPayload = payload as unknown as Record<string, unknown>;
+  let currentPayload: Record<string, unknown> = { ...payload };
   const mergedData: Record<string, unknown> = {};
   let modified = false;
   for (const { loaded, handler } of handlersFor(event, opts)) {

@@ -8,7 +8,7 @@ Local changes:
 - Removed the `*.test.ts` RuleTester suites. `bun test` would collect them, and the oxlint `RuleTester` does not run under Bun. Get them from upstream when you edit a rule.
 - `shared/dictionary-types.ts`: `unsafeMembers[0] ?? null`, so the file typechecks under this repo's `noUncheckedIndexedAccess`.
 
-`oxlint.config.ts` at the repo root turns on a subset of rules. `bun run lint:slop` runs it, and the merge gate runs it in the Lint and Type Check job.
+`oxlint.config.ts` at the repo root turns on a subset of rules. `no-chained-type-assertions` is on for production code only; tests still cast partial fakes. A deliberate chain needs an `oxlint-disable-next-line` comment with a reason. `bun run lint:slop` runs it, and the merge gate runs it in the Lint and Type Check job.
 
 ## Rules not yet on
 
@@ -16,7 +16,6 @@ Counts are for `src`, `apps/evals` and `packages` on 2026-10-10.
 
 | Rule | Hits | Why it is off |
 |---|---|---|
-| `no-chained-type-assertions` | 63 prod, 363 test | Good next candidate. Fix `as unknown as` casts or add a reason. |
 | `no-array-filter-map` | 80 | Taste. The fix uses iterator helpers. |
 | `no-reflect-get`, `no-reflect-apply` | 6 | Every hit is a `Proxy` trap, where `Reflect` is the correct idiom. |
 | `no-module-mocking` | 0 | Checks Vitest/Jest only. It does not see `bun:test` `mock.module`. |

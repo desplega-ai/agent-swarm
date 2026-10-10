@@ -73,6 +73,7 @@ type PatchableProto = {
  * Call it before the Bolt `App` (and its receiver) are constructed.
  */
 export function installSlackEgressScrub(): void {
+  // oxlint-disable-next-line anti-slop/no-chained-type-assertions -- we patch private WebClient prototype methods.
   const proto = webApi.WebClient.prototype as unknown as PatchableProto;
   if (proto[INSTALLED]) return;
   const originalApiCall = proto.apiCall;

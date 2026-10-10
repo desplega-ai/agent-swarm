@@ -15,7 +15,7 @@ export type ExtensionCatalogEntry = {
   readme: string | null;
 };
 
-const BUNDLED = generated as unknown as Record<string, ExtensionCatalogEntry>;
+const BUNDLED = generated as Record<string, ExtensionCatalogEntry>;
 let override: Record<string, ExtensionCatalogEntry> | null = null;
 
 export function getExtensionCatalog(): Record<string, ExtensionCatalogEntry> {

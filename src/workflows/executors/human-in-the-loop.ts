@@ -286,7 +286,7 @@ export class HumanInTheLoopExecutor extends BaseExecutor<
         async: true,
         waitFor: "approval.resolved",
         correlationId: existing.id,
-      } as unknown as ExecutorResult<HITLOutput>;
+      } as ExecutorResult<HITLOutput>;
     }
 
     // 2. Create the approval request. `run` already replaced a dynamic token
@@ -314,7 +314,7 @@ export class HumanInTheLoopExecutor extends BaseExecutor<
         async: true,
         waitFor: "approval.resolved",
         correlationId: requestId,
-      } as unknown as ExecutorResult<HITLOutput>;
+      } as ExecutorResult<HITLOutput>;
     }
 
     // 3. Dispatch notifications (fire-and-forget — failures must not block the workflow)
@@ -333,7 +333,7 @@ export class HumanInTheLoopExecutor extends BaseExecutor<
       async: true,
       waitFor: "approval.resolved",
       correlationId: requestId,
-    } as unknown as ExecutorResult<HITLOutput>;
+    } as ExecutorResult<HITLOutput>;
   }
 
   /** Dispatch notifications for each configured channel. Updates DB with messageTs on success. */
