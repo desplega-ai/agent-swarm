@@ -9,6 +9,7 @@ import {
   createPage,
   deletePage,
   getLatestPageBySlug,
+  getLeadAgent,
   getPage,
   getPageBySlug,
   getPageVersion,
@@ -19,6 +20,10 @@ import {
   withFavoriteFlags,
 } from "../be/db";
 import { snapshotPage } from "../pages/version";
+import { resolveTemplate } from "../prompts/resolver";
+// Side-effect import: registers `task.page.feedback`.
+import "../prompts/session-templates";
+import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
 import {
   AssetKeySchema,
   type Page,
@@ -216,6 +221,57 @@ const updatePageRoute = route({
     413: { description: "Payload too large" },
   },
 });
+
+/**
+ * POST /api/pages/:id/feedback — turn the element comments collected by the
+ * in-page feedback overlay (`?__swarm-feedback`, see
+ * `src/artifact-sdk/feedback-overlay.ts`) into one task for the lead. The
+ * overlay reaches this route through the `/@swarm/api/*` page proxy, which
+ * pins `X-Page-Id` to the cookie's page, so a page can only file feedback on
+ * itself. Guest (password) sessions are refused by the proxy allowlist.
+ */
+const PageFeedbackCommentSchema = z.object({
+  selector: z.string().min(1).max(1000),
+  comment: z.string().trim().min(1).max(4000),
+  tagName: z.string().max(64).optional(),
+  text: z.string().max(500).optional(),
+  html: z.string().max(1000).optional(),
+});
+
+const pageFeedbackRoute = route({
+  method: "post",
+  path: "/api/pages/{id}/feedback",
+  pattern: ["api", "pages", null, "feedback"],
+  summary: "Send element comments on a page to the lead as a feedback task",
+  tags: ["Pages"],
+  params: z.object({ id: z.string() }),
+  body: z.object({
+    pageUrl: z.string().max(2000).optional(),
+    note: z.string().trim().max(4000).optional(),
+    comments: z.array(PageFeedbackCommentSchema).min(1).max(50),
+  }),
+  responses: {
+    201: {
+      description: "Feedback task created",
+      schema: z.object({
+        taskId: z.string(),
+        status: z.string(),
+        agentId: z.string().nullable(),
+        task_url: z.string(),
+      }),
+    },
+    400: { description: "Invalid body" },
+    403: { description: "Page session is scoped to a different page" },
+    404: { description: "Page not found" },
+    413: { description: "Payload too large" },
+  },
+  rbac: {
+    ungated:
+      "creates a lead task, same posture as POST /api/tasks; guest page sessions are refused by the page proxy",
+  },
+});
+
+const MAX_PAGE_FEEDBACK_BYTES = 256 * 1024;
 
 const deletePageRoute = route({
   method: "delete",
@@ -424,6 +480,20 @@ function withShareUrls<T extends { id: string; slug: string }>(
 async function pageEditCounter(pageId: string): Promise<number> {
   const versions = await getPageVersions(pageId);
   return versions.length > 0 ? versions[0]!.version + 1 : 1;
+}
+
+/** Render the overlay's element comments as a numbered markdown list for the task prompt. */
+function formatFeedbackComments(comments: z.infer<typeof PageFeedbackCommentSchema>[]): string {
+  const indent = (value: string) => value.replace(/\n/g, "\n   ");
+  return comments
+    .map((c, i) => {
+      const lines = [`${i + 1}. Element: \`${c.selector}\`${c.tagName ? ` (<${c.tagName}>)` : ""}`];
+      if (c.text) lines.push(`   Excerpt: "${indent(c.text)}"`);
+      if (c.html) lines.push(`   HTML: ${indent(c.html)}`);
+      lines.push(`   Comment: ${indent(c.comment)}`);
+      return lines.join("\n");
+    })
+    .join("\n\n");
 }
 
 function isDevRequest(req: IncomingMessage): boolean {
@@ -760,6 +830,61 @@ export async function handlePages(
     }
     res.writeHead(204);
     res.end();
+    return true;
+  }
+
+  // POST /api/pages/:id/feedback — overlay comments → one task for the lead.
+  if (pageFeedbackRoute.match(req.method, pathSegments)) {
+    if (enforceContentLengthCap(req, res, MAX_PAGE_FEEDBACK_BYTES) === BODY_TOO_LARGE) return true;
+    const parsed = await pageFeedbackRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+
+    const page = await getPage(parsed.params.id);
+    if (!page) {
+      jsonError(res, "Page not found", 404);
+      return true;
+    }
+    // Only the page proxy sets X-Page-Id. A session for page A must not file
+    // feedback as page B.
+    const proxiedPageId = req.headers["x-page-id"];
+    if (typeof proxiedPageId === "string" && proxiedPageId !== page.id) {
+      jsonError(res, "Page session is scoped to a different page", 403);
+      return true;
+    }
+
+    const note = parsed.body.note;
+    const taskPrompt = resolveTemplate("task.page.feedback", {
+      page_id: page.id,
+      page_title: page.title,
+      page_slug: page.slug,
+      page_agent_id: page.agentId,
+      page_url: parsed.body.pageUrl || `${getApiBaseUrl()}/p/${page.id}`,
+      note_section: note ? `\nOverall note from the viewer:\n${note}\n` : "",
+      comments: formatFeedbackComments(parsed.body.comments),
+    });
+    const lead = await getLeadAgent();
+    const requestedByUserId = (await resolveHttpAuditUserId(req, myAgentId)) ?? undefined;
+    const task = await createTaskWithSiblingAwareness(
+      taskPrompt.text,
+      {
+        source: "api",
+        agentId: lead?.id,
+        routingReason: lead ? "skill" : undefined,
+        routingSource: lead ? "engine_default" : undefined,
+        taskType: "page-feedback",
+        tags: ["page-feedback"],
+        // Group the task with the page's asset namespace.
+        key: page.key,
+        requestedByUserId,
+      },
+      { origin: "rest" },
+    );
+    pageFeedbackRoute.respond(res, 201, {
+      taskId: task.id,
+      status: task.status,
+      agentId: task.agentId ?? null,
+      task_url: `${getAppBaseUrl()}/tasks/${task.id}`,
+    });
     return true;
   }
 

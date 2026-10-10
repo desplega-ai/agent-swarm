@@ -420,6 +420,25 @@ file. No headless Chromium, no server-side rendering — zero infra weight.
 > Want a custom print layout? Override the print styles in your page's own
 > `<style>` block — agent CSS always wins over the head defaults.
 
+## Viewer feedback
+
+Add `?__swarm-feedback` to an HTML page URL (`/p/:id?__swarm-feedback` or
+`/pages/:id?__swarm-feedback=1`) to show the feedback overlay. The **Feedback**
+button on `/pages/:id` sets the same param. `0` or `false` turns it off.
+
+With the overlay, a viewer selects elements, writes one comment per element,
+and clicks **Send to swarm**. The API (`POST /api/pages/:id/feedback`) creates
+one task for the lead, tagged `page-feedback`, in the page's asset namespace.
+Each comment carries a CSS selector, an excerpt, and an HTML snippet of its
+element.
+
+If you get a `page-feedback` task: read the page with `GET /api/pages/:id`,
+change it with `PUT /api/pages/:id`, and report which comments you applied.
+
+Limits: signed-in dashboard sessions only. Password-page guests get 403. A
+direct `/p/:id` visit with no page session gets 401. The overlay is hidden in
+print. Do not add your own UI under the `swarm-feedback-root` element name.
+
 ## View counter
 
 Every successful `200` from `GET /p/:id` (HTML inline) and `GET /p/:id.json`

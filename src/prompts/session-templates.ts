@@ -543,6 +543,32 @@ registerTemplate({
   category: "task_lifecycle",
 });
 
+registerTemplate({
+  eventType: "task.page.feedback",
+  header: "",
+  defaultBody: `A viewer left feedback on the page "{{page_title}}" (id {{page_id}}, slug {{page_slug}}, owner agent {{page_agent_id}}).
+Viewed at: {{page_url}}
+
+Each comment below points at one element of the page, by CSS selector and a short excerpt of that element.
+{{note_section}}
+{{comments}}
+
+Act on the feedback: read the current page with \`GET /api/pages/{{page_id}}\`, then apply the changes with \`PUT /api/pages/{{page_id}}\` (or delegate the work to the owner agent). Reply with what you changed and any comment you did not act on, with the reason.`,
+  variables: [
+    { name: "page_id", description: "The page id" },
+    { name: "page_title", description: "The page title" },
+    { name: "page_slug", description: "The page slug" },
+    { name: "page_agent_id", description: "The id of the agent that owns the page" },
+    { name: "page_url", description: "The URL the viewer had open when sending the feedback" },
+    {
+      name: "note_section",
+      description: "The viewer's overall note as a formatted section, or empty string",
+    },
+    { name: "comments", description: "The numbered element comments, formatted as markdown" },
+  ],
+  category: "task_lifecycle",
+});
+
 // ============================================================================
 // Composite session templates (category: "session")
 // ============================================================================

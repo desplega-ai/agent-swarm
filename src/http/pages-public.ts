@@ -24,6 +24,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import { BROWSER_SDK_JS, SWARM_UI_JS } from "../artifact-sdk/browser-sdk";
+import { feedbackOverlayScripts, isPageFeedbackRequested } from "../artifact-sdk/feedback-overlay";
 import { getPage, incrementPageViewCount } from "../be/db";
 import { type Page, PageSchema } from "../types";
 import { getAppUrl, getConfiguredAppUrls } from "../utils/constants";
@@ -642,8 +643,12 @@ export async function handlePagesPublic(
   }
 
   // text/html — inject SDK + serve. Append the self-print snippet when the
-  // export button requested it.
-  const html = injectBrowserSdk(page.body) + (wantsPrint ? PRINT_AUTOTRIGGER_SCRIPT : "");
+  // export button requested it, and the feedback overlay when
+  // `?__swarm-feedback` is on (the overlay hides itself in print).
+  const html =
+    injectBrowserSdk(page.body) +
+    (wantsPrint ? PRINT_AUTOTRIGGER_SCRIPT : "") +
+    (isPageFeedbackRequested(queryParams) ? feedbackOverlayScripts(page.id) : "");
   const headers: Record<string, string> = {
     "Content-Type": "text/html; charset=utf-8",
     "Cache-Control": "no-store",

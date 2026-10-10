@@ -31,6 +31,7 @@ import {
   ExternalLink,
   Lock,
   Maximize2,
+  MessageSquarePlus,
   Minimize2,
   Printer,
 } from "lucide-react";
@@ -96,6 +97,19 @@ function pageFrameQuery(searchParams: URLSearchParams): string {
   }
   const query = forwarded.toString();
   return query ? `?${query}` : "";
+}
+
+/**
+ * Query param that turns on the in-page feedback overlay (served by the API
+ * on `/p/:id`, see `src/artifact-sdk/feedback-overlay.ts`). It is a normal
+ * forwarded param, so the iframe, "Open" and "Full" links all carry it.
+ */
+const FEEDBACK_PARAM = "__swarm-feedback";
+
+/** Mirrors `isPageFeedbackRequested` on the API: present and not `0` / `false`. */
+function isFeedbackOn(searchParams: URLSearchParams): boolean {
+  const value = searchParams.get(FEEDBACK_PARAM);
+  return value !== null && value.toLowerCase() !== "0" && value.toLowerCase() !== "false";
 }
 
 /** SPA route for the page, keeping the forwarded params and toggling `mode=full`. */
@@ -359,9 +373,21 @@ function ArtifactPageError({ message }: { message: string }) {
 
 export default function ArtifactPage() {
   const { id } = useParams<{ id: string }>();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const fullMode = searchParams.get("mode") === "full";
   const frameQuery = pageFrameQuery(searchParams);
+  const feedbackOn = isFeedbackOn(searchParams);
+  const toggleFeedback = useCallback(() => {
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        if (isFeedbackOn(prev)) next.delete(FEEDBACK_PARAM);
+        else next.set(FEEDBACK_PARAM, "1");
+        return next;
+      },
+      { replace: true },
+    );
+  }, [setSearchParams]);
   const gate = useFeatureGate("1.79.0");
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const needsSlugResolve = !!id && !PAGE_ID_RE.test(id);
@@ -442,7 +468,16 @@ export default function ArtifactPage() {
   } else {
     switch (data.authMode) {
       case "public":
-        body = (
+        // Feedback posts through the cookie-gated `/@swarm/api` proxy, so a
+        // public page needs the launch-minted session like an authed one.
+        body = feedbackOn ? (
+          <AuthedHtmlFrame
+            id={pageId!}
+            title={data.title}
+            frameQuery={frameQuery}
+            iframeRef={iframeRef}
+          />
+        ) : (
           <PublicHtmlFrame
             id={pageId!}
             title={data.title}
@@ -517,6 +552,13 @@ export default function ArtifactPage() {
               favoriteToggle.mutate({ itemId: pageId!, favorite: !pageRow?.favorite })
             }
             onExportPdf={handleExportPdf}
+            feedback={
+              // HTML only (JSON pages render in the SPA), and not for password
+              // pages: their guest session cannot create tasks.
+              data.contentType === "text/html" && data.authMode !== "password"
+                ? { on: feedbackOn, onToggle: toggleFeedback }
+                : undefined
+            }
           />
         }
       />
@@ -560,6 +602,7 @@ function PageHeaderActions({
   favoriteDisabled,
   onToggleFavorite,
   onExportPdf,
+  feedback,
 }: {
   id: string;
   frameQuery: string;
@@ -568,6 +611,8 @@ function PageHeaderActions({
   favoriteDisabled?: boolean;
   onToggleFavorite: () => void;
   onExportPdf: () => void;
+  /** Feedback-overlay toggle; omitted when the page cannot take feedback. */
+  feedback?: { on: boolean; onToggle: () => void };
 }) {
   // The share link carries the same forwarded params as the iframe, so
   // "Open" keeps whatever filter the page is showing.
@@ -575,6 +620,18 @@ function PageHeaderActions({
   return (
     <div className="flex flex-wrap items-center gap-2">
       <FavoriteButton favorite={favorite} disabled={favoriteDisabled} onToggle={onToggleFavorite} />
+      {feedback ? (
+        <Button
+          variant={feedback.on ? "default" : "outline"}
+          size="sm"
+          aria-pressed={feedback.on}
+          title="Select elements on the page, comment on them, and send the comments to the swarm"
+          onClick={feedback.onToggle}
+        >
+          <MessageSquarePlus className="size-3.5" />
+          Feedback
+        </Button>
+      ) : null}
       <Button asChild variant="outline" size="sm" title="Open the API-served URL in a new tab">
         <a href={href} target="_blank" rel="noreferrer">
           <ExternalLink className="size-3.5" />

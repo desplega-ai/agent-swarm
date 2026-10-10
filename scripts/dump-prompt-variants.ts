@@ -515,6 +515,20 @@ async function renderTaskPrompts(): Promise<string> {
         input_json: '{"incidentId":"inc_7"}',
       },
     },
+    {
+      title: "Page feedback task (task description, created by src/http/pages.ts)",
+      eventType: "task.page.feedback",
+      vars: {
+        page_id: "951aea93862f45aaa0405e8130394479",
+        page_title: "Quarterly report",
+        page_slug: "quarterly-report",
+        page_agent_id: "6a5c1ded-e51d-4122-ba80-c44965e5567f",
+        page_url: "https://api.example.com/p/951aea93862f45aaa0405e8130394479",
+        note_section: "\nOverall note from the viewer:\nTighten the copy overall.\n",
+        comments:
+          '1. Element: `body > main > p` (<p>)\n   Excerpt: "Revenue grew 12% this quarter."\n   Comment: Say whether this is year over year.',
+      },
+    },
   ];
 
   for (const s of samples) {
