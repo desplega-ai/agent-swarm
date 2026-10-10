@@ -25,6 +25,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { readBooleanParam, readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
+import { isRowNavigationSuppressed } from "@/lib/grid-row-click";
 import { cn, formatSmartTime } from "@/lib/utils";
 
 /**
@@ -105,7 +106,7 @@ export default function PagesListingPage() {
           return (
             <FavoriteButton
               favorite={page.favorite}
-              disabled={favoriteToggle.isPending}
+              disabled={favoriteToggle.isPending && favoriteToggle.variables?.itemId === page.id}
               onToggle={() => favoriteToggle.mutate({ itemId: page.id, favorite: !page.favorite })}
             />
           );
@@ -210,6 +211,8 @@ export default function PagesListingPage() {
 
   const onRowClicked = useCallback(
     (event: RowClickedEvent<PageListItem>) => {
+      // The star sits in the row: without this guard a star click also opened the page.
+      if (isRowNavigationSuppressed(event.event?.target)) return;
       if (event.data) void navigate(`/pages/${event.data.id}`);
     },
     [navigate],

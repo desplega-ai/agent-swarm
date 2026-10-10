@@ -116,7 +116,7 @@ export function setCorsHeaders(req: IncomingMessage, res: ServerResponse) {
     const askedHeaders = Array.isArray(reqHeaders) ? reqHeaders.join(", ") : reqHeaders;
     res.setHeader(
       "Access-Control-Allow-Headers",
-      askedHeaders ?? "Authorization, Content-Type, X-Agent-ID, X-Requested-With",
+      askedHeaders ?? "Authorization, Content-Type, X-Agent-ID, X-Requested-With, X-Swarm-User-Id",
     );
     res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
     res.setHeader("Access-Control-Expose-Headers", "Content-Type, Content-Length, ETag, Location");

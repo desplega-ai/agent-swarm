@@ -617,6 +617,8 @@ describe("script connections", () => {
       markMigrationApplied(database, "202_codex_oauth_device_flows.sql");
       // 203 alters workflow_runs, which this migration-112-only fixture does not create.
       markMigrationApplied(database, "203_workflow_run_parent_step.sql");
+      // 205 copies user_favorites rows, which this migration-112-only fixture does not create.
+      markMigrationApplied(database, "205_favorites_per_dashboard_user.sql");
 
       const id = crypto.randomUUID();
       const now = new Date().toISOString();

@@ -16,6 +16,9 @@ export function FavoriteColumnHeader() {
 
 /** Shared column props: pair with a `FavoriteButton` cell renderer. */
 export const FAVORITE_COLUMN = {
+  // `isRowNavigationSuppressed` keys on this id: a click anywhere in the
+  // column toggles or does nothing, it never opens the row.
+  colId: "favorite",
   headerName: "Favorite",
   headerComponent: FavoriteColumnHeader,
   width: 52,

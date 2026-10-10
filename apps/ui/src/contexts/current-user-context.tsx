@@ -34,6 +34,7 @@
  * value in localStorage.
  */
 
+import { useQueryClient } from "@tanstack/react-query";
 import {
   createContext,
   type ReactNode,
@@ -41,8 +42,10 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
+import { invalidateFavoriteQueries } from "@/api/hooks/use-favorites";
 import { useFeatureGate } from "@/api/hooks/use-feature-gate";
 import { useUsers } from "@/api/hooks/use-users";
 import { useWhoami } from "@/api/hooks/use-whoami";
@@ -50,10 +53,10 @@ import type { User } from "@/api/types";
 import { useConfig } from "@/hooks/use-config";
 import { deriveStorageKey } from "@/hooks/use-dismissible-card-key";
 import { isUserTokenApiKey } from "@/lib/config";
+import { CURRENT_USER_CARD_KEY } from "@/lib/dashboard-user";
 import { uiDeploymentConfig } from "@/lib/deployment-config";
 
-/** Per-connection localStorage card key for the dashboard identity pick. */
-export const CURRENT_USER_CARD_KEY = "current-user";
+export { CURRENT_USER_CARD_KEY } from "@/lib/dashboard-user";
 
 export type CurrentUserState = "pending" | "needs-pick" | "ready";
 
@@ -126,6 +129,16 @@ export function CurrentUserProvider({ children }: { children: ReactNode }) {
     window.addEventListener("storage", handler);
     return () => window.removeEventListener("storage", handler);
   }, [storageKey]);
+
+  // Favorites belong to the picked user (the API client sends it), so a
+  // switch here or in another tab refetches every starred list and detail.
+  const queryClient = useQueryClient();
+  const previousStoredUserId = useRef(storedUserId);
+  useEffect(() => {
+    if (previousStoredUserId.current === storedUserId) return;
+    previousStoredUserId.current = storedUserId;
+    invalidateFavoriteQueries(queryClient);
+  }, [storedUserId, queryClient]);
 
   const setUserId = useCallback(
     (id: string) => {

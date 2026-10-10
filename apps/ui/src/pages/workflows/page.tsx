@@ -32,6 +32,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { readBooleanParam, readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
 import { isAutomationSetupError } from "@/lib/automation-setup";
+import { isRowNavigationSuppressed } from "@/lib/grid-row-click";
 import { matchesSearchTerms, searchText } from "@/lib/list-search";
 import { formatElapsed, formatSmartTime } from "@/lib/utils";
 
@@ -119,7 +120,9 @@ export default function WorkflowsPage() {
           return (
             <FavoriteButton
               favorite={workflow.favorite}
-              disabled={favoriteToggle.isPending}
+              disabled={
+                favoriteToggle.isPending && favoriteToggle.variables?.itemId === workflow.id
+              }
               onToggle={() =>
                 favoriteToggle.mutate({
                   itemId: workflow.id,
@@ -208,8 +211,7 @@ export default function WorkflowsPage() {
 
   const onWorkflowRowClicked = useCallback(
     (event: RowClickedEvent<WorkflowSummary>) => {
-      const target = event.event?.target as HTMLElement | null;
-      if (target?.closest('a, [data-slot="switch"], button')) return;
+      if (isRowNavigationSuppressed(event.event?.target)) return;
       if (event.data) void navigate(`/workflows/${event.data.id}`);
     },
     [navigate],
