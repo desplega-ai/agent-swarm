@@ -40,6 +40,7 @@ const connectRoute = route({
 });
 
 type ControllerAuth = Extract<HttpRequestAuth, { kind: "controller" }>;
+class ControllerAuthError extends Error {}
 
 async function reconcileHandles(controller: RemoteController): Promise<void> {
   const ownerId = await ensureRuntimeOwnerId();
@@ -82,14 +83,27 @@ export function attachControllerTransport(
     );
     const reportError = (error: unknown) =>
       console.error("[runtime-controller]", scrubSecrets(String(error)));
+    const closeOnError = (error: unknown) => {
+      const detail = scrubSecrets(String(error));
+      reportError(error);
+      void getDbClient()
+        .run(
+          "UPDATE runtime_controllers SET last_error = ?, last_error_at = ?, status = CASE WHEN status = 'online' THEN status ELSE 'offline' END WHERE id = ?",
+          [detail, new Date().toISOString(), auth.controllerId],
+        )
+        .catch(reportError)
+        .finally(() =>
+          ws.close(
+            error instanceof ControllerAuthError ? 1008 : 1011,
+            Buffer.from(detail).subarray(0, 120).toString(),
+          ),
+        );
+    };
     const checkAuth = async () => {
       const current = await resolveHttpRequestAuth(req, getApiKey(), { touchSessionToken: false });
-      if (
-        !isRuntimePoolsEnabled() ||
-        current?.kind !== "controller" ||
-        current.tokenId !== auth.tokenId
-      )
-        throw new Error("Controller token revoked or expired");
+      if (current?.kind !== "controller" || current.tokenId !== auth.tokenId)
+        throw new ControllerAuthError("Controller token revoked or expired");
+      if (!isRuntimePoolsEnabled()) throw new Error("Runtime pools disabled");
     };
     const hello = async (
       message: Extract<ReturnType<typeof ControllerClientMessageSchema.parse>, { type: "hello" }>,
@@ -97,15 +111,7 @@ export function attachControllerTransport(
       await checkAuth();
       const row = await getRuntimeController(auth.controllerId);
       if (!row || message.controllerId !== auth.controllerId || message.kind !== row.kind) {
-        await getDbClient().run(
-          "UPDATE runtime_controllers SET last_error = ?, last_error_at = ?, status = CASE WHEN status = 'online' THEN status ELSE 'offline' END WHERE id = ?",
-          [
-            "Controller identity or kind does not match",
-            new Date().toISOString(),
-            auth.controllerId,
-          ],
-        );
-        throw new Error("Controller identity or kind does not match");
+        throw new ControllerAuthError("Controller identity or kind does not match");
       }
       if (closed) return;
       await getDbClient().run("UPDATE runtime_controllers SET status = 'unknown' WHERE id = ?", [
@@ -138,12 +144,9 @@ export function attachControllerTransport(
         }
         if (helloReceived) throw new Error("Controller already sent hello");
         helloReceived = true;
-        void hello(message).catch((error) => {
-          reportError(error);
-          ws.close(1008, "Controller handshake failed");
-        });
+        void hello(message).catch(closeOnError);
       } catch {
-        ws.close(1008, "Invalid controller message");
+        ws.close(1002, "Invalid controller message");
       }
     });
     ws.on("pong", () => {
@@ -164,7 +167,7 @@ export function attachControllerTransport(
             new Date().toISOString(),
             auth.controllerId,
           ]);
-      })().catch(() => ws.close(1008, "Controller token revoked or expired"));
+      })().catch(closeOnError);
     }, CONTROLLER_PING_INTERVAL_MS);
     timer.unref();
     ws.on("close", () => {
@@ -190,7 +193,7 @@ export function attachControllerTransport(
         version: CONTROLLER_PROTOCOL_VERSION,
       }),
     );
-    void checkAuth().catch(() => ws.close(1008, "Controller token revoked or expired"));
+    void checkAuth().catch(closeOnError);
   }
 
   return () => {

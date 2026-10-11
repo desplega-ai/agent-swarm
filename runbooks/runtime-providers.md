@@ -51,7 +51,11 @@ The CLI accepts static, Docker, and E2B providers. It rejects the reserved `k8s`
 The API pings every 15 seconds and checks token validity.
 A new authenticated session replaces the previous session for that controller.
 Reconnect uses jittered exponential backoff between 1 and 30 seconds.
-Policy close code 1008 stops the process with a non-zero exit and a token diagnostic.
+Auth close code 1008 stops the process with a non-zero exit and a token diagnostic.
+The API uses 1008 for invalid or revoked credentials and a mismatched controller identity or kind.
+Operational handshake failures, including list errors and timeouts, use 1011 and the normal reconnect backoff.
+The API records the scrubbed error in the controller's `last_error` and `last_error_at` columns.
+Invalid protocol messages use close code 1002.
 A replaced process waits five minutes before another connection attempt and reports that another process holds the token.
 
 Before the controller becomes online, the API lists runtimes with its stable swarm owner ID.
@@ -130,6 +134,9 @@ Its status is unknown and its list is empty. Static workers need no infrastructu
 ## docker
 
 `DOCKER_HOST` defaults to `unix:///var/run/docker.sock`. Only Unix sockets are supported.
+The first request to each socket negotiates the API version through an unversioned `GET /_ping`.
+The adapter reads `Api-Version` and caps it at 1.47. A missing header selects unversioned paths.
+The process caches the negotiated version per socket. Failed probes can retry on the next request.
 On OrbStack Macs, set `DOCKER_HOST="unix://$HOME/.orbstack/run/docker.sock"`.
 `DOCKER_NETWORK` selects a network. `DOCKER_EXTRA_HOSTS` adds comma-separated `host:address` entries.
 The adapter always includes `host.docker.internal:host-gateway`.

@@ -100,7 +100,7 @@ export function startControllerClient(options: {
         }
       })().catch((error) => {
         log(scrubSecrets(String(error)));
-        ws.close(1008, "Invalid controller message");
+        ws.close(1002, "Invalid controller message");
       });
     };
     ws.onerror = () => log("Connection failed");

@@ -24,9 +24,13 @@ let handler: EngineHandler;
 let calls: Array<{ url: URL; init: RequestInit }>;
 let server: Bun.Server<undefined>;
 let socket: string;
+let serverVersion: string | undefined;
+let pings: string[];
 
 beforeEach(() => {
   calls = [];
+  pings = [];
+  serverVersion = "1.51";
   handler = () => Response.json({ Id: handle.externalId });
   socket = join(tmpdir(), `rp-${crypto.randomUUID().slice(0, 16)}.sock`);
   target = { DOCKER_HOST: `unix://${socket}` };
@@ -34,6 +38,12 @@ beforeEach(() => {
     unix: socket,
     async fetch(req) {
       const url = new URL(req.url);
+      if (url.pathname === "/_ping") {
+        pings.push(req.method);
+        return new Response("OK", {
+          headers: serverVersion ? { "Api-Version": serverVersion } : {},
+        });
+      }
       const init = { method: req.method, body: await req.text() };
       calls.push({ url, init });
       return handler(url, init);
@@ -51,6 +61,24 @@ afterEach(async () => {
 });
 
 describe("Docker runtime provider", () => {
+  for (const [version, prefix] of [
+    ["1.51", "/v1.47"],
+    ["1.44", "/v1.44"],
+    [undefined, ""],
+  ] as const) {
+    test(`negotiates ${version ?? "a missing API header"} and caches the version per socket`, async () => {
+      serverVersion = version;
+      handler = () => new Response(null, { status: 204 });
+      await Promise.all([provider.terminate(target, handle), provider.terminate(target, handle)]);
+      serverVersion = "1.50";
+      await provider.terminate(target, handle);
+      expect(pings).toEqual(["GET"]);
+      expect(calls.map(({ url }) => url.pathname)).toEqual(
+        Array(3).fill(`${prefix}/containers/container-1`),
+      );
+    });
+  }
+
   test("creates and starts a container with authoritative labels and host configuration", async () => {
     expect(
       await provider.provision(
@@ -63,8 +91,8 @@ describe("Docker runtime provider", () => {
       ),
     ).toEqual(handle);
     expect(calls.map(({ url, init }) => `${init.method} ${url.pathname}`)).toEqual([
-      "POST /v1.43/containers/create",
-      "POST /v1.43/containers/container-1/start",
+      "POST /v1.47/containers/create",
+      "POST /v1.47/containers/container-1/start",
     ]);
     expect(calls[0]?.url.searchParams.get("name")).toBe(`swarm-rt-${request.runtimeId}`);
     expect(JSON.parse(String(calls[0]?.init.body))).toEqual({
@@ -305,9 +333,9 @@ describe("Docker runtime provider", () => {
       };
       await expect(provider.provision(target, request)).rejects.toThrow("start failed");
       expect(calls.map(({ url, init }) => `${init.method} ${url.pathname}`)).toEqual([
-        "POST /v1.43/containers/create",
-        "POST /v1.43/containers/container-1/start",
-        "DELETE /v1.43/containers/container-1",
+        "POST /v1.47/containers/create",
+        "POST /v1.47/containers/container-1/start",
+        "DELETE /v1.47/containers/container-1",
       ]);
       expect(calls[2]?.url.searchParams.get("force")).toBe("true");
     }

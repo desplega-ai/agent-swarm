@@ -1738,6 +1738,35 @@ function jsonOutputCandidates(text: string): string[] {
   return [...new Set(candidates)];
 }
 
+async function postFinalTaskUpdate(
+  url: string,
+  headers: Record<string, string>,
+  body: Record<string, string>,
+  deadline: number,
+): Promise<Response> {
+  let delay = 1000;
+  for (;;) {
+    try {
+      const response = await fetch(url, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(Math.max(1, Math.min(30_000, deadline - Date.now()))),
+      });
+      if (response.status < 500) return response;
+      throw new Error(`HTTP ${response.status}: ${await response.text()}`);
+    } catch (error) {
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) throw error;
+      const wait = Math.min(delay, remaining);
+      console.warn(scrubSecrets(`[runner] Final task update failed. Retry in ${wait}ms: ${error}`));
+      await Bun.sleep(wait);
+      if (Date.now() >= deadline) throw error;
+      delay = Math.min(30_000, delay * 2);
+    }
+  }
+}
+
 export async function ensureTaskFinished(
   config: ApiConfig,
   role: string,
@@ -1752,6 +1781,7 @@ export async function ensureTaskFinished(
    */
   provider?: ProviderName,
   failureDiagnostics?: string,
+  finalProgress?: string,
 ): Promise<void> {
   const headers: Record<string, string> = {
     "X-Agent-ID": config.agentId,
@@ -1836,11 +1866,26 @@ export async function ensureTaskFinished(
   }
 
   try {
-    const response = await fetch(`${config.apiUrl}/api/tasks/${taskId}/finish`, {
-      method: "POST",
+    const maxSec = Number(process.env.RUNNER_FINISH_RETRY_MAX_SEC);
+    const deadline = Date.now() + (Number.isFinite(maxSec) && maxSec > 0 ? maxSec : 300) * 1000;
+    if (finalProgress) {
+      const progress = await postFinalTaskUpdate(
+        `${config.apiUrl}/api/tasks/${taskId}/progress`,
+        headers,
+        { progress: scrubSecrets(finalProgress) },
+        deadline,
+      );
+      if (progress.status === 401) {
+        console.warn(`[${role}] Final task update rejected: HTTP 401`);
+        return;
+      }
+    }
+    const response = await postFinalTaskUpdate(
+      `${config.apiUrl}/api/tasks/${taskId}/finish`,
       headers,
-      body: JSON.stringify(body),
-    });
+      body,
+      deadline,
+    );
 
     if (response.ok) {
       const result = (await response.json()) as {
@@ -1862,18 +1907,22 @@ export async function ensureTaskFinished(
       // wrapper posts its fallback result. Preserve the first terminal write,
       // surface the discarded wrapper result, and let session teardown finish.
       console.warn(
-        `[${role}] Runner result for task ${taskId.slice(0, 8)} was discarded because the task is already terminal; continuing: ${error}`,
+        scrubSecrets(
+          `[${role}] Runner result for task ${taskId.slice(0, 8)} was discarded because the task is already terminal; continuing: ${error}`,
+        ),
       );
     } else if (response.status === 404) {
       console.log(`[${role}] Task ${taskId.slice(0, 8)} already finalized (not found), skipping`);
     } else {
       const error = await response.text();
       console.warn(
-        `[${role}] Failed to finish task ${taskId.slice(0, 8)}: ${response.status} ${error}`,
+        scrubSecrets(
+          `[${role}] Failed to finish task ${taskId.slice(0, 8)}: ${response.status} ${error}`,
+        ),
       );
     }
   } catch (err) {
-    console.warn(`[${role}] Error finishing task ${taskId.slice(0, 8)}: ${err}`);
+    console.warn(scrubSecrets(`[${role}] Error finishing task ${taskId.slice(0, 8)}: ${err}`));
   }
 }
 
@@ -2575,6 +2624,8 @@ export interface RunningTask {
    * adapter's `ProviderResult.output` is empty (see `trackAssistantText`).
    */
   assistantText?: { value?: string };
+  /** Last progress value, retained until the final API writes settle. */
+  finalProgress?: { value?: string };
   /** Last time `reconcileActiveTasks` read this task's server-side status. */
   lastReconcileAt?: number;
   /** When the runner asked the session to abort (cancel or reconcile). */
@@ -4269,6 +4320,7 @@ async function spawnProviderProcess(
   // Shared holder mutated by `onEvent`'s "message" case, read back after the
   // session promise resolves (see `trackAssistantText`).
   const assistantTextHolder: { value?: string } = {};
+  const finalProgressHolder: { value?: string } = {};
 
   // Context usage throttle: max 1 snapshot per 30 seconds
   let lastContextPostTime = 0;
@@ -4409,8 +4461,9 @@ async function spawnProviderProcess(
 
           // Auto-progress: report tool activity as task progress (throttled)
           const now = Date.now();
+          const progress = toolCallToProgress(event.toolName, event.args);
+          if (progress) finalProgressHolder.value = scrubSecrets(progress);
           if (effectiveTaskId && opts.apiUrl && now - lastProgressTime >= PROGRESS_THROTTLE_MS) {
-            const progress = toolCallToProgress(event.toolName, event.args);
             if (progress) {
               lastProgressTime = now;
               updateProgressViaAPI(opts.apiUrl, opts.apiKey, effectiveTaskId, progress).catch(
@@ -4599,6 +4652,7 @@ async function spawnProviderProcess(
           break;
 
         case "progress": {
+          finalProgressHolder.value = scrubSecrets(event.message);
           if (effectiveTaskId && opts.apiUrl) {
             const now = Date.now();
             if (now - lastProgressTime >= PROGRESS_THROTTLE_MS) {
@@ -4844,6 +4898,7 @@ async function spawnProviderProcess(
     hasLocalEnvironment: adapter.traits.hasLocalEnvironment,
     model: model || undefined,
     assistantText: assistantTextHolder,
+    finalProgress: finalProgressHolder,
   };
   runningTaskForSessionInit = runningTask;
   if (pendingHarnessVariant !== undefined) {
@@ -5077,6 +5132,7 @@ export async function checkCompletedProcesses(
     model?: string;
     durationMs: number;
     assistantText?: RunningTask["assistantText"];
+    finalProgress?: RunningTask["finalProgress"];
     serverTerminalStatus?: string;
   }> = [];
 
@@ -5102,22 +5158,16 @@ export async function checkCompletedProcesses(
         model: task.model,
         durationMs: Date.now() - task.startTime.getTime(),
         assistantText: task.assistantText,
+        finalProgress: task.finalProgress,
         serverTerminalStatus: task.serverTerminalStatus,
       });
     }
-  }
-
-  if (apiConfig) {
-    await Promise.allSettled(
-      completedTasks.map(({ taskId }) => removeActiveSession(apiConfig, taskId)),
-    );
   }
 
   // Remove completed tasks from the map and ensure they're marked as finished
   for (const {
     taskId,
     result,
-    triggerType,
     triggerSurface,
     requestedByUserId,
     cursorUpdates,
@@ -5129,16 +5179,12 @@ export async function checkCompletedProcesses(
     model,
     durationMs,
     assistantText,
+    finalProgress,
     serverTerminalStatus,
   } of completedTasks) {
-    state.activeTasks.delete(taskId);
     vcsDetectedTasks.delete(taskId);
     vcsCheckTimestamps.delete(taskId);
     cancelledSignaled?.delete(taskId);
-    if (triggerType === "task_assigned" || triggerType === "task_resumed") {
-      state.tasksProcessed += 1;
-    }
-
     // The server finished this task without the session (heartbeat sweep,
     // another writer). Its result stands: no finish call, and no credential
     // or model outcome built from the abort this runner forced.
@@ -5225,6 +5271,7 @@ export async function checkCompletedProcesses(
             resolveProviderOutput(result, assistantText),
             harnessProvider,
             bridgeFailureDiagnostics,
+            finalProgress?.value,
           ),
       );
 
@@ -5304,6 +5351,18 @@ export async function checkCompletedProcesses(
           console.warn(`[${role}] Failed to commit channel activity cursors: ${err}`);
         }
       }
+    }
+  }
+
+  if (apiConfig) {
+    await Promise.allSettled(
+      completedTasks.map(({ taskId }) => removeActiveSession(apiConfig, taskId)),
+    );
+  }
+  for (const { taskId, triggerType } of completedTasks) {
+    state.activeTasks.delete(taskId);
+    if (triggerType === "task_assigned" || triggerType === "task_resumed") {
+      state.tasksProcessed += 1;
     }
   }
 
