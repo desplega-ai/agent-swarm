@@ -7,9 +7,11 @@ import {
   createAgent,
   createSkill,
   createTaskExtended,
+  getAgentSkills,
   getDbClient,
   initDb,
   installSkill,
+  startTask,
 } from "../be/db";
 import { getSkillUsageDetail, getSkillUsageSummary } from "../be/skill-usage";
 import { handleSkills } from "../http/skills";
@@ -148,6 +150,8 @@ beforeAll(async () => {
   const taskWithout = await createTaskExtended("task without skills", { agentId: agentB.id });
   const pendingTask = await createTaskExtended("never started", { agentId: agentB.id });
   const iso = (t: number) => new Date(t).toISOString();
+  // Started, then failed: still a started task.
+  await startTask(taskWithout.id);
   await getDbClient().run(
     "UPDATE agent_tasks SET status = 'completed', createdAt = ? WHERE id = ?",
     [iso(NOW - 2 * DAY), taskWithSkill.id],
@@ -252,22 +256,22 @@ describe("getSkillUsageSummary", () => {
 
   test("per-agent adoption compares used against installed", async () => {
     const summary = await getSkillUsageSummary("7d", 0, NOW);
-    const implicit = (
-      await getDbClient().get<{ n: number }>(
-        "SELECT COUNT(DISTINCT name) AS n FROM skills WHERE isEnabled = 1 AND (systemDefault = 1 OR scope = 'swarm')",
-      )
-    )?.n;
     const a = summary.agents.find((row) => row.agentId === agentA.id);
     const b = summary.agents.find((row) => row.agentId === agentB.id);
-    // A: usage-used + usage-old explicit, plus every swarm/system-default skill.
+    // The oracle is getAgentSkills, the list a runner actually receives.
     expect(a).toMatchObject({
-      installed: (implicit ?? 0) + 2,
+      installed: (await getAgentSkills(agentA.id)).length,
       installedUsed: 1,
       skillsUsed: 2,
       invocations: 2,
       isLead: false,
     });
-    expect(b).toMatchObject({ installed: (implicit ?? 0) + 1, installedUsed: 1, isLead: true });
+    expect(b).toMatchObject({
+      installed: (await getAgentSkills(agentB.id)).length,
+      installedUsed: 1,
+      isLead: true,
+    });
+    expect(a?.installed).toBe((b?.installed ?? 0) + 1);
     expect(summary.agents.some((row) => row.agentId === offlineIdle.id)).toBe(false);
   });
 

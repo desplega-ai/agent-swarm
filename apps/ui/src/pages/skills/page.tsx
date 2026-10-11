@@ -129,21 +129,21 @@ export default function SkillsPage() {
       {
         field: "type",
         headerName: "Type",
-        width: 100,
+        width: 90,
         cellRenderer: (params: ICellRendererParams<SkillRow>) =>
           params.value ? <TypeBadge type={params.value} /> : null,
       },
       {
         field: "scope",
         headerName: "Scope",
-        width: 100,
+        width: 90,
         cellRenderer: (params: ICellRendererParams<SkillRow>) =>
           params.value ? <ScopeBadge scope={params.value} /> : null,
       },
       {
         field: "systemDefault",
         headerName: "Default",
-        width: 105,
+        width: 100,
         cellRenderer: (params: ICellRendererParams<SkillRow>) =>
           params.value ? <SystemDefaultBadge /> : null,
       },
@@ -151,12 +151,12 @@ export default function SkillsPage() {
         field: "description",
         headerName: "Description",
         flex: 2,
-        minWidth: 200,
+        minWidth: 150,
       },
       {
         field: "version",
         headerName: "Ver",
-        width: 70,
+        width: 60,
       },
       {
         field: "isEnabled",
@@ -187,7 +187,7 @@ export default function SkillsPage() {
       {
         field: "lastInvokedAt",
         headerName: "Last used",
-        width: 130,
+        width: 120,
         comparator: compareIsoNullsLast,
         cellRenderer: (params: ICellRendererParams<SkillRow>) =>
           params.value ? (
@@ -201,7 +201,7 @@ export default function SkillsPage() {
       {
         field: "lastUpdatedAt",
         headerName: "Updated",
-        width: 140,
+        width: 130,
         valueFormatter: (params) => (params.value ? formatRelativeTime(params.value) : "-"),
       },
     ],
@@ -272,13 +272,13 @@ export default function SkillsPage() {
                   setParam("usage", value, { defaultValue: "all", reset: ["skillsPage"] })
                 }
               >
-                <SelectTrigger className="w-[130px]" aria-label="Usage">
+                <SelectTrigger className="w-[160px]" aria-label="Usage">
                   <SelectValue placeholder="Usage" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All Usage</SelectItem>
                   <SelectItem value="used">Used</SelectItem>
-                  <SelectItem value="unused">Never Used</SelectItem>
+                  <SelectItem value="unused">Unused in window</SelectItem>
                 </SelectContent>
               </Select>
             </>

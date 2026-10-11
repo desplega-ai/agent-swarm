@@ -16,8 +16,25 @@ const WINDOW_DAYS: Record<SkillUsageWindow, number | null> = { "7d": 7, "30d": 3
 const DAY_MS = 24 * 60 * 60 * 1000;
 const RECENT_LIMIT = 25;
 
-/** Tasks a worker actually started: the denominator for task adoption. */
-const WORKED_TASK_STATUSES = ["in_progress", "paused", "completed", "failed", "superseded"];
+/**
+ * Tasks a worker actually started: the denominator for task adoption. A task
+ * counts when its status is only reachable after starting, when a harness
+ * session ran for it, or when `agent_log` recorded it entering `in_progress`.
+ * The last two keep a task cancelled or failed mid-run, and leave out one that
+ * was terminalized while still pending (`failPendingResumeIfUnclaimed`).
+ */
+const STARTED_TASK_SQL = `(t.status IN ('in_progress', 'paused', 'completed')
+  OR t.claudeSessionId IS NOT NULL
+  OR EXISTS (
+    SELECT 1 FROM agent_log l
+     WHERE l.taskId = t.id
+       AND l.eventType IN ('task_status_change', 'task_claimed')
+       AND l.newValue = 'in_progress'
+  ))`;
+
+/** The `all` summary scans the whole history, so it is reused for a while. */
+const ALL_WINDOW_CACHE_MS = 5 * 60 * 1000;
+const allWindowCache = new Map<number, { at: number; summary: Promise<SkillUsageSummary> }>();
 
 export function skillUsageWindowStart(window: SkillUsageWindow, now = Date.now()): string | null {
   const days = WINDOW_DAYS[window];
@@ -130,17 +147,59 @@ export interface SkillUsageDetail {
   recent: SkillUsageRecentRow[];
 }
 
-/** `(? IS NULL OR createdAt >= ?)` takes the bound twice. */
-const SINCE_SQL = "(? IS NULL OR si.createdAt >= ?)";
+/**
+ * The window predicate. A finite window is a plain range on `createdAt`, so
+ * SQLite can SEARCH `idx_skill_invocations_created` (or a composite index
+ * ending in `createdAt`). `all` has no predicate at all. A nullable
+ * `(? IS NULL OR ...)` form would force a full SCAN for every window.
+ */
+function sinceFilter(since: string | null): { sql: string; args: string[] } {
+  return since === null ? { sql: "1", args: [] } : { sql: "si.createdAt >= ?", args: [since] };
+}
 
-export async function getSkillUsageSummary(
+/**
+ * Swarm-wide aggregates pin the time index for a finite window. Without it the
+ * planner may pick `idx_skill_invocations_skill_time` to serve a GROUP BY, or
+ * `idx_skill_invocations_agent_time` for `agentId IS NOT NULL`, and walk the
+ * whole history.
+ */
+function invocationsFrom(since: string | null): string {
+  return since === null
+    ? "skill_invocations si"
+    : "skill_invocations si INDEXED BY idx_skill_invocations_created";
+}
+
+export function getSkillUsageSummary(
   window: SkillUsageWindow,
   tzOffsetMinutes = 0,
   now = Date.now(),
 ): Promise<SkillUsageSummary> {
+  if (window !== "all") return computeSkillUsageSummary(window, tzOffsetMinutes, now);
+
+  const cached = allWindowCache.get(tzOffsetMinutes);
+  if (cached && now >= cached.at && now - cached.at < ALL_WINDOW_CACHE_MS) return cached.summary;
+  for (const [key, entry] of allWindowCache) {
+    if (now - entry.at >= ALL_WINDOW_CACHE_MS) allWindowCache.delete(key);
+  }
+  const summary = computeSkillUsageSummary(window, tzOffsetMinutes, now);
+  allWindowCache.set(tzOffsetMinutes, { at: now, summary });
+  summary.catch(() => {
+    if (allWindowCache.get(tzOffsetMinutes)?.summary === summary) {
+      allWindowCache.delete(tzOffsetMinutes);
+    }
+  });
+  return summary;
+}
+
+async function computeSkillUsageSummary(
+  window: SkillUsageWindow,
+  tzOffsetMinutes: number,
+  now: number,
+): Promise<SkillUsageSummary> {
   const db = getDbClient();
   const since = skillUsageWindowStart(window, now);
-  const sinceArgs = [since, since];
+  const { sql: sinceSql, args: sinceArgs } = sinceFilter(since);
+  const fromSql = invocationsFrom(since);
 
   const totals = await db.get<{
     invocations: number;
@@ -156,8 +215,8 @@ export async function getSkillUsageSummary(
             COUNT(DISTINCT si.taskId) AS distinctTasks,
             SUM(CASE WHEN si.skillId IS NULL THEN 1 ELSE 0 END) AS unresolved,
             SUM(si.tokenCount) AS tokens
-       FROM skill_invocations si
-      WHERE ${SINCE_SQL}`,
+       FROM ${fromSql}
+      WHERE ${sinceSql}`,
     sinceArgs,
   );
 
@@ -171,8 +230,8 @@ export async function getSkillUsageSummary(
             COUNT(*) AS invocations,
             COUNT(DISTINCT si.skillName) AS skills,
             COUNT(DISTINCT si.taskId) AS tasks
-       FROM skill_invocations si
-      WHERE ${SINCE_SQL}
+       FROM ${fromSql}
+      WHERE ${sinceSql}
       GROUP BY 1
       ORDER BY 1`,
     [dayModifier(tzOffsetMinutes), ...sinceArgs],
@@ -180,8 +239,8 @@ export async function getSkillUsageSummary(
 
   const byHarness = await db.query<SkillUsageCountRow>(
     `SELECT COALESCE(si.harness, 'unknown') AS key, COUNT(*) AS invocations
-       FROM skill_invocations si
-      WHERE ${SINCE_SQL}
+       FROM ${fromSql}
+      WHERE ${sinceSql}
       GROUP BY 1
       ORDER BY 2 DESC, 1`,
     sinceArgs,
@@ -196,9 +255,9 @@ export async function getSkillUsageSummary(
             COUNT(DISTINCT si.agentId) AS agents,
             COALESCE(SUM(si.tokenCount), 0) AS tokens,
             MAX(si.createdAt) AS lastInvokedAt
-       FROM skill_invocations si
+       FROM ${fromSql}
        LEFT JOIN skills s ON s.id = si.skillId
-      WHERE ${SINCE_SQL}
+      WHERE ${sinceSql}
       GROUP BY si.skillId, CASE WHEN si.skillId IS NULL THEN si.skillName END
       ORDER BY invocations DESC, skillName`,
     sinceArgs,
@@ -209,7 +268,6 @@ export async function getSkillUsageSummary(
   // could never have recorded one.
   const adoptionSince =
     trackingSince === null ? null : since !== null && since > trackingSince ? since : trackingSince;
-  const statusPlaceholders = WORKED_TASK_STATUSES.map(() => "?").join(", ");
   const adoption =
     adoptionSince === null
       ? { tasks: 0, tasksWithSkill: 0 }
@@ -220,8 +278,8 @@ export async function getSkillUsageSummary(
                          WHERE taskId IS NOT NULL AND createdAt >= ?
                       ) THEN 1 ELSE 0 END) AS tasksWithSkill
              FROM agent_tasks t
-            WHERE t.createdAt >= ? AND t.status IN (${statusPlaceholders})`,
-          [adoptionSince, adoptionSince, ...WORKED_TASK_STATUSES],
+            WHERE t.createdAt >= ? AND ${STARTED_TASK_SQL}`,
+          [adoptionSince, adoptionSince],
         );
 
   // Installed = what getAgentSkills returns: active explicit installs plus
@@ -243,8 +301,8 @@ export async function getSkillUsageSummary(
      used AS (
        SELECT si.agentId AS agentId, si.skillName AS name,
               COUNT(*) AS n, MAX(si.createdAt) AS last
-         FROM skill_invocations si
-        WHERE si.agentId IS NOT NULL AND si.skillName IS NOT NULL AND ${SINCE_SQL}
+         FROM ${fromSql}
+        WHERE si.agentId IS NOT NULL AND si.skillName IS NOT NULL AND ${sinceSql}
         GROUP BY si.agentId, si.skillName
      )
      SELECT a.id AS agentId,
@@ -278,7 +336,7 @@ export async function getSkillUsageSummary(
         AND (s.systemDefault = 1 OR s.scope = 'swarm'
              OR EXISTS (SELECT 1 FROM agent_skills x WHERE x.skillId = s.id AND x.isActive = 1))
         AND NOT EXISTS (
-          SELECT 1 FROM skill_invocations si WHERE si.skillId = s.id AND ${SINCE_SQL}
+          SELECT 1 FROM skill_invocations si WHERE si.skillId = s.id AND ${sinceSql}
         )
       ORDER BY s.name`,
     sinceArgs,
@@ -322,8 +380,9 @@ export async function getSkillUsageDetail(
 ): Promise<SkillUsageDetail> {
   const db = getDbClient();
   const since = skillUsageWindowStart(window, now);
-  const args = [skillId, since, since];
-  const where = `si.skillId = ? AND ${SINCE_SQL}`;
+  const filter = sinceFilter(since);
+  const args = [skillId, ...filter.args];
+  const where = `si.skillId = ? AND ${filter.sql}`;
 
   const totals = await db.get<{
     invocations: number;
