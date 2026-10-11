@@ -1,3 +1,5 @@
+import { redactWithEnv } from "../e2b/env";
+import { scrubSecrets } from "../utils/secret-scrubber";
 import {
   type ConfigStatus,
   type ProvisionRequest,
@@ -15,15 +17,27 @@ import {
  * Target config:
  * - DOCKER_HOST: `unix:///path/to/docker.sock` (default /var/run/docker.sock)
  * - DOCKER_NETWORK: optional network to attach runtimes to
+ * - DOCKER_EXTRA_HOSTS: comma-separated host:address entries
  */
 const API_VERSION = "v1.43";
 
 function socketPath(target: RuntimeTargetConfig): string {
   const host = target.DOCKER_HOST ?? "unix:///var/run/docker.sock";
   if (!host.startsWith("unix://")) {
-    throw new Error(`docker provider only supports unix sockets, got DOCKER_HOST=${host}`);
+    throw new Error(
+      scrubSecrets(`docker provider only supports unix sockets, got DOCKER_HOST=${host}`),
+    );
   }
   return host.slice("unix://".length);
+}
+
+class DockerApiError extends Error {
+  constructor(
+    readonly statusCode: number,
+    message: string,
+  ) {
+    super(scrubSecrets(message));
+  }
 }
 
 async function dockerApi<T>(
@@ -31,20 +45,43 @@ async function dockerApi<T>(
   method: string,
   path: string,
   body?: unknown,
+  stream = false,
 ): Promise<T> {
-  const res = await fetch(`http://docker/${API_VERSION}${path}`, {
-    method,
-    unix: socketPath(target),
-    headers: body === undefined ? undefined : { "Content-Type": "application/json" },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  } as RequestInit);
-  if (!res.ok) {
+  const socket = socketPath(target);
+  try {
+    const res = await fetch(`http://docker/${API_VERSION}${path}`, {
+      method,
+      unix: socket,
+      headers: body === undefined ? undefined : { "Content-Type": "application/json" },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    } as RequestInit);
+    if (!res.ok) {
+      const text = scrubSecrets(await res.text());
+      throw new DockerApiError(
+        res.status,
+        `docker ${method} ${path} failed (${res.status}): ${text}`,
+      );
+    }
+    if (res.status === 204 || res.status === 304) return undefined as T;
     const text = await res.text();
-    throw new Error(`docker ${method} ${path} failed (${res.status}): ${text.slice(0, 300)}`);
+    if (stream) {
+      for (const line of text.split("\n").filter((line) => line.trim())) {
+        const event = JSON.parse(line) as { error?: string; errorDetail?: { message?: string } };
+        if (event.error || event.errorDetail?.message) {
+          throw new Error(event.error ?? event.errorDetail?.message);
+        }
+      }
+      return undefined as T;
+    }
+    return (text ? JSON.parse(text) : undefined) as T;
+  } catch (err) {
+    if (err instanceof DockerApiError) throw err;
+    throw new Error(
+      scrubSecrets(
+        `docker ${method} ${path} via socket ${socket}: ${String(err)}. Set DOCKER_HOST to select the Docker socket.`,
+      ),
+    );
   }
-  if (res.status === 204 || res.status === 304) return undefined as T;
-  const text = await res.text();
-  return (text ? JSON.parse(text) : undefined) as T;
 }
 
 export class DockerRuntimeProvider implements RuntimeProvider {
@@ -61,30 +98,59 @@ export class DockerRuntimeProvider implements RuntimeProvider {
   }
 
   async provision(target: RuntimeTargetConfig, req: ProvisionRequest): Promise<RuntimeHandle> {
-    const created = await dockerApi<{ Id: string }>(
-      target,
-      "POST",
-      `/containers/create?name=${encodeURIComponent(`swarm-rt-${req.runtimeId}`)}`,
-      {
+    try {
+      const path = `/containers/create?name=${encodeURIComponent(`swarm-rt-${req.runtimeId}`)}`;
+      const body = {
         Image: req.image,
         Env: Object.entries(req.env).map(([k, v]) => `${k}=${v}`),
         Labels: {
           ...req.labels,
+          [RUNTIME_LABELS.owner]: req.ownerId,
           [RUNTIME_LABELS.runtimeId]: req.runtimeId,
           [RUNTIME_LABELS.poolId]: req.poolId,
           [RUNTIME_LABELS.agentId]: req.agentId,
         },
         HostConfig: {
           // Lets a container reach an API on the docker host (compose-less installs).
-          ExtraHosts: ["host.docker.internal:host-gateway"],
+          ExtraHosts: [
+            "host.docker.internal:host-gateway",
+            ...(target.DOCKER_EXTRA_HOSTS?.split(",")
+              .map((host) => host.trim())
+              .filter(Boolean) ?? []),
+          ],
           NetworkMode: target.DOCKER_NETWORK,
           Memory: req.resources?.memoryMb ? req.resources.memoryMb * 1024 * 1024 : undefined,
           NanoCpus: req.resources?.cpu ? Math.round(req.resources.cpu * 1e9) : undefined,
         },
-      },
-    );
-    await dockerApi(target, "POST", `/containers/${created.Id}/start`);
-    return { kind: "docker", externalId: created.Id };
+      };
+      let created: { Id: string };
+      try {
+        created = await dockerApi(target, "POST", path, body);
+      } catch (err) {
+        if (
+          !(err instanceof DockerApiError) ||
+          err.statusCode !== 404 ||
+          !err.message.includes("No such image")
+        ) {
+          throw err;
+        }
+        const pullParams = new URLSearchParams({ fromImage: req.image });
+        if (!req.image.includes("@") && req.image.lastIndexOf(":") <= req.image.lastIndexOf("/")) {
+          pullParams.set("tag", "latest");
+        }
+        await dockerApi(target, "POST", `/images/create?${pullParams}`, undefined, true);
+        created = await dockerApi(target, "POST", path, body);
+      }
+      try {
+        await dockerApi(target, "POST", `/containers/${created.Id}/start`);
+      } catch (err) {
+        await dockerApi(target, "DELETE", `/containers/${created.Id}?force=true`).catch(() => {});
+        throw err;
+      }
+      return { kind: "docker", externalId: created.Id };
+    } catch (err) {
+      throw new Error(redactWithEnv(String(err), req.env));
+    }
   }
 
   async terminate(target: RuntimeTargetConfig, handle: RuntimeHandle): Promise<void> {
@@ -110,13 +176,15 @@ export class DockerRuntimeProvider implements RuntimeProvider {
         default:
           return "unknown";
       }
-    } catch {
-      return "unknown";
+    } catch (err) {
+      return err instanceof DockerApiError && err.statusCode === 404 ? "exited" : "unknown";
     }
   }
 
-  async list(target: RuntimeTargetConfig): Promise<RuntimeHandle[]> {
-    const filters = encodeURIComponent(JSON.stringify({ label: [RUNTIME_LABELS.runtimeId] }));
+  async list(target: RuntimeTargetConfig, ownerId: string): Promise<RuntimeHandle[]> {
+    const filters = encodeURIComponent(
+      JSON.stringify({ label: [RUNTIME_LABELS.runtimeId, `${RUNTIME_LABELS.owner}=${ownerId}`] }),
+    );
     const rows = await dockerApi<Array<{ Id: string; Labels: Record<string, string> }>>(
       target,
       "GET",

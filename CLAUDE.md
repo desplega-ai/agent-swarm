@@ -412,6 +412,12 @@ Full rulebook: [apps/evals/SCENARIO-AUTHORING.md](./apps/evals/SCENARIO-AUTHORIN
 
 </important>
 
+<important if="you are modifying runtime providers (src/runtime-providers/*) or adding an infrastructure adapter">
+
+Adapter contract, owner isolation, and same-PR documentation rules: [runbooks/runtime-providers.md](./runbooks/runtime-providers.md).
+
+</important>
+
 ## Related
 
 - [runbooks/db-retention.md](./runbooks/db-retention.md) — opt-in retention for non-critical SQLite log tables

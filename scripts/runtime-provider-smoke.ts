@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * SPIKE: on-demand worker runtimes (push-based-workers brainstorm, 2026-10-10).
+ * Smoke test for on-demand worker runtimes.
  *
  * Plays the part of the future API-side supervisor by hand:
  *   1. create a task pinned to a brand-new agent id (no agent row, no runtime)
@@ -9,18 +9,20 @@
  *   4. terminate the runtime and confirm list() no longer reports it
  *
  * The worker boots from the stock image/template and polls as today. Delivery
- * stays pull: this spike only exercises the provisioning half of the design.
+ * stays pull: this smoke test exercises provisioning.
  *
  * Usage:
- *   bun scripts/spike-runtime-providers.ts --provider docker \
+ *   bun scripts/runtime-provider-smoke.ts --provider docker \
  *     --api http://localhost:3913 --worker-api http://host.docker.internal:3913 \
  *     --image ghcr.io/desplega-ai/agent-swarm-worker:slim
- *   bun scripts/spike-runtime-providers.ts --provider e2b \
+ *   bun scripts/runtime-provider-smoke.ts --provider e2b \
  *     --api http://localhost:3913 --worker-api https://<ngrok-host> \
  *     --image agent-swarm-worker-1-168-0
  */
 import { parseArgs } from "node:util";
 import { createRuntimeProvider, type RuntimeProviderKind } from "../src/runtime-providers";
+import { getApiKey } from "../src/utils/api-key";
+import { registerVolatileSecret, scrubSecrets } from "../src/utils/secret-scrubber";
 
 const { values: args } = parseArgs({
   options: {
@@ -29,6 +31,7 @@ const { values: args } = parseArgs({
     "worker-api": { type: "string" },
     image: { type: "string" },
     "api-key": { type: "string" },
+    "owner-id": { type: "string" },
     "timeout-sec": { type: "string", default: "600" },
     keep: { type: "boolean", default: false },
   },
@@ -39,7 +42,9 @@ if (!kind || !args.image || !args["worker-api"]) {
   console.error("required: --provider docker|e2b --image <image|template> --worker-api <url>");
   process.exit(2);
 }
-const apiKey = args["api-key"] ?? process.env.SPIKE_API_KEY ?? "spike-key-123";
+const apiKey = args["api-key"] ?? getApiKey();
+if (!apiKey) throw new Error("Missing API key. Use --api-key or AGENT_SWARM_API_KEY.");
+registerVolatileSecret(apiKey, "AGENT_SWARM_API_KEY");
 const headers = { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" };
 
 async function e2bKeyFromCli(): Promise<string | undefined> {
@@ -50,8 +55,16 @@ async function e2bKeyFromCli(): Promise<string | undefined> {
 
 const target: Record<string, string | undefined> =
   kind === "docker"
-    ? { DOCKER_HOST: process.env.DOCKER_HOST ?? "unix:///var/run/docker.sock" }
-    : { E2B_API_KEY: process.env.E2B_API_KEY ?? (await e2bKeyFromCli()) };
+    ? {
+        DOCKER_HOST: process.env.DOCKER_HOST ?? "unix:///var/run/docker.sock",
+        DOCKER_NETWORK: process.env.DOCKER_NETWORK,
+        DOCKER_EXTRA_HOSTS: process.env.DOCKER_EXTRA_HOSTS,
+      }
+    : {
+        E2B_API_KEY: process.env.E2B_API_KEY ?? (await e2bKeyFromCli()),
+        E2B_API_BASE: process.env.E2B_API_BASE,
+        E2B_MAX_CONTINUOUS_SEC: process.env.E2B_MAX_CONTINUOUS_SEC,
+      };
 
 async function api<T>(method: string, path: string, body?: unknown): Promise<T | undefined> {
   const res = await fetch(`${args.api}${path}`, {
@@ -60,11 +73,12 @@ async function api<T>(method: string, path: string, body?: unknown): Promise<T |
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   if (res.status === 404) return undefined;
-  if (!res.ok) throw new Error(`${method} ${path} -> ${res.status} ${await res.text()}`);
+  if (!res.ok)
+    throw new Error(scrubSecrets(`${method} ${path} -> ${res.status} ${await res.text()}`));
   return (await res.json()) as T;
 }
 
-const provider = await createRuntimeProvider(kind);
+const provider = await createRuntimeProvider(kind, target);
 const config = provider.checkConfig(target);
 if (!config.ready) {
   console.error(`provider ${kind} not ready: missing ${config.missing.join(", ")}`);
@@ -73,16 +87,17 @@ if (!config.ready) {
 
 const agentId = crypto.randomUUID();
 const runtimeId = crypto.randomUUID();
+const ownerId = args["owner-id"] ?? crypto.randomUUID();
 const t0 = performance.now();
 const marks: Record<string, number> = {};
 const mark = (name: string) => {
   marks[name] = Math.round(performance.now() - t0);
-  console.log(`[spike] +${(marks[name] / 1000).toFixed(1)}s ${name}`);
+  console.log(`[smoke] +${(marks[name] / 1000).toFixed(1)}s ${name}`);
 };
 
 // 1. Work exists for an agent that has no runtime (and no agent row yet).
 const task = await api<{ id: string }>("POST", "/api/tasks", {
-  task: "Spike check: call store-progress to complete this task with the output 'pong'. Do nothing else.",
+  task: "Smoke check: call store-progress to complete this task with the output 'pong'. Do nothing else.",
   agentId,
   routingReason: "human_pinned",
   modelTier: "smol",
@@ -94,10 +109,11 @@ mark("task_created");
 const handle = await provider.provision(target, {
   runtimeId,
   agentId,
-  poolId: "spike",
+  poolId: "smoke",
+  ownerId,
   image: args.image,
   ttlSec: 1200,
-  labels: { "swarm.spike": "push-workers" },
+  labels: { "swarm.smoke": "runtime-providers" },
   env: {
     AGENT_ID: agentId,
     AGENT_ROLE: "worker",
@@ -111,11 +127,12 @@ const handle = await provider.provision(target, {
   },
 });
 mark("infra_accepted");
-console.log(`[spike] handle ${handle.kind}:${handle.externalId.slice(0, 16)}`);
+console.log(`[smoke] handle ${handle.kind}:${handle.externalId.slice(0, 16)}`);
 
 // 3. Watch the API for registration, start and completion.
 const deadline = Date.now() + Number(args["timeout-sec"]) * 1000;
 let finalStatus = "timeout";
+let leftoversAfterTerminate = 0;
 try {
   while (Date.now() < deadline) {
     if (marks.worker_registered === undefined) {
@@ -141,12 +158,13 @@ try {
 } finally {
   // 4. Reap.
   if (!args.keep) {
-    await provider.terminate(target, handle, "spike done");
+    await provider.terminate(target, handle, "smoke done");
     mark("terminated");
-    const leftovers = (await provider.list(target)).filter(
+    const leftovers = (await provider.list(target, ownerId)).filter(
       (h) => h.externalId === handle.externalId,
     );
-    console.log(`[spike] list() after terminate: ${leftovers.length} matching runtime(s)`);
+    console.log(`[smoke] list() after terminate: ${leftovers.length} matching runtime(s)`);
+    leftoversAfterTerminate = leftovers.length;
   }
 }
 
@@ -156,7 +174,9 @@ console.log(
     image: args.image,
     finalStatus,
     agentId,
+    ownerId,
     taskId: task.id,
     marksMs: marks,
   }),
 );
+if (finalStatus !== "completed" || leftoversAfterTerminate > 0) process.exitCode = 1;

@@ -6,22 +6,23 @@
  * DB-free by design: the same adapters run inside the API (built-in controller)
  * and inside a remote `swarm-controller` process. The API-side supervisor owns
  * the DB rows; adapters only talk to infrastructure.
- *
- * SPIKE: shape under evaluation in the push-based-workers brainstorm
- * (thoughts/taras/brainstorms/2026-10-10-push-based-workers.md).
  */
 
-export type RuntimeProviderKind = "static" | "docker" | "e2b" | "k8s";
+import type { RuntimeProviderKind } from "../types";
+
+export type { RuntimeProviderKind } from "../types";
 
 export interface RuntimeProviderTraits {
   /** false for "static": operator-managed workers the swarm never starts. */
   canProvision: boolean;
   /** Workspace is lost when the runtime exits. */
   ephemeralDisk: boolean;
-  /** Provider can pause and resume a runtime (not used yet). */
+  /** Provider can pause and resume a runtime. */
   supportsPause: boolean;
   /** Provider hard cap on runtime lifetime, if any. */
   maxTtlSec?: number;
+  /** Continuous runtime limit for the configured infrastructure tier. */
+  maxContinuousSec?: number;
 }
 
 /** Credentials and location of one infrastructure target (one controller). */
@@ -38,6 +39,7 @@ export interface ProvisionRequest {
   runtimeId: string;
   agentId: string;
   poolId: string;
+  ownerId: string;
   /** Docker image, E2B template, or k8s image. */
   image: string;
   /** Worker env: MCP_BASE_URL, AGENT_ID, API key or scoped token, pool env. */
@@ -52,10 +54,12 @@ export interface RuntimeHandle {
   kind: RuntimeProviderKind;
   /** Container id, sandbox id, or pod name. */
   externalId: string;
+  /** Set by the controller, never by the adapter. */
+  controllerId?: string;
   meta?: Record<string, string>;
 }
 
-export type RuntimeStatus = "starting" | "running" | "exited" | "failed" | "unknown";
+export type RuntimeStatus = "starting" | "running" | "paused" | "exited" | "failed" | "unknown";
 
 export interface RuntimeProvider {
   readonly kind: RuntimeProviderKind;
@@ -67,11 +71,19 @@ export interface RuntimeProvider {
   terminate(target: RuntimeTargetConfig, handle: RuntimeHandle, reason: string): Promise<void>;
   status(target: RuntimeTargetConfig, handle: RuntimeHandle): Promise<RuntimeStatus>;
   /** Every runtime this swarm owns on the target, found by labels. Used to reap orphans. */
-  list(target: RuntimeTargetConfig): Promise<RuntimeHandle[]>;
+  list(target: RuntimeTargetConfig, ownerId: string): Promise<RuntimeHandle[]>;
+  renew?(
+    target: RuntimeTargetConfig,
+    handle: RuntimeHandle,
+    ttlSec: number,
+  ): Promise<{ endAt: string }>;
+  pause?(target: RuntimeTargetConfig, handle: RuntimeHandle): Promise<void>;
+  resume?(target: RuntimeTargetConfig, handle: RuntimeHandle): Promise<void>;
 }
 
 /** Label keys every provider stamps on the runtimes it starts. */
 export const RUNTIME_LABELS = {
+  owner: "swarm.owner",
   runtimeId: "swarm.runtime-id",
   poolId: "swarm.pool-id",
   agentId: "swarm.agent-id",
