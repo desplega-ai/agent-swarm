@@ -2,9 +2,7 @@
 id: step-12
 name: Integration E2E + docs
 depends_on: [step-4, step-6, step-8, step-9, step-10, step-11]
-status: claimed
-assignee: orchestrator (codex 12a + opus 12b + sonnet QA)
-claimed_at: 2026-10-11T21:00:00Z
+status: done
 ---
 
 <!-- During /v-implement, `desplega:step-running` adds `assignee` and `claimed_at` while
@@ -41,14 +39,14 @@ Stitch the slices together and prove the whole model: lead on a `static` pool wi
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Flag-off leg: `bun run e2e --only runtime-pools` passes
-- [ ] Flag-on leg: `bun run e2e --only runtime-pools --sut-env RUNTIME_POOLS_ENABLED=true --sut-env MULTI_RUNTIME_ENABLED=true --sut-env RUNTIME_WAKE_GRACE_SEC=2` passes
-- [ ] `cd apps/ui && bun run lint && bunx tsc -b` pass (token dialog)
-- [ ] Full gate from root `## Global Verification` passes, starting with `bun run check && bun run tsc:check:tsc && bun run test:root -- --parallel=4`
+- [x] Flag-off leg: `bun run e2e --only runtime-pools` passes
+- [x] Flag-on leg: `bun run e2e --only runtime-pools --sut-env RUNTIME_POOLS_ENABLED=true --sut-env MULTI_RUNTIME_ENABLED=true --sut-env RUNTIME_WAKE_GRACE_SEC=2` passes
+- [x] `cd apps/ui && bun run lint && bunx tsc -b` pass (token dialog)
+- [x] Full gate from root `## Global Verification` passes, starting with `bun run check && bun run tsc:check:tsc && bun run test:root -- --parallel=4`
 
 #### Automated QA:
-- [ ] Run the root plan's `## Manual E2E` scenarios 1-5 with Docker as an agent (all commands are scriptable). Save a short QA log with timings and container/runtime/task states to `thoughts/taras/qa/2026-10-10-push-based-workers.md`.
-- [ ] Stress test (Taras, 2026-10-11): root plan `## Manual E2E` scenario 7, one lead + one pool worker, the lead sends 100 ping-pong tasks to that worker. Run the docker leg first, then the E2B leg once step-9 is merged (costs money: confirm with Taras right before the E2B leg if he is reachable, otherwise run it, the expected spend is small). Record the results table from scenario 7 in the QA log and the PR body.
+- [x] Run the root plan's `## Manual E2E` scenarios 1-5 with Docker as an agent (all commands are scriptable). Save a short QA log with timings and container/runtime/task states to `thoughts/taras/qa/2026-10-10-push-based-workers.md`.
+- [x] Stress test (Taras, 2026-10-11): root plan `## Manual E2E` scenario 7, one lead + one pool worker, the lead sends 100 ping-pong tasks to that worker. Run the docker leg first, then the E2B leg once step-9 is merged (costs money: confirm with Taras right before the E2B leg if he is reachable, otherwise run it, the expected spend is small). Record the results table from scenario 7 in the QA log and the PR body.
 
 #### Manual Verification:
 - [ ] Taras runs Manual E2E scenario 6 (E2B) if step-9's automated run was skipped.

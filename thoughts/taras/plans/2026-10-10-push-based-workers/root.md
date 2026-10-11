@@ -2,8 +2,8 @@
 date: 2026-10-10T00:00:00+02:00
 author: Taras (with Claude)
 plan_type: dag
-status: in-progress
-last_updated: 2026-10-10
+status: completed
+last_updated: 2026-10-11
 last_updated_by: Claude
 ---
 
@@ -175,32 +175,34 @@ graph TD
 
 ## Pre-flight Verification
 
-- [ ] Branch is based on `spike/push-workers` (PR #2045, holds the spike code in `src/runtime-providers/`), rebased on current `main`
-- [ ] Working tree is clean
-- [ ] Baseline passes: `bun run check`
-- [ ] Baseline typecheck: `bun run tsc:check:tsc`
-- [ ] Migration tail on `main` is still `204` and no open PR adds `205`/`206`: `git fetch origin main && git ls-tree --name-only origin/main src/be/migrations/ | tail -2` and `bash scripts/check-migration-conflicts.sh`. If taken, renumber steps 1 and 2 before starting.
-- [ ] Docker (OrbStack) is running for steps 3, 5, 6, 8, 10, 12: `docker info`
-- [ ] Worker slim image builds from this branch: `bun run docker:build:worker:slim`
-- [ ] Optional for step-9: `E2B_API_KEY` available plus a way to open an HTTPS tunnel
+- [x] Branch is based on `spike/push-workers` (PR #2045, holds the spike code in `src/runtime-providers/`), rebased on current `main`
+- [x] Working tree is clean
+- [x] Baseline passes: `bun run check`
+- [x] Baseline typecheck: `bun run tsc:check:tsc`
+- [x] Migration tail on `main` is still `204` and no open PR adds `205`/`206`: `git fetch origin main && git ls-tree --name-only origin/main src/be/migrations/ | tail -2` and `bash scripts/check-migration-conflicts.sh`. If taken, renumber steps 1 and 2 before starting. (2026-10-11: main had 205, renumbered to 206/207.)
+- [x] Docker (OrbStack) is running for steps 3, 5, 6, 8, 10, 12: `docker info`
+- [x] Worker slim image builds from this branch: `bun run docker:build:worker:slim`
+- [x] Optional for step-9: `E2B_API_KEY` available plus a way to open an HTTPS tunnel
 
 ## Global Verification
 
 Run after all steps complete:
 
-- [ ] `bun run check`
-- [ ] `bun run lint`
-- [ ] `bun run tsc:check:tsc`
-- [ ] `bun run test:root -- --parallel=4`
-- [ ] `bun run e2e`
-- [ ] `bun run e2e:ui`
-- [ ] `bash scripts/check-db-boundary.sh && bash scripts/check-async-db-seam.sh && bash scripts/check-test-spawn-sync.sh && bash scripts/check-audit-columns.sh && bash scripts/check-migration-conflicts.sh`
-- [ ] `bun scripts/check-floating-promises.ts && bun scripts/check-promise-sinks.ts && bun scripts/check-sdk-tool-registration.ts`
-- [ ] `bun run check:rbac-coverage && bun run check:openapi-response-coverage && bun run check:api-key-boundary && bun run check:dep-graph`
-- [ ] `bun run docs:openapi` and `bun run build:script-types` leave no diff
-- [ ] `cd apps/ui && bun install --frozen-lockfile && bun run lint && bunx tsc -b`
-- [ ] Flag off on a copy of an existing DB: API boots, existing workers register and run a task, no supervisor/routing/nudge activity in logs
-- [ ] Manual E2E scenarios 1-5 below pass
+- [x] `bun run check`
+- [x] `bun run lint`
+- [x] `bun run tsc:check:tsc`
+- [x] `bun run test:root -- --parallel=4`
+- [x] `bun run e2e`
+- [x] `bun run e2e:ui`
+- [x] `bash scripts/check-db-boundary.sh && bash scripts/check-async-db-seam.sh && bash scripts/check-test-spawn-sync.sh && bash scripts/check-audit-columns.sh && bash scripts/check-migration-conflicts.sh`
+- [x] `bun scripts/check-floating-promises.ts && bun scripts/check-promise-sinks.ts && bun scripts/check-sdk-tool-registration.ts`
+- [x] `bun run check:rbac-coverage && bun run check:openapi-response-coverage && bun run check:api-key-boundary && bun run check:dep-graph`
+- [x] `bun run docs:openapi` and `bun run build:script-types` leave no diff
+- [x] `cd apps/ui && bun install --frozen-lockfile && bun run lint && bunx tsc -b`
+- [x] Flag off on a copy of an existing DB: API boots, existing workers register and run a task, no supervisor/routing/nudge activity in logs
+- [x] Manual E2E scenarios 1-5 below pass (plus 6 and 7, see thoughts/taras/qa/2026-10-10-push-based-workers.md)
+
+Note (2026-10-11): `bun run e2e` and `bun run e2e:ui` must run from a worktree without the developer `.env` (it leaks MCP_BASE_URL and SLACK_* into the SUT); clean run: e2e 25/25, pools-on leg pass, e2e:ui 66 passed + 1 known flake (tasks.spec, also flaky on main).
 
 ## Manual E2E
 
