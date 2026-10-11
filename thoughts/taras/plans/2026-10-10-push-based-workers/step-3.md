@@ -2,9 +2,7 @@
 id: step-3
 name: Runtime providers productionized
 depends_on: []
-status: claimed
-assignee: codex-gpt-6.1-sol-pw-step-3
-claimed_at: 2026-10-11T00:00:00Z
+status: done
 ---
 
 <!-- During /v-implement, `desplega:step-running` adds `assignee` and `claimed_at` while
@@ -67,14 +65,14 @@ Turn the spike in `src/runtime-providers/` into the supported, DB-free provider 
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Tests pass: `bun run test:root -- src/tests/runtime-provider-registration.test.ts src/tests/runtime-providers-docker.test.ts src/tests/runtime-providers-e2b.test.ts`
-- [ ] `bash scripts/check-db-boundary.sh` passes (`src/runtime-providers/` stays DB-free)
-- [ ] `bun run lint && bun run tsc:check:tsc` pass
+- [x] Tests pass: `bun run test:root -- src/tests/runtime-provider-registration.test.ts src/tests/runtime-providers-docker.test.ts src/tests/runtime-providers-e2b.test.ts`
+- [x] `bash scripts/check-db-boundary.sh` passes (`src/runtime-providers/` stays DB-free)
+- [x] `bun run lint && bun run tsc:check:tsc` pass
 
 #### Automated QA:
-- [ ] Docker smoke against local Docker/OrbStack with a local API on a temp DB: `bun scripts/runtime-provider-smoke.ts --provider docker --api http://localhost:<port> --worker-api http://host.docker.internal:<port> --image ghcr.io/desplega-ai/agent-swarm-worker:slim --api-key <key>`. The task completes, `terminate` runs, owner-filtered `list` is empty.
-- [ ] Owner isolation: start one container by hand with `swarm.runtime-id` but a different `swarm.owner` label. `list(target, ownerId)` does not return it. Remove it afterwards.
-- [ ] Image pull: `docker rmi` the worker image (or use a small tagged copy), run the smoke again, confirm the pull path.
+- [x] Docker smoke against local Docker/OrbStack with a local API on a temp DB: `bun scripts/runtime-provider-smoke.ts --provider docker --api http://localhost:<port> --worker-api http://host.docker.internal:<port> --image ghcr.io/desplega-ai/agent-swarm-worker:slim --api-key <key>`. The task completes, `terminate` runs, owner-filtered `list` is empty.
+- [x] Owner isolation: start one container by hand with `swarm.runtime-id` but a different `swarm.owner` label. `list(target, ownerId)` does not return it. Remove it afterwards.
+- [x] Image pull: `docker rmi` the worker image (or use a small tagged copy), run the smoke again, confirm the pull path.
 
 #### Manual Verification:
 - [ ] Optional E2B smoke (costs a sandbox): `bun scripts/runtime-provider-smoke.ts --provider e2b --api http://localhost:<port> --worker-api https://<tunnel-host> --image <e2b-template>` behind an HTTPS tunnel, if Taras wants it before step-9.
