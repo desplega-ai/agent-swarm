@@ -171,7 +171,7 @@ const createAgentRoute = route({
     404: { description: "Not found or runtime pools disabled" },
     409: { description: "Entity is in use or already exists" },
   },
-  rbac: { permission: "runtime_pool.write" },
+  rbac: { permission: "runtime_pool.bind" },
 });
 
 const listControllersRoute = route({
@@ -285,7 +285,7 @@ const bindAgentRoute = route({
     403: { description: "Permission denied" },
     404: { description: "Not found or runtime pools disabled" },
   },
-  rbac: { permission: "runtime_pool.write" },
+  rbac: { permission: "runtime_pool.bind" },
 });
 
 const controllerTokenRoute = route({

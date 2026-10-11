@@ -758,7 +758,7 @@ List runtime pools and their configuration.
 
 **Runtime Pool Upsert**
 
-Create a runtime pool, or update a pool by id. Creation requires name, kind, and one controller placement.
+Create a runtime pool, or update a pool by id. Creation requires name, kind, and one controller placement. Operator or user callers only: agents, including the lead, get a permission error. A lead can place agents into existing pools with runtime-pool-create-agent or runtime-pool-bind-agent.
 
 See the [input schema](https://github.com/desplega-ai/agent-swarm/blob/main/src/tools/runtime-pool-upsert.ts) for parameters.
 

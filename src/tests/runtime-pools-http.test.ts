@@ -119,14 +119,14 @@ describe("runtime pools HTTP", () => {
         ).status,
       ).toBe(200);
       expect(checks.at(-1)).toMatchObject({
-        verb: "runtime_pool.write",
+        verb: "runtime_pool.bind",
         resource: { kind: "runtime_pool", poolId: "default-static" },
       });
       expect(
         (await dispatch(`/api/agents/${workerId}/runtime-pool`, "PUT", { poolId: null })).status,
       ).toBe(200);
       expect(checks.at(-1)).toMatchObject({
-        verb: "runtime_pool.write",
+        verb: "runtime_pool.bind",
         resource: { kind: "runtime_pool", poolId: "default-static" },
       });
     } finally {
@@ -221,11 +221,31 @@ describe("runtime pools HTTP", () => {
     expect(k8s.status).toBe(400);
     expect(k8s.data.error).toBe("k8s provider not implemented");
   });
-  test("pool writes permit leads, operators and users, and deny workers", async () => {
+  test("pool writes permit operators and users only; leads may only bind", async () => {
     expect((await dispatch("/api/runtime-pools", "POST", poolInput, "worker")).status).toBe(403);
-    const created = await dispatch("/api/runtime-pools", "POST", poolInput, "lead");
+    expect((await dispatch("/api/runtime-pools", "POST", poolInput, "lead")).status).toBe(403);
+    const created = await dispatch("/api/runtime-pools", "POST", poolInput, "user");
     expect(created.status).toBe(200);
     const id = created.data.pool.id;
+    expect(
+      (await dispatch(`/api/runtime-pools/${id}`, "PATCH", { image: "evil:latest" }, "lead"))
+        .status,
+    ).toBe(403);
+    expect((await dispatch(`/api/runtime-pools/${id}`, "DELETE", undefined, "lead")).status).toBe(
+      403,
+    );
+    expect(
+      (await dispatch(`/api/runtime-pools/${id}/agents`, "POST", { name: "lead-made" }, "lead"))
+        .status,
+    ).toBe(200);
+    expect(
+      (await dispatch(`/api/agents/${workerId}/runtime-pool`, "PUT", { poolId: id }, "lead"))
+        .status,
+    ).toBe(200);
+    expect(
+      (await dispatch(`/api/agents/${workerId}/runtime-pool`, "PUT", { poolId: null }, "lead"))
+        .status,
+    ).toBe(200);
     expect(
       (await dispatch(`/api/runtime-pools/${id}`, "PATCH", { enabled: false }, "user")).status,
     ).toBe(200);
@@ -241,7 +261,8 @@ describe("runtime pools HTTP", () => {
         .status,
     ).toBe(403);
     expect(
-      (await dispatch(`/api/runtime-pools/${id}`, "DELETE", undefined, "operator")).status,
+      (await dispatch(`/api/runtime-pools/${id}?force=true`, "DELETE", undefined, "operator"))
+        .status,
     ).toBe(200);
   });
   test("controller CRUD permits users and operators, denies leads, and hides secrets", async () => {
@@ -362,6 +383,8 @@ test("MCP proxies enforce REST permissions and compose both result channels", as
       >;
     }
   )._registeredTools;
+  // Sentinel header value the fake fetch maps to an operator (no agent) caller.
+  const operatorAgentId = "operator-sentinel";
   const call = (name: string, args: unknown, agentId = leadId) =>
     tools[name]!.handler(args, { requestInfo: { headers: { "x-agent-id": agentId } } });
   const savedFetch = globalThis.fetch;
@@ -375,7 +398,11 @@ test("MCP proxies enforce REST permissions and compose both result channels", as
       url.pathname + url.search,
       init?.method,
       init?.body ? JSON.parse(String(init.body)) : undefined,
-      headers.get("x-agent-id") === leadId ? "lead" : "worker",
+      headers.get("x-agent-id") === leadId
+        ? "lead"
+        : headers.get("x-agent-id") === operatorAgentId
+          ? "operator"
+          : "worker",
     );
     return new Response(response.text, {
       status: response.status,
@@ -392,14 +419,21 @@ test("MCP proxies enforce REST permissions and compose both result channels", as
       );
     }
     expect(fetchCalls).toBe(0);
-    const created = await call("runtime-pool-upsert", poolInput);
+    const leadCreate = await call("runtime-pool-upsert", poolInput);
+    expect(leadCreate.isError).toBe(true);
+    expect(leadCreate.content[0]?.text).toContain("requires operator or user");
+    const created = await call("runtime-pool-upsert", poolInput, operatorAgentId);
     expect(created.isError).toBe(false);
     const pool = created.structuredContent.pool as { id: string };
     expect(created.content.map((item) => item.text).join(" ")).toContain(pool.id);
     const list = await call("runtime-pool-list", {});
     expect(list.structuredContent.pools).toContainEqual(expect.objectContaining({ id: pool.id }));
     expect(list.content.map((item) => item.text).join(" ")).toContain(pool.id);
-    const updated = await call("runtime-pool-upsert", { id: pool.id, delivery: "push" });
+    const updated = await call(
+      "runtime-pool-upsert",
+      { id: pool.id, delivery: "push" },
+      operatorAgentId,
+    );
     expect(updated.structuredContent.pool).toMatchObject({ delivery: "push" });
     expect(
       (await call("runtime-pool-bind-agent", { agentId: workerId, poolId: pool.id }))
@@ -417,8 +451,8 @@ test("MCP proxies enforce REST permissions and compose both result channels", as
     expect(denied.structuredContent.success).toBe(false);
     expect(denied.content[0]?.text).toContain("requires");
     expect(
-      (await call("runtime-pool-delete", { poolId: pool.id, force: true })).structuredContent
-        .deleted,
+      (await call("runtime-pool-delete", { poolId: pool.id, force: true }, operatorAgentId))
+        .structuredContent.deleted,
     ).toBe(true);
     process.env.RUNTIME_POOLS_ENABLED = "false";
     const disabled = await call("runtime-pool-list", {});

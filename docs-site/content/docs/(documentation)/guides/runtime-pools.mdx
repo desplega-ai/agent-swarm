@@ -74,6 +74,10 @@ An unassigned task can also select this agent after wake grace, provided no othe
 The dashboard exposes pools and controllers under Settings. The agent page can bind an existing agent to a pool.
 The API returns `200` for pool and controller writes. Task creation returns `201`.
 
+Pool and controller writes require operator credentials or a user account.
+A pool selects the image that receives a runtime token, so agents cannot create, change, or delete pools.
+A Lead can list pools, create an agent in an existing pool, and bind an agent to a pool.
+
 ## Push and poll delivery
 
 Push workers dial `/api/realtime`. They need no inbound port.

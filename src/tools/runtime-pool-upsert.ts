@@ -10,7 +10,7 @@ export const registerRuntimePoolUpsertTool = (server: McpServer) => {
     {
       title: "Runtime Pool Upsert",
       description:
-        "Create a runtime pool, or update a pool by id. Creation requires name, kind, and one controller placement.",
+        "Create a runtime pool, or update a pool by id. Creation requires name, kind, and one controller placement. Operator or user callers only: agents, including the lead, get a permission error. A lead can place agents into existing pools with runtime-pool-create-agent or runtime-pool-bind-agent.",
       annotations: { openWorldHint: false },
       inputSchema: RuntimePoolUpdateSchema.extend({ id: z.string().min(1).optional() }),
       outputSchema: runtimePoolToolOutputSchema,

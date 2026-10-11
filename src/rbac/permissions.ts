@@ -316,7 +316,11 @@ export const PERMISSIONS = {
     namespace: "script",
   },
   "runtime_pool.write": {
-    description: "Create, update, delete, or bind runtime pools.",
+    description: "Create, update, or delete runtime pools (image, provider kind, placement).",
+    namespace: "runtime_pool",
+  },
+  "runtime_pool.bind": {
+    description: "Bind an agent to an existing runtime pool, or create an agent in one.",
     namespace: "runtime_pool",
   },
   "runtime_controller.write": {

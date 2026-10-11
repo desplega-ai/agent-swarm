@@ -335,7 +335,10 @@ export const LEGACY_POLICY = {
   "script.api.update": leadOnly,
   "script.api.rotate": leadOnly,
   "script.api.delete": leadOnly,
-  "runtime_pool.write": leadOrOperatorOrUser,
+  // Pool writes pick the image that receives a runtime token, so only humans
+  // may make them. The lead may only place agents into operator-made pools.
+  "runtime_pool.write": operatorOrUser,
+  "runtime_pool.bind": leadOrOperatorOrUser,
   "runtime_controller.write": operatorOrUser,
   "extension.write": extensionWrite,
   "extension.activate": extensionActivation,
