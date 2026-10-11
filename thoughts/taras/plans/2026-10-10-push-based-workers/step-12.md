@@ -2,7 +2,9 @@
 id: step-12
 name: Integration E2E + docs
 depends_on: [step-4, step-6, step-8, step-9, step-10, step-11]
-status: ready
+status: claimed
+assignee: orchestrator (codex 12a + opus 12b + sonnet QA)
+claimed_at: 2026-10-11T21:00:00Z
 ---
 
 <!-- During /v-implement, `desplega:step-running` adds `assignee` and `claimed_at` while
