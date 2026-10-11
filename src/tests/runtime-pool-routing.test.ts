@@ -92,7 +92,12 @@ beforeEach(async () => {
   ])
     await getDbClient().run(`DELETE FROM ${table}`);
   const controller = await createRuntimeController({ name: "docker", kind: "docker" });
-  pool = await createRuntimePool({ name: "coders", kind: "docker", placements: [controller.id] });
+  pool = await createRuntimePool({
+    name: "coders",
+    kind: "docker",
+    placements: [controller.id],
+    image: "test-worker",
+  });
 });
 async function sleeper(name = "sleeping", maxTasks = 1) {
   return await createPoolAgent(pool.id, { name, maxTasks });
@@ -233,7 +238,7 @@ describe("server pool routing", () => {
     const client = getDbClient();
     const query = client.query.bind(client);
     const reads = spyOn(client, "query").mockImplementation(async (sql, params) => {
-      expect(isInTransaction()).toBe(false);
+      if (isInTransaction()) expect(sql).toContain("SELECT r.agent_id");
       expect(sql).not.toContain("pool_wake_at IS NOT NULL");
       return await query(sql, params);
     });
@@ -255,6 +260,277 @@ describe("server pool routing", () => {
     expect(await routePoolTasks({ now: afterGrace(task) })).toEqual([
       { taskId: task.id, agentId: warm.id },
     ]);
+    expect((await getTaskById(task.id))?.poolWakeAt).toBeUndefined();
+  });
+  test.each([
+    "disabled",
+    "draining",
+    "credentials",
+    "offline",
+    "stale",
+  ])("tier 1 rejects a %s runtime or pool and marks the alternative wake", async (reason) => {
+    const first = await sleeper("A");
+    const runtime = await upsertRuntimeInstance({
+      id: crypto.randomUUID(),
+      agentId: first.id,
+      reportedSlots: 1,
+    });
+    await getDbClient().run("UPDATE agents SET status = 'idle' WHERE id = ?", [first.id]);
+    if (reason === "disabled") await updateRuntimePool(pool.id, { enabled: false });
+    if (reason === "draining")
+      await getDbClient().run("UPDATE runtime_instances SET draining = 1 WHERE id = ?", [
+        runtime!.id,
+      ]);
+    if (reason === "credentials")
+      await getDbClient().run("UPDATE runtime_instances SET credential_ready = 0 WHERE id = ?", [
+        runtime!.id,
+      ]);
+    if (reason === "offline")
+      await getDbClient().run("UPDATE runtime_instances SET status = 'offline' WHERE id = ?", [
+        runtime!.id,
+      ]);
+    if (reason === "stale")
+      await getDbClient().run("UPDATE runtime_instances SET last_seen_at = ? WHERE id = ?", [
+        new Date(Date.now() - 3600000).toISOString(),
+        runtime!.id,
+      ]);
+    const alternativePool = await createRuntimePool({
+      name: "alternative",
+      kind: "docker",
+      placements: pool.placements,
+      image: "test-worker",
+    });
+    const second = await createPoolAgent(alternativePool.id, { name: "B", maxTasks: 2 });
+    const task = await createTaskExtended("pool work");
+    const now = afterGrace(task);
+    await routePoolTasks({ now });
+    expect(await getTaskById(task.id)).toMatchObject({
+      status: "pending",
+      agentId: second.id,
+      poolWakeAt: now.toISOString(),
+    });
+  });
+  test("tier 1 reserves physical runtime slots across pending assignments", async () => {
+    const warm = await live("idle", 3);
+    await getDbClient().run("UPDATE runtime_instances SET reported_slots = 1 WHERE agent_id = ?", [
+      warm.id,
+    ]);
+    const first = await createTaskExtended("first");
+    const second = await createTaskExtended("second");
+    expect(await routePoolTasks()).toEqual([{ taskId: first.id, agentId: warm.id }]);
+    expect((await getTaskById(second.id))?.status).toBe("unassigned");
+  });
+  test("concurrent tier 1 routing reserves the last physical slot once", async () => {
+    const warm = await live("idle", 3);
+    await getDbClient().run("UPDATE runtime_instances SET reported_slots = 1 WHERE agent_id = ?", [
+      warm.id,
+    ]);
+    const first = await createTaskExtended("first");
+    const second = await createTaskExtended("second");
+    const assignments = await Promise.all([
+      routePoolTasks({ taskIds: [first.id] }),
+      routePoolTasks({ taskIds: [second.id] }),
+    ]);
+    expect(assignments.flat()).toHaveLength(1);
+  });
+  test("tier 1 requires an unoccupied runtime slot despite logical headroom", async () => {
+    const warm = await live("busy", 3);
+    const runtime = await getDbClient().get<{ id: string }>(
+      "SELECT id FROM runtime_instances WHERE agent_id = ?",
+      [warm.id],
+    );
+    await getDbClient().run("UPDATE runtime_instances SET reported_slots = 1 WHERE id = ?", [
+      runtime!.id,
+    ]);
+    const active = await createTaskExtended("active", { agentId: warm.id });
+    await startTask(active.id);
+    await getDbClient().run(
+      "INSERT INTO active_sessions (id, agentId, taskId, triggerType, runtimeInstanceId) VALUES (?, ?, ?, 'task_assigned', ?)",
+      [crypto.randomUUID(), warm.id, active.id, runtime!.id],
+    );
+    const task = await createTaskExtended("queued");
+    expect(await routePoolTasks()).toEqual([]);
+    expect((await getTaskById(task.id))?.status).toBe("unassigned");
+  });
+  test.each([
+    "disabled",
+    "unbound",
+    "missing",
+    "static",
+  ])("reroutes an unmarked pending task when its pool becomes %s", async (reason) => {
+    const holder = await sleeper("holder", 3);
+    const runtime = await upsertRuntimeInstance({
+      id: crypto.randomUUID(),
+      agentId: holder.id,
+      reportedSlots: 3,
+    });
+    await getDbClient().run("UPDATE runtime_instances SET pool_id = ? WHERE id = ?", [
+      pool.id,
+      runtime!.id,
+    ]);
+    await getDbClient().run("UPDATE agents SET status = 'idle' WHERE id = ?", [holder.id]);
+    const task = await createTaskExtended("pool work");
+    await routePoolTasks({ taskIds: [task.id] });
+    expect((await getTaskById(task.id))?.agentId).toBe(holder.id);
+    expect((await getTaskById(task.id))?.poolWakeAt).toBeUndefined();
+    const human = await createTaskExtended("human pin", {
+      agentId: holder.id,
+      routingReason: "human_pinned",
+    });
+    await getDbClient().run("UPDATE runtime_instances SET draining = 1 WHERE id = ?", [
+      runtime!.id,
+    ]);
+    if (reason === "disabled") await updateRuntimePool(pool.id, { enabled: false });
+    if (reason === "unbound")
+      await getDbClient().run("UPDATE agents SET runtime_pool_id = NULL WHERE id = ?", [holder.id]);
+    if (reason === "missing")
+      await getDbClient().run("DELETE FROM runtime_pools WHERE id = ?", [pool.id]);
+    if (reason === "static")
+      await getDbClient().run("UPDATE runtime_pools SET kind = 'static' WHERE id = ?", [pool.id]);
+    const warm = await live();
+    expect(await routePoolTasks()).toEqual([{ taskId: task.id, agentId: warm.id }]);
+    expect(await getTaskById(human.id)).toMatchObject({ status: "pending", agentId: holder.id });
+  });
+  test("unmarked pending release CAS preserves a concurrent claim", async () => {
+    const holder = await sleeper();
+    const task = await createTaskExtended("pending", { agentId: holder.id });
+    await updateRuntimePool(pool.id, { enabled: false });
+    const client = getDbClient();
+    const run = client.run.bind(client);
+    const writes = spyOn(client, "run").mockImplementation(async (sql, params) => {
+      if (sql.includes("UPDATE agent_tasks SET agentId = NULL")) await startTask(task.id);
+      return await run(sql, params);
+    });
+    try {
+      await live();
+      await routePoolTasks();
+      expect(await getTaskById(task.id)).toMatchObject({
+        status: "in_progress",
+        agentId: holder.id,
+      });
+      expect(
+        writes.mock.calls.some(([sql]) => sql.includes("UPDATE agent_tasks SET agentId = NULL")),
+      ).toBe(true);
+    } finally {
+      writes.mockRestore();
+    }
+  });
+  test.each([
+    "sleeping",
+    "per-task",
+    "backoff",
+  ])("preserves explicit pending demand on a wakeable %s agent", async (state) => {
+    const holder = await sleeper();
+    if (state === "per-task") {
+      await updateRuntimePool(pool.id, { lifecycle: "per-task" });
+      const completed = await createTaskExtended("previous", { agentId: holder.id });
+      await getDbClient().run("UPDATE agent_tasks SET status = 'completed' WHERE id = ?", [
+        completed.id,
+      ]);
+      const runtime = await upsertRuntimeInstance({
+        id: crypto.randomUUID(),
+        agentId: holder.id,
+        reportedSlots: 1,
+      });
+      await getDbClient().run(
+        "UPDATE runtime_instances SET task_id = ?, pool_id = ? WHERE id = ?",
+        [completed.id, pool.id, runtime!.id],
+      );
+    }
+    if (state === "backoff")
+      await getDbClient().run(
+        "UPDATE agents SET runtime_provision_attempts = 1, runtime_provision_retry_at = ? WHERE id = ?",
+        [new Date(Date.now() + 60000).toISOString(), holder.id],
+      );
+    const task = await createTaskExtended("explicit demand", {
+      agentId: holder.id,
+      routingReason: "skill",
+    });
+    await live();
+    expect(await routePoolTasks()).toEqual([]);
+    expect(await getTaskById(task.id)).toMatchObject({
+      status: "pending",
+      agentId: holder.id,
+      routingReason: "skill",
+    });
+    expect((await getTaskById(task.id))?.poolWakeAt).toBeUndefined();
+  });
+  test.each(["zero-capacity", "missing-image"])("tier 2 skips a %s pool", async (state) => {
+    await sleeper();
+    await updateRuntimePool(
+      pool.id,
+      state === "zero-capacity" ? { maxRuntimes: 0 } : { image: null },
+    );
+    const task = await createTaskExtended("pool work");
+    expect(await routePoolTasks({ now: afterGrace(task) })).toEqual([]);
+    expect((await getTaskById(task.id))?.status).toBe("unassigned");
+  });
+  test.each([
+    true,
+    false,
+  ])("unmarked pending provisioning stays assigned with pools enabled=%s", async (enabled) => {
+    const holder = await sleeper();
+    const task = await createTaskExtended("pending", { agentId: holder.id });
+    await getDbClient().run(
+      "INSERT INTO runtime_instances (id, agent_id, pool_id, status, reported_slots) VALUES (?, ?, ?, 'provisioning', 1)",
+      [crypto.randomUUID(), holder.id, pool.id],
+    );
+    await live();
+    process.env.RUNTIME_POOLS_ENABLED = String(enabled);
+    expect(await routePoolTasks()).toEqual([]);
+    expect(await getTaskById(task.id)).toMatchObject({ status: "pending", agentId: holder.id });
+  });
+  test("flag off preserves unmarked assignments without a runtime", async () => {
+    const holder = await sleeper();
+    const task = await createTaskExtended("pending", { agentId: holder.id });
+    await live();
+    process.env.RUNTIME_POOLS_ENABLED = "false";
+    expect(await routePoolTasks()).toEqual([]);
+    expect(await getTaskById(task.id)).toMatchObject({ status: "pending", agentId: holder.id });
+  });
+  test("flag off retains the legacy runtime eligibility check", async () => {
+    const warm = await live("idle", 3);
+    await getDbClient().run(
+      "UPDATE runtime_instances SET draining = 1, credential_ready = 0, reported_slots = 1 WHERE agent_id = ?",
+      [warm.id],
+    );
+    process.env.RUNTIME_POOLS_ENABLED = "false";
+    const first = await createTaskExtended("first");
+    const second = await createTaskExtended("second");
+    expect(await routePoolTasks()).toEqual([
+      { taskId: first.id, agentId: warm.id },
+      { taskId: second.id, agentId: warm.id },
+    ]);
+  });
+  test("unmarked pending work waits for an occupied eligible runtime", async () => {
+    const holder = await sleeper("holder", 2);
+    const runtime = await upsertRuntimeInstance({
+      id: crypto.randomUUID(),
+      agentId: holder.id,
+      reportedSlots: 1,
+    });
+    await getDbClient().run("UPDATE agents SET status = 'busy' WHERE id = ?", [holder.id]);
+    const active = await createTaskExtended("active", { agentId: holder.id });
+    await startTask(active.id);
+    await getDbClient().run("UPDATE runtime_instances SET task_id = ? WHERE id = ?", [
+      active.id,
+      runtime!.id,
+    ]);
+    const pending = await createTaskExtended("waiting", { agentId: holder.id });
+    await live();
+    expect(await routePoolTasks()).toEqual([]);
+    expect(await getTaskById(pending.id)).toMatchObject({ status: "pending", agentId: holder.id });
+  });
+  test("tier 1 keeps healthy runtimes eligible while their pool circuit is open", async () => {
+    const agent = await sleeper();
+    await upsertRuntimeInstance({ id: crypto.randomUUID(), agentId: agent.id, reportedSlots: 1 });
+    await getDbClient().run("UPDATE agents SET status = 'idle' WHERE id = ?", [agent.id]);
+    await getDbClient().run("UPDATE runtime_pools SET circuit_open_until = ? WHERE id = ?", [
+      new Date(Date.now() + 60000).toISOString(),
+      pool.id,
+    ]);
+    const task = await createTaskExtended("pool work");
+    expect(await routePoolTasks()).toEqual([{ taskId: task.id, agentId: agent.id }]);
     expect((await getTaskById(task.id))?.poolWakeAt).toBeUndefined();
   });
   test("tier 2 waits for grace and preserves the existing routing reason", async () => {
@@ -434,7 +710,7 @@ describe("server pool routing", () => {
     const beta = await sleeper("beta", 3);
     const alpha = await sleeper("alpha", 3);
     await sleeper("small", 1);
-    await createTaskExtended("reserved", { agentId: beta.id });
+    await createTaskExtended("reserved", { agentId: beta.id, routingReason: "human_pinned" });
     const first = await createTaskExtended("first");
     const second = await createTaskExtended("second");
     const third = await createTaskExtended("third");
@@ -446,7 +722,7 @@ describe("server pool routing", () => {
   test("leads and agents without headroom never take pool tasks", async () => {
     await createPoolAgent(pool.id, { name: "lead", isLead: true });
     const agent = await sleeper();
-    await createTaskExtended("reserved", { agentId: agent.id });
+    await createTaskExtended("reserved", { agentId: agent.id, routingReason: "human_pinned" });
     const task = await createTaskExtended("pool work");
     expect(await routePoolTasks({ now: afterGrace(task) })).toEqual([]);
   });

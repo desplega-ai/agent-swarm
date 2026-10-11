@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import {
+  claimOfferedTask,
   closeDb,
   createAgent,
   createTaskExtended,
@@ -7,6 +8,7 @@ import {
   getDbClient,
   getTaskById,
   initDb,
+  releaseStaleOfferedTasksForOfflineAgents,
 } from "../be/db";
 import {
   createPoolAgent,
@@ -14,7 +16,7 @@ import {
   createRuntimePool,
   updateRuntimePool,
 } from "../be/runtime-pools/db";
-import { isAgentReachable } from "../be/runtime-pools/reachability";
+import { isAgentReachable, isRuntimePoolWakeable } from "../be/runtime-pools/reachability";
 import { codeLevelTriage, gatherSystemStatus, getBootTriageFindings } from "../heartbeat/heartbeat";
 import { routeMessage } from "../slack/router";
 import { resolveLeadOnlyRecoveryAssignment } from "../tasks/worker-follow-up";
@@ -24,6 +26,7 @@ import type { RuntimePool } from "../types";
 
 const dbPath = "./test-runtime-pool-reachability.sqlite";
 const savedFlag = process.env.RUNTIME_POOLS_ENABLED;
+const savedMultiRuntime = process.env.MULTI_RUNTIME_ENABLED;
 let pool: RuntimePool;
 async function cleanup() {
   for (const suffix of ["", "-wal", "-shm"])
@@ -41,9 +44,12 @@ afterAll(async () => {
   await cleanup();
   if (savedFlag === undefined) delete process.env.RUNTIME_POOLS_ENABLED;
   else process.env.RUNTIME_POOLS_ENABLED = savedFlag;
+  if (savedMultiRuntime === undefined) delete process.env.MULTI_RUNTIME_ENABLED;
+  else process.env.MULTI_RUNTIME_ENABLED = savedMultiRuntime;
 });
 beforeEach(async () => {
   process.env.RUNTIME_POOLS_ENABLED = "true";
+  process.env.MULTI_RUNTIME_ENABLED = "true";
   for (const table of [
     "active_sessions",
     "agent_tasks",
@@ -54,13 +60,134 @@ beforeEach(async () => {
   ])
     await getDbClient().run(`DELETE FROM ${table}`);
   const controller = await createRuntimeController({ name: "docker", kind: "docker" });
-  pool = await createRuntimePool({ name: "coders", kind: "docker", placements: [controller.id] });
+  pool = await createRuntimePool({
+    name: "coders",
+    kind: "docker",
+    placements: [controller.id],
+    image: "test-worker",
+  });
 });
 async function sleepingLead() {
   return await createPoolAgent(pool.id, { name: "sleeping-lead", isLead: true });
 }
 
 describe("pool agent reachability", () => {
+  test.each([
+    "docker",
+    "e2b",
+  ] as const)("%s pools require capacity and an image to wake", (kind) => {
+    expect(isRuntimePoolWakeable({ ...pool, kind, maxRuntimes: 0 })).toBe(false);
+    expect(isRuntimePoolWakeable({ ...pool, kind, image: null, resolvedImage: null })).toBe(false);
+    expect(
+      isRuntimePoolWakeable({ ...pool, kind, image: null, resolvedImage: "resolved-worker" }),
+    ).toBe(true);
+    expect(isRuntimePoolWakeable({ ...pool, kind, maxRuntimes: null })).toBe(true);
+  });
+  test.each([
+    "zero-capacity",
+    "missing-image",
+  ])("offline agents in a %s pool are unreachable", async (state) => {
+    const lead = await sleepingLead();
+    await updateRuntimePool(
+      pool.id,
+      state === "zero-capacity" ? { maxRuntimes: 0 } : { image: null },
+    );
+    expect(await isAgentReachable(lead)).toBe(false);
+  });
+  test.each([
+    "zero-capacity",
+    "missing-image",
+  ])("user send-task rejects a sleeping Lead in a %s pool", async (state) => {
+    await sleepingLead();
+    await updateRuntimePool(
+      pool.id,
+      state === "zero-capacity" ? { maxRuntimes: 0 } : { image: null },
+    );
+    const user = await createUser({ name: "requester" });
+    const result = await sendTaskHandler(userCtx(user), {
+      task: "delegate",
+      offerMode: false,
+      allowDuplicate: false,
+    });
+    expect(result.ok).toBe(false);
+    expect(result.message).toContain("No online Lead");
+  });
+  test.each([
+    "zero-capacity",
+    "missing-image",
+  ])("offer reaper releases a sleeping recipient in a %s pool", async (state) => {
+    const agent = await createPoolAgent(pool.id, { name: "offeree" });
+    await updateRuntimePool(
+      pool.id,
+      state === "zero-capacity" ? { maxRuntimes: 0 } : { image: null },
+    );
+    const task = await createTaskExtended("offer", { offeredTo: agent.id });
+    expect(await releaseStaleOfferedTasksForOfflineAgents(isAgentReachable)).toBe(1);
+    expect((await getTaskById(task.id))?.status).toBe("unassigned");
+    expect((await getTaskById(task.id))?.offeredTo).toBeUndefined();
+  });
+  test.each([
+    "flag-off",
+    "disabled",
+    "circuit",
+    "static",
+    "deleted",
+  ])("offer reaper retains legacy release behavior for %s recipients", async (state) => {
+    const agent = await createPoolAgent(pool.id, { name: "offeree" });
+    const task = await createTaskExtended("offer", { offeredTo: agent.id });
+    if (state === "flag-off") process.env.RUNTIME_POOLS_ENABLED = "false";
+    if (state === "disabled") await updateRuntimePool(pool.id, { enabled: false });
+    if (state === "circuit")
+      await getDbClient().run("UPDATE runtime_pools SET circuit_open_until = ? WHERE id = ?", [
+        new Date(Date.now() + 60000).toISOString(),
+        pool.id,
+      ]);
+    if (state === "static")
+      await getDbClient().run("UPDATE runtime_pools SET kind = 'static' WHERE id = ?", [pool.id]);
+    if (state === "deleted") await getDbClient().run("DELETE FROM agents WHERE id = ?", [agent.id]);
+    expect(await releaseStaleOfferedTasksForOfflineAgents(isAgentReachable)).toBe(1);
+    const released = await getTaskById(task.id);
+    expect(released?.status).toBe("unassigned");
+    expect(released?.offeredTo).toBeUndefined();
+    expect(released?.offeredAt).toBeUndefined();
+  });
+  test("offer reaper preserves a concurrent offer claim", async () => {
+    const agent = await createPoolAgent(pool.id, { name: "offeree" });
+    await updateRuntimePool(pool.id, { enabled: false });
+    const task = await createTaskExtended("offer", { offeredTo: agent.id });
+    expect(
+      await releaseStaleOfferedTasksForOfflineAgents(async (recipient) => {
+        await claimOfferedTask(task.id, recipient.id);
+        return await isAgentReachable(recipient);
+      }),
+    ).toBe(0);
+    expect(await getTaskById(task.id)).toMatchObject({ status: "reviewing", offeredTo: agent.id });
+  });
+  test.each([
+    "sleeping",
+    "provisioning",
+  ])("heartbeat preserves offers to %s pool agents", async (state) => {
+    const agent = await createPoolAgent(pool.id, { name: "offeree" });
+    if (state === "provisioning") {
+      await getDbClient().run(
+        "INSERT INTO runtime_instances (id, agent_id, pool_id, status, reported_slots) VALUES (?, ?, ?, 'provisioning', 1)",
+        [crypto.randomUUID(), agent.id, pool.id],
+      );
+      await getDbClient().run("UPDATE runtime_pools SET circuit_open_until = ? WHERE id = ?", [
+        new Date(Date.now() + 60000).toISOString(),
+        pool.id,
+      ]);
+    }
+    const task = await createTaskExtended("offered work", { offeredTo: agent.id });
+    const findings = await codeLevelTriage();
+    expect(findings.staleCleanup.staleOfferedTasks).toBe(0);
+    expect(await getTaskById(task.id)).toMatchObject({
+      status: "offered",
+      offeredTo: agent.id,
+      offeredAt: task.offeredAt,
+    });
+    expect(await isAgentReachable(agent)).toBe(true);
+  });
   test("online agents remain reachable and unbound offline agents remain unreachable", async () => {
     const agent = await createAgent({ name: "online", status: "idle", isLead: false });
     expect(await isAgentReachable(agent)).toBe(true);

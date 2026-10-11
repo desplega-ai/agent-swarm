@@ -334,7 +334,10 @@ test("circuit blocks provisioning and tier-2 routing, allows one trial, reopens 
   process.env.RUNTIME_CIRCUIT_THRESHOLD = "1";
   process.env.RUNTIME_CIRCUIT_OPEN_MIN = "1";
   process.env.RUNTIME_WAKE_GRACE_SEC = "0";
-  const { pool } = await setup();
+  const { pool, task } = await setup();
+  await getDbClient().run("UPDATE agent_tasks SET routing_reason = 'human_pinned' WHERE id = ?", [
+    task.id,
+  ]);
   const now = new Date();
   state.fake.failure = "Provider unavailable";
   await reconcileOnce({ now });

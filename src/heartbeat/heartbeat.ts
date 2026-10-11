@@ -416,7 +416,8 @@ export async function codeLevelTriage(): Promise<HeartbeatFindings> {
   // offer stuck on a dead offeree is otherwise invisible to
   // autoAssignPoolTasks (unassigned-only) and to the offeree's own
   // accept/reject path (nobody left to reach it). See #1190.
-  findings.staleCleanup.staleOfferedTasks = await releaseStaleOfferedTasksForOfflineAgents();
+  findings.staleCleanup.staleOfferedTasks =
+    await releaseStaleOfferedTasksForOfflineAgents(isAgentReachable);
 
   // 1. Detect and remediate stalled tasks (tiered: auto-fail dead workers)
   await detectAndRemediateStalledTasks(findings);
@@ -1829,7 +1830,7 @@ export async function runHeartbeatSweep(): Promise<void> {
       // offered and its offeree deleted/closed in the same idle window isn't
       // left waiting for the next actionable tick.
       cleanupOnlyFindings.staleCleanup.staleOfferedTasks =
-        await releaseStaleOfferedTasksForOfflineAgents();
+        await releaseStaleOfferedTasksForOfflineAgents(isAgentReachable);
       await cleanupStaleResources(cleanupOnlyFindings);
       logFindings(cleanupOnlyFindings);
       return; // Nothing actionable — bail early

@@ -3341,19 +3341,30 @@ export async function releaseStaleReviewingTasks(timeoutMinutes: number = 30): P
  * matters — `runtimeStaleThresholdMinutes()` / `RUNTIME_STALE_THRESHOLD_MIN`
  * for multi-runtime expiry, or immediate for an explicit close — so no
  * separate timeout knob is introduced here.
+ * When runtime pools are enabled, the supplied reachability predicate preserves
+ * offers to wakeable or provisioning agents without a DB import of runtime-pools.
  */
-export async function releaseStaleOfferedTasksForOfflineAgents(): Promise<number> {
+export async function releaseStaleOfferedTasksForOfflineAgents(
+  isReachable?: (agent: Agent) => Promise<boolean>,
+): Promise<number> {
   const now = new Date().toISOString();
+  const reachable: string[] = [];
+  if (isRuntimePoolsEnabled() && isReachable) {
+    for (const agent of await getAllAgents()) {
+      if (agent.status === "offline" && (await isReachable(agent))) reachable.push(agent.id);
+    }
+  }
 
   const result = await getDbClient().run(
     `UPDATE agent_tasks
      SET status = 'unassigned', offeredTo = NULL, offeredAt = NULL, lastUpdatedAt = ?
      WHERE status = 'offered'
        AND offeredTo IS NOT NULL
+       ${reachable.length ? `AND offeredTo NOT IN (${reachable.map(() => "?").join(",")})` : ""}
        AND NOT EXISTS (
          SELECT 1 FROM agents WHERE agents.id = agent_tasks.offeredTo AND agents.status != 'offline'
        )`,
-    [now],
+    [now, ...reachable],
   );
 
   return result.changes;
