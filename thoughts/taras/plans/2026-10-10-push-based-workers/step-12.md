@@ -46,6 +46,7 @@ Stitch the slices together and prove the whole model: lead on a `static` pool wi
 
 #### Automated QA:
 - [ ] Run the root plan's `## Manual E2E` scenarios 1-5 with Docker as an agent (all commands are scriptable). Save a short QA log with timings and container/runtime/task states to `thoughts/taras/qa/2026-10-10-push-based-workers.md`.
+- [ ] Stress test (Taras, 2026-10-11): root plan `## Manual E2E` scenario 7, one lead + one pool worker, the lead sends 100 ping-pong tasks to that worker. Run the docker leg first, then the E2B leg once step-9 is merged (costs money: confirm with Taras right before the E2B leg if he is reachable, otherwise run it, the expected spend is small). Record the results table from scenario 7 in the QA log and the PR body.
 
 #### Manual Verification:
 - [ ] Taras runs Manual E2E scenario 6 (E2B) if step-9's automated run was skipped.

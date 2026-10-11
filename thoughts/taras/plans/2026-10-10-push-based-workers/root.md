@@ -244,6 +244,9 @@ curl -s -H "$AUTH" $API/api/runtime-controllers | jq '.controllers[] | {id,name,
 
 6. **E2B (costs money, optional).** Open an HTTPS tunnel to `$PORT`, restart the API with `RUNTIME_WORKER_API_URL=https://<tunnel-host>`, set the key on the controller (`curl -X PATCH -H "$AUTH" -H 'Content-Type: application/json' $API/api/runtime-controllers/builtin-e2b -d '{"secretConfig":{"E2B_API_KEY":"<key>"}}'`), create an `e2b` pool on `builtin-e2b` with the published worker template, `ttl_sec: 300`, `lifecycle: idle`, `idleMinutes: 2`, pin a pong task. Expect: sandbox in `bun run src/cli.tsx e2b list`, renew logged, task completes, sandbox gone after the idle window. Close the tunnel.
 
+7. **Stress: 1 lead, 1 worker, 100 ping-pong tasks (added by Taras 2026-10-11).** Model for both agents: `openrouter/deepseek/deepseek-v4.1-flash` on an OpenRouter-capable harness (pi or opencode), `OPENROUTER_API_KEY` from the repo `.env`. Lead: one agent (static pool or a `docker` pool with `lifecycle: idle`). Worker: one pool agent with `maxTasks: 5`, `slotsPerRuntime: 5`, `maxRuntimes: 1`, `delivery: push`. Give the lead one task: "Use send-task 100 times to send the task `Reply with exactly: pong <n>` (n = 1..100) to agent <worker-id>, then report the 100 task ids." Run the docker leg first, then the same on an `e2b` pool (scenario 6 setup) after step-9.
+   Expect and record: 100 tasks created, 100 `completed` with output `pong <n>`, zero `failed`/duplicates/lost tasks; at most `maxRuntimes` runtimes alive at any time and never more than 5 tasks in progress; wall clock from first create to last completion; p50/p95 of create→in_progress and in_progress→completed; `/api/poll` count and nudge count; supervisor/provision errors (expect none); OpenRouter spend (from `/api/session-costs` or the OpenRouter dashboard); API memory and DB size before and after. Cleanup as below.
+
 Cleanup:
 ```bash
 docker ps -aq --filter label=swarm.runtime-id | xargs -r docker rm -f
