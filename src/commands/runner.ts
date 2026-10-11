@@ -3767,6 +3767,21 @@ export function resolveSessionTelemetryEvent(
 }
 
 /**
+ * Env handed to a harness session. An API an agent boots from its own shell
+ * (`bun run start:http`, `bun src/http.ts`) is a throwaway QA boot, so the
+ * session defaults DESPLEGA_TELEMETRY_ENV to `test` and those boots stop
+ * reporting as production installs. A non-blank value already in the env
+ * wins. Returns a copy: the runner's own env, and with it the runner's own
+ * telemetry, keeps its environment.
+ */
+export function withHarnessTelemetryEnv(
+  env: Record<string, string | undefined>,
+): Record<string, string | undefined> {
+  if (env.DESPLEGA_TELEMETRY_ENV?.trim()) return { ...env };
+  return { ...env, DESPLEGA_TELEMETRY_ENV: "test" };
+}
+
+/**
  * Entry shape for the `activeToolSpans` map maintained by `runWithSession`.
  * Exported for unit tests that exercise `implicitCloseActiveToolSpans`.
  */
@@ -4024,7 +4039,7 @@ async function spawnProviderProcess(
     additionalArgs: opts.additionalArgs,
     resumeSessionId: opts.resumeSessionId,
     iteration: opts.iteration,
-    env: freshEnv as Record<string, string>,
+    env: withHarnessTelemetryEnv(freshEnv) as Record<string, string>,
     // Propagate the selected OAuth slot so the adapter refreshes back to the
     // correct pool key. Undefined for non-codex providers and single-cred
     // deploys — only a real pool slot (isPoolBacked) may set this, otherwise

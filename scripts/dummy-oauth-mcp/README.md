@@ -44,7 +44,7 @@ Tools exposed by the MCP endpoint:
    `src/oauth/mcp-wrapper.ts` otherwise refuses `localhost` URLs.
 
    ```bash
-   MCP_OAUTH_ALLOW_PRIVATE_HOSTS=true bun run start:http
+   DESPLEGA_TELEMETRY_ENV=test MCP_OAUTH_ALLOW_PRIVATE_HOSTS=true bun run start:http
    ```
 
 2. **Start the dummy server** in a second shell:

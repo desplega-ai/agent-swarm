@@ -312,6 +312,14 @@ Preserve the bridge flag's existing fallback without OAuth credentials.
 Custom executable prefixes must speak the SDK protocol. Never silently remove their arguments.
 Swarm context preambles remain the continuation mechanism. Native SDK resume stays disabled.
 
+## Harness session env: telemetry tag
+
+`spawnProviderProcess` builds `ProviderSessionConfig.env` with `withHarnessTelemetryEnv(freshEnv)`. It sets `DESPLEGA_TELEMETRY_ENV=test` when the resolved env has no non-blank value, and keeps an explicit one. It returns a copy: the runner's `process.env` and the runner's own telemetry keep their environment.
+
+An API an agent boots from its shell (`bun run start:http`, `bun src/http.ts`) is a throwaway QA boot, so it reports `test`, not `production`. That holds for a customer's agents too. An API started outside a harness session is untouched.
+
+The tag reaches the agent's shell only where the adapter hands `config.env` to the process that runs commands: claude (CLI and SDK), codex, amp, dsh. pi, cursor and opencode run commands with the runner's `process.env`. grok and the ACP targets pass an env allowlist that does not include the key. devin and claude-managed run remotely. A new adapter should pass `config.env` to its command runner.
+
 ## `HARNESS_PROVIDER` resolution + live re-assignment
 
 Workers resolve their effective harness provider on each poll iteration, with this precedence (highest first):

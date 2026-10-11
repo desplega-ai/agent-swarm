@@ -575,7 +575,7 @@ Assembled around `runner.ts` L1582–1596 and L3093–3133:
 | `resumeSessionId` | **Deprecated** — always `undefined`. The runner stopped threading native session resume in the 2026-05-28 plan; follow-up continuity flows entirely through the context preamble prepended to `prompt`. |
 | `iteration` | Retry counter (runner state) |
 | `logFile` | `${logDir}/${timestamp}-${taskIdSlice}.jsonl` (L3102) — see §4 |
-| `env` | Merged worker env + task-provided env |
+| `env` | Merged worker env + task-provided env, plus `DESPLEGA_TELEMETRY_ENV=test` when unset (`withHarnessTelemetryEnv`), so an API the agent boots from its shell does not report as a production install. Adapters should pass this env to the process that runs the agent's commands. |
 
 ### API endpoints touched per task
 
