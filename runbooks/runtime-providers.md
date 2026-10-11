@@ -89,10 +89,13 @@ Pool `maxRuntimes` limits all runtimes across its agents. Provisioning rows coun
 `RUNTIME_PROVISION_CONCURRENCY` bounds simultaneous provisions, with a default of 8.
 Started requests reserve demand. Each new request checks budget admission, retry deadlines, and the pool circuit.
 An expired circuit permits only one trial. A failure preserves sibling requests and stops further requests for that agent during the tick.
+Each tick counts at most one failure per agent toward retry attempts and the pool circuit.
+An agent with prior failures permits only one provision awaiting registration. Registration clears its retry state and restores concurrent provisioning.
 With `lifecycle: "idle"`, `idleMinutes: null` keeps runtimes indefinitely.
 A positive `idleMinutes` terminates idle runtimes after that interval, while preserving the warm floor.
 With `lifecycle: "per-task"`, the worker exits after task completion. Use one slot for one task per runtime.
 Task completion preserves the runtime, its sessions, and its token during post-task reporting.
+The finished runtime still counts toward agent `maxTasks` and pool `maxRuntimes` throughout its exit grace.
 Runner shutdown permits immediate teardown. Otherwise, teardown waits `RUNTIME_PER_TASK_EXIT_GRACE_SEC` seconds from task completion, with a default of 60.
 
 The API inserts the provisioning row and mints a scoped runtime token before the infrastructure request.

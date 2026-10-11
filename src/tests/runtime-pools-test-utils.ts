@@ -45,6 +45,7 @@ export function runtimeFailureFixture(dbPath: string) {
   const keys = [
     "RUNTIME_POOLS_ENABLED",
     "MULTI_RUNTIME_ENABLED",
+    "RUNTIME_PROVISION_CONCURRENCY",
     "RUNTIME_PROVISION_TIMEOUT_SEC",
     "RUNTIME_PROVISION_MAX_ATTEMPTS",
     "RUNTIME_CIRCUIT_THRESHOLD",

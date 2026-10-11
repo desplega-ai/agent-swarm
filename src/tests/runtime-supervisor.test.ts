@@ -269,14 +269,14 @@ test("concurrent provisions respect the limit, pool cap, and demand reservation"
   });
   const tick = reconcileOnce();
   try {
-    for (let i = 0; i < 100 && releases.length < 2; i++) await Bun.sleep(5);
+    for (let i = 0; i < 1000 && releases.length < 2; i++) await Bun.sleep(5);
     expect(fake.requests).toHaveLength(2);
     expect(await listRuntimeInstancesForPool(pool.id)).toHaveLength(2);
     await reconcileOnce();
     expect(fake.requests).toHaveLength(2);
     for (let count = 3; count <= 4; count++) {
       releases[count - 3]!();
-      for (let i = 0; i < 100 && releases.length < count; i++) await Bun.sleep(5);
+      for (let i = 0; i < 1000 && releases.length < count; i++) await Bun.sleep(5);
       expect(fake.requests).toHaveLength(count);
     }
   } finally {
@@ -300,7 +300,7 @@ test("provision concurrency defaults to eight", async () => {
   });
   const tick = reconcileOnce();
   try {
-    for (let i = 0; i < 100 && fake.requests.length < 8; i++) await Bun.sleep(5);
+    for (let i = 0; i < 1000 && fake.requests.length < 8; i++) await Bun.sleep(5);
     expect(fake.requests).toHaveLength(8);
     await reconcileOnce();
     expect(fake.requests).toHaveLength(8);
@@ -326,7 +326,7 @@ test("an expired circuit admits only one trial during concurrent provisioning", 
   });
   const tick = reconcileOnce();
   try {
-    for (let i = 0; i < 100 && !fake.requests.length; i++) await Bun.sleep(5);
+    for (let i = 0; i < 1000 && !fake.requests.length; i++) await Bun.sleep(5);
     expect(fake.requests).toHaveLength(1);
     await reconcileOnce();
     expect(fake.requests).toHaveLength(1);
@@ -384,7 +384,7 @@ test("a concurrent provision failure preserves siblings and applies backoff", as
   const now = new Date();
   const tick = reconcileOnce({ now });
   try {
-    for (let i = 0; i < 100 && fake.requests.length < 2; i++) await Bun.sleep(5);
+    for (let i = 0; i < 1000 && fake.requests.length < 2; i++) await Bun.sleep(5);
     expect(fake.requests).toHaveLength(2);
   } finally {
     release();

@@ -183,6 +183,8 @@ is never expired):
   Reachable sleeping pool agents remain valid resume targets after their last runtime becomes offline.
 - Provision errors and registration timeouts count as failures. A timeout terminates the runtime.
   The agent row persists the failure count and retry deadline. Retries wait 30, 90, then 180 seconds.
+  Each tick counts at most one failure per agent toward retry attempts and the pool circuit, including simultaneous registration timeouts.
+  An agent with prior failures permits only one provision awaiting registration. Registration clears retry state and restores concurrent provisioning.
   After `RUNTIME_PROVISION_MAX_ATTEMPTS`, the oldest ready pending task fails with a scrubbed provisioning reason.
   The existing failure follow-up notifies the Lead. Task failure and first registration reset agent retry state.
   A tick with no ready demand clears retry state. Reaching the attempt cap without a ready pending task also clears retry state.
@@ -213,6 +215,7 @@ is never expired):
 - Per-task runtimes preserve sessions and tokens after task completion so the runner can report cost, logs, and context.
   Runner shutdown sends `/close` with `runtimeShutdown: true`, which retires the row and permits provider teardown.
   Without shutdown, teardown waits `RUNTIME_PER_TASK_EXIT_GRACE_SEC` seconds from task completion (default 60).
+  The finished runtime still counts toward agent `maxTasks` and pool `maxRuntimes` during this grace.
 - E2B runtimes use the same drain path within `RUNTIME_ROTATE_BEFORE_SEC` seconds of their continuous runtime limit.
   Demand can provision replacements within the pool cap. Busy runtimes finish their tasks before termination.
   The limit comes from controller `E2B_MAX_CONTINUOUS_SEC`, then the deployment value, then 3600 seconds.

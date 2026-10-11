@@ -28,6 +28,86 @@ const dbPath = "./test-runtime-supervisor-failures.sqlite";
 const { state, setup } = runtimeFailureFixture(dbPath);
 const later = (now: Date, seconds: number) => new Date(now.getTime() + seconds * 1000);
 
+test("eight failed concurrent provisions count one attempt and preserve retry delays", async () => {
+  const { pool, agent, task } = await setup({}, 8);
+  for (let i = 1; i < 8; i++) await createTaskExtended("More work", { agentId: agent.id });
+  state.fake.failure = "Bad image";
+  const started = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  const original = state.fake.provision.bind(state.fake);
+  let calls = 0;
+  const provision = spyOn(state.fake, "provision").mockImplementation(async (request) => {
+    if (++calls === 8) started.resolve();
+    await release.promise;
+    return original(request);
+  });
+  const now = new Date();
+  const tick = reconcileOnce({ now });
+  try {
+    await started.promise;
+    expect(calls).toBe(8);
+  } finally {
+    release.resolve();
+    await tick;
+    provision.mockRestore();
+  }
+  expect((await getAgentById(agent.id))?.runtimeProvisionAttempts).toBe(1);
+  expect((await getAgentById(agent.id))?.runtimeProvisionRetryAt).toBe(
+    later(now, 30).toISOString(),
+  );
+  expect((await getTaskById(task.id))?.status).toBe("pending");
+  expect(await getRuntimePool(pool.id)).toMatchObject({
+    consecutiveFailures: 1,
+    circuitOpenUntil: null,
+  });
+  const rows = await listRuntimeInstancesForPool(pool.id);
+  expect(rows).toHaveLength(8);
+  expect(rows.every((r) => r.status === "offline")).toBe(true);
+  await reconcileOnce({ now: later(now, 29) });
+  expect(state.fake.requests).toHaveLength(8);
+  await reconcileOnce({ now: later(now, 30) });
+  expect(state.fake.requests).toHaveLength(9);
+  expect((await getAgentById(agent.id))?.runtimeProvisionAttempts).toBe(2);
+  expect((await getAgentById(agent.id))?.runtimeProvisionRetryAt).toBe(
+    later(now, 120).toISOString(),
+  );
+  expect((await getTaskById(task.id))?.status).toBe("pending");
+  expect((await getRuntimePool(pool.id))?.consecutiveFailures).toBe(2);
+  await reconcileOnce({ now: later(now, 119) });
+  expect(state.fake.requests).toHaveLength(9);
+  await reconcileOnce({ now: later(now, 120) });
+  expect(state.fake.requests).toHaveLength(10);
+  expect((await getTaskById(task.id))?.status).toBe("failed");
+  expect((await getTaskById(task.id))?.failureReason).toStartWith(
+    "provisioning failed after 3 attempts:",
+  );
+  expect(await getRuntimePool(pool.id)).toMatchObject({
+    consecutiveFailures: 3,
+    circuitOpenUntil: null,
+  });
+});
+
+test("backoff permits one provision awaiting registration, then restores concurrency", async () => {
+  const { pool, agent } = await setup({}, 8);
+  state.fake.failure = "Bad image";
+  const now = new Date();
+  await reconcileOnce({ now });
+  expect((await getAgentById(agent.id))?.runtimeProvisionAttempts).toBe(1);
+  for (let i = 1; i < 8; i++) await createTaskExtended("More work", { agentId: agent.id });
+  state.fake.failure = null;
+  await reconcileOnce({ now: later(now, 30) });
+  expect(state.fake.requests).toHaveLength(2);
+  await reconcileOnce({ now: later(now, 31) });
+  expect(state.fake.requests).toHaveLength(2);
+  const runtime = (await listRuntimeInstancesForPool(pool.id)).find(
+    (r) => r.status === "provisioning",
+  )!;
+  await upsertRuntimeInstance({ id: runtime.id, agentId: agent.id, reportedSlots: 1 });
+  expect((await getAgentById(agent.id))?.runtimeProvisionAttempts).toBe(0);
+  await reconcileOnce({ now: later(now, 32) });
+  expect(state.fake.requests).toHaveLength(9);
+});
+
 test("provision errors persist backoff through restart and pruning, then fail the oldest task with a scrubbed Lead follow-up", async () => {
   const lead = await createAgent({ name: "Lead", isLead: true, status: "idle" });
   const { pool, agent, task } = await setup({}, 4);

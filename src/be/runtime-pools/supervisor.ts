@@ -92,6 +92,7 @@ async function recordProvisionFailure(
   runtime: Pick<RuntimeInstance, "agentId" | "poolId" | "controllerId"> & { id: string | null },
   reason: string,
   now: Date,
+  countedFailures: Set<string>,
 ): Promise<void> {
   const error = scrubSecrets(reason);
   const failedTask = await getDbClient().transaction(async (tx) => {
@@ -103,6 +104,9 @@ async function recordProvisionFailure(
       if (!retired.changes) return null;
       await markRuntimeTerminated(runtime.id, error);
     }
+    // Retire every failed runtime, but advance retry and circuit state once per agent per tick.
+    if (countedFailures.has(runtime.agentId)) return null;
+    countedFailures.add(runtime.agentId);
     const pool = await tx.get<{ circuit_open_until: string | null }>(
       `UPDATE runtime_pools SET consecutive_failures = consecutive_failures + 1,
        last_error = ?, last_error_at = ?, updated_at = ?,
@@ -181,9 +185,13 @@ export async function provisionRuntime(
   controller: ControllerCommands,
   ownerId: string,
   now = new Date(),
-  signal?: AbortSignal,
-  onFailure?: () => void,
+  options: {
+    signal?: AbortSignal;
+    onFailure?: () => void;
+    countedFailures?: Set<string>;
+  } = {},
 ): Promise<boolean> {
+  const { signal, onFailure, countedFailures = new Set<string>() } = options;
   const runtimeId = crypto.randomUUID();
   try {
     const image =
@@ -292,6 +300,7 @@ export async function provisionRuntime(
         },
         String(error),
         now,
+        countedFailures,
       );
     } catch (cleanupError) {
       reportSupervisorError(cleanupError);
@@ -325,6 +334,7 @@ export async function reapPoolRuntimes(
   now: Date,
   listedHandles?: RuntimeHandle[] | null,
   rotatingIds?: ReadonlySet<string>,
+  countedFailures = new Set<string>(),
 ): Promise<void> {
   const rotations =
     rotatingIds ??
@@ -425,7 +435,7 @@ export async function reapPoolRuntimes(
                 ? "Runtime missing from provider list"
                 : `Runtime ${status}`;
           if (runtime.status === "provisioning") {
-            await recordProvisionFailure(runtime, reason, now);
+            await recordProvisionFailure(runtime, reason, now, countedFailures);
             if ((await getRuntimeInstanceById(runtime.id))?.status !== "offline") return;
           }
           await terminateRuntime(runtime, controller, reason);
@@ -641,6 +651,7 @@ async function reconcilePools(
   const ownerId = await ensureRuntimeOwnerId();
   const controllers = new Map<string, ControllerCommands>();
   const listed = new Map<string, RuntimeHandle[] | null>();
+  const countedFailures = new Set<string>();
   const rotationCutoff = new Date(
     now.getTime() + runtimeNumber("RUNTIME_TOKEN_ROTATE_BEFORE_MIN", 60) * 60_000,
   ).toISOString();
@@ -684,6 +695,7 @@ async function reconcilePools(
         now,
         listed.get(controllerId),
         rotatingIds,
+        countedFailures,
       );
       await renewPoolLeases(pool, controller, now);
       if (signal.aborted) return;
@@ -766,8 +778,11 @@ async function reconcilePools(
             if (!(pool.resolvedImage ?? pool.image)) break;
             if (!(await canClaim(agent.id, now, pending.topTask?.requestedByUserId)).allowed) break;
             if (signal.aborted) return;
-            const retry = await getDbClient().get<{ runtime_provision_retry_at: string | null }>(
-              "SELECT runtime_provision_retry_at FROM agents WHERE id = ?",
+            const retry = await getDbClient().get<{
+              runtime_provision_retry_at: string | null;
+              runtime_provision_attempts: number;
+            }>(
+              "SELECT runtime_provision_retry_at, runtime_provision_attempts FROM agents WHERE id = ?",
               [agent.id],
             );
             if (
@@ -775,6 +790,8 @@ async function reconcilePools(
               Date.parse(retry.runtime_provision_retry_at) > now.getTime()
             )
               break;
+            const retrying = (retry?.runtime_provision_attempts ?? 0) > 0;
+            if (retrying && demand.provisioning > 0) break;
             const freshPool = await getRuntimePool(pool.id);
             if (!freshPool?.enabled) break;
             if (freshPool.circuitOpenUntil) {
@@ -789,17 +806,13 @@ async function reconcilePools(
             }
             if (signal.aborted) return;
             if (failedAgents.has(agent.id)) break;
-            const provision = provisionRuntime(
-              pool,
-              agent,
-              controller,
-              ownerId,
-              now,
+            const provision = provisionRuntime(pool, agent, controller, ownerId, now, {
               signal,
-              () => {
+              countedFailures,
+              onFailure: () => {
                 failedAgents.add(agent.id);
               },
-            ).then(
+            }).then(
               (success) => {
                 provisions.delete(provision);
                 if (!success) failedAgents.add(agent.id);
@@ -811,6 +824,7 @@ async function reconcilePools(
               },
             );
             provisions.add(provision);
+            if (retrying) break;
           }
         }
       } finally {
