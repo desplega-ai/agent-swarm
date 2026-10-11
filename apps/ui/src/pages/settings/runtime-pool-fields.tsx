@@ -133,6 +133,9 @@ export function validate(
   if (typeof min === "number" && typeof max === "number" && min > max)
     errors.minRuntimes = "Minimum must not exceed maximum.";
   const isStatic = form.kind === "static";
+  if (!isStatic && !form.image.trim())
+    errors.image =
+      form.kind === "e2b" ? "Enter an E2B template or docker:// image." : "Enter an image.";
   const idle = isStatic ? null : optionalInt(form.idleMinutes, 1);
   if (idle === undefined) errors.idleMinutes = "Enter a whole number, 1 or more, or leave blank.";
   const ttl = optionalInt(form.ttlSec, 1);
@@ -335,7 +338,11 @@ export function PoolFields({
           <SettingsRow
             label="Image"
             htmlFor="pool-image"
-            helper="Leave blank to use the swarm worker image."
+            helper={
+              form.kind === "e2b"
+                ? "An E2B template name, or a docker:// image to build a template from."
+                : "The worker image this pool starts. It must extend an Agent Swarm worker image."
+            }
             className="sm:col-span-2"
           >
             <Input
@@ -344,7 +351,9 @@ export function PoolFields({
               onChange={(event) => set("image", event.target.value)}
               placeholder="ghcr.io/desplega-ai/agent-swarm-worker:latest"
               className="font-mono"
+              {...errorProps("pool-image", errors.image)}
             />
+            <FieldError fieldId="pool-image" message={errors.image} />
           </SettingsRow>
         ) : null}
         <SettingsRow

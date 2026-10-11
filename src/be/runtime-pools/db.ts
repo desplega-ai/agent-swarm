@@ -297,6 +297,9 @@ async function validatePool(data: z.output<typeof RuntimePoolCreateSchema>): Pro
     throw new RuntimePoolError("Pool kind must equal controller kind");
   if (data.maxRuntimes !== null && data.minRuntimes > data.maxRuntimes)
     throw new RuntimePoolError("minRuntimes must not exceed maxRuntimes");
+  // The supervisor cannot start a runtime without an image, so reject the pool here.
+  if (data.kind !== "static" && !data.image?.trim())
+    throw new RuntimePoolError(`${data.kind} pools require an image`);
   if (data.kind === "static") {
     data.lifecycle = "idle";
     data.idleMinutes = null;

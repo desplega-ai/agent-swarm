@@ -165,7 +165,15 @@ describe("runtime pools persistence", () => {
   });
   test("validates controller kind, bounds and unsupported providers on create and update", async () => {
     const controller = await createRuntimeController({ name: "docker", kind: "docker" });
-    const input = { name: "docker", kind: "docker" as const, placements: [controller.id] };
+    const input = {
+      name: "docker",
+      kind: "docker" as const,
+      placements: [controller.id],
+      image: "agent-swarm-worker:test",
+    };
+    await expect(createRuntimePool({ ...input, image: null })).rejects.toThrow(
+      "docker pools require an image",
+    );
     await expect(createRuntimePool({ ...input, placements: [] })).rejects.toMatchObject({
       status: 400,
     });

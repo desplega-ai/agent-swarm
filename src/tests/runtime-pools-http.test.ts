@@ -102,7 +102,12 @@ beforeEach(async () => {
     RUNTIME_DOCKER_HOST: "unix:///tmp/runtime-pools-test.sock",
   });
 });
-const poolInput = { name: "coders", kind: "docker", placements: ["builtin-docker"] };
+const poolInput = {
+  name: "coders",
+  kind: "docker",
+  placements: ["builtin-docker"],
+  image: "agent-swarm-worker:test",
+};
 
 describe("runtime pools HTTP", () => {
   test("binding audit uses the target pool and unbinding uses the previous pool", async () => {
@@ -240,13 +245,15 @@ describe("runtime pools HTTP", () => {
       "builtin-docker",
     ]);
   });
-  test("rejects kind mismatches, k8s, invalid bounds and missing placements", async () => {
+  test("rejects kind mismatches, k8s, invalid bounds, missing placements and missing images", async () => {
     for (const input of [
       { ...poolInput, kind: "e2b" },
       { ...poolInput, kind: "k8s" },
       { ...poolInput, slotsPerRuntime: 0 },
       { ...poolInput, minRuntimes: 2, maxRuntimes: 1 },
       { ...poolInput, placements: [] },
+      { ...poolInput, image: null },
+      { ...poolInput, image: "  " },
     ]) {
       expect((await dispatch("/api/runtime-pools", "POST", input)).status).toBe(400);
     }
