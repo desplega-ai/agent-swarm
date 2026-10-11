@@ -45675,6 +45675,622 @@
         }
       }
     },
+    "/api/skills/usage": {
+      "get": {
+        "summary": "Swarm-wide skill usage and adoption",
+        "description": "Aggregates `skill_invocations` over a rolling window (7d, 30d or all; default 30d): totals, daily counts, per-harness and per-skill counts, task adoption, per-agent adoption, and installed skills with no use in the window.",
+        "tags": [
+          "Skills"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "7d",
+                "30d",
+                "all"
+              ]
+            },
+            "required": false,
+            "name": "window",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": -840,
+              "maximum": 840
+            },
+            "required": false,
+            "name": "tzOffset",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Skill usage summary",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "window": {
+                      "type": "string",
+                      "enum": [
+                        "7d",
+                        "30d",
+                        "all"
+                      ]
+                    },
+                    "since": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "trackingSince": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "generatedAt": {
+                      "type": "string"
+                    },
+                    "totals": {
+                      "type": "object",
+                      "properties": {
+                        "invocations": {
+                          "type": "number"
+                        },
+                        "distinctSkills": {
+                          "type": "number"
+                        },
+                        "distinctAgents": {
+                          "type": "number"
+                        },
+                        "distinctTasks": {
+                          "type": "number"
+                        },
+                        "unresolved": {
+                          "type": "number"
+                        },
+                        "tokens": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "invocations",
+                        "distinctSkills",
+                        "distinctAgents",
+                        "distinctTasks",
+                        "unresolved",
+                        "tokens"
+                      ]
+                    },
+                    "taskAdoption": {
+                      "type": "object",
+                      "properties": {
+                        "tasks": {
+                          "type": "number"
+                        },
+                        "tasksWithSkill": {
+                          "type": "number"
+                        },
+                        "since": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "tasks",
+                        "tasksWithSkill",
+                        "since"
+                      ]
+                    },
+                    "daily": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "date": {
+                            "type": "string",
+                            "description": "Local day (YYYY-MM-DD) after applying tzOffset"
+                          },
+                          "invocations": {
+                            "type": "number"
+                          },
+                          "skills": {
+                            "type": "number"
+                          },
+                          "tasks": {
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "date",
+                          "invocations",
+                          "skills",
+                          "tasks"
+                        ]
+                      }
+                    },
+                    "byHarness": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "key": {
+                            "type": "string"
+                          },
+                          "invocations": {
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "key",
+                          "invocations"
+                        ]
+                      }
+                    },
+                    "bySkill": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "skillId": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "skillName": {
+                            "type": "string"
+                          },
+                          "invocations": {
+                            "type": "number"
+                          },
+                          "agents": {
+                            "type": "number"
+                          },
+                          "tokens": {
+                            "type": "number"
+                          },
+                          "lastInvokedAt": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "skillId",
+                          "skillName",
+                          "invocations",
+                          "agents",
+                          "tokens",
+                          "lastInvokedAt"
+                        ]
+                      }
+                    },
+                    "agents": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "agentId": {
+                            "type": "string"
+                          },
+                          "agentName": {
+                            "type": "string"
+                          },
+                          "isLead": {
+                            "type": "boolean"
+                          },
+                          "installed": {
+                            "type": "number"
+                          },
+                          "installedUsed": {
+                            "type": "number"
+                          },
+                          "skillsUsed": {
+                            "type": "number"
+                          },
+                          "invocations": {
+                            "type": "number"
+                          },
+                          "lastInvokedAt": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "agentId",
+                          "agentName",
+                          "isLead",
+                          "installed",
+                          "installedUsed",
+                          "skillsUsed",
+                          "invocations",
+                          "lastInvokedAt"
+                        ]
+                      }
+                    },
+                    "unused": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "scope": {
+                            "type": "string"
+                          },
+                          "type": {
+                            "type": "string"
+                          },
+                          "systemDefault": {
+                            "type": "boolean"
+                          },
+                          "installedEverywhere": {
+                            "type": "boolean"
+                          },
+                          "installedAgents": {
+                            "type": "number"
+                          },
+                          "invocationCount": {
+                            "type": "number"
+                          },
+                          "lastInvokedAt": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "name",
+                          "scope",
+                          "type",
+                          "systemDefault",
+                          "installedEverywhere",
+                          "installedAgents",
+                          "invocationCount",
+                          "lastInvokedAt"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "window",
+                    "since",
+                    "trackingSince",
+                    "generatedAt",
+                    "totals",
+                    "taskAdoption",
+                    "daily",
+                    "byHarness",
+                    "bySkill",
+                    "agents",
+                    "unused"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/skills/{id}/usage": {
+      "get": {
+        "summary": "Usage of one skill",
+        "description": "Aggregates the skill's `skill_invocations` over a rolling window (7d, 30d or all; default 30d): totals, daily counts, breakdowns by agent, harness and load path, and the most recent invocations.",
+        "tags": [
+          "Skills"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "7d",
+                "30d",
+                "all"
+              ]
+            },
+            "required": false,
+            "name": "window",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": -840,
+              "maximum": 840
+            },
+            "required": false,
+            "name": "tzOffset",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Skill usage",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "skillId": {
+                      "type": "string"
+                    },
+                    "window": {
+                      "type": "string",
+                      "enum": [
+                        "7d",
+                        "30d",
+                        "all"
+                      ]
+                    },
+                    "since": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "generatedAt": {
+                      "type": "string"
+                    },
+                    "totals": {
+                      "type": "object",
+                      "properties": {
+                        "invocations": {
+                          "type": "number"
+                        },
+                        "distinctAgents": {
+                          "type": "number"
+                        },
+                        "distinctTasks": {
+                          "type": "number"
+                        },
+                        "tokens": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "invocations",
+                        "distinctAgents",
+                        "distinctTasks",
+                        "tokens"
+                      ]
+                    },
+                    "daily": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "date": {
+                            "type": "string",
+                            "description": "Local day (YYYY-MM-DD) after applying tzOffset"
+                          },
+                          "invocations": {
+                            "type": "number"
+                          },
+                          "skills": {
+                            "type": "number"
+                          },
+                          "tasks": {
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "date",
+                          "invocations",
+                          "skills",
+                          "tasks"
+                        ]
+                      }
+                    },
+                    "byAgent": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "agentId": {
+                            "type": "string"
+                          },
+                          "agentName": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "invocations": {
+                            "type": "number"
+                          },
+                          "lastInvokedAt": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "agentId",
+                          "agentName",
+                          "invocations",
+                          "lastInvokedAt"
+                        ]
+                      }
+                    },
+                    "byHarness": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "key": {
+                            "type": "string"
+                          },
+                          "invocations": {
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "key",
+                          "invocations"
+                        ]
+                      }
+                    },
+                    "byVia": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "key": {
+                            "type": "string"
+                          },
+                          "invocations": {
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "key",
+                          "invocations"
+                        ]
+                      }
+                    },
+                    "recent": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "agentId": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "agentName": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "taskId": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "taskTitle": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "harness": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "via": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "skillVersion": {
+                            "type": [
+                              "number",
+                              "null"
+                            ]
+                          },
+                          "tokenCount": {
+                            "type": [
+                              "number",
+                              "null"
+                            ]
+                          },
+                          "createdAt": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "agentId",
+                          "agentName",
+                          "taskId",
+                          "taskTitle",
+                          "harness",
+                          "via",
+                          "skillVersion",
+                          "tokenCount",
+                          "createdAt"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "skillId",
+                    "window",
+                    "since",
+                    "generatedAt",
+                    "totals",
+                    "daily",
+                    "byAgent",
+                    "byHarness",
+                    "byVia",
+                    "recent"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Skill not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/skills/{id}": {
       "get": {
         "summary": "Get skill by ID",

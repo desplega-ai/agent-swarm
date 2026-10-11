@@ -125,6 +125,9 @@ import type {
   SkillFile,
   SkillFilesResponse,
   SkillsResponse,
+  SkillUsageDetail,
+  SkillUsageSummary,
+  SkillUsageWindow,
   Stats,
   SteeringMessage,
   SteeringMessagesResponse,
@@ -2264,6 +2267,26 @@ class ApiClient {
     const url = `${this.getBaseUrl()}/api/skills/${id}`;
     const res = await fetch(url, { headers: this.getHeaders() });
     if (!res.ok) throw new Error(`Failed to fetch skill: ${res.status}`);
+    return res.json();
+  }
+
+  async fetchSkillUsage(window: SkillUsageWindow, tzOffset: number): Promise<SkillUsageSummary> {
+    const params = new URLSearchParams({ window, tzOffset: String(tzOffset) });
+    const url = `${this.getBaseUrl()}/api/skills/usage?${params}`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to fetch skill usage: ${res.status}`);
+    return res.json();
+  }
+
+  async fetchSkillUsageDetail(
+    id: string,
+    window: SkillUsageWindow,
+    tzOffset: number,
+  ): Promise<SkillUsageDetail> {
+    const params = new URLSearchParams({ window, tzOffset: String(tzOffset) });
+    const url = `${this.getBaseUrl()}/api/skills/${id}/usage?${params}`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to fetch skill usage: ${res.status}`);
     return res.json();
   }
 

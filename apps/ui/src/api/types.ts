@@ -2335,6 +2335,9 @@ export interface Skill {
   version: number;
   isEnabled: boolean;
   systemDefault: boolean;
+  /** All-time loads, at most one per runner session. */
+  invocationCount: number;
+  lastInvokedAt: string | null;
   createdAt: string;
   lastUpdatedAt: string;
   lastFetchedAt: string | null;
@@ -2374,6 +2377,107 @@ export interface SkillFile extends SkillFileManifestEntry {
 export interface SkillFilesResponse {
   files: SkillFileManifestEntry[];
   total: number;
+}
+
+// Skill usage (GET /api/skills/usage, GET /api/skills/:id/usage)
+export type SkillUsageWindow = "7d" | "30d" | "all";
+
+export interface SkillUsageDailyRow {
+  /** The viewer's local day (`YYYY-MM-DD`). */
+  date: string;
+  invocations: number;
+  skills: number;
+  tasks: number;
+}
+
+export interface SkillUsageCountRow {
+  key: string;
+  invocations: number;
+}
+
+export interface SkillUsageBySkillRow {
+  /** Null for a name that matches no skill row (a harness-native skill). */
+  skillId: string | null;
+  skillName: string;
+  invocations: number;
+  agents: number;
+  tokens: number;
+  lastInvokedAt: string;
+}
+
+export interface SkillUsageAgentRow {
+  agentId: string;
+  agentName: string;
+  isLead: boolean;
+  installed: number;
+  installedUsed: number;
+  skillsUsed: number;
+  invocations: number;
+  lastInvokedAt: string | null;
+}
+
+export interface SkillUsageUnusedRow {
+  id: string;
+  name: string;
+  scope: string;
+  type: string;
+  systemDefault: boolean;
+  installedEverywhere: boolean;
+  installedAgents: number;
+  invocationCount: number;
+  lastInvokedAt: string | null;
+}
+
+export interface SkillUsageSummary {
+  window: SkillUsageWindow;
+  since: string | null;
+  trackingSince: string | null;
+  generatedAt: string;
+  totals: {
+    invocations: number;
+    distinctSkills: number;
+    distinctAgents: number;
+    distinctTasks: number;
+    unresolved: number;
+    tokens: number;
+  };
+  taskAdoption: { tasks: number; tasksWithSkill: number; since: string | null };
+  daily: SkillUsageDailyRow[];
+  byHarness: SkillUsageCountRow[];
+  bySkill: SkillUsageBySkillRow[];
+  agents: SkillUsageAgentRow[];
+  unused: SkillUsageUnusedRow[];
+}
+
+export interface SkillUsageRecentRow {
+  id: string;
+  agentId: string | null;
+  agentName: string | null;
+  taskId: string | null;
+  taskTitle: string | null;
+  harness: string | null;
+  via: string | null;
+  skillVersion: number | null;
+  tokenCount: number | null;
+  createdAt: string;
+}
+
+export interface SkillUsageDetail {
+  skillId: string;
+  window: SkillUsageWindow;
+  since: string | null;
+  generatedAt: string;
+  totals: { invocations: number; distinctAgents: number; distinctTasks: number; tokens: number };
+  daily: SkillUsageDailyRow[];
+  byAgent: {
+    agentId: string;
+    agentName: string | null;
+    invocations: number;
+    lastInvokedAt: string;
+  }[];
+  byHarness: SkillUsageCountRow[];
+  byVia: SkillUsageCountRow[];
+  recent: SkillUsageRecentRow[];
 }
 
 // MCP Servers

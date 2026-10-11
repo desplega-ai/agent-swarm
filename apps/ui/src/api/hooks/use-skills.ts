@@ -1,5 +1,36 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../client";
+import type { SkillUsageWindow } from "../types";
+
+/** Usage aggregates move slowly; poll them far less than the 10s default. */
+const SKILL_USAGE_REFETCH_MS = 60_000;
+
+/** Minutes east of UTC, so the server buckets days by the viewer's local day. */
+function viewerTzOffset(): number {
+  return -new Date().getTimezoneOffset();
+}
+
+export function useSkillUsage(window: SkillUsageWindow) {
+  const tzOffset = viewerTzOffset();
+  return useQuery({
+    queryKey: ["skill-usage", window, tzOffset],
+    queryFn: () => api.fetchSkillUsage(window, tzOffset),
+    refetchInterval: SKILL_USAGE_REFETCH_MS,
+    placeholderData: keepPreviousData,
+  });
+}
+
+export function useSkillUsageDetail(skillId: string, window: SkillUsageWindow) {
+  const tzOffset = viewerTzOffset();
+  return useQuery({
+    queryKey: ["skill-usage-detail", skillId, window, tzOffset],
+    queryFn: () => api.fetchSkillUsageDetail(skillId, window, tzOffset),
+    enabled: !!skillId,
+    refetchInterval: SKILL_USAGE_REFETCH_MS,
+    // Keep the old window's numbers while a new window loads, never another skill's.
+    placeholderData: (previous) => (previous?.skillId === skillId ? previous : undefined),
+  });
+}
 
 export interface SkillFilters {
   type?: string;

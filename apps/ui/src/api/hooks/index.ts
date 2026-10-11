@@ -162,6 +162,8 @@ export {
   useSkillFile,
   useSkillFiles,
   useSkills,
+  useSkillUsage,
+  useSkillUsageDetail,
   useSyncRemoteSkills,
   useUninstallSkill,
   useUpdateSkill,

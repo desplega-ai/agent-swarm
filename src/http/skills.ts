@@ -18,6 +18,7 @@ import {
 } from "../be/db";
 import { parseSkillContent } from "../be/skill-parser";
 import { computeAgentSkillsSignature, syncSkillsToFilesystem } from "../be/skill-sync";
+import { getSkillUsageDetail, getSkillUsageSummary, SKILL_USAGE_WINDOWS } from "../be/skill-usage";
 import {
   AgentSkillSchema,
   SkillFileSchema,
@@ -107,6 +108,116 @@ const agentSkillsSignatureResponseSchema = z.object({
   generatedAt: z.string(),
 });
 
+const skillUsageQuerySchema = z.object({
+  window: z.enum(SKILL_USAGE_WINDOWS).optional(),
+  /** Minutes east of UTC (`-new Date().getTimezoneOffset()`), so days are the viewer's local days. */
+  tzOffset: z.coerce.number().int().min(-840).max(840).optional(),
+});
+
+const skillUsageDailyRowSchema = z.object({
+  date: z.string().describe("Local day (YYYY-MM-DD) after applying tzOffset"),
+  invocations: z.number(),
+  skills: z.number(),
+  tasks: z.number(),
+});
+
+const skillUsageCountRowSchema = z.object({ key: z.string(), invocations: z.number() });
+
+const skillUsageSummaryResponseSchema = z.object({
+  window: z.enum(SKILL_USAGE_WINDOWS),
+  since: z.string().nullable(),
+  trackingSince: z.string().nullable(),
+  generatedAt: z.string(),
+  totals: z.object({
+    invocations: z.number(),
+    distinctSkills: z.number(),
+    distinctAgents: z.number(),
+    distinctTasks: z.number(),
+    unresolved: z.number(),
+    tokens: z.number(),
+  }),
+  taskAdoption: z.object({
+    tasks: z.number(),
+    tasksWithSkill: z.number(),
+    since: z.string().nullable(),
+  }),
+  daily: z.array(skillUsageDailyRowSchema),
+  byHarness: z.array(skillUsageCountRowSchema),
+  bySkill: z.array(
+    z.object({
+      skillId: z.string().nullable(),
+      skillName: z.string(),
+      invocations: z.number(),
+      agents: z.number(),
+      tokens: z.number(),
+      lastInvokedAt: z.string(),
+    }),
+  ),
+  agents: z.array(
+    z.object({
+      agentId: z.string(),
+      agentName: z.string(),
+      isLead: z.boolean(),
+      installed: z.number(),
+      installedUsed: z.number(),
+      skillsUsed: z.number(),
+      invocations: z.number(),
+      lastInvokedAt: z.string().nullable(),
+    }),
+  ),
+  unused: z.array(
+    z.object({
+      id: z.string(),
+      name: z.string(),
+      scope: z.string(),
+      type: z.string(),
+      systemDefault: z.boolean(),
+      installedEverywhere: z.boolean(),
+      installedAgents: z.number(),
+      invocationCount: z.number(),
+      lastInvokedAt: z.string().nullable(),
+    }),
+  ),
+});
+
+const skillUsageDetailResponseSchema = z.object({
+  skillId: z.string(),
+  window: z.enum(SKILL_USAGE_WINDOWS),
+  since: z.string().nullable(),
+  generatedAt: z.string(),
+  totals: z.object({
+    invocations: z.number(),
+    distinctAgents: z.number(),
+    distinctTasks: z.number(),
+    tokens: z.number(),
+  }),
+  daily: z.array(skillUsageDailyRowSchema),
+  byAgent: z.array(
+    z.object({
+      agentId: z.string(),
+      agentName: z.string().nullable(),
+      invocations: z.number(),
+      lastInvokedAt: z.string(),
+    }),
+  ),
+  byHarness: z.array(skillUsageCountRowSchema),
+  byVia: z.array(skillUsageCountRowSchema),
+  recent: z.array(
+    z.object({
+      id: z.string(),
+      agentId: z.string().nullable(),
+      agentName: z.string().nullable(),
+      taskId: z.string().nullable(),
+      taskTitle: z.string().nullable(),
+      harness: z.string().nullable(),
+      via: z.string().nullable(),
+      skillVersion: z.number().nullable(),
+      tokenCount: z.number().nullable(),
+      createdAt: z.string(),
+    }),
+  ),
+});
+
 function decodeSkillFilePath(pathSegments: string[]): string {
   return pathSegments
     .slice(4)
@@ -136,6 +247,38 @@ const listSkillsRoute = route({
   }),
   responses: {
     200: { description: "Skill list", schema: skillsListResponseSchema },
+  },
+});
+
+const skillUsageSummaryRoute = route({
+  method: "get",
+  path: "/api/skills/usage",
+  pattern: ["api", "skills", "usage"],
+  summary: "Swarm-wide skill usage and adoption",
+  description:
+    "Aggregates `skill_invocations` over a rolling window (7d, 30d or all; default 30d): totals, daily counts, per-harness and per-skill counts, task adoption, per-agent adoption, and installed skills with no use in the window.",
+  tags: ["Skills"],
+  auth: { apiKey: true },
+  query: skillUsageQuerySchema,
+  responses: {
+    200: { description: "Skill usage summary", schema: skillUsageSummaryResponseSchema },
+  },
+});
+
+const skillUsageDetailRoute = route({
+  method: "get",
+  path: "/api/skills/{id}/usage",
+  pattern: ["api", "skills", null, "usage"],
+  summary: "Usage of one skill",
+  description:
+    "Aggregates the skill's `skill_invocations` over a rolling window (7d, 30d or all; default 30d): totals, daily counts, breakdowns by agent, harness and load path, and the most recent invocations.",
+  tags: ["Skills"],
+  auth: { apiKey: true },
+  params: z.object({ id: z.string() }),
+  query: skillUsageQuerySchema,
+  responses: {
+    200: { description: "Skill usage", schema: skillUsageDetailResponseSchema },
+    404: { description: "Skill not found" },
   },
 });
 
@@ -588,6 +731,36 @@ export async function handleSkills(
 
     const removed = await uninstallSkill(parsed.params.agentId, parsed.params.id);
     uninstallSkillRoute.respond(res, 200, { success: removed });
+    return true;
+  }
+
+  // GET /api/skills/usage (must be before /api/skills/:id)
+  if (skillUsageSummaryRoute.match(req.method, pathSegments)) {
+    const parsed = await skillUsageSummaryRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    const summary = await getSkillUsageSummary(
+      parsed.query.window ?? "30d",
+      parsed.query.tzOffset ?? 0,
+    );
+    skillUsageSummaryRoute.respond(res, 200, summary);
+    return true;
+  }
+
+  // GET /api/skills/:id/usage
+  if (skillUsageDetailRoute.match(req.method, pathSegments)) {
+    const parsed = await skillUsageDetailRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    const skill = await getSkillById(parsed.params.id);
+    if (!skill) {
+      jsonError(res, "Skill not found", 404);
+      return true;
+    }
+    const detail = await getSkillUsageDetail(
+      skill.id,
+      parsed.query.window ?? "30d",
+      parsed.query.tzOffset ?? 0,
+    );
+    skillUsageDetailRoute.respond(res, 200, detail);
     return true;
   }
 
