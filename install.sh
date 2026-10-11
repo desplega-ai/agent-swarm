@@ -82,7 +82,8 @@ Tunnel (--tunnel):
   sends warm-up requests (the first request through a fresh tunnel can hang).
   The URL is random and changes whenever the tunnel restarts, including after a
   reboot. Anyone with the URL can reach your API; every route except /health
-  still needs the API key. Stop it with: kill "\$(cat .agent-swarm/tunnel.pid)"
+  still needs the API key. Re-running with --tunnel replaces the tunnel. Stop it:
+    pkill -P "\$(cat .agent-swarm/tunnel.pid)"; kill "\$(cat .agent-swarm/tunnel.pid)"
 
 Examples:
   curl -fsSL .../install.sh | bash
@@ -264,27 +265,51 @@ lt_command() {
   fi
 }
 
+# Stop a tunnel from a previous run. The pid may be a `bunx` wrapper whose
+# `lt` child survives a plain kill, so stop the children first and wait.
+stop_tunnel() {
+  local pid i
+  [ -f .agent-swarm/tunnel.pid ] || return 0
+  pid="$(cat .agent-swarm/tunnel.pid)"
+  case "$pid" in '' | *[!0-9]*) return 0 ;; esac
+  kill -0 "$pid" 2>/dev/null || return 0
+  say "Stopping the previous tunnel (pid ${pid})"
+  if [ "$DRY_RUN" -eq 1 ]; then
+    printf '+ kill %s and its children, wait up to 10s\n' "$pid"
+    return 0
+  fi
+  local pids p alive
+  pids="$pid $(pgrep -P "$pid" 2>/dev/null | tr '\n' ' ' || true)"
+  for p in $pids; do kill "$p" 2>/dev/null || true; done
+  for ((i = 0; i < 10; i++)); do
+    alive=0
+    for p in $pids; do kill -0 "$p" 2>/dev/null && alive=1; done
+    [ "$alive" -eq 0 ] && break
+    sleep 1
+  done
+}
+
 start_tunnel() {
   local port="$1" lt_cmd url="" i code
   lt_cmd="$(lt_command)"
   run mkdir -p .agent-swarm
 
-  if [ -f .agent-swarm/tunnel.pid ] && kill -0 "$(cat .agent-swarm/tunnel.pid)" 2>/dev/null; then
-    say "Stopping the previous tunnel"
-    run kill "$(cat .agent-swarm/tunnel.pid)"
-  fi
+  stop_tunnel
 
   say "Starting tunnel: ${lt_cmd} --port ${port}"
   if [ "$DRY_RUN" -eq 1 ]; then
     printf '+ nohup %s --port %s >.agent-swarm/tunnel.log 2>&1 &  # pid -> .agent-swarm/tunnel.pid\n' "$lt_cmd" "$port"
     url="https://<random>.lt.desplega.ai"
   else
+    # A fresh file: a straggler still holding the old log open cannot write
+    # into the new one.
+    rm -f .agent-swarm/tunnel.log
     # shellcheck disable=SC2086 # lt_cmd is a trusted multi-word command
     nohup $lt_cmd --port "$port" >.agent-swarm/tunnel.log 2>&1 </dev/null &
     echo $! >.agent-swarm/tunnel.pid
     disown 2>/dev/null || true
     for ((i = 0; i < 60; i++)); do
-      url="$(grep -oE 'https://[^ ]+' .agent-swarm/tunnel.log 2>/dev/null | head -n 1 || true)"
+      url="$(grep -aoE 'https://[^ ]+' .agent-swarm/tunnel.log 2>/dev/null | head -n 1 || true)"
       [ -n "$url" ] && break
       kill -0 "$(cat .agent-swarm/tunnel.pid)" 2>/dev/null || break
       sleep 1
