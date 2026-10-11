@@ -32,6 +32,35 @@ export interface WorkerRegistration {
   pollRequired?: boolean;
 }
 
+export function updateWorkerDeliveryMode(
+  previousMode: DeliveryMode | undefined,
+  registration: WorkerRegistration,
+  isLead: boolean,
+  env: NodeJS.ProcessEnv = process.env,
+): DeliveryMode {
+  const mode = resolveWorkerDeliveryMode(
+    registration.deliveryMode,
+    isLead,
+    env,
+    registration.pollRequired,
+  );
+  if (mode !== previousMode) {
+    const override = env.SWARM_DELIVERY_MODE;
+    const source =
+      override === "poll" || override === "push"
+        ? `SWARM_DELIVERY_MODE override: ${override}`
+        : registration.deliveryMode
+          ? `register response: ${registration.deliveryMode}`
+          : "register response omitted deliveryMode, default: poll";
+    const required =
+      isLead && (registration.pollRequired || isLeadChannelMonitoringEnabled(env))
+        ? ", LEAD_MONITOR_CHANNELS requires poll"
+        : "";
+    console.log(scrubSecrets(`[runner] Delivery mode: ${mode} (${source}${required}).`));
+  }
+  return mode;
+}
+
 type DeliveryChecks = ReturnType<RunnerPushDelivery["checks"]>;
 
 export function taskReconciliation(checks: DeliveryChecks) {
@@ -103,13 +132,15 @@ export class RunnerPushDelivery {
 
   checks(mode: DeliveryMode, now = Date.now(), safetyMs = resolvePushSafetyPollMs()) {
     if (this.client.isConnected()) {
+      if (this.fallback && mode === "push")
+        console.log(scrubSecrets("[runner] Delivery mode: push (push socket reconnected)."));
       this.fallback = false;
     } else {
       if (mode === "push" && now - this.client.disconnectedSince() > 60_000 && !this.fallback) {
         this.fallback = true;
         console.warn(
           scrubSecrets(
-            "[runner] Push socket unavailable for 60 seconds. Using poll until reconnect.",
+            "[runner] Delivery mode: poll (push socket unavailable for 60 seconds). Using poll until reconnect.",
           ),
         );
       }

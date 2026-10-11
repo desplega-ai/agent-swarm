@@ -45,6 +45,7 @@ import type {
   RuntimeTargetConfig,
 } from "../runtime-providers";
 import * as providers from "../runtime-providers";
+import { ControllerOfflineError } from "../runtime-providers/controller";
 import { registerVolatileSecret, scrubSecrets } from "../utils/secret-scrubber";
 
 class FakeRuntimeProvider implements RuntimeProvider {
@@ -674,6 +675,25 @@ test("tick setup failures do not escape reconciliation or shutdown", async () =>
     }
   }
   expect(errorSpy).toHaveBeenCalled();
+});
+
+test("offline controllers remain quiet across ticks while other failures log errors", async () => {
+  await setup();
+  const offline = async () => {
+    throw new ControllerOfflineError(controllerId);
+  };
+  await reconcileOnce({ getControllerCommands: offline });
+  await reconcileOnce({ getControllerCommands: offline });
+  expect(errorSpy).not.toHaveBeenCalled();
+  await reconcileOnce({
+    getControllerCommands: async () => {
+      throw new Error("controller command failed");
+    },
+  });
+  expect(errorSpy).toHaveBeenCalledWith(
+    "[runtime-pools] Supervisor failed:",
+    "Error: controller command failed",
+  );
 });
 
 test("shutdown returns after its bound and stops subsequent provisioning", async () => {

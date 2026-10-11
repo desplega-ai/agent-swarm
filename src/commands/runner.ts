@@ -126,9 +126,9 @@ import {
 } from "./provider-credentials.ts";
 import {
   RunnerPushDelivery,
-  resolveWorkerDeliveryMode,
   shouldRunDeliveryLoop,
   taskReconciliation,
+  updateWorkerDeliveryMode,
   type WorkerRegistration,
 } from "./push-delivery";
 import {
@@ -5676,7 +5676,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   const templateMaxTasks = cachedTemplate?.config.agentDefaults?.maxTasks;
   const maxConcurrent = resolveMaxConcurrent(process.env, templateMaxTasks, defaultMaxTasks);
   const exitAfterTasks = resolveExitAfterTasks();
-  console.log(`[${role}] Mode: runner-level polling`);
+  console.log(`[${role}] Mode: runner-level delivery`);
   console.log(`[${role}] Max concurrent tasks: ${maxConcurrent}`);
 
   // Initialize runner state for parallel execution
@@ -5734,13 +5734,15 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   let shuttingDown = false;
   let lastPushPingAt = 0;
   let pushPingTimer: ReturnType<typeof setInterval> | undefined;
+  let lastLoggedDeliveryMode: DeliveryMode | undefined;
   const applyDeliveryMode = (registration: WorkerRegistration) => {
-    const mode = resolveWorkerDeliveryMode(
-      registration.deliveryMode,
+    const mode = updateWorkerDeliveryMode(
+      lastLoggedDeliveryMode,
+      registration,
       isLead,
       process.env,
-      registration.pollRequired,
     );
+    lastLoggedDeliveryMode = mode;
     if (mode !== state.deliveryMode) {
       state.deliveryMode = mode;
       pushDelivery.wakeWork();

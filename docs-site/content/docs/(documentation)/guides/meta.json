@@ -33,6 +33,7 @@
     "worker-credential-recovery",
     "provider-auth",
     "x402-payments",
-    "multi-runtime-agents"
+    "multi-runtime-agents",
+    "runtime-pools"
   ]
 }

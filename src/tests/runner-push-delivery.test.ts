@@ -6,6 +6,7 @@ import {
   resolveWorkerDeliveryMode,
   shouldRunDeliveryLoop,
   taskReconciliation,
+  updateWorkerDeliveryMode,
 } from "../commands/push-delivery";
 import {
   createSteeringDispatchState,
@@ -533,6 +534,39 @@ test("delivery resolution honors worker overrides, older APIs, and channel-monit
     expect(resolvePushSafetyPollMs({ RUNNER_PUSH_SAFETY_POLL_MS: "0" })).toBe(30_000);
     expect(resolvePushSafetyPollMs({ RUNNER_PUSH_SAFETY_POLL_MS: "invalid" })).toBe(30_000);
   } finally {
+    warning.mockRestore();
+  }
+});
+
+test("delivery logs report the source at startup and only repeat when the mode changes", () => {
+  const log = spyOn(console, "log").mockImplementation(() => {});
+  const warning = spyOn(console, "warn").mockImplementation(() => {});
+  try {
+    let mode = updateWorkerDeliveryMode(undefined, { deliveryMode: "poll" }, false, {});
+    expect(log.mock.calls).toEqual([["[runner] Delivery mode: poll (register response: poll)."]]);
+    mode = updateWorkerDeliveryMode(mode, { deliveryMode: "poll" }, false, {});
+    expect(log).toHaveBeenCalledTimes(1);
+    mode = updateWorkerDeliveryMode(mode, { deliveryMode: "push" }, false, {});
+    expect(log.mock.calls.at(-1)?.[0]).toBe(
+      "[runner] Delivery mode: push (register response: push).",
+    );
+    mode = updateWorkerDeliveryMode(mode, { deliveryMode: "push" }, false, {
+      SWARM_DELIVERY_MODE: "poll",
+    });
+    expect(mode).toBe("poll");
+    expect(log.mock.calls.at(-1)?.[0]).toBe(
+      "[runner] Delivery mode: poll (SWARM_DELIVERY_MODE override: poll).",
+    );
+    updateWorkerDeliveryMode(undefined, {}, false, { SWARM_DELIVERY_MODE: "invalid" });
+    expect(log.mock.calls.at(-1)?.[0]).toContain("register response omitted deliveryMode");
+    updateWorkerDeliveryMode(undefined, { deliveryMode: "push", pollRequired: true }, true, {
+      SWARM_DELIVERY_MODE: "push",
+    });
+    expect(log.mock.calls.at(-1)?.[0]).toBe(
+      "[runner] Delivery mode: poll (SWARM_DELIVERY_MODE override: push, LEAD_MONITOR_CHANNELS requires poll).",
+    );
+  } finally {
+    log.mockRestore();
     warning.mockRestore();
   }
 });

@@ -70,6 +70,7 @@ interface ToolInfo {
   title: string;
   description: string;
   fields: FieldInfo[];
+  schemaSource?: string;
 }
 
 interface FieldInfo {
@@ -322,7 +323,11 @@ async function parseToolFile(toolFileName: string): Promise<ToolInfo[]> {
     }
 
     const fields = parseSchemaFields(snippet, content);
-    infos.push({ name, title, description, fields });
+    const schemaSource =
+      fields.length === 0 && /inputSchema:\s*(?!z\b)[A-Za-z_$][\w$]*/.test(snippet)
+        ? toolFileName
+        : undefined;
+    infos.push({ name, title, description, fields, schemaSource });
   }
 
   return infos;
@@ -583,6 +588,8 @@ function generateToolMarkdown(tool: ToolInfo): string {
       md += `| \`${field.name}\` | \`${field.type}\` | ${req} | ${def} | ${desc} |\n`;
     }
     md += "\n";
+  } else if (tool.schemaSource) {
+    md += `See the [input schema](https://github.com/desplega-ai/agent-swarm/blob/main/src/tools/${tool.schemaSource}.ts) for parameters.\n\n`;
   } else {
     md += "*No parameters*\n\n";
   }

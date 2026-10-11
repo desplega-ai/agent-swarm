@@ -304,6 +304,7 @@ disable, and version activation. See [extension trust controls](/docs/guides/ext
 ## Runtime pools
 
 `RUNTIME_POOLS_ENABLED` enables runtime pool and controller configuration. It defaults to `false`.
+See the [runtime pools guide](/docs/guides/runtime-pools) for topology, lifecycle, controllers, and troubleshooting.
 Restart the API after enabling it to seed built-in controllers and the default static pool.
 Agents remain unbound until an operator assigns a pool.
 Pool routing requires `MULTI_RUNTIME_ENABLED=true`. Otherwise, the heartbeat uses legacy routing.
@@ -357,6 +358,8 @@ The **Harness & tools** group also exposes these API settings for provisioned wo
 | Setting | Default | Behavior |
 | --- | --- | --- |
 | `RUNTIME_WORKER_API_URL` | Public API URL | API URL reachable by provisioned workers. Controller `WORKER_API_URL` overrides it. |
+| `RUNTIME_DOCKER_HOST` | `DOCKER_HOST` or local socket | Unix socket stored when seeding the built-in Docker controller. Restart required. Existing controller configuration takes precedence. |
+| `E2B_API_BASE` | SDK default | Custom E2B API endpoint. Controller configuration overrides this fallback. |
 | `DOCKER_HOST` | `unix:///var/run/docker.sock` | Unix socket for built-in Docker controllers. Restart the API to seed a new controller. |
 | `DOCKER_NETWORK` | Unset | Docker network for provisioned workers. |
 | `DOCKER_EXTRA_HOSTS` | Unset | Comma-separated `host:address` entries. Docker also includes `host.docker.internal:host-gateway`. |
@@ -385,6 +388,8 @@ Push workers fetch work on nudges and safety ticks. They also fetch current stat
 They retain a 30-second ping interval and temporarily use poll delivery after 60 seconds without a socket.
 A lead uses poll delivery when the API enables `LEAD_MONITOR_CHANNELS=true`.
 The runner honors this restriction, including when a worker override requests push, and logs a warning.
+Workers log their active delivery mode at startup and whenever it changes.
+The log identifies the registration response or the worker override that selected the mode.
 
-It defaults to `poll`. A pool's explicit mode takes precedence.
+`RUNTIME_DEFAULT_DELIVERY` defaults to `poll`. A pool's explicit mode takes precedence.
 Controller credentials remain encrypted in the controller record. Workers do not receive them through global configuration.

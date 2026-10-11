@@ -69,6 +69,7 @@ type Viewer = { userId: string; name: string; kind: "user" | "guest" | "agent" }
 type AuthenticatedConnection = {
   identity: Identity;
   me: Viewer;
+  runtimeId?: string;
   expiresAt: number | undefined;
   sessionToken?: { tokenId: string; check: () => Promise<void> };
 };
@@ -99,6 +100,10 @@ function identityFromHttpAuth(
         : undefined;
   const guestId = `guest-${crypto.randomUUID()}`;
   return {
+    runtimeId:
+      auth.kind === "agent" && auth.runtimeId
+        ? auth.runtimeId
+        : header(req, "x-runtime-instance-id"),
     identity: {
       agentId,
       sourceTaskId:
@@ -193,9 +198,7 @@ export function attachRealtimeTransport(server: Server): () => void {
           socket.destroy();
           return;
         }
-        return wss.handleUpgrade(req, socket, head, (ws) =>
-          connect(ws, auth, header(req, "x-runtime-instance-id")),
-        );
+        return wss.handleUpgrade(req, socket, head, (ws) => connect(ws, auth, auth.runtimeId));
       }, rejectUpgrade)
       .catch(rejectUpgrade)
       .finally(() => {

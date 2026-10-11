@@ -80,6 +80,23 @@ They do not increment provision failures, apply backoff, or change the pool circ
 
 The schema reserves another kind for a future adapter. The factory rejects that kind until the adapter exists.
 
+## Supervisor
+
+`RUNTIME_POOLS_ENABLED=true` and `MULTI_RUNTIME_ENABLED=true` enable demand reconciliation.
+The supervisor provisions within agent `maxTasks`, pool `maxRuntimes`, and budget admission.
+`slotsPerRuntime` sets process capacity. `minRuntimes` keeps a warm floor for each bound agent.
+Pool `maxRuntimes` limits all runtimes across its agents. Provisioning rows count toward the limit.
+With `lifecycle: "idle"`, `idleMinutes: null` keeps runtimes indefinitely.
+A positive `idleMinutes` terminates idle runtimes after that interval, while preserving the warm floor.
+With `lifecycle: "per-task"`, the worker exits after task completion. Use one slot for one task per runtime.
+
+The API inserts the provisioning row and mints a scoped runtime token before the infrastructure request.
+Registration activates that row. Termination revokes its runtime and child tokens and reconciles agent liveness.
+Registration timeouts and provision failures use persisted retry deadlines and a pool circuit breaker.
+Provider death triggers heartbeat recovery for sessions owned by that runtime.
+See [heartbeat and crash recovery](./heartbeat-crash-recovery.md#1a-runtime-liveness-multi_runtime_enabled-only) for recovery rules and environment settings.
+See the [operator guide](../docs-site/content/docs/(documentation)/guides/runtime-pools.mdx) for setup and troubleshooting.
+
 ## Adapter contract
 
 `createRuntimeProvider(kind, target?)` imports adapters lazily. Pass the target when E2B traits must reflect a configured tier.
@@ -266,6 +283,10 @@ Workers send `/ping` at least every 30 seconds, independently of budget backoff.
 A lead with `LEAD_MONITOR_CHANNELS=true` must use `poll` because channel activity is computed during polling.
 The API forces poll delivery and returns `pollRequired` for that lead.
 The runner warns and honors this restriction, including when a worker override requests push.
+
+The runner logs `Delivery mode: poll` or `Delivery mode: push` at startup and whenever the mode changes.
+The log identifies the register response, a valid `SWARM_DELIVERY_MODE` override, or an older API's default.
+Temporary socket fallback and reconnect also log the active mode.
 
 All write hooks publish through `getDbClient().afterCommit()`.
 Rollback suppresses their nudges.

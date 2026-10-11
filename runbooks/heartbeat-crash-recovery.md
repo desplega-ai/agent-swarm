@@ -782,16 +782,12 @@ Notes:
 
 ## Quick reference: env knobs
 
-All of these are read **dynamically** — `heartbeat.ts` exposes them as getter
-functions (`stallThresholdMinutes()`, `maxAutoAssignPerSweep()`,
-`maxResumeGenerations()`, …) rather than module-level `const`s. Module-level
-capture ran before `loadGlobalConfigsIntoEnv()` hydrated `swarm_config` into
-`process.env`, so a value saved from the dashboard's Configuration page was
-ignored even across a restart. Because the sweep re-reads them, a config reload
-now applies immediately to every threshold below **except** the two that size
-the `setInterval` itself (`HEARTBEAT_INTERVAL_MS`, and `HEARTBEAT_DISABLE`
-which decides whether the interval is created at all) — those are read once in
-`src/http/index.ts` after hydration, so they need a restart.
+Heartbeat thresholds use getter functions such as `stallThresholdMinutes()`,
+`maxAutoAssignPerSweep()`, and `maxResumeGenerations()`.
+The sweep reads them dynamically after `loadGlobalConfigsIntoEnv()` hydrates stored configuration.
+Configuration reload applies those thresholds immediately.
+`HEARTBEAT_INTERVAL_MS` and `HEARTBEAT_DISABLE` require a restart because startup reads them when creating the timer.
+Runtime routing, supervisor timers, and controller seeding also require a restart where marked below.
 
 Rollback switches accept `0`/`false` interchangeably (both parse through
 `parseEnvFlag` in `src/utils/env-flag.ts`); `HEARTBEAT_PIN_CRASH_RESUME` and
@@ -805,7 +801,20 @@ Rollback switches accept `0`/`false` interchangeably (both parse through
 | Lead-escalation stall (Case C) | 30 min | `HEARTBEAT_STALL_THRESHOLD_MIN` |
 | Pending-steering stall grace | 5 min | `HEARTBEAT_STEERING_GRACE_MIN` |
 | Stale-resource cleanup | 30 min | `HEARTBEAT_STALE_CLEANUP_MIN` |
+| Runtime pools feature flag (restart to seed controllers) | off | `RUNTIME_POOLS_ENABLED` |
+| Default worker delivery | poll | `RUNTIME_DEFAULT_DELIVERY` |
+| Sleeping-agent wake grace | 15s | `RUNTIME_WAKE_GRACE_SEC` |
+| Pending wake reroute timeout | 600s | `RUNTIME_WAKE_REROUTE_SEC` |
+| Pool routing cadence (restart required) | 5s | `RUNTIME_ROUTING_INTERVAL_MS` |
 | Runtime supervisor cadence (restart required) | 5s | `RUNTIME_SUPERVISOR_INTERVAL_MS` |
+| Worker-reachable API URL | Public API URL | `RUNTIME_WORKER_API_URL` |
+| Seeded Docker socket (restart required) | `DOCKER_HOST` or local socket | `RUNTIME_DOCKER_HOST` |
+| Docker socket fallback | `unix:///var/run/docker.sock` | `DOCKER_HOST` |
+| Docker network fallback | unset | `DOCKER_NETWORK` |
+| Docker extra hosts fallback | unset | `DOCKER_EXTRA_HOSTS` |
+| E2B API endpoint fallback | SDK default | `E2B_API_BASE` |
+| Runtime token lifetime | 168h | `RUNTIME_TOKEN_TTL_HOURS` |
+| Remote controller token lifetime | 90 days | `RUNTIME_CONTROLLER_TOKEN_TTL_DAYS` |
 | Remote controller disconnect grace (§1a) | 120s | `RUNTIME_CONTROLLER_GRACE_SEC` |
 | Runtime registration timeout | 300s | `RUNTIME_PROVISION_TIMEOUT_SEC` |
 | Runtime provision failure limit | 3 | `RUNTIME_PROVISION_MAX_ATTEMPTS` |
@@ -814,11 +823,14 @@ Rollback switches accept `0`/`false` interchangeably (both parse through
 | Push socket grace | 60s | `RUNTIME_SOCKET_GRACE_SEC` |
 | Runtime token rotation window | 60 min | `RUNTIME_TOKEN_ROTATE_BEFORE_MIN` |
 | E2B lease renewal window | 300s | `RUNTIME_LEASE_RENEW_BEFORE_SEC` |
+| E2B template build timeout | 600s | `RUNTIME_E2B_BUILD_TIMEOUT_SEC` |
 | Continuous runtime rotation window | 600s | `RUNTIME_ROTATE_BEFORE_SEC` |
 | E2B continuous runtime limit | 3600s | `E2B_MAX_CONTINUOUS_SEC` |
 | Runtime liveness window (§1a) | 5 min | `RUNTIME_STALE_THRESHOLD_MIN` |
 | Same-agent liveness window | 30s | `WORKER_LIVENESS_WINDOW_SECONDS` |
 | Worker active-task reconcile cadence (worker env, read at worker start) | 30s | `RUNNER_TASK_RECONCILE_INTERVAL_MS` |
+| Worker delivery override (worker env) | Register response | `SWARM_DELIVERY_MODE` |
+| Push safety fetch cadence (worker env) | 30s | `RUNNER_PUSH_SAFETY_POLL_MS` |
 | Resume-generation cap | 3 | `HEARTBEAT_MAX_RESUME_GENERATIONS` |
 | Resume-pin grace, reaper (`0` = off) | 10 min | `HEARTBEAT_RESUME_PIN_GRACE_MIN` |
 | Same-agent crash pin, rollback (`0` = off) | on | `HEARTBEAT_PIN_CRASH_RESUME` |

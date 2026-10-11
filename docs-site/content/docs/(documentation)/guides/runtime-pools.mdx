@@ -1,0 +1,187 @@
+---
+title: Runtime pools (beta)
+description: Start worker runtimes on demand with pools, controllers, and push delivery
+---
+
+Runtime pools let the API start workers when tasks need capacity and stop workers when their lifecycle ends.
+The feature is **BETA** and defaults to off. Set `RUNTIME_POOLS_ENABLED=true` and keep `MULTI_RUNTIME_ENABLED=true` on the API.
+Restart the API after enabling pools so it can seed built-in controllers.
+The dashboard requires API version `1.169.0` or later. Development deployments can use `SWARM_DEV_MODE=true` to bypass that version check.
+With pools disabled, existing workers keep their registration and poll behavior. Pool and controller routes return `404`.
+
+## Concepts
+
+| Concept | Purpose |
+| --- | --- |
+| Agent | Durable identity, profile, credentials, task queue, and logical `maxTasks` limit. |
+| Pool | Infrastructure kind, controller placement, worker image, delivery mode, lifecycle, and capacity limits. |
+| Controller | Starts and stops runtimes through Docker or E2B. A built-in controller runs inside the API. A remote controller runs elsewhere. |
+| Runtime | One worker process serving an agent. It has its own identity, slots, liveness record, and scoped credential. |
+
+An agent binds to one pool. A pool has one controller placement in this release.
+Several runtimes can serve the same agent. Pool workers use the [multi-runtime rules](/docs/guides/multi-runtime-agents).
+Workspace files remain local to each runtime. Save durable results in Git, shared storage, or attachments before a runtime exits.
+
+## Recommended topology
+
+Keep one Lead on a `static` pool with `delivery: "poll"`. Operators manage static workers themselves.
+Put coding agents on a `docker` or `e2b` pool with `delivery: "push"` and on-demand capacity.
+Use `minRuntimes: 0` to permit an agent to sleep when no work remains.
+
+The router first selects an eligible live worker with free capacity.
+After `RUNTIME_WAKE_GRACE_SEC` (default 15 seconds), it can assign work to an eligible sleeping pool agent.
+The supervisor then provisions capacity after budget admission.
+Tasks retain their role, capability, and model compatibility requirements.
+An open circuit prevents assignments to sleeping agents. Existing runtimes can continue their tasks.
+
+## Docker pools
+
+The API needs access to a Docker Unix socket. TCP Docker endpoints are unsupported.
+`DOCKER_HOST` defaults to `unix:///var/run/docker.sock`. On OrbStack, use `unix://$HOME/.orbstack/run/docker.sock`.
+`RUNTIME_DOCKER_HOST` seeds an explicit socket into the built-in controller, even when Docker is offline.
+Existing controller configuration takes precedence over later changes to that seed setting.
+`DOCKER_NETWORK` selects the worker network. `DOCKER_EXTRA_HOSTS` adds comma-separated `host:address` entries.
+
+Workers must reach the API through controller `WORKER_API_URL`, deployment `RUNTIME_WORKER_API_URL`, or the public API URL.
+For a host API and local Docker workers, use `http://host.docker.internal:<api-port>`.
+For a shared Docker network, use an API hostname on that network.
+
+Set `API` to your API origin and export `AGENT_SWARM_API_KEY` before these commands.
+First discover controller IDs:
+
+```bash
+curl -s -H "Authorization: Bearer $AGENT_SWARM_API_KEY" \
+  "$API/api/runtime-controllers" | jq '.controllers[] | {id, kind, status}'
+```
+
+Create a pool and its offline agent:
+
+```bash
+POOL=$(curl -s -X POST "$API/api/runtime-pools" \
+  -H "Authorization: Bearer $AGENT_SWARM_API_KEY" -H 'Content-Type: application/json' \
+  -d '{"name":"coders","kind":"docker","placements":["builtin-docker"],"image":"ghcr.io/desplega-ai/agent-swarm-worker:slim","delivery":"push","lifecycle":"per-task","slotsPerRuntime":1,"maxRuntimes":3}' \
+  | jq -r '.pool.id')
+CODER=$(curl -s -X POST "$API/api/runtime-pools/$POOL/agents" \
+  -H "Authorization: Bearer $AGENT_SWARM_API_KEY" -H 'Content-Type: application/json' \
+  -d '{"name":"coder-1","maxTasks":3}' | jq -r '.agent.id')
+curl -s -X POST "$API/api/tasks" \
+  -H "Authorization: Bearer $AGENT_SWARM_API_KEY" -H 'Content-Type: application/json' \
+  -d "{\"task\":\"Report pong through store-progress\",\"agentId\":\"$CODER\",\"routingReason\":\"human_pinned\",\"modelTier\":\"smol\"}"
+```
+
+Configure the agent's harness and credentials before sending real tasks.
+An unassigned task can also select this agent after wake grace, provided no other eligible worker has live capacity.
+The dashboard exposes pools and controllers under Settings. The agent page can bind an existing agent to a pool.
+The API returns `200` for pool and controller writes. Task creation returns `201`.
+
+## Push and poll delivery
+
+Push workers dial `/api/realtime`. They need no inbound port.
+The socket sends nudges for work, cancellation, steering, and configuration changes.
+A nudge carries no task content or secrets. Workers fetch current state through the existing API endpoints.
+Workers also fetch after reconnecting and every 30 seconds by default for safety.
+They retain a 30-second liveness ping. A socket unavailable for 60 seconds causes temporary poll fallback.
+
+The register response selects the pool's delivery mode, then `RUNTIME_DEFAULT_DELIVERY`, then `poll`.
+A valid worker `SWARM_DELIVERY_MODE=poll|push` overrides that selection.
+`RUNNER_PUSH_SAFETY_POLL_MS` changes the safety interval in the worker environment.
+The worker logs its active mode and source at startup and whenever the mode changes.
+Check the `Delivery mode:` log when diagnosing unexpected polling or push behavior.
+Socket fallback and reconnect also log the mode.
+
+A Lead with `LEAD_MONITOR_CHANNELS=true` must use poll delivery because polling computes channel activity.
+This restriction overrides a worker's request for push delivery.
+Changes to pool delivery apply at the worker's next registration.
+
+## Lifecycles and capacity
+
+| Setting | Behavior |
+| --- | --- |
+| `lifecycle: "idle"`, `idleMinutes: null` | Keep runtimes indefinitely. This represents the "never exit" policy. |
+| `lifecycle: "idle"`, positive `idleMinutes` | Stop idle runtimes after that interval, while retaining the warm floor. |
+| `lifecycle: "per-task"` | Exit after task completion. Use `slotsPerRuntime: 1` for one task per runtime. |
+| `slotsPerRuntime` | Maximum concurrent tasks for one provisioned process. |
+| Agent `maxTasks` | Logical capacity across that agent's runtimes. Keep it at least as large as `slotsPerRuntime`. |
+| Pool `maxRuntimes` | Physical limit across all agents in the pool. Provisioning runtimes count. `null` removes this pool limit. |
+| Pool `minRuntimes` | Warm floor for each bound agent, within the agent and pool limits. |
+
+Workers receive a scoped runtime token instead of the operator key.
+The token binds the agent and runtime identities. Conflicting identity headers return `403`.
+The token can read the agent's resolved secrets and mint task tokens for its assigned tasks.
+Infrastructure credentials remain with the controller. Workers do not receive them.
+Termination revokes the runtime token and its task tokens. Calls with revoked tokens return `401`.
+Runtime death uses heartbeat recovery to preserve work through resume tasks.
+
+## E2B pools
+
+Choose `kind: "e2b"` with an E2B controller and an HTTPS API URL reachable by the sandbox.
+Store `E2B_API_KEY` in the controller's encrypted secret configuration.
+The seeded `builtin-e2b` controller can inherit the deployment key. Other controllers require their own key.
+`E2B_API_BASE` selects a custom API endpoint. Controller configuration overrides the API environment fallback.
+
+A plain `image` names an existing E2B worker template.
+A `docker://` image reference builds a template during first provision and caches the resolved template on the pool.
+Custom images must extend an Agent Swarm worker image. Image and resource changes invalidate the cache.
+Template construction requires E2B credentials available to the API, including when a remote controller serves the pool.
+
+Set pool `ttlSec` to request a lease. The default is 900 seconds.
+The supervisor renews wanted runtimes near expiry and stores the expiry that E2B applied.
+If the API stops, lease expiry bounds sandbox lifetime.
+`E2B_MAX_CONTINUOUS_SEC` defaults to 3600 seconds for Hobby. Pro deployments can configure 86400 seconds.
+The setting describes the account limit. It does not increase that limit.
+The supervisor drains runtimes before the continuous limit and permits replacements within the pool cap.
+Busy runtimes finish their tasks while draining. Tasks longer than the limit can still need crash recovery.
+Automatic idle pause is not available in this release.
+Use an idle lifecycle or warm floor to reduce repeated sandbox boot cost for frequent tasks.
+
+## Remote controllers
+
+Use a remote controller when the API cannot reach the infrastructure that starts workers.
+Create a controller with `placement: "remote"` and the appropriate `kind`.
+Set controller `WORKER_API_URL` to an API origin reachable by its workers.
+Use the controller's ID in the pool's `placements` array.
+
+Mint its token using operator credentials or an authorized user account:
+
+```bash
+curl -s -X POST "$API/api/runtime-controllers/<controller-id>/token" \
+  -H "Authorization: Bearer $AGENT_SWARM_API_KEY"
+```
+
+The response returns the plaintext once. Save it as `AGENT_SWARM_CONTROLLER_TOKEN` on the controller host.
+Minting another token revokes the previous token and disconnects its session.
+Start the controller next to Docker:
+
+```bash
+export AGENT_SWARM_CONTROLLER_TOKEN=<controller-token>
+agent-swarm controller --api-url https://api.example.test --kind docker \
+  --docker-host unix:///var/run/docker.sock --docker-network swarm-workers
+```
+
+The CLI reads the token from the environment. It does not accept a `--token` flag.
+Infrastructure credentials stay on that host. The controller needs no inbound port.
+On reconnect, it lists runtimes belonging to this swarm before becoming online.
+Disconnect stops new provisioning. Existing runtime records survive the controller grace, which defaults to 120 seconds.
+After grace expiry, the API revokes their tokens and recovers active tasks.
+
+## Troubleshooting
+
+| Symptom | Check |
+| --- | --- |
+| Settings pages are absent | Confirm the BETA flag, API version gate, and `runtime_pools` status in `GET /status`. |
+| Supervisor does not run | Keep `MULTI_RUNTIME_ENABLED=true` and inspect `GET /status`. |
+| Task remains unassigned | Check wake grace, affinity, model compatibility, budgets, agent capacity, pool enabled state, and circuit status. |
+| Runtime never registers | Check `WORKER_API_URL` reachability and worker image contents. Registration timeout defaults to 300 seconds. |
+| Circuit remains open | Read pool `lastError`, `consecutiveFailures`, and `circuitOpenUntil`. Correct the provider or image failure before the trial provision. |
+| Remote controller stays offline | Check its token, provider kind, API URL, and host logs. Controller tokens cannot authenticate worker routes. |
+| Push worker polls frequently | Check `Delivery mode:` logs, `SWARM_DELIVERY_MODE`, socket fallback, and the safety interval. |
+| E2B task stops near the limit | Confirm the account tier, lease renewal, draining state, and continuous runtime limit. |
+
+Inspect runtimes with `GET /api/runtime-pools/<pool-id>/runtimes`.
+Provider errors are scrubbed before storage. Unknown provider status alone does not prove runtime death.
+Provision retries wait 30, 90, then 180 seconds. After the attempt limit, the oldest ready pending task fails and notifies the Lead.
+The pool circuit blocks new provisioning after repeated failures and permits one trial after its expiry.
+First registration closes the circuit. Healthy re-registration does not reset it.
+
+See [Configuration](/docs/ui/configuration#runtime-pools) for environment settings and defaults.
+Maintainers can consult the [runtime provider runbook](https://github.com/desplega-ai/agent-swarm/blob/main/runbooks/runtime-providers.md).

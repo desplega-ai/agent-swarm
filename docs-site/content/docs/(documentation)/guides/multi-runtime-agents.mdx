@@ -7,6 +7,9 @@ Multi-runtime mode lets several worker processes serve one logical agent. Each
 process gets its own runtime identity and liveness record, while the workers
 still share the agent's task policy and queue identity.
 
+Use [runtime pools](/docs/guides/runtime-pools) when the API should start and stop these processes on demand.
+Pool workers retain the same runtime identity, liveness, and capacity rules.
+
 ## When to use it
 
 Use multi-runtime mode when you want to scale one logical agent horizontally.
@@ -31,7 +34,7 @@ API server:
 1. Deploy a worker version that sends its runtime identity during registration,
    polling, and shutdown. The runner generates a random UUID once per process
    boot. You do not configure a runtime ID, and a restarted process receives a
-   new one.
+   new one. Supervisor-provisioned workers preserve the runtime ID that the API injects.
 2. Keep `MULTI_RUNTIME_ENABLED` off while rolling the workers. Confirm that
    the updated workers have started and can register normally.
 3. Enable `MULTI_RUNTIME_ENABLED` on the API server, then reload or restart

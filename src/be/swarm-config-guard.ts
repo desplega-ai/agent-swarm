@@ -233,6 +233,7 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
   RUNTIME_CONTROLLER_GRACE_SEC: validateControllerGraceSec,
   ...integerValidators(
     [
+      "RUNTIME_SUPERVISOR_INTERVAL_MS",
       "RUNTIME_PROVISION_TIMEOUT_SEC",
       "RUNTIME_PROVISION_MAX_ATTEMPTS",
       "RUNTIME_CIRCUIT_THRESHOLD",
