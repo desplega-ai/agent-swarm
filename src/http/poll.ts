@@ -49,6 +49,7 @@ import { ensure } from "../utils/business-use";
 import { isLeadChannelMonitoringEnabled } from "../utils/lead-monitor-channels";
 import { isMultiRuntimeEnabled } from "../utils/multi-runtime";
 import { getUserCommsPrefs } from "../utils/requester-comms";
+import { isRuntimePoolsEnabled } from "../utils/runtime-pools-flag";
 import { route, runtimeInstanceHeader } from "./route-def";
 import { jsonError } from "./utils";
 
@@ -315,6 +316,12 @@ export async function handlePoll(
       "UPDATE runtime_instances SET task_id = ? WHERE id = ? AND agent_id = ?",
       [taskId, runtimeInstanceId, myAgentId!],
     );
+    if (isRuntimePoolsEnabled()) {
+      await getDbClient().run(
+        "UPDATE agent_tasks SET runtime_instance_id = ? WHERE id = ? AND agentId = ?",
+        [runtimeInstanceId, taskId, myAgentId!],
+      );
+    }
   };
   // Handle cursor commit endpoint
   if (commitCursorsRoute.match(req.method, pathSegments)) {

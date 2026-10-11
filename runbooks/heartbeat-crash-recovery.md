@@ -180,6 +180,10 @@ is never expired):
   This marks the row offline, reconciles agent status, and revokes runtime and child tokens.
   Revocation closes token-authenticated sockets. Subsequent worker calls receive 401.
   Recovery reads sessions by `active_sessions.runtimeInstanceId` and applies the existing heartbeat decision to each in-progress task.
+  With runtime pools enabled, recovery also reads sessionless dispatches from `agent_tasks.runtime_instance_id` and `runtime_instances.task_id`.
+  Dispatch records each slot's task ownership within the claim transaction, before the worker registers its session.
+  Existing sessions determine ownership and exclude fallback recovery by a different runtime.
+  Guarded state updates preserve concurrent completion and prevent repeated recovery from creating duplicate resumes.
   Recovery deletes sessions after remediation. Repeated recovery creates no additional resume.
   A session error logs a scrubbed reason and does not block sibling recovery. A later tick retries the failed session.
   Reachable sleeping pool agents remain valid resume targets after their last runtime becomes offline.

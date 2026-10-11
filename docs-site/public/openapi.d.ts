@@ -17557,7 +17557,7 @@ export interface paths {
         post?: never;
         /**
          * Revoke an ephemeral session token
-         * @description Revokes an aseph_ bearer token by ID. No-op if already revoked.
+         * @description Operators can revoke any ephemeral token. With runtime pools enabled, runtime tokens can revoke their own child task tokens. Repeated revocation has no effect.
          */
         delete: {
             parameters: {
@@ -17579,6 +17579,15 @@ export interface paths {
                 };
                 /** @description Unauthorized */
                 401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Token cannot revoke this child */
+                403: {
                     headers: {
                         [name: string]: unknown;
                     };

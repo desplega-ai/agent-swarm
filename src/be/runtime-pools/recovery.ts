@@ -50,6 +50,17 @@ async function recoverSessions(runtimeId: string, reason: string): Promise<void>
     "SELECT taskId FROM active_sessions WHERE runtimeInstanceId = ?",
     [runtimeId],
   );
+  if (isRuntimePoolsEnabled()) {
+    const dispatched = await getDbClient().query<{ taskId: string }>(
+      `SELECT t.id AS taskId FROM agent_tasks t
+       WHERE (t.runtime_instance_id = ? OR t.id IN (
+         SELECT task_id FROM runtime_instances WHERE id = ? AND agent_id = t.agentId
+       )) AND t.status = 'in_progress'
+       AND NOT EXISTS (SELECT 1 FROM active_sessions s WHERE s.taskId = t.id)`,
+      [runtimeId, runtimeId],
+    );
+    sessions.push(...dispatched);
+  }
   if (!sessions.length) return;
   const { remediateTaskForDeadRuntime } = await import("../../heartbeat/heartbeat");
   for (const session of sessions) {
