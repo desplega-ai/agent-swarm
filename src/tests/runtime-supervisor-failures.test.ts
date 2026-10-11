@@ -287,6 +287,8 @@ test("circuit blocks provisioning and tier-2 routing, allows one trial, reopens 
 test("failure knobs reject invalid saved values", () => {
   for (const key of [
     "RUNTIME_PROVISION_TIMEOUT_SEC",
+    "RUNTIME_PROVISION_CONCURRENCY",
+    "RUNTIME_PER_TASK_EXIT_GRACE_SEC",
     "RUNTIME_SUPERVISOR_INTERVAL_MS",
     "RUNTIME_PROVISION_MAX_ATTEMPTS",
     "RUNTIME_CIRCUIT_THRESHOLD",
