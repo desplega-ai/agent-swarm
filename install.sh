@@ -157,6 +157,10 @@ check_docker() {
 }
 
 ensure_bun() {
+  # A previous run installed Bun but a fresh non-login shell lacks it on PATH.
+  if ! have bun && [ -x "${BUN_INSTALL:-$HOME/.bun}/bin/bun" ]; then
+    export PATH="${BUN_INSTALL:-$HOME/.bun}/bin:$PATH"
+  fi
   if have bun; then
     say "Bun found: $(bun --version)"
     return 0
