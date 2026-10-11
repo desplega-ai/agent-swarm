@@ -3,6 +3,7 @@ import { getConfig } from "@/lib/config";
 import { DASHBOARD_USER_HEADER, dashboardUserIdFor } from "../lib/dashboard-user";
 import type {
   AcpRuntimeConfig,
+  Agent,
   AgentAvatar,
   AgentMcpServersResponse,
   AgentRuntimeInstancesResponse,
@@ -96,6 +97,12 @@ import type {
   PromptTemplateHistory,
   ReasoningEffortLevel,
   ResolveUnmappedInput,
+  RuntimeController,
+  RuntimeControllerInput,
+  RuntimePool,
+  RuntimePoolCreateAgentInput,
+  RuntimePoolInput,
+  RuntimePoolRuntime,
   ScheduledTask,
   ScheduledTasksResponse,
   ScriptApiAuthMode,
@@ -278,6 +285,31 @@ export class ExtensionInstallError extends Error {
     this.name = "ExtensionInstallError";
     this.diagnostics = diagnostics;
   }
+}
+
+/**
+ * A failed runtime pool or controller request. `status` lets the pool delete
+ * dialog offer a forced delete on 409 (the pool still has bound agents).
+ */
+export class RuntimePoolApiError extends Error {
+  readonly status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "RuntimePoolApiError";
+    this.status = status;
+  }
+}
+
+/** Parse a runtime pool route response or throw a `RuntimePoolApiError`. */
+async function runtimePoolResponse<T>(res: Response, label: string): Promise<T> {
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as { error?: string; message?: string };
+    throw new RuntimePoolApiError(
+      body.error || body.message || `${label} (${res.status})`,
+      res.status,
+    );
+  }
+  return (await res.json()) as T;
 }
 
 /** Unwrap the `{ extension }` envelope every extension lifecycle route answers with. */
@@ -1683,6 +1715,155 @@ class ApiClient {
       body: JSON.stringify({ version }),
     });
     return extractExtension(res, "Failed to activate extension version");
+  }
+
+  // ── Runtime pools ──
+
+  async fetchRuntimePools(): Promise<RuntimePool[]> {
+    const url = `${this.getBaseUrl()}/api/runtime-pools`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    const data = await runtimePoolResponse<{ pools: RuntimePool[] }>(
+      res,
+      "Failed to fetch runtime pools",
+    );
+    return data.pools;
+  }
+
+  async fetchRuntimePool(id: string): Promise<RuntimePool> {
+    const url = `${this.getBaseUrl()}/api/runtime-pools/${encodeURIComponent(id)}`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    const data = await runtimePoolResponse<{ pool: RuntimePool }>(
+      res,
+      "Failed to fetch runtime pool",
+    );
+    return data.pool;
+  }
+
+  async createRuntimePool(input: RuntimePoolInput): Promise<RuntimePool> {
+    const url = `${this.getBaseUrl()}/api/runtime-pools`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: this.getHeaders(),
+      body: JSON.stringify(input),
+    });
+    const data = await runtimePoolResponse<{ pool: RuntimePool }>(
+      res,
+      "Failed to create runtime pool",
+    );
+    return data.pool;
+  }
+
+  async updateRuntimePool(id: string, input: Partial<RuntimePoolInput>): Promise<RuntimePool> {
+    const url = `${this.getBaseUrl()}/api/runtime-pools/${encodeURIComponent(id)}`;
+    const res = await fetch(url, {
+      method: "PATCH",
+      headers: this.getHeaders(),
+      body: JSON.stringify(input),
+    });
+    const data = await runtimePoolResponse<{ pool: RuntimePool }>(
+      res,
+      "Failed to update runtime pool",
+    );
+    return data.pool;
+  }
+
+  /** `force` unbinds the pool's agents first; without it a bound pool answers 409. */
+  async deleteRuntimePool(id: string, force = false): Promise<void> {
+    const suffix = force ? "?force=true" : "";
+    const url = `${this.getBaseUrl()}/api/runtime-pools/${encodeURIComponent(id)}${suffix}`;
+    const res = await fetch(url, { method: "DELETE", headers: this.getHeaders() });
+    await runtimePoolResponse<{ deleted: true }>(res, "Failed to delete runtime pool");
+  }
+
+  async fetchRuntimePoolRuntimes(id: string): Promise<RuntimePoolRuntime[]> {
+    const url = `${this.getBaseUrl()}/api/runtime-pools/${encodeURIComponent(id)}/runtimes`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    const data = await runtimePoolResponse<{ runtimes: RuntimePoolRuntime[] }>(
+      res,
+      "Failed to fetch pool runtimes",
+    );
+    return data.runtimes;
+  }
+
+  /** Create an offline agent that is already bound to the pool. */
+  async createRuntimePoolAgent(id: string, input: RuntimePoolCreateAgentInput): Promise<Agent> {
+    const url = `${this.getBaseUrl()}/api/runtime-pools/${encodeURIComponent(id)}/agents`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: this.getHeaders(),
+      body: JSON.stringify(input),
+    });
+    const data = await runtimePoolResponse<{ agent: Agent }>(res, "Failed to create agent");
+    return data.agent;
+  }
+
+  /** Bind an agent to a pool, or unbind it with `poolId: null`. */
+  async bindAgentRuntimePool(agentId: string, poolId: string | null): Promise<Agent> {
+    const url = `${this.getBaseUrl()}/api/agents/${encodeURIComponent(agentId)}/runtime-pool`;
+    const res = await fetch(url, {
+      method: "PUT",
+      headers: this.getHeaders(),
+      body: JSON.stringify({ poolId }),
+    });
+    const data = await runtimePoolResponse<{ agent: Agent }>(res, "Failed to bind agent");
+    return data.agent;
+  }
+
+  async fetchRuntimeControllers(): Promise<RuntimeController[]> {
+    const url = `${this.getBaseUrl()}/api/runtime-controllers`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    const data = await runtimePoolResponse<{ controllers: RuntimeController[] }>(
+      res,
+      "Failed to fetch runtime controllers",
+    );
+    return data.controllers;
+  }
+
+  async fetchRuntimeController(id: string): Promise<RuntimeController> {
+    const url = `${this.getBaseUrl()}/api/runtime-controllers/${encodeURIComponent(id)}`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    const data = await runtimePoolResponse<{ controller: RuntimeController }>(
+      res,
+      "Failed to fetch runtime controller",
+    );
+    return data.controller;
+  }
+
+  async createRuntimeController(input: RuntimeControllerInput): Promise<RuntimeController> {
+    const url = `${this.getBaseUrl()}/api/runtime-controllers`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: this.getHeaders(),
+      body: JSON.stringify(input),
+    });
+    const data = await runtimePoolResponse<{ controller: RuntimeController }>(
+      res,
+      "Failed to create runtime controller",
+    );
+    return data.controller;
+  }
+
+  async updateRuntimeController(
+    id: string,
+    input: RuntimeControllerInput,
+  ): Promise<RuntimeController> {
+    const url = `${this.getBaseUrl()}/api/runtime-controllers/${encodeURIComponent(id)}`;
+    const res = await fetch(url, {
+      method: "PATCH",
+      headers: this.getHeaders(),
+      body: JSON.stringify(input),
+    });
+    const data = await runtimePoolResponse<{ controller: RuntimeController }>(
+      res,
+      "Failed to update runtime controller",
+    );
+    return data.controller;
+  }
+
+  async deleteRuntimeController(id: string): Promise<void> {
+    const url = `${this.getBaseUrl()}/api/runtime-controllers/${encodeURIComponent(id)}`;
+    const res = await fetch(url, { method: "DELETE", headers: this.getHeaders() });
+    await runtimePoolResponse<{ deleted: true }>(res, "Failed to delete runtime controller");
   }
 
   // ── Script connections ──

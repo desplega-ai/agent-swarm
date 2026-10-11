@@ -202,7 +202,7 @@ const footerNav: FooterItem[] = [
  * explains what the surface is — the sidebar already mounts a
  * `TooltipProvider` (delayDuration 0) around its whole subtree.
  */
-function BetaTag({ tooltip }: { tooltip: string }) {
+export function BetaTag({ tooltip }: { tooltip: string }) {
   return (
     <Tooltip>
       <TooltipTrigger asChild>

@@ -174,11 +174,113 @@ export interface Agent {
   claudeTransport?: ClaudeTransport;
   /** Last heartbeat or activity (ISO). "Alive" in `/status` = within 5 min and not offline. */
   lastActivityAt?: string;
+  /** Runtime pool this agent is bound to. Absent on APIs without runtime pools. */
+  runtimePoolId?: string | null;
   createdAt: string;
   lastUpdatedAt: string;
 }
 
 export type RuntimeInstanceStatus = "active" | "offline";
+
+// ── Runtime pools (mirror RuntimePoolSchema / RuntimeControllerSchema in src/types.ts) ──
+
+export type RuntimeProviderKind = "static" | "docker" | "e2b" | "k8s";
+export type RuntimeDeliveryMode = "poll" | "push";
+export type RuntimePoolLifecycle = "idle" | "per-task";
+
+export interface RuntimeResources {
+  cpu?: number;
+  memoryMb?: number;
+}
+
+export interface RuntimeController {
+  id: string;
+  name: string;
+  kind: RuntimeProviderKind;
+  placement: "builtin" | "remote";
+  config: Record<string, string>;
+  /** Names of the stored secret keys. The API never returns secret values. */
+  secretConfigKeys: string[];
+  secretConfigError?: boolean;
+  status: "online" | "offline" | "unknown";
+  lastSeenAt: string | null;
+  lastError: string | null;
+  lastErrorAt: string | null;
+  createdBy: string | null;
+  updatedBy: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RuntimeControllerInput {
+  name?: string;
+  kind?: RuntimeProviderKind;
+  placement?: "builtin" | "remote";
+  config?: Record<string, string>;
+  /** Write-only. A `null` value deletes that key on update. */
+  secretConfig?: Record<string, string | null>;
+}
+
+export interface RuntimePoolInput {
+  name: string;
+  kind: RuntimeProviderKind;
+  placements: [string];
+  image: string | null;
+  lifecycle: RuntimePoolLifecycle;
+  idleMinutes: number | null;
+  slotsPerRuntime: number;
+  maxRuntimes: number | null;
+  minRuntimes: number;
+  delivery: RuntimeDeliveryMode | null;
+  env: Record<string, string>;
+  resources: RuntimeResources | null;
+  ttlSec: number | null;
+  enabled: boolean;
+}
+
+export interface RuntimePool extends RuntimePoolInput {
+  id: string;
+  resolvedImage: string | null;
+  consecutiveFailures: number;
+  circuitOpenUntil: string | null;
+  lastError: string | null;
+  lastErrorAt: string | null;
+  createdBy: string | null;
+  updatedBy: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** One runtime row from `GET /api/runtime-pools/{id}/runtimes` (RuntimeInstanceSchema). */
+export interface RuntimePoolRuntime {
+  id: string;
+  agentId: string;
+  status: "active" | "offline" | "provisioning";
+  poolId?: string | null;
+  controllerId?: string | null;
+  externalHandle?: Record<string, unknown> | null;
+  provisionAttempts?: number;
+  provisionError?: string | null;
+  provisionRequestedAt?: string | null;
+  draining?: boolean;
+  idleSince?: string | null;
+  leaseExpiresAt?: string | null;
+  taskId?: string | null;
+  reportedSlots: number;
+  credentialReady?: boolean | null;
+  metadata: Record<string, unknown> | null;
+  lastSeenAt: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RuntimePoolCreateAgentInput {
+  name: string;
+  isLead?: boolean;
+  harnessProvider?: ProviderName;
+  maxTasks?: number;
+  templateId?: string;
+}
 
 export interface RuntimeInstance {
   id: string;
@@ -2973,6 +3075,8 @@ export interface StatusResponse {
   health: StatusHealth;
   /** Absent when the dashboard talks to an older API; treat absence as enabled. */
   telemetry?: StatusTelemetry;
+  /** Absent on APIs without runtime pools; treat absence as disabled. */
+  runtime_pools?: { enabled: boolean };
 }
 
 export interface TestConnectionResponse {

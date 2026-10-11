@@ -60,12 +60,8 @@ const TOUCH_POINTS: TouchPoint[] = [
       if (!match?.[1]) throw new Error("Cannot find RUNTIME_PROVIDER_KINDS in runtime-pools.ts.");
       return [...match[1].matchAll(/["']([^"']+)["']/g)].map((match) => match[1] as string);
     },
-    exempt: {
-      ...notImplemented,
-      static: "UI lands in step-11",
-      docker: "UI lands in step-11",
-      e2b: "UI lands in step-11",
-    },
+    // The UI lists k8s too (disabled, "coming soon"), so no kind is exempt.
+    exempt: {},
   },
 ];
 

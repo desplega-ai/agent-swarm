@@ -29,6 +29,9 @@ const ConfigurationPage = lazyRoute(() => import("@/pages/settings/configuration
 const ExtensionsPage = lazyRoute(() => import("@/pages/settings/extensions-page"));
 const ExtensionDetailPage = lazyRoute(() => import("@/pages/settings/extension-detail-page"));
 const ExtensionCatalogPage = lazyRoute(() => import("@/pages/settings/extension-catalog-page"));
+const RuntimePoolsPage = lazyRoute(() => import("@/pages/settings/runtime-pools-page"));
+const RuntimePoolDetailPage = lazyRoute(() => import("@/pages/settings/runtime-pool-detail-page"));
+const RuntimeControllersPage = lazyRoute(() => import("@/pages/settings/runtime-controllers-page"));
 const IntegrationsPage = lazyRoute(() => import("@/pages/integrations/page"));
 const IntegrationDetailPage = lazyRoute(() => import("@/pages/integrations/[id]/page"));
 const ReposPage = lazyRoute(() => import("@/pages/repos/page"));
@@ -191,6 +194,10 @@ export const router = createBrowserRouter([
           { path: "extensions", element: <ExtensionsPage /> },
           { path: "extensions/new", element: <ExtensionCatalogPage /> },
           { path: "extensions/:id", element: <ExtensionDetailPage /> },
+          { path: "runtime-pools", element: <RuntimePoolsPage /> },
+          { path: "runtime-pools/new", element: <RuntimePoolDetailPage /> },
+          { path: "runtime-pools/controllers", element: <RuntimeControllersPage /> },
+          { path: "runtime-pools/:id", element: <RuntimePoolDetailPage /> },
           { path: "repos", element: <ReposPage /> },
           { path: "debug", element: <DebugPage /> },
         ],
