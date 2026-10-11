@@ -13019,6 +13019,15 @@ export interface paths {
                         "application/json": components["schemas"]["AgentTask"];
                     };
                 };
+                /** @description Task belongs to another token agent */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
                 /** @description Task not found */
                 404: {
                     headers: {

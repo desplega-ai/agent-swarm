@@ -43,8 +43,8 @@ Bun auto-loads `.env`. Don't use `dotenv`.
 `AGENT_SWARM_API_KEY` / `API_KEY` and `SECRETS_ENCRYPTION_KEY` are reserved — they cannot be stored in `swarm_config`.
 
 Runtime tokens are `aseph_` bearer tokens bound to one agent and runtime, with access to that agent's resolved secrets.
-Non-lead runtime tokens read repo secrets only with an owned `X-Source-Task-Id` whose repository matches `repoId`.
-The runner sends this header for task config reads. Lead tokens retain `config.read.secrets`, and ACP tokens retain the global default scope.
+Repo-scoped secrets are not delivered to non-lead runtime-token workers in v1.
+Lead tokens retain `config.read.secrets`, and ACP tokens retain the global default scope.
 They replace the swarm key only for supervisor-provisioned runtimes, and runtime revocation also revokes their task tokens.
 
 SSRF guards on script-connection URL fetches (OpenAPI spec URLs, OAuth

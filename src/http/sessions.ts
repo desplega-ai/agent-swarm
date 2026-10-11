@@ -230,8 +230,14 @@ export async function handleSessions(
       const result = await getDbClient().transaction(async () => {
         if (auth.kind === "agent") {
           const task = taskId ? await getTaskById(taskId) : null;
-          if (agentId !== auth.agentId || runtimeId || !task || task.agentId !== auth.agentId) {
-            return { error: "Token can mint only for its own assigned task" };
+          if (
+            agentId !== auth.agentId ||
+            runtimeId ||
+            !task ||
+            task.agentId !== auth.agentId ||
+            (task.status !== "pending" && task.status !== "in_progress")
+          ) {
+            return { error: "Token can mint only for its own live assigned task" };
           }
           return {
             token: await mintSessionToken(agentId, taskId!, ttlMs!, {

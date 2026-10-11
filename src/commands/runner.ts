@@ -64,6 +64,7 @@ import { getApiKey } from "../utils/api-key.ts";
 import { computeBudgetBackoffMs } from "../utils/budget-backoff.ts";
 import { ensure, initialize } from "../utils/business-use";
 import { isCodexAuthFailureReason } from "../utils/codex-auth-failure.ts";
+import { MASKED_SECRET_VALUE } from "../utils/config-secrets.ts";
 import { getMcpBaseUrl } from "../utils/constants.ts";
 import { getContextWindowSize } from "../utils/context-window.ts";
 import {
@@ -882,10 +883,15 @@ export async function fetchResolvedEnv(
         }
 
         if (data.configs?.length) {
+          const skippedSecretKeys: string[] = [];
           scriptsOnlyConfigValue = data.configs.find(
             (config) => config.key === "SCRIPTS_ONLY_MCP",
           )?.value;
           for (const config of data.configs) {
+            if (config.isSecret && config.value === MASKED_SECRET_VALUE) {
+              skippedSecretKeys.push(config.key);
+              continue;
+            }
             // Read on demand via codex-oauth/storage.ts; see env-keys.ts.
             if (isCodexOAuthConfigKey(config.key)) continue;
             // Lets the scrubber redact `KEY=value` dumps of secret rows whose
@@ -918,6 +924,11 @@ export async function fetchResolvedEnv(
               continue;
             }
             env[config.key] = config.value;
+          }
+          if (skippedSecretKeys.length) {
+            console.warn(
+              scrubSecrets(`[env-reload] Skipped masked secrets: ${skippedSecretKeys.join(", ")}`),
+            );
           }
           console.log(`[env-reload] Loaded ${data.configs.length} config entries from API`);
         }

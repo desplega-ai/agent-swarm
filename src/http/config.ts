@@ -7,8 +7,6 @@ import {
   getSwarmConfigById,
   getSwarmConfigLookupById,
   getSwarmConfigs,
-  getSwarmRepoById,
-  getTaskById,
   maskSecrets,
 } from "../be/db";
 import {
@@ -54,12 +52,12 @@ function singleHeader(req: IncomingMessage, name: string): string | undefined {
   return Array.isArray(raw) ? raw[0] : raw;
 }
 
-async function requestMayReadSecrets(
+async function requestSecretReadScope(
   req: IncomingMessage,
   resolvedScope?: { agentId?: string; repoId?: string },
-): Promise<boolean> {
+): Promise<"all" | "self" | "none"> {
   const auth = getRequestAuth(req);
-  if (auth?.kind === "operator") return true;
+  if (auth?.kind === "operator") return "all";
   if (auth?.kind === "agent") {
     const agent = await getAgentById(auth.agentId);
     if (
@@ -70,34 +68,17 @@ async function requestMayReadSecrets(
         source: "http",
       }).allow
     )
-      return true;
-    if (!auth.runtimeId || resolvedScope?.agentId !== auth.agentId) return false;
-    if (!resolvedScope.repoId) return true;
-    const taskId = singleHeader(req, "x-source-task-id");
-    const task = taskId ? await getTaskById(taskId) : null;
-    if (task?.agentId !== auth.agentId || !task.vcsRepo) return false;
-    const repo = await getSwarmRepoById(resolvedScope.repoId);
-    if (!repo) return false;
-    const requested = task.vcsRepo
-      .trim()
-      .replace(/\/+$/, "")
-      .replace(/\.git$/, "");
-    const url = repo.url
-      .trim()
-      .replace(/\/+$/, "")
-      .replace(/\.git$/, "");
-    return (
-      url === requested ||
-      (!requested.includes(":") && (url.endsWith(`/${requested}`) || url.endsWith(`:${requested}`)))
-    );
+      return "all";
+    if (!auth.runtimeId || resolvedScope?.agentId !== auth.agentId) return "none";
+    return "self";
   }
-  if (auth?.kind === "guest") return false;
+  if (auth?.kind === "guest") return "none";
   // Preserve legacy reads without a user or session-token principal.
-  if (auth?.kind !== "user") return true;
-  if (!isRbacEnabled()) return true;
+  if (auth?.kind !== "user") return "all";
+  if (!isRbacEnabled()) return "all";
 
   const grant = await getUserGrant(auth.userId);
-  return grant.grantsAll || grant.verbs.has("config.read.secrets");
+  return grant.grantsAll || grant.verbs.has("config.read.secrets") ? "all" : "none";
 }
 
 async function resolveSecretsRead(
@@ -105,10 +86,13 @@ async function resolveSecretsRead(
   includeSecrets: boolean,
   resolvedScope?: { agentId?: string; repoId?: string },
 ) {
-  if (!includeSecrets || (await requestMayReadSecrets(req, resolvedScope))) {
-    return { effectiveIncludeSecrets: includeSecrets, secretsNote: "" };
-  }
-  return { effectiveIncludeSecrets: false, secretsNote: SECRETS_FORCE_MASK_NOTE };
+  const scope = await requestSecretReadScope(req, resolvedScope);
+  const auth = getRequestAuth(req);
+  return {
+    effectiveIncludeSecrets: includeSecrets && scope !== "none",
+    includeRepoSecrets: !(auth?.kind === "agent" && auth.runtimeId && scope !== "all"),
+    secretsNote: includeSecrets && scope === "none" ? SECRETS_FORCE_MASK_NOTE : "",
+  };
 }
 
 /**
@@ -343,7 +327,7 @@ export async function handleConfig(
         (auth?.kind === "agent" && auth.runtimeId ? auth.agentId : undefined),
       repoId: parsed.query.repoId || undefined,
     };
-    const { effectiveIncludeSecrets, secretsNote } = await resolveSecretsRead(
+    const { effectiveIncludeSecrets, includeRepoSecrets, secretsNote } = await resolveSecretsRead(
       req,
       includeSecrets,
       resolvedScope,
@@ -351,7 +335,7 @@ export async function handleConfig(
     // Filter by key before masking and before any secret is registered, so a
     // caller asking for one key never receives the rest (matches get-config).
     const configs = stripApiOnlyKeys(
-      await getResolvedConfig(resolvedScope.agentId, resolvedScope.repoId),
+      await getResolvedConfig(resolvedScope.agentId, resolvedScope.repoId, { includeRepoSecrets }),
     ).filter((c) => !key || c.key === key);
     const result = effectiveIncludeSecrets ? configs : maskSecrets(configs);
     if (effectiveIncludeSecrets) {

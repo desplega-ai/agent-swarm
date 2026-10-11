@@ -136,6 +136,7 @@ import {
   CODEX_AUTH_WATCH_NAMESPACE,
   codexAuthBenchMarkerKey,
 } from "../utils/codex-auth-failure";
+import { MASKED_SECRET_VALUE } from "../utils/config-secrets";
 import { deriveProviderFromKeyType } from "../utils/credentials";
 import type { RateLimitWindowTelemetry } from "../utils/error-tracker";
 import { extractGitHubPullRequestUrls } from "../utils/github-pull-request";
@@ -6415,7 +6416,7 @@ export function autoEncryptLegacyPlaintextSecrets(
  * Mask secret values in config entries for API responses.
  */
 export function maskSecrets(configs: SwarmConfig[]): SwarmConfig[] {
-  return configs.map((c) => (c.isSecret ? { ...c, value: "********" } : c));
+  return configs.map((c) => (c.isSecret ? { ...c, value: MASKED_SECRET_VALUE } : c));
 }
 
 /**
@@ -6698,7 +6699,11 @@ export async function deleteSwarmConfigByKey(
  * Scope resolution: repo > agent > global (most-specific wins).
  * Returns one entry per unique key with the most-specific scope winning.
  */
-export async function getResolvedConfig(agentId?: string, repoId?: string): Promise<SwarmConfig[]> {
+export async function getResolvedConfig(
+  agentId?: string,
+  repoId?: string,
+  options: { includeRepoSecrets?: boolean } = {},
+): Promise<SwarmConfig[]> {
   // Start with global configs
   const configMap = new Map<string, SwarmConfig>();
 
@@ -6719,6 +6724,7 @@ export async function getResolvedConfig(agentId?: string, repoId?: string): Prom
   if (repoId) {
     const repoConfigs = await getSwarmConfigs({ scope: "repo", scopeId: repoId });
     for (const config of repoConfigs) {
+      if (config.isSecret && options.includeRepoSecrets === false) continue;
       configMap.set(config.key, config);
     }
   }

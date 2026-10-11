@@ -9,6 +9,7 @@ import {
   createTaskExtended,
   getAgentById,
   getDbClient,
+  getTaskById,
   initDb,
   upsertSwarmConfig,
 } from "../be/db";
@@ -334,14 +335,14 @@ describe("runtime token HTTP and realtime auth", () => {
     ).toBe(200);
   });
 
-  test("runtime repo secrets require its assigned task and that task's repository", async () => {
+  test("rewriting an owned task's VCS cannot reveal repo secrets", async () => {
     const ownRepo = await createSwarmRepo({
       name: "review-own",
       url: "https://github.com/review/own.git",
     });
     const otherRepo = await createSwarmRepo({
-      name: "review-other",
-      url: "https://github.com/review/other.git",
+      name: "secret-repo",
+      url: "https://github.com/victim/secret-repo.git",
     });
     const task = await createTaskExtended("Repo scope task", {
       agentId,
@@ -360,21 +361,171 @@ describe("runtime token HTTP and realtime auth", () => {
         isSecret: true,
       });
     }
+    for (const scope of ["global", "agent"] as const) {
+      await upsertSwarmConfig({
+        scope,
+        scopeId: scope === "agent" ? agentId : undefined,
+        key: `REVIEW_${scope.toUpperCase()}_SECRET`,
+        value: `${scope}-allowed-secret`,
+        isSecret: true,
+      });
+      // An omitted repo secret must not suppress an allowed value with the same key.
+      await upsertSwarmConfig({
+        scope: "repo",
+        scopeId: otherRepo.id,
+        key: `REVIEW_${scope.toUpperCase()}_SECRET`,
+        value: `victim-${scope}-secret`,
+        isSecret: true,
+      });
+    }
+    await upsertSwarmConfig({
+      scope: "repo",
+      scopeId: otherRepo.id,
+      key: "REVIEW_REPO_PUBLIC",
+      value: "repo-public-value",
+      isSecret: false,
+    });
     const read = async (repoId: string, taskId?: string) => {
       const response = await request(
-        `/api/config/resolved?repoId=${repoId}&includeSecrets=true`,
+        `/api/config/resolved?agentId=${agentId}&repoId=${repoId}&includeSecrets=true`,
         token.plaintext,
         {
           headers: taskId ? { "X-Source-Task-Id": taskId } : {},
         },
       );
       expect(response.status).toBe(200);
-      return await response.text();
+      const data = (await response.json()) as {
+        configs: Array<{ key: string; value: string; scope: string }>;
+      };
+      expect(data.configs.find((config) => config.key === "REVIEW_GLOBAL_SECRET")?.value).toBe(
+        "global-allowed-secret",
+      );
+      expect(data.configs.find((config) => config.key === "REVIEW_AGENT_SECRET")?.value).toBe(
+        "agent-allowed-secret",
+      );
+      expect(data.configs.some((config) => config.key === "REVIEW_REPO_SECRET")).toBe(false);
+      if (repoId === otherRepo.id) {
+        expect(data.configs.find((config) => config.key === "REVIEW_REPO_PUBLIC")?.value).toBe(
+          "repo-public-value",
+        );
+      }
+      return JSON.stringify(data);
     };
-    expect(await read(ownRepo.id, task.id)).toContain("own-repo-secret");
+    expect(await read(ownRepo.id, task.id)).not.toContain("own-repo-secret");
     expect(await read(ownRepo.id)).not.toContain("own-repo-secret");
     expect(await read(otherRepo.id, task.id)).not.toContain("other-repo-secret");
     expect(await read(ownRepo.id, ownTaskId)).not.toContain("own-repo-secret");
+    for (const vcsRepo of ["victim/secret-repo", "secret-repo"]) {
+      const rewritten = await request(`/api/tasks/${task.id}/vcs`, token.plaintext, {
+        method: "PATCH",
+        body: {
+          vcsProvider: "github",
+          vcsRepo,
+          vcsNumber: 1,
+          vcsUrl: "https://github.com/victim/secret-repo/pull/1",
+        },
+      });
+      expect(rewritten.status).toBe(200);
+      expect((await getTaskById(task.id))?.vcsRepo).toBe(vcsRepo);
+      const response = await read(otherRepo.id, task.id);
+      expect(response).not.toContain("other-repo-secret");
+      expect(response).not.toContain("victim-global-secret");
+      expect(response).not.toContain("victim-agent-secret");
+    }
+    await getDbClient().run("UPDATE agent_tasks SET status = 'completed' WHERE id = ?", [task.id]);
+    expect(await read(otherRepo.id, task.id)).not.toContain("other-repo-secret");
+    const defaultScope = await request(
+      `/api/config/resolved?repoId=${otherRepo.id}&includeSecrets=true`,
+    );
+    expect(await defaultScope.text()).toContain("agent-allowed-secret");
+    const maskedRead = await request(
+      `/api/config/resolved?agentId=${agentId}&repoId=${otherRepo.id}&includeSecrets=false`,
+    );
+    const maskedData = await maskedRead.json();
+    expect(
+      maskedData.configs.some(
+        (config: { scope: string; isSecret: boolean }) =>
+          config.scope === "repo" && config.isSecret,
+      ),
+    ).toBe(false);
+    expect(JSON.stringify(maskedData)).not.toContain("agent-allowed-secret");
+    const leadId = crypto.randomUUID();
+    await createAgent({ id: leadId, name: "Repo secret lead", isLead: true, status: "idle" });
+    const lead = await mintRuntimeToken(leadId, crypto.randomUUID(), 60_000);
+    for (const bearer of [key, lead.plaintext]) {
+      const allowedRead = await request(
+        `/api/config/resolved?repoId=${otherRepo.id}&includeSecrets=true`,
+        bearer,
+      );
+      expect(allowedRead.status).toBe(200);
+      expect(await allowedRead.text()).toContain("other-repo-secret");
+    }
+  });
+
+  test("agent tokens can update VCS only for their assigned task, while swarm-key behavior remains", async () => {
+    const own = await createTaskExtended("VCS owner task", { agentId, source: "system" });
+    const other = await createTaskExtended("VCS other task", {
+      agentId: otherId,
+      source: "system",
+    });
+    const unassigned = await createTaskExtended("VCS unassigned task", { source: "system" });
+    const acp = await mintSessionToken(agentId, own.id, 60_000);
+    const body = {
+      vcsProvider: "github",
+      vcsRepo: "review/owner",
+      vcsNumber: 2,
+      vcsUrl: "https://github.com/review/owner/pull/2",
+    };
+    for (const bearer of [token.plaintext, acp.plaintext]) {
+      expect(
+        (await request(`/api/tasks/${own.id}/vcs`, bearer, { method: "PATCH", body })).status,
+      ).toBe(200);
+      for (const task of [other, unassigned]) {
+        const before = await getTaskById(task.id);
+        expect(
+          (await request(`/api/tasks/${task.id}/vcs`, bearer, { method: "PATCH", body })).status,
+        ).toBe(403);
+        expect(await getTaskById(task.id)).toEqual(before);
+      }
+    }
+    expect(
+      (
+        await request(`/api/tasks/${other.id}/vcs`, key, {
+          method: "PATCH",
+          body,
+          headers: { "X-Agent-ID": agentId },
+        })
+      ).status,
+    ).toBe(200);
+    expect((await getTaskById(other.id))?.vcsRepo).toBe(body.vcsRepo);
+  });
+
+  test("runtime child tokens require pending or in-progress tasks", async () => {
+    const task = await createTaskExtended("Child token status task", { agentId, source: "system" });
+    for (const status of [
+      "pending",
+      "in_progress",
+      "completed",
+      "failed",
+      "cancelled",
+      "paused",
+      "draft",
+      "unassigned",
+    ]) {
+      await getDbClient().run("UPDATE agent_tasks SET status = ? WHERE id = ?", [status, task.id]);
+      const before = await getDbClient().get<{ count: number }>(
+        "SELECT COUNT(*) AS count FROM session_tokens",
+      );
+      const response = await request("/api/sessions/tokens", token.plaintext, {
+        body: { agentId, taskId: task.id, ttlMs: 60_000 },
+      });
+      const live = status === "pending" || status === "in_progress";
+      expect(response.status).toBe(live ? 200 : 403);
+      const after = await getDbClient().get<{ count: number }>(
+        "SELECT COUNT(*) AS count FROM session_tokens",
+      );
+      expect(after!.count).toBe(before!.count + (live ? 1 : 0));
+    }
   });
 
   test("runtime task headers bind KV and MCP context, and agent tokens cannot impersonate pages", async () => {

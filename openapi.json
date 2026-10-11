@@ -31334,6 +31334,16 @@
               }
             }
           },
+          "403": {
+            "description": "Task belongs to another token agent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "404": {
             "description": "Task not found",
             "content": {
