@@ -2,9 +2,7 @@
 id: step-8
 name: Worker push client + delivery mode
 depends_on: [step-1, step-7]
-status: claimed
-assignee: codex-gpt-6.1-sol-pw-step-8
-claimed_at: 2026-10-11T02:00:00Z
+status: done
 ---
 
 <!-- During /v-implement, `desplega:step-running` adds `assignee` and `claimed_at` while
@@ -49,13 +47,13 @@ A worker in `push` mode keeps a socket to `/api/realtime`, subscribes to `worker
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Tests pass: `bun run test:root -- src/tests/worker-realtime-client.test.ts src/tests/runner-push-delivery.test.ts src/tests/runner-polling-api.test.ts src/tests/runner-slot-reconcile.test.ts src/tests/multi-runtime-registration.test.ts`
-- [ ] `bun run test:root -- src/tests/worker-realtime-client.test.ts` (real transport on `port: 0`): subscribe, ack, nudge delivery, reconnect after server-side close, synthetic replay nudges, backoff bounds
-- [ ] `bun run test:root -- src/tests/runner-push-delivery.test.ts` (fake API pattern from `runner-polling-api.test.ts`): idle push worker polls only on nudge/safety tick; cancel nudge aborts the right task; steer nudge dispatches; config nudge triggers reconcile; socket down → poll fallback; poll mode unchanged; `LEAD_MONITOR_CHANNELS` lead forced to poll
-- [ ] `bun run test:root -- src/tests/multi-runtime-registration.test.ts`: register response `deliveryMode` resolution (flag off, pool push, pool null + default, env override is worker-side)
-- [ ] `bash scripts/check-db-boundary.sh && bun run check:api-key-boundary` pass
-- [ ] `bun run docs:openapi` run and committed (register response gains `deliveryMode`), no diff afterwards
-- [ ] `bun run lint && bun run tsc:check:tsc` pass
+- [x] Tests pass: `bun run test:root -- src/tests/worker-realtime-client.test.ts src/tests/runner-push-delivery.test.ts src/tests/runner-polling-api.test.ts src/tests/runner-slot-reconcile.test.ts src/tests/multi-runtime-registration.test.ts`
+- [x] `bun run test:root -- src/tests/worker-realtime-client.test.ts` (real transport on `port: 0`): subscribe, ack, nudge delivery, reconnect after server-side close, synthetic replay nudges, backoff bounds
+- [x] `bun run test:root -- src/tests/runner-push-delivery.test.ts` (fake API pattern from `runner-polling-api.test.ts`): idle push worker polls only on nudge/safety tick; cancel nudge aborts the right task; steer nudge dispatches; config nudge triggers reconcile; socket down → poll fallback; poll mode unchanged; `LEAD_MONITOR_CHANNELS` lead forced to poll
+- [x] `bun run test:root -- src/tests/multi-runtime-registration.test.ts`: register response `deliveryMode` resolution (flag off, pool push, pool null + default, env override is worker-side)
+- [x] `bash scripts/check-db-boundary.sh && bun run check:api-key-boundary` pass
+- [x] `bun run docs:openapi` run and committed (register response gains `deliveryMode`), no diff afterwards
+- [x] `bun run lint && bun run tsc:check:tsc` pass
 
 #### Automated QA:
 - [ ] API on a temp DB with the flag on and `RUNTIME_DEFAULT_DELIVERY=push`. Run one docker worker by hand (`docker run … -e SWARM_DELIVERY_MODE=push ghcr.io/desplega-ai/agent-swarm-worker:slim`, image built from this branch with `bun run docker:build:worker:slim`). Create a task pinned to that worker's agent (`agentId` + `routingReason: "human_pinned"`; unassigned pool tasks need step-4): `startedAt - createdAt` under 1 s (compare with a poll-mode worker: about 0-2 s).

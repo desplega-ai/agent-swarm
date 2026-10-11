@@ -2,9 +2,7 @@
 id: step-4
 name: Server-side pool routing
 depends_on: [step-1]
-status: claimed
-assignee: codex-gpt-6.1-sol-pw-step-4
-claimed_at: 2026-10-11T02:00:00Z
+status: done
 ---
 
 <!-- During /v-implement, `desplega:step-running` adds `assignee` and `claimed_at` while
@@ -53,11 +51,11 @@ Lead wake demand itself (`pendingWorkForAgent`) is step-5's.
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Tests pass: `bun run test:root -- src/tests/runtime-pool-routing.test.ts src/tests/heartbeat.test.ts`
-- [ ] `bun run test:root -- src/tests/runtime-pool-routing.test.ts` cases cover: tier 1 beats tier 2; tier 2 waits for the grace; flag off → tier 2 never runs and heartbeat behavior is identical; harness and affinity filters apply to tier 2; circuit-open and disabled pools skipped; budget refusal leaves the task unassigned; headroom choice; flag-on tier 1 picks a busy agent with a free slot over waking; `pool_wake` re-route after the timeout and on circuit open, human pins untouched; `task.created` / release / reject triggers
-- [ ] `bun run test:root -- src/tests/runtime-pool-reachability.test.ts` covers `isAgentReachable` and each call site: user `send-task` to a sleeping pool lead succeeds, Slack follow-up routes to a sleeping pool worker, escalation not skipped, boot triage omits pool agents' pending tasks; flag off = today's behavior
-- [ ] `bun scripts/check-floating-promises.ts && bun scripts/check-promise-sinks.ts && bash scripts/check-async-db-seam.sh` pass
-- [ ] `bun run lint && bun run tsc:check:tsc` pass
+- [x] Tests pass: `bun run test:root -- src/tests/runtime-pool-routing.test.ts src/tests/heartbeat.test.ts`
+- [x] `bun run test:root -- src/tests/runtime-pool-routing.test.ts` cases cover: tier 1 beats tier 2; tier 2 waits for the grace; flag off → tier 2 never runs and heartbeat behavior is identical; harness and affinity filters apply to tier 2; circuit-open and disabled pools skipped; budget refusal leaves the task unassigned; headroom choice; flag-on tier 1 picks a busy agent with a free slot over waking; `pool_wake` re-route after the timeout and on circuit open, human pins untouched; `task.created` / release / reject triggers
+- [x] `bun run test:root -- src/tests/runtime-pool-reachability.test.ts` covers `isAgentReachable` and each call site: user `send-task` to a sleeping pool lead succeeds, Slack follow-up routes to a sleeping pool worker, escalation not skipped, boot triage omits pool agents' pending tasks; flag off = today's behavior
+- [x] `bun scripts/check-floating-promises.ts && bun scripts/check-promise-sinks.ts && bash scripts/check-async-db-seam.sh` pass
+- [x] `bun run lint && bun run tsc:check:tsc` pass
 
 #### Automated QA:
 - [ ] Boot the API on a temp DB with the flag on and `RUNTIME_WAKE_GRACE_SEC=3`. Create a `docker` pool and one agent on it (`POST /api/runtime-pools/{id}/agents`). Create an unassigned pool task with curl. After about 3-8 s, `GET /api/tasks/{id}` shows `status=pending`, `agentId=<pool agent>`.
