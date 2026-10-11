@@ -127,6 +127,7 @@ const proc = Bun.spawn(["bun", "--expose-gc", "src/http.ts"], {
   cwd: process.cwd(),
   env: {
     ...process.env,
+    DESPLEGA_TELEMETRY_ENV: "test",
     DATABASE_PATH: DB_PATH,
     AGENT_SWARM_API_KEY: KEY,
     HEARTBEAT_STALL_NO_SESSION_MIN: STALL_MIN,

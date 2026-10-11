@@ -144,6 +144,7 @@ async function maybeStartServer(): Promise<void> {
     stderr: Bun.file(logFile),
     env: {
       ...process.env,
+      DESPLEGA_TELEMETRY_ENV: "test",
       AGENT_SWARM_API_KEY: apiKey,
       API_KEY: apiKey,
       PORT: port,

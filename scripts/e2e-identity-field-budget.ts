@@ -48,6 +48,7 @@ const server = Bun.spawn(["bun", "run", "start:http"], {
   cwd: process.cwd(),
   env: {
     ...process.env,
+    DESPLEGA_TELEMETRY_ENV: "test",
     PORT: String(port),
     MCP_BASE_URL: baseUrl,
     DATABASE_PATH: dbPath,

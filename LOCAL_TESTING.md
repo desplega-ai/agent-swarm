@@ -12,6 +12,8 @@ Quick index:
 - [Dashboard UI](#dashboard-ui)
 - [Port-conflict resolution](#port-conflict-resolution)
 
+**Tag every API or worker you boot for a test.** Prefix the command with `DESPLEGA_TELEMETRY_ENV=test`, or pass `-e DESPLEGA_TELEMETRY_ENV=test` to `docker run`. An untagged boot reports to telemetry as a production install. Inside a swarm worker it also inherits that swarm's `SWARM_ORG_NAME`. `bun test`, `bun run e2e` and `bun run e2e:ui` tag themselves.
+
 ## Unit tests
 
 Runner: `bun run test:root` (workspace root). Bun version: the one in `package.json` `packageManager` (CI installs exactly that; `bun scripts/check-bun-version.ts` asserts the Dockerfiles match it).
@@ -331,7 +333,7 @@ Local install of the tracker: the template lives at `desplega-ai/agent-work`, `w
 ```bash
 PORT=3998 MCP_BASE_URL=http://127.0.0.1:3998 DATABASE_PATH=/tmp/ui-e2e-p2/tracker.sqlite \
   AGENT_SWARM_API_KEY=localkey API_KEY=localkey GITHUB_DISABLE=true LINEAR_DISABLE=true \
-  JIRA_DISABLE=true SLACK_DISABLE=true HEARTBEAT_DISABLE=true \
+  JIRA_DISABLE=true SLACK_DISABLE=true HEARTBEAT_DISABLE=true DESPLEGA_TELEMETRY_ENV=test \
   bun --no-env-file run src/http.ts
 ```
 
@@ -359,7 +361,7 @@ If you only need to verify the API boots and workers register — no tasks, no U
 ```bash
 # 1. Clean DB + start API
 rm -f agent-swarm-db.sqlite agent-swarm-db.sqlite-wal agent-swarm-db.sqlite-shm
-bun run start:http &
+DESPLEGA_TELEMETRY_ENV=test bun run start:http &
 
 # 2. Build worker image (slim is faster and sufficient for smoke tests;
 #    use `bun run docker:build:worker` + :latest when the test needs
@@ -448,6 +450,7 @@ Defaults: UI on `APP_URL` (port 5274), API proxy on `http://localhost:3013`. Set
 `VITE_PROXY_TARGET` to use another development API. See `apps/ui/README.md` for fixed deployments.
 
 ```bash
+DESPLEGA_TELEMETRY_ENV=test bun run start:http &   # API for QA, port 3013
 cd apps/ui && bun run dev   # port 5274
 cd apps/ui && bun run dev --port 5275   # if 5274 is taken
 ```

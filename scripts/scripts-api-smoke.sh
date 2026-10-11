@@ -22,7 +22,7 @@ cleanup() {
 trap cleanup EXIT
 
 if [[ -z "${SWARM_BASE_URL:-}" ]]; then
-  AGENT_SWARM_API_KEY="$API_KEY" PORT="${PORT:-3013}" bun run start:http >"$LOG_FILE" 2>&1 &
+  DESPLEGA_TELEMETRY_ENV=test AGENT_SWARM_API_KEY="$API_KEY" PORT="${PORT:-3013}" bun run start:http >"$LOG_FILE" 2>&1 &
   SERVER_PID=$!
   STARTED_SERVER=1
 fi

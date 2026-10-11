@@ -68,7 +68,7 @@ Full rules: [runbooks/extensions.md](./runbooks/extensions.md).
 | Command | What it does |
 |---|---|
 | `bun install` | Install deps |
-| `bun run start:http` | MCP HTTP server (port 3013) |
+| `bun run start:http` | MCP HTTP server (port 3013). For a test or QA boot, prefix `DESPLEGA_TELEMETRY_ENV=test` |
 | `bun run dev:http` | Hot reload, portless: `https://api.swarm.localhost:1355` |
 | `bun run lint:fix` | Lint & format with Biome |
 | `bun run lint:slop` | Anti-slop Oxlint rule subset (`oxlint.config.ts`, vendored plugin in `tools/oxlint/anti-slop/`) |

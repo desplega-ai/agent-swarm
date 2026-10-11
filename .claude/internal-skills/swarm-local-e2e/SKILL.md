@@ -56,10 +56,12 @@ lsof -ti :$PORT | xargs kill 2>/dev/null
 # Clean DB for fresh state
 rm -f agent-swarm-db.sqlite agent-swarm-db.sqlite-wal agent-swarm-db.sqlite-shm
 
-# Start API server
-bun run start:http &
+# Start API server (tagged as a test install so it stays out of production telemetry)
+DESPLEGA_TELEMETRY_ENV=test bun run start:http &
 # Wait ~3s for startup, confirm "MCP HTTP server running on http://localhost:$PORT/mcp"
 ```
+
+Keep `DESPLEGA_TELEMETRY_ENV=test` on every API and container you boot for a test. Without it, the boot reports as a production install and inherits the swarm's `SWARM_ORG_NAME`.
 
 ## Step 3: Build Docker Image
 
@@ -77,6 +79,7 @@ Use a **unique container name** to avoid conflicts with other worktrees (e.g. in
 docker run --rm -d \
   --name e2e-lead-$(git branch --show-current | tr '/' '-') \
   --env-file .env.docker-lead \
+  -e DESPLEGA_TELEMETRY_ENV=test \
   -e AGENT_ROLE=lead \
   -e MAX_CONCURRENT_TASKS=1 \
   -p 3201:3000 \
@@ -97,6 +100,7 @@ If port 3201 is taken by another worktree, pick a different host port (e.g. `-p 
 docker run --rm -d \
   --name e2e-worker-$(git branch --show-current | tr '/' '-') \
   --env-file .env.docker \
+  -e DESPLEGA_TELEMETRY_ENV=test \
   -e MAX_CONCURRENT_TASKS=1 \
   -p 3203:3000 \
   agent-swarm-worker:slim

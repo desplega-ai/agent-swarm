@@ -73,7 +73,7 @@ trap cleanup EXIT
 echo "=== E2E Workflow Redesign Tests ==="
 echo ""
 rm -f agent-swarm-db.sqlite agent-swarm-db.sqlite-wal agent-swarm-db.sqlite-shm
-SLACK_DISABLE=true GITHUB_DISABLE=true bun run start:http &
+DESPLEGA_TELEMETRY_ENV=test SLACK_DISABLE=true GITHUB_DISABLE=true bun run start:http &
 # Wait for server to be ready (health check with retry)
 for i in $(seq 1 10); do
   curl -sf "$API/api/agents" -H "$AUTH" > /dev/null 2>&1 && break

@@ -187,6 +187,7 @@ async function startApi() {
     cwd: import.meta.dir + "/..",
     env: {
       ...process.env,
+      DESPLEGA_TELEMETRY_ENV: "test",
       PORT,
       API_KEY,
       DATABASE_PATH: DB_PATH,

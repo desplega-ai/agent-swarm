@@ -144,6 +144,7 @@ async function startOpencodeWorker(
   const containerName = `${CONTAINER_PREFIX}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
 
   const envFlags: string[] = [
+    "-e", "DESPLEGA_TELEMETRY_ENV=test",
     "-e", "HARNESS_PROVIDER=opencode",
     "-e", `API_KEY=${API_KEY}`,
     "-e", `AGENT_ID=${agentId}`,
@@ -494,6 +495,7 @@ async function main() {
   apiProc = Bun.spawn(["bun", "run", "src/http.ts"], {
     env: {
       ...process.env,
+      DESPLEGA_TELEMETRY_ENV: "test",
       PORT,
       API_KEY,
       DATABASE_PATH: DB_PATH,

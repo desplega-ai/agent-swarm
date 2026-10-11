@@ -161,6 +161,8 @@ async function startWorker(
 
   const envFlags: string[] = [
     "-e",
+    "DESPLEGA_TELEMETRY_ENV=test",
+    "-e",
     `HARNESS_PROVIDER=${provider}`,
     "-e",
     `API_KEY=${API_KEY}`,
@@ -791,6 +793,7 @@ async function main() {
   apiProc = Bun.spawn(["bun", "run", "src/http.ts"], {
     env: {
       ...process.env,
+      DESPLEGA_TELEMETRY_ENV: "test",
       PORT,
       API_KEY,
       DATABASE_PATH: DB_PATH,

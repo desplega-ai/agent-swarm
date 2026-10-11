@@ -12,7 +12,7 @@ set -euo pipefail
 #   PORT=3014 ./scripts/e2e-workflow-test.sh
 #
 # Prerequisites:
-#   - API server running: bun run start:http
+#   - API server running: DESPLEGA_TELEMETRY_ENV=test bun run start:http
 #   - curl and jq installed
 # ===========================================================================
 
@@ -76,7 +76,7 @@ assert_json() {
 log "Checking API server at ${BASE_URL}..."
 if ! curl -sf -o /dev/null "${BASE_URL}/api/agents" -H "Authorization: Bearer ${API_KEY}" 2>/dev/null; then
   echo -e "\033[1;31mERROR: API server not reachable at ${BASE_URL}\033[0m"
-  echo "Start it first: PORT=${PORT} bun run start:http"
+  echo "Start it first: DESPLEGA_TELEMETRY_ENV=test PORT=${PORT} bun run start:http"
   exit 1
 fi
 log "Server is up."
