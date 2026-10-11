@@ -8,6 +8,7 @@ export const MODEL_SOURCE_LABELS: Record<ModelSource, string> = {
   "tier-config": "Tier config",
   "tier-default": "Tier default",
   "fallback:cli-unsupported": "Fallback (CLI rejected the requested model)",
+  "fallback:cli-unsupported:model": "Fallback (CLI rejected the task's own model)",
 };
 
 export function modelSourceLabel(source: string): string {

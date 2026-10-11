@@ -38,7 +38,8 @@ export type ModelSource =
   | "worker-env"
   | "tier-config"
   | "tier-default"
-  | "fallback:cli-unsupported";
+  | "fallback:cli-unsupported"
+  | "fallback:cli-unsupported:model";
 /** One row of `GET /api/models-catalog/tiers`: what a tier resolves to for a provider. */
 export interface ModelTierPreview {
   provider: string;
