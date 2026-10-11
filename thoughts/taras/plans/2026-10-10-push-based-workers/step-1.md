@@ -2,7 +2,9 @@
 id: step-1
 name: Runtime pools + controllers entity
 depends_on: []
-status: ready
+status: claimed
+assignee: codex-gpt-6.1-sol-pw-step-1
+claimed_at: 2026-10-11T00:00:00Z
 ---
 
 <!-- During /v-implement, `desplega:step-running` adds `assignee` and `claimed_at` while

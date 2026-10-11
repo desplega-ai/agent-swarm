@@ -2,7 +2,9 @@
 id: step-2
 name: Runtime token + central agent binding
 depends_on: []
-status: ready
+status: claimed
+assignee: codex-gpt-6.1-sol-pw-step-2
+claimed_at: 2026-10-11T00:00:00Z
 ---
 
 <!-- During /v-implement, `desplega:step-running` adds `assignee` and `claimed_at` while

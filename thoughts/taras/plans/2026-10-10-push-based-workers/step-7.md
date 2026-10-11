@@ -2,7 +2,9 @@
 id: step-7
 name: "Push server: worker namespace + nudges"
 depends_on: []
-status: ready
+status: claimed
+assignee: codex-gpt-6.1-sol-pw-step-7
+claimed_at: 2026-10-11T00:00:00Z
 ---
 
 <!-- During /v-implement, `desplega:step-running` adds `assignee` and `claimed_at` while
