@@ -581,6 +581,25 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         docsUrl: `${DOCS}ui/configuration#runtime-pools`,
       },
       {
+        key: "E2B_API_BASE",
+        label: "E2B API endpoint",
+        description:
+          "Custom E2B API endpoint for built-in controllers. Controller configuration overrides this fallback.",
+        kind: "string",
+        defaultValue: "",
+        docsUrl: `${DOCS}guides/runtime-pools#e2b-pools`,
+      },
+      {
+        key: "RUNTIME_DOCKER_HOST",
+        label: "Seeded Docker socket",
+        description:
+          "Seed the built-in Docker controller with this Unix socket, even when Docker is offline. Existing controller configuration takes precedence.",
+        kind: "string",
+        defaultValue: "",
+        restartRequired: true,
+        docsUrl: `${DOCS}guides/runtime-pools#docker-pools`,
+      },
+      {
         key: "DOCKER_HOST",
         label: "Docker socket",
         description:

@@ -61,6 +61,12 @@ SDK allowlist instead), and HTTP REST routes are generally not gated.
   - [extension-catalog](#extension-catalog)
   - [extension-install](#extension-install)
   - [extension-list](#extension-list)
+  - [runtime-pool-list](#runtime-pool-list)
+  - [runtime-pool-upsert](#runtime-pool-upsert)
+  - [runtime-pool-delete](#runtime-pool-delete)
+  - [runtime-pool-bind-agent](#runtime-pool-bind-agent)
+  - [runtime-pool-create-agent](#runtime-pool-create-agent)
+  - [runtime-controller-list](#runtime-controller-list)
   - [script-delete](#script-delete)
   - [script-query-types](#script-query-types)
   - [launch-script-run](#launch-script-run)
@@ -739,6 +745,60 @@ Activate a stored extension version, reloading it if enabled. Requires a lead, o
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `enabledOnly` | `boolean` | No | - | Return only enabled extensions. |
+
+### runtime-pool-list
+
+**Runtime Pool List**
+
+List runtime pools and their configuration.
+
+*No parameters*
+
+### runtime-pool-upsert
+
+**Runtime Pool Upsert**
+
+Create a runtime pool, or update a pool by id. Creation requires name, kind, and one controller placement.
+
+See the [input schema](https://github.com/desplega-ai/agent-swarm/blob/main/src/tools/runtime-pool-upsert.ts) for parameters.
+
+### runtime-pool-delete
+
+**Runtime Pool Delete**
+
+Delete a runtime pool. Set force to unbind its agents before deletion.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `poolId` | `string` | Yes | - | - |
+| `force` | `boolean` | No | - | - |
+
+### runtime-pool-bind-agent
+
+**Runtime Pool Bind Agent**
+
+Bind an agent to a runtime pool. Use a null poolId to remove the binding.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `agentId` | `string` | Yes | - | - |
+| `poolId` | `string` | Yes | - | - |
+
+### runtime-pool-create-agent
+
+**Runtime Pool Create Agent**
+
+Create an offline agent bound to a pool. An existing lead prevents creation of another lead.
+
+See the [input schema](https://github.com/desplega-ai/agent-swarm/blob/main/src/tools/runtime-pool-create-agent.ts) for parameters.
+
+### runtime-controller-list
+
+**Runtime Controller List**
+
+List runtime controllers. Responses contain secret key names and omit secret values.
+
+*No parameters*
 
 ### script-delete
 

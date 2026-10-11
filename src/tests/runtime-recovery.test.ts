@@ -1,5 +1,6 @@
 import { expect, spyOn, test } from "bun:test";
 import { createServer } from "node:http";
+import WebSocket from "ws";
 import {
   completeTask,
   createTaskExtended,
@@ -29,6 +30,7 @@ import * as heartbeat from "../heartbeat/heartbeat";
 import { codeLevelTriage, setBeforeHeartbeatSupersedeForTests } from "../heartbeat/heartbeat";
 import { resolveHttpRequestAuth } from "../http/auth";
 import { realtimeBus } from "../realtime/bus";
+import { attachRealtimeTransport } from "../realtime/transport";
 import { runtimeFailureFixture } from "./runtime-pools-test-utils";
 import { listenOnFreePort } from "./test-net";
 
@@ -217,6 +219,52 @@ test("socket disconnect recovers a gone provider runtime", async () => {
   realtimeBus.publish("worker.socket.disconnected", { agentId: agent.id, runtimeId: runtime.id });
   for (let n = 0; n < 100 && (await getActiveSessionForTask(task.id)); n++) await Bun.sleep(5);
   await assertRecovered(task.id, runtime.id, agent.id, token);
+});
+
+test("a real worker socket disconnect reaches runtime recovery with its token identity", async () => {
+  const { agent, task, runtime, token } = await running({ delivery: "push" });
+  process.env.RUNTIME_SOCKET_GRACE_SEC = "0";
+  startRuntimeRecovery();
+  const server = createServer();
+  const detach = attachRealtimeTransport(server);
+  const port = await listenOnFreePort(server);
+  const ws = new WebSocket(`ws://127.0.0.1:${port}/api/realtime`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  try {
+    const subscribed = new Promise<void>((resolve, reject) => {
+      ws.on("error", reject);
+      ws.on("message", (raw) => {
+        const frame = JSON.parse(raw.toString());
+        if (typeof frame.seq === "number") ws.send(JSON.stringify({ ack: frame.seq }));
+        if (frame.id === 1) {
+          if (frame.type === "error") reject(new Error(frame.error));
+          else resolve();
+        }
+      });
+      ws.once("open", () => {
+        ws.send(
+          JSON.stringify({
+            id: 1,
+            op: "subscribe",
+            namespace: `worker:${agent.id}`,
+            name: "nudge",
+          }),
+        );
+      });
+    });
+    await subscribed;
+    state.fake.runtimes.clear();
+    const closed = new Promise<void>((resolve) => ws.once("close", () => resolve()));
+    ws.close();
+    await closed;
+    for (let n = 0; n < 100 && (await getActiveSessionForTask(task.id)); n++) await Bun.sleep(5);
+    await assertRecovered(task.id, runtime.id, agent.id, token);
+  } finally {
+    ws.terminate();
+    detach();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
 });
 
 test("reconnection or another connected socket cancels a grace check", async () => {
