@@ -110,6 +110,33 @@ Provider death triggers heartbeat recovery for sessions owned by that runtime.
 See [heartbeat and crash recovery](./heartbeat-crash-recovery.md#1a-runtime-liveness-multi_runtime_enabled-only) for recovery rules and environment settings.
 See the [operator guide](../docs-site/content/docs/(documentation)/guides/runtime-pools.mdx) for setup and troubleshooting.
 
+## Routing and offers
+
+With both runtime flags enabled, warm routing requires an active, fresh runtime that accepts work.
+Its pool must be enabled. The runtime must not drain or report unavailable credentials.
+A null credential report remains eligible. Completed per-task runtimes remain excluded during their exit grace.
+Routing counts occupied runtime slots and reserves slots for pending assignments, within the agent's logical capacity.
+Warm assignment checks physical capacity again within its write transaction, so concurrent routers cannot reserve the same last slot.
+An open pool circuit blocks new provisioning but permits warm routing to healthy runtimes.
+
+Wakeable pools must support provisioning, allow at least one runtime, and have an image or resolved image.
+An unlimited `maxRuntimes` remains wakeable. Zero capacity and missing images block tier-2 routing and sleeping-agent reachability.
+
+The routing sweep examines current pool agents and agents whose runtime rows record a previous pool.
+It releases unmarked pending assignments only when the agent has no eligible runtime, no provision in progress, and no wakeable pool.
+Unbound agents and missing, disabled, or non-wakeable pools meet the last condition.
+Sleeping agents in wakeable pools retain explicit assignments, including between per-task runtimes and during provision backoff.
+The supervisor handles their pending demand and its existing attempt-limit failure path.
+Busy eligible runtimes and provisions preserve these assignments.
+Marked wake assignments retain their timeout and circuit rules. Human pins remain assigned.
+The release checks pending status, recipient, wake marker, and human-pin exclusion, so a concurrent claim wins.
+
+Heartbeat preserves offers to offline pool agents that can wake or have a provision in progress on an enabled pool.
+An existing provision preserves reachability even when the pool circuit opens.
+Heartbeat supplies the reachability predicate to the legacy reaper, which keeps the database layer independent of runtime pools.
+The reaper still releases offers to deleted or unreachable offline recipients and preserves concurrent claims.
+With `RUNTIME_POOLS_ENABLED=false`, routing and offer cleanup retain their legacy behavior.
+
 ## Adapter contract
 
 `createRuntimeProvider(kind, target?)` imports adapters lazily. Pass the target when E2B traits must reflect a configured tier.

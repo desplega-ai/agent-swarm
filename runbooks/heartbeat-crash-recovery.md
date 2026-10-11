@@ -39,6 +39,16 @@ flowchart TD
 - `autoAssignPoolTasks` and `claimTask`/`assignUnassignedTaskPending` are gated by the **routing-affinity eligibility check** (§4, `isAgentEligibleForTask`) — a pooled task tagged with a `routingAffinity` snapshot (from a resume/retry, or an explicit `requiredCapabilities` on a fresh `send-task`) can only go to a role/capability-matching agent. Untagged tasks are unaffected — assignment stays open to any idle (non-lead) worker, exactly as before. The pool paths (`autoAssignPoolTasks` and the poll auto-claim scan) also apply `poolTaskRunsOnHarness(task, harness)` (`src/be/model-validation.ts`): a task that pins a `model` the worker's harness cannot run is skipped for that worker and waits for a compatible one ([model-tiers.md § Harness compatibility](./model-tiers.md)). `autoAssignPoolTasks` **does** skip idle workers whose `emptyPollCount >= MAX_EMPTY_POLLS` (the poll gate) — assigning to them would just have them exit on their next poll. The filter reads `emptyPollCount` off the rows `getIdleWorkersWithCapacity()` already returns (no per-worker re-query). Note the poll gate is cleared on a genuine `waiting_for_credentials -> ready` recovery (`updateAgentCredentialState`) and on re-register, but **not** by routine post-task `ready:true` credential reports.
 - `checkWorkerHealth` only flips `busy↔idle` (it pre-filters `offline`) and never sets `offline`. A successful `/api/poll` dispatch updates the agent to `busy` in the same transaction that starts a pre-assigned task or claims a pool task; the worker-only `poll-task` tool does the same for its direct pending-task path. The heartbeat sweep remains the reconciliation backstop for any other task-state transition that leaves `agents.status` stale. Leads can become `busy` while running a directly assigned task, but remain structurally excluded from pool assignment (`getIdleWorkersWithCapacity` and the pool dispatch query filter `isLead=0`). `offline` has two writers: the graceful `POST /close` handler (`src/http/core.ts`), and — only when `MULTI_RUNTIME_ENABLED` is enabled — the stale-runtime expiry in §1a. With the flag explicitly off, a hard-crashed (SIGKILL) worker is still never auto-offlined.
 
+### Offer cleanup
+
+After runtime expiry, heartbeat releases offers to deleted or unreachable offline recipients.
+Both full triage and cleanup-only sweeps pass `isAgentReachable` to the legacy offer reaper.
+With runtime pools enabled, an offline agent remains reachable when its enabled pool can wake or already has a provision in progress.
+Wakeable pools require nonzero runtime capacity and an image or resolved image, in addition to a provisionable kind and closed circuit.
+An existing provision preserves reachability during an open circuit.
+The guarded update only releases tasks still offered to an offline or deleted recipient, so a concurrent claim wins.
+With `RUNTIME_POOLS_ENABLED=false`, the reaper retains its legacy offline predicate and clears the released recipient and offer timestamp.
+
 ### Workflow recovery
 
 Every cleanup sweep invokes `recoverIncompleteRuns`, also used at server startup.
@@ -529,23 +539,36 @@ Routing creates demand for the supervisor. Routing does not provision runtimes.
 flowchart TD
   trigger["Creation, release, rejection, timer, heartbeat"] --> flag{"Runtime pools and multi-runtime enabled?"}
   flag -->|no| legacy["Heartbeat: legacy idle workers and polling gates"]
-  flag -->|yes| reroute["Release expired pending wake assignments<br/>or assignments on an open circuit<br/>Keep human pins"]
+  flag -->|yes| reroute["Release expired or circuit-blocked wakes<br/>Release unmarked pool assignments only without runtime, provision, or wakeable pool<br/>Keep human pins"]
   reroute --> warm{"Eligible live worker with free capacity?"}
   warm -->|yes| assign["CAS to pending<br/>Publish work nudge after commit"]
   warm -->|no| grace{"Task age reaches wake grace?"}
   grace -->|no| queued["Leave unassigned"]
-  grace -->|yes| wake["Enabled provisionable pool, closed circuit<br/>Eligible worker with headroom<br/>Most headroom first, ties by name"]
+  grace -->|yes| wake["Enabled provisionable pool, closed circuit<br/>Nonzero runtime capacity and image<br/>Eligible worker with headroom<br/>Most headroom first, ties by name"]
   wake --> budget{"Budget admission allows assignment?"}
   budget -->|yes| mark["CAS to pending with pool_wake_at<br/>Supervisor sees demand"]
   budget -->|no eligible candidate| queued
 ```
 
-A busy worker can receive another task if it has a live runtime and spare capacity.
+A busy worker can receive another task if it has an eligible runtime and spare physical and logical capacity.
+Warm runtimes must be active and fresh, with no draining flag or unavailable credentials.
+A null credential report remains eligible. Bound agents require an enabled pool.
+Completed per-task runtimes remain excluded during their exit grace.
+Occupied sessions consume physical slots. A runtime task in progress or review consumes one slot when its session is absent.
+Pending assignments reserve physical slots. Warm assignment checks capacity again within its write transaction.
+An open circuit permits warm routing to healthy runtimes.
 Both tiers apply `isAgentEligibleForTask` and `poolTaskRunsOnHarness`.
 Tier 2 also applies `canClaim`, including the task requester budget.
 A budget refusal skips that agent and tries the next eligible candidate because agent budgets can differ.
 Wake assignments use `pool_wake_at`. They retain the existing routing reason.
-The router releases only marked pending wake assignments after the timeout or when their pool circuit opens.
+The router releases marked pending wake assignments after the timeout or when their pool circuit opens.
+It also examines agents whose runtime rows record a previous pool, including after unbinding or pool deletion.
+It releases unmarked pending assignments only without an eligible runtime, a provision in progress, or a wakeable pool.
+This covers unbound agents and missing, disabled, or non-wakeable pools.
+Sleeping agents in wakeable pools retain explicit assignments, including between per-task runtimes and during provision backoff.
+The supervisor handles pending demand and its existing attempt-limit failure path.
+Busy eligible runtimes and provisions preserve unmarked assignments.
+The release guards pending status, recipient, wake marker, and human-pin exclusion, so a concurrent claim wins.
 Human pins remain assigned.
 The sweep excludes the released agent for that pass when another eligible wake candidate exists.
 It retries the same agent only when it is the sole candidate and its pool circuit is closed.
@@ -604,11 +627,16 @@ cascadeFailDependents(task.id, "failed")   # whatever still depends on the swept
 routePoolTasks(taskIds?, now):
     read pools and agent snapshots without a write transaction
     if no taskIds and both runtime pools and multi-runtime enabled:
-        for pending task with pool_wake_at and routingReason != human_pinned:
-            if wake age >= RUNTIME_WAKE_REROUTE_SEC (default 600)
-               or its pool circuit is open:
-                releaseTask(task, wake snapshot)       # CAS pending wake, remember old agent
-    warm = live non-Lead agents with pending + in_progress < maxTasks
+        for pending task with a wake marker or current/recorded pool agent, excluding human_pinned:
+            if marked wake age >= RUNTIME_WAKE_REROUTE_SEC (default 600)
+               or marked wake's pool circuit is open
+               or unmarked pool assignment has no eligible runtime, provision, or wakeable pool:
+                releaseTask(task, snapshot) if marked, else guarded UPDATE
+                # CAS pending recipient and wake marker, remember old agent
+    warm = non-Lead agents with eligible runtimes and pending + in_progress < maxTasks
+    eligible runtime = active, fresh, not draining, credentials ready or null, pool enabled if bound
+    exclude completed per-task runtimes during exit grace
+    require free physical slots after occupied sessions and pending reservations
     if runtime pools disabled or multi-runtime disabled:
         warm = legacy idle workers with capacity
         require a live runtime only when multi-runtime mode is enabled
@@ -618,6 +646,7 @@ routePoolTasks(taskIds?, now):
         worker = first warm agent passing eligibility and harness compatibility
         if no worker and both flags enabled and task age >= RUNTIME_WAKE_GRACE_SEC (default 15):
             wake = non-Lead agents bound to enabled provisionable pools with closed circuits
+            require maxRuntimes != 0 and an image or resolved image
             exclude waiting_for_credentials and agents without headroom
             filter by eligibility and harness compatibility
             exclude released agent unless it is the only eligible wake candidate
@@ -625,7 +654,9 @@ routePoolTasks(taskIds?, now):
             worker = first candidate allowed by canClaim(agent, now, requestedByUserId)
             if worker: pool_wake_at = now
         if worker:
-            assignUnassignedTaskPending(task, worker, snapshots) # CAS state and capacity
+            transaction for warm assignment with both flags enabled, otherwise direct:
+                if warm with both flags: recheck eligible runtime slots minus pending reservations
+                assignUnassignedTaskPending(task, worker, snapshots) # CAS state and capacity
             reserve one slot                         # pending assignments consume headroom
 
 # HTTP poll auto-claim (getUnassignedTaskIdsForAgent(agent, 5, accept)):

@@ -6,6 +6,7 @@ import { workflowEventBus } from "../../workflows/event-bus";
 import { canClaim } from "../budget-admission";
 import {
   assignUnassignedTaskPending,
+  createLogEntry,
   getAllAgents,
   getDbClient,
   getIdleWorkersWithCapacity,
@@ -17,7 +18,7 @@ import {
 } from "../db";
 import { type AgentTaskRow, rowToAgentTask } from "../db/tasks/read";
 import { poolTaskRunsOnHarness } from "../model-validation";
-import { agentsWithLiveRuntime } from "../multi-runtime";
+import { agentsWithLiveRuntime, runtimeStaleThresholdMinutes } from "../multi-runtime";
 import { listRuntimePools } from "./db";
 import { isRuntimePoolWakeable } from "./reachability";
 
@@ -27,6 +28,31 @@ function nonnegativeEnv(key: string, fallback: number): number {
   return raw && Number.isInteger(n) && n >= 0 ? n : fallback;
 }
 
+async function eligibleRuntimeSlots(agentId?: string): Promise<Map<string, number>> {
+  const runtimes = await getDbClient().query<{ agent_id: string; free_slots: number }>(
+    `SELECT r.agent_id, SUM(MAX(0, r.reported_slots - MAX(
+       (SELECT COUNT(*) FROM active_sessions WHERE runtimeInstanceId = r.id),
+       CASE WHEN t.status IN ('in_progress', 'reviewing') THEN 1 ELSE 0 END
+     ))) AS free_slots
+     FROM runtime_instances r JOIN agents a ON a.id = r.agent_id
+     LEFT JOIN runtime_pools p ON p.id = a.runtime_pool_id
+     LEFT JOIN agent_tasks t ON t.id = r.task_id
+     WHERE r.status = 'active' AND r.draining = 0
+       AND (r.credential_ready IS NULL OR r.credential_ready = 1)
+       AND r.last_seen_at >= ?
+       AND (a.runtime_pool_id IS NULL OR p.enabled = 1)
+       AND (COALESCE(p.lifecycle, 'idle') != 'per-task' OR t.id IS NULL
+         OR t.status NOT IN ('completed', 'failed', 'cancelled', 'superseded'))
+       ${agentId ? "AND r.agent_id = ?" : ""}
+     GROUP BY r.agent_id`,
+    [
+      new Date(Date.now() - runtimeStaleThresholdMinutes() * 60000).toISOString(),
+      ...(agentId ? [agentId] : []),
+    ],
+  );
+  return new Map(runtimes.map((runtime) => [runtime.agent_id, runtime.free_slots]));
+}
+
 export async function routePoolTasks(
   opts: { taskIds?: string[]; now?: Date } = {},
 ): Promise<Array<{ taskId: string; agentId: string }>> {
@@ -34,27 +60,72 @@ export async function routePoolTasks(
   const now = opts.now ?? new Date();
   const pools = enabled ? await listRuntimePools() : [];
   const allAgents = enabled ? await getAllAgents() : [];
+  const runtimeSlots = enabled ? await eligibleRuntimeSlots() : new Map<string, number>();
+  const provisioning = new Set<string>();
+  if (enabled && !opts.taskIds) {
+    const starting = await getDbClient().query<{ agent_id: string }>(
+      "SELECT DISTINCT agent_id FROM runtime_instances WHERE status = 'provisioning' AND draining = 0",
+    );
+    for (const runtime of starting) provisioning.add(runtime.agent_id);
+  }
   const releasedFrom = new Map<string, string>();
   if (enabled && !opts.taskIds) {
     const pending = await getDbClient().query<AgentTaskRow>(
-      "SELECT * FROM agent_tasks WHERE status = 'pending' AND pool_wake_at IS NOT NULL AND COALESCE(routing_reason, '') != 'human_pinned'",
+      `SELECT * FROM agent_tasks WHERE status = 'pending'
+       AND (pool_wake_at IS NOT NULL OR agentId IN (
+         SELECT id FROM agents WHERE runtime_pool_id IS NOT NULL
+         UNION SELECT agent_id FROM runtime_instances WHERE pool_id IS NOT NULL
+       )) AND COALESCE(routing_reason, '') != 'human_pinned'`,
     );
     for (const task of pending.map(rowToAgentTask)) {
-      if (!task.poolWakeAt || task.routingReason === "human_pinned") continue;
       const agent = allAgents.find((a) => a.id === task.agentId);
       const pool = pools.find((p) => p.id === agent?.runtimePoolId);
       const expired =
+        task.poolWakeAt &&
         now.getTime() - Date.parse(task.poolWakeAt) >=
-        nonnegativeEnv("RUNTIME_WAKE_REROUTE_SEC", 600) * 1000;
+          nonnegativeEnv("RUNTIME_WAKE_REROUTE_SEC", 600) * 1000;
       const circuitOpen =
-        pool?.circuitOpenUntil && Date.parse(pool.circuitOpenUntil) > now.getTime();
-      if ((expired || circuitOpen) && task.agentId && (await releaseTask(task.id, task)))
-        releasedFrom.set(task.id, task.agentId);
+        task.poolWakeAt &&
+        pool?.circuitOpenUntil &&
+        Date.parse(pool.circuitOpenUntil) > now.getTime();
+      const stranded =
+        !task.poolWakeAt &&
+        (!pool || !isRuntimePoolWakeable(pool, now)) &&
+        !runtimeSlots.has(task.agentId!) &&
+        !provisioning.has(task.agentId!);
+      if (!(expired || circuitOpen || stranded) || !task.agentId) continue;
+      if (task.poolWakeAt) {
+        if (await releaseTask(task.id, task)) releasedFrom.set(task.id, task.agentId);
+      } else {
+        // The sweep routes this release itself, without an independent routing event.
+        const released = await getDbClient().run(
+          `UPDATE agent_tasks SET agentId = NULL, status = 'unassigned', lastUpdatedAt = ?
+           WHERE id = ? AND status = 'pending' AND agentId = ? AND pool_wake_at IS NULL
+             AND COALESCE(routing_reason, '') != 'human_pinned'`,
+          [new Date().toISOString(), task.id, task.agentId],
+        );
+        if (released.changes) {
+          releasedFrom.set(task.id, task.agentId);
+          try {
+            await createLogEntry({
+              eventType: "task_released",
+              agentId: task.agentId,
+              taskId: task.id,
+              oldValue: "pending",
+              newValue: "unassigned",
+            });
+          } catch {}
+        }
+      }
     }
   }
 
   // Runtime liveness stays inert when multi-runtime mode is disabled.
-  const withLiveRuntime = enabled || isMultiRuntimeEnabled() ? await agentsWithLiveRuntime() : null;
+  const withLiveRuntime = enabled
+    ? new Set(runtimeSlots.keys())
+    : isMultiRuntimeEnabled()
+      ? await agentsWithLiveRuntime()
+      : null;
   // Legacy workers at the empty-poll limit would exit on their next poll.
   const warm = (enabled ? allAgents : await getIdleWorkersWithCapacity()).filter(
     (a) =>
@@ -79,14 +150,15 @@ export async function routePoolTasks(
   const headroom = async (agent: Agent): Promise<number> => {
     let count = reserved.get(agent.id);
     if (count === undefined) {
-      count =
-        (
-          await getDbClient().get<{ count: number }>(
-            "SELECT COUNT(*) AS count FROM agent_tasks WHERE agentId = ? AND status IN ('pending', 'in_progress')",
-            [agent.id],
-          )
-        )?.count ?? 0;
+      const occupied = await getDbClient().get<{ count: number; pending: number }>(
+        `SELECT COUNT(*) AS count, COALESCE(SUM(status = 'pending'), 0) AS pending
+         FROM agent_tasks WHERE agentId = ? AND status IN ('pending', 'in_progress')`,
+        [agent.id],
+      );
+      count = occupied?.count ?? 0;
       reserved.set(agent.id, count);
+      if (runtimeSlots.has(agent.id))
+        runtimeSlots.set(agent.id, runtimeSlots.get(agent.id)! - (occupied?.pending ?? 0));
     }
     return (agent.maxTasks ?? 1) - count;
   };
@@ -115,7 +187,11 @@ export async function routePoolTasks(
       let worker: Agent | undefined;
       let poolWakeAt: string | undefined;
       for (const agent of warm) {
-        if (agent.id !== releasedFrom.get(task.id) && (await eligible(agent, task))) {
+        if (
+          agent.id !== releasedFrom.get(task.id) &&
+          (await eligible(agent, task)) &&
+          (!enabled || (runtimeSlots.get(agent.id) ?? 0) > 0)
+        ) {
           worker = agent;
           break;
         }
@@ -145,18 +221,33 @@ export async function routePoolTasks(
         }
       }
       if (!worker) continue;
-      if (
-        await assignUnassignedTaskPending(task.id, worker.id, {
-          poolWakeAt,
-          routingSnapshot: {
-            task,
-            agent: worker,
-            pool: poolWakeAt ? pools.find((p) => p.id === worker.runtimePoolId) : undefined,
-          },
-        })
-      ) {
+      const assignmentOptions = {
+        poolWakeAt,
+        routingSnapshot: {
+          task,
+          agent: worker,
+          pool: poolWakeAt ? pools.find((p) => p.id === worker.runtimePoolId) : undefined,
+        },
+      };
+      const workerId = worker.id;
+      const assignment =
+        enabled && !poolWakeAt
+          ? await getDbClient().transaction(async (tx) => {
+              // Recheck physical capacity under the assignment's write lock.
+              const slots = (await eligibleRuntimeSlots(workerId)).get(workerId) ?? 0;
+              const pending = await tx.get<{ count: number }>(
+                "SELECT COUNT(*) AS count FROM agent_tasks WHERE agentId = ? AND status = 'pending'",
+                [workerId],
+              );
+              if (slots <= (pending?.count ?? 0)) return null;
+              return await assignUnassignedTaskPending(task.id, workerId, assignmentOptions);
+            })
+          : await assignUnassignedTaskPending(task.id, workerId, assignmentOptions);
+      if (assignment) {
         assigned.push({ taskId: task.id, agentId: worker.id });
         reserved.set(worker.id, (reserved.get(worker.id) ?? 0) + 1);
+        if (runtimeSlots.has(worker.id))
+          runtimeSlots.set(worker.id, runtimeSlots.get(worker.id)! - 1);
         assignedInBatch++;
       }
     }
