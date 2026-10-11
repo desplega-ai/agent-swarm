@@ -217,6 +217,8 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
   ...booleanValidators(["RUNTIME_POOLS_ENABLED"]),
   ...enumValidator("RUNTIME_DEFAULT_DELIVERY", ["poll", "push"]),
   RUNTIME_TOKEN_TTL_HOURS: validateRuntimeTokenTtlHours,
+  ...boundedIntegerValidators(["RUNTIME_CONTROLLER_TOKEN_TTL_DAYS"], 1, 3650),
+  ...boundedIntegerValidators(["RUNTIME_CONTROLLER_GRACE_SEC"], 0, 86_400),
   ...integerValidators(
     ["RUNTIME_WAKE_GRACE_SEC", "RUNTIME_WAKE_REROUTE_SEC", "RUNTIME_ROUTING_INTERVAL_MS"],
     0,

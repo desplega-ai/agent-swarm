@@ -22,9 +22,10 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { scheduleOrgDomainRecompute } from "../telemetry-identity";
 import type { User } from "../types";
-import { unregisterVolatileSecret } from "../utils/secret-scrubber";
+import { registerVolatileSecret, unregisterVolatileSecret } from "../utils/secret-scrubber";
 import { closeSessionTokenConnections } from "../utils/session-token-connections";
 import { getDbClient } from "./db";
+import { getRuntimeController, RuntimePoolError } from "./runtime-pools/db";
 import { validateRuntimeTokenTtlHours } from "./swarm-config-guard";
 
 // ---------------------------------------------------------------------------
@@ -599,6 +600,71 @@ export async function mintRuntimeToken(
   return await insertSessionToken(agentId, null, runtimeId, ttlMs);
 }
 
+export async function mintControllerToken(
+  controllerId: string,
+): Promise<{ tokenId: string; plaintext: string; expiresAt: string }> {
+  return await getDbClient().transaction(async (client) => {
+    const controller = await getRuntimeController(controllerId);
+    if (!controller) throw new RuntimePoolError("Controller not found", 404);
+    if (controller.placement !== "remote")
+      throw new RuntimePoolError("Only remote controllers can receive a controller token");
+    await revokeControllerTokens(controllerId);
+    const days = Number(process.env.RUNTIME_CONTROLLER_TOKEN_TTL_DAYS ?? 90);
+    const ttlDays = Number.isInteger(days) && days > 0 && days <= 3650 ? days : 90;
+    const credential = await insertSessionToken(
+      controllerId,
+      null,
+      null,
+      ttlDays * 86_400_000,
+      null,
+      undefined,
+      controllerId,
+    );
+    const row = await client.get<{ expiresAt: string }>(
+      "SELECT expiresAt FROM session_tokens WHERE id = ?",
+      [credential.tokenId],
+    );
+    getDbClient().afterCommit(() =>
+      registerVolatileSecret(credential.plaintext, `controller-token:${credential.tokenId}`),
+    );
+    return { ...credential, expiresAt: row!.expiresAt };
+  });
+}
+
+export async function revokeControllerTokens(controllerId: string): Promise<void> {
+  await getDbClient().transaction(async (client) => {
+    const rows = await client.query<{ id: string }>(
+      "SELECT id FROM session_tokens WHERE controllerId = ? AND revokedAt IS NULL",
+      [controllerId],
+    );
+    await client.run(
+      "UPDATE session_tokens SET revokedAt = ? WHERE controllerId = ? AND revokedAt IS NULL",
+      [new Date().toISOString(), controllerId],
+    );
+    getDbClient().afterCommit(() => {
+      closeSessionTokenConnections(rows.map((row) => row.id));
+      for (const row of rows) unregisterVolatileSecret(`controller-token:${row.id}`);
+    });
+  });
+}
+
+export async function resolveControllerToken(
+  plaintext: string,
+): Promise<{ controllerId: string; tokenId: string; expiresAt: string } | null> {
+  if (!plaintext.startsWith(SESSION_TOKEN_PREFIX)) return null;
+  const row = await getDbClient().get<{
+    controllerId: string;
+    tokenId: string;
+    expiresAt: string;
+  }>(
+    `SELECT s.controllerId, s.id AS tokenId, s.expiresAt FROM session_tokens s
+     JOIN runtime_controllers c ON c.id = s.controllerId AND c.placement = 'remote'
+     WHERE s.tokenHash = ? AND s.revokedAt IS NULL AND s.expiresAt > ?`,
+    [sha256Hex(plaintext), new Date().toISOString()],
+  );
+  return row ?? null;
+}
+
 async function insertSessionToken(
   agentId: string,
   taskId: string | null,
@@ -606,6 +672,7 @@ async function insertSessionToken(
   ttlMs: number,
   parentRuntimeId: string | null = null,
   expiresAtCeiling?: string,
+  controllerId: string | null = null,
 ): Promise<{ tokenId: string; plaintext: string }> {
   const plaintext = `${SESSION_TOKEN_PREFIX}${base62(randomBytes(24))}`;
   const tokenId = randomUUID().replace(/-/g, "");
@@ -618,8 +685,8 @@ async function insertSessionToken(
 
   await getDbClient().run(
     `INSERT INTO session_tokens
-     (id, tokenHash, tokenPreview, agentId, taskId, runtimeId, parentRuntimeId, expiresAt, createdAt)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     (id, tokenHash, tokenPreview, agentId, taskId, runtimeId, parentRuntimeId, expiresAt, createdAt, controllerId)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       tokenId,
       hash,
@@ -630,6 +697,7 @@ async function insertSessionToken(
       parentRuntimeId,
       expiresAt,
       now.toISOString(),
+      controllerId,
     ],
   );
 

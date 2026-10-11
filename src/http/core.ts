@@ -419,6 +419,16 @@ export async function handleCore(
   // request pipeline does afterwards, including audit columns in the DB layer.
   beginRequestAuthScope();
 
+  // Controller credentials authorize only their separate WebSocket transport.
+  if (req.headers.authorization?.startsWith("Bearer aseph_")) {
+    const credential = await resolveHttpRequestAuth(req, apiKey, { touchSessionToken: false });
+    if (credential?.kind === "controller") {
+      setRequestAuth(req, credential);
+      jsonError(res, "Controller tokens can only connect to the controller socket", 403);
+      return true;
+    }
+  }
+
   // Handle preflight
   if (req.method === "OPTIONS") {
     res.writeHead(204);

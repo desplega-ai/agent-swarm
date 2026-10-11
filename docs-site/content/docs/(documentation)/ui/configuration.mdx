@@ -78,6 +78,21 @@ Settings with deeper behavior link out to the relevant guide (for example the [t
 
 ![Editing a configuration group](/ui/configuration-group.png)
 
+## Remote controllers
+
+`RUNTIME_CONTROLLER_TOKEN_TTL_DAYS` sets the lifetime for new remote controller tokens.
+The default is 90 days. Accepted values are 1 through 3650 whole days.
+Minting a token revokes the previous token and closes its connection.
+Changing this setting does not change existing tokens.
+
+`RUNTIME_CONTROLLER_GRACE_SEC` sets the grace after a remote controller disconnects.
+The default is 120 seconds. Accepted values are 0 through 86400 whole seconds.
+The API stops provisioning through the controller and preserves its runtimes during the grace.
+After expiry, the supervisor marks those runtimes offline and revokes their runtime tokens.
+Both settings apply without an API restart.
+
+Controller credentials belong on the controller host. They are absent from the configuration catalog.
+
 ## Heartbeat checklist gate
 
 `HEARTBEAT_CHECKLIST_GATE_SCRIPT` names a global-scope script that runs as the Lead before

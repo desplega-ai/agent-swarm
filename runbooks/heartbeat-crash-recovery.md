@@ -101,6 +101,16 @@ count lands in `staleCleanup.connectorCodes` and adds to `stale_cleanup=`.
 
 ## 1a. Runtime liveness (`MULTI_RUNTIME_ENABLED` only)
 
+Remote controllers authenticate on a separate socket at `/api/controllers/connect`.
+A disconnect marks the controller offline and prevents provisioning or provider death checks through that controller.
+`RUNTIME_CONTROLLER_GRACE_SEC` defaults to 120 seconds. Runtime rows remain unchanged during the grace.
+A reconnect lists owner-filtered runtimes before the controller becomes online.
+Known handles remain. Ownership labels restore handles when a provision result was lost.
+After the grace, `reconcileDisconnectedControllers` invokes its runtime recovery callback for each remaining runtime.
+The supervisor currently supplies `markRuntimeTerminated`, which marks the runtime offline and revokes its tokens.
+Immediate task remediation requires the shared `recoverRuntime` callback from the failure supervisor.
+An API restart gives persisted online controllers a new grace period when their sockets are absent.
+
 With multi-runtime mode enabled, one logical agent may be served by several
 worker processes, each recorded in `runtime_instances`. Workers send their per-boot `X-Runtime-Instance-ID` on `POST /ping` and on
 `GET /api/poll`; either refreshes that row's `last_seen_at`, so liveness
@@ -712,6 +722,7 @@ Rollback switches accept `0`/`false` interchangeably (both parse through
 | Pending-steering stall grace | 5 min | `HEARTBEAT_STEERING_GRACE_MIN` |
 | Stale-resource cleanup | 30 min | `HEARTBEAT_STALE_CLEANUP_MIN` |
 | Runtime supervisor cadence (restart required) | 5s | `RUNTIME_SUPERVISOR_INTERVAL_MS` |
+| Remote controller disconnect grace (§1a) | 120s | `RUNTIME_CONTROLLER_GRACE_SEC` |
 | Runtime liveness window (§1a) | 5 min | `RUNTIME_STALE_THRESHOLD_MIN` |
 | Same-agent liveness window | 30s | `WORKER_LIVENESS_WINDOW_SECONDS` |
 | Worker active-task reconcile cadence (worker env, read at worker start) | 30s | `RUNNER_TASK_RECONCILE_INTERVAL_MS` |

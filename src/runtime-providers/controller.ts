@@ -8,6 +8,13 @@ import type {
   RuntimeTargetConfig,
 } from "./types";
 
+export class ControllerOfflineError extends Error {
+  constructor(readonly controllerId: string) {
+    super(`Runtime controller ${controllerId} is offline`);
+    this.name = "ControllerOfflineError";
+  }
+}
+
 export interface ControllerCommands {
   readonly traits: RuntimeProviderTraits;
   readonly workerApiUrl?: string;

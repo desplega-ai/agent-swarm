@@ -82,6 +82,7 @@ function identityFromHttpAuth(
   req: IncomingMessage,
   auth: HttpRequestAuth,
 ): AuthenticatedConnection {
+  if (auth.kind === "controller") throw new Error("Controller tokens cannot use realtime");
   if (auth.kind === "agent") {
     const agentId = header(req, "x-agent-id");
     const runtimeId = header(req, "x-runtime-instance-id");
@@ -129,6 +130,10 @@ function identityFromHttpAuth(
 }
 
 async function authenticate(req: IncomingMessage): Promise<AuthenticatedConnection> {
+  if (header(req, "authorization")?.startsWith("Bearer aseph_")) {
+    const auth = await resolveHttpRequestAuth(req, getApiKey(), { touchSessionToken: false });
+    if (auth?.kind === "controller") throw new Error("Controller tokens cannot use realtime");
+  }
   const url = new URL(req.url ?? "/", "http://localhost");
   const ticket = url.searchParams.get("ticket");
   if (ticket) {
@@ -172,6 +177,7 @@ export function attachRealtimeTransport(server: Server): () => void {
   // Authentication precedes upgrade on both direct and proxied paths.
   const onUpgrade = (req: IncomingMessage, socket: import("node:stream").Duplex, head: Buffer) => {
     const path = req.url?.split("?")[0];
+    if (path === "/api/controllers/connect") return;
     if (
       closing ||
       (path !== "/@swarm/realtime" && path !== "/api/realtime") ||

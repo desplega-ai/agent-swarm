@@ -1,6 +1,9 @@
 import { z } from "zod";
 import { canProvisionKind, type RuntimeHandle } from "../../runtime-providers";
-import type { ControllerCommands } from "../../runtime-providers/controller";
+import {
+  type ControllerCommands,
+  ControllerOfflineError,
+} from "../../runtime-providers/controller";
 import { RUNTIME_LABELS } from "../../runtime-providers/types";
 import {
   type Agent,
@@ -28,6 +31,7 @@ import {
   clearRuntimeOwnerIdCache,
   ensureRuntimeOwnerId,
   getControllerCommands,
+  reconcileDisconnectedControllers,
 } from "./controllers";
 import { getPoolForAgent, listAgentsForPool, listRuntimePools, resolvePoolDelivery } from "./db";
 import { type AgentDemand, computeDesired, pendingWorkForAgent } from "./demand";
@@ -112,6 +116,8 @@ export async function provisionRuntime(
     );
   } catch (error) {
     reportSupervisorError(error);
+    // Keep an ambiguous remote provision reserved until reconnect or disconnect recovery.
+    if (error instanceof ControllerOfflineError) return;
     try {
       await markRuntimeTerminated(runtimeId, scrubSecrets(String(error)));
     } catch (cleanupError) {
@@ -292,6 +298,7 @@ async function reconcilePools(
   commands: typeof getControllerCommands,
   signal: AbortSignal,
 ): Promise<void> {
+  await reconcileDisconnectedControllers(markRuntimeTerminated, now);
   const ownerId = await ensureRuntimeOwnerId();
   const controllers = new Map<string, ControllerCommands>();
   for (const pool of await listRuntimePools()) {

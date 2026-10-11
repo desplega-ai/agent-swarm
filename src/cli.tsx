@@ -161,6 +161,19 @@ const COMMAND_HELP: Record<
   string,
   { usage: string; description: string; options: string; examples: string }
 > = {
+  controller: {
+    usage: `${binName} controller --api-url <url> --kind docker [options]`,
+    description: "Run a remote controller next to the worker infrastructure.",
+    options: [
+      "  --api-url <url>        Swarm API URL (default: MCP_BASE_URL)",
+      "  --token <aseph_...>    Controller token (or AGENT_SWARM_CONTROLLER_TOKEN)",
+      "  --kind <kind>         Runtime provider (default: docker)",
+      "  --docker-host <url>   Docker Unix socket (or DOCKER_HOST)",
+      "  --docker-network <n>  Worker network (or DOCKER_NETWORK)",
+      "  -h, --help            Show this help",
+    ].join("\n"),
+    examples: `  ${binName} controller --api-url https://api.example.test --kind docker`,
+  },
   onboard: {
     usage: `${binName} onboard [options]`,
     description:
@@ -408,7 +421,7 @@ const COMMAND_HELP: Record<
 function printHelp(command?: string) {
   if (command && command !== "help" && COMMAND_HELP[command]) {
     const cmd = COMMAND_HELP[command];
-    console.log(`\n${binName} ${command} — v${pkg.version}\n`);
+    console.log(`\n${binName} ${command}: v${pkg.version}\n`);
     console.log(cmd.description);
     console.log(`\nUsage:\n  ${cmd.usage}\n`);
     console.log(`Options:\n${cmd.options}\n`);
@@ -427,6 +440,7 @@ function printHelp(command?: string) {
     ["worker", "Run Claude in headless loop mode"],
     ["lead", "Run Claude as lead agent in headless loop"],
     ["api", "Start the API + MCP HTTP server"],
+    ["controller", "Run a remote runtime controller"],
     ["claude", "Run Claude CLI"],
     ["hook", "Handle Claude Code hook events (stdin)"],
     ["codex-hook", "Handle Codex CLI hook events (stdin, steering delivery)"],
@@ -724,13 +738,13 @@ if (args.showHelp || args.command === "help" || args.command === undefined) {
 } else if (args.command === "version") {
   console.log(`${binName} v${pkg.version}`);
   process.exit(0);
-} else if (args.command === "onboard" && !process.versions.bun) {
-  // The published bin uses Node, but the onboarding wizard requires Bun APIs.
+} else if ((args.command === "onboard" || args.command === "controller") && !process.versions.bun) {
+  // The published bin uses Node, but these commands require Bun APIs.
   const { spawnSync } = await import("node:child_process");
   const result = spawnSync("bun", process.argv.slice(1), { stdio: "inherit" });
   if (result.error) {
     console.error(
-      "Onboarding requires Bun. Install Bun from https://bun.sh, then retry this command.",
+      "This command requires Bun. Install Bun from https://bun.sh, then retry this command.",
     );
   }
   process.exit(result.status ?? 1);
@@ -807,6 +821,9 @@ if (args.showHelp || args.command === "help" || args.command === undefined) {
   const { runE2BCommand } = await import("./commands/e2b");
   const e2bArgs = process.argv.slice(process.argv.indexOf("e2b") + 1);
   await runE2BCommand(e2bArgs);
+} else if (args.command === "controller") {
+  const { runController } = await import("./commands/controller");
+  await runController(process.argv.slice(process.argv.indexOf("controller") + 1));
 } else {
   render(<App args={args} />);
 }

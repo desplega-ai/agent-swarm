@@ -4,6 +4,62 @@ An agent binds to a runtime pool. The pool chooses a controller that manages run
 The API owns database rows. Adapters in `src/runtime-providers/` call infrastructure APIs and must remain DB-free.
 Controllers can use the same adapters inside the API or in a separate process.
 
+## Remote controllers
+
+Use a remote controller when the API cannot reach the infrastructure that starts workers.
+Run the controller next to that infrastructure. It dials the API and needs no inbound port.
+Enable `RUNTIME_POOLS_ENABLED=true` on the API.
+
+Create a controller with `placement: "remote"` and the provider kind.
+Set its public `WORKER_API_URL` to an API URL reachable by its workers.
+Use that controller's ID as the pool's placement.
+
+Mint a token with operator or authorized user credentials:
+
+```bash
+curl -s -X POST "$API/api/runtime-controllers/<controller-id>/token" \
+  -H "Authorization: Bearer $AGENT_SWARM_API_KEY"
+```
+
+The response returns `plaintext`, `tokenId`, and `expiresAt`. Save the plaintext securely.
+Minting revokes the previous token and closes its socket. Controller deletion also revokes its tokens.
+Lead and worker credentials cannot mint controller tokens.
+`RUNTIME_CONTROLLER_TOKEN_TTL_DAYS` defaults to 90 days and accepts 1 through 3650 whole days.
+Its value applies to new tokens. Controller tokens authorize only `/api/controllers/connect`.
+They cannot access worker routes, MCP, configuration, or `/api/realtime`.
+
+Start the controller with its token in the environment:
+
+```bash
+export AGENT_SWARM_CONTROLLER_TOKEN=<controller-token>
+bun run src/cli.tsx controller --api-url https://api.example.test --kind docker \
+  --docker-host unix:///var/run/docker.sock --docker-network swarm-workers
+```
+
+The CLI also accepts `--token`. Docker flags override `DOCKER_HOST` and `DOCKER_NETWORK`.
+`DOCKER_EXTRA_HOSTS` remains an environment setting.
+Infrastructure credentials remain on the controller host. The CLI scrubs errors and never logs command payloads or tokens.
+
+The API sends `welcome` with the controller ID before the client sends `hello`.
+The hello declares the provider kind and protocol version 1. The API rejects a different kind or version.
+Commands carry an ID, operation, and payload. Results carry the same ID and success or error.
+Commands have a 60-second timeout. The API pings every 15 seconds and checks token validity.
+A new authenticated session replaces the previous session for that controller.
+Reconnect uses jittered exponential backoff between 1 and 30 seconds.
+
+Before the controller becomes online, the API lists runtimes with its stable swarm owner ID.
+Known handles remain. Ownership labels restore a provision handle whose result was lost during disconnect.
+The client waits for unfinished provisions before it answers that list request.
+Owner-filtered orphans follow the supervisor's existing orphan grace. Other swarms' runtimes remain excluded.
+
+Disconnect marks the controller offline. The API starts no runtimes through an offline controller.
+`RUNTIME_CONTROLLER_GRACE_SEC` defaults to 120 seconds and accepts 0 through 86400 whole seconds.
+The supervisor preserves runtime rows and credentials during this grace.
+After grace expiry, it marks those rows offline and revokes their runtime tokens.
+The controller reconciler accepts the shared runtime recovery callback for immediate task remediation.
+The supervisor's termination callback currently provides fencing. Immediate task remediation requires the failure supervisor's recovery callback.
+Controller offline errors preserve ambiguous provisions and do not increment pool failure counters.
+
 ## Supported kinds
 
 | Kind | Adapter | Behavior |

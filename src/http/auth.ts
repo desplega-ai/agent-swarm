@@ -4,6 +4,7 @@ import {
   findUserById,
   fingerprintApiKey,
   resolveBySessionToken,
+  resolveControllerToken,
   resolveUserByToken,
 } from "../be/users";
 import type { User } from "../types";
@@ -62,6 +63,8 @@ export async function resolveHttpRequestAuth(
   }
 
   if (bearer.startsWith("aseph_")) {
+    const controller = await resolveControllerToken(bearer);
+    if (controller) return { kind: "controller", ...controller };
     const principal = await resolveBySessionToken(bearer, { touch: options.touchSessionToken });
     if (principal) {
       return { kind: "agent", ...principal };

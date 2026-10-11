@@ -11,6 +11,7 @@ import { decryptSecret, encryptSecret, getEncryptionKey } from "../crypto";
 import { createAgent, getAgentById, getAllAgents, getDbClient, upsertSwarmConfig } from "../db";
 import { type AgentRow, rowToAgent } from "../db/agents";
 import { registerStoredSecret } from "../secret-registry";
+import { revokeControllerTokens } from "../users";
 
 export class RuntimePoolError extends Error {
   constructor(
@@ -202,6 +203,7 @@ export async function deleteRuntimeController(id: string): Promise<void> {
     if (!(await getRuntimeController(id))) throw new RuntimePoolError("Controller not found", 404);
     if ((await listRuntimePools()).some((pool) => pool.placements.includes(id)))
       throw new RuntimePoolError("Controller has runtime pools", 409);
+    await revokeControllerTokens(id);
     await tx.run("DELETE FROM runtime_controllers WHERE id = ?", [id]);
   });
 }
