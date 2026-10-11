@@ -101,6 +101,19 @@ count lands in `staleCleanup.connectorCodes` and adds to `stale_cleanup=`.
 
 ## 1a. Runtime liveness (`MULTI_RUNTIME_ENABLED` only)
 
+Remote controllers authenticate on a separate socket at `/api/controllers/connect`.
+A disconnect marks the controller offline and prevents provisioning or provider death checks through that controller.
+`RUNTIME_CONTROLLER_GRACE_SEC` defaults to 120 seconds. Runtime rows remain unchanged during the grace.
+A reconnect lists owner-filtered runtimes before the controller becomes online.
+Known handles remain. Ownership labels restore handles when a provision result was lost.
+After the grace, `reconcileDisconnectedControllers` invokes its runtime recovery callback for each remaining runtime.
+The supervisor supplies `recoverRuntime`, which marks the runtime offline, revokes its tokens, and remediates active tasks.
+Failed reconnect handshakes do not extend the original disconnect grace.
+Reconnection retires provisioning rows with no handle when the controller list does not report them.
+This retirement releases capacity and revokes tokens without a provision failure or infrastructure termination.
+Controller offline errors and command timeouts do not increment failures, apply backoff, or change the pool circuit.
+An API restart gives persisted online controllers a new grace period when their sockets are absent.
+
 With multi-runtime mode enabled, one logical agent may be served by several
 worker processes, each recorded in `runtime_instances`. Workers send their per-boot `X-Runtime-Instance-ID` on `POST /ping` and on
 `GET /api/poll`; either refreshes that row's `last_seen_at`, so liveness
@@ -793,6 +806,7 @@ Rollback switches accept `0`/`false` interchangeably (both parse through
 | Pending-steering stall grace | 5 min | `HEARTBEAT_STEERING_GRACE_MIN` |
 | Stale-resource cleanup | 30 min | `HEARTBEAT_STALE_CLEANUP_MIN` |
 | Runtime supervisor cadence (restart required) | 5s | `RUNTIME_SUPERVISOR_INTERVAL_MS` |
+| Remote controller disconnect grace (§1a) | 120s | `RUNTIME_CONTROLLER_GRACE_SEC` |
 | Runtime registration timeout | 300s | `RUNTIME_PROVISION_TIMEOUT_SEC` |
 | Runtime provision failure limit | 3 | `RUNTIME_PROVISION_MAX_ATTEMPTS` |
 | Pool circuit failure threshold | 5 | `RUNTIME_CIRCUIT_THRESHOLD` |

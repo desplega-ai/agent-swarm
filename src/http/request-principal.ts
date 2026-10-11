@@ -15,6 +15,7 @@ export async function requestPrincipal(
   myAgentId: string | undefined,
 ): Promise<RbacPrincipal | null> {
   const auth = getRequestAuth(req);
+  if (auth?.kind === "controller") return { kind: "guest" };
   if (auth?.kind === "operator") return { kind: "operator" };
   if (auth?.kind === "user") return { kind: "user", userId: auth.userId };
   if (auth?.kind === "guest") return { kind: "guest" };
@@ -35,6 +36,7 @@ export async function agentFirstPrincipal(
   myAgentId: string | undefined,
 ): Promise<RbacPrincipal> {
   const auth = getRequestAuth(req);
+  if (auth?.kind === "controller") return { kind: "guest" };
   if (auth?.kind === "user") return { kind: "user", userId: auth.userId };
   if (auth?.kind === "guest") return { kind: "guest" };
   const agentId = auth?.kind === "agent" ? auth.agentId : myAgentId;

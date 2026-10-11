@@ -19,6 +19,7 @@ import {
   updateRuntimeController,
   updateRuntimePool,
 } from "../be/runtime-pools/db";
+import { mintControllerToken } from "../be/runtime-pools/tokens";
 import { can } from "../rbac";
 import {
   AgentSchema,
@@ -31,6 +32,7 @@ import {
   RuntimePoolSchema,
   RuntimePoolUpdateSchema,
 } from "../types";
+import { getRequestAuth } from "../utils/request-auth-context";
 import { isRuntimePoolsEnabled } from "../utils/runtime-pools-flag";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { agentFirstPrincipal } from "./request-principal";
@@ -286,6 +288,27 @@ const bindAgentRoute = route({
   rbac: { permission: "runtime_pool.write" },
 });
 
+const controllerTokenRoute = route({
+  method: "post",
+  path: "/api/runtime-controllers/{id}/token",
+  pattern: ["api", "runtime-controllers", null, "token"],
+  operationId: "runtime_mintControllerToken",
+  summary: "Mint a remote controller token",
+  description: "Returns the token once. Revokes the previous token and disconnects its session.",
+  tags: ["Runtime pools"],
+  params: idParams,
+  rbac: { permission: "runtime_controller.write" },
+  responses: {
+    200: {
+      description: "Controller token",
+      schema: z.object({ tokenId: z.string(), plaintext: z.string(), expiresAt: z.string() }),
+    },
+    400: { description: "Controller placement must be remote" },
+    403: { description: "Operator or user credentials required" },
+    404: { description: "Controller not found or runtime pools disabled" },
+  },
+});
+
 function scrubResponse<T>(data: T): T {
   return JSON.parse(scrubSecrets(JSON.stringify(data))) as T;
 }
@@ -311,6 +334,7 @@ export async function handleRuntimePools(
     patchControllerRoute,
     deleteControllerRoute,
     bindAgentRoute,
+    controllerTokenRoute,
   ];
   const matched = routes.find((route) => route.match(req.method, pathSegments));
   if (!matched) return false;
@@ -319,6 +343,13 @@ export async function handleRuntimePools(
     return true;
   }
   try {
+    if (matched === controllerTokenRoute) {
+      const auth = getRequestAuth(req);
+      if (auth?.kind !== "operator" && auth?.kind !== "user") {
+        jsonError(res, "Controller tokens require operator or user credentials", 403);
+        return true;
+      }
+    }
     const binding =
       matched === bindAgentRoute
         ? await bindAgentRoute.parse(req, res, pathSegments, queryParams)
@@ -347,6 +378,13 @@ export async function handleRuntimePools(
       }
     }
     const actor = req.method === "GET" ? null : await resolveHttpAuditUserId(req, agentId);
+    if (matched === controllerTokenRoute) {
+      const parsed = await controllerTokenRoute.parse(req, res, pathSegments, queryParams);
+      if (!parsed) return true;
+      res.setHeader("Cache-Control", "no-store");
+      controllerTokenRoute.respond(res, 200, await mintControllerToken(parsed.params.id));
+      return true;
+    }
     if (matched === listPoolsRoute) {
       const parsed = await listPoolsRoute.parse(req, res, pathSegments, queryParams);
       if (!parsed) return true;

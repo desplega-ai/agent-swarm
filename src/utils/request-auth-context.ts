@@ -7,6 +7,7 @@ export type HttpRequestAuth = (
   | { kind: "user"; userId: string; user: User }
   /** Password-page viewer with no user identity. Least privilege: every gate denies it. */
   | { kind: "guest" }
+  | { kind: "controller"; controllerId: string; tokenId: string; expiresAt: string }
   /** Ephemeral token bound to an ACP task or a worker runtime (aseph_ prefix). */
   | {
       kind: "agent";

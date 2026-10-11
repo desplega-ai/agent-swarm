@@ -599,13 +599,14 @@ export async function mintRuntimeToken(
   return await insertSessionToken(agentId, null, runtimeId, ttlMs);
 }
 
-async function insertSessionToken(
+export async function insertSessionToken(
   agentId: string,
   taskId: string | null,
   runtimeId: string | null,
   ttlMs: number,
   parentRuntimeId: string | null = null,
   expiresAtCeiling?: string,
+  controllerId: string | null = null,
 ): Promise<{ tokenId: string; plaintext: string }> {
   const plaintext = `${SESSION_TOKEN_PREFIX}${base62(randomBytes(24))}`;
   const tokenId = randomUUID().replace(/-/g, "");
@@ -618,8 +619,8 @@ async function insertSessionToken(
 
   await getDbClient().run(
     `INSERT INTO session_tokens
-     (id, tokenHash, tokenPreview, agentId, taskId, runtimeId, parentRuntimeId, expiresAt, createdAt)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     (id, tokenHash, tokenPreview, agentId, taskId, runtimeId, parentRuntimeId, expiresAt, createdAt, controllerId)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       tokenId,
       hash,
@@ -630,6 +631,7 @@ async function insertSessionToken(
       parentRuntimeId,
       expiresAt,
       now.toISOString(),
+      controllerId,
     ],
   );
 
@@ -688,6 +690,27 @@ export async function resolveBySessionToken(
   runtimeId: string | null;
   expiresAt: string;
 } | null> {
+  const principal = await resolveSessionToken(plaintext, options);
+  if (!principal || principal.kind === "controller") return null;
+  const { kind: _, ...agent } = principal;
+  return agent;
+}
+
+export async function resolveSessionToken(
+  plaintext: string,
+  options: { touch?: boolean } = {},
+): Promise<
+  | { kind: "controller"; controllerId: string; tokenId: string; expiresAt: string }
+  | {
+      kind: "agent";
+      tokenId: string;
+      agentId: string;
+      taskId: string | null;
+      runtimeId: string | null;
+      expiresAt: string;
+    }
+  | null
+> {
   if (!plaintext.startsWith(SESSION_TOKEN_PREFIX)) return null;
   const hash = sha256Hex(plaintext);
   const client = getDbClient();
@@ -698,14 +721,28 @@ export async function resolveBySessionToken(
     taskId: string | null;
     runtimeId: string | null;
     controllerId: string | null;
+    placement: string | null;
     expiresAt: string;
     revokedAt: string | null;
   }>(
-    "SELECT id, agentId, taskId, runtimeId, controllerId, expiresAt, revokedAt FROM session_tokens WHERE tokenHash = ?",
+    `SELECT s.id, s.agentId, s.taskId, s.runtimeId, s.controllerId, s.expiresAt, s.revokedAt,
+     c.placement FROM session_tokens s LEFT JOIN runtime_controllers c ON c.id = s.controllerId
+     WHERE s.tokenHash = ?`,
     [hash],
   );
-  if (!row || row.revokedAt !== null || row.controllerId !== null) return null;
+  if (!row || row.revokedAt !== null) return null;
   if (new Date(row.expiresAt) <= new Date()) return null;
+
+  if (row.controllerId !== null) {
+    return row.placement === "remote"
+      ? {
+          kind: "controller",
+          controllerId: row.controllerId,
+          tokenId: row.id,
+          expiresAt: row.expiresAt,
+        }
+      : null;
+  }
 
   if (options.touch !== false) {
     try {
@@ -719,6 +756,7 @@ export async function resolveBySessionToken(
   }
 
   return {
+    kind: "agent",
     tokenId: row.id,
     agentId: row.agentId,
     taskId: row.taskId,

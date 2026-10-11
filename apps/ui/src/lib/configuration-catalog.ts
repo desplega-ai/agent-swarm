@@ -476,6 +476,16 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         docsUrl: `${DOCS}ui/configuration#runtime-pools`,
       },
       {
+        key: "RUNTIME_CONTROLLER_GRACE_SEC",
+        label: "Controller disconnect grace",
+        description:
+          "Preserve runtimes during a remote controller disconnect before recovery and token revocation.",
+        kind: "number",
+        unit: "s",
+        defaultValue: "120",
+        docsUrl: `${DOCS}ui/configuration#remote-controllers`,
+      },
+      {
         key: "RUNTIME_PROVISION_TIMEOUT_SEC",
         label: "Runtime registration timeout",
         description:
@@ -1215,6 +1225,16 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         unit: "h",
         defaultValue: "168",
         docsUrl: `${DOCS}ui/configuration#runtime-tokens`,
+      },
+      {
+        key: "RUNTIME_CONTROLLER_TOKEN_TTL_DAYS",
+        label: "Controller token lifetime",
+        description:
+          "Lifetime for new remote controller tokens. Minting revokes the previous token.",
+        kind: "number",
+        unit: "days",
+        defaultValue: "90",
+        docsUrl: `${DOCS}ui/configuration#remote-controllers`,
       },
       {
         key: "RBAC_ENABLED",
