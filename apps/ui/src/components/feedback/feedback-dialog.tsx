@@ -131,13 +131,17 @@ export function FeedbackDialog() {
     return () => window.removeEventListener("storage", handler);
   }, [storageKey]);
 
-  function savePopupState(next: FeedbackPopupState) {
-    try {
-      localStorage.setItem(storageKey, JSON.stringify(next));
-    } catch {
-      // Storage can be unavailable in privacy mode; in-memory state still suppresses this session.
-    }
-    setPopupState(next);
+  /** Merge `patch` into the latest state, so two writes in one commit do not drop each other. */
+  function savePopupState(patch: Partial<FeedbackPopupState>) {
+    setPopupState((current) => {
+      const next = { ...current, ...patch };
+      try {
+        localStorage.setItem(storageKey, JSON.stringify(next));
+      } catch {
+        // Storage can be unavailable in privacy mode; in-memory state still suppresses this session.
+      }
+      return next;
+    });
     setLoadedStorageKey(storageKey);
   }
 
@@ -147,7 +151,6 @@ export function FeedbackDialog() {
   useEffect(() => {
     if (!ready || tasksFailed === 0 || popupState.firstFailureSessionId !== null) return;
     savePopupState({
-      ...popupState,
       firstFailureSessionId: sessionId,
       firstFailureSeenAt: new Date().toISOString(),
     });
@@ -157,7 +160,16 @@ export function FeedbackDialog() {
   useEffect(() => {
     if (!trigger) return;
     setActive({ submissionId: crypto.randomUUID(), trigger });
-    savePopupState({ ...popupState, lastShownAt: new Date().toISOString() });
+    // A fresh card: nothing carries over from an earlier one in this mount.
+    setScore(null);
+    setMessage("");
+    setName("");
+    setEmail("");
+    setNewsletterConsent(false);
+    setIncludeOrgName(false);
+    setFollowUpSent(false);
+    submittedReported.current = false;
+    savePopupState({ lastShownAt: new Date().toISOString() });
     sendEvent({ event: "popup.shown", properties: { popup: "feedback", trigger } });
   }, [trigger]);
 
@@ -195,7 +207,7 @@ export function FeedbackDialog() {
   function close(method: PopupDismissMethod) {
     if (score === null) {
       sendEvent({ event: "popup.dismissed", properties: { popup: "feedback", method } });
-      savePopupState({ ...popupState, lastDismissedAt: new Date().toISOString() });
+      savePopupState({ lastDismissedAt: new Date().toISOString() });
     } else {
       reportSubmitted();
     }
@@ -210,7 +222,6 @@ export function FeedbackDialog() {
       onError: () => toast.error("Could not send your score. Please try again."),
     });
     savePopupState({
-      ...popupState,
       lastSubmittedAt: new Date().toISOString(),
       submissionCount: popupState.submissionCount + 1,
     });
