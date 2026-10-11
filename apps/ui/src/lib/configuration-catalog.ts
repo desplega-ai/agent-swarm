@@ -486,6 +486,25 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         docsUrl: `${DOCS}ui/configuration#remote-controllers`,
       },
       {
+        key: "RUNTIME_PROVISION_CONCURRENCY",
+        label: "Runtime provision concurrency",
+        description:
+          "Limit simultaneous runtime provisions. Pool capacity, demand reservations, retry deadlines, and circuit checks still apply.",
+        kind: "number",
+        defaultValue: "8",
+        docsUrl: `${DOCS}ui/configuration#runtime-pools`,
+      },
+      {
+        key: "RUNTIME_PER_TASK_EXIT_GRACE_SEC",
+        label: "Per-task runtime exit grace",
+        description:
+          "Preserve a runtime after task completion until runner shutdown or this timeout. The runner can report cost, logs, and context.",
+        kind: "number",
+        unit: "s",
+        defaultValue: "60",
+        docsUrl: `${DOCS}ui/configuration#runtime-pools`,
+      },
+      {
         key: "RUNTIME_PROVISION_TIMEOUT_SEC",
         label: "Runtime registration timeout",
         description:

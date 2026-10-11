@@ -92,6 +92,7 @@ async function recordProvisionFailure(
   runtime: Pick<RuntimeInstance, "agentId" | "poolId" | "controllerId"> & { id: string | null },
   reason: string,
   now: Date,
+  countedFailures: Set<string>,
 ): Promise<void> {
   const error = scrubSecrets(reason);
   const failedTask = await getDbClient().transaction(async (tx) => {
@@ -103,6 +104,9 @@ async function recordProvisionFailure(
       if (!retired.changes) return null;
       await markRuntimeTerminated(runtime.id, error);
     }
+    // Retire every failed runtime, but advance retry and circuit state once per agent per tick.
+    if (countedFailures.has(runtime.agentId)) return null;
+    countedFailures.add(runtime.agentId);
     const pool = await tx.get<{ circuit_open_until: string | null }>(
       `UPDATE runtime_pools SET consecutive_failures = consecutive_failures + 1,
        last_error = ?, last_error_at = ?, updated_at = ?,
@@ -181,8 +185,13 @@ export async function provisionRuntime(
   controller: ControllerCommands,
   ownerId: string,
   now = new Date(),
-  signal?: AbortSignal,
+  options: {
+    signal?: AbortSignal;
+    onFailure?: () => void;
+    countedFailures?: Set<string>;
+  } = {},
 ): Promise<boolean> {
+  const { signal, onFailure, countedFailures = new Set<string>() } = options;
   const runtimeId = crypto.randomUUID();
   try {
     const image =
@@ -271,6 +280,8 @@ export async function provisionRuntime(
     );
     return true;
   } catch (error) {
+    // Stop new requests before asynchronous failure cleanup commits.
+    onFailure?.();
     if (signal?.aborted) {
       await markRuntimeTerminated(runtimeId, "Supervisor stopped during provision");
       return false;
@@ -289,6 +300,7 @@ export async function provisionRuntime(
         },
         String(error),
         now,
+        countedFailures,
       );
     } catch (cleanupError) {
       reportSupervisorError(cleanupError);
@@ -322,6 +334,7 @@ export async function reapPoolRuntimes(
   now: Date,
   listedHandles?: RuntimeHandle[] | null,
   rotatingIds?: ReadonlySet<string>,
+  countedFailures = new Set<string>(),
 ): Promise<void> {
   const rotations =
     rotatingIds ??
@@ -368,13 +381,16 @@ export async function reapPoolRuntimes(
       await serializeRuntimeAction(candidate.id, async () => {
         const runtime = await getRuntimeInstanceById(candidate.id);
         if (!runtime) return;
-        const staleSession = await getDbClient().get<{ id: string }>(
-          `SELECT id FROM active_sessions WHERE runtimeInstanceId = ? AND NOT EXISTS (
+        const staleSession =
+          pool.lifecycle === "per-task" && runtime.status !== "offline"
+            ? null
+            : await getDbClient().get<{ id: string }>(
+                `SELECT id FROM active_sessions WHERE runtimeInstanceId = ? AND NOT EXISTS (
             SELECT 1 FROM agent_tasks WHERE id = active_sessions.taskId
               AND status NOT IN (${TERMINAL_TASK_STATUS_PLACEHOLDERS})
           ) LIMIT 1`,
-          [runtime.id, ...TERMINAL_TASK_STATUSES],
-        );
+                [runtime.id, ...TERMINAL_TASK_STATUSES],
+              );
         if (staleSession)
           await getDbClient().run(
             `DELETE FROM active_sessions WHERE runtimeInstanceId = ? AND NOT EXISTS (
@@ -419,7 +435,7 @@ export async function reapPoolRuntimes(
                 ? "Runtime missing from provider list"
                 : `Runtime ${status}`;
           if (runtime.status === "provisioning") {
-            await recordProvisionFailure(runtime, reason, now);
+            await recordProvisionFailure(runtime, reason, now, countedFailures);
             if ((await getRuntimeInstanceById(runtime.id))?.status !== "offline") return;
           }
           await terminateRuntime(runtime, controller, reason);
@@ -461,6 +477,22 @@ export async function reapPoolRuntimes(
           );
           return;
         }
+        if (pool.lifecycle === "per-task" && task && isTerminalTaskStatus(task.status)) {
+          const finishedAt = task.finishedAt ?? runtime.idleSince ?? now.toISOString();
+          if (!runtime.idleSince)
+            await getDbClient().run("UPDATE runtime_instances SET idle_since = ? WHERE id = ?", [
+              finishedAt,
+              runtime.id,
+            ]);
+          if (
+            now.getTime() - Date.parse(finishedAt) <
+            runtimeNumber("RUNTIME_PER_TASK_EXIT_GRACE_SEC", 60) * 1000
+          )
+            return;
+          await terminateRuntime(runtime, controller, "Task exit grace expired");
+          remaining.set(runtime.agentId, (remaining.get(runtime.agentId) ?? 1) - 1);
+          return;
+        }
         if (rotating) {
           if (!runtime.draining) {
             await getDbClient().run("UPDATE runtime_instances SET draining = 1 WHERE id = ?", [
@@ -495,11 +527,6 @@ export async function reapPoolRuntimes(
             idleSince,
             runtime.id,
           ]);
-        if (pool.lifecycle === "per-task" && task && isTerminalTaskStatus(task.status)) {
-          await terminateRuntime(runtime, controller, "Task finished");
-          remaining.set(runtime.agentId, (remaining.get(runtime.agentId) ?? 1) - 1);
-          return;
-        }
         if (pool.lifecycle !== "idle" || pool.idleMinutes === null) return;
         if ((remaining.get(runtime.agentId) ?? 0) <= pool.minRuntimes) {
           if (runtime.draining)
@@ -624,6 +651,7 @@ async function reconcilePools(
   const ownerId = await ensureRuntimeOwnerId();
   const controllers = new Map<string, ControllerCommands>();
   const listed = new Map<string, RuntimeHandle[] | null>();
+  const countedFailures = new Set<string>();
   const rotationCutoff = new Date(
     now.getTime() + runtimeNumber("RUNTIME_TOKEN_ROTATE_BEFORE_MIN", 60) * 60_000,
   ).toISOString();
@@ -667,6 +695,7 @@ async function reconcilePools(
         now,
         listed.get(controllerId),
         rotatingIds,
+        countedFailures,
       );
       await renewPoolLeases(pool, controller, now);
       if (signal.aborted) return;
@@ -735,35 +764,71 @@ async function reconcilePools(
         },
         demands,
       );
-      for (const agent of agents) {
-        const demand = demands.find((d) => d.agentId === agent.id)!;
-        const pending = work.get(agent.id)!;
-        for (let count = demand.current; count < (desired.get(agent.id) ?? 0); count++) {
-          if (signal.aborted) return;
-          if (!(pool.resolvedImage ?? pool.image)) break;
-          if (!(await canClaim(agent.id, now, pending.topTask?.requestedByUserId)).allowed) break;
-          if (signal.aborted) return;
-          const retry = await getDbClient().get<{ runtime_provision_retry_at: string | null }>(
-            "SELECT runtime_provision_retry_at FROM agents WHERE id = ?",
-            [agent.id],
-          );
-          if (
-            retry?.runtime_provision_retry_at &&
-            Date.parse(retry.runtime_provision_retry_at) > now.getTime()
-          )
-            break;
-          const freshPool = await getRuntimePool(pool.id);
-          if (!freshPool?.enabled) break;
-          if (freshPool.circuitOpenUntil) {
-            if (Date.parse(freshPool.circuitOpenUntil) > now.getTime()) break;
+      const provisions = new Set<Promise<void>>();
+      const failedAgents = new Set<string>();
+      const concurrency = runtimeNumber("RUNTIME_PROVISION_CONCURRENCY", 8);
+      try {
+        for (const agent of agents) {
+          const demand = demands.find((d) => d.agentId === agent.id)!;
+          const pending = work.get(agent.id)!;
+          for (let count = demand.current; count < (desired.get(agent.id) ?? 0); count++) {
+            if (provisions.size >= concurrency) await Promise.race(provisions);
+            if (signal.aborted) return;
+            if (failedAgents.has(agent.id)) break;
+            if (!(pool.resolvedImage ?? pool.image)) break;
+            if (!(await canClaim(agent.id, now, pending.topTask?.requestedByUserId)).allowed) break;
+            if (signal.aborted) return;
+            const retry = await getDbClient().get<{
+              runtime_provision_retry_at: string | null;
+              runtime_provision_attempts: number;
+            }>(
+              "SELECT runtime_provision_retry_at, runtime_provision_attempts FROM agents WHERE id = ?",
+              [agent.id],
+            );
             if (
-              (await listRuntimeInstancesForPool(pool.id)).some((r) => r.status === "provisioning")
+              retry?.runtime_provision_retry_at &&
+              Date.parse(retry.runtime_provision_retry_at) > now.getTime()
             )
               break;
+            const retrying = (retry?.runtime_provision_attempts ?? 0) > 0;
+            if (retrying && demand.provisioning > 0) break;
+            const freshPool = await getRuntimePool(pool.id);
+            if (!freshPool?.enabled) break;
+            if (freshPool.circuitOpenUntil) {
+              if (Date.parse(freshPool.circuitOpenUntil) > now.getTime()) break;
+              if (
+                provisions.size ||
+                (await listRuntimeInstancesForPool(pool.id)).some(
+                  (r) => r.status === "provisioning",
+                )
+              )
+                break;
+            }
+            if (signal.aborted) return;
+            if (failedAgents.has(agent.id)) break;
+            const provision = provisionRuntime(pool, agent, controller, ownerId, now, {
+              signal,
+              countedFailures,
+              onFailure: () => {
+                failedAgents.add(agent.id);
+              },
+            }).then(
+              (success) => {
+                provisions.delete(provision);
+                if (!success) failedAgents.add(agent.id);
+              },
+              (error) => {
+                provisions.delete(provision);
+                failedAgents.add(agent.id);
+                reportSupervisorError(error);
+              },
+            );
+            provisions.add(provision);
+            if (retrying) break;
           }
-          if (signal.aborted) return;
-          if (!(await provisionRuntime(pool, agent, controller, ownerId, now, signal))) break;
         }
+      } finally {
+        await Promise.all(provisions);
       }
     } catch (error) {
       reportSupervisorError(error);

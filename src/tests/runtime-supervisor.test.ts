@@ -18,6 +18,7 @@ import {
   getRuntimeInstanceById,
   insertProvisioningRuntime,
   listRuntimeInstancesForPool,
+  markRuntimeTerminated,
   upsertRuntimeInstance,
 } from "../be/multi-runtime";
 import * as controllers from "../be/runtime-pools/controllers";
@@ -27,6 +28,7 @@ import {
   createPoolAgent,
   createRuntimeController,
   createRuntimePool,
+  getRuntimePool,
 } from "../be/runtime-pools/db";
 import {
   reconcileControllerOrphans,
@@ -98,6 +100,8 @@ const envKeys = [
   "MULTI_RUNTIME_ENABLED",
   "RUNTIME_WORKER_API_URL",
   "SECRETS_ENCRYPTION_KEY",
+  "RUNTIME_PER_TASK_EXIT_GRACE_SEC",
+  "RUNTIME_PROVISION_CONCURRENCY",
 ] as const;
 const previous = Object.fromEntries(envKeys.map((key) => [key, process.env[key]]));
 let fake: FakeRuntimeProvider;
@@ -113,6 +117,8 @@ beforeEach(async () => {
   process.env.MULTI_RUNTIME_ENABLED = "true";
   process.env.RUNTIME_WORKER_API_URL = "http://worker-api.invalid";
   process.env.SECRETS_ENCRYPTION_KEY = "a".repeat(64);
+  delete process.env.RUNTIME_PER_TASK_EXIT_GRACE_SEC;
+  delete process.env.RUNTIME_PROVISION_CONCURRENCY;
   for (const table of [
     "active_sessions",
     "runtime_instances",
@@ -248,6 +254,153 @@ test("logical slots and pool caps bound pending demand", async () => {
   expect(fake.requests.every((r) => r.agentId === agent.id)).toBe(true);
 });
 
+test("concurrent provisions respect the limit, pool cap, and demand reservation", async () => {
+  process.env.RUNTIME_PROVISION_CONCURRENCY = "2";
+  const { pool, agent } = await setup({ maxRuntimes: 4 }, 3);
+  const sibling = await createPoolAgent(pool.id, { name: "sibling", maxTasks: 3 });
+  for (const id of [agent.id, sibling.id])
+    for (let i = 0; i < 5; i++) await createTaskExtended("work", { agentId: id });
+  const releases: Array<() => void> = [];
+  const original = fake.provision.bind(fake);
+  const provision = spyOn(fake, "provision").mockImplementation(async (target, request) => {
+    const handle = await original(target, request);
+    await new Promise<void>((resolve) => releases.push(resolve));
+    return handle;
+  });
+  const tick = reconcileOnce();
+  try {
+    for (let i = 0; i < 1000 && releases.length < 2; i++) await Bun.sleep(5);
+    expect(fake.requests).toHaveLength(2);
+    expect(await listRuntimeInstancesForPool(pool.id)).toHaveLength(2);
+    await reconcileOnce();
+    expect(fake.requests).toHaveLength(2);
+    for (let count = 3; count <= 4; count++) {
+      releases[count - 3]!();
+      for (let i = 0; i < 1000 && releases.length < count; i++) await Bun.sleep(5);
+      expect(fake.requests).toHaveLength(count);
+    }
+  } finally {
+    provision.mockRestore();
+    for (const release of releases) release();
+    await tick;
+  }
+  expect(fake.requests.filter((r) => r.agentId === agent.id)).toHaveLength(3);
+  expect(fake.requests.filter((r) => r.agentId === sibling.id)).toHaveLength(1);
+  expect(await listRuntimeInstancesForPool(pool.id)).toHaveLength(4);
+  await reconcileOnce();
+  expect(fake.requests).toHaveLength(4);
+});
+
+test("provision concurrency defaults to eight", async () => {
+  const { agent } = await setup({}, 9);
+  for (let i = 0; i < 9; i++) await createTaskExtended("work", { agentId: agent.id });
+  let release!: () => void;
+  fake.gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const tick = reconcileOnce();
+  try {
+    for (let i = 0; i < 1000 && fake.requests.length < 8; i++) await Bun.sleep(5);
+    expect(fake.requests).toHaveLength(8);
+    await reconcileOnce();
+    expect(fake.requests).toHaveLength(8);
+  } finally {
+    release();
+    await tick;
+  }
+  expect(fake.requests).toHaveLength(9);
+});
+
+test("an expired circuit admits only one trial during concurrent provisioning", async () => {
+  const { pool, agent } = await setup({}, 4);
+  const sibling = await createPoolAgent(pool.id, { name: "sibling", maxTasks: 2 });
+  for (const id of [agent.id, sibling.id])
+    for (let i = 0; i < 4; i++) await createTaskExtended("work", { agentId: id });
+  await getDbClient().run("UPDATE runtime_pools SET circuit_open_until = ? WHERE id = ?", [
+    new Date(Date.now() - 1000).toISOString(),
+    pool.id,
+  ]);
+  let release!: () => void;
+  fake.gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const tick = reconcileOnce();
+  try {
+    for (let i = 0; i < 1000 && !fake.requests.length; i++) await Bun.sleep(5);
+    expect(fake.requests).toHaveLength(1);
+    await reconcileOnce();
+    expect(fake.requests).toHaveLength(1);
+  } finally {
+    release();
+    await tick;
+  }
+  await reconcileOnce();
+  expect(fake.requests).toHaveLength(1);
+});
+
+test("a controller disconnect preserves reservations without failure backoff", async () => {
+  const { pool, agent } = await setup({}, 1);
+  const sibling = await createPoolAgent(pool.id, { name: "sibling", maxTasks: 1 });
+  for (const id of [agent.id, sibling.id]) await createTaskExtended("work", { agentId: id });
+  const commands = await getControllerCommands(controllerId);
+  const original = commands.provision.bind(commands);
+  const provision = spyOn(commands, "provision").mockImplementation(async (request) => {
+    if (request.agentId === agent.id) {
+      fake.requests.push(request);
+      throw new ControllerOfflineError(controllerId);
+    }
+    return original(request);
+  });
+  try {
+    await reconcileOnce({ getControllerCommands: async () => commands });
+  } finally {
+    provision.mockRestore();
+  }
+  const rows = await listRuntimeInstancesForPool(pool.id);
+  expect(rows).toHaveLength(2);
+  expect(rows.every((r) => r.status === "provisioning")).toBe(true);
+  const reserved = rows.find((r) => r.agentId === agent.id)!;
+  expect(reserved.externalHandle).toBeNull();
+  expect(rows.find((r) => r.agentId === sibling.id)?.externalHandle).not.toBeNull();
+  expect(
+    await resolveBySessionToken(fake.requests.find((r) => r.agentId === agent.id)!.env.API_KEY!),
+  ).not.toBeNull();
+  expect((await getAgentById(agent.id))?.runtimeProvisionAttempts).toBe(0);
+  expect((await getAgentById(agent.id))?.runtimeProvisionRetryAt).toBeNull();
+  expect((await getRuntimePool(pool.id))?.consecutiveFailures).toBe(0);
+  expect(errorSpy).not.toHaveBeenCalled();
+});
+
+test("a concurrent provision failure preserves siblings and applies backoff", async () => {
+  process.env.RUNTIME_PROVISION_CONCURRENCY = "2";
+  const { pool, agent } = await setup({}, 1);
+  const sibling = await createPoolAgent(pool.id, { name: "sibling", maxTasks: 1 });
+  for (const id of [agent.id, sibling.id]) await createTaskExtended("work", { agentId: id });
+  fake.provisionFailures.set(agent.id, "provision failed");
+  let release!: () => void;
+  fake.gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const now = new Date();
+  const tick = reconcileOnce({ now });
+  try {
+    for (let i = 0; i < 1000 && fake.requests.length < 2; i++) await Bun.sleep(5);
+    expect(fake.requests).toHaveLength(2);
+  } finally {
+    release();
+    await tick;
+  }
+  const rows = await listRuntimeInstancesForPool(pool.id);
+  expect(rows.find((r) => r.agentId === agent.id)?.status).toBe("offline");
+  expect(rows.find((r) => r.agentId === sibling.id)?.status).toBe("provisioning");
+  expect((await getAgentById(agent.id))?.runtimeProvisionAttempts).toBe(1);
+  expect((await getAgentById(agent.id))?.runtimeProvisionRetryAt).toBe(
+    new Date(now.getTime() + 30_000).toISOString(),
+  );
+  await reconcileOnce({ now: new Date(now.getTime() + 29_000) });
+  expect(fake.requests).toHaveLength(2);
+});
+
 test("warm floor starts without work and remains warm past idle timeout", async () => {
   const { pool, agent } = await setup({ minRuntimes: 1, idleMinutes: 1 });
   await reconcileOnce();
@@ -363,7 +516,7 @@ test.each([
   ).not.toBeNull();
 });
 
-test("per-task runtime reaps after a task and injects the exit limit", async () => {
+test("per-task runtime preserves post-task work until runner shutdown", async () => {
   const { agent, task, runtime } = await wake({ lifecycle: "per-task" });
   expect(fake.requests[0]!.env.SWARM_EXIT_AFTER_TASKS).toBe("1");
   await completeTask(task.id, "done");
@@ -372,9 +525,45 @@ test("per-task runtime reaps after a task and injects the exit limit", async () 
     task.id,
     runtime.id,
   ]);
+  await getDbClient().run(
+    "INSERT INTO active_sessions (id, agentId, taskId, triggerType, runtimeInstanceId) VALUES (?, ?, ?, 'task_assigned', ?)",
+    [crypto.randomUUID(), agent.id, task.id, runtime.id],
+  );
+  await reconcileOnce();
+  expect(fake.terminated).toHaveLength(0);
+  expect((await getRuntimeInstanceById(runtime.id))?.status).toBe("active");
+  expect(await resolveBySessionToken(fake.requests[0]!.env.API_KEY!)).not.toBeNull();
+  expect(
+    await getDbClient().get("SELECT id FROM active_sessions WHERE taskId = ?", [task.id]),
+  ).not.toBeNull();
+  // The runner's shutdown close marks the runtime offline before provider cleanup.
+  await markRuntimeTerminated(runtime.id, "Runner shutdown");
   await reconcileOnce();
   expect(fake.terminated).toHaveLength(1);
   expect((await getRuntimeInstanceById(runtime.id))?.status).toBe("offline");
+  expect(await resolveBySessionToken(fake.requests[0]!.env.API_KEY!)).toBeNull();
+});
+
+test.each([
+  undefined,
+  "10",
+])("per-task runtime expires exit grace (%s) without runner shutdown", async (grace) => {
+  if (grace !== undefined) process.env.RUNTIME_PER_TASK_EXIT_GRACE_SEC = grace;
+  const { agent, task, runtime } = await wake({ lifecycle: "per-task" });
+  await activate(runtime.id, agent.id);
+  const finished = await completeTask(task.id, "done");
+  await getDbClient().run("UPDATE runtime_instances SET task_id = ? WHERE id = ?", [
+    task.id,
+    runtime.id,
+  ]);
+  const deadline = Date.parse(finished!.finishedAt!) + Number(grace ?? 60) * 1000;
+  await reconcileOnce({ now: new Date(deadline - 1) });
+  expect(fake.terminated).toHaveLength(0);
+  expect(await resolveBySessionToken(fake.requests[0]!.env.API_KEY!)).not.toBeNull();
+  await reconcileOnce({ now: new Date(deadline) });
+  expect(fake.terminated).toHaveLength(1);
+  expect((await getRuntimeInstanceById(runtime.id))?.status).toBe("offline");
+  expect(await resolveBySessionToken(fake.requests[0]!.env.API_KEY!)).toBeNull();
 });
 
 test("clean provider exit retires a missing handle", async () => {
@@ -764,6 +953,7 @@ test("offline controllers remain quiet across ticks while other failures log err
 });
 
 test("shutdown returns after its bound and stops subsequent provisioning", async () => {
+  process.env.RUNTIME_PROVISION_CONCURRENCY = "1";
   const { agent } = await setup();
   await createTaskExtended("first", { agentId: agent.id });
   await createTaskExtended("second", { agentId: agent.id });
@@ -845,5 +1035,5 @@ test("per-task runtime survives offer review before a real task finishes", async
   expect(fake.terminated).toHaveLength(0);
   await completeTask(task.id, "done");
   await reconcileOnce();
-  expect((await getRuntimeInstanceById(runtime.id))?.status).toBe("offline");
+  expect((await getRuntimeInstanceById(runtime.id))?.status).toBe("active");
 });

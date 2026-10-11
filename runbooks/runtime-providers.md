@@ -91,9 +91,17 @@ The schema reserves another kind for a future adapter. The factory rejects that 
 The supervisor provisions within agent `maxTasks`, pool `maxRuntimes`, and budget admission.
 `slotsPerRuntime` sets process capacity. `minRuntimes` keeps a warm floor for each bound agent.
 Pool `maxRuntimes` limits all runtimes across its agents. Provisioning rows count toward the limit.
+`RUNTIME_PROVISION_CONCURRENCY` bounds simultaneous provisions, with a default of 8.
+Started requests reserve demand. Each new request checks budget admission, retry deadlines, and the pool circuit.
+An expired circuit permits only one trial. A failure preserves sibling requests and stops further requests for that agent during the tick.
+Each tick counts at most one failure per agent toward retry attempts and the pool circuit.
+An agent with prior failures permits only one provision awaiting registration. Registration clears its retry state and restores concurrent provisioning.
 With `lifecycle: "idle"`, `idleMinutes: null` keeps runtimes indefinitely.
 A positive `idleMinutes` terminates idle runtimes after that interval, while preserving the warm floor.
 With `lifecycle: "per-task"`, the worker exits after task completion. Use one slot for one task per runtime.
+Task completion preserves the runtime, its sessions, and its token during post-task reporting.
+The finished runtime still counts toward agent `maxTasks` and pool `maxRuntimes` throughout its exit grace.
+Runner shutdown permits immediate teardown. Otherwise, teardown waits `RUNTIME_PER_TASK_EXIT_GRACE_SEC` seconds from task completion, with a default of 60.
 
 The API inserts the provisioning row and mints a scoped runtime token before the infrastructure request.
 Registration activates that row. Termination revokes its runtime and child tokens and reconciles agent liveness.
@@ -358,7 +366,9 @@ Provisioning rows reserve capacity until workers register with the injected runt
 `minRuntimes` maintains a warm floor per agent, within those caps.
 An idle lifecycle with no `idleMinutes` keeps runtimes indefinitely.
 An idle timeout first drains the runtime. The next reconcile terminates it if it remains idle above its warm floor.
-A per-task lifecycle injects `SWARM_EXIT_AFTER_TASKS=1`. The runner closes after its task finishes.
+A per-task lifecycle injects `SWARM_EXIT_AFTER_TASKS=1`. The runner closes after it reports cost, removes sessions, and reports logs and context.
+The supervisor waits for this shutdown close or the task's exit grace deadline before teardown.
+Idle runtimes still discard sessions whose tasks are terminal or missing, so stale sessions cannot prevent idle teardown.
 The supervisor removes exited runtimes and owner-filtered orphans, marks rows offline, and revokes runtime tokens.
 Provider list handles can include `createdAt` as an ISO timestamp from infrastructure metadata.
 The supervisor gives newly created orphans two minutes before termination to permit database registration.

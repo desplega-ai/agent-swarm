@@ -267,11 +267,11 @@ test("renews active and provisioning runtimes before expiry and stores the clamp
   );
 });
 
-test("does not renew a runtime reaped after its task finishes", async () => {
+test("does not renew a runtime reaped after its task exit grace", async () => {
   const { task, runtime } = await busy({ ttlSec: 300, lifecycle: "per-task" });
   await completeTask(task.id, "Done");
   await getDbClient().run("DELETE FROM active_sessions WHERE taskId = ?", [task.id]);
-  await tick(1);
+  await tick(61);
   expect((await getRuntimeInstanceById(runtime.id))?.status).toBe("offline");
   expect(fake.renewed).toHaveLength(0);
 });

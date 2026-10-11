@@ -316,6 +316,8 @@ The API checks the pool flag for each routing event and timer tick.
 | `RUNTIME_WAKE_REROUTE_SEC` | `600` | Seconds before the router releases a pending wake assignment and tries another eligible agent. |
 | `RUNTIME_ROUTING_INTERVAL_MS` | `5000` | Milliseconds between routing sweeps. Restart the API after changing this value. |
 | `RUNTIME_SUPERVISOR_INTERVAL_MS` | `5000` | Milliseconds between runtime demand and lifecycle checks. Restart the API after changing this value. |
+| `RUNTIME_PROVISION_CONCURRENCY` | `8` | Maximum simultaneous provisions. Pool caps, demand reservations, retry deadlines, and circuit checks still apply. |
+| `RUNTIME_PER_TASK_EXIT_GRACE_SEC` | `60` | Seconds after task completion before forced per-task teardown. Runner shutdown permits earlier teardown after cost, logs, and context reporting. |
 | `RUNTIME_PROVISION_TIMEOUT_SEC` | `300` | Seconds before registration timeout terminates the runtime and counts one failure. |
 | `RUNTIME_PROVISION_MAX_ATTEMPTS` | `3` | Provision failures before the oldest ready pending task fails and notifies the Lead. |
 | `RUNTIME_CIRCUIT_THRESHOLD` | `5` | Consecutive provision failures before the pool stops provisioning. |
@@ -333,6 +335,9 @@ Healthy re-registration leaves the circuit unchanged. No ready demand or an open
 The supervisor stores scrubbed errors on the runtime, pool, and controller.
 The circuit blocks provisioning and assignments to sleeping pool agents. Existing runtimes continue their tasks.
 After the circuit expires, one provision may await registration. Registration closes the circuit. Failure opens the circuit again.
+The supervisor starts provisions with bounded concurrency. A failure preserves sibling provisions and prevents further requests for that agent during the tick.
+Per-task runtimes preserve their sessions and tokens until runner shutdown or the exit grace deadline.
+Task completion starts the grace period. It does not immediately terminate the runtime.
 Token rotation drains runtimes before termination. A later tick checks activity again before terminating an idle runtime.
 Demand can create replacements within the pool cap. The supervisor terminates drained runtimes after their tasks finish.
 The failure settings accept positive integers. Socket grace also accepts zero for an immediate provider check.

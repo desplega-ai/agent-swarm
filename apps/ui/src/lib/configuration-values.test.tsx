@@ -65,6 +65,15 @@ test("runtime supervisor and Docker fallbacks are operator settings", () => {
     defaultValue: "5000",
     restartRequired: true,
   });
+  expect(entries.find((entry) => entry.key === "RUNTIME_PROVISION_CONCURRENCY")).toMatchObject({
+    kind: "number",
+    defaultValue: "8",
+  });
+  expect(entries.find((entry) => entry.key === "RUNTIME_PER_TASK_EXIT_GRACE_SEC")).toMatchObject({
+    kind: "number",
+    unit: "s",
+    defaultValue: "60",
+  });
   for (const key of [
     "RUNTIME_WORKER_API_URL",
     "DOCKER_HOST",

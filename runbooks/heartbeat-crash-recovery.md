@@ -185,10 +185,16 @@ is never expired):
   Reachable sleeping pool agents remain valid resume targets after their last runtime becomes offline.
 - Provision errors and registration timeouts count as failures. A timeout terminates the runtime.
   The agent row persists the failure count and retry deadline. Retries wait 30, 90, then 180 seconds.
+  Each tick counts at most one failure per agent toward retry attempts and the pool circuit, including simultaneous registration timeouts.
+  An agent with prior failures permits only one provision awaiting registration. Registration clears retry state and restores concurrent provisioning.
   After `RUNTIME_PROVISION_MAX_ATTEMPTS`, the oldest ready pending task fails with a scrubbed provisioning reason.
   The existing failure follow-up notifies the Lead. Task failure and first registration reset agent retry state.
   A tick with no ready demand clears retry state. Reaching the attempt cap without a ready pending task also clears retry state.
   Each failure stores scrubbed errors on the runtime, pool, and controller.
+- The supervisor provisions concurrently, bounded by `RUNTIME_PROVISION_CONCURRENCY` (default 8).
+  Started requests reserve demand within agent and pool caps. Each new request checks budget admission, backoff, and the circuit.
+  A failure preserves sibling requests and stops further requests for that agent during the tick.
+  An expired circuit still permits only one trial awaiting registration.
 - `RUNTIME_CIRCUIT_THRESHOLD` consecutive failures open the pool circuit for `RUNTIME_CIRCUIT_OPEN_MIN` minutes.
   An open circuit blocks provisioning and tier-2 routing. Existing runtimes continue their tasks.
   Opening the circuit clears retry state for its agents.
@@ -203,11 +209,15 @@ is never expired):
   The supervisor terminates the drained runtime when its tasks finish.
 - A draining runtime cannot receive work through `/api/poll`. The supervisor drains idle runtimes before termination and checks activity again next tick.
 - The supervisor counts sessions as busy only when their task exists and is non-terminal.
-  Each tick checks for sessions with terminal or missing tasks, scoped to the pooled runtime being checked.
+  Each tick checks idle-lifecycle runtimes for sessions with terminal or missing tasks, scoped to the runtime being checked.
   The supervisor issues DELETE only when that read finds a stale session.
   A runtime's recorded `in_progress` or `reviewing` task also keeps it busy without a session row.
   Workers delete sessions concurrently for each completed batch, with three one-second attempts and 100/200 ms backoffs.
   Final failure logs a scrubbed warning and lets task completion continue.
+- Per-task runtimes preserve sessions and tokens after task completion so the runner can report cost, logs, and context.
+  Runner shutdown sends `/close` with `runtimeShutdown: true`, which retires the row and permits provider teardown.
+  Without shutdown, teardown waits `RUNTIME_PER_TASK_EXIT_GRACE_SEC` seconds from task completion (default 60).
+  The finished runtime still counts toward agent `maxTasks` and pool `maxRuntimes` during this grace.
 - E2B runtimes use the same drain path within `RUNTIME_ROTATE_BEFORE_SEC` seconds of their continuous runtime limit.
   Demand can provision replacements within the pool cap. Busy runtimes finish their tasks before termination.
   The limit comes from controller `E2B_MAX_CONTINUOUS_SEC`, then the deployment value, then 3600 seconds.
@@ -825,6 +835,8 @@ Rollback switches accept `0`/`false` interchangeably (both parse through
 | Remote controller token lifetime | 90 days | `RUNTIME_CONTROLLER_TOKEN_TTL_DAYS` |
 | Remote controller disconnect grace (§1a) | 120s | `RUNTIME_CONTROLLER_GRACE_SEC` |
 | Runtime registration timeout | 300s | `RUNTIME_PROVISION_TIMEOUT_SEC` |
+| Runtime provision concurrency | 8 | `RUNTIME_PROVISION_CONCURRENCY` |
+| Per-task runtime exit grace | 60s | `RUNTIME_PER_TASK_EXIT_GRACE_SEC` |
 | Runtime provision failure limit | 3 | `RUNTIME_PROVISION_MAX_ATTEMPTS` |
 | Pool circuit failure threshold | 5 | `RUNTIME_CIRCUIT_THRESHOLD` |
 | Pool circuit duration | 10 min | `RUNTIME_CIRCUIT_OPEN_MIN` |
