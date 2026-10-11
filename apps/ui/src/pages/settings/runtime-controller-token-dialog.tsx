@@ -1,8 +1,8 @@
-import { AlertCircle, AlertTriangle, KeyRound } from "lucide-react";
-import { useState } from "react";
+import { AlertCircle, AlertTriangle, Check, Copy, KeyRound } from "lucide-react";
+import { useMemo, useState } from "react";
+import { toast } from "sonner";
 import { useMintRuntimeControllerToken } from "@/api/hooks/use-runtime-pools";
 import type { RuntimeController, RuntimeControllerToken } from "@/api/types";
-import { CopyButton } from "@/components/shared/copy-button";
 import { CopyableField } from "@/components/shared/copyable-fields";
 import { AlertCallout } from "@/components/ui/alert-callout";
 import { Button } from "@/components/ui/button";
@@ -15,6 +15,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
+import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
 import { getConfig } from "@/lib/config";
 
 /** The controller CLI reads its token from this env var, never from a flag. */
@@ -23,6 +24,8 @@ const TOKEN_ENV = "AGENT_SWARM_CONTROLLER_TOKEN";
 function controllerCommand(controller: RuntimeController, token: string): string {
   const apiUrl = getConfig().apiUrl.replace(/\/+$/, "");
   return [
+    // Safe unescaped in single quotes: mintControllerToken -> insertSessionToken
+    // (src/be/users.ts) builds "aseph_" + base62, so only [A-Za-z0-9_].
     `export ${TOKEN_ENV}='${token}'`,
     `agent-swarm controller --api-url ${apiUrl} --kind ${controller.kind}`,
   ].join("\n");
@@ -43,6 +46,15 @@ export function RuntimeControllerTokenDialog({
   const mint = useMintRuntimeControllerToken();
   const [token, setToken] = useState<RuntimeControllerToken | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const { copied, copy } = useCopyToClipboard();
+  const command = useMemo(
+    () => (token ? controllerCommand(controller, token.plaintext) : null),
+    [controller, token],
+  );
+
+  function copyFailed() {
+    toast.error("Copy failed. Select the text and copy it by hand.");
+  }
 
   function submit() {
     setError(null);
@@ -63,7 +75,16 @@ export function RuntimeControllerTokenDialog({
         if (!open) onClose();
       }}
     >
-      <DialogContent className="sm:max-w-2xl">
+      <DialogContent
+        className="sm:max-w-2xl"
+        // The token cannot be shown again: only Done or the X button close it.
+        onPointerDownOutside={(event) => {
+          if (token) event.preventDefault();
+        }}
+        onEscapeKeyDown={(event) => {
+          if (token) event.preventDefault();
+        }}
+      >
         <DialogHeader>
           <DialogTitle>
             {token ? `Token for ${controller.name}` : `Mint token for ${controller.name}?`}
@@ -75,23 +96,35 @@ export function RuntimeControllerTokenDialog({
           </DialogDescription>
         </DialogHeader>
 
-        {token ? (
+        {token && command ? (
           <div className="max-h-[65vh] space-y-4 overflow-y-auto pr-1">
             <AlertCallout tone="warning" icon={AlertTriangle}>
               This token is shown once. It expires {new Date(token.expiresAt).toLocaleString()}.
             </AlertCallout>
-            <CopyableField label="Controller token" value={token.plaintext} />
+            <CopyableField
+              label="Controller token"
+              value={token.plaintext}
+              onCopyError={copyFailed}
+            />
             <div className="space-y-1.5">
               <Label className="text-xs text-muted-foreground uppercase tracking-wide">
                 Run the controller
               </Label>
               <div className="relative rounded-md border border-border bg-muted/35">
-                <CopyButton
-                  value={controllerCommand(controller, token.plaintext)}
-                  ariaLabel="Copy command"
-                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  className="absolute top-1.5 right-1.5 h-7 w-7"
+                  aria-label={copied ? "Copied" : "Copy command"}
+                  onClick={async () => {
+                    if (!(await copy(command))) copyFailed();
+                  }}
+                >
+                  {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+                </Button>
                 <pre className="overflow-x-auto whitespace-pre p-3 pr-11 font-mono text-xs leading-relaxed">
-                  {controllerCommand(controller, token.plaintext)}
+                  {command}
                 </pre>
               </div>
               <p className="text-xs text-muted-foreground">
