@@ -2286,6 +2286,8 @@ export interface paths {
                     content: {
                         "application/json": components["schemas"]["Agent"] & {
                             enabledCapabilities: ("core" | "task-pool" | "scripts" | "config" | "prompt-templates" | "mcp" | "profiles" | "services" | "scheduling" | "memory" | "workflows" | "pages" | "metrics" | "kv" | "slack" | "tracker" | "skills" | "messaging" | "repo" | "agentmail" | "kapso" | "swarm-x")[];
+                            /** @enum {string} */
+                            deliveryMode: "poll" | "push";
                         };
                     };
                 };
@@ -2297,6 +2299,8 @@ export interface paths {
                     content: {
                         "application/json": components["schemas"]["Agent"] & {
                             enabledCapabilities: ("core" | "task-pool" | "scripts" | "config" | "prompt-templates" | "mcp" | "profiles" | "services" | "scheduling" | "memory" | "workflows" | "pages" | "metrics" | "kv" | "slack" | "tracker" | "skills" | "messaging" | "repo" | "agentmail" | "kapso" | "swarm-x")[];
+                            /** @enum {string} */
+                            deliveryMode: "poll" | "push";
                         };
                     };
                 };

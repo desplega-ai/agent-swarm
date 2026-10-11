@@ -44,6 +44,7 @@ import {
   setRuntimeCredentialReady,
   upsertRuntimeInstance,
 } from "../be/multi-runtime";
+import { getPoolForAgent, resolvePoolDelivery } from "../be/runtime-pools/db";
 import { ACP_TARGET_IDS } from "../providers/acp-target-catalog";
 import { reasoningCapability } from "../providers/reasoning-effort";
 import { ALL_CAPABILITIES, getEnabledCapabilities } from "../server";
@@ -57,6 +58,7 @@ import {
   AgentSchema,
   AgentStatusSchema,
   AgentWithTasksSchema,
+  DeliveryModeSchema,
   type ProfileSyncConflict,
   type ProviderName,
   ProviderNameSchema,
@@ -78,6 +80,7 @@ import {
   IdentityFieldBudgetError,
 } from "../utils/identity-field-budget";
 import { isMultiRuntimeEnabled } from "../utils/multi-runtime";
+import { isRuntimePoolsEnabled } from "../utils/runtime-pools-flag";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { route, runtimeInstanceHeader } from "./route-def";
 import { agentWithCapacity, json, jsonError } from "./utils";
@@ -116,6 +119,7 @@ const AgentWithCapacityAndTasksSchema = AgentWithTasksSchema.extend({
 /** POST /api/agents response: the agent row plus the server's capability flags. */
 const RegisterAgentResponseSchema = AgentSchema.extend({
   enabledCapabilities: z.array(CapabilitySchema),
+  deliveryMode: DeliveryModeSchema,
 });
 
 /** Shape shared by the single- and bulk- credential-status endpoints. */
@@ -805,6 +809,9 @@ export async function handleAgentRegister(
     registerAgent.respond(res, result.created ? 201 : 200, {
       ...result.agent!,
       enabledCapabilities: getEnabledCapabilities(),
+      deliveryMode: isRuntimePoolsEnabled()
+        ? resolvePoolDelivery((await getPoolForAgent(agentId)) ?? { delivery: null })
+        : "poll",
     });
     return true;
   }
