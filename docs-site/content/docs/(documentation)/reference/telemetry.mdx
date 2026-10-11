@@ -166,9 +166,11 @@ The dashboard never sends telemetry to Desplega itself. It posts each event to i
 | `notification.submitted` | Someone submits a notification card | `key`, and `email_domain` when they typed an email: the **domain** only, never the address |
 | `popup.shown` | The organization-name prompt or the feedback pop-up opens | `popup` (`org_name`, `feedback`) and `trigger`: why it opened |
 | `popup.dismissed` | It closes without being submitted | `popup` and `method`: `later`, `close` or `escape` |
-| `popup.submitted` | It is submitted | `popup`, `has_message` and `has_contact`: whether a message or a name or email was filled in, never the text |
+| `popup.submitted` | It is submitted | `popup`, `has_message` and `has_contact`: whether a message or a name or email was filled in, never the text. The feedback card adds the 0-10 `score` |
 
 A notification card that asks for your email, and the feedback dialog, are different. Those send what you type to the feedback endpoint (`https://proxy.desplega.sh/v1/feedback`, overridable with the `feedback_endpoint` config key), and only when you submit them. They are not telemetry, so the opt-out does not block them.
+
+The feedback card asks self-hosted admins one 0-10 question. It shows once after a completed workflow run, after 10 completed tasks on an install at least 3 days old, or in the session after the one that first saw a failed task, and then at most once a quarter. A tap on a score sends it; a follow-up question and contact details are optional. With telemetry off, the card still works, but it sends no installation ID, and sends the organization name only when you tick "Include my organization name".
 
 ## Identifiers
 

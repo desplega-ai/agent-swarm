@@ -27551,6 +27551,35 @@
                       "required": [
                         "enabled"
                       ]
+                    },
+                    "instance": {
+                      "type": "object",
+                      "properties": {
+                        "first_seen_at": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "tasks_completed": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "tasks_failed": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "workflow_runs_completed": {
+                          "type": "integer",
+                          "minimum": 0
+                        }
+                      },
+                      "required": [
+                        "first_seen_at",
+                        "tasks_completed",
+                        "tasks_failed",
+                        "workflow_runs_completed"
+                      ]
                     }
                   },
                   "required": [

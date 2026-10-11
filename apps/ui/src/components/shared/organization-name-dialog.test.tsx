@@ -26,6 +26,7 @@ mock.module("@/api/hooks/use-integrations-meta", () => ({
 mock.module("@/api/hooks/use-onboarding", () => ({ useOnboardingOwnsFirstRun: () => false }));
 const sentEvents: Array<{ event: string; properties: Record<string, unknown> }> = [];
 mock.module("@/api/hooks/use-ui-telemetry", () => ({
+  isUiTelemetryEnabled: () => true,
   useUiTelemetry: () => (input: { event: string; properties: Record<string, unknown> }) =>
     sentEvents.push(input),
 }));
@@ -38,7 +39,17 @@ mock.module("@/hooks/use-other-dialog-open", () => ({
   useOtherDialogOpen: () => false,
 }));
 mock.module("@/app/status-context", () => ({
-  useStatusContext: () => ({ data: { identity: { is_cloud: false, name: "" } } }),
+  useStatusContext: () => ({
+    data: {
+      identity: { is_cloud: false, name: "" },
+      instance: {
+        first_seen_at: null,
+        tasks_completed: 0,
+        tasks_failed: 0,
+        workflow_runs_completed: 1,
+      },
+    },
+  }),
 }));
 mock.module("@/api/hooks/use-tasks", () => ({ useTasks: () => ({ data: { tasks: [{}] } }) }));
 mock.module("@/api/hooks/use-feedback", () => ({ useSubmitFeedback: () => ({}) }));

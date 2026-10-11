@@ -1,27 +1,33 @@
-import { describe, expect, test } from "bun:test";
 import {
   EMPTY_FEEDBACK_POPUP_STATE,
   FEEDBACK_DISMISS_COOLDOWN_MS,
   FEEDBACK_SUBMISSION_COOLDOWN_MS,
   feedbackPopupStorageKey,
+  feedbackPopupTrigger,
+  followUpQuestion,
   parseFeedbackPopupState,
-  shouldShowFeedbackPopup,
 } from "./feedback-popup";
 import { isAdminLike } from "./user-role";
 
 const NOW = Date.parse("2026-09-03T12:00:00.000Z");
 const daysAgo = (days: number) => new Date(NOW - days * 24 * 60 * 60 * 1000).toISOString();
 
-const eligible = {
+/** Eligible in every respect, but no trigger holds yet. */
+const base = {
   isCloud: false,
   currentUserState: "ready" as const,
   user: { role: "admin" },
   state: EMPTY_FEEDBACK_POPUP_STATE,
   installedAt: daysAgo(8),
-  hasFailedTask: false,
+  tasksCompleted: 0,
+  tasksFailed: 0,
+  workflowRunsCompleted: 0,
+  sessionId: "session-2",
   otherDialogOpen: false,
   nowMs: NOW,
 };
+/** Eligible with the workflow trigger. */
+const eligible = { ...base, workflowRunsCompleted: 1 };
 
 describe("isAdminLike", () => {
   test("treats missing and empty roles as admin during onboarding", () => {
@@ -35,97 +41,121 @@ describe("isAdminLike", () => {
   });
 });
 
-describe("shouldShowFeedbackPopup", () => {
-  test("shows after a failed task within the install window", () => {
+describe("feedbackPopupTrigger", () => {
+  test("no trigger, no card", () => {
+    expect(feedbackPopupTrigger(base)).toBeNull();
+  });
+
+  test("task_failed waits for a later session than the first failure", () => {
+    const seen = { ...EMPTY_FEEDBACK_POPUP_STATE, firstFailureSessionId: "session-1" };
+    expect(feedbackPopupTrigger({ ...base, tasksFailed: 1 })).toBeNull();
     expect(
-      shouldShowFeedbackPopup({ ...eligible, installedAt: daysAgo(5), hasFailedTask: true }),
-    ).toBe(true);
+      feedbackPopupTrigger({
+        ...base,
+        tasksFailed: 1,
+        state: { ...seen, firstFailureSessionId: "session-2" },
+      }),
+    ).toBeNull();
+    expect(feedbackPopupTrigger({ ...base, tasksFailed: 1, state: seen })).toBe("task_failed");
   });
 
-  test("does not show when the install date is unknown", () => {
-    expect(shouldShowFeedbackPopup({ ...eligible, installedAt: null })).toBe(false);
-    expect(shouldShowFeedbackPopup({ ...eligible, installedAt: null, hasFailedTask: true })).toBe(
-      false,
-    );
+  test("workflow_completed after one completed workflow run", () => {
+    expect(feedbackPopupTrigger(eligible)).toBe("workflow_completed");
   });
 
-  test("does not show after the install window", () => {
+  test("tasks_completed needs 10 tasks and an install at least 3 days old", () => {
+    expect(feedbackPopupTrigger({ ...base, tasksCompleted: 10 })).toBe("tasks_completed");
+    expect(feedbackPopupTrigger({ ...base, tasksCompleted: 9 })).toBeNull();
     expect(
-      shouldShowFeedbackPopup({ ...eligible, installedAt: daysAgo(31), hasFailedTask: true }),
-    ).toBe(false);
+      feedbackPopupTrigger({ ...base, tasksCompleted: 10, installedAt: daysAgo(2) }),
+    ).toBeNull();
   });
 
-  test("does not show without a failed task", () => {
-    expect(shouldShowFeedbackPopup({ ...eligible, installedAt: daysAgo(5) })).toBe(false);
+  test("quarterly asks a 200-day-old install that was never asked", () => {
+    expect(feedbackPopupTrigger({ ...base, installedAt: daysAgo(200) })).toBe("quarterly");
+  });
+
+  test("quarterly waits 90 days after the last ask", () => {
+    const state = { ...EMPTY_FEEDBACK_POPUP_STATE, lastShownAt: daysAgo(89) };
+    expect(feedbackPopupTrigger({ ...base, installedAt: daysAgo(200), state })).toBeNull();
+    expect(
+      feedbackPopupTrigger({
+        ...base,
+        installedAt: daysAgo(200),
+        state: { ...state, lastShownAt: daysAgo(90) },
+      }),
+    ).toBe("quarterly");
+  });
+
+  test("event triggers fire only before the first ask", () => {
+    const asked = { ...EMPTY_FEEDBACK_POPUP_STATE, lastShownAt: daysAgo(40) };
+    expect(feedbackPopupTrigger({ ...eligible, state: asked })).toBeNull();
+  });
+
+  test("an unknown install date blocks only the age-based triggers", () => {
+    expect(feedbackPopupTrigger({ ...base, installedAt: null, tasksCompleted: 50 })).toBeNull();
+    expect(feedbackPopupTrigger({ ...eligible, installedAt: null })).toBe("workflow_completed");
   });
 
   test("waits for identity and any other dialog to close", () => {
-    expect(shouldShowFeedbackPopup({ ...eligible, currentUserState: "pending" })).toBe(false);
-    expect(shouldShowFeedbackPopup({ ...eligible, otherDialogOpen: true })).toBe(false);
+    expect(feedbackPopupTrigger({ ...eligible, currentUserState: "pending" })).toBeNull();
+    expect(feedbackPopupTrigger({ ...eligible, otherDialogOpen: true })).toBeNull();
   });
 
   test("never shows on cloud or to an explicit non-admin", () => {
-    expect(shouldShowFeedbackPopup({ ...eligible, isCloud: true })).toBe(false);
-    expect(shouldShowFeedbackPopup({ ...eligible, user: { role: "viewer" } })).toBe(false);
+    expect(feedbackPopupTrigger({ ...eligible, isCloud: true })).toBeNull();
+    expect(feedbackPopupTrigger({ ...eligible, user: { role: "viewer" } })).toBeNull();
   });
 
   test("never prompts twice inside the submission cooldown", () => {
-    const submittedAt = new Date(NOW - FEEDBACK_SUBMISSION_COOLDOWN_MS + 1).toISOString();
+    const at = (ms: number) => ({
+      ...EMPTY_FEEDBACK_POPUP_STATE,
+      lastSubmittedAt: new Date(NOW - ms).toISOString(),
+      submissionCount: 1,
+    });
+    const old = { ...base, installedAt: daysAgo(400) };
     expect(
-      shouldShowFeedbackPopup({
-        ...eligible,
-        hasFailedTask: true,
-        state: { ...EMPTY_FEEDBACK_POPUP_STATE, lastSubmittedAt: submittedAt, submissionCount: 1 },
-      }),
-    ).toBe(false);
-    expect(
-      shouldShowFeedbackPopup({
-        ...eligible,
-        hasFailedTask: true,
-        state: {
-          ...EMPTY_FEEDBACK_POPUP_STATE,
-          lastSubmittedAt: new Date(NOW - FEEDBACK_SUBMISSION_COOLDOWN_MS).toISOString(),
-          submissionCount: 1,
-        },
-      }),
-    ).toBe(true);
+      feedbackPopupTrigger({ ...old, state: at(FEEDBACK_SUBMISSION_COOLDOWN_MS - 1) }),
+    ).toBeNull();
+    expect(feedbackPopupTrigger({ ...old, state: at(FEEDBACK_SUBMISSION_COOLDOWN_MS) })).toBe(
+      "quarterly",
+    );
   });
 
   test("suppresses a dismissal for the shorter cooldown", () => {
+    const at = (ms: number) => ({
+      ...EMPTY_FEEDBACK_POPUP_STATE,
+      lastDismissedAt: new Date(NOW - ms).toISOString(),
+    });
     expect(
-      shouldShowFeedbackPopup({
-        ...eligible,
-        hasFailedTask: true,
-        state: {
-          ...EMPTY_FEEDBACK_POPUP_STATE,
-          lastDismissedAt: new Date(NOW - FEEDBACK_DISMISS_COOLDOWN_MS + 1).toISOString(),
-        },
-      }),
-    ).toBe(false);
-    expect(
-      shouldShowFeedbackPopup({
-        ...eligible,
-        hasFailedTask: true,
-        state: {
-          ...EMPTY_FEEDBACK_POPUP_STATE,
-          lastDismissedAt: new Date(NOW - FEEDBACK_DISMISS_COOLDOWN_MS).toISOString(),
-        },
-      }),
-    ).toBe(true);
+      feedbackPopupTrigger({ ...eligible, state: at(FEEDBACK_DISMISS_COOLDOWN_MS - 1) }),
+    ).toBeNull();
+    expect(feedbackPopupTrigger({ ...eligible, state: at(FEEDBACK_DISMISS_COOLDOWN_MS) })).toBe(
+      "workflow_completed",
+    );
   });
 
   test("treats a future stored timestamp conservatively", () => {
     expect(
-      shouldShowFeedbackPopup({
+      feedbackPopupTrigger({
         ...eligible,
-        hasFailedTask: true,
         state: {
           ...EMPTY_FEEDBACK_POPUP_STATE,
           lastSubmittedAt: new Date(NOW + 24 * 60 * 60 * 1000).toISOString(),
           submissionCount: 1,
         },
       }),
-    ).toBe(false);
+    ).toBeNull();
+  });
+});
+
+describe("followUpQuestion", () => {
+  test("asks detractors, passives and promoters different questions", () => {
+    expect(followUpQuestion(0)).toBe("What almost made you give up?");
+    expect(followUpQuestion(6)).toBe("What almost made you give up?");
+    expect(followUpQuestion(7)).toBe("What would make it a 10?");
+    expect(followUpQuestion(8)).toBe("What would make it a 10?");
+    expect(followUpQuestion(9)).toBe("What would you tell a colleague?");
   });
 });
 
@@ -147,9 +177,8 @@ describe("feedback popup storage", () => {
         }),
       ),
     ).toEqual({
-      version: 1,
+      ...EMPTY_FEEDBACK_POPUP_STATE,
       lastSubmittedAt: "2026-09-01T00:00:00.000Z",
-      lastDismissedAt: null,
       submissionCount: 2,
     });
     expect(parseFeedbackPopupState("not-json")).toEqual(EMPTY_FEEDBACK_POPUP_STATE);

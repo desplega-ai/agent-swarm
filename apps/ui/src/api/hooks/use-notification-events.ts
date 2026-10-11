@@ -67,7 +67,7 @@ export function useNotificationEvents() {
     submitFeedback.mutate({
       submission_id: crypto.randomUUID(),
       user_id: currentUser.userId,
-      install_id: installId,
+      install_id: installId ?? undefined,
       installed_at: installedAt,
       org_name: orgName,
       swarm_version: __APP_VERSION__,

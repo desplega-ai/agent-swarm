@@ -28,6 +28,7 @@ import {
   getAgentHarnessProviders,
   getDbClient,
   getInstanceActivity,
+  getInstanceFeedbackSignals,
   getLiveAgentCounts,
   hasFirstCompletedTask,
   listAgentsWithCredStatusByProvider,
@@ -144,6 +145,19 @@ export const StatusTelemetrySchema = z.object({
 });
 export type StatusTelemetry = z.infer<typeof StatusTelemetrySchema>;
 
+/**
+ * Counts the dashboard's feedback pop-up decides on. `first_seen_at` is the
+ * oldest agent registration: the install-age anchor when telemetry is off
+ * and `telemetry_installed_at` does not exist.
+ */
+export const StatusInstanceSchema = z.object({
+  first_seen_at: z.string().nullable(),
+  tasks_completed: z.number().int().nonnegative(),
+  tasks_failed: z.number().int().nonnegative(),
+  workflow_runs_completed: z.number().int().nonnegative(),
+});
+export type StatusInstance = z.infer<typeof StatusInstanceSchema>;
+
 export const StatusAgentFsSchema = z.object({
   configured: z.boolean(),
   base_url: z.string().nullable(),
@@ -203,6 +217,8 @@ export const StatusResponseSchema = z.object({
   health: StatusHealthSchema,
   /** Additive: absent on servers that predate it, so consumers treat missing as enabled. */
   telemetry: StatusTelemetrySchema.optional(),
+  /** Additive: absent on servers that predate it. */
+  instance: StatusInstanceSchema.optional(),
 });
 export type StatusResponse = z.infer<typeof StatusResponseSchema>;
 
@@ -718,6 +734,7 @@ export async function buildStatusPayload(): Promise<StatusResponse> {
     .map((automation) => toStatus(preflightAutomation(automation, automationSetup)))
     .sort((a, b) => a.name.localeCompare(b.name) || a.kind.localeCompare(b.kind));
   const activity = await getInstanceActivity();
+  const instance = await getInstanceFeedbackSignals();
   return {
     runtime_pools: { enabled: isRuntimePoolsEnabled(), supervisor: runtimeSupervisorStatus() },
     identity: buildIdentity(),
@@ -732,6 +749,7 @@ export async function buildStatusPayload(): Promise<StatusResponse> {
     automations,
     health: computeHealth(setup),
     telemetry: { enabled: isTelemetryEnabled() },
+    instance,
   };
 }
 

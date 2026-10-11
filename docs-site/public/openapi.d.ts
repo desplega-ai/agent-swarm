@@ -10973,6 +10973,12 @@ export interface paths {
                             telemetry?: {
                                 enabled: boolean;
                             };
+                            instance?: {
+                                first_seen_at: string | null;
+                                tasks_completed: number;
+                                tasks_failed: number;
+                                workflow_runs_completed: number;
+                            };
                         };
                     };
                 };

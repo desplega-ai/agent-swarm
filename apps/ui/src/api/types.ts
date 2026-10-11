@@ -3082,17 +3082,30 @@ export interface StatusTelemetry {
   enabled: boolean;
 }
 
+/** Counts behind the feedback pop-up triggers (`/status` `instance`). */
+export interface StatusInstance {
+  /** Oldest agent registration; the install-age anchor when telemetry is off. */
+  first_seen_at: string | null;
+  tasks_completed: number;
+  tasks_failed: number;
+  workflow_runs_completed: number;
+}
+
 export interface FeedbackInput {
   submission_id: string;
   user_id: string;
-  install_id: string | null;
-  installed_at: string | null;
-  org_name: string;
+  /** Left out when telemetry is off: such an install has no ID to send. */
+  install_id?: string;
+  installed_at?: string | null;
+  /** Left out when telemetry is off, unless the user opts to include it. */
+  org_name?: string;
   swarm_version: string;
   name?: string;
   email?: string;
   newsletter_consent: boolean;
-  nps?: 1 | 2 | 3 | 4 | 5;
+  /** 0-10 with `scale: "0-10"`; older clients sent 1-5 with no scale. */
+  nps?: number;
+  scale?: "0-10";
   message?: string;
   submitted_at: string;
 }
@@ -3200,6 +3213,8 @@ export interface StatusResponse {
   telemetry?: StatusTelemetry;
   /** Absent on APIs without runtime pools; treat absence as disabled. */
   runtime_pools?: { enabled: boolean };
+  /** Absent on servers that predate it. */
+  instance?: StatusInstance;
 }
 
 export interface TestConnectionResponse {
