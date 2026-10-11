@@ -10,6 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
 import { resolveClaudePrompt } from "../providers/claude-adapter";
+import { CodexAdapter, type ThreadEvent } from "../providers/codex-adapter";
 import { resolveCodexPrompt, resolveSlashSkillPrompt } from "../providers/codex-skill-resolver";
 import { PiMonoSession } from "../providers/pi-mono-adapter";
 import {
@@ -20,6 +21,54 @@ import {
   skillInvokeFromToolStart,
 } from "../providers/skill-invoke";
 import type { ProviderEvent, ProviderSessionConfig } from "../providers/types";
+
+describe("Codex shell skill reads", () => {
+  test.each([0, 1])("command_execution exit %i reaches the tracker", async (exitCode) => {
+    const dir = join(tmpdir(), `codex-skill-read-${crypto.randomUUID()}`);
+    mkdirSync(dir, { recursive: true });
+    const item = {
+      id: "shell",
+      type: "command_execution" as const,
+      command: "/bin/bash -lc 'cat /home/worker/.agents/skills/work-on-task/SKILL.md'",
+    };
+    const adapter = new CodexAdapter({
+      bypassSubprocess: true,
+      threadFactory: () => ({
+        id: null,
+        async steer() {},
+        async interrupt() {},
+        async close() {},
+        async runStreamed() {
+          async function* events(): AsyncGenerator<ThreadEvent> {
+            yield { type: "item.started", item };
+            yield {
+              type: "item.completed",
+              item: { ...item, exit_code: exitCode, status: "completed" },
+            };
+            yield { type: "turn.completed" };
+          }
+          return { events: events() };
+        },
+      }),
+    });
+    const tracker = createSkillInvokeTracker();
+    const invokes: SkillInvoke[] = [];
+    tracker.attach((invoke) => invokes.push(invoke));
+    try {
+      const session = await adapter.createSession({
+        cwd: dir,
+        prompt: "Read the skill",
+        systemPrompt: "test",
+        logFile: join(dir, "session.log"),
+      });
+      session.onEvent((event) => tracker.onEvent(event));
+      await session.waitForCompletion();
+      expect(invokes).toEqual(exitCode === 0 ? [{ via: "read", skillName: "work-on-task" }] : []);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
 
 describe("skillInvokeFromToolStart — tool path", () => {
   test.each([
@@ -145,6 +194,54 @@ describe("createSkillInvokeTracker", () => {
     ...(isError === undefined ? {} : { isError }),
   });
   const skillMd = (name: string) => ({ path: `/home/worker/.pi/agent/skills/${name}/SKILL.md` });
+
+  test.each([
+    "cat ~/.agents/skills/pages/SKILL.md",
+    "/bin/bash -lc 'cat /home/worker/.agents/skills/pages/SKILL.md'",
+    'cat "/home/worker/.codex/skills/pages/SKILL.md"',
+  ])("shell read waits for successful completion: %s", (command) => {
+    const { tracker, emitted, attach } = track();
+    attach();
+    tracker.onEvent(toolStart("shell", "bash", { command }));
+    expect(emitted).toEqual([]);
+    tracker.onEvent(toolEnd("shell", true));
+    expect(emitted).toEqual([]);
+    tracker.onEvent(toolStart("retry", "bash", { command }));
+    tracker.onEvent(toolEnd("retry", false));
+    expect(emitted).toEqual([{ via: "read", skillName: "pages" }]);
+  });
+
+  test("one shell command can read several skills without duplicate invocations", () => {
+    const { tracker, emitted, attach } = track();
+    attach();
+    tracker.onEvent(
+      toolStart("shell", "bash", {
+        command:
+          "cat ~/.agents/skills/pages/SKILL.md ~/.agents/skills/apps/SKILL.md ~/.agents/skills/pages/SKILL.md",
+      }),
+    );
+    tracker.onEvent(toolEnd("shell", false));
+    expect(emitted).toEqual([
+      { via: "read", skillName: "pages" },
+      { via: "read", skillName: "apps" },
+    ]);
+  });
+
+  test.each([
+    "ls ~/.agents/skills",
+    "grep -r foo ~/.agents/skills",
+    "ls ~/.agents/skills/pages/SKILL.md",
+    "echo cat ~/.agents/skills/pages/SKILL.md",
+    "cat /workspace/skills/pages/SKILL.md",
+    "cat README.md; ls ~/.agents/skills/pages/SKILL.md",
+    "cat > ~/.agents/skills/pages/SKILL.md",
+  ])("shell discovery does not invoke a skill: %s", (command) => {
+    const { tracker, emitted, attach } = track();
+    attach();
+    tracker.onEvent(toolStart("shell", "bash", { command }));
+    tracker.onEvent(toolEnd("shell", false));
+    expect(emitted).toEqual([]);
+  });
 
   test("holds invocations recorded before attach, then emits each skill once", () => {
     const { tracker, emitted, attach } = track();

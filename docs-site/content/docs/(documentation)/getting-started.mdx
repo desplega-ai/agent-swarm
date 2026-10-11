@@ -5,7 +5,7 @@ description: Install Agent Swarm, configure your first lead and worker agents, a
 
 This guide walks you through setting up a fully operational Agent Swarm with a lead agent and workers.
 
-> Agent Swarm supports multiple AI providers via the **harness** system. The default is **Claude Code** (recommended), with Codex, opencode, pi-mono, Devin, Claude Managed Agents, and ACP-compatible agents also supported. See the [Harness Configuration](/docs/guides/harness-configuration) guide for details.
+> Agent Swarm supports multiple AI providers via the **harness** system. The default is **Claude Code** (recommended), with Codex, opencode, pi-mono, Devin, Claude Managed Agents, Amp, Cursor, Grok, DeepSeek dsh, and ACP-compatible agents also supported. See the [Harness Configuration](/docs/guides/harness-configuration) guide for details.
 
 ## Prerequisites
 
@@ -71,11 +71,21 @@ cp .env.docker.example .env
 # Edit .env — set API_KEY and CLAUDE_CODE_OAUTH_TOKEN at minimum
 # Optionally set TEMPLATE_ID=official/coder for workers, TEMPLATE_ID=official/lead for leads
 
+# Create the secrets encryption key (back it up with the database)
+openssl rand -base64 32 > encryption_key
+chmod 600 .env encryption_key
+
 # Start everything
 docker compose -f docker-compose.example.yml --env-file .env up -d
 ```
 
 The API runs on port `3013`. For the dashboard, use the hosted [app.agent-swarm.dev](https://app.agent-swarm.dev) or run it yourself — see [Dashboard UI](/docs/ui).
+
+Agent ID variables in `.env` are optional. Each container generates a UUID on first boot and keeps it in its personal volume. Set one only to keep an existing identity or to survive removing volumes. The Compose example mounts `encryption_key` as a secret, so create it before the first `up`; see [Secrets Encryption](/docs/guides/secrets-encryption).
+
+### Finish setup in the browser
+
+Open the dashboard and connect it to `http://localhost:3013` with your `API_KEY`. A new install redirects to `/setup`, a guided first run that checks the API, then walks through naming the swarm, AI providers, agents and their models, memory, integrations, and a first task. Existing installs skip it.
 
 ## Option C: Local API + Docker Workers
 
@@ -142,7 +152,7 @@ Once your swarm is running, you can verify it's working:
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `PORT` | `3013` | API server port |
-| `HARNESS_PROVIDER` | `claude` | AI provider: `claude`, `codex`, `opencode`, `pi`, `devin`, `claude-managed`, or `acp`. See [Harness Configuration](/docs/guides/harness-configuration) |
+| `HARNESS_PROVIDER` | `claude` | AI provider: `claude`, `codex`, `opencode`, `pi`, `devin`, `claude-managed`, `acp`, `dsh`, `amp`, `cursor`, or `grok`. See [Harness Configuration](/docs/guides/harness-configuration) |
 | `AGENT_ID` | Auto-generated | Stable UUID for task resume |
 | `AGENT_NAME` | Auto-generated | Display name for the agent |
 | `AGENT_ROLE` | `worker` | Role: `worker` or `lead` |

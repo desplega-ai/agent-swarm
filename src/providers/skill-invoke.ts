@@ -116,6 +116,43 @@ export function skillInvokeFromToolStart(toolName: string, args: unknown): Skill
   return null;
 }
 
+/** Detect explicit cat reads, including Codex's bash -lc wrapper. No shell is executed. */
+function shellSkillReads(command: string): SkillInvoke[] {
+  // Keep quoted words together; separators delimit commands rather than becoming paths.
+  const tokens = command.match(/"[^"\\]*(?:\\.[^"\\]*)*"|'[^']*'|[^\s;|&]+|[;|&]+/g) ?? [];
+  const words = tokens.map((token) =>
+    /^(['"])[\s\S]*\1$/.test(token) ? token.slice(1, -1) : token,
+  );
+  if (
+    /^(?:.*\/)?(?:bash|sh|zsh)$/.test(words[0] ?? "") &&
+    /^-[a-z]*c[a-z]*$/.test(words[1] ?? "")
+  ) {
+    return words.length === 3 ? shellSkillReads(words[2] as string) : [];
+  }
+  const invokes = new Map<string, SkillInvoke>();
+  let reading = false;
+  let commandStart = true;
+  for (const word of words) {
+    if (/^[;|&]+$/.test(word)) {
+      reading = false;
+      commandStart = true;
+      continue;
+    }
+    if (commandStart) {
+      commandStart = false;
+      reading = /^(?:.*\/)?cat$/.test(word);
+      continue;
+    }
+    if (/[<>]/.test(word)) reading = false;
+    if (!reading) continue;
+    // Redirections, substitutions and globs are not explicit file reads.
+    if (/[<>`$*?\\]/.test(word)) continue;
+    const skillName = INSTALLED_SKILL_FILE_REGEX.exec(word)?.[1];
+    if (skillName) invokes.set(skillName, { via: "read", skillName });
+  }
+  return [...invokes.values()];
+}
+
 /**
  * The skill pi expands from a `/skill:name` prompt, mirroring pi's
  * `AgentSession._expandSkillCommand`: the prompt must start with `/skill:`,
@@ -152,7 +189,7 @@ export function createSkillInvokeTracker(): {
 } {
   const seenKeys = new Set<string>();
   const held: SkillInvoke[] = [];
-  const pendingReads = new Map<string, SkillInvoke>();
+  const pendingReads = new Map<string, SkillInvoke[]>();
   let emit: ((invoke: SkillInvoke) => void) | undefined;
 
   function record(invoke: SkillInvoke) {
@@ -171,13 +208,20 @@ export function createSkillInvokeTracker(): {
     onEvent(event) {
       if (event.type === "tool_start") {
         const invoke = skillInvokeFromToolStart(event.toolName, event.args);
-        if (invoke?.via === "read") pendingReads.set(event.toolCallId, invoke);
+        const command = nonEmptyString(argsRecord(event.args)?.command);
+        const reads =
+          (event.toolName === "bash" || event.toolName === "Bash") && command
+            ? shellSkillReads(command)
+            : invoke?.via === "read"
+              ? [invoke]
+              : [];
+        if (reads.length) pendingReads.set(event.toolCallId, reads);
         else if (invoke) record(invoke);
       } else if (event.type === "tool_end") {
         const invoke = pendingReads.get(event.toolCallId);
         if (!invoke) return;
         pendingReads.delete(event.toolCallId);
-        if (!event.isError) record(invoke);
+        if (!event.isError) for (const read of invoke) record(read);
       }
     },
     attach(fn) {

@@ -120,7 +120,9 @@ describe("RBAC admission over real HTTP", () => {
     server = await spawnSwarmServer({
       dbPath,
       logPath: join(dir, "server-on.log"),
-      env: { RBAC_ENABLED: "true" },
+      // Flush audit rows every 100ms instead of 2s so the audit wait below
+      // returns as soon as the rows land.
+      env: { RBAC_ENABLED: "true", RBAC_AUDIT_FLUSH_MS: "100" },
     });
     await registerAgent(server.base, WORKER_A, "rbac-admission-worker", false);
 
