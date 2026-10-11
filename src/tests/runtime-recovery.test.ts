@@ -110,6 +110,40 @@ for (const status of ["exited", "failed"] as const) {
   });
 }
 
+test.each([
+  "exited",
+  "stale",
+])("%s runtime with only a completed session recovers without task remediation", async (status) => {
+  const { task, runtime, token } = await running();
+  await completeTask(task.id, "done");
+  expect(await getActiveSessionForTask(task.id)).not.toBeNull();
+  if (status === "exited") {
+    state.fake.runtimes.get(runtime.externalHandle!.externalId)!.status = "exited";
+  } else {
+    await getDbClient().run("UPDATE runtime_instances SET last_seen_at = ? WHERE id = ?", [
+      new Date(Date.now() - 6 * 60_000).toISOString(),
+      runtime.id,
+    ]);
+  }
+  const recover = spyOn(recovery, "recoverRuntime");
+  const remediate = spyOn(heartbeat, "remediateTaskForDeadRuntime");
+  try {
+    await reconcileOnce();
+    expect(recover).toHaveBeenCalledWith(runtime.id, expect.any(String));
+    expect(remediate).not.toHaveBeenCalled();
+    expect((await getRuntimeInstanceById(runtime.id))?.status).toBe("offline");
+    expect(await resolveBySessionToken(token)).toBeNull();
+    expect(await getActiveSessionForTask(task.id)).toBeNull();
+    expect((await getTaskById(task.id))?.status).toBe("completed");
+    expect(await getChildTasks(task.id)).toHaveLength(0);
+    expect(state.fake.terminated).toEqual([runtime.externalHandle!.externalId]);
+    expect(state.fake.requests).toHaveLength(1);
+  } finally {
+    recover.mockRestore();
+    remediate.mockRestore();
+  }
+});
+
 test("absence from an owner-filtered list recovers a runtime even when status says running", async () => {
   const { agent, task, runtime, token } = await running();
   state.fake.listed = false;
@@ -358,7 +392,7 @@ test("rotation preserves a task claimed between the idle read and draining", asy
   let claimed = false;
   const read = spyOn(client, "get").mockImplementation(async (sql, params) => {
     const row = await original(sql, params);
-    if (!claimed && sql.startsWith("SELECT taskId FROM active_sessions")) {
+    if (!claimed && sql.startsWith("SELECT s.taskId FROM active_sessions")) {
       claimed = true;
       await startTask(task.id);
       await client.run(
