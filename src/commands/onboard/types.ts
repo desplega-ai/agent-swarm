@@ -243,7 +243,7 @@ const STEP_DAG: Record<OnboardStep, OnboardStep[]> = {
   generate: ["prereq_check"],
   prereq_check: ["start", "done"],
   start: ["health_check"],
-  health_check: ["post_connect"],
+  health_check: ["post_connect", "done"],
   post_connect: ["post_dashboard"],
   post_dashboard: ["post_task", "done"],
   post_task: ["done"],
