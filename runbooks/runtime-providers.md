@@ -129,7 +129,14 @@ If container start fails, the adapter attempts forced deletion before it returns
 ## e2b
 
 `E2B_API_KEY` is required. `E2B_API_BASE` selects a custom endpoint.
-Images must name an E2B worker template. Template construction belongs to the controller layer.
+Worker URLs must use HTTPS. Resolution checks controller `WORKER_API_URL`, then `RUNTIME_WORKER_API_URL`, then `PUBLIC_MCP_BASE_URL`.
+The public API resolver supplies the final fallback, including deployment `MCP_BASE_URL`.
+Validation and worker injection use the same resolver.
+Only the seeded `builtin-e2b` controller copies deployment `E2B_API_KEY`. Other controllers require their own stored key.
+Builtin controllers update configuration readiness only when it changes.
+Configuration errors use an `E2B configuration:` prefix. Readiness checks preserve provision errors in `last_error`.
+Creating a pool on an unready builtin E2B controller succeeds with a `warning` field.
+Plain image values name an E2B worker template.
 The default lease is 900 seconds. Target configuration `E2B_TTL_SEC` overrides that default.
 An explicit provision request `ttlSec` takes precedence. `renew` uses its explicit `ttlSec` and returns the expiry that E2B actually applied.
 
@@ -137,9 +144,44 @@ An explicit provision request `ttlSec` takes precedence. `renew` uses its explic
 Pro deployments can set 86400 seconds. Pass this target to the factory when constructing the adapter.
 The SDK enforces the account limit. The trait does not increase that limit.
 
+The supervisor provisions with pool `ttlSec` or 900 seconds, bounded by provider limits.
+It raises short leases to the renewal window plus 60 seconds, within provider limits.
+If a provider limit prevents that margin, the effective renewal window becomes shorter.
+It stores the lease expiry and renews active or provisioning runtimes within `RUNTIME_LEASE_RENEW_BEFORE_SEC` seconds of expiry.
+This window defaults to 300 seconds. Reaped runtimes receive no renewals.
+Renewal stores the expiry E2B actually applied. A failed renewal waits for the next full reap to check provider status.
+Confirmed absence triggers task recovery. Transport errors do not prove death.
+If the API stops, lease expiry bounds sandbox lifetime without a cleanup request.
+
+Within `RUNTIME_ROTATE_BEFORE_SEC` seconds of the continuous limit, the supervisor drains the runtime.
+This window defaults to 600 seconds. Idle rotation uses two ticks: the first drains, and the next checks activity before termination.
+Busy runtimes finish their tasks while draining. Demand can provision replacements within the pool cap.
+The supervisor never pauses a busy runtime. Tasks longer than the continuous limit can still require crash recovery.
+
+For `docker://ghcr.io/acme/worker:1.2`, the API starts a background template build when provisioning needs the image.
+One build runs per pool and build input. Pending builds reserve no runtime and count no provision failure.
+Other pools continue renewal and recovery while a build runs.
+`RUNTIME_E2B_BUILD_TIMEOUT_SEC` bounds builds to 600 seconds by default. API shutdown aborts pending builds.
+The template name hashes the JSON array `[image, cpu, memoryMb]`, using the image reference without `docker://`.
+The name is `swarm-<sha256(inputs).slice(0,12)>`. CPU and memory defaults are 4 and 8192 MiB.
+The pool stores this name in `resolved_image`. Later provisions reuse it.
+Changing `image` or effective CPU or memory clears the cache. Changes during construction prevent storing the obsolete result.
+Old templates remain in E2B. Template deletion requires a separate follow-up.
+Custom images must extend `ghcr.io/desplega-ai/agent-swarm-worker:slim` or the full worker image.
+Build failures use provision backoff and the circuit breaker. Missing runners surface through the registration timeout.
+Template construction requires E2B credentials available to the API.
+
+Per-task pools pay for the boot sequence each time they start a sandbox.
+The spike measured 89 boot API calls. See [#2048](https://github.com/desplega-ai/agent-swarm/issues/2048) for boot bundle work.
+Use an idle lifecycle or a warm floor when frequent tasks make this cost significant.
+
 Status uses one `Sandbox.getInfo` lookup. It preserves paused state because `Sandbox.connect` would resume the sandbox.
 A sandbox lookup that reports absence returns `exited`. Authentication and transport failures remain errors.
 Pause uses `Sandbox.betaPause`. Resume uses `Sandbox.connect` with the configured lease or the 900-second default.
+An unplanned pause resumes an idle runtime that remains wanted, then renews its lease.
+A pause during active work terminates the sandbox, then triggers `recoverRuntime` because the pause interrupted the model stream.
+Socket-grace checks and the reaper serialize actions per runtime and use the same rule for whether a runtime remains wanted.
+An unwanted paused runtime terminates without resuming.
 If the worker process fails during provision, the adapter attempts sandbox deletion before it returns the original error.
 See [E2B dispatch](./e2b-dispatch.md) for templates and tracked process behavior.
 
@@ -292,4 +334,4 @@ Provider list handles can include `createdAt` as an ISO timestamp from infrastru
 The supervisor gives newly created orphans two minutes before termination to permit database registration.
 Disabled pools stop provisioning but retain runtime cleanup.
 Provision failures retire the row and store a scrubbed error. Retry policy and crash recovery belong to the failure supervisor.
-E2B provisioning requires its separate lease reconciliation.
+E2B pools use the same supervisor with the lease and rotation rules above.

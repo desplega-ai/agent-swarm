@@ -57492,6 +57492,9 @@
                   "properties": {
                     "pool": {
                       "$ref": "#/components/schemas/RuntimePool"
+                    },
+                    "warning": {
+                      "type": "string"
                     }
                   },
                   "required": [

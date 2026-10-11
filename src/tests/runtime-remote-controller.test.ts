@@ -29,6 +29,7 @@ import {
   createRuntimePool,
   getRuntimeController,
   getRuntimePool,
+  updateRuntimeController,
 } from "../be/runtime-pools/db";
 import { remoteControllerSession } from "../be/runtime-pools/remote-controller";
 import {
@@ -218,6 +219,92 @@ test("hello sets online and all controller commands make round trips through the
   await commands.terminate(handle, "test complete");
   expect(await commands.status([handle])).toEqual({ [handle.externalId]: "exited" });
   expect(JSON.stringify(logSpy.mock.calls)).not.toContain(token);
+});
+
+test("remote E2B provisioning, renewal, pause, and resume use the controller session", async () => {
+  await updateRuntimeController(controllerId, {
+    kind: "e2b",
+    config: { WORKER_API_URL: "https://remote-worker.invalid" },
+  });
+  const renewed: Array<{ externalId: string; ttlSec: number }> = [];
+  const paused: string[] = [];
+  const resumed: string[] = [];
+  let endAt = new Date(Date.now() + 600_000).toISOString();
+  const provider: RuntimeProvider = {
+    kind: "e2b",
+    traits: { ...fake.traits, supportsPause: true, maxTtlSec: 86400, maxContinuousSec: 3600 },
+    checkConfig: () => fake.checkConfig(),
+    provision: async (target, req) => {
+      const handle = await fake.provision(target, req);
+      handle.kind = "e2b";
+      return handle;
+    },
+    terminate: (target, handle) => fake.terminate(target, handle),
+    status: (target, handle) => fake.status(target, handle),
+    list: (target, ownerId) => fake.list(target, ownerId),
+    renew: async (_target, handle, ttlSec) => {
+      renewed.push({ externalId: handle.externalId, ttlSec });
+      return { endAt };
+    },
+    pause: async (_target, handle) => {
+      paused.push(handle.externalId);
+      fake.runtimes.get(handle.externalId)!.status = "paused";
+    },
+    resume: async (_target, handle) => {
+      resumed.push(handle.externalId);
+      fake.runtimes.get(handle.externalId)!.status = "running";
+    },
+  };
+  clients.push(startControllerClient({ apiUrl, token, provider, target: {} }));
+  await until(async () => (await getRuntimeController(controllerId))?.status === "online");
+  const commands = await getControllerCommands(controllerId);
+  expect(commands).toBe(remoteControllerSession(controllerId)!);
+  const pool = await createRuntimePool({
+    name: "remote-e2b-pool",
+    kind: "e2b",
+    placements: [controllerId],
+    image: "worker-template",
+    ttlSec: 600,
+  });
+  const agent = await createPoolAgent(pool.id, { name: "remote-e2b-agent" });
+  const task = await createTaskExtended("work", { agentId: agent.id });
+  await reconcileOnce();
+  expect(fake.requests[0]).toMatchObject({
+    ttlSec: 600,
+    image: "worker-template",
+    env: { MCP_BASE_URL: "https://remote-worker.invalid" },
+  });
+  const runtime = (await listRuntimeInstancesForPool(pool.id))[0]!;
+  await upsertRuntimeInstance({ id: runtime.id, agentId: agent.id, reportedSlots: 1 });
+  const handle = runtime.externalHandle as unknown as RuntimeHandle;
+  await commands.pause!(handle);
+  await reconcileOnce();
+  expect(paused).toEqual([handle.externalId]);
+  expect(resumed).toEqual([handle.externalId]);
+  expect(renewed).toEqual([{ externalId: handle.externalId, ttlSec: 600 }]);
+  expect((await getRuntimeInstanceById(runtime.id))?.leaseExpiresAt).toBe(endAt);
+
+  const now = new Date(Date.now() + 301_000);
+  endAt = new Date(now.getTime() + 600_000).toISOString();
+  await getDbClient().run("UPDATE runtime_instances SET last_seen_at = ? WHERE id = ?", [
+    now.toISOString(),
+    runtime.id,
+  ]);
+  await reconcileOnce({ now });
+  expect(renewed).toHaveLength(2);
+  expect((await getRuntimeInstanceById(runtime.id))?.leaseExpiresAt).toBe(endAt);
+
+  await startTask(task.id);
+  await getDbClient().run(
+    "INSERT INTO active_sessions (id, agentId, taskId, triggerType, runtimeInstanceId) VALUES (?, ?, ?, 'task_assigned', ?)",
+    [crypto.randomUUID(), agent.id, task.id, runtime.id],
+  );
+  await commands.pause!(handle);
+  await reconcileOnce({ now });
+  expect(fake.terminated).toEqual([handle.externalId]);
+  expect(resumed).toHaveLength(1);
+  expect((await getRuntimeInstanceById(runtime.id))?.status).toBe("offline");
+  expect((await getTaskById(task.id))?.status).toBe("superseded");
 });
 
 test("kind mismatch closes the socket and records an error", async () => {

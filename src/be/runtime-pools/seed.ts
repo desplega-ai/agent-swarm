@@ -1,6 +1,7 @@
 import { isRuntimePoolsEnabled } from "../../utils/runtime-pools-flag";
 import { getDbClient } from "../db";
 import {
+  checkE2bControllerConfig,
   createRuntimeController,
   createRuntimePool,
   getRuntimeController,
@@ -73,11 +74,12 @@ export async function seedRuntimePools(env: NodeJS.ProcessEnv = process.env): Pr
           await updateRuntimeController(controller.id, {
             secretConfig: { E2B_API_KEY: env.E2B_API_KEY }, // gitleaks:allow (env reference)
           });
-        controller.status =
-          !stored.secretConfigError &&
-          (env.E2B_API_KEY || stored.secretConfigKeys.includes("E2B_API_KEY"))
-            ? "online"
-            : "offline";
+        const config = await checkE2bControllerConfig(
+          (await getRuntimeController(controller.id))!,
+          undefined,
+          env,
+        );
+        controller.status = config.ready ? "online" : "offline";
       }
       await tx.run("UPDATE runtime_controllers SET status = ?, updated_at = ? WHERE id = ?", [
         controller.status,

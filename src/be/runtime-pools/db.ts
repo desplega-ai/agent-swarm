@@ -1,4 +1,9 @@
 import type { z } from "zod";
+import {
+  type ConfigStatus,
+  createRuntimeProvider,
+  type RuntimeTargetConfig,
+} from "../../runtime-providers";
 import type { Agent, DeliveryMode, RuntimeController, RuntimePool } from "../../types";
 import {
   RuntimeControllerCreateSchema,
@@ -7,6 +12,7 @@ import {
   RuntimePoolCreateSchema,
   RuntimePoolUpdateSchema,
 } from "../../types";
+import { registerVolatileSecret, scrubSecrets } from "../../utils/secret-scrubber";
 import { decryptSecret, encryptSecret, getEncryptionKey } from "../crypto";
 import { createAgent, getAgentById, getAllAgents, getDbClient, upsertSwarmConfig } from "../db";
 import { type AgentRow, rowToAgent } from "../db/agents";
@@ -98,6 +104,75 @@ export async function getRuntimeControllerSecrets(id: string): Promise<Record<st
   );
   if (!row) throw new RuntimePoolError("Controller not found", 404);
   return controllerSecrets(row);
+}
+
+export async function getRuntimeControllerTarget(
+  controller: RuntimeController,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<RuntimeTargetConfig> {
+  const secrets = await getRuntimeControllerSecrets(controller.id);
+  for (const [key, value] of Object.entries(secrets))
+    registerVolatileSecret(value, `runtime-controller:${controller.id}:${key}`);
+  return {
+    DOCKER_HOST: env.DOCKER_HOST,
+    DOCKER_NETWORK: env.DOCKER_NETWORK,
+    DOCKER_EXTRA_HOSTS: env.DOCKER_EXTRA_HOSTS,
+    E2B_API_BASE: env.E2B_API_BASE,
+    E2B_MAX_CONTINUOUS_SEC: env.E2B_MAX_CONTINUOUS_SEC,
+    RUNTIME_WORKER_API_URL: env.RUNTIME_WORKER_API_URL,
+    PUBLIC_MCP_BASE_URL: env.PUBLIC_MCP_BASE_URL,
+    ...controller.config,
+    ...secrets,
+  };
+}
+
+export async function checkE2bControllerConfig(
+  controller: RuntimeController,
+  target?: RuntimeTargetConfig,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<ConfigStatus> {
+  let config: ConfigStatus;
+  try {
+    const resolved = target ?? (await getRuntimeControllerTarget(controller, env));
+    config = (await createRuntimeProvider("e2b", resolved)).checkConfig(resolved);
+  } catch (error) {
+    config = { ready: false, missing: [], hint: scrubSecrets(String(error)) };
+  }
+  const status = config.ready ? "online" : "offline";
+  const prefix = "E2B configuration: ";
+  const error = config.ready
+    ? null
+    : prefix + scrubSecrets(config.hint ?? `Missing configuration: ${config.missing.join(", ")}`);
+  if (
+    controller.status === status &&
+    (controller.lastError === error ||
+      (controller.lastError !== null && !controller.lastError.startsWith(prefix)))
+  )
+    return config;
+  const now = new Date().toISOString();
+  await getDbClient().run(
+    `UPDATE runtime_controllers SET status = ?,
+     last_error = CASE WHEN last_error IS NULL OR substr(last_error, 1, ?) = ? THEN ? ELSE last_error END,
+     last_error_at = CASE WHEN last_error IS NULL OR substr(last_error, 1, ?) = ? THEN ? ELSE last_error_at END,
+     updated_at = ? WHERE id = ? AND (status != ? OR
+       ((last_error IS NULL OR substr(last_error, 1, ?) = ?) AND last_error IS NOT ?))`,
+    [
+      status,
+      prefix.length,
+      prefix,
+      error,
+      prefix.length,
+      prefix,
+      error ? now : null,
+      now,
+      controller.id,
+      status,
+      prefix.length,
+      prefix,
+      error,
+    ],
+  );
+  return config;
 }
 
 export async function createRuntimeController(
@@ -276,12 +351,17 @@ export async function updateRuntimePool(
     if (await tx.get("SELECT id FROM runtime_pools WHERE name = ? AND id != ?", [data.name, id]))
       throw new RuntimePoolError("Pool name already exists", 409);
     await tx.run(
-      `UPDATE runtime_pools SET name = ?, kind = ?, placements = ?, image = ?, lifecycle = ?, idle_minutes = ?, slots_per_runtime = ?, max_runtimes = ?, min_runtimes = ?, delivery = ?, env = ?, resources = ?, ttl_sec = ?, enabled = ?, updated_by = COALESCE(?, updated_by), updated_at = ? WHERE id = ?`,
+      `UPDATE runtime_pools SET name = ?, kind = ?, placements = ?, image = ?, resolved_image = ?, lifecycle = ?, idle_minutes = ?, slots_per_runtime = ?, max_runtimes = ?, min_runtimes = ?, delivery = ?, env = ?, resources = ?, ttl_sec = ?, enabled = ?, updated_by = COALESCE(?, updated_by), updated_at = ? WHERE id = ?`,
       [
         data.name,
         data.kind,
         JSON.stringify(data.placements),
         data.image ?? null,
+        data.image !== existing.image ||
+        (data.resources?.cpu ?? 4) !== (existing.resources?.cpu ?? 4) ||
+        (data.resources?.memoryMb ?? 8192) !== (existing.resources?.memoryMb ?? 8192)
+          ? null
+          : existing.resolvedImage,
         data.lifecycle,
         data.idleMinutes,
         data.slotsPerRuntime,

@@ -46,6 +46,7 @@ test("seed is idempotent and preserves operator edits and secrets", async () => 
     RUNTIME_POOLS_ENABLED: "true",
     RUNTIME_DOCKER_HOST: "unix:///tmp/test.sock",
     E2B_API_KEY: secret,
+    RUNTIME_WORKER_API_URL: "https://swarm.test",
   };
   await seedRuntimePools(env);
   expect((await listRuntimeControllers()).map((row) => row.id).sort()).toEqual([
@@ -83,7 +84,7 @@ test("seed is idempotent and preserves operator edits and secrets", async () => 
   });
 });
 test("boot refreshes status and fills absent env keys without overwriting stored keys", async () => {
-  const env = { RUNTIME_POOLS_ENABLED: "true" };
+  const env = { RUNTIME_POOLS_ENABLED: "true", PUBLIC_MCP_BASE_URL: "https://swarm.test" };
   await seedRuntimePools(env);
   const secret = crypto.randomUUID() + crypto.randomUUID();
   await seedRuntimePools({ ...env, E2B_API_KEY: secret });
@@ -100,6 +101,17 @@ test("boot refreshes status and fills absent env keys without overwriting stored
   await seedRuntimePools(env);
   expect(await getRuntimeController("builtin-e2b")).toMatchObject({ status: "offline" });
   expect(await getRuntimeController("builtin-static")).toMatchObject({ status: "online" });
+});
+test("E2B seeding records an HTTPS configuration error even with a key", async () => {
+  await seedRuntimePools({
+    RUNTIME_POOLS_ENABLED: "true",
+    E2B_API_KEY: crypto.randomUUID(),
+    RUNTIME_WORKER_API_URL: "http://swarm.test",
+  });
+  expect(await getRuntimeController("builtin-e2b")).toMatchObject({
+    status: "offline",
+    lastError: expect.stringContaining("HTTPS"),
+  });
 });
 test("docker status follows reachability on every boot", async () => {
   const server = Bun.serve({ port: 0, fetch: () => new Response("OK") });

@@ -29077,6 +29077,7 @@ export interface operations {
                 content: {
                     "application/json": {
                         pool: components["schemas"]["RuntimePool"];
+                        warning?: string;
                     };
                 };
             };

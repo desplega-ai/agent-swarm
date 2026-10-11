@@ -434,11 +434,13 @@ test("an extension-selected fail survives concurrent supervisor recovery after t
     }
     await originalTerminate(handle);
   });
-  const originalRecovery = recovery.recoverRuntime;
-  const recover = spyOn(recovery, "recoverRuntime").mockImplementation(async (id, reason) => {
-    requested.resolve();
-    await originalRecovery(id, reason);
-  });
+  const originalSerialize = recovery.serializeRuntimeAction;
+  const serialize = spyOn(recovery, "serializeRuntimeAction").mockImplementation(
+    async (id, action) => {
+      if (id === runtime.id) requested.resolve();
+      await originalSerialize(id, action);
+    },
+  );
   const triage = codeLevelTriage();
   let tick: Promise<void> | undefined;
   try {
@@ -458,7 +460,7 @@ test("an extension-selected fail survives concurrent supervisor recovery after t
     await Promise.allSettled([triage, tick]);
     hook.mockRestore();
     terminate.mockRestore();
-    recover.mockRestore();
+    serialize.mockRestore();
   }
 });
 

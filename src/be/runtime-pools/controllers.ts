@@ -5,12 +5,13 @@ import {
   ControllerOfflineError,
 } from "../../runtime-providers/controller";
 import { RUNTIME_LABELS, type RuntimeHandle } from "../../runtime-providers/types";
+import { resolveWorkerApiUrl } from "../../runtime-providers/worker-api-url";
 import { isRuntimePoolsEnabled } from "../../utils/runtime-pools-flag";
-import { registerVolatileSecret, scrubSecrets } from "../../utils/secret-scrubber";
+import { scrubSecrets } from "../../utils/secret-scrubber";
 import { getDbClient, getSwarmConfigs, upsertSwarmConfig } from "../db";
 import { markRuntimeTerminated } from "../multi-runtime";
 import { validateControllerGraceSec } from "../swarm-config-guard";
-import { getRuntimeController, getRuntimeControllerSecrets } from "./db";
+import { checkE2bControllerConfig, getRuntimeController, getRuntimeControllerTarget } from "./db";
 import { remoteControllerSession } from "./remote-controller";
 
 let ownerId: Promise<string> | null = null;
@@ -133,21 +134,15 @@ export async function getControllerCommands(controllerId: string): Promise<Contr
         throw new ControllerOfflineError(controllerId);
       return session;
     }
-    const secrets = await getRuntimeControllerSecrets(controllerId);
-    for (const [key, value] of Object.entries(secrets))
-      registerVolatileSecret(value, `runtime-controller:${controllerId}:${key}`);
-    const target = {
-      DOCKER_HOST: process.env.DOCKER_HOST,
-      DOCKER_NETWORK: process.env.DOCKER_NETWORK,
-      DOCKER_EXTRA_HOSTS: process.env.DOCKER_EXTRA_HOSTS,
-      ...controller.config,
-      ...secrets,
-    };
-    const provider = await createRuntimeProvider(controller.kind, target);
-    const config = provider.checkConfig(target);
+    const target = await getRuntimeControllerTarget(controller);
+    const config =
+      controller.kind === "e2b"
+        ? await checkE2bControllerConfig(controller, target)
+        : (await createRuntimeProvider(controller.kind, target)).checkConfig(target);
     if (!config.ready)
       throw new Error(config.hint ?? `Missing configuration: ${config.missing.join(", ")}`);
-    return new BuiltinController(controllerId, provider, target, controller.config.WORKER_API_URL);
+    const provider = await createRuntimeProvider(controller.kind, target);
+    return new BuiltinController(controllerId, provider, target, resolveWorkerApiUrl(target));
   } catch (error) {
     if (error instanceof ControllerOfflineError) throw error;
     throw new Error(scrubSecrets(String(error)));

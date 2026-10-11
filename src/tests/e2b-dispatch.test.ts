@@ -1,7 +1,8 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Template } from "e2b";
 import {
   buildDashboardDeepLink,
   type LaunchSpec,
@@ -401,6 +402,32 @@ describe("E2B dispatch helpers", () => {
         "e2b-sdk template build --from-image ghcr.io/desplega-ai/agent-swarm:latest",
       ),
     });
+  });
+
+  test("buildImageTemplate forwards cancellation to the E2B SDK", async () => {
+    const abort = new AbortController();
+    const build = spyOn(Template, "build").mockResolvedValue({
+      alias: "worker",
+      name: "worker",
+      tags: [],
+      templateId: "template",
+      buildId: "build",
+    });
+    try {
+      await buildImageTemplate({
+        role: "worker",
+        name: "worker",
+        image: "worker-image",
+        cpuCount: 4,
+        memoryMb: 8192,
+        noCache: false,
+        e2bEnv: { E2B_API_KEY: "fake" },
+        signal: abort.signal,
+      });
+      expect(build.mock.calls[0]?.[2]).toMatchObject({ signal: abort.signal });
+    } finally {
+      build.mockRestore();
+    }
   });
 });
 

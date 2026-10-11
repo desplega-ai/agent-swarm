@@ -544,6 +544,43 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         docsUrl: `${DOCS}ui/configuration#runtime-pools`,
       },
       {
+        key: "RUNTIME_LEASE_RENEW_BEFORE_SEC",
+        label: "Runtime lease renewal window",
+        description: "Renew wanted E2B runtimes before their lease expires.",
+        kind: "number",
+        unit: "s",
+        defaultValue: "300",
+        docsUrl: `${DOCS}ui/configuration#runtime-pools`,
+      },
+      {
+        key: "RUNTIME_E2B_BUILD_TIMEOUT_SEC",
+        label: "E2B template build timeout",
+        description: "Cancel an E2B template build after this duration.",
+        kind: "number",
+        unit: "s",
+        defaultValue: "600",
+        docsUrl: `${DOCS}ui/configuration#runtime-pools`,
+      },
+      {
+        key: "RUNTIME_ROTATE_BEFORE_SEC",
+        label: "Runtime rotation window",
+        description: "Drain E2B runtimes before their continuous runtime limit.",
+        kind: "number",
+        unit: "s",
+        defaultValue: "600",
+        docsUrl: `${DOCS}ui/configuration#runtime-pools`,
+      },
+      {
+        key: "E2B_MAX_CONTINUOUS_SEC",
+        label: "E2B continuous runtime limit",
+        description:
+          "Use 3600 seconds for Hobby or 86400 seconds for Pro. Controller configuration overrides this default.",
+        kind: "number",
+        unit: "s",
+        defaultValue: "3600",
+        docsUrl: `${DOCS}ui/configuration#runtime-pools`,
+      },
+      {
         key: "DOCKER_HOST",
         label: "Docker socket",
         description:

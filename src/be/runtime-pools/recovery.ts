@@ -1,16 +1,25 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { realtimeBus } from "../../realtime/bus";
 import { canProvisionKind } from "../../runtime-providers";
+import type { ControllerCommands } from "../../runtime-providers/controller";
 import type { RuntimeInstance } from "../../types";
 import { isMultiRuntimeEnabled } from "../../utils/multi-runtime";
 import { isRuntimePoolsEnabled } from "../../utils/runtime-pools-flag";
 import { scrubSecrets } from "../../utils/secret-scrubber";
 import { getDbClient, getTaskById } from "../db";
-import { getRuntimeInstanceById, markRuntimeTerminated } from "../multi-runtime";
+import {
+  getRuntimeInstanceById,
+  listRuntimeInstancesForPool,
+  markRuntimeTerminated,
+  runtimeStaleThresholdMinutes,
+} from "../multi-runtime";
 import { ensureRuntimeOwnerId, getControllerCommands } from "./controllers";
 import { getRuntimePool, resolvePoolDelivery } from "./db";
+import { isRuntimeWanted, rotatingRuntimes } from "./lifecycle";
 import { runtimeHandle, terminateRuntime } from "./supervisor";
 
 const recovering = new Map<string, Promise<void>>();
+const currentAction = new AsyncLocalStorage<string>();
 const socketChecks = new Map<string, ReturnType<typeof setTimeout>>();
 const sockets = new Map<string, number>();
 let subscriptions: Array<() => void> = [];
@@ -19,9 +28,15 @@ function reportRecoveryError(error: unknown): void {
   console.error("[runtime-pools] Recovery failed:", scrubSecrets(String(error)));
 }
 
-async function serializeRecovery(runtimeId: string, action: () => Promise<void>): Promise<void> {
+export async function serializeRuntimeAction(
+  runtimeId: string,
+  action: () => Promise<void>,
+): Promise<void> {
+  if (currentAction.getStore() === runtimeId) return action();
   const previous = recovering.get(runtimeId) ?? Promise.resolve();
-  const recovery = previous.catch(reportRecoveryError).then(action);
+  const recovery = previous
+    .catch(reportRecoveryError)
+    .then(() => currentAction.run(runtimeId, action));
   recovering.set(runtimeId, recovery);
   try {
     await recovery;
@@ -53,10 +68,33 @@ async function recoverSessions(runtimeId: string, reason: string): Promise<void>
 }
 
 export async function recoverRuntime(runtimeId: string, reason: string): Promise<void> {
-  await serializeRecovery(runtimeId, async () => {
+  await serializeRuntimeAction(runtimeId, async () => {
     await markRuntimeTerminated(runtimeId, scrubSecrets(reason));
     await recoverSessions(runtimeId, reason);
   });
+}
+
+export async function recoverPausedRuntime(
+  runtime: RuntimeInstance,
+  controller: ControllerCommands,
+  wanted: boolean,
+  busy: boolean,
+  now = new Date(),
+): Promise<void> {
+  if (busy) {
+    await terminateRuntime(runtime, controller, "Runtime paused during a task");
+    await recoverRuntime(runtime.id, "Runtime paused during a task");
+  } else if (!wanted) {
+    await terminateRuntime(runtime, controller, "Paused runtime no longer wanted");
+  } else {
+    const handle = runtimeHandle(runtime);
+    if (!handle || !controller.resume) throw new Error("Controller cannot resume a paused runtime");
+    await controller.resume(handle);
+    await getDbClient().run(
+      "UPDATE runtime_instances SET last_seen_at = ?, lease_expires_at = NULL WHERE id = ? AND status != 'offline'",
+      [now.toISOString(), runtime.id],
+    );
+  }
 }
 
 export async function remediateStalledRuntime(
@@ -68,7 +106,7 @@ export async function remediateStalledRuntime(
   const runtime = await getRuntimeInstanceById(runtimeId);
   const pool = runtime?.poolId ? await getRuntimePool(runtime.poolId) : null;
   if (!runtime || !pool || !canProvisionKind(pool.kind)) return false;
-  await serializeRecovery(runtimeId, async () => {
+  await serializeRuntimeAction(runtimeId, async () => {
     if (await remediate(() => fenceStalledRuntime(runtime, reason)))
       await recoverSessions(runtimeId, reason);
   });
@@ -87,25 +125,69 @@ async function fenceStalledRuntime(runtime: RuntimeInstance, reason: string): Pr
 
 export async function checkDisconnectedRuntime(runtimeId: string): Promise<void> {
   if (!isRuntimePoolsEnabled() || !isMultiRuntimeEnabled()) return;
-  const runtime = await getRuntimeInstanceById(runtimeId);
-  if (!runtime || runtime.status !== "active" || !runtime.poolId || !runtime.controllerId) return;
-  const pool = await getRuntimePool(runtime.poolId);
-  if (!pool || !canProvisionKind(pool.kind) || resolvePoolDelivery(pool) !== "push") return;
-  const handle = runtimeHandle(runtime);
-  if (!handle) return;
-  const controller = await getControllerCommands(runtime.controllerId);
-  const status = (await controller.status([handle]))[handle.externalId];
-  if (status === "running" || status === "starting" || status === "paused") return;
-  if (
-    status === "exited" ||
-    status === "failed" ||
-    !(await controller.list(await ensureRuntimeOwnerId())).some(
-      (h) => h.externalId === handle.externalId,
-    )
-  ) {
-    await terminateRuntime(runtime, controller, "Runtime died after socket disconnect");
-    await recoverRuntime(runtimeId, "Runtime died after socket disconnect");
-  }
+  await serializeRuntimeAction(runtimeId, async () => {
+    const runtime = await getRuntimeInstanceById(runtimeId);
+    if (!runtime || runtime.status !== "active" || !runtime.poolId || !runtime.controllerId) return;
+    const pool = await getRuntimePool(runtime.poolId);
+    if (!pool || !canProvisionKind(pool.kind) || resolvePoolDelivery(pool) !== "push") return;
+    const handle = runtimeHandle(runtime);
+    if (!handle) return;
+    const controller = await getControllerCommands(runtime.controllerId);
+    const status = (await controller.status([handle]))[handle.externalId];
+    if (status === "paused" && pool.kind === "e2b") {
+      const session = await getDbClient().get(
+        "SELECT taskId FROM active_sessions WHERE runtimeInstanceId = ? LIMIT 1",
+        [runtimeId],
+      );
+      const task = runtime.taskId ? await getTaskById(runtime.taskId) : null;
+      const now = new Date();
+      const configured = Number(process.env.RUNTIME_TOKEN_ROTATE_BEFORE_MIN);
+      const beforeMin = Number.isInteger(configured) && configured > 0 ? configured : 60;
+      const rotations = await rotatingRuntimes(
+        pool.id,
+        new Date(now.getTime() + beforeMin * 60_000).toISOString(),
+        now,
+        controller.traits.maxContinuousSec,
+      );
+      const siblings = (await listRuntimeInstancesForPool(pool.id)).filter(
+        (r) => r.agentId === runtime.agentId,
+      );
+      const cutoff = now.getTime() - runtimeStaleThresholdMinutes() * 60_000;
+      const staleHandles = siblings
+        .filter(
+          (r) => r.id !== runtimeId && r.status === "active" && Date.parse(r.lastSeenAt) < cutoff,
+        )
+        .map(runtimeHandle)
+        .filter((h) => h !== null);
+      const statuses = staleHandles.length ? await controller.status(staleHandles) : {};
+      const remaining = siblings.filter(
+        (r) =>
+          r.status === "provisioning" ||
+          (r.status === "active" &&
+            (Date.parse(r.lastSeenAt) >= cutoff ||
+              r.id === runtimeId ||
+              statuses[runtimeHandle(r)?.externalId ?? ""] === "paused")),
+      ).length;
+      await recoverPausedRuntime(
+        runtime,
+        controller,
+        await isRuntimeWanted(pool, runtime, rotations.has(runtime.id), remaining, now),
+        !!session || task?.status === "in_progress" || task?.status === "reviewing",
+      );
+      return;
+    }
+    if (status === "running" || status === "starting" || status === "paused") return;
+    if (
+      status === "exited" ||
+      status === "failed" ||
+      !(await controller.list(await ensureRuntimeOwnerId())).some(
+        (h) => h.externalId === handle.externalId,
+      )
+    ) {
+      await terminateRuntime(runtime, controller, "Runtime died after socket disconnect");
+      await recoverRuntime(runtimeId, "Runtime died after socket disconnect");
+    }
+  });
 }
 
 function socketRuntimeId(data: unknown): string | null {
