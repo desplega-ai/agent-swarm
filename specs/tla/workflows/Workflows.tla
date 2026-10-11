@@ -27,6 +27,7 @@ CONSTANTS
   UserRetry,         \* TRUE: the user may retry a failed run once
   InputAwait,        \* TRUE: workflow.input resolution awaits between run INSERT and walkGraph
   ReplayUnreadable,  \* TRUE: a sealed replay read may fail (#1926: missing or rotated key, corrupt ciphertext)
+  ChildRunResume,    \* TRUE (#2030): every async branch is a `sub-workflow` step whose "task" is a child run
   \* --- historical guards (CALIBRATION.md removes them) ---
   GuardActiveWalk,   \* bf12ab53 / #1584: recovery skips runs with a live walk
   GuardConvergeSeed, \* d4753302 lineage: walkGraph gates start nodes on predecessors
@@ -236,14 +237,26 @@ XFail(t) ==
   /\ UNCHANGED <<run, active, execLive, okCount, hbLeft, crashes>>
 
 \* X5 engine.ts:729-732 + checkpoint.ts:82-104 — checkpointStepWaiting CAS.
+\* CR (#2030) engine.ts:952-957: a parked sub-workflow step calls
+\* resumeFromChildRun inline, because a child that finished before the park
+\* had its event dropped (E1 saw the step still running). Modelled as a
+\* re-delivery: the row's event thread re-enters E1. The walker blocks on the
+\* real call and then reports "waiting", so letting it run on concurrently
+\* only adds interleavings.
 XCkWait(t) ==
   /\ thr[t].pc = "xCkWait"
   /\ LET i == thr[t].sid
-         n == thr[t].cur IN
+         n == thr[t].cur
+         e == Ev(i, steps[i].tg) IN
      IF steps[i].st = "running" /\ run \in {"running", "waiting"}
      THEN /\ steps' = [steps EXCEPT ![i].st = "waiting"]
           /\ run' = "waiting"
-          /\ SetT(t, [thr[t] EXCEPT !.pc = "wPick", !.hasW = TRUE])
+          /\ thr' = [thr EXCEPT ![t] = [thr[t] EXCEPT !.pc = "wPick", !.hasW = TRUE],
+                                ![e] = IF ChildRunResume /\ steps[i].task \in {"ok", "fail"}
+                                          /\ thr[e].pc = "eDone"
+                                       THEN [Idle EXCEPT !.pc = "e1", !.sid = i, !.cur = n,
+                                                         !.g = steps[i].tg]
+                                       ELSE thr[e]]
      ELSE /\ SetT(t, [thr[t] EXCEPT !.pc = "wPick", !.done = @ \cup {n}, !.ex = @ \cup {n}])
           /\ UNCHANGED <<steps, run>>
   /\ UNCHANGED <<active, execLive, okCount, hbLeft, crashes>>
@@ -327,7 +340,7 @@ XDedupUnreadable(t) ==
 \* updateWorkflowRunStep(stepId, failed, nextRetryAt null). `WHERE id = ?`
 \* only (db.ts updateWorkflowRunStep): no status guard.
 RFStep(t) ==
-  /\ thr[t].pc \in {"pRF", "eRF"}
+  /\ thr[t].pc \in {"pRF", "eRF", "hRF"}
   /\ steps' = [steps EXCEPT ![thr[t].sid].st = "failed", ![thr[t].sid].nra = FALSE]
   /\ SetT(t, [thr[t] EXCEPT !.pc = "rfRun"])
   /\ UNCHANGED <<run, active, execLive, okCount, hbLeft, crashes>>
@@ -495,6 +508,16 @@ Poller == P1 \/ P2 \/ P3 \/ P4 \/ P5 \/ P5Unreadable \/ P6 \/ P7 \/ P8 \/ P9 \/ 
 ----------------------------------------------------------------------------
 (* Heartbeat recoverIncompleteRuns (recovery.ts)                          *)
 
+\* resume.ts finalizeOrWait (EFin, H13): transaction, no run-status guard.
+FinalizeOrWait ==
+  IF FixJoinWaitsLive /\ LatestIn({"running"}) # {}
+  THEN \* F6: leave it to the live walk, whose finalizer needs `running`
+       IF run = "waiting" THEN "running" ELSE run
+  ELSE IF \E j \in StepIds : steps[j].st = "waiting"
+       \/ (FixTaskRetry /\ PendingRetry(j))
+       \/ (FixPendingRetryGate /\ steps[j].st \in {"running", "pending"})
+  THEN "waiting" ELSE "completed"
+
 Ready(done, edges) ==
   {n \in Nodes : /\ n \notin done
                  /\ \/ Preds(n) = {}
@@ -566,7 +589,8 @@ H4 ==
 H5 ==
   /\ thr[THb].pc = "h5"
   /\ SetT(THb, [thr[THb] EXCEPT !.pc = "h6",
-                 !.R = IF run = "waiting"
+                 \* CR: a sub-workflow step has no agent task, so the join finds no row.
+                 !.R = IF run = "waiting" /\ ~ChildRunResume
                        THEN {<<i, steps[i].tg, steps[i].task>> :
                                i \in {j \in StepIds : steps[j].st = "waiting" /\ steps[j].task \in {"ok", "fail"}}}
                        ELSE {}])
@@ -576,7 +600,7 @@ H5 ==
 H6 ==
   /\ thr[THb].pc = "h6"
   /\ IF thr[THb].R = {}
-     THEN SetT(THb, [thr[THb] EXCEPT !.pc = "hIdle"])
+     THEN SetT(THb, [thr[THb] EXCEPT !.pc = IF ChildRunResume THEN "h9" ELSE "hIdle"])
      ELSE \E r \in thr[THb].R :
             SetT(THb, [thr[THb] EXCEPT !.R = @ \ {r}, !.sid = r[1], !.g = r[2], !.cur = steps[r[1]].node,
                         !.pc = IF run # "waiting" THEN "h6"
@@ -632,7 +656,76 @@ H8Unreadable ==
   /\ SetT(THb, [thr[THb] EXCEPT !.pc = "rfRun", !.rf = "h6"])
   /\ UNCHANGED <<run, steps, active, execLive, okCount, hbLeft, crashes>>
 
-Heartbeat == H1 \/ H2 \/ H2Unreadable \/ H8Unreadable \/ H3 \/ H4 \/ H5 \/ H6 \/ H7R \/ H7 \/ H8 \/ Walk(THb)
+\* --- Case 5 (#2030): waiting sub-workflow steps whose child run is terminal ---
+\* H9 recovery.ts:60-67 -> workflow-runs.ts getSettledChildRunParentSteps:
+\* waiting sub-workflow rows whose child is terminal. No run-status filter.
+H9 ==
+  /\ thr[THb].pc = "h9"
+  /\ SetT(THb, [thr[THb] EXCEPT !.pc = "h10",
+                 !.R = {<<i, steps[i].tg, steps[i].task>> :
+                          i \in {j \in StepIds : steps[j].st = "waiting" /\ steps[j].task \in {"ok", "fail"}}}])
+  /\ UNCHANGED <<run, steps, active, execLive, okCount, hbLeft, crashes>>
+
+\* H10 resume.ts:792-805 resumeFromChildRun pre-checks, outside any
+\* transaction: step still waiting, child outcome (null while it runs), run
+\* waiting or running. No task-generation fence and no retry policy.
+H10 ==
+  /\ thr[THb].pc = "h10"
+  /\ IF thr[THb].R = {}
+     THEN SetT(THb, [thr[THb] EXCEPT !.pc = "hIdle"])
+     ELSE \E r \in thr[THb].R :
+            LET i == r[1] IN
+            SetT(THb, [thr[THb] EXCEPT !.R = @ \ {r}, !.sid = i, !.g = r[2], !.cur = steps[i].node,
+                        !.pc = IF run \notin {"waiting", "running"} \/ steps[i].st # "waiting"
+                                  \/ steps[i].task \notin {"ok", "fail"} THEN "h10"
+                               ELSE IF steps[i].task = "ok" THEN "h11" ELSE "h12"])
+  /\ UNCHANGED <<run, steps, active, execLive, okCount, hbLeft, crashes>>
+
+\* H11 resume.ts:814-838 checkpointPortStepAndResolveSuccessors
+\* (task-step-routing.ts:76-92: CAS on step waiting, run -> running), then
+\* walkGraph(successors) or finalizeOrWait.
+H11 ==
+  /\ thr[THb].pc = "h11"
+  /\ LET i == thr[THb].sid
+         n == thr[THb].cur IN
+     IF steps[i].st = "waiting"
+     THEN /\ steps' = [steps EXCEPT ![i].st = "completed"]
+          /\ okCount' = [okCount EXCEPT ![n] = @ + 1]
+          /\ run' = "running"
+          /\ IF Succ(n) # {}
+             THEN Call(THb, Succ(n), "h10")
+             ELSE SetT(THb, [thr[THb] EXCEPT !.pc = "h13"]) /\ UNCHANGED active
+     ELSE /\ SetT(THb, [thr[THb] EXCEPT !.pc = "h10"])
+          /\ UNCHANGED <<steps, okCount, run, active>>
+  /\ UNCHANGED <<execLive, hbLeft, crashes>>
+
+\* H11U resume.ts:814 `run.context` throws before the claim;
+\* failClosedOnUnreadableReplay fails the step, then the run.
+H11Unreadable ==
+  /\ ReplayUnreadable
+  /\ thr[THb].pc = "h11"
+  /\ SetT(THb, [thr[THb] EXCEPT !.pc = "hRF", !.rf = "h10"])
+  /\ UNCHANGED <<run, steps, active, execLive, okCount, hbLeft, crashes>>
+
+\* H12 resume.ts:809-811 failStepAndRunIfWaiting (no ownerTaskId).
+H12 ==
+  /\ thr[THb].pc = "h12"
+  /\ LET i == thr[THb].sid IN
+     IF steps[i].st = "waiting"
+     THEN steps' = [steps EXCEPT ![i].st = "failed"] /\ run' = "failed"
+     ELSE UNCHANGED <<steps, run>>
+  /\ SetT(THb, [thr[THb] EXCEPT !.pc = "h10"])
+  /\ UNCHANGED <<active, execLive, okCount, hbLeft, crashes>>
+
+\* H13 resume.ts:839-841 finalizeOrWait (as EFin): no run-status guard.
+H13 ==
+  /\ thr[THb].pc = "h13"
+  /\ run' = FinalizeOrWait
+  /\ SetT(THb, [thr[THb] EXCEPT !.pc = "h10"])
+  /\ UNCHANGED <<steps, active, execLive, okCount, hbLeft, crashes>>
+
+Heartbeat == H1 \/ H2 \/ H2Unreadable \/ H8Unreadable \/ H3 \/ H4 \/ H5 \/ H6 \/ H7R \/ H7 \/ H8
+             \/ H9 \/ H10 \/ H11 \/ H11Unreadable \/ H12 \/ H13 \/ Walk(THb)
 
 ----------------------------------------------------------------------------
 (* Agent tasks and the task-event handlers (resume.ts)                     *)
@@ -648,13 +741,18 @@ TaskFinish(i) ==
 
 \* E1 resume.ts:140-144 / 249-257 — pre-checks outside any transaction,
 \* including isStaleTaskEvent (resume.ts:325): another task is bound now.
+\* CR (#2030): a `workflow.child.finished` event runs resumeFromChildRun
+\* (resume.ts:792-805): no generation fence, the child outcome must be
+\* terminal, and a failed child fails the step (no retry policy, EF).
 E1(t) ==
   /\ thr[t].pc = "e1"
   /\ LET i == thr[t].sid IN
      SetT(t, [thr[t] EXCEPT !.pc =
                 IF run \notin {"waiting", "running"} \/ steps[i].st # "waiting"
-                   \/ steps[i].tg # thr[t].g THEN "eDone"
+                   \/ (~ChildRunResume /\ steps[i].tg # thr[t].g)
+                   \/ (ChildRunResume /\ steps[i].task \notin {"ok", "fail"}) THEN "eDone"
                 ELSE IF steps[i].task = "ok" THEN "e2"
+                ELSE IF ChildRunResume THEN "eF"
                 ELSE IF FixTaskRetry THEN "eR" ELSE "eF"])
   /\ UNCHANGED <<run, steps, active, execLive, okCount, hbLeft, crashes>>
 
@@ -688,13 +786,7 @@ E2Unreadable(t) ==
 \* F7: a retry-pending row keeps the run waiting, like a waiting row.
 EFin(t) ==
   /\ thr[t].pc = "eFin"
-  /\ run' = IF FixJoinWaitsLive /\ LatestIn({"running"}) # {}
-            THEN \* F6: leave it to the live walk, whose finalizer needs `running`
-                 IF run = "waiting" THEN "running" ELSE run
-            ELSE IF \E j \in StepIds : steps[j].st = "waiting"
-                 \/ (FixTaskRetry /\ PendingRetry(j))
-                 \/ (FixPendingRetryGate /\ steps[j].st \in {"running", "pending"})
-            THEN "waiting" ELSE "completed"
+  /\ run' = FinalizeOrWait
   /\ SetT(t, [thr[t] EXCEPT !.pc = "eDone"])
   /\ UNCHANGED <<steps, active, execLive, okCount, hbLeft, crashes>>
 
