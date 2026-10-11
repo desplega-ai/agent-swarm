@@ -87,6 +87,8 @@ export interface ContextInput {
   orgId: string;
   orgName?: string | null;
   orgDomain?: string | null;
+  /** The admin-declared company website (`SWARM_ORG_WEBSITE`), already normalized. */
+  orgWebsite?: string | null;
   installationId: string;
   actor?: TelemetryActor;
   isCloud: boolean;
@@ -102,6 +104,7 @@ export function buildContext(input: ContextInput): EventContext {
   const userId = input.actor?.userId?.trim();
   const orgName = input.orgName?.trim();
   const orgDomain = validOrgDomain(input.orgDomain);
+  const orgWebsite = validOrgDomain(input.orgWebsite);
   return {
     org_id: input.orgId,
     org_name: orgName ? orgName : null,
@@ -114,6 +117,9 @@ export function buildContext(input: ContextInput): EventContext {
     install_method: input.installMethod ?? null,
     install_preset: input.installPreset ?? null,
     acquisition_source: input.acquisitionSource ?? null,
+    // Optional in the catalog: left out, not null, when unset, so an ingest
+    // that predates the field keeps accepting events from installs without one.
+    ...(orgWebsite ? { org_website: orgWebsite } : {}),
   };
 }
 

@@ -67,9 +67,13 @@ export interface ConfigurationRowProps {
   entry: ConfigCatalogEntry;
   /** Whether the key is currently present in the API server's `process.env`. */
   inEnv: boolean;
+  /** Rewrite a typed value before it is saved (e.g. a URL to its bare hostname). */
+  normalize?: (value: string) => string;
+  /** Called after a value is sent for saving. */
+  onSave?: (value: string) => void;
 }
 
-export function ConfigurationRow({ entry, inEnv }: ConfigurationRowProps) {
+export function ConfigurationRow({ entry, inEnv, normalize, onSave }: ConfigurationRowProps) {
   const { config, value: savedValue, save, reset, isSaving, isLoading } = useSwarmConfig(entry.key);
   const inputId = `config-${entry.key}`;
   const isPending = isSaving || isLoading;
@@ -133,7 +137,10 @@ export function ConfigurationRow({ entry, inEnv }: ConfigurationRowProps) {
   }, [config]);
 
   function handleSave(value: string) {
-    save(value, { description: entry.description });
+    const next = normalize ? normalize(value) : value;
+    save(next, { description: entry.description });
+    if (next !== value) setDraft(next);
+    onSave?.(next);
   }
 
   function cancelOverride() {

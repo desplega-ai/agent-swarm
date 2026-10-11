@@ -1,20 +1,33 @@
 import type { LucideIcon } from "lucide-react";
-import { ArrowUpCircle, Building2, ExternalLink, Wrench, X } from "lucide-react";
-import type { ReactNode } from "react";
+import { ArrowUpCircle, BarChart3, Building2, ExternalLink, Wrench, X } from "lucide-react";
+import { type ReactNode, useState } from "react";
 import { Link } from "react-router-dom";
 import { useConfigs } from "@/api/hooks/use-config-api";
 import { useFeatureGate } from "@/api/hooks/use-feature-gate";
 import { useOnboardingOwnsFirstRun } from "@/api/hooks/use-onboarding";
+import { useEnableTelemetry } from "@/api/hooks/use-org-profile";
 import { useStatusContext } from "@/app/status-context";
 import { Button } from "@/components/ui/button";
 import { useCurrentUser } from "@/contexts/current-user-context";
+import { useConfig } from "@/hooks/use-config";
 import { useDismissibleCard } from "@/hooks/use-dismissible-card";
+import { deriveStorageKey } from "@/hooks/use-dismissible-card-key";
+import { showTelemetryBanner, TELEMETRY_BANNER_CARD_KEY } from "@/lib/telemetry-banner";
 import { isAdminLike } from "@/lib/user-role";
 import { cn } from "@/lib/utils";
 import { AutomationSetupRows } from "./automation-setup-rows";
 
 const CURRENT_VERSION = __APP_VERSION__;
 const ORG_NAME_KEY = "SWARM_ORG_NAME";
+const TELEMETRY_DOCS_URL = "https://docs.agent-swarm.dev/docs/reference/telemetry";
+
+function readDismissedAt(storageKey: string): string | null {
+  try {
+    return localStorage.getItem(storageKey);
+  } catch {
+    return null;
+  }
+}
 
 export function DashboardNudges() {
   const { user } = useCurrentUser();
@@ -25,8 +38,29 @@ export function DashboardNudges() {
   const orgNameCard = useDismissibleCard("dashboard-org-name");
   // Open onboarding owns naming (step 2), and the setup card sits right above.
   const onboardingOwnsName = useOnboardingOwnsFirstRun();
+  const { config } = useConfig();
+  const telemetryKey = deriveStorageKey(config.apiUrl, TELEMETRY_BANNER_CARD_KEY);
+  const [telemetryDismissedAt, setTelemetryDismissedAt] = useState(() =>
+    readDismissedAt(telemetryKey),
+  );
+  const enableTelemetry = useEnableTelemetry();
 
   if (!isAdminLike(user)) return null;
+
+  const showTelemetry = showTelemetryBanner({
+    telemetryEnabled: status?.telemetry?.enabled,
+    isAdmin: true,
+    dismissedAt: telemetryDismissedAt,
+  });
+  function dismissTelemetry() {
+    const now = new Date().toISOString();
+    try {
+      localStorage.setItem(telemetryKey, now);
+    } catch {
+      // In-memory dismissal still hides it for this session.
+    }
+    setTelemetryDismissedAt(now);
+  }
 
   const orgName = configs?.find((config) => config.key === ORG_NAME_KEY)?.value.trim();
   const showUpgrade =
@@ -38,7 +72,7 @@ export function DashboardNudges() {
   );
   const showAutomations = (waitingAutomations?.length ?? 0) > 0;
 
-  if (!showUpgrade && !showOrgName && !showAutomations) return null;
+  if (!showUpgrade && !showOrgName && !showAutomations && !showTelemetry) return null;
 
   return (
     <div className="flex flex-col gap-2">
@@ -73,6 +107,43 @@ export function DashboardNudges() {
         />
       )}
 
+      {showTelemetry && (
+        <NudgeBanner
+          priority="secondary"
+          icon={BarChart3}
+          title="Telemetry is off"
+          description={
+            <>
+              Turning it on sends usage counts to Desplega: lifecycle and usage events (task and
+              agent counts, outcomes, versions), your organization name and website, and your
+              admin's email domain. Never prompts, task content, outputs, error messages, names or
+              email addresses. <strong>You get</strong> faster fixes for the errors you actually
+              hit. <strong>We get</strong> to see which features matter and which bugs hurt real
+              installs, so we build the right things.{" "}
+              <a
+                href={TELEMETRY_DOCS_URL}
+                target="_blank"
+                rel="noreferrer"
+                className="underline underline-offset-2"
+              >
+                What we collect
+              </a>
+            </>
+          }
+          action={
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={enableTelemetry.isPending}
+              onClick={() => enableTelemetry.mutate("banner")}
+            >
+              {enableTelemetry.isPending ? "Turning on…" : "Turn on"}
+            </Button>
+          }
+          onDismiss={dismissTelemetry}
+        />
+      )}
+
       {showOrgName && (
         <NudgeBanner
           priority="secondary"
@@ -92,7 +163,7 @@ export function DashboardNudges() {
   );
 }
 
-function NudgeBanner({
+export function NudgeBanner({
   priority,
   icon: Icon,
   title,

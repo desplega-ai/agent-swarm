@@ -31,6 +31,7 @@ import { startRuntimeSupervisor, stopRuntimeSupervisor } from "../be/runtime-poo
 import { startScratchScriptGc, stopScratchScriptGc } from "../be/scripts/retention";
 import { loadSecretRegistry } from "../be/secret-registry";
 import { seedLegacyCapabilitiesConfig } from "../be/seed-capabilities";
+import { initApiTelemetry } from "../be/telemetry-enable";
 import { startWorkerNudgeListener } from "../be/worker-nudge-listener";
 import {
   loadEnabledExtensions,
@@ -57,7 +58,7 @@ import { attachRealtimeTransport } from "../realtime/transport";
 import { startScriptRunSupervisor, stopScriptRunSupervisor } from "../script-workflows/supervisor";
 import { getServerSessionsProcessed } from "../server-runtime-counters";
 import { startSlackApp, stopSlackApp } from "../slack";
-import { initTelemetry, telemetry } from "../telemetry";
+import { telemetry } from "../telemetry";
 import { startTelemetryTicker } from "../telemetry-snapshot";
 import { API_DRAINING_HEADER } from "../utils/api-drain";
 import { getApiKey } from "../utils/api-key";
@@ -133,6 +134,7 @@ import { handleTaskTemplates } from "./task-templates";
 import { handleTasks } from "./tasks";
 import { handleTelemetryUi } from "./telemetry-ui";
 import { handleTrackers } from "./trackers";
+import { handleUsedBy } from "./used-by";
 import { handleUsers } from "./users";
 import {
   getPathSegments,
@@ -402,6 +404,7 @@ const httpServer = createHttpServer(async (req, res) => {
         () => handleSessions(req, res, pathSegments, queryParams),
         () => handleInboxState(req, res, pathSegments, queryParams),
         () => handleTelemetryUi(req, res, pathSegments, queryParams, myAgentId),
+        () => handleUsedBy(req, res, pathSegments, queryParams, myAgentId),
         () => handleTaskTemplates(req, res, pathSegments, queryParams),
         () => handleMcp(req, res, transports, transportActivity, mcpSessionAgents),
         () => handleMcpUser(req, res, transportsUser, sessionUsers, transportActivityUser),
@@ -737,9 +740,8 @@ httpServer
     const telemetrySetConfig = async (key: string, value: string) => {
       await upsertSwarmConfig({ scope: "global", key, value });
     };
-    await initTelemetry("api-server", telemetryGetConfig, telemetrySetConfig, {
-      generateIfMissing: true,
-    });
+    // Also keeps the accessors so turning telemetry on at runtime re-inits it.
+    await initApiTelemetry(telemetryGetConfig, telemetrySetConfig);
     telemetry.server("started", { port });
     // Org email domain (hourly + on user changes) and the daily org.snapshot.
     startTelemetryTicker({ getConfig: telemetryGetConfig, setConfig: telemetrySetConfig });

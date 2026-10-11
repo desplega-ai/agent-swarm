@@ -3,6 +3,7 @@ import { normalizeSlackReactionShortcode } from "../slack/reaction-shortcode";
 import { ProviderNameSchema } from "../types";
 import { API_DRAIN_MAX_MS_LIMIT } from "../utils/api-drain";
 import { parseEnabledTools } from "../utils/enabled-tools";
+import { normalizeOrgWebsite } from "../utils/org-website";
 import { parseTaskToolManifest } from "../utils/task-tool-manifest";
 import { isTierConfigKey, validateTierConfigValue } from "./model-tier-keys";
 
@@ -354,7 +355,15 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
     }
     return null;
   },
+  // A bare public hostname, as `normalizeOrgWebsite` stores it.
+  SWARM_ORG_WEBSITE: (value) => {
+    const str = String(value).trim();
+    return normalizeOrgWebsite(str) === str
+      ? null
+      : "Invalid SWARM_ORG_WEBSITE (must be a public hostname such as example.com, without scheme, www, path or port)";
+  },
   ...booleanValidators([
+    "SWARM_USED_BY_CONSENT",
     "SWARM_DEV_MODE",
     "MULTI_RUNTIME_ENABLED",
     "STEERING_ENABLED",

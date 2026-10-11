@@ -34,7 +34,11 @@ export type UiTelemetryEvent =
     }
   | { event: "notification.viewed"; properties: { key: string } }
   | { event: "notification.dismissed"; properties: { key: string } }
-  | { event: "notification.submitted"; properties: { key: string; email_domain?: string } };
+  | { event: "notification.submitted"; properties: { key: string; email_domain?: string } }
+  | {
+      event: "org.profile_updated";
+      properties: { fields: Array<"name" | "website">; surface: "prompt" | "setup" | "settings" };
+    };
 
 /**
  * Whether dashboard events may leave the browser.

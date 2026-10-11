@@ -14,6 +14,7 @@ import {
   resetAgentMaxTasksMirror,
   upsertSwarmConfigWithPolicyMirror,
 } from "../be/multi-runtime";
+import { fillOrgLogoFromWebsite } from "../be/org-profile";
 import { getUserGrant } from "../be/rbac-roles";
 import {
   internalConfigKeyError,
@@ -484,6 +485,9 @@ export async function handleConfig(
       // (CLI, automation, dashboard) don't have to remember to hit /reload.
       // Debounced to coalesce sequential single-key upserts from the dashboard
       // batch save (no bulk endpoint exists).
+      if (scope === "global" && key === "SWARM_ORG_WEBSITE") {
+        await fillOrgLogoFromWebsite(String(value));
+      }
       if (scope === "global") {
         scheduleIntegrationsReload();
       }

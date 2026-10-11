@@ -24,6 +24,7 @@ import {
 } from "./telemetry-context";
 import type { PropsFor, TelemetryEventName } from "./telemetry-contract";
 import { isEnvFlagEnabled } from "./utils/env-flag";
+import { normalizeOrgWebsite } from "./utils/org-website";
 import { getCurrentRequestUserId } from "./utils/request-auth-context";
 
 export type { TelemetryActor } from "./telemetry-context";
@@ -633,6 +634,7 @@ function emit(
         orgId,
         orgName: orgIdentity.organization_name,
         orgDomain: cachedOrgDomain,
+        orgWebsite: normalizeOrgWebsite(process.env.SWARM_ORG_WEBSITE),
         installationId,
         actor: userId ? { userId, role: actor?.role ?? roleResolver?.(userId) ?? null } : undefined,
         isCloud,

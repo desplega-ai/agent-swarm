@@ -1,7 +1,11 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
+import { upsertSwarmConfig } from "../be/db";
+import { syncTelemetryEnabled } from "../be/telemetry-enable";
 import { isTelemetryEnabled, trackRelayed } from "../telemetry";
 import { uiEventEmitter, validateUiEvent } from "../telemetry-ui-events";
+import { ensureConfigAdmin } from "./config";
+import { scheduleIntegrationsReload } from "./core";
 import { resolveHttpFavoriteOwner } from "./favorite-owner";
 import { rejectGuest } from "./request-principal";
 import { route } from "./route-def";
@@ -31,6 +35,27 @@ const uiEvent = route({
   rbac: { ungated: "any authenticated dashboard user; event name allowlisted" },
 });
 
+const enableTelemetry = route({
+  method: "post",
+  path: "/api/telemetry/enable",
+  pattern: ["api", "telemetry", "enable"],
+  summary: "Turn telemetry on",
+  description:
+    "Stores `ANONYMIZED_TELEMETRY=true` and applies it to the running server: the install ID is minted if needed and `telemetry.enabled` is sent once, so no restart is needed.",
+  tags: ["Telemetry"],
+  body: z.object({ via: z.enum(["banner", "settings"]).default("banner") }),
+  responses: {
+    200: {
+      description: "Telemetry is on",
+      schema: z.object({ enabled: z.boolean() }),
+    },
+    400: { description: "Validation error" },
+    401: { description: "Unauthorized" },
+    403: { description: "Only a config admin can turn telemetry on" },
+  },
+  rbac: { permission: "config.write.any" },
+});
+
 // ─── Handler ─────────────────────────────────────────────────────────────────
 
 export async function handleTelemetryUi(
@@ -40,6 +65,18 @@ export async function handleTelemetryUi(
   queryParams: URLSearchParams,
   myAgentId: string | undefined,
 ): Promise<boolean> {
+  if (enableTelemetry.match(req.method, pathSegments)) {
+    const parsed = await enableTelemetry.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    if (!(await ensureConfigAdmin(req, res, "config.write.any"))) return true;
+    await upsertSwarmConfig({ scope: "global", key: "ANONYMIZED_TELEMETRY", value: "true" });
+    process.env.ANONYMIZED_TELEMETRY = "true";
+    await syncTelemetryEnabled(parsed.body.via);
+    scheduleIntegrationsReload();
+    enableTelemetry.respond(res, 200, { enabled: isTelemetryEnabled() });
+    return true;
+  }
+
   if (!uiEvent.match(req.method, pathSegments)) return false;
   if (rejectGuest(req, res)) return true;
   const parsed = await uiEvent.parse(req, res, pathSegments, queryParams);

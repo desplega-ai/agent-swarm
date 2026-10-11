@@ -67,6 +67,7 @@ import "./task-templates";
 import "./telemetry-ui";
 import "./trackers/jira";
 import "./trackers/linear";
+import "./used-by";
 import "./users";
 import "./webhooks";
 import "./workflow-events";

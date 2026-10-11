@@ -1481,7 +1481,7 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         key: "ANONYMIZED_TELEMETRY",
         label: "Anonymized telemetry",
         description:
-          "Send anonymized usage telemetry to help improve Agent Swarm. Set to false to opt out.",
+          "Send anonymized usage telemetry to help improve Agent Swarm. Set to false to opt out. Turning it on applies without a restart.",
         kind: "boolean",
         defaultValue: "true",
       },
@@ -1504,6 +1504,15 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         docsUrl: `${DOCS}guides/personalization`,
       },
       {
+        key: "SWARM_ORG_WEBSITE",
+        label: "Company website",
+        description:
+          "Your company's website, stored as a bare hostname such as example.com. When the logo below is empty, the dashboard uses this site's logo. Sent with telemetry as org_website when telemetry is on.",
+        kind: "string",
+        placeholder: "example.com",
+        docsUrl: `${DOCS}reference/telemetry`,
+      },
+      {
         key: "SWARM_BRAND_COLOR",
         label: "Brand accent color",
         description:
@@ -1515,7 +1524,8 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
       {
         key: "SWARM_ORG_LOGO_URL",
         label: "Organization logo URL",
-        description: "Publicly reachable URL of the logo shown alongside the organization name.",
+        description:
+          "Publicly reachable URL of the logo shown alongside the organization name. Filled from the company website when empty; a URL you set here is never replaced.",
         kind: "string",
         placeholder: "https://example.com/logo.svg",
         docsUrl: `${DOCS}guides/personalization`,

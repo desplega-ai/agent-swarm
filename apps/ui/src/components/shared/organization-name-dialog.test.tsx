@@ -11,8 +11,12 @@ mock.module("react-router-dom", () => ({ useLocation: () => ({ pathname }) }));
 let apiUrl = "https://swarm.example";
 const key = () => `swarm:org-name-prompt:later:v1:${apiUrl}`;
 const Box = ({ children }: { children?: ReactNode }) => <div>{children}</div>;
+const upserts: Array<{ key: string; value: string }> = [];
+const consents: boolean[] = [];
 mock.module("@/api/hooks/use-config-api", () => ({
-  useUpsertConfig: () => ({}),
+  useUpsertConfig: () => ({
+    mutateAsync: async (input: { key: string; value: string }) => upserts.push(input),
+  }),
   useConfigs: () => ({
     data: [
       { key: "telemetry_installed_at", value: new Date(Date.now() - 5 * 86400000).toISOString() },
@@ -21,9 +25,12 @@ mock.module("@/api/hooks/use-config-api", () => ({
 }));
 mock.module("@/api/hooks/use-integrations-meta", () => ({
   useEnvPresence: () => ({ data: { SWARM_ORG_NAME: false }, dataUpdatedAt: Date.now() + 1000 }),
-  useReloadConfig: () => ({}),
+  useReloadConfig: () => ({ mutateAsync: async () => {} }),
 }));
 mock.module("@/api/hooks/use-onboarding", () => ({ useOnboardingOwnsFirstRun: () => false }));
+mock.module("@/api/hooks/use-org-profile", () => ({
+  useSetUsedByConsent: () => ({ mutateAsync: async (granted: boolean) => consents.push(granted) }),
+}));
 const sentEvents: Array<{ event: string; properties: Record<string, unknown> }> = [];
 mock.module("@/api/hooks/use-ui-telemetry", () => ({
   isUiTelemetryEnabled: () => true,
@@ -59,13 +66,23 @@ mock.module("@/components/ui/label", () => ({ Label: Box }));
 mock.module("@/components/ui/textarea", () => ({ Textarea: () => <textarea /> }));
 mock.module("@/lib/user-role", () => require("../../lib/user-role"));
 mock.module("@/components/ui/button", () => ({
-  Button: ({ children, onClick }: { children: ReactNode; onClick?: () => void }) => (
-    <button type="button" onClick={onClick}>
+  Button: ({
+    children,
+    onClick,
+    type,
+  }: {
+    children: ReactNode;
+    onClick?: () => void;
+    type?: "button" | "submit";
+  }) => (
+    <button type={type === "submit" ? "submit" : "button"} onClick={onClick}>
       {children}
     </button>
   ),
 }));
-mock.module("@/components/ui/input", () => ({ Input: () => <input /> }));
+mock.module("@/components/ui/input", () => ({
+  Input: (props: Record<string, unknown>) => <input {...props} />,
+}));
 mock.module("@/components/ui/settings-row", () => ({ SettingsRow: Box }));
 mock.module("@/components/ui/dialog", () => ({
   Dialog: ({
@@ -109,6 +126,8 @@ afterEach(async () => {
   cleanup = undefined;
   sessionStorage.clear();
   sentEvents.length = 0;
+  upserts.length = 0;
+  consents.length = 0;
   role = "admin";
   pathname = "/";
   apiUrl = "https://swarm.example";
@@ -192,4 +211,50 @@ test("non-Home pages leave naming to the notification bell", async () => {
   pathname = "/tasks";
   expect((await mount()).querySelector('[role="dialog"]')).toBeNull();
   expect(sessionStorage.getItem(key())).toBeNull();
+});
+
+async function typeInto(input: HTMLInputElement, value: string) {
+  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+  await act(async () => {
+    setter?.call(input, value);
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+}
+
+test("saves the normalized website and the used-by consent with the name", async () => {
+  const container = await mount();
+  const checkbox = container.querySelector('input[type="checkbox"]') as HTMLInputElement;
+  expect(checkbox.disabled).toBe(true);
+  await typeInto(container.querySelector("#organization-name") as HTMLInputElement, "Acme");
+  await typeInto(
+    container.querySelector("#organization-website") as HTMLInputElement,
+    "https://www.Acme.com/about",
+  );
+  expect(checkbox.disabled).toBe(false);
+  await act(async () => checkbox.click());
+  const form = container.querySelector("form") as HTMLFormElement;
+  await act(async () => form.requestSubmit());
+  expect(upserts.map(({ key, value }) => [key, value])).toEqual([
+    ["SWARM_ORG_NAME", "Acme"],
+    ["SWARM_ORG_WEBSITE", "acme.com"],
+  ]);
+  expect(consents).toEqual([true]);
+  expect(sentEvents).toContainEqual({
+    event: "org.profile_updated",
+    properties: { fields: ["name", "website"], surface: "prompt" },
+  });
+});
+
+test("an invalid website blocks saving", async () => {
+  const container = await mount();
+  await typeInto(container.querySelector("#organization-name") as HTMLInputElement, "Acme");
+  await typeInto(container.querySelector("#organization-website") as HTMLInputElement, "localhost");
+  expect(
+    (container.querySelector("#organization-website") as HTMLInputElement).getAttribute(
+      "aria-invalid",
+    ),
+  ).toBe("true");
+  const form = container.querySelector("form") as HTMLFormElement;
+  await act(async () => form.requestSubmit());
+  expect(upserts).toEqual([]);
 });

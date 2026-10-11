@@ -26,6 +26,7 @@ import {
 } from "../be/multi-runtime";
 import { enqueueAdmissionRow } from "../be/rbac-audit";
 import { getUserGrant } from "../be/rbac-roles";
+import { syncTelemetryEnabled } from "../be/telemetry-enable";
 import { initGitHub, resetGitHub } from "../github";
 import { initGitLab, isGitLabEnabled, resetGitLab } from "../gitlab";
 import { initJira, resetJira } from "../jira";
@@ -167,6 +168,12 @@ async function reloadGlobalConfigsAndIntegrationsInner(): Promise<ReloadConfigRe
   const wasEmbeddingsConfigured = getEmbeddingProvider().isConfigured();
 
   const updated = await loadGlobalConfigsIntoEnv(true);
+
+  // ANONYMIZED_TELEMETRY may have just flipped on: mint the install ID now
+  // instead of dropping every event until a restart.
+  await syncTelemetryEnabled("settings").catch((err) => {
+    console.error("[config-reload] telemetry re-init failed (non-fatal):", err);
+  });
 
   // Retire the old transport before any other integration can fail during
   // reload. HTTP/invalid selection must never leave the previous socket live.

@@ -2,6 +2,7 @@ import { Bot, House, ListTodo } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useConfigs } from "@/api/hooks/use-config-api";
 import { useStatus } from "@/api/hooks/use-status";
+import { sendUiTelemetry } from "@/api/hooks/use-ui-telemetry";
 import { SaveIndicator, WithIndicator } from "@/components/onboarding/save-indicator";
 import { SetupCard } from "@/components/onboarding/setup-card";
 import { useSetupSave } from "@/components/onboarding/use-setup-save";
@@ -20,6 +21,7 @@ import { useTheme } from "@/hooks/use-theme";
 import { AVATAR_COLOR_INPUT_FALLBACK, AVATAR_SUGGESTED_SWATCHES } from "@/lib/agent-color";
 import { resolveCssVarToHex } from "@/lib/css-color";
 import { cn } from "@/lib/utils";
+import { normalizeOrgWebsite, websiteSuggestion } from "../../../../../../src/utils/org-website";
 import { httpUrlError } from "../components/http-url";
 import { DEFAULT_SWARM_NAME, initialSwarmName } from "../components/swarm-name";
 import type { StepProps } from "../step-contract";
@@ -62,6 +64,7 @@ export function StepName({ onboarding, act, setContinueBlocker, setContinueActio
   const [urlDraft, setUrlDraft] = useState<string | null>(null);
   const [emojiDraft, setEmojiDraft] = useState<string | null>(null);
   const [colorDraft, setColorDraft] = useState<string | null>(null);
+  const [websiteDraft, setWebsiteDraft] = useState<string | null>(null);
 
   const name = (nameDraft ?? initialSwarmName(storedName, identity?.name)).trim();
 
@@ -108,8 +111,35 @@ export function StepName({ onboarding, act, setContinueBlocker, setContinueActio
   const color = colorInput.trim();
   const colorValid = color === "" || HEX_RE.test(color);
 
+  const storedWebsite = configs?.find((c) => c.key === "SWARM_ORG_WEBSITE")?.value ?? "";
+  const websiteInput = websiteDraft ?? storedWebsite;
+  const website = normalizeOrgWebsite(websiteInput);
+  const websiteError =
+    websiteInput.trim() && !website ? "Enter a public website, such as example.com." : null;
+  const websitePlaceholder =
+    websiteSuggestion(configs?.find((c) => c.key === "telemetry_org_domain")?.value) ??
+    "example.com";
+  const websiteSave = useAutosave({
+    value: website ?? "",
+    dirty: websiteDraft !== null && (website ?? "") !== storedWebsite,
+    ready: website !== null,
+    save: async (value) => {
+      await save([{ key: "SWARM_ORG_WEBSITE", value, isSecret: false }]);
+      sendUiTelemetry(status, {
+        event: "org.profile_updated",
+        properties: { fields: ["website"], surface: "setup" },
+      });
+    },
+  });
+
   async function storeName(value: string) {
-    if (value !== storedName) await save([{ key: "SWARM_ORG_NAME", value, isSecret: false }]);
+    if (value !== storedName) {
+      await save([{ key: "SWARM_ORG_NAME", value, isSecret: false }]);
+      sendUiTelemetry(status, {
+        event: "org.profile_updated",
+        properties: { fields: ["name"], surface: "setup" },
+      });
+    }
     const method = value === DEFAULT_SWARM_NAME ? "default_name" : "custom_name";
     if (nameStep.status !== "done" || nameStep.method !== method) {
       await act({ action: "complete", step: "name", method });
@@ -175,6 +205,34 @@ export function StepName({ onboarding, act, setContinueBlocker, setContinueActio
                 onChange={(event) => setNameDraft(event.target.value)}
                 onBlur={nameSave.commit}
                 aria-invalid={!name}
+                className="pr-8"
+              />
+            </WithIndicator>
+          </SettingsRow>
+
+          <SettingsRow
+            label="Company website (optional)"
+            htmlFor="setup-org-website"
+            helper={
+              websiteError ? (
+                <span className="text-status-error-strong">{websiteError}</span>
+              ) : (
+                "Its logo becomes your swarm logo when you have not set one."
+              )
+            }
+          >
+            <WithIndicator
+              indicator={<SaveIndicator phase={websiteSave.phase} error={websiteSave.error} />}
+            >
+              <Input
+                id="setup-org-website"
+                value={websiteInput}
+                placeholder={websitePlaceholder}
+                inputMode="url"
+                autoComplete="url"
+                onChange={(event) => setWebsiteDraft(event.target.value)}
+                onBlur={websiteSave.commit}
+                aria-invalid={websiteError !== null}
                 className="pr-8"
               />
             </WithIndicator>

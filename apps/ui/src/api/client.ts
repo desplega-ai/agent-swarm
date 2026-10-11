@@ -3380,6 +3380,33 @@ class ApiClient {
     if (!res.ok) throw new Error(`Failed to send telemetry event: ${res.status}`);
   }
 
+  /** Turn telemetry on and apply it to the running server. */
+  async enableTelemetry(via: "banner" | "settings"): Promise<{ enabled: boolean }> {
+    const url = `${this.getBaseUrl()}/api/telemetry/enable`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: this.getHeaders(),
+      body: JSON.stringify({ via }),
+    });
+    if (!res.ok) throw new Error(`Failed to turn telemetry on: ${res.status}`);
+    return (await res.json()) as { enabled: boolean };
+  }
+
+  /** Grant or revoke the "used by" logo consent. */
+  async setUsedByConsent(granted: boolean): Promise<{ granted: boolean; changedAt: string }> {
+    const url = `${this.getBaseUrl()}/api/used-by`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: this.getHeaders(),
+      body: JSON.stringify({ granted }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: "" }));
+      throw new Error(err.error || `Failed to update the consent: ${res.status}`);
+    }
+    return (await res.json()) as { granted: boolean; changedAt: string };
+  }
+
   // ─── Credential-Missing Agents (Phase 6 ≥1.76.0) ──────────────────────────
 
   async listCredentialMissingAgents(): Promise<CredentialMissingAgent[]> {
