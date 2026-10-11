@@ -73,6 +73,14 @@ The Repository Guidelines carry `allowMerge` and `mergeChecks`.
 7. Read the diff for security (injection, secrets in code), logic (null handling, off-by-one, edge cases), performance (N+1, leaks), and code shape (naming, duplication, error handling). Run the test suite and the type check locally when you can.
 8. Post the review with the verdict first. One finding per comment, with file and line, and what to change.
 
+9. Self-authored PR. GitHub refuses APPROVE and REQUEST_CHANGES when the reviewing account authored the PR. Compare `gh pr view <n> --json author --jq .author.login` with `gh api user --jq .login` before you submit. Same login: post one COMMENT whose first line is the verdict (`APPROVE` or `REQUEST_CHANGES`), then one line saying a formal review is blocked because this account authored the PR.
+10. Optimistic UI mutations (toggles, favorites, pins). Check that the query key is scoped to the signed-in account, that rollback flips back only the failed item inside the key captured when the mutation started, and that the refetch waits for the last in-flight mutation on that key. Ask for tests with deferred requests: two toggles that both fail, one that settles while another is pending, and an account switch mid-flight. Run them against the old head too: they must fail there.
+11. A resolved thread is not a fixed finding. Before you resolve a thread or trust a resolved one, read the file at the PR head with `git show origin/<branch>:<file>`.
+12. A bot acknowledgment carries no change request. Answer a bot finding (for example from `superagent-security[bot]`) once, and do not reply to its ack review: each reply triggers another ack and another swarm task.
+13. Human verdicts live in the reviews endpoint. `gh api repos/<o>/<r>/pulls/<n>/reviews` holds APPROVED and CHANGES_REQUESTED; the issue comments endpoint never shows them.
+14. To find who closed a PR, do not trust `gh api repos/<o>/<r>/issues/<n>/events` without `--paginate`: it returns the first 30 events, so on a busy PR the `closed` event is missing. Use GraphQL `timelineItems(itemTypes:[CLOSED_EVENT])`.
+15. Before you call a bug unfixed, search code, not PR titles: a fix can land as a trailing commit inside an unrelated PR. Use `git log origin/main -S'<symbol>'` and the open PRs' diffs.
+
 ## GitHub review-reply provenance
 
 Before an automated reply to an inline review thread:

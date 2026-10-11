@@ -69,7 +69,7 @@ export default async function (args: z.infer<typeof argsSchema>, ctx: ScriptCont
 - `agentId` is propagated through the `X-Agent-ID` header, so SDK calls run as you. `taskId` is not ambient: pass it in `args` when the script calls `task_storeProgress`.
 - A script invoked from a workflow node may run under a workflow identity.
 - Return compact structured data. Raw logs, full HTML, big JSON arrays, and file contents stay inside the script.
-- Limits: about 30 s wall clock (up to 5 minutes where the tool exposes it), 1 MB stdout. Never sleep or loop past about 25 s. Chain `wait-for-task` calls instead.
+- Limits: about 30 s wall clock (up to 5 minutes where the tool exposes it), 1 MB stdout. Never sleep or loop past about 25 s. Chain `wait-for-task` calls instead. The cap also applies to a script called through `ctx.step.swarmScript`; the step's `timeoutMs` does not extend it. A long LLM call, such as a 2,000-word draft, goes in a `ctx.step.rawLlm` step inside `launch-script-run`, never in a called script.
 
 ### What `ctx` holds
 

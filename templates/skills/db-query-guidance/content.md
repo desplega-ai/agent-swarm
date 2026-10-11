@@ -38,6 +38,15 @@ For these four tables:
 If you need a row total or a column type census, ask the lead. Do not derive
 it yourself by scanning the table.
 
+## Columns audits guess wrong
+
+Run `SELECT name FROM pragma_table_info('<table>')` before you guess a column.
+
+- `agent_tasks`: no cost column and no `metadata` column. Cost is `session_costs.totalCostUsd`, joined on `taskId`. Assignee `agentId`, creator `creatorAgentId`, model `model`, `resolvedModel`, `modelSource`. `parentTaskId` is the only SQL child finder, because `key` is unique per task.
+- `scripts`: the owner is `createdByAgentId`; there is no `agentId`. `isScratch = 1` marks inline `script-run` bodies (`scratch-*` names), and they outnumber named scripts many times over. Add `isScratch = 0` to catalog audits. To find a script's callers, group by `isScratch` instead of dropping scratch rows: inline runs are often the negative tests.
+- `script_runs`: `scriptName`, `agentId`, `status`, `startedAt`, `finishedAt`, `error`. There is no duration column: use `(julianday(finishedAt) - julianday(startedAt)) * 86400`.
+- `session_costs`: `taskId`, `agentId`, `totalCostUsd`, `model`, the token columns, `createdAt`.
+
 ## Operator config knobs
 
 All are read dynamically (a `swarm_config` edit or env var change takes
