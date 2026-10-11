@@ -164,6 +164,55 @@ On reconnect, it lists runtimes belonging to this swarm before becoming online.
 Disconnect stops new provisioning. Existing runtime records survive the controller grace, which defaults to 120 seconds.
 After grace expiry, the API revokes their tokens and recovers active tasks.
 
+## Benchmarks
+
+These numbers come from the v1 test runs on 2026-10-11. Use them as a rough guide, not as a guarantee.
+Each task was a one-line "pong" task. The model was `openrouter/deepseek/deepseek-v4.1-flash` on the pi harness.
+The worker image was built from the same code as this release.
+
+### One worker, 100 tasks
+
+A Lead got one task: send 100 pong tasks to one pool agent. The agent had `maxTasks: 5`, `slotsPerRuntime: 5`, `maxRuntimes: 1`, and push delivery.
+
+| Metric | Docker (local) | E2B (through a tunnel) |
+| --- | --- | --- |
+| Tasks completed | 100 of 100 | 100 of 100 |
+| Failed, lost, or duplicate tasks | 0 | 0 |
+| Runtimes alive at the same time | 1 | 1 |
+| Wall clock, first task to last completion | 75 s | 631 s |
+| Task create to done, p50 / p95 | 10 s / 17 s | queue-bound |
+| Model spend | $0.17 | $0.30 |
+
+On E2B, the worker filled only 2 of its 5 slots.
+Each request from the sandbox crossed a tunnel with about 0.4 s of latency, and the runner makes many API calls for each task.
+Use a low-latency, public API URL for E2B pools.
+
+### E2B scale-out, one sandbox per task
+
+One pool agent with `lifecycle: per-task`, `slotsPerRuntime: 1`, and `maxRuntimes` equal to the wave size. Tasks were created through the API.
+
+| Wave | Tasks completed | Peak sandboxes | All sandboxes started | All tasks done |
+| --- | --- | --- | --- | --- |
+| 10 | 10 of 10 | 10 | 31 s | 77 s |
+| 25 | 25 of 25 | 25 | 74 s | 162 s |
+| 50 | 50 of 50 | 50 | 22 s | 389 s |
+
+The 10 and 25 waves ran before concurrent provisioning existed. The 50 wave used it (`RUNTIME_PROVISION_CONCURRENCY`, default 8). Without it, the 50th sandbox started 147 s after the first.
+The API stayed below 41% CPU. The limit was the single free tunnel between the sandboxes and the API: sandbox registration p50 rose to about 2 minutes, and some sandboxes lost their MCP connection.
+E2B spend was below $1 per wave of 50 at 2 vCPU and 2 GiB per sandbox.
+
+### Remote controller on a Docker 29 host
+
+The API ran on a laptop. The controller and its containers ran on a remote Linux host, connected through an SSH reverse tunnel.
+
+| Test | Result |
+| --- | --- |
+| One task | Completed in 27 s. The container exited about 14 s after the task, when the runner finished its post-task work. |
+| 10 tasks, `maxRuntimes: 5` | All completed in 96 s. Never more than 5 containers. |
+| Controller killed within the grace | No new containers during the outage. Reconcile after restart. |
+| Controller killed past the grace | Runtime tokens revoked, task superseded and resumed after restart. |
+| Network drop at task finish | The runner retried, then saved the result. No re-run. |
+
 ## Troubleshooting
 
 | Symptom | Check |
