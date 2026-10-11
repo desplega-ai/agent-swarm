@@ -39,23 +39,33 @@ Listing requires both the runtime label and the matching owner label. Runtimes w
 Two swarms on one Docker host or E2B team must use different owner IDs.
 Termination and status use explicit handles. Controllers must obtain those handles from their own records or owner-filtered lists.
 
-## Docker
+## static
+
+Operators start and stop static workers. The adapter cannot provision, terminate, pause, or resume them.
+Its status is unknown and its list is empty. Static workers need no infrastructure configuration.
+
+## docker
 
 `DOCKER_HOST` defaults to `unix:///var/run/docker.sock`. Only Unix sockets are supported.
+On OrbStack Macs, set `DOCKER_HOST="unix://$HOME/.orbstack/run/docker.sock"`.
 `DOCKER_NETWORK` selects a network. `DOCKER_EXTRA_HOSTS` adds comma-separated `host:address` entries.
 The adapter always includes `host.docker.internal:host-gateway`.
 Requests can set memory in MiB and CPU count through `resources`.
 
 When creation returns 404 with `No such image`, the adapter pulls the requested image and retries creation once.
+Untagged references use `tag=latest`. Registry ports do not count as tags, and digest references remain unchanged.
 It consumes the pull response to completion and rejects errors embedded in the response stream.
 A missing container reports `exited`. Other lookup errors report `unknown`.
-Adapter errors pass through `scrubSecrets`. Provisioned environment values register with the scrubber before Docker receives them.
+Adapter errors pass through `scrubSecrets`. Provision errors also redact sensitive values from the request environment locally.
+The adapter does not register request environment values in the process-wide secret registry.
+If container start fails, the adapter attempts forced deletion before it returns the original error.
 
-## E2B
+## e2b
 
 `E2B_API_KEY` is required. `E2B_API_BASE` selects a custom endpoint.
 Images must name an E2B worker template. Template construction belongs to the controller layer.
-The default lease is 900 seconds. `renew` uses `setSandboxTimeout` and returns the expiry that E2B actually applied.
+The default lease is 900 seconds. Target configuration `E2B_TTL_SEC` overrides that default.
+An explicit provision request `ttlSec` takes precedence. `renew` uses its explicit `ttlSec` and returns the expiry that E2B actually applied.
 
 `E2B_MAX_CONTINUOUS_SEC` sets the continuous runtime trait. It defaults to 3600 seconds for Hobby.
 Pro deployments can set 86400 seconds. Pass this target to the factory when constructing the adapter.
@@ -63,7 +73,8 @@ The SDK enforces the account limit. The trait does not increase that limit.
 
 Status uses one `Sandbox.getInfo` lookup. It preserves paused state because `Sandbox.connect` would resume the sandbox.
 A sandbox lookup that reports absence returns `exited`. Authentication and transport failures remain errors.
-Pause uses `Sandbox.betaPause`. Resume uses `Sandbox.connect`.
+Pause uses `Sandbox.betaPause`. Resume uses `Sandbox.connect` with the configured lease or the 900-second default.
+If the worker process fails during provision, the adapter attempts sandbox deletion before it returns the original error.
 See [E2B dispatch](./e2b-dispatch.md) for templates and tracked process behavior.
 
 ## Adding a provider

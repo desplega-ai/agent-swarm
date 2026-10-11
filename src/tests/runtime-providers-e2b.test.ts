@@ -68,9 +68,13 @@ beforeEach(() => {
   ])
     fn.mockClear();
   createSandbox.mockImplementation(async () => sandbox);
+  startDetachedProcess.mockImplementation(async () => "pid-1");
+  killSandbox.mockImplementation(async () => {});
   listSandboxes.mockImplementation(async () => []);
   setSandboxTimeout.mockImplementation(async () => ({ expiresAt: endAt }));
   getInfo.mockImplementation(async () => ({ state: "running" }));
+  betaPause.mockImplementation(async () => true);
+  connect.mockImplementation(async () => ({}));
 });
 
 describe("E2B runtime provider", () => {
@@ -189,7 +193,67 @@ describe("E2B runtime provider", () => {
     await provider.resume(target, handle);
     const options = { apiKey: target.E2B_API_KEY, apiUrl: target.E2B_API_BASE };
     expect(betaPause).toHaveBeenCalledWith(handle.externalId, options);
-    expect(connect).toHaveBeenCalledWith(handle.externalId, options);
+    expect(connect).toHaveBeenCalledWith(handle.externalId, { ...options, timeoutMs: 900_000 });
+  });
+
+  test("uses the configured lease for provision, renew, and resume", async () => {
+    const provider = new E2BRuntimeProvider();
+    const configured = { ...target, E2B_TTL_SEC: "1200" };
+    await provider.provision(configured, request);
+    await provider.renew(configured, handle, 1200);
+    await provider.resume(configured, handle);
+    expect(createSandbox.mock.calls[0]?.[0].timeoutSec).toBe(1200);
+    expect(setSandboxTimeout.mock.calls[0]?.[0].timeoutMs).toBe(1_200_000);
+    expect(connect).toHaveBeenCalledWith(handle.externalId, {
+      apiKey: target.E2B_API_KEY,
+      apiUrl: target.E2B_API_BASE,
+      timeoutMs: 1_200_000,
+    });
+    await expect(provider.resume({ ...target, E2B_TTL_SEC: "invalid" }, handle)).rejects.toThrow(
+      "positive integer",
+    );
+  });
+
+  test("kills a created sandbox after process failure and preserves that error", async () => {
+    const provider = new E2BRuntimeProvider();
+    startDetachedProcess.mockImplementation(async () => {
+      throw new Error("process failed");
+    });
+    for (const cleanupFails of [false, true]) {
+      killSandbox.mockClear();
+      killSandbox.mockImplementation(async () => {
+        if (cleanupFails) throw new Error("cleanup failed");
+      });
+      await expect(provider.provision(target, request)).rejects.toThrow("process failed");
+      expect(killSandbox).toHaveBeenCalledWith(
+        sandbox.sandboxID,
+        target.E2B_API_KEY,
+        target.E2B_API_BASE,
+      );
+    }
+  });
+
+  test("redacts controller credentials in every infrastructure operation", async () => {
+    const fail = async (): Promise<never> => {
+      throw new Error(`rejected ${target.E2B_API_KEY}`);
+    };
+    killSandbox.mockImplementation(fail);
+    listSandboxes.mockImplementation(fail);
+    setSandboxTimeout.mockImplementation(fail);
+    getInfo.mockImplementation(fail);
+    betaPause.mockImplementation(fail);
+    connect.mockImplementation(fail);
+    const provider = new E2BRuntimeProvider();
+    for (const run of [
+      () => provider.terminate(target, handle),
+      () => provider.list(target, request.ownerId),
+      () => provider.renew(target, handle, 900),
+      () => provider.status(target, handle),
+      () => provider.pause(target, handle),
+      () => provider.resume(target, handle),
+    ]) {
+      await expect(run()).rejects.toThrow("rejected [REDACTED");
+    }
   });
 
   test("terminate calls the existing kill helper", async () => {

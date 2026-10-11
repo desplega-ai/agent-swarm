@@ -1,9 +1,12 @@
-import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { DockerRuntimeProvider } from "../runtime-providers/docker";
 import { type ProvisionRequest, RUNTIME_LABELS } from "../runtime-providers/types";
+import { scrubSecrets } from "../utils/secret-scrubber";
 
 const provider = new DockerRuntimeProvider();
-const target = { DOCKER_HOST: "unix:///tmp/runtime-provider-test.sock" };
+let target: { DOCKER_HOST: string };
 const handle = { kind: "docker" as const, externalId: "container-1" };
 const request: ProvisionRequest = {
   runtimeId: crypto.randomUUID(),
@@ -19,26 +22,33 @@ const request: ProvisionRequest = {
 type EngineHandler = (url: URL, init: RequestInit) => Response | Promise<Response>;
 let handler: EngineHandler;
 let calls: Array<{ url: URL; init: RequestInit }>;
-let fetchSpy: ReturnType<typeof spyOn<typeof globalThis, "fetch">>;
+let server: Bun.Server<undefined>;
+let socket: string;
 
 beforeEach(() => {
   calls = [];
   handler = () => Response.json({ Id: handle.externalId });
-  // Mock HTTP because the sandbox cannot access a real Docker socket.
-  fetchSpy = spyOn(globalThis, "fetch").mockImplementation(
-    mock(async (input, init) => {
-      const url = new URL(String(input));
-      const options = init ?? {};
-      expect((options as RequestInit & { unix: string }).unix).toBe(
-        "/tmp/runtime-provider-test.sock",
-      );
-      calls.push({ url, init: options });
-      return handler(url, options);
-    }),
-  );
+  socket = join(tmpdir(), `rp-${crypto.randomUUID().slice(0, 16)}.sock`);
+  target = { DOCKER_HOST: `unix://${socket}` };
+  server = Bun.serve({
+    unix: socket,
+    async fetch(req) {
+      const url = new URL(req.url);
+      const init = { method: req.method, body: await req.text() };
+      calls.push({ url, init });
+      return handler(url, init);
+    },
+  });
 });
 
-afterEach(() => fetchSpy.mockRestore());
+afterEach(async () => {
+  await server.stop(true);
+  await Bun.file(socket)
+    .delete()
+    .catch((err) => {
+      if (err.code !== "ENOENT") throw err;
+    });
+});
 
 describe("Docker runtime provider", () => {
   test("creates and starts a container with authoritative labels and host configuration", async () => {
@@ -124,6 +134,33 @@ describe("Docker runtime provider", () => {
     expect(calls).toHaveLength(3);
   });
 
+  test("pulls latest for untagged images without confusing registry ports with tags", async () => {
+    for (const [image, tag] of [
+      ["ghcr.io/org/worker", "latest"],
+      ["worker", "latest"],
+      ["host:5000/img", "latest"],
+      ["host:5000/img:test", null],
+      ["host:5000/img@sha256:abc123", null],
+    ] as const) {
+      let creates = 0;
+      handler = (url) => {
+        if (url.pathname.endsWith("/containers/create")) {
+          return ++creates === 1
+            ? Response.json({ message: "No such image" }, { status: 404 })
+            : Response.json({ Id: handle.externalId });
+        }
+        if (url.pathname.endsWith("/images/create")) {
+          expect(url.searchParams.get("fromImage")).toBe(image);
+          expect(url.searchParams.get("tag")).toBe(tag);
+          return new Response('{"status":"Complete"}\n');
+        }
+        return new Response(null, { status: 204 });
+      };
+      await provider.provision(target, { ...request, image });
+      expect(creates).toBe(2);
+    }
+  });
+
   test("does not pull on other create failures", async () => {
     for (const [status, message] of [
       [404, "No such network"],
@@ -146,22 +183,34 @@ describe("Docker runtime provider", () => {
   });
 
   test("lists only runtimes for this owner and sends both label filters", async () => {
-    handler = () =>
-      Response.json([
-        {
-          Id: "ours",
-          Labels: {
-            [RUNTIME_LABELS.runtimeId]: "runtime",
-            [RUNTIME_LABELS.owner]: request.ownerId,
+    handler = (url) => {
+      const filters = JSON.parse(url.searchParams.get("filters") ?? "") as { label: string[] };
+      return Response.json(
+        [
+          {
+            Id: "ours",
+            Labels: {
+              [RUNTIME_LABELS.runtimeId]: "runtime",
+              [RUNTIME_LABELS.owner]: request.ownerId,
+            },
           },
-        },
-        {
-          Id: "theirs",
-          Labels: { [RUNTIME_LABELS.runtimeId]: "runtime", [RUNTIME_LABELS.owner]: "other" },
-        },
-        { Id: "legacy", Labels: { [RUNTIME_LABELS.runtimeId]: "runtime" } },
-        { Id: "unrelated", Labels: { [RUNTIME_LABELS.owner]: request.ownerId } },
-      ]);
+          {
+            Id: "theirs",
+            Labels: { [RUNTIME_LABELS.runtimeId]: "runtime", [RUNTIME_LABELS.owner]: "other" },
+          },
+          { Id: "legacy", Labels: { [RUNTIME_LABELS.runtimeId]: "runtime" } },
+          { Id: "unrelated", Labels: { [RUNTIME_LABELS.owner]: request.ownerId } },
+        ].filter((row) =>
+          filters.label.every((label) => {
+            const [key, value] = label.split("=");
+            const labels: Record<string, string | undefined> = row.Labels;
+            return (
+              key !== undefined && (value === undefined ? key in labels : labels[key] === value)
+            );
+          }),
+        ),
+      );
+    };
     const rows = await provider.list(target, request.ownerId);
     expect(rows.map((row) => row.externalId)).toEqual(["ours"]);
     expect(JSON.parse(calls[0]?.url.searchParams.get("filters") ?? "")).toEqual({
@@ -195,21 +244,66 @@ describe("Docker runtime provider", () => {
     expect(calls[0]?.url.searchParams.get("force")).toBe("true");
   });
 
-  test("scrubs environment values echoed by Docker and transport failures", async () => {
+  test("scrubs sensitive environment values locally without registering ordinary values", async () => {
     const secret = `private-${crypto.randomUUID()}`;
-    const req = { ...request, env: { CUSTOM_PASSWORD: secret } };
-    handler = () => new Response(`bad env ${secret}`, { status: 500 });
+    const agentId = crypto.randomUUID();
+    const apiUrl = `https://${crypto.randomUUID()}.test`;
+    const req = {
+      ...request,
+      env: { CUSTOM_PASSWORD: secret, AGENT_ID: agentId, MCP_BASE_URL: apiUrl },
+    };
+    handler = () =>
+      new Response(`${"x".repeat(290)} bad env ${secret} ${agentId} ${apiUrl}`, { status: 500 });
     try {
       await provider.provision(target, req);
       throw new Error("Provision unexpectedly succeeded");
     } catch (err) {
       expect(String(err)).not.toContain(secret);
       expect(String(err)).toContain("REDACTED");
+      expect(String(err)).toContain(agentId);
+      expect(String(err)).toContain(apiUrl);
     }
-    handler = () => {
-      throw new Error(`transport ${secret}`);
-    };
-    await expect(provider.list(target, request.ownerId)).rejects.toThrow("REDACTED");
+    expect(scrubSecrets(agentId)).toBe(agentId);
+    expect(scrubSecrets(apiUrl)).toBe(apiUrl);
+    expect(scrubSecrets(secret)).toBe(secret);
+    handler = () => Response.json({ Id: handle.externalId });
+    await provider.provision(target, req);
+    expect(scrubSecrets(agentId)).toBe(agentId);
+    expect(scrubSecrets(apiUrl)).toBe(apiUrl);
+    expect(scrubSecrets(secret)).toBe(secret);
+  });
+
+  test("removes a created container after start failure and preserves that error", async () => {
+    for (const cleanupStatus of [204, 500]) {
+      calls = [];
+      handler = (url, init) => {
+        if (url.pathname.endsWith("/containers/create"))
+          return Response.json({ Id: handle.externalId });
+        if (init.method === "DELETE")
+          return new Response(cleanupStatus === 204 ? null : "cleanup failed", {
+            status: cleanupStatus,
+          });
+        return new Response("start failed", { status: 500 });
+      };
+      await expect(provider.provision(target, request)).rejects.toThrow("start failed");
+      expect(calls.map(({ url, init }) => `${init.method} ${url.pathname}`)).toEqual([
+        "POST /v1.43/containers/create",
+        "POST /v1.43/containers/container-1/start",
+        "DELETE /v1.43/containers/container-1",
+      ]);
+      expect(calls[2]?.url.searchParams.get("force")).toBe("true");
+    }
+  });
+
+  test("socket errors identify the attempted path and DOCKER_HOST configuration", async () => {
+    const missingSocket = `${socket}.missing`;
+    await expect(
+      provider.list({ DOCKER_HOST: `unix://${missingSocket}` }, request.ownerId),
+    ).rejects.toThrow(missingSocket);
+    await expect(
+      provider.list({ DOCKER_HOST: `unix://${missingSocket}` }, request.ownerId),
+    ).rejects.toThrow("Set DOCKER_HOST");
+    expect(calls).toHaveLength(0);
   });
 
   test("rejects TCP targets before any HTTP call", async () => {

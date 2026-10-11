@@ -1,4 +1,5 @@
-import { registerVolatileSecret, scrubSecrets } from "../utils/secret-scrubber";
+import { redactWithEnv } from "../e2b/env";
+import { scrubSecrets } from "../utils/secret-scrubber";
 import {
   type ConfigStatus,
   type ProvisionRequest,
@@ -46,10 +47,11 @@ async function dockerApi<T>(
   body?: unknown,
   stream = false,
 ): Promise<T> {
+  const socket = socketPath(target);
   try {
     const res = await fetch(`http://docker/${API_VERSION}${path}`, {
       method,
-      unix: socketPath(target),
+      unix: socket,
       headers: body === undefined ? undefined : { "Content-Type": "application/json" },
       body: body === undefined ? undefined : JSON.stringify(body),
     } as RequestInit);
@@ -57,7 +59,7 @@ async function dockerApi<T>(
       const text = scrubSecrets(await res.text());
       throw new DockerApiError(
         res.status,
-        `docker ${method} ${path} failed (${res.status}): ${text.slice(0, 300)}`,
+        `docker ${method} ${path} failed (${res.status}): ${text}`,
       );
     }
     if (res.status === 204 || res.status === 304) return undefined as T;
@@ -74,7 +76,11 @@ async function dockerApi<T>(
     return (text ? JSON.parse(text) : undefined) as T;
   } catch (err) {
     if (err instanceof DockerApiError) throw err;
-    throw new Error(scrubSecrets(`docker ${method} ${path}: ${String(err)}`));
+    throw new Error(
+      scrubSecrets(
+        `docker ${method} ${path} via socket ${socket}: ${String(err)}. Set DOCKER_HOST to select the Docker socket.`,
+      ),
+    );
   }
 }
 
@@ -92,53 +98,59 @@ export class DockerRuntimeProvider implements RuntimeProvider {
   }
 
   async provision(target: RuntimeTargetConfig, req: ProvisionRequest): Promise<RuntimeHandle> {
-    for (const [key, value] of Object.entries(req.env)) registerVolatileSecret(value, key);
-    const path = `/containers/create?name=${encodeURIComponent(`swarm-rt-${req.runtimeId}`)}`;
-    const body = {
-      Image: req.image,
-      Env: Object.entries(req.env).map(([k, v]) => `${k}=${v}`),
-      Labels: {
-        ...req.labels,
-        [RUNTIME_LABELS.owner]: req.ownerId,
-        [RUNTIME_LABELS.runtimeId]: req.runtimeId,
-        [RUNTIME_LABELS.poolId]: req.poolId,
-        [RUNTIME_LABELS.agentId]: req.agentId,
-      },
-      HostConfig: {
-        // Lets a container reach an API on the docker host (compose-less installs).
-        ExtraHosts: [
-          "host.docker.internal:host-gateway",
-          ...(target.DOCKER_EXTRA_HOSTS?.split(",")
-            .map((host) => host.trim())
-            .filter(Boolean) ?? []),
-        ],
-        NetworkMode: target.DOCKER_NETWORK,
-        Memory: req.resources?.memoryMb ? req.resources.memoryMb * 1024 * 1024 : undefined,
-        NanoCpus: req.resources?.cpu ? Math.round(req.resources.cpu * 1e9) : undefined,
-      },
-    };
-    let created: { Id: string };
     try {
-      created = await dockerApi(target, "POST", path, body);
-    } catch (err) {
-      if (
-        !(err instanceof DockerApiError) ||
-        err.statusCode !== 404 ||
-        !err.message.includes("No such image")
-      ) {
+      const path = `/containers/create?name=${encodeURIComponent(`swarm-rt-${req.runtimeId}`)}`;
+      const body = {
+        Image: req.image,
+        Env: Object.entries(req.env).map(([k, v]) => `${k}=${v}`),
+        Labels: {
+          ...req.labels,
+          [RUNTIME_LABELS.owner]: req.ownerId,
+          [RUNTIME_LABELS.runtimeId]: req.runtimeId,
+          [RUNTIME_LABELS.poolId]: req.poolId,
+          [RUNTIME_LABELS.agentId]: req.agentId,
+        },
+        HostConfig: {
+          // Lets a container reach an API on the docker host (compose-less installs).
+          ExtraHosts: [
+            "host.docker.internal:host-gateway",
+            ...(target.DOCKER_EXTRA_HOSTS?.split(",")
+              .map((host) => host.trim())
+              .filter(Boolean) ?? []),
+          ],
+          NetworkMode: target.DOCKER_NETWORK,
+          Memory: req.resources?.memoryMb ? req.resources.memoryMb * 1024 * 1024 : undefined,
+          NanoCpus: req.resources?.cpu ? Math.round(req.resources.cpu * 1e9) : undefined,
+        },
+      };
+      let created: { Id: string };
+      try {
+        created = await dockerApi(target, "POST", path, body);
+      } catch (err) {
+        if (
+          !(err instanceof DockerApiError) ||
+          err.statusCode !== 404 ||
+          !err.message.includes("No such image")
+        ) {
+          throw err;
+        }
+        const pullParams = new URLSearchParams({ fromImage: req.image });
+        if (!req.image.includes("@") && req.image.lastIndexOf(":") <= req.image.lastIndexOf("/")) {
+          pullParams.set("tag", "latest");
+        }
+        await dockerApi(target, "POST", `/images/create?${pullParams}`, undefined, true);
+        created = await dockerApi(target, "POST", path, body);
+      }
+      try {
+        await dockerApi(target, "POST", `/containers/${created.Id}/start`);
+      } catch (err) {
+        await dockerApi(target, "DELETE", `/containers/${created.Id}?force=true`).catch(() => {});
         throw err;
       }
-      await dockerApi(
-        target,
-        "POST",
-        `/images/create?fromImage=${encodeURIComponent(req.image)}`,
-        undefined,
-        true,
-      );
-      created = await dockerApi(target, "POST", path, body);
+      return { kind: "docker", externalId: created.Id };
+    } catch (err) {
+      throw new Error(redactWithEnv(String(err), req.env));
     }
-    await dockerApi(target, "POST", `/containers/${created.Id}/start`);
-    return { kind: "docker", externalId: created.Id };
   }
 
   async terminate(target: RuntimeTargetConfig, handle: RuntimeHandle): Promise<void> {
@@ -178,11 +190,6 @@ export class DockerRuntimeProvider implements RuntimeProvider {
       "GET",
       `/containers/json?all=true&filters=${filters}`,
     );
-    return rows
-      .filter(
-        (row) =>
-          row.Labels[RUNTIME_LABELS.runtimeId] && row.Labels[RUNTIME_LABELS.owner] === ownerId,
-      )
-      .map((row) => ({ kind: "docker", externalId: row.Id, meta: row.Labels }));
+    return rows.map((row) => ({ kind: "docker", externalId: row.Id, meta: row.Labels }));
   }
 }

@@ -45,7 +45,7 @@ const TOUCH_POINTS: TouchPoint[] = [
     file: "runbooks/runtime-providers.md",
     members: async () => {
       const source = await Bun.file(join(repoRoot, "runbooks/runtime-providers.md")).text();
-      return kinds.filter((kind) => new RegExp(`\\b${kind}\\b`).test(source));
+      return kinds.filter((kind) => new RegExp(`^#{2,3} ${kind}\\s*$`, "m").test(source));
     },
     exempt: notImplemented,
   },

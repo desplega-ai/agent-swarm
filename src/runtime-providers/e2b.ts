@@ -25,8 +25,29 @@ import {
  * Target config:
  * - E2B_API_KEY (required)
  * - E2B_API_BASE (optional)
+ * - E2B_TTL_SEC (optional, default 900)
  */
 const DEFAULT_TTL_SEC = 900;
+
+function leaseTtlSec(target: RuntimeTargetConfig): number {
+  const ttlSec = Number(target.E2B_TTL_SEC ?? DEFAULT_TTL_SEC);
+  if (!Number.isInteger(ttlSec) || ttlSec <= 0) {
+    throw new Error("E2B_TTL_SEC must be a positive integer");
+  }
+  return ttlSec;
+}
+
+async function withRedactedErrors<T>(
+  target: RuntimeTargetConfig,
+  run: () => Promise<T>,
+  env: Record<string, string> = {},
+): Promise<T> {
+  try {
+    return await run();
+  } catch (err) {
+    throw new Error(redactWithEnv(String(err), { ...env, E2B_API_KEY: target.E2B_API_KEY ?? "" }));
+  }
+}
 
 export class E2BRuntimeProvider implements RuntimeProvider {
   readonly kind = "e2b" as const;
@@ -58,61 +79,66 @@ export class E2BRuntimeProvider implements RuntimeProvider {
   }
 
   async provision(target: RuntimeTargetConfig, req: ProvisionRequest): Promise<RuntimeHandle> {
-    try {
-      const apiKey = this.apiKey(target);
-      const sandbox = await createSandbox({
-        apiKey,
-        apiBase: target.E2B_API_BASE,
-        template: req.image,
-        timeoutSec: req.ttlSec ?? DEFAULT_TTL_SEC,
-        envVars: req.env,
-        metadata: {
-          ...req.labels,
-          [RUNTIME_LABELS.owner]: req.ownerId,
-          [RUNTIME_LABELS.runtimeId]: req.runtimeId,
-          [RUNTIME_LABELS.poolId]: req.poolId,
-          [RUNTIME_LABELS.agentId]: req.agentId,
-        },
-      });
-      await startDetachedProcess({
-        sandbox,
-        apiKey,
-        apiBase: target.E2B_API_BASE,
-        env: req.env,
-        command: "/docker-entrypoint.sh",
-        role: "worker",
-        cwd: "/workspace",
-      });
-      return { kind: "e2b", externalId: sandbox.sandboxID };
-    } catch (err) {
-      throw new Error(
-        redactWithEnv(String(err), { ...req.env, E2B_API_KEY: target.E2B_API_KEY ?? "" }),
-      );
-    }
+    return withRedactedErrors(
+      target,
+      async () => {
+        const apiKey = this.apiKey(target);
+        const sandbox = await createSandbox({
+          apiKey,
+          apiBase: target.E2B_API_BASE,
+          template: req.image,
+          timeoutSec: req.ttlSec ?? leaseTtlSec(target),
+          envVars: req.env,
+          metadata: {
+            ...req.labels,
+            [RUNTIME_LABELS.owner]: req.ownerId,
+            [RUNTIME_LABELS.runtimeId]: req.runtimeId,
+            [RUNTIME_LABELS.poolId]: req.poolId,
+            [RUNTIME_LABELS.agentId]: req.agentId,
+          },
+        });
+        try {
+          await startDetachedProcess({
+            sandbox,
+            apiKey,
+            apiBase: target.E2B_API_BASE,
+            env: req.env,
+            command: "/docker-entrypoint.sh",
+            role: "worker",
+            cwd: "/workspace",
+          });
+        } catch (err) {
+          await killSandbox(sandbox.sandboxID, apiKey, target.E2B_API_BASE).catch(() => {});
+          throw err;
+        }
+        return { kind: "e2b", externalId: sandbox.sandboxID };
+      },
+      req.env,
+    );
   }
 
   async terminate(target: RuntimeTargetConfig, handle: RuntimeHandle): Promise<void> {
-    try {
-      await killSandbox(handle.externalId, this.apiKey(target), target.E2B_API_BASE);
-    } catch (err) {
-      throw new Error(redactWithEnv(String(err), { E2B_API_KEY: target.E2B_API_KEY ?? "" }));
-    }
+    return withRedactedErrors(target, () =>
+      killSandbox(handle.externalId, this.apiKey(target), target.E2B_API_BASE),
+    );
   }
 
   async status(target: RuntimeTargetConfig, handle: RuntimeHandle): Promise<RuntimeStatus> {
-    const { Sandbox, SandboxNotFoundError } = await import("e2b");
-    const options = e2bSdkConnectionOptions(this.apiKey(target), {}, target.E2B_API_BASE);
-    try {
-      const info = await Sandbox.getInfo(handle.externalId, options);
-      return info.state === "paused" ? "paused" : "running";
-    } catch (err) {
-      if (err instanceof SandboxNotFoundError) return "exited";
-      throw new Error(redactWithEnv(String(err), { E2B_API_KEY: options.apiKey }));
-    }
+    return withRedactedErrors(target, async () => {
+      const { Sandbox, SandboxNotFoundError } = await import("e2b");
+      const options = e2bSdkConnectionOptions(this.apiKey(target), {}, target.E2B_API_BASE);
+      try {
+        const info = await Sandbox.getInfo(handle.externalId, options);
+        return info.state === "paused" ? "paused" : "running";
+      } catch (err) {
+        if (err instanceof SandboxNotFoundError) return "exited";
+        throw err;
+      }
+    });
   }
 
   async list(target: RuntimeTargetConfig, ownerId: string): Promise<RuntimeHandle[]> {
-    try {
+    return withRedactedErrors(target, async () => {
       const rows = await listSandboxes(this.apiKey(target), target.E2B_API_BASE);
       return rows
         .filter(
@@ -121,9 +147,7 @@ export class E2BRuntimeProvider implements RuntimeProvider {
             row.metadata[RUNTIME_LABELS.owner] === ownerId,
         )
         .map((row) => ({ kind: "e2b", externalId: row.sandboxID, meta: row.metadata }));
-    } catch (err) {
-      throw new Error(redactWithEnv(String(err), { E2B_API_KEY: target.E2B_API_KEY ?? "" }));
-    }
+    });
   }
 
   async renew(
@@ -131,7 +155,7 @@ export class E2BRuntimeProvider implements RuntimeProvider {
     handle: RuntimeHandle,
     ttlSec: number,
   ): Promise<{ endAt: string }> {
-    try {
+    return withRedactedErrors(target, async () => {
       const ttl = await setSandboxTimeout({
         sandboxId: handle.externalId,
         apiKey: this.apiKey(target),
@@ -140,28 +164,25 @@ export class E2BRuntimeProvider implements RuntimeProvider {
       });
       if (!ttl.expiresAt) throw new Error("E2B did not return the renewed expiry");
       return { endAt: ttl.expiresAt };
-    } catch (err) {
-      throw new Error(redactWithEnv(String(err), { E2B_API_KEY: target.E2B_API_KEY ?? "" }));
-    }
+    });
   }
 
   async pause(target: RuntimeTargetConfig, handle: RuntimeHandle): Promise<void> {
-    const { Sandbox } = await import("e2b");
-    const options = e2bSdkConnectionOptions(this.apiKey(target), {}, target.E2B_API_BASE);
-    try {
+    return withRedactedErrors(target, async () => {
+      const { Sandbox } = await import("e2b");
+      const options = e2bSdkConnectionOptions(this.apiKey(target), {}, target.E2B_API_BASE);
       await Sandbox.betaPause(handle.externalId, options);
-    } catch (err) {
-      throw new Error(redactWithEnv(String(err), { E2B_API_KEY: options.apiKey }));
-    }
+    });
   }
 
   async resume(target: RuntimeTargetConfig, handle: RuntimeHandle): Promise<void> {
-    const { Sandbox } = await import("e2b");
-    const options = e2bSdkConnectionOptions(this.apiKey(target), {}, target.E2B_API_BASE);
-    try {
-      await Sandbox.connect(handle.externalId, options);
-    } catch (err) {
-      throw new Error(redactWithEnv(String(err), { E2B_API_KEY: options.apiKey }));
-    }
+    return withRedactedErrors(target, async () => {
+      const { Sandbox } = await import("e2b");
+      const options = e2bSdkConnectionOptions(this.apiKey(target), {}, target.E2B_API_BASE);
+      await Sandbox.connect(handle.externalId, {
+        ...options,
+        timeoutMs: leaseTtlSec(target) * 1000,
+      });
+    });
   }
 }
