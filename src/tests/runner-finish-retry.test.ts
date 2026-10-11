@@ -245,13 +245,22 @@ for (const network of [false, true]) {
     runner.activeTasks.get(taskId)!.result!.cost = cost;
     failures["session-costs"] = 2;
     disconnect = network;
-    await checkCompletedProcesses(runner, "worker", config);
-    expect(
-      requests.filter((request) => request.path === "session-costs").map(({ body }) => body),
-    ).toEqual(Array(3).fill(cost));
-    expect(savedCosts).toEqual([cost]);
-    expect(waits).toEqual([1000, 2000]);
-    expect(runner.tasksProcessed).toBe(1);
+    const warn = spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      await checkCompletedProcesses(runner, "worker", config);
+      const bodies = requests
+        .filter((request) => request.path === "session-costs")
+        .map(({ body }) => body);
+      const id = bodies[0]?.id;
+      expect(id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+      expect(bodies).toEqual(Array(3).fill({ ...cost, id }));
+      expect(savedCosts).toEqual([{ ...cost, id }]);
+      expect(waits).toEqual([1000, 2000]);
+      expect(runner.tasksProcessed).toBe(1);
+      expect(warn.mock.calls.flat().join(" ")).toContain("Session cost POST failed.");
+    } finally {
+      warn.mockRestore();
+    }
   });
 }
 
@@ -340,7 +349,7 @@ test("cost and finish POSTs run concurrently and exit-after-N waits for cost bef
     releaseCost();
     await completion;
   }
-  expect(savedCosts).toEqual([cost]);
+  expect(savedCosts).toMatchObject([cost]);
   expect(await exitAfterTasksIfFinished(runner, 1, shutdown)).toBe(true);
   expect(shutdown).toHaveBeenCalledTimes(1);
   expect(requests.at(-1)?.body).toEqual({ runtimeShutdown: true });
@@ -370,7 +379,7 @@ test("abort after server task completion still posts collected cost", async () =
   await checkCompletedProcesses(runner, "worker", config);
   expect(abort).toHaveBeenCalledTimes(1);
   expect(task.serverTerminalStatus).toBe("completed");
-  expect(savedCosts).toEqual([result.cost]);
+  expect(savedCosts).toMatchObject([result.cost]);
   expect(requests.some((request) => request.path === "finish")).toBe(false);
   expect(runner.activeTasks.size).toBe(0);
 });
@@ -448,6 +457,7 @@ test("5xx diagnostics scrub secrets before truncating the response body", async 
     const diagnostic = warn.mock.calls.flat().join(" ");
     expect(diagnostic).not.toContain(secret);
     expect(diagnostic).toContain("REDACTED");
+    expect(diagnostic).toContain("Final task finish POST failed.");
     expect(diagnostic).not.toContain("END_OF_BODY");
     expect(diagnostic.length).toBeLessThan(400);
   } finally {

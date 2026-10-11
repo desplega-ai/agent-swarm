@@ -206,6 +206,8 @@ and heartbeat-classified roots are omitted, and the metrics remain separate.
 
 ## When a model is missing
 
+Cost POSTs accept an optional UUID `id`. The runner reuses it across retries. Repeated IDs return the stored record without changing its price.
+
 If `POST /api/session-costs` arrives with a `(provider, model)` pair that has
 no input/output pricing rows at the lookup time, the row is persisted with
 `costSource='unpriced'` (rather than 'harness'). The UI surfaces this as a

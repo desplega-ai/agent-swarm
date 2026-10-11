@@ -29,6 +29,8 @@ Every adapter emits a `CostData` event with its advisory local total, token brea
 
 The adapter writes via `POST /api/session-costs` with the `provider` field set.
 
+The runner supplies one UUID `id` per cost record and reuses it across retries. Repeated IDs return the stored record without changing spend.
+
 ### 2. API recompute
 
 When the API receives a `POST /api/session-costs` with a `provider` tag, it does a synchronous lookup against the `pricing` table for `(provider, model, token_class)` at the row's `createdAt`. Four outcomes:

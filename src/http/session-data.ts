@@ -175,6 +175,7 @@ const createSessionCostRoute = route({
   summary: "Store session cost record",
   tags: ["Session Data"],
   body: z.object({
+    id: z.string().uuid().optional(),
     sessionId: z.string().min(1),
     agentId: z.string().min(1),
     totalCostUsd: z.number(),
@@ -413,6 +414,7 @@ export async function handleSessionData(
       const { totalCostUsd, costSource } = recomputed;
 
       const cost = await createSessionCost({
+        id: parsed.body.id,
         sessionId: parsed.body.sessionId,
         taskId: parsed.body.taskId || undefined,
         agentId: parsed.body.agentId,

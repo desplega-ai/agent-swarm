@@ -1743,11 +1743,12 @@ function finalUpdateDeadline(): number {
   return Date.now() + (Number.isFinite(maxSec) && maxSec > 0 ? maxSec : 300) * 1000;
 }
 
-async function postFinalTaskUpdate(
+async function postWithRetry(
   url: string,
   headers: Record<string, string>,
   body: Record<string, string> | CostData,
   deadline: number,
+  label: string,
 ): Promise<Response> {
   let delay = 1000;
   for (;;) {
@@ -1766,7 +1767,7 @@ async function postFinalTaskUpdate(
       const remaining = deadline - Date.now();
       if (remaining <= 0) throw error;
       const wait = Math.min(delay, remaining);
-      console.warn(scrubSecrets(`[runner] Final task update failed. Retry in ${wait}ms: ${error}`));
+      console.warn(scrubSecrets(`[runner] ${label} failed. Retry in ${wait}ms: ${error}`));
       await Bun.sleep(wait);
       if (Date.now() >= deadline) throw error;
       delay = Math.min(30_000, delay * 2);
@@ -1876,22 +1877,24 @@ export async function ensureTaskFinished(
   try {
     const deadline = retryDeadline ?? finalUpdateDeadline();
     if (finalProgress) {
-      const progress = await postFinalTaskUpdate(
+      const progress = await postWithRetry(
         `${config.apiUrl}/api/tasks/${taskId}/progress`,
         headers,
         { progress: scrubSecrets(finalProgress) },
         deadline,
+        "Final task progress POST",
       );
       if (progress.status === 401) {
         console.warn(`[${role}] Final task update rejected: HTTP 401`);
         return;
       }
     }
-    const response = await postFinalTaskUpdate(
+    const response = await postWithRetry(
       `${config.apiUrl}/api/tasks/${taskId}/finish`,
       headers,
       body,
       deadline,
+      "Final task finish POST",
     );
 
     if (response.ok) {
@@ -2771,11 +2774,13 @@ async function saveCostData(
   }
 
   try {
-    const response = await postFinalTaskUpdate(
+    const body = { ...cost, id: crypto.randomUUID() };
+    const response = await postWithRetry(
       `${apiUrl}/api/session-costs`,
       headers,
-      cost,
+      body,
       deadline,
+      "Session cost POST",
     );
 
     if (response.status === 401) {

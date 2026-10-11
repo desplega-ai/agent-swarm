@@ -4793,6 +4793,7 @@ function rowToSessionCost(row: SessionCostRow): SessionCost {
 }
 
 export interface CreateSessionCostInput {
+  id?: string;
   sessionId: string;
   taskId?: string;
   agentId: string;
@@ -4828,7 +4829,7 @@ export interface CreateSessionCostInput {
 }
 
 export async function createSessionCost(input: CreateSessionCostInput): Promise<SessionCost> {
-  const id = crypto.randomUUID();
+  const id = input.id ?? crypto.randomUUID();
   const costSource: SessionCostSource = input.costSource ?? "harness";
   const reasoningOutputTokens = input.reasoningOutputTokens ?? 0;
   const thinkingTokens = input.thinkingTokens ?? 0;
@@ -4842,7 +4843,8 @@ export async function createSessionCost(input: CreateSessionCostInput): Promise<
          costSource, harnessCostUsd, cacheWrite5mTokens, cacheWrite1hTokens,
          modelBreakdown, createdAt
        )
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+       ON CONFLICT(id) DO NOTHING`,
     [
       id,
       input.sessionId,
@@ -4867,29 +4869,11 @@ export async function createSessionCost(input: CreateSessionCostInput): Promise<
     ],
   );
 
-  return {
+  const row = await getDbClient().get<SessionCostRow>("SELECT * FROM session_costs WHERE id = ?", [
     id,
-    sessionId: input.sessionId,
-    taskId: input.taskId,
-    agentId: input.agentId,
-    totalCostUsd: input.totalCostUsd,
-    inputTokens: input.inputTokens ?? 0,
-    outputTokens: input.outputTokens ?? 0,
-    cacheReadTokens: input.cacheReadTokens ?? 0,
-    cacheWriteTokens: input.cacheWriteTokens ?? 0,
-    reasoningOutputTokens,
-    thinkingTokens,
-    durationMs: input.durationMs,
-    numTurns: input.numTurns,
-    model: input.model,
-    isError: input.isError ?? false,
-    costSource,
-    harnessCostUsd: input.harnessCostUsd ?? null,
-    cacheWrite5mTokens: input.cacheWrite5mTokens ?? null,
-    cacheWrite1hTokens: input.cacheWrite1hTokens ?? null,
-    modelBreakdown: input.modelBreakdown ?? null,
-    createdAt: new Date().toISOString(),
-  };
+  ]);
+  if (!row) throw new Error("Session cost record is missing after insertion.");
+  return rowToSessionCost(row);
 }
 
 export async function getSessionCostsByTaskId(taskId: string, limit = 500): Promise<SessionCost[]> {
