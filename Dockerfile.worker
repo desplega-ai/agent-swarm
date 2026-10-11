@@ -646,10 +646,12 @@ RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
     && HOME=/root COPILOT_AUTO_UPDATE=false copilot --version | grep -F "${COPILOT_CLI_VERSION}" \
     && rm -rf /tmp/npm-cache /root/.npm /root/.cache /root/.copilot
 # Qwen Code (Apache-2.0), the `qwen` ACP target (`qwen --acp`). Its own prefix
-# keeps the ~120 MB bundle out of the shared global-deps layer.
+# keeps the ~120 MB bundle out of the shared global-deps layer. Lifecycle
+# scripts are not needed for ACP (verified on 0.25.1), so none run as root.
 ARG QWEN_CODE_VERSION=0.25.1
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
-      --prefix /opt/qwen-code --no-audit --no-fund "@qwen-code/qwen-code@${QWEN_CODE_VERSION}" \
+      --prefix /opt/qwen-code --ignore-scripts --no-audit --no-fund \
+      "@qwen-code/qwen-code@${QWEN_CODE_VERSION}" \
     && ln -sf /opt/qwen-code/node_modules/.bin/qwen /usr/local/bin/qwen \
     && test "$(HOME=/tmp/qwen-home qwen --version)" = "${QWEN_CODE_VERSION}" \
     && rm -rf /tmp/npm-cache /tmp/qwen-home /root/.npm /root/.cache /root/.qwen
