@@ -316,9 +316,79 @@ test("kind mismatch closes the socket and records an error", async () => {
       JSON.stringify({ type: "hello", controllerId, kind: "e2b", version: 1, traits: fake.traits }),
     ),
   );
-  await new Promise<void>((resolve) => ws.on("close", () => resolve()));
+  const code = await new Promise<number>((resolve) => ws.on("close", resolve));
+  expect(code).toBe(1008);
   expect((await getRuntimeController(controllerId))?.status).toBe("offline");
   expect((await getRuntimeController(controllerId))?.lastError).toContain("kind does not match");
+});
+
+for (const failure of ["list error", "list timeout"] as const) {
+  test(`handshake ${failure} closes with 1011 and records a scrubbed error`, async () => {
+    const ws = new WebSocket(`${apiUrl.replace("http:", "ws:")}/api/controllers/connect`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    ws.on("message", (data) => {
+      const message = JSON.parse(data.toString());
+      if (message.type === "welcome") {
+        ws.send(
+          JSON.stringify({
+            type: "hello",
+            controllerId,
+            kind: "docker",
+            version: 1,
+            traits: fake.traits,
+          }),
+        );
+      } else if (failure === "list error") {
+        ws.send(
+          JSON.stringify({
+            type: "result",
+            id: message.id,
+            ok: false,
+            error: `Engine unavailable: ${token} ${"⚠".repeat(100)}`,
+          }),
+        );
+      }
+    });
+    const closed = await new Promise<{ code: number; reason: string }>((resolve) =>
+      ws.on("close", (code, reason) => resolve({ code, reason: reason.toString() })),
+    );
+    expect(closed.code).toBe(1011);
+    expect(closed.reason).toBe("controller operation failed");
+    const row = await getRuntimeController(controllerId);
+    expect(row?.lastError).toContain(failure === "list error" ? "Engine unavailable" : "timed out");
+    expect(row?.lastError).not.toContain(token);
+    expect(row?.lastErrorAt).toBeTruthy();
+  });
+}
+
+test("CLI client retries an operational handshake failure with normal backoff", async () => {
+  const list = spyOn(fake, "list")
+    .mockRejectedValueOnce(new Error("Engine unavailable"))
+    .mockResolvedValue([]);
+  let fatal = false;
+  const startedAt = Date.now();
+  clients.push(
+    startControllerClient({
+      apiUrl,
+      token,
+      provider: fake,
+      target: {},
+      onFatal: () => {
+        fatal = true;
+      },
+    }),
+  );
+  try {
+    await until(async () => (await getRuntimeController(controllerId))?.status === "online", 3000);
+    expect(fatal).toBe(false);
+    expect(list).toHaveBeenCalledTimes(2);
+    expect(Date.now() - startedAt).toBeGreaterThanOrEqual(1000);
+    expect(logSpy.mock.calls.flat().join(" ")).toContain("Disconnected. Reconnect in 1000ms");
+    expect((await getRuntimeController(controllerId))?.lastError).toBeNull();
+  } finally {
+    list.mockRestore();
+  }
 });
 
 test("operator credentials cannot upgrade a controller socket", async () => {
@@ -704,6 +774,7 @@ test("failed reconnect handshakes do not extend the controller disconnect grace"
   const list = spyOn(fake, "list").mockRejectedValue(new Error("Infrastructure unavailable"));
   try {
     for (let attempt = 0; attempt < 2; attempt++) {
+      const listsBefore = list.mock.calls.length;
       let rejected = false;
       const failed = startControllerClient({
         apiUrl,
@@ -715,7 +786,16 @@ test("failed reconnect handshakes do not extend the controller disconnect grace"
         },
       });
       clients.push(failed);
-      await until(async () => rejected && remoteControllerSession(controllerId) === undefined);
+      await until(
+        async () =>
+          list.mock.calls.length > listsBefore &&
+          (await getRuntimeController(controllerId))?.lastError?.includes(
+            "Infrastructure unavailable",
+          ) === true &&
+          remoteControllerSession(controllerId) === undefined,
+      );
+      failed.stop();
+      expect(rejected).toBe(false);
       expect((await getRuntimeController(controllerId))?.lastSeenAt).toBe(disconnectedAt);
       expect((await getRuntimeController(controllerId))?.updatedAt).toBe(disconnectedAt);
     }

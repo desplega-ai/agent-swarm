@@ -19,7 +19,30 @@ import {
  * - DOCKER_NETWORK: optional network to attach runtimes to
  * - DOCKER_EXTRA_HOSTS: comma-separated host:address entries
  */
-const API_VERSION = "v1.43";
+const MAX_API_VERSION = 47;
+const apiVersions = new Map<string, Promise<string>>();
+
+async function apiVersion(socket: string): Promise<string> {
+  let version = apiVersions.get(socket);
+  if (!version) {
+    version = (async () => {
+      const response = await fetch("http://docker/_ping", { unix: socket } as RequestInit);
+      if (!response.ok) {
+        throw new DockerApiError(response.status, `docker ping failed: ${await response.text()}`);
+      }
+      const match = response.headers.get("Api-Version")?.match(/^1\.(\d+)$/);
+      await response.text();
+      return match ? `/v1.${Math.min(Number(match[1]), MAX_API_VERSION)}` : "";
+    })();
+    apiVersions.set(socket, version);
+  }
+  try {
+    return await version;
+  } catch (error) {
+    apiVersions.delete(socket);
+    throw error;
+  }
+}
 
 function socketPath(target: RuntimeTargetConfig): string {
   const host = target.DOCKER_HOST ?? "unix:///var/run/docker.sock";
@@ -46,10 +69,12 @@ async function dockerApi<T>(
   path: string,
   body?: unknown,
   stream = false,
+  retryVersion = true,
 ): Promise<T> {
   const socket = socketPath(target);
   try {
-    const res = await fetch(`http://docker/${API_VERSION}${path}`, {
+    const version = await apiVersion(socket);
+    const res = await fetch(`http://docker${version}${path}`, {
       method,
       unix: socket,
       headers: body === undefined ? undefined : { "Content-Type": "application/json" },
@@ -57,6 +82,14 @@ async function dockerApi<T>(
     } as RequestInit);
     if (!res.ok) {
       const text = scrubSecrets(await res.text());
+      if (
+        retryVersion &&
+        (/client version .* is too old/i.test(text) ||
+          (res.status === 400 && /version/i.test(text)))
+      ) {
+        apiVersions.delete(socket);
+        return await dockerApi<T>(target, method, path, body, stream, false);
+      }
       throw new DockerApiError(
         res.status,
         `docker ${method} ${path} failed (${res.status}): ${text}`,
