@@ -476,6 +476,64 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         docsUrl: `${DOCS}ui/configuration#runtime-pools`,
       },
       {
+        key: "RUNTIME_PROVISION_TIMEOUT_SEC",
+        label: "Runtime registration timeout",
+        description:
+          "Terminate a runtime that does not register before this timeout. Each timeout counts as a provision failure.",
+        kind: "number",
+        unit: "s",
+        defaultValue: "300",
+        docsUrl: `${DOCS}ui/configuration#runtime-pools`,
+      },
+      {
+        key: "RUNTIME_PROVISION_MAX_ATTEMPTS",
+        label: "Runtime provision attempts",
+        description:
+          "Fail the oldest waiting task after this many provision failures. Retries wait 30, 90, then 180 seconds.",
+        kind: "number",
+        defaultValue: "3",
+        docsUrl: `${DOCS}ui/configuration#runtime-pools`,
+      },
+      {
+        key: "RUNTIME_CIRCUIT_THRESHOLD",
+        label: "Runtime circuit threshold",
+        description:
+          "Stop provisioning for a pool after this many consecutive failures. Registration resets the count.",
+        kind: "number",
+        defaultValue: "5",
+        docsUrl: `${DOCS}ui/configuration#runtime-pools`,
+      },
+      {
+        key: "RUNTIME_CIRCUIT_OPEN_MIN",
+        label: "Runtime circuit duration",
+        description:
+          "Wait this long before one trial provision. Registration closes the circuit. Failure opens the circuit again.",
+        kind: "number",
+        unit: "min",
+        defaultValue: "10",
+        docsUrl: `${DOCS}ui/configuration#runtime-pools`,
+      },
+      {
+        key: "RUNTIME_SOCKET_GRACE_SEC",
+        label: "Runtime socket grace",
+        description:
+          "Wait after a push socket disconnect before checking the provider. A running runtime keeps its tasks.",
+        kind: "number",
+        unit: "s",
+        defaultValue: "60",
+        docsUrl: `${DOCS}ui/configuration#runtime-pools`,
+      },
+      {
+        key: "RUNTIME_TOKEN_ROTATE_BEFORE_MIN",
+        label: "Runtime token rotation window",
+        description:
+          "Drain busy runtimes before their token expires. Terminate idle runtimes so demand can create replacements.",
+        kind: "number",
+        unit: "min",
+        defaultValue: "60",
+        docsUrl: `${DOCS}ui/configuration#runtime-pools`,
+      },
+      {
         key: "DOCKER_HOST",
         label: "Docker socket",
         description:

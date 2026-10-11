@@ -2,6 +2,7 @@ import { z } from "zod";
 import { canProvisionKind, type RuntimeHandle } from "../../runtime-providers";
 import type { ControllerCommands } from "../../runtime-providers/controller";
 import { RUNTIME_LABELS } from "../../runtime-providers/types";
+import { createWorkerTaskFollowUp } from "../../tasks/worker-follow-up";
 import {
   type Agent,
   isTerminalTaskStatus,
@@ -15,8 +16,9 @@ import { isRuntimePoolsEnabled } from "../../utils/runtime-pools-flag";
 import { registerVolatileSecret, scrubSecrets } from "../../utils/secret-scrubber";
 import { workflowEventBus } from "../../workflows/event-bus";
 import { canClaim } from "../budget-admission";
-import { getDbClient, getResolvedConfig, getTaskById } from "../db";
+import { checkDependencies, failTask, getDbClient, getResolvedConfig, getTaskById } from "../db";
 import {
+  getRuntimeInstanceById,
   insertProvisioningRuntime,
   listRuntimeInstancesForAgent,
   listRuntimeInstancesForPool,
@@ -29,8 +31,15 @@ import {
   ensureRuntimeOwnerId,
   getControllerCommands,
 } from "./controllers";
-import { getPoolForAgent, listAgentsForPool, listRuntimePools, resolvePoolDelivery } from "./db";
+import {
+  getPoolForAgent,
+  getRuntimePool,
+  listAgentsForPool,
+  listRuntimePools,
+  resolvePoolDelivery,
+} from "./db";
 import { type AgentDemand, computeDesired, pendingWorkForAgent } from "./demand";
+import { recoverRuntime, startRuntimeRecovery, stopRuntimeRecovery } from "./recovery";
 
 let timer: ReturnType<typeof setInterval> | null = null;
 let kickTimer: ReturnType<typeof setTimeout> | null = null;
@@ -50,12 +59,105 @@ function reportSupervisorError(error: unknown): void {
   console.error("[runtime-pools] Supervisor failed:", scrubSecrets(String(error)));
 }
 
+function runtimeNumber(key: string, fallback: number): number {
+  const value = Number(process.env[key]);
+  return Number.isInteger(value) && value > 0 ? value : fallback;
+}
+
+async function recordProvisionFailure(
+  runtime: Pick<RuntimeInstance, "agentId" | "poolId" | "controllerId"> & { id: string | null },
+  reason: string,
+  now: Date,
+): Promise<void> {
+  const error = scrubSecrets(reason);
+  const failedTask = await getDbClient().transaction(async (tx) => {
+    if (runtime.id) {
+      const retired = await tx.run(
+        "UPDATE runtime_instances SET provision_error = ? WHERE id = ? AND status = 'provisioning' AND provision_error IS NULL",
+        [error, runtime.id],
+      );
+      if (!retired.changes) return null;
+      await markRuntimeTerminated(runtime.id, error);
+    }
+    const pool = await tx.get<{ circuit_open_until: string | null }>(
+      `UPDATE runtime_pools SET consecutive_failures = consecutive_failures + 1,
+       last_error = ?, last_error_at = ?, updated_at = ?,
+       circuit_open_until = CASE WHEN consecutive_failures + 1 >= ? OR circuit_open_until IS NOT NULL
+         THEN ? ELSE circuit_open_until END WHERE id = ? RETURNING circuit_open_until`,
+      [
+        error,
+        now.toISOString(),
+        now.toISOString(),
+        runtimeNumber("RUNTIME_CIRCUIT_THRESHOLD", 5),
+        new Date(
+          now.getTime() + runtimeNumber("RUNTIME_CIRCUIT_OPEN_MIN", 10) * 60_000,
+        ).toISOString(),
+        runtime.poolId ?? null,
+      ],
+    );
+    await tx.run(
+      "UPDATE runtime_controllers SET last_error = ?, last_error_at = ?, updated_at = ? WHERE id = ?",
+      [error, now.toISOString(), now.toISOString(), runtime.controllerId ?? null],
+    );
+    const state = await tx.get<{ runtime_provision_attempts: number }>(
+      "UPDATE agents SET runtime_provision_attempts = runtime_provision_attempts + 1 WHERE id = ? RETURNING runtime_provision_attempts",
+      [runtime.agentId],
+    );
+    const attempts = state!.runtime_provision_attempts;
+    const delay = [30, 90, 180][Math.min(attempts - 1, 2)]!;
+    await tx.run("UPDATE agents SET runtime_provision_retry_at = ? WHERE id = ?", [
+      new Date(now.getTime() + delay * 1000).toISOString(),
+      runtime.agentId,
+    ]);
+    if (pool?.circuit_open_until)
+      await tx.run(
+        "UPDATE agents SET runtime_provision_attempts = 0, runtime_provision_retry_at = NULL WHERE runtime_pool_id = ?",
+        [runtime.poolId ?? null],
+      );
+    if (attempts < runtimeNumber("RUNTIME_PROVISION_MAX_ATTEMPTS", 3)) return null;
+    const pending = await tx.query<{ id: string }>(
+      "SELECT id FROM agent_tasks WHERE agentId = ? AND status = 'pending' ORDER BY createdAt, rowid",
+      [runtime.agentId],
+    );
+    for (const row of pending) {
+      if (!(await checkDependencies(row.id)).ready) continue;
+      const failed = await failTask(
+        row.id,
+        `provisioning failed after ${attempts} attempts: ${error}`,
+      );
+      if (!failed) continue;
+      await tx.run(
+        "UPDATE agents SET runtime_provision_attempts = 0, runtime_provision_retry_at = NULL WHERE id = ?",
+        [runtime.agentId],
+      );
+      return failed;
+    }
+    await tx.run(
+      "UPDATE agents SET runtime_provision_attempts = 0, runtime_provision_retry_at = NULL WHERE id = ?",
+      [runtime.agentId],
+    );
+    return null;
+  });
+  if (failedTask) {
+    try {
+      await createWorkerTaskFollowUp({
+        task: failedTask,
+        status: "failed",
+        failureReason: failedTask.failureReason ?? error,
+      });
+    } catch (followUpError) {
+      reportSupervisorError(followUpError);
+    }
+  }
+}
+
 export async function provisionRuntime(
   pool: RuntimePool,
   agent: Agent,
   controller: ControllerCommands,
   ownerId: string,
-): Promise<void> {
+  now = new Date(),
+): Promise<boolean> {
   const runtimeId = crypto.randomUUID();
   try {
     const token = await getDbClient().transaction(async () => {
@@ -67,6 +169,12 @@ export async function provisionRuntime(
         controllerId: pool.placements[0]!,
         reportedSlots: pool.slotsPerRuntime,
       });
+      await getDbClient().run(
+        `UPDATE runtime_instances SET provision_attempts =
+           (SELECT runtime_provision_attempts + 1 FROM agents WHERE id = ?),
+         provision_requested_at = ? WHERE id = ?`,
+        [agent.id, now.toISOString(), runtimeId],
+      );
       return credential.plaintext;
     });
     registerVolatileSecret(token, `runtime:${runtimeId}`);
@@ -110,13 +218,25 @@ export async function provisionRuntime(
       "UPDATE runtime_instances SET external_handle = ?, updated_at = ? WHERE id = ?",
       [JSON.stringify(handle), new Date().toISOString(), runtimeId],
     );
+    return true;
   } catch (error) {
     reportSupervisorError(error);
     try {
-      await markRuntimeTerminated(runtimeId, scrubSecrets(String(error)));
+      const runtime = await getRuntimeInstanceById(runtimeId);
+      await recordProvisionFailure(
+        runtime ?? {
+          id: null,
+          agentId: agent.id,
+          poolId: pool.id,
+          controllerId: pool.placements[0]!,
+        },
+        String(error),
+        now,
+      );
     } catch (cleanupError) {
       reportSupervisorError(cleanupError);
     }
+    return false;
   }
 }
 
@@ -128,7 +248,7 @@ const RuntimeHandleSchema = z.object({
   meta: z.record(z.string(), z.string()).optional(),
 });
 
-function runtimeHandle(runtime: RuntimeInstance): RuntimeHandle | null {
+export function runtimeHandle(runtime: RuntimeInstance): RuntimeHandle | null {
   return runtime.externalHandle ? RuntimeHandleSchema.parse(runtime.externalHandle) : null;
 }
 
@@ -146,14 +266,52 @@ export async function terminateRuntime(
   await markRuntimeTerminated(runtime.id, reason);
 }
 
+async function rotatingRuntimes(poolId: string, expiresBy: string): Promise<Set<string>> {
+  const rows = await getDbClient().query<{ runtimeId: string }>(
+    `SELECT DISTINCT t.runtimeId FROM session_tokens t
+     JOIN runtime_instances r ON r.id = t.runtimeId
+     WHERE r.pool_id = ? AND t.revokedAt IS NULL AND t.expiresAt <= ?`,
+    [poolId, expiresBy],
+  );
+  return new Set(rows.map((row) => row.runtimeId));
+}
+
 export async function reapPoolRuntimes(
   pool: RuntimePool,
   runtimes: RuntimeInstance[],
   controller: ControllerCommands,
   now: Date,
+  listedHandles?: RuntimeHandle[] | null,
+  rotatingIds?: ReadonlySet<string>,
 ): Promise<void> {
+  const rotations =
+    rotatingIds ??
+    (await rotatingRuntimes(
+      pool.id,
+      new Date(
+        now.getTime() + runtimeNumber("RUNTIME_TOKEN_ROTATE_BEFORE_MIN", 60) * 60_000,
+      ).toISOString(),
+    ));
   const cutoff = now.getTime() - runtimeStaleThresholdMinutes() * 60_000;
   const remaining = new Map<string, number>();
+  const handles = runtimes
+    .filter((r) => r.status !== "offline" && Date.parse(r.lastSeenAt) >= cutoff)
+    .map(runtimeHandle)
+    .filter((h): h is RuntimeHandle => h !== null);
+  let statuses: Awaited<ReturnType<ControllerCommands["status"]>> = {};
+  try {
+    if (handles.length) statuses = await controller.status(handles);
+  } catch (error) {
+    reportSupervisorError(error);
+    // One lookup failure must not prevent sibling recovery.
+    for (const handle of handles) {
+      try {
+        Object.assign(statuses, await controller.status([handle]));
+      } catch (lookupError) {
+        reportSupervisorError(lookupError);
+      }
+    }
+  }
   for (const runtime of runtimes)
     if (
       runtime.status === "provisioning" ||
@@ -161,19 +319,39 @@ export async function reapPoolRuntimes(
     )
       remaining.set(runtime.agentId, (remaining.get(runtime.agentId) ?? 0) + 1);
   for (const runtime of runtimes) {
-    if (runtime.status === "offline") continue;
     try {
+      if (runtime.status === "offline") {
+        const session = await getDbClient().get<{ taskId: string }>(
+          "SELECT taskId FROM active_sessions WHERE runtimeInstanceId = ? LIMIT 1",
+          [runtime.id],
+        );
+        if (session) await recoverRuntime(runtime.id, runtime.provisionError ?? "Runtime offline");
+        continue;
+      }
       const handle = runtimeHandle(runtime);
       const stale = runtime.status === "active" && Date.parse(runtime.lastSeenAt) < cutoff;
-      const status =
-        !stale && handle ? (await controller.status([handle]))[handle.externalId] : undefined;
-      // Step 6 adds task recovery after runtime termination.
-      if (status === "exited" || status === "failed" || stale) {
-        await terminateRuntime(
-          runtime,
-          controller,
-          stale ? "Runtime stopped pinging" : `Runtime ${status}`,
-        );
+      const status = handle ? statuses[handle.externalId] : undefined;
+      const missing =
+        handle && listedHandles && !listedHandles.some((h) => h.externalId === handle.externalId);
+      const timeoutSec = runtimeNumber("RUNTIME_PROVISION_TIMEOUT_SEC", 300);
+      const timedOut =
+        runtime.status === "provisioning" &&
+        now.getTime() - Date.parse(runtime.provisionRequestedAt ?? runtime.createdAt) >=
+          timeoutSec * 1000;
+      if (status === "exited" || status === "failed" || stale || missing || timedOut) {
+        const reason = timedOut
+          ? `runtime did not register within ${timeoutSec}s (image may lack the swarm runner, or WORKER_API_URL is unreachable)`
+          : stale
+            ? "Runtime stopped pinging"
+            : missing
+              ? "Runtime missing from provider list"
+              : `Runtime ${status}`;
+        if (runtime.status === "provisioning") {
+          await recordProvisionFailure(runtime, reason, now);
+          if ((await getRuntimeInstanceById(runtime.id))?.status !== "offline") continue;
+        }
+        await terminateRuntime(runtime, controller, reason);
+        await recoverRuntime(runtime.id, reason);
         if (!stale) remaining.set(runtime.agentId, (remaining.get(runtime.agentId) ?? 1) - 1);
         continue;
       }
@@ -184,11 +362,23 @@ export async function reapPoolRuntimes(
       );
       const task = runtime.taskId ? await getTaskById(runtime.taskId) : null;
       const taskRunning = task?.status === "in_progress" || task?.status === "reviewing";
+      const rotating = rotations.has(runtime.id);
       if (busy || taskRunning) {
         await getDbClient().run(
-          "UPDATE runtime_instances SET idle_since = NULL, draining = 0, task_id = COALESCE(?, task_id) WHERE id = ?",
-          [busy?.taskId ?? null, runtime.id],
+          "UPDATE runtime_instances SET idle_since = NULL, draining = ?, task_id = COALESCE(?, task_id) WHERE id = ?",
+          [rotating || !pool.enabled ? 1 : 0, busy?.taskId ?? null, runtime.id],
         );
+        continue;
+      }
+      if (rotating) {
+        if (!runtime.draining) {
+          await getDbClient().run("UPDATE runtime_instances SET draining = 1 WHERE id = ?", [
+            runtime.id,
+          ]);
+        } else {
+          await terminateRuntime(runtime, controller, "Runtime token expires soon");
+          remaining.set(runtime.agentId, (remaining.get(runtime.agentId) ?? 1) - 1);
+        }
         continue;
       }
       if (!pool.enabled) {
@@ -241,6 +431,7 @@ export async function reconcileControllerOrphans(
   controller: ControllerCommands,
   ownerId: string,
   now = new Date(),
+  listedHandles?: RuntimeHandle[] | null,
 ): Promise<void> {
   const rows = await getDbClient().query<{
     id: string;
@@ -258,7 +449,7 @@ export async function reconcileControllerOrphans(
       reportSupervisorError(error);
     }
   }
-  const handles = await controller.list(ownerId);
+  const handles = listedHandles ?? (await controller.list(ownerId));
   const listed = new Set(handles.map((handle) => `${controllerId}:${handle.externalId}`));
   for (const key of orphanFirstSeen.keys())
     if (key.startsWith(`${controllerId}:`) && !listed.has(key)) orphanFirstSeen.delete(key);
@@ -294,6 +485,10 @@ async function reconcilePools(
 ): Promise<void> {
   const ownerId = await ensureRuntimeOwnerId();
   const controllers = new Map<string, ControllerCommands>();
+  const listed = new Map<string, RuntimeHandle[] | null>();
+  const rotationCutoff = new Date(
+    now.getTime() + runtimeNumber("RUNTIME_TOKEN_ROTATE_BEFORE_MIN", 60) * 60_000,
+  ).toISOString();
   for (const pool of await listRuntimePools()) {
     if (signal.aborted) return;
     // E2B lifecycle and leases are installed by step 9.
@@ -303,8 +498,33 @@ async function reconcilePools(
       const controller = controllers.get(controllerId) ?? (await commands(controllerId));
       controllers.set(controllerId, controller);
       if (!controller.traits.canProvision) continue;
-      await reapPoolRuntimes(pool, await listRuntimeInstancesForPool(pool.id), controller, now);
-      if (!pool.enabled || signal.aborted) continue;
+      if (!listed.has(controllerId)) {
+        try {
+          listed.set(controllerId, await controller.list(ownerId));
+        } catch (error) {
+          reportSupervisorError(error);
+          listed.set(controllerId, null);
+        }
+        if (listed.get(controllerId))
+          await reconcileControllerOrphans(
+            controllerId,
+            controller,
+            ownerId,
+            now,
+            listed.get(controllerId),
+          );
+      }
+      const rotatingIds = await rotatingRuntimes(pool.id, rotationCutoff);
+      await reapPoolRuntimes(
+        pool,
+        await listRuntimeInstancesForPool(pool.id),
+        controller,
+        now,
+        listed.get(controllerId),
+        rotatingIds,
+      );
+      if (signal.aborted) return;
+      const currentPool = await getRuntimePool(pool.id);
       const agents = await listAgentsForPool(pool.id);
       const demands: AgentDemand[] = [];
       const work = new Map<string, Awaited<ReturnType<typeof pendingWorkForAgent>>>();
@@ -312,6 +532,11 @@ async function reconcilePools(
         if (signal.aborted) return;
         const pending = await pendingWorkForAgent(agent.id);
         work.set(agent.id, pending);
+        if (!pending.work && (agent.runtimeProvisionAttempts || agent.runtimeProvisionRetryAt))
+          await getDbClient().run(
+            "UPDATE agents SET runtime_provision_attempts = 0, runtime_provision_retry_at = NULL WHERE id = ?",
+            [agent.id],
+          );
         const runtimes = await listRuntimeInstancesForAgent(agent.id);
         let freeSlots = 0;
         let provisioning = 0;
@@ -334,11 +559,19 @@ async function reconcilePools(
           agentId: agent.id,
           maxTasks: agent.maxTasks ?? 1,
           work: pending.work,
-          current: runtimes.filter((r) => r.status === "provisioning" || r.isLive).length,
+          current: runtimes.filter(
+            (r) =>
+              r.status === "provisioning" || (r.isLive && !(r.draining && rotatingIds.has(r.id))),
+          ).length,
           freeSlots,
           provisioning,
         });
       }
+      if (
+        !pool.enabled ||
+        (currentPool?.circuitOpenUntil && Date.parse(currentPool.circuitOpenUntil) > now.getTime())
+      )
+        continue;
       const poolCount = (await listRuntimeInstancesForPool(pool.id)).filter(
         (r) =>
           r.status === "provisioning" ||
@@ -364,17 +597,27 @@ async function reconcilePools(
           if (!(pool.resolvedImage ?? pool.image)) break;
           if (!(await canClaim(agent.id, now, pending.topTask?.requestedByUserId)).allowed) break;
           if (signal.aborted) return;
-          await provisionRuntime(pool, agent, controller, ownerId);
+          const retry = await getDbClient().get<{ runtime_provision_retry_at: string | null }>(
+            "SELECT runtime_provision_retry_at FROM agents WHERE id = ?",
+            [agent.id],
+          );
+          if (
+            retry?.runtime_provision_retry_at &&
+            Date.parse(retry.runtime_provision_retry_at) > now.getTime()
+          )
+            break;
+          const freshPool = await getRuntimePool(pool.id);
+          if (!freshPool?.enabled) break;
+          if (freshPool.circuitOpenUntil) {
+            if (Date.parse(freshPool.circuitOpenUntil) > now.getTime()) break;
+            if (
+              (await listRuntimeInstancesForPool(pool.id)).some((r) => r.status === "provisioning")
+            )
+              break;
+          }
+          if (!(await provisionRuntime(pool, agent, controller, ownerId, now))) break;
         }
       }
-    } catch (error) {
-      reportSupervisorError(error);
-    }
-  }
-  for (const [id, controller] of controllers) {
-    if (signal.aborted) return;
-    try {
-      await reconcileControllerOrphans(id, controller, ownerId, now);
     } catch (error) {
       reportSupervisorError(error);
     }
@@ -435,6 +678,7 @@ export function startRuntimeSupervisor(
     return;
   }
   workflowEventBus.on("task.created", onTaskCreated);
+  startRuntimeRecovery();
   timer = setInterval(
     () => {
       void reconcileOnce().catch(reportSupervisorError);
@@ -450,6 +694,7 @@ export async function stopRuntimeSupervisor(timeoutMs = 10_000): Promise<void> {
   timer = null;
   kickTimer = null;
   workflowEventBus.off("task.created", onTaskCreated);
+  stopRuntimeRecovery();
   tickAbort?.abort();
   let timeout: ReturnType<typeof setTimeout> | undefined;
   try {
