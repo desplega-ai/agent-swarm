@@ -130,10 +130,8 @@ function identityFromHttpAuth(
 }
 
 async function authenticate(req: IncomingMessage): Promise<AuthenticatedConnection> {
-  if (header(req, "authorization")?.startsWith("Bearer aseph_")) {
-    const auth = await resolveHttpRequestAuth(req, getApiKey(), { touchSessionToken: false });
-    if (auth?.kind === "controller") throw new Error("Controller tokens cannot use realtime");
-  }
+  const auth = await resolveHttpRequestAuth(req, getApiKey());
+  if (auth?.kind === "controller") throw new Error("Controller tokens cannot use realtime");
   const url = new URL(req.url ?? "/", "http://localhost");
   const ticket = url.searchParams.get("ticket");
   if (ticket) {
@@ -165,7 +163,6 @@ async function authenticate(req: IncomingMessage): Promise<AuthenticatedConnecti
       expiresAt: session ? session.exp * 1000 : undefined,
     };
   }
-  const auth = await resolveHttpRequestAuth(req, getApiKey());
   if (!auth) throw new Error("Authentication required");
   return identityFromHttpAuth(req, auth);
 }

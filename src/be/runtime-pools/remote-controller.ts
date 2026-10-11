@@ -17,6 +17,7 @@ import type {
   RuntimeStatus,
 } from "../../runtime-providers/types";
 import { scrubSecrets } from "../../utils/secret-scrubber";
+import { validateConfigValue } from "../swarm-config-guard";
 
 const sessions = new Map<string, RemoteController>();
 type CommandInput<T = ControllerCommand> = T extends ControllerCommand
@@ -58,7 +59,7 @@ export class RemoteController implements ControllerCommands {
     private readonly ws: WebSocket,
     readonly traits: RuntimeProviderTraits,
     readonly workerApiUrl?: string,
-    private readonly timeoutMs = CONTROLLER_COMMAND_TIMEOUT_MS,
+    private readonly timeouts: { commandTimeoutMs?: number; provisionTimeoutMs?: number } = {},
   ) {
     if (traits.maxTtlSec)
       this.renew = async (handle, ttlSec) =>
@@ -100,14 +101,20 @@ export class RemoteController implements ControllerCommands {
     if (this.closed || this.ws.readyState !== WebSocket.OPEN)
       throw new ControllerOfflineError(this.id);
     const id = crypto.randomUUID();
+    const configured = process.env.RUNTIME_PROVISION_TIMEOUT_SEC;
+    const timeoutMs =
+      command.op === "provision"
+        ? (this.timeouts.provisionTimeoutMs ??
+          (configured !== undefined &&
+          validateConfigValue("RUNTIME_PROVISION_TIMEOUT_SEC", configured) === null
+            ? Number(configured) * 1000
+            : 300_000))
+        : (this.timeouts.commandTimeoutMs ?? CONTROLLER_COMMAND_TIMEOUT_MS);
     return await new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
-        const error = new ControllerOfflineError(this.id);
-        error.message = `Controller command ${command.op} timed out`;
-        reject(error);
-        this.disconnect("Controller command timed out");
-      }, this.timeoutMs);
+        reject(new ControllerOfflineError(this.id, `Controller command ${command.op} timed out`));
+      }, timeoutMs);
       timer.unref();
       this.pending.set(id, { resolve, reject, timer });
       this.ws.send(JSON.stringify({ ...command, type: "cmd", id }), (error) => {

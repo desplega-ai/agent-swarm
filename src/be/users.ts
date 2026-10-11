@@ -22,10 +22,9 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { scheduleOrgDomainRecompute } from "../telemetry-identity";
 import type { User } from "../types";
-import { registerVolatileSecret, unregisterVolatileSecret } from "../utils/secret-scrubber";
+import { unregisterVolatileSecret } from "../utils/secret-scrubber";
 import { closeSessionTokenConnections } from "../utils/session-token-connections";
 import { getDbClient } from "./db";
-import { getRuntimeController, RuntimePoolError } from "./runtime-pools/db";
 import { validateRuntimeTokenTtlHours } from "./swarm-config-guard";
 
 // ---------------------------------------------------------------------------
@@ -600,72 +599,7 @@ export async function mintRuntimeToken(
   return await insertSessionToken(agentId, null, runtimeId, ttlMs);
 }
 
-export async function mintControllerToken(
-  controllerId: string,
-): Promise<{ tokenId: string; plaintext: string; expiresAt: string }> {
-  return await getDbClient().transaction(async (client) => {
-    const controller = await getRuntimeController(controllerId);
-    if (!controller) throw new RuntimePoolError("Controller not found", 404);
-    if (controller.placement !== "remote")
-      throw new RuntimePoolError("Only remote controllers can receive a controller token");
-    await revokeControllerTokens(controllerId);
-    const days = Number(process.env.RUNTIME_CONTROLLER_TOKEN_TTL_DAYS ?? 90);
-    const ttlDays = Number.isInteger(days) && days > 0 && days <= 3650 ? days : 90;
-    const credential = await insertSessionToken(
-      controllerId,
-      null,
-      null,
-      ttlDays * 86_400_000,
-      null,
-      undefined,
-      controllerId,
-    );
-    const row = await client.get<{ expiresAt: string }>(
-      "SELECT expiresAt FROM session_tokens WHERE id = ?",
-      [credential.tokenId],
-    );
-    getDbClient().afterCommit(() =>
-      registerVolatileSecret(credential.plaintext, `controller-token:${credential.tokenId}`),
-    );
-    return { ...credential, expiresAt: row!.expiresAt };
-  });
-}
-
-export async function revokeControllerTokens(controllerId: string): Promise<void> {
-  await getDbClient().transaction(async (client) => {
-    const rows = await client.query<{ id: string }>(
-      "SELECT id FROM session_tokens WHERE controllerId = ? AND revokedAt IS NULL",
-      [controllerId],
-    );
-    await client.run(
-      "UPDATE session_tokens SET revokedAt = ? WHERE controllerId = ? AND revokedAt IS NULL",
-      [new Date().toISOString(), controllerId],
-    );
-    getDbClient().afterCommit(() => {
-      closeSessionTokenConnections(rows.map((row) => row.id));
-      for (const row of rows) unregisterVolatileSecret(`controller-token:${row.id}`);
-    });
-  });
-}
-
-export async function resolveControllerToken(
-  plaintext: string,
-): Promise<{ controllerId: string; tokenId: string; expiresAt: string } | null> {
-  if (!plaintext.startsWith(SESSION_TOKEN_PREFIX)) return null;
-  const row = await getDbClient().get<{
-    controllerId: string;
-    tokenId: string;
-    expiresAt: string;
-  }>(
-    `SELECT s.controllerId, s.id AS tokenId, s.expiresAt FROM session_tokens s
-     JOIN runtime_controllers c ON c.id = s.controllerId AND c.placement = 'remote'
-     WHERE s.tokenHash = ? AND s.revokedAt IS NULL AND s.expiresAt > ?`,
-    [sha256Hex(plaintext), new Date().toISOString()],
-  );
-  return row ?? null;
-}
-
-async function insertSessionToken(
+export async function insertSessionToken(
   agentId: string,
   taskId: string | null,
   runtimeId: string | null,
@@ -756,6 +690,27 @@ export async function resolveBySessionToken(
   runtimeId: string | null;
   expiresAt: string;
 } | null> {
+  const principal = await resolveSessionToken(plaintext, options);
+  if (!principal || principal.kind === "controller") return null;
+  const { kind: _, ...agent } = principal;
+  return agent;
+}
+
+export async function resolveSessionToken(
+  plaintext: string,
+  options: { touch?: boolean } = {},
+): Promise<
+  | { kind: "controller"; controllerId: string; tokenId: string; expiresAt: string }
+  | {
+      kind: "agent";
+      tokenId: string;
+      agentId: string;
+      taskId: string | null;
+      runtimeId: string | null;
+      expiresAt: string;
+    }
+  | null
+> {
   if (!plaintext.startsWith(SESSION_TOKEN_PREFIX)) return null;
   const hash = sha256Hex(plaintext);
   const client = getDbClient();
@@ -766,14 +721,28 @@ export async function resolveBySessionToken(
     taskId: string | null;
     runtimeId: string | null;
     controllerId: string | null;
+    placement: string | null;
     expiresAt: string;
     revokedAt: string | null;
   }>(
-    "SELECT id, agentId, taskId, runtimeId, controllerId, expiresAt, revokedAt FROM session_tokens WHERE tokenHash = ?",
+    `SELECT s.id, s.agentId, s.taskId, s.runtimeId, s.controllerId, s.expiresAt, s.revokedAt,
+     c.placement FROM session_tokens s LEFT JOIN runtime_controllers c ON c.id = s.controllerId
+     WHERE s.tokenHash = ?`,
     [hash],
   );
-  if (!row || row.revokedAt !== null || row.controllerId !== null) return null;
+  if (!row || row.revokedAt !== null) return null;
   if (new Date(row.expiresAt) <= new Date()) return null;
+
+  if (row.controllerId !== null) {
+    return row.placement === "remote"
+      ? {
+          kind: "controller",
+          controllerId: row.controllerId,
+          tokenId: row.id,
+          expiresAt: row.expiresAt,
+        }
+      : null;
+  }
 
   if (options.touch !== false) {
     try {
@@ -787,6 +756,7 @@ export async function resolveBySessionToken(
   }
 
   return {
+    kind: "agent",
     tokenId: row.id,
     agentId: row.agentId,
     taskId: row.taskId,

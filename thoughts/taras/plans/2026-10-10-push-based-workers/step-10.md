@@ -2,7 +2,9 @@
 id: step-10
 name: Remote controller
 depends_on: [step-2, step-5]
-status: ready
+status: claimed
+assignee: codex-gpt-6.1-sol-pw-step-10
+claimed_at: 2026-10-11T17:00:00Z
 ---
 
 <!-- During /v-implement, `desplega:step-running` adds `assignee` and `claimed_at` while

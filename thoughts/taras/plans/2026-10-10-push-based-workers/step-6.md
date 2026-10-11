@@ -2,7 +2,7 @@
 id: step-6
 name: Provision failures + runtime-death recovery
 depends_on: [step-5]
-status: ready
+status: done
 ---
 
 <!-- During /v-implement, `desplega:step-running` adds `assignee` and `claimed_at` while
@@ -51,15 +51,15 @@ Make the supervisor safe when things go wrong. Provisioning failures retry with 
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Tests pass: `bun run test:root -- src/tests/runtime-supervisor-failures.test.ts src/tests/runtime-recovery.test.ts src/tests/heartbeat.test.ts`
-- [ ] `bun run test:root -- src/tests/runtime-supervisor-failures.test.ts src/tests/runtime-recovery.test.ts` (fake provider) cover: provision throws → backoff schedule → task failed after N with scrubbed reason; registration timeout counts as a failure and terminates; success resets the counter; circuit opens at threshold, half-open retry, closes on success; status `exited` → task superseded with a resume pinned to the same agent, session deleted, token revoked, agent offline; missing from `list()` → same; revoked token → worker call 401 (fence); socket disconnect + provider running → no recovery; disconnect + provider gone → recovery; token rotation idle vs busy (drain)
-- [ ] `bun scripts/check-floating-promises.ts && bun scripts/check-promise-sinks.ts && bash scripts/check-async-db-seam.sh` pass
-- [ ] `bun run lint && bun run tsc:check:tsc` pass
+- [x] Tests pass: `bun run test:root -- src/tests/runtime-supervisor-failures.test.ts src/tests/runtime-recovery.test.ts src/tests/heartbeat.test.ts`
+- [x] `bun run test:root -- src/tests/runtime-supervisor-failures.test.ts src/tests/runtime-recovery.test.ts` (fake provider) cover: provision throws → backoff schedule → task failed after N with scrubbed reason; registration timeout counts as a failure and terminates; success resets the counter; circuit opens at threshold, half-open retry, closes on success; status `exited` → task superseded with a resume pinned to the same agent, session deleted, token revoked, agent offline; missing from `list()` → same; revoked token → worker call 401 (fence); socket disconnect + provider running → no recovery; disconnect + provider gone → recovery; token rotation idle vs busy (drain)
+- [x] `bun scripts/check-floating-promises.ts && bun scripts/check-promise-sinks.ts && bash scripts/check-async-db-seam.sh` pass
+- [x] `bun run lint && bun run tsc:check:tsc` pass
 
 #### Automated QA:
-- [ ] Docker QA (setup from step-5 QA). Bad image (`busybox`): two retries visible in `GET /api/runtime-pools/{id}` (`lastError`), then the task fails with the provisioning reason.
-- [ ] Mid-task kill: start a long task ("sleep 120 via bash then store-progress"), `docker kill swarm-rt-<id>`. Within one supervisor tick plus a few seconds: runtime `offline`, original task `superseded`, a resume task pending for the same agent, a new container provisioned, the resume completes.
-- [ ] Fence: copy the dead runtime's token, `curl -H "Authorization: Bearer <token>" $API/me` → 401.
+- [x] Docker QA (setup from step-5 QA). Bad image (`busybox`): two retries visible in `GET /api/runtime-pools/{id}` (`lastError`), then the task fails with the provisioning reason.
+- [x] Mid-task kill: start a long task ("sleep 120 via bash then store-progress"), `docker kill swarm-rt-<id>`. Within one supervisor tick plus a few seconds: runtime `offline`, original task `superseded`, a resume task pending for the same agent, a new container provisioned, the resume completes.
+- [x] Fence: copy the dead runtime's token, `curl -H "Authorization: Bearer <token>" $API/me` → 401.
 
 #### Manual Verification:
 - [ ] None.

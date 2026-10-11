@@ -73,7 +73,7 @@ export const ControllerClientMessageSchema = z.discriminatedUnion("type", [
     controllerId: z.string().min(1),
     kind: RuntimeProviderKindSchema,
     version: z.literal(CONTROLLER_PROTOCOL_VERSION),
-    traits: traitsSchema.optional(),
+    traits: traitsSchema,
   }),
   z.object({
     type: z.literal("result"),

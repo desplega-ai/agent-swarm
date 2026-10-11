@@ -213,12 +213,35 @@ export function validateRuntimeTokenTtlHours(value: unknown): string | null {
     : "Invalid RUNTIME_TOKEN_TTL_HOURS (must be greater than zero and at most 168)";
 }
 
+export const validateControllerTokenTtlDays = boundedIntegerValidators(
+  ["RUNTIME_CONTROLLER_TOKEN_TTL_DAYS"],
+  1,
+  3650,
+).RUNTIME_CONTROLLER_TOKEN_TTL_DAYS!;
+
+export const validateControllerGraceSec = boundedIntegerValidators(
+  ["RUNTIME_CONTROLLER_GRACE_SEC"],
+  0,
+  86_400,
+).RUNTIME_CONTROLLER_GRACE_SEC!;
+
 const VALIDATED_KEYS: Record<string, ConfigValidator> = {
   ...booleanValidators(["RUNTIME_POOLS_ENABLED"]),
   ...enumValidator("RUNTIME_DEFAULT_DELIVERY", ["poll", "push"]),
   RUNTIME_TOKEN_TTL_HOURS: validateRuntimeTokenTtlHours,
-  ...boundedIntegerValidators(["RUNTIME_CONTROLLER_TOKEN_TTL_DAYS"], 1, 3650),
-  ...boundedIntegerValidators(["RUNTIME_CONTROLLER_GRACE_SEC"], 0, 86_400),
+  RUNTIME_CONTROLLER_TOKEN_TTL_DAYS: validateControllerTokenTtlDays,
+  RUNTIME_CONTROLLER_GRACE_SEC: validateControllerGraceSec,
+  ...integerValidators(
+    [
+      "RUNTIME_PROVISION_TIMEOUT_SEC",
+      "RUNTIME_PROVISION_MAX_ATTEMPTS",
+      "RUNTIME_CIRCUIT_THRESHOLD",
+      "RUNTIME_CIRCUIT_OPEN_MIN",
+      "RUNTIME_TOKEN_ROTATE_BEFORE_MIN",
+    ],
+    1,
+  ),
+  ...integerValidators(["RUNTIME_SOCKET_GRACE_SEC"], 0),
   ...integerValidators(
     ["RUNTIME_WAKE_GRACE_SEC", "RUNTIME_WAKE_REROUTE_SEC", "RUNTIME_ROUTING_INTERVAL_MS"],
     0,

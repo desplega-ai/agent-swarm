@@ -9,8 +9,11 @@ import type {
 } from "./types";
 
 export class ControllerOfflineError extends Error {
-  constructor(readonly controllerId: string) {
-    super(`Runtime controller ${controllerId} is offline`);
+  constructor(
+    readonly controllerId: string,
+    message = `Runtime controller ${controllerId} is offline`,
+  ) {
+    super(message);
     this.name = "ControllerOfflineError";
   }
 }

@@ -54,6 +54,7 @@ import {
   expireStaleRuntimeInstances,
 } from "../be/multi-runtime";
 import { isAgentReachable } from "../be/runtime-pools/reachability";
+import { remediateStalledRuntime } from "../be/runtime-pools/recovery";
 import { routePoolTasks } from "../be/runtime-pools/routing";
 import { getScript } from "../be/scripts/db";
 import { runSavedScriptAsAgent } from "../be/scripts/run-saved";
@@ -566,7 +567,21 @@ async function detectAndRemediateStalledTasks(findings: HeartbeatFindings): Prom
       continue;
     }
 
-    await remediateCrashedWorkerTask(findings, task, remediationOpts, proposed);
+    const opts = remediationOpts;
+    const decision = proposed;
+    if (
+      session?.runtimeInstanceId &&
+      (await remediateStalledRuntime(session.runtimeInstanceId, decision.reason, (fence) =>
+        remediateCrashedWorkerTask(
+          findings,
+          task,
+          { ...opts, cleanupActiveSession: true, onRemediated: fence },
+          decision,
+        ),
+      ))
+    )
+      continue;
+    await remediateCrashedWorkerTask(findings, task, opts, decision);
   }
 }
 
@@ -659,6 +674,22 @@ interface RemediationOptions {
   legacyFailReason: string;
   shortLabel: string;
   cleanupActiveSession?: boolean;
+  onRemediated?: () => Promise<void>;
+}
+
+export async function remediateTaskForDeadRuntime(task: AgentTask, reason: string): Promise<void> {
+  const opts: RemediationOptions = {
+    supersedeReason: scrubSecrets(`Runtime died: ${reason}`),
+    legacyFailReason: scrubSecrets(`Runtime died: ${reason}`),
+    shortLabel: "runtime-died",
+    cleanupActiveSession: true,
+  };
+  await remediateCrashedWorkerTask(
+    { autoFailedTasks: [], autoResumedTasks: [], pinnedResumes: [] },
+    task,
+    opts,
+    await defaultRemediationDecision(task, opts),
+  );
 }
 
 /**
@@ -669,12 +700,12 @@ interface RemediationOptions {
  * workflow ownership, excluded task types, idempotency, and resume-budget behavior.
  */
 async function remediateCrashedWorkerTask(
-  findings: HeartbeatFindings,
+  findings: Pick<HeartbeatFindings, "autoFailedTasks" | "autoResumedTasks" | "pinnedResumes">,
   task: AgentTask,
   opts: RemediationOptions,
   decision: RemediationDecision,
-): Promise<void> {
-  if (!task.agentId) return; // Type guard — caller already checked.
+): Promise<boolean> {
+  if (!task.agentId) return false;
 
   if (decision.action === "fail") {
     // CAS on the lastUpdatedAt this sweep read: progress since then wins.
@@ -682,6 +713,7 @@ async function remediateCrashedWorkerTask(
       expectedLastUpdatedAt: task.lastUpdatedAt,
     });
     if (failed) {
+      await opts.onRemediated?.();
       findings.autoFailedTasks.push({
         taskId: task.id,
         agentId: task.agentId,
@@ -694,7 +726,7 @@ async function remediateCrashedWorkerTask(
       const remaining = await getActiveTaskCount(task.agentId);
       if (remaining === 0) await restoreAgentIdleAfterRemediation(task.agentId);
     }
-    return;
+    return failed !== null;
   }
 
   await beforeHeartbeatSupersedeForTests?.(task);
@@ -706,8 +738,9 @@ async function remediateCrashedWorkerTask(
     expectedLastUpdatedAt: task.lastUpdatedAt,
   });
   if (!superseded) {
-    return;
+    return false;
   }
+  await opts.onRemediated?.();
 
   try {
     await promotePendingSteeringForTask(
@@ -771,6 +804,7 @@ async function remediateCrashedWorkerTask(
 
   const remaining = await getActiveTaskCount(task.agentId);
   if (remaining === 0) await restoreAgentIdleAfterRemediation(task.agentId);
+  return true;
 }
 
 /**

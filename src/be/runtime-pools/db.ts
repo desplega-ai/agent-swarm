@@ -11,16 +11,10 @@ import { decryptSecret, encryptSecret, getEncryptionKey } from "../crypto";
 import { createAgent, getAgentById, getAllAgents, getDbClient, upsertSwarmConfig } from "../db";
 import { type AgentRow, rowToAgent } from "../db/agents";
 import { registerStoredSecret } from "../secret-registry";
-import { revokeControllerTokens } from "../users";
+import { RuntimePoolError } from "./errors";
+import { revokeControllerTokens } from "./tokens";
 
-export class RuntimePoolError extends Error {
-  constructor(
-    message: string,
-    public status = 400,
-  ) {
-    super(message);
-  }
-}
+export { RuntimePoolError } from "./errors";
 
 type ControllerRow = Omit<
   RuntimeController,

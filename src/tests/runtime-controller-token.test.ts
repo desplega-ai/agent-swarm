@@ -1,15 +1,11 @@
-import { afterAll, beforeAll, expect, test } from "bun:test";
+import { afterAll, beforeAll, expect, spyOn, test } from "bun:test";
 import { createServer, type Server } from "node:http";
 import WebSocket from "ws";
 import { closeDb, createAgent, getDbClient, initDb } from "../be/db";
 import { createRuntimeController, deleteRuntimeController } from "../be/runtime-pools/db";
+import { mintControllerToken } from "../be/runtime-pools/tokens";
 import { validateConfigValue } from "../be/swarm-config-guard";
-import {
-  mintControllerToken,
-  mintRuntimeToken,
-  resolveBySessionToken,
-  resolveControllerToken,
-} from "../be/users";
+import { mintRuntimeToken, resolveBySessionToken, resolveSessionToken } from "../be/users";
 import { handleCore } from "../http/core";
 import { handleRuntimePools } from "../http/runtime-pools";
 import { getPathSegments, parseQueryParams } from "../http/utils";
@@ -77,6 +73,34 @@ function request(path: string, bearer = key, method = "GET") {
   return fetch(url + path, { method, headers: { Authorization: `Bearer ${bearer}` } });
 }
 
+test("controller identity rejects extra spaces and lowercase bearer before every HTTP route", async () => {
+  const token = await mintControllerToken(controllerId);
+  for (const header of [`Bearer  ${token.plaintext}`, `bearer ${token.plaintext}`]) {
+    for (const path of [
+      "/api/agents",
+      "/api/tasks",
+      "/api/config/resolved?includeSecrets=true",
+      "/health",
+      "/mcp-user",
+    ]) {
+      const response = await fetch(url + path, { headers: { Authorization: header } });
+      expect(response.status).toBe(403);
+      await response.text();
+    }
+  }
+});
+
+test("worker HTTP authentication performs one session-token lookup", async () => {
+  const query = spyOn(getDbClient(), "get");
+  try {
+    const response = await request("/me", leadToken);
+    await response.text();
+    expect(query.mock.calls.filter(([sql]) => sql.includes("FROM session_tokens"))).toHaveLength(1);
+  } finally {
+    query.mockRestore();
+  }
+});
+
 test("mint returns a controller identity, stores only its hash, and rotates the previous token", async () => {
   const firstResponse = await request(
     `/api/runtime-controllers/${controllerId}/token`,
@@ -91,7 +115,7 @@ test("mint returns a controller identity, stores only its hash, and rotates the 
     expiresAt: string;
   };
   expect(first.plaintext).toStartWith("aseph_");
-  expect(await resolveControllerToken(first.plaintext)).toMatchObject({
+  expect(await resolveSessionToken(first.plaintext)).toMatchObject({
     controllerId,
     tokenId: first.tokenId,
   });
@@ -109,7 +133,7 @@ test("mint returns a controller identity, stores only its hash, and rotates the 
   try {
     const second = await request(`/api/runtime-controllers/${controllerId}/token`, key, "POST");
     expect(second.status).toBe(200);
-    expect(await resolveControllerToken(first.plaintext)).toBeNull();
+    expect(await resolveSessionToken(first.plaintext)).toBeNull();
     expect(closed).toBe(true);
   } finally {
     unregister();
@@ -172,26 +196,27 @@ test("controller token cannot upgrade the realtime socket", async () => {
   expect(status).toBe(401);
 });
 
-test("a realtime ticket cannot bypass rejection of a controller bearer", async () => {
-  const token = await mintControllerToken(controllerId);
-  const ticket = issueRealtimeTicket({ kind: "operator", fingerprint: "test" }).ticket;
-  const ws = new WebSocket(`${url.replace("http:", "ws:")}/api/realtime?ticket=${ticket}`, {
-    headers: { Authorization: `Bearer ${token.plaintext}` },
-  });
-  const status = await new Promise<number>((resolve, reject) => {
-    ws.on("unexpected-response", (_req, response) => {
-      response.resume();
-      ws.terminate();
-      resolve(response.statusCode ?? 0);
+for (const prefix of ["Bearer ", "Bearer  ", "bearer "])
+  test(`a realtime ticket cannot bypass a controller with ${JSON.stringify(prefix)}`, async () => {
+    const token = await mintControllerToken(controllerId);
+    const ticket = issueRealtimeTicket({ kind: "operator", fingerprint: "test" }).ticket;
+    const ws = new WebSocket(`${url.replace("http:", "ws:")}/api/realtime?ticket=${ticket}`, {
+      headers: { Authorization: `${prefix}${token.plaintext}` },
     });
-    ws.on("open", () => {
-      ws.terminate();
-      reject(new Error("Controller upgraded realtime with a ticket"));
+    const status = await new Promise<number>((resolve, reject) => {
+      ws.on("unexpected-response", (_req, response) => {
+        response.resume();
+        ws.terminate();
+        resolve(response.statusCode ?? 0);
+      });
+      ws.on("open", () => {
+        ws.terminate();
+        reject(new Error("Controller upgraded realtime with a ticket"));
+      });
+      ws.on("error", () => {});
     });
-    ws.on("error", () => {});
+    expect(status).toBe(401);
   });
-  expect(status).toBe(401);
-});
 
 test("controller delete revokes tokens and expiration prevents resolution", async () => {
   const row = await createRuntimeController({
@@ -204,10 +229,10 @@ test("controller delete revokes tokens and expiration prevents resolution", asyn
     new Date(Date.now() - 1000).toISOString(),
     token.tokenId,
   ]);
-  expect(await resolveControllerToken(token.plaintext)).toBeNull();
+  expect(await resolveSessionToken(token.plaintext)).toBeNull();
   const replacement = await mintControllerToken(row.id);
   await deleteRuntimeController(row.id);
-  expect(await resolveControllerToken(replacement.plaintext)).toBeNull();
+  expect(await resolveSessionToken(replacement.plaintext)).toBeNull();
   expect(
     await getDbClient().get(
       "SELECT id FROM session_tokens WHERE id = ? AND revokedAt IS NOT NULL",

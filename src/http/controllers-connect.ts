@@ -2,7 +2,7 @@ import type { IncomingMessage, Server } from "node:http";
 import type { Duplex } from "node:stream";
 import { type WebSocket, WebSocketServer } from "ws";
 import { getDbClient } from "../be/db";
-import { ensureRuntimeOwnerId } from "../be/runtime-pools/controllers";
+import { ensureRuntimeOwnerId, reconcileRemoteProvisions } from "../be/runtime-pools/controllers";
 import { getRuntimeController } from "../be/runtime-pools/db";
 import {
   installRemoteController,
@@ -16,7 +16,6 @@ import {
   CONTROLLER_PROTOCOL_VERSION,
   ControllerClientMessageSchema,
 } from "../runtime-providers/controller-protocol";
-import { RUNTIME_LABELS } from "../runtime-providers/types";
 import { getApiKey } from "../utils/api-key";
 import type { HttpRequestAuth } from "../utils/request-auth-context";
 import { isRuntimePoolsEnabled } from "../utils/runtime-pools-flag";
@@ -44,32 +43,14 @@ type ControllerAuth = Extract<HttpRequestAuth, { kind: "controller" }>;
 
 async function reconcileHandles(controller: RemoteController): Promise<void> {
   const ownerId = await ensureRuntimeOwnerId();
-  for (const handle of await controller.list(ownerId)) {
-    const labels = handle.meta;
-    if (labels?.[RUNTIME_LABELS.owner] !== ownerId) continue;
-    const runtimeId = labels[RUNTIME_LABELS.runtimeId];
-    if (!runtimeId) continue;
-    // Recover a handle when infrastructure accepted a provision before the socket closed.
-    await getDbClient().run(
-      `UPDATE runtime_instances SET external_handle = ?, updated_at = ?
-       WHERE id = ? AND controller_id = ? AND agent_id = ? AND pool_id = ?
-       AND status != 'offline' AND external_handle IS NULL`,
-      [
-        JSON.stringify(handle),
-        new Date().toISOString(),
-        runtimeId,
-        controller.id,
-        labels[RUNTIME_LABELS.agentId] ?? "",
-        labels[RUNTIME_LABELS.poolId] ?? "",
-      ],
-    );
-  }
-  await reconcileControllerOrphans(controller.id, controller, ownerId);
+  const handles = await controller.list(ownerId);
+  await reconcileRemoteProvisions(controller.id, handles, ownerId);
+  await reconcileControllerOrphans(controller.id, controller, ownerId, new Date(), handles);
 }
 
 export function attachControllerTransport(
   server: Server,
-  options: { commandTimeoutMs?: number } = {},
+  options: { commandTimeoutMs?: number; provisionTimeoutMs?: number } = {},
 ): () => void {
   const wss = new WebSocketServer({ noServer: true, maxPayload: 1024 * 1024 });
   let closing = false;
@@ -94,6 +75,7 @@ export function attachControllerTransport(
     let session: RemoteController | undefined;
     let closed = false;
     let helloReceived = false;
+    let online = false;
     let alive = true;
     const unregister = registerSessionTokenConnection(auth.tokenId, () =>
       ws.close(1008, "Controller token revoked"),
@@ -133,13 +115,9 @@ export function attachControllerTransport(
       session = new RemoteController(
         row.id,
         ws,
-        message.traits ?? {
-          canProvision: row.kind !== "static",
-          ephemeralDisk: true,
-          supportsPause: row.kind === "e2b",
-        },
+        message.traits,
         row.config.WORKER_API_URL,
-        options.commandTimeoutMs,
+        options,
       );
       installRemoteController(session);
       await reconcileHandles(session);
@@ -149,6 +127,7 @@ export function attachControllerTransport(
         "UPDATE runtime_controllers SET status = 'online', last_seen_at = ?, updated_at = ?, last_error = NULL, last_error_at = NULL WHERE id = ?",
         [new Date().toISOString(), new Date().toISOString(), row.id],
       );
+      online = true;
     };
     ws.on("message", (data) => {
       try {
@@ -180,7 +159,7 @@ export function attachControllerTransport(
       ws.ping();
       void (async () => {
         await checkAuth();
-        if (session && remoteControllerSession(auth.controllerId) === session)
+        if (online && session && remoteControllerSession(auth.controllerId) === session)
           await getDbClient().run("UPDATE runtime_controllers SET last_seen_at = ? WHERE id = ?", [
             new Date().toISOString(),
             auth.controllerId,
@@ -197,8 +176,10 @@ export function attachControllerTransport(
       const disconnectedAt = new Date().toISOString();
       void getDbClient()
         .run(
-          "UPDATE runtime_controllers SET status = 'offline', updated_at = ?, last_seen_at = ? WHERE id = ?",
-          [disconnectedAt, disconnectedAt, auth.controllerId],
+          online
+            ? "UPDATE runtime_controllers SET status = 'offline', updated_at = ?, last_seen_at = ? WHERE id = ?"
+            : "UPDATE runtime_controllers SET status = 'offline' WHERE id = ?",
+          online ? [disconnectedAt, disconnectedAt, auth.controllerId] : [auth.controllerId],
         )
         .catch(reportError);
     });

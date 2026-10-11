@@ -1,7 +1,16 @@
 import { afterAll, afterEach, beforeAll, beforeEach, expect, spyOn, test } from "bun:test";
 import { createServer, type Server } from "node:http";
 import WebSocket from "ws";
-import { closeDb, createTaskExtended, getDbClient, initDb } from "../be/db";
+import {
+  closeDb,
+  createTaskExtended,
+  getActiveSessionForTask,
+  getAgentById,
+  getDbClient,
+  getTaskById,
+  initDb,
+  startTask,
+} from "../be/db";
 import {
   getRuntimeInstanceById,
   listRuntimeInstancesForPool,
@@ -19,9 +28,16 @@ import {
   createRuntimeController,
   createRuntimePool,
   getRuntimeController,
+  getRuntimePool,
 } from "../be/runtime-pools/db";
-import { reconcileOnce, stopRuntimeSupervisor } from "../be/runtime-pools/supervisor";
-import { mintControllerToken, resolveBySessionToken } from "../be/users";
+import { remoteControllerSession } from "../be/runtime-pools/remote-controller";
+import {
+  provisionRuntime,
+  reconcileOnce,
+  stopRuntimeSupervisor,
+} from "../be/runtime-pools/supervisor";
+import { mintControllerToken } from "../be/runtime-pools/tokens";
+import { resolveBySessionToken } from "../be/users";
 import { startControllerClient } from "../commands/controller";
 import { attachControllerTransport } from "../http/controllers-connect";
 import { attachRealtimeTransport } from "../realtime/transport";
@@ -35,6 +51,7 @@ import type {
 import { ControllerOfflineError } from "../runtime-providers/controller";
 import { RUNTIME_LABELS } from "../runtime-providers/types";
 import { listenOnFreePort } from "./test-net";
+import { CHILD_PROCESS_TEST_BUDGET_MS, runChild } from "./test-proc";
 
 class FakeProvider implements RuntimeProvider {
   readonly kind = "docker" as const;
@@ -78,6 +95,8 @@ const envKeys = [
   "RUNTIME_POOLS_ENABLED",
   "MULTI_RUNTIME_ENABLED",
   "RUNTIME_CONTROLLER_GRACE_SEC",
+  "RUNTIME_CIRCUIT_THRESHOLD",
+  "RUNTIME_PROVISION_MAX_ATTEMPTS",
 ] as const;
 const previous = Object.fromEntries(envKeys.map((key) => [key, process.env[key]]));
 const key = "remote-controller-test-operator";
@@ -110,6 +129,8 @@ beforeEach(async () => {
   process.env.RUNTIME_POOLS_ENABLED = "true";
   process.env.MULTI_RUNTIME_ENABLED = "true";
   process.env.RUNTIME_CONTROLLER_GRACE_SEC = "120";
+  process.env.RUNTIME_CIRCUIT_THRESHOLD = "3";
+  process.env.RUNTIME_PROVISION_MAX_ATTEMPTS = "1";
   for (const table of [
     "active_sessions",
     "runtime_instances",
@@ -137,7 +158,7 @@ beforeEach(async () => {
   server = createServer((_req, res) => res.writeHead(404).end());
   apiUrl = `http://127.0.0.1:${await listenOnFreePort(server)}`;
   detachRealtime = attachRealtimeTransport(server);
-  detach = attachControllerTransport(server, { commandTimeoutMs: 300 });
+  detach = attachControllerTransport(server, { commandTimeoutMs: 100, provisionTimeoutMs: 300 });
 });
 afterEach(async () => {
   for (const client of clients) client.stop();
@@ -159,9 +180,14 @@ afterAll(() => {
 });
 
 async function connect() {
+  const previous = remoteControllerSession(controllerId);
   const client = startControllerClient({ apiUrl, token, provider: fake, target: {} });
   clients.push(client);
-  await until(async () => (await getRuntimeController(controllerId))?.status === "online");
+  await until(
+    async () =>
+      remoteControllerSession(controllerId) !== previous &&
+      (await getRuntimeController(controllerId))?.status === "online",
+  );
   return client;
 }
 function request(ownerId: string): ProvisionRequest {
@@ -199,7 +225,9 @@ test("kind mismatch closes the socket and records an error", async () => {
     headers: { Authorization: `Bearer ${token}` },
   });
   ws.on("message", () =>
-    ws.send(JSON.stringify({ type: "hello", controllerId, kind: "e2b", version: 1 })),
+    ws.send(
+      JSON.stringify({ type: "hello", controllerId, kind: "e2b", version: 1, traits: fake.traits }),
+    ),
   );
   await new Promise<void>((resolve) => ws.on("close", () => resolve()));
   expect((await getRuntimeController(controllerId))?.status).toBe("offline");
@@ -225,7 +253,7 @@ test("replacement session closes the previous one without marking the controller
   const first = await connect();
   const old = await getControllerCommands(controllerId);
   const replacement = await connect();
-  await Bun.sleep(30);
+  await until(async () => remoteControllerSession(controllerId) !== old);
   expect((await getRuntimeController(controllerId))?.status).toBe("online");
   await expect(old.list("test")).rejects.toBeInstanceOf(ControllerOfflineError);
   first.stop();
@@ -233,14 +261,24 @@ test("replacement session closes the previous one without marking the controller
   replacement.stop();
 });
 
-test("command timeout closes the session and rejects with an offline error", async () => {
-  const client = await connect();
-  fake.gate = new Promise(() => {});
+test("provision has a longer timeout, list bypasses a pending pull, and an op timeout preserves the session", async () => {
+  await connect();
+  let release!: () => void;
+  fake.gate = new Promise((resolve) => {
+    release = resolve;
+  });
   const commands = await getControllerCommands(controllerId);
-  await expect(commands.provision(request("owner"))).rejects.toThrow("timed out");
-  client.stop();
-  await until(async () => (await getRuntimeController(controllerId))?.status === "offline");
-  await expect(getControllerCommands(controllerId)).rejects.toBeInstanceOf(ControllerOfflineError);
+  const provisioning = commands.provision(request("owner"));
+  const failure = expect(provisioning).rejects.toThrow("timed out");
+  await until(async () => fake.requests.length === 1);
+  expect(await commands.list("owner")).toEqual([]);
+  expect(await commands.status([])).toEqual({});
+  await failure;
+  expect(await getControllerCommands(controllerId)).toBe(commands);
+  expect((await getRuntimeController(controllerId))?.status).toBe("online");
+  release();
+  await until(async () => fake.runtimes.size === 1);
+  expect(await commands.list("owner")).toHaveLength(1);
 });
 
 test("disconnect preserves runtimes and pending demand during grace, and reconnect keeps known handles", async () => {
@@ -250,7 +288,7 @@ test("disconnect preserves runtimes and pending demand during grace, and reconne
     kind: "docker",
     placements: [controllerId],
     image: "worker:test",
-    maxRuntimes: 1,
+    maxRuntimes: 3,
     lifecycle: "idle",
     idleMinutes: null,
   });
@@ -261,6 +299,8 @@ test("disconnect preserves runtimes and pending demand during grace, and reconne
   await upsertRuntimeInstance({ id: runtime.id, agentId: agent.id, reportedSlots: 1 });
   client.stop();
   await until(async () => (await getRuntimeController(controllerId))?.status === "offline");
+  const waiting = await createPoolAgent(pool.id, { name: "waiting-agent" });
+  await createTaskExtended("new demand", { agentId: waiting.id });
   await reconcileOnce();
   expect(fake.requests).toHaveLength(1);
   expect((await getRuntimeInstanceById(runtime.id))?.status).toBe("active");
@@ -273,7 +313,7 @@ test("disconnect preserves runtimes and pending demand during grace, and reconne
   ).toBeTruthy();
   await connect();
   await reconcileOnce();
-  expect(fake.requests).toHaveLength(1);
+  expect(fake.requests).toHaveLength(2);
   expect(fake.terminated).toEqual([]);
   expect((await getRuntimeInstanceById(runtime.id))?.externalHandle).toEqual(
     runtime.externalHandle,
@@ -358,7 +398,7 @@ test("disconnect recovery seam waits for grace, then recovers and fences each ru
   expect(await resolveBySessionToken(fake.requests[0]!.env.API_KEY!)).toBeNull();
 });
 
-test("supervisor fences runtimes after controller grace without provisioning or changing the circuit", async () => {
+test("supervisor recovers an active task and fences tokens after controller grace", async () => {
   const client = await connect();
   const pool = await createRuntimePool({
     name: "expired-pool",
@@ -367,16 +407,32 @@ test("supervisor fences runtimes after controller grace without provisioning or 
     image: "worker:test",
   });
   const agent = await createPoolAgent(pool.id, { name: "expired-agent" });
-  await createTaskExtended("work", { agentId: agent.id });
+  const task = await createTaskExtended("work", { agentId: agent.id });
   await reconcileOnce();
   const runtime = (await listRuntimeInstancesForPool(pool.id))[0]!;
+  await upsertRuntimeInstance({ id: runtime.id, agentId: agent.id, reportedSlots: 1 });
+  await startTask(task.id);
+  await getDbClient().run(
+    "INSERT INTO active_sessions (id, agentId, taskId, triggerType, runtimeInstanceId) VALUES (?, ?, ?, 'task_assigned', ?)",
+    [crypto.randomUUID(), agent.id, task.id, runtime.id],
+  );
   client.stop();
   await until(async () => (await getRuntimeController(controllerId))?.status === "offline");
   const disconnectedAt = (await getRuntimeController(controllerId))!.updatedAt;
+  await reconcileOnce({ now: new Date(Date.parse(disconnectedAt) + 119_000) });
+  expect((await getTaskById(task.id))?.status).toBe("in_progress");
+  expect(await getActiveSessionForTask(task.id)).not.toBeNull();
   await reconcileOnce({ now: new Date(Date.parse(disconnectedAt) + 121_000) });
   expect((await getRuntimeInstanceById(runtime.id))?.status).toBe("offline");
   expect(await resolveBySessionToken(fake.requests[0]!.env.API_KEY!)).toBeNull();
   expect(fake.requests).toHaveLength(1);
+  expect((await getTaskById(task.id))?.status).toBe("superseded");
+  expect(await getActiveSessionForTask(task.id)).toBeNull();
+  const resumes = await getDbClient().query<{ agentId: string; status: string }>(
+    "SELECT agentId, status FROM agent_tasks WHERE parentTaskId = ? AND taskType = 'resume'",
+    [task.id],
+  );
+  expect(resumes).toEqual([{ agentId: agent.id, status: "pending" }]);
   expect(
     await getDbClient().get(
       "SELECT id FROM runtime_pools WHERE id = ? AND consecutive_failures = 0 AND circuit_open_until IS NULL",
@@ -399,3 +455,225 @@ test("persisted online controller without a socket receives a new grace period a
   expect((await getRuntimeController(controllerId))?.updatedAt).toBe(now.toISOString());
   expect(recovered).toEqual([]);
 });
+
+for (const failure of ["disconnect", "timeout"] as const) {
+  test(`a provision ${failure} does not change failure counters, backoff, circuit, or the waiting task`, async () => {
+    const client = await connect();
+    const pool = await createRuntimePool({
+      name: "failure-pool",
+      kind: "docker",
+      placements: [controllerId],
+      image: "worker:test",
+      maxRuntimes: 1,
+    });
+    const agent = await createPoolAgent(pool.id, { name: "failure-agent" });
+    const task = await createTaskExtended("work", { agentId: agent.id });
+    await getDbClient().run(
+      "UPDATE runtime_pools SET consecutive_failures = 2, last_error = 'previous failure' WHERE id = ?",
+      [pool.id],
+    );
+    let release!: () => void;
+    fake.gate = new Promise((resolve) => {
+      release = resolve;
+    });
+    const attempt = provisionRuntime(
+      pool,
+      agent,
+      await getControllerCommands(controllerId),
+      await ensureRuntimeOwnerId(),
+    );
+    await until(async () => fake.requests.length === 1);
+    if (failure === "disconnect") client.stop();
+    expect(await attempt).toBe(false);
+    const runtime = (await listRuntimeInstancesForPool(pool.id))[0]!;
+    expect(await getRuntimePool(pool.id)).toMatchObject({
+      consecutiveFailures: 2,
+      circuitOpenUntil: null,
+      lastError: "previous failure",
+    });
+    expect(await getAgentById(agent.id)).toMatchObject({
+      runtimeProvisionAttempts: 0,
+      runtimeProvisionRetryAt: null,
+    });
+    expect((await getTaskById(task.id))?.status).toBe("pending");
+    expect(runtime.status).toBe("provisioning");
+    expect(await resolveBySessionToken(fake.requests[0]!.env.API_KEY!)).not.toBeNull();
+    if (failure === "timeout") {
+      expect((await getRuntimeController(controllerId))?.status).toBe("online");
+      await getDbClient().run("UPDATE runtime_pools SET enabled = 0 WHERE id = ?", [pool.id]);
+      await reconcileOnce();
+      expect((await getRuntimeInstanceById(runtime.id))?.status).toBe("offline");
+      expect(await resolveBySessionToken(fake.requests[0]!.env.API_KEY!)).toBeNull();
+      expect(await getRuntimePool(pool.id)).toMatchObject({
+        consecutiveFailures: 2,
+        circuitOpenUntil: null,
+      });
+      expect(await getAgentById(agent.id)).toMatchObject({
+        runtimeProvisionAttempts: 0,
+        runtimeProvisionRetryAt: null,
+      });
+    }
+    release();
+    await until(async () => fake.runtimes.size === 1);
+  });
+}
+
+test("reconnect retires a missing ambiguous provision and releases pool capacity without a failure", async () => {
+  const client = await connect();
+  const pool = await createRuntimePool({
+    name: "missing-pool",
+    kind: "docker",
+    placements: [controllerId],
+    image: "worker:test",
+    maxRuntimes: 1,
+  });
+  const agent = await createPoolAgent(pool.id, { name: "missing-agent" });
+  await createTaskExtended("work", { agentId: agent.id });
+  let reject!: (error: Error) => void;
+  fake.gate = new Promise((_resolve, fail) => {
+    reject = fail;
+  });
+  const tick = reconcileOnce();
+  await until(async () => fake.requests.length === 1);
+  client.stop();
+  await tick;
+  const runtime = (await listRuntimeInstancesForPool(pool.id))[0]!;
+  reject(new Error("Provision did not reach infrastructure"));
+  fake.gate = undefined;
+  const listsBefore = fake.owners.length;
+  await connect();
+  expect(fake.owners.length - listsBefore).toBe(1);
+  expect((await getRuntimeInstanceById(runtime.id))?.status).toBe("offline");
+  expect(await resolveBySessionToken(fake.requests[0]!.env.API_KEY!)).toBeNull();
+  expect(fake.terminated).toEqual([]);
+  expect(await getRuntimePool(pool.id)).toMatchObject({
+    consecutiveFailures: 0,
+    circuitOpenUntil: null,
+  });
+  expect(await getAgentById(agent.id)).toMatchObject({
+    runtimeProvisionAttempts: 0,
+    runtimeProvisionRetryAt: null,
+  });
+  await reconcileOnce();
+  expect(fake.requests).toHaveLength(2);
+  expect(
+    (await listRuntimeInstancesForPool(pool.id)).filter((r) => r.status === "provisioning"),
+  ).toHaveLength(1);
+});
+
+test("a pending reconnect handshake does not suspend an expired disconnect grace", async () => {
+  const client = await connect();
+  const pool = await createRuntimePool({
+    name: "handshake-pool",
+    kind: "docker",
+    placements: [controllerId],
+    image: "worker:test",
+  });
+  const agent = await createPoolAgent(pool.id, { name: "handshake-agent" });
+  await createTaskExtended("work", { agentId: agent.id });
+  await reconcileOnce();
+  const runtime = (await listRuntimeInstancesForPool(pool.id))[0]!;
+  client.stop();
+  await until(async () => (await getRuntimeController(controllerId))?.status === "offline");
+  await getDbClient().run("UPDATE runtime_controllers SET last_seen_at = ? WHERE id = ?", [
+    new Date(Date.now() - 121_000).toISOString(),
+    controllerId,
+  ]);
+  let release!: () => void;
+  const pending = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const list = spyOn(fake, "list").mockImplementation(async () => {
+    await pending;
+    return [];
+  });
+  const reconnect = startControllerClient({ apiUrl, token, provider: fake, target: {} });
+  clients.push(reconnect);
+  try {
+    await until(
+      async () =>
+        remoteControllerSession(controllerId) !== undefined &&
+        (await getRuntimeController(controllerId))?.status === "unknown",
+    );
+    await reconcileOnce();
+    expect((await getRuntimeInstanceById(runtime.id))?.status).toBe("offline");
+    expect(await resolveBySessionToken(fake.requests[0]!.env.API_KEY!)).toBeNull();
+  } finally {
+    reconnect.stop();
+    release();
+    list.mockRestore();
+  }
+});
+
+test("failed reconnect handshakes do not extend the controller disconnect grace", async () => {
+  const client = await connect();
+  client.stop();
+  await until(async () => (await getRuntimeController(controllerId))?.status === "offline");
+  const disconnectedAt = new Date(Date.now() - 121_000).toISOString();
+  await getDbClient().run(
+    "UPDATE runtime_controllers SET last_seen_at = ?, updated_at = ? WHERE id = ?",
+    [disconnectedAt, disconnectedAt, controllerId],
+  );
+  const list = spyOn(fake, "list").mockRejectedValue(new Error("Infrastructure unavailable"));
+  try {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      let rejected = false;
+      const failed = startControllerClient({
+        apiUrl,
+        token,
+        provider: fake,
+        target: {},
+        onFatal: () => {
+          rejected = true;
+        },
+      });
+      clients.push(failed);
+      await until(async () => rejected && remoteControllerSession(controllerId) === undefined);
+      expect((await getRuntimeController(controllerId))?.lastSeenAt).toBe(disconnectedAt);
+      expect((await getRuntimeController(controllerId))?.updatedAt).toBe(disconnectedAt);
+    }
+  } finally {
+    list.mockRestore();
+  }
+});
+
+test(
+  "controller CLI exits non-zero after a policy close and keeps the token out of output",
+  async () => {
+    const result = await runChild(
+      ["bun", "run", "src/cli.tsx", "controller", "--api-url", apiUrl, "--kind", "static"],
+      {
+        env: { ...process.env, AGENT_SWARM_CONTROLLER_TOKEN: token },
+      },
+    );
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain("Controller access rejected or token revoked");
+    expect(result.stdout + result.stderr).not.toContain(token);
+  },
+  CHILD_PROCESS_TEST_BUDGET_MS,
+);
+
+test(
+  "controller CLI rejects a token flag and the unsupported k8s provider",
+  async () => {
+    for (const args of [
+      ["--token", token],
+      ["--kind", "k8s"],
+    ]) {
+      const result = await runChild(
+        ["bun", "run", "src/cli.tsx", "controller", "--api-url", apiUrl, ...args],
+        {
+          env: { ...process.env, AGENT_SWARM_CONTROLLER_TOKEN: token },
+        },
+      );
+      expect(result.exitCode).toBe(1);
+      expect(result.stdout + result.stderr).not.toContain(token);
+      expect(result.stderr).toContain(
+        args[0] === "--kind"
+          ? "Remote k8s controllers are not supported"
+          : "supported name and a value",
+      );
+    }
+  },
+  CHILD_PROCESS_TEST_BUDGET_MS,
+);

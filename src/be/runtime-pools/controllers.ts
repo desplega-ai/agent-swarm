@@ -4,9 +4,12 @@ import {
   type ControllerCommands,
   ControllerOfflineError,
 } from "../../runtime-providers/controller";
+import { RUNTIME_LABELS, type RuntimeHandle } from "../../runtime-providers/types";
 import { isRuntimePoolsEnabled } from "../../utils/runtime-pools-flag";
 import { registerVolatileSecret, scrubSecrets } from "../../utils/secret-scrubber";
 import { getDbClient, getSwarmConfigs, upsertSwarmConfig } from "../db";
+import { markRuntimeTerminated } from "../multi-runtime";
+import { validateControllerGraceSec } from "../swarm-config-guard";
 import { getRuntimeController, getRuntimeControllerSecrets } from "./db";
 import { remoteControllerSession } from "./remote-controller";
 
@@ -47,10 +50,9 @@ export async function reconcileDisconnectedControllers(
   now = new Date(),
 ): Promise<void> {
   if (!isRuntimePoolsEnabled()) return;
-  const configured = Number(process.env.RUNTIME_CONTROLLER_GRACE_SEC ?? 120);
+  const configured = process.env.RUNTIME_CONTROLLER_GRACE_SEC;
   const graceMs =
-    (Number.isInteger(configured) && configured >= 0 && configured <= 86_400 ? configured : 120) *
-    1000;
+    (validateControllerGraceSec(configured) === null ? Number(configured) : 120) * 1000;
   const rows = await getDbClient().query<{
     id: string;
     status: string;
@@ -60,7 +62,7 @@ export async function reconcileDisconnectedControllers(
     "SELECT id, status, updated_at, last_seen_at FROM runtime_controllers WHERE placement = 'remote'",
   );
   for (const row of rows) {
-    if (remoteControllerSession(row.id)) continue;
+    if (row.status === "online" && remoteControllerSession(row.id)) continue;
     // An API restart loses sessions even when the persisted controller status remains online.
     if (row.status === "online") {
       await getDbClient().run(
@@ -75,10 +77,50 @@ export async function reconcileDisconnectedControllers(
       [row.id],
     );
     for (const runtime of runtimes) {
-      if (remoteControllerSession(row.id)) break;
+      if (
+        remoteControllerSession(row.id) &&
+        (await getRuntimeController(row.id))?.status === "online"
+      )
+        break;
       await recoverRuntime(runtime.id, "Remote controller disconnect grace expired");
     }
   }
+}
+
+export async function reconcileRemoteProvisions(
+  controllerId: string,
+  handles: RuntimeHandle[],
+  ownerId: string,
+): Promise<void> {
+  await getDbClient().transaction(async (tx) => {
+    for (const handle of handles) {
+      const labels = handle.meta;
+      const runtimeId = labels?.[RUNTIME_LABELS.runtimeId];
+      if (labels?.[RUNTIME_LABELS.owner] !== ownerId || !runtimeId) continue;
+      await tx.run(
+        `UPDATE runtime_instances SET external_handle = ?, updated_at = ?
+         WHERE id = ? AND controller_id = ? AND agent_id = ? AND pool_id = ?
+         AND status != 'offline' AND external_handle IS NULL`,
+        [
+          JSON.stringify(handle),
+          new Date().toISOString(),
+          runtimeId,
+          controllerId,
+          labels[RUNTIME_LABELS.agentId] ?? "",
+          labels[RUNTIME_LABELS.poolId] ?? "",
+        ],
+      );
+    }
+    const missing = await tx.query<{ id: string }>(
+      "SELECT id FROM runtime_instances WHERE controller_id = ? AND status = 'provisioning' AND external_handle IS NULL",
+      [controllerId],
+    );
+    for (const runtime of missing)
+      await markRuntimeTerminated(
+        runtime.id,
+        "Controller list did not report the ambiguous provision",
+      );
+  });
 }
 
 export async function getControllerCommands(controllerId: string): Promise<ControllerCommands> {

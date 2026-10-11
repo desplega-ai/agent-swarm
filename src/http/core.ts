@@ -420,13 +420,11 @@ export async function handleCore(
   beginRequestAuthScope();
 
   // Controller credentials authorize only their separate WebSocket transport.
-  if (req.headers.authorization?.startsWith("Bearer aseph_")) {
-    const credential = await resolveHttpRequestAuth(req, apiKey, { touchSessionToken: false });
-    if (credential?.kind === "controller") {
-      setRequestAuth(req, credential);
-      jsonError(res, "Controller tokens can only connect to the controller socket", 403);
-      return true;
-    }
+  let auth = await resolveHttpRequestAuth(req, apiKey);
+  if (auth?.kind === "controller") {
+    setRequestAuth(req, auth);
+    jsonError(res, "Controller tokens can only connect to the controller socket", 403);
+    return true;
   }
 
   // Handle preflight
@@ -475,14 +473,12 @@ export async function handleCore(
   // either the global swarm key or an active user-bound `aswt_` token.
   const pathSegments = getPathSegments(req.url || "");
   const isUserMcpRoute = req.url === "/mcp-user";
-  let auth = null as Awaited<ReturnType<typeof resolveHttpRequestAuth>>;
   // `/mcp-user` runs its own `aswt_`-token auth in `handleMcpUser`; the swarm
   // API key must not gate it.
   if (isUserMcpRoute || isPublicRoute(req.method, pathSegments)) {
+    auth = null;
     setRequestAuth(req, null);
   } else {
-    auth = await resolveHttpRequestAuth(req, apiKey);
-
     if (!auth) {
       setRequestAuth(req, null);
       res.writeHead(401, { "Content-Type": "application/json" });

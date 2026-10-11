@@ -36,29 +36,39 @@ bun run src/cli.tsx controller --api-url https://api.example.test --kind docker 
   --docker-host unix:///var/run/docker.sock --docker-network swarm-workers
 ```
 
-The CLI also accepts `--token`. Docker flags override `DOCKER_HOST` and `DOCKER_NETWORK`.
+The CLI reads its token only from `AGENT_SWARM_CONTROLLER_TOKEN`.
+Docker flags override `DOCKER_HOST` and `DOCKER_NETWORK`.
 `DOCKER_EXTRA_HOSTS` remains an environment setting.
 Infrastructure credentials remain on the controller host. The CLI scrubs errors and never logs command payloads or tokens.
 
 The API sends `welcome` with the controller ID before the client sends `hello`.
 The hello declares the provider kind and protocol version 1. The API rejects a different kind or version.
 Commands carry an ID, operation, and payload. Results carry the same ID and success or error.
-Commands have a 60-second timeout. The API pings every 15 seconds and checks token validity.
+Provision commands use `RUNTIME_PROVISION_TIMEOUT_SEC`, with a default of 300 seconds.
+Other commands have a 60-second timeout. A timeout fails only that command and preserves the socket.
+The remote protocol includes renewal, pause, and resume for E2B lease management.
+The CLI accepts static, Docker, and E2B providers. It rejects the reserved `k8s` kind.
+The API pings every 15 seconds and checks token validity.
 A new authenticated session replaces the previous session for that controller.
 Reconnect uses jittered exponential backoff between 1 and 30 seconds.
+Policy close code 1008 stops the process with a non-zero exit and a token diagnostic.
+A replaced process waits five minutes before another connection attempt and reports that another process holds the token.
 
 Before the controller becomes online, the API lists runtimes with its stable swarm owner ID.
 Known handles remain. Ownership labels restore a provision handle whose result was lost during disconnect.
-The client waits for unfinished provisions before it answers that list request.
+List requests do not wait for unfinished provisions.
+The API retires provisioning rows with no handle when that list does not report them.
+Retirement revokes their tokens and releases capacity without a provision failure or infrastructure termination.
+If a late provision completes, its fenced runtime becomes an orphan on a subsequent list.
 Owner-filtered orphans follow the supervisor's existing orphan grace. Other swarms' runtimes remain excluded.
 
 Disconnect marks the controller offline. The API starts no runtimes through an offline controller.
 `RUNTIME_CONTROLLER_GRACE_SEC` defaults to 120 seconds and accepts 0 through 86400 whole seconds.
 The supervisor preserves runtime rows and credentials during this grace.
-After grace expiry, it marks those rows offline and revokes their runtime tokens.
-The controller reconciler accepts the shared runtime recovery callback for immediate task remediation.
-The supervisor's termination callback currently provides fencing. Immediate task remediation requires the failure supervisor's recovery callback.
-Controller offline errors preserve ambiguous provisions and do not increment pool failure counters.
+After grace expiry, `recoverRuntime` marks those rows offline, revokes their tokens, and remediates active tasks through heartbeat recovery.
+Failed reconnect handshakes do not extend the original disconnect grace.
+Controller offline errors and command timeouts preserve ambiguous provisions until reconciliation.
+They do not increment provision failures, apply backoff, or change the pool circuit.
 
 ## Supported kinds
 

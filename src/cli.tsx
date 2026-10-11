@@ -166,7 +166,7 @@ const COMMAND_HELP: Record<
     description: "Run a remote controller next to the worker infrastructure.",
     options: [
       "  --api-url <url>        Swarm API URL (default: MCP_BASE_URL)",
-      "  --token <aseph_...>    Controller token (or AGENT_SWARM_CONTROLLER_TOKEN)",
+      "  Token: AGENT_SWARM_CONTROLLER_TOKEN environment variable",
       "  --kind <kind>         Runtime provider (default: docker)",
       "  --docker-host <url>   Docker Unix socket (or DOCKER_HOST)",
       "  --docker-network <n>  Worker network (or DOCKER_NETWORK)",
@@ -421,7 +421,7 @@ const COMMAND_HELP: Record<
 function printHelp(command?: string) {
   if (command && command !== "help" && COMMAND_HELP[command]) {
     const cmd = COMMAND_HELP[command];
-    console.log(`\n${binName} ${command}: v${pkg.version}\n`);
+    console.log(`\n${binName} ${command} — v${pkg.version}\n`);
     console.log(cmd.description);
     console.log(`\nUsage:\n  ${cmd.usage}\n`);
     console.log(`Options:\n${cmd.options}\n`);
@@ -744,7 +744,9 @@ if (args.showHelp || args.command === "help" || args.command === undefined) {
   const result = spawnSync("bun", process.argv.slice(1), { stdio: "inherit" });
   if (result.error) {
     console.error(
-      "This command requires Bun. Install Bun from https://bun.sh, then retry this command.",
+      args.command === "onboard"
+        ? "Onboarding requires Bun. Install Bun from https://bun.sh, then retry this command."
+        : "Controller requires Bun. Install Bun from https://bun.sh, then retry this command.",
     );
   }
   process.exit(result.status ?? 1);

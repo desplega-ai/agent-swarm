@@ -18,7 +18,7 @@ import {
   updateRuntimeController,
   updateRuntimePool,
 } from "../be/runtime-pools/db";
-import { mintControllerToken } from "../be/users";
+import { mintControllerToken } from "../be/runtime-pools/tokens";
 import { can } from "../rbac";
 import {
   AgentSchema,
