@@ -2,9 +2,7 @@
 id: step-2
 name: Runtime token + central agent binding
 depends_on: []
-status: claimed
-assignee: codex-gpt-6.1-sol-pw-step-2
-claimed_at: 2026-10-11T00:00:00Z
+status: done
 ---
 
 <!-- During /v-implement, `desplega:step-running` adds `assignee` and `claimed_at` while
@@ -61,19 +59,19 @@ Not in scope: who mints at provision time (step-5), controller tokens (step-10 a
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Tests pass: `bun run test:root -- src/tests/session-tokens.test.ts src/tests/acp-session-token.test.ts src/tests/runtime-token-auth.test.ts src/tests/migration-207-runtime-session-tokens.test.ts src/tests/realtime-transport.test.ts`
-- [ ] `bun run test:root -- src/tests/runtime-token-auth.test.ts` cases cover: mint/resolve/revoke; mismatched `X-Agent-ID` → 403 on `/api/poll`, `/ping`, `/api/tasks/{id}/progress`, `/mcp`; missing header resolves to the token's agent; mismatched `X-Runtime-Instance-ID` → 403; revoked or expired token → 401; runtime token reads its own secrets unmasked, task-bound token masked, another agent's scope masked; runtime token mints a task-bound token only for its own agent's task, and revoking the runtime revokes the child token; `isLead` escalation ignored; non-lead token → 403 on `PUT /api/agents/{other}/profile` and `GET /api/agents/{other}/mcp-servers?resolveSecrets=true`; realtime socket with mismatched `X-Agent-ID` rejected; revoking the token closes its open realtime socket
-- [ ] `bun run test:root -- src/tests/migration-207-runtime-session-tokens.test.ts`: existing ACP rows survive the rebuild, the CHECK rejects a row with no binding
-- [ ] Existing ACP flow unchanged: `bun run test:root -- src/tests/acp-session-token.test.ts`
-- [ ] `bun run check:rbac-coverage && bun run check:openapi-response-coverage && bun run check:api-key-boundary` pass
-- [ ] `bash scripts/check-migration-conflicts.sh && bash scripts/check-async-db-seam.sh` pass
-- [ ] `bun run docs:openapi` run and committed (the sessions-token body changes), no diff afterwards
-- [ ] `bun run lint && bun run tsc:check:tsc` pass
+- [x] Tests pass: `bun run test:root -- src/tests/session-tokens.test.ts src/tests/acp-session-token.test.ts src/tests/runtime-token-auth.test.ts src/tests/migration-207-runtime-session-tokens.test.ts src/tests/realtime-transport.test.ts`
+- [x] `bun run test:root -- src/tests/runtime-token-auth.test.ts` cases cover: mint/resolve/revoke; mismatched `X-Agent-ID` → 403 on `/api/poll`, `/ping`, `/api/tasks/{id}/progress`, `/mcp`; missing header resolves to the token's agent; mismatched `X-Runtime-Instance-ID` → 403; revoked or expired token → 401; runtime token reads its own secrets unmasked, task-bound token masked, another agent's scope masked; runtime token mints a task-bound token only for its own agent's task, and revoking the runtime revokes the child token; `isLead` escalation ignored; non-lead token → 403 on `PUT /api/agents/{other}/profile` and `GET /api/agents/{other}/mcp-servers?resolveSecrets=true`; realtime socket with mismatched `X-Agent-ID` rejected; revoking the token closes its open realtime socket
+- [x] `bun run test:root -- src/tests/migration-207-runtime-session-tokens.test.ts`: existing ACP rows survive the rebuild, the CHECK rejects a row with no binding
+- [x] Existing ACP flow unchanged: `bun run test:root -- src/tests/acp-session-token.test.ts`
+- [x] `bun run check:rbac-coverage && bun run check:openapi-response-coverage && bun run check:api-key-boundary` pass
+- [x] `bash scripts/check-migration-conflicts.sh && bash scripts/check-async-db-seam.sh` pass
+- [x] `bun run docs:openapi` run and committed (the sessions-token body changes), no diff afterwards
+- [x] `bun run lint && bun run tsc:check:tsc` pass
 
 #### Automated QA:
-- [ ] Boot the API on a temp DB. Mint a runtime token with the swarm key: `curl -X POST $API/api/sessions/tokens -H "Authorization: Bearer $KEY" -d '{"agentId":"<uuid>","runtimeId":"<uuid>","ttlMs":3600000}'`. Create a task pinned to that agent. Start `ghcr.io/desplega-ai/agent-swarm-worker:slim` with `API_KEY=<token>`, `AGENT_ID=<uuid>`, `SWARM_RUNTIME_INSTANCE_ID=<uuid>`, `MCP_BASE_URL=http://host.docker.internal:<port>` (the spike recipe in `scripts/spike-runtime-providers.ts`). The task reaches `completed`. Worker logs show no 401/403.
-- [ ] With the same token, `curl -H "X-Agent-ID: <other-uuid>" $API/api/poll` returns 403.
-- [ ] Revoke via `DELETE /api/sessions/tokens/{id}`. The next worker call returns 401 (visible in worker logs) and the worker cannot write progress.
+- [x] Boot the API on a temp DB. Mint a runtime token with the swarm key: `curl -X POST $API/api/sessions/tokens -H "Authorization: Bearer $KEY" -d '{"agentId":"<uuid>","runtimeId":"<uuid>","ttlMs":3600000}'`. Create a task pinned to that agent. Start `ghcr.io/desplega-ai/agent-swarm-worker:slim` with `API_KEY=<token>`, `AGENT_ID=<uuid>`, `SWARM_RUNTIME_INSTANCE_ID=<uuid>`, `MCP_BASE_URL=http://host.docker.internal:<port>` (the spike recipe in `scripts/spike-runtime-providers.ts`). The task reaches `completed`. Worker logs show no 401/403.
+- [x] With the same token, `curl -H "X-Agent-ID: <other-uuid>" $API/api/poll` returns 403.
+- [x] Revoke via `DELETE /api/sessions/tokens/{id}`. The next worker call returns 401 (visible in worker logs) and the worker cannot write progress.
 
 #### Manual Verification:
 - [ ] Taras confirms the self-scoped secret rule matches the intended trust model (runtime token sees the same resolved secrets a swarm-key worker sees for its agent, no more).
