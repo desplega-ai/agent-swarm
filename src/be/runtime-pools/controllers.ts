@@ -1,5 +1,6 @@
 import { createRuntimeProvider } from "../../runtime-providers";
 import { BuiltinController, type ControllerCommands } from "../../runtime-providers/controller";
+import { resolveWorkerApiUrl } from "../../runtime-providers/worker-api-url";
 import { scrubSecrets } from "../../utils/secret-scrubber";
 import { getDbClient, getSwarmConfigs, upsertSwarmConfig } from "../db";
 import { checkE2bControllerConfig, getRuntimeController, getRuntimeControllerTarget } from "./db";
@@ -49,7 +50,7 @@ export async function getControllerCommands(controllerId: string): Promise<Contr
     if (!config.ready)
       throw new Error(config.hint ?? `Missing configuration: ${config.missing.join(", ")}`);
     const provider = await createRuntimeProvider(controller.kind, target);
-    return new BuiltinController(controllerId, provider, target, target.WORKER_API_URL);
+    return new BuiltinController(controllerId, provider, target, resolveWorkerApiUrl(target));
   } catch (error) {
     throw new Error(scrubSecrets(String(error)));
   }

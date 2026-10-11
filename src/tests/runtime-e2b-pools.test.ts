@@ -17,6 +17,7 @@ import {
   listRuntimeInstancesForPool,
   upsertRuntimeInstance,
 } from "../be/multi-runtime";
+import * as controllers from "../be/runtime-pools/controllers";
 import { getControllerCommands } from "../be/runtime-pools/controllers";
 import {
   checkE2bControllerConfig,
@@ -24,14 +25,18 @@ import {
   createRuntimeController,
   createRuntimePool,
   getRuntimeController,
+  getRuntimeControllerTarget,
   getRuntimePool,
+  updateRuntimeController,
   updateRuntimePool,
 } from "../be/runtime-pools/db";
 import { resolveE2bImage } from "../be/runtime-pools/e2b-images";
+import { checkDisconnectedRuntime, startRuntimeRecovery } from "../be/runtime-pools/recovery";
 import { reconcileOnce, stopRuntimeSupervisor } from "../be/runtime-pools/supervisor";
 import { resolveBySessionToken } from "../be/users";
 import * as dispatch from "../e2b/dispatch";
 import { handleRuntimePools } from "../http/runtime-pools";
+import { realtimeBus } from "../realtime/bus";
 import type { ProvisionRequest, RuntimeHandle, RuntimeStatus } from "../runtime-providers";
 import type { ControllerCommands } from "../runtime-providers/controller";
 import { setRequestAuth } from "../utils/request-auth-context";
@@ -97,6 +102,9 @@ const keys = [
   "RUNTIME_ROTATE_BEFORE_SEC",
   "SECRETS_ENCRYPTION_KEY",
   "RUNTIME_CIRCUIT_THRESHOLD",
+  "RUNTIME_E2B_BUILD_TIMEOUT_SEC",
+  "RUNTIME_SOCKET_GRACE_SEC",
+  "MCP_BASE_URL",
 ];
 const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
 let fake: FakeE2bController;
@@ -166,6 +174,21 @@ async function tick(seconds = 0) {
   ]);
   await reconcileOnce({ now, getControllerCommands: async () => fake });
 }
+async function waitUntil(check: () => boolean | Promise<boolean>) {
+  const deadline = Date.now() + 2000;
+  while (!(await check())) {
+    if (Date.now() >= deadline) throw new Error("Condition did not become true");
+    await Bun.sleep(5);
+  }
+}
+async function builtImage(poolId: string): Promise<string> {
+  let image: string | null = null;
+  await waitUntil(async () => {
+    image = await resolveE2bImage(poolId);
+    return image !== null;
+  });
+  return image!;
+}
 async function setup(options: Partial<Parameters<typeof createRuntimePool>[0]> = {}) {
   const pool = await createRuntimePool({
     name: crypto.randomUUID(),
@@ -181,6 +204,10 @@ async function setup(options: Partial<Parameters<typeof createRuntimePool>[0]> =
 async function wake(options: Partial<Parameters<typeof createRuntimePool>[0]> = {}) {
   const state = await setup(options);
   await tick();
+  if (state.pool.image?.startsWith("docker://")) {
+    await builtImage(state.pool.id);
+    await tick();
+  }
   const runtime = (await listRuntimeInstancesForPool(state.pool.id))[0]!;
   await upsertRuntimeInstance({ id: runtime.id, agentId: state.agent.id, reportedSlots: 1 });
   return { ...state, runtime };
@@ -226,6 +253,11 @@ test("renews active and provisioning runtimes before expiry and stores the clamp
   const provisioning = await setup({ ttlSec: 300 });
   await tick();
   const pendingRuntime = (await listRuntimeInstancesForPool(provisioning.pool.id))[0]!;
+  expect(fake.requests.find((r) => r.runtimeId === pendingRuntime.id)?.ttlSec).toBe(360);
+  await getDbClient().run("UPDATE runtime_instances SET lease_expires_at = ? WHERE id = ?", [
+    new Date(now.getTime() + 300_000).toISOString(),
+    pendingRuntime.id,
+  ]);
   await tick(1);
   expect(
     fake.renewed.some((r) => r.handle.externalId === pendingRuntime.externalHandle!.externalId),
@@ -370,9 +402,12 @@ test("terminates an unwanted paused runtime without resuming or renewing", async
   expect(fake.renewed).toHaveLength(0);
 });
 
-test("a failed renew checks status and recovers confirmed death", async () => {
+test("a failed renew waits for the next full reap to recover confirmed death", async () => {
   const { task, runtime } = await busy({ ttlSec: 300 });
   fake.renewFailure = "gone";
+  await tick(61);
+  expect((await getRuntimeInstanceById(runtime.id))?.status).toBe("active");
+  expect((await getTaskById(task.id))?.status).toBe("in_progress");
   await tick(1);
   expect((await getRuntimeInstanceById(runtime.id))?.status).toBe("offline");
   expect((await getTaskById(task.id))?.status).toBe("superseded");
@@ -382,7 +417,8 @@ test("a failed renew checks status and recovers confirmed death", async () => {
 test("a failed renew does not kill a runtime that the provider still reports running", async () => {
   const { task, runtime } = await busy({ ttlSec: 300 });
   fake.renewFailure = "unavailable";
-  await tick(1);
+  await tick(61);
+  expect(fake.renewed).toHaveLength(1);
   expect((await getRuntimeInstanceById(runtime.id))?.status).toBe("active");
   expect((await getTaskById(task.id))?.status).toBe("in_progress");
   expect(fake.terminated).toHaveLength(0);
@@ -391,7 +427,10 @@ test("a failed renew does not kill a runtime that the provider still reports run
 test("builds docker images once, caches the template, and rebuilds after image PATCH", async () => {
   const { pool, agent } = await wake({ image: "docker://ghcr.io/acme/worker:1.2", minRuntimes: 2 });
   expect(buildSpy).toHaveBeenCalledTimes(1);
-  const expected = `swarm-${new Bun.CryptoHasher("sha256").update("ghcr.io/acme/worker:1.2").digest("hex").slice(0, 12)}`;
+  const expected = `swarm-${new Bun.CryptoHasher("sha256")
+    .update(JSON.stringify(["ghcr.io/acme/worker:1.2", 4, 8192]))
+    .digest("hex")
+    .slice(0, 12)}`;
   expect((await getRuntimePool(pool.id))?.resolvedImage).toBe(expected);
   expect(fake.requests.map((r) => r.image)).toEqual([expected, expected]);
   expect(buildSpy.mock.calls[0]?.[0]).toMatchObject({
@@ -405,7 +444,7 @@ test("builds docker images once, caches the template, and rebuilds after image P
   expect((await getRuntimePool(pool.id))?.resolvedImage).toBe(expected);
   await updateRuntimePool(pool.id, { image: "docker://ghcr.io/acme/worker:1.3" });
   expect((await getRuntimePool(pool.id))?.resolvedImage).toBeNull();
-  expect(await resolveE2bImage(pool.id)).not.toBe(expected);
+  expect(await builtImage(pool.id)).not.toBe(expected);
   expect(buildSpy).toHaveBeenCalledTimes(2);
   expect(agent.runtimePoolId).toBe(pool.id);
 });
@@ -416,8 +455,281 @@ test("an image changed during a build cannot cache a stale template", async () =
     await updateRuntimePool(pool.id, { image: "docker://new-image" });
     return { exitCode: 0, stdout: "Built", stderr: "" };
   });
-  await expect(resolveE2bImage(pool.id)).rejects.toThrow("image changed");
+  expect(await resolveE2bImage(pool.id)).toBeNull();
+  await waitUntil(async () => (await getRuntimePool(pool.id))?.image === "docker://new-image");
   expect((await getRuntimePool(pool.id))?.resolvedImage).toBeNull();
+});
+
+test("template keys include CPU and memory, and resource PATCH invalidates the cache", async () => {
+  const { pool } = await setup({ image: "docker://same-image" });
+  const differentCpu = await setup({ image: pool.image!, resources: { cpu: 2 } });
+  const differentMemory = await setup({ image: pool.image!, resources: { memoryMb: 4096 } });
+  const images = await Promise.all(
+    [pool, differentCpu.pool, differentMemory.pool].map((p) => builtImage(p.id)),
+  );
+  expect(new Set(images).size).toBe(3);
+  await updateRuntimePool(pool.id, { resources: { cpu: 2, memoryMb: 8192 } });
+  expect((await getRuntimePool(pool.id))?.resolvedImage).toBeNull();
+  expect(await builtImage(pool.id)).toBe(images[1]!);
+  await updateRuntimePool(pool.id, { resources: { cpu: 2, memoryMb: 4096 } });
+  expect((await getRuntimePool(pool.id))?.resolvedImage).toBeNull();
+  expect(await builtImage(pool.id)).not.toBe(images[1]!);
+});
+
+test("a resource change during a build cannot cache the obsolete template", async () => {
+  const { pool } = await setup({ image: "docker://same-image" });
+  buildSpy.mockImplementation(async () => {
+    await updateRuntimePool(pool.id, { resources: { cpu: 2 } });
+    return { exitCode: 0, stdout: "Built", stderr: "" };
+  });
+  expect(await resolveE2bImage(pool.id)).toBeNull();
+  await waitUntil(async () => (await getRuntimePool(pool.id))?.resources?.cpu === 2);
+  expect((await getRuntimePool(pool.id))?.resolvedImage).toBeNull();
+});
+
+test("a pending build does not block another pool renewal or count as a failure", async () => {
+  const { runtime } = await wake({ ttlSec: 600 });
+  const { pool, agent } = await setup({ image: "docker://slow-image" });
+  buildSpy.mockImplementation(() => new Promise(() => {}));
+  await tick(300);
+  expect(fake.renewed).toHaveLength(1);
+  expect(fake.renewed[0]?.handle.externalId).toBe(runtime.externalHandle!.externalId);
+  await tick(60);
+  expect(buildSpy).toHaveBeenCalledTimes(1);
+  expect(await listRuntimeInstancesForPool(pool.id)).toHaveLength(0);
+  expect((await getRuntimePool(pool.id))?.consecutiveFailures).toBe(0);
+  expect(
+    (
+      await getDbClient().get<{ attempts: number }>(
+        "SELECT runtime_provision_attempts AS attempts FROM agents WHERE id = ?",
+        [agent.id],
+      )
+    )?.attempts,
+  ).toBe(0);
+});
+
+test("shutdown aborts a build and its late completion provisions nothing", async () => {
+  const { pool } = await setup({ image: "docker://slow-image" });
+  let finish!: () => void;
+  buildSpy.mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        finish = () => resolve({ exitCode: 0, stdout: "Built", stderr: "" });
+      }),
+  );
+  await tick();
+  await waitUntil(() => buildSpy.mock.calls.length === 1);
+  const signal = buildSpy.mock.calls[0]![0].signal!;
+  await stopRuntimeSupervisor();
+  expect(signal.aborted).toBe(true);
+  finish();
+  // The DB read lets the build continuation observe the abort before checking its cache.
+  expect((await getRuntimePool(pool.id))?.resolvedImage).toBeNull();
+  expect(fake.requests).toHaveLength(0);
+  expect(await listRuntimeInstancesForPool(pool.id)).toHaveLength(0);
+});
+
+test("a build timeout aborts the SDK request and uses provision backoff", async () => {
+  process.env.RUNTIME_E2B_BUILD_TIMEOUT_SEC = "1";
+  const { pool } = await setup({ image: "docker://slow-image" });
+  buildSpy.mockImplementation(() => new Promise(() => {}));
+  await tick();
+  await waitUntil(() => buildSpy.mock.calls.length === 1);
+  const signal = buildSpy.mock.calls[0]![0].signal!;
+  await waitUntil(() => signal.aborted);
+  await tick();
+  expect((await getRuntimePool(pool.id))?.lastError).toContain("exceeded 1s");
+  await tick(1);
+  expect(buildSpy).toHaveBeenCalledTimes(1);
+});
+
+test("template builds receive only E2B connection settings", async () => {
+  await updateRuntimeController(controllerId, {
+    config: {
+      WORKER_API_URL: fake.workerApiUrl,
+      E2B_API_BASE: "https://e2b.test",
+      E2B_DOMAIN: "domain.test",
+      E2B_SANDBOX_URL: "https://sandbox.test",
+    },
+    secretConfig: { OTHER_SECRET: "must-not-reach-sdk" },
+  });
+  const { pool } = await setup({ image: "docker://worker-image" });
+  await builtImage(pool.id);
+  expect(Object.keys(buildSpy.mock.calls[0]![0].e2bEnv).sort()).toEqual([
+    "E2B_API_KEY",
+    "E2B_API_URL",
+    "E2B_DOMAIN",
+    "E2B_SANDBOX_URL",
+  ]);
+  expect(buildSpy.mock.calls[0]![0].e2bEnv).toMatchObject({
+    E2B_API_URL: "https://e2b.test",
+    E2B_DOMAIN: "domain.test",
+    E2B_SANDBOX_URL: "https://sandbox.test",
+  });
+});
+
+test("a failed renewal preserves the warm floor and the two-tick idle drain", async () => {
+  const { pool, runtime } = await wake({
+    ttlSec: 300,
+    idleMinutes: 1,
+    minRuntimes: 1,
+    maxRuntimes: 2,
+  });
+  const runtimes = await listRuntimeInstancesForPool(pool.id);
+  // Add a second warm runtime to exercise the full pool count.
+  await updateRuntimePool(pool.id, { minRuntimes: 2 });
+  await tick();
+  const sibling = (await listRuntimeInstancesForPool(pool.id)).find((r) => r.id !== runtime.id)!;
+  await upsertRuntimeInstance({ id: sibling.id, agentId: runtime.agentId, reportedSlots: 1 });
+  await updateRuntimePool(pool.id, { minRuntimes: 1 });
+  await getDbClient().run("UPDATE runtime_instances SET idle_since = ? WHERE pool_id = ?", [
+    now.toISOString(),
+    pool.id,
+  ]);
+  fake.renewFailure = "unavailable";
+  await tick(61);
+  expect((await getRuntimeInstanceById(runtime.id))?.draining).toBe(true);
+  expect(fake.terminated).toHaveLength(0);
+  await tick(1);
+  expect(fake.terminated).toHaveLength(1);
+  expect(
+    (await listRuntimeInstancesForPool(pool.id)).filter((r) => r.status !== "offline"),
+  ).toHaveLength(1);
+  expect(runtimes).toHaveLength(1);
+});
+
+async function socketGrace(
+  runtime: { id: string; agentId: string },
+  done: () => boolean | Promise<boolean>,
+) {
+  process.env.RUNTIME_SOCKET_GRACE_SEC = "0";
+  const commands = spyOn(controllers, "getControllerCommands").mockResolvedValue(fake);
+  try {
+    startRuntimeRecovery();
+    realtimeBus.publish("worker.socket.disconnected", {
+      agentId: runtime.agentId,
+      runtimeId: runtime.id,
+    });
+    await waitUntil(done);
+  } finally {
+    commands.mockRestore();
+  }
+}
+
+test("socket grace resumes a wanted idle paused runtime", async () => {
+  const { runtime } = await wake({ delivery: "push" });
+  fake.runtimes.get(runtime.externalHandle!.externalId)!.status = "paused";
+  await socketGrace(runtime, () => fake.resumed.length === 1);
+  expect((await getRuntimeInstanceById(runtime.id))?.status).toBe("active");
+  expect(fake.terminated).toHaveLength(0);
+});
+
+test("socket grace counts paused siblings toward the idle warm floor", async () => {
+  const { pool, runtime } = await wake({ delivery: "push", minRuntimes: 2, idleMinutes: 1 });
+  const runtimes = await listRuntimeInstancesForPool(pool.id);
+  for (const row of runtimes) {
+    await upsertRuntimeInstance({ id: row.id, agentId: row.agentId, reportedSlots: 1 });
+    fake.runtimes.get(row.externalHandle!.externalId)!.status = "paused";
+  }
+  await updateRuntimePool(pool.id, { minRuntimes: 1 });
+  await getDbClient().run(
+    "UPDATE runtime_instances SET idle_since = ?, last_seen_at = ? WHERE pool_id = ?",
+    [
+      new Date(Date.now() - 61_000).toISOString(),
+      new Date(Date.now() - 30 * 60_000).toISOString(),
+      pool.id,
+    ],
+  );
+  await socketGrace(
+    runtime,
+    async () => (await getRuntimeInstanceById(runtime.id))?.status === "offline",
+  );
+  expect(fake.terminated).toEqual([runtime.externalHandle!.externalId]);
+  expect(fake.resumed).toHaveLength(0);
+});
+
+test("socket grace terminates a busy paused runtime before task recovery", async () => {
+  const { task, runtime } = await busy({ delivery: "push" });
+  fake.runtimes.get(runtime.externalHandle!.externalId)!.status = "paused";
+  const terminate = spyOn(fake, "terminate").mockImplementation(async (handle) => {
+    expect((await getTaskById(task.id))?.status).toBe("in_progress");
+    fake.terminated.push(handle.externalId);
+    fake.runtimes.delete(handle.externalId);
+  });
+  try {
+    await socketGrace(runtime, async () => (await getTaskById(task.id))?.status === "superseded");
+    expect(fake.terminated).toEqual([runtime.externalHandle!.externalId]);
+    expect(fake.resumed).toHaveLength(0);
+    expect(await getActiveSessionForTask(task.id)).toBeNull();
+  } finally {
+    terminate.mockRestore();
+  }
+});
+
+for (const unwanted of ["disabled", "rotation", "idle", "per-task"] as const) {
+  test(`socket grace terminates an unwanted paused runtime: ${unwanted}`, async () => {
+    const { pool, task, runtime } = await wake({
+      delivery: "push",
+      ...(unwanted === "idle" ? { idleMinutes: 1 } : {}),
+      ...(unwanted === "per-task" ? { lifecycle: "per-task" } : {}),
+    });
+    fake.runtimes.get(runtime.externalHandle!.externalId)!.status = "paused";
+    if (unwanted === "disabled") await updateRuntimePool(pool.id, { enabled: false });
+    if (unwanted === "rotation")
+      await getDbClient().run("UPDATE runtime_instances SET created_at = ? WHERE id = ?", [
+        new Date(Date.now() - 3001_000).toISOString(),
+        runtime.id,
+      ]);
+    if (unwanted === "idle")
+      await getDbClient().run("UPDATE runtime_instances SET idle_since = ? WHERE id = ?", [
+        new Date(Date.now() - 61_000).toISOString(),
+        runtime.id,
+      ]);
+    if (unwanted === "per-task") {
+      await startTask(task.id);
+      await completeTask(task.id, "Done");
+      await getDbClient().run("UPDATE runtime_instances SET task_id = ? WHERE id = ?", [
+        task.id,
+        runtime.id,
+      ]);
+    }
+    await socketGrace(
+      runtime,
+      async () => (await getRuntimeInstanceById(runtime.id))?.status === "offline",
+    );
+    expect(fake.terminated).toEqual([runtime.externalHandle!.externalId]);
+    expect(fake.resumed).toHaveLength(0);
+  });
+}
+
+test("socket grace and the reaper serialize paused actions for the same runtime", async () => {
+  const { runtime } = await wake({ delivery: "push" });
+  fake.runtimes.get(runtime.externalHandle!.externalId)!.status = "paused";
+  let finish!: () => void;
+  let started = false;
+  const resume = spyOn(fake, "resume").mockImplementation(async (handle) => {
+    started = true;
+    await new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    fake.resumed.push(handle.externalId);
+    fake.runtimes.get(handle.externalId)!.status = "running";
+  });
+  const commands = spyOn(controllers, "getControllerCommands").mockResolvedValue(fake);
+  try {
+    const check = checkDisconnectedRuntime(runtime.id);
+    await waitUntil(() => started);
+    const reaping = tick();
+    await Bun.sleep(5);
+    expect(resume).toHaveBeenCalledTimes(1);
+    finish();
+    await Promise.all([check, reaping]);
+    expect(resume).toHaveBeenCalledTimes(1);
+    expect(fake.terminated).toHaveLength(0);
+  } finally {
+    resume.mockRestore();
+    commands.mockRestore();
+  }
 });
 
 test("image build failures use provision backoff and the circuit breaker", async () => {
@@ -425,9 +737,12 @@ test("image build failures use provision backoff and the circuit breaker", async
   const { pool, agent } = await setup({ image: "docker://missing-image" });
   buildSpy.mockRejectedValue(new Error("Registry image missing"));
   await tick();
-  const failed = (await listRuntimeInstancesForPool(pool.id))[0]!;
-  expect(failed.status).toBe("offline");
-  expect(failed.provisionError).toContain("Registry image missing");
+  await waitUntil(async () => {
+    await tick();
+    return (await getRuntimePool(pool.id))?.consecutiveFailures === 1;
+  });
+  expect(await listRuntimeInstancesForPool(pool.id)).toHaveLength(0);
+  expect((await getRuntimePool(pool.id))?.lastError).toContain("Registry image missing");
   expect((await getRuntimePool(pool.id))?.consecutiveFailures).toBe(1);
   expect((await getRuntimePool(pool.id))?.circuitOpenUntil).not.toBeNull();
   expect(fake.requests).toHaveLength(0);
@@ -436,7 +751,7 @@ test("image build failures use provision backoff and the circuit breaker", async
   expect(agent.runtimePoolId).toBe(pool.id);
 });
 
-test("controller readiness persists HTTPS errors and accepts deployment fallbacks", async () => {
+test("controller readiness preserves provision errors and accepts deployment URL fallbacks", async () => {
   const id = (await createRuntimeController({ name: "unready", kind: "e2b", placement: "builtin" }))
     .id;
   const controller = (await getRuntimeController(id))!;
@@ -446,10 +761,55 @@ test("controller readiness persists HTTPS errors and accepts deployment fallback
   process.env.E2B_API_KEY = `fake-${crypto.randomUUID()}`;
   process.env.RUNTIME_WORKER_API_URL = "https://swarm.test";
   process.env.E2B_MAX_CONTINUOUS_SEC = "86400";
+  expect((await checkE2bControllerConfig((await getRuntimeController(id))!)).ready).toBe(false);
+  expect((await getRuntimeControllerTarget(controller)).E2B_API_KEY).toBeUndefined();
+  await updateRuntimeController(id, {
+    secretConfig: { E2B_API_KEY: `stored-${crypto.randomUUID()}` },
+  });
   const commands = await getControllerCommands(id);
   expect(commands.traits.maxContinuousSec).toBe(86400);
   expect((await getRuntimeController(id))?.status).toBe("online");
   expect((await getRuntimeController(id))?.lastError).toBeNull();
+  const failedAt = new Date(0).toISOString();
+  await getDbClient().run(
+    "UPDATE runtime_controllers SET last_error = ?, last_error_at = ?, updated_at = ? WHERE id = ?",
+    ["Provision failed", failedAt, failedAt, id],
+  );
+  await getControllerCommands(id);
+  await getControllerCommands(id);
+  expect(await getRuntimeController(id)).toMatchObject({
+    lastError: "Provision failed",
+    lastErrorAt: failedAt,
+    updatedAt: failedAt,
+  });
+});
+
+test("configuration validates the same controller URL that provisioning injects", async () => {
+  process.env.RUNTIME_WORKER_API_URL = "http://deployment.test";
+  process.env.PUBLIC_MCP_BASE_URL = "https://public.test";
+  await updateRuntimeController(controllerId, {
+    config: {
+      RUNTIME_WORKER_API_URL: "https://controller.test",
+      PUBLIC_MCP_BASE_URL: "https://controller-public.test",
+    },
+  });
+  const commands = await getControllerCommands(controllerId);
+  expect(commands.workerApiUrl).toBe("https://controller.test");
+  fake.workerApiUrl = commands.workerApiUrl!;
+  await setup();
+  await tick();
+  expect(fake.requests[0]?.env.MCP_BASE_URL).toBe("https://controller.test");
+  await updateRuntimeController(controllerId, {
+    config: { PUBLIC_MCP_BASE_URL: "https://public.test" },
+  });
+  await expect(getControllerCommands(controllerId)).rejects.toThrow("HTTPS");
+  delete process.env.RUNTIME_WORKER_API_URL;
+  process.env.MCP_BASE_URL = "https://api-fallback.test/";
+  delete process.env.PUBLIC_MCP_BASE_URL;
+  await updateRuntimeController(controllerId, { config: {} });
+  expect((await getControllerCommands(controllerId)).workerApiUrl).toBe(
+    "https://api-fallback.test",
+  );
 });
 
 test("pool creation succeeds with a warning when builtin E2B is unready", async () => {

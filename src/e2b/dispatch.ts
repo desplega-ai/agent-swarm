@@ -76,6 +76,7 @@ export type BuildImageTemplateOptions = {
   noCache: boolean;
   e2bEnv: EnvMap;
   dryRun?: boolean;
+  signal?: AbortSignal;
 };
 
 export type CreateSandboxOptions = {
@@ -609,6 +610,7 @@ export async function buildImageTemplate(
     cpuCount: opts.cpuCount,
     memoryMB: opts.memoryMb,
     skipCache: opts.noCache,
+    signal: opts.signal,
   });
 
   return {

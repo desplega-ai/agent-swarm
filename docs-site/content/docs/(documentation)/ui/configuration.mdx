@@ -306,6 +306,7 @@ The API checks the pool flag for each routing event and timer tick.
 | `RUNTIME_SOCKET_GRACE_SEC` | `60` | Seconds after the last push socket disconnect before a provider check. Running runtimes keep their tasks. |
 | `RUNTIME_TOKEN_ROTATE_BEFORE_MIN` | `60` | Minutes before token expiry to drain busy runtimes or terminate idle runtimes. |
 | `RUNTIME_LEASE_RENEW_BEFORE_SEC` | `300` | Seconds before E2B lease expiry to renew wanted runtimes. |
+| `RUNTIME_E2B_BUILD_TIMEOUT_SEC` | `600` | Maximum E2B template build duration in seconds. Builds run independently of supervisor ticks. |
 | `RUNTIME_ROTATE_BEFORE_SEC` | `600` | Seconds before the continuous runtime limit to drain E2B runtimes. |
 | `E2B_MAX_CONTINUOUS_SEC` | `3600` | E2B continuous limit in seconds. Use `3600` for Hobby or `86400` for Pro. Controller configuration overrides this default. |
 

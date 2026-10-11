@@ -17,6 +17,7 @@ import {
   type RuntimeStatus,
   type RuntimeTargetConfig,
 } from "./types";
+import { resolveWorkerApiUrl } from "./worker-api-url";
 
 /**
  * E2B runtime provider. Wraps the existing DB-free helpers in src/e2b/dispatch.ts:
@@ -71,8 +72,7 @@ export class E2BRuntimeProvider implements RuntimeProvider {
 
   checkConfig(target: RuntimeTargetConfig): ConfigStatus {
     const missing = target.E2B_API_KEY ? [] : ["E2B_API_KEY"];
-    const workerUrl =
-      target.WORKER_API_URL ?? target.RUNTIME_WORKER_API_URL ?? target.PUBLIC_MCP_BASE_URL;
+    const workerUrl = resolveWorkerApiUrl(target);
     try {
       if (!workerUrl || new URL(workerUrl).protocol !== "https:") missing.push("WORKER_API_URL");
     } catch {

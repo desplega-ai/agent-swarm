@@ -543,6 +543,15 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         docsUrl: `${DOCS}ui/configuration#runtime-pools`,
       },
       {
+        key: "RUNTIME_E2B_BUILD_TIMEOUT_SEC",
+        label: "E2B template build timeout",
+        description: "Cancel an E2B template build after this duration.",
+        kind: "number",
+        unit: "s",
+        defaultValue: "600",
+        docsUrl: `${DOCS}ui/configuration#runtime-pools`,
+      },
+      {
         key: "RUNTIME_ROTATE_BEFORE_SEC",
         label: "Runtime rotation window",
         description: "Drain E2B runtimes before their continuous runtime limit.",

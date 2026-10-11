@@ -157,9 +157,9 @@ is never expired):
   The ping cutoff also triggers termination and recovery. A fresh `unknown` runtime present in the list remains unchanged.
   Provider errors do not prove death.
   An unplanned pause resumes a wanted idle runtime and renews its lease.
-  A pause during active work triggers `recoverRuntime`, then terminates the sandbox because the model stream cannot continue.
+  A pause during active work terminates the sandbox, then triggers `recoverRuntime` because the model stream cannot continue.
   An unwanted paused runtime terminates without resuming.
-  E2B lease expiry can remove the sandbox. A failed renewal checks provider status and recovers confirmed absence.
+  E2B lease expiry can remove the sandbox. After a failed renewal, the next full reap checks status and recovers confirmed absence.
   A running sandbox retains its tasks after a renewal transport error.
 - `recoverRuntime` serializes recovery for its runtime, then calls `markRuntimeTerminated`.
   This marks the row offline, reconciles agent status, and revokes runtime and child tokens.
