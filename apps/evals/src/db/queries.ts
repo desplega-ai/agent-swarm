@@ -31,6 +31,7 @@ function rowToRun(r: Row): EvalRunRow {
     preset: (r.preset as string) ?? null,
     rerunOf: (r.rerun_of as string) ?? null,
     summaryPostedAt: (r.summary_posted_at as string) ?? null,
+    autoResumes: r.auto_resumes == null ? 0 : Number(r.auto_resumes),
     createdAt: r.created_at as string,
     finishedAt: (r.finished_at as string) ?? null,
   };
@@ -384,6 +385,34 @@ export async function resetErrorAttempts(db: Client, runId: string): Promise<num
     args: [runId],
   });
   return res.rowsAffected;
+}
+
+/**
+ * Re-queue the attempts the boot reaper closed out with `reason` (a restart cut them).
+ * Unlike `resetErrorAttempts`, real errors stay closed, so a boot resume never pays
+ * to re-run an attempt that already failed on its own.
+ */
+export async function resetReapedAttempts(
+  db: Client,
+  runId: string,
+  reason: string,
+): Promise<number> {
+  const res = await db.execute({
+    sql: `UPDATE attempts SET status = 'pending', retries = 0, error = NULL, exclusion = NULL,
+          started_at = NULL, finished_at = NULL
+          WHERE run_id = ? AND status = 'error' AND exclusion = 'cancelled' AND error = ?`,
+    args: [runId, reason],
+  });
+  return res.rowsAffected;
+}
+
+/** Count one boot resume of a run. False once the run already used `max` of them. */
+export async function claimAutoResume(db: Client, runId: string, max: number): Promise<boolean> {
+  const res = await db.execute({
+    sql: "UPDATE eval_runs SET auto_resumes = auto_resumes + 1 WHERE id = ? AND auto_resumes < ?",
+    args: [runId, max],
+  });
+  return res.rowsAffected > 0;
 }
 
 /**

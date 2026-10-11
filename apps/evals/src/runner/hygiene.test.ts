@@ -24,6 +24,7 @@ import {
   type Registry,
   reconcileOrphanedRuns,
   runAttemptWithRetry,
+  SHUTDOWN_ABORT_REASON,
 } from "./index.ts";
 
 /**
@@ -421,6 +422,28 @@ describe("cancelling a run", () => {
     expect((await getRun(db, "run-abort"))?.status).toBe("cancelled");
     // ...and resume can still pick them all up.
     expect(await resetErrorAttempts(db, "run-abort")).toBe(4);
+  });
+
+  test("a shutdown abort leaves the run running for the next boot to resume", async () => {
+    await makeRun({ id: "run-shutdown", attemptsPerCell: 3, concurrency: 1 });
+    const db = getDb();
+    const controller = new AbortController();
+    await executeRun({
+      db,
+      runId: "run-shutdown",
+      registry: registryOf([scenario("scn")], [piConfig]),
+      log: () => {},
+      sweep: noSweep,
+      signal: controller.signal,
+      runAttempt: (async ({ db: d, attempt }: { db: typeof db; attempt: AttemptRow }) => {
+        controller.abort(SHUTDOWN_ABORT_REASON);
+        await updateAttempt(d, attempt.id, { status: "pending" });
+      }) as never,
+    });
+    expect((await getRun(db, "run-shutdown"))?.status).toBe("running");
+    expect((await listAttempts(db, "run-shutdown")).every((r) => r.status === "pending")).toBe(
+      true,
+    );
   });
 });
 

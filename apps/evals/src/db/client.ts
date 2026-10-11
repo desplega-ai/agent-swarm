@@ -251,4 +251,6 @@ const COLUMN_MIGRATIONS = [
   "ALTER TABLE eval_runs ADD COLUMN preset TEXT",
   "ALTER TABLE eval_runs ADD COLUMN rerun_of TEXT",
   "ALTER TABLE eval_runs ADD COLUMN summary_posted_at TEXT",
+  // How many times boot resumed this run after a restart cut it (crash-loop guard).
+  "ALTER TABLE eval_runs ADD COLUMN auto_resumes INTEGER NOT NULL DEFAULT 0",
 ];

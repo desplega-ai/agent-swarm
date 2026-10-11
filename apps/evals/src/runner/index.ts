@@ -1,4 +1,5 @@
 import type { Client } from "@libsql/client";
+import { SCHEDULED_PRESET_IDS } from "../../configs/presets.ts";
 import { isHeldOut, suiteVersionFor } from "../../scenarios/suite.ts";
 import {
   attemptMeteredUsd,
@@ -9,6 +10,7 @@ import {
 import { recomputeCost, recomputeCostMulti } from "../cost/recompute.ts";
 import {
   cancelUnfinishedAttempts,
+  claimAutoResume,
   clearAttemptResults,
   getAttempt,
   getRun,
@@ -18,6 +20,7 @@ import {
   listAttempts,
   listRuns,
   listUnfinishedAttempts,
+  resetReapedAttempts,
   setRunStatus,
   updateAttempt,
 } from "../db/queries.ts";
@@ -63,6 +66,7 @@ import {
   CASCADE_SKIP_RE,
   type CostSource,
   type DeterministicCheck,
+  type EvalRunRow,
   type HarnessConfig,
   type JudgeContext,
   type JudgeTrace,
@@ -587,6 +591,44 @@ export async function reconcileOrphanedRuns(
   if (reaped > 0)
     log(`reaped ${reaped} unfinished attempt(s) of dead runs (cancelled, excluded from scores)`);
   return orphanedRuns.length;
+}
+
+/**
+ * Abort reason the server passes on SIGTERM/SIGINT. `executeRun` then leaves the run
+ * `running` instead of cancelling it, so the next boot reaps and resumes it.
+ */
+export const SHUTDOWN_ABORT_REASON = "evals-process-shutdown";
+
+/** Boot resumes per run; past it a run that keeps dying stays failed (crash-loop guard). */
+export const MAX_AUTO_RESUMES = 3;
+
+/**
+ * Pick the orphaned runs boot should resume: runs of a scheduled preset (nobody is
+ * watching to resume them by hand) under MAX_AUTO_RESUMES, oldest first, at most
+ * `limit`. Each pick is counted and its reaped attempts go back to pending; real
+ * errors stay closed. Call after `reconcileOrphanedRuns`, with the runs it found.
+ */
+export async function claimAutoResumableRuns(
+  db: Client,
+  orphanedRuns: EvalRunRow[],
+  limit: number,
+  log: RunnerLog = (msg) => console.log(msg),
+): Promise<string[]> {
+  const picked: string[] = [];
+  const candidates = orphanedRuns
+    .filter((run) => run.preset != null && SCHEDULED_PRESET_IDS.includes(run.preset))
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  for (const run of candidates) {
+    if (picked.length >= limit) break;
+    if (!(await claimAutoResume(db, run.id, MAX_AUTO_RESUMES))) {
+      log(`run ${run.id} already resumed ${MAX_AUTO_RESUMES} time(s) at boot; leaving it failed`);
+      continue;
+    }
+    const requeued = await resetReapedAttempts(db, run.id, CANCEL_REASON_DEAD_RUN);
+    log(`resuming scheduled run ${run.id}: ${requeued} reaped attempt(s) back to pending`);
+    picked.push(run.id);
+  }
+  return picked;
 }
 
 export async function forceCancelInactiveRun(
@@ -2369,6 +2411,12 @@ export async function executeRun(opts: {
     },
   );
 
+  if (signal?.aborted && signal.reason === SHUTDOWN_ABORT_REASON) {
+    // The process is going down (redeploy). Leave the run `running` so the next
+    // boot reaps its attempts and resumes it; cancelling here would strand it.
+    baseLog(`run ${runId} interrupted by shutdown; the next boot resumes it`);
+    return;
+  }
   if (signal?.aborted) {
     // Attempts cancelled mid-flight were reset to pending; close them and the
     // never-started ones out so a cancelled run leaves no work in flight.
