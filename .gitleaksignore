@@ -2,3 +2,5 @@
 # by reference (no literal secret). The current line carries an inline gitleaks:allow.
 de31b64f878e099593d448de43d1b45d0f552918:src/be/runtime-pools/seed.ts:generic-api-key:71
 1af7fc853584a2741b19a834a119d0aab6d8c8e9:src/be/runtime-pools/seed.ts:generic-api-key:36
+# RFC 6455 sample WebSocket nonce in a test handshake, not a secret.
+f96877b9c709d3a4080c8466cc700217e89c65a5:src/tests/runtime-token-auth.test.ts:generic-api-key:704
