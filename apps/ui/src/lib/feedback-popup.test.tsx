@@ -158,3 +158,16 @@ describe("feedback popup storage", () => {
     );
   });
 });
+
+describe("prompt coordination", () => {
+  test("remembers the prompt for this load and scopes it to the connection", async () => {
+    const { markPromptShownThisLoad, promptShownThisLoad } = await import(
+      "../hooks/use-other-dialog-open"
+    );
+    const apiUrl = "https://prompt-coordination.example";
+    expect(promptShownThisLoad(apiUrl)).toBe(false);
+    markPromptShownThisLoad(apiUrl);
+    expect(promptShownThisLoad(apiUrl)).toBe(true);
+    expect(promptShownThisLoad("https://other.example")).toBe(false);
+  });
+});

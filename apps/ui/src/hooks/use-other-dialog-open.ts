@@ -1,5 +1,15 @@
 import { useLayoutEffect, useState } from "react";
 
+const shownPrompts = new Set<string>();
+
+export function markPromptShownThisLoad(apiUrl: string): void {
+  shownPrompts.add(apiUrl);
+}
+
+export function promptShownThisLoad(apiUrl: string): boolean {
+  return shownPrompts.has(apiUrl);
+}
+
 const OTHER_DIALOG_SELECTOR =
   '[data-slot="dialog-content"][data-state="open"]:not([data-feedback-popup])';
 

@@ -12,6 +12,7 @@ test.describe("organization name onboarding", () => {
   });
 
   test.beforeEach(async ({ api }) => {
+    await api.put("/api/onboarding", { action: "dismiss" });
     await api.put("/api/config", {
       scope: "global",
       key: "SWARM_ORG_NAME",
@@ -58,10 +59,7 @@ test.describe("organization name onboarding", () => {
     await clean.assertClean();
   });
 
-  test("treats whitespace as unset and allows deferring until the next visit", async ({
-    page,
-    api,
-  }) => {
+  test("treats whitespace as unset and defers for this tab session", async ({ page, api }) => {
     await api.put("/api/config", {
       scope: "global",
       key: "SWARM_ORG_NAME",
@@ -79,7 +77,12 @@ test.describe("organization name onboarding", () => {
     await dialog.getByRole("button", { name: "Later" }).click();
     await expect(dialog).not.toBeVisible();
     await page.reload();
-    await expect(dialog).toBeVisible();
+    await expect(page.getByRole("link", { name: "Settings", exact: true })).toBeVisible();
+    await expect(dialog).not.toBeVisible();
+    const freshTab = await page.context().newPage();
+    await freshTab.goto("/");
+    await expect(freshTab.getByRole("dialog", { name: "Name your organization" })).toBeVisible();
+    await freshTab.close();
   });
 
   test("keeps an explicitly configured Swarm name", async ({ page, api, clean }) => {
@@ -126,6 +129,7 @@ test.describe("organization name onboarding", () => {
       await released;
       await route.continue();
     });
+    await page.evaluate(() => sessionStorage.clear());
     await page.reload();
     await expect(page.getByRole("link", { name: "Settings", exact: true })).toBeVisible();
     await expect(dialog).not.toBeVisible();

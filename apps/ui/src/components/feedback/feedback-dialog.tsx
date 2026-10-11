@@ -19,7 +19,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useCurrentUser } from "@/contexts/current-user-context";
 import { useConfig } from "@/hooks/use-config";
-import { useOtherDialogOpen } from "@/hooks/use-other-dialog-open";
+import { promptShownThisLoad, useOtherDialogOpen } from "@/hooks/use-other-dialog-open";
 import {
   type FeedbackPopupState,
   feedbackPopupStorageKey,
@@ -69,6 +69,7 @@ export function FeedbackDialog() {
   const [message, setMessage] = useState("");
 
   const open =
+    !promptShownThisLoad(config.apiUrl) &&
     status.data !== null &&
     status.data !== undefined &&
     globalConfigs !== undefined &&
