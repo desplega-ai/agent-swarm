@@ -23,6 +23,7 @@ import {
 import {
   type Agent,
   type AgentTask,
+  type CreateTaskOptions,
   CreateTaskOptionsSchema,
   type ResumeReason,
   type RoutingAffinity,
@@ -157,6 +158,54 @@ export function getResumeGeneration(task: Pick<AgentTask, "tags">): number {
 
 export function getNextResumeGeneration(parent: Pick<AgentTask, "tags">): number {
   return getResumeGeneration(parent) + 1;
+}
+
+/**
+ * The model selection a continuation of the SAME interrupted work (resume,
+ * reboot retry) must carry: the parent's portable `modelTier`, plus its
+ * concrete `model` only when that `model` was a task-level pin.
+ *
+ * `agent_tasks.model` is not always the creator's pin: the worker reports the
+ * model it actually ran on `POST /api/tasks/{id}/session`, which overwrites the
+ * column. So the pin is read from the claim-time record instead:
+ *   - `modelSource = "model"`: the task's own `model` won at claim. A `latest:`
+ *     alias survives only in `modelAlias` (the session report replaced `model`
+ *     with the concrete id), so the alias is what travels.
+ *   - `modelSource = "fallback:cli-unsupported"` with a `modelAlias` and no
+ *     `modelTier`: only a `model` alias can produce that row.
+ *   - no claim record and no session: `model` is still the creator's value.
+ * Anything else (a tier layer won, or `model` is just the session report) is
+ * not a pin and is left off, so the resume resolves on its claiming worker.
+ *
+ * `resolvedModel`, `modelSource` and `modelAlias` themselves are NOT copied:
+ * claim time writes all three together for the task being claimed, and the
+ * carried `model` makes that claim record `modelSource = "model"` again.
+ * A carried pin is safe across workers: a pooled claim skips harnesses that
+ * cannot run the model, and a directed claim fails fast with
+ * `[model-harness-mismatch]` instead of silently running another model.
+ */
+export function inheritedModelSelection(
+  parent: Pick<
+    AgentTask,
+    "model" | "modelTier" | "modelSource" | "modelAlias" | "resolvedModel" | "claudeSessionId"
+  >,
+): Pick<CreateTaskOptions, "model" | "modelTier"> {
+  let model: string | undefined;
+  if (parent.modelSource === "model") {
+    model = parent.modelAlias ?? parent.model;
+  } else if (
+    parent.modelSource === "fallback:cli-unsupported" &&
+    parent.modelAlias &&
+    !parent.modelTier
+  ) {
+    model = parent.modelAlias;
+  } else if (!parent.modelSource && !parent.resolvedModel && !parent.claudeSessionId) {
+    model = parent.model;
+  }
+  return {
+    ...(model ? { model } : {}),
+    ...(parent.modelTier ? { modelTier: parent.modelTier } : {}),
+  };
 }
 
 function attachmentPointer(a: TaskAttachment): string {
@@ -378,11 +427,11 @@ export type CreateResumeFollowUpResult =
  * context, `requestedByUserId`, `contextKey`, `followUpConfig`). This was chosen
  * over re-listing fields here so there is a single source of truth.
  *
- * `model` is intentionally NOT inherited: a resume task is routinely claimed by
- * a different worker (and thus a different harness/provider) than the parent, so
- * carrying the parent's concrete provider-specific model would break the child
- * at session-init. The resume task runs on the assignee agent's own model. See
- * the `model` carve-out comment in `createTaskExtended` (`src/be/db.ts`).
+ * `createTaskExtended` never inherits `model` (see its carve-out comment in
+ * `src/be/db.ts`). The resume is the same work, so it passes the parent's
+ * task-level model selection explicitly via `inheritedModelSelection`: the
+ * `modelTier`, and the `model` only when it was a pin. Without a pin the
+ * resume still runs on the assignee agent's own model.
  *
  * Routing: the parent's assigned worker (`parent.agentId`) is preferred when
  * the agent row still exists, is not `offline`, and has remaining capacity
@@ -530,9 +579,9 @@ export async function createResumeFollowUp(args: {
   // requestedByUserId) are auto-inherited from the parent by
   // `createTaskExtended`'s parentTaskId block (see src/be/db.ts);
   // followUpConfig is opt-in and set below. `model` is
-  // deliberately excluded there so the resume task resolves to the claiming
-  // agent's own provider/model — never the parent's concrete model string.
-  // We only override what's SPECIFIC to the resume task here.
+  // deliberately excluded there; a task-level model pin is passed explicitly
+  // below (`inheritedModelSelection`) because a pinned run must not finish on
+  // another model. We only override what's SPECIFIC to the resume task here.
   //
   // Routing affinity: stamp a FRESH snapshot from the parent's own agent —
   // this covers every leg (pinned AND the pool-fallback legs) so a resume
@@ -572,6 +621,7 @@ export async function createResumeFollowUp(args: {
     // fire when this resume finishes.
     inheritParentFollowUpConfig: true,
     routingAffinity,
+    ...inheritedModelSelection(parent),
   });
 
   if (authorizationDecision) {

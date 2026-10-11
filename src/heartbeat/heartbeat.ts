@@ -69,6 +69,7 @@ import {
   getNextResumeGeneration,
   getPinCandidateAgent,
   getResumeGeneration,
+  inheritedModelSelection,
   REBOOT_RETRY_PIN_TAG,
   resolveLeadOnlyRecoveryAssignment,
 } from "../tasks/worker-follow-up";
@@ -1002,6 +1003,8 @@ export async function runRebootSweep(): Promise<void> {
               // onCompleted/onFailed.
               inheritParentFollowUpConfig: true,
               routingAffinity,
+              // Same work: a task-level model pin must survive the retry.
+              ...inheritedModelSelection(task),
             });
             if (authorization.decision) {
               await createLogEntry({

@@ -83,6 +83,30 @@ describe("Heartbeat orphaned supersede repair (TLA+ counterexample)", () => {
     expect(await getChildTasks(task.id)).toHaveLength(1);
   });
 
+  test("the repaired resume keeps the superseded task's model pin", async () => {
+    const agent = await createAgent({ name: "crashed-worker", isLead: false, status: "idle" });
+    const task = await createTaskExtended("Pinned work interrupted mid-recovery", {
+      agentId: agent.id,
+      model: "claude-fable-5-1",
+    });
+    await startTask(task.id);
+    await getDbClient().run(
+      "UPDATE agent_tasks SET resolvedModel = ?, modelSource = 'model', claudeSessionId = 'sess-1' WHERE id = ?",
+      ["claude-fable-5-1", task.id],
+    );
+    await supersedeTask(task.id, { reason: "crash_recovery", resumeTaskId: null });
+    await getDbClient().run("UPDATE agent_tasks SET finishedAt = ? WHERE id = ?", [
+      new Date(Date.now() - 10 * 60 * 1000).toISOString(),
+      task.id,
+    ]);
+
+    await codeLevelTriage();
+
+    const [resume] = await getChildTasks(task.id);
+    expect(resume?.taskType).toBe("resume");
+    expect(resume?.model).toBe("claude-fable-5-1");
+  });
+
   // Crash after createResumeFollowUp, before backfillSupersedeTaskResumeTaskId.
   test("a dependent left waiting on a superseded task with a resume is re-pointed on the next sweep", async () => {
     const agent = await createAgent({ name: "crashed-worker", isLead: false, status: "idle" });

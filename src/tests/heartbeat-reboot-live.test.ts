@@ -13,6 +13,7 @@ import {
   createAgent,
   createTaskExtended,
   getActiveSessionForTask,
+  getChildTasks,
   getDbClient,
   getTaskById,
   initDb,
@@ -88,6 +89,36 @@ describe("Reboot sweep live sessions (TLA+ counterexample)", () => {
 
       expect((await getTaskById(task.id))?.status).toBe("in_progress");
       expect(await getActiveSessionForTask(task.id)).not.toBeNull();
+    } finally {
+      gs.__runId = original;
+    }
+  });
+
+  test("reboot retry child keeps the failed task's model pin", async () => {
+    const gs = globalThis as typeof globalThis & { __runId?: string };
+    const original = gs.__runId;
+    const bootTime = Date.now();
+    gs.__runId = `run_${bootTime}`;
+    try {
+      const agent = await createAgent({ name: "dead-worker", isLead: false, status: "busy" });
+      const task = await createTaskExtended("Pinned-model audit", {
+        agentId: agent.id,
+        model: "claude-fable-5-1",
+      });
+      await startTask(task.id);
+      await getDbClient().run(
+        "UPDATE agent_tasks SET resolvedModel = ?, modelSource = 'model', claudeSessionId = 'sess-1' WHERE id = ?",
+        ["claude-fable-5-1", task.id],
+      );
+      await backdateTask(task.id, new Date(bootTime - 60_000).toISOString());
+
+      // No active session: the worker died with the old API process.
+      await runRebootSweep();
+
+      expect((await getTaskById(task.id))?.status).toBe("failed");
+      const [retry] = await getChildTasks(task.id);
+      expect(retry?.tags).toContain("reboot-retry");
+      expect(retry?.model).toBe("claude-fable-5-1");
     } finally {
       gs.__runId = original;
     }

@@ -2553,7 +2553,9 @@ export async function createTaskExtended(
       // `src/commands/runner.ts` — `opts.model || configModel`). A null `model`
       // here is the correct, intended state. Do NOT re-add inheritance here; if
       // a same-provider child genuinely needs a specific model, the creator must
-      // pass it explicitly.
+      // pass it explicitly. Resume and reboot-retry creators do: they pass the
+      // parent's task-level pin via `inheritedModelSelection`
+      // (`src/tasks/worker-follow-up.ts`).
       if (parent.dir && !options.dir) {
         options.dir = parent.dir;
       }

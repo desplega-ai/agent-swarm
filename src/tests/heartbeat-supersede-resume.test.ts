@@ -111,6 +111,27 @@ describe("Heartbeat — supersede + resume (DES-523)", () => {
     expect(metadata.resumeTaskId).toBe(resume.id);
   });
 
+  test("Case A: crash-recovery resume keeps the parent's task-level model pin", async () => {
+    const agent = await createAgent({ name: "dead-pinned-worker", isLead: false, status: "busy" });
+    const parent = await createTaskExtended("Pinned-model audit", {
+      agentId: agent.id,
+      model: "claude-fable-5-1",
+    });
+    await startTask(parent.id);
+    // Claimed with the pin, session reported, then 10 min stale.
+    await getDbClient().run(
+      "UPDATE agent_tasks SET resolvedModel = ?, modelSource = 'model', claudeSessionId = 'sess-1', lastUpdatedAt = ? WHERE id = ?",
+      ["claude-fable-5-1", new Date(Date.now() - 10 * 60 * 1000).toISOString(), parent.id],
+    );
+
+    const findings = await codeLevelTriage();
+
+    expect(findings.autoResumedTasks.length).toBe(1);
+    const [resume] = await getChildTasks(parent.id);
+    expect(resume?.taskType).toBe("resume");
+    expect(resume?.model).toBe("claude-fable-5-1");
+  });
+
   test("Case A: crash-recovery resume chain stops at the generation cap", async () => {
     const agent = await createAgent({ name: "dead-resume-worker", isLead: false, status: "busy" });
     const parent = await createTaskExtended("Resume at generation cap", {

@@ -179,10 +179,9 @@ describe("Task Supersede + Resume", () => {
       const child = result.task;
       expect(child.taskType).toBe("resume");
       expect(child.parentTaskId).toBe(parent.id);
-      // `model` is DELIBERATELY NOT inherited: a resume task may be claimed by a
-      // different-provider worker, so it must resolve to the claiming agent's
-      // own model at session-init rather than the parent's concrete string.
-      expect(child.model).toBeUndefined();
+      // The parent never ran a session, so `model` is still the creator's pin
+      // and the resume carries it (see `inheritedModelSelection`).
+      expect(child.model).toBe("openrouter/openai/gpt-5-nano");
       expect(child.dir).toBe("/workspace/project-x");
       expect(child.vcsRepo).toBe("owner/repo");
       expect(child.vcsProvider).toBe("github");
@@ -228,6 +227,90 @@ describe("Task Supersede + Resume", () => {
         model: "sonnet",
       });
       expect(explicitChild.model).toBe("sonnet");
+    });
+
+    // A claimed, running parent: the claim recorded modelSource="model" and the
+    // worker's session report rewrote `model` with the id it ran.
+    async function claimedPinnedParent(prefix: string, model: string) {
+      const worker = await freshAgent(prefix, { lastActivityAt: new Date().toISOString() });
+      const parent = await createTaskExtended(`Pinned-model audit (${prefix})`, {
+        agentId: worker.id,
+        model,
+      });
+      await startTask(parent.id);
+      await getDbClient().run(
+        "UPDATE agent_tasks SET resolvedModel = ?, modelSource = 'model', claudeSessionId = ? WHERE id = ?",
+        [model, `sess-${prefix}`, parent.id],
+      );
+      return parent;
+    }
+
+    for (const reason of ["graceful_shutdown", "context_limits", "manual_supersede"] as const) {
+      test(`${reason} resume keeps the parent's task-level model pin`, async () => {
+        const parent = await claimedPinnedParent(`pin-${reason}`, "claude-fable-5-1");
+        await supersedeTask(parent.id, { reason, resumeTaskId: null });
+
+        const result = await createResumeFollowUp({ parentId: parent.id, reason });
+        expect(result.kind).toBe("created");
+        if (result.kind !== "created") return;
+        const resume = (await getTaskById(result.task.id))!;
+        expect(resume.model).toBe("claude-fable-5-1");
+        // Claim-time outputs are not copied; the resume's own claim writes them.
+        expect(resume.resolvedModel).toBeUndefined();
+        expect(resume.modelSource).toBeUndefined();
+        expect(resume.modelAlias).toBeUndefined();
+      });
+    }
+
+    test("a latest: alias pin travels as the alias, with the parent's modelTier", async () => {
+      const worker = await freshAgent("pin-alias", { lastActivityAt: new Date().toISOString() });
+      const parent = await createTaskExtended("Alias-pinned work", {
+        agentId: worker.id,
+        model: "claude-opus-5-5",
+        modelTier: "smart",
+      });
+      await startTask(parent.id);
+      await getDbClient().run(
+        "UPDATE agent_tasks SET resolvedModel = 'claude-opus-5-5', modelSource = 'model', modelAlias = 'latest:anthropic/opus@stable', claudeSessionId = 'sess-alias' WHERE id = ?",
+        [parent.id],
+      );
+
+      const result = await createResumeFollowUp({
+        parentId: parent.id,
+        reason: "graceful_shutdown",
+      });
+      if (result.kind !== "created") throw new Error(result.kind);
+      expect(result.task.model).toBe("latest:anthropic/opus@stable");
+      expect(result.task.modelTier).toBe("smart");
+    });
+
+    test("no pin: a session-reported model is not carried, a tier is", async () => {
+      const worker = await freshAgent("no-pin", { lastActivityAt: new Date().toISOString() });
+      const unpinned = await createTaskExtended("Unpinned work", { agentId: worker.id });
+      const tiered = await createTaskExtended("Tier-only work", {
+        agentId: worker.id,
+        modelTier: "smart",
+      });
+      await startTask(unpinned.id);
+      await startTask(tiered.id);
+      // The worker reported the model it ran; no claim record for `unpinned`,
+      // a tier layer won for `tiered`.
+      await getDbClient().run(
+        "UPDATE agent_tasks SET model = 'claude-opus-5-5', claudeSessionId = 'sess-np' WHERE id = ?",
+        [unpinned.id],
+      );
+      await getDbClient().run(
+        "UPDATE agent_tasks SET model = 'opus', resolvedModel = 'opus', modelSource = 'tier-default', claudeSessionId = 'sess-t' WHERE id = ?",
+        [tiered.id],
+      );
+
+      const a = await createResumeFollowUp({ parentId: unpinned.id, reason: "graceful_shutdown" });
+      const b = await createResumeFollowUp({ parentId: tiered.id, reason: "graceful_shutdown" });
+      if (a.kind !== "created" || b.kind !== "created") throw new Error("resume not created");
+      expect(a.task.model).toBeUndefined();
+      expect(a.task.modelTier).toBeUndefined();
+      expect(b.task.model).toBeUndefined();
+      expect(b.task.modelTier).toBe("smart");
     });
 
     test("non-workflow parent with outputSchema → schema carries forward to resume child", async () => {
