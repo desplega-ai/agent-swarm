@@ -53,7 +53,7 @@ export async function handleRealtimeTicket(
   const parsed = await realtimeTicketRoute.parse(req, res, pathSegments, queryParams);
   if (!parsed) return true;
   const auth = getRequestAuth(req);
-  if (!auth || auth.kind === "agent" || auth.kind === "guest") {
+  if (!auth || auth.kind === "agent" || auth.kind === "guest" || auth.kind === "controller") {
     jsonError(res, "Comb presence requires dashboard authentication", 403);
     return true;
   }

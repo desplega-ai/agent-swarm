@@ -1,6 +1,9 @@
-import { z } from "zod";
 import { canProvisionKind, type RuntimeHandle } from "../../runtime-providers";
-import type { ControllerCommands } from "../../runtime-providers/controller";
+import {
+  type ControllerCommands,
+  ControllerOfflineError,
+} from "../../runtime-providers/controller";
+import { RuntimeHandleSchema } from "../../runtime-providers/controller-protocol";
 import { RUNTIME_LABELS } from "../../runtime-providers/types";
 import { createWorkerTaskFollowUp } from "../../tasks/worker-follow-up";
 import {
@@ -8,7 +11,6 @@ import {
   isTerminalTaskStatus,
   type RuntimeInstance,
   type RuntimePool,
-  RuntimeProviderKindSchema,
 } from "../../types";
 import { getPublicMcpBaseUrl } from "../../utils/constants";
 import { isMultiRuntimeEnabled } from "../../utils/multi-runtime";
@@ -30,6 +32,8 @@ import {
   clearRuntimeOwnerIdCache,
   ensureRuntimeOwnerId,
   getControllerCommands,
+  reconcileDisconnectedControllers,
+  reconcileRemoteProvisions,
 } from "./controllers";
 import {
   getPoolForAgent,
@@ -40,6 +44,7 @@ import {
 } from "./db";
 import { type AgentDemand, computeDesired, pendingWorkForAgent } from "./demand";
 import { recoverRuntime, startRuntimeRecovery, stopRuntimeRecovery } from "./recovery";
+import { remoteControllerSession } from "./remote-controller";
 
 let timer: ReturnType<typeof setInterval> | null = null;
 let kickTimer: ReturnType<typeof setTimeout> | null = null;
@@ -221,6 +226,8 @@ export async function provisionRuntime(
     return true;
   } catch (error) {
     reportSupervisorError(error);
+    // Keep an ambiguous remote provision reserved until reconnect or disconnect recovery.
+    if (error instanceof ControllerOfflineError) return false;
     try {
       const runtime = await getRuntimeInstanceById(runtimeId);
       await recordProvisionFailure(
@@ -239,14 +246,6 @@ export async function provisionRuntime(
     return false;
   }
 }
-
-const RuntimeHandleSchema = z.object({
-  kind: RuntimeProviderKindSchema,
-  externalId: z.string(),
-  createdAt: z.string().optional(),
-  controllerId: z.string().optional(),
-  meta: z.record(z.string(), z.string()).optional(),
-});
 
 export function runtimeHandle(runtime: RuntimeInstance): RuntimeHandle | null {
   return runtime.externalHandle ? RuntimeHandleSchema.parse(runtime.externalHandle) : null;
@@ -483,6 +482,7 @@ async function reconcilePools(
   commands: typeof getControllerCommands,
   signal: AbortSignal,
 ): Promise<void> {
+  await reconcileDisconnectedControllers(recoverRuntime, now);
   const ownerId = await ensureRuntimeOwnerId();
   const controllers = new Map<string, ControllerCommands>();
   const listed = new Map<string, RuntimeHandle[] | null>();
@@ -505,6 +505,9 @@ async function reconcilePools(
           reportSupervisorError(error);
           listed.set(controllerId, null);
         }
+        const handles = listed.get(controllerId);
+        if (handles && remoteControllerSession(controllerId) === controller)
+          await reconcileRemoteProvisions(controllerId, handles, ownerId);
         if (listed.get(controllerId))
           await reconcileControllerOrphans(
             controllerId,

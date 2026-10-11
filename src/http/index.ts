@@ -440,6 +440,8 @@ const httpServer = createHttpServer(async (req, res) => {
 
 // Store references in globalThis for hot reload persistence
 const detachRealtime = attachRealtimeTransport(httpServer);
+const { attachControllerTransport } = await import("./controllers-connect");
+const detachControllers = attachControllerTransport(httpServer);
 const stopWorkerNudges = startWorkerNudgeListener();
 const stopRoomDeletion = realtimeBus.subscribe("room:namespace-deleted", (namespace) => {
   void Promise.resolve(removeNamespaceRooms(String(namespace))).catch((error) =>
@@ -448,6 +450,7 @@ const stopRoomDeletion = realtimeBus.subscribe("room:namespace-deleted", (namesp
 });
 globalState.__closeRealtime = () => {
   detachRealtime();
+  detachControllers();
   stopWorkerNudges();
   stopRoomDeletion();
 };
