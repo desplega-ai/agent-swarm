@@ -1,0 +1,569 @@
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import { Readable } from "node:stream";
+import WebSocket from "ws";
+import {
+  closeDb,
+  createAgent,
+  createTaskExtended,
+  getAgentById,
+  getDbClient,
+  initDb,
+  upsertSwarmConfig,
+} from "../be/db";
+import {
+  mintRuntimeToken,
+  mintSessionToken,
+  resolveBySessionToken,
+  revokeRuntimeTokensForRuntime,
+  revokeSessionToken,
+} from "../be/users";
+import { handleAgentRegister, handleAgentsRest } from "../http/agents";
+import { handleConfig } from "../http/config";
+import { handleCore } from "../http/core";
+import { handleMcp } from "../http/mcp";
+import { handleMcpServers } from "../http/mcp-servers";
+import { handlePoll } from "../http/poll";
+import { handleSessions } from "../http/sessions";
+import { handleTasks } from "../http/tasks";
+import { getPathSegments, parseQueryParams } from "../http/utils";
+import { attachRealtimeTransport } from "../realtime/transport";
+import { registerSessionTokenConnection } from "../utils/session-token-connections";
+import { listenOnFreePort } from "./test-net";
+
+const key = "runtime-token-auth-test-key";
+const agentId = crypto.randomUUID();
+const otherId = crypto.randomUUID();
+const runtimeId = crypto.randomUUID();
+let server: Server;
+let baseUrl: string;
+let detach: () => void;
+let token: { tokenId: string; plaintext: string };
+let ownTaskId: string;
+let otherTaskId: string;
+const oldKey = process.env.AGENT_SWARM_API_KEY;
+
+async function request(
+  path: string,
+  bearer = token.plaintext,
+  options: { method?: string; body?: unknown; headers?: Record<string, string> } = {},
+) {
+  return await fetch(`${baseUrl}${path}`, {
+    method: options.method ?? (options.body === undefined ? "GET" : "POST"),
+    headers: {
+      Authorization: `Bearer ${bearer}`,
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+    body: options.body === undefined ? undefined : JSON.stringify(options.body),
+  });
+}
+
+beforeAll(async () => {
+  initDb(":memory:");
+  process.env.AGENT_SWARM_API_KEY = key;
+  await createAgent({ id: agentId, name: "Runtime worker", isLead: false, status: "idle" });
+  await createAgent({ id: otherId, name: "Other worker", isLead: false, status: "idle" });
+  ownTaskId = (await createTaskExtended("Runtime task", { agentId, source: "system" })).id;
+  otherTaskId = (await createTaskExtended("Other task", { agentId: otherId, source: "system" })).id;
+  token = await mintRuntimeToken(agentId, runtimeId, 60_000);
+});
+
+async function dispatch(req: IncomingMessage, res: ServerResponse) {
+  if (await handleCore(req, res, req.headers["x-agent-id"] as string | undefined, key)) return;
+  const segments = getPathSegments(req.url ?? "");
+  const query = parseQueryParams(req.url ?? "");
+  const id = req.headers["x-agent-id"] as string | undefined;
+  if (await handleAgentRegister(req, res, segments, id)) return;
+  if (await handleAgentsRest(req, res, segments, query, id)) return;
+  if (await handlePoll(req, res, segments, query, id)) return;
+  if (await handleTasks(req, res, segments, query, id)) return;
+  if (await handleSessions(req, res, segments, query)) return;
+  if (await handleConfig(req, res, segments, query)) return;
+  if (await handleMcpServers(req, res, segments, query, id)) return;
+  if (await handleMcp(req, res, {})) return;
+  res.writeHead(404).end();
+}
+
+async function startServer() {
+  server = createServer((req, res) => {
+    void dispatch(req, res).catch(() => res.writeHead(500).end());
+  });
+  const port = await listenOnFreePort(server);
+  baseUrl = `http://127.0.0.1:${port}`;
+  detach = attachRealtimeTransport(server);
+}
+
+afterAll(async () => {
+  detach?.();
+  if (server?.listening) await new Promise<void>((resolve) => server.close(() => resolve()));
+  closeDb();
+  if (oldKey === undefined) delete process.env.AGENT_SWARM_API_KEY;
+  else process.env.AGENT_SWARM_API_KEY = oldKey;
+});
+
+// Exercise handlers without a listener. Network tests below cover the wire path.
+async function directRequest(
+  path: string,
+  bearer = token.plaintext,
+  options: { method?: string; body?: unknown; headers?: Record<string, string> } = {},
+) {
+  const headers = Object.fromEntries(
+    Object.entries({
+      Authorization: `Bearer ${bearer}`,
+      "Content-Type": "application/json",
+      ...options.headers,
+    }).map(([name, value]) => [name.toLowerCase(), value]),
+  );
+  const req = Object.assign(
+    Readable.from(options.body === undefined ? [] : [JSON.stringify(options.body)]),
+    {
+      method: options.method ?? (options.body === undefined ? "GET" : "POST"),
+      url: path,
+      headers,
+    },
+  ) as IncomingMessage;
+  let status = 200;
+  let output = "";
+  const res = {
+    writeHead(code: number) {
+      status = code;
+      return res;
+    },
+    end(data = "") {
+      output = data;
+      return res;
+    },
+    setHeader() {
+      return res;
+    },
+  } as unknown as ServerResponse;
+  await dispatch(req, res);
+  return { status, body: output ? JSON.parse(output) : null };
+}
+
+test("central handler binding rejects spoofed identities and supplies missing headers", async () => {
+  for (const [path, method] of [
+    ["/api/poll", "GET"],
+    ["/ping", "POST"],
+    [`/api/tasks/${ownTaskId}/progress`, "POST"],
+    ["/mcp", "POST"],
+  ]) {
+    expect(
+      (await directRequest(path!, token.plaintext, { method, headers: { "X-Agent-ID": otherId } }))
+        .status,
+    ).toBe(403);
+  }
+  expect((await directRequest("/me")).body.id).toBe(agentId);
+  expect((await directRequest("/ping", token.plaintext, { method: "POST" })).status).toBe(204);
+  expect(
+    (
+      await directRequest("/api/poll", token.plaintext, {
+        headers: { "X-Runtime-Instance-ID": "wrong" },
+      })
+    ).status,
+  ).toBe(403);
+  expect(
+    (
+      await directRequest(`/api/agents/${otherId}/profile`, token.plaintext, {
+        method: "PUT",
+        body: {},
+      })
+    ).status,
+  ).toBe(403);
+  expect(
+    (await directRequest(`/api/agents/${otherId}/mcp-servers?resolveSecrets=true`)).status,
+  ).toBe(403);
+  expect(
+    (
+      await directRequest("/api/agents", token.plaintext, {
+        body: { name: "Runtime", isLead: true, runtimeInstanceId: runtimeId },
+      })
+    ).status,
+  ).toBe(200);
+  expect((await getAgentById(agentId))?.isLead).toBe(false);
+  const newAgentId = crypto.randomUUID();
+  const newRuntimeId = crypto.randomUUID();
+  const newToken = await mintRuntimeToken(newAgentId, newRuntimeId, 60_000);
+  expect(
+    (
+      await directRequest("/api/agents", newToken.plaintext, {
+        body: { name: "New runtime", isLead: true, runtimeInstanceId: newRuntimeId },
+      })
+    ).status,
+  ).toBe(201);
+  expect((await getAgentById(newAgentId))?.isLead).toBe(false);
+});
+
+test("handlers enforce self secrets and child token lifetime and ownership", async () => {
+  const secret = "runtime-handler-secret-123456";
+  await upsertSwarmConfig({
+    scope: "agent",
+    scopeId: agentId,
+    key: "DIRECT_TEST_SECRET",
+    value: secret,
+    isSecret: true,
+  });
+  expect(
+    JSON.stringify((await directRequest("/api/config/resolved?includeSecrets=true")).body),
+  ).toContain(secret);
+  const taskToken = await mintSessionToken(agentId, ownTaskId, 60_000);
+  expect(
+    JSON.stringify(
+      (await directRequest("/api/config/resolved?includeSecrets=true", taskToken.plaintext)).body,
+    ),
+  ).not.toContain(secret);
+  const child = await directRequest("/api/sessions/tokens", token.plaintext, {
+    body: { agentId, taskId: ownTaskId, ttlMs: 120_000 },
+  });
+  expect(child.status).toBe(200);
+  expect((await resolveBySessionToken(child.body.plaintext))!.expiresAt).toBe(
+    (await resolveBySessionToken(token.plaintext))!.expiresAt,
+  );
+  expect(
+    (
+      await directRequest("/api/sessions/tokens", token.plaintext, {
+        body: { agentId, taskId: otherTaskId, ttlMs: 60_000 },
+      })
+    ).status,
+  ).toBe(403);
+  expect(
+    (
+      await directRequest("/api/sessions/tokens", token.plaintext, {
+        body: { agentId, runtimeId, ttlMs: 60_000 },
+      })
+    ).status,
+  ).toBe(403);
+  expect(
+    (
+      await directRequest("/api/sessions/tokens", taskToken.plaintext, {
+        body: { agentId, taskId: ownTaskId, ttlMs: 60_000 },
+      })
+    ).status,
+  ).toBe(401);
+  const revokedRuntimeId = crypto.randomUUID();
+  const parent = await directRequest("/api/sessions/tokens", key, {
+    body: { agentId, runtimeId: revokedRuntimeId, ttlMs: 60_000 },
+  });
+  expect(parent.status).toBe(200);
+  const minted = await directRequest("/api/sessions/tokens", parent.body.plaintext, {
+    body: { agentId, taskId: ownTaskId, ttlMs: 60_000 },
+  });
+  expect(minted.status).toBe(200);
+  expect(
+    (await directRequest(`/api/sessions/tokens/${parent.body.tokenId}`, key, { method: "DELETE" }))
+      .status,
+  ).toBe(204);
+  expect((await directRequest("/ping", parent.body.plaintext, { method: "POST" })).status).toBe(
+    401,
+  );
+  expect((await directRequest("/ping", minted.body.plaintext, { method: "POST" })).status).toBe(
+    401,
+  );
+});
+
+test("runtime token lifecycle preserves binding and revokes child tokens", async () => {
+  const id = crypto.randomUUID();
+  const parent = await mintRuntimeToken(agentId, id, 60_000);
+  const principal = (await resolveBySessionToken(parent.plaintext))!;
+  expect(principal).toMatchObject({ agentId, taskId: null, runtimeId: id });
+  const child = await mintSessionToken(agentId, ownTaskId, 120_000, {
+    runtimeId: id,
+    expiresAt: principal.expiresAt,
+  });
+  expect(Date.parse((await resolveBySessionToken(child.plaintext))!.expiresAt)).toBeLessThanOrEqual(
+    Date.parse(principal.expiresAt),
+  );
+  await revokeRuntimeTokensForRuntime(id);
+  expect(await resolveBySessionToken(parent.plaintext)).toBeNull();
+  expect(await resolveBySessionToken(child.plaintext)).toBeNull();
+  await expect(
+    mintSessionToken(agentId, ownTaskId, 60_000, { runtimeId: id, expiresAt: principal.expiresAt }),
+  ).rejects.toThrow("Runtime token is no longer valid");
+  const expired = await mintRuntimeToken(agentId, crypto.randomUUID(), -1);
+  expect(await resolveBySessionToken(expired.plaintext)).toBeNull();
+});
+
+test("runtime revocation closes registered connections only after commit", async () => {
+  const id = crypto.randomUUID();
+  const parent = await mintRuntimeToken(agentId, id, 60_000);
+  let closed = 0;
+  const unregister = registerSessionTokenConnection(parent.tokenId, () => {
+    closed++;
+  });
+  try {
+    await expect(
+      getDbClient().transaction(async () => {
+        await revokeRuntimeTokensForRuntime(id);
+        expect(closed).toBe(0);
+        throw new Error("Rollback");
+      }),
+    ).rejects.toThrow("Rollback");
+    expect(closed).toBe(0);
+    expect(await resolveBySessionToken(parent.plaintext)).not.toBeNull();
+    await getDbClient().transaction(async () => {
+      await revokeSessionToken(parent.tokenId);
+      expect(closed).toBe(0);
+    });
+    expect(closed).toBe(1);
+  } finally {
+    unregister();
+  }
+});
+
+describe("runtime token HTTP and realtime auth", () => {
+  beforeAll(startServer);
+
+  test("runtime and ACP tokens initialize MCP with the token agent", async () => {
+    const acp = await mintSessionToken(agentId, ownTaskId, 60_000);
+    for (const bearer of [token.plaintext, acp.plaintext]) {
+      const response = await request("/mcp", bearer, {
+        headers: { Accept: "application/json, text/event-stream", "X-Source-Task-Id": ownTaskId },
+        body: {
+          jsonrpc: "2.0",
+          id: 1,
+          method: "initialize",
+          params: {
+            protocolVersion: "2024-11-05",
+            clientInfo: { name: "runtime-token-test", version: "1" },
+            capabilities: {},
+          },
+        },
+      });
+      expect(response.status).toBe(200);
+      await response.text();
+    }
+  });
+  test("operator mints a runtime token with the configured default TTL", async () => {
+    const previous = process.env.RUNTIME_TOKEN_TTL_HOURS;
+    process.env.RUNTIME_TOKEN_TTL_HOURS = "2";
+    try {
+      const response = await request("/api/sessions/tokens", key, { body: { agentId, runtimeId } });
+      expect(response.status).toBe(200);
+      const minted = (await response.json()) as typeof token;
+      const principal = await resolveBySessionToken(minted.plaintext);
+      expect(principal).toMatchObject({ agentId, runtimeId, taskId: null });
+      expect(Date.parse(principal!.expiresAt) - Date.now()).toBeGreaterThan(7_190_000);
+      await revokeSessionToken(minted.tokenId);
+      expect(await resolveBySessionToken(minted.plaintext)).toBeNull();
+      // The runtime revoke also fences the original token for this runtime.
+      token = await mintRuntimeToken(agentId, runtimeId, 60_000);
+    } finally {
+      if (previous === undefined) delete process.env.RUNTIME_TOKEN_TTL_HOURS;
+      else process.env.RUNTIME_TOKEN_TTL_HOURS = previous;
+    }
+  });
+
+  test.each([
+    ["/api/poll", "GET"],
+    ["/ping", "POST"],
+    ["/api/tasks/task-id/progress", "POST"],
+    ["/mcp", "POST"],
+  ])("rejects a mismatched agent header on %s", async (path, method) => {
+    const response = await request(path, token.plaintext, {
+      method,
+      headers: { "X-Agent-ID": otherId },
+    });
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({ error: "X-Agent-ID does not match token" });
+  });
+
+  test("missing headers resolve to the token identity on core and downstream routes", async () => {
+    const me = await request("/me");
+    expect(me.status).toBe(200);
+    expect(((await me.json()) as { id: string }).id).toBe(agentId);
+    expect((await request("/ping", token.plaintext, { method: "POST" })).status).toBe(204);
+    expect((await request("/api/poll")).status).toBe(200);
+    expect(
+      (
+        await request(`/api/tasks/${ownTaskId}/progress`, token.plaintext, {
+          body: { progress: "Runtime progress" },
+        })
+      ).status,
+    ).toBe(200);
+  });
+
+  test("rejects a mismatched runtime header", async () => {
+    expect(
+      (
+        await request("/api/poll", token.plaintext, {
+          headers: { "X-Runtime-Instance-ID": crypto.randomUUID() },
+        })
+      ).status,
+    ).toBe(403);
+  });
+
+  test("revoked and expired tokens return 401", async () => {
+    const revoked = await mintRuntimeToken(agentId, crypto.randomUUID(), 60_000);
+    await revokeRuntimeTokensForRuntime(
+      (await resolveBySessionToken(revoked.plaintext))!.runtimeId!,
+    );
+    const expired = await mintRuntimeToken(agentId, crypto.randomUUID(), -1);
+    for (const bearer of [revoked.plaintext, expired.plaintext]) {
+      expect((await request("/ping", bearer, { method: "POST" })).status).toBe(401);
+      expect(
+        (
+          await request(`/api/tasks/${ownTaskId}/progress`, bearer, {
+            body: { progress: "revoked" },
+          })
+        ).status,
+      ).toBe(401);
+    }
+  });
+
+  test("runtime secret reads reveal only the resolved own scope", async () => {
+    const secret = "runtime-self-secret-123456";
+    await upsertSwarmConfig({
+      scope: "agent",
+      scopeId: agentId,
+      key: "RUNTIME_TEST_SECRET",
+      value: secret,
+      isSecret: true,
+    });
+    await upsertSwarmConfig({
+      scope: "agent",
+      scopeId: otherId,
+      key: "OTHER_TEST_SECRET",
+      value: "other-secret-123456",
+      isSecret: true,
+    });
+    const read = async (path: string, bearer = token.plaintext) => {
+      const response = await request(path, bearer);
+      expect(response.status).toBe(200);
+      return JSON.stringify(await response.json());
+    };
+    expect(await read("/api/config/resolved?includeSecrets=true")).toContain(secret);
+    expect(await read(`/api/config/resolved?agentId=${agentId}&includeSecrets=true`)).toContain(
+      secret,
+    );
+    expect(await read(`/api/config/resolved?agentId=${otherId}&includeSecrets=true`)).not.toContain(
+      "other-secret-123456",
+    );
+    expect(await read("/api/config?includeSecrets=true")).not.toContain(secret);
+    const acp = await mintSessionToken(agentId, ownTaskId, 60_000);
+    expect(
+      await read(`/api/config/resolved?agentId=${agentId}&includeSecrets=true`, acp.plaintext),
+    ).not.toContain(secret);
+  });
+
+  test("runtime can mint only its own task tokens, capped at its expiry and revoked with it", async () => {
+    const parentRuntime = crypto.randomUUID();
+    const parent = await mintRuntimeToken(agentId, parentRuntime, 60_000);
+    for (const body of [
+      { agentId: otherId, taskId: otherTaskId, ttlMs: 60_000 },
+      { agentId, taskId: otherTaskId, ttlMs: 60_000 },
+      { agentId, taskId: crypto.randomUUID(), ttlMs: 60_000 },
+      { agentId, runtimeId: crypto.randomUUID(), ttlMs: 60_000 },
+    ]) {
+      expect((await request("/api/sessions/tokens", parent.plaintext, { body })).status).toBe(403);
+    }
+    const minted = await request("/api/sessions/tokens", parent.plaintext, {
+      body: { agentId, taskId: ownTaskId, ttlMs: 120_000 },
+    });
+    expect(minted.status).toBe(200);
+    const child = (await minted.json()) as typeof token;
+    const parentPrincipal = await resolveBySessionToken(parent.plaintext);
+    const childPrincipal = await resolveBySessionToken(child.plaintext);
+    expect(childPrincipal).toMatchObject({ agentId, taskId: ownTaskId, runtimeId: null });
+    expect(Date.parse(childPrincipal!.expiresAt)).toBeLessThanOrEqual(
+      Date.parse(parentPrincipal!.expiresAt),
+    );
+    expect(
+      await getDbClient().get("SELECT parentRuntimeId FROM session_tokens WHERE id = ?", [
+        child.tokenId,
+      ]),
+    ).toEqual({ parentRuntimeId: parentRuntime });
+    expect(
+      (
+        await request("/api/sessions/tokens", child.plaintext, {
+          body: { agentId, taskId: ownTaskId, ttlMs: 60_000 },
+        })
+      ).status,
+    ).toBe(401);
+    expect(
+      (await request(`/api/sessions/tokens/${parent.tokenId}`, key, { method: "DELETE" })).status,
+    ).toBe(204);
+    expect(await resolveBySessionToken(child.plaintext)).toBeNull();
+    expect((await request("/ping", child.plaintext, { method: "POST" })).status).toBe(401);
+  });
+
+  test("registration cannot promote an agent or register another runtime", async () => {
+    expect(
+      (
+        await request("/api/agents", token.plaintext, {
+          body: { name: "Runtime worker", isLead: true, runtimeInstanceId: runtimeId },
+        })
+      ).status,
+    ).toBe(200);
+    expect((await getAgentById(agentId))?.isLead).toBe(false);
+    expect(
+      (
+        await request("/api/agents", token.plaintext, {
+          body: { name: "Runtime worker", runtimeInstanceId: crypto.randomUUID() },
+        })
+      ).status,
+    ).toBe(403);
+  });
+
+  test("non-lead token cannot modify or resolve another agent's scope", async () => {
+    expect(
+      (
+        await request(`/api/agents/${otherId}/profile`, token.plaintext, {
+          method: "PUT",
+          body: { role: "lead" },
+        })
+      ).status,
+    ).toBe(403);
+    expect((await request(`/api/agents/${otherId}/mcp-servers?resolveSecrets=true`)).status).toBe(
+      403,
+    );
+    expect(
+      (await request(`/api/agents/${otherId}/mcp-servers?resolveSecrets=true`, key)).status,
+    ).toBe(200);
+  });
+
+  test("realtime rejects mismatched identities and closes runtime and child sockets on revoke", async () => {
+    const url = `${baseUrl.replace("http:", "ws:")}/api/realtime`;
+    await new Promise<void>((resolve, reject) => {
+      const ws = new WebSocket(url, {
+        headers: { Authorization: `Bearer ${token.plaintext}`, "X-Agent-ID": otherId },
+      });
+      ws.once("open", () => {
+        ws.close();
+        reject(new Error("Spoofed socket opened"));
+      });
+      ws.once("error", (error) => {
+        if (error.message.includes("401")) resolve();
+        else reject(error);
+      });
+    });
+    const parentRuntime = crypto.randomUUID();
+    const parent = await mintRuntimeToken(agentId, parentRuntime, 60_000);
+    const principal = (await resolveBySessionToken(parent.plaintext))!;
+    const child = await mintSessionToken(agentId, ownTaskId, 60_000, {
+      runtimeId: parentRuntime,
+      expiresAt: principal.expiresAt,
+    });
+    const sockets: WebSocket[] = [];
+    try {
+      for (const bearer of [parent.plaintext, child.plaintext]) {
+        const ws = new WebSocket(url, { headers: { Authorization: `Bearer ${bearer}` } });
+        sockets.push(ws);
+        const hello = await new Promise<{ me: { userId: string; kind: string } }>(
+          (resolve, reject) => {
+            ws.once("error", reject);
+            ws.once("message", (raw) => resolve(JSON.parse(raw.toString())));
+          },
+        );
+        expect(hello.me).toMatchObject({ userId: agentId, kind: "agent" });
+      }
+      const closed = sockets.map(
+        (ws) => new Promise<number>((resolve) => ws.once("close", resolve)),
+      );
+      await revokeRuntimeTokensForRuntime(parentRuntime);
+      expect(await Promise.all(closed)).toEqual([1008, 1008]);
+    } finally {
+      for (const ws of sockets) ws.terminate();
+    }
+  });
+});

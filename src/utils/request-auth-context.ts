@@ -7,8 +7,15 @@ export type HttpRequestAuth = (
   | { kind: "user"; userId: string; user: User }
   /** Password-page viewer with no user identity. Least privilege: every gate denies it. */
   | { kind: "guest" }
-  /** Ephemeral session token minted by the ACP adapter per session (aseph_ prefix). */
-  | { kind: "agent"; agentId: string; taskId: string }
+  /** Ephemeral token bound to an ACP task or a worker runtime (aseph_ prefix). */
+  | {
+      kind: "agent";
+      agentId: string;
+      taskId: string | null;
+      runtimeId: string | null;
+      tokenId: string;
+      expiresAt: string;
+    }
 ) & {
   /** Verified page context for agent-scoped operations. This does not identify the viewer. */
   page?: { id: string; executionAgentId: string };

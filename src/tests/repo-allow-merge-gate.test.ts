@@ -66,7 +66,14 @@ const KEYED_REQUEST: HttpRequestAuth = { kind: "operator", fingerprint: "test-ke
 /** What the other auth schemes resolve to, picked per request with the x-test-auth header. */
 const AUTH_BY_SCHEME: Record<string, HttpRequestAuth> = {
   user: { kind: "user", userId: "a".repeat(32), user: {} as never },
-  "agent-session": { kind: "agent", agentId: WORKER_ID, taskId: "task-1" },
+  "agent-session": {
+    kind: "agent",
+    agentId: WORKER_ID,
+    taskId: "task-1",
+    runtimeId: null,
+    tokenId: "test-token",
+    expiresAt: "2030-01-01",
+  },
 };
 
 async function api(

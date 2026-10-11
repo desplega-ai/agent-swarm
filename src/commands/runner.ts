@@ -5646,7 +5646,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
 
   // Fresh per boot and shared by registration, ping, and close: a restarted
   // process is a new runtime, but one process presents one identity.
-  const runtimeInstanceId = crypto.randomUUID();
+  const runtimeInstanceId = process.env.SWARM_RUNTIME_INSTANCE_ID || crypto.randomUUID();
 
   // Session MCP configs are built in provider adapters, which read this to
   // stamp the runtime identity onto worker tool calls.

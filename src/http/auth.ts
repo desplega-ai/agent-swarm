@@ -63,7 +63,7 @@ export async function resolveHttpRequestAuth(
   if (bearer.startsWith("aseph_")) {
     const principal = await resolveBySessionToken(bearer);
     if (principal) {
-      return { kind: "agent", agentId: principal.agentId, taskId: principal.taskId };
+      return { kind: "agent", ...principal };
     }
   }
 

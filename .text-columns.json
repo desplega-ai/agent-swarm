@@ -2572,6 +2572,9 @@
     }
   },
   "session_tokens": {
+    "runtimeId": { "exempt": "identifier" },
+    "parentRuntimeId": { "exempt": "identifier" },
+    "controllerId": { "exempt": "identifier" },
     "id": {
       "exempt": "identifier"
     },

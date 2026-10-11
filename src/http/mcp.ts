@@ -92,20 +92,15 @@ function forbidden(res: ServerResponse, message: string): true {
 
 /**
  * When a request is authenticated via an aseph_ session token (kind: "agent"),
- * the X-Agent-ID and X-Source-Task-Id headers MUST match the token's bound
- * agentId and taskId. A valid token cannot be used on behalf of a different
- * agent or task.
+ * the X-Source-Task-Id header must match a task-bound token.
+ * Central HTTP authentication enforces the agent and runtime headers.
  */
 function validateAgentTokenIdentity(req: IncomingMessage, res: ServerResponse): true | undefined {
   const auth = getRequestAuth(req);
-  if (!auth || auth.kind !== "agent") return undefined;
+  if (!auth || auth.kind !== "agent" || auth.taskId === null) return undefined;
 
-  const agentId = headerValue(req.headers["x-agent-id"]);
   const taskId = headerValue(req.headers["x-source-task-id"]);
 
-  if (!agentId || agentId !== auth.agentId) {
-    return forbidden(res, "X-Agent-ID does not match session token");
-  }
   if (!taskId || taskId !== auth.taskId) {
     return forbidden(res, "X-Source-Task-Id does not match session token");
   }

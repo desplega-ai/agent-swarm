@@ -249,7 +249,7 @@ describe("/mcp aseph_ token identity enforcement", () => {
     expect(res.status).toBe(403);
   });
 
-  test("rejects with 403 when X-Agent-ID header is missing", async () => {
+  test("uses the token agent when X-Agent-ID is missing, then rejects an unknown agent", async () => {
     const { plaintext } = await mintSessionToken("mcp-agent-E", "mcp-task-E", 60_000);
     const res = await fetch(`http://localhost:${mcpPort}/mcp`, {
       method: "POST",
@@ -260,7 +260,8 @@ describe("/mcp aseph_ token identity enforcement", () => {
       },
       body: JSON.stringify({ jsonrpc: "2.0", method: "initialize", id: 1, params: {} }),
     });
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ error: "Agent not found" });
   });
 
   test("rejects with 403 when X-Source-Task-Id header is missing", async () => {

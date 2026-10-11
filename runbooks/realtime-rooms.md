@@ -29,6 +29,9 @@ Guest proxy calls reach only `GET pages/<own id>` (without `passwordHash`) and t
 Public pages admit anonymous room peers through the dedicated socket path. They do not receive a general API cookie.
 
 Page sockets require a matching `Origin` and host. Authenticated sockets close when the signed page session expires.
+Task and runtime tokens identify their bound agent on bearer sockets.
+Sockets reject conflicting agent or runtime headers and check token validity every 15 seconds.
+Token revocation closes matching sockets after the database commit.
 Every page request resolves to `task:page:<pageId>`, regardless of a supplied namespace.
 Bearer agents can explicitly join a page room. Other agent namespaces retain the existing own-agent or lead authorization.
 User mutations require the configured `kv.write.any` grant when RBAC is enabled.

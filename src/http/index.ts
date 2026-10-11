@@ -329,7 +329,7 @@ const httpServer = createHttpServer(async (req, res) => {
       if (isApiDraining()) res.setHeader(API_DRAINING_HEADER, "1");
 
       const queryParams = parseQueryParams(req.url || "");
-      const myAgentId = req.headers["x-agent-id"] as string | undefined;
+      let myAgentId = req.headers["x-agent-id"] as string | undefined;
 
       // ── Route handlers (order matters — first match wins) ──
       const handlers: (() => Promise<boolean>)[] = [
@@ -406,6 +406,7 @@ const httpServer = createHttpServer(async (req, res) => {
         // the async listener as an unhandled rejection and the client got a
         // dropped connection instead of a 500.
         if (await handleCore(req, res, myAgentId, apiKey)) return;
+        myAgentId = req.headers["x-agent-id"] as string | undefined;
 
         for (const handler of handlers) {
           if (await handler()) return;

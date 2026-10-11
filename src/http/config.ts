@@ -32,7 +32,7 @@ import { jsonError } from "./utils";
 
 const MAX_ENV_PRESENCE_KEYS = 200;
 const SECRETS_FORCE_MASK_NOTE =
-  " (secret values masked: reading unmasked secrets requires the lead agent)";
+  " (secret values masked: this token cannot read secrets in this scope)";
 
 // Config keys the API server owns for its own use and must NEVER hand out over
 // HTTP — workers/entrypoints read config to build their env, and the agent-fs
@@ -56,13 +56,13 @@ async function requestMayReadSecrets(req: IncomingMessage): Promise<boolean> {
   const auth = getRequestAuth(req);
   if (auth?.kind === "operator") return true;
   if (auth?.kind === "agent") {
-    const agent = await getAgentById(auth.agentId);
-    return can({
-      principal: { kind: "agent", agentId: auth.agentId, isLead: agent?.isLead ?? false },
-      verb: "config.read.secrets",
-      resource: { kind: "none" },
-      source: "http",
-    }).allow;
+    if (!auth.runtimeId) return false;
+    const path = req.url?.split("?")[0];
+    const query = new URLSearchParams(req.url?.split("?")[1]);
+    return (
+      path === "/api/config/resolved" &&
+      (!query.has("agentId") || query.get("agentId") === auth.agentId)
+    );
   }
   if (auth?.kind === "guest") return false;
   // Preserve legacy reads without a user or session-token principal.
@@ -299,10 +299,14 @@ export async function handleConfig(
     const includeSecrets = parsed.query.includeSecrets === "true";
     const { effectiveIncludeSecrets, secretsNote } = await resolveSecretsRead(req, includeSecrets);
     const key = parsed.query.key;
+    const auth = getRequestAuth(req);
     // Filter by key before masking and before any secret is registered, so a
     // caller asking for one key never receives the rest (matches get-config).
     const configs = stripApiOnlyKeys(
-      await getResolvedConfig(parsed.query.agentId || undefined, parsed.query.repoId || undefined),
+      await getResolvedConfig(
+        parsed.query.agentId || (auth?.kind === "agent" ? auth.agentId : undefined),
+        parsed.query.repoId || undefined,
+      ),
     ).filter((c) => !key || c.key === key);
     const result = effectiveIncludeSecrets ? configs : maskSecrets(configs);
     if (effectiveIncludeSecrets) {

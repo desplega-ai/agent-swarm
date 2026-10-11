@@ -18,6 +18,7 @@ Bun auto-loads `.env`. Don't use `dotenv`.
 |---|---|---|
 | `AGENT_SWARM_API_KEY` (preferred) / `API_KEY` (legacy) | `123123` | Auth header `Authorization: Bearer …`. `AGENT_SWARM_API_KEY` wins when both are set — prefer it when exporting in your shell profile so the CLI works from any cwd without colliding with other tools' `API_KEY`. |
 | `RBAC_ENABLED` | `true` | Gates REST calls authenticated with `aswt_` user tokens at HTTP admission against the user's RBAC role grants. Operator key and agent calls are unaffected. |
+| `RUNTIME_TOKEN_TTL_HOURS` | `168` | Runtime token lifetime in hours, greater than zero and at most 168. Applies to new tokens. |
 | `MCP_BASE_URL` | `http://localhost:3013` | Internal/worker-facing API base the workers/UI hit |
 | `PUBLIC_MCP_BASE_URL` | falls back to `MCP_BASE_URL` | Public origin for OAuth redirect URIs + webhook URLs. No action needed locally — leave unset and it defaults to `MCP_BASE_URL`. Only relevant in split deploys where `MCP_BASE_URL` is an internal/cluster address. |
 | `APP_URL` | `http://localhost:5274` | Dashboard URL |
@@ -40,6 +41,9 @@ Bun auto-loads `.env`. Don't use `dotenv`.
 `HARNESS_PROVIDER=devin` requires `DEVIN_API_KEY` (prefix `cog_*`) and `DEVIN_ORG_ID` (prefix `org-*`). Optional: `DEVIN_POLL_INTERVAL_MS` (default 15000), `DEVIN_ACU_COST_USD` (default 2.25), `DEVIN_MAX_ACU_LIMIT` (per-session ACU cap, sent to Devin API and shown in UI budget bar), `DEVIN_API_BASE_URL` (override for testing). Repos are configured via the task's `vcsRepo` field — no env var needed. See `.env.docker-devin.example` for a full template.
 
 `AGENT_SWARM_API_KEY` / `API_KEY` and `SECRETS_ENCRYPTION_KEY` are reserved — they cannot be stored in `swarm_config`.
+
+Runtime tokens are `aseph_` bearer tokens bound to one agent and runtime, with access to that agent's resolved secrets.
+They replace the swarm key only for supervisor-provisioned runtimes, and runtime revocation also revokes their task tokens.
 
 SSRF guards on script-connection URL fetches (OpenAPI spec URLs, OAuth
 discovery, authorize/token URLs) **fail closed**: private/loopback and plain

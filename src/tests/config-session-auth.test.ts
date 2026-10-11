@@ -65,7 +65,7 @@ afterAll(async () => {
 
 describe("config HTTP session-token authorization", () => {
   for (const route of ["list", "resolved", "by-id"] as const) {
-    test(`${route} masks secrets for a non-lead session even with a spoofed lead header`, async () => {
+    test(`${route} masks task-token secrets and rejects a spoofed lead header`, async () => {
       const token = await mint(workerId);
       const lead = await mint(leadId);
       const path =
@@ -75,18 +75,22 @@ describe("config HTTP session-token authorization", () => {
             ? "/api/config/resolved"
             : "/api/config";
       const url = `${baseUrl}${path}?includeSecrets=true&agentId=${workerId}`;
-      // Positive controls: operator and a token bound to the actual lead may read.
-      for (const bearer of [API_KEY, lead.plaintext]) {
+      // The operator can read secrets. Task tokens remain masked, including lead tokens.
+      for (const bearer of [API_KEY]) {
         const res = await fetch(url, { headers: headers(bearer) });
         expect(res.status).toBe(200);
         expect(await res.text()).toContain(SECRET);
       }
+      const leadRead = await fetch(url, { headers: headers(lead.plaintext) });
+      expect(leadRead.status).toBe(200);
+      expect(await leadRead.text()).not.toContain(SECRET);
       const responses: string[] = [];
-      for (const agentId of [undefined, workerId, leadId]) {
+      for (const agentId of [undefined, workerId]) {
         const res = await fetch(url, { headers: headers(token.plaintext, agentId) });
         expect(res.status).toBe(200);
         responses.push(await res.text());
       }
+      expect((await fetch(url, { headers: headers(token.plaintext, leadId) })).status).toBe(403);
       const revoked = await fetch(`${baseUrl}/api/sessions/tokens/${token.tokenId}`, {
         method: "DELETE",
         headers: headers(API_KEY),

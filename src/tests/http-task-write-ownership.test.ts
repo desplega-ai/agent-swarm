@@ -39,7 +39,14 @@ let baseUrl: string;
 
 function authFor(caller: Caller): HttpRequestAuth {
   if (caller.as === "session") {
-    return { kind: "agent", agentId: caller.agentId, taskId: "session-task" };
+    return {
+      kind: "agent",
+      agentId: caller.agentId,
+      taskId: "session-task",
+      runtimeId: null,
+      tokenId: "test-token",
+      expiresAt: "2030-01-01",
+    };
   }
   if (caller.as === "user") {
     return { kind: "user", userId, user: { id: userId } as never };
