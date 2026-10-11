@@ -69,9 +69,9 @@ Not in scope: who mints at provision time (step-5), controller tokens (step-10 a
 - [x] `bun run lint && bun run tsc:check:tsc` pass
 
 #### Automated QA:
-- [x] Boot the API on a temp DB. Mint a runtime token with the swarm key: `curl -X POST $API/api/sessions/tokens -H "Authorization: Bearer $KEY" -d '{"agentId":"<uuid>","runtimeId":"<uuid>","ttlMs":3600000}'`. Create a task pinned to that agent. Start `ghcr.io/desplega-ai/agent-swarm-worker:slim` with `API_KEY=<token>`, `AGENT_ID=<uuid>`, `SWARM_RUNTIME_INSTANCE_ID=<uuid>`, `MCP_BASE_URL=http://host.docker.internal:<port>` (the spike recipe in `scripts/spike-runtime-providers.ts`). The task reaches `completed`. Worker logs show no 401/403.
+- [ ] (pending: docker worker QA at integration) Boot the API on a temp DB. Mint a runtime token with the swarm key: `curl -X POST $API/api/sessions/tokens -H "Authorization: Bearer $KEY" -d '{"agentId":"<uuid>","runtimeId":"<uuid>","ttlMs":3600000}'`. Create a task pinned to that agent. Start `ghcr.io/desplega-ai/agent-swarm-worker:slim` with `API_KEY=<token>`, `AGENT_ID=<uuid>`, `SWARM_RUNTIME_INSTANCE_ID=<uuid>`, `MCP_BASE_URL=http://host.docker.internal:<port>` (the spike recipe in `scripts/spike-runtime-providers.ts`). The task reaches `completed`. Worker logs show no 401/403.
 - [x] With the same token, `curl -H "X-Agent-ID: <other-uuid>" $API/api/poll` returns 403.
-- [x] Revoke via `DELETE /api/sessions/tokens/{id}`. The next worker call returns 401 (visible in worker logs) and the worker cannot write progress.
+- [ ] (API part verified; worker-log part pending) Revoke via `DELETE /api/sessions/tokens/{id}`. The next worker call returns 401 (visible in worker logs) and the worker cannot write progress.
 
 #### Manual Verification:
 - [ ] Taras confirms the self-scoped secret rule matches the intended trust model (runtime token sees the same resolved secrets a swarm-key worker sees for its agent, no more).
