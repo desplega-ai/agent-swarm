@@ -25,6 +25,7 @@ const connect = mock(async (_id: string, _opts?: unknown) => ({}));
 const target = {
   E2B_API_KEY: `controller-${crypto.randomUUID()}`,
   E2B_API_BASE: "https://e2b.test",
+  WORKER_API_URL: "https://swarm.test",
 };
 const handle = { kind: "e2b" as const, externalId: sandbox.sandboxID };
 const request: ProvisionRequest = {
@@ -81,7 +82,8 @@ describe("E2B runtime provider", () => {
   test("requires a controller key and configures the continuous limit", () => {
     expect(new E2BRuntimeProvider().checkConfig({})).toEqual({
       ready: false,
-      missing: ["E2B_API_KEY"],
+      missing: ["E2B_API_KEY", "WORKER_API_URL"],
+      hint: "E2B requires E2B_API_KEY and WORKER_API_URL. WORKER_API_URL must use HTTPS.",
     });
     expect(new E2BRuntimeProvider().checkConfig(target).ready).toBe(true);
     expect(new E2BRuntimeProvider().traits.maxContinuousSec).toBe(3600);
@@ -91,6 +93,31 @@ describe("E2B runtime provider", () => {
     expect(() => new E2BRuntimeProvider({ E2B_MAX_CONTINUOUS_SEC: "invalid" })).toThrow(
       "positive integer",
     );
+  });
+
+  test("requires an HTTPS worker URL and respects URL precedence", () => {
+    const provider = new E2BRuntimeProvider();
+    for (const WORKER_API_URL of ["http://swarm.test", "invalid", ""])
+      expect(provider.checkConfig({ ...target, WORKER_API_URL }).ready).toBe(false);
+    expect(
+      provider.checkConfig({
+        E2B_API_KEY: target.E2B_API_KEY,
+        RUNTIME_WORKER_API_URL: "https://swarm.test",
+      }).ready,
+    ).toBe(true);
+    expect(
+      provider.checkConfig({
+        E2B_API_KEY: target.E2B_API_KEY,
+        PUBLIC_MCP_BASE_URL: "https://swarm.test",
+      }).ready,
+    ).toBe(true);
+    expect(
+      provider.checkConfig({
+        ...target,
+        WORKER_API_URL: "http://swarm.test",
+        PUBLIC_MCP_BASE_URL: "https://swarm.test",
+      }).ready,
+    ).toBe(false);
   });
 
   test("provisions with owner metadata and a short default lease", async () => {
@@ -145,6 +172,16 @@ describe("E2B runtime provider", () => {
       { ...handle, meta: metadata, createdAt: startedAt },
     ]);
     expect(listSandboxes).toHaveBeenCalledWith(target.E2B_API_KEY, target.E2B_API_BASE);
+  });
+
+  test("provision preserves the provider lease expiry and creation time", async () => {
+    const startedAt = "2026-10-11T12:00:00.000Z";
+    createSandbox.mockImplementation(async () => ({ ...sandbox, endAt, startedAt }));
+    expect(await new E2BRuntimeProvider().provision(target, request)).toEqual({
+      ...handle,
+      createdAt: startedAt,
+      meta: { leaseExpiresAt: endAt },
+    });
   });
 
   test("status uses a single lookup without resuming a paused sandbox", async () => {

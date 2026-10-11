@@ -5,6 +5,7 @@ import { getAgentById } from "../be/db";
 import { listRuntimeInstancesForPool } from "../be/multi-runtime";
 import {
   bindAgentToPool,
+  checkE2bControllerConfig,
   createPoolAgent,
   createRuntimeController,
   createRuntimePool,
@@ -65,7 +66,10 @@ const createPoolRoute = route({
   body: RuntimePoolCreateSchema,
 
   responses: {
-    200: { description: "Success", schema: z.object({ pool: RuntimePoolSchema }) },
+    200: {
+      description: "Success",
+      schema: z.object({ pool: RuntimePoolSchema, warning: z.string().optional() }),
+    },
     400: { description: "Invalid configuration" },
     403: { description: "Permission denied" },
     404: { description: "Not found or runtime pools disabled" },
@@ -352,10 +356,20 @@ export async function handleRuntimePools(
     if (matched === createPoolRoute) {
       const parsed = await createPoolRoute.parse(req, res, pathSegments, queryParams);
       if (!parsed) return true;
+      const pool = await createRuntimePool(parsed.body, actor);
+      const controller =
+        pool.kind === "e2b" ? await getRuntimeController(pool.placements[0]!) : null;
+      const config =
+        controller?.placement === "builtin" ? await checkE2bControllerConfig(controller) : null;
       createPoolRoute.respond(
         res,
         200,
-        scrubResponse({ pool: await createRuntimePool(parsed.body, actor) }),
+        scrubResponse({
+          pool,
+          ...(config && !config.ready
+            ? { warning: config.hint ?? `Missing configuration: ${config.missing.join(", ")}` }
+            : {}),
+        }),
       );
       return true;
     }

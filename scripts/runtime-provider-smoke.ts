@@ -64,6 +64,7 @@ const target: Record<string, string | undefined> =
         E2B_API_KEY: process.env.E2B_API_KEY ?? (await e2bKeyFromCli()),
         E2B_API_BASE: process.env.E2B_API_BASE,
         E2B_MAX_CONTINUOUS_SEC: process.env.E2B_MAX_CONTINUOUS_SEC,
+        WORKER_API_URL: args["worker-api"],
       };
 
 async function api<T>(method: string, path: string, body?: unknown): Promise<T | undefined> {

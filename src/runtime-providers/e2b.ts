@@ -27,6 +27,7 @@ import {
  * - E2B_API_KEY (required)
  * - E2B_API_BASE (optional)
  * - E2B_TTL_SEC (optional, default 900)
+ * - WORKER_API_URL (required HTTPS URL, with deployment fallbacks)
  */
 const DEFAULT_TTL_SEC = 900;
 
@@ -69,9 +70,21 @@ export class E2BRuntimeProvider implements RuntimeProvider {
   }
 
   checkConfig(target: RuntimeTargetConfig): ConfigStatus {
-    return target.E2B_API_KEY
-      ? { ready: true, missing: [] }
-      : { ready: false, missing: ["E2B_API_KEY"] };
+    const missing = target.E2B_API_KEY ? [] : ["E2B_API_KEY"];
+    const workerUrl =
+      target.WORKER_API_URL ?? target.RUNTIME_WORKER_API_URL ?? target.PUBLIC_MCP_BASE_URL;
+    try {
+      if (!workerUrl || new URL(workerUrl).protocol !== "https:") missing.push("WORKER_API_URL");
+    } catch {
+      missing.push("WORKER_API_URL");
+    }
+    return missing.length
+      ? {
+          ready: false,
+          missing,
+          hint: `E2B requires ${missing.join(" and ")}. WORKER_API_URL must use HTTPS.`,
+        }
+      : { ready: true, missing: [] };
   }
 
   private apiKey(target: RuntimeTargetConfig): string {
@@ -112,7 +125,13 @@ export class E2BRuntimeProvider implements RuntimeProvider {
           await killSandbox(sandbox.sandboxID, apiKey, target.E2B_API_BASE).catch(() => {});
           throw err;
         }
-        return { kind: "e2b", externalId: sandbox.sandboxID };
+        const leaseExpiresAt = sandbox.endAt ?? sandbox.expiresAt;
+        return {
+          kind: "e2b",
+          externalId: sandbox.sandboxID,
+          ...(sandbox.startedAt ? { createdAt: sandbox.startedAt } : {}),
+          ...(leaseExpiresAt ? { meta: { leaseExpiresAt } } : {}),
+        };
       },
       req.env,
     );

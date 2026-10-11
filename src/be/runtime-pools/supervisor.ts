@@ -39,7 +39,13 @@ import {
   resolvePoolDelivery,
 } from "./db";
 import { type AgentDemand, computeDesired, pendingWorkForAgent } from "./demand";
-import { recoverRuntime, startRuntimeRecovery, stopRuntimeRecovery } from "./recovery";
+import { resolveE2bImage } from "./e2b-images";
+import {
+  recoverPausedRuntime,
+  recoverRuntime,
+  startRuntimeRecovery,
+  stopRuntimeRecovery,
+} from "./recovery";
 
 let timer: ReturnType<typeof setInterval> | null = null;
 let kickTimer: ReturnType<typeof setTimeout> | null = null;
@@ -62,6 +68,14 @@ function reportSupervisorError(error: unknown): void {
 function runtimeNumber(key: string, fallback: number): number {
   const value = Number(process.env[key]);
   return Number.isInteger(value) && value > 0 ? value : fallback;
+}
+
+function poolLeaseTtl(pool: RuntimePool, controller: ControllerCommands): number {
+  return Math.min(
+    pool.ttlSec ?? 900,
+    controller.traits.maxTtlSec ?? Infinity,
+    controller.traits.maxContinuousSec ?? Infinity,
+  );
 }
 
 async function recordProvisionFailure(
@@ -159,6 +173,7 @@ export async function provisionRuntime(
   now = new Date(),
 ): Promise<boolean> {
   const runtimeId = crypto.randomUUID();
+  const startedAt = Date.now();
   try {
     const token = await getDbClient().transaction(async () => {
       const credential = await mintRuntimeToken(agent.id, runtimeId);
@@ -199,12 +214,23 @@ export async function provisionRuntime(
     delete env.TEMPLATE_ID;
     if (pool.lifecycle === "per-task") env.SWARM_EXIT_AFTER_TASKS = "1";
     if (templateId) env.TEMPLATE_ID = templateId;
+    const ttlSec = pool.kind === "e2b" ? poolLeaseTtl(pool, controller) : undefined;
+    const image =
+      pool.kind === "e2b" ? await resolveE2bImage(pool.id) : (pool.resolvedImage ?? pool.image!);
+    if (pool.kind === "e2b") {
+      // Image construction does not consume the worker registration window.
+      await getDbClient().run(
+        "UPDATE runtime_instances SET provision_requested_at = ? WHERE id = ?",
+        [new Date(now.getTime() + Date.now() - startedAt).toISOString(), runtimeId],
+      );
+    }
     const handle = await controller.provision({
       runtimeId,
       agentId: agent.id,
       poolId: pool.id,
       ownerId,
-      image: pool.resolvedImage ?? pool.image!,
+      image,
+      ...(ttlSec === undefined ? {} : { ttlSec }),
       env,
       resources: pool.resources ?? undefined,
       labels: {
@@ -215,8 +241,16 @@ export async function provisionRuntime(
       },
     });
     await getDbClient().run(
-      "UPDATE runtime_instances SET external_handle = ?, updated_at = ? WHERE id = ?",
-      [JSON.stringify(handle), new Date().toISOString(), runtimeId],
+      "UPDATE runtime_instances SET external_handle = ?, lease_expires_at = ?, created_at = COALESCE(?, created_at), updated_at = ? WHERE id = ?",
+      [
+        JSON.stringify(handle),
+        ttlSec === undefined
+          ? null
+          : (handle.meta?.leaseExpiresAt ?? new Date(now.getTime() + ttlSec * 1000).toISOString()),
+        pool.kind === "e2b" ? (handle.createdAt ?? now.toISOString()) : null,
+        new Date().toISOString(),
+        runtimeId,
+      ],
     );
     return true;
   } catch (error) {
@@ -266,12 +300,25 @@ export async function terminateRuntime(
   await markRuntimeTerminated(runtime.id, reason);
 }
 
-async function rotatingRuntimes(poolId: string, expiresBy: string): Promise<Set<string>> {
+async function rotatingRuntimes(
+  poolId: string,
+  expiresBy: string,
+  now: Date,
+  maxContinuousSec?: number,
+): Promise<Set<string>> {
+  const rotateAt =
+    maxContinuousSec === undefined
+      ? null
+      : new Date(
+          now.getTime() -
+            Math.max(0, maxContinuousSec - runtimeNumber("RUNTIME_ROTATE_BEFORE_SEC", 600)) * 1000,
+        ).toISOString();
   const rows = await getDbClient().query<{ runtimeId: string }>(
-    `SELECT DISTINCT t.runtimeId FROM session_tokens t
-     JOIN runtime_instances r ON r.id = t.runtimeId
-     WHERE r.pool_id = ? AND t.revokedAt IS NULL AND t.expiresAt <= ?`,
-    [poolId, expiresBy],
+    `SELECT DISTINCT r.id AS runtimeId FROM runtime_instances r
+     LEFT JOIN session_tokens t ON r.id = t.runtimeId
+     WHERE r.pool_id = ? AND ((t.revokedAt IS NULL AND t.expiresAt <= ?)
+       OR (? IS NOT NULL AND r.created_at <= ?))`,
+    [poolId, expiresBy, rotateAt, rotateAt],
   );
   return new Set(rows.map((row) => row.runtimeId));
 }
@@ -291,11 +338,15 @@ export async function reapPoolRuntimes(
       new Date(
         now.getTime() + runtimeNumber("RUNTIME_TOKEN_ROTATE_BEFORE_MIN", 60) * 60_000,
       ).toISOString(),
+      now,
+      controller.traits.maxContinuousSec,
     ));
   const cutoff = now.getTime() - runtimeStaleThresholdMinutes() * 60_000;
   const remaining = new Map<string, number>();
   const handles = runtimes
-    .filter((r) => r.status !== "offline" && Date.parse(r.lastSeenAt) >= cutoff)
+    .filter(
+      (r) => r.status !== "offline" && (pool.kind === "e2b" || Date.parse(r.lastSeenAt) >= cutoff),
+    )
     .map(runtimeHandle)
     .filter((h): h is RuntimeHandle => h !== null);
   let statuses: Awaited<ReturnType<ControllerCommands["status"]>> = {};
@@ -315,7 +366,9 @@ export async function reapPoolRuntimes(
   for (const runtime of runtimes)
     if (
       runtime.status === "provisioning" ||
-      (runtime.status === "active" && Date.parse(runtime.lastSeenAt) >= cutoff)
+      (runtime.status === "active" &&
+        (Date.parse(runtime.lastSeenAt) >= cutoff ||
+          (pool.kind === "e2b" && statuses[runtimeHandle(runtime)?.externalId ?? ""] === "paused")))
     )
       remaining.set(runtime.agentId, (remaining.get(runtime.agentId) ?? 0) + 1);
   for (const runtime of runtimes) {
@@ -329,10 +382,16 @@ export async function reapPoolRuntimes(
         continue;
       }
       const handle = runtimeHandle(runtime);
-      const stale = runtime.status === "active" && Date.parse(runtime.lastSeenAt) < cutoff;
       const status = handle ? statuses[handle.externalId] : undefined;
+      const stale =
+        runtime.status === "active" &&
+        Date.parse(runtime.lastSeenAt) < cutoff &&
+        !(pool.kind === "e2b" && status === "paused");
       const missing =
-        handle && listedHandles && !listedHandles.some((h) => h.externalId === handle.externalId);
+        handle &&
+        listedHandles &&
+        !listedHandles.some((h) => h.externalId === handle.externalId) &&
+        !(pool.kind === "e2b" && status === "paused");
       const timeoutSec = runtimeNumber("RUNTIME_PROVISION_TIMEOUT_SEC", 300);
       const timedOut =
         runtime.status === "provisioning" &&
@@ -355,7 +414,6 @@ export async function reapPoolRuntimes(
         if (!stale) remaining.set(runtime.agentId, (remaining.get(runtime.agentId) ?? 1) - 1);
         continue;
       }
-      if (runtime.status !== "active" && pool.enabled) continue;
       const busy = await getDbClient().get<{ taskId: string }>(
         "SELECT taskId FROM active_sessions WHERE runtimeInstanceId = ? LIMIT 1",
         [runtime.id],
@@ -363,6 +421,26 @@ export async function reapPoolRuntimes(
       const task = runtime.taskId ? await getTaskById(runtime.taskId) : null;
       const taskRunning = task?.status === "in_progress" || task?.status === "reviewing";
       const rotating = rotations.has(runtime.id);
+      if (status === "paused" && pool.kind === "e2b") {
+        const idleExpired =
+          pool.lifecycle === "idle" &&
+          pool.idleMinutes !== null &&
+          runtime.idleSince != null &&
+          now.getTime() - Date.parse(runtime.idleSince) >= pool.idleMinutes * 60_000 &&
+          (remaining.get(runtime.agentId) ?? 0) > pool.minRuntimes;
+        const finished = pool.lifecycle === "per-task" && task && isTerminalTaskStatus(task.status);
+        await recoverPausedRuntime(
+          runtime,
+          controller,
+          pool.enabled && !rotating && !idleExpired && !finished,
+          !!busy || taskRunning,
+          now,
+        );
+        if ((await getRuntimeInstanceById(runtime.id))?.status === "offline")
+          remaining.set(runtime.agentId, (remaining.get(runtime.agentId) ?? 1) - 1);
+        continue;
+      }
+      if (runtime.status !== "active" && pool.enabled) continue;
       if (busy || taskRunning) {
         await getDbClient().run(
           "UPDATE runtime_instances SET idle_since = NULL, draining = ?, task_id = COALESCE(?, task_id) WHERE id = ?",
@@ -376,7 +454,13 @@ export async function reapPoolRuntimes(
             runtime.id,
           ]);
         } else {
-          await terminateRuntime(runtime, controller, "Runtime token expires soon");
+          await terminateRuntime(
+            runtime,
+            controller,
+            controller.traits.maxContinuousSec === undefined
+              ? "Runtime token expires soon"
+              : "Runtime rotation due",
+          );
           remaining.set(runtime.agentId, (remaining.get(runtime.agentId) ?? 1) - 1);
         }
         continue;
@@ -422,6 +506,39 @@ export async function reapPoolRuntimes(
       }
     } catch (error) {
       reportSupervisorError(error);
+    }
+  }
+}
+
+async function renewPoolLeases(
+  pool: RuntimePool,
+  controller: ControllerCommands,
+  now: Date,
+): Promise<void> {
+  if (pool.kind !== "e2b" || !controller.renew) return;
+  const renewBy = now.getTime() + runtimeNumber("RUNTIME_LEASE_RENEW_BEFORE_SEC", 300) * 1000;
+  for (const runtime of await listRuntimeInstancesForPool(pool.id)) {
+    if (
+      runtime.status === "offline" ||
+      (runtime.leaseExpiresAt && Date.parse(runtime.leaseExpiresAt) > renewBy)
+    )
+      continue;
+    const handle = runtimeHandle(runtime);
+    if (!handle) continue;
+    try {
+      const { endAt } = await controller.renew(handle, poolLeaseTtl(pool, controller));
+      if (!Number.isFinite(Date.parse(endAt)))
+        throw new Error("Provider returned an invalid lease expiry");
+      await getDbClient().run(
+        "UPDATE runtime_instances SET lease_expires_at = ?, updated_at = ? WHERE id = ? AND status != 'offline'",
+        [endAt, now.toISOString(), runtime.id],
+      );
+      console.log(
+        scrubSecrets(`[runtime-pools] Runtime ${runtime.id} lease renewed until ${endAt}`),
+      );
+    } catch (error) {
+      reportSupervisorError(error);
+      await reapPoolRuntimes(pool, [runtime], controller, now);
     }
   }
 }
@@ -491,8 +608,7 @@ async function reconcilePools(
   ).toISOString();
   for (const pool of await listRuntimePools()) {
     if (signal.aborted) return;
-    // E2B lifecycle and leases are installed by step 9.
-    if (!canProvisionKind(pool.kind) || pool.kind !== "docker") continue;
+    if (!canProvisionKind(pool.kind)) continue;
     const controllerId = pool.placements[0]!;
     try {
       const controller = controllers.get(controllerId) ?? (await commands(controllerId));
@@ -514,7 +630,12 @@ async function reconcilePools(
             listed.get(controllerId),
           );
       }
-      const rotatingIds = await rotatingRuntimes(pool.id, rotationCutoff);
+      const rotatingIds = await rotatingRuntimes(
+        pool.id,
+        rotationCutoff,
+        now,
+        controller.traits.maxContinuousSec,
+      );
       await reapPoolRuntimes(
         pool,
         await listRuntimeInstancesForPool(pool.id),
@@ -523,6 +644,7 @@ async function reconcilePools(
         listed.get(controllerId),
         rotatingIds,
       );
+      await renewPoolLeases(pool, controller, now);
       if (signal.aborted) return;
       const currentPool = await getRuntimePool(pool.id);
       const agents = await listAgentsForPool(pool.id);

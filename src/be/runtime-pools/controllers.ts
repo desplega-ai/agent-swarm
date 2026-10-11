@@ -1,8 +1,8 @@
 import { createRuntimeProvider } from "../../runtime-providers";
 import { BuiltinController, type ControllerCommands } from "../../runtime-providers/controller";
-import { registerVolatileSecret, scrubSecrets } from "../../utils/secret-scrubber";
+import { scrubSecrets } from "../../utils/secret-scrubber";
 import { getDbClient, getSwarmConfigs, upsertSwarmConfig } from "../db";
-import { getRuntimeController, getRuntimeControllerSecrets } from "./db";
+import { checkE2bControllerConfig, getRuntimeController, getRuntimeControllerTarget } from "./db";
 
 let ownerId: Promise<string> | null = null;
 
@@ -41,21 +41,15 @@ export async function getControllerCommands(controllerId: string): Promise<Contr
     const controller = await getRuntimeController(controllerId);
     if (!controller) throw new Error("Runtime controller does not exist");
     if (controller.placement !== "builtin") throw new Error("Remote controller is not available");
-    const secrets = await getRuntimeControllerSecrets(controllerId);
-    for (const [key, value] of Object.entries(secrets))
-      registerVolatileSecret(value, `runtime-controller:${controllerId}:${key}`);
-    const target = {
-      DOCKER_HOST: process.env.DOCKER_HOST,
-      DOCKER_NETWORK: process.env.DOCKER_NETWORK,
-      DOCKER_EXTRA_HOSTS: process.env.DOCKER_EXTRA_HOSTS,
-      ...controller.config,
-      ...secrets,
-    };
-    const provider = await createRuntimeProvider(controller.kind, target);
-    const config = provider.checkConfig(target);
+    const target = await getRuntimeControllerTarget(controller);
+    const config =
+      controller.kind === "e2b"
+        ? await checkE2bControllerConfig(controller, target)
+        : (await createRuntimeProvider(controller.kind, target)).checkConfig(target);
     if (!config.ready)
       throw new Error(config.hint ?? `Missing configuration: ${config.missing.join(", ")}`);
-    return new BuiltinController(controllerId, provider, target, controller.config.WORKER_API_URL);
+    const provider = await createRuntimeProvider(controller.kind, target);
+    return new BuiltinController(controllerId, provider, target, target.WORKER_API_URL);
   } catch (error) {
     throw new Error(scrubSecrets(String(error)));
   }

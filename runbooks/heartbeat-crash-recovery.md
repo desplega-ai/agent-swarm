@@ -155,7 +155,12 @@ is never expired):
 - The supervisor batches provider status checks for pooled runtimes every five seconds by default.
   Provider `exited`, `failed`, or absence from a successful owner-filtered list triggers immediate recovery.
   The ping cutoff also triggers termination and recovery. A fresh `unknown` runtime present in the list remains unchanged.
-  Provider errors do not prove death. Paused runtimes retain their tasks.
+  Provider errors do not prove death.
+  An unplanned pause resumes a wanted idle runtime and renews its lease.
+  A pause during active work triggers `recoverRuntime`, then terminates the sandbox because the model stream cannot continue.
+  An unwanted paused runtime terminates without resuming.
+  E2B lease expiry can remove the sandbox. A failed renewal checks provider status and recovers confirmed absence.
+  A running sandbox retains its tasks after a renewal transport error.
 - `recoverRuntime` serializes recovery for its runtime, then calls `markRuntimeTerminated`.
   This marks the row offline, reconciles agent status, and revokes runtime and child tokens.
   Revocation closes token-authenticated sockets. Subsequent worker calls receive 401.
@@ -182,6 +187,10 @@ is never expired):
   A busy runtime drains and accepts no new tasks. Demand can provision a replacement within the pool cap.
   The supervisor terminates the drained runtime when its tasks finish.
 - A draining runtime cannot receive work through `/api/poll`. The supervisor drains idle runtimes before termination and checks activity again next tick.
+- E2B runtimes use the same drain path within `RUNTIME_ROTATE_BEFORE_SEC` seconds of their continuous runtime limit.
+  Demand can provision replacements within the pool cap. Busy runtimes finish their tasks before termination.
+  The limit comes from controller `E2B_MAX_CONTINUOUS_SEC`, then the deployment value, then 3600 seconds.
+  Pro deployments can configure 86400 seconds. Planned rotation never pauses a busy runtime.
 - Supervisor termination immediately marks the runtime offline, reconciles the agent status, and revokes runtime tokens. A surviving live runtime keeps its agent available.
 - Disabled pools stop provisioning and drain idle runtimes. The supervisor continues provider checks and orphan cleanup.
 - The whole mechanism is inert while the flag is off. After a rollback workers
@@ -790,6 +799,9 @@ Rollback switches accept `0`/`false` interchangeably (both parse through
 | Pool circuit duration | 10 min | `RUNTIME_CIRCUIT_OPEN_MIN` |
 | Push socket grace | 60s | `RUNTIME_SOCKET_GRACE_SEC` |
 | Runtime token rotation window | 60 min | `RUNTIME_TOKEN_ROTATE_BEFORE_MIN` |
+| E2B lease renewal window | 300s | `RUNTIME_LEASE_RENEW_BEFORE_SEC` |
+| Continuous runtime rotation window | 600s | `RUNTIME_ROTATE_BEFORE_SEC` |
+| E2B continuous runtime limit | 3600s | `E2B_MAX_CONTINUOUS_SEC` |
 | Runtime liveness window (§1a) | 5 min | `RUNTIME_STALE_THRESHOLD_MIN` |
 | Same-agent liveness window | 30s | `WORKER_LIVENESS_WINDOW_SECONDS` |
 | Worker active-task reconcile cadence (worker env, read at worker start) | 30s | `RUNNER_TASK_RECONCILE_INTERVAL_MS` |

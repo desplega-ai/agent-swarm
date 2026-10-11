@@ -305,6 +305,9 @@ The API checks the pool flag for each routing event and timer tick.
 | `RUNTIME_CIRCUIT_OPEN_MIN` | `10` | Minutes before the pool permits one trial provision. Failure opens the circuit again. |
 | `RUNTIME_SOCKET_GRACE_SEC` | `60` | Seconds after the last push socket disconnect before a provider check. Running runtimes keep their tasks. |
 | `RUNTIME_TOKEN_ROTATE_BEFORE_MIN` | `60` | Minutes before token expiry to drain busy runtimes or terminate idle runtimes. |
+| `RUNTIME_LEASE_RENEW_BEFORE_SEC` | `300` | Seconds before E2B lease expiry to renew wanted runtimes. |
+| `RUNTIME_ROTATE_BEFORE_SEC` | `600` | Seconds before the continuous runtime limit to drain E2B runtimes. |
+| `E2B_MAX_CONTINUOUS_SEC` | `3600` | E2B continuous limit in seconds. Use `3600` for Hobby or `86400` for Pro. Controller configuration overrides this default. |
 
 Retries wait 30, 90, then 180 seconds. Agent rows persist retry counts and deadlines across API restarts.
 First registration resets the agent retry state and closes the pool circuit.
@@ -316,6 +319,17 @@ Token rotation drains runtimes before termination. A later tick checks activity 
 Demand can create replacements within the pool cap. The supervisor terminates drained runtimes after their tasks finish.
 The failure settings accept positive integers. Socket grace also accepts zero for an immediate provider check.
 These settings apply after configuration reload. The supervisor interval requires a restart.
+
+E2B pools provision with pool `ttlSec` or a 900-second lease, bounded by provider limits.
+Renewal stores E2B's actual expiry. If the API stops, the lease bounds sandbox lifetime.
+Continuous rotation uses the same drain path as token rotation. Busy runtimes finish their tasks before termination.
+An unplanned pause resumes a wanted idle runtime. A pause during active work triggers task recovery and sandbox termination.
+E2B requires `E2B_API_KEY` and an HTTPS worker URL. Controller readiness records configuration failures.
+Pool creation succeeds with a warning while the builtin E2B controller remains unready.
+Plain images name E2B templates. A `docker://` image builds and caches a template during first provision.
+Custom images must extend the slim or full Agent Swarm worker image. Changing the image clears the template cache.
+Per-task pools pay for the boot sequence on every sandbox start.
+See the [runtime provider runbook](https://github.com/desplega-ai/agent-swarm/blob/main/runbooks/runtime-providers.md#e2b) for details.
 
 The routing and wake settings accept nonnegative integers. Zero permits an immediate wake or reroute.
 For the routing interval, zero uses the default. Positive values below 500 use 500 milliseconds.

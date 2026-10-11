@@ -1,5 +1,6 @@
 import { realtimeBus } from "../../realtime/bus";
 import { canProvisionKind } from "../../runtime-providers";
+import type { ControllerCommands } from "../../runtime-providers/controller";
 import type { RuntimeInstance } from "../../types";
 import { isMultiRuntimeEnabled } from "../../utils/multi-runtime";
 import { isRuntimePoolsEnabled } from "../../utils/runtime-pools-flag";
@@ -59,6 +60,29 @@ export async function recoverRuntime(runtimeId: string, reason: string): Promise
   });
 }
 
+export async function recoverPausedRuntime(
+  runtime: RuntimeInstance,
+  controller: ControllerCommands,
+  wanted: boolean,
+  busy: boolean,
+  now = new Date(),
+): Promise<void> {
+  if (busy) {
+    await recoverRuntime(runtime.id, "Runtime paused during a task");
+    await terminateRuntime(runtime, controller, "Runtime paused during a task");
+  } else if (!wanted) {
+    await terminateRuntime(runtime, controller, "Paused runtime no longer wanted");
+  } else {
+    const handle = runtimeHandle(runtime);
+    if (!handle || !controller.resume) throw new Error("Controller cannot resume a paused runtime");
+    await controller.resume(handle);
+    await getDbClient().run(
+      "UPDATE runtime_instances SET last_seen_at = ?, lease_expires_at = NULL WHERE id = ? AND status != 'offline'",
+      [now.toISOString(), runtime.id],
+    );
+  }
+}
+
 export async function remediateStalledRuntime(
   runtimeId: string,
   reason: string,
@@ -95,6 +119,20 @@ export async function checkDisconnectedRuntime(runtimeId: string): Promise<void>
   if (!handle) return;
   const controller = await getControllerCommands(runtime.controllerId);
   const status = (await controller.status([handle]))[handle.externalId];
+  if (status === "paused" && pool.kind === "e2b") {
+    const session = await getDbClient().get(
+      "SELECT taskId FROM active_sessions WHERE runtimeInstanceId = ? LIMIT 1",
+      [runtimeId],
+    );
+    const task = runtime.taskId ? await getTaskById(runtime.taskId) : null;
+    await recoverPausedRuntime(
+      runtime,
+      controller,
+      pool.enabled && !runtime.draining,
+      !!session || task?.status === "in_progress" || task?.status === "reviewing",
+    );
+    return;
+  }
   if (status === "running" || status === "starting" || status === "paused") return;
   if (
     status === "exited" ||
