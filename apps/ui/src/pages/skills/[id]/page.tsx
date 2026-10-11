@@ -33,8 +33,12 @@ import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { PageHeader } from "@/components/ui/page-header";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
 import { formatRelativeTime } from "@/lib/utils";
+import { SkillUsagePanel } from "../components/skill-usage-panel";
+import { formatCount, formatLocalDateTime, readUsageWindow } from "../components/usage-shared";
 
 /**
  * Split a SKILL.md into its YAML frontmatter block and the markdown body.
@@ -90,6 +94,10 @@ function parseFrontmatter(yaml: string): FrontmatterEntry[] {
 export default function SkillDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { searchParams, setParam } = useUrlSearchState();
+  const activeTab =
+    readStringParam(searchParams, "tab", "content") === "usage" ? "usage" : "content";
+  const usageWindow = readUsageWindow(searchParams);
   const { data: skill, isLoading } = useSkill(id!);
   const updateSkill = useUpdateSkill();
   const deleteSkill = useDeleteSkill();
@@ -273,106 +281,127 @@ export default function SkillDetailPage() {
       <DetailPageBody
         className="flex-1 min-h-0"
         main={
-          <div className="flex flex-col flex-1 min-h-0 gap-3">
-            <div className="flex items-center justify-between shrink-0">
-              {skillFiles.length > 0 ? (
-                <SearchableSelect
-                  value={selectedFilePath}
-                  onChange={setSelectedFilePath}
-                  // The editor stays bound to SKILL.md while editing (Edit is
-                  // only offered on SKILL.md), so switching files mid-edit
-                  // would show a bundled file's path over SKILL.md's content
-                  // and Save would silently overwrite SKILL.md.
-                  disabled={editContent !== null}
-                  options={[
-                    { value: "", label: `${skill.name}/SKILL.md` },
-                    ...skillFiles.map((file) => ({
-                      value: file.path,
-                      label: `${skill.name}/${file.path}`,
-                      hint: file.isBinary ? "binary" : undefined,
-                    })),
-                  ]}
-                  searchPlaceholder="Search files…"
-                  triggerClassName="h-8 w-auto min-w-[220px] max-w-[480px] px-2.5 text-sm text-muted-foreground"
-                  contentClassName="w-auto min-w-[320px]"
-                />
-              ) : (
-                <span className="text-sm text-muted-foreground">SKILL.md content</span>
-              )}
-              {editContent !== null ? (
-                <div className="flex gap-2">
-                  <Button variant="outline" size="sm" onClick={() => setEditContent(null)}>
-                    Cancel
-                  </Button>
-                  <Button size="sm" onClick={handleSaveContent} disabled={updateSkill.isPending}>
-                    Save
-                  </Button>
-                </div>
-              ) : (
-                <div className="flex gap-2">
-                  <Tooltip>
-                    <TooltipTrigger asChild>
+          <Tabs
+            value={activeTab}
+            onValueChange={(value) => setParam("tab", value, { defaultValue: "content" })}
+            className="flex flex-col flex-1 min-h-0 gap-3"
+          >
+            <TabsList className="shrink-0">
+              <TabsTrigger value="content">Content</TabsTrigger>
+              <TabsTrigger value="usage">Usage</TabsTrigger>
+            </TabsList>
+            <TabsContent value="content" className="flex flex-col flex-1 min-h-0 gap-3">
+              <div className="flex items-center justify-between shrink-0">
+                {skillFiles.length > 0 ? (
+                  <SearchableSelect
+                    value={selectedFilePath}
+                    onChange={setSelectedFilePath}
+                    // The editor stays bound to SKILL.md while editing (Edit is
+                    // only offered on SKILL.md), so switching files mid-edit
+                    // would show a bundled file's path over SKILL.md's content
+                    // and Save would silently overwrite SKILL.md.
+                    disabled={editContent !== null}
+                    options={[
+                      { value: "", label: `${skill.name}/SKILL.md` },
+                      ...skillFiles.map((file) => ({
+                        value: file.path,
+                        label: `${skill.name}/${file.path}`,
+                        hint: file.isBinary ? "binary" : undefined,
+                      })),
+                    ]}
+                    searchPlaceholder="Search files…"
+                    triggerClassName="h-8 w-auto min-w-[220px] max-w-[480px] px-2.5 text-sm text-muted-foreground"
+                    contentClassName="w-auto min-w-[320px]"
+                  />
+                ) : (
+                  <span className="text-sm text-muted-foreground">SKILL.md content</span>
+                )}
+                {editContent !== null ? (
+                  <div className="flex gap-2">
+                    <Button variant="outline" size="sm" onClick={() => setEditContent(null)}>
+                      Cancel
+                    </Button>
+                    <Button size="sm" onClick={handleSaveContent} disabled={updateSkill.isPending}>
+                      Save
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="flex gap-2">
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          variant="outline"
+                          size="icon"
+                          className="size-8"
+                          onClick={() => setIsReading(true)}
+                          disabled={!readableText.trim()}
+                          aria-label="Read full screen"
+                        >
+                          <Maximize2 className="h-4 w-4" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent side="bottom">Read full screen</TooltipContent>
+                    </Tooltip>
+                    {!skill.systemDefault && !viewingFile && (
                       <Button
                         variant="outline"
-                        size="icon"
-                        className="size-8"
-                        onClick={() => setIsReading(true)}
-                        disabled={!readableText.trim()}
-                        aria-label="Read full screen"
+                        size="sm"
+                        onClick={() => setEditContent(skill.content)}
                       >
-                        <Maximize2 className="h-4 w-4" />
+                        Edit
                       </Button>
-                    </TooltipTrigger>
-                    <TooltipContent side="bottom">Read full screen</TooltipContent>
-                  </Tooltip>
-                  {!skill.systemDefault && !viewingFile && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setEditContent(skill.content)}
-                    >
-                      Edit
-                    </Button>
-                  )}
-                </div>
-              )}
-            </div>
-            {editContent !== null ? (
-              <MarkdownEditor
-                value={editContent}
-                onChange={setEditContent}
-                className="flex-1 min-h-[320px]"
-              />
-            ) : (
-              <Card className="flex-1 min-h-0 overflow-hidden py-0">
-                <CardContent className="prose-doc h-full overflow-auto px-4 py-4">
-                  {viewingFile ? (
-                    isFileLoading ? (
-                      <Skeleton className="h-32 w-full" />
-                    ) : !selectedFile ? (
-                      <p className="text-sm text-muted-foreground">File not found.</p>
-                    ) : selectedFile.isBinary ? (
-                      <p className="text-sm text-muted-foreground">
-                        Binary file ({selectedFile.mimeType}
-                        {selectedFile.size != null ? `, ${selectedFile.size} bytes` : ""}) — not
-                        rendered.
-                      </p>
-                    ) : isMarkdownFile ? (
-                      <MarkdownView text={selectedFile.content} normalizeSoftBreaks={false} />
+                    )}
+                  </div>
+                )}
+              </div>
+              {editContent !== null ? (
+                <MarkdownEditor
+                  value={editContent}
+                  onChange={setEditContent}
+                  className="flex-1 min-h-[320px]"
+                />
+              ) : (
+                <Card className="flex-1 min-h-0 overflow-hidden py-0">
+                  <CardContent className="prose-doc h-full overflow-auto px-4 py-4">
+                    {viewingFile ? (
+                      isFileLoading ? (
+                        <Skeleton className="h-32 w-full" />
+                      ) : !selectedFile ? (
+                        <p className="text-sm text-muted-foreground">File not found.</p>
+                      ) : selectedFile.isBinary ? (
+                        <p className="text-sm text-muted-foreground">
+                          Binary file ({selectedFile.mimeType}
+                          {selectedFile.size != null ? `, ${selectedFile.size} bytes` : ""}) — not
+                          rendered.
+                        </p>
+                      ) : isMarkdownFile ? (
+                        <MarkdownView text={selectedFile.content} normalizeSoftBreaks={false} />
+                      ) : (
+                        <MonacoCodeBlock
+                          language={fileLanguage}
+                          value={selectedFile.content}
+                          fill
+                        />
+                      )
+                    ) : body.trim() ? (
+                      <MarkdownView text={body} normalizeSoftBreaks={false} />
                     ) : (
-                      <MonacoCodeBlock language={fileLanguage} value={selectedFile.content} fill />
-                    )
-                  ) : body.trim() ? (
-                    <MarkdownView text={body} normalizeSoftBreaks={false} />
-                  ) : (
-                    <p className="text-sm text-muted-foreground">
-                      This skill has no content below its frontmatter.
-                    </p>
-                  )}
-                </CardContent>
-              </Card>
-            )}
-          </div>
+                      <p className="text-sm text-muted-foreground">
+                        This skill has no content below its frontmatter.
+                      </p>
+                    )}
+                  </CardContent>
+                </Card>
+              )}
+            </TabsContent>
+            <TabsContent value="usage" className="flex-1 min-h-0 overflow-y-auto">
+              <SkillUsagePanel
+                skillId={skill.id}
+                window={usageWindow}
+                onWindowChange={(value) => setParam("window", value, { defaultValue: "30d" })}
+              />
+            </TabsContent>
+          </Tabs>
         }
         rail={
           <DetailPageRail>
@@ -399,6 +428,19 @@ export default function SkillDetailPage() {
             <QuickStats>
               <QuickStat label="ID" value={skill.id} mono />
               <QuickStat label="Version" value={skill.version} />
+              <QuickStat label="Uses (all time)" value={formatCount(skill.invocationCount ?? 0)} />
+              <QuickStat
+                label="Last Used"
+                value={
+                  skill.lastInvokedAt ? (
+                    <span title={formatLocalDateTime(skill.lastInvokedAt)}>
+                      {formatRelativeTime(skill.lastInvokedAt)}
+                    </span>
+                  ) : (
+                    "Never"
+                  )
+                }
+              />
               <QuickStat label="Created" value={formatRelativeTime(skill.createdAt)} />
               <QuickStat label="Last Updated" value={formatRelativeTime(skill.lastUpdatedAt)} />
               {skill.lastFetchedAt && (

@@ -1340,6 +1340,9 @@ export class CodexSession implements ProviderSession {
             toolCallId: item.id,
             toolName: this.toolNameForItem(item),
             result: item,
+            ...(item.type === "command_execution"
+              ? { isError: item.exit_code !== 0 || item.status === "failed" }
+              : {}),
           });
           this.transcript.push(
             `Tool[${this.toolNameForItem(item)}] completed: ${this.shortenItemResult(item)}`,

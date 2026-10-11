@@ -14,7 +14,17 @@ export type MaxConcurrentTasksResult =
   | { ok: false; error: string };
 
 export type NonInteractiveProviderResult =
-  | { ok: true; state: Pick<OnboardState, ProviderStateKey>; credentialLabel: string }
+  | {
+      ok: true;
+      state: Pick<OnboardState, ProviderStateKey>;
+      credentialLabel: string;
+      /**
+       * Set when the provider has no credential yet. Workers boot and park in
+       * credential-wait (src/commands/credential-wait.ts) until the dashboard
+       * /setup page writes one to swarm_config, so this is a warning, not an error.
+       */
+      missingCredentialWarning?: string;
+    }
   | { ok: false; error: string };
 
 type ProviderStateKey =
@@ -34,6 +44,20 @@ type ProviderStateKey =
 
 const ACCEPTED_CREDENTIALS =
   "Set one of: CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY (Claude Code); OPENAI_API_KEY (OpenAI); OPENROUTER_API_KEY (OpenRouter); or AWS_REGION plus AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY or AWS_PROFILE and a Bedrock MODEL_OVERRIDE.";
+
+const DEFERRED_CREDENTIAL_LABEL = "no credential yet";
+
+function deferredCredential(
+  state: Pick<OnboardState, ProviderStateKey>,
+  missing: string,
+): NonInteractiveProviderResult {
+  return {
+    ok: true,
+    state,
+    credentialLabel: DEFERRED_CREDENTIAL_LABEL,
+    missingCredentialWarning: `${missing} Workers will wait until you add one in the dashboard (/setup). ${ACCEPTED_CREDENTIALS}`,
+  };
+}
 
 function value(env: Env, key: string): string {
   return env[key]?.trim() ?? "";
@@ -110,7 +134,11 @@ export function normalizeBedrockModel(model: string): string {
     : `amazon-bedrock/${trimmed}`;
 }
 
-/** Resolve and validate install-provider credentials without React side effects. */
+/**
+ * Resolve and validate install-provider credentials without React side effects.
+ * A missing Claude, OpenAI or OpenRouter credential is non-fatal: onboarding
+ * continues and returns `missingCredentialWarning`.
+ */
 export function resolveNonInteractiveProvider(env: Env): NonInteractiveProviderResult {
   const provider = selectedProvider(env);
   if (provider === "invalid") {
@@ -120,7 +148,7 @@ export function resolveNonInteractiveProvider(env: Env): NonInteractiveProviderR
     };
   }
 
-  // Preserve the historical default. Its missing-credential error now explains every alternative.
+  // Preserve the historical default. Its missing-credential warning explains every alternative.
   const resolvedProvider = provider ?? "claude";
   const state = baseState(resolvedProvider);
 
@@ -128,7 +156,7 @@ export function resolveNonInteractiveProvider(env: Env): NonInteractiveProviderR
     state.claudeOAuthToken = value(env, "CLAUDE_CODE_OAUTH_TOKEN");
     state.anthropicApiKey = value(env, "ANTHROPIC_API_KEY");
     if (!state.claudeOAuthToken && !state.anthropicApiKey)
-      return { ok: false, error: ACCEPTED_CREDENTIALS };
+      return deferredCredential(state, "No Claude Code credential is set.");
     state.credentialType = state.anthropicApiKey ? "api_key" : "oauth";
     return {
       ok: true,
@@ -139,23 +167,19 @@ export function resolveNonInteractiveProvider(env: Env): NonInteractiveProviderR
 
   if (resolvedProvider === "openai") {
     state.openaiApiKey = value(env, "OPENAI_API_KEY");
-    if (!state.openaiApiKey)
-      return { ok: false, error: `OPENAI_API_KEY is required for OpenAI. ${ACCEPTED_CREDENTIALS}` };
+    if (!state.openaiApiKey) return deferredCredential(state, "OPENAI_API_KEY is not set.");
     return { ok: true, state, credentialLabel: "API key" };
   }
 
   if (resolvedProvider === "openrouter") {
     state.openrouterApiKey = value(env, "OPENROUTER_API_KEY");
     state.modelOverride = value(env, "MODEL_OVERRIDE") || "openrouter/qwen/qwen3-coder-flash";
-    if (!state.openrouterApiKey) {
-      return {
-        ok: false,
-        error: `OPENROUTER_API_KEY is required for OpenRouter. ${ACCEPTED_CREDENTIALS}`,
-      };
-    }
+    if (!state.openrouterApiKey) return deferredCredential(state, "OPENROUTER_API_KEY is not set.");
     return { ok: true, state, credentialLabel: "API key" };
   }
 
+  // Bedrock stays fatal: AWS_REGION and the model are boot config, and pi hands
+  // Bedrock auth to the AWS SDK, so the worker never parks in credential-wait.
   state.awsRegion = value(env, "AWS_REGION");
   state.awsAccessKeyId = value(env, "AWS_ACCESS_KEY_ID");
   state.awsSecretAccessKey = value(env, "AWS_SECRET_ACCESS_KEY");

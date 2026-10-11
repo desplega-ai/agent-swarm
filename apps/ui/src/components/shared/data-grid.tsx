@@ -15,6 +15,7 @@ import {
   QuickFilterModule,
   type RowClickedEvent,
   TextFilterModule,
+  TooltipModule,
   ValidationModule,
 } from "ag-grid-community";
 import { AgGridReact } from "ag-grid-react";
@@ -32,6 +33,7 @@ ModuleRegistry.registerModules([
   QuickFilterModule,
   ColumnAutoSizeModule,
   CsvExportModule,
+  TooltipModule,
   ValidationModule,
 ]);
 

@@ -47,11 +47,15 @@ describe("describeModelResolution", () => {
   test("every server modelSource has a label, and unknown ones pass through", () => {
     expect(Object.keys(MODEL_SOURCE_LABELS).sort()).toEqual([
       "fallback:cli-unsupported",
+      "fallback:cli-unsupported:model",
       "model",
       "tier-config",
       "tier-default",
       "worker-env",
     ]);
+    expect(modelSourceLabel("fallback:cli-unsupported:model")).toBe(
+      "Fallback (CLI rejected the task's own model)",
+    );
     expect(modelSourceLabel("something-new")).toBe("something-new");
   });
 });

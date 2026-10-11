@@ -219,6 +219,9 @@ export function Onboard({
     addLog(
       `Provider: ${providerConfig.state.provider} → ${providerConfig.state.harness} (${providerConfig.credentialLabel})`,
     );
+    if (providerConfig.missingCredentialWarning) {
+      addLog(`Warning: ${providerConfig.missingCredentialWarning}`);
+    }
     if (Object.values(integrations).some(Boolean)) {
       const enabled = Object.entries(integrations)
         .filter(([, v]) => v)

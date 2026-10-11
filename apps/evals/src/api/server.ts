@@ -31,11 +31,13 @@ import { getAttemptProgress } from "../live/attempt-progress.ts";
 import { loadRegistry, serializeScenario } from "../registry.ts";
 import { summarizeRun } from "../results.ts";
 import {
+  claimAutoResumableRuns,
   executeRun,
   forceCancelInactiveRun,
   killAllActiveStacks,
   killRunStacks,
   reconcileOrphanedRuns,
+  SHUTDOWN_ABORT_REASON,
 } from "../runner/index.ts";
 import { assertRunConfigsResolve, ensureRunConfigPins } from "../runner/run-configs.ts";
 import { parseEffortOverrides, planRunEfforts } from "../runner/run-efforts.ts";
@@ -515,6 +517,7 @@ export async function startServer(
   opts: {
     reconcileOrphanedRuns?: typeof reconcileOrphanedRuns;
     forceCancelInactiveRun?: typeof forceCancelInactiveRun;
+    claimAutoResumableRuns?: typeof claimAutoResumableRuns;
   } = {},
 ) {
   await initDb();
@@ -522,9 +525,16 @@ export async function startServer(
   await initHarnessConfigs(db);
   const reconcile = opts.reconcileOrphanedRuns ?? reconcileOrphanedRuns;
   const forceCancel = opts.forceCancelInactiveRun ?? forceCancelInactiveRun;
-  const reconciled = await reconcile(db, (msg) => console.log(`[orphan-reconcile] ${msg}`));
+  const orphanedRuns = (await listRuns(db)).filter((run) => run.status === "running");
+  const reconcileLog = (msg: string) => console.log(`[orphan-reconcile] ${msg}`);
+  const reconciled = await reconcile(db, reconcileLog);
   if (reconciled > 0) {
     console.log(`[orphan-reconcile] reconciled ${reconciled} orphaned run(s)`);
+  }
+  // A redeploy must not kill the weekly matrix: resume scheduled runs a restart cut.
+  const claim = opts.claimAutoResumableRuns ?? claimAutoResumableRuns;
+  for (const runId of await claim(db, orphanedRuns, getMaxConcurrentRuns(), reconcileLog)) {
+    startRunExecution(db, runId);
   }
   warnIfApiOpen();
   // Live models.dev catalog (6h revalidation). Off under `bun test` so suites stay offline.
@@ -1105,7 +1115,7 @@ export async function startServer(
 
   const shutdown = () => {
     console.log("\nshutting down — aborting active runs and tearing down live sandboxes…");
-    for (const controller of activeRuns.values()) controller.abort();
+    for (const controller of activeRuns.values()) controller.abort(SHUTDOWN_ABORT_REASON);
     void killAllActiveStacks()
       .then(() => Bun.sleep(500))
       .finally(() => process.exit(130));

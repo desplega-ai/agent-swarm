@@ -2487,7 +2487,7 @@ export interface paths {
                         reasoning_effort?: "off" | "low" | "medium" | "high" | "xhigh" | "max" | null;
                         acp?: {
                             /** @enum {string} */
-                            target: "opencode" | "gemini" | "copilot" | "custom";
+                            target: "opencode" | "gemini" | "copilot" | "qwen" | "kiro" | "goose" | "custom";
                             command?: string | null;
                             args?: string[];
                             envKeys?: string[];
@@ -17882,6 +17882,205 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/skills/usage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Swarm-wide skill usage and adoption
+         * @description Aggregates `skill_invocations` over a rolling window (7d, 30d or all; default 30d): totals, daily counts, per-harness and per-skill counts, task adoption, per-agent adoption, and installed skills with no use in the window.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    window?: "7d" | "30d" | "all";
+                    tzOffset?: number | null;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Skill usage summary */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @enum {string} */
+                            window: "7d" | "30d" | "all";
+                            since: string | null;
+                            trackingSince: string | null;
+                            generatedAt: string;
+                            totals: {
+                                invocations: number;
+                                distinctSkills: number;
+                                distinctAgents: number;
+                                distinctTasks: number;
+                                unresolved: number;
+                                tokens: number;
+                            };
+                            taskAdoption: {
+                                tasks: number;
+                                tasksWithSkill: number;
+                                since: string | null;
+                            };
+                            daily: {
+                                /** @description Local day (YYYY-MM-DD) after applying tzOffset */
+                                date: string;
+                                invocations: number;
+                                skills: number;
+                                tasks: number;
+                            }[];
+                            byHarness: {
+                                key: string;
+                                invocations: number;
+                            }[];
+                            bySkill: {
+                                skillId: string | null;
+                                skillName: string;
+                                invocations: number;
+                                agents: number;
+                                tokens: number;
+                                lastInvokedAt: string;
+                            }[];
+                            agents: {
+                                agentId: string;
+                                agentName: string;
+                                isLead: boolean;
+                                installed: number;
+                                installedUsed: number;
+                                skillsUsed: number;
+                                invocations: number;
+                                lastInvokedAt: string | null;
+                            }[];
+                            unused: {
+                                id: string;
+                                name: string;
+                                scope: string;
+                                type: string;
+                                systemDefault: boolean;
+                                installedEverywhere: boolean;
+                                installedAgents: number;
+                                invocationCount: number;
+                                lastInvokedAt: string | null;
+                            }[];
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/skills/{id}/usage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Usage of one skill
+         * @description Aggregates the skill's `skill_invocations` over a rolling window (7d, 30d or all; default 30d): totals, daily counts, breakdowns by agent, harness and load path, and the most recent invocations.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    window?: "7d" | "30d" | "all";
+                    tzOffset?: number | null;
+                };
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Skill usage */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            skillId: string;
+                            /** @enum {string} */
+                            window: "7d" | "30d" | "all";
+                            since: string | null;
+                            generatedAt: string;
+                            totals: {
+                                invocations: number;
+                                distinctAgents: number;
+                                distinctTasks: number;
+                                tokens: number;
+                            };
+                            daily: {
+                                /** @description Local day (YYYY-MM-DD) after applying tzOffset */
+                                date: string;
+                                invocations: number;
+                                skills: number;
+                                tasks: number;
+                            }[];
+                            byAgent: {
+                                agentId: string;
+                                agentName: string | null;
+                                invocations: number;
+                                lastInvokedAt: string;
+                            }[];
+                            byHarness: {
+                                key: string;
+                                invocations: number;
+                            }[];
+                            byVia: {
+                                key: string;
+                                invocations: number;
+                            }[];
+                            recent: {
+                                id: string;
+                                agentId: string | null;
+                                agentName: string | null;
+                                taskId: string | null;
+                                taskTitle: string | null;
+                                harness: string | null;
+                                via: string | null;
+                                skillVersion: number | null;
+                                tokenCount: number | null;
+                                createdAt: string;
+                            }[];
+                        };
+                    };
+                };
+                /** @description Skill not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/skills/{id}": {
         parameters: {
             query?: never;
@@ -23998,7 +24197,7 @@ export interface components {
         /** @default null */
         AgentAcpStatus: {
             /** @enum {string} */
-            target: "opencode" | "gemini" | "copilot" | "custom";
+            target: "opencode" | "gemini" | "copilot" | "qwen" | "kiro" | "goose" | "custom";
             configOptions: ({
                 /** @enum {string} */
                 type: "select";

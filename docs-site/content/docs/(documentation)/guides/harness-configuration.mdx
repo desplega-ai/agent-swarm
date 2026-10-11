@@ -371,7 +371,7 @@ For full provider design rationale (why we don't `agents.create` at runtime, the
 
 `acp` drives any agent that speaks the [Agent Client Protocol](https://agentclientprotocol.com) — an open, editor-agnostic JSON-RPC protocol for driving coding agents over stdio. If your agent already has an ACP server mode (or you build one), you can run it as a swarm worker with no adapter code of your own. See the protocol's own [Get started → Agents](https://agentclientprotocol.com/get-started/agents) guide for what it takes for an agent to speak ACP.
 
-The dashboard offers curated **OpenCode**, **Gemini CLI**, and **GitHub Copilot CLI** presets and a free-form **Custom** target. ACP has no live steering (see the steering table in [Adding a Harness Provider](/docs/guides/harness-providers#live-task-steering) — ACP exposes a single in-flight `session/prompt` and the only interrupt is a full `session/cancel`).
+The dashboard offers curated **OpenCode**, **Gemini CLI**, **GitHub Copilot CLI**, **Qwen Code**, **Kiro CLI**, and **Goose** presets and a free-form **Custom** target. ACP has no live steering (see the steering table in [Adding a Harness Provider](/docs/guides/harness-providers#live-task-steering) — ACP exposes a single in-flight `session/prompt` and the only interrupt is a full `session/cancel`).
 
 ### How it works
 
@@ -384,7 +384,7 @@ Because the target process owns its own model credentials, `acp` reports `ready:
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
 | `HARNESS_PROVIDER` | Yes | — | Must be set to `acp` |
-| `ACP_TARGET` | No | `custom` | `opencode` or `gemini` for a curated preset, `copilot` for the GitHub Copilot CLI preset, or `custom` for an operator-supplied command |
+| `ACP_TARGET` | No | `custom` | `opencode`, `gemini`, `copilot`, `qwen`, `kiro` or `goose` for a curated preset, or `custom` for an operator-supplied command |
 | `ACP_TARGET_COMMAND` | Custom only | — | Executable to spawn as the custom ACP agent (also accepts the shorter `ACP_COMMAND` alias). Must resolve on `$PATH` or be an absolute path |
 | `ACP_TARGET_ARGS` | No | — | Arguments to the target command. Accepts a JSON array (`["acp", "--flag"]`) or a plain whitespace-separated string |
 | `ACP_TARGET_ENV_KEYS` | No | `[]` | JSON array (or comma-separated list for hand-authored config) of environment/config keys explicitly allowed into a custom target process |
@@ -398,7 +398,7 @@ Use the dashboard runtime editor when possible. It updates the harness, `MODEL_O
 
 Any ACP-speaking agent works. A few starting points:
 
-<Tabs items={["opencode", "GitHub Copilot CLI", "claude-code-acp", "Gemini CLI", "Custom"]}>
+<Tabs items={["opencode", "GitHub Copilot CLI", "claude-code-acp", "Gemini CLI", "Qwen Code", "Kiro CLI", "Goose", "Custom"]}>
   <Tab value="opencode">
     [opencode](https://opencode.ai) ships a built-in ACP server:
 
@@ -465,6 +465,43 @@ Any ACP-speaking agent works. A few starting points:
 
     The preset forwards only Gemini's own auth and endpoint keys: `GEMINI_API_KEY`, `GOOGLE_API_KEY`, the Vertex AI set (`GOOGLE_GENAI_USE_VERTEXAI`, `GOOGLE_CLOUD_PROJECT`, `GOOGLE_CLOUD_LOCATION`, `GOOGLE_APPLICATION_CREDENTIALS`), `GOOGLE_GEMINI_BASE_URL`, `GOOGLE_VERTEX_BASE_URL` and `GEMINI_CLI_HOME`. The adapter writes the composed system prompt to a private temp file outside the task `cwd` and points `GEMINI_SYSTEM_MD` at it, so it replaces Gemini CLI's built-in prompt. Gemini CLI does not advertise an ACP `model` option, so `MODEL_OVERRIDE` reaches it as `GEMINI_MODEL` at spawn. The preset also sets `GEMINI_CLI_TRUST_WORKSPACE=true`, because a worker cannot answer the folder-trust prompt.
   </Tab>
+  <Tab value="Qwen Code">
+    [Qwen Code](https://github.com/QwenLM/qwen-code) runs as `qwen --acp`. The full worker image ships it, pinned. Give it an OpenAI-compatible endpoint:
+
+    ```bash
+    HARNESS_PROVIDER=acp
+    ACP_TARGET=qwen
+    OPENAI_API_KEY=sk-...
+    OPENAI_BASE_URL=https://api.openai.com/v1
+    MODEL_OVERRIDE=gpt-4.1-mini
+    ```
+
+    Set `OPENAI_BASE_URL` explicitly: without it Qwen Code calls DashScope. `QWEN_AUTH_TYPE` switches to `anthropic`, `gemini`, `vertex-ai` or `openai-responses` (with that provider's keys); browser-only Qwen OAuth is not supported. `MODEL_OVERRIDE` is passed as `--model`. The swarm system prompt replaces Qwen's built-in one through `QWEN_SYSTEM_MD`, from a temp file outside the repo.
+  </Tab>
+  <Tab value="Kiro CLI">
+    [Kiro CLI](https://kiro.dev/docs/cli/acp/) runs as `kiro-cli acp`. The full worker image ships it, pinned. It authenticates with a `KIRO_API_KEY`, which only paid Kiro plans can create:
+
+    ```bash
+    HARNESS_PROVIDER=acp
+    ACP_TARGET=kiro
+    KIRO_API_KEY=ksk_...
+    ```
+
+    `MODEL_OVERRIDE` is passed as `--model`. Kiro reads its prompt from a Kiro agent config, so the swarm system prompt is not injected. Kiro CLI is proprietary AWS software.
+  </Tab>
+  <Tab value="Goose">
+    [Goose](https://goose-docs.ai/docs/gdk/acp/) runs as `goose acp`. The full worker image ships it, pinned. Pick a provider and give it that provider's key:
+
+    ```bash
+    HARNESS_PROVIDER=acp
+    ACP_TARGET=goose
+    GOOSE_PROVIDER=anthropic
+    ANTHROPIC_API_KEY=sk-ant-...
+    MODEL_OVERRIDE=claude-sonnet-4-5
+    ```
+
+    Goose sends every MCP tool to the model at once. OpenAI-API providers cap a request at 128 tools, and the swarm exposes more, so use a provider without that cap. The preset disables the OS keyring and passes the swarm system prompt through `GOOSE_MOIM_MESSAGE_FILE`, which Goose adds to each turn's context.
+  </Tab>
   <Tab value="Custom">
     Any executable that speaks ACP over stdio (reads ndjson on stdin, writes ndjson on stdout) works without modification:
 
@@ -485,7 +522,7 @@ An ACP agent's *own* tools (file edit, shell, etc.) are whatever the target proc
 ### ACP Specifics
 
 - **The target receives a session-scoped `aseph_` token.** `newSession`'s swarm MCP server entry carries this token as an `Authorization` header (see [How it works](#how-it-works) above). The adapter mints it for the session's agent and task, with a 24-hour expiry, and fails closed if minting fails; it never falls back to the operator key. Session completion starts best-effort revocation. If revocation fails, the token remains valid until expiry. `ACP_TARGET_COMMAND` is operator-configured and runs in the worker container as the worker; point it only at a binary you trust with that agent's swarm MCP access for up to 24 hours.
-- **No swarm-side credential gate.** The `acp` adapter has no `readyCheck` — the worker reports `ready: true` immediately. The Docker entrypoint does check the target binary at boot: it resolves the command the adapter would spawn (`opencode`, `gemini` or `copilot` for a preset, otherwise `ACP_TARGET_COMMAND` / `ACP_COMMAND`) and exits with `FATAL` if no target is configured or the executable is not on `$PATH`. Outside the Docker image, an unresolvable target still surfaces at session-spawn time (task fails with `ACP target failed during startup: ...`).
+- **No swarm-side credential gate.** The `acp` adapter has no `readyCheck` — the worker reports `ready: true` immediately. The Docker entrypoint does check the target binary at boot: it resolves the command the adapter would spawn (`opencode`, `gemini`, `copilot`, `qwen`, `kiro-cli` or `goose` for a preset, otherwise `ACP_TARGET_COMMAND` / `ACP_COMMAND`) and exits with `FATAL` if no target is configured or the executable is not on `$PATH`. Outside the Docker image, an unresolvable target still surfaces at session-spawn time (task fails with `ACP target failed during startup: ...`).
 - **No live steering.** `deliverSteering` is not implemented; mid-run messages promote to follow-up tasks the same way an unsupported provider always handles them.
 - **No skill filesystem sync.** The generic worker image still seeds `~/.claude/skills`, `~/.opencode/skills`, etc. at boot, so a target that reads one of those directories natively (like opencode) still sees skills; a fully custom target sees whatever `ACP_SYSTEM_PROMPT_PATH` writes and nothing more.
 

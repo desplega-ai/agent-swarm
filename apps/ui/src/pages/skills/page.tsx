@@ -3,7 +3,7 @@ import { FolderTree, RefreshCw, ShieldCheck } from "lucide-react";
 import { useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 
-import { useSkills, useSyncRemoteSkills } from "@/api/hooks";
+import { useSkills, useSkillUsage, useSyncRemoteSkills } from "@/api/hooks";
 import type { Skill } from "@/api/types";
 import { DataGrid } from "@/components/shared/data-grid";
 import { Badge } from "@/components/ui/badge";
@@ -17,9 +17,21 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
 import { formatRelativeTime } from "@/lib/utils";
+import { AdoptionView } from "./components/adoption-view";
+import {
+  compareIsoNullsLast,
+  formatCount,
+  formatLocalDateTime,
+  readUsageWindow,
+  UsageWindowControl,
+} from "./components/usage-shared";
+
+/** A skill row plus its load count in the selected window. */
+type SkillRow = Skill & { uses: number };
 
 function TypeBadge({ type }: { type: string }) {
   return (
@@ -61,6 +73,10 @@ export default function SkillsPage() {
   const search = readStringParam(searchParams, "search");
   const typeFilter = readStringParam(searchParams, "type", "all");
   const scopeFilter = readStringParam(searchParams, "scope", "all");
+  const usageFilter = readStringParam(searchParams, "usage", "all");
+  const activeTab =
+    readStringParam(searchParams, "tab", "skills") === "adoption" ? "adoption" : "skills";
+  const usageWindow = readUsageWindow(searchParams);
   const syncRemote = useSyncRemoteSkills();
 
   const filters = useMemo(() => {
@@ -71,16 +87,27 @@ export default function SkillsPage() {
   }, [typeFilter, scopeFilter]);
 
   const { data, isLoading } = useSkills(filters);
-  const skills = data?.skills ?? [];
+  const { data: usage, isLoading: usageLoading } = useSkillUsage(usageWindow);
 
-  const columnDefs = useMemo<ColDef<Skill>[]>(
+  const rows = useMemo<SkillRow[]>(() => {
+    const uses = new Map<string, number>();
+    for (const row of usage?.bySkill ?? []) {
+      if (row.skillId) uses.set(row.skillId, row.invocations);
+    }
+    const all = (data?.skills ?? []).map((skill) => ({ ...skill, uses: uses.get(skill.id) ?? 0 }));
+    if (usageFilter === "used") return all.filter((row) => row.uses > 0);
+    if (usageFilter === "unused") return all.filter((row) => row.uses === 0);
+    return all;
+  }, [data, usage, usageFilter]);
+
+  const columnDefs = useMemo<ColDef<SkillRow>[]>(
     () => [
       {
         field: "name",
         headerName: "Name",
         flex: 1,
         minWidth: 150,
-        cellRenderer: (params: ICellRendererParams<Skill>) => (
+        cellRenderer: (params: ICellRendererParams<SkillRow>) => (
           <span className="inline-flex items-center gap-1.5 font-medium">
             {params.value}
             {params.data?.isComplex && (
@@ -102,40 +129,40 @@ export default function SkillsPage() {
       {
         field: "type",
         headerName: "Type",
-        width: 100,
-        cellRenderer: (params: ICellRendererParams<Skill>) =>
+        width: 90,
+        cellRenderer: (params: ICellRendererParams<SkillRow>) =>
           params.value ? <TypeBadge type={params.value} /> : null,
       },
       {
         field: "scope",
         headerName: "Scope",
-        width: 100,
-        cellRenderer: (params: ICellRendererParams<Skill>) =>
+        width: 90,
+        cellRenderer: (params: ICellRendererParams<SkillRow>) =>
           params.value ? <ScopeBadge scope={params.value} /> : null,
       },
       {
         field: "systemDefault",
         headerName: "Default",
-        width: 105,
-        cellRenderer: (params: ICellRendererParams<Skill>) =>
+        width: 100,
+        cellRenderer: (params: ICellRendererParams<SkillRow>) =>
           params.value ? <SystemDefaultBadge /> : null,
       },
       {
         field: "description",
         headerName: "Description",
         flex: 2,
-        minWidth: 200,
+        minWidth: 150,
       },
       {
         field: "version",
         headerName: "Ver",
-        width: 70,
+        width: 60,
       },
       {
         field: "isEnabled",
         headerName: "Status",
         width: 90,
-        cellRenderer: (params: ICellRendererParams<Skill>) => (
+        cellRenderer: (params: ICellRendererParams<SkillRow>) => (
           <Badge
             variant="outline"
             size="tag"
@@ -150,9 +177,31 @@ export default function SkillsPage() {
         ),
       },
       {
+        field: "uses",
+        headerName: "Uses",
+        headerTooltip: "Loads in the selected window, at most one per runner session",
+        width: 100,
+        type: "numericColumn",
+        valueFormatter: (params) => formatCount(params.value ?? 0),
+      },
+      {
+        field: "lastInvokedAt",
+        headerName: "Last used",
+        width: 120,
+        comparator: compareIsoNullsLast,
+        cellRenderer: (params: ICellRendererParams<SkillRow>) =>
+          params.value ? (
+            <span title={formatLocalDateTime(params.value)}>
+              {formatRelativeTime(params.value)}
+            </span>
+          ) : (
+            <span className="text-muted-foreground">Never</span>
+          ),
+      },
+      {
         field: "lastUpdatedAt",
         headerName: "Updated",
-        width: 140,
+        width: 130,
         valueFormatter: (params) => (params.value ? formatRelativeTime(params.value) : "-"),
       },
     ],
@@ -160,7 +209,7 @@ export default function SkillsPage() {
   );
 
   const onRowClicked = useCallback(
-    (event: RowClickedEvent<Skill>) => {
+    (event: RowClickedEvent<SkillRow>) => {
       if (event.data) void navigate(`/skills/${event.data.id}`);
     },
     [navigate],
@@ -170,70 +219,122 @@ export default function SkillsPage() {
     <div className="flex flex-col flex-1 min-h-0 gap-4">
       <PageHeader className="shrink-0" title="Skills" />
 
-      <div className="flex items-center gap-3 shrink-0">
-        <Input
-          placeholder="Search skills..."
-          value={search}
-          onChange={(e) => setParam("search", e.target.value, { reset: ["skillsPage"] })}
-          className="max-w-xs"
-        />
-        <Select
-          value={typeFilter}
-          onValueChange={(value) =>
-            setParam("type", value, { defaultValue: "all", reset: ["skillsPage"] })
-          }
-        >
-          <SelectTrigger className="w-[130px]">
-            <SelectValue placeholder="Type" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Types</SelectItem>
-            <SelectItem value="personal">Personal</SelectItem>
-            <SelectItem value="remote">Remote</SelectItem>
-          </SelectContent>
-        </Select>
-        <Select
-          value={scopeFilter}
-          onValueChange={(value) =>
-            setParam("scope", value, { defaultValue: "all", reset: ["skillsPage"] })
-          }
-        >
-          <SelectTrigger className="w-[130px]">
-            <SelectValue placeholder="Scope" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Scopes</SelectItem>
-            <SelectItem value="global">Global</SelectItem>
-            <SelectItem value="swarm">Swarm</SelectItem>
-            <SelectItem value="agent">Agent</SelectItem>
-          </SelectContent>
-        </Select>
-        {/* Sync lives in the toolbar as a bare icon — no lone header action row. */}
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="outline"
-              size="icon"
-              className="size-8 ml-auto"
-              onClick={() => syncRemote.mutate({})}
-              disabled={syncRemote.isPending}
-              aria-label="Sync remote skills"
-            >
-              <RefreshCw className={`h-4 w-4 ${syncRemote.isPending ? "animate-spin" : ""}`} />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>Sync remote skills</TooltipContent>
-        </Tooltip>
-      </div>
-      <DataGrid
-        rowData={skills}
-        columnDefs={columnDefs}
-        quickFilterText={search}
-        onRowClicked={onRowClicked}
-        loading={isLoading}
-        emptyMessage="No skills found"
-        paginationQueryKey="skills"
-      />
+      <Tabs
+        value={activeTab}
+        onValueChange={(value) => setParam("tab", value, { defaultValue: "skills" })}
+        className="flex flex-col flex-1 min-h-0"
+      >
+        {/* Shared toolbar: the list filters on the left (Skills tab only), the
+            usage window and tabs pinned to the right. */}
+        <div className="flex flex-wrap items-center gap-3 shrink-0">
+          {activeTab === "skills" ? (
+            <>
+              <Input
+                placeholder="Search skills..."
+                value={search}
+                onChange={(e) => setParam("search", e.target.value, { reset: ["skillsPage"] })}
+                className="max-w-xs"
+              />
+              <Select
+                value={typeFilter}
+                onValueChange={(value) =>
+                  setParam("type", value, { defaultValue: "all", reset: ["skillsPage"] })
+                }
+              >
+                <SelectTrigger className="w-[130px]">
+                  <SelectValue placeholder="Type" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Types</SelectItem>
+                  <SelectItem value="personal">Personal</SelectItem>
+                  <SelectItem value="remote">Remote</SelectItem>
+                </SelectContent>
+              </Select>
+              <Select
+                value={scopeFilter}
+                onValueChange={(value) =>
+                  setParam("scope", value, { defaultValue: "all", reset: ["skillsPage"] })
+                }
+              >
+                <SelectTrigger className="w-[130px]">
+                  <SelectValue placeholder="Scope" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Scopes</SelectItem>
+                  <SelectItem value="global">Global</SelectItem>
+                  <SelectItem value="swarm">Swarm</SelectItem>
+                  <SelectItem value="agent">Agent</SelectItem>
+                </SelectContent>
+              </Select>
+              <Select
+                value={usageFilter}
+                onValueChange={(value) =>
+                  setParam("usage", value, { defaultValue: "all", reset: ["skillsPage"] })
+                }
+              >
+                <SelectTrigger className="w-[160px]" aria-label="Usage">
+                  <SelectValue placeholder="Usage" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Usage</SelectItem>
+                  <SelectItem value="used">Used</SelectItem>
+                  <SelectItem value="unused">Unused in window</SelectItem>
+                </SelectContent>
+              </Select>
+            </>
+          ) : null}
+          <div className="ml-auto flex items-center gap-3">
+            <UsageWindowControl
+              value={usageWindow}
+              onChange={(value) =>
+                setParam("window", value, { defaultValue: "30d", reset: ["skillsPage"] })
+              }
+            />
+            {activeTab === "skills" ? (
+              // Sync lives in the toolbar as a bare icon, no lone header action row.
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    className="size-8"
+                    onClick={() => syncRemote.mutate({})}
+                    disabled={syncRemote.isPending}
+                    aria-label="Sync remote skills"
+                  >
+                    <RefreshCw
+                      className={`h-4 w-4 ${syncRemote.isPending ? "animate-spin" : ""}`}
+                    />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Sync remote skills</TooltipContent>
+              </Tooltip>
+            ) : null}
+            <TabsList className="shrink-0">
+              <TabsTrigger value="skills">Skills</TabsTrigger>
+              <TabsTrigger value="adoption">Adoption</TabsTrigger>
+            </TabsList>
+          </div>
+        </div>
+
+        <TabsContent value="skills" className="flex flex-col flex-1 min-h-0 mt-2">
+          <DataGrid
+            rowData={rows}
+            columnDefs={columnDefs}
+            quickFilterText={search}
+            onRowClicked={onRowClicked}
+            loading={isLoading || (usageFilter !== "all" && usageLoading)}
+            emptyMessage={
+              usageFilter === "unused" ? "Every skill was used in this window" : "No skills found"
+            }
+            paginationQueryKey="skills"
+          />
+        </TabsContent>
+
+        <TabsContent value="adoption" className="flex-1 min-h-0 overflow-y-auto mt-2">
+          <AdoptionView summary={usage} isLoading={usageLoading} window={usageWindow} />
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

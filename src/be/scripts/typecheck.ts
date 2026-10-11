@@ -913,6 +913,26 @@ function scriptTypesBase(): string {
   return fileURLToPath(new URL("../../index.ts", import.meta.url));
 }
 
+/**
+ * Parsed declaration files (TypeScript libs, zod, the SDK and stdlib modules)
+ * shared across typecheck programs. Every check re-reads the same few MB of
+ * `.d.ts`, and parsing them dominated each call: seeding the scripts catalog on
+ * a fresh database spent seconds re-parsing identical files. A hit requires the
+ * same file name, parse options and text, so a changed SDK module (a new app or
+ * connection) re-parses. The per-call user and check files are never cached.
+ * Sharing a SourceFile across programs with the same compiler options is what
+ * TypeScript's own DocumentRegistry does for the language service.
+ */
+const sharedSourceFiles = new Map<string, { text: string; sourceFile: ts.SourceFile }>();
+
+function sourceFileCacheKey(
+  fileName: string,
+  languageVersion: ts.ScriptTarget | ts.CreateSourceFileOptions,
+): string {
+  if (typeof languageVersion === "number") return `${fileName}\0${languageVersion}`;
+  return `${fileName}\0${languageVersion.languageVersion}\0${languageVersion.impliedNodeFormat}\0${languageVersion.jsDocParsingMode}`;
+}
+
 function createCompilerHost(
   files: Map<string, string>,
   options: ts.CompilerOptions,
@@ -924,10 +944,27 @@ function createCompilerHost(
   host.getSourceFile = (fileName, languageVersion, onError, shouldCreateNewSourceFile) => {
     const normalized = fileName.replace(/\\/g, "/");
     const source = files.get(normalized);
-    if (source !== undefined) {
-      return ts.createSourceFile(normalized, source, languageVersion, true, ts.ScriptKind.TS);
+    if (normalized === USER_FILE || normalized === CHECK_FILE) {
+      if (source !== undefined) {
+        return ts.createSourceFile(normalized, source, languageVersion, true, ts.ScriptKind.TS);
+      }
     }
-    return originalGetSourceFile(fileName, languageVersion, onError, shouldCreateNewSourceFile);
+    const text = source ?? ts.sys.readFile(fileName);
+    if (text === undefined || shouldCreateNewSourceFile) {
+      if (source !== undefined) {
+        return ts.createSourceFile(normalized, source, languageVersion, true, ts.ScriptKind.TS);
+      }
+      return originalGetSourceFile(fileName, languageVersion, onError, shouldCreateNewSourceFile);
+    }
+    const key = sourceFileCacheKey(normalized, languageVersion);
+    const cached = sharedSourceFiles.get(key);
+    if (cached && cached.text === text) return cached.sourceFile;
+    const sourceFile =
+      source !== undefined
+        ? ts.createSourceFile(normalized, source, languageVersion, true, ts.ScriptKind.TS)
+        : originalGetSourceFile(fileName, languageVersion, onError, shouldCreateNewSourceFile);
+    if (sourceFile) sharedSourceFiles.set(key, { text, sourceFile });
+    return sourceFile;
   };
 
   host.fileExists = (fileName) => {
