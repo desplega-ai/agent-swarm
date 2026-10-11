@@ -1967,6 +1967,13 @@ export type ActiveSession = z.infer<typeof ActiveSessionSchema>;
 export const RuntimeInstanceStatusSchema = z.enum(["active", "offline"]);
 
 /**
+ * Infrastructure kind a runtime pool provisions on. `k8s` is reserved: write
+ * paths reject it until its adapter exists.
+ */
+export const RuntimeProviderKindSchema = z.enum(["static", "docker", "e2b", "k8s"]);
+export type RuntimeProviderKind = z.infer<typeof RuntimeProviderKindSchema>;
+
+/**
  * One worker process serving a logical agent. The `agents` row (AGENT_ID /
  * X-Agent-ID) keeps durable identity and the logical maxTasks policy; a
  * runtime instance carries only process-scoped state: liveness and its own
