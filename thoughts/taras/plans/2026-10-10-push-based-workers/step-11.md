@@ -2,9 +2,7 @@
 id: step-11
 name: Dashboard UI for pools
 depends_on: [step-1]
-status: claimed
-assignee: claude-opus-pw-step-11
-claimed_at: 2026-10-11T02:00:00Z
+status: done
 ---
 
 <!-- During /v-implement, `desplega:step-running` adds `assignee` and `claimed_at` while
@@ -45,14 +43,14 @@ Full CRUD in the dashboard for runtime pools and controllers, an agent-to-pool b
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] `cd apps/ui && bun install --frozen-lockfile && bun run lint && bunx tsc -b` pass
-- [ ] `bun run test:root -- src/tests/runtime-provider-registration.test.ts` passes (UI kind list registered)
-- [ ] UI E2E smoke if the suite covers settings pages: `bun run e2e:ui -- --grep @smoke`
+- [x] `cd apps/ui && bun install --frozen-lockfile && bun run lint && bunx tsc -b` pass
+- [x] `bun run test:root -- src/tests/runtime-provider-registration.test.ts` passes (UI kind list registered)
+- [x] UI E2E smoke if the suite covers settings pages: `bun run e2e:ui -- --grep @smoke`
 
 #### Automated QA:
-- [ ] `agent-browser` against `bun run dev:http` + the UI dev server with `RUNTIME_POOLS_ENABLED=true`: create a docker pool, edit it, bind an agent from the agent page, create an agent on the pool, view the runtimes table (seed one runtime row via the API or a step-5 run), delete the pool with force. Screenshots of list, detail, controllers, agent binding; one recording of the create → bind → delete flow.
-- [ ] With the flag off: no nav item, direct URL redirects. With an API version below the gate (stub `/health` version): surface hidden.
-- [ ] Upload screenshots and the recording with the `github-attach` skill for the PR's `## Before / after` section.
+- [x] `agent-browser` against `bun run dev:http` + the UI dev server with `RUNTIME_POOLS_ENABLED=true`: create a docker pool, edit it, bind an agent from the agent page, create an agent on the pool, view the runtimes table (seed one runtime row via the API or a step-5 run), delete the pool with force. Screenshots of list, detail, controllers, agent binding; one recording of the create → bind → delete flow.
+- [x] With the flag off: no nav item, direct URL redirects. With an API version below the gate (stub `/health` version): surface hidden.
+- [x] Upload screenshots and the recording with the `github-attach` skill for the PR's `## Before / after` section.
 
 #### Manual Verification:
 - [ ] Taras reviews the pages visually (layout, copy, BETA chip placement).
