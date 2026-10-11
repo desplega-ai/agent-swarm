@@ -27,8 +27,8 @@ import { SettingsIcon } from "@/components/icons/settings";
 import { UsersIcon } from "@/components/icons/users";
 import { WorkflowIcon } from "@/components/icons/workflow";
 import { UserSwitcher } from "@/components/identity/user-switcher";
+import { BetaTag } from "@/components/shared/beta-tag";
 import { CollapsibleSection } from "@/components/shared/collapsible-section";
-import { Badge } from "@/components/ui/badge";
 import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover";
 import {
   Sidebar,
@@ -43,7 +43,6 @@ import {
   SidebarMenuItem,
   SidebarRail,
 } from "@/components/ui/sidebar";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { navRequirementMet } from "@/lib/agent-fs/state";
 import { formatCost } from "@/lib/cost-format";
 import { isDemoMode } from "@/lib/deployment-config";
@@ -198,28 +197,6 @@ const footerNav: FooterItem[] = [
 ];
 
 /**
- * "BETA" chip shown after an experimental nav item's label. Hover/focus
- * explains what the surface is — the sidebar already mounts a
- * `TooltipProvider` (delayDuration 0) around its whole subtree.
- */
-function BetaTag({ tooltip }: { tooltip: string }) {
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Badge
-          variant="outline"
-          size="tag"
-          className="ml-auto border-status-info/30 text-status-info-strong"
-        >
-          BETA
-        </Badge>
-      </TooltipTrigger>
-      <TooltipContent side="right">{tooltip}</TooltipContent>
-    </Tooltip>
-  );
-}
-
-/**
  * One nav row: SidebarMenuButton + NavLink + animated icon + label. The ROW
  * drives the icon — hovering anywhere on the button plays the icon's
  * animation through its imperative handle (attaching the ref disables the
@@ -250,7 +227,7 @@ function NavIconLink({
       >
         <item.icon ref={iconRef} size={16} className="shrink-0" />
         <span>{item.title}</span>
-        {showBeta && item.beta && <BetaTag tooltip={item.beta.tooltip} />}
+        {showBeta && item.beta && <BetaTag tooltip={item.beta.tooltip} className="ml-auto" />}
       </NavLink>
     </SidebarMenuButton>
   );

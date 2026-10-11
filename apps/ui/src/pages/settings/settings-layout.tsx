@@ -1,5 +1,6 @@
 import {
   Blocks,
+  Boxes,
   Bug,
   Cable,
   Key,
@@ -17,21 +18,27 @@ import { useCallback, useEffect } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { useOnboarding } from "@/api/hooks/use-onboarding";
 import { AnimatedReveal } from "@/components/shared/animated-reveal";
+import { BetaTag } from "@/components/shared/beta-tag";
 import { SectionTabs } from "@/components/shared/section-tabs";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
+import { useRuntimePoolsGate } from "@/lib/runtime-pools";
 import { cn } from "@/lib/utils";
 
 interface SettingsNavItem {
   title: string;
   path: string;
   icon: LucideIcon;
+  /** Experimental surface: renders a BETA chip after the label. */
+  beta?: { tooltip: string };
 }
 
 // The first-run stepper lives outside the settings shell; the rail links to
 // it only when the API serves `/api/onboarding`.
 const SETUP_PATH = "/setup";
+// Shown only while `useRuntimePoolsGate()` is open.
+const RUNTIME_POOLS_NAV_PATH = "/settings/runtime-pools";
 
 const SETTINGS_NAV: SettingsNavItem[] = [
   { title: "Connections", path: "/settings/connections", icon: Cable },
@@ -42,6 +49,12 @@ const SETTINGS_NAV: SettingsNavItem[] = [
   { title: "Integrations", path: "/settings/integrations", icon: Plug },
   { title: "Configuration", path: "/settings/configuration", icon: SlidersHorizontal },
   { title: "Extensions", path: "/settings/extensions", icon: Blocks },
+  {
+    title: "Runtime pools",
+    path: RUNTIME_POOLS_NAV_PATH,
+    icon: Boxes,
+    beta: { tooltip: "Run agents on Docker or E2B runtimes" },
+  },
   { title: "Repos", path: "/settings/repos", icon: SettingsIcon },
   { title: "Debug", path: "/settings/debug", icon: Bug },
 ];
@@ -84,9 +97,12 @@ export function SettingsLayout() {
   }, [collapsed]);
 
   const onboarding = useOnboarding();
-  const navItems = onboarding.data
-    ? SETTINGS_NAV
-    : SETTINGS_NAV.filter((item) => item.path !== SETUP_PATH);
+  const runtimePools = useRuntimePoolsGate();
+  const navItems = SETTINGS_NAV.filter(
+    (item) =>
+      (item.path !== SETUP_PATH || onboarding.data) &&
+      (item.path !== RUNTIME_POOLS_NAV_PATH || runtimePools.open),
+  );
 
   // Match the active rail item by path prefix so deep links (e.g.
   // /settings/integrations/slack) keep "Integrations" highlighted.
@@ -141,6 +157,7 @@ export function SettingsLayout() {
             >
               <item.icon className="size-4 shrink-0" />
               <span>{item.title}</span>
+              {item.beta ? <BetaTag tooltip={item.beta.tooltip} className="ml-auto" /> : null}
             </NavLink>
           ))}
         </nav>

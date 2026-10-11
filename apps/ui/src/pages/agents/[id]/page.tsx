@@ -16,7 +16,9 @@ import type {
 import { AgentActivityGraph } from "@/components/shared/agent-activity-graph";
 import { AgentAppearancePicker } from "@/components/shared/agent-appearance-picker";
 import { AgentAvatar as AgentAvatarDisc } from "@/components/shared/agent-avatar";
+import { AgentRuntimePoolSelect } from "@/components/shared/agent-runtime-pool-select";
 import { AgentRuntimeSettings } from "@/components/shared/agent-runtime-settings";
+import { BetaTag } from "@/components/shared/beta-tag";
 import { HarnessCell } from "@/components/shared/harness-cell";
 import { MobileList, MobileListRow } from "@/components/shared/mobile-list";
 import { StatusBadge } from "@/components/shared/status-badge";
@@ -50,6 +52,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { readNumberParam, readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
+import { useRuntimePoolsGate } from "@/lib/runtime-pools";
 import { taskListTitle } from "@/lib/task-title";
 import { cn, formatRelativeTime, formatSmartTime } from "@/lib/utils";
 import { CredentialsPanel } from "./credentials-panel";
@@ -197,6 +200,7 @@ export default function AgentDetailPage() {
   const { data: agent, isLoading } = useAgent(id!);
   const updateName = useUpdateAgentName();
   const updateProfile = useUpdateAgentProfile();
+  const runtimePools = useRuntimePoolsGate();
 
   const [editing, setEditing] = useState(false);
   const [editName, setEditName] = useState("");
@@ -432,6 +436,18 @@ export default function AgentDetailPage() {
                       <InfoRow label="Runtime">
                         <AgentRuntimeSettings agent={agent} />
                       </InfoRow>
+                      {runtimePools.open && (
+                        <InfoRow
+                          label={
+                            <span className="inline-flex items-center gap-2">
+                              Runtime pool
+                              <BetaTag tooltip="Run agents on Docker or E2B runtimes" side="top" />
+                            </span>
+                          }
+                        >
+                          <AgentRuntimePoolSelect agent={agent} />
+                        </InfoRow>
+                      )}
                       {agent.description && (
                         <InfoRow label="Description">{agent.description}</InfoRow>
                       )}
