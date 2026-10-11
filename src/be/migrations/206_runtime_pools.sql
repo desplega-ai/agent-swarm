@@ -43,7 +43,11 @@ CREATE TABLE runtime_pools (
 );
 
 ALTER TABLE agents ADD COLUMN runtime_pool_id TEXT REFERENCES runtime_pools(id) ON DELETE SET NULL;
+ALTER TABLE agents ADD COLUMN runtime_provision_attempts INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE agents ADD COLUMN runtime_provision_retry_at TEXT;
 CREATE INDEX idx_agents_runtime_pool_id ON agents(runtime_pool_id);
+
+ALTER TABLE agent_tasks ADD COLUMN pool_wake_at TEXT;
 
 ALTER TABLE runtime_instances ADD COLUMN pool_id TEXT;
 ALTER TABLE runtime_instances ADD COLUMN controller_id TEXT;

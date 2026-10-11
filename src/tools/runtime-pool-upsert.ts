@@ -2,7 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { RuntimePoolUpdateSchema } from "../types";
 import { proxyRuntimePoolsApi, runtimePoolToolOutputSchema } from "./runtime-pool-common";
-import { createToolRegistrar } from "./utils";
+import { createToolRegistrar, toolErr } from "./utils";
 
 export const registerRuntimePoolUpsertTool = (server: McpServer) => {
   createToolRegistrar(server)(
@@ -16,6 +16,8 @@ export const registerRuntimePoolUpsertTool = (server: McpServer) => {
       outputSchema: runtimePoolToolOutputSchema,
     },
     async (args, requestInfo) => {
+      if (!args.id && (!args.name || !args.kind || !args.placements))
+        return toolErr("Pool creation requires name, kind, and one controller placement.");
       const { id: _, ...body } = args;
       return proxyRuntimePoolsApi({
         method: args.id ? "PATCH" : "POST",

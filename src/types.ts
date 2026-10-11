@@ -594,6 +594,7 @@ export const AgentTaskSchema = z
       "Origin of the routing reason: declared by the caller or chosen by the engine. Absent for unknown historical provenance or no reason.",
     ),
     routingNote: z.string().max(200).optional(),
+    poolWakeAt: z.string().optional(),
 
     // Task metadata
     taskType: z.string().max(50).optional(), // e.g., "bug", "feature", "chore"
@@ -1159,6 +1160,8 @@ export const AgentSchema = z
     isLead: z.boolean().default(false),
     status: AgentStatusSchema,
     runtimePoolId: z.string().nullable().optional(),
+    runtimeProvisionAttempts: z.number().int().min(0).optional(),
+    runtimeProvisionRetryAt: z.string().nullable().optional(),
 
     // Profile fields
     description: z.string().optional(),
@@ -2001,6 +2004,7 @@ export const RuntimeControllerSchema = RuntimeControllerCreateSchema.omit({ secr
   .extend({
     id: z.string(),
     secretConfigKeys: z.array(z.string()),
+    secretConfigError: z.boolean().optional(),
     status: z.enum(["online", "offline", "unknown"]),
     lastSeenAt: z.string().nullable(),
     lastError: z.string().nullable(),

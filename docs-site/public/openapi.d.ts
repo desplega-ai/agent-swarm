@@ -23722,6 +23722,7 @@ export interface components {
              */
             routingSource?: "declared" | "engine_default";
             routingNote?: string;
+            poolWakeAt?: string;
             taskType?: string;
             /** @default [] */
             tags: string[];
@@ -23931,6 +23932,8 @@ export interface components {
             /** @enum {string} */
             status: "idle" | "busy" | "offline" | "waiting_for_credentials";
             runtimePoolId?: string | null;
+            runtimeProvisionAttempts?: number;
+            runtimeProvisionRetryAt?: string | null;
             description?: string;
             role?: string;
             /** @default [] */
@@ -25318,6 +25321,7 @@ export interface components {
             };
             id: string;
             secretConfigKeys: string[];
+            secretConfigError?: boolean;
             /** @enum {string} */
             status: "online" | "offline" | "unknown";
             lastSeenAt: string | null;
@@ -28906,15 +28910,6 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Entity is in use or already exists */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
         };
     };
     runtime_createPool: {
@@ -29058,15 +29053,6 @@ export interface operations {
             };
             /** @description Not found or runtime pools disabled */
             404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Entity is in use or already exists */
-            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -29275,15 +29261,6 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Entity is in use or already exists */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
         };
     };
     runtime_createAgent: {
@@ -29397,15 +29374,6 @@ export interface operations {
             };
             /** @description Not found or runtime pools disabled */
             404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Entity is in use or already exists */
-            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -29535,15 +29503,6 @@ export interface operations {
             };
             /** @description Not found or runtime pools disabled */
             404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Entity is in use or already exists */
-            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -29738,15 +29697,6 @@ export interface operations {
             };
             /** @description Not found or runtime pools disabled */
             404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Entity is in use or already exists */
-            409: {
                 headers: {
                     [name: string]: unknown;
                 };

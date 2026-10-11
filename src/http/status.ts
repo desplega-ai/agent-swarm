@@ -1,4 +1,3 @@
-import { isRuntimePoolsEnabled } from "../utils/runtime-pools-flag";
 /**
  * `/status` — identity + setup readiness + activity + agent_fs aggregate
  * for the home page.
@@ -42,6 +41,7 @@ import { getSlackConfiguration } from "../slack/config";
 import { getSlackConnectionState } from "../slack/connection-state";
 import { isTelemetryEnabled } from "../telemetry";
 import { type AgentCredStatus, AutomationIntegrationIdSchema, ProviderNameSchema } from "../types";
+import { isRuntimePoolsEnabled } from "../utils/runtime-pools-flag";
 import { route } from "./route-def";
 import { json, jsonError } from "./utils";
 

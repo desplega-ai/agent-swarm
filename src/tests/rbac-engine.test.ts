@@ -91,8 +91,13 @@ const LEAD_OR_OPERATOR_OR_USER_VERBS: PermissionVerb[] = [
   "extension.activate",
   "extension.install.inline",
   "repo.merge-policy.write",
+  "runtime_pool.write",
 ];
-const OPERATOR_OR_USER_VERBS: PermissionVerb[] = ["comb.presence", "approval.respond"];
+const OPERATOR_OR_USER_VERBS: PermissionVerb[] = [
+  "comb.presence",
+  "approval.respond",
+  "runtime_controller.write",
+];
 
 const LEAD_OR_OPERATOR_VERBS: PermissionVerb[] = ["models.catalog.write"];
 

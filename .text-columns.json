@@ -379,6 +379,9 @@
     "routing_note": {
       "pending": "unassigned: no batch yet scrubs this writer"
     },
+    "pool_wake_at": {
+      "exempt": "timestamp"
+    },
     "routing_source": {
       "pending": "unassigned: no batch yet scrubs this writer"
     },
@@ -493,6 +496,9 @@
     },
     "runtime_pool_id": {
       "exempt": "runtime pool identifier"
+    },
+    "runtime_provision_retry_at": {
+      "exempt": "timestamp"
     }
   },
   "api_key_status": {

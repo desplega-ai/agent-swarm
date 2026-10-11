@@ -21,7 +21,10 @@ export class RuntimePoolError extends Error {
   }
 }
 
-type ControllerRow = Omit<RuntimeController, "config" | "secretConfigKeys"> & {
+type ControllerRow = Omit<
+  RuntimeController,
+  "config" | "secretConfigKeys" | "secretConfigError"
+> & {
   config: string;
   secretConfig: string | null;
 };
@@ -46,10 +49,18 @@ function controllerSecrets(row: ControllerRow): Record<string, string> {
 }
 function rowToController(row: ControllerRow): RuntimeController {
   const { secretConfig: _, ...publicRow } = row;
+  let secretConfigKeys: string[] = [];
+  let secretConfigError: boolean | undefined;
+  try {
+    secretConfigKeys = Object.keys(controllerSecrets(row)).sort();
+  } catch {
+    secretConfigError = true;
+  }
   return {
     ...publicRow,
     config: JSON.parse(row.config),
-    secretConfigKeys: Object.keys(controllerSecrets(row)).sort(),
+    secretConfigKeys,
+    ...(secretConfigError ? { secretConfigError } : {}),
   };
 }
 function rowToPool(row: PoolRow): RuntimePool {
@@ -114,8 +125,10 @@ export async function createRuntimeController(
     const encrypted = Object.keys(secrets).length
       ? encryptSecret(JSON.stringify(secrets), getEncryptionKey())
       : null;
-    for (const [key, value] of Object.entries(secrets))
-      registerStoredSecret(value, `runtime-controller:${id}:${key}`);
+    getDbClient().afterCommit(() => {
+      for (const [key, value] of Object.entries(secrets))
+        registerStoredSecret(value, `runtime-controller:${id}:${key}`);
+    });
     await tx.run(
       `INSERT INTO runtime_controllers (id, name, kind, placement, config, secret_config, created_by, updated_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       [
@@ -163,8 +176,10 @@ export async function updateRuntimeController(
       encrypted = Object.keys(secrets).length
         ? encryptSecret(JSON.stringify(secrets), getEncryptionKey())
         : null;
-      for (const [key, value] of Object.entries(secrets))
-        registerStoredSecret(value, `runtime-controller:${id}:${key}`);
+      getDbClient().afterCommit(() => {
+        for (const [key, value] of Object.entries(secrets))
+          registerStoredSecret(value, `runtime-controller:${id}:${key}`);
+      });
     }
     await tx.run(
       `UPDATE runtime_controllers SET name = ?, kind = ?, placement = ?, config = ?, secret_config = ?, updated_by = COALESCE(?, updated_by), updated_at = ? WHERE id = ?`,

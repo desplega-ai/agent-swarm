@@ -198,6 +198,9 @@
             "type": "string",
             "maxLength": 200
           },
+          "poolWakeAt": {
+            "type": "string"
+          },
           "taskType": {
             "type": "string",
             "maxLength": 50
@@ -947,6 +950,16 @@
             ]
           },
           "runtimePoolId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "runtimeProvisionAttempts": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "runtimeProvisionRetryAt": {
             "type": [
               "string",
               "null"
@@ -6009,6 +6022,9 @@
             "items": {
               "type": "string"
             }
+          },
+          "secretConfigError": {
+            "type": "boolean"
           },
           "status": {
             "type": "string",
@@ -57262,16 +57278,6 @@
                 }
               }
             }
-          },
-          "409": {
-            "description": "Entity is in use or already exists",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
           }
         }
       },
@@ -57540,16 +57546,6 @@
           },
           "404": {
             "description": "Not found or runtime pools disabled",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "Entity is in use or already exists",
             "content": {
               "application/json": {
                 "schema": {
@@ -57929,16 +57925,6 @@
                 }
               }
             }
-          },
-          "409": {
-            "description": "Entity is in use or already exists",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
           }
         }
       }
@@ -58131,16 +58117,6 @@
           },
           "404": {
             "description": "Not found or runtime pools disabled",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "Entity is in use or already exists",
             "content": {
               "application/json": {
                 "schema": {
@@ -58342,16 +58318,6 @@
           },
           "404": {
             "description": "Not found or runtime pools disabled",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "Entity is in use or already exists",
             "content": {
               "application/json": {
                 "schema": {
@@ -58666,16 +58632,6 @@
           },
           "404": {
             "description": "Not found or runtime pools disabled",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "Entity is in use or already exists",
             "content": {
               "application/json": {
                 "schema": {

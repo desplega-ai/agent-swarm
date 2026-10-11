@@ -7,6 +7,7 @@ import { seedRuntimePools } from "../be/runtime-pools/seed";
 import { handleRuntimePools } from "../http/runtime-pools";
 import { buildStatusPayload } from "../http/status";
 import { getPathSegments, parseQueryParams } from "../http/utils";
+import { clearAuditSink, type RbacCheck, setAuditSink } from "../rbac";
 import { registerRuntimeControllerListTool } from "../tools/runtime-controller-list";
 import { registerRuntimePoolBindAgentTool } from "../tools/runtime-pool-bind-agent";
 import { registerRuntimePoolCreateAgentTool } from "../tools/runtime-pool-create-agent";
@@ -32,7 +33,8 @@ async function dispatch(
   path: string,
   method = "GET",
   body?: unknown,
-  caller: "operator" | "lead" | "worker" | "user" = "operator",
+  caller: "operator" | "lead" | "worker" | "user" | "anonymous" = "operator",
+  headerAgentId?: string,
 ) {
   const req = Readable.from(
     body === undefined ? [] : [Buffer.from(JSON.stringify(body))],
@@ -40,13 +42,15 @@ async function dispatch(
   req.method = method;
   req.url = path;
   req.headers = { "content-type": "application/json" };
-  const agentId = caller === "lead" ? leadId : caller === "worker" ? workerId : undefined;
-  setRequestAuth(
-    req,
-    caller === "user"
-      ? { kind: "user", userId, user: { id: userId } as User }
-      : { kind: "operator" },
-  );
+  const agentId =
+    headerAgentId ?? (caller === "lead" ? leadId : caller === "worker" ? workerId : undefined);
+  if (caller !== "anonymous")
+    setRequestAuth(
+      req,
+      caller === "user"
+        ? { kind: "user", userId, user: { id: userId } as User }
+        : { kind: "operator" },
+    );
   let status = 200;
   let text = "";
   const res = {
@@ -81,6 +85,7 @@ beforeEach(async () => {
   await getDbClient().run("DELETE FROM agents");
   await getDbClient().run("DELETE FROM runtime_pools");
   await getDbClient().run("DELETE FROM runtime_controllers");
+  await getDbClient().run("DELETE FROM seed_state WHERE key = 'runtime-pools-default-static'");
   await getDbClient().run("DELETE FROM users");
   userId = crypto.randomUUID();
   await getDbClient().run(
@@ -100,6 +105,74 @@ beforeEach(async () => {
 const poolInput = { name: "coders", kind: "docker", placements: ["builtin-docker"] };
 
 describe("runtime pools HTTP", () => {
+  test("binding audit uses the target pool and unbinding uses the previous pool", async () => {
+    const checks: RbacCheck[] = [];
+    setAuditSink((check) => {
+      checks.push(check);
+    });
+    try {
+      expect(
+        (
+          await dispatch(`/api/agents/${workerId}/runtime-pool`, "PUT", {
+            poolId: "default-static",
+          })
+        ).status,
+      ).toBe(200);
+      expect(checks.at(-1)).toMatchObject({
+        verb: "runtime_pool.write",
+        resource: { kind: "runtime_pool", poolId: "default-static" },
+      });
+      expect(
+        (await dispatch(`/api/agents/${workerId}/runtime-pool`, "PUT", { poolId: null })).status,
+      ).toBe(200);
+      expect(checks.at(-1)).toMatchObject({
+        verb: "runtime_pool.write",
+        resource: { kind: "runtime_pool", poolId: "default-static" },
+      });
+    } finally {
+      clearAuditSink();
+    }
+  });
+  test("shared principal treats absent identity as operator and user auth wins over an agent header", async () => {
+    expect((await dispatch("/api/runtime-pools", "POST", poolInput, "anonymous")).status).toBe(200);
+    expect(
+      (
+        await dispatch(
+          "/api/runtime-controllers/builtin-static",
+          "PATCH",
+          { config: { REGION: "test" } },
+          "user",
+          leadId,
+        )
+      ).status,
+    ).toBe(200);
+  });
+  test("a controller with undecryptable secrets does not break controller reads", async () => {
+    await getDbClient().run(
+      "UPDATE runtime_controllers SET secret_config = 'invalid-ciphertext' WHERE id = 'builtin-e2b'",
+    );
+    const read = await dispatch("/api/runtime-controllers/builtin-e2b");
+    expect(read.status).toBe(200);
+    expect(read.data.controller).toMatchObject({ secretConfigKeys: [], secretConfigError: true });
+    const list = await dispatch("/api/runtime-controllers");
+    expect(list.status).toBe(200);
+    expect(list.data.controllers).toHaveLength(3);
+    expect(list.text).not.toContain("invalid-ciphertext");
+  });
+  test("controller deletion returns 409 while a pool references it", async () => {
+    const response = await dispatch("/api/runtime-controllers/builtin-static", "DELETE");
+    expect(response.status).toBe(409);
+    expect(response.data.error).toBe("Controller has runtime pools");
+    expect((await dispatch("/api/runtime-controllers/builtin-static")).status).toBe(200);
+  });
+  test("pool-agent creation returns 409 for an existing agent name", async () => {
+    const response = await dispatch("/api/runtime-pools/default-static/agents", "POST", {
+      name: "worker",
+    });
+    expect(response.status).toBe(409);
+    expect(response.data.error).toBe("Agent name already exists");
+    expect((await getAgentById(workerId))?.runtimePoolId).toBeNull();
+  });
   test("pool CRUD, binding, runtimes and forced deletion", async () => {
     const created = await dispatch("/api/runtime-pools", "POST", poolInput);
     expect(created.status).toBe(200);
@@ -289,7 +362,9 @@ test("MCP proxies enforce REST permissions and compose both result channels", as
   const call = (name: string, args: unknown, agentId = leadId) =>
     tools[name]!.handler(args, { requestInfo: { headers: { "x-agent-id": agentId } } });
   const savedFetch = globalThis.fetch;
+  let fetchCalls = 0;
   globalThis.fetch = (async (input, init) => {
+    fetchCalls++;
     const url = new URL(String(input));
     const headers = new Headers(init?.headers);
     expect(headers.get("x-agent-id")).toBeTruthy();
@@ -305,6 +380,15 @@ test("MCP proxies enforce REST permissions and compose both result channels", as
     });
   }) as typeof fetch;
   try {
+    for (const args of [{}, { name: "incomplete" }, { name: "incomplete", kind: "docker" }]) {
+      const missing = await call("runtime-pool-upsert", args);
+      expect(missing.isError).toBe(true);
+      expect(missing.structuredContent.success).toBe(false);
+      expect(missing.content[0]?.text).toContain(
+        "requires name, kind, and one controller placement",
+      );
+    }
+    expect(fetchCalls).toBe(0);
     const created = await call("runtime-pool-upsert", poolInput);
     expect(created.isError).toBe(false);
     const pool = created.structuredContent.pool as { id: string };

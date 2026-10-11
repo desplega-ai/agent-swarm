@@ -28,6 +28,22 @@ function verifyColumns(db: Database) {
     "task_id",
   ])
     expect(columns).toContain(column);
+  const agentColumns = db
+    .query<{ name: string }, []>("PRAGMA table_info(agents)")
+    .all()
+    .map((row) => row.name);
+  for (const column of [
+    "runtime_pool_id",
+    "runtime_provision_attempts",
+    "runtime_provision_retry_at",
+  ])
+    expect(agentColumns).toContain(column);
+  expect(
+    db
+      .query<{ name: string }, []>("PRAGMA table_info(agent_tasks)")
+      .all()
+      .map((row) => row.name),
+  ).toContain("pool_wake_at");
   expect(db.query("PRAGMA foreign_key_check").all()).toEqual([]);
 }
 test("migration 206 applies on a fresh database", () => {
@@ -71,11 +87,33 @@ test("migration 206 preserves agents and runtimes in a database at 205", async (
       agentId,
       JSON.stringify({ existing: true }),
     ]);
+    const taskId = crypto.randomUUID();
+    db.run(
+      "INSERT INTO agent_tasks (id, agentId, task, status, source, routing_reason, routing_note, createdAt, lastUpdatedAt) VALUES (?, ?, 'existing-task', 'pending', 'mcp', 'human_pinned', 'keep-note', ?, ?)",
+      [taskId, agentId, new Date().toISOString(), new Date().toISOString()],
+    );
     runMigrations(db);
     verifyColumns(db);
-    expect(db.query("SELECT name, runtime_pool_id FROM agents WHERE id = ?").get(agentId)).toEqual({
+    expect(
+      db
+        .query(
+          "SELECT name, runtime_pool_id, runtime_provision_attempts, runtime_provision_retry_at FROM agents WHERE id = ?",
+        )
+        .get(agentId),
+    ).toEqual({
       name: "existing-worker",
       runtime_pool_id: null,
+      runtime_provision_attempts: 0,
+      runtime_provision_retry_at: null,
+    });
+    expect(
+      db
+        .query("SELECT routing_reason, routing_note, pool_wake_at FROM agent_tasks WHERE id = ?")
+        .get(taskId),
+    ).toEqual({
+      routing_reason: "human_pinned",
+      routing_note: "keep-note",
+      pool_wake_at: null,
     });
     expect(
       db

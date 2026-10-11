@@ -1,5 +1,15 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
-import { closeDb, createAgent, getAgentById, getDbClient, getSwarmConfigs, initDb } from "../be/db";
+import { encryptSecret } from "../be/crypto";
+import {
+  closeDb,
+  createAgent,
+  createTaskExtended,
+  getAgentById,
+  getDbClient,
+  getSwarmConfigs,
+  getTaskById,
+  initDb,
+} from "../be/db";
 import {
   bindAgentToPool,
   createPoolAgent,
@@ -8,9 +18,12 @@ import {
   deleteRuntimeController,
   deleteRuntimePool,
   getPoolForAgent,
+  getRuntimeController,
   getRuntimeControllerSecrets,
   getRuntimePool,
   listAgentsForPool,
+  listRuntimeControllers,
+  loadRuntimeControllerSecrets,
   updateRuntimeController,
   updateRuntimePool,
 } from "../be/runtime-pools/db";
@@ -39,6 +52,91 @@ beforeEach(async () => {
 });
 
 describe("runtime pools persistence", () => {
+  test("maps persisted task wake and agent provisioning state without changing routing", async () => {
+    const agent = await createAgent({ name: "worker", status: "offline", isLead: false });
+    expect(agent).toMatchObject({ runtimeProvisionAttempts: 0, runtimeProvisionRetryAt: null });
+    const task = await createTaskExtended("wake task", {
+      agentId: agent.id,
+      routingReason: "human_pinned",
+      routingNote: "keep-note",
+    });
+    expect(task.poolWakeAt).toBeUndefined();
+    const at = new Date().toISOString();
+    await getDbClient().run("UPDATE agent_tasks SET pool_wake_at = ? WHERE id = ?", [at, task.id]);
+    await getDbClient().run(
+      "UPDATE agents SET runtime_provision_attempts = 2, runtime_provision_retry_at = ? WHERE id = ?",
+      [at, agent.id],
+    );
+    expect(await getTaskById(task.id)).toMatchObject({
+      poolWakeAt: at,
+      routingReason: "human_pinned",
+      routingNote: "keep-note",
+    });
+    expect(await getAgentById(agent.id)).toMatchObject({
+      runtimeProvisionAttempts: 2,
+      runtimeProvisionRetryAt: at,
+    });
+  });
+  test("controller reads isolate secrets encrypted under a different key", async () => {
+    const healthy = await createRuntimeController({
+      name: "healthy",
+      kind: "e2b",
+      secretConfig: { E2B_API_KEY: crypto.randomUUID() },
+    });
+    const broken = await createRuntimeController({ name: "broken", kind: "e2b" });
+    const ciphertext = encryptSecret(
+      JSON.stringify({ E2B_API_KEY: "unreadable-secret" }),
+      Buffer.from(crypto.getRandomValues(new Uint8Array(32))),
+    );
+    await getDbClient().run("UPDATE runtime_controllers SET secret_config = ? WHERE id = ?", [
+      ciphertext,
+      broken.id,
+    ]);
+    expect(await getRuntimeController(broken.id)).toMatchObject({
+      secretConfigKeys: [],
+      secretConfigError: true,
+    });
+    expect(await listRuntimeControllers()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: healthy.id, secretConfigKeys: ["E2B_API_KEY"] }),
+        expect.objectContaining({ id: broken.id, secretConfigKeys: [], secretConfigError: true }),
+      ]),
+    );
+    expect(await updateRuntimeController(broken.id, { name: "still-readable" })).toMatchObject({
+      secretConfigError: true,
+    });
+    expect(await loadRuntimeControllerSecrets()).toEqual({ count: 1, failed: 1 });
+    await expect(getRuntimeControllerSecrets(broken.id)).rejects.toThrow();
+  });
+  test("secret registration waits for commit and discards rolled back creates and updates", async () => {
+    const secret = crypto.randomUUID() + crypto.randomUUID();
+    const controllerId = crypto.randomUUID();
+    await expect(
+      getDbClient().transaction(async () => {
+        await createRuntimeController(
+          { name: "rollback", kind: "e2b", secretConfig: { E2B_API_KEY: secret } },
+          null,
+          controllerId,
+        );
+        expect(scrubSecrets(secret)).toBe(secret);
+        throw new Error("rollback");
+      }),
+    ).rejects.toThrow("rollback");
+    expect(await getRuntimeController(controllerId)).toBeNull();
+    expect(scrubSecrets(secret)).toBe(secret);
+    const controller = await createRuntimeController({ name: "committed", kind: "e2b" });
+    await expect(
+      getDbClient().transaction(async () => {
+        await updateRuntimeController(controller.id, { secretConfig: { E2B_API_KEY: secret } });
+        expect(scrubSecrets(secret)).toBe(secret);
+        throw new Error("rollback");
+      }),
+    ).rejects.toThrow("rollback");
+    expect(await getRuntimeControllerSecrets(controller.id)).toEqual({});
+    expect(scrubSecrets(secret)).toBe(secret);
+    await updateRuntimeController(controller.id, { secretConfig: { E2B_API_KEY: secret } });
+    expect(scrubSecrets(secret)).not.toContain(secret);
+  });
   test("static lifecycle, binding, protected deletion and forced unbinding", async () => {
     const controller = await createRuntimeController({ name: "static", kind: "static" });
     const pool = await createRuntimePool({

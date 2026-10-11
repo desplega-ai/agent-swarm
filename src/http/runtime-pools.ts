@@ -18,7 +18,7 @@ import {
   updateRuntimeController,
   updateRuntimePool,
 } from "../be/runtime-pools/db";
-import { can, type RbacPrincipal } from "../rbac";
+import { can } from "../rbac";
 import {
   AgentSchema,
   RuntimeControllerCreateSchema,
@@ -30,9 +30,9 @@ import {
   RuntimePoolSchema,
   RuntimePoolUpdateSchema,
 } from "../types";
-import { getRequestAuth } from "../utils/request-auth-context";
 import { isRuntimePoolsEnabled } from "../utils/runtime-pools-flag";
 import { scrubSecrets } from "../utils/secret-scrubber";
+import { agentFirstPrincipal } from "./request-principal";
 import { route } from "./route-def";
 import { jsonError } from "./utils";
 
@@ -51,7 +51,6 @@ const listPoolsRoute = route({
     400: { description: "Invalid configuration" },
     403: { description: "Permission denied" },
     404: { description: "Not found or runtime pools disabled" },
-    409: { description: "Entity is in use or already exists" },
   },
 });
 
@@ -89,7 +88,6 @@ const getPoolRoute = route({
     400: { description: "Invalid configuration" },
     403: { description: "Permission denied" },
     404: { description: "Not found or runtime pools disabled" },
-    409: { description: "Entity is in use or already exists" },
   },
 });
 
@@ -147,7 +145,6 @@ const runtimesRoute = route({
     400: { description: "Invalid configuration" },
     403: { description: "Permission denied" },
     404: { description: "Not found or runtime pools disabled" },
-    409: { description: "Entity is in use or already exists" },
   },
 });
 
@@ -187,7 +184,6 @@ const listControllersRoute = route({
     400: { description: "Invalid configuration" },
     403: { description: "Permission denied" },
     404: { description: "Not found or runtime pools disabled" },
-    409: { description: "Entity is in use or already exists" },
   },
 });
 
@@ -225,7 +221,6 @@ const getControllerRoute = route({
     400: { description: "Invalid configuration" },
     403: { description: "Permission denied" },
     404: { description: "Not found or runtime pools disabled" },
-    409: { description: "Entity is in use or already exists" },
   },
 });
 
@@ -283,22 +278,12 @@ const bindAgentRoute = route({
     400: { description: "Invalid configuration" },
     403: { description: "Permission denied" },
     404: { description: "Not found or runtime pools disabled" },
-    409: { description: "Entity is in use or already exists" },
   },
   rbac: { permission: "runtime_pool.write" },
 });
 
 function scrubResponse<T>(data: T): T {
   return JSON.parse(scrubSecrets(JSON.stringify(data))) as T;
-}
-async function principal(req: IncomingMessage, agentId?: string): Promise<RbacPrincipal> {
-  if (agentId)
-    return { kind: "agent", agentId, isLead: (await getAgentById(agentId))?.isLead ?? false };
-  const auth = getRequestAuth(req);
-  if (auth?.kind === "operator") return { kind: "operator" };
-  if (auth?.kind === "user") return { kind: "user", userId: auth.userId };
-  if (auth?.kind === "guest") return { kind: "guest" };
-  return { kind: "agent", agentId: "", isLead: false };
 }
 
 export async function handleRuntimePools(
@@ -330,15 +315,26 @@ export async function handleRuntimePools(
     return true;
   }
   try {
-    if (req.method !== "GET") {
-      const caller = await principal(req, agentId);
-      const controller = pathSegments[1] === "runtime-controllers";
+    const binding =
+      matched === bindAgentRoute
+        ? await bindAgentRoute.parse(req, res, pathSegments, queryParams)
+        : undefined;
+    if (matched === bindAgentRoute && !binding) return true;
+    const rbac = matched.def.rbac;
+    if (rbac && "permission" in rbac) {
+      const caller = await agentFirstPrincipal(req, agentId);
+      const poolId = binding
+        ? (binding.body.poolId ??
+          (await getAgentById(binding.params.id))?.runtimePoolId ??
+          undefined)
+        : pathSegments[2];
       const decision = can({
         principal: caller,
-        verb: controller ? "runtime_controller.write" : "runtime_pool.write",
-        resource: controller
-          ? { kind: "runtime_controller", controllerId: pathSegments[2] }
-          : { kind: "runtime_pool", poolId: pathSegments[2] },
+        verb: rbac.permission,
+        resource:
+          rbac.permission === "runtime_controller.write"
+            ? { kind: "runtime_controller", controllerId: pathSegments[2] }
+            : { kind: "runtime_pool", poolId },
         source: "http",
       });
       if (!decision.allow) {
@@ -347,13 +343,13 @@ export async function handleRuntimePools(
       }
     }
     const actor = req.method === "GET" ? null : await resolveHttpAuditUserId(req, agentId);
-    if (listPoolsRoute.match(req.method, pathSegments)) {
+    if (matched === listPoolsRoute) {
       const parsed = await listPoolsRoute.parse(req, res, pathSegments, queryParams);
       if (!parsed) return true;
       listPoolsRoute.respond(res, 200, scrubResponse({ pools: await listRuntimePools() }));
       return true;
     }
-    if (createPoolRoute.match(req.method, pathSegments)) {
+    if (matched === createPoolRoute) {
       const parsed = await createPoolRoute.parse(req, res, pathSegments, queryParams);
       if (!parsed) return true;
       createPoolRoute.respond(
@@ -363,7 +359,7 @@ export async function handleRuntimePools(
       );
       return true;
     }
-    if (getPoolRoute.match(req.method, pathSegments)) {
+    if (matched === getPoolRoute) {
       const parsed = await getPoolRoute.parse(req, res, pathSegments, queryParams);
       if (!parsed) return true;
       const pool = await getRuntimePool(parsed.params.id);
@@ -371,7 +367,7 @@ export async function handleRuntimePools(
       getPoolRoute.respond(res, 200, scrubResponse({ pool }));
       return true;
     }
-    if (patchPoolRoute.match(req.method, pathSegments)) {
+    if (matched === patchPoolRoute) {
       const parsed = await patchPoolRoute.parse(req, res, pathSegments, queryParams);
       if (!parsed) return true;
       patchPoolRoute.respond(
@@ -381,14 +377,14 @@ export async function handleRuntimePools(
       );
       return true;
     }
-    if (deletePoolRoute.match(req.method, pathSegments)) {
+    if (matched === deletePoolRoute) {
       const parsed = await deletePoolRoute.parse(req, res, pathSegments, queryParams);
       if (!parsed) return true;
       await deleteRuntimePool(parsed.params.id, parsed.query.force === "true", actor);
       deletePoolRoute.respond(res, 200, { deleted: true });
       return true;
     }
-    if (runtimesRoute.match(req.method, pathSegments)) {
+    if (matched === runtimesRoute) {
       const parsed = await runtimesRoute.parse(req, res, pathSegments, queryParams);
       if (!parsed) return true;
       if (!(await getRuntimePool(parsed.params.id)))
@@ -400,7 +396,7 @@ export async function handleRuntimePools(
       );
       return true;
     }
-    if (createAgentRoute.match(req.method, pathSegments)) {
+    if (matched === createAgentRoute) {
       const parsed = await createAgentRoute.parse(req, res, pathSegments, queryParams);
       if (!parsed) return true;
       createAgentRoute.respond(
@@ -410,7 +406,7 @@ export async function handleRuntimePools(
       );
       return true;
     }
-    if (listControllersRoute.match(req.method, pathSegments)) {
+    if (matched === listControllersRoute) {
       const parsed = await listControllersRoute.parse(req, res, pathSegments, queryParams);
       if (!parsed) return true;
       listControllersRoute.respond(
@@ -420,7 +416,7 @@ export async function handleRuntimePools(
       );
       return true;
     }
-    if (createControllerRoute.match(req.method, pathSegments)) {
+    if (matched === createControllerRoute) {
       const parsed = await createControllerRoute.parse(req, res, pathSegments, queryParams);
       if (!parsed) return true;
       createControllerRoute.respond(
@@ -430,7 +426,7 @@ export async function handleRuntimePools(
       );
       return true;
     }
-    if (getControllerRoute.match(req.method, pathSegments)) {
+    if (matched === getControllerRoute) {
       const parsed = await getControllerRoute.parse(req, res, pathSegments, queryParams);
       if (!parsed) return true;
       const controller = await getRuntimeController(parsed.params.id);
@@ -438,7 +434,7 @@ export async function handleRuntimePools(
       getControllerRoute.respond(res, 200, scrubResponse({ controller }));
       return true;
     }
-    if (patchControllerRoute.match(req.method, pathSegments)) {
+    if (matched === patchControllerRoute) {
       const parsed = await patchControllerRoute.parse(req, res, pathSegments, queryParams);
       if (!parsed) return true;
       patchControllerRoute.respond(
@@ -450,16 +446,15 @@ export async function handleRuntimePools(
       );
       return true;
     }
-    if (deleteControllerRoute.match(req.method, pathSegments)) {
+    if (matched === deleteControllerRoute) {
       const parsed = await deleteControllerRoute.parse(req, res, pathSegments, queryParams);
       if (!parsed) return true;
       await deleteRuntimeController(parsed.params.id);
       deleteControllerRoute.respond(res, 200, { deleted: true });
       return true;
     }
-    if (bindAgentRoute.match(req.method, pathSegments)) {
-      const parsed = await bindAgentRoute.parse(req, res, pathSegments, queryParams);
-      if (!parsed) return true;
+    if (matched === bindAgentRoute) {
+      const parsed = binding!;
       bindAgentRoute.respond(
         res,
         200,
