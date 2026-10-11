@@ -382,6 +382,9 @@
     "pool_wake_at": {
       "exempt": "timestamp"
     },
+    "runtime_instance_id": {
+      "exempt": "identifier"
+    },
     "routing_source": {
       "pending": "unassigned: no batch yet scrubs this writer"
     },
