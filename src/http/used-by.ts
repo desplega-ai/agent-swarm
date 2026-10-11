@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import { getSwarmConfigs, upsertSwarmConfig } from "../be/db";
-import { trackRelayed } from "../telemetry";
+import { isTelemetryEnabled, trackRelayed } from "../telemetry";
 import { normalizeOrgWebsite, TELEMETRY_PROXY_ORIGIN } from "../utils/org-website";
 import { ensureConfigAdmin } from "./config";
 import { scheduleIntegrationsReload } from "./core";
@@ -47,7 +47,7 @@ async function globalConfig(key: string): Promise<string | undefined> {
 /** `/v1/used-by` next to the configured `/v1/feedback` endpoint, so a stubbed proxy gets both. */
 export async function usedByEndpoint(): Promise<string> {
   const feedback = await globalConfig("feedback_endpoint");
-  if (feedback && /\/v1\/feedback\/?$/.test(feedback)) {
+  if (feedback && /^https?:\/\/[^/]+\/v1\/feedback\/?$/.test(feedback)) {
     return feedback.replace(/\/v1\/feedback\/?$/, "/v1/used-by");
   }
   return `${TELEMETRY_PROXY_ORIGIN}/v1/used-by`;
@@ -74,7 +74,10 @@ export async function handleUsedBy(
     jsonError(res, "Set the organization name and website first", 400);
     return true;
   }
-  const installId = await globalConfig("telemetry_installation_id");
+  // With telemetry off this sends only what the admin asked to share.
+  const installId = isTelemetryEnabled()
+    ? await globalConfig("telemetry_installation_id")
+    : undefined;
   const orgDomain = await globalConfig("telemetry_org_domain");
   const changedAt = new Date().toISOString();
 

@@ -110,6 +110,23 @@ describe("POST /api/used-by", () => {
     expect(await configValue("SWARM_USED_BY_CONSENT")).toBe("false");
   });
 
+  test("with telemetry off the install ID stays home", async () => {
+    await upsertSwarmConfig({
+      scope: "global",
+      key: "telemetry_installation_id",
+      value: "install_0123456789abcdef",
+    });
+    const saved = process.env.ANONYMIZED_TELEMETRY;
+    process.env.ANONYMIZED_TELEMETRY = "true";
+    await post({ granted: true }, OPERATOR);
+    process.env.ANONYMIZED_TELEMETRY = "false";
+    await post({ granted: true }, OPERATOR);
+    if (saved === undefined) delete process.env.ANONYMIZED_TELEMETRY;
+    else process.env.ANONYMIZED_TELEMETRY = saved;
+    expect(proxied[0]?.body.install_id).toBe("install_0123456789abcdef");
+    expect(proxied[1]?.body).not.toHaveProperty("install_id");
+  });
+
   test("follows a stubbed feedback_endpoint", async () => {
     await upsertSwarmConfig({
       scope: "global",

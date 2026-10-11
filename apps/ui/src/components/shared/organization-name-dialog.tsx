@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
+import { toast } from "sonner";
 import { useConfigs, useUpsertConfig } from "@/api/hooks/use-config-api";
 import { useEnvPresence, useReloadConfig } from "@/api/hooks/use-integrations-meta";
 import { useOnboardingOwnsFirstRun } from "@/api/hooks/use-onboarding";
@@ -135,7 +136,9 @@ export function OrganizationNameDialog() {
       });
       if (usedBy && canConsent) {
         // An explicit opt-in: a failure here must not lose the saved name.
-        await setUsedBy.mutateAsync(true).catch(() => {});
+        await setUsedBy.mutateAsync(true).catch(() => {
+          toast.error("Saved. The logo consent did not go through; try again in Settings.");
+        });
       }
       setDismissed(true);
     } catch {

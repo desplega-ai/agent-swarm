@@ -2,6 +2,7 @@ import type { LucideIcon } from "lucide-react";
 import { ArrowUpCircle, BarChart3, Building2, ExternalLink, Wrench, X } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { Link } from "react-router-dom";
+import { toast } from "sonner";
 import { useConfigs } from "@/api/hooks/use-config-api";
 import { useFeatureGate } from "@/api/hooks/use-feature-gate";
 import { useOnboardingOwnsFirstRun } from "@/api/hooks/use-onboarding";
@@ -135,7 +136,11 @@ export function DashboardNudges() {
               size="sm"
               variant="outline"
               disabled={enableTelemetry.isPending}
-              onClick={() => enableTelemetry.mutate("banner")}
+              onClick={() =>
+                enableTelemetry.mutate("banner", {
+                  onError: () => toast.error("Could not turn telemetry on. Please try again."),
+                })
+              }
             >
               {enableTelemetry.isPending ? "Turning on…" : "Turn on"}
             </Button>

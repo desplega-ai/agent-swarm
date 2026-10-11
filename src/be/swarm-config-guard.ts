@@ -355,10 +355,10 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
     }
     return null;
   },
-  // A bare public hostname, as `normalizeOrgWebsite` stores it.
+  // A bare public hostname, as `normalizeOrgWebsite` stores it, or empty to clear it.
   SWARM_ORG_WEBSITE: (value) => {
     const str = String(value).trim();
-    return normalizeOrgWebsite(str) === str
+    return str === "" || normalizeOrgWebsite(str) === str
       ? null
       : "Invalid SWARM_ORG_WEBSITE (must be a public hostname such as example.com, without scheme, www, path or port)";
   },

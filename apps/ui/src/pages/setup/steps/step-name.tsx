@@ -122,7 +122,8 @@ export function StepName({ onboarding, act, setContinueBlocker, setContinueActio
   const websiteSave = useAutosave({
     value: website ?? "",
     dirty: websiteDraft !== null && (website ?? "") !== storedWebsite,
-    ready: website !== null,
+    // Empty clears the website.
+    ready: website !== null || websiteInput.trim() === "",
     save: async (value) => {
       await save([{ key: "SWARM_ORG_WEBSITE", value, isSecret: false }]);
       sendUiTelemetry(status, {

@@ -71,12 +71,13 @@ describe("websiteSuggestion", () => {
 });
 
 describe("SWARM_ORG_WEBSITE config guard", () => {
-  test("accepts a bare hostname", () => {
+  test("accepts a bare hostname, or empty to clear it", () => {
     expect(validateConfigValue("SWARM_ORG_WEBSITE", "acme.com")).toBeNull();
+    expect(validateConfigValue("SWARM_ORG_WEBSITE", "")).toBeNull();
   });
 
   test("rejects anything that is not already a bare public hostname", () => {
-    for (const value of ["https://acme.com", "www.acme.com", "localhost", "10.0.0.1", ""]) {
+    for (const value of ["https://acme.com", "www.acme.com", "localhost", "10.0.0.1"]) {
       expect(validateConfigValue("SWARM_ORG_WEBSITE", value)).toContain("SWARM_ORG_WEBSITE");
     }
   });
