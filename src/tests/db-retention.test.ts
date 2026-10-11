@@ -79,6 +79,37 @@ async function countRows(table: (typeof DB_RETENTION_TABLES)[number]["table"]): 
   return row?.count ?? 0;
 }
 
+/**
+ * The catch-up interval's valid minimum is 5s, and waiting it out in real time
+ * made the catch-up tests the slowest in the suite. While compression is on, a
+ * timer for exactly that interval fires after {@link COMPRESSED_CATCHUP_MS}
+ * and is recorded, so tests still pin that the sweep asked for the configured
+ * interval. Every other timer keeps its real delay.
+ */
+const CATCHUP_INTERVAL_MS = 5_000;
+const COMPRESSED_CATCHUP_MS = 100;
+const realSetTimeout = globalThis.setTimeout;
+let requestedCatchupDelays: number[] = [];
+
+function compressCatchupTimers(): void {
+  requestedCatchupDelays = [];
+  globalThis.setTimeout = ((handler: TimerHandler, delay?: number, ...args: unknown[]) => {
+    if (delay === CATCHUP_INTERVAL_MS) {
+      requestedCatchupDelays.push(delay);
+      return realSetTimeout(handler, COMPRESSED_CATCHUP_MS, ...args);
+    }
+    return realSetTimeout(handler, delay, ...args);
+  }) as typeof setTimeout;
+}
+
+async function waitFor(condition: () => boolean | Promise<boolean>, timeoutMs: number) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await condition()) return;
+    await Bun.sleep(25);
+  }
+}
+
 beforeAll(async () => {
   closeDb();
   await removeDbFiles();
@@ -100,6 +131,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   await stopDbRetention();
+  globalThis.setTimeout = realSetTimeout;
 });
 
 describe("DB retention", () => {
@@ -554,6 +586,7 @@ describe("DB retention", () => {
     process.env.EVENTS_RETENTION_DAYS = "1";
     process.env.DB_RETENTION_TICK_BUDGET_MS = "1000"; // minimum allowed budget
     process.env.DB_RETENTION_CATCHUP_INTERVAL_MS = "5000"; // minimum allowed interval
+    compressCatchupTimers();
 
     // tickCount becomes 1 on the tick below, so the rotation starts at index 1:
     // [agent_log, events, session_logs].
@@ -601,9 +634,11 @@ describe("DB retention", () => {
     expect(getDbRetentionStats().sessionLogs).toBeUndefined();
     expect(await countRows("session_logs")).toBe(1);
 
-    // Catch-up must still be armed for them. The trigger is gone, so the
-    // catch-up tick (~5s out, plus its own budget) drains what pass 1 skipped.
-    await Bun.sleep(9_000);
+    // Catch-up must still be armed for them, on the configured interval. The
+    // trigger is gone, so the (compressed) catch-up tick drains what pass 1
+    // skipped.
+    expect(requestedCatchupDelays).toEqual([CATCHUP_INTERVAL_MS]);
+    await waitFor(() => getDbRetentionStats().sessionLogs?.rowsDeleted === 1, 9_000);
     expect(getDbRetentionStats().sessionLogs?.rowsDeleted).toBe(1);
     expect(await countRows("session_logs")).toBe(0);
   }, 40_000);
@@ -617,6 +652,7 @@ describe("DB retention", () => {
     // undrained set, and left catch-up unarmed until the hourly tick.
     process.env.SESSION_LOG_RETENTION_DAYS = "1";
     process.env.DB_RETENTION_CATCHUP_INTERVAL_MS = "5000"; // minimum allowed interval
+    compressCatchupTimers();
     const client = getDbClient();
     await insertRow("session_logs", "race-seed", "2026-08-01T00:00:00.000Z");
 
@@ -643,7 +679,8 @@ describe("DB retention", () => {
 
       // Still undrained means catch-up is armed. A second tick must run on the
       // 5s catch-up interval — no hourly timer, no manual runDbRetentionTick.
-      await Bun.sleep(7_500);
+      expect(requestedCatchupDelays).toEqual([CATCHUP_INTERVAL_MS]);
+      await waitFor(() => getDbRetentionStats().sessionLogs?.at !== afterFirstTick, 7_500);
       expect(getDbRetentionStats().sessionLogs?.at).not.toBe(afterFirstTick);
     } finally {
       // Stop the (permanently undrained) catch-up loop before removing the
@@ -657,27 +694,30 @@ describe("DB retention", () => {
     process.env.SESSION_LOG_RETENTION_DAYS = "1";
     process.env.DB_RETENTION_TICK_BUDGET_MS = "1000"; // minimum allowed budget
     process.env.DB_RETENTION_CATCHUP_INTERVAL_MS = "5000"; // minimum allowed interval
+    compressCatchupTimers();
     await bulkInsertSessionLogs("catchup", 200_000, "2026-08-01T00:00:00.000Z");
 
     await runDbRetentionTick({ now: NOW });
     expect(getDbRetentionStats().sessionLogs?.drained).toBe(false);
     const afterFirstTick = getDbRetentionStats().sessionLogs?.at;
 
-    // A catch-up tick is armed for ~5s from now, and (given the same 1000ms
-    // budget) needs up to another ~1s to complete and write its stats
-    // record — wait past both, plus a safety margin, to confirm it ran on
+    // A catch-up tick is armed on the configured 5s interval (compressed
+    // here), and (given the same 1000ms budget) needs up to another ~1s to
+    // complete and write its stats record — wait for it to confirm it ran on
     // its own, without a manual runDbRetentionTick call and without waiting
     // for the (much longer) hourly interval.
-    await Bun.sleep(7_500);
+    expect(requestedCatchupDelays).toEqual([CATCHUP_INTERVAL_MS]);
+    await waitFor(() => getDbRetentionStats().sessionLogs?.at !== afterFirstTick, 7_500);
     const afterCatchup = getDbRetentionStats().sessionLogs?.at;
     expect(afterCatchup).not.toBe(afterFirstTick);
 
     if (getDbRetentionStats().sessionLogs?.drained === false) {
       // Another catch-up timer is now pending from the tick above; stop it
-      // before it fires and confirm it never runs.
+      // before it fires and confirm it never runs. The wait is many times the
+      // compressed interval.
       await stopDbRetention();
       const afterStop = getDbRetentionStats().sessionLogs?.at;
-      await Bun.sleep(7_500);
+      await Bun.sleep(COMPRESSED_CATCHUP_MS * 10);
       expect(getDbRetentionStats().sessionLogs?.at).toBe(afterStop);
     }
   }, 25_000);
