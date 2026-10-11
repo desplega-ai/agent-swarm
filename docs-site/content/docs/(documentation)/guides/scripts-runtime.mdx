@@ -265,6 +265,10 @@ scripts run. The setting applies to every script run on that server.
 | `native` (default) | A sandboxed `bun` subprocess with `ulimit` limits. Everything on this page applies. | ~10 ms (process spawn) |
 | `quickjs` (experimental) | QuickJS compiled to WASM, in a pool of worker threads inside the API process. | ~1 ms |
 
+`SCRIPT_QUICKJS_POOL_SIZE` (default `4`, 1 to 32) caps the `quickjs` worker
+threads. The pool reads it once, when it is first created, so restart the API
+after a change. More workers trade memory for concurrent throughput.
+
 `quickjs` suits short scripts that call the swarm or HTTP APIs, for example
 scripts that you [expose externally](/docs/guides/scripts-external-apis). It
 does not suit CPU-heavy scripts: an interpreter runs them 3-11x slower than

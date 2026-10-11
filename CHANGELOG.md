@@ -6,6 +6,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.169.0] - 2026-10-11
+
+### Added
+- Workflows: a `sub-workflow` node runs another workflow as a child run with explicit `inputs`, waits for it to finish, and outputs its node outputs (#2030).
+- Heartbeat: `HEARTBEAT_CHECKLIST_GATE_SCRIPT` runs a global script before each recurring Lead checklist task. In `enforce` mode (`HEARTBEAT_CHECKLIST_GATE_MODE`) a quiet verdict skips the tick; the default `shadow` mode only tags the task (#2033).
+- Pages: an in-page feedback overlay lets a viewer comment on page elements and send the batch to the Lead as one task (`POST /api/pages/:id/feedback`) (#2039).
+- Slack: a durable inbound receipt store with explicit dispatch outcomes, plus `GET /api/slack/inbound/diagnostics` for operators. Socket Mode ingress is unchanged (#1606).
+- Scripts: `SCRIPT_QUICKJS_POOL_SIZE` sets the QuickJS worker pool size (default 4, 1 to 32) (#2037).
+- Evals: nightly canary and weekly matrix presets with a regression check, automatic reruns and one Slack summary per run (#1768), plus a read-only `GET /api/runs/:id/publish-bundle` endpoint for the weekly benchmark publish (#2046).
+
+### Changed
+- CI: vendored anti-slop Oxlint rules, with a first subset gated in CI (#2038).
+- Worker image: claude-code, codex, copilot, amp, acp and anthropic-sdk bumped (#2034, #2040); agent-browser bumped to 0.39.0 (#2035).
+- Docs: heartbeat spec sync, dreaming-v2 skill seed patches, and design notes on a computer primitive, team-scoped privacy and the swarm building-block ontology (#2032, #2036, #2042, #2043, #2044).
+
+### Fixed
+- Evals: the nightly canary cost cap is sized from measured cost, and a run stopped by the cap still gets its summary (#2041).
+
 ## [1.168.0] - 2026-10-10
 
 ### Added

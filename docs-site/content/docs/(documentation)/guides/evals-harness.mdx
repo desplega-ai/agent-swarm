@@ -99,6 +99,14 @@ The agentic judge is the strongest option when transcript-only grading is too tr
 - Verifying multi-worker handoffs and lead/worker orchestration
 - Measuring cost, duration, and pass-rate trends across runtime versions
 
+## Scheduled Runs
+
+Two scheduled presets run the suite on a timer: `nightly-canary` (the public single-run scenarios, Monday to Saturday) and `weekly-matrix` (the whole suite, Sunday). A scheduled swarm workflow starts each run with `POST /api/runs {"preset": "..."}`; the schedule itself lives in the deployed swarm, not in the repo.
+
+When a scheduled run finishes, the service compares every config × scenario cell with the same preset's last 14 finished runs. Cells that fail more than their baseline allows get automatic reruns and page only when the difference is statistically significant. Cost drift and model changes are reported separately. One summary goes to `EVALS_SLACK_WEBHOOK_URL`, and `GET /api/runs/:id/regression` returns the same report.
+
+After the weekly matrix, the workflow reads `GET /api/runs/:id/publish-bundle` (API key required, writes nothing) and opens a PR with the benchmark snapshot for a human to merge. See the repo README's "Scheduled runs" section for thresholds and failure handling.
+
 ## Where To Look Next
 
 - Repo source of truth: [`apps/evals/README.md`](https://github.com/desplega-ai/agent-swarm/blob/main/apps/evals/README.md)
