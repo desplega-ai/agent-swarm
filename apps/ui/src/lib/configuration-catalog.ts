@@ -429,6 +429,7 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         label: "Runtime wake grace (seconds)",
         description: "Wait for a live worker before assigning a task to a sleeping pool agent.",
         kind: "number",
+        unit: "s",
         defaultValue: "15",
         docsUrl: `${DOCS}ui/configuration#runtime-pools`,
       },
@@ -438,6 +439,7 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         description:
           "Release pending wake assignments after this timeout and try another eligible agent.",
         kind: "number",
+        unit: "s",
         defaultValue: "600",
         docsUrl: `${DOCS}ui/configuration#runtime-pools`,
       },
@@ -447,6 +449,7 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         description:
           "Check queued tasks at this interval. Zero uses 5000 ms. Positive values below 500 use 500 ms.",
         kind: "number",
+        unit: "ms",
         defaultValue: "5000",
         restartRequired: true,
         docsUrl: `${DOCS}ui/configuration#runtime-pools`,

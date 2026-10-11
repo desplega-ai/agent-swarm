@@ -49,7 +49,7 @@ describe("configuration duration storage", () => {
   });
   test("every catalog duration declares its native unit", () => {
     const entries = CONFIGURATION_GROUPS.flatMap((group) => group.entries);
-    const suffixes = { MS: "ms", SEC: "s", SECONDS: "s", MIN: "min", DAYS: "days" };
+    const suffixes = { MS: "ms", SEC: "s", SECONDS: "s", MIN: "min", HOURS: "h", DAYS: "days" };
     for (const entry of entries.filter((entry) => entry.kind === "number")) {
       const suffix = entry.key.split("_").at(-1) as keyof typeof suffixes;
       expect(entry.unit).toBe(suffixes[suffix]);
