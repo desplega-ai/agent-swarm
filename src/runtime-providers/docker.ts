@@ -154,7 +154,11 @@ export class DockerRuntimeProvider implements RuntimeProvider {
   }
 
   async terminate(target: RuntimeTargetConfig, handle: RuntimeHandle): Promise<void> {
-    await dockerApi(target, "DELETE", `/containers/${handle.externalId}?force=true`);
+    try {
+      await dockerApi(target, "DELETE", `/containers/${handle.externalId}?force=true`);
+    } catch (err) {
+      if (!(err instanceof DockerApiError) || err.statusCode !== 404) throw err;
+    }
   }
 
   async status(target: RuntimeTargetConfig, handle: RuntimeHandle): Promise<RuntimeStatus> {
@@ -185,11 +189,14 @@ export class DockerRuntimeProvider implements RuntimeProvider {
     const filters = encodeURIComponent(
       JSON.stringify({ label: [RUNTIME_LABELS.runtimeId, `${RUNTIME_LABELS.owner}=${ownerId}`] }),
     );
-    const rows = await dockerApi<Array<{ Id: string; Labels: Record<string, string> }>>(
-      target,
-      "GET",
-      `/containers/json?all=true&filters=${filters}`,
-    );
-    return rows.map((row) => ({ kind: "docker", externalId: row.Id, meta: row.Labels }));
+    const rows = await dockerApi<
+      Array<{ Id: string; Created?: number; Labels: Record<string, string> }>
+    >(target, "GET", `/containers/json?all=true&filters=${filters}`);
+    return rows.map((row) => ({
+      kind: "docker",
+      externalId: row.Id,
+      createdAt: row.Created === undefined ? undefined : new Date(row.Created * 1000).toISOString(),
+      meta: row.Labels,
+    }));
   }
 }

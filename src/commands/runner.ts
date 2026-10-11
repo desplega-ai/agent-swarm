@@ -787,7 +787,8 @@ async function closeAgent(config: ApiConfig, role: string): Promise<void> {
     console.log(`[${role}] Marking agent as offline...`);
     await fetch(`${config.apiUrl}/close`, {
       method: "POST",
-      headers,
+      headers: { ...headers, "Content-Type": "application/json" },
+      body: JSON.stringify({ runtimeShutdown: true }),
     });
     console.log(`[${role}] Agent marked as offline`);
   } catch {
@@ -804,11 +805,10 @@ export function resolveExitAfterTasks(env: NodeJS.ProcessEnv = process.env): num
 export async function exitAfterTasksIfFinished(
   state: RunnerState,
   limit: number | null,
-  apiConfig: ApiConfig,
-  role: string,
+  shutdown: (signal: string) => Promise<void>,
 ): Promise<boolean> {
   if (limit === null || state.tasksProcessed < limit || state.activeTasks.size > 0) return false;
-  await closeAgent(apiConfig, role);
+  await shutdown("SWARM_EXIT_AFTER_TASKS");
   return true;
 }
 
@@ -2382,12 +2382,12 @@ export async function buildResumePrompt(
 }
 
 /** Setup signal handlers for graceful shutdown */
-function setupShutdownHandlers(
+export function setupShutdownHandlers(
   role: string,
   apiConfig?: ApiConfig,
   getRunnerState?: () => RunnerState | undefined,
   onShutdown?: () => void,
-): void {
+): (signal: string, exitCode?: number) => Promise<void> {
   let shutdownInProgress = false;
   const shutdown = async (signal: string, exitCode = 0) => {
     if (shutdownInProgress) return;
@@ -2475,16 +2475,15 @@ function setupShutdownHandlers(
     process.exit(exitCode);
   };
 
-  const beginShutdown = (signal: string, exitCode = 0) => {
-    void shutdown(signal, exitCode).catch(async (error) => {
+  const beginShutdown = (signal: string, exitCode = 0) =>
+    shutdown(signal, exitCode).catch(async (error) => {
       console.error(`[${role}] Shutdown failed after ${signal}:`, error);
       await terminateRegisteredProcessGroups();
       process.exit(1);
     });
-  };
 
-  process.on("SIGINT", () => beginShutdown("SIGINT"));
-  process.on("SIGTERM", () => beginShutdown("SIGTERM"));
+  process.on("SIGINT", () => void beginShutdown("SIGINT"));
+  process.on("SIGTERM", () => void beginShutdown("SIGTERM"));
   let fatalShutdownInProgress = false;
   const fatalShutdown = (kind: string, error: unknown) => {
     if (fatalShutdownInProgress) return;
@@ -2498,6 +2497,7 @@ function setupShutdownHandlers(
   process.on("unhandledRejection", (reason) => {
     fatalShutdown("Unhandled rejection", reason);
   });
+  return beginShutdown;
 }
 
 /** Configuration for a runner role (worker or lead) */
@@ -5098,6 +5098,7 @@ export async function checkCompletedProcesses(
   for (const {
     taskId,
     result,
+    triggerType,
     triggerSurface,
     requestedByUserId,
     cursorUpdates,
@@ -5115,6 +5116,9 @@ export async function checkCompletedProcesses(
     vcsDetectedTasks.delete(taskId);
     vcsCheckTimestamps.delete(taskId);
     cancelledSignaled?.delete(taskId);
+    if (triggerType === "task_assigned" || triggerType === "task_resumed") {
+      state.tasksProcessed += 1;
+    }
 
     if (apiConfig) {
       removeActiveSession(apiConfig, taskId).catch((err) =>
@@ -5132,7 +5136,6 @@ export async function checkCompletedProcesses(
       console.log(
         `[${role}] Task ${taskId.slice(0, 8)} was already ${serverTerminalStatus} server-side — slot released, server result kept`,
       );
-      state.tasksProcessed += 1;
       continue;
     }
 
@@ -5254,8 +5257,6 @@ export async function checkCompletedProcesses(
           sessionActor,
         );
       }
-      state.tasksProcessed += 1;
-
       ensure({
         id: "worker_process_finished",
         flow: "task",
@@ -5760,7 +5761,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   };
 
   // Setup graceful shutdown handlers with API config and runner state access
-  setupShutdownHandlers(
+  const shutdown = setupShutdownHandlers(
     role,
     apiConfig,
     () => state,
@@ -6646,11 +6647,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
     const activeBeforeCompletion = state.activeTasks.size;
     await checkCompletedProcesses(state, role, apiConfig, cancelledSignaled);
     if (state.activeTasks.size < activeBeforeCompletion) pushDelivery.wakeWork();
-    if (await exitAfterTasksIfFinished(state, exitAfterTasks, apiConfig, role)) {
-      clearInterval(pushPingTimer);
-      pushDelivery.client.stop();
-      process.exit(0);
-    }
+    if (await exitAfterTasksIfFinished(state, exitAfterTasks, shutdown)) return;
 
     // Live HARNESS_PROVIDER reconciliation. Re-fetches `swarm_config` (overlaid
     // on env) and swaps the adapter if the resolved provider changed —

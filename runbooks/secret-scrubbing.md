@@ -25,6 +25,9 @@ Secret `swarm_config` writes also register the new plaintext with the scrubber s
 
 Volatile registration is process-local. It does not update another already-running API or worker process. Cross-process coverage begins only after that process reloads the config or otherwise learns and registers the new value; deployments with multiple API replicas must coordinate reloads when rotating shared secrets.
 
+Runtime tokens use `runtime:<runtimeId>` registration names. Revocation removes their volatile registrations after commit with `unregisterVolatileSecret(name)`.
+Stored secret registrations retain their existing append-only behavior. Structural patterns still scrub revoked `aseph_` tokens.
+
 ## Coverage
 
 The scrubber is worker/API-neutral: it reads `process.env` and its process-local volatile registry, but never accesses the database. It is safe to import from either side without violating the DB boundary.

@@ -6665,8 +6665,8 @@
     },
     "/close": {
       "post": {
-        "summary": "Mark an agent or runtime offline on shutdown",
-        "description": "Retires the calling process. Workers may send `X-Runtime-Instance-ID`, the per-boot identifier of the calling process. It is ignored unless MULTI_RUNTIME_ENABLED is set. With multi-runtime mode on, the header is required and only that runtime is retired; the agent goes offline once no live runtime remains. With the flag off, the agent is marked offline as before.",
+        "summary": "End a session or terminate an agent runtime",
+        "description": "Closes the calling session. Workers may send `X-Runtime-Instance-ID`, the per-boot identifier of the calling process. It is ignored unless MULTI_RUNTIME_ENABLED is set. Pooled runtimes remain active unless runtimeShutdown is true. With multi-runtime mode on, the header is required and static runtimes retire independently. With the flag off, static agents are marked offline.",
         "tags": [
           "Core"
         ],
@@ -6687,9 +6687,23 @@
             "in": "header"
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "runtimeShutdown": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
         "responses": {
           "204": {
-            "description": "Runtime (and agent, when last) marked offline"
+            "description": "Session closed or runtime retired"
           },
           "400": {
             "description": "Missing X-Agent-ID, or missing X-Runtime-Instance-ID in multi-runtime mode",

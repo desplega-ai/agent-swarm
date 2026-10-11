@@ -1031,6 +1031,15 @@ export function registerVolatileSecret(value: string, name: string): void {
   }
 }
 
+/** Remove a short-lived secret and its encoded forms after credential revocation. */
+export function unregisterVolatileSecret(name: string): void {
+  for (const [value, registeredName] of volatileSecrets) {
+    if (registeredName !== name) continue;
+    volatileSecrets.delete(value);
+    volatileGeneration++;
+  }
+}
+
 /**
  * Mark a key name as sensitive at runtime (a swarm_config row with
  * isSecret=1 whose name matches no suffix rule). Its process.env value joins

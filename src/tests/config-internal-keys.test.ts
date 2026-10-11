@@ -23,6 +23,7 @@ const INTERNAL_KEY = "onboarding_state";
 let server: Server;
 let baseUrl: string;
 let internalId: string;
+let ownerId: string;
 
 type ToolHandler = (args: unknown, meta: unknown) => Promise<unknown> | unknown;
 
@@ -52,6 +53,13 @@ beforeAll(async () => {
       scope: "global",
       key: INTERNAL_KEY,
       value: JSON.stringify({ version: 1 }),
+    })
+  ).id;
+  ownerId = (
+    await upsertSwarmConfig({
+      scope: "global",
+      key: "runtime_owner_id",
+      value: crypto.randomUUID(),
     })
   ).id;
   await upsertSwarmConfig({ scope: "global", key: "VISIBLE_CONFIG", value: "visible" });
@@ -100,6 +108,7 @@ describe("internal config keys", () => {
       expect(response.status).toBe(200);
       const body = (await response.json()) as { configs: Array<{ key: string }> };
       expect(body.configs.some((config) => config.key === INTERNAL_KEY)).toBe(false);
+      expect(body.configs.some((config) => config.key === "runtime_owner_id")).toBe(false);
       expect(body.configs.some((config) => config.key === "VISIBLE_CONFIG")).toBe(true);
     }
   });
@@ -112,6 +121,24 @@ describe("internal config keys", () => {
     });
     expect(response.status).toBe(400);
     expect(await response.text()).toContain("managed by /api/onboarding");
+  });
+
+  test("runtime owner cannot be read, overwritten, or deleted through generic config", async () => {
+    expect((await fetch(`${baseUrl}/api/config/${ownerId}`, { headers: headers() })).status).toBe(
+      404,
+    );
+    const put = await fetch(`${baseUrl}/api/config`, {
+      method: "PUT",
+      headers: headers(),
+      body: JSON.stringify({ scope: "global", key: "runtime_owner_id", value: "tampered" }),
+    });
+    expect(put.status).toBe(400);
+    expect(await put.text()).toContain("managed by the runtime supervisor");
+    expect(
+      (await fetch(`${baseUrl}/api/config/${ownerId}`, { method: "DELETE", headers: headers() }))
+        .status,
+    ).toBe(400);
+    expect(await getSwarmConfigs({ key: "runtime_owner_id" })).toHaveLength(1);
   });
 
   test("config by-id GET hides onboarding_state and DELETE rejects it", async () => {

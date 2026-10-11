@@ -571,7 +571,8 @@ export async function handleHook(): Promise<void> {
     try {
       await fetch(`${getBaseUrl()}/close`, {
         method: "POST",
-        headers: mcpConfig.headers,
+        headers: { ...mcpConfig.headers, "Content-Type": "application/json" },
+        body: JSON.stringify({ runtimeShutdown: false }),
       });
     } catch {
       // Silently fail
@@ -1393,7 +1394,7 @@ export async function handleHook(): Promise<void> {
         );
       }
 
-      // Mark the agent as offline
+      // Close this session. The runner owns pooled runtime termination.
       await close();
       // NOTE: Task completion is NOT handled here intentionally.
       // The runner wrapper (src/commands/runner.ts) handles ensuring tasks are

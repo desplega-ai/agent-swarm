@@ -54,6 +54,8 @@ export interface RuntimeHandle {
   kind: RuntimeProviderKind;
   /** Container id, sandbox id, or pod name. */
   externalId: string;
+  /** Infrastructure creation time in ISO format, when available. */
+  createdAt?: string;
   /** Set by the controller, never by the adapter. */
   controllerId?: string;
   meta?: Record<string, string>;

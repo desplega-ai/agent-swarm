@@ -189,6 +189,7 @@ describe("Docker runtime provider", () => {
         [
           {
             Id: "ours",
+            Created: 1791720000,
             Labels: {
               [RUNTIME_LABELS.runtimeId]: "runtime",
               [RUNTIME_LABELS.owner]: request.ownerId,
@@ -213,6 +214,7 @@ describe("Docker runtime provider", () => {
     };
     const rows = await provider.list(target, request.ownerId);
     expect(rows.map((row) => row.externalId)).toEqual(["ours"]);
+    expect(rows[0]?.createdAt).toBe("2026-10-11T12:00:00.000Z");
     expect(JSON.parse(calls[0]?.url.searchParams.get("filters") ?? "")).toEqual({
       label: [RUNTIME_LABELS.runtimeId, `${RUNTIME_LABELS.owner}=${request.ownerId}`],
     });
@@ -242,6 +244,22 @@ describe("Docker runtime provider", () => {
     await provider.terminate(target, handle);
     expect(calls[0]?.init.method).toBe("DELETE");
     expect(calls[0]?.url.searchParams.get("force")).toBe("true");
+  });
+
+  test("termination succeeds when the container is already absent", async () => {
+    handler = () => new Response("No such container", { status: 404 });
+    await provider.terminate(target, handle);
+    expect(calls).toHaveLength(1);
+  });
+
+  test("termination preserves other engine and transport errors", async () => {
+    for (const status of [403, 500]) {
+      handler = () => new Response("delete rejected", { status });
+      await expect(provider.terminate(target, handle)).rejects.toThrow("delete rejected");
+    }
+    await expect(
+      provider.terminate({ DOCKER_HOST: `unix://${socket}.missing` }, handle),
+    ).rejects.toThrow("Set DOCKER_HOST");
   });
 
   test("scrubs sensitive environment values locally without registering ordinary values", async () => {

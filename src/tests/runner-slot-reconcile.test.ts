@@ -64,6 +64,7 @@ function setup(startedAt: number) {
   const taskId = crypto.randomUUID();
   const task = {
     taskId,
+    triggerType: "task_assigned",
     session,
     logFile: "/tmp/runner-slot-reconcile.log",
     startTime: new Date(startedAt),

@@ -105,8 +105,9 @@ With multi-runtime mode enabled, one logical agent may be served by several
 worker processes, each recorded in `runtime_instances`. Workers send their per-boot `X-Runtime-Instance-ID` on `POST /ping` and on
 `GET /api/poll`; either refreshes that row's `last_seen_at`, so liveness
 tracks actual worker traffic rather than one endpoint's cadence — a worker
-sitting inside the long-poll loop keeps itself fresh. `POST /close` retires
-just that row. Neither can revive a retired or expired runtime: the refresh
+sitting inside the long-poll loop keeps itself fresh. For pooled runtimes, `POST /close` retires
+the row only when the runner sends `runtimeShutdown: true`. Session hooks preserve the row and token.
+Static workers retain their existing close behavior. A ping cannot revive a retired or expired runtime: the refresh
 only matches a row that is already live, and registration is the sole path
 back to `active`.
 
@@ -150,10 +151,12 @@ is never expired):
   cleans the session when it remediates; the sweep's 30-minute stale-session
   cleanup backstops any leftover row. The worker's next re-registration
   restores its runtime row.
-- The heartbeat deletes retired rows for workers without a pool. The supervisor retains pool runtime rows and their external handles.
-- The heartbeat skips provisioning rows and pool rows. The supervisor owns provisioning timeouts and infrastructure reconciliation.
+- The heartbeat prunes stale offline rows, including pooled runtimes. It retains active pooled rows and provisioning rows for the supervisor.
+- The supervisor terminates pooled runtimes after provider `exited` or `failed` status, or after the normal ping cutoff. Fresh `unknown` runtimes remain unchanged.
+- The supervisor owns provisioning timeouts and infrastructure reconciliation.
 - A draining runtime cannot receive work through `/api/poll`. The supervisor drains idle runtimes before termination and checks activity again next tick.
 - Supervisor termination immediately marks the runtime offline, reconciles the agent status, and revokes runtime tokens. A surviving live runtime keeps its agent available.
+- Disabled pools stop provisioning and drain idle runtimes. The supervisor continues provider checks and orphan cleanup.
 - The whole mechanism is inert while the flag is off. After a rollback workers
   stop refreshing their rows, and expiring them would offline agents that are
   running fine under legacy semantics.

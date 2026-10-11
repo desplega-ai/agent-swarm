@@ -7,6 +7,7 @@ import {
   registerVolatileSecret,
   scrubObject,
   scrubSecrets,
+  unregisterVolatileSecret,
 } from "../utils/secret-scrubber";
 import { randomToken } from "./synthetic-secret-helpers";
 
@@ -393,6 +394,19 @@ describe("registerVolatileSecret", () => {
     registerVolatileSecret("short", "TOO_SHORT");
     const out = scrubSecrets("contains short somewhere");
     expect(out).toBe("contains short somewhere");
+  });
+
+  test("unregister removes all forms of only the named volatile secret", () => {
+    const removed = 'example "removable" volatile value/1234567890';
+    const retained = "example retained volatile value/1234567890";
+    registerVolatileSecret(removed, "runtime:removed");
+    registerVolatileSecret(retained, "runtime:retained");
+    const encoded = JSON.stringify(removed).slice(1, -1);
+    expect(scrubSecrets(encoded)).not.toContain(encoded);
+    unregisterVolatileSecret("runtime:removed");
+    expect(scrubSecrets(removed)).toContain(removed);
+    expect(scrubSecrets(encoded)).toContain(encoded);
+    expect(scrubSecrets(retained)).not.toContain(retained);
   });
 });
 

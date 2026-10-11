@@ -257,15 +257,6 @@ export async function insertProvisioningRuntime(instance: {
   return rowToRuntimeInstance(row!);
 }
 
-export async function countCoveringRuntimes(agentId: string): Promise<number> {
-  const row = await getDbClient().get<{ count: number }>(
-    `SELECT COUNT(*) AS count FROM runtime_instances WHERE agent_id = ?
-     AND (status = 'provisioning' OR (status = 'active' AND last_seen_at >= ?))`,
-    [agentId, runtimeLivenessCutoff()],
-  );
-  return row?.count ?? 0;
-}
-
 export async function markRuntimeTerminated(id: string, reason: string): Promise<void> {
   await getDbClient().transaction(async () => {
     const runtime = await getRuntimeInstanceById(id);
@@ -453,8 +444,8 @@ export async function agentsWithLiveRuntime(): Promise<Set<string>> {
  * refreshing their rows, and expiring them would offline agents that are
  * running perfectly well under legacy semantics.
  *
- * Workers without a pool retain the existing pruning behavior. Pool rows and
- * provisioning rows stay available for supervisor infrastructure reconciliation.
+ * Stale offline pool rows retain the existing pruning behavior. Active pooled
+ * rows and provisioning rows stay available for infrastructure reconciliation.
  *
  * Expiry deliberately does NOT touch active_sessions. Runtime liveness and
  * in-flight work liveness answer different questions: a stale runtime row is
@@ -487,11 +478,11 @@ export async function expireStaleRuntimeInstances(): Promise<{
       [cutoff],
     );
 
-    // Pool rows retain their handles until the supervisor reconciles infrastructure.
+    // Active pool rows retain handles for supervisor infrastructure reconciliation.
     // Provisioning rows use the supervisor timeout rather than the ping cutoff.
     const pruned = (
       await tx.run(
-        "DELETE FROM runtime_instances WHERE last_seen_at < ? AND status != 'provisioning' AND pool_id IS NULL",
+        "DELETE FROM runtime_instances WHERE last_seen_at < ? AND status != 'provisioning' AND (pool_id IS NULL OR status = 'offline')",
         [cutoff],
       )
     ).changes;
@@ -516,5 +507,3 @@ export async function listRuntimeInstancesForPool(poolId: string): Promise<Runti
     )
   ).map(rowToRuntimeInstance);
 }
-
-export const listPoolRuntimes = listRuntimeInstancesForPool;

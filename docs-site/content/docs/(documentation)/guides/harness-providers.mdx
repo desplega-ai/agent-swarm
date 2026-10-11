@@ -57,9 +57,11 @@ unchanged. Keep API and ChatGPT lifecycle decisions separate.
 
 ## Worker exit limit
 
-`SWARM_EXIT_AFTER_TASKS=N` stops a worker after N completed runner sessions.
+`SWARM_EXIT_AFTER_TASKS=N` stops a worker after N completed assigned or resumed task executions.
+Offer review and mention sessions do not count toward this limit.
 The worker accepts no further work once completed and active sessions reach N.
-It waits for active sessions, calls `/close`, and exits with code 0.
+It waits for active sessions, then uses the normal shutdown routine and exits with code 0.
+Shutdown terminates process groups, emits telemetry, saves PM2 state, and sends `/close` with `runtimeShutdown: true`.
 Unset or invalid values preserve continuous operation.
 Per-task Docker pools set N to 1.
 

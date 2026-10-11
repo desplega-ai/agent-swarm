@@ -189,13 +189,21 @@ async function pingAgent(agentId: string, runtimeInstanceId?: string): Promise<n
   return res.status;
 }
 
-async function closeRuntime(agentId: string, runtimeInstanceId?: string): Promise<number> {
+async function closeRuntime(
+  agentId: string,
+  runtimeInstanceId?: string,
+  runtimeShutdown?: boolean,
+): Promise<number> {
   const headers: Record<string, string> = {
     "X-Agent-ID": agentId,
     Authorization: `Bearer ${API_KEY}`,
   };
   if (runtimeInstanceId) headers["X-Runtime-Instance-ID"] = runtimeInstanceId;
-  const res = await fetch(`${baseUrl}/close`, { method: "POST", headers });
+  const res = await fetch(`${baseUrl}/close`, {
+    method: "POST",
+    headers: { ...headers, "Content-Type": "application/json" },
+    body: runtimeShutdown === undefined ? undefined : JSON.stringify({ runtimeShutdown }),
+  });
   await res.text();
   return res.status;
 }
@@ -381,7 +389,7 @@ test("poll refuses a draining runtime and records task history after draining en
   expect((await getRuntimeInstanceById(id))?.taskId).toBe(task.id);
 });
 
-test("close revokes a pool runtime token before infrastructure disappears", async () => {
+test("runner shutdown close terminates a pool runtime and revokes its token", async () => {
   process.env.MULTI_RUNTIME_ENABLED = "true";
   const agentId = await makeAgent(2);
   const id = crypto.randomUUID();
@@ -393,9 +401,57 @@ test("close revokes a pool runtime token before infrastructure disappears", asyn
   });
   const token = await mintRuntimeToken(agentId, id);
   await register(agentId, { runtimeInstanceId: id });
-  expect(await closeRuntime(agentId, id)).toBe(204);
+  expect(await closeRuntime(agentId, id, true)).toBe(204);
   expect(await resolveBySessionToken(token.plaintext)).toBeNull();
+  expect((await getRuntimeInstanceById(id))?.status).toBe("offline");
   expect((await getAgentById(agentId))?.status).toBe("offline");
+});
+
+for (const runtimeShutdown of [undefined, false]) {
+  test(`session close preserves a pooled runtime and token (shutdown: ${runtimeShutdown ?? "omitted"})`, async () => {
+    process.env.MULTI_RUNTIME_ENABLED = "true";
+    const agentId = await makeAgent(2);
+    const id = crypto.randomUUID();
+    await insertProvisioningRuntime({
+      id,
+      agentId,
+      poolId: "test-pool",
+      controllerId: "test-controller",
+    });
+    const token = await mintRuntimeToken(agentId, id);
+    await register(agentId, { runtimeInstanceId: id });
+    const task = await createTaskExtended("active task", { agentId });
+    await startTask(task.id);
+    await startSessionFor(agentId, task.id, id);
+    const agentStatus = (await getAgentById(agentId))?.status;
+
+    expect(await closeRuntime(agentId, id, runtimeShutdown)).toBe(204);
+    expect((await getRuntimeInstanceById(id))?.status).toBe("active");
+    expect(await resolveBySessionToken(token.plaintext)).not.toBeNull();
+    expect((await getAgentById(agentId))?.status).toBe(agentStatus);
+    expect(await getActiveSessionForTask(task.id)).not.toBeNull();
+    expect(await pingAgent(agentId, id)).toBe(204);
+  });
+}
+
+test("runner shutdown cannot terminate another agent's pooled runtime", async () => {
+  process.env.MULTI_RUNTIME_ENABLED = "true";
+  const agentId = await makeAgent(2);
+  const otherAgentId = await makeAgent(1);
+  const id = crypto.randomUUID();
+  await insertProvisioningRuntime({
+    id,
+    agentId,
+    poolId: "test-pool",
+    controllerId: "test-controller",
+  });
+  const token = await mintRuntimeToken(agentId, id);
+  await register(agentId, { runtimeInstanceId: id });
+
+  expect(await closeRuntime(otherAgentId, id, true)).toBe(204);
+  expect((await getRuntimeInstanceById(id))?.status).toBe("active");
+  expect(await resolveBySessionToken(token.plaintext)).not.toBeNull();
+  expect((await getAgentById(agentId))?.status).toBe("idle");
 });
 
 // ─── Migration 131 ──────────────────────────────────────────────────────────

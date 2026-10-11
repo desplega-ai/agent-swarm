@@ -49,12 +49,29 @@ describe("configuration duration storage", () => {
   });
   test("every catalog duration declares its native unit", () => {
     const entries = CONFIGURATION_GROUPS.flatMap((group) => group.entries);
-    const suffixes = { MS: "ms", SEC: "s", SECONDS: "s", MIN: "min", DAYS: "days" };
+    const suffixes = { MS: "ms", SEC: "s", SECONDS: "s", MIN: "min", HOURS: "h", DAYS: "days" };
     for (const entry of entries.filter((entry) => entry.kind === "number")) {
       const suffix = entry.key.split("_").at(-1) as keyof typeof suffixes;
       expect(entry.unit).toBe(suffixes[suffix]);
     }
   });
+});
+
+test("runtime supervisor and Docker fallbacks are operator settings", () => {
+  const entries = CONFIGURATION_GROUPS.flatMap((group) => group.entries);
+  expect(entries.find((entry) => entry.key === "RUNTIME_SUPERVISOR_INTERVAL_MS")).toMatchObject({
+    kind: "number",
+    unit: "ms",
+    defaultValue: "5000",
+    restartRequired: true,
+  });
+  for (const key of [
+    "RUNTIME_WORKER_API_URL",
+    "DOCKER_HOST",
+    "DOCKER_NETWORK",
+    "DOCKER_EXTRA_HOSTS",
+  ])
+    expect(entries.find((entry) => entry.key === key)).toMatchObject({ kind: "string" });
 });
 
 test("CSV empty selections and unknown entries survive editing", () => {

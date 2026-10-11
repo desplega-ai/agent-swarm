@@ -4,7 +4,25 @@ import { registerVolatileSecret, scrubSecrets } from "../../utils/secret-scrubbe
 import { getDbClient, getSwarmConfigs, upsertSwarmConfig } from "../db";
 import { getRuntimeController, getRuntimeControllerSecrets } from "./db";
 
+let ownerId: Promise<string> | null = null;
+
+export function clearRuntimeOwnerIdCache(): void {
+  ownerId = null;
+}
+
 export async function ensureRuntimeOwnerId(): Promise<string> {
+  if (!ownerId) {
+    ownerId = readRuntimeOwnerId().catch((error) => {
+      ownerId = null;
+      throw error;
+    });
+  }
+  return await ownerId;
+}
+
+async function readRuntimeOwnerId(): Promise<string> {
+  const existing = (await getSwarmConfigs({ scope: "global", key: "runtime_owner_id" }))[0];
+  if (existing) return existing.value;
   return await getDbClient().transaction(async () => {
     const existing = (await getSwarmConfigs({ scope: "global", key: "runtime_owner_id" }))[0];
     if (existing) return existing.value;

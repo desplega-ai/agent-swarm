@@ -22,6 +22,7 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { scheduleOrgDomainRecompute } from "../telemetry-identity";
 import type { User } from "../types";
+import { unregisterVolatileSecret } from "../utils/secret-scrubber";
 import { closeSessionTokenConnections } from "../utils/session-token-connections";
 import { getDbClient } from "./db";
 import { validateRuntimeTokenTtlHours } from "./swarm-config-guard";
@@ -665,7 +666,10 @@ export async function revokeRuntimeTokensForRuntime(runtimeId: string): Promise<
        WHERE (runtimeId = ? OR parentRuntimeId = ?) AND revokedAt IS NULL`,
       [new Date().toISOString(), runtimeId, runtimeId],
     );
-    getDbClient().afterCommit(() => closeSessionTokenConnections(rows.map((row) => row.id)));
+    getDbClient().afterCommit(() => {
+      unregisterVolatileSecret(`runtime:${runtimeId}`);
+      closeSessionTokenConnections(rows.map((row) => row.id));
+    });
   });
 }
 

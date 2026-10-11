@@ -4,6 +4,7 @@ import type { ControllerCommands } from "../../runtime-providers/controller";
 import { RUNTIME_LABELS } from "../../runtime-providers/types";
 import {
   type Agent,
+  isTerminalTaskStatus,
   type RuntimeInstance,
   type RuntimePool,
   RuntimeProviderKindSchema,
@@ -17,19 +18,27 @@ import { canClaim } from "../budget-admission";
 import { getDbClient, getResolvedConfig, getTaskById } from "../db";
 import {
   insertProvisioningRuntime,
-  listPoolRuntimes,
   listRuntimeInstancesForAgent,
+  listRuntimeInstancesForPool,
   markRuntimeTerminated,
+  runtimeStaleThresholdMinutes,
 } from "../multi-runtime";
 import { mintRuntimeToken } from "../users";
-import { ensureRuntimeOwnerId, getControllerCommands } from "./controllers";
+import {
+  clearRuntimeOwnerIdCache,
+  ensureRuntimeOwnerId,
+  getControllerCommands,
+} from "./controllers";
 import { getPoolForAgent, listAgentsForPool, listRuntimePools, resolvePoolDelivery } from "./db";
 import { type AgentDemand, computeDesired, pendingWorkForAgent } from "./demand";
 
 let timer: ReturnType<typeof setInterval> | null = null;
 let kickTimer: ReturnType<typeof setTimeout> | null = null;
 let inFlight: Promise<void> | null = null;
+let tickAbort: AbortController | null = null;
 let warnedMultiRuntime = false;
+const orphanFirstSeen = new Map<string, number>();
+const ORPHAN_GRACE_MS = 120_000;
 
 export function runtimeSupervisorStatus(): string {
   if (!isRuntimePoolsEnabled()) return "disabled";
@@ -48,19 +57,19 @@ export async function provisionRuntime(
   ownerId: string,
 ): Promise<void> {
   const runtimeId = crypto.randomUUID();
-  const token = await getDbClient().transaction(async () => {
-    const credential = await mintRuntimeToken(agent.id, runtimeId);
-    await insertProvisioningRuntime({
-      id: runtimeId,
-      agentId: agent.id,
-      poolId: pool.id,
-      controllerId: pool.placements[0]!,
-      reportedSlots: pool.slotsPerRuntime,
-    });
-    return credential.plaintext;
-  });
-  registerVolatileSecret(token, `runtime:${runtimeId}`);
   try {
+    const token = await getDbClient().transaction(async () => {
+      const credential = await mintRuntimeToken(agent.id, runtimeId);
+      await insertProvisioningRuntime({
+        id: runtimeId,
+        agentId: agent.id,
+        poolId: pool.id,
+        controllerId: pool.placements[0]!,
+        reportedSlots: pool.slotsPerRuntime,
+      });
+      return credential.plaintext;
+    });
+    registerVolatileSecret(token, `runtime:${runtimeId}`);
     const templateId = (await getResolvedConfig(agent.id)).find(
       (c) => c.key === "TEMPLATE_ID",
     )?.value;
@@ -102,14 +111,19 @@ export async function provisionRuntime(
       [JSON.stringify(handle), new Date().toISOString(), runtimeId],
     );
   } catch (error) {
-    await markRuntimeTerminated(runtimeId, scrubSecrets(String(error)));
     reportSupervisorError(error);
+    try {
+      await markRuntimeTerminated(runtimeId, scrubSecrets(String(error)));
+    } catch (cleanupError) {
+      reportSupervisorError(cleanupError);
+    }
   }
 }
 
 const RuntimeHandleSchema = z.object({
   kind: RuntimeProviderKindSchema,
   externalId: z.string(),
+  createdAt: z.string().optional(),
   controllerId: z.string().optional(),
   meta: z.record(z.string(), z.string()).optional(),
 });
@@ -124,7 +138,11 @@ export async function terminateRuntime(
   reason: string,
 ): Promise<void> {
   const handle = runtimeHandle(runtime);
-  if (handle) await controller.terminate(handle, reason);
+  try {
+    if (handle) await controller.terminate(handle, reason);
+  } catch (error) {
+    reportSupervisorError(error);
+  }
   await markRuntimeTerminated(runtime.id, reason);
 }
 
@@ -134,65 +152,86 @@ export async function reapPoolRuntimes(
   controller: ControllerCommands,
   now: Date,
 ): Promise<void> {
-  const handles = runtimes.flatMap((runtime) => {
-    const handle = runtimeHandle(runtime);
-    return runtime.status !== "offline" && handle ? [handle] : [];
-  });
-  const statuses = await controller.status(handles);
+  const cutoff = now.getTime() - runtimeStaleThresholdMinutes() * 60_000;
   const remaining = new Map<string, number>();
   for (const runtime of runtimes)
-    if (runtime.status !== "offline")
+    if (
+      runtime.status === "provisioning" ||
+      (runtime.status === "active" && Date.parse(runtime.lastSeenAt) >= cutoff)
+    )
       remaining.set(runtime.agentId, (remaining.get(runtime.agentId) ?? 0) + 1);
   for (const runtime of runtimes) {
     if (runtime.status === "offline") continue;
-    const handle = runtimeHandle(runtime);
-    // Clean exits require no task recovery. Step 6 handles failures and unknown state.
-    if (handle && statuses[handle.externalId] === "exited") {
-      await terminateRuntime(runtime, controller, "Runtime exited");
-      remaining.set(runtime.agentId, (remaining.get(runtime.agentId) ?? 1) - 1);
-      continue;
-    }
-    if (runtime.status !== "active") continue;
-    const busy = await getDbClient().get<{ taskId: string }>(
-      "SELECT taskId FROM active_sessions WHERE runtimeInstanceId = ? LIMIT 1",
-      [runtime.id],
-    );
-    const task = runtime.taskId ? await getTaskById(runtime.taskId) : null;
-    const taskRunning = task?.status === "in_progress" || task?.status === "reviewing";
-    if (busy || taskRunning) {
-      await getDbClient().run(
-        "UPDATE runtime_instances SET idle_since = NULL, draining = 0, task_id = COALESCE(?, task_id) WHERE id = ?",
-        [busy?.taskId ?? null, runtime.id],
+    try {
+      const handle = runtimeHandle(runtime);
+      const stale = runtime.status === "active" && Date.parse(runtime.lastSeenAt) < cutoff;
+      const status =
+        !stale && handle ? (await controller.status([handle]))[handle.externalId] : undefined;
+      // Step 6 adds task recovery after runtime termination.
+      if (status === "exited" || status === "failed" || stale) {
+        await terminateRuntime(
+          runtime,
+          controller,
+          stale ? "Runtime stopped pinging" : `Runtime ${status}`,
+        );
+        if (!stale) remaining.set(runtime.agentId, (remaining.get(runtime.agentId) ?? 1) - 1);
+        continue;
+      }
+      if (runtime.status !== "active" && pool.enabled) continue;
+      const busy = await getDbClient().get<{ taskId: string }>(
+        "SELECT taskId FROM active_sessions WHERE runtimeInstanceId = ? LIMIT 1",
+        [runtime.id],
       );
-      continue;
-    }
-    const idleSince = runtime.idleSince ?? now.toISOString();
-    if (!runtime.idleSince)
-      await getDbClient().run("UPDATE runtime_instances SET idle_since = ? WHERE id = ?", [
-        idleSince,
-        runtime.id,
-      ]);
-    if (pool.lifecycle === "per-task" && runtime.taskId) {
-      await terminateRuntime(runtime, controller, "Task finished");
-      remaining.set(runtime.agentId, (remaining.get(runtime.agentId) ?? 1) - 1);
-      continue;
-    }
-    if (pool.lifecycle !== "idle" || pool.idleMinutes === null) continue;
-    if ((remaining.get(runtime.agentId) ?? 0) <= pool.minRuntimes) {
-      if (runtime.draining)
-        await getDbClient().run("UPDATE runtime_instances SET draining = 0 WHERE id = ?", [
+      const task = runtime.taskId ? await getTaskById(runtime.taskId) : null;
+      const taskRunning = task?.status === "in_progress" || task?.status === "reviewing";
+      if (busy || taskRunning) {
+        await getDbClient().run(
+          "UPDATE runtime_instances SET idle_since = NULL, draining = 0, task_id = COALESCE(?, task_id) WHERE id = ?",
+          [busy?.taskId ?? null, runtime.id],
+        );
+        continue;
+      }
+      if (!pool.enabled) {
+        if (!runtime.draining) {
+          await getDbClient().run("UPDATE runtime_instances SET draining = 1 WHERE id = ?", [
+            runtime.id,
+          ]);
+        } else {
+          await terminateRuntime(runtime, controller, "Pool disabled");
+          remaining.set(runtime.agentId, (remaining.get(runtime.agentId) ?? 1) - 1);
+        }
+        continue;
+      }
+      const idleSince = runtime.idleSince ?? now.toISOString();
+      if (!runtime.idleSince)
+        await getDbClient().run("UPDATE runtime_instances SET idle_since = ? WHERE id = ?", [
+          idleSince,
           runtime.id,
         ]);
-      continue;
-    }
-    if (now.getTime() - Date.parse(idleSince) < pool.idleMinutes * 60_000) continue;
-    if (!runtime.draining) {
-      await getDbClient().run("UPDATE runtime_instances SET draining = 1 WHERE id = ?", [
-        runtime.id,
-      ]);
-    } else {
-      await terminateRuntime(runtime, controller, "Idle timeout");
-      remaining.set(runtime.agentId, (remaining.get(runtime.agentId) ?? 1) - 1);
+      if (pool.lifecycle === "per-task" && task && isTerminalTaskStatus(task.status)) {
+        await terminateRuntime(runtime, controller, "Task finished");
+        remaining.set(runtime.agentId, (remaining.get(runtime.agentId) ?? 1) - 1);
+        continue;
+      }
+      if (pool.lifecycle !== "idle" || pool.idleMinutes === null) continue;
+      if ((remaining.get(runtime.agentId) ?? 0) <= pool.minRuntimes) {
+        if (runtime.draining)
+          await getDbClient().run("UPDATE runtime_instances SET draining = 0 WHERE id = ?", [
+            runtime.id,
+          ]);
+        continue;
+      }
+      if (now.getTime() - Date.parse(idleSince) < pool.idleMinutes * 60_000) continue;
+      if (!runtime.draining) {
+        await getDbClient().run("UPDATE runtime_instances SET draining = 1 WHERE id = ?", [
+          runtime.id,
+        ]);
+      } else {
+        await terminateRuntime(runtime, controller, "Idle timeout");
+        remaining.set(runtime.agentId, (remaining.get(runtime.agentId) ?? 1) - 1);
+      }
+    } catch (error) {
+      reportSupervisorError(error);
     }
   }
 }
@@ -201,6 +240,7 @@ export async function reconcileControllerOrphans(
   controllerId: string,
   controller: ControllerCommands,
   ownerId: string,
+  now = new Date(),
 ): Promise<void> {
   const rows = await getDbClient().query<{
     id: string;
@@ -209,37 +249,67 @@ export async function reconcileControllerOrphans(
   }>("SELECT id, status, external_handle FROM runtime_instances WHERE controller_id = ?", [
     controllerId,
   ]);
-  const known = new Map(
-    rows.flatMap((row) =>
-      row.external_handle
-        ? [[RuntimeHandleSchema.parse(JSON.parse(row.external_handle)).externalId, row] as const]
-        : [],
-    ),
-  );
-  for (const handle of await controller.list(ownerId)) {
-    const row = known.get(handle.externalId);
-    if (row && row.status !== "offline") continue;
-    await controller.terminate(handle, "Orphan runtime");
-    if (row) await markRuntimeTerminated(row.id, "Runtime closed");
+  const known = new Map<string, (typeof rows)[number]>();
+  for (const row of rows) {
+    if (!row.external_handle) continue;
+    try {
+      known.set(RuntimeHandleSchema.parse(JSON.parse(row.external_handle)).externalId, row);
+    } catch (error) {
+      reportSupervisorError(error);
+    }
+  }
+  const handles = await controller.list(ownerId);
+  const listed = new Set(handles.map((handle) => `${controllerId}:${handle.externalId}`));
+  for (const key of orphanFirstSeen.keys())
+    if (key.startsWith(`${controllerId}:`) && !listed.has(key)) orphanFirstSeen.delete(key);
+  for (const handle of handles) {
+    try {
+      const row = known.get(handle.externalId);
+      const key = `${controllerId}:${handle.externalId}`;
+      if (row && row.status !== "offline") {
+        orphanFirstSeen.delete(key);
+        continue;
+      }
+      if (!row) {
+        const created = handle.createdAt ? Date.parse(handle.createdAt) : NaN;
+        const firstSeen = Number.isFinite(created)
+          ? created
+          : (orphanFirstSeen.get(key) ?? now.getTime());
+        orphanFirstSeen.set(key, firstSeen);
+        if (now.getTime() - firstSeen < ORPHAN_GRACE_MS) continue;
+      }
+      await controller.terminate(handle, "Orphan runtime");
+      if (row) await markRuntimeTerminated(row.id, "Runtime closed");
+      orphanFirstSeen.delete(key);
+    } catch (error) {
+      reportSupervisorError(error);
+    }
   }
 }
 
-async function reconcilePools(now: Date, commands: typeof getControllerCommands): Promise<void> {
+async function reconcilePools(
+  now: Date,
+  commands: typeof getControllerCommands,
+  signal: AbortSignal,
+): Promise<void> {
   const ownerId = await ensureRuntimeOwnerId();
   const controllers = new Map<string, ControllerCommands>();
   for (const pool of await listRuntimePools()) {
+    if (signal.aborted) return;
     // E2B lifecycle and leases are installed by step 9.
-    if (!pool.enabled || !canProvisionKind(pool.kind) || pool.kind !== "docker") continue;
+    if (!canProvisionKind(pool.kind) || pool.kind !== "docker") continue;
     const controllerId = pool.placements[0]!;
     try {
       const controller = controllers.get(controllerId) ?? (await commands(controllerId));
       controllers.set(controllerId, controller);
       if (!controller.traits.canProvision) continue;
-      await reapPoolRuntimes(pool, await listPoolRuntimes(pool.id), controller, now);
+      await reapPoolRuntimes(pool, await listRuntimeInstancesForPool(pool.id), controller, now);
+      if (!pool.enabled || signal.aborted) continue;
       const agents = await listAgentsForPool(pool.id);
       const demands: AgentDemand[] = [];
       const work = new Map<string, Awaited<ReturnType<typeof pendingWorkForAgent>>>();
       for (const agent of agents) {
+        if (signal.aborted) return;
         const pending = await pendingWorkForAgent(agent.id);
         work.set(agent.id, pending);
         const runtimes = await listRuntimeInstancesForAgent(agent.id);
@@ -248,14 +318,14 @@ async function reconcilePools(now: Date, commands: typeof getControllerCommands)
         for (const runtime of runtimes) {
           if (runtime.status === "provisioning") provisioning++;
           if (!runtime.isLive || runtime.draining || runtime.credentialReady === false) continue;
-          if (pool.lifecycle === "per-task" && runtime.taskId) continue;
+          const task = runtime.taskId ? await getTaskById(runtime.taskId) : null;
+          if (pool.lifecycle === "per-task" && task && isTerminalTaskStatus(task.status)) continue;
           const sessions = await getDbClient().get<{ count: number }>(
             "SELECT COUNT(*) AS count FROM active_sessions WHERE runtimeInstanceId = ?",
             [runtime.id],
           );
           let occupied = sessions?.count ?? 0;
           if (occupied === 0 && runtime.taskId) {
-            const task = await getTaskById(runtime.taskId);
             if (task?.status === "in_progress" || task?.status === "reviewing") occupied = 1;
           }
           freeSlots += Math.max(0, runtime.reportedSlots - occupied);
@@ -269,8 +339,11 @@ async function reconcilePools(now: Date, commands: typeof getControllerCommands)
           provisioning,
         });
       }
-      const poolCount = (await listPoolRuntimes(pool.id)).filter(
-        (r) => r.status !== "offline",
+      const poolCount = (await listRuntimeInstancesForPool(pool.id)).filter(
+        (r) =>
+          r.status === "provisioning" ||
+          (r.status === "active" &&
+            Date.parse(r.lastSeenAt) >= now.getTime() - runtimeStaleThresholdMinutes() * 60_000),
       ).length;
       const counted = demands.reduce((n, d) => n + d.current, 0);
       const desired = computeDesired(
@@ -287,8 +360,10 @@ async function reconcilePools(now: Date, commands: typeof getControllerCommands)
         const demand = demands.find((d) => d.agentId === agent.id)!;
         const pending = work.get(agent.id)!;
         for (let count = demand.current; count < (desired.get(agent.id) ?? 0); count++) {
+          if (signal.aborted) return;
           if (!(pool.resolvedImage ?? pool.image)) break;
           if (!(await canClaim(agent.id, now, pending.topTask?.requestedByUserId)).allowed) break;
+          if (signal.aborted) return;
           await provisionRuntime(pool, agent, controller, ownerId);
         }
       }
@@ -297,8 +372,9 @@ async function reconcilePools(now: Date, commands: typeof getControllerCommands)
     }
   }
   for (const [id, controller] of controllers) {
+    if (signal.aborted) return;
     try {
-      await reconcileControllerOrphans(id, controller, ownerId);
+      await reconcileControllerOrphans(id, controller, ownerId, now);
     } catch (error) {
       reportSupervisorError(error);
     }
@@ -309,14 +385,19 @@ export async function reconcileOnce(
   opts: { now?: Date; getControllerCommands?: typeof getControllerCommands } = {},
 ): Promise<void> {
   if (!isRuntimePoolsEnabled() || !isMultiRuntimeEnabled() || inFlight) return;
+  tickAbort = new AbortController();
   inFlight = reconcilePools(
     opts.now ?? new Date(),
     opts.getControllerCommands ?? getControllerCommands,
+    tickAbort.signal,
   );
   try {
     await inFlight;
+  } catch (error) {
+    reportSupervisorError(error);
   } finally {
     inFlight = null;
+    tickAbort = null;
   }
 }
 
@@ -363,11 +444,34 @@ export function startRuntimeSupervisor(
   timer.unref?.();
 }
 
-export async function stopRuntimeSupervisor(): Promise<void> {
+export async function stopRuntimeSupervisor(timeoutMs = 10_000): Promise<void> {
   if (timer) clearInterval(timer);
   if (kickTimer) clearTimeout(kickTimer);
   timer = null;
   kickTimer = null;
   workflowEventBus.off("task.created", onTaskCreated);
-  await inFlight;
+  tickAbort?.abort();
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    if (inFlight) {
+      await Promise.race([
+        inFlight.catch(reportSupervisorError),
+        new Promise<void>((resolve) => {
+          timeout = setTimeout(
+            () => {
+              console.error("[runtime-pools] Supervisor shutdown timed out.");
+              resolve();
+            },
+            Math.min(10_000, Math.max(0, timeoutMs)),
+          );
+        }),
+      ]);
+    }
+  } catch (error) {
+    reportSupervisorError(error);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+    clearRuntimeOwnerIdCache();
+    orphanFirstSeen.clear();
+  }
 }
