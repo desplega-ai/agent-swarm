@@ -2,9 +2,7 @@
 id: step-7
 name: "Push server: worker namespace + nudges"
 depends_on: []
-status: claimed
-assignee: codex-gpt-6.1-sol-pw-step-7
-claimed_at: 2026-10-11T00:00:00Z
+status: done
 ---
 
 <!-- During /v-implement, `desplega:step-running` adds `assignee` and `claimed_at` while
@@ -52,13 +50,13 @@ The API publishes small **nudges** to a reserved realtime namespace `worker:<age
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Tests pass: `bun run test:root -- src/tests/worker-nudges.test.ts src/tests/realtime-transport.test.ts src/tests/realtime-room-auth.test.ts`
-- [ ] `bun run test:root -- src/tests/worker-nudges.test.ts` (ws client pattern: `src/tests/realtime-transport.test.ts:133`) covers: subscribe as X ok; subscribe as Y to `worker:X` → error; client `publish` into `worker:X` → error; one nudge per hook point (task created pending, created offered, accept, pool assign, mention, cancel, steering, agent-scope config, global config to all subscribed); nudge fires only after commit (a rolled-back transaction publishes nothing); flag off → nothing published
-- [ ] `bun scripts/check-floating-promises.ts && bun scripts/check-promise-sinks.ts` pass
-- [ ] `bun run lint && bun run tsc:check:tsc` pass
+- [x] Tests pass: `bun run test:root -- src/tests/worker-nudges.test.ts src/tests/realtime-transport.test.ts src/tests/realtime-room-auth.test.ts`
+- [x] `bun run test:root -- src/tests/worker-nudges.test.ts` (ws client pattern: `src/tests/realtime-transport.test.ts:133`) covers: subscribe as X ok; subscribe as Y to `worker:X` → error; client `publish` into `worker:X` → error; one nudge per hook point (task created pending, created offered, accept, pool assign, mention, cancel, steering, agent-scope config, global config to all subscribed); nudge fires only after commit (a rolled-back transaction publishes nothing); flag off → nothing published
+- [x] `bun scripts/check-floating-promises.ts && bun scripts/check-promise-sinks.ts` pass
+- [x] `bun run lint && bun run tsc:check:tsc` pass
 
 #### Automated QA:
-- [ ] Boot the API on a temp DB with the flag on. Open a ws client (`bun -e` script with the `ws` package, `Authorization: Bearer $KEY`, `X-Agent-ID: <X>`), subscribe to `{namespace:"worker:<X>", name:"nudge"}`, ack frames. Create a task for X with curl, cancel it, post a steering message, upsert an agent-scope config: the client prints four nudges in order. A second client as Y gets an error subscribing to `worker:<X>`.
+- [x] Boot the API on a temp DB with the flag on. Open a ws client (`bun -e` script with the `ws` package, `Authorization: Bearer $KEY`, `X-Agent-ID: <X>`), subscribe to `{namespace:"worker:<X>", name:"nudge"}`, ack frames. Create a task for X with curl, cancel it, post a steering message, upsert an agent-scope config: the client prints four nudges in order. A second client as Y gets an error subscribing to `worker:<X>`.
 
 #### Manual Verification:
 - [ ] None.
