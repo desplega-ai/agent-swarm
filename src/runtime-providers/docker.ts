@@ -69,6 +69,7 @@ async function dockerApi<T>(
   path: string,
   body?: unknown,
   stream = false,
+  retryVersion = true,
 ): Promise<T> {
   const socket = socketPath(target);
   try {
@@ -81,6 +82,14 @@ async function dockerApi<T>(
     } as RequestInit);
     if (!res.ok) {
       const text = scrubSecrets(await res.text());
+      if (
+        retryVersion &&
+        (/client version .* is too old/i.test(text) ||
+          (res.status === 400 && /version/i.test(text)))
+      ) {
+        apiVersions.delete(socket);
+        return await dockerApi<T>(target, method, path, body, stream, false);
+      }
       throw new DockerApiError(
         res.status,
         `docker ${method} ${path} failed (${res.status}): ${text}`,

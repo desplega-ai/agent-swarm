@@ -1754,7 +1754,9 @@ async function postFinalTaskUpdate(
         signal: AbortSignal.timeout(Math.max(1, Math.min(30_000, deadline - Date.now()))),
       });
       if (response.status < 500) return response;
-      throw new Error(`HTTP ${response.status}: ${await response.text()}`);
+      throw new Error(
+        `HTTP ${response.status}: ${scrubSecrets(await response.text()).slice(0, 300)}`,
+      );
     } catch (error) {
       const remaining = deadline - Date.now();
       if (remaining <= 0) throw error;
@@ -1866,8 +1868,11 @@ export async function ensureTaskFinished(
   }
 
   try {
+    const DEFAULT_FINISH_RETRY_MAX_SEC = 300;
     const maxSec = Number(process.env.RUNNER_FINISH_RETRY_MAX_SEC);
-    const deadline = Date.now() + (Number.isFinite(maxSec) && maxSec > 0 ? maxSec : 300) * 1000;
+    const deadline =
+      Date.now() +
+      (Number.isFinite(maxSec) && maxSec > 0 ? maxSec : DEFAULT_FINISH_RETRY_MAX_SEC) * 1000;
     if (finalProgress) {
       const progress = await postFinalTaskUpdate(
         `${config.apiUrl}/api/tasks/${taskId}/progress`,
@@ -1901,6 +1906,12 @@ export async function ensureTaskFinished(
           `[${role}] Runner marked task ${taskId.slice(0, 8)} as ${status} (exit code: ${exitCode})`,
         );
       }
+    } else if (response.status === 401) {
+      console.warn(
+        scrubSecrets(
+          `[${role}] Task ${taskId.slice(0, 8)}: runtime token revoked or expired; giving up on finish`,
+        ),
+      );
     } else if (response.status === 409) {
       const error = await response.text();
       // The agent may have completed through store-progress before the runner
@@ -5165,205 +5176,232 @@ export async function checkCompletedProcesses(
   }
 
   // Remove completed tasks from the map and ensure they're marked as finished
-  for (const {
-    taskId,
-    result,
-    triggerSurface,
-    requestedByUserId,
-    cursorUpdates,
-    workingDir,
-    credentialInfo,
-    harnessProvider,
-    harnessVariant,
-    harnessVariantMeta,
-    model,
-    durationMs,
-    assistantText,
-    finalProgress,
-    serverTerminalStatus,
-  } of completedTasks) {
-    vcsDetectedTasks.delete(taskId);
-    vcsCheckTimestamps.delete(taskId);
-    cancelledSignaled?.delete(taskId);
-    // The server finished this task without the session (heartbeat sweep,
-    // another writer). Its result stands: no finish call, and no credential
-    // or model outcome built from the abort this runner forced.
-    if (serverTerminalStatus) {
-      console.log(
-        `[${role}] Task ${taskId.slice(0, 8)} was already ${serverTerminalStatus} server-side — slot released, server result kept`,
-      );
-      continue;
-    }
-
-    // Detect VCS before finishing — last chance to link a PR
-    if (apiConfig && workingDir && !vcsDetectedTasks.has(taskId)) {
-      await detectVcsForTask(apiConfig.apiUrl, apiConfig.apiKey, taskId, workingDir);
-    }
-
-    // Call the finish API to ensure task status is updated
-    // This is idempotent - if the agent already marked it, this is a no-op
-    if (apiConfig) {
-      let failureReason: string | undefined;
-      if (result.exitCode !== 0 && result.failureReason) {
-        failureReason = result.failureReason;
-        console.log(`[${role}] Detected error for task ${taskId.slice(0, 8)}: ${failureReason}`);
-      }
-
-      // Record whether this worker's CLI accepts the model (harness_model_support).
-      void reportHarnessModelOutcome({
-        apiUrl: apiConfig.apiUrl,
-        apiKey: apiConfig.apiKey,
-        agentId: apiConfig.agentId,
-        harness: harnessProvider,
+  let credentialReports = Promise.resolve();
+  const completions = await Promise.allSettled(
+    completedTasks.map(
+      async ({
+        taskId,
+        result,
+        triggerType,
+        triggerSurface,
+        requestedByUserId,
+        cursorUpdates,
+        workingDir,
+        credentialInfo,
+        harnessProvider,
+        harnessVariant,
+        harnessVariantMeta,
         model,
-        exitCode: result.exitCode,
-        failureReason,
-      });
-
-      if (credentialInfo) {
-        await reportKeyCompletionOutcome({
-          apiUrl: apiConfig.apiUrl,
-          apiKey: apiConfig.apiKey,
-          credential: credentialInfo,
-          taskId,
-          exitCode: result.exitCode,
-          failureReason,
+        durationMs,
+        assistantText,
+        finalProgress,
+        serverTerminalStatus,
+      }) => {
+        const credentialReport = credentialReports.then(async () => {
+          if (apiConfig && credentialInfo && !serverTerminalStatus) {
+            await reportKeyCompletionOutcome({
+              apiUrl: apiConfig.apiUrl,
+              apiKey: apiConfig.apiKey,
+              credential: credentialInfo,
+              taskId,
+              exitCode: result.exitCode,
+              failureReason: result.exitCode !== 0 ? result.failureReason : undefined,
+            });
+          }
         });
-      }
-      let bridgeDiagnostics: Awaited<ReturnType<typeof getBridgeFailureDiagnostics>> | undefined;
-      if (result.exitCode !== 0 && harnessProvider === "claude" && workingDir) {
-        bridgeDiagnostics = await getBridgeFailureDiagnostics(workingDir);
-        if (bridgeDiagnostics?.artifactPath && result.sessionId) {
-          console.log(`[${role}] Bridge failure artifact found: ${bridgeDiagnostics.artifactPath}`);
-          updateHarnessVariantMeta(apiConfig.apiUrl, apiConfig.apiKey, taskId, result.sessionId, {
-            failureArtifact: bridgeDiagnostics.artifactPath,
-          }).catch((err) => console.warn(`[runner] Failed to update harness variant meta: ${err}`));
-        }
-      }
-      const bridgeFailureDiagnostics =
-        bridgeDiagnostics?.paneTail != null
-          ? `Claude bridge final tmux pane tail (${bridgeDiagnostics.artifactPath}):\n${bridgeDiagnostics.paneTail}`
-          : undefined;
-      // Reports that gate admission on other workers (a seat mismatch, a
-      // model window rejection) land before the task finishes.
-      await reportCredentialOutcomeThenFinish(
-        {
-          apiUrl: apiConfig.apiUrl,
-          apiKey: apiConfig.apiKey,
-          credentialInfo,
-          result,
-          failureReason,
-          model,
-          codexCreditsExhaustedCooldownMs: state.codexCreditsExhaustedCooldownMs,
-          modelWindowBlocks: state.modelWindowBlocks,
-        },
-        () =>
-          ensureTaskFinished(
-            apiConfig,
-            role,
-            taskId,
-            result.exitCode,
-            failureReason,
-            // Runner-buffered last assistant text is a harness-agnostic fallback
-            // for adapters that never populate `ProviderResult.output` (Codex
-            // today, any future adapter). Empty buffer -> `undefined`, byte
-            // identical to pre-fix behavior.
-            resolveProviderOutput(result, assistantText),
-            harnessProvider,
-            bridgeFailureDiagnostics,
-            finalProgress?.value,
-          ),
-      );
-
-      const sessionTriggerSurface = workerTriggerSurface(triggerSurface);
-      const sessionActor = { userId: requestedByUserId ?? null };
-      telemetry.taskEvent(
-        "session_completed",
-        {
-          taskId,
-          trigger_surface: sessionTriggerSurface,
-          agentId: apiConfig.agentId,
-          provider: result.cost?.provider ?? harnessProvider,
-          model: result.cost?.model ?? model ?? "unknown",
-          harnessVariant,
-          harnessVersion:
-            typeof harnessVariantMeta?.version === "string" ||
-            typeof harnessVariantMeta?.version === "number"
-              ? String(harnessVariantMeta.version)
-              : undefined,
-          exitCode: result.exitCode,
-          isError: result.exitCode !== 0,
-          durationMs,
-        },
-        sessionActor,
-      );
-      const sessionTelemetryEvent = resolveSessionTelemetryEvent(result);
-      if (sessionTelemetryEvent) {
-        telemetry.session(
-          sessionTelemetryEvent,
-          {
-            agentId: apiConfig.agentId,
-            taskId,
-            trigger_surface: sessionTriggerSurface,
-            errorCategory: normalizeSessionErrorCategory(result.errorCategory),
-            provider: result.cost?.provider ?? harnessProvider,
-            model: result.cost?.model ?? model ?? "unknown",
-            durationMs: result.cost?.durationMs ?? durationMs,
-            wasRateLimited: result.rateLimitResetAt != null,
-          },
-          sessionActor,
-        );
-      }
-      ensure({
-        id: "worker_process_finished",
-        flow: "task",
-        runId: taskId,
-        depIds: ["worker_process_spawned"],
-        data: {
-          taskId,
-          agentId: apiConfig.agentId,
-          role,
-          exitCode: result.exitCode,
-          success: result.exitCode === 0,
-          failureReason,
-        },
-        validator: (data) => data.exitCode === 0,
-        // biome-ignore lint/correctness/noEmptyPattern: data unused, ctx needed
-        filter: ({}, ctx) => ctx.deps.length > 0,
-        conditions: [{ timeout_ms: 3_600_000 }], // 1 hour: process runtime
-      });
-
-      // Commit channel activity cursors after successful processing
-      // If the task failed, cursors stay uncommitted so messages are re-seen on next poll
-      if (cursorUpdates && cursorUpdates.length > 0 && result.exitCode === 0) {
+        credentialReports = credentialReport.catch(() => {});
         try {
-          const headers: Record<string, string> = { "Content-Type": "application/json" };
-          if (apiConfig.apiKey) headers.Authorization = `Bearer ${apiConfig.apiKey}`;
-          await fetch(`${apiConfig.apiUrl}/api/channel-activity/commit-cursors`, {
-            method: "POST",
-            headers,
-            body: JSON.stringify({ cursorUpdates }),
-          });
-          console.log(
-            `[${role}] Committed ${cursorUpdates.length} channel activity cursor(s) for task ${taskId.slice(0, 8)}`,
-          );
-        } catch (err) {
-          console.warn(`[${role}] Failed to commit channel activity cursors: ${err}`);
-        }
-      }
-    }
-  }
+          vcsDetectedTasks.delete(taskId);
+          vcsCheckTimestamps.delete(taskId);
+          cancelledSignaled?.delete(taskId);
+          // The server finished this task without the session (heartbeat sweep,
+          // another writer). Its result stands: no finish call, and no credential
+          // or model outcome built from the abort this runner forced.
+          if (serverTerminalStatus) {
+            console.log(
+              `[${role}] Task ${taskId.slice(0, 8)} was already ${serverTerminalStatus} server-side — slot released, server result kept`,
+            );
+            return;
+          }
 
-  if (apiConfig) {
-    await Promise.allSettled(
-      completedTasks.map(({ taskId }) => removeActiveSession(apiConfig, taskId)),
-    );
-  }
-  for (const { taskId, triggerType } of completedTasks) {
-    state.activeTasks.delete(taskId);
-    if (triggerType === "task_assigned" || triggerType === "task_resumed") {
-      state.tasksProcessed += 1;
-    }
+          // Detect VCS before finishing — last chance to link a PR
+          if (apiConfig && workingDir && !vcsDetectedTasks.has(taskId)) {
+            await detectVcsForTask(apiConfig.apiUrl, apiConfig.apiKey, taskId, workingDir);
+          }
+
+          // Call the finish API to ensure task status is updated
+          // This is idempotent - if the agent already marked it, this is a no-op
+          if (apiConfig) {
+            let failureReason: string | undefined;
+            if (result.exitCode !== 0 && result.failureReason) {
+              failureReason = result.failureReason;
+              console.log(
+                `[${role}] Detected error for task ${taskId.slice(0, 8)}: ${failureReason}`,
+              );
+            }
+
+            // Record whether this worker's CLI accepts the model (harness_model_support).
+            void reportHarnessModelOutcome({
+              apiUrl: apiConfig.apiUrl,
+              apiKey: apiConfig.apiKey,
+              agentId: apiConfig.agentId,
+              harness: harnessProvider,
+              model,
+              exitCode: result.exitCode,
+              failureReason,
+            });
+
+            await credentialReport;
+            let bridgeDiagnostics:
+              | Awaited<ReturnType<typeof getBridgeFailureDiagnostics>>
+              | undefined;
+            if (result.exitCode !== 0 && harnessProvider === "claude" && workingDir) {
+              bridgeDiagnostics = await getBridgeFailureDiagnostics(workingDir);
+              if (bridgeDiagnostics?.artifactPath && result.sessionId) {
+                console.log(
+                  `[${role}] Bridge failure artifact found: ${bridgeDiagnostics.artifactPath}`,
+                );
+                updateHarnessVariantMeta(
+                  apiConfig.apiUrl,
+                  apiConfig.apiKey,
+                  taskId,
+                  result.sessionId,
+                  {
+                    failureArtifact: bridgeDiagnostics.artifactPath,
+                  },
+                ).catch((err) =>
+                  console.warn(`[runner] Failed to update harness variant meta: ${err}`),
+                );
+              }
+            }
+            const bridgeFailureDiagnostics =
+              bridgeDiagnostics?.paneTail != null
+                ? `Claude bridge final tmux pane tail (${bridgeDiagnostics.artifactPath}):\n${bridgeDiagnostics.paneTail}`
+                : undefined;
+            // Reports that gate admission on other workers (a seat mismatch, a
+            // model window rejection) land before the task finishes.
+            await reportCredentialOutcomeThenFinish(
+              {
+                apiUrl: apiConfig.apiUrl,
+                apiKey: apiConfig.apiKey,
+                credentialInfo,
+                result,
+                failureReason,
+                model,
+                codexCreditsExhaustedCooldownMs: state.codexCreditsExhaustedCooldownMs,
+                modelWindowBlocks: state.modelWindowBlocks,
+              },
+              () =>
+                ensureTaskFinished(
+                  apiConfig,
+                  role,
+                  taskId,
+                  result.exitCode,
+                  failureReason,
+                  // Runner-buffered last assistant text is a harness-agnostic fallback
+                  // for adapters that never populate `ProviderResult.output` (Codex
+                  // today, any future adapter). Empty buffer -> `undefined`, byte
+                  // identical to pre-fix behavior.
+                  resolveProviderOutput(result, assistantText),
+                  harnessProvider,
+                  bridgeFailureDiagnostics,
+                  finalProgress?.value,
+                ),
+            );
+
+            const sessionTriggerSurface = workerTriggerSurface(triggerSurface);
+            const sessionActor = { userId: requestedByUserId ?? null };
+            telemetry.taskEvent(
+              "session_completed",
+              {
+                taskId,
+                trigger_surface: sessionTriggerSurface,
+                agentId: apiConfig.agentId,
+                provider: result.cost?.provider ?? harnessProvider,
+                model: result.cost?.model ?? model ?? "unknown",
+                harnessVariant,
+                harnessVersion:
+                  typeof harnessVariantMeta?.version === "string" ||
+                  typeof harnessVariantMeta?.version === "number"
+                    ? String(harnessVariantMeta.version)
+                    : undefined,
+                exitCode: result.exitCode,
+                isError: result.exitCode !== 0,
+                durationMs,
+              },
+              sessionActor,
+            );
+            const sessionTelemetryEvent = resolveSessionTelemetryEvent(result);
+            if (sessionTelemetryEvent) {
+              telemetry.session(
+                sessionTelemetryEvent,
+                {
+                  agentId: apiConfig.agentId,
+                  taskId,
+                  trigger_surface: sessionTriggerSurface,
+                  errorCategory: normalizeSessionErrorCategory(result.errorCategory),
+                  provider: result.cost?.provider ?? harnessProvider,
+                  model: result.cost?.model ?? model ?? "unknown",
+                  durationMs: result.cost?.durationMs ?? durationMs,
+                  wasRateLimited: result.rateLimitResetAt != null,
+                },
+                sessionActor,
+              );
+            }
+            ensure({
+              id: "worker_process_finished",
+              flow: "task",
+              runId: taskId,
+              depIds: ["worker_process_spawned"],
+              data: {
+                taskId,
+                agentId: apiConfig.agentId,
+                role,
+                exitCode: result.exitCode,
+                success: result.exitCode === 0,
+                failureReason,
+              },
+              validator: (data) => data.exitCode === 0,
+              // biome-ignore lint/correctness/noEmptyPattern: data unused, ctx needed
+              filter: ({}, ctx) => ctx.deps.length > 0,
+              conditions: [{ timeout_ms: 3_600_000 }], // 1 hour: process runtime
+            });
+
+            // Commit channel activity cursors after successful processing
+            // If the task failed, cursors stay uncommitted so messages are re-seen on next poll
+            if (cursorUpdates && cursorUpdates.length > 0 && result.exitCode === 0) {
+              try {
+                const headers: Record<string, string> = { "Content-Type": "application/json" };
+                if (apiConfig.apiKey) headers.Authorization = `Bearer ${apiConfig.apiKey}`;
+                await fetch(`${apiConfig.apiUrl}/api/channel-activity/commit-cursors`, {
+                  method: "POST",
+                  headers,
+                  body: JSON.stringify({ cursorUpdates }),
+                });
+                console.log(
+                  `[${role}] Committed ${cursorUpdates.length} channel activity cursor(s) for task ${taskId.slice(0, 8)}`,
+                );
+              } catch (err) {
+                console.warn(`[${role}] Failed to commit channel activity cursors: ${err}`);
+              }
+            }
+          }
+        } finally {
+          try {
+            if (apiConfig) await removeActiveSession(apiConfig, taskId);
+          } finally {
+            state.activeTasks.delete(taskId);
+            if (triggerType === "task_assigned" || triggerType === "task_resumed") {
+              state.tasksProcessed += 1;
+            }
+          }
+        }
+      },
+    ),
+  );
+  for (const completion of completions) {
+    if (completion.status === "rejected")
+      console.warn(scrubSecrets(`[${role}] Task completion failed: ${completion.reason}`));
   }
 
   // Harness-agnostic FS → DB profile sync at session end.

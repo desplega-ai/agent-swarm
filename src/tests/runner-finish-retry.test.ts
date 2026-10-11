@@ -8,6 +8,7 @@ import {
   type RunnerState,
   type RunningTask,
 } from "../commands/runner";
+import { registerVolatileSecret } from "../utils/secret-scrubber";
 import { listenOnFreePort } from "./test-net";
 
 let server: Server;
@@ -22,6 +23,8 @@ let waits: number[];
 let sleep: ReturnType<typeof spyOn<typeof Bun, "sleep">>;
 let finishGate: Promise<void> | undefined;
 let hang: boolean;
+let blockedTaskId: string | undefined;
+let errorBody: string;
 
 beforeAll(async () => {
   server = createServer(async (req, res) => {
@@ -30,14 +33,14 @@ beforeAll(async () => {
     for await (const chunk of req) text += chunk;
     requests.push({ path, method: req.method, body: text ? JSON.parse(text) : {} });
     if (path === "finish" && hang) return;
-    if (path === "finish") await finishGate;
+    if (path === "finish" && (!blockedTaskId || req.url?.includes(blockedTaskId))) await finishGate;
     if ((failures[path] ?? 0) > 0) {
       failures[path]!--;
       if (disconnect) {
         req.socket.destroy();
         return;
       }
-      res.writeHead(status).end("API unavailable");
+      res.writeHead(status).end(errorBody);
       return;
     }
     res.writeHead(200, { "Content-Type": "application/json" }).end("{}");
@@ -57,6 +60,8 @@ beforeEach(() => {
   waits = [];
   finishGate = undefined;
   hang = false;
+  blockedTaskId = undefined;
+  errorBody = "API unavailable";
   process.env.RUNNER_FINISH_RETRY_MAX_SEC = "300";
   sleep = spyOn(Bun, "sleep").mockImplementation(async (ms) => {
     waits.push(Number(ms));
@@ -183,4 +188,108 @@ test("exit-after-N waits for finish acknowledgement and retains the active sessi
   expect(requests.some((request) => request.method === "DELETE")).toBe(true);
   expect(await exitAfterTasksIfFinished(runner, 1, shutdown)).toBe(true);
   expect(shutdown).toHaveBeenCalledTimes(1);
+});
+
+function completedState(ids: string[]): RunnerState {
+  return {
+    activeTasks: new Map(
+      ids.map((id) => [
+        id,
+        {
+          taskId: id,
+          result: { exitCode: 0, output: "saved result" },
+          triggerType: "task_assigned",
+          startTime: new Date(),
+          harnessProvider: "codex",
+          hasLocalEnvironment: false,
+        } as RunningTask,
+      ]),
+    ),
+    maxConcurrent: ids.length,
+    startedAt: Date.now(),
+    tasksProcessed: 0,
+    harnessProvider: "codex",
+    codexCreditsExhaustedCooldownMs: 0,
+    modelWindowBlocks: new Map(),
+  };
+}
+
+test("a blocked finish does not delay a sibling's retries or slot release", async () => {
+  const siblingId = crypto.randomUUID();
+  const runner = completedState([taskId, siblingId]);
+  blockedTaskId = taskId;
+  failures.finish = 2;
+  let release!: () => void;
+  finishGate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const completion = checkCompletedProcesses(runner, "worker", config);
+  try {
+    const deadline = Date.now() + 1000;
+    while (runner.activeTasks.has(siblingId) && Date.now() < deadline)
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(runner.activeTasks.has(siblingId)).toBe(false);
+    expect(runner.activeTasks.has(taskId)).toBe(true);
+    expect(runner.tasksProcessed).toBe(1);
+    expect(waits).toEqual([1000, 2000]);
+  } finally {
+    release();
+    await completion;
+  }
+  expect(runner.tasksProcessed).toBe(2);
+  expect(runner.activeTasks.size).toBe(0);
+});
+
+test("a completion exception releases its slot and preserves sibling completion", async () => {
+  const siblingId = crypto.randomUUID();
+  const runner = completedState([taskId, siblingId]);
+  runner.activeTasks.get(taskId)!.result = { exitCode: 1, failureReason: "provider failed" };
+  const log = spyOn(console, "log").mockImplementation((message) => {
+    if (String(message).includes("Detected error for task"))
+      throw new Error("completion preparation failed");
+  });
+  try {
+    await checkCompletedProcesses(runner, "worker", config);
+    expect(runner.activeTasks.size).toBe(0);
+    expect(runner.tasksProcessed).toBe(2);
+    expect(requests.filter((request) => request.path === "finish")).toHaveLength(1);
+    expect(requests.filter((request) => request.method === "DELETE")).toHaveLength(2);
+    const shutdown = mock(async (_signal: string) => {});
+    expect(await exitAfterTasksIfFinished(runner, 2, shutdown)).toBe(true);
+  } finally {
+    log.mockRestore();
+  }
+});
+
+test("HTTP 401 reports that the runtime token is revoked or expired", async () => {
+  failures.finish = 1;
+  status = 401;
+  const warn = spyOn(console, "warn").mockImplementation(() => {});
+  try {
+    await ensureTaskFinished(config, "worker", taskId, 0, undefined, "saved result", "codex");
+    expect(warn.mock.calls.flat().join(" ")).toContain(
+      "runtime token revoked or expired; giving up on finish",
+    );
+    expect(waits).toEqual([]);
+  } finally {
+    warn.mockRestore();
+  }
+});
+
+test("5xx diagnostics scrub secrets before truncating the response body", async () => {
+  const secret = `finish-${crypto.randomUUID()}`;
+  registerVolatileSecret(secret, "runner.finish-retry-test");
+  failures.finish = 1;
+  errorBody = `${secret} ${"x".repeat(1000)} END_OF_BODY`;
+  const warn = spyOn(console, "warn").mockImplementation(() => {});
+  try {
+    await ensureTaskFinished(config, "worker", taskId, 0, undefined, "saved result", "codex");
+    const diagnostic = warn.mock.calls.flat().join(" ");
+    expect(diagnostic).not.toContain(secret);
+    expect(diagnostic).toContain("REDACTED");
+    expect(diagnostic).not.toContain("END_OF_BODY");
+    expect(diagnostic.length).toBeLessThan(400);
+  } finally {
+    warn.mockRestore();
+  }
 });

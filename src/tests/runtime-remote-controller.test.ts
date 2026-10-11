@@ -354,8 +354,7 @@ for (const failure of ["list error", "list timeout"] as const) {
       ws.on("close", (code, reason) => resolve({ code, reason: reason.toString() })),
     );
     expect(closed.code).toBe(1011);
-    expect(closed.reason).not.toContain(token);
-    expect(Buffer.byteLength(closed.reason)).toBeLessThanOrEqual(123);
+    expect(closed.reason).toBe("controller operation failed");
     const row = await getRuntimeController(controllerId);
     expect(row?.lastError).toContain(failure === "list error" ? "Engine unavailable" : "timed out");
     expect(row?.lastError).not.toContain(token);

@@ -85,7 +85,6 @@ export function attachControllerTransport(
       console.error("[runtime-controller]", scrubSecrets(String(error)));
     const closeOnError = (error: unknown) => {
       const detail = scrubSecrets(String(error));
-      reportError(error);
       void getDbClient()
         .run(
           "UPDATE runtime_controllers SET last_error = ?, last_error_at = ?, status = CASE WHEN status = 'online' THEN status ELSE 'offline' END WHERE id = ?",
@@ -95,7 +94,9 @@ export function attachControllerTransport(
         .finally(() =>
           ws.close(
             error instanceof ControllerAuthError ? 1008 : 1011,
-            Buffer.from(detail).subarray(0, 120).toString(),
+            error instanceof ControllerAuthError
+              ? "Controller access rejected"
+              : "controller operation failed",
           ),
         );
     };

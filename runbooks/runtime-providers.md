@@ -55,6 +55,7 @@ Auth close code 1008 stops the process with a non-zero exit and a token diagnost
 The API uses 1008 for invalid or revoked credentials and a mismatched controller identity or kind.
 Operational handshake failures, including list errors and timeouts, use 1011 and the normal reconnect backoff.
 The API records the scrubbed error in the controller's `last_error` and `last_error_at` columns.
+Operational failures send the fixed close reason `controller operation failed`.
 Invalid protocol messages use close code 1002.
 A replaced process waits five minutes before another connection attempt and reports that another process holds the token.
 
@@ -137,6 +138,7 @@ Its status is unknown and its list is empty. Static workers need no infrastructu
 The first request to each socket negotiates the API version through an unversioned `GET /_ping`.
 The adapter reads `Api-Version` and caps it at 1.47. A missing header selects unversioned paths.
 The process caches the negotiated version per socket. Failed probes can retry on the next request.
+A client-version rejection clears the cached version, negotiates again, and retries the request once.
 On OrbStack Macs, set `DOCKER_HOST="unix://$HOME/.orbstack/run/docker.sock"`.
 `DOCKER_NETWORK` selects a network. `DOCKER_EXTRA_HOSTS` adds comma-separated `host:address` entries.
 The adapter always includes `host.docker.internal:host-gateway`.

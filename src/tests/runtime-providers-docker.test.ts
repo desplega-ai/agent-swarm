@@ -61,6 +61,44 @@ afterEach(async () => {
 });
 
 describe("Docker runtime provider", () => {
+  for (const message of [
+    "client version 1.44 is too old. Minimum supported API version is 1.47",
+    "API version is unsupported",
+  ]) {
+    test(`renegotiates a rejected version once: ${message}`, async () => {
+      serverVersion = "1.44";
+      let attempts = 0;
+      handler = () => {
+        serverVersion = "1.51";
+        return ++attempts === 1
+          ? Response.json({ message }, { status: 400 })
+          : new Response(null, { status: 204 });
+      };
+      await provider.terminate(target, handle);
+      expect(pings).toEqual(["GET", "GET"]);
+      expect(calls.map(({ url }) => url.pathname)).toEqual([
+        "/v1.44/containers/container-1",
+        "/v1.47/containers/container-1",
+      ]);
+      await provider.terminate(target, handle);
+      expect(pings).toHaveLength(2);
+    });
+  }
+
+  test("does not retry a version error more than once", async () => {
+    handler = () => Response.json({ message: "client version 1.47 is too old" }, { status: 400 });
+    await expect(provider.terminate(target, handle)).rejects.toThrow("too old");
+    expect(pings).toHaveLength(2);
+    expect(calls).toHaveLength(2);
+  });
+
+  test("does not renegotiate unrelated HTTP 400 errors", async () => {
+    handler = () => new Response("Invalid container", { status: 400 });
+    await expect(provider.terminate(target, handle)).rejects.toThrow("Invalid container");
+    expect(pings).toHaveLength(1);
+    expect(calls).toHaveLength(1);
+  });
+
   for (const [version, prefix] of [
     ["1.51", "/v1.47"],
     ["1.44", "/v1.44"],
