@@ -5107,6 +5107,12 @@ export async function checkCompletedProcesses(
     }
   }
 
+  if (apiConfig) {
+    await Promise.allSettled(
+      completedTasks.map(({ taskId }) => removeActiveSession(apiConfig, taskId)),
+    );
+  }
+
   // Remove completed tasks from the map and ensure they're marked as finished
   for (const {
     taskId,
@@ -5131,10 +5137,6 @@ export async function checkCompletedProcesses(
     cancelledSignaled?.delete(taskId);
     if (triggerType === "task_assigned" || triggerType === "task_resumed") {
       state.tasksProcessed += 1;
-    }
-
-    if (apiConfig) {
-      await removeActiveSession(apiConfig, taskId);
     }
 
     // The server finished this task without the session (heartbeat sweep,

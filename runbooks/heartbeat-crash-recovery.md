@@ -201,9 +201,10 @@ is never expired):
   The supervisor terminates the drained runtime when its tasks finish.
 - A draining runtime cannot receive work through `/api/poll`. The supervisor drains idle runtimes before termination and checks activity again next tick.
 - The supervisor counts sessions as busy only when their task exists and is non-terminal.
-  Each tick deletes sessions with terminal or missing tasks, scoped to the pooled runtime being checked.
+  Each tick checks for sessions with terminal or missing tasks, scoped to the pooled runtime being checked.
+  The supervisor issues DELETE only when that read finds a stale session.
   A runtime's recorded `in_progress` or `reviewing` task also keeps it busy without a session row.
-  Workers await session deletion with three one-second attempts and 100/200 ms backoffs.
+  Workers delete sessions concurrently for each completed batch, with three one-second attempts and 100/200 ms backoffs.
   Final failure logs a scrubbed warning and lets task completion continue.
 - E2B runtimes use the same drain path within `RUNTIME_ROTATE_BEFORE_SEC` seconds of their continuous runtime limit.
   Demand can provision replacements within the pool cap. Busy runtimes finish their tasks before termination.

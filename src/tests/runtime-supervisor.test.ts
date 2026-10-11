@@ -281,6 +281,20 @@ test("idle reap drains first, then terminates, offlines the agent, and revokes t
   expect(await resolveBySessionToken(fake.requests[0]!.env.API_KEY!)).toBeNull();
 });
 
+test("an empty stale-session scan does not issue a session DELETE", async () => {
+  const { agent, runtime } = await wake();
+  await activate(runtime.id, agent.id);
+  const writes = spyOn(getDbClient(), "run");
+  try {
+    await reconcileOnce();
+    expect(writes.mock.calls.some(([sql]) => sql.startsWith("DELETE FROM active_sessions"))).toBe(
+      false,
+    );
+  } finally {
+    writes.mockRestore();
+  }
+});
+
 test.each([
   ...TERMINAL_TASK_STATUSES,
   "missing",

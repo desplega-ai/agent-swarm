@@ -62,6 +62,7 @@ let tickAbort: AbortController | null = null;
 let warnedMultiRuntime = false;
 const orphanFirstSeen = new Map<string, number>();
 const ORPHAN_GRACE_MS = 120_000;
+const TERMINAL_TASK_STATUS_PLACEHOLDERS = TERMINAL_TASK_STATUSES.map(() => "?").join(", ");
 
 export function runtimeSupervisorStatus(): string {
   if (!isRuntimePoolsEnabled()) return "disabled";
@@ -367,14 +368,21 @@ export async function reapPoolRuntimes(
       await serializeRuntimeAction(candidate.id, async () => {
         const runtime = await getRuntimeInstanceById(candidate.id);
         if (!runtime) return;
-        const terminalStatuses = TERMINAL_TASK_STATUSES.map(() => "?").join(", ");
-        await getDbClient().run(
-          `DELETE FROM active_sessions WHERE runtimeInstanceId = ? AND NOT EXISTS (
+        const staleSession = await getDbClient().get<{ id: string }>(
+          `SELECT id FROM active_sessions WHERE runtimeInstanceId = ? AND NOT EXISTS (
             SELECT 1 FROM agent_tasks WHERE id = active_sessions.taskId
-              AND status NOT IN (${terminalStatuses})
-          )`,
+              AND status NOT IN (${TERMINAL_TASK_STATUS_PLACEHOLDERS})
+          ) LIMIT 1`,
           [runtime.id, ...TERMINAL_TASK_STATUSES],
         );
+        if (staleSession)
+          await getDbClient().run(
+            `DELETE FROM active_sessions WHERE runtimeInstanceId = ? AND NOT EXISTS (
+              SELECT 1 FROM agent_tasks WHERE id = active_sessions.taskId
+                AND status NOT IN (${TERMINAL_TASK_STATUS_PLACEHOLDERS})
+            )`,
+            [runtime.id, ...TERMINAL_TASK_STATUSES],
+          );
         if (runtime.status === "offline") {
           const session = await getDbClient().get<{ taskId: string }>(
             "SELECT taskId FROM active_sessions WHERE runtimeInstanceId = ? LIMIT 1",
@@ -421,7 +429,7 @@ export async function reapPoolRuntimes(
         }
         const busy = await getDbClient().get<{ taskId: string }>(
           `SELECT s.taskId FROM active_sessions s JOIN agent_tasks t ON t.id = s.taskId
-           WHERE s.runtimeInstanceId = ? AND t.status NOT IN (${terminalStatuses}) LIMIT 1`,
+           WHERE s.runtimeInstanceId = ? AND t.status NOT IN (${TERMINAL_TASK_STATUS_PLACEHOLDERS}) LIMIT 1`,
           [runtime.id, ...TERMINAL_TASK_STATUSES],
         );
         const task = runtime.taskId ? await getTaskById(runtime.taskId) : null;

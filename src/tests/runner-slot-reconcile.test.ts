@@ -221,6 +221,16 @@ describe("completed session deletion", () => {
     const { task, taskId, state } = setup(Date.now());
     task.result = { exitCode: 0, sessionId: task.session.sessionId };
     task.serverTerminalStatus = "completed";
+    const taskIds = [taskId];
+    if (failure === "timeout") {
+      for (let i = 0; i < 2; i++) {
+        const sibling = setup(Date.now());
+        sibling.task.result = { exitCode: 0, sessionId: sibling.task.session.sessionId };
+        sibling.task.serverTerminalStatus = "completed";
+        state.activeTasks.set(sibling.taskId, sibling.task);
+        taskIds.push(sibling.taskId);
+      }
+    }
     deleteFailures = failure === "transient" ? 2 : 3;
     hangDelete = failure === "timeout";
     const warning = spyOn(console, "warn").mockImplementation(() => {});
@@ -232,13 +242,17 @@ describe("completed session deletion", () => {
         agentId: crypto.randomUUID(),
       });
       expect(Date.now() - start).toBeLessThan(5_000);
-      expect(requests).toEqual(Array(3).fill(`DELETE /api/active-sessions/by-task/${taskId}`));
+      expect(requests).toHaveLength(3 * taskIds.length);
+      for (const id of taskIds)
+        expect(
+          requests.filter((request) => request === `DELETE /api/active-sessions/by-task/${id}`),
+        ).toHaveLength(3);
       expect(state.activeTasks.size).toBe(0);
-      expect(state.tasksProcessed).toBe(1);
+      expect(state.tasksProcessed).toBe(taskIds.length);
       if (failure === "transient") {
         expect(warning).not.toHaveBeenCalled();
       } else {
-        expect(warning).toHaveBeenCalledTimes(1);
+        expect(warning).toHaveBeenCalledTimes(taskIds.length);
         expect(warning.mock.calls[0]?.[0]).toContain("after 3 attempts");
       }
     } finally {
