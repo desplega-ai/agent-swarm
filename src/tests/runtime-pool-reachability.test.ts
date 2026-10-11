@@ -88,10 +88,13 @@ describe("pool agent reachability", () => {
     "missing-image",
   ])("offline agents in a %s pool are unreachable", async (state) => {
     const lead = await sleepingLead();
-    await updateRuntimePool(
-      pool.id,
-      state === "zero-capacity" ? { maxRuntimes: 0 } : { image: null },
-    );
+    // The API now rejects imageless pools; raw SQL models a row saved before that check.
+    if (state === "zero-capacity") await updateRuntimePool(pool.id, { maxRuntimes: 0 });
+    else
+      await getDbClient().run(
+        "UPDATE runtime_pools SET image = NULL, resolved_image = NULL WHERE id = ?",
+        [pool.id],
+      );
     expect(await isAgentReachable(lead)).toBe(false);
   });
   test.each([
@@ -99,10 +102,13 @@ describe("pool agent reachability", () => {
     "missing-image",
   ])("user send-task rejects a sleeping Lead in a %s pool", async (state) => {
     await sleepingLead();
-    await updateRuntimePool(
-      pool.id,
-      state === "zero-capacity" ? { maxRuntimes: 0 } : { image: null },
-    );
+    // The API now rejects imageless pools; raw SQL models a row saved before that check.
+    if (state === "zero-capacity") await updateRuntimePool(pool.id, { maxRuntimes: 0 });
+    else
+      await getDbClient().run(
+        "UPDATE runtime_pools SET image = NULL, resolved_image = NULL WHERE id = ?",
+        [pool.id],
+      );
     const user = await createUser({ name: "requester" });
     const result = await sendTaskHandler(userCtx(user), {
       task: "delegate",
@@ -117,10 +123,13 @@ describe("pool agent reachability", () => {
     "missing-image",
   ])("offer reaper releases a sleeping recipient in a %s pool", async (state) => {
     const agent = await createPoolAgent(pool.id, { name: "offeree" });
-    await updateRuntimePool(
-      pool.id,
-      state === "zero-capacity" ? { maxRuntimes: 0 } : { image: null },
-    );
+    // The API now rejects imageless pools; raw SQL models a row saved before that check.
+    if (state === "zero-capacity") await updateRuntimePool(pool.id, { maxRuntimes: 0 });
+    else
+      await getDbClient().run(
+        "UPDATE runtime_pools SET image = NULL, resolved_image = NULL WHERE id = ?",
+        [pool.id],
+      );
     const task = await createTaskExtended("offer", { offeredTo: agent.id });
     expect(await releaseStaleOfferedTasksForOfflineAgents(isAgentReachable)).toBe(1);
     expect((await getTaskById(task.id))?.status).toBe("unassigned");

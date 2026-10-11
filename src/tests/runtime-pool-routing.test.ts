@@ -457,10 +457,13 @@ describe("server pool routing", () => {
   });
   test.each(["zero-capacity", "missing-image"])("tier 2 skips a %s pool", async (state) => {
     await sleeper();
-    await updateRuntimePool(
-      pool.id,
-      state === "zero-capacity" ? { maxRuntimes: 0 } : { image: null },
-    );
+    // The API now rejects imageless pools; raw SQL models a row saved before that check.
+    if (state === "zero-capacity") await updateRuntimePool(pool.id, { maxRuntimes: 0 });
+    else
+      await getDbClient().run(
+        "UPDATE runtime_pools SET image = NULL, resolved_image = NULL WHERE id = ?",
+        [pool.id],
+      );
     const task = await createTaskExtended("pool work");
     expect(await routePoolTasks({ now: afterGrace(task) })).toEqual([]);
     expect((await getTaskById(task.id))?.status).toBe("unassigned");
