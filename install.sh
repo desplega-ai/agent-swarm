@@ -32,6 +32,7 @@ INSTALL_DIR="${AGENT_SWARM_DIR:-$DEFAULT_DIR}"
 PRESET="${AGENT_SWARM_PRESET:-$DEFAULT_PRESET}"
 CLI_VERSION="${AGENT_SWARM_CLI_VERSION:-$DEFAULT_CLI_VERSION}"
 LT_VERSION="${AGENT_SWARM_LT_VERSION:-$DEFAULT_LT_VERSION}"
+CLI_PACKAGE="${AGENT_SWARM_CLI_PACKAGE:-}"
 
 usage() {
   cat <<EOF
@@ -55,6 +56,8 @@ Environment:
   AGENT_SWARM_DIR          Same as --dir
   AGENT_SWARM_PRESET       Same as --preset
   AGENT_SWARM_CLI_VERSION  Same as --version
+  AGENT_SWARM_CLI_PACKAGE  Full package spec for the CLI instead of the npm release:
+                           a tarball path or URL from \`bun pm pack\` (testing unreleased builds)
   AGENT_SWARM_LT_VERSION   @desplega.ai/localtunnel version for --tunnel (default: ${DEFAULT_LT_VERSION})
   CLAUDE_CODE_OAUTH_TOKEN, ANTHROPIC_API_KEY, OPENAI_API_KEY, OPENROUTER_API_KEY,
   HARNESS_PROVIDER, GITHUB_TOKEN, SLACK_BOT_TOKEN, ...
@@ -182,8 +185,9 @@ onboard() {
     compose_up
     return 0
   fi
-  say "Running agent-swarm onboard (preset: ${PRESET}, cli: ${CLI_VERSION})"
-  run bunx "@desplega.ai/agent-swarm@${CLI_VERSION}" onboard --yes --preset "$PRESET" \
+  local spec="${CLI_PACKAGE:-@desplega.ai/agent-swarm@${CLI_VERSION}}"
+  say "Running agent-swarm onboard (preset: ${PRESET}, cli: ${spec})"
+  run bunx --package "$spec" agent-swarm onboard --yes --preset "$PRESET" \
     --container-engine docker </dev/null
 }
 
