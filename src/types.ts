@@ -2710,8 +2710,20 @@ export const WorkflowRunSchema = z
     startedAt: z.string(),
     lastUpdatedAt: z.string(),
     finishedAt: z.string().optional(),
+    /** The `sub-workflow` step that started this run. Unset on a top-level run. */
+    parentStepId: z.string().optional(),
   })
   .openapi("WorkflowRun");
+
+/** The run and `sub-workflow` step that started a child run. */
+export const WorkflowRunParentSchema = z
+  .object({
+    runId: z.string(),
+    workflowId: z.string(),
+    stepId: z.string(),
+    nodeId: z.string(),
+  })
+  .openapi("WorkflowRunParent");
 export type WorkflowRun = z.infer<typeof WorkflowRunSchema>;
 
 /** List row of a run: no `context`, which `GET /api/workflow-runs/{id}` serves. */

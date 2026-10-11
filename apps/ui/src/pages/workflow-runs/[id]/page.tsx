@@ -1,8 +1,8 @@
-import { ArrowLeft, ChevronsDownUp, ChevronsUpDown, RefreshCw } from "lucide-react";
+import { ArrowLeft, ChevronsDownUp, ChevronsUpDown, CornerLeftUp, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useRetryWorkflowRun, useWorkflow, useWorkflowRun } from "@/api/hooks/use-workflows";
-import type { WorkflowRunStep } from "@/api/types";
+import type { WorkflowRunParent, WorkflowRunStep } from "@/api/types";
 import { CollapsibleSection } from "@/components/shared/collapsible-section";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { ProgressRing, TaskStatusIcon } from "@/components/shared/task-status-icon";
@@ -280,6 +280,8 @@ export default function WorkflowRunDetailPage() {
           <ArrowLeft className="h-4 w-4" /> Back to Runs
         </button>
 
+        {run.parent && <ParentRunLink parent={run.parent} />}
+
         <PageHeader
           title={
             <div className="flex items-center gap-3 flex-wrap min-w-0">
@@ -290,6 +292,15 @@ export default function WorkflowRunDetailPage() {
                 </Link>
               </h1>
               <StatusBadge status={run.status} size="md" />
+              {run.parent && (
+                <Badge
+                  variant="outline"
+                  size="tag"
+                  className="border-action-sub-workflow/40 text-action-sub-workflow"
+                >
+                  child run
+                </Badge>
+              )}
               <Badge variant="outline" size="tag">
                 {formatSmartTime(run.startedAt)}
               </Badge>
@@ -436,6 +447,28 @@ export default function WorkflowRunDetailPage() {
           </ScrollArea>
         </div>
       </div>
+    </div>
+  );
+}
+
+/** Breadcrumb from a child run back to the run and `sub-workflow` step that started it. */
+function ParentRunLink({ parent }: { parent: WorkflowRunParent }) {
+  const { data: parentWorkflow } = useWorkflow(parent.workflowId);
+  const step = encodeURIComponent(parent.nodeId);
+  return (
+    <div className="flex items-center gap-1.5 text-sm text-muted-foreground flex-wrap">
+      <CornerLeftUp className="h-4 w-4 text-action-sub-workflow" />
+      <span>Started by</span>
+      <Link
+        to={`/workflow-runs/${parent.runId}?node=${step}&steps=${step}`}
+        className="text-primary hover:underline"
+      >
+        {parentWorkflow?.name ?? "parent workflow"} run{" "}
+        <span className="font-mono">{parent.runId.slice(0, 8)}</span>
+      </Link>
+      <span>
+        step <span className="font-mono">{parent.nodeId}</span>
+      </span>
     </div>
   );
 }

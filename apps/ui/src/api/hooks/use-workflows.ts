@@ -100,6 +100,15 @@ export function useWorkflowVersions(workflowId: string) {
   });
 }
 
+/** Every executor type, so a graph can read each node's `mode` from one query. */
+export function useExecutorTypes() {
+  return useQuery({
+    queryKey: ["executor-types"],
+    queryFn: () => api.fetchExecutorTypes(),
+    staleTime: 60_000, // schemas don't change at runtime
+  });
+}
+
 export function useExecutorType(type: string) {
   return useQuery({
     queryKey: ["executor-type", type],

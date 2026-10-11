@@ -2,6 +2,7 @@ import type { NodeProps } from "@xyflow/react";
 import {
   Bell,
   Bot,
+  BrainCircuit,
   Library,
   ListPlus,
   type LucideIcon,
@@ -10,12 +11,17 @@ import {
   Share2,
   Terminal,
   UserCheck,
+  Workflow,
   Zap,
 } from "lucide-react";
+import { useMemo } from "react";
+import { Link } from "react-router-dom";
+import { useExecutorTypes, useWorkflows } from "@/api/hooks/use-workflows";
 import { WorkflowNodeShell } from "@/components/shared/workflow-node-shell";
 import { Badge } from "@/components/ui/badge";
 import type { FlowNodeData } from "./graph-utils";
 import { statusBorderColor } from "./node-styles";
+import { subWorkflowTargetId, systemOneSummary } from "./node-summary";
 
 type NodeStyle = {
   border: string;
@@ -89,6 +95,20 @@ const nodeStyleMap: Record<string, NodeStyle> = {
     handle: "!bg-action-swarm-script",
     icon: Library,
   },
+  "sub-workflow": {
+    border: "border-action-sub-workflow/50",
+    bg: "bg-action-sub-workflow/10",
+    text: "text-action-sub-workflow",
+    handle: "!bg-action-sub-workflow",
+    icon: Workflow,
+  },
+  "system-one-decision": {
+    border: "border-action-system-one-decision/50",
+    bg: "bg-action-system-one-decision/10",
+    text: "text-action-system-one-decision",
+    handle: "!bg-action-system-one-decision",
+    icon: BrainCircuit,
+  },
 };
 
 const defaultStyle: NodeStyle = {
@@ -99,13 +119,46 @@ const defaultStyle: NodeStyle = {
   icon: Zap,
 };
 
-const ASYNC_TYPES = new Set(["agent-task", "create-task", "delegate-to-agent", "foreach"]);
+/** Node type → executor mode, from the API, so the card agrees with the node inspector. */
+function useAsyncTypes(): Set<string> {
+  const { data } = useExecutorTypes();
+  return useMemo(
+    () => new Set((data ?? []).filter((t) => t.mode === "async").map((t) => t.type)),
+    [data],
+  );
+}
+
+/** The name of the workflow a `sub-workflow` node runs, linked to its definition. */
+function SubWorkflowTarget({ workflowId }: { workflowId: string }) {
+  const { data: workflows } = useWorkflows();
+  const name = workflows?.find((w) => w.id === workflowId)?.name;
+  return (
+    <Link
+      to={`/workflows/${workflowId}`}
+      // nodrag/nopan: let the click through to the link instead of starting a pan.
+      className="nodrag nopan hover:underline hover:text-foreground"
+      onClick={(e) => e.stopPropagation()}
+      title={workflowId}
+    >
+      &rarr; {name ?? `${workflowId.slice(0, 8)}…`}
+    </Link>
+  );
+}
+
+function nodeSubtitle(d: FlowNodeData) {
+  if (d.nodeType === "sub-workflow") {
+    const workflowId = subWorkflowTargetId(d.config);
+    return workflowId ? <SubWorkflowTarget workflowId={workflowId} /> : undefined;
+  }
+  if (d.nodeType === "system-one-decision") return systemOneSummary(d.config);
+  return undefined;
+}
 
 export function ActionNode({ data }: NodeProps) {
   const d = data as unknown as FlowNodeData;
   const style = nodeStyleMap[d.nodeType] ?? defaultStyle;
   const borderClass = d.stepStatus ? statusBorderColor[d.stepStatus] : style.border;
-  const isAsync = ASYNC_TYPES.has(d.nodeType);
+  const isAsync = useAsyncTypes().has(d.nodeType);
 
   return (
     <WorkflowNodeShell
@@ -118,6 +171,7 @@ export function ActionNode({ data }: NodeProps) {
       handleClass={style.handle}
       selected={d.selected}
       outputPorts={d.outputPorts}
+      subtitle={nodeSubtitle(d)}
       badge={
         isAsync ? (
           <Badge

@@ -160,6 +160,7 @@ import type {
   WhoamiResponse,
   Workflow,
   WorkflowRun,
+  WorkflowRunParent,
   WorkflowRunStep,
   WorkflowRunSummary,
   WorkflowRunsPage,
@@ -1433,9 +1434,13 @@ class ApiClient {
     const url = `${this.getBaseUrl()}/api/workflow-runs/${id}`;
     const res = await fetch(url, { headers: this.getHeaders() });
     if (!res.ok) throw new Error(`Failed to fetch workflow run: ${res.status}`);
-    const data = (await res.json()) as { run: WorkflowRun; steps: WorkflowRunStep[] };
-    // Reshape { run, steps } into WorkflowRunWithSteps
-    return { ...data.run, steps: data.steps };
+    const data = (await res.json()) as {
+      run: WorkflowRun;
+      steps: WorkflowRunStep[];
+      parent?: WorkflowRunParent;
+    };
+    // Reshape { run, steps, parent } into WorkflowRunWithSteps
+    return { ...data.run, steps: data.steps, parent: data.parent };
   }
 
   async fetchWorkflowVersions(workflowId: string): Promise<WorkflowVersion[]> {

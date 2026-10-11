@@ -15,6 +15,7 @@ import {
   type updateWorkflow,
   withFavoriteFlags,
 } from "../be/db";
+import { getWorkflowRunParent } from "../be/db/workflow-runs";
 import {
   AssetKeySchema,
   AutomationIntegrationIdSchema,
@@ -26,6 +27,7 @@ import {
   WorkflowEdgeSchema,
   WorkflowNodePatchSchema,
   WorkflowPatchSchema,
+  WorkflowRunParentSchema,
   WorkflowRunSchema,
   WorkflowRunStatusSchema,
   WorkflowRunStepSchema,
@@ -331,7 +333,12 @@ const getWorkflowRunRoute = route({
   responses: {
     200: {
       description: "Workflow run details with steps including retry info",
-      schema: z.object({ run: WorkflowRunSchema, steps: z.array(WorkflowRunStepSchema) }),
+      schema: z.object({
+        run: WorkflowRunSchema,
+        steps: z.array(WorkflowRunStepSchema),
+        /** Set on a child run: the run and `sub-workflow` step that started it. */
+        parent: WorkflowRunParentSchema.optional(),
+      }),
     },
     404: { description: "Run not found" },
   },
@@ -909,7 +916,8 @@ export async function handleWorkflows(
       return true;
     }
     const steps = await getWorkflowRunStepsByRunId(parsed.params.id, "display");
-    getWorkflowRunRoute.respond(res, 200, { run, steps });
+    const parent = run.parentStepId ? await getWorkflowRunParent(run.parentStepId) : null;
+    getWorkflowRunRoute.respond(res, 200, { run, steps, ...(parent ? { parent } : {}) });
     return true;
   }
 

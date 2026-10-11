@@ -5244,6 +5244,9 @@
           },
           "finishedAt": {
             "type": "string"
+          },
+          "parentStepId": {
+            "type": "string"
           }
         },
         "required": [
@@ -5294,6 +5297,9 @@
             "type": "string"
           },
           "finishedAt": {
+            "type": "string"
+          },
+          "parentStepId": {
             "type": "string"
           }
         },
@@ -5375,6 +5381,29 @@
           "nodeType",
           "status",
           "startedAt"
+        ]
+      },
+      "WorkflowRunParent": {
+        "type": "object",
+        "properties": {
+          "runId": {
+            "type": "string"
+          },
+          "workflowId": {
+            "type": "string"
+          },
+          "stepId": {
+            "type": "string"
+          },
+          "nodeId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "runId",
+          "workflowId",
+          "stepId",
+          "nodeId"
         ]
       },
       "WorkflowVersion": {
@@ -56751,6 +56780,9 @@
                       "items": {
                         "$ref": "#/components/schemas/WorkflowRunStep"
                       }
+                    },
+                    "parent": {
+                      "$ref": "#/components/schemas/WorkflowRunParent"
                     }
                   },
                   "required": [

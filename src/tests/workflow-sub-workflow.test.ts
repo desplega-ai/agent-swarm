@@ -11,6 +11,7 @@ import {
   getWorkflowRunStepsByRunId,
   initDb,
 } from "../be/db";
+import { getWorkflowRunParent } from "../be/db/workflow-runs";
 import type { Workflow, WorkflowDefinition, WorkflowRun } from "../types";
 import { startWorkflowExecution } from "../workflows/engine";
 import { workflowEventBus } from "../workflows/event-bus";
@@ -160,6 +161,27 @@ describe("sub-workflow node", () => {
     expect(output.runId).toBe(childRun!.id);
     expect(output.outputs.check).toMatchObject({ passed: true });
     expect(output.outputs.trigger).toBeUndefined();
+  });
+
+  test("a child run names its parent step and run", async () => {
+    const child = await makeWorkflow(instantChild);
+    const parent = await makeWorkflow(parentOf(child.id));
+
+    const runId = await startWorkflowExecution(parent, {}, registry);
+    await waitForRun(runId, isDone);
+
+    const [childRow] = await childRunsOf(child.id);
+    const childRun = await getWorkflowRun(childRow!.id, "display");
+    const [parentStep] = await getWorkflowRunStepsByRunId(runId);
+    expect(childRun?.parentStepId).toBe(parentStep!.id);
+    expect(await getWorkflowRunParent(childRun!.parentStepId!)).toEqual({
+      runId,
+      workflowId: parent.id,
+      stepId: parentStep!.id,
+      nodeId: "child",
+    });
+    expect((await getWorkflowRun(runId))?.parentStepId).toBeUndefined();
+    expect(await getWorkflowRunParent(crypto.randomUUID())).toBeNull();
   });
 
   test("a failed child fails the node and the parent run", async () => {

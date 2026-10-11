@@ -23323,6 +23323,7 @@ export interface paths {
                         "application/json": {
                             run: components["schemas"]["WorkflowRun"];
                             steps: components["schemas"]["WorkflowRunStep"][];
+                            parent?: components["schemas"]["WorkflowRunParent"];
                         };
                     };
                 };
@@ -25146,6 +25147,7 @@ export interface components {
             startedAt: string;
             lastUpdatedAt: string;
             finishedAt?: string;
+            parentStepId?: string;
         };
         WorkflowRun: {
             /** Format: uuid */
@@ -25163,6 +25165,7 @@ export interface components {
             startedAt: string;
             lastUpdatedAt: string;
             finishedAt?: string;
+            parentStepId?: string;
         };
         WorkflowRunStep: {
             /** Format: uuid */
@@ -25186,6 +25189,12 @@ export interface components {
             idempotencyKey?: string;
             diagnostics?: string;
             nextPort?: string;
+        };
+        WorkflowRunParent: {
+            runId: string;
+            workflowId: string;
+            stepId: string;
+            nodeId: string;
         };
         WorkflowVersion: {
             /** Format: uuid */

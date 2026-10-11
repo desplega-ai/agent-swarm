@@ -30,6 +30,7 @@ import {
   useUpdateWorkflow,
   useWorkflow,
   useWorkflowRuns,
+  useWorkflows,
   useWorkflowVersions,
 } from "@/api/hooks/use-workflows";
 import type {
@@ -69,6 +70,7 @@ import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { JsonTree } from "@/components/workflows/json-tree";
+import { subWorkflowTargetId } from "@/components/workflows/node-summary";
 import { WorkflowGraph } from "@/components/workflows/workflow-graph";
 import { useTheme } from "@/hooks/use-theme";
 import {
@@ -615,6 +617,8 @@ function NodeInspector({ node, allNodes }: { node: WorkflowNode; allNodes: Workf
           <NotifyNodeConfig config={node.config} />
         ) : node.type === "property-match" ? (
           <PropertyMatchConfig config={node.config} />
+        ) : node.type === "sub-workflow" ? (
+          <SubWorkflowConfig config={node.config} />
         ) : Object.keys(node.config ?? {}).length > 0 ? (
           <InspectorSection label="Configuration">
             <JsonTree data={node.config} defaultExpandDepth={2} maxHeight="250px" />
@@ -895,6 +899,37 @@ function runtimeToLanguage(runtime: string | null, code: string): string {
   if (trimmed.startsWith("#!/usr/bin/env bun") || trimmed.startsWith("#!/usr/bin/env ts"))
     return "typescript";
   return "shell";
+}
+
+function SubWorkflowConfig({ config }: { config: Record<string, unknown> }) {
+  const workflowId = subWorkflowTargetId(config);
+  const { data: workflows, isLoading } = useWorkflows();
+  const target = workflowId ? workflows?.find((w) => w.id === workflowId) : undefined;
+  const inputs = config.inputs != null && typeof config.inputs === "object" ? config.inputs : null;
+
+  return (
+    <InspectorSection label="Configuration">
+      <div className="space-y-3">
+        {workflowId && (
+          <div className="text-xs space-y-0.5">
+            <span className="text-muted-foreground">Runs workflow: </span>
+            <Link to={`/workflows/${workflowId}`} className="text-primary hover:underline">
+              {target?.name ?? (isLoading ? "…" : "Unknown workflow")}
+            </Link>
+            <div className="font-mono text-[10px] text-muted-foreground">{workflowId}</div>
+          </div>
+        )}
+        {inputs && Object.keys(inputs).length > 0 && (
+          <div className="space-y-1">
+            <span className="text-[10px] text-muted-foreground uppercase tracking-wide">
+              Child inputs
+            </span>
+            <JsonTree data={inputs} defaultExpandDepth={2} maxHeight="200px" />
+          </div>
+        )}
+      </div>
+    </InspectorSection>
+  );
 }
 
 function RawLlmConfig({ config }: { config: Record<string, unknown> }) {

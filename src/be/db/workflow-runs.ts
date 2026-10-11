@@ -21,6 +21,28 @@ export async function getChildWorkflowRunId(parentStepId: string): Promise<strin
   return row?.id ?? null;
 }
 
+/** Where a child run came from: the `sub-workflow` step that started it and that step's run. */
+export type WorkflowRunParent = {
+  runId: string;
+  workflowId: string;
+  stepId: string;
+  nodeId: string;
+};
+
+/** The parent of a child run, or null when the step (or its run) is gone. */
+export async function getWorkflowRunParent(
+  parentStepId: string,
+): Promise<WorkflowRunParent | null> {
+  const row = await getDbClient().get<WorkflowRunParent>(
+    `SELECT s.runId AS runId, r.workflowId AS workflowId, s.id AS stepId, s.nodeId AS nodeId
+       FROM workflow_run_steps s
+       JOIN workflow_runs r ON r.id = s.runId
+      WHERE s.id = ?`,
+    [parentStepId],
+  );
+  return row ?? null;
+}
+
 /**
  * Workflow ids of a run and the ancestor runs that started it, nearest first.
  * Stops `maxDepth` ancestors up, so it returns at most `maxDepth + 1` ids.

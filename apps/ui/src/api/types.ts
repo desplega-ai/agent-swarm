@@ -1372,6 +1372,16 @@ export interface WorkflowRun {
   startedAt: string;
   lastUpdatedAt: string;
   finishedAt?: string;
+  /** The `sub-workflow` step that started this run. Unset on a top-level run. */
+  parentStepId?: string;
+}
+
+/** The run and `sub-workflow` step that started a child run. */
+export interface WorkflowRunParent {
+  runId: string;
+  workflowId: string;
+  stepId: string;
+  nodeId: string;
 }
 
 export type WorkflowRunStepStatus =
@@ -1404,6 +1414,7 @@ export interface WorkflowRunStep {
 
 export interface WorkflowRunWithSteps extends WorkflowRun {
   steps: WorkflowRunStep[];
+  parent?: WorkflowRunParent;
 }
 
 export interface WorkflowVersion {

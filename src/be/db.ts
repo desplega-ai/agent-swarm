@@ -7704,6 +7704,7 @@ function rowToWorkflowRun(row: WorkflowRunRow, view: WorkflowPayloadView = "repl
     startedAt: normalizeDateRequired(row.startedAt),
     lastUpdatedAt: normalizeDateRequired(row.lastUpdatedAt),
     finishedAt: normalizeDate(row.finishedAt) ?? undefined,
+    parentStepId: row.parentStepId ?? undefined,
   };
   return defineWorkflowPayload(run, "context", row.context, row.context_replay, view, {
     runId: row.id,

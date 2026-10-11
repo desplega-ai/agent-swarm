@@ -1,4 +1,6 @@
 import { describe, expect, mock, test } from "bun:test";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import type { ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router-dom";
 import type { WorkflowRunStep } from "../../api/types";
@@ -21,8 +23,12 @@ mock.module("@/components/workflows/graph-utils", () => require("./graph-utils")
 mock.module("@/components/workflows/json-tree", () => require("./json-tree"));
 mock.module("@/lib/synthetic-step-id", () => require("../../lib/synthetic-step-id"));
 mock.module("@/api/hooks/use-agents", () => require("../../api/hooks/use-agents"));
+mock.module("@/api/hooks/use-workflows", () => require("../../api/hooks/use-workflows"));
+mock.module("@/api/hooks/use-approval-requests", () =>
+  require("../../api/hooks/use-approval-requests"),
+);
 mock.module("@/lib/config", () => require("../../lib/config"));
-const { HitlOutput } = await import("./step-card");
+const { HitlOutput, SubWorkflowOutput, SystemOneOutput } = await import("./step-card");
 
 function step(status: string): WorkflowRunStep {
   return {
@@ -53,5 +59,155 @@ describe("HitlOutput", () => {
 
   test("a timed-out approval reads Timed out", () => {
     expect(render("timeout")).toContain("Timed out");
+  });
+});
+
+/** Hooks stay pending under static rendering, so these render the step output alone. */
+function renderWithQuery(node: ReactNode): string {
+  return renderToStaticMarkup(
+    <QueryClientProvider client={new QueryClient()}>
+      <MemoryRouter>{node}</MemoryRouter>
+    </QueryClientProvider>,
+  );
+}
+
+function systemOneStep(output: unknown, status = "completed"): WorkflowRunStep {
+  return {
+    id: "step-2",
+    runId: "run-1",
+    nodeId: "classify",
+    nodeType: "system-one-decision",
+    status,
+    output,
+    startedAt: "2026-09-28T10:00:00.000Z",
+  } as WorkflowRunStep;
+}
+
+const decision = {
+  model: "laya-rl-agent",
+  answers: {
+    sentiment: {
+      type: "choice",
+      choice: "negative",
+      probabilities: { negative: 0.9494 },
+      confidence: 0.9494,
+    },
+  },
+  usage: { input_tokens: 12, output_tokens: 3 },
+};
+
+describe("SystemOneOutput", () => {
+  test("shows each answer, its confidence and who decided", () => {
+    const html = renderWithQuery(
+      <SystemOneOutput
+        step={systemOneStep({
+          ...decision,
+          review: {
+            status: "not_required",
+            questions: { sentiment: { confidence: 0.9494, inBand: false, decidedBy: "model" } },
+          },
+        })}
+      />,
+    );
+    expect(html).toContain("sentiment");
+    expect(html).toContain("negative");
+    expect(html).toContain("95%");
+    expect(html).toContain("decided by model");
+    expect(html).toContain("No review needed");
+    expect(html).toContain("laya-rl-agent");
+  });
+
+  test("a person's override keeps the model's answer visible", () => {
+    const html = renderWithQuery(
+      <SystemOneOutput
+        step={systemOneStep({
+          ...decision,
+          answers: { sentiment: { ...decision.answers.sentiment, choice: "neutral" } },
+          review: {
+            status: "approved",
+            approvalRequestId: "00000000-0000-4000-8000-000000000002",
+            questions: {
+              sentiment: {
+                confidence: 0.5,
+                inBand: true,
+                decidedBy: "human",
+                modelAnswer: "negative",
+              },
+            },
+          },
+        })}
+      />,
+    );
+    expect(html).toContain("decided by human");
+    expect(html).toContain("model said negative");
+    expect(html).toContain("Review approved");
+    expect(html).toContain("/approval-requests/00000000-0000-4000-8000-000000000002");
+  });
+
+  test("a parked review shows that it waits for a person", () => {
+    const html = renderWithQuery(
+      <SystemOneOutput
+        step={systemOneStep(
+          {
+            ...decision,
+            review: {
+              status: "pending",
+              questions: { sentiment: { confidence: 0.5, inBand: true, decidedBy: "model" } },
+            },
+          },
+          "waiting",
+        )}
+        node={{
+          id: "classify",
+          type: "system-one-decision",
+          config: { humanReview: { band: { min: 0.4, max: 0.8 } } },
+        }}
+      />,
+    );
+    expect(html).toContain("Awaiting review");
+    expect(html).toContain("Awaiting approval");
+    expect(html).toContain("review band 0.4–0.8");
+    expect(html).toContain("in review band");
+  });
+});
+
+describe("SubWorkflowOutput", () => {
+  test("links the child run and lists each child node result", () => {
+    const html = renderWithQuery(
+      <SubWorkflowOutput
+        step={{
+          id: "step-3",
+          runId: "run-1",
+          nodeId: "call",
+          nodeType: "sub-workflow",
+          status: "completed",
+          output: {
+            runId: "61a5d1a2-0000-4000-8000-000000000003",
+            outputs: { check: { passed: true }, summarize: "done" },
+          },
+          startedAt: "2026-09-28T10:00:00.000Z",
+        }}
+      />,
+    );
+    expect(html).toContain("/workflow-runs/61a5d1a2-0000-4000-8000-000000000003");
+    expect(html).toContain("Node results (2)");
+    expect(html).toContain("check");
+    expect(html).toContain("summarize");
+  });
+
+  test("a waiting step says it waits for the child run", () => {
+    const html = renderWithQuery(
+      <SubWorkflowOutput
+        step={{
+          id: "step-3",
+          runId: "run-1",
+          nodeId: "call",
+          nodeType: "sub-workflow",
+          status: "waiting",
+          startedAt: "2026-09-28T10:00:00.000Z",
+        }}
+      />,
+    );
+    expect(html).toContain("Waiting for the child run");
   });
 });

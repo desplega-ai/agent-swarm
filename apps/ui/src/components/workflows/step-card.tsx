@@ -1,6 +1,8 @@
 import { AlertCircle, AlertTriangle, ChevronDown, ChevronRight, Code2, Timer } from "lucide-react";
 import { forwardRef, useState } from "react";
 import { Link } from "react-router-dom";
+import { useApprovalRequests } from "@/api/hooks/use-approval-requests";
+import { useWorkflow, useWorkflowRun } from "@/api/hooks/use-workflows";
 import type { WorkflowNode, WorkflowRunStep } from "@/api/types";
 import { Spinner } from "@/components/kibo-ui/spinner";
 import { AgentLink } from "@/components/shared/agent-link";
@@ -115,6 +117,12 @@ export const StepCard = forwardRef<HTMLDivElement, StepCardProps>(
               "shrink-0",
               (itemKey != null || step.nodeType === "foreach") &&
                 "border-action-foreach/40 text-action-foreach",
+              itemKey == null &&
+                step.nodeType === "sub-workflow" &&
+                "border-action-sub-workflow/40 text-action-sub-workflow",
+              itemKey == null &&
+                step.nodeType === "system-one-decision" &&
+                "border-action-system-one-decision/40 text-action-system-one-decision",
             )}
           >
             {typeBadge}
@@ -244,6 +252,14 @@ function StepOutput({ step, node }: { step: WorkflowRunStep; node?: WorkflowNode
 
   if (step.nodeType === "script" || step.nodeType === "raw-llm") {
     return <ScriptOutput step={step} />;
+  }
+
+  if (step.nodeType === "system-one-decision") {
+    return <SystemOneOutput step={step} node={node} />;
+  }
+
+  if (step.nodeType === "sub-workflow") {
+    return <SubWorkflowOutput step={step} />;
   }
 
   // Generic fallback for other step types
@@ -479,6 +495,302 @@ function GenericOutput({ step }: { step: WorkflowRunStep }) {
       <span className="text-xs text-muted-foreground uppercase tracking-wide">Output</span>
       <CollapsibleOutput label="output" data={step.output} />
       <RawJsonToggle data={step.output} />
+    </div>
+  );
+}
+
+type SystemOneAnswer =
+  | { type: "noul"; noul: number }
+  | { type: "choice"; choice: string; confidence: number }
+  | { type: "score"; score: number; confidence: number };
+
+type SystemOneReviewQuestion = {
+  confidence: number;
+  inBand: boolean;
+  decidedBy: "model" | "human";
+  modelAnswer?: string | number;
+};
+
+type SystemOneDecision = {
+  model: string;
+  answers: Record<string, SystemOneAnswer>;
+  usage?: { input_tokens: number; output_tokens: number };
+  routing?: { model: string };
+  review?: {
+    status: "not_required" | "pending" | "approved" | "rejected" | "timeout";
+    approvalRequestId?: string;
+    reason?: string;
+    questions: Record<string, SystemOneReviewQuestion>;
+  };
+};
+
+const REVIEW_STATUS: Record<string, { label: string; className: string }> = {
+  not_required: { label: "No review needed", className: "border-border text-muted-foreground" },
+  pending: {
+    label: "Awaiting review",
+    className: "border-status-active/30 text-status-active-strong",
+  },
+  approved: {
+    label: "Review approved",
+    className: "border-status-success/30 text-status-success-strong",
+  },
+  rejected: {
+    label: "Review rejected",
+    className: "border-status-error/30 text-status-error-strong",
+  },
+  timeout: {
+    label: "Review timed out",
+    className: "border-status-active/30 text-status-active-strong",
+  },
+};
+
+function formatAnswer(answer: SystemOneAnswer): string {
+  if (answer.type === "choice") return answer.choice;
+  if (answer.type === "score") return String(answer.score);
+  return answer.noul.toFixed(2);
+}
+
+/** The confidence shown for an answer: the review's tested number, else the answer's own. */
+function answerConfidence(
+  answer: SystemOneAnswer,
+  review?: SystemOneReviewQuestion,
+): number | null {
+  if (review) return review.confidence;
+  return answer.type === "noul" ? null : answer.confidence;
+}
+
+function ConfidenceBar({ value }: { value: number }) {
+  const pct = Math.round(Math.min(Math.max(value, 0), 1) * 100);
+  return (
+    <div className="flex items-center gap-1.5" title={`confidence ${value}`}>
+      <div className="h-1.5 w-16 rounded-full bg-muted overflow-hidden">
+        <div className="h-full bg-action-system-one-decision" style={{ width: `${pct}%` }} />
+      </div>
+      <span className="text-[10px] font-mono text-muted-foreground">{pct}%</span>
+    </div>
+  );
+}
+
+/** A `system-one-decision` step: each question's answer, how sure the model was, and who decided. */
+export function SystemOneOutput({ step, node }: { step: WorkflowRunStep; node?: WorkflowNode }) {
+  const output = step.output as SystemOneDecision | null | undefined;
+
+  if (output == null || typeof output !== "object" || !output.answers) {
+    if (step.status === "running" || step.status === "pending") {
+      return (
+        <div className="flex items-center gap-2 text-xs text-muted-foreground py-1">
+          <Spinner className="size-3.5" />
+          <span>Asking the model</span>
+        </div>
+      );
+    }
+    return <GenericOutput step={step} />;
+  }
+
+  const review = output.review;
+  const reviewStatus = review ? REVIEW_STATUS[review.status] : undefined;
+  const model = output.routing?.model ?? output.model;
+
+  return (
+    <div className="space-y-2">
+      <span className="text-xs text-muted-foreground uppercase tracking-wide">Decision</span>
+      <div className="flex items-center gap-2 flex-wrap">
+        {reviewStatus && (
+          <Badge variant="outline" size="tag" className={reviewStatus.className}>
+            {reviewStatus.label}
+          </Badge>
+        )}
+        <Badge variant="outline" size="tag" className="font-mono">
+          {model}
+        </Badge>
+        {review?.approvalRequestId && (
+          <Link
+            to={`/approval-requests/${review.approvalRequestId}`}
+            className="text-primary hover:underline font-mono text-xs"
+            onClick={(e) => e.stopPropagation()}
+          >
+            &rarr; {review.approvalRequestId.slice(0, 8)}
+          </Link>
+        )}
+      </div>
+
+      {review?.status === "pending" && step.status === "waiting" && (
+        <PendingReview step={step} node={node} />
+      )}
+
+      {review?.reason && <p className="text-xs text-status-error-strong">{review.reason}</p>}
+
+      <div className="space-y-1.5">
+        {Object.entries(output.answers).map(([id, answer]) => {
+          const question = review?.questions[id];
+          const confidence = answerConfidence(answer, question);
+          const decidedBy = question?.decidedBy ?? "model";
+          return (
+            <div
+              key={id}
+              className="rounded-md border border-border/50 px-3 py-2 flex items-center gap-2 flex-wrap"
+            >
+              <span className="text-xs text-muted-foreground font-mono">{id}</span>
+              <span className="text-xs font-medium">{formatAnswer(answer)}</span>
+              {confidence != null && <ConfidenceBar value={confidence} />}
+              <Badge
+                variant="outline"
+                size="tag"
+                className={cn(
+                  "ml-auto",
+                  decidedBy === "human" && "border-status-info/30 text-status-info-strong",
+                )}
+              >
+                decided by {decidedBy}
+              </Badge>
+              {question?.inBand && decidedBy === "model" && (
+                <Badge
+                  variant="outline"
+                  size="tag"
+                  className="border-status-active/30 text-status-active-strong"
+                >
+                  in review band
+                </Badge>
+              )}
+              {decidedBy === "human" && question?.modelAnswer !== undefined && (
+                <span className="w-full text-[10px] text-muted-foreground">
+                  model said {String(question.modelAnswer)}
+                </span>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {output.usage && (
+        <p className="text-[10px] text-muted-foreground font-mono">
+          {output.usage.input_tokens} in · {output.usage.output_tokens} out tokens
+        </p>
+      )}
+
+      <RawJsonToggle data={output} />
+    </div>
+  );
+}
+
+/** The approval request a parked `system-one-decision` step is waiting on. */
+function PendingReview({ step, node }: { step: WorkflowRunStep; node?: WorkflowNode }) {
+  const { data: requests } = useApprovalRequests({ workflowRunId: step.runId });
+  const request = requests?.find((r) => r.workflowRunStepId === step.id && r.status === "pending");
+  const humanReview = node?.config?.humanReview as
+    | { band?: { min?: number; max?: number } }
+    | undefined;
+  const band = humanReview?.band;
+
+  return (
+    <div className="flex items-center gap-2 text-xs text-status-active-strong py-1 flex-wrap">
+      <span className="relative flex h-2 w-2">
+        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-status-active opacity-75" />
+        <span className="relative inline-flex rounded-full h-2 w-2 bg-status-active" />
+      </span>
+      <span>{request ? request.title : "Awaiting approval"}</span>
+      {request && (
+        <Link
+          to={`/approval-requests/${request.id}`}
+          className="text-primary hover:underline font-mono"
+          onClick={(e) => e.stopPropagation()}
+        >
+          &rarr; {request.id.slice(0, 8)}
+        </Link>
+      )}
+      {typeof band?.min === "number" && typeof band?.max === "number" && (
+        <span className="text-muted-foreground">
+          review band {band.min}–{band.max}
+        </span>
+      )}
+    </div>
+  );
+}
+
+type SubWorkflowStepOutput = {
+  runId: string;
+  outputs: Record<string, unknown>;
+  error?: string;
+};
+
+/** A `sub-workflow` step: the child run's status and each child node's result. */
+export function SubWorkflowOutput({ step }: { step: WorkflowRunStep }) {
+  const output = step.output as SubWorkflowStepOutput | null | undefined;
+  const runId = output && typeof output.runId === "string" ? output.runId : "";
+  const { data: childRun } = useWorkflowRun(runId);
+  const { data: childWorkflow } = useWorkflow(childRun?.workflowId ?? "");
+
+  if (output == null || !runId) {
+    if (step.status === "running" || step.status === "waiting" || step.status === "pending") {
+      return (
+        <div className="flex items-center gap-2 text-xs text-muted-foreground py-1">
+          <Spinner className="size-3.5" />
+          <span>Waiting for the child run</span>
+        </div>
+      );
+    }
+    return <GenericOutput step={step} />;
+  }
+
+  const nodes = childWorkflow?.definition.nodes;
+  // Latest step per node wins, as on the graph.
+  const childSteps = new Map((childRun?.steps ?? []).map((s) => [s.nodeId, s]));
+  const results = Object.entries(output.outputs ?? {});
+
+  return (
+    <div className="space-y-2">
+      <span className="text-xs text-muted-foreground uppercase tracking-wide">Child run</span>
+      <div className="flex items-center gap-2 flex-wrap">
+        {childRun && <StatusBadge status={childRun.status} />}
+        {childWorkflow && (
+          <Link
+            to={`/workflows/${childWorkflow.id}`}
+            className="text-xs hover:underline"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {childWorkflow.name}
+          </Link>
+        )}
+        <Link
+          to={`/workflow-runs/${runId}`}
+          className="text-primary hover:underline font-mono text-xs"
+          onClick={(e) => e.stopPropagation()}
+        >
+          &rarr; run {runId.slice(0, 8)}
+        </Link>
+      </div>
+
+      {output.error && (
+        <p className="text-xs text-status-error-strong">Partial failure: {output.error}</p>
+      )}
+
+      {results.length > 0 && (
+        <div className="space-y-1.5">
+          <span className="text-[10px] text-muted-foreground uppercase tracking-wide">
+            Node results ({results.length})
+          </span>
+          {results.map(([nodeId, value]) => {
+            const childNode = nodes?.find((n) => n.id === nodeId);
+            const childStep = childSteps.get(nodeId);
+            return (
+              <div key={nodeId} className="rounded-md border border-border/50 px-3 py-2 space-y-1">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-xs font-medium">{childNode?.label || nodeId}</span>
+                  {childNode && (
+                    <Badge variant="outline" size="tag">
+                      {childNode.type}
+                    </Badge>
+                  )}
+                  {childStep && <StatusBadge status={childStep.status} className="ml-auto" />}
+                </div>
+                <CollapsibleOutput label="result" data={value} />
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      <RawJsonToggle data={output} />
     </div>
   );
 }

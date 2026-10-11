@@ -45,6 +45,8 @@ export interface WorkflowNodeShellProps {
   outputPorts?: string[];
   /** Optional inline badge (e.g. "async" for action nodes). */
   badge?: ReactNode;
+  /** Optional line under the type, e.g. the workflow a `sub-workflow` node runs. */
+  subtitle?: ReactNode;
   className?: string;
 }
 
@@ -60,6 +62,7 @@ export function WorkflowNodeShell({
   showTargetHandle = true,
   outputPorts = ["default"],
   badge,
+  subtitle,
   className,
 }: WorkflowNodeShellProps) {
   const ports = outputPorts.length > 0 ? outputPorts : ["default"];
@@ -90,6 +93,9 @@ export function WorkflowNodeShell({
             {badge}
           </div>
           <div className="text-[10px] text-muted-foreground uppercase">{nodeType}</div>
+          {subtitle ? (
+            <div className="text-[10px] text-muted-foreground truncate">{subtitle}</div>
+          ) : null}
         </div>
       </div>
       {isMulti ? (
