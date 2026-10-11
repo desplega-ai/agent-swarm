@@ -54,6 +54,7 @@ export function runtimeFailureFixture(dbPath: string) {
     "RUNTIME_TOKEN_ROTATE_BEFORE_MIN",
     "HEARTBEAT_MAX_RESUME_GENERATIONS",
     "RUNTIME_WAKE_GRACE_SEC",
+    "HEARTBEAT_STALE_CLEANUP_MIN",
   ];
   const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
   const state = { fake: new FailureTestController(), controllerId: "" };

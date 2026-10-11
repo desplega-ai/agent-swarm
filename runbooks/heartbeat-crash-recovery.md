@@ -212,8 +212,11 @@ is never expired):
   A busy runtime drains and accepts no new tasks. Demand can provision a replacement within the pool cap.
   The supervisor terminates the drained runtime when its tasks finish.
 - A draining runtime cannot receive work through `/api/poll`. The supervisor drains idle runtimes before termination and checks activity again next tick.
-- The supervisor counts sessions as busy only when their task exists and is non-terminal.
-  Each tick checks idle-lifecycle runtimes for sessions with terminal or missing tasks, scoped to the runtime being checked.
+- The supervisor counts non-terminal task sessions as busy.
+  Taskless `unread_mentions`, `pool_tasks_available`, and `channel_activity` sessions also count while `lastHeartbeatAt` remains fresh.
+  `HEARTBEAT_STALE_CLEANUP_MIN` bounds taskless occupancy (default 30 minutes). Runtime pings do not extend this session deadline.
+  Each tick checks idle-lifecycle runtimes for terminal task sessions, missing task executions, and stale taskless sessions.
+  Each check remains scoped to the runtime being checked.
   The supervisor issues DELETE only when that read finds a stale session.
   A runtime's recorded `in_progress` or `reviewing` task also keeps it busy without a session row.
   Workers delete sessions concurrently for each completed batch, with three one-second attempts and 100/200 ms backoffs.
@@ -228,6 +231,12 @@ is never expired):
   Pro deployments can configure 86400 seconds. Planned rotation never pauses a busy runtime.
 - Supervisor termination immediately marks the runtime offline, reconciles the agent status, and revokes runtime tokens. A surviving live runtime keeps its agent available.
 - Disabled pools stop provisioning and drain idle runtimes. The supervisor continues provider checks and orphan cleanup.
+  Existing runtimes use their recorded controller for listing, status, termination, and E2B renewal.
+  The pool's current placement applies only to new provisions.
+  Placement and provider-kind changes return 409 while the pool has non-offline runtimes.
+  Ordinary and forced deletion also return 409 until all pool runtimes are offline.
+  Operators must scale to zero or disable the pool and wait for teardown.
+  Agent binding changes return 409 while that agent has non-offline pool runtimes.
 - The whole mechanism is inert while the flag is off. After a rollback workers
   stop refreshing their rows, and expiring them would offline agents that are
   running fine under legacy semantics.

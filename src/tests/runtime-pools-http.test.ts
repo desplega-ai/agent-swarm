@@ -201,11 +201,44 @@ describe("runtime pools HTTP", () => {
       draining: false,
     });
     expect((await dispatch(`/api/runtime-pools/${id}`, "DELETE")).status).toBe(409);
+    const forced = await dispatch(`/api/runtime-pools/${id}?force=true`, "DELETE");
+    expect(forced.status).toBe(409);
+    expect(forced.data.error).toContain("wait for teardown");
+    expect((await getAgentById(workerId))?.runtimePoolId).toBe(id);
+    expect(
+      (await dispatch(`/api/agents/${workerId}/runtime-pool`, "PUT", { poolId: null })).status,
+    ).toBe(409);
+    await getDbClient().run("UPDATE runtime_instances SET status = 'offline' WHERE pool_id = ?", [
+      id,
+    ]);
     expect((await dispatch(`/api/runtime-pools/${id}?force=true`, "DELETE")).data).toEqual({
       deleted: true,
     });
     expect((await getAgentById(workerId))?.runtimePoolId).toBeNull();
     expect((await dispatch(`/api/runtime-pools/${id}`)).status).toBe(404);
+  });
+  test("pool placement and kind changes return 409 while a runtime is non-offline", async () => {
+    const created = await dispatch("/api/runtime-pools", "POST", poolInput);
+    const id = created.data.pool.id;
+    const other = await dispatch("/api/runtime-controllers", "POST", {
+      name: "other-docker",
+      kind: "docker",
+    });
+    await getDbClient().run(
+      "INSERT INTO runtime_instances (id, agent_id, pool_id, controller_id, status) VALUES (?, ?, ?, 'builtin-docker', 'active')",
+      [crypto.randomUUID(), workerId, id],
+    );
+    for (const patch of [
+      { placements: [other.data.controller.id] },
+      { kind: "e2b", placements: ["builtin-e2b"] },
+    ]) {
+      const response = await dispatch(`/api/runtime-pools/${id}`, "PATCH", patch);
+      expect(response.status).toBe(409);
+      expect(response.data.error).toContain("wait for teardown");
+    }
+    expect((await dispatch(`/api/runtime-pools/${id}`)).data.pool.placements).toEqual([
+      "builtin-docker",
+    ]);
   });
   test("rejects kind mismatches, k8s, invalid bounds and missing placements", async () => {
     for (const input of [

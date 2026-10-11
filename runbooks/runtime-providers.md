@@ -103,6 +103,22 @@ Task completion preserves the runtime, its sessions, and its token during post-t
 The finished runtime still counts toward agent `maxTasks` and pool `maxRuntimes` throughout its exit grace.
 Runner shutdown permits immediate teardown. Otherwise, teardown waits `RUNTIME_PER_TASK_EXIT_GRACE_SEC` seconds from task completion, with a default of 60.
 
+Existing runtimes use their recorded `runtime_instances.controller_id` for provider listing, status, termination, and E2B renewal.
+The pool's current placement selects the controller for new provisions.
+Placement and provider-kind changes return 409 while any pool runtime is non-offline.
+Disable the pool and wait for teardown before changing either field.
+Pool deletion also returns 409 while any runtime is non-offline, including forced deletion.
+Scale to zero or disable the pool and wait before deletion.
+Force deletion only unbinds agents after all runtimes are offline.
+Changing or removing an agent's binding returns 409 while that agent has non-offline pool runtimes.
+
+Non-terminal task sessions keep a runtime busy. Finished task sessions do not.
+Taskless `unread_mentions`, `pool_tasks_available`, and `channel_activity` sessions also keep a runtime busy while their session heartbeat remains fresh.
+The supervisor uses `lastHeartbeatAt` and `HEARTBEAT_STALE_CLEANUP_MIN` (default 30 minutes) to bound taskless occupancy.
+Fresh runtime pings do not extend this session deadline.
+For idle lifecycles, cleanup deletes sessions for finished tasks, missing task executions, and stale taskless triggers.
+Per-task runtimes retain their existing post-task reporting and exit grace.
+
 The API inserts the provisioning row and mints a scoped runtime token before the infrastructure request.
 Registration activates that row. Termination revokes its runtime and child tokens and reconciles agent liveness.
 Registration timeouts and provision failures use persisted retry deadlines and a pool circuit breaker.
