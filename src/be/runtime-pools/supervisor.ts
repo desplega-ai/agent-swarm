@@ -12,6 +12,7 @@ import {
   isTerminalTaskStatus,
   type RuntimeInstance,
   type RuntimePool,
+  TERMINAL_TASK_STATUSES,
 } from "../../types";
 import { isMultiRuntimeEnabled } from "../../utils/multi-runtime";
 import { isRuntimePoolsEnabled } from "../../utils/runtime-pools-flag";
@@ -366,6 +367,14 @@ export async function reapPoolRuntimes(
       await serializeRuntimeAction(candidate.id, async () => {
         const runtime = await getRuntimeInstanceById(candidate.id);
         if (!runtime) return;
+        const terminalStatuses = TERMINAL_TASK_STATUSES.map(() => "?").join(", ");
+        await getDbClient().run(
+          `DELETE FROM active_sessions WHERE runtimeInstanceId = ? AND NOT EXISTS (
+            SELECT 1 FROM agent_tasks WHERE id = active_sessions.taskId
+              AND status NOT IN (${terminalStatuses})
+          )`,
+          [runtime.id, ...TERMINAL_TASK_STATUSES],
+        );
         if (runtime.status === "offline") {
           const session = await getDbClient().get<{ taskId: string }>(
             "SELECT taskId FROM active_sessions WHERE runtimeInstanceId = ? LIMIT 1",
@@ -411,8 +420,9 @@ export async function reapPoolRuntimes(
           return;
         }
         const busy = await getDbClient().get<{ taskId: string }>(
-          "SELECT taskId FROM active_sessions WHERE runtimeInstanceId = ? LIMIT 1",
-          [runtime.id],
+          `SELECT s.taskId FROM active_sessions s JOIN agent_tasks t ON t.id = s.taskId
+           WHERE s.runtimeInstanceId = ? AND t.status NOT IN (${terminalStatuses}) LIMIT 1`,
+          [runtime.id, ...TERMINAL_TASK_STATUSES],
         );
         const task = runtime.taskId ? await getTaskById(runtime.taskId) : null;
         const taskRunning = task?.status === "in_progress" || task?.status === "reviewing";

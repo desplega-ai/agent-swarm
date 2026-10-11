@@ -2995,17 +2995,30 @@ async function registerActiveSession(
   }
 }
 
-/** Remove an active session by taskId (fire-and-forget) */
+/** Remove an active session by taskId with a bounded retry. */
 async function removeActiveSession(config: ApiConfig, taskId: string): Promise<void> {
   const headers: Record<string, string> = { "X-Agent-ID": config.agentId };
   if (config.apiKey) headers.Authorization = `Bearer ${config.apiKey}`;
-  try {
-    await fetch(`${config.apiUrl}/api/active-sessions/by-task/${taskId}`, {
-      method: "DELETE",
-      headers,
-    });
-  } catch {
-    // Non-blocking
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const response = await fetch(`${config.apiUrl}/api/active-sessions/by-task/${taskId}`, {
+        method: "DELETE",
+        headers,
+        signal: AbortSignal.timeout(1_000),
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      return;
+    } catch (error) {
+      if (attempt === 3) {
+        console.warn(
+          scrubSecrets(
+            `[runner] Active-session removal failed for task ${taskId} after 3 attempts: ${error instanceof Error ? error.message : String(error)}`,
+          ),
+        );
+      } else {
+        await Bun.sleep(attempt * 100);
+      }
+    }
   }
 }
 
@@ -5121,12 +5134,7 @@ export async function checkCompletedProcesses(
     }
 
     if (apiConfig) {
-      removeActiveSession(apiConfig, taskId).catch((err) =>
-        console.error(
-          "[runner] active-session removal failed:",
-          scrubSecrets(err instanceof Error ? err.message : String(err)),
-        ),
-      );
+      await removeActiveSession(apiConfig, taskId);
     }
 
     // The server finished this task without the session (heartbeat sweep,

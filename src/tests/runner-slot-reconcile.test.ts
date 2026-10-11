@@ -5,7 +5,7 @@
  * that never settles, on a fake clock, and check the slot frees within the
  * reconcile interval plus the abort grace.
  */
-import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { createServer as createHttpServer, type Server } from "node:http";
 import {
   ABORT_SETTLE_GRACE_MS,
@@ -18,6 +18,7 @@ import {
   resolveTaskReconcileIntervalMs,
 } from "../commands/runner";
 import type { ProviderResult, ProviderSession } from "../providers/types";
+import { registerVolatileSecret } from "../utils/secret-scrubber";
 import { listenOnFreePort } from "./test-net";
 
 const INTERVAL_MS = 30_000;
@@ -25,12 +26,22 @@ const TICK_MS = 1_000;
 
 let api: Server;
 let apiUrl = "";
+let deleteFailures = 0;
+let hangDelete = false;
 /** Worker → API calls, as `METHOD /path`. */
 const requests: string[] = [];
 
 beforeAll(async () => {
   api = createHttpServer((req, res) => {
     requests.push(`${req.method} ${new URL(req.url || "/", "http://localhost").pathname}`);
+    if (req.method === "DELETE") {
+      if (hangDelete) return;
+      if (deleteFailures-- > 0) {
+        res.writeHead(503);
+        res.end();
+        return;
+      }
+    }
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end("{}");
   });
@@ -43,6 +54,8 @@ afterAll(async () => {
 
 beforeEach(() => {
   requests.length = 0;
+  deleteFailures = 0;
+  hangDelete = false;
 });
 
 /** A session like the one in #1819: abort() returns, the promise never settles. */
@@ -196,5 +209,65 @@ describe("resolveTaskReconcileIntervalMs", () => {
     expect(resolveTaskReconcileIntervalMs({ RUNNER_TASK_RECONCILE_INTERVAL_MS: "soon" })).toBe(
       DEFAULT_TASK_RECONCILE_INTERVAL_MS,
     );
+  });
+});
+
+describe("completed session deletion", () => {
+  test.each([
+    "transient",
+    "permanent",
+    "timeout",
+  ])("%s DELETE failure retries and completes within a few seconds", async (failure) => {
+    const { task, taskId, state } = setup(Date.now());
+    task.result = { exitCode: 0, sessionId: task.session.sessionId };
+    task.serverTerminalStatus = "completed";
+    deleteFailures = failure === "transient" ? 2 : 3;
+    hangDelete = failure === "timeout";
+    const warning = spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const start = Date.now();
+      await checkCompletedProcesses(state, "worker", {
+        apiUrl,
+        apiKey: "test-key",
+        agentId: crypto.randomUUID(),
+      });
+      expect(Date.now() - start).toBeLessThan(5_000);
+      expect(requests).toEqual(Array(3).fill(`DELETE /api/active-sessions/by-task/${taskId}`));
+      expect(state.activeTasks.size).toBe(0);
+      expect(state.tasksProcessed).toBe(1);
+      if (failure === "transient") {
+        expect(warning).not.toHaveBeenCalled();
+      } else {
+        expect(warning).toHaveBeenCalledTimes(1);
+        expect(warning.mock.calls[0]?.[0]).toContain("after 3 attempts");
+      }
+    } finally {
+      warning.mockRestore();
+    }
+  });
+
+  test("network failures retry and the final warning scrubs secrets", async () => {
+    const { task, state } = setup(Date.now());
+    task.result = { exitCode: 0, sessionId: task.session.sessionId };
+    task.serverTerminalStatus = "completed";
+    const secret = `delete-secret-${crypto.randomUUID()}`;
+    registerVolatileSecret(secret, "session-delete-test");
+    const fetchSpy = spyOn(globalThis, "fetch").mockRejectedValue(new Error(secret));
+    const warning = spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      await checkCompletedProcesses(state, "worker", {
+        apiUrl,
+        apiKey: "test-key",
+        agentId: crypto.randomUUID(),
+      });
+      expect(fetchSpy).toHaveBeenCalledTimes(3);
+      expect(warning).toHaveBeenCalledTimes(1);
+      expect(warning.mock.calls[0]?.[0]).toContain("after 3 attempts");
+      expect(warning.mock.calls[0]?.[0]).not.toContain(secret);
+      expect(state.tasksProcessed).toBe(1);
+    } finally {
+      fetchSpy.mockRestore();
+      warning.mockRestore();
+    }
   });
 });

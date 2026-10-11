@@ -46,6 +46,7 @@ import type {
 } from "../runtime-providers";
 import * as providers from "../runtime-providers";
 import { ControllerOfflineError } from "../runtime-providers/controller";
+import { TERMINAL_TASK_STATUSES } from "../types";
 import { registerVolatileSecret, scrubSecrets } from "../utils/secret-scrubber";
 
 class FakeRuntimeProvider implements RuntimeProvider {
@@ -280,9 +281,55 @@ test("idle reap drains first, then terminates, offlines the agent, and revokes t
   expect(await resolveBySessionToken(fake.requests[0]!.env.API_KEY!)).toBeNull();
 });
 
-test("active session clears draining and records task history", async () => {
+test.each([
+  ...TERMINAL_TASK_STATUSES,
+  "missing",
+] as const)("a session with a %s task becomes idle and is reaped", async (status) => {
+  const { task, agent, runtime } = await wake({ idleMinutes: 1 });
+  await activate(runtime.id, agent.id);
+  if (status === "missing") {
+    await getDbClient().run("DELETE FROM agent_tasks WHERE id = ?", [task.id]);
+  } else {
+    await getDbClient().run("UPDATE agent_tasks SET status = ? WHERE id = ?", [status, task.id]);
+  }
+  await getDbClient().run("UPDATE runtime_instances SET task_id = ? WHERE id = ?", [
+    task.id,
+    runtime.id,
+  ]);
+  await getDbClient().run(
+    "INSERT INTO active_sessions (id, agentId, taskId, triggerType, runtimeInstanceId) VALUES (?, ?, ?, 'task_assigned', ?)",
+    [crypto.randomUUID(), agent.id, task.id, runtime.id],
+  );
+  const siblingSessionId = crypto.randomUUID();
+  await getDbClient().run(
+    "INSERT INTO active_sessions (id, agentId, taskId, triggerType, runtimeInstanceId) VALUES (?, ?, ?, 'task_assigned', ?)",
+    [siblingSessionId, agent.id, crypto.randomUUID(), crypto.randomUUID()],
+  );
+  await reconcileOnce();
+  const idleSince = (await getRuntimeInstanceById(runtime.id))?.idleSince;
+  expect(idleSince).toBeString();
+  expect(fake.terminated).toHaveLength(0);
+  expect(
+    await getDbClient().get("SELECT id FROM active_sessions WHERE taskId = ?", [task.id]),
+  ).toBeNull();
+  expect(
+    await getDbClient().get("SELECT id FROM active_sessions WHERE id = ?", [siblingSessionId]),
+  ).not.toBeNull();
+  await reconcileOnce({ now: new Date(Date.parse(idleSince!) + 60_000) });
+  expect((await getRuntimeInstanceById(runtime.id))?.draining).toBe(true);
+  await reconcileOnce({ now: new Date(Date.parse(idleSince!) + 61_000) });
+  expect(fake.terminated).toHaveLength(1);
+  expect((await getRuntimeInstanceById(runtime.id))?.status).toBe("offline");
+});
+
+test.each([
+  "pending",
+  "in_progress",
+  "reviewing",
+])("%s session clears draining and records task history", async (status) => {
   const { agent, runtime, task } = await wake({ idleMinutes: 1 });
   await activate(runtime.id, agent.id);
+  await getDbClient().run("UPDATE agent_tasks SET status = ? WHERE id = ?", [status, task.id]);
   await getDbClient().run("UPDATE runtime_instances SET draining = 1 WHERE id = ?", [runtime.id]);
   await getDbClient().run(
     "INSERT INTO active_sessions (id, agentId, taskId, triggerType, runtimeInstanceId) VALUES (?, ?, ?, 'task_assigned', ?)",
@@ -294,6 +341,12 @@ test("active session clears draining and records task history", async () => {
   expect(row?.idleSince).toBeNull();
   expect(row?.taskId).toBe(task.id);
   expect(fake.terminated).toHaveLength(0);
+  await reconcileOnce({ now: new Date(Date.now() + 120_000) });
+  expect((await getRuntimeInstanceById(runtime.id))?.idleSince).toBeNull();
+  expect(fake.terminated).toHaveLength(0);
+  expect(
+    await getDbClient().get("SELECT taskId FROM active_sessions WHERE taskId = ?", [task.id]),
+  ).not.toBeNull();
 });
 
 test("per-task runtime reaps after a task and injects the exit limit", async () => {
