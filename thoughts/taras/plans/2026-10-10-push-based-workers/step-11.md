@@ -2,7 +2,9 @@
 id: step-11
 name: Dashboard UI for pools
 depends_on: [step-1]
-status: ready
+status: claimed
+assignee: claude-opus-pw-step-11
+claimed_at: 2026-10-11T02:00:00Z
 ---
 
 <!-- During /v-implement, `desplega:step-running` adds `assignee` and `claimed_at` while

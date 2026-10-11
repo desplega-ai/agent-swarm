@@ -2,7 +2,9 @@
 id: step-4
 name: Server-side pool routing
 depends_on: [step-1]
-status: ready
+status: claimed
+assignee: codex-gpt-6.1-sol-pw-step-4
+claimed_at: 2026-10-11T02:00:00Z
 ---
 
 <!-- During /v-implement, `desplega:step-running` adds `assignee` and `claimed_at` while
