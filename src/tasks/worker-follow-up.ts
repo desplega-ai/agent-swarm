@@ -171,8 +171,14 @@ export function getNextResumeGeneration(parent: Pick<AgentTask, "tags">): number
  *   - `modelSource = "model"`: the task's own `model` won at claim. A `latest:`
  *     alias survives only in `modelAlias` (the session report replaced `model`
  *     with the concrete id), so the alias is what travels.
- *   - `modelSource = "fallback:cli-unsupported"` with a `modelAlias` and no
- *     `modelTier`: only a `model` alias can produce that row.
+ *   - `modelSource = "fallback:cli-unsupported:model"`: the task's own
+ *     `latest:` alias won, then the claiming CLI rejected what it resolved to.
+ *     The alias in `modelAlias` travels, with or without a `modelTier`.
+ *   - `modelSource = "fallback:cli-unsupported"` (a tier layer's alias fell
+ *     back) is not a pin. Rows written before the `:model` variant existed are
+ *     ambiguous; one with a `modelAlias` and no `modelTier` can only have come
+ *     from a `model` alias, so its alias travels. With a `modelTier` it stays
+ *     ambiguous and only the tier travels.
  *   - no claim record and no session: `model` is still the creator's value.
  * Anything else (a tier layer won, or `model` is just the session report) is
  * not a pin and is left off, so the resume resolves on its claiming worker.
@@ -193,6 +199,8 @@ export function inheritedModelSelection(
   let model: string | undefined;
   if (parent.modelSource === "model") {
     model = parent.modelAlias ?? parent.model;
+  } else if (parent.modelSource === "fallback:cli-unsupported:model" && parent.modelAlias) {
+    model = parent.modelAlias;
   } else if (
     parent.modelSource === "fallback:cli-unsupported" &&
     parent.modelAlias &&

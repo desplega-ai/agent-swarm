@@ -73,7 +73,8 @@ export type ModelSource =
   | "worker-env"
   | "tier-config"
   | "tier-default"
-  | "fallback:cli-unsupported";
+  | "fallback:cli-unsupported"
+  | "fallback:cli-unsupported:model";
 
 export interface TaskModelResolution {
   resolvedModel: string;
@@ -488,7 +489,13 @@ async function applyCliSupport(
   );
   if (!fallback) return resolution;
   noticeCliUnsupported(harness, cliVersion, resolution.resolvedModel, fallback);
-  return { ...resolution, resolvedModel: fallback, modelSource: "fallback:cli-unsupported" };
+  // Keep the winning layer in the source: a fallback from the task's own `latest:` alias is
+  // still a task-level pin (a resume carries it), one from a tier layer is not.
+  const modelSource =
+    resolution.modelSource === "model"
+      ? "fallback:cli-unsupported:model"
+      : "fallback:cli-unsupported";
+  return { ...resolution, resolvedModel: fallback, modelSource };
 }
 
 export type ClaimModelFields = Partial<TaskModelResolution> & {

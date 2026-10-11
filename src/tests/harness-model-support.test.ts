@@ -3,7 +3,14 @@
 
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
-import { closeDb, createAgent, createTaskExtended, getDbClient, initDb } from "../be/db";
+import {
+  closeDb,
+  createAgent,
+  createTaskExtended,
+  getDbClient,
+  initDb,
+  supersedeTask,
+} from "../be/db";
 import {
   getHarnessModelSupport,
   recordHarnessModelSupport,
@@ -12,6 +19,7 @@ import {
 import { type ModelCatalogEntry, replaceModelCatalog } from "../be/model-catalog-store";
 import { invalidateTierResolutionCatalog } from "../be/model-tier-resolution";
 import { handlePoll } from "../http/poll";
+import { createResumeFollowUp } from "../tasks/worker-follow-up";
 import {
   parseCliVersion,
   reportHarnessModelOutcome,
@@ -180,7 +188,8 @@ describe("claim-time CLI support", () => {
     const trigger = await callPoll(w.id);
     expect(trigger?.task.modelUnsupported).toBeUndefined();
     expect(trigger?.task.resolvedModel).toBe("claude-opus-5");
-    expect(trigger?.task.modelSource).toBe("fallback:cli-unsupported");
+    // The `:model` variant records that the task's own alias won, so a resume carries it.
+    expect(trigger?.task.modelSource).toBe("fallback:cli-unsupported:model");
     // The alias the task named is still on the record.
     expect(trigger?.task.modelAlias).toBe("latest:anthropic/opus");
     const row = await getDbClient().get<{ modelAlias: string }>(
@@ -188,6 +197,65 @@ describe("claim-time CLI support", () => {
       [task.id],
     );
     expect(row?.modelAlias).toBe("latest:anthropic/opus");
+  });
+
+  describe("a resume of a task whose claim fell back", () => {
+    // Claim through the real poll, then report the session the way the worker does
+    // (it overwrites `model` with the model it ran), then supersede and resume.
+    async function resumeAfterFallback(
+      name: string,
+      opts: { model?: string; modelTier: "smart" },
+    ): Promise<{ claimSource: unknown; model?: string; modelTier?: string }> {
+      await recordHarnessModelSupport({
+        harness: "claude",
+        cliVersion: CLI,
+        modelId: "claude-opus-5-5",
+        status: "unsupported",
+      });
+      const w = await worker(name);
+      const parent = await createTaskExtended(`${name} work`, { agentId: w.id, ...opts });
+      const trigger = await callPoll(w.id);
+      expect(trigger?.taskId).toBe(parent.id);
+      expect(trigger?.task.resolvedModel).toBe("claude-opus-5");
+      await getDbClient().run(
+        "UPDATE agent_tasks SET model = 'claude-opus-5', claudeSessionId = ? WHERE id = ?",
+        [`sess-${name}`, parent.id],
+      );
+      await supersedeTask(parent.id, { reason: "graceful_shutdown", resumeTaskId: null });
+      const result = await createResumeFollowUp({
+        parentId: parent.id,
+        reason: "graceful_shutdown",
+      });
+      if (result.kind !== "created") throw new Error(result.kind);
+      return {
+        claimSource: trigger?.task.modelSource,
+        model: result.task.model,
+        modelTier: result.task.modelTier,
+      };
+    }
+
+    test("an explicit alias next to a tier: the alias won, fell back, and the resume carries it", async () => {
+      const resumed = await resumeAfterFallback("w-resume-explicit", {
+        model: "latest:anthropic/opus@stable",
+        modelTier: "smart",
+      });
+      expect(resumed).toEqual({
+        claimSource: "fallback:cli-unsupported:model",
+        model: "latest:anthropic/opus@stable",
+        modelTier: "smart",
+      });
+    });
+
+    test("a tier-only alias fell back: the resume carries the tier, not the alias", async () => {
+      process.env.MODEL_TIER_CLAUDE_SMART = "latest:anthropic/opus@stable";
+      const resumed = await resumeAfterFallback("w-resume-tier", { modelTier: "smart" });
+      delete process.env.MODEL_TIER_CLAUDE_SMART;
+      expect(resumed).toEqual({
+        claimSource: "fallback:cli-unsupported",
+        model: undefined,
+        modelTier: "smart",
+      });
+    });
   });
 
   test("an alias with no usable sibling keeps its resolution instead of failing the task", async () => {
