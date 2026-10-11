@@ -1,3 +1,4 @@
+import { isRuntimePoolsEnabled } from "../utils/runtime-pools-flag";
 /**
  * `/status` — identity + setup readiness + activity + agent_fs aggregate
  * for the home page.
@@ -188,7 +189,10 @@ export type AutomationStatus = z.infer<typeof AutomationStatusSchema>;
 export const StatusHealthSchema = z.enum(["ok", "degraded", "broken"]);
 export type StatusHealth = z.infer<typeof StatusHealthSchema>;
 
+export const StatusRuntimePoolsSchema = z.object({ enabled: z.boolean() });
+
 export const StatusResponseSchema = z.object({
+  runtime_pools: StatusRuntimePoolsSchema,
   identity: StatusIdentitySchema,
   setup: z.array(SetupMilestoneSchema),
   activity: StatusActivitySchema,
@@ -714,6 +718,7 @@ export async function buildStatusPayload(): Promise<StatusResponse> {
     .sort((a, b) => a.name.localeCompare(b.name) || a.kind.localeCompare(b.kind));
   const activity = await getInstanceActivity();
   return {
+    runtime_pools: { enabled: isRuntimePoolsEnabled() },
     identity: buildIdentity(),
     setup,
     activity,

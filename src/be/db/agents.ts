@@ -63,6 +63,7 @@ export type AgentRow = {
   cred_status: string | null;
   /** Migration 119: custom avatar (JSON of AgentAvatar). NULL = deterministic hash-derived fallback. */
   avatar: string | null;
+  runtime_pool_id: string | null;
 };
 
 /** Safe-parse the `avatar` JSON column. Malformed/invalid content (e.g. a
@@ -91,6 +92,7 @@ export function rowToAgent(row: AgentRow, slim = false): Agent {
     name: row.name,
     isLead: row.isLead === 1,
     status: row.status,
+    runtimePoolId: row.runtime_pool_id ?? null,
     description: row.description ?? undefined,
     role: row.role ?? undefined,
     capabilities: row.capabilities ? JSON.parse(row.capabilities) : [],

@@ -490,6 +490,9 @@
     },
     "harnessCliVersion": {
       "pending": "unassigned: no batch yet scrubs this writer"
+    },
+    "runtime_pool_id": {
+      "exempt": "runtime pool identifier"
     }
   },
   "api_key_status": {
@@ -2010,6 +2013,30 @@
     },
     "updated_by": {
       "exempt": "identifier"
+    },
+    "pool_id": {
+      "exempt": "identifier"
+    },
+    "controller_id": {
+      "exempt": "identifier"
+    },
+    "task_id": {
+      "exempt": "identifier"
+    },
+    "provision_requested_at": {
+      "exempt": "timestamp"
+    },
+    "idle_since": {
+      "exempt": "timestamp"
+    },
+    "lease_expires_at": {
+      "exempt": "timestamp"
+    },
+    "external_handle": {
+      "exempt": "provider handle must round trip byte exact"
+    },
+    "provision_error": {
+      "pending": "runtime supervisor writes this field in step-5"
     }
   },
   "scheduled_tasks": {
@@ -3569,6 +3596,103 @@
     },
     "requires": {
       "pending": "unassigned: no batch yet scrubs this writer"
+    }
+  },
+  "runtime_controllers": {
+    "id": {
+      "exempt": "identifier"
+    },
+    "name": {
+      "exempt": "controller name must round trip byte exact"
+    },
+    "kind": {
+      "exempt": "enum"
+    },
+    "placement": {
+      "exempt": "enum"
+    },
+    "config": {
+      "exempt": "target configuration must round trip byte exact"
+    },
+    "secret_config": {
+      "exempt": "AES-GCM ciphertext"
+    },
+    "status": {
+      "exempt": "enum"
+    },
+    "last_seen_at": {
+      "exempt": "timestamp"
+    },
+    "last_error": {
+      "pending": "health status written by later supervisor steps"
+    },
+    "last_error_at": {
+      "exempt": "timestamp"
+    },
+    "created_by": {
+      "exempt": "identifier"
+    },
+    "updated_by": {
+      "exempt": "identifier"
+    },
+    "created_at": {
+      "exempt": "timestamp"
+    },
+    "updated_at": {
+      "exempt": "timestamp"
+    }
+  },
+  "runtime_pools": {
+    "id": {
+      "exempt": "identifier"
+    },
+    "name": {
+      "exempt": "pool name must round trip byte exact"
+    },
+    "kind": {
+      "exempt": "enum"
+    },
+    "placements": {
+      "exempt": "JSON controller identifiers"
+    },
+    "image": {
+      "exempt": "provider image reference"
+    },
+    "lifecycle": {
+      "exempt": "enum"
+    },
+    "delivery": {
+      "exempt": "enum"
+    },
+    "env": {
+      "exempt": "worker environment must round trip byte exact"
+    },
+    "resources": {
+      "exempt": "JSON resource settings"
+    },
+    "resolved_image": {
+      "exempt": "provider artifact reference"
+    },
+    "circuit_open_until": {
+      "exempt": "timestamp"
+    },
+    "last_error": {
+      "pending": "health status written by later supervisor steps"
+    },
+    "last_error_at": {
+      "exempt": "timestamp"
+    },
+    "created_by": {
+      "exempt": "identifier"
+    },
+    "updated_by": {
+      "exempt": "identifier"
+    },
+    "created_at": {
+      "exempt": "timestamp"
+    },
+    "updated_at": {
+      "exempt": "timestamp"
     }
   }
 }

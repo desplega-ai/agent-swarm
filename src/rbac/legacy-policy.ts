@@ -332,6 +332,8 @@ export const LEGACY_POLICY = {
   "script.api.update": leadOnly,
   "script.api.rotate": leadOnly,
   "script.api.delete": leadOnly,
+  "runtime_pool.write": leadOrOperatorOrUser,
+  "runtime_controller.write": operatorOrUser,
   "extension.write": extensionWrite,
   "extension.activate": extensionActivation,
   "extension.install.inline": leadOrOperatorOrUser,

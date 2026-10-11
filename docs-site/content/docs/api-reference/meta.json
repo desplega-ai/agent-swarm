@@ -39,6 +39,7 @@
     "prompttemplates",
     "repos",
     "rooms",
+    "runtime-pools",
     "schedules",
     "script-connections",
     "script-runs",

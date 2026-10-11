@@ -124,6 +124,16 @@ export async function upsertSwarmConfigWithPolicyMirror(
 interface RuntimeInstanceRow {
   id: string;
   agent_id: string;
+  pool_id: string | null;
+  controller_id: string | null;
+  external_handle: string | null;
+  provision_attempts: number;
+  provision_error: string | null;
+  provision_requested_at: string | null;
+  draining: number;
+  idle_since: string | null;
+  lease_expires_at: string | null;
+  task_id: string | null;
   status: string;
   reported_slots: number;
   credential_ready: number | null;
@@ -147,6 +157,16 @@ function rowToRuntimeInstance(row: RuntimeInstanceRow): RuntimeInstance {
   return {
     id: row.id,
     agentId: row.agent_id,
+    poolId: row.pool_id ?? null,
+    controllerId: row.controller_id ?? null,
+    externalHandle: row.external_handle ? JSON.parse(row.external_handle) : null,
+    provisionAttempts: row.provision_attempts ?? 0,
+    provisionError: row.provision_error ?? null,
+    provisionRequestedAt: row.provision_requested_at ?? null,
+    draining: row.draining === 1,
+    idleSince: row.idle_since ?? null,
+    leaseExpiresAt: row.lease_expires_at ?? null,
+    taskId: row.task_id ?? null,
     status: row.status as RuntimeInstanceStatus,
     reportedSlots: row.reported_slots,
     credentialReady: row.credential_ready === null ? null : row.credential_ready === 1,
@@ -434,4 +454,13 @@ export async function expireStaleRuntimeInstances(): Promise<{
     }
     return { expired: stale.length, agentsOffline, pruned };
   });
+}
+
+export async function listRuntimeInstancesForPool(poolId: string): Promise<RuntimeInstance[]> {
+  return (
+    await getDbClient().query<RuntimeInstanceRow>(
+      "SELECT * FROM runtime_instances WHERE pool_id = ? ORDER BY created_at",
+      [poolId],
+    )
+  ).map(rowToRuntimeInstance);
 }

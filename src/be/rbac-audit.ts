@@ -81,6 +81,10 @@ function resourceIdOf(resource: RbacCheck["resource"]): string | null {
       return resource.appId;
     case "owned":
       return resource.ownerAgentId ?? null;
+    case "runtime_pool":
+      return resource.poolId ?? null;
+    case "runtime_controller":
+      return resource.controllerId ?? null;
     case "none":
       return null;
   }

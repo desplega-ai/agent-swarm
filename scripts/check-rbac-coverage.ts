@@ -61,6 +61,12 @@ const PIN_REASON =
   "no hard authorization gate at the slice-1 pin (plan Appendix A) — open to all authenticated agents";
 
 const UNGATED_TOOL_FILES: Record<string, string> = {
+  "src/tools/runtime-pool-list.ts": "read-only configuration proxy",
+  "src/tools/runtime-controller-list.ts": "read-only configuration proxy",
+  "src/tools/runtime-pool-upsert.ts": "proxies to HTTP routes enforcing runtime_pool.write",
+  "src/tools/runtime-pool-delete.ts": "proxies to HTTP routes enforcing runtime_pool.write",
+  "src/tools/runtime-pool-bind-agent.ts": "proxies to HTTP routes enforcing runtime_pool.write",
+  "src/tools/runtime-pool-create-agent.ts": "proxies to HTTP routes enforcing runtime_pool.write",
   "src/tools/app-list.ts": "app summaries are list-level; per-app filtering is future work",
   "src/tools/create-channel.ts": PIN_REASON,
   "src/tools/create-metric.ts": PIN_REASON,
