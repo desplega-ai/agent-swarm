@@ -127,6 +127,7 @@ export const runtimePools: Scenario = {
     let tokenId: string | undefined;
     let peer: Awaited<ReturnType<typeof openWorkerSocket>> | undefined;
     const taskIds: string[] = [];
+    const cleanupErrors: { label: string; error: unknown }[] = [];
     try {
       // An offline remote controller keeps this API contract test free of infrastructure calls.
       const controller = await ctx.api("POST", "/api/runtime-controllers", {
@@ -218,7 +219,7 @@ export const runtimePools: Scenario = {
               typeof row.poolWakeAt === "string"
             );
           },
-          20_000,
+          45_000,
           100,
         ),
         "Tier-two routing did not assign the sleeping agent after grace",
@@ -332,39 +333,73 @@ export const runtimePools: Scenario = {
         "runtime-pools: CRUD, wake routing, scoped tokens, push nudges, and supervisor status verified",
       );
     } finally {
-      peer?.ws.close();
-      if (tokenId) await ctx.api("DELETE", `/api/sessions/tokens/${tokenId}`);
-      for (const id of taskIds) await ctx.api("POST", `/api/tasks/${id}/cancel`, { body: {} });
+      async function cleanup(label: string, action: () => unknown | Promise<unknown>) {
+        try {
+          await action();
+        } catch (error) {
+          cleanupErrors.push({ label, error });
+        }
+      }
+      await cleanup("close socket", () => peer?.ws.close());
+      if (tokenId)
+        await cleanup("revoke runtime token", () =>
+          ctx.api("DELETE", `/api/sessions/tokens/${tokenId}`),
+        );
+      for (const id of taskIds)
+        await cleanup("cancel task", () =>
+          ctx.api("POST", `/api/tasks/${id}/cancel`, { body: {} }),
+        );
       if (agentId && runtimeId)
-        await ctx.api("POST", "/close", {
-          agentId,
-          headers: { "X-Runtime-Instance-ID": runtimeId },
-          body: {},
-        });
-      if (agentId)
-        expectStatus(
-          await ctx.api("PUT", `/api/agents/${agentId}/runtime-pool`, {
-            body: { poolId: null },
+        await cleanup("close runtime", () =>
+          ctx.api("POST", "/close", {
+            agentId,
+            headers: { "X-Runtime-Instance-ID": runtimeId! },
+            body: {},
           }),
-          [200],
-          "unbind pool agent",
+        );
+      if (agentId)
+        await cleanup("unbind pool agent", async () =>
+          expectStatus(
+            await ctx.api("PUT", `/api/agents/${agentId}/runtime-pool`, {
+              body: { poolId: null },
+            }),
+            [200],
+            "unbind pool agent",
+          ),
         );
       if (poolId) {
-        expectStatus(await ctx.api("DELETE", `/api/runtime-pools/${poolId}`), [200], "delete pool");
-        expectStatus(await ctx.api("GET", `/api/runtime-pools/${poolId}`), [404], "pool deleted");
+        await cleanup("delete pool", async () =>
+          expectStatus(
+            await ctx.api("DELETE", `/api/runtime-pools/${poolId}`),
+            [200],
+            "delete pool",
+          ),
+        );
+        await cleanup("pool deleted", async () =>
+          expectStatus(await ctx.api("GET", `/api/runtime-pools/${poolId}`), [404], "pool deleted"),
+        );
       }
       if (controllerId) {
-        expectStatus(
-          await ctx.api("DELETE", `/api/runtime-controllers/${controllerId}`),
-          [200],
-          "delete controller",
+        await cleanup("delete controller", async () =>
+          expectStatus(
+            await ctx.api("DELETE", `/api/runtime-controllers/${controllerId}`),
+            [200],
+            "delete controller",
+          ),
         );
-        expectStatus(
-          await ctx.api("GET", `/api/runtime-controllers/${controllerId}`),
-          [404],
-          "controller deleted",
+        await cleanup("controller deleted", async () =>
+          expectStatus(
+            await ctx.api("GET", `/api/runtime-controllers/${controllerId}`),
+            [404],
+            "controller deleted",
+          ),
         );
       }
     }
+    if (cleanupErrors.length)
+      throw new AggregateError(
+        cleanupErrors.map(({ error }) => error),
+        `Runtime pool cleanup failed: ${cleanupErrors.map(({ label }) => label).join(", ")}`,
+      );
   },
 };

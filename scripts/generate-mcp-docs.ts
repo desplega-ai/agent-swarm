@@ -1,5 +1,4 @@
 #!/usr/bin/env bun
-
 /**
  * MCP Tools Documentation Generator
  *
@@ -9,8 +8,8 @@
  * Run with: bun run docs:mcp
  */
 
-import path from "node:path";
 import { Glob } from "bun";
+import path from "node:path";
 
 const TOOLS_DIR = path.join(import.meta.dir, "../src/tools");
 const TYPES_FILE = path.join(import.meta.dir, "../src/types.ts");
@@ -89,9 +88,7 @@ interface FieldInfo {
  */
 function parseDefaultCapabilities(serverContent: string): Set<string> {
   const defaults = new Set<string>();
-  const arrMatch = serverContent.match(
-    /const DEFAULT_CAPABILITIES[^=]*=\s*\[([\s\S]*?)\]\s*\.join/,
-  );
+  const arrMatch = serverContent.match(/const DEFAULT_CAPABILITIES[^=]*=\s*\[([\s\S]*?)\]\s*\.join/);
   if (!arrMatch) return defaults;
   for (const rawLine of arrMatch[1]!.split("\n")) {
     const line = rawLine.trim();
@@ -140,12 +137,13 @@ async function discoverCategories(): Promise<ToolCategory[]> {
   const categories: ToolCategory[] = [];
 
   const ifRe = /if\s*\(hasCapability\(["']([\w-]+)["']\)\)\s*\{/g;
-  for (const match of serverContent.matchAll(ifRe)) {
+  let match: RegExpExecArray | null;
+  while ((match = ifRe.exec(serverContent)) !== null) {
     const capName = match[1]!;
 
     // Brace-match the block body (register calls may sit under nested comments
     // but never nested braces today; counting keeps this robust anyway).
-    let i = match.index + match[0].length;
+    let i = ifRe.lastIndex;
     const bodyStart = i;
     let depth = 1;
     while (i < serverContent.length && depth > 0) {
@@ -299,9 +297,7 @@ function resolveStringConstant(constName: string, content: string): string {
 async function parseToolFile(toolFileName: string): Promise<ToolInfo[]> {
   const filePath = path.join(TOOLS_DIR, `${toolFileName}.ts`);
   const content = await Bun.file(filePath).text();
-  const registrations = [
-    ...content.matchAll(/(?:createToolRegistrar\(server\)|register)\(\s*["']([^"']+)["']/g),
-  ];
+  const registrations = [...content.matchAll(/(?:createToolRegistrar\(server\)|register)\(\s*["']([^"']+)["']/g)];
   if (registrations.length === 0) return [];
 
   const infos: ToolInfo[] = [];
@@ -309,10 +305,7 @@ async function parseToolFile(toolFileName: string): Promise<ToolInfo[]> {
     const match = registrations[idx]!;
     const name = match[1]!;
     const start = match.index ?? 0;
-    const end =
-      idx + 1 < registrations.length
-        ? (registrations[idx + 1]!.index ?? content.length)
-        : content.length;
+    const end = idx + 1 < registrations.length ? (registrations[idx + 1]!.index ?? content.length) : content.length;
     const snippet = content.slice(start, end);
 
     const titleMatch = snippet.match(/title:\s*["']([^"']+)["']/);
@@ -320,7 +313,8 @@ async function parseToolFile(toolFileName: string): Promise<ToolInfo[]> {
 
     let description = "";
     const descKeyRegex = /description\s*:\s*(?=["'`])/g;
-    for (const descKeyMatch of snippet.matchAll(descKeyRegex)) {
+    let descKeyMatch: RegExpExecArray | null;
+    while ((descKeyMatch = descKeyRegex.exec(snippet)) !== null) {
       const startIdx = descKeyMatch.index + descKeyMatch[0].length;
       const parsed = parseStringLiteralChain(snippet, startIdx);
       if (!parsed) continue;
@@ -478,7 +472,9 @@ function parseField(fieldStr: string, fullContent: string): FieldInfo | null {
     // shared enum constants so the docs keep the finite alternatives (and a
     // default declared on the constant itself, e.g. OnUnsupportedSchema).
     const identifierMatch = typeChain.match(/^([A-Za-z_$][\w$]*)/);
-    const resolved = identifierMatch ? resolveEnumConstant(identifierMatch[1]!, fullContent) : null;
+    const resolved = identifierMatch
+      ? resolveEnumConstant(identifierMatch[1]!, fullContent)
+      : null;
     if (resolved) {
       type = resolved.values.join(" \\| ");
       if (resolved.defaultValue) constantDefault = resolved.defaultValue;
@@ -553,10 +549,12 @@ function camelToKebab(str: string): string {
  * Format category name to title
  */
 function formatCategoryTitle(name: string): string {
-  return `${name
-    .split("-")
-    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-    .join(" ")} Tools`;
+  return (
+    name
+      .split("-")
+      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(" ") + " Tools"
+  );
 }
 
 /**
@@ -725,7 +723,10 @@ SDK allowlist instead), and HTTP REST routes are generally not gated.
   const uncategorized = [...toolInfoMap.keys()].filter((name) => !categorizedTools.has(name));
 
   if (uncategorized.length > 0) {
-    markdown = markdown.replace("\n---\n\n", `- [Other Tools](#other-tools)\n\n---\n\n`);
+    markdown = markdown.replace(
+      "\n---\n\n",
+      `- [Other Tools](#other-tools)\n\n---\n\n`,
+    );
     markdown += `## Other Tools\n\n`;
     markdown += `*Tools not assigned to a capability group*\n\n`;
     for (const toolName of uncategorized) {

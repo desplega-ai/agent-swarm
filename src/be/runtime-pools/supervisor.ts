@@ -69,6 +69,7 @@ export function runtimeSupervisorStatus(): string {
 }
 
 function reportSupervisorError(error: unknown): void {
+  if (error instanceof ControllerOfflineError) return;
   console.error("[runtime-pools] Supervisor failed:", scrubSecrets(String(error)));
 }
 
