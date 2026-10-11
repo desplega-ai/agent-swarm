@@ -56,10 +56,10 @@ A worker in `push` mode keeps a socket to `/api/realtime`, subscribes to `worker
 - [x] `bun run lint && bun run tsc:check:tsc` pass
 
 #### Automated QA:
-- [ ] API on a temp DB with the flag on and `RUNTIME_DEFAULT_DELIVERY=push`. Run one docker worker by hand (`docker run … -e SWARM_DELIVERY_MODE=push ghcr.io/desplega-ai/agent-swarm-worker:slim`, image built from this branch with `bun run docker:build:worker:slim`). Create a task pinned to that worker's agent (`agentId` + `routingReason: "human_pinned"`; unassigned pool tasks need step-4): `startedAt - createdAt` under 1 s (compare with a poll-mode worker: about 0-2 s).
-- [ ] Idle for 60 s: the API log (or a request counter) shows at most 3 `GET /api/poll` from that agent.
-- [ ] Restart the API process: the worker reconnects and picks up a task created right after the restart.
-- [ ] Cancel a running task via the API: the worker aborts it within about 1 s.
+- [x] API on a temp DB with the flag on and `RUNTIME_DEFAULT_DELIVERY=push`. Run one docker worker by hand (`docker run … -e SWARM_DELIVERY_MODE=push ghcr.io/desplega-ai/agent-swarm-worker:slim`, image built from this branch with `bun run docker:build:worker:slim`). Create a task pinned to that worker's agent (`agentId` + `routingReason: "human_pinned"`; unassigned pool tasks need step-4): `startedAt - createdAt` under 1 s (compare with a poll-mode worker: about 0-2 s).
+- [x] Idle for 60 s: the API log (or a request counter) shows at most 3 `GET /api/poll` from that agent.
+- [x] Restart the API process: the worker reconnects and picks up a task created right after the restart.
+- [x] Cancel a running task via the API: the worker aborts it within about 1 s.
 
 #### Manual Verification:
 - [ ] None.

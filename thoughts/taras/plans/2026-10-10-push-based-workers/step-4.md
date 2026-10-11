@@ -58,8 +58,8 @@ Lead wake demand itself (`pendingWorkForAgent`) is step-5's.
 - [x] `bun run lint && bun run tsc:check:tsc` pass
 
 #### Automated QA:
-- [ ] Boot the API on a temp DB with the flag on and `RUNTIME_WAKE_GRACE_SEC=3`. Create a `docker` pool and one agent on it (`POST /api/runtime-pools/{id}/agents`). Create an unassigned pool task with curl. After about 3-8 s, `GET /api/tasks/{id}` shows `status=pending`, `agentId=<pool agent>`.
-- [ ] Register a live idle worker by hand (`POST /api/agents` + `/ping` loop from a small script), create another pool task: it goes to the live worker within about 1 s, not the pool agent.
+- [x] Boot the API on a temp DB with the flag on and `RUNTIME_WAKE_GRACE_SEC=3`. Create a `docker` pool and one agent on it (`POST /api/runtime-pools/{id}/agents`). Create an unassigned pool task with curl. After about 3-8 s, `GET /api/tasks/{id}` shows `status=pending`, `agentId=<pool agent>`.
+- [x] Register a live idle worker by hand (`POST /api/agents` + `/ping` loop from a small script), create another pool task: it goes to the live worker within about 1 s, not the pool agent.
 
 #### Manual Verification:
 - [ ] None.
