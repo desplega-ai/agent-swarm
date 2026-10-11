@@ -13,6 +13,7 @@ import type {
 import { isTerminalTaskStatus } from "../../../types";
 import { scrubSecrets } from "../../../utils/secret-scrubber";
 import { emitTaskStarted } from "../../task-lifecycle-events";
+import { publishWorkerNudge } from "../../worker-nudges";
 import { getAgentById, isAgentEligibleForTask } from "../agents";
 import { getDbClient } from "../runtime";
 import {
@@ -238,6 +239,7 @@ export async function assignUnassignedTaskPending(
         metadata: { pendingDispatch: true },
       });
     } catch {}
+    getDbClient().afterCommit(() => publishWorkerNudge(agentId, { kind: "work", taskId }));
   }
 
   return row ? rowToAgentTask(row) : null;
@@ -641,6 +643,10 @@ export async function cancelTask(id: string, reason?: string): Promise<AgentTask
   );
 
   if (row && oldTask) {
+    if (row.agentId) {
+      const agentId = row.agentId;
+      getDbClient().afterCommit(() => publishWorkerNudge(agentId, { kind: "cancel", taskId: id }));
+    }
     dependencies.emitTaskLifecycleTelemetryAfterCommit(
       "cancelled",
       {

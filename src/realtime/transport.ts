@@ -8,6 +8,7 @@ import { resolveHttpRequestAuth } from "../http/auth";
 import { getApiKey } from "../utils/api-key";
 import { extractAndVerifyCookie } from "../utils/page-session";
 import type { HttpRequestAuth } from "../utils/request-auth-context";
+import { isRuntimePoolsEnabled } from "../utils/runtime-pools-flag";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { authorizeRoomNamespace, resolveRoomNamespace } from "./auth";
 import { realtimeBus } from "./bus";
@@ -128,8 +129,14 @@ async function authenticate(req: IncomingMessage): Promise<AuthenticatedConnecti
   return identityFromHttpAuth(req, auth);
 }
 
-function channelTopic(namespace: string, name: string): string {
+export function channelTopic(namespace: string, name: string): string {
   return `channel:${JSON.stringify([namespace, name])}`;
+}
+
+const subscribedWorkerSockets = new Map<string, Set<WebSocket>>();
+
+export function listSubscribedWorkerAgents(): string[] {
+  return [...subscribedWorkerSockets.keys()];
 }
 
 export function attachRealtimeTransport(server: Server): () => void {
@@ -157,7 +164,9 @@ export function attachRealtimeTransport(server: Server): () => void {
           socket.destroy();
           return;
         }
-        return wss.handleUpgrade(req, socket, head, (ws) => connect(ws, auth));
+        return wss.handleUpgrade(req, socket, head, (ws) =>
+          connect(ws, auth, header(req, "x-runtime-instance-id")),
+        );
       }, rejectUpgrade)
       .catch(rejectUpgrade)
       .finally(() => {
@@ -176,7 +185,11 @@ export function attachRealtimeTransport(server: Server): () => void {
   };
 }
 
-function connect(ws: WebSocket, auth: Awaited<ReturnType<typeof authenticate>>): void {
+function connect(
+  ws: WebSocket,
+  auth: Awaited<ReturnType<typeof authenticate>>,
+  runtimeId?: string,
+): void {
   const rooms = new Map<string, { room: LiveRoom; version: number; stop: () => void }>();
   const channels = new Map<string, () => void>();
   const pending = new Map<number, number>();
@@ -187,6 +200,15 @@ function connect(ws: WebSocket, auth: Awaited<ReturnType<typeof authenticate>>):
   let queuedMessages = 0;
   let alive = true;
   let closed = false;
+  let workerAgentId: string | undefined;
+
+  const removeWorkerSubscription = () => {
+    if (!workerAgentId) return;
+    const sockets = subscribedWorkerSockets.get(workerAgentId);
+    sockets?.delete(ws);
+    if (sockets?.size === 0) subscribedWorkerSockets.delete(workerAgentId);
+    workerAgentId = undefined;
+  };
 
   const send = (payload: Record<string, unknown>) => {
     if (ws.readyState !== WebSocket.OPEN) return;
@@ -251,7 +273,7 @@ function connect(ws: WebSocket, auth: Awaited<ReturnType<typeof authenticate>>):
       if (namespace.startsWith("presence:comb:") && msg.name !== "default") {
         throw new Error("Comb presence uses the default room");
       }
-      const denied = await authorizeRoomNamespace(namespace, auth.identity, msg.op);
+      const denied = await authorizeRoomNamespace(namespace, auth.identity, msg.op, msg.name);
       if (denied) throw new Error(typeof denied === "string" ? denied : "Forbidden");
       if (closed) return;
       const key = roomTopic(namespace, msg.name);
@@ -265,11 +287,19 @@ function connect(ws: WebSocket, auth: Awaited<ReturnType<typeof authenticate>>):
               send({ type: "channel", name: msg.name, namespace, data }),
             ),
           );
+          if (namespace.startsWith("worker:")) {
+            workerAgentId = auth.identity.agentId!;
+            const sockets = subscribedWorkerSockets.get(workerAgentId) ?? new Set<WebSocket>();
+            sockets.add(ws);
+            subscribedWorkerSockets.set(workerAgentId, sockets);
+            realtimeBus.publish("worker.socket.connected", { agentId: workerAgentId, runtimeId });
+          }
         }
       } else if (msg.op === "unsubscribe") {
         const topic = channelTopic(namespace, msg.name);
         channels.get(topic)?.();
         channels.delete(topic);
+        if (namespace.startsWith("worker:")) removeWorkerSubscription();
       } else if (msg.op === "publish") {
         if (Buffer.byteLength(JSON.stringify(msg.data) ?? "null") > 64 * 1024)
           throw new Error("Channel payload exceeds 64 KiB");
@@ -430,6 +460,11 @@ function connect(ws: WebSocket, auth: Awaited<ReturnType<typeof authenticate>>):
     for (const key of rooms.keys()) leave(key);
     for (const stop of channels.values()) stop();
     channels.clear();
+    const agentId = workerAgentId;
+    removeWorkerSubscription();
+    if (agentId && isRuntimePoolsEnabled()) {
+      realtimeBus.publish("worker.socket.disconnected", { agentId, runtimeId });
+    }
   });
   send({ type: "hello", me: auth.me });
 }

@@ -6,6 +6,14 @@ import { normalizeAssetKey } from "./assets/key";
 import { isSafeBundlePath } from "./extensions/bundle-path";
 import { MAX_PROFILE_FILE_LENGTH } from "./utils/constants";
 import { z } from "./utils/zod-openapi";
+
+export const WorkerNudgeSchema = z.object({
+  v: z.literal(1),
+  kind: z.enum(["work", "cancel", "steer", "config"]),
+  taskId: z.string().optional(),
+  at: z.iso.datetime(),
+});
+export type WorkerNudge = z.infer<typeof WorkerNudgeSchema>;
 // ─── Asset namespaces ──────────────────────────────────────────────────────
 
 export const AssetKeySchema = z

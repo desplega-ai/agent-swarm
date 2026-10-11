@@ -205,6 +205,7 @@ import { configSecretName, registerStoredSecret } from "./secret-registry";
 import { promotePendingSteeringForTask } from "./steering";
 import { isInternalConfigKey, isReservedConfigKey, reservedKeyError } from "./swarm-config-guard";
 import { emitTaskStarted } from "./task-lifecycle-events";
+import { publishWorkerConfigNudge, publishWorkerNudge } from "./worker-nudges";
 import { defineWorkflowPayload, type WorkflowPayloadView } from "./workflow-replay";
 
 export {
@@ -1966,6 +1967,11 @@ export async function createSteeringMessage(
   );
   if (!row) throw new Error("Failed to create steering message");
 
+  getDbClient().afterCommit(async () => {
+    const task = await getTaskById(args.taskId);
+    if (task?.agentId) publishWorkerNudge(task.agentId, { kind: "steer", taskId: args.taskId });
+  });
+
   try {
     await createLogEntry({
       eventType: "task_steering",
@@ -3091,6 +3097,7 @@ export async function acceptTask(taskId: string, agentId: string): Promise<Agent
         newValue: "pending",
       });
     } catch {}
+    getDbClient().afterCommit(() => publishWorkerNudge(agentId, { kind: "work", taskId }));
   }
 
   return row ? rowToAgentTask(row) : null;
@@ -3934,6 +3941,12 @@ export async function postMessage(
       targetMentions = parentMessage.mentions;
     }
   }
+
+  getDbClient().afterCommit(() => {
+    for (const mentionedAgentId of new Set(targetMentions)) {
+      publishWorkerNudge(mentionedAgentId, { kind: "work" });
+    }
+  });
 
   // Only create tasks when /task prefix is used
   if (isTaskMessage && targetMentions.length > 0) {
@@ -6636,6 +6649,8 @@ export async function upsertSwarmConfig(data: {
     registerSensitiveKeyName(config.key);
   }
 
+  getDbClient().afterCommit(() => publishWorkerConfigNudge(config.scope, config.scopeId));
+
   return config;
 }
 
@@ -6660,8 +6675,12 @@ export async function emitBuiltInIntegrationConnectedOnce(
  * predate hardening must remain removable through remediation paths.
  */
 export async function deleteSwarmConfig(id: string): Promise<boolean> {
-  const result = await getDbClient().run("DELETE FROM swarm_config WHERE id = ?", [id]);
-  return result.changes > 0;
+  const row = await getDbClient().get<Pick<SwarmConfigRow, "scope" | "scopeId">>(
+    "DELETE FROM swarm_config WHERE id = ? RETURNING scope, scopeId",
+    [id],
+  );
+  if (row) getDbClient().afterCommit(() => publishWorkerConfigNudge(row.scope, row.scopeId));
+  return row !== null;
 }
 
 /**
