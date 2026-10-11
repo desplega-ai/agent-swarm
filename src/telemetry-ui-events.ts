@@ -33,14 +33,22 @@ const file = catalog as unknown as {
 /**
  * Events the API relays for the dashboard: every catalog event whose emitter
  * is `ui`, plus `lead.captured` (the Slack Connect invite form is the only
- * dashboard surface that captures a lead).
+ * dashboard surface that captures a lead). `used_by.consent_changed` is left
+ * out: the API sends it itself after an admin-only consent change, so a
+ * non-admin cannot fake one.
  */
 const RELAYED_API_EVENTS = new Set(["lead.captured"]);
+const SERVER_ONLY_UI_EVENTS = new Set(["used_by.consent_changed"]);
+/** Longest string property the route relays. Catalog strings are keys and IDs, never prose. */
+const MAX_STRING_LENGTH = 200;
 
 const relayable = new Map(
   file.events
     .filter(
-      (e) => e.product === "agent-swarm" && (e.source === "ui" || RELAYED_API_EVENTS.has(e.event)),
+      (e) =>
+        e.product === "agent-swarm" &&
+        !SERVER_ONLY_UI_EVENTS.has(e.event) &&
+        (e.source === "ui" || RELAYED_API_EVENTS.has(e.event)),
     )
     .map((e) => [e.event, e]),
 );
@@ -102,6 +110,9 @@ export function validateUiEvent(event: string, properties: Record<string, unknow
         `"${key}" must be ${spec.type === "array" ? "an array of strings" : `a ${spec.type}`}`,
       );
       continue;
+    }
+    if (typeof value === "string" && value.length > MAX_STRING_LENGTH) {
+      problems.push(`"${key}" must be at most ${MAX_STRING_LENGTH} characters`);
     }
     if (spec.enum && !spec.enum.includes(value as string)) {
       problems.push(`"${key}" must be one of ${spec.enum.join(", ")}`);

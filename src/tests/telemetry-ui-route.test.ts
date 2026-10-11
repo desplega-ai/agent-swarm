@@ -163,6 +163,8 @@ describe("validateUiEvent", () => {
     expect(UI_EVENT_NAMES).toContain("notification.submitted");
     expect(UI_EVENT_NAMES).toContain("lead.captured");
     expect(UI_EVENT_NAMES).not.toContain("task.created");
+    // The API sends it after an admin-only change; a dashboard user cannot fake it.
+    expect(UI_EVENT_NAMES).not.toContain("used_by.consent_changed");
   });
 
   test("rejects missing required, unknown keys, wrong types and values below minimum", () => {
@@ -180,6 +182,9 @@ describe("validateUiEvent", () => {
         has_contact: false,
       }),
     ).toEqual(['"score" must be at least 0', '"has_message" must be a boolean']);
+    expect(validateUiEvent("notification.viewed", { key: "k".repeat(201) })).toEqual([
+      '"key" must be at most 200 characters',
+    ]);
     expect(validateUiEvent("org.profile_updated", { fields: ["name"], surface: "prompt" })).toEqual(
       [],
     );

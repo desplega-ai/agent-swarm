@@ -4,6 +4,7 @@ import { useUpsertConfig } from "@/api/hooks/use-config-api";
 import { useEnvPresence, useReloadConfig } from "@/api/hooks/use-integrations-meta";
 import { useOnboardingOwnsFirstRun } from "@/api/hooks/use-onboarding";
 import { type PopupDismissMethod, useUiTelemetry } from "@/api/hooks/use-ui-telemetry";
+import { useStatusContext } from "@/app/status-context";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -69,14 +70,16 @@ export function OrganizationNameDialog() {
     if (open) markPromptShownThisLoad(config.apiUrl);
   }, [open, config.apiUrl]);
 
+  // Wait for /status: sendEvent drops events until it knows whether telemetry is on.
+  const statusLoaded = useStatusContext().data !== undefined;
   useEffect(() => {
-    if (!open || shownReported.current) return;
+    if (!open || !statusLoaded || shownReported.current) return;
     shownReported.current = true;
     sendEvent({
       event: "popup.shown",
       properties: { popup: "org_name", trigger: "missing_org_name" },
     });
-  }, [open, sendEvent]);
+  }, [open, statusLoaded, sendEvent]);
 
   function dismiss(method: PopupDismissMethod) {
     sendEvent({ event: "popup.dismissed", properties: { popup: "org_name", method } });
