@@ -1,15 +1,22 @@
 import { Bell } from "lucide-react";
 import { useState } from "react";
+import { useLocation } from "react-router-dom";
 import { useAgentFsMentions } from "@/api/hooks/use-agent-fs";
 import { useInboxState, useUpdateInboxItem } from "@/api/hooks/use-inbox-state";
+import { useEnvPresence } from "@/api/hooks/use-integrations-meta";
 import { useNotificationEvents } from "@/api/hooks/use-notification-events";
+import { useOnboardingOwnsFirstRun } from "@/api/hooks/use-onboarding";
 import type { InboxItemState } from "@/api/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useCurrentUser } from "@/contexts/current-user-context";
-import { NOTIFICATION_DEFINITIONS } from "@/lib/notifications/definitions";
+import {
+  NOTIFICATION_DEFINITIONS,
+  ORGANIZATION_NAME_NOTIFICATION,
+} from "@/lib/notifications/definitions";
 import { unreadBadgeLabel } from "@/lib/notifications/unread";
+import { isAdminLike } from "@/lib/user-role";
 import { NotificationPanel } from "./notification-panel";
 
 /**
@@ -24,6 +31,9 @@ function isUnread(state: InboxItemState | undefined): boolean {
 
 export function NotificationBell() {
   const currentUser = useCurrentUser();
+  const { pathname } = useLocation();
+  const presence = useEnvPresence(["SWARM_ORG_NAME"]);
+  const onboardingOwnsName = useOnboardingOwnsFirstRun();
   const inboxState = useInboxState({ userId: currentUser.userId, itemType: "notification" });
   const { trackEvent } = useNotificationEvents();
   const updateInboxItem = useUpdateInboxItem();
@@ -31,14 +41,27 @@ export function NotificationBell() {
   // they keep the bell visible without a current user.
   const mentions = useAgentFsMentions();
   const [open, setOpen] = useState(false);
+  const [mountedAt] = useState(Date.now);
 
   const hasUser = Boolean(currentUser.userId);
   if (!hasUser && !mentions.drive) return null;
 
   const stateByKey = new Map((inboxState.data ?? []).map((row) => [row.itemId, row]));
+  const orgState = stateByKey.get(ORGANIZATION_NAME_NOTIFICATION.key);
+  const showOrgName =
+    pathname !== "/" &&
+    isAdminLike(currentUser.user) &&
+    !onboardingOwnsName &&
+    !presence.isError &&
+    presence.dataUpdatedAt >= mountedAt &&
+    presence.data?.SWARM_ORG_NAME === false &&
+    orgState?.status !== "dismissed" &&
+    orgState?.status !== "done";
+  const definitions = showOrgName
+    ? [ORGANIZATION_NAME_NOTIFICATION, ...NOTIFICATION_DEFINITIONS]
+    : NOTIFICATION_DEFINITIONS;
   const staticUnread = hasUser
-    ? NOTIFICATION_DEFINITIONS.filter((definition) => isUnread(stateByKey.get(definition.key)))
-        .length
+    ? definitions.filter((definition) => isUnread(stateByKey.get(definition.key))).length
     : 0;
   // Static notifications (per swarm user) plus Comb mentions (per agent-fs identity).
   const unreadCount = staticUnread + (mentions.drive ? (mentions.query.data?.unreadCount ?? 0) : 0);
@@ -49,10 +72,10 @@ export function NotificationBell() {
     setOpen(next);
     if (!next || !hasUser) return;
     const nowIso = new Date().toISOString();
-    for (const definition of NOTIFICATION_DEFINITIONS) {
+    for (const definition of definitions) {
       const state = stateByKey.get(definition.key);
       if (!isUnread(state)) continue;
-      trackEvent(definition.key, "view");
+      if (definition.key !== ORGANIZATION_NAME_NOTIFICATION.key) trackEvent(definition.key, "view");
       if (!currentUser.userId) continue;
       updateInboxItem.mutate({
         userId: currentUser.userId,
@@ -86,6 +109,17 @@ export function NotificationBell() {
       </PopoverTrigger>
       <PopoverContent align="end" className="w-96 p-0">
         <NotificationPanel
+          definitions={definitions}
+          onDismiss={(key) => {
+            if (!currentUser.userId) return;
+            updateInboxItem.mutate({
+              userId: currentUser.userId,
+              itemType: "notification",
+              itemId: key,
+              status: "dismissed",
+              readAt: new Date().toISOString(),
+            });
+          }}
           stateByKey={stateByKey}
           showStatic={hasUser}
           mentions={mentions}

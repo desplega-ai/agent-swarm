@@ -1,10 +1,9 @@
 import type { ComponentType } from "react";
+import { Link } from "react-router-dom";
 import type { AgentFsMentions } from "@/api/hooks/use-agent-fs";
 import type { InboxItemState } from "@/api/types";
-import {
-  NOTIFICATION_DEFINITIONS,
-  type NotificationDefinition,
-} from "@/lib/notifications/definitions";
+import { Button } from "@/components/ui/button";
+import type { NotificationDefinition } from "@/lib/notifications/definitions";
 import { AgentFsMentionsSection } from "./agent-fs-mentions-section";
 import { SlackConnectInviteCard } from "./slack-connect-invite-card";
 
@@ -17,6 +16,8 @@ const CARD_COMPONENTS: Record<
 };
 
 interface NotificationPanelProps {
+  definitions: NotificationDefinition[];
+  onDismiss: (key: string) => void;
   stateByKey: Map<string, InboxItemState>;
   /** The static definitions need a swarm user (their read state is per user). */
   showStatic: boolean;
@@ -27,6 +28,8 @@ interface NotificationPanelProps {
 }
 
 export function NotificationPanel({
+  definitions,
+  onDismiss,
   stateByKey,
   showStatic,
   mentions,
@@ -47,13 +50,13 @@ export function NotificationPanel({
           />
         ) : null}
         {/* Opening the bell marks the static cards read, so they stay in view under the mentions. */}
-        {!showStatic ? null : NOTIFICATION_DEFINITIONS.length === 0 ? (
+        {!showStatic ? null : definitions.length === 0 ? (
           <p className="px-4 py-6 text-center text-sm text-muted-foreground">
             No notifications yet.
           </p>
         ) : (
           <div className="max-h-96 divide-y overflow-y-auto">
-            {NOTIFICATION_DEFINITIONS.map((definition) => {
+            {definitions.map((definition) => {
               const Card = CARD_COMPONENTS[definition.key];
               const state = stateByKey.get(definition.key);
               return (
@@ -64,6 +67,22 @@ export function NotificationPanel({
                     <div className="space-y-1">
                       <p className="text-sm font-medium">{definition.title}</p>
                       <p className="text-xs text-muted-foreground">{definition.body}</p>
+                      {definition.href && (
+                        <div className="flex gap-2 pt-1">
+                          <Button asChild size="sm" variant="outline">
+                            <Link to={definition.href} onClick={onNavigate}>
+                              {definition.actionLabel}
+                            </Link>
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => onDismiss(definition.key)}
+                          >
+                            Dismiss
+                          </Button>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>

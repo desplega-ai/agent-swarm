@@ -15,6 +15,8 @@ export interface NotificationDefinition {
   key: string;
   title: string;
   body: string;
+  href?: string;
+  actionLabel?: string;
 }
 
 export const NOTIFICATION_DEFINITIONS: NotificationDefinition[] = [
@@ -24,3 +26,11 @@ export const NOTIFICATION_DEFINITIONS: NotificationDefinition[] = [
     body: "Share a Slack Connect channel with your team and ours, so we can see how you're using the swarm and help faster when something looks off.",
   },
 ];
+
+export const ORGANIZATION_NAME_NOTIFICATION: NotificationDefinition = {
+  key: "organization_name",
+  title: "Name your organization",
+  body: "Add a name for your dashboard and messages.",
+  href: "/settings/configuration?search=SWARM_ORG_NAME#setting-SWARM_ORG_NAME",
+  actionLabel: "Add name",
+};

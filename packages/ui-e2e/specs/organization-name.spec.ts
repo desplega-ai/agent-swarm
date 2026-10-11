@@ -11,7 +11,17 @@ test.describe("organization name onboarding", () => {
     await api.post("/api/config/reload", {});
   });
 
-  test.beforeEach(async ({ api }) => {
+  test.beforeEach(async ({ api, page, swarm, seed }) => {
+    const reset = await page.request.patch(`${swarm.apiUrl}/api/inbox-state`, {
+      headers: { Authorization: `Bearer ${swarm.apiKey}` },
+      data: {
+        userId: seed?.user.id,
+        itemType: "notification",
+        itemId: "organization_name",
+        status: "open",
+      },
+    });
+    expect(reset.ok()).toBe(true);
     await api.put("/api/onboarding", { action: "dismiss" });
     await api.put("/api/config", {
       scope: "global",
@@ -159,6 +169,81 @@ test.describe("organization name onboarding", () => {
       expect(errors).toEqual([]);
     });
   }
+
+  test("shows the org nudge in the existing bell off Home, marks it read, and dismisses it", async ({
+    page,
+    api,
+    seed,
+  }) => {
+    await page.goto("/");
+    await page
+      .getByRole("dialog", { name: "Name your organization" })
+      .getByRole("button", { name: "Later" })
+      .click();
+    await expect(page.getByRole("link", { name: "Add name", exact: true })).toBeVisible();
+    await page.getByRole("button", { name: /^Notifications/ }).click();
+    await expect(page.getByText("Add a name for your dashboard and messages.")).not.toBeVisible();
+    await page.keyboard.press("Escape");
+    await page.getByRole("link", { name: "Tasks", exact: true }).click();
+    await page.getByRole("button", { name: "Notifications, 1 unread", exact: true }).click();
+    await expect(page.getByText("Add a name for your dashboard and messages.")).toBeVisible();
+    await expect
+      .poll(async () => {
+        const { items } = await api.get<{
+          items: Array<{ itemId: string; readAt: string | null }>;
+        }>(`/api/inbox-state?itemType=notification&userId=${seed?.user.id}`);
+        return items.find((item) => item.itemId === "organization_name")?.readAt;
+      })
+      .toBeTruthy();
+    await page.getByRole("link", { name: "Add name", exact: true }).click();
+    await expect(page).toHaveURL(/settings\/configuration\?search=SWARM_ORG_NAME/);
+    await expect(page.getByText("Add a name for your dashboard and messages.")).not.toBeVisible();
+    await page.getByRole("button", { name: /^Notifications/ }).click();
+    await page.getByRole("button", { name: "Dismiss", exact: true }).first().click();
+    await expect(page.getByText("Add a name for your dashboard and messages.")).not.toBeVisible();
+    await page.reload();
+    await page.getByRole("button", { name: /^Notifications/ }).click();
+    await expect(page.getByText("Add a name for your dashboard and messages.")).not.toBeVisible();
+  });
+
+  test("a fresh non-Home load shows the bell nudge without an automatic naming dialog", async ({
+    page,
+  }) => {
+    await page.goto("/tasks");
+    await page.getByRole("button", { name: /^Notifications/ }).click();
+    await expect(page.getByText("Add a name for your dashboard and messages.")).toBeVisible();
+    await expect(page.getByRole("dialog", { name: "Name your organization" })).not.toBeVisible();
+  });
+
+  test("members do not see an org notification", async ({ page }) => {
+    await page.route("**/api/users**", async (route) => {
+      const response = await route.fetch();
+      const body = await response.json();
+      await route.fulfill({
+        json: {
+          ...body,
+          users: body.users.map((user: Record<string, unknown>) => ({ ...user, role: "member" })),
+        },
+      });
+    });
+    await page.goto("/tasks");
+    await page.getByRole("button", { name: /^Notifications/ }).click();
+    await expect(page.getByText("Add a name for your dashboard and messages.")).not.toBeVisible();
+    await expect(page.getByRole("dialog", { name: "Name your organization" })).not.toBeVisible();
+  });
+
+  test("a configured name removes the notification", async ({ page, api }) => {
+    await api.put("/api/config", {
+      scope: "global",
+      key: "SWARM_ORG_NAME",
+      value: "Acme",
+      isSecret: false,
+    });
+    await api.post("/api/config/reload", {});
+    await page.goto("/tasks");
+    await page.getByRole("button", { name: /^Notifications/ }).click();
+    await expect(page.getByText("Add a name for your dashboard and messages.")).not.toBeVisible();
+  });
 
   test("save failure remains retryable and dismissible", async ({ page }) => {
     await page.route("**/api/config/reload", (route) =>

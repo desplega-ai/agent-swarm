@@ -55,13 +55,7 @@ export function DashboardNudges() {
         <NudgeBanner
           priority="secondary"
           icon={ArrowUpCircle}
-          title="A newer Agent Swarm version is available"
-          description={
-            <>
-              This API is running <strong>v{upgradeGate.currentVersion}</strong>. The dashboard is
-              built for <strong>v{CURRENT_VERSION}</strong>.
-            </>
-          }
+          title="Update available"
           action={
             <Button asChild size="sm" variant="outline">
               <a
@@ -83,13 +77,11 @@ export function DashboardNudges() {
         <NudgeBanner
           priority="secondary"
           icon={Building2}
-          title="Make this dashboard yours"
-          description="Add your organization name so it appears in the dashboard, status page, and outbound messages."
+          title="Organization name"
           action={
             <Button asChild size="sm" variant="outline">
               <Link to="/settings/configuration?search=SWARM_ORG_NAME#setting-SWARM_ORG_NAME">
-                <span className="hidden sm:inline">Add organization name</span>
-                <span className="sm:hidden">Add name</span>
+                Add name
               </Link>
             </Button>
           }
@@ -111,7 +103,7 @@ function NudgeBanner({
   priority: "primary" | "secondary";
   icon: LucideIcon;
   title: string;
-  description: ReactNode;
+  description?: ReactNode;
   action?: ReactNode;
   onDismiss?: () => void;
 }) {
@@ -136,8 +128,8 @@ function NudgeBanner({
 
         <div className="min-w-0 flex-1">
           <div className="flex flex-col gap-0.5 sm:flex-row sm:items-baseline sm:gap-2">
-            <p className="text-sm font-medium leading-snug text-foreground">{title}</p>
-            <div className="text-sm text-muted-foreground">{description}</div>
+            <p className="truncate text-sm font-medium leading-snug text-foreground">{title}</p>
+            {description && <div className="text-sm text-muted-foreground">{description}</div>}
           </div>
         </div>
 

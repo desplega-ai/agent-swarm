@@ -1,4 +1,5 @@
 import { useLayoutEffect, useState } from "react";
+import { useLocation } from "react-router-dom";
 import { useUpsertConfig } from "@/api/hooks/use-config-api";
 import { useEnvPresence, useReloadConfig } from "@/api/hooks/use-integrations-meta";
 import { useOnboardingOwnsFirstRun } from "@/api/hooks/use-onboarding";
@@ -22,6 +23,7 @@ const ORG_NAME_KEY = "SWARM_ORG_NAME";
 
 export function OrganizationNameDialog() {
   const { config, pendingConnection } = useConfig();
+  const { pathname } = useLocation();
   const { state: identityState, user } = useCurrentUser();
   const laterKey = `swarm:org-name-prompt:later:v1:${config.apiUrl}`;
   const presence = useEnvPresence([ORG_NAME_KEY]);
@@ -50,6 +52,7 @@ export function OrganizationNameDialog() {
     // In-memory dismissal still works when browser storage is unavailable.
   }
   const open =
+    pathname === "/" &&
     !dismissed &&
     !deferred &&
     isAdminLike(user) &&

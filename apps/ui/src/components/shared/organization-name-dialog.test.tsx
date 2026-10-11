@@ -6,6 +6,8 @@ GlobalRegistrator.register();
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 const { createRoot } = await import("react-dom/client");
 let role = "admin";
+let pathname = "/";
+mock.module("react-router-dom", () => ({ useLocation: () => ({ pathname }) }));
 let apiUrl = "https://swarm.example";
 const key = () => `swarm:org-name-prompt:later:v1:${apiUrl}`;
 const Box = ({ children }: { children?: ReactNode }) => <div>{children}</div>;
@@ -91,6 +93,7 @@ afterEach(async () => {
   cleanup = undefined;
   sessionStorage.clear();
   role = "admin";
+  pathname = "/";
   apiUrl = "https://swarm.example";
 });
 afterAll(async () => {
@@ -144,4 +147,10 @@ test("feedback stays hidden after the org prompt closes", async () => {
   expect(container.querySelector('[role="dialog"]')).toBeNull();
   await act(async () => root.unmount());
   container.remove();
+});
+
+test("non-Home pages leave naming to the notification bell", async () => {
+  pathname = "/tasks";
+  expect((await mount()).querySelector('[role="dialog"]')).toBeNull();
+  expect(sessionStorage.getItem(key())).toBeNull();
 });
