@@ -795,6 +795,23 @@ async function closeAgent(config: ApiConfig, role: string): Promise<void> {
   }
 }
 
+export function resolveExitAfterTasks(env: NodeJS.ProcessEnv = process.env): number | null {
+  const raw = env.SWARM_EXIT_AFTER_TASKS?.trim();
+  const value = Number(raw);
+  return raw && Number.isInteger(value) && value > 0 ? value : null;
+}
+
+export async function exitAfterTasksIfFinished(
+  state: RunnerState,
+  limit: number | null,
+  apiConfig: ApiConfig,
+  role: string,
+): Promise<boolean> {
+  if (limit === null || state.tasksProcessed < limit || state.activeTasks.size > 0) return false;
+  await closeAgent(apiConfig, role);
+  return true;
+}
+
 /**
  * Fetch resolved config from the API and merge into a base env object.
  * Falls back to baseEnv on any error (network, parse, etc).
@@ -5657,6 +5674,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   const defaultMaxTasks = isLead ? 2 : 1;
   const templateMaxTasks = cachedTemplate?.config.agentDefaults?.maxTasks;
   const maxConcurrent = resolveMaxConcurrent(process.env, templateMaxTasks, defaultMaxTasks);
+  const exitAfterTasks = resolveExitAfterTasks();
   console.log(`[${role}] Mode: runner-level polling`);
   console.log(`[${role}] Max concurrent tasks: ${maxConcurrent}`);
 
@@ -6628,6 +6646,11 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
     const activeBeforeCompletion = state.activeTasks.size;
     await checkCompletedProcesses(state, role, apiConfig, cancelledSignaled);
     if (state.activeTasks.size < activeBeforeCompletion) pushDelivery.wakeWork();
+    if (await exitAfterTasksIfFinished(state, exitAfterTasks, apiConfig, role)) {
+      clearInterval(pushPingTimer);
+      pushDelivery.client.stop();
+      process.exit(0);
+    }
 
     // Live HARNESS_PROVIDER reconciliation. Re-fetches `swarm_config` (overlaid
     // on env) and swaps the adapter if the resolved provider changed —
@@ -6739,7 +6762,10 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
       mode: state.deliveryMode ?? "poll",
       push: deliveryChecks.push,
       activeCount: state.activeTasks.size,
-      maxConcurrent: state.maxConcurrent,
+      maxConcurrent:
+        exitAfterTasks === null
+          ? state.maxConcurrent
+          : Math.min(state.maxConcurrent, Math.max(0, exitAfterTasks - state.tasksProcessed)),
       draining: state.apiDraining,
       lastPushPingAt,
       pollInterval: PollIntervalMs,

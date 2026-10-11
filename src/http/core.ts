@@ -18,6 +18,7 @@ import {
 } from "../be/db";
 import {
   markRuntimeInstanceOffline,
+  markRuntimeTerminated,
   reconcileAgentStatusFromRuntimes,
   touchRuntimeInstance,
 } from "../be/multi-runtime";
@@ -758,8 +759,9 @@ export async function handleCore(
         // One process exiting retires only its own runtime; the logical state
         // is then recomputed from whatever is left — offline when nothing is,
         // otherwise reflecting the surviving runtimes' readiness and work.
-        await markRuntimeInstanceOffline(runtimeInstanceId, agent.id);
-        await reconcileAgentStatusFromRuntimes(agent.id);
+        const retired = await markRuntimeInstanceOffline(runtimeInstanceId, agent.id);
+        if (retired?.poolId) await markRuntimeTerminated(runtimeInstanceId, "Runtime closed");
+        else await reconcileAgentStatusFromRuntimes(agent.id);
       } else {
         // Legacy semantics, with or without a runtime header.
         await updateAgentStatus(agent.id, "offline");

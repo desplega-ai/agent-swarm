@@ -780,3 +780,11 @@ This runbook applies when modifying:
 - `src/prompts/*` (system-prompt composition)
 - `docker-entrypoint.sh` (provider branches)
 - Or adding a new provider end-to-end
+
+## Worker exit limit
+
+`SWARM_EXIT_AFTER_TASKS=N` sets a positive integer limit for completed runner sessions.
+Unset, invalid, or nonpositive values keep the existing continuous runner behavior.
+The runner stops acquiring work when completed and active sessions reach the limit.
+After the limit completes with no active session, the runner calls `/close` and exits with code 0.
+Docker pools with a per-task lifecycle inject a limit of 1.

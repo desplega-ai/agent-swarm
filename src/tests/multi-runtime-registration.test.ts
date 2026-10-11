@@ -33,6 +33,7 @@ import {
   getAgentMaxTasksConfig,
   getRuntimeInstanceById,
   hasReadyLiveRuntime,
+  insertProvisioningRuntime,
 } from "../be/multi-runtime";
 import {
   bindAgentToPool,
@@ -40,6 +41,7 @@ import {
   createRuntimePool,
   updateRuntimePool,
 } from "../be/runtime-pools/db";
+import { mintRuntimeToken, resolveBySessionToken } from "../be/users";
 import {
   CREDENTIAL_RETRY_INTERVAL_MS,
   type CredentialRefreshState,
@@ -337,6 +339,63 @@ beforeEach(async () => {
     status: "idle",
     capabilities: [],
   });
+});
+
+test("registration adopts a provisioning runtime and preserves controller metadata", async () => {
+  process.env.MULTI_RUNTIME_ENABLED = "true";
+  const agentId = await makeAgent(4);
+  const id = crypto.randomUUID();
+  await insertProvisioningRuntime({
+    id,
+    agentId,
+    poolId: "test-pool",
+    controllerId: "test-controller",
+  });
+  const handle = { kind: "docker", externalId: "test-container" };
+  await getDbClient().run("UPDATE runtime_instances SET external_handle = ? WHERE id = ?", [
+    JSON.stringify(handle),
+    id,
+  ]);
+  expect((await register(agentId, { runtimeInstanceId: id, maxTasks: 2 })).status).toBe(200);
+  expect(await getRuntimeInstanceById(id)).toMatchObject({
+    status: "active",
+    poolId: "test-pool",
+    controllerId: "test-controller",
+    externalHandle: handle,
+    reportedSlots: 2,
+  });
+  expect((await getAgentById(agentId))?.maxTasks).toBe(4);
+});
+
+test("poll refuses a draining runtime and records task history after draining ends", async () => {
+  process.env.MULTI_RUNTIME_ENABLED = "true";
+  const agentId = await makeAgent(2);
+  const id = crypto.randomUUID();
+  await register(agentId, { runtimeInstanceId: id });
+  const task = await createTaskExtended("draining task", { agentId });
+  await getDbClient().run("UPDATE runtime_instances SET draining = 1 WHERE id = ?", [id]);
+  expect((await pollAgent(agentId, id))?.trigger).toBeNull();
+  expect((await getTaskById(task.id))?.status).toBe("pending");
+  await getDbClient().run("UPDATE runtime_instances SET draining = 0 WHERE id = ?", [id]);
+  expect((await pollAgent(agentId, id))?.trigger?.type).toBe("task_assigned");
+  expect((await getRuntimeInstanceById(id))?.taskId).toBe(task.id);
+});
+
+test("close revokes a pool runtime token before infrastructure disappears", async () => {
+  process.env.MULTI_RUNTIME_ENABLED = "true";
+  const agentId = await makeAgent(2);
+  const id = crypto.randomUUID();
+  await insertProvisioningRuntime({
+    id,
+    agentId,
+    poolId: "test-pool",
+    controllerId: "test-controller",
+  });
+  const token = await mintRuntimeToken(agentId, id);
+  await register(agentId, { runtimeInstanceId: id });
+  expect(await closeRuntime(agentId, id)).toBe(204);
+  expect(await resolveBySessionToken(token.plaintext)).toBeNull();
+  expect((await getAgentById(agentId))?.status).toBe("offline");
 });
 
 // ─── Migration 131 ──────────────────────────────────────────────────────────

@@ -27101,10 +27101,14 @@
                       "properties": {
                         "enabled": {
                           "type": "boolean"
+                        },
+                        "supervisor": {
+                          "type": "string"
                         }
                       },
                       "required": [
-                        "enabled"
+                        "enabled",
+                        "supervisor"
                       ]
                     },
                     "identity": {

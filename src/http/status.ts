@@ -34,6 +34,7 @@ import {
   NOT_EXTENSION_AGENT_SQL,
 } from "../be/db";
 import { getEmbeddingProvider } from "../be/memory";
+import { runtimeSupervisorStatus } from "../be/runtime-pools/supervisor";
 import { getCombServiceUserId } from "../comb/agent-fs";
 import { getCombConfig } from "../comb/config";
 import { getFileStorageProvider } from "../fs/registry";
@@ -189,7 +190,7 @@ export type AutomationStatus = z.infer<typeof AutomationStatusSchema>;
 export const StatusHealthSchema = z.enum(["ok", "degraded", "broken"]);
 export type StatusHealth = z.infer<typeof StatusHealthSchema>;
 
-export const StatusRuntimePoolsSchema = z.object({ enabled: z.boolean() });
+export const StatusRuntimePoolsSchema = z.object({ enabled: z.boolean(), supervisor: z.string() });
 
 export const StatusResponseSchema = z.object({
   runtime_pools: StatusRuntimePoolsSchema,
@@ -718,7 +719,7 @@ export async function buildStatusPayload(): Promise<StatusResponse> {
     .sort((a, b) => a.name.localeCompare(b.name) || a.kind.localeCompare(b.kind));
   const activity = await getInstanceActivity();
   return {
-    runtime_pools: { enabled: isRuntimePoolsEnabled() },
+    runtime_pools: { enabled: isRuntimePoolsEnabled(), supervisor: runtimeSupervisorStatus() },
     identity: buildIdentity(),
     setup,
     activity,
@@ -809,7 +810,7 @@ export async function handleStatus(
   if (getStatus.match(req.method, pathSegments)) {
     try {
       const payload = await buildStatusPayload();
-      json(res, payload);
+      getStatus.respond(res, 200, payload);
     } catch (err) {
       jsonError(res, err instanceof Error ? err.message : "Failed to build status", 500);
     }

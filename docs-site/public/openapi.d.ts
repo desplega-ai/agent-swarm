@@ -10887,6 +10887,7 @@ export interface paths {
                         "application/json": {
                             runtime_pools: {
                                 enabled: boolean;
+                                supervisor: string;
                             };
                             identity: {
                                 name: string;

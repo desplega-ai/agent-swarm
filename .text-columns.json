@@ -2041,9 +2041,7 @@
     "external_handle": {
       "exempt": "provider handle must round trip byte exact"
     },
-    "provision_error": {
-      "pending": "runtime supervisor writes this field in step-5"
-    }
+    "provision_error": "scrubbed"
   },
   "scheduled_tasks": {
     "id": {

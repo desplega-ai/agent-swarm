@@ -10,6 +10,7 @@
 
 import type { Agent, RuntimeInstance, RuntimeInstanceStatus, SwarmConfig } from "../types";
 import { isMultiRuntimeEnabled } from "../utils/multi-runtime";
+import { scrubSecrets } from "../utils/secret-scrubber";
 import {
   getActiveTaskCount,
   getAgentById,
@@ -19,6 +20,7 @@ import {
   updateAgentStatus,
   upsertSwarmConfig,
 } from "./db";
+import { revokeRuntimeTokensForRuntime } from "./users";
 
 // ─── Logical task policy ─────────────────────────────────────────────────────
 
@@ -232,6 +234,54 @@ export async function getRuntimeInstanceById(id: string): Promise<RuntimeInstanc
   return row ? rowToRuntimeInstance(row) : null;
 }
 
+export async function insertProvisioningRuntime(instance: {
+  id: string;
+  agentId: string;
+  poolId: string;
+  controllerId: string;
+  reportedSlots?: number;
+}): Promise<RuntimeInstance> {
+  const row = await getDbClient().get<RuntimeInstanceRow>(
+    `INSERT INTO runtime_instances (id, agent_id, pool_id, controller_id, status,
+       reported_slots, provision_requested_at)
+     VALUES (?, ?, ?, ?, 'provisioning', ?, ?) RETURNING *`,
+    [
+      instance.id,
+      instance.agentId,
+      instance.poolId,
+      instance.controllerId,
+      instance.reportedSlots ?? 1,
+      new Date().toISOString(),
+    ],
+  );
+  return rowToRuntimeInstance(row!);
+}
+
+export async function countCoveringRuntimes(agentId: string): Promise<number> {
+  const row = await getDbClient().get<{ count: number }>(
+    `SELECT COUNT(*) AS count FROM runtime_instances WHERE agent_id = ?
+     AND (status = 'provisioning' OR (status = 'active' AND last_seen_at >= ?))`,
+    [agentId, runtimeLivenessCutoff()],
+  );
+  return row?.count ?? 0;
+}
+
+export async function markRuntimeTerminated(id: string, reason: string): Promise<void> {
+  await getDbClient().transaction(async () => {
+    const runtime = await getRuntimeInstanceById(id);
+    if (!runtime) return;
+    await markRuntimeInstanceOffline(id, runtime.agentId);
+    if (runtime.status === "provisioning") {
+      await getDbClient().run("UPDATE runtime_instances SET provision_error = ? WHERE id = ?", [
+        scrubSecrets(reason),
+        id,
+      ]);
+    }
+    await reconcileAgentStatusFromRuntimes(runtime.agentId);
+    await revokeRuntimeTokensForRuntime(id);
+  });
+}
+
 /**
  * Refresh a live runtime instance's liveness from the worker's ping cadence.
  *
@@ -403,9 +453,8 @@ export async function agentsWithLiveRuntime(): Promise<Set<string>> {
  * refreshing their rows, and expiring them would offline agents that are
  * running perfectly well under legacy semantics.
  *
- * Deleting the retired rows rather than keeping them is deliberate. Runtime
- * identity is per boot, so retaining them would grow the table once per boot
- * per agent forever; nothing reads a runtime after it stops being live.
+ * Workers without a pool retain the existing pruning behavior. Pool rows and
+ * provisioning rows stay available for supervisor infrastructure reconciliation.
  *
  * Expiry deliberately does NOT touch active_sessions. Runtime liveness and
  * in-flight work liveness answer different questions: a stale runtime row is
@@ -434,15 +483,18 @@ export async function expireStaleRuntimeInstances(): Promise<{
     // work is dead is decided separately (see doc comment above).
     const stale = await tx.query<{ id: string; agent_id: string }>(
       `SELECT id, agent_id FROM runtime_instances
-       WHERE status = 'active' AND last_seen_at < ?`,
+       WHERE status = 'active' AND last_seen_at < ? AND pool_id IS NULL`,
       [cutoff],
     );
 
-    // Prune every row past the window, closed ones included. Runtime identity
-    // is per boot, so keeping them would add a row per boot per agent forever
-    // and nothing reads a runtime once it stops being live.
-    const pruned = (await tx.run("DELETE FROM runtime_instances WHERE last_seen_at < ?", [cutoff]))
-      .changes;
+    // Pool rows retain their handles until the supervisor reconciles infrastructure.
+    // Provisioning rows use the supervisor timeout rather than the ping cutoff.
+    const pruned = (
+      await tx.run(
+        "DELETE FROM runtime_instances WHERE last_seen_at < ? AND status != 'provisioning' AND pool_id IS NULL",
+        [cutoff],
+      )
+    ).changes;
 
     // Recompute every affected agent from what survived: losing the only
     // ready runtime has to park the agent even though a waiting sibling is
@@ -464,3 +516,5 @@ export async function listRuntimeInstancesForPool(poolId: string): Promise<Runti
     )
   ).map(rowToRuntimeInstance);
 }
+
+export const listPoolRuntimes = listRuntimeInstancesForPool;

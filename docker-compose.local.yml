@@ -122,6 +122,9 @@ services:
       - AGENT_FS_REGISTER_EMAIL=${AGENT_FS_REGISTER_EMAIL:-swarm-admin@agent-fs.local}
       - SLACK_DISABLE=true
       - GITHUB_DISABLE=true
+      - RUNTIME_POOLS_ENABLED=${RUNTIME_POOLS_ENABLED:-false}
+      - RUNTIME_WORKER_API_URL=http://api:3013
+      - DOCKER_NETWORK=swarm-local
       - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-}
       - OTEL_EXPORTER_OTLP_HEADERS=${OTEL_EXPORTER_OTLP_HEADERS:-}
       - OTEL_EXPORTER_OTLP_PROTOCOL=${OTEL_EXPORTER_OTLP_PROTOCOL:-}
@@ -130,6 +133,10 @@ services:
 
     ports:
       - "3013:3013"
+
+    # Enable this mount when the API should provision Docker pool workers.
+    # volumes:
+    #   - /var/run/docker.sock:/var/run/docker.sock
 
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:3013/health || exit 1"]
@@ -278,6 +285,10 @@ services:
       - local_codex_agent:/home/worker/.codex
 
     restart: unless-stopped
+
+networks:
+  default:
+    name: swarm-local
 
 volumes:
   local_agent_fs_minio:
