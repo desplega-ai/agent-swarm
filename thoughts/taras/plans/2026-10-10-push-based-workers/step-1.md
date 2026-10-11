@@ -2,9 +2,7 @@
 id: step-1
 name: Runtime pools + controllers entity
 depends_on: []
-status: claimed
-assignee: codex-gpt-6.1-sol-pw-step-1
-claimed_at: 2026-10-11T00:00:00Z
+status: done
 ---
 
 <!-- During /v-implement, `desplega:step-running` adds `assignee` and `claimed_at` while
@@ -80,21 +78,21 @@ Model (from the brainstorm): agent → bound to → pool → placed on → contr
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] New tests pass: `bun run test:root -- src/tests/runtime-pools-db.test.ts src/tests/runtime-pools-http.test.ts src/tests/runtime-pools-seed.test.ts`
-- [ ] `bun run test:root -- src/tests/runtime-pools-http.test.ts` cases cover: CRUD, kind/controller mismatch 400, `k8s` 400, delete-with-bound-agents 409, flag-off 404, pool create-agent (row offline + bound, second lead → 409), seed idempotency + user-edit preservation, `RUNTIME_DEFAULT_DELIVERY` resolution, RBAC (pool: non-lead agent write 403, lead write 200; controller: lead write 403, user/operator 200), controller `secret_config` values never appear in any response or log
-- [ ] Migration applies on a fresh DB and on a DB at ordinal 205 with existing agents and runtime rows (pattern `src/tests/migration-063-schema-relax.test.ts`): `bun run test:root -- src/tests/migration-206-runtime-pools.test.ts`
-- [ ] `bash scripts/check-migration-conflicts.sh` passes
-- [ ] `bash scripts/check-audit-columns.sh` passes
-- [ ] `bun run check:rbac-coverage && bun run check:openapi-response-coverage` pass
-- [ ] `bun scripts/check-sdk-tool-registration.ts` passes
-- [ ] `bash scripts/check-async-db-seam.sh && bun scripts/check-floating-promises.ts && bun scripts/check-promise-sinks.ts` pass
-- [ ] `bun run lint && bun run tsc:check:tsc` pass
-- [ ] `bun run docs:openapi` leaves no diff after commit
+- [x] New tests pass: `bun run test:root -- src/tests/runtime-pools-db.test.ts src/tests/runtime-pools-http.test.ts src/tests/runtime-pools-seed.test.ts`
+- [x] `bun run test:root -- src/tests/runtime-pools-http.test.ts` cases cover: CRUD, kind/controller mismatch 400, `k8s` 400, delete-with-bound-agents 409, flag-off 404, pool create-agent (row offline + bound, second lead → 409), seed idempotency + user-edit preservation, `RUNTIME_DEFAULT_DELIVERY` resolution, RBAC (pool: non-lead agent write 403, lead write 200; controller: lead write 403, user/operator 200), controller `secret_config` values never appear in any response or log
+- [x] Migration applies on a fresh DB and on a DB at ordinal 205 with existing agents and runtime rows (pattern `src/tests/migration-063-schema-relax.test.ts`): `bun run test:root -- src/tests/migration-206-runtime-pools.test.ts`
+- [x] `bash scripts/check-migration-conflicts.sh` passes
+- [x] `bash scripts/check-audit-columns.sh` passes
+- [x] `bun run check:rbac-coverage && bun run check:openapi-response-coverage` pass
+- [x] `bun scripts/check-sdk-tool-registration.ts` passes
+- [x] `bash scripts/check-async-db-seam.sh && bun scripts/check-floating-promises.ts && bun scripts/check-promise-sinks.ts` pass
+- [x] `bun run lint && bun run tsc:check:tsc` pass
+- [x] `bun run docs:openapi` leaves no diff after commit
 
 #### Automated QA:
-- [ ] Boot the API on a temp DB with `RUNTIME_POOLS_ENABLED=true` (`DATABASE_PATH=/tmp/rp-qa.sqlite PORT=<free> bun run start:http`). With curl: list controllers (seeded rows present), create a `docker` pool on `builtin-docker`, bind an agent, read it back via `GET /api/agents/{id}`, delete with bound agent (409), then `force`.
-- [ ] Same boot with the flag off: `GET /api/runtime-pools` returns 404 and `/status` reports `runtime_pools.enabled=false`.
-- [ ] Call `runtime-pool-list` and `runtime-pool-upsert` through the MCP endpoint (`/mcp`) with a lead agent id and confirm both channels of the tool result.
+- [x] Boot the API on a temp DB with `RUNTIME_POOLS_ENABLED=true` (`DATABASE_PATH=/tmp/rp-qa.sqlite PORT=<free> bun run start:http`). With curl: list controllers (seeded rows present), create a `docker` pool on `builtin-docker`, bind an agent, read it back via `GET /api/agents/{id}`, delete with bound agent (409), then `force`.
+- [x] Same boot with the flag off: `GET /api/runtime-pools` returns 404 and `/status` reports `runtime_pools.enabled=false`.
+- [x] Call `runtime-pool-list` and `runtime-pool-upsert` through the MCP endpoint (`/mcp`) with a lead agent id and confirm both channels of the tool result.
 
 #### Manual Verification:
 - [ ] Taras reviews the column set in `206_runtime_pools.sql` once more (forward-only migration, cannot be edited after merge).
