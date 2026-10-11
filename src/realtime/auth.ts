@@ -7,6 +7,7 @@ import { reservedNamespaceError } from "../kv-reserved-namespaces";
 import { can, isRbacEnabled } from "../rbac";
 import { agentContextKey, pageContextKey } from "../tasks/context-key";
 import type { HttpRequestAuth } from "../utils/request-auth-context";
+import { isRuntimePoolsEnabled } from "../utils/runtime-pools-flag";
 
 export type RoomNamespaceInfo = {
   agentId?: string;
@@ -102,9 +103,21 @@ export async function authorizeRoomNamespace(
   namespace: string,
   info: RoomAuthorizationInfo,
   access: boolean | RoomNamespaceOperation,
+  name?: string,
 ): Promise<string | null> {
   const overflowError = mcpOverflowAuthError(namespace, info.agentId);
   if (overflowError) return overflowError;
+
+  if (namespace === "worker" || namespace.startsWith("worker:")) {
+    if (!isRuntimePoolsEnabled()) return "Worker push delivery is disabled";
+    if (name !== "nudge" || (access !== "subscribe" && access !== "unsubscribe")) {
+      return "Worker channels only allow subscribe and unsubscribe to nudge";
+    }
+    if (!info.agentId || info.pageId || namespace !== `worker:${info.agentId}`) {
+      return "Worker channels require the matching agent identity";
+    }
+    return null;
+  }
 
   if (namespace.startsWith("presence:comb:")) {
     if (!COMB_PRESENCE_NAMESPACE.test(namespace)) {

@@ -28,6 +28,7 @@ import {
 import { startScratchScriptGc, stopScratchScriptGc } from "../be/scripts/retention";
 import { loadSecretRegistry } from "../be/secret-registry";
 import { seedLegacyCapabilitiesConfig } from "../be/seed-capabilities";
+import { startWorkerNudgeListener } from "../be/worker-nudge-listener";
 import {
   loadEnabledExtensions,
   setExtensionLoopbackBaseUrl,
@@ -433,6 +434,7 @@ const httpServer = createHttpServer(async (req, res) => {
 
 // Store references in globalThis for hot reload persistence
 const detachRealtime = attachRealtimeTransport(httpServer);
+const stopWorkerNudges = startWorkerNudgeListener();
 const stopRoomDeletion = realtimeBus.subscribe("room:namespace-deleted", (namespace) => {
   void Promise.resolve(removeNamespaceRooms(String(namespace))).catch((error) =>
     console.error("[rooms] Deletion failed:", scrubSecrets(String(error))),
@@ -440,6 +442,7 @@ const stopRoomDeletion = realtimeBus.subscribe("room:namespace-deleted", (namesp
 });
 globalState.__closeRealtime = () => {
   detachRealtime();
+  stopWorkerNudges();
   stopRoomDeletion();
 };
 globalState.__httpServer = httpServer;

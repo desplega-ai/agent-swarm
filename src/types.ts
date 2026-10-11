@@ -6,6 +6,7 @@ import { normalizeAssetKey } from "./assets/key";
 import { isSafeBundlePath } from "./extensions/bundle-path";
 import { MAX_PROFILE_FILE_LENGTH } from "./utils/constants";
 import { z } from "./utils/zod-openapi";
+
 // ─── Asset namespaces ──────────────────────────────────────────────────────
 
 export const AssetKeySchema = z
@@ -1958,6 +1959,14 @@ export type ActiveSession = z.infer<typeof ActiveSessionSchema>;
 // ============================================================================
 // Runtime Instance Types (multi-runtime worker tracking)
 // ============================================================================
+
+export const WorkerNudgeSchema = z.object({
+  v: z.literal(1),
+  kind: z.enum(["work", "cancel", "steer", "config"]),
+  taskId: z.string().optional(),
+  at: z.iso.datetime(),
+});
+export type WorkerNudge = z.infer<typeof WorkerNudgeSchema>;
 
 /**
  * Lifecycle of a runtime instance. Zod is the source of truth for the allowed

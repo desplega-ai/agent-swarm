@@ -9,6 +9,55 @@ import { can } from "../rbac";
 import { authorizeRoomNamespace, resolveRoomNamespace, roomRequestInfo } from "../realtime/auth";
 
 describe("realtime room namespace guards", () => {
+  test("reserves worker channels and permits only the matching agent's nudge subscription", async () => {
+    const previous = process.env.RUNTIME_POOLS_ENABLED;
+    process.env.RUNTIME_POOLS_ENABLED = "true";
+    const agentId = crypto.randomUUID();
+    const namespace = `worker:${agentId}`;
+    try {
+      expect(isReservedNamespace("worker")).toBe(true);
+      expect(isReservedNamespace(namespace)).toBe(true);
+      for (const op of ["subscribe", "unsubscribe"] as const) {
+        expect(await authorizeRoomNamespace(namespace, { agentId }, op, "nudge")).toBeNull();
+        expect(
+          await authorizeRoomNamespace(namespace, { agentId: crypto.randomUUID() }, op, "nudge"),
+        ).not.toBeNull();
+        expect(
+          await authorizeRoomNamespace(namespace, { isOperator: true }, op, "nudge"),
+        ).not.toBeNull();
+        expect(
+          await authorizeRoomNamespace(namespace, { userId: crypto.randomUUID() }, op, "nudge"),
+        ).not.toBeNull();
+        expect(
+          await authorizeRoomNamespace(namespace, { agentId, pageId: "page" }, op, "nudge"),
+        ).not.toBeNull();
+        expect(await authorizeRoomNamespace(namespace, { agentId }, op, "other")).not.toBeNull();
+      }
+      for (const op of [
+        "join",
+        "leave",
+        "publish",
+        "update",
+        "change",
+        "reset",
+        "presence",
+        true,
+        false,
+      ] as const) {
+        expect(
+          await authorizeRoomNamespace(namespace, { agentId, isOperator: true }, op, "nudge"),
+        ).not.toBeNull();
+      }
+      process.env.RUNTIME_POOLS_ENABLED = "false";
+      expect(await authorizeRoomNamespace(namespace, { agentId }, "subscribe", "nudge")).toContain(
+        "disabled",
+      );
+    } finally {
+      if (previous === undefined) delete process.env.RUNTIME_POOLS_ENABLED;
+      else process.env.RUNTIME_POOLS_ENABLED = previous;
+    }
+  });
+
   test("pins page requests to the page namespace", async () => {
     const resolved = await resolveRoomNamespace("task:agent:other", { pageId: "page-1" });
     expect(resolved).toEqual({ namespace: "task:page:page-1", source: "page" });
