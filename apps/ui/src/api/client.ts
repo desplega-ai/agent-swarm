@@ -3367,6 +3367,19 @@ class ApiClient {
     return data.item;
   }
 
+  // ─── Dashboard telemetry ──────────────────────────────────────────────────
+
+  /** Relay one catalogued dashboard event. The API drops it when telemetry is off. */
+  async sendUiEvent(event: string, properties: Record<string, unknown>): Promise<void> {
+    const url = `${this.getBaseUrl()}/api/telemetry/ui-event`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: this.getHeaders(),
+      body: JSON.stringify({ event, properties }),
+    });
+    if (!res.ok) throw new Error(`Failed to send telemetry event: ${res.status}`);
+  }
+
   // ─── Credential-Missing Agents (Phase 6 ≥1.76.0) ──────────────────────────
 
   async listCredentialMissingAgents(): Promise<CredentialMissingAgent[]> {

@@ -1,51 +1,33 @@
 /**
- * Notification-center event tracking.
+ * Notification-center events.
  *
- * There is no PostHog (or similar) in this dashboard — the only outbound
- * channel to us is the existing feedback proxy (`useSubmitFeedback`, already
- * live at `https://proxy.desplega.sh/v1/feedback`, overridable via the
- * `feedback_endpoint` global config key). We reuse it for two distinct kinds
- * of call, kept SEPARATE on purpose:
+ * Two kinds of call, kept SEPARATE on purpose:
  *
- *   - `trackEvent` — fired for every view/dismiss/submit/already-have-one
- *     interaction. Carries the install id and, for the "submit" action, the
- *     requester's email DOMAIN only (never the address).
- *   - `notifyUs` — fired only when the user submits an email (e.g. to open a
- *     Slack Connect channel). Carries the RAW address, because that's the
- *     whole point of the ask — but only this call ever sees it.
- *
- * Both piggyback on `FeedbackInput.message` as a small structured string
- * since the feedback schema has no dedicated "event" field; if `/v1/feedback`
- * grows one, switch these to it instead of the message convention.
- *
- * Opt-out: `trackEvent` is background analytics, so it honours the server's
- * effective `ANONYMIZED_TELEMETRY` flag (`/status` → `telemetry.enabled`) and
- * sends nothing when the operator turned telemetry off. `notifyUs` is NOT
- * gated: it only fires when the user types their email and submits it.
+ *   - `trackEvent` sends `notification.viewed` / `.dismissed` / `.submitted`
+ *     as real telemetry events through the API (`useUiTelemetry`). The
+ *     "submitted" event carries the email DOMAIN only, never the address.
+ *     It honours the server's effective `ANONYMIZED_TELEMETRY` flag
+ *     (`/status` → `telemetry.enabled`) and sends nothing while it is off.
+ *   - `notifyUs` fires only when the user types an email and submits it
+ *     (e.g. to open a Slack Connect channel). It goes to the feedback proxy
+ *     (`/v1/feedback`, overridable via the `feedback_endpoint` global config
+ *     key) with the RAW address, because that is the whole point of the ask.
+ *     It is an explicit user action, so it is NOT gated. When telemetry is
+ *     on it also sends `lead.captured` with the same submission ID.
  */
 import { useConfigs } from "@/api/hooks/use-config-api";
 import { useSubmitFeedback } from "@/api/hooks/use-feedback";
-import type { StatusResponse } from "@/api/types";
+import { isUiTelemetryEnabled, sendUiTelemetry } from "@/api/hooks/use-ui-telemetry";
 import { useStatusContext } from "@/app/status-context";
 import { useCurrentUser } from "@/contexts/current-user-context";
 
 const DEFAULT_FEEDBACK_ENDPOINT = "https://proxy.desplega.sh/v1/feedback";
 const FEEDBACK_ENDPOINT_CONFIG_KEY = "feedback_endpoint";
 
-export type NotificationEventAction = "view" | "submit" | "dismiss" | "already_have_one";
+export type NotificationEventAction = "view" | "submit" | "dismiss";
 
-/**
- * Whether background notification events may leave the browser.
- *
- * - `undefined` (`/status` not resolved yet): no. We can't know the opt-out
- *   yet, and a dropped analytics event costs less than a leaked one.
- * - `null` (older API without `/status`) or a payload without `telemetry`:
- *   yes, matching the server default (on unless `ANONYMIZED_TELEMETRY=false`).
- */
-export function isEventTrackingEnabled(status: StatusResponse | null | undefined): boolean {
-  if (status === undefined) return false;
-  return status?.telemetry?.enabled !== false;
-}
+/** Kept for callers that predate `isUiTelemetryEnabled`; same rule. */
+export const isEventTrackingEnabled = isUiTelemetryEnabled;
 
 export function useNotificationEvents() {
   const status = useStatusContext();
@@ -65,26 +47,24 @@ export function useNotificationEvents() {
     emailDomain?: string,
   ) {
     if (!currentUser.userId) return;
-    if (!isEventTrackingEnabled(status.data)) return;
-    submitFeedback.mutate({
-      submission_id: crypto.randomUUID(),
-      user_id: currentUser.userId,
-      install_id: installId,
-      installed_at: installedAt,
-      org_name: orgName,
-      swarm_version: __APP_VERSION__,
-      newsletter_consent: false,
-      message: `[notification_event] key=${notificationKey} action=${action}${
-        emailDomain ? ` domain=${emailDomain}` : ""
-      }`,
-      submitted_at: new Date().toISOString(),
-    });
+    const key = notificationKey;
+    if (action === "view") {
+      sendUiTelemetry(status.data, { event: "notification.viewed", properties: { key } });
+    } else if (action === "dismiss") {
+      sendUiTelemetry(status.data, { event: "notification.dismissed", properties: { key } });
+    } else {
+      sendUiTelemetry(status.data, {
+        event: "notification.submitted",
+        properties: { key, email_domain: emailDomain },
+      });
+    }
   }
 
   function notifyUs(notificationKey: string, note: string, email: string) {
     if (!currentUser.userId) return;
+    const submissionId = crypto.randomUUID();
     submitFeedback.mutate({
-      submission_id: crypto.randomUUID(),
+      submission_id: submissionId,
       user_id: currentUser.userId,
       install_id: installId,
       installed_at: installedAt,
@@ -94,6 +74,10 @@ export function useNotificationEvents() {
       newsletter_consent: false,
       message: `[notification] key=${notificationKey} ${note}`,
       submitted_at: new Date().toISOString(),
+    });
+    sendUiTelemetry(status.data, {
+      event: "lead.captured",
+      properties: { channel: "slack_connect", consent: true, submission_id: submissionId },
     });
   }
 

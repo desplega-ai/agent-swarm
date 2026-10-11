@@ -1,9 +1,9 @@
 {
   "repo": "desplega-ai/proxy",
-  "commit": "9a76aa6ad422ad1d37fd8ffd1f54b024f6ec11b3",
+  "commit": "09ef0f38647e387d1e10485de5968ba047a2cef1",
   "files": {
-    "types.gen.ts": "11e8f600077f96b3e9ec183e435c0cb048b8e0501d356c06f0af6abed738a099",
-    "catalog.json": "7437b9f64548537ca9869a4d63691e6b5f44b226367f5bab653a500142ccec56",
-    "EVENTS.md": "90a71a8813b9d02553776c1bf7850b522ba581d4913e747f09f8ea0a8b7e93bb"
+    "types.gen.ts": "9de6741502759552556b4073a1ca30cd1fbae8cf349dda6754b4ed7d7f271097",
+    "catalog.json": "b6dd31da171ac2545f311473f2b6cd306a03827870fa86472200aa938c044214",
+    "EVENTS.md": "8ae820a977bba7f4cb3972aae1295cb6b12e1e5ee81d3ffed55606e213a66004"
   }
 }

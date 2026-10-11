@@ -4,6 +4,12 @@
 
 Every event the ingest accepts with `schema_version: 2`. A v2 event that is not listed here, or that sends a property not listed for it, is rejected with a typed 400. `Emitter` is the envelope `source`.
 
+## `popup`
+
+Dashboard pop-up that a popup.* event is about.
+
+Values: `feedback`, `org_name`, `used_by`.
+
 ## `trigger_surface`
 
 Surface that started a chain of work: agent-swarm's AgentTaskSourceSchema values plus other.
@@ -38,10 +44,11 @@ Common properties, allowed on every event of this product:
 | `agent.registered` | api-server | 2026-09-30 | An agent registered or reconnected. | `capabilities` (array, required)<br>`isReconnect` (boolean, required)<br>`role` (string) |
 | `compaction.triggered` | worker | 2026-09-30 | The harness compacted a session context. | `compactTrigger` (string, required)<br>`contextTotalTokens` (integer, required)<br>`preCompactTokens` (integer, required) |
 | `feature.used` | ui | 2026-09-30 | A dashboard feature was used. | `feature` (string, required) |
+| `fleet_benchmark.viewed` | ui | 2026-10-12 | The fleet benchmark card was shown. | `has_org_name` (boolean, required) |
 | `integration.connected` | api-server | 2026-09-30 | An integration was connected. | `first_of_type` (boolean, required)<br>`provider` (string)<br>`type` (string, required) |
 | `lead.captured` | api-server | 2026-09-30 | A consented lead (Teams waitlist or private-beta sign-up). The email stays in feedback_submissions. | `channel` (string, required)<br>`consent` (boolean, required)<br>`submission_id` (string, required) |
 | `notification.dismissed` | ui | 2026-09-30 | A notification-centre item was dismissed. | `key` (string, required) |
-| `notification.submitted` | ui | 2026-09-30 | A notification-centre item was submitted. | `key` (string, required) |
+| `notification.submitted` | ui | 2026-09-30 | A notification-centre item was submitted. | `email_domain` (string)<br>`key` (string, required) |
 | `notification.viewed` | ui | 2026-09-30 | A notification-centre item was shown. | `key` (string, required) |
 | `onboarding.completed` | api-server | 2026-09-30 | Onboarding was completed. | `seconds_since_install` (integer)<br>`seconds_since_start` (integer, required) |
 | `onboarding.dismissed` | api-server | 2026-09-30 | Onboarding was dismissed. | `seconds_since_install` (integer)<br>`seconds_since_start` (integer, required) |
@@ -51,8 +58,12 @@ Common properties, allowed on every event of this product:
 | `onboarding.step_failed` | api-server | 2026-09-30 | An onboarding step failed. | `error_class` (string, required)<br>`seconds_since_install` (integer)<br>`seconds_since_start` (integer, required)<br>`step` (string, required) |
 | `onboarding.step_skipped` | api-server | 2026-09-30 | An onboarding step was skipped. | `seconds_since_install` (integer)<br>`seconds_since_start` (integer, required)<br>`step` (string, required) |
 | `onboarding.step_viewed` | api-server | 2026-09-30 | An onboarding step was shown. | `seconds_since_install` (integer)<br>`seconds_since_start` (integer, required)<br>`step` (string, required) |
+| `org.profile_updated` | ui | 2026-10-12 | An admin changed the org profile. Lists which fields changed, never their values. | `fields` (array, required)<br>`surface` (prompt \| setup \| settings, required) |
 | `org.snapshot` | api-server | 2026-09-30 | Daily per-install user and agent counts. Counts only: no names, emails or IDs. | `agents_total` (integer ≥0, required)<br>`users_active_7d` (integer ≥0, required)<br>`users_admin` (integer ≥0, required)<br>`users_linked_github` (integer ≥0, required)<br>`users_linked_gitlab` (integer ≥0, required)<br>`users_linked_jira` (integer ≥0, required)<br>`users_linked_linear` (integer ≥0, required)<br>`users_linked_other` (integer ≥0, required)<br>`users_linked_slack` (integer ≥0, required)<br>`users_suspended` (integer ≥0, required)<br>`users_total` (integer ≥0, required)<br>`users_with_login` (integer ≥0, required) |
 | `page.viewed` | ui | 2026-09-30 | A dashboard page was viewed. | `route_template` (string, required) |
+| `popup.dismissed` | ui | 2026-10-12 | A dashboard pop-up was closed without submitting. | `method` (later \| close \| escape, required)<br>`popup` (feedback \| org_name \| used_by, required) |
+| `popup.shown` | ui | 2026-10-12 | A dashboard pop-up was shown. Telemetry-gated: never sent while telemetry is off. | `popup` (feedback \| org_name \| used_by, required)<br>`trigger` (task_failed \| tasks_completed \| workflow_completed \| quarterly \| missing_org_name, required) |
+| `popup.submitted` | ui | 2026-10-12 | A dashboard pop-up was submitted. Content stays out of telemetry: only flags for what was filled. | `has_contact` (boolean, required)<br>`has_message` (boolean, required)<br>`popup` (feedback \| org_name \| used_by, required)<br>`score` (integer ≥0) |
 | `schedule.error` | api-server | 2026-09-30 | A schedule failed to fire. | `consecutiveErrors` (integer, required)<br>`scheduleType` (string, required)<br>`triggeredWorkflows` (boolean, required)<br>`wasRecovered` (boolean, required) |
 | `schedule.executed` | api-server | 2026-09-30 | A schedule fired. | `scheduleType` (string, required)<br>`triggeredWorkflows` (boolean, required)<br>`wasRecovered` (boolean, required) |
 | `server.shutdown` | api-server | 2026-09-30 | The API server shut down. | `sessionsProcessed` (integer, required)<br>`signal` (string, required)<br>`uptimeMs` (integer, required) |
@@ -72,7 +83,9 @@ Common properties, allowed on every event of this product:
 | `task.session_completed` | worker | 2026-09-30 | A worker session for a task finished. | `agentId` (string, required)<br>`durationMs` (integer, required)<br>`exitCode` (integer, required)<br>`harnessVariant` (string)<br>`harnessVersion` (string)<br>`isError` (boolean, required)<br>`model` (string, required)<br>`provider` (string, required)<br>`taskId` (string, nullable, required)<br>`trigger_surface` (enum, nullable, required) |
 | `task.started` | api-server | 2026-09-30 | A task started running. | `agentId` (string, required)<br>`taskId` (string, required)<br>`task_source` (enum, required)<br>`trigger_surface` (enum, required) |
 | `task.superseded` | api-server | 2026-09-30 | A task was superseded by another task. | `agentId` (string)<br>`durationMs` (integer)<br>`harnessVariant` (string)<br>`harnessVersion` (string)<br>`provider` (string)<br>`reason` (string, required)<br>`taskId` (string, required)<br>`task_source` (enum, required)<br>`trigger_surface` (enum, required) |
+| `telemetry.enabled` | api-server | 2026-10-12 | Telemetry was turned on. Sent once, on the first boot or re-init after opting in. | `via` (banner \| settings \| env, required) |
 | `ui.session_started` | ui | 2026-09-30 | A dashboard session started. | none |
+| `used_by.consent_changed` | ui | 2026-10-12 | An admin granted or revoked the "used by" logo consent. The request itself goes to /v1/used-by. | `granted` (boolean, required) |
 | `workflow.completed` | api-server | 2026-09-30 | A workflow run completed. | `durationMs` (integer)<br>`stepsCompleted` (integer, required)<br>`stepsFailed` (integer, required)<br>`workflowId` (string, required) |
 | `workflow.created` | api-server | 2026-09-30 | A workflow was created. | `nodeCount` (integer, required)<br>`via` (api \| mcp)<br>`workflowId` (string, required) |
 | `workflow.deleted` | api-server | 2026-09-30 | A workflow was deleted. | `via` (api \| mcp)<br>`workflowId` (string, required) |

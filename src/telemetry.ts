@@ -591,12 +591,27 @@ export function track<E extends SwarmEventName>(options: TrackOptions<E>): void 
   );
 }
 
+/**
+ * Relay an event the dashboard asked the API to send (`POST /api/telemetry/ui-event`).
+ * The route validates the name and properties against the catalog first, so this
+ * takes them untyped. `emitter` is the catalog `source` of the event (`ui` for
+ * most), so the envelope names the surface the event happened on.
+ */
+export function trackRelayed(
+  event: string,
+  properties: Record<string, unknown>,
+  options: { actor?: TelemetryActor; emitter: string },
+): void {
+  emit(event, properties, undefined, options.actor, options.emitter);
+}
+
 /** The untyped sender behind `track` and the typed `telemetry.*` wrappers. */
 function emit(
   event: string,
   properties: Record<string, unknown>,
   metadata?: Record<string, unknown>,
   actor?: TelemetryActor,
+  emitter: string = source,
 ): void {
   if (!isTelemetryEnabled() || !installationId) return;
   maybeRefreshOrgIdentity();
@@ -611,7 +626,7 @@ function emit(
       product: PRODUCT,
       event,
       occurred_at: new Date().toISOString(),
-      source,
+      source: emitter,
       actor_mode: "anonymous" as const,
       actor_anonymous_id: installationId,
       context: buildContext({

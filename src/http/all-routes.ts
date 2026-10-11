@@ -64,6 +64,7 @@ import "./stats";
 import "./status";
 import "./tasks";
 import "./task-templates";
+import "./telemetry-ui";
 import "./trackers/jira";
 import "./trackers/linear";
 import "./users";

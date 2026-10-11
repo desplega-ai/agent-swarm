@@ -1,9 +1,10 @@
 import { ExternalLink } from "lucide-react";
-import { type FormEvent, useEffect, useMemo, useState } from "react";
+import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useConfigs } from "@/api/hooks/use-config-api";
 import { useSubmitFeedback } from "@/api/hooks/use-feedback";
 import { useTasks } from "@/api/hooks/use-tasks";
+import { type PopupDismissMethod, useUiTelemetry } from "@/api/hooks/use-ui-telemetry";
 import { useStatusContext } from "@/app/status-context";
 import { Button } from "@/components/ui/button";
 import {
@@ -67,6 +68,8 @@ export function FeedbackDialog() {
   const [newsletterConsent, setNewsletterConsent] = useState(false);
   const [nps, setNps] = useState<1 | 2 | 3 | 4 | 5>();
   const [message, setMessage] = useState("");
+  const sendEvent = useUiTelemetry();
+  const closeMethod = useRef<PopupDismissMethod>("close");
 
   const open =
     !promptShownThisLoad(config.apiUrl) &&
@@ -96,8 +99,13 @@ export function FeedbackDialog() {
   useEffect(() => {
     if (open && !attempt) {
       setAttempt({ submissionId: crypto.randomUUID(), submittedAt: new Date().toISOString() });
+      // Today's only trigger is a failed task; the 0-10 card adds the others.
+      sendEvent({
+        event: "popup.shown",
+        properties: { popup: "feedback", trigger: "task_failed" },
+      });
     }
-  }, [attempt, open]);
+  }, [attempt, open, sendEvent]);
 
   useEffect(() => {
     const handler = (event: StorageEvent) => {
@@ -117,7 +125,8 @@ export function FeedbackDialog() {
     setLoadedStorageKey(storageKey);
   }
 
-  function dismiss() {
+  function dismiss(method: PopupDismissMethod) {
+    sendEvent({ event: "popup.dismissed", properties: { popup: "feedback", method } });
     savePopupState({ ...popupState, lastDismissedAt: new Date().toISOString() });
     setAttempt(null);
   }
@@ -148,6 +157,15 @@ export function FeedbackDialog() {
             submissionCount: popupState.submissionCount + 1,
           });
           setAttempt(null);
+          // No score yet: the 1-5 scale here is not the catalog's 0-10.
+          sendEvent({
+            event: "popup.submitted",
+            properties: {
+              popup: "feedback",
+              has_message: message.trim().length > 0,
+              has_contact: Boolean(name.trim() || email.trim()),
+            },
+          });
           toast.success("Thanks for sharing your feedback.");
         },
         onError: () => {
@@ -161,11 +179,16 @@ export function FeedbackDialog() {
     <Dialog
       open={open}
       onOpenChange={(nextOpen) => {
-        if (!nextOpen) dismiss();
+        if (nextOpen) return;
+        dismiss(closeMethod.current);
+        closeMethod.current = "close";
       }}
     >
       <DialogContent
         data-feedback-popup
+        onEscapeKeyDown={() => {
+          closeMethod.current = "escape";
+        }}
         className="max-h-[calc(100vh-2rem)] overflow-y-auto sm:max-w-xl"
       >
         <DialogHeader>

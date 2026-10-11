@@ -111,6 +111,8 @@ export interface components {
             org_name?: string | null;
             /** @description Lowercase hostname of the org's email domain, without `@`. */
             org_domain?: string | null;
+            /** @description Lowercase hostname of the company website an admin declared, without scheme, `www.`, path or port. Unlike `org_domain`, it is never inferred. */
+            org_website?: string | null;
             /** @description Pseudonymous user reference. */
             user_ref?: string | null;
             /** @enum {string|null} */
@@ -194,14 +196,20 @@ export interface components {
             email?: string | null;
             /** @description Whether the submitter explicitly consented to newsletter contact. */
             newsletter_consent: boolean;
-            /** @description Optional rating from 1 through 5. */
+            /** @description Optional score on `scale`. 1-5 on scale `1-5`, 0-10 on scale `0-10`; out of range is `invalid_nps`. */
             nps?: number | null;
+            /**
+             * @description Scale of `nps`. Absent means `1-5`, the scale clients sent before the 0-10 card.
+             * @default 1-5
+             * @enum {string}
+             */
+            scale: "1-5" | "0-10";
             /** @description Optional feedback message. Blank strings are treated as absent. */
             message?: string | null;
             /** @description Stable agent-swarm user identifier. */
             user_id: string;
-            /** @description Stable agent-swarm installation identifier. */
-            install_id: string;
+            /** @description Stable agent-swarm installation identifier. Omit it when the install has none (telemetry off). */
+            install_id?: string;
             /** @description Agent-swarm version that submitted the feedback. */
             swarm_version: string;
             /** @description Optional organization name. Blank strings are treated as absent. */
@@ -397,6 +405,36 @@ export interface components {
             product: "agent-swarm";
             properties: components["schemas"]["AgentSwarmFeatureUsedProperties"];
         };
+        AgentSwarmFleetBenchmarkViewedProperties: {
+            /** @description An email channel is configured. */
+            has_email_channel?: boolean;
+            /** @description An embedding API key is configured. */
+            has_embedding_key?: boolean;
+            /** @description A notification channel is configured. */
+            has_notification_channel?: boolean;
+            has_org_name: boolean;
+            /** @description A Slack channel is configured. */
+            has_slack_channel?: boolean;
+            /** @description Legacy key kept during the v1 window; v2 carries context.install_method. */
+            install_method?: string;
+            /** @description Legacy key kept during the v1 window; v2 carries context.deployment. */
+            is_cloud?: boolean;
+            /** @description Legacy key kept during the v1 window; v2 carries context.deployment. */
+            is_e2b?: boolean;
+            /** @description agent-swarm version. Legacy key kept during the v1 window; v2 carries context.swarm_version. */
+            swarmVersion?: string;
+        };
+        /** @description The fleet benchmark card was shown. (emitter: ui, since 2026-10-12) */
+        AgentSwarmFleetBenchmarkViewedEvent: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            event: "fleet_benchmark.viewed";
+            /** @constant */
+            product: "agent-swarm";
+            properties: components["schemas"]["AgentSwarmFleetBenchmarkViewedProperties"];
+        };
         AgentSwarmIntegrationConnectedProperties: {
             first_of_type: boolean;
             /** @description An email channel is configured. */
@@ -492,6 +530,8 @@ export interface components {
             properties: components["schemas"]["AgentSwarmNotificationDismissedProperties"];
         };
         AgentSwarmNotificationSubmittedProperties: {
+            /** @description Domain of the email typed into the item, never the address. */
+            email_domain?: string;
             /** @description An email channel is configured. */
             has_email_channel?: boolean;
             /** @description An embedding API key is configured. */
@@ -808,6 +848,42 @@ export interface components {
             product: "agent-swarm";
             properties: components["schemas"]["AgentSwarmOnboardingStepViewedProperties"];
         };
+        AgentSwarmOrgProfileUpdatedProperties: {
+            /** @description Changed field names: name, website. */
+            fields: unknown[];
+            /** @description An email channel is configured. */
+            has_email_channel?: boolean;
+            /** @description An embedding API key is configured. */
+            has_embedding_key?: boolean;
+            /** @description A notification channel is configured. */
+            has_notification_channel?: boolean;
+            /** @description A Slack channel is configured. */
+            has_slack_channel?: boolean;
+            /** @description Legacy key kept during the v1 window; v2 carries context.install_method. */
+            install_method?: string;
+            /** @description Legacy key kept during the v1 window; v2 carries context.deployment. */
+            is_cloud?: boolean;
+            /** @description Legacy key kept during the v1 window; v2 carries context.deployment. */
+            is_e2b?: boolean;
+            /**
+             * @description Where the change was made. Not trigger_surface: that key fills the raw_events.trigger_surface column.
+             * @enum {string}
+             */
+            surface: "prompt" | "setup" | "settings";
+            /** @description agent-swarm version. Legacy key kept during the v1 window; v2 carries context.swarm_version. */
+            swarmVersion?: string;
+        };
+        /** @description An admin changed the org profile. Lists which fields changed, never their values. (emitter: ui, since 2026-10-12) */
+        AgentSwarmOrgProfileUpdatedEvent: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            event: "org.profile_updated";
+            /** @constant */
+            product: "agent-swarm";
+            properties: components["schemas"]["AgentSwarmOrgProfileUpdatedProperties"];
+        };
         AgentSwarmOrgSnapshotProperties: {
             /** @description Registered agents. */
             agents_total: number;
@@ -891,6 +967,113 @@ export interface components {
             /** @constant */
             product: "agent-swarm";
             properties: components["schemas"]["AgentSwarmPageViewedProperties"];
+        };
+        /**
+         * @description Dashboard pop-up that a popup.* event is about.
+         * @enum {string}
+         */
+        Popup: "feedback" | "org_name" | "used_by";
+        AgentSwarmPopupDismissedProperties: {
+            /** @description An email channel is configured. */
+            has_email_channel?: boolean;
+            /** @description An embedding API key is configured. */
+            has_embedding_key?: boolean;
+            /** @description A notification channel is configured. */
+            has_notification_channel?: boolean;
+            /** @description A Slack channel is configured. */
+            has_slack_channel?: boolean;
+            /** @description Legacy key kept during the v1 window; v2 carries context.install_method. */
+            install_method?: string;
+            /** @description Legacy key kept during the v1 window; v2 carries context.deployment. */
+            is_cloud?: boolean;
+            /** @description Legacy key kept during the v1 window; v2 carries context.deployment. */
+            is_e2b?: boolean;
+            /** @enum {string} */
+            method: "later" | "close" | "escape";
+            popup: components["schemas"]["Popup"];
+            /** @description agent-swarm version. Legacy key kept during the v1 window; v2 carries context.swarm_version. */
+            swarmVersion?: string;
+        };
+        /** @description A dashboard pop-up was closed without submitting. (emitter: ui, since 2026-10-12) */
+        AgentSwarmPopupDismissedEvent: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            event: "popup.dismissed";
+            /** @constant */
+            product: "agent-swarm";
+            properties: components["schemas"]["AgentSwarmPopupDismissedProperties"];
+        };
+        AgentSwarmPopupShownProperties: {
+            /** @description An email channel is configured. */
+            has_email_channel?: boolean;
+            /** @description An embedding API key is configured. */
+            has_embedding_key?: boolean;
+            /** @description A notification channel is configured. */
+            has_notification_channel?: boolean;
+            /** @description A Slack channel is configured. */
+            has_slack_channel?: boolean;
+            /** @description Legacy key kept during the v1 window; v2 carries context.install_method. */
+            install_method?: string;
+            /** @description Legacy key kept during the v1 window; v2 carries context.deployment. */
+            is_cloud?: boolean;
+            /** @description Legacy key kept during the v1 window; v2 carries context.deployment. */
+            is_e2b?: boolean;
+            popup: components["schemas"]["Popup"];
+            /** @description agent-swarm version. Legacy key kept during the v1 window; v2 carries context.swarm_version. */
+            swarmVersion?: string;
+            /**
+             * @description Rule that made the pop-up eligible.
+             * @enum {string}
+             */
+            trigger: "task_failed" | "tasks_completed" | "workflow_completed" | "quarterly" | "missing_org_name";
+        };
+        /** @description A dashboard pop-up was shown. Telemetry-gated: never sent while telemetry is off. (emitter: ui, since 2026-10-12) */
+        AgentSwarmPopupShownEvent: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            event: "popup.shown";
+            /** @constant */
+            product: "agent-swarm";
+            properties: components["schemas"]["AgentSwarmPopupShownProperties"];
+        };
+        AgentSwarmPopupSubmittedProperties: {
+            /** @description A name or email was left. The values go to /v1/feedback, never here. */
+            has_contact: boolean;
+            /** @description An email channel is configured. */
+            has_email_channel?: boolean;
+            /** @description An embedding API key is configured. */
+            has_embedding_key?: boolean;
+            has_message: boolean;
+            /** @description A notification channel is configured. */
+            has_notification_channel?: boolean;
+            /** @description A Slack channel is configured. */
+            has_slack_channel?: boolean;
+            /** @description Legacy key kept during the v1 window; v2 carries context.install_method. */
+            install_method?: string;
+            /** @description Legacy key kept during the v1 window; v2 carries context.deployment. */
+            is_cloud?: boolean;
+            /** @description Legacy key kept during the v1 window; v2 carries context.deployment. */
+            is_e2b?: boolean;
+            popup: components["schemas"]["Popup"];
+            /** @description Feedback pop-up only: the 0-10 score. /v1/feedback enforces the upper bound. */
+            score?: number;
+            /** @description agent-swarm version. Legacy key kept during the v1 window; v2 carries context.swarm_version. */
+            swarmVersion?: string;
+        };
+        /** @description A dashboard pop-up was submitted. Content stays out of telemetry: only flags for what was filled. (emitter: ui, since 2026-10-12) */
+        AgentSwarmPopupSubmittedEvent: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            event: "popup.submitted";
+            /** @constant */
+            product: "agent-swarm";
+            properties: components["schemas"]["AgentSwarmPopupSubmittedProperties"];
         };
         AgentSwarmScheduleErrorProperties: {
             consecutiveErrors: number;
@@ -1592,6 +1775,37 @@ export interface components {
             product: "agent-swarm";
             properties: components["schemas"]["AgentSwarmTaskSupersededProperties"];
         };
+        AgentSwarmTelemetryEnabledProperties: {
+            /** @description An email channel is configured. */
+            has_email_channel?: boolean;
+            /** @description An embedding API key is configured. */
+            has_embedding_key?: boolean;
+            /** @description A notification channel is configured. */
+            has_notification_channel?: boolean;
+            /** @description A Slack channel is configured. */
+            has_slack_channel?: boolean;
+            /** @description Legacy key kept during the v1 window; v2 carries context.install_method. */
+            install_method?: string;
+            /** @description Legacy key kept during the v1 window; v2 carries context.deployment. */
+            is_cloud?: boolean;
+            /** @description Legacy key kept during the v1 window; v2 carries context.deployment. */
+            is_e2b?: boolean;
+            /** @description agent-swarm version. Legacy key kept during the v1 window; v2 carries context.swarm_version. */
+            swarmVersion?: string;
+            /** @enum {string} */
+            via: "banner" | "settings" | "env";
+        };
+        /** @description Telemetry was turned on. Sent once, on the first boot or re-init after opting in. (emitter: api-server, since 2026-10-12) */
+        AgentSwarmTelemetryEnabledEvent: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            event: "telemetry.enabled";
+            /** @constant */
+            product: "agent-swarm";
+            properties: components["schemas"]["AgentSwarmTelemetryEnabledProperties"];
+        };
         AgentSwarmUiSessionStartedProperties: {
             /** @description An email channel is configured. */
             has_email_channel?: boolean;
@@ -1620,6 +1834,36 @@ export interface components {
             /** @constant */
             product: "agent-swarm";
             properties: components["schemas"]["AgentSwarmUiSessionStartedProperties"];
+        };
+        AgentSwarmUsedByConsentChangedProperties: {
+            granted: boolean;
+            /** @description An email channel is configured. */
+            has_email_channel?: boolean;
+            /** @description An embedding API key is configured. */
+            has_embedding_key?: boolean;
+            /** @description A notification channel is configured. */
+            has_notification_channel?: boolean;
+            /** @description A Slack channel is configured. */
+            has_slack_channel?: boolean;
+            /** @description Legacy key kept during the v1 window; v2 carries context.install_method. */
+            install_method?: string;
+            /** @description Legacy key kept during the v1 window; v2 carries context.deployment. */
+            is_cloud?: boolean;
+            /** @description Legacy key kept during the v1 window; v2 carries context.deployment. */
+            is_e2b?: boolean;
+            /** @description agent-swarm version. Legacy key kept during the v1 window; v2 carries context.swarm_version. */
+            swarmVersion?: string;
+        };
+        /** @description An admin granted or revoked the "used by" logo consent. The request itself goes to /v1/used-by. (emitter: ui, since 2026-10-12) */
+        AgentSwarmUsedByConsentChangedEvent: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            event: "used_by.consent_changed";
+            /** @constant */
+            product: "agent-swarm";
+            properties: components["schemas"]["AgentSwarmUsedByConsentChangedProperties"];
         };
         AgentSwarmWorkflowCompletedProperties: {
             durationMs?: number;
@@ -1790,7 +2034,7 @@ export interface components {
             product: "agent-swarm";
             properties: components["schemas"]["AgentSwarmWorkflowStartedProperties"];
         };
-        AgentSwarmCatalogEvent: components["schemas"]["AgentSwarmAgentRegisteredEvent"] | components["schemas"]["AgentSwarmCompactionTriggeredEvent"] | components["schemas"]["AgentSwarmFeatureUsedEvent"] | components["schemas"]["AgentSwarmIntegrationConnectedEvent"] | components["schemas"]["AgentSwarmLeadCapturedEvent"] | components["schemas"]["AgentSwarmNotificationDismissedEvent"] | components["schemas"]["AgentSwarmNotificationSubmittedEvent"] | components["schemas"]["AgentSwarmNotificationViewedEvent"] | components["schemas"]["AgentSwarmOnboardingCompletedEvent"] | components["schemas"]["AgentSwarmOnboardingDismissedEvent"] | components["schemas"]["AgentSwarmOnboardingFirstTaskCompletedEvent"] | components["schemas"]["AgentSwarmOnboardingStartedEvent"] | components["schemas"]["AgentSwarmOnboardingStepCompletedEvent"] | components["schemas"]["AgentSwarmOnboardingStepFailedEvent"] | components["schemas"]["AgentSwarmOnboardingStepSkippedEvent"] | components["schemas"]["AgentSwarmOnboardingStepViewedEvent"] | components["schemas"]["AgentSwarmOrgSnapshotEvent"] | components["schemas"]["AgentSwarmPageViewedEvent"] | components["schemas"]["AgentSwarmScheduleErrorEvent"] | components["schemas"]["AgentSwarmScheduleExecutedEvent"] | components["schemas"]["AgentSwarmServerShutdownEvent"] | components["schemas"]["AgentSwarmServerStartedEvent"] | components["schemas"]["AgentSwarmSessionCancelledEvent"] | components["schemas"]["AgentSwarmSessionCostEvent"] | components["schemas"]["AgentSwarmSessionEndedEvent"] | components["schemas"]["AgentSwarmSessionFailureEvent"] | components["schemas"]["AgentSwarmSessionStartedEvent"] | components["schemas"]["AgentSwarmSessionSteeredEvent"] | components["schemas"]["AgentSwarmSkillInvokedEvent"] | components["schemas"]["AgentSwarmTaskCancelledEvent"] | components["schemas"]["AgentSwarmTaskClaimedEvent"] | components["schemas"]["AgentSwarmTaskCompletedEvent"] | components["schemas"]["AgentSwarmTaskCreatedEvent"] | components["schemas"]["AgentSwarmTaskFailedEvent"] | components["schemas"]["AgentSwarmTaskSessionCompletedEvent"] | components["schemas"]["AgentSwarmTaskStartedEvent"] | components["schemas"]["AgentSwarmTaskSupersededEvent"] | components["schemas"]["AgentSwarmUiSessionStartedEvent"] | components["schemas"]["AgentSwarmWorkflowCompletedEvent"] | components["schemas"]["AgentSwarmWorkflowCreatedEvent"] | components["schemas"]["AgentSwarmWorkflowDeletedEvent"] | components["schemas"]["AgentSwarmWorkflowFailedEvent"] | components["schemas"]["AgentSwarmWorkflowStartedEvent"];
+        AgentSwarmCatalogEvent: components["schemas"]["AgentSwarmAgentRegisteredEvent"] | components["schemas"]["AgentSwarmCompactionTriggeredEvent"] | components["schemas"]["AgentSwarmFeatureUsedEvent"] | components["schemas"]["AgentSwarmFleetBenchmarkViewedEvent"] | components["schemas"]["AgentSwarmIntegrationConnectedEvent"] | components["schemas"]["AgentSwarmLeadCapturedEvent"] | components["schemas"]["AgentSwarmNotificationDismissedEvent"] | components["schemas"]["AgentSwarmNotificationSubmittedEvent"] | components["schemas"]["AgentSwarmNotificationViewedEvent"] | components["schemas"]["AgentSwarmOnboardingCompletedEvent"] | components["schemas"]["AgentSwarmOnboardingDismissedEvent"] | components["schemas"]["AgentSwarmOnboardingFirstTaskCompletedEvent"] | components["schemas"]["AgentSwarmOnboardingStartedEvent"] | components["schemas"]["AgentSwarmOnboardingStepCompletedEvent"] | components["schemas"]["AgentSwarmOnboardingStepFailedEvent"] | components["schemas"]["AgentSwarmOnboardingStepSkippedEvent"] | components["schemas"]["AgentSwarmOnboardingStepViewedEvent"] | components["schemas"]["AgentSwarmOrgProfileUpdatedEvent"] | components["schemas"]["AgentSwarmOrgSnapshotEvent"] | components["schemas"]["AgentSwarmPageViewedEvent"] | components["schemas"]["AgentSwarmPopupDismissedEvent"] | components["schemas"]["AgentSwarmPopupShownEvent"] | components["schemas"]["AgentSwarmPopupSubmittedEvent"] | components["schemas"]["AgentSwarmScheduleErrorEvent"] | components["schemas"]["AgentSwarmScheduleExecutedEvent"] | components["schemas"]["AgentSwarmServerShutdownEvent"] | components["schemas"]["AgentSwarmServerStartedEvent"] | components["schemas"]["AgentSwarmSessionCancelledEvent"] | components["schemas"]["AgentSwarmSessionCostEvent"] | components["schemas"]["AgentSwarmSessionEndedEvent"] | components["schemas"]["AgentSwarmSessionFailureEvent"] | components["schemas"]["AgentSwarmSessionStartedEvent"] | components["schemas"]["AgentSwarmSessionSteeredEvent"] | components["schemas"]["AgentSwarmSkillInvokedEvent"] | components["schemas"]["AgentSwarmTaskCancelledEvent"] | components["schemas"]["AgentSwarmTaskClaimedEvent"] | components["schemas"]["AgentSwarmTaskCompletedEvent"] | components["schemas"]["AgentSwarmTaskCreatedEvent"] | components["schemas"]["AgentSwarmTaskFailedEvent"] | components["schemas"]["AgentSwarmTaskSessionCompletedEvent"] | components["schemas"]["AgentSwarmTaskStartedEvent"] | components["schemas"]["AgentSwarmTaskSupersededEvent"] | components["schemas"]["AgentSwarmTelemetryEnabledEvent"] | components["schemas"]["AgentSwarmUiSessionStartedEvent"] | components["schemas"]["AgentSwarmUsedByConsentChangedEvent"] | components["schemas"]["AgentSwarmWorkflowCompletedEvent"] | components["schemas"]["AgentSwarmWorkflowCreatedEvent"] | components["schemas"]["AgentSwarmWorkflowDeletedEvent"] | components["schemas"]["AgentSwarmWorkflowFailedEvent"] | components["schemas"]["AgentSwarmWorkflowStartedEvent"];
         /** @description Every catalogued (product, event) pair with its property schema. Generated from contracts/telemetry/catalog/events.json. */
         CatalogEvent: components["schemas"]["AgentFsCatalogEvent"] | components["schemas"]["AgentSwarmCatalogEvent"];
     };

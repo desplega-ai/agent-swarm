@@ -51,6 +51,7 @@
     "stats",
     "status",
     "tasks",
+    "telemetry",
     "trackers",
     "users",
     "webhooks",

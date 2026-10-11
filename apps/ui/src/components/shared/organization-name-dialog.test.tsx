@@ -24,6 +24,11 @@ mock.module("@/api/hooks/use-integrations-meta", () => ({
   useReloadConfig: () => ({}),
 }));
 mock.module("@/api/hooks/use-onboarding", () => ({ useOnboardingOwnsFirstRun: () => false }));
+const sentEvents: Array<{ event: string; properties: Record<string, unknown> }> = [];
+mock.module("@/api/hooks/use-ui-telemetry", () => ({
+  useUiTelemetry: () => (input: { event: string; properties: Record<string, unknown> }) =>
+    sentEvents.push(input),
+}));
 mock.module("@/contexts/current-user-context", () => ({
   useCurrentUser: () => ({ state: "ready", userId: "admin", user: { role } }),
 }));
@@ -92,6 +97,7 @@ afterEach(async () => {
   await cleanup?.();
   cleanup = undefined;
   sessionStorage.clear();
+  sentEvents.length = 0;
   role = "admin";
   pathname = "/";
   apiUrl = "https://swarm.example";
@@ -113,6 +119,28 @@ for (const action of ["Later", "Close"]) {
     expect((await mount()).querySelector('[role="dialog"]')).toBeNull();
   });
 }
+test("reports popup.shown once and popup.dismissed with the method", async () => {
+  const container = await mount();
+  const later = [...container.querySelectorAll("button")].find(
+    (item) => item.textContent === "Later",
+  );
+  await act(async () => later?.click());
+  expect(sentEvents).toEqual([
+    { event: "popup.shown", properties: { popup: "org_name", trigger: "missing_org_name" } },
+    { event: "popup.dismissed", properties: { popup: "org_name", method: "later" } },
+  ]);
+});
+test("closing the dialog reports method close", async () => {
+  const container = await mount();
+  const close = [...container.querySelectorAll("button")].find(
+    (item) => item.textContent === "Close",
+  );
+  await act(async () => close?.click());
+  expect(sentEvents.at(-1)).toEqual({
+    event: "popup.dismissed",
+    properties: { popup: "org_name", method: "close" },
+  });
+});
 test("clearing session storage lets a new session prompt again", async () => {
   sessionStorage.setItem(key(), "1");
   expect((await mount()).querySelector('[role="dialog"]')).toBeNull();

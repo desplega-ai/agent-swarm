@@ -38,11 +38,6 @@ export function SlackConnectInviteCard({
     resolve("dismissed");
   }
 
-  function handleAlreadyHaveOne() {
-    trackEvent(definition.key, "already_have_one");
-    resolve("done");
-  }
-
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const value = email.trim();
@@ -82,14 +77,9 @@ export function SlackConnectInviteCard({
               OK
             </Button>
           </div>
-          <div className="flex gap-2">
-            <Button type="button" variant="ghost" size="sm" onClick={handleDismiss}>
-              Dismiss
-            </Button>
-            <Button type="button" variant="outline" size="sm" onClick={handleAlreadyHaveOne}>
-              I already have one
-            </Button>
-          </div>
+          <Button type="button" variant="ghost" size="sm" onClick={handleDismiss}>
+            Dismiss
+          </Button>
         </form>
       ) : null}
     </div>

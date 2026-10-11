@@ -18,6 +18,15 @@
         "system",
         "other"
       ]
+    },
+    "popup": {
+      "type": "string",
+      "description": "Dashboard pop-up that a popup.* event is about.",
+      "enum": [
+        "feedback",
+        "org_name",
+        "used_by"
+      ]
     }
   },
   "common_properties": {
@@ -1142,6 +1151,10 @@
         "key": {
           "type": "string",
           "required": true
+        },
+        "email_domain": {
+          "type": "string",
+          "description": "Domain of the email typed into the item, never the address."
         }
       }
     },
@@ -1216,6 +1229,148 @@
           "required": true
         },
         "consent": {
+          "type": "boolean",
+          "required": true
+        }
+      }
+    },
+    {
+      "product": "agent-swarm",
+      "event": "popup.shown",
+      "description": "A dashboard pop-up was shown. Telemetry-gated: never sent while telemetry is off.",
+      "since": "2026-10-12",
+      "source": "ui",
+      "properties": {
+        "popup": {
+          "ref": "popup",
+          "required": true
+        },
+        "trigger": {
+          "type": "string",
+          "required": true,
+          "enum": [
+            "task_failed",
+            "tasks_completed",
+            "workflow_completed",
+            "quarterly",
+            "missing_org_name"
+          ],
+          "description": "Rule that made the pop-up eligible."
+        }
+      }
+    },
+    {
+      "product": "agent-swarm",
+      "event": "popup.dismissed",
+      "description": "A dashboard pop-up was closed without submitting.",
+      "since": "2026-10-12",
+      "source": "ui",
+      "properties": {
+        "popup": {
+          "ref": "popup",
+          "required": true
+        },
+        "method": {
+          "type": "string",
+          "required": true,
+          "enum": [
+            "later",
+            "close",
+            "escape"
+          ]
+        }
+      }
+    },
+    {
+      "product": "agent-swarm",
+      "event": "popup.submitted",
+      "description": "A dashboard pop-up was submitted. Content stays out of telemetry: only flags for what was filled.",
+      "since": "2026-10-12",
+      "source": "ui",
+      "properties": {
+        "popup": {
+          "ref": "popup",
+          "required": true
+        },
+        "score": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Feedback pop-up only: the 0-10 score. /v1/feedback enforces the upper bound."
+        },
+        "has_message": {
+          "type": "boolean",
+          "required": true
+        },
+        "has_contact": {
+          "type": "boolean",
+          "required": true,
+          "description": "A name or email was left. The values go to /v1/feedback, never here."
+        }
+      }
+    },
+    {
+      "product": "agent-swarm",
+      "event": "org.profile_updated",
+      "description": "An admin changed the org profile. Lists which fields changed, never their values.",
+      "since": "2026-10-12",
+      "source": "ui",
+      "properties": {
+        "fields": {
+          "type": "array",
+          "required": true,
+          "description": "Changed field names: name, website."
+        },
+        "surface": {
+          "type": "string",
+          "required": true,
+          "enum": [
+            "prompt",
+            "setup",
+            "settings"
+          ],
+          "description": "Where the change was made. Not trigger_surface: that key fills the raw_events.trigger_surface column."
+        }
+      }
+    },
+    {
+      "product": "agent-swarm",
+      "event": "used_by.consent_changed",
+      "description": "An admin granted or revoked the \"used by\" logo consent. The request itself goes to /v1/used-by.",
+      "since": "2026-10-12",
+      "source": "ui",
+      "properties": {
+        "granted": {
+          "type": "boolean",
+          "required": true
+        }
+      }
+    },
+    {
+      "product": "agent-swarm",
+      "event": "telemetry.enabled",
+      "description": "Telemetry was turned on. Sent once, on the first boot or re-init after opting in.",
+      "since": "2026-10-12",
+      "source": "api-server",
+      "properties": {
+        "via": {
+          "type": "string",
+          "required": true,
+          "enum": [
+            "banner",
+            "settings",
+            "env"
+          ]
+        }
+      }
+    },
+    {
+      "product": "agent-swarm",
+      "event": "fleet_benchmark.viewed",
+      "description": "The fleet benchmark card was shown.",
+      "since": "2026-10-12",
+      "source": "ui",
+      "properties": {
+        "has_org_name": {
           "type": "boolean",
           "required": true
         }

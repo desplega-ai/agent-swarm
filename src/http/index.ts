@@ -131,6 +131,7 @@ import { handleStats } from "./stats";
 import { handleStatus } from "./status";
 import { handleTaskTemplates } from "./task-templates";
 import { handleTasks } from "./tasks";
+import { handleTelemetryUi } from "./telemetry-ui";
 import { handleTrackers } from "./trackers";
 import { handleUsers } from "./users";
 import {
@@ -400,6 +401,7 @@ const httpServer = createHttpServer(async (req, res) => {
         () => handleUsers(req, res, pathSegments, queryParams),
         () => handleSessions(req, res, pathSegments, queryParams),
         () => handleInboxState(req, res, pathSegments, queryParams),
+        () => handleTelemetryUi(req, res, pathSegments, queryParams, myAgentId),
         () => handleTaskTemplates(req, res, pathSegments, queryParams),
         () => handleMcp(req, res, transports, transportActivity, mcpSessionAgents),
         () => handleMcpUser(req, res, transportsUser, sessionUsers, transportActivityUser),
