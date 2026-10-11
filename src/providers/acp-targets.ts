@@ -307,6 +307,114 @@ const copilotTargetProfile: AcpTargetProfile = {
   },
 };
 
+/** Qwen Code's `--auth-type` choices (0.25.1). `qwen-oauth` needs a browser, so it is left out. */
+const QWEN_AUTH_TYPES = ["openai", "openai-responses", "anthropic", "gemini", "vertex-ai"] as const;
+
+// Qwen Code is a Gemini CLI fork: QWEN_SYSTEM_MD replaces its built-in prompt
+// the way GEMINI_SYSTEM_MD does, so the file lives outside the task cwd too.
+const qwenSystemPromptPaths = new WeakMap<ProviderSessionConfig, string>();
+
+const qwenTargetProfile: AcpTargetProfile = {
+  target: "qwen",
+  command(config) {
+    const entry = getAcpTargetCatalogEntry("qwen");
+    // A fresh worker has no ~/.qwen/settings.json naming an auth type, and
+    // without one the CLI waits for an interactive `/auth`.
+    const authType = readEnv(config, "QWEN_AUTH_TYPE")?.trim() || "openai";
+    if (!(QWEN_AUTH_TYPES as readonly string[]).includes(authType)) {
+      throw new AcpTargetResolutionError(
+        `Unsupported QWEN_AUTH_TYPE "${authType}". Supported: ${QWEN_AUTH_TYPES.join(", ")}.`,
+      );
+    }
+    const args = [entry.command!, ...(entry.args ?? []), "--auth-type", authType];
+    // Startup fallback when the ACP `model` option rejects the id.
+    if (config.model.trim()) args.push("--model", config.model.trim());
+    return args;
+  },
+  env(config) {
+    const env = baseTargetEnv(config);
+    copyEnvKeys(config, env, getAcpTargetCatalogEntry("qwen").envKeys);
+    const systemPromptPath = qwenSystemPromptPaths.get(config);
+    if (systemPromptPath) env.QWEN_SYSTEM_MD = systemPromptPath;
+    return env;
+  },
+  // `--model` already set it; the ACP option wants a `<id>(<authType>)` value.
+  configuredOptions(config) {
+    const { model: _, ...options } = configuredOptions(config);
+    return options;
+  },
+  async writeSystemPromptArtifact(config) {
+    if (!config.systemPrompt?.trim()) return;
+    const directory = await mkdtemp(join(tmpdir(), "swarm-acp-qwen-"));
+    const path = join(directory, "system.md");
+    await Bun.write(path, config.systemPrompt);
+    qwenSystemPromptPaths.set(config, path);
+  },
+  async cleanupSystemPromptArtifact(config) {
+    const path = qwenSystemPromptPaths.get(config);
+    if (path) await rm(join(path, ".."), { recursive: true, force: true });
+  },
+};
+
+/**
+ * Kiro CLI reads its prompt from a Kiro agent config, not from a flag or an
+ * env var, so the swarm system prompt is not injected (as with OpenCode).
+ * Kiro 2.29.1 advertises no ACP config options, so the model rides on argv.
+ */
+const kiroTargetProfile: AcpTargetProfile = {
+  target: "kiro",
+  command(config) {
+    const entry = getAcpTargetCatalogEntry("kiro");
+    const args = [entry.command!, ...(entry.args ?? [])];
+    if (config.model.trim()) args.push("--model", config.model.trim());
+    return args;
+  },
+  env(config) {
+    const env = baseTargetEnv(config);
+    copyEnvKeys(config, env, getAcpTargetCatalogEntry("kiro").envKeys);
+    return env;
+  },
+  configuredOptions,
+  async writeSystemPromptArtifact() {},
+};
+
+/**
+ * Goose injects GOOSE_MOIM_MESSAGE_FILE into each turn's context, which is how
+ * the swarm prompt reaches it without writing `.goosehints` into the repo.
+ */
+const gooseSystemPromptPaths = new WeakMap<ProviderSessionConfig, string>();
+
+const gooseTargetProfile: AcpTargetProfile = {
+  target: "goose",
+  command() {
+    const entry = getAcpTargetCatalogEntry("goose");
+    return [entry.command!, ...(entry.args ?? [])];
+  },
+  env(config) {
+    const env = baseTargetEnv(config);
+    copyEnvKeys(config, env, getAcpTargetCatalogEntry("goose").envKeys);
+    // A worker has no Secret Service; keys come from the environment.
+    env.GOOSE_DISABLE_KEYRING = "1";
+    // Startup fallback when the ACP `model` option is not applied.
+    if (config.model.trim()) env.GOOSE_MODEL = config.model.trim();
+    const systemPromptPath = gooseSystemPromptPaths.get(config);
+    if (systemPromptPath) env.GOOSE_MOIM_MESSAGE_FILE = systemPromptPath;
+    return env;
+  },
+  configuredOptions,
+  async writeSystemPromptArtifact(config) {
+    if (!config.systemPrompt?.trim()) return;
+    const directory = await mkdtemp(join(tmpdir(), "swarm-acp-goose-"));
+    const path = join(directory, "system.md");
+    await Bun.write(path, config.systemPrompt);
+    gooseSystemPromptPaths.set(config, path);
+  },
+  async cleanupSystemPromptArtifact(config) {
+    const path = gooseSystemPromptPaths.get(config);
+    if (path) await rm(join(path, ".."), { recursive: true, force: true });
+  },
+};
+
 /**
  * Grok CLI env keys passed through to `grok agent stdio`. `GROK_HOME` is the
  * per-session state dir the grok adapter creates; the rest switch off the
@@ -550,6 +658,12 @@ export function resolveAcpTarget(config: ProviderSessionConfig): AcpTargetProfil
       return geminiTargetProfile;
     case "copilot":
       return copilotTargetProfile;
+    case "qwen":
+      return qwenTargetProfile;
+    case "kiro":
+      return kiroTargetProfile;
+    case "goose":
+      return gooseTargetProfile;
     case "custom":
       return customTargetProfile;
   }

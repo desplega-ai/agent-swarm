@@ -645,6 +645,49 @@ RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
     && cp /opt/copilot-cli/node_modules/@github/copilot/LICENSE.md /usr/share/doc/github-copilot-cli/LICENSE.md \
     && HOME=/root COPILOT_AUTO_UPDATE=false copilot --version | grep -F "${COPILOT_CLI_VERSION}" \
     && rm -rf /tmp/npm-cache /root/.npm /root/.cache /root/.copilot
+# Qwen Code (Apache-2.0), the `qwen` ACP target (`qwen --acp`). Its own prefix
+# keeps the ~120 MB bundle out of the shared global-deps layer.
+ARG QWEN_CODE_VERSION=0.25.1
+RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
+      --prefix /opt/qwen-code --no-audit --no-fund "@qwen-code/qwen-code@${QWEN_CODE_VERSION}" \
+    && ln -sf /opt/qwen-code/node_modules/.bin/qwen /usr/local/bin/qwen \
+    && test "$(HOME=/tmp/qwen-home qwen --version)" = "${QWEN_CODE_VERSION}" \
+    && rm -rf /tmp/npm-cache /tmp/qwen-home /root/.npm /root/.cache /root/.qwen
+# Goose (Apache-2.0), the `goose` ACP target (`goose acp`): one static binary
+# from the GitHub release, verified against the release's SHA-256 digests.
+# Bump GOOSE_VERSION and both pins together.
+ARG GOOSE_VERSION=1.54.0
+ARG GOOSE_SHA256_AMD64=ab396c95aebbd28b4d38c175234be8d4a3ea0c96e7ccb24c307e4618c9be57e1
+ARG GOOSE_SHA256_ARM64=0f174b5118a53888cd4e65b7ca9a4b72dd0b887e89142c8ce41e2409205e40d5
+RUN case "$TARGETARCH" in \
+      amd64) goose_arch=x86_64; goose_sha256="$GOOSE_SHA256_AMD64" ;; \
+      arm64) goose_arch=aarch64; goose_sha256="$GOOSE_SHA256_ARM64" ;; \
+      *) echo "Unsupported goose architecture: $TARGETARCH" >&2; exit 1 ;; \
+    esac \
+    && curl -fsSL "https://github.com/aaif-goose/goose/releases/download/v${GOOSE_VERSION}/goose-${goose_arch}-unknown-linux-gnu.tar.gz" -o /tmp/goose.tgz \
+    && echo "${goose_sha256}  /tmp/goose.tgz" | sha256sum -c - \
+    && tar -xzf /tmp/goose.tgz -C /usr/local/bin ./goose \
+    && chmod 0755 /usr/local/bin/goose \
+    && HOME=/tmp/goose-home /usr/local/bin/goose --version | grep -qF "${GOOSE_VERSION}" \
+    && rm -rf /tmp/goose.tgz /tmp/goose-home
+# Kiro CLI, the `kiro` ACP target (`kiro-cli acp`). The headless tarball from
+# the versioned download path, verified against the SHA-256 the stable channel
+# manifest lists. `kiro-cli` dispatches to `kiro-cli-chat`, so both are kept;
+# the terminal helper is not needed for ACP. Bump KIRO_CLI_VERSION and both
+# pins together. Proprietary (AWS): confirm its licence before publishing.
+ARG KIRO_CLI_VERSION=2.29.1
+ARG KIRO_CLI_SHA256_AMD64=9d25a37eec54d6dbd972cc2fc0b8bb548d530836e364e97d12af34ef6388fc03
+ARG KIRO_CLI_SHA256_ARM64=a451af6d72397f540d565089812bcf785afd0d16073568d43658df605d599891
+RUN case "$TARGETARCH" in \
+      amd64) kiro_arch=x86_64; kiro_sha256="$KIRO_CLI_SHA256_AMD64" ;; \
+      arm64) kiro_arch=aarch64; kiro_sha256="$KIRO_CLI_SHA256_ARM64" ;; \
+      *) echo "Unsupported kiro-cli architecture: $TARGETARCH" >&2; exit 1 ;; \
+    esac \
+    && curl -fsSL "https://prod.download.cli.kiro.dev/stable/${KIRO_CLI_VERSION}/kirocli-${kiro_arch}-linux.tar.gz" -o /tmp/kiro.tgz \
+    && echo "${kiro_sha256}  /tmp/kiro.tgz" | sha256sum -c - \
+    && tar -xzf /tmp/kiro.tgz -C /usr/local/bin --strip-components=2 kirocli/bin/kiro-cli kirocli/bin/kiro-cli-chat \
+    && test "$(HOME=/tmp/kiro-home /usr/local/bin/kiro-cli --version)" = "kiro-cli ${KIRO_CLI_VERSION}" \
+    && rm -rf /tmp/kiro.tgz /tmp/kiro-home
 
 # Grok CLI (xAI, Apache-2.0). Its npm platform package carries one
 # brotli-compressed native binary that the wrapper's postinstall unpacks (and

@@ -757,6 +757,9 @@
               "opencode",
               "gemini",
               "copilot",
+              "qwen",
+              "kiro",
+              "goose",
               "custom"
             ]
           },
@@ -10289,6 +10292,9 @@
                           "opencode",
                           "gemini",
                           "copilot",
+                          "qwen",
+                          "kiro",
+                          "goose",
                           "custom"
                         ]
                       },

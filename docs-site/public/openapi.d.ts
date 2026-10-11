@@ -2475,7 +2475,7 @@ export interface paths {
                         reasoning_effort?: "off" | "low" | "medium" | "high" | "xhigh" | "max" | null;
                         acp?: {
                             /** @enum {string} */
-                            target: "opencode" | "gemini" | "copilot" | "custom";
+                            target: "opencode" | "gemini" | "copilot" | "qwen" | "kiro" | "goose" | "custom";
                             command?: string | null;
                             args?: string[];
                             envKeys?: string[];
@@ -23750,7 +23750,7 @@ export interface components {
         /** @default null */
         AgentAcpStatus: {
             /** @enum {string} */
-            target: "opencode" | "gemini" | "copilot" | "custom";
+            target: "opencode" | "gemini" | "copilot" | "qwen" | "kiro" | "goose" | "custom";
             configOptions: ({
                 /** @enum {string} */
                 type: "select";

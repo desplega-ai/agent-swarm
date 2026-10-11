@@ -60,7 +60,7 @@ export interface ModelTierPreview {
 export { REASONING_EFFORT_LEVELS };
 export type { ReasoningEffortLevel };
 
-export type AcpTarget = "opencode" | "gemini" | "copilot" | "custom";
+export type AcpTarget = "opencode" | "gemini" | "copilot" | "qwen" | "kiro" | "goose" | "custom";
 
 export type ClaudeTransport = "cli" | "sdk";
 

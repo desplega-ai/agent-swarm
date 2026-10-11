@@ -390,6 +390,19 @@ elif [ "$HARNESS_PROVIDER" = "acp" ]; then
             echo "  PATH=$PATH"
             exit 1
         fi
+    elif [ "$ACP_TARGET_ID" = "qwen" ] || [ "$ACP_TARGET_ID" = "kiro" ] || [ "$ACP_TARGET_ID" = "goose" ]; then
+        # Catalog commands: `qwen --acp`, `kiro-cli acp`, `goose acp`. The full
+        # image bakes all three; a slim or custom image must install them itself.
+        case "$ACP_TARGET_ID" in
+            qwen) ACP_BIN="qwen"; ACP_INSTALL_HINT="npm install -g @qwen-code/qwen-code" ;;
+            kiro) ACP_BIN="kiro-cli"; ACP_INSTALL_HINT="curl -fsSL https://cli.kiro.dev/install | bash" ;;
+            goose) ACP_BIN="goose"; ACP_INSTALL_HINT="see https://goose-docs.ai/docs/getting-started/installation" ;;
+        esac
+        if ! command -v "$ACP_BIN" > /dev/null 2>&1; then
+            echo "FATAL: ACP target binary not found: '$ACP_BIN' (ACP_TARGET='$ACP_TARGET_ID'). Install it: $ACP_INSTALL_HINT"
+            echo "  PATH=$PATH"
+            exit 1
+        fi
     elif [ "$ACP_TARGET_ID" = "custom" ]; then
         if [ -n "${ACP_TARGET_COMMAND+set}" ]; then
             ACP_BIN="$ACP_TARGET_COMMAND"
@@ -419,7 +432,7 @@ elif [ "$HARNESS_PROVIDER" = "acp" ]; then
             ACP_BIN=$(printf '%s' "$ACP_BIN" | awk '{print $1}')
         fi
     else
-        echo "FATAL: unsupported ACP target '$ACP_TARGET_ID'. Supported targets: opencode, gemini, copilot, custom."
+        echo "FATAL: unsupported ACP target '$ACP_TARGET_ID'. Supported targets: opencode, gemini, copilot, qwen, kiro, goose, custom."
         echo "  PATH=$PATH"
         exit 1
     fi

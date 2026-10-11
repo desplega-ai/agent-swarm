@@ -1321,7 +1321,7 @@ export type AcpSessionConfigOption = z.infer<typeof AcpSessionConfigOptionSchema
 
 export const AgentAcpStatusSchema = z
   .object({
-    target: z.enum(["opencode", "gemini", "copilot", "custom"]),
+    target: z.enum(["opencode", "gemini", "copilot", "qwen", "kiro", "goose", "custom"]),
     configOptions: z.array(AcpSessionConfigOptionSchema),
     reportedAt: z.number(),
   })
