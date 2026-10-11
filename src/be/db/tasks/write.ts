@@ -197,6 +197,7 @@ export async function getPendingTaskForAgent(agentId: string): Promise<AgentTask
 export async function assignUnassignedTaskPending(
   taskId: string,
   agentId: string,
+  options: { poolWakeAt?: string } = {},
 ): Promise<AgentTask | null> {
   // This guard is always needed for lead-only tasks; the predicate itself
   // handles the optional role/capability kill-switch.
@@ -223,9 +224,9 @@ export async function assignUnassignedTaskPending(
 
   const now = new Date().toISOString();
   const row = await getDbClient().get<AgentTaskRow>(
-    `UPDATE agent_tasks SET agentId = ?, status = 'pending', lastUpdatedAt = ?
+    `UPDATE agent_tasks SET agentId = ?, status = 'pending', lastUpdatedAt = ?, pool_wake_at = ?
        WHERE id = ? AND status = 'unassigned' RETURNING *`,
-    [agentId, now, taskId],
+    [agentId, now, options.poolWakeAt ?? null, taskId],
   );
 
   if (row) {

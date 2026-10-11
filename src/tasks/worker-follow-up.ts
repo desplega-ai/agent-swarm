@@ -14,6 +14,7 @@ import {
   isAgentEligibleForTask,
 } from "../be/db";
 import { repointTrackerSyncBySwarmId } from "../be/db-queries/tracker";
+import { isAgentReachable } from "../be/runtime-pools/reachability";
 import { dispatchPre } from "../extensions/dispatcher";
 import { resolveTemplate } from "../prompts/resolver";
 import {
@@ -142,7 +143,7 @@ export async function resolveLeadOnlyRecoveryAssignment(
     return { agentId: sourceCandidate.id, decision: "source_lead_pin" };
   }
   const lead = await getLeadAgent();
-  if (lead && lead.status !== "offline" && isAgentEligibleForTask(lead, task)) {
+  if (lead && (await isAgentReachable(lead)) && isAgentEligibleForTask(lead, task)) {
     return { agentId: lead.id, decision: "rerouted_to_lead" };
   }
   return { decision: "escalated_unassigned" };

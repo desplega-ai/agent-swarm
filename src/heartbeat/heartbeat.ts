@@ -5,7 +5,6 @@ import {
 } from "../be/approval-sweeps";
 import { deleteExpiredConnectorCodes } from "../be/connector-codes";
 import {
-  assignUnassignedTaskPending,
   backfillSupersedeTaskResumeTaskId,
   buildRoutingAffinityFromAgent,
   cascadeFailDependents,
@@ -39,7 +38,6 @@ import {
   hasPendingSteering,
   isAgentEligibleForTask,
   isPoolAffinityEnforcementEnabled,
-  MAX_EMPTY_POLLS,
   promoteAbandonedDraftTasks,
   releaseStaleMentionProcessing,
   releaseStaleOfferedTasksForOfflineAgents,
@@ -52,10 +50,11 @@ import {
 import { repointTrackerSyncBySwarmId } from "../be/db-queries/tracker";
 import { poolTaskRunsOnHarness } from "../be/model-validation";
 import {
-  agentsWithLiveRuntime,
   countActiveRuntimeInstancesForAgent,
   expireStaleRuntimeInstances,
 } from "../be/multi-runtime";
+import { isAgentReachable } from "../be/runtime-pools/reachability";
+import { routePoolTasks } from "../be/runtime-pools/routing";
 import { getScript } from "../be/scripts/db";
 import { runSavedScriptAsAgent } from "../be/scripts/run-saved";
 import { promotePendingSteeringForTask } from "../be/steering";
@@ -146,29 +145,6 @@ const STALE_CLEANUP_THRESHOLD_MINUTES = Number(process.env.HEARTBEAT_STALE_CLEAN
  * mid-upload) to its owner within one coffee break, not half an hour.
  */
 const DRAFT_TASK_TIMEOUT_MINUTES = Number(process.env.HEARTBEAT_DRAFT_TASK_TIMEOUT_MIN) || 5;
-
-/** Max pool tasks to auto-assign per sweep */
-function maxAutoAssignPerSweep(): number {
-  const raw = process.env.HEARTBEAT_MAX_AUTO_ASSIGN?.trim();
-  if (!raw) return 5;
-  const n = Number(raw);
-  // 0 is a valid operator choice ("assign nothing this sweep") and the config
-  // validator accepts it — the usual `Number(...) || 5` idiom would silently
-  // turn it back into the default.
-  return Number.isInteger(n) && n >= 0 ? n : 5;
-}
-
-/**
- * Page size for `autoAssignPoolTasks`' paginated pool scan and the hard cap on
- * total rows scanned per sweep. A single bounded fetch used to mean N
- * ineligible affinity-tagged tasks at the head of the priority order could
- * hide all eligible work behind them indefinitely (see PR #954 review) — the
- * scan now pages through the pool until it has assigned `MAX_AUTO_ASSIGN_PER_SWEEP`
- * tasks or exhausted the pool, capped so a pool full of ineligible tasks can't
- * turn every sweep into an unbounded scan.
- */
-const POOL_SCAN_BATCH_SIZE = Number(process.env.HEARTBEAT_POOL_SCAN_BATCH_SIZE) || 50;
-const POOL_SCAN_CAP = Number(process.env.HEARTBEAT_POOL_SCAN_CAP) || 500;
 
 /** Max crash-recovery resume generations before failing for lead triage */
 export function maxResumeGenerations(): number {
@@ -1135,100 +1111,8 @@ async function checkWorkerHealth(findings: HeartbeatFindings): Promise<void> {
   }
 }
 
-/**
- * Auto-assign unassigned pool tasks to idle workers with capacity.
- * Leaves tasks pending so the assigned worker's normal poll dispatches them.
- *
- * Routing affinity (Phase 3): per-task filtering, not blind round-robin — for
- * each pool task (in priority/creation order), pick the first idle worker
- * that both has remaining capacity AND satisfies `isAgentEligibleForTask`.
- * A task with no eligible worker this sweep is left `unassigned` (queued);
- * it either gets picked up on a later sweep once a matching worker frees up,
- * or is escalated to the Lead by `escalateStarvedPoolTasks` once it's been
- * stale long enough with zero eligible agents at all.
- *
- * The pool scan itself is paginated (Phase 3.1): a single bounded fetch of
- * `MAX_AUTO_ASSIGN_PER_SWEEP` tasks used to mean that if the highest-priority
- * rows were all affinity-tagged for a role with no idle match this sweep,
- * lower-priority eligible work behind them was never even looked at — it
- * would starve indefinitely regardless of how many sweeps ran, since the same
- * ineligible head-of-line rows were re-fetched every time. This now pages
- * through the pool in `POOL_SCAN_BATCH_SIZE` windows until it has assigned
- * `MAX_AUTO_ASSIGN_PER_SWEEP` tasks or exhausted the pool (capped at
- * `POOL_SCAN_CAP` rows scanned).
- */
 async function autoAssignPoolTasks(findings: HeartbeatFindings): Promise<void> {
-  await getDbClient().transaction(async () => {
-    // Skip idle workers whose accumulated empty-poll count has hit the gate;
-    // assigning to them would just have them exit on their next poll. Filter on
-    // the rows already returned (emptyPollCount is populated) rather than
-    // re-querying per worker via shouldBlockPolling().
-    // A multi-runtime agent whose runtimes have all died still reads as idle
-    // until its rows expire; assigning to it would strand the task, since
-    // nothing is left to poll for it.
-    // While the mode is on, only an agent with a live runtime can poll, so
-    // anything else — dead runtimes, or a worker that has not re-registered
-    // since the flag was enabled — would have the task stranded on it. With
-    // the flag off this is inert: legacy workers stop refreshing their
-    // retained rows, and filtering on them would park tasks on healthy agents.
-    const multiRuntime = isMultiRuntimeEnabled();
-    const withLiveRuntime = multiRuntime ? await agentsWithLiveRuntime() : null;
-    const idleWorkers = (await getIdleWorkersWithCapacity()).filter(
-      (w) =>
-        (w.emptyPollCount ?? 0) < MAX_EMPTY_POLLS &&
-        (withLiveRuntime === null || withLiveRuntime.has(w.id)),
-    );
-    if (idleWorkers.length === 0) return;
-
-    const reservedByWorker = new Map<string, number>();
-    const reservedForWorker = async (agentId: string): Promise<number> => {
-      const cached = reservedByWorker.get(agentId);
-      if (cached !== undefined) return cached;
-      const row = await getDbClient().get<{ count: number }>(
-        "SELECT COUNT(*) as count FROM agent_tasks WHERE agentId = ? AND status IN ('pending', 'in_progress')",
-        [agentId],
-      );
-      const reserved = row?.count ?? 0;
-      reservedByWorker.set(agentId, reserved);
-      return reserved;
-    };
-
-    let assignedCount = 0;
-    let offset = 0;
-
-    while (assignedCount < maxAutoAssignPerSweep() && offset < POOL_SCAN_CAP) {
-      const batch = await getUnassignedPoolTasks(POOL_SCAN_BATCH_SIZE, offset);
-      if (batch.length === 0) break;
-
-      for (const task of batch) {
-        if (assignedCount >= maxAutoAssignPerSweep()) break;
-
-        let worker: (typeof idleWorkers)[number] | undefined;
-        for (const w of idleWorkers) {
-          if (
-            (await reservedForWorker(w.id)) < (w.maxTasks ?? 1) &&
-            isAgentEligibleForTask(w, task) &&
-            // A pinned model from another harness family waits for a compatible worker.
-            (await poolTaskRunsOnHarness(task, w.harnessProvider ?? w.provider ?? null))
-          ) {
-            worker = w;
-            break;
-          }
-        }
-        if (!worker) continue; // No eligible worker with capacity this sweep — leave queued.
-
-        const assigned = await assignUnassignedTaskPending(task.id, worker.id);
-        if (assigned) {
-          findings.autoAssigned.push({ taskId: task.id, agentId: worker.id });
-          reservedByWorker.set(worker.id, (await reservedForWorker(worker.id)) + 1);
-          assignedCount++;
-        }
-      }
-
-      offset += batch.length;
-      if (batch.length < POOL_SCAN_BATCH_SIZE) break; // Exhausted the pool.
-    }
-  });
+  findings.autoAssigned.push(...(await routePoolTasks({})));
 }
 
 /**
@@ -1251,14 +1135,10 @@ async function escalateUnreclaimedResumes(findings: HeartbeatFindings): Promise<
   const stale = await getStalePinnedResumes(HEARTBEAT_RESUME_PIN_GRACE_MIN);
   if (stale.length === 0) return;
 
-  // A non-offline Lead is required to re-delegate. Without one (none registered,
-  // or the only lead is `offline` after POST /close), leave escalation candidates
-  // `pending` rather than cancel the pin and hand the decision to an agent that
-  // can't poll it (which would strand the work). The budget-exhaustion path below
-  // is independent of the Lead and still runs. `getLeadAgent` already prefers a
-  // non-offline lead, so this also guards the createRerouteDecisionTask assignment.
+  // A reachable Lead is required to re-delegate. Sleeping pool Leads can wake.
+  // Without one, keep the pin pending. The generation cap still applies below.
   const lead = await getLeadAgent();
-  const hasLead = lead != null && lead.status !== "offline";
+  const hasLead = lead != null && (await isAgentReachable(lead));
 
   for (const resume of stale) {
     if (!resume.parentTaskId) continue; // Defensive — resumes always have a parent.
@@ -1674,7 +1554,7 @@ async function getOrphanedPendingOrOfferedTasks(
       const holderId = status === "offered" ? task.offeredTo : task.agentId;
       if (!holderId) continue;
       const agent = agents.find((a) => a.id === holderId);
-      if (!agent || agent.status === "offline") {
+      if (!agent || !(await isAgentReachable(agent))) {
         orphanedTasks.push(task);
       }
     }

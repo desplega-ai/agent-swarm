@@ -43,6 +43,7 @@ import {
   splitLegacyModelAlias,
 } from "@/types";
 import { findJsonSchemaShapeErrors } from "@/workflows/json-schema-validator";
+import { isAgentReachable } from "../be/runtime-pools/reachability";
 import { looseAgentTaskOutputSchema } from "./get-task-details";
 
 /**
@@ -291,7 +292,7 @@ export async function sendTaskHandler(
   }: SendTaskArgs,
 ): Promise<SwarmToolResult> {
   const userLead = ctx.kind === "user" ? await getLeadAgent() : null;
-  if (ctx.kind === "user" && (!userLead || userLead.status === "offline")) {
+  if (ctx.kind === "user" && (!userLead || !(await isAgentReachable(userLead)))) {
     return toolErr("No online Lead is available. Start or register a Lead before sending a task.");
   }
 
@@ -661,7 +662,7 @@ export async function sendTaskHandler(
       };
     }
 
-    if (ctx.kind === "user" && (!agent.isLead || agent.status === "offline")) {
+    if (ctx.kind === "user" && (!agent.isLead || !(await isAgentReachable(agent)))) {
       return {
         success: false,
         message: "The Lead is no longer online. No task was created.",

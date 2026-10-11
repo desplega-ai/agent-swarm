@@ -3031,7 +3031,7 @@ export async function releaseTask(taskId: string): Promise<AgentTask | null> {
 
   const now = new Date().toISOString();
   const row = await getDbClient().get<AgentTaskRow>(
-    `UPDATE agent_tasks SET agentId = NULL, status = 'unassigned', lastUpdatedAt = ?
+    `UPDATE agent_tasks SET agentId = NULL, status = 'unassigned', lastUpdatedAt = ?, pool_wake_at = NULL
        WHERE id = ? AND status IN ('pending', 'in_progress') RETURNING *`,
     [now, taskId],
   );
@@ -3046,6 +3046,11 @@ export async function releaseTask(taskId: string): Promise<AgentTask | null> {
         newValue: "unassigned",
       });
     } catch {}
+    getDbClient().afterCommit(() => {
+      void import("../workflows/event-bus")
+        .then(({ workflowEventBus }) => workflowEventBus.emit("task.unassigned", { taskId }))
+        .catch((error) => console.error("[db] Routing event failed:", scrubSecrets(String(error))));
+    });
   }
 
   return row ? rowToAgentTask(row) : null;
@@ -3118,7 +3123,7 @@ export async function rejectTask(
   const row = await getDbClient().get<AgentTaskRow>(
     `UPDATE agent_tasks SET
         status = 'unassigned', offeredTo = NULL, offeredAt = NULL,
-        rejectionReason = ?, lastUpdatedAt = ?
+        rejectionReason = ?, lastUpdatedAt = ?, pool_wake_at = NULL
        WHERE id = ? AND status IN ('offered', 'reviewing') RETURNING *`,
     [reason ?? null, now, taskId],
   );
@@ -3134,6 +3139,11 @@ export async function rejectTask(
         metadata: reason ? { reason } : undefined,
       });
     } catch {}
+    getDbClient().afterCommit(() => {
+      void import("../workflows/event-bus")
+        .then(({ workflowEventBus }) => workflowEventBus.emit("task.unassigned", { taskId }))
+        .catch((error) => console.error("[db] Routing event failed:", scrubSecrets(String(error))));
+    });
   }
 
   return row ? rowToAgentTask(row) : null;

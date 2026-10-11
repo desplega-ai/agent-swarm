@@ -25,6 +25,7 @@ import {
   stopAuditGc,
   stopAuditWriter,
 } from "../be/rbac-audit";
+import { startPoolRouting, stopPoolRouting } from "../be/runtime-pools/routing";
 import { seedRuntimePools } from "../be/runtime-pools/seed";
 import { startScratchScriptGc, stopScratchScriptGc } from "../be/scripts/retention";
 import { loadSecretRegistry } from "../be/secret-registry";
@@ -474,6 +475,7 @@ async function shutdown() {
 
   // Stop heartbeat triage
   stopHeartbeat();
+  stopPoolRouting();
 
   // Stop the out-of-band queue alarm before disconnecting its Slack notifier.
   stopQueueStallAlarm();
@@ -794,6 +796,8 @@ httpServer
       const heartbeatMs = Number(process.env.HEARTBEAT_INTERVAL_MS) || 90000;
       startHeartbeat(heartbeatMs);
     }
+
+    startPoolRouting();
 
     // Start OAuth token keepalive (proactive refresh to prevent expiry)
     if (process.env.OAUTH_KEEPALIVE_DISABLE !== "true") {
