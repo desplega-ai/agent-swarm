@@ -5,29 +5,51 @@ import {
   createTaskExtended,
   getActiveSessionForTask,
   getAgentById,
+  getChildTasks,
   getDbClient,
   getTaskById,
   startTask,
+  updateTaskProgress,
 } from "../be/db";
 import {
   getRuntimeInstanceById,
   listRuntimeInstancesForPool,
   upsertRuntimeInstance,
 } from "../be/multi-runtime";
+import * as recovery from "../be/runtime-pools/recovery";
 import {
   checkDisconnectedRuntime,
   recoverRuntime,
   startRuntimeRecovery,
 } from "../be/runtime-pools/recovery";
-import { reconcileOnce } from "../be/runtime-pools/supervisor";
+import { reapPoolRuntimes, reconcileOnce } from "../be/runtime-pools/supervisor";
 import { mintSessionToken, resolveBySessionToken } from "../be/users";
-import { codeLevelTriage } from "../heartbeat/heartbeat";
+import * as dispatcher from "../extensions/dispatcher";
+import * as heartbeat from "../heartbeat/heartbeat";
+import { codeLevelTriage, setBeforeHeartbeatSupersedeForTests } from "../heartbeat/heartbeat";
 import { resolveHttpRequestAuth } from "../http/auth";
 import { realtimeBus } from "../realtime/bus";
 import { runtimeFailureFixture } from "./runtime-pools-test-utils";
 import { listenOnFreePort } from "./test-net";
 
 const { state, setup } = runtimeFailureFixture("./test-runtime-recovery.sqlite");
+
+function deferred() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
+async function stall(taskId: string) {
+  const old = new Date(Date.now() - 20 * 60_000).toISOString();
+  await getDbClient().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [old, taskId]);
+  await getDbClient().run("UPDATE active_sessions SET lastHeartbeatAt = ? WHERE taskId = ?", [
+    old,
+    taskId,
+  ]);
+}
 
 async function running(options: Partial<Parameters<typeof setup>[0]> = {}, tags?: string[]) {
   const { pool, agent, task } = await setup(options);
@@ -200,17 +222,46 @@ test("socket disconnect recovers a gone provider runtime", async () => {
 test("reconnection or another connected socket cancels a grace check", async () => {
   const { agent, runtime } = await running({ delivery: "push" });
   startRuntimeRecovery();
-  process.env.RUNTIME_SOCKET_GRACE_SEC = "0";
-  state.fake.statusCalls = [];
+  const timer = setTimeout(() => {}, 60_000);
+  const schedule = spyOn(globalThis, "setTimeout").mockReturnValue(timer);
+  const cancel = spyOn(globalThis, "clearTimeout");
   const event = { agentId: agent.id, runtimeId: runtime.id };
-  realtimeBus.publish("worker.socket.disconnected", event);
-  realtimeBus.publish("worker.socket.connected", event);
-  await Bun.sleep(15);
-  expect(state.fake.statusCalls).toHaveLength(0);
-  realtimeBus.publish("worker.socket.connected", event);
-  realtimeBus.publish("worker.socket.disconnected", event);
-  await Bun.sleep(15);
-  expect(state.fake.statusCalls).toHaveLength(0);
+  try {
+    realtimeBus.publish("worker.socket.disconnected", event);
+    expect(schedule).toHaveBeenCalledTimes(1);
+    realtimeBus.publish("worker.socket.connected", event);
+    expect(cancel).toHaveBeenCalledWith(timer);
+    realtimeBus.publish("worker.socket.connected", event);
+    realtimeBus.publish("worker.socket.disconnected", event);
+    expect(schedule).toHaveBeenCalledTimes(1);
+    realtimeBus.publish("worker.socket.disconnected", event);
+    expect(schedule).toHaveBeenCalledTimes(2);
+  } finally {
+    schedule.mockRestore();
+    cancel.mockRestore();
+    clearTimeout(timer);
+  }
+});
+
+test("socket counts remain symmetric while runtime pools are disabled", async () => {
+  const { agent, runtime } = await running({ delivery: "push" });
+  startRuntimeRecovery();
+  const timer = setTimeout(() => {}, 60_000);
+  const schedule = spyOn(globalThis, "setTimeout").mockReturnValue(timer);
+  const event = { agentId: agent.id, runtimeId: runtime.id };
+  try {
+    process.env.RUNTIME_POOLS_ENABLED = "false";
+    realtimeBus.publish("worker.socket.connected", event);
+    realtimeBus.publish("worker.socket.disconnected", event);
+    expect(schedule).not.toHaveBeenCalled();
+    process.env.RUNTIME_POOLS_ENABLED = "true";
+    realtimeBus.publish("worker.socket.connected", event);
+    realtimeBus.publish("worker.socket.disconnected", event);
+    expect(schedule).toHaveBeenCalledTimes(1);
+  } finally {
+    schedule.mockRestore();
+    clearTimeout(timer);
+  }
 });
 
 test("socket checks ignore poll pools and disabled feature flags", async () => {
@@ -223,7 +274,7 @@ test("socket checks ignore poll pools and disabled feature flags", async () => {
   expect((await getRuntimeInstanceById(runtime.id))?.status).toBe("active");
 });
 
-test("idle token rotation terminates the old runtime and provisions demand", async () => {
+test("idle token rotation drains before termination and replacement", async () => {
   const { pool, agent } = await setup({ maxRuntimes: 1 });
   await reconcileOnce();
   const runtime = (await listRuntimeInstancesForPool(pool.id))[0]!;
@@ -234,9 +285,57 @@ test("idle token rotation terminates the old runtime and provisions demand", asy
     runtime.id,
   ]);
   await reconcileOnce();
+  expect((await getRuntimeInstanceById(runtime.id))?.status).toBe("active");
+  expect((await getRuntimeInstanceById(runtime.id))?.draining).toBe(true);
+  expect(await resolveBySessionToken(token)).not.toBeNull();
+  expect(state.fake.terminated).toHaveLength(0);
+  expect(state.fake.requests).toHaveLength(1);
+  await reconcileOnce();
   expect((await getRuntimeInstanceById(runtime.id))?.status).toBe("offline");
   expect(await resolveBySessionToken(token)).toBeNull();
   expect(state.fake.requests).toHaveLength(2);
+});
+
+test("rotation preserves a task claimed between the idle read and draining", async () => {
+  const { pool, agent, task } = await setup({ maxRuntimes: 1 });
+  await reconcileOnce();
+  const runtime = (await listRuntimeInstancesForPool(pool.id))[0]!;
+  await upsertRuntimeInstance({ id: runtime.id, agentId: agent.id, reportedSlots: 1 });
+  await getDbClient().run("UPDATE session_tokens SET expiresAt = ? WHERE runtimeId = ?", [
+    new Date(Date.now() + 30 * 60_000).toISOString(),
+    runtime.id,
+  ]);
+  const client = getDbClient();
+  const original = client.get.bind(client);
+  let claimed = false;
+  const read = spyOn(client, "get").mockImplementation(async (sql, params) => {
+    const row = await original(sql, params);
+    if (!claimed && sql.startsWith("SELECT taskId FROM active_sessions")) {
+      claimed = true;
+      await startTask(task.id);
+      await client.run(
+        "INSERT INTO active_sessions (id, agentId, taskId, triggerType, runtimeInstanceId) VALUES (?, ?, ?, 'task_assigned', ?)",
+        [crypto.randomUUID(), agent.id, task.id, runtime.id],
+      );
+    }
+    return row;
+  });
+  try {
+    await reapPoolRuntimes(
+      pool,
+      [(await getRuntimeInstanceById(runtime.id))!],
+      state.fake,
+      new Date(),
+    );
+  } finally {
+    read.mockRestore();
+  }
+  expect(claimed).toBe(true);
+  expect((await getRuntimeInstanceById(runtime.id))?.draining).toBe(true);
+  await reconcileOnce();
+  expect((await getTaskById(task.id))?.status).toBe("in_progress");
+  expect((await getRuntimeInstanceById(runtime.id))?.status).toBe("active");
+  expect(state.fake.terminated).toHaveLength(0);
 });
 
 test("busy token rotation drains persistently, provisions a replacement, then terminates when idle", async () => {
@@ -293,6 +392,141 @@ test("stalled pooled sessions terminate their runtime and recover sibling tasks"
   expect((await getTaskById(task.id))?.status).toBe("superseded");
   expect((await getTaskById(sibling.id))?.status).toBe("superseded");
   expect(await getActiveSessionForTask(sibling.id)).toBeNull();
+});
+
+test("progress after a pooled stall read cancels remediation and fencing", async () => {
+  const { task, runtime, token } = await running();
+  await stall(task.id);
+  setBeforeHeartbeatSupersedeForTests(async (candidate) => {
+    await updateTaskProgress(candidate.id, "Still working");
+  });
+  try {
+    await codeLevelTriage();
+    await reconcileOnce();
+    expect((await getTaskById(task.id))?.status).toBe("in_progress");
+    expect((await getRuntimeInstanceById(runtime.id))?.status).toBe("active");
+    expect(await resolveBySessionToken(token)).not.toBeNull();
+    expect(await getActiveSessionForTask(task.id)).not.toBeNull();
+    expect(await getChildTasks(task.id)).toHaveLength(0);
+    expect(state.fake.terminated).toHaveLength(0);
+  } finally {
+    setBeforeHeartbeatSupersedeForTests(null);
+  }
+});
+
+test("an extension-selected fail survives concurrent supervisor recovery after the heartbeat fences", async () => {
+  const { task, runtime, token } = await running();
+  await stall(task.id);
+  const hook = spyOn(dispatcher, "dispatchPre").mockResolvedValue({
+    action: "modify",
+    data: { proposedAction: "fail" },
+  });
+  const entered = deferred();
+  const release = deferred();
+  const requested = deferred();
+  const originalTerminate = state.fake.terminate.bind(state.fake);
+  let blocked = false;
+  const terminate = spyOn(state.fake, "terminate").mockImplementation(async (handle) => {
+    if (!blocked) {
+      blocked = true;
+      entered.resolve();
+      await release.promise;
+    }
+    await originalTerminate(handle);
+  });
+  const originalRecovery = recovery.recoverRuntime;
+  const recover = spyOn(recovery, "recoverRuntime").mockImplementation(async (id, reason) => {
+    requested.resolve();
+    await originalRecovery(id, reason);
+  });
+  const triage = codeLevelTriage();
+  let tick: Promise<void> | undefined;
+  try {
+    await entered.promise;
+    expect((await getTaskById(task.id))?.status).toBe("failed");
+    expect((await getRuntimeInstanceById(runtime.id))?.status).toBe("offline");
+    expect(await resolveBySessionToken(token)).toBeNull();
+    tick = reconcileOnce();
+    await requested.promise;
+    release.resolve();
+    await Promise.all([triage, tick]);
+    expect((await getTaskById(task.id))?.status).toBe("failed");
+    expect(await getChildTasks(task.id)).toHaveLength(0);
+    expect(await getActiveSessionForTask(task.id)).toBeNull();
+  } finally {
+    release.resolve();
+    await Promise.allSettled([triage, tick]);
+    hook.mockRestore();
+    terminate.mockRestore();
+    recover.mockRestore();
+  }
+});
+
+test("provider recovery that starts first completes before an extension-selected fail", async () => {
+  const { task, runtime } = await running();
+  await stall(task.id);
+  const entered = deferred();
+  const release = deferred();
+  const selected = deferred();
+  setBeforeHeartbeatSupersedeForTests(async () => {
+    entered.resolve();
+    await release.promise;
+  });
+  const hook = spyOn(dispatcher, "dispatchPre").mockImplementation(async () => {
+    selected.resolve();
+    return { action: "modify", data: { proposedAction: "fail" } };
+  });
+  state.fake.runtimes.get(runtime.externalHandle!.externalId)!.status = "failed";
+  const tick = reconcileOnce();
+  let triage: ReturnType<typeof codeLevelTriage> | undefined;
+  try {
+    await entered.promise;
+    triage = codeLevelTriage();
+    await selected.promise;
+    release.resolve();
+    await Promise.all([tick, triage]);
+    expect((await getTaskById(task.id))?.status).toBe("superseded");
+    const children = await getChildTasks(task.id);
+    expect(children.filter((child) => child.taskType === "resume")).toHaveLength(1);
+    expect(await getActiveSessionForTask(task.id)).toBeNull();
+  } finally {
+    release.resolve();
+    await Promise.allSettled([tick, triage]);
+    setBeforeHeartbeatSupersedeForTests(null);
+    hook.mockRestore();
+  }
+});
+
+test("one throwing session remediation does not block its sibling", async () => {
+  const { agent, task, runtime } = await running();
+  const sibling = await createTaskExtended("Sibling task", { agentId: agent.id });
+  await startTask(sibling.id);
+  await getDbClient().run(
+    "INSERT INTO active_sessions (id, agentId, taskId, triggerType, runtimeInstanceId) VALUES (?, ?, ?, 'task_assigned', ?)",
+    [crypto.randomUUID(), agent.id, sibling.id, runtime.id],
+  );
+  const original = heartbeat.remediateTaskForDeadRuntime;
+  const secret = `aseph_${"A".repeat(32)}`;
+  const errors = spyOn(console, "error");
+  const remediate = spyOn(heartbeat, "remediateTaskForDeadRuntime").mockImplementation(
+    async (candidate, reason) => {
+      if (candidate.id === task.id) throw new Error(`Remediation failed: ${secret}`);
+      await original(candidate, reason);
+    },
+  );
+  try {
+    await recoverRuntime(runtime.id, "Container disappeared");
+    expect((await getTaskById(sibling.id))?.status).toBe("superseded");
+    expect(await getActiveSessionForTask(sibling.id)).toBeNull();
+    expect((await getTaskById(task.id))?.status).toBe("in_progress");
+    expect(errors).toHaveBeenCalled();
+    expect(JSON.stringify(errors.mock.calls)).not.toContain(secret);
+  } finally {
+    remediate.mockRestore();
+    errors.mockRestore();
+  }
+  await recoverRuntime(runtime.id, "Retry failed session recovery");
+  expect((await getTaskById(task.id))?.status).toBe("superseded");
 });
 
 test("paused provider runtimes retain their task", async () => {

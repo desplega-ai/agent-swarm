@@ -65,23 +65,25 @@ function runtimeNumber(key: string, fallback: number): number {
 }
 
 async function recordProvisionFailure(
-  runtime: RuntimeInstance,
+  runtime: Pick<RuntimeInstance, "agentId" | "poolId" | "controllerId"> & { id: string | null },
   reason: string,
   now: Date,
 ): Promise<void> {
   const error = scrubSecrets(reason);
   const failedTask = await getDbClient().transaction(async (tx) => {
-    const retired = await tx.run(
-      "UPDATE runtime_instances SET provision_error = ? WHERE id = ? AND status = 'provisioning' AND provision_error IS NULL",
-      [error, runtime.id],
-    );
-    if (!retired.changes) return null;
-    await markRuntimeTerminated(runtime.id, error);
-    await tx.run(
+    if (runtime.id) {
+      const retired = await tx.run(
+        "UPDATE runtime_instances SET provision_error = ? WHERE id = ? AND status = 'provisioning' AND provision_error IS NULL",
+        [error, runtime.id],
+      );
+      if (!retired.changes) return null;
+      await markRuntimeTerminated(runtime.id, error);
+    }
+    const pool = await tx.get<{ circuit_open_until: string | null }>(
       `UPDATE runtime_pools SET consecutive_failures = consecutive_failures + 1,
        last_error = ?, last_error_at = ?, updated_at = ?,
        circuit_open_until = CASE WHEN consecutive_failures + 1 >= ? OR circuit_open_until IS NOT NULL
-         THEN ? ELSE circuit_open_until END WHERE id = ?`,
+         THEN ? ELSE circuit_open_until END WHERE id = ? RETURNING circuit_open_until`,
       [
         error,
         now.toISOString(),
@@ -107,6 +109,11 @@ async function recordProvisionFailure(
       new Date(now.getTime() + delay * 1000).toISOString(),
       runtime.agentId,
     ]);
+    if (pool?.circuit_open_until)
+      await tx.run(
+        "UPDATE agents SET runtime_provision_attempts = 0, runtime_provision_retry_at = NULL WHERE runtime_pool_id = ?",
+        [runtime.poolId ?? null],
+      );
     if (attempts < runtimeNumber("RUNTIME_PROVISION_MAX_ATTEMPTS", 3)) return null;
     const pending = await tx.query<{ id: string }>(
       "SELECT id FROM agent_tasks WHERE agentId = ? AND status = 'pending' ORDER BY createdAt, rowid",
@@ -125,6 +132,10 @@ async function recordProvisionFailure(
       );
       return failed;
     }
+    await tx.run(
+      "UPDATE agents SET runtime_provision_attempts = 0, runtime_provision_retry_at = NULL WHERE id = ?",
+      [runtime.agentId],
+    );
     return null;
   });
   if (failedTask) {
@@ -159,8 +170,10 @@ export async function provisionRuntime(
         reportedSlots: pool.slotsPerRuntime,
       });
       await getDbClient().run(
-        "UPDATE runtime_instances SET provision_attempts = ?, provision_requested_at = ? WHERE id = ?",
-        [(agent.runtimeProvisionAttempts ?? 0) + 1, now.toISOString(), runtimeId],
+        `UPDATE runtime_instances SET provision_attempts =
+           (SELECT runtime_provision_attempts + 1 FROM agents WHERE id = ?),
+         provision_requested_at = ? WHERE id = ?`,
+        [agent.id, now.toISOString(), runtimeId],
       );
       return credential.plaintext;
     });
@@ -209,10 +222,17 @@ export async function provisionRuntime(
   } catch (error) {
     reportSupervisorError(error);
     try {
-      const runtime = (await listRuntimeInstancesForAgent(agent.id)).find(
-        (row) => row.id === runtimeId,
+      const runtime = await getRuntimeInstanceById(runtimeId);
+      await recordProvisionFailure(
+        runtime ?? {
+          id: null,
+          agentId: agent.id,
+          poolId: pool.id,
+          controllerId: pool.placements[0]!,
+        },
+        String(error),
+        now,
       );
-      if (runtime) await recordProvisionFailure(runtime, String(error), now);
     } catch (cleanupError) {
       reportSupervisorError(cleanupError);
     }
@@ -246,13 +266,32 @@ export async function terminateRuntime(
   await markRuntimeTerminated(runtime.id, reason);
 }
 
+async function rotatingRuntimes(poolId: string, expiresBy: string): Promise<Set<string>> {
+  const rows = await getDbClient().query<{ runtimeId: string }>(
+    `SELECT DISTINCT t.runtimeId FROM session_tokens t
+     JOIN runtime_instances r ON r.id = t.runtimeId
+     WHERE r.pool_id = ? AND t.revokedAt IS NULL AND t.expiresAt <= ?`,
+    [poolId, expiresBy],
+  );
+  return new Set(rows.map((row) => row.runtimeId));
+}
+
 export async function reapPoolRuntimes(
   pool: RuntimePool,
   runtimes: RuntimeInstance[],
   controller: ControllerCommands,
   now: Date,
   listedHandles?: RuntimeHandle[] | null,
+  rotatingIds?: ReadonlySet<string>,
 ): Promise<void> {
+  const rotations =
+    rotatingIds ??
+    (await rotatingRuntimes(
+      pool.id,
+      new Date(
+        now.getTime() + runtimeNumber("RUNTIME_TOKEN_ROTATE_BEFORE_MIN", 60) * 60_000,
+      ).toISOString(),
+    ));
   const cutoff = now.getTime() - runtimeStaleThresholdMinutes() * 60_000;
   const remaining = new Map<string, number>();
   const handles = runtimes
@@ -323,14 +362,7 @@ export async function reapPoolRuntimes(
       );
       const task = runtime.taskId ? await getTaskById(runtime.taskId) : null;
       const taskRunning = task?.status === "in_progress" || task?.status === "reviewing";
-      const token = await getDbClient().get<{ expiresAt: string }>(
-        "SELECT MIN(expiresAt) AS expiresAt FROM session_tokens WHERE runtimeId = ? AND revokedAt IS NULL",
-        [runtime.id],
-      );
-      const rotating =
-        token?.expiresAt &&
-        Date.parse(token.expiresAt) <=
-          now.getTime() + runtimeNumber("RUNTIME_TOKEN_ROTATE_BEFORE_MIN", 60) * 60_000;
+      const rotating = rotations.has(runtime.id);
       if (busy || taskRunning) {
         await getDbClient().run(
           "UPDATE runtime_instances SET idle_since = NULL, draining = ?, task_id = COALESCE(?, task_id) WHERE id = ?",
@@ -339,8 +371,14 @@ export async function reapPoolRuntimes(
         continue;
       }
       if (rotating) {
-        await terminateRuntime(runtime, controller, "Runtime token expires soon");
-        remaining.set(runtime.agentId, (remaining.get(runtime.agentId) ?? 1) - 1);
+        if (!runtime.draining) {
+          await getDbClient().run("UPDATE runtime_instances SET draining = 1 WHERE id = ?", [
+            runtime.id,
+          ]);
+        } else {
+          await terminateRuntime(runtime, controller, "Runtime token expires soon");
+          remaining.set(runtime.agentId, (remaining.get(runtime.agentId) ?? 1) - 1);
+        }
         continue;
       }
       if (!pool.enabled) {
@@ -448,6 +486,9 @@ async function reconcilePools(
   const ownerId = await ensureRuntimeOwnerId();
   const controllers = new Map<string, ControllerCommands>();
   const listed = new Map<string, RuntimeHandle[] | null>();
+  const rotationCutoff = new Date(
+    now.getTime() + runtimeNumber("RUNTIME_TOKEN_ROTATE_BEFORE_MIN", 60) * 60_000,
+  ).toISOString();
   for (const pool of await listRuntimePools()) {
     if (signal.aborted) return;
     // E2B lifecycle and leases are installed by step 9.
@@ -473,36 +514,29 @@ async function reconcilePools(
             listed.get(controllerId),
           );
       }
+      const rotatingIds = await rotatingRuntimes(pool.id, rotationCutoff);
       await reapPoolRuntimes(
         pool,
         await listRuntimeInstancesForPool(pool.id),
         controller,
         now,
         listed.get(controllerId),
+        rotatingIds,
       );
-      if (!pool.enabled || signal.aborted) continue;
+      if (signal.aborted) return;
       const currentPool = await getRuntimePool(pool.id);
-      if (currentPool?.circuitOpenUntil && Date.parse(currentPool.circuitOpenUntil) > now.getTime())
-        continue;
       const agents = await listAgentsForPool(pool.id);
-      const rotatingIds = new Set(
-        (
-          await getDbClient().query<{ runtimeId: string }>(
-            "SELECT runtimeId FROM session_tokens WHERE runtimeId IS NOT NULL AND revokedAt IS NULL AND expiresAt <= ?",
-            [
-              new Date(
-                now.getTime() + runtimeNumber("RUNTIME_TOKEN_ROTATE_BEFORE_MIN", 60) * 60_000,
-              ).toISOString(),
-            ],
-          )
-        ).map((row) => row.runtimeId),
-      );
       const demands: AgentDemand[] = [];
       const work = new Map<string, Awaited<ReturnType<typeof pendingWorkForAgent>>>();
       for (const agent of agents) {
         if (signal.aborted) return;
         const pending = await pendingWorkForAgent(agent.id);
         work.set(agent.id, pending);
+        if (!pending.work && (agent.runtimeProvisionAttempts || agent.runtimeProvisionRetryAt))
+          await getDbClient().run(
+            "UPDATE agents SET runtime_provision_attempts = 0, runtime_provision_retry_at = NULL WHERE id = ?",
+            [agent.id],
+          );
         const runtimes = await listRuntimeInstancesForAgent(agent.id);
         let freeSlots = 0;
         let provisioning = 0;
@@ -533,6 +567,11 @@ async function reconcilePools(
           provisioning,
         });
       }
+      if (
+        !pool.enabled ||
+        (currentPool?.circuitOpenUntil && Date.parse(currentPool.circuitOpenUntil) > now.getTime())
+      )
+        continue;
       const poolCount = (await listRuntimeInstancesForPool(pool.id)).filter(
         (r) =>
           r.status === "provisioning" ||

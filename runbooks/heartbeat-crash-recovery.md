@@ -156,23 +156,29 @@ is never expired):
   Provider `exited`, `failed`, or absence from a successful owner-filtered list triggers immediate recovery.
   The ping cutoff also triggers termination and recovery. A fresh `unknown` runtime present in the list remains unchanged.
   Provider errors do not prove death. Paused runtimes retain their tasks.
-- `recoverRuntime` first calls `markRuntimeTerminated`. This marks the row offline, reconciles agent status, and revokes runtime and child tokens.
+- `recoverRuntime` serializes recovery for its runtime, then calls `markRuntimeTerminated`.
+  This marks the row offline, reconciles agent status, and revokes runtime and child tokens.
   Revocation closes token-authenticated sockets. Subsequent worker calls receive 401.
   Recovery reads sessions by `active_sessions.runtimeInstanceId` and applies the existing heartbeat decision to each in-progress task.
   Recovery deletes sessions after remediation. Repeated recovery creates no additional resume.
+  A session error logs a scrubbed reason and does not block sibling recovery. A later tick retries the failed session.
   Reachable sleeping pool agents remain valid resume targets after their last runtime becomes offline.
 - Provision errors and registration timeouts count as failures. A timeout terminates the runtime.
   The agent row persists the failure count and retry deadline. Retries wait 30, 90, then 180 seconds.
   After `RUNTIME_PROVISION_MAX_ATTEMPTS`, the oldest ready pending task fails with a scrubbed provisioning reason.
-  The existing failure follow-up notifies the Lead. Task failure and registration reset agent retry state.
+  The existing failure follow-up notifies the Lead. Task failure and first registration reset agent retry state.
+  A tick with no ready demand clears retry state. Reaching the attempt cap without a ready pending task also clears retry state.
   Each failure stores scrubbed errors on the runtime, pool, and controller.
 - `RUNTIME_CIRCUIT_THRESHOLD` consecutive failures open the pool circuit for `RUNTIME_CIRCUIT_OPEN_MIN` minutes.
   An open circuit blocks provisioning and tier-2 routing. Existing runtimes continue their tasks.
-  After expiry, one trial provision may await registration. Registration resets pool failures and closes the circuit.
+  Opening the circuit clears retry state for its agents.
+  After expiry, one trial provision may await registration. First registration resets pool failures and closes the circuit.
+  Re-registration of a healthy runtime does not change the circuit.
   Failure opens the circuit again.
 - The last push socket disconnect schedules a provider check after `RUNTIME_SOCKET_GRACE_SEC` seconds.
   Reconnection cancels the check. A running provider runtime keeps its tasks. Confirmed death triggers recovery.
-- Within `RUNTIME_TOKEN_ROTATE_BEFORE_MIN` minutes of token expiry, an idle runtime terminates immediately.
+- Within `RUNTIME_TOKEN_ROTATE_BEFORE_MIN` minutes of token expiry, an idle runtime drains first.
+  The next tick checks activity again and terminates it if it remains idle.
   A busy runtime drains and accepts no new tasks. Demand can provision a replacement within the pool cap.
   The supervisor terminates the drained runtime when its tasks finish.
 - A draining runtime cannot receive work through `/api/poll`. The supervisor drains idle runtimes before termination and checks activity again next tick.
@@ -214,16 +220,29 @@ flowchart TD
   hook -->|"invalid modify"| keep["warn and keep<br/>the default action"]
   keep --> action
   action -->|"record"| record["record stalled task<br/>perform no remediation"]
-  action -->|"fail"| fail["fail task<br/>restore agent state"]
-  action -->|"supersede-resume"| resume["supersede task<br/>create crash-recovery resume"]
+  action -->|"fail or supersede-resume"| owned{"session on a<br/>provisionable pool?"}
+  owned -->|"yes"| lock["serialize with recoverRuntime"]
+  owned -->|"no"| cas
+  lock --> cas{"selected task CAS succeeds?<br/>expected lastUpdatedAt"}
+  cas -->|"no: progress or another remediation"| skip
+  cas -->|"yes, pooled"| fence["markRuntimeTerminated:<br/>offline + revoke tokens<br/>then terminate provider runtime"]
+  cas -->|"yes, static"| finish
+  fence --> finish["complete selected fail or resume<br/>clean session and restore agent state"]
+  finish --> siblings{"pooled runtime?"}
+  siblings -->|"yes"| recover["recover sibling sessions<br/>under the same recovery lock"]
+  siblings -->|"no"| done["remediation complete"]
+  recover --> done
 ```
 
 - Candidate set = `getStalledInProgressTasks(STALL_THRESHOLD_NO_SESSION_MIN)` → `status='in_progress' AND lastUpdatedAt > 5m`. Tasks in `pending`/`offered` are **not** seen by this sweep. A candidate with a pending steering message newer than `STEERING_STALL_GRACE_MIN` is deferred for that sweep; once the bounded grace expires, normal classification and remediation resume.
 - An **active_session** = one worker-*run* process for a task (`active_sessions`, `UNIQUE(taskId)`), created lazily *after* the provider process spawns, kept alive by two inputs to `active_sessions.lastHeartbeatAt`: **tool activity** (`PUT /api/active-sessions/heartbeat/{taskId}`, throttled ~5s worker-side) and **provider output** (`POST /api/session-logs` with a `taskId`: `refreshActiveSessionOnActivity` refreshes that task's own session row, at most once per 30s, via a `lastHeartbeatAt < cutoff` guard on the UPDATE). Provider output covers every harness and a long reasoning stream with no tool calls; it is task-scoped, so it never refreshes another task's session. The one wall-clock ping is scoped to background work: a Claude session (CLI or SDK transport) that has at least one non-ambient task in its latest `system/background_tasks_changed` set PUTs the heartbeat every 60s (`ClaudeBackgroundKeepalive`, `src/providers/claude-background-keepalive.ts`), so a turn that ended waiting on a `run_in_background` job stays live; the ping stops when the set empties, the session ends, or the session has emitted nothing for 2h. Any other silent worker (no tool call, no output, no background task) still goes stale. "No active session" is AND-gated with `lastUpdatedAt > 5m`, so it means *"no live run **and** no task progress in 5 min."* It can false-positive on a long-but-quiet live worker; the resume-generation budget (`MAX_RESUME_GENERATIONS`) bounds the blast radius.
 - The classifier emits `no-session`, `stale-session`, or `fresh-stalled` only after a task crosses its existing threshold. Extensions cannot change thresholds or classify a healthy task as stalled.
 - `decideRemediation` keeps the default recovery policy. It selects `fail` for workflow steps, excluded task types, existing resume children, and exhausted resume budgets. It otherwise selects `supersede-resume`. A fresh-session stall defaults to `record`.
-- For a selected remediation with a session on a provisionable pool, the classifier terminates and fences that runtime before changing the task.
-  It then recovers other sessions on that runtime. Extension blocks and `record` actions leave the runtime unchanged.
+- For a selected remediation with a session on a provisionable pool, the classifier uses the same runtime lock as `recoverRuntime`.
+  A successful task CAS fences the runtime before session cleanup or resume creation. Provider termination follows the fence.
+  A failed CAS leaves the runtime unchanged. Progress after the candidate read cancels remediation and fencing.
+  The classifier completes the selected action, then recovers sibling sessions under the same lock.
+  Concurrent provider recovery waits for that action. Extension blocks and `record` actions leave the runtime unchanged.
   Static workers retain their existing behavior.
 - `pre.heartbeat.remediate` receives the task, optional session, classification, proposed action, reason, and age values before any remediation write. An extension can select `supersede-resume`, `fail`, or `record`. A block records the stalled task and an `extensionSkipped` finding, then performs no remediation during that sweep. An invalid action logs a scrubbed warning and keeps the original proposal.
 - Thresholds (env-overridable): `STALL_THRESHOLD_NO_SESSION_MIN=5` (`HEARTBEAT_STALL_NO_SESSION_MIN`), `STALL_THRESHOLD_STALE_HEARTBEAT_MIN=15`, `STALL_THRESHOLD_MINUTES=30`, `STEERING_STALL_GRACE_MIN=5` (`HEARTBEAT_STEERING_GRACE_MIN`), `STALE_CLEANUP_THRESHOLD_MINUTES=30`.
@@ -299,16 +318,26 @@ if extensionResult modifies to a valid action:
 if proposed.action == record:
     stalledTasks += task
     continue
+# For a pooled session, run this selected-action block under the same runtime
+# lock as recoverRuntime. Concurrent recovery waits until this block finishes.
 if proposed.action == fail:
-    failTask(task.id, proposed.reason, expectedLastUpdatedAt = task.lastUpdatedAt)
-    clean a stale active session when classification == stale-session
+    changed = failTask(task.id, proposed.reason, expectedLastUpdatedAt = task.lastUpdatedAt)
+else:
+    changed = supersedeTask(parent, expectedLastUpdatedAt = task.lastUpdatedAt)
+
+# Both writes compare against the candidate's lastUpdatedAt.
+# A progress write cancels remediation, fencing, and sibling recovery.
+if not changed:
+    continue
+if session belongs to a provisionable pool:
+    markRuntimeTerminated(runtime.id, proposed.reason)  # offline + token revoke
+    controller.terminate(runtime.handle, proposed.reason)
+if proposed.action == fail:
+    clean session when stale or pooled
     restore agent state
+    if pooled: recover sibling sessions under the same runtime lock
     continue
 
-# fail and supersede both compare-and-swap on the lastUpdatedAt this sweep read:
-# a progress write between the candidate read and the write cancels remediation.
-# proposed.action == supersede-resume:
-supersedeTask(parent, expectedLastUpdatedAt = task.lastUpdatedAt)   # frees the agent's in_progress slot
 promotePendingSteeringForTask(parent)       # pending rows → follow-up tasks, exactly once
 resume = createResumeFollowUp(parent, reason = crash_recovery | graceful_shutdown):
     preferredAgentId = undefined
@@ -329,6 +358,19 @@ resume = createResumeFollowUp(parent, reason = crash_recovery | graceful_shutdow
 # supersedeTask(resumeTaskId = null) leaves dependents waiting on parent; they settle here:
 if resume created: backfillSupersedeTaskResumeTaskId(parent, resume)   # log entry + settle(parent, resume)
 else:              settleSupersededTaskDependents(parent, null); failTask(parent, resume_creation_skipped_<reason>)
+clean session when stale or pooled
+restore agent state
+if pooled: recover sibling sessions under the same runtime lock
+
+recoverRuntime(runtime.id, reason):
+    serialize under the same runtime lock:
+        markRuntimeTerminated(runtime.id, reason)
+        for session on runtime.id:
+            try:
+                if task is in_progress:
+                    remediateTaskForDeadRuntime(task, reason)  # existing default decision
+                else: delete the stale session
+            catch: log scrubbed error and continue with the next session
 
 settleSupersededTaskDependents(parent, resume):
     if resume:

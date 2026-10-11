@@ -211,6 +211,10 @@ export async function upsertRuntimeInstance(instance: {
 }): Promise<RuntimeInstance | null> {
   const metadataJson = instance.metadata ? JSON.stringify(instance.metadata) : null;
   const row = await getDbClient().transaction(async (tx) => {
+    const provisioning = await tx.get<{ id: string }>(
+      "SELECT id FROM runtime_instances WHERE id = ? AND status = 'provisioning' AND agent_id = ?",
+      [instance.id, instance.agentId],
+    );
     const row = await tx.get<RuntimeInstanceRow>(
       `INSERT INTO runtime_instances (id, agent_id, status, reported_slots, metadata)
      VALUES (?, ?, 'active', ?, ?)
@@ -224,7 +228,7 @@ export async function upsertRuntimeInstance(instance: {
      RETURNING *`,
       [instance.id, instance.agentId, instance.reportedSlots, metadataJson],
     );
-    if (row?.pool_id) {
+    if (row?.pool_id && provisioning) {
       await tx.run(
         "UPDATE agents SET runtime_provision_attempts = 0, runtime_provision_retry_at = NULL WHERE id = ?",
         [row.agent_id],

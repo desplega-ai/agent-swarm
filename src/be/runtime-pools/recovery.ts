@@ -1,5 +1,6 @@
 import { realtimeBus } from "../../realtime/bus";
 import { canProvisionKind } from "../../runtime-providers";
+import type { RuntimeInstance } from "../../types";
 import { isMultiRuntimeEnabled } from "../../utils/multi-runtime";
 import { isRuntimePoolsEnabled } from "../../utils/runtime-pools-flag";
 import { scrubSecrets } from "../../utils/secret-scrubber";
@@ -18,18 +19,26 @@ function reportRecoveryError(error: unknown): void {
   console.error("[runtime-pools] Recovery failed:", scrubSecrets(String(error)));
 }
 
-export async function recoverRuntime(runtimeId: string, reason: string): Promise<void> {
-  const existing = recovering.get(runtimeId);
-  if (existing) return await existing;
-  const recovery = (async () => {
-    await markRuntimeTerminated(runtimeId, scrubSecrets(reason));
-    const sessions = await getDbClient().query<{ taskId: string }>(
-      "SELECT taskId FROM active_sessions WHERE runtimeInstanceId = ?",
-      [runtimeId],
-    );
-    if (!sessions.length) return;
-    const { remediateTaskForDeadRuntime } = await import("../../heartbeat/heartbeat");
-    for (const session of sessions) {
+async function serializeRecovery(runtimeId: string, action: () => Promise<void>): Promise<void> {
+  const previous = recovering.get(runtimeId) ?? Promise.resolve();
+  const recovery = previous.catch(reportRecoveryError).then(action);
+  recovering.set(runtimeId, recovery);
+  try {
+    await recovery;
+  } finally {
+    if (recovering.get(runtimeId) === recovery) recovering.delete(runtimeId);
+  }
+}
+
+async function recoverSessions(runtimeId: string, reason: string): Promise<void> {
+  const sessions = await getDbClient().query<{ taskId: string }>(
+    "SELECT taskId FROM active_sessions WHERE runtimeInstanceId = ?",
+    [runtimeId],
+  );
+  if (!sessions.length) return;
+  const { remediateTaskForDeadRuntime } = await import("../../heartbeat/heartbeat");
+  for (const session of sessions) {
+    try {
       const task = await getTaskById(session.taskId);
       if (task?.status === "in_progress") await remediateTaskForDeadRuntime(task, reason);
       else
@@ -37,29 +46,43 @@ export async function recoverRuntime(runtimeId: string, reason: string): Promise
           "DELETE FROM active_sessions WHERE taskId = ? AND runtimeInstanceId = ?",
           [session.taskId, runtimeId],
         );
+    } catch (error) {
+      reportRecoveryError(error);
     }
-  })();
-  recovering.set(runtimeId, recovery);
-  try {
-    await recovery;
-  } finally {
-    recovering.delete(runtimeId);
   }
 }
 
-export async function fenceStalledRuntime(runtimeId: string, reason: string): Promise<boolean> {
+export async function recoverRuntime(runtimeId: string, reason: string): Promise<void> {
+  await serializeRecovery(runtimeId, async () => {
+    await markRuntimeTerminated(runtimeId, scrubSecrets(reason));
+    await recoverSessions(runtimeId, reason);
+  });
+}
+
+export async function remediateStalledRuntime(
+  runtimeId: string,
+  reason: string,
+  remediate: (fence: () => Promise<void>) => Promise<boolean>,
+): Promise<boolean> {
   if (!isRuntimePoolsEnabled() || !isMultiRuntimeEnabled()) return false;
   const runtime = await getRuntimeInstanceById(runtimeId);
   const pool = runtime?.poolId ? await getRuntimePool(runtime.poolId) : null;
   if (!runtime || !pool || !canProvisionKind(pool.kind)) return false;
+  await serializeRecovery(runtimeId, async () => {
+    if (await remediate(() => fenceStalledRuntime(runtime, reason)))
+      await recoverSessions(runtimeId, reason);
+  });
+  return true;
+}
+
+async function fenceStalledRuntime(runtime: RuntimeInstance, reason: string): Promise<void> {
+  await markRuntimeTerminated(runtime.id, scrubSecrets(reason));
   try {
     if (runtime.controllerId)
       await terminateRuntime(runtime, await getControllerCommands(runtime.controllerId), reason);
   } catch (error) {
     reportRecoveryError(error);
   }
-  await markRuntimeTerminated(runtimeId, scrubSecrets(reason));
-  return true;
 }
 
 export async function checkDisconnectedRuntime(runtimeId: string): Promise<void> {
@@ -102,13 +125,14 @@ export function startRuntimeRecovery(): void {
     }),
     realtimeBus.subscribe("worker.socket.disconnected", (data) => {
       const id = socketRuntimeId(data);
-      if (!id || !isRuntimePoolsEnabled() || !isMultiRuntimeEnabled()) return;
+      if (!id) return;
       const count = Math.max(0, (sockets.get(id) ?? 1) - 1);
       if (count) {
         sockets.set(id, count);
         return;
       }
       sockets.delete(id);
+      if (!isRuntimePoolsEnabled() || !isMultiRuntimeEnabled()) return;
       if (socketChecks.has(id)) return;
       const seconds = Number(process.env.RUNTIME_SOCKET_GRACE_SEC);
       const delay = Number.isInteger(seconds) && seconds >= 0 ? seconds : 60;

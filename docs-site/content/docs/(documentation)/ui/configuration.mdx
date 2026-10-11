@@ -307,11 +307,13 @@ The API checks the pool flag for each routing event and timer tick.
 | `RUNTIME_TOKEN_ROTATE_BEFORE_MIN` | `60` | Minutes before token expiry to drain busy runtimes or terminate idle runtimes. |
 
 Retries wait 30, 90, then 180 seconds. Agent rows persist retry counts and deadlines across API restarts.
-Registration resets the agent retry state and closes the pool circuit.
+First registration resets the agent retry state and closes the pool circuit.
+Healthy re-registration leaves the circuit unchanged. No ready demand or an open circuit clears agent retry state.
 The supervisor stores scrubbed errors on the runtime, pool, and controller.
 The circuit blocks provisioning and assignments to sleeping pool agents. Existing runtimes continue their tasks.
 After the circuit expires, one provision may await registration. Registration closes the circuit. Failure opens the circuit again.
-Token rotation drains busy runtimes. Demand can create replacements within the pool cap. The supervisor terminates drained runtimes after their tasks finish.
+Token rotation drains runtimes before termination. A later tick checks activity again before terminating an idle runtime.
+Demand can create replacements within the pool cap. The supervisor terminates drained runtimes after their tasks finish.
 The failure settings accept positive integers. Socket grace also accepts zero for an immediate provider check.
 These settings apply after configuration reload. The supervisor interval requires a restart.
 
