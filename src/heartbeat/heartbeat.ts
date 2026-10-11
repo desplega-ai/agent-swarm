@@ -54,6 +54,7 @@ import {
   expireStaleRuntimeInstances,
 } from "../be/multi-runtime";
 import { isAgentReachable } from "../be/runtime-pools/reachability";
+import { fenceStalledRuntime, recoverRuntime } from "../be/runtime-pools/recovery";
 import { routePoolTasks } from "../be/runtime-pools/routing";
 import { getScript } from "../be/scripts/db";
 import { runSavedScriptAsAgent } from "../be/scripts/run-saved";
@@ -566,7 +567,13 @@ async function detectAndRemediateStalledTasks(findings: HeartbeatFindings): Prom
       continue;
     }
 
+    const fenced = session?.runtimeInstanceId
+      ? await fenceStalledRuntime(session.runtimeInstanceId, proposed.reason)
+      : false;
+    if (fenced) remediationOpts.cleanupActiveSession = true;
     await remediateCrashedWorkerTask(findings, task, remediationOpts, proposed);
+    if (fenced && session?.runtimeInstanceId)
+      await recoverRuntime(session.runtimeInstanceId, proposed.reason);
   }
 }
 
@@ -661,6 +668,21 @@ interface RemediationOptions {
   cleanupActiveSession?: boolean;
 }
 
+export async function remediateTaskForDeadRuntime(task: AgentTask, reason: string): Promise<void> {
+  const opts: RemediationOptions = {
+    supersedeReason: scrubSecrets(`Runtime died: ${reason}`),
+    legacyFailReason: scrubSecrets(`Runtime died: ${reason}`),
+    shortLabel: "runtime-died",
+    cleanupActiveSession: true,
+  };
+  await remediateCrashedWorkerTask(
+    { autoFailedTasks: [], autoResumedTasks: [], pinnedResumes: [] },
+    task,
+    opts,
+    await defaultRemediationDecision(task, opts),
+  );
+}
+
 /**
  * Applies a selected remediation action for a stalled task. Extensions can replace
  * the selected action before this function runs.
@@ -669,7 +691,7 @@ interface RemediationOptions {
  * workflow ownership, excluded task types, idempotency, and resume-budget behavior.
  */
 async function remediateCrashedWorkerTask(
-  findings: HeartbeatFindings,
+  findings: Pick<HeartbeatFindings, "autoFailedTasks" | "autoResumedTasks" | "pinnedResumes">,
   task: AgentTask,
   opts: RemediationOptions,
   decision: RemediationDecision,

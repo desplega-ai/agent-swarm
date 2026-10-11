@@ -218,6 +218,17 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
   ...enumValidator("RUNTIME_DEFAULT_DELIVERY", ["poll", "push"]),
   RUNTIME_TOKEN_TTL_HOURS: validateRuntimeTokenTtlHours,
   ...integerValidators(
+    [
+      "RUNTIME_PROVISION_TIMEOUT_SEC",
+      "RUNTIME_PROVISION_MAX_ATTEMPTS",
+      "RUNTIME_CIRCUIT_THRESHOLD",
+      "RUNTIME_CIRCUIT_OPEN_MIN",
+      "RUNTIME_TOKEN_ROTATE_BEFORE_MIN",
+    ],
+    1,
+  ),
+  ...integerValidators(["RUNTIME_SOCKET_GRACE_SEC"], 0),
+  ...integerValidators(
     ["RUNTIME_WAKE_GRACE_SEC", "RUNTIME_WAKE_REROUTE_SEC", "RUNTIME_ROUTING_INTERVAL_MS"],
     0,
   ),

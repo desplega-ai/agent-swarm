@@ -210,8 +210,9 @@ export async function upsertRuntimeInstance(instance: {
   metadata?: Record<string, unknown> | null;
 }): Promise<RuntimeInstance | null> {
   const metadataJson = instance.metadata ? JSON.stringify(instance.metadata) : null;
-  const row = await getDbClient().get<RuntimeInstanceRow>(
-    `INSERT INTO runtime_instances (id, agent_id, status, reported_slots, metadata)
+  const row = await getDbClient().transaction(async (tx) => {
+    const row = await tx.get<RuntimeInstanceRow>(
+      `INSERT INTO runtime_instances (id, agent_id, status, reported_slots, metadata)
      VALUES (?, ?, 'active', ?, ?)
      ON CONFLICT(id) DO UPDATE SET
        status = 'active',
@@ -221,8 +222,20 @@ export async function upsertRuntimeInstance(instance: {
        updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
      WHERE runtime_instances.agent_id = excluded.agent_id
      RETURNING *`,
-    [instance.id, instance.agentId, instance.reportedSlots, metadataJson],
-  );
+      [instance.id, instance.agentId, instance.reportedSlots, metadataJson],
+    );
+    if (row?.pool_id) {
+      await tx.run(
+        "UPDATE agents SET runtime_provision_attempts = 0, runtime_provision_retry_at = NULL WHERE id = ?",
+        [row.agent_id],
+      );
+      await tx.run(
+        "UPDATE runtime_pools SET consecutive_failures = 0, circuit_open_until = NULL WHERE id = ?",
+        [row.pool_id],
+      );
+    }
+    return row;
+  });
   return row ? rowToRuntimeInstance(row) : null;
 }
 

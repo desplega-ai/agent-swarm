@@ -152,8 +152,29 @@ is never expired):
   cleanup backstops any leftover row. The worker's next re-registration
   restores its runtime row.
 - The heartbeat prunes stale offline rows, including pooled runtimes. It retains active pooled rows and provisioning rows for the supervisor.
-- The supervisor terminates pooled runtimes after provider `exited` or `failed` status, or after the normal ping cutoff. Fresh `unknown` runtimes remain unchanged.
-- The supervisor owns provisioning timeouts and infrastructure reconciliation.
+- The supervisor batches provider status checks for pooled runtimes every five seconds by default.
+  Provider `exited`, `failed`, or absence from a successful owner-filtered list triggers immediate recovery.
+  The ping cutoff also triggers termination and recovery. A fresh `unknown` runtime present in the list remains unchanged.
+  Provider errors do not prove death. Paused runtimes retain their tasks.
+- `recoverRuntime` first calls `markRuntimeTerminated`. This marks the row offline, reconciles agent status, and revokes runtime and child tokens.
+  Revocation closes token-authenticated sockets. Subsequent worker calls receive 401.
+  Recovery reads sessions by `active_sessions.runtimeInstanceId` and applies the existing heartbeat decision to each in-progress task.
+  Recovery deletes sessions after remediation. Repeated recovery creates no additional resume.
+  Reachable sleeping pool agents remain valid resume targets after their last runtime becomes offline.
+- Provision errors and registration timeouts count as failures. A timeout terminates the runtime.
+  The agent row persists the failure count and retry deadline. Retries wait 30, 90, then 180 seconds.
+  After `RUNTIME_PROVISION_MAX_ATTEMPTS`, the oldest ready pending task fails with a scrubbed provisioning reason.
+  The existing failure follow-up notifies the Lead. Task failure and registration reset agent retry state.
+  Each failure stores scrubbed errors on the runtime, pool, and controller.
+- `RUNTIME_CIRCUIT_THRESHOLD` consecutive failures open the pool circuit for `RUNTIME_CIRCUIT_OPEN_MIN` minutes.
+  An open circuit blocks provisioning and tier-2 routing. Existing runtimes continue their tasks.
+  After expiry, one trial provision may await registration. Registration resets pool failures and closes the circuit.
+  Failure opens the circuit again.
+- The last push socket disconnect schedules a provider check after `RUNTIME_SOCKET_GRACE_SEC` seconds.
+  Reconnection cancels the check. A running provider runtime keeps its tasks. Confirmed death triggers recovery.
+- Within `RUNTIME_TOKEN_ROTATE_BEFORE_MIN` minutes of token expiry, an idle runtime terminates immediately.
+  A busy runtime drains and accepts no new tasks. Demand can provision a replacement within the pool cap.
+  The supervisor terminates the drained runtime when its tasks finish.
 - A draining runtime cannot receive work through `/api/poll`. The supervisor drains idle runtimes before termination and checks activity again next tick.
 - Supervisor termination immediately marks the runtime offline, reconciles the agent status, and revokes runtime tokens. A surviving live runtime keeps its agent available.
 - Disabled pools stop provisioning and drain idle runtimes. The supervisor continues provider checks and orphan cleanup.
@@ -201,6 +222,9 @@ flowchart TD
 - An **active_session** = one worker-*run* process for a task (`active_sessions`, `UNIQUE(taskId)`), created lazily *after* the provider process spawns, kept alive by two inputs to `active_sessions.lastHeartbeatAt`: **tool activity** (`PUT /api/active-sessions/heartbeat/{taskId}`, throttled ~5s worker-side) and **provider output** (`POST /api/session-logs` with a `taskId`: `refreshActiveSessionOnActivity` refreshes that task's own session row, at most once per 30s, via a `lastHeartbeatAt < cutoff` guard on the UPDATE). Provider output covers every harness and a long reasoning stream with no tool calls; it is task-scoped, so it never refreshes another task's session. The one wall-clock ping is scoped to background work: a Claude session (CLI or SDK transport) that has at least one non-ambient task in its latest `system/background_tasks_changed` set PUTs the heartbeat every 60s (`ClaudeBackgroundKeepalive`, `src/providers/claude-background-keepalive.ts`), so a turn that ended waiting on a `run_in_background` job stays live; the ping stops when the set empties, the session ends, or the session has emitted nothing for 2h. Any other silent worker (no tool call, no output, no background task) still goes stale. "No active session" is AND-gated with `lastUpdatedAt > 5m`, so it means *"no live run **and** no task progress in 5 min."* It can false-positive on a long-but-quiet live worker; the resume-generation budget (`MAX_RESUME_GENERATIONS`) bounds the blast radius.
 - The classifier emits `no-session`, `stale-session`, or `fresh-stalled` only after a task crosses its existing threshold. Extensions cannot change thresholds or classify a healthy task as stalled.
 - `decideRemediation` keeps the default recovery policy. It selects `fail` for workflow steps, excluded task types, existing resume children, and exhausted resume budgets. It otherwise selects `supersede-resume`. A fresh-session stall defaults to `record`.
+- For a selected remediation with a session on a provisionable pool, the classifier terminates and fences that runtime before changing the task.
+  It then recovers other sessions on that runtime. Extension blocks and `record` actions leave the runtime unchanged.
+  Static workers retain their existing behavior.
 - `pre.heartbeat.remediate` receives the task, optional session, classification, proposed action, reason, and age values before any remediation write. An extension can select `supersede-resume`, `fail`, or `record`. A block records the stalled task and an `extensionSkipped` finding, then performs no remediation during that sweep. An invalid action logs a scrubbed warning and keeps the original proposal.
 - Thresholds (env-overridable): `STALL_THRESHOLD_NO_SESSION_MIN=5` (`HEARTBEAT_STALL_NO_SESSION_MIN`), `STALL_THRESHOLD_STALE_HEARTBEAT_MIN=15`, `STALL_THRESHOLD_MINUTES=30`, `STEERING_STALL_GRACE_MIN=5` (`HEARTBEAT_STEERING_GRACE_MIN`), `STALE_CLEANUP_THRESHOLD_MINUTES=30`.
 
@@ -224,16 +248,20 @@ The user MCP exposes no backlog actions.
 ```mermaid
 flowchart TD
   entry["supersedeTask(parent) → frees capacity,<br/>then createResumeFollowUp(crash_recovery<br/>or graceful_shutdown)"]
-  entry --> gate{"lead-only parent?<br/>worker source → current Lead;<br/>otherwise original row exists,<br/>status≠offline, hasCap?"}
+  entry --> gate{"lead-only parent?<br/>worker source → current Lead;<br/>otherwise original agent reachable,<br/>hasCap?"}
   gate -->|"yes (recoverable / restarting)"| pin["resume = PENDING, agentId = parent<br/>(reclaimed on the agent's next poll —<br/>never enters the pool)"]
-  gate -->|"no — offline / row gone / at capacity /<br/>pin kill-switch=0"| pool["resume = UNASSIGNED → pool<br/>(genuinely-gone / rollback path)"]
+  gate -->|"no: unreachable / at capacity /<br/>pin kill-switch=0"| pool["resume = UNASSIGNED → pool<br/>(unreachable / rollback path)"]
   pin --> reap{"reaper (every sweep, in cleanupStaleResources):<br/>still PENDING after<br/>HEARTBEAT_RESUME_PIN_GRACE_MIN?"}
   reap -->|"no — agent reclaimed it"| ok["runs on the original agent"]
   reap -->|"yes — never reclaimed"| esc["atomically cancel the pin, then<br/>createRerouteDecisionTask → Lead<br/>(over generation cap → fail, no decision)"]
   esc --> lead["Lead re-delegates via send-task(agentId=…)<br/>— explicit agent, never re-pooled"]
 ```
 
-**Heuristic (current):** `crash_recovery` and `graceful_shutdown` resumes are **pinned back to their own (stable-ID) agent**, except a structured `routingAffinity.leadOnly: true` task may only pin to a Lead. A legacy/misrouted worker parent is rerouted to the current Lead when available; otherwise its child remains unassigned (workers cannot claim it) and emits a `task_recovery_authorization` escalation event. `createResumeFollowUp` sets `agentId = parent.agentId` whenever the agent row still exists, is not `offline`, and has capacity — *regardless of the 30s `WORKER_LIVENESS_WINDOW_SECONDS` freshness*. The agent ID survives both crash recovery and deploy/SIGTERM graceful shutdown, so "stale" usually means "restarting", not "gone". The resume is `pending` and reclaimed on the agent's next poll; it **never enters the role-blind pool**, so no wrong-specialization worker can grab it (DES-523). It falls back to the pool only when the agent is genuinely gone (`offline`), its row is absent, capacity is full, or the reason-specific rollback switch is `0` (`HEARTBEAT_PIN_CRASH_RESUME` for crash recovery, `HEARTBEAT_PIN_GRACEFUL_RESUME` for graceful shutdown). Other reasons (`context_limits` / `manual_supersede`) still require `fresh`.
+`crash_recovery` and `graceful_shutdown` resumes prefer their original agent when that agent is reachable and has capacity.
+Reachability includes sleeping agents on enabled provisionable pools with closed circuits when runtime pools are enabled.
+The crash and graceful pin switches retain their existing behavior. Other resume reasons still require fresh activity.
+A Lead-only task can pin only to an eligible Lead. Recovery uses the current Lead when its original agent is a worker.
+The resume remains pending for its selected agent. It enters the pool only when recovery cannot select a valid target.
 
 A pin **never reclaimed within `HEARTBEAT_RESUME_PIN_GRACE_MIN`** (the agent that looked recoverable never returned) is escalated by the **reaper** (`escalateUnreclaimedResumes`, run inside `cleanupStaleResources` on *every* sweep, including the post-reboot sweep): it atomically cancels the still-`pending` resume (skipping if the agent reclaimed it in the gap — TOCTOU-safe) and creates a Lead-owned `task.reroute.decision` follow-up. The Lead re-delegates via `send-task` with an **explicit `agentId`** — the work is never re-pooled. A resume already at the generation cap (`MAX_RESUME_GENERATIONS`) is failed instead of escalated, bounding a flapping task. Net: protected pinned reasons touch the unassigned pool **zero times** unless a fail-open guard or rollback switch sends them there.
 
@@ -286,7 +314,7 @@ resume = createResumeFollowUp(parent, reason = crash_recovery | graceful_shutdow
     preferredAgentId = undefined
     if parent.agentId:
         cand = getAgentById(parent.agentId)
-        if cand and cand.status != "offline" and activeCount(cand) < cand.maxTasks:
+        if cand and isAgentReachable(cand) and activeCount(cand) < cand.maxTasks:
             isCrash = (reason == crash_recovery) and HEARTBEAT_PIN_CRASH_RESUME
             isGraceful = (reason == graceful_shutdown) and HEARTBEAT_PIN_GRACEFUL_RESUME
             isFreshReason = (reason != graceful_shutdown) and (now - cand.lastActivityAt < 30s)
@@ -398,7 +426,9 @@ Every consumer of the `unassigned` pool calls the **same** `isAgentEligibleForTa
 **Where a `routingAffinity` snapshot comes from** (`buildRoutingAffinityFromAgent(agentId)` snapshots an agent's current `role`/`harnessProvider`/`capabilities`; `createTaskExtended` auto-inherits a parent's `routingAffinity` on `parentTaskId` when the child doesn't set its own, except for the explicit control-plane opt-out above):
 
 1. **`createResumeFollowUp`** (§3) stamps a fresh snapshot from `parent.agentId` on **every** leg — pinned AND pool-fallback — so even a resume that falls to the pool (agent offline/gone/at-capacity, or a pin kill-switch off) is gated. Falls back to the parent's own inherited snapshot when the agent row is already gone.
-2. **`runRebootSweep`**'s retry-child creation (§1) now applies the *same* recoverability gate `createResumeFollowUp` uses for its same-agent pin (row exists, not `offline`, has capacity — via the shared `getPinCandidateAgent` helper) — a recoverable retry is pinned `pending` to the original agent and tagged `reboot-retry-pin`; otherwise it falls to the pool with the snapshot stamped anyway. `getStalePinnedResumes`'s reaper scope (§3) now also covers `reboot-retry-pin`, so an unreclaimed reboot pin escalates to the Lead exactly like a crash/graceful pin (retry children are fresh tasks with no `resume-generation` tag, so the generation budget is 0 at first escalation — expected).
+2. `runRebootSweep` uses `getPinCandidateAgent` and capacity checks to select the original agent, like `createResumeFollowUp`.
+   A reachable agent receives a pending retry tagged `reboot-retry-pin`. Otherwise, the retry enters the pool with its routing affinity.
+   The reaper also covers reboot pins and escalates unclaimed retries to the Lead.
 3. **`send-task`** / **`task-action create`** accept an optional `requiredCapabilities: string[]` — written into a fresh pool task's `routingAffinity` with `role` left unset. Per the predicate above, a capabilities-only snapshot (no `role`) is eligible for nobody but its declaring agent (n/a here — there is none), so such a task always ends up escalated to the Lead by §4's starvation check below; it's a way to *record* a requirement for the Lead's judgment, not to auto-route today.
 
 **Starvation escalation** (`escalateStarvedPoolTasks`, wired into `cleanupStaleResources` — runs every sweep): an `unassigned` task carrying a `routingAffinity`, queued longer than `POOL_AFFINITY_ESCALATION_MIN`, with **zero eligible registered agents** (eligible = passes the predicate **and** `poolTaskRunsOnHarness` for its harness; any status — an offline-but-matching agent still counts as "not starved"; this is "nobody of that role exists", not "everyone's busy right now") gets a Lead `task.pool.starved.decision` follow-up (`createPoolStarvationDecisionTask`, same `taskType: "reroute-decision"` discriminator and idempotency check as §3's `createRerouteDecisionTask` — no `staleResume`/generation budget since the task was never pinned).
@@ -466,7 +496,7 @@ failTask(task.id, cascadeDependents=false)                    # then create the 
 
 # reboot-sweep retry child (on each auto-failed in_progress task):
 preferredAgentId = undefined
-cand = getPinCandidateAgent(task.agentId)                   # row exists, not offline
+cand = getPinCandidateAgent(task.agentId)                   # reachable agent
 if cand and activeCount(cand) < cand.maxTasks:
     preferredAgentId = cand.id
 createTaskExtended(task.task, parentTaskId=task.id, agentId=preferredAgentId,
@@ -712,6 +742,12 @@ Rollback switches accept `0`/`false` interchangeably (both parse through
 | Pending-steering stall grace | 5 min | `HEARTBEAT_STEERING_GRACE_MIN` |
 | Stale-resource cleanup | 30 min | `HEARTBEAT_STALE_CLEANUP_MIN` |
 | Runtime supervisor cadence (restart required) | 5s | `RUNTIME_SUPERVISOR_INTERVAL_MS` |
+| Runtime registration timeout | 300s | `RUNTIME_PROVISION_TIMEOUT_SEC` |
+| Runtime provision failure limit | 3 | `RUNTIME_PROVISION_MAX_ATTEMPTS` |
+| Pool circuit failure threshold | 5 | `RUNTIME_CIRCUIT_THRESHOLD` |
+| Pool circuit duration | 10 min | `RUNTIME_CIRCUIT_OPEN_MIN` |
+| Push socket grace | 60s | `RUNTIME_SOCKET_GRACE_SEC` |
+| Runtime token rotation window | 60 min | `RUNTIME_TOKEN_ROTATE_BEFORE_MIN` |
 | Runtime liveness window (§1a) | 5 min | `RUNTIME_STALE_THRESHOLD_MIN` |
 | Same-agent liveness window | 30s | `WORKER_LIVENESS_WINDOW_SECONDS` |
 | Worker active-task reconcile cadence (worker env, read at worker start) | 30s | `RUNNER_TASK_RECONCILE_INTERVAL_MS` |

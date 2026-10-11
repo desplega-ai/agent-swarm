@@ -299,6 +299,21 @@ The API checks the pool flag for each routing event and timer tick.
 | `RUNTIME_WAKE_REROUTE_SEC` | `600` | Seconds before the router releases a pending wake assignment and tries another eligible agent. |
 | `RUNTIME_ROUTING_INTERVAL_MS` | `5000` | Milliseconds between routing sweeps. Restart the API after changing this value. |
 | `RUNTIME_SUPERVISOR_INTERVAL_MS` | `5000` | Milliseconds between runtime demand and lifecycle checks. Restart the API after changing this value. |
+| `RUNTIME_PROVISION_TIMEOUT_SEC` | `300` | Seconds before registration timeout terminates the runtime and counts one failure. |
+| `RUNTIME_PROVISION_MAX_ATTEMPTS` | `3` | Provision failures before the oldest ready pending task fails and notifies the Lead. |
+| `RUNTIME_CIRCUIT_THRESHOLD` | `5` | Consecutive provision failures before the pool stops provisioning. |
+| `RUNTIME_CIRCUIT_OPEN_MIN` | `10` | Minutes before the pool permits one trial provision. Failure opens the circuit again. |
+| `RUNTIME_SOCKET_GRACE_SEC` | `60` | Seconds after the last push socket disconnect before a provider check. Running runtimes keep their tasks. |
+| `RUNTIME_TOKEN_ROTATE_BEFORE_MIN` | `60` | Minutes before token expiry to drain busy runtimes or terminate idle runtimes. |
+
+Retries wait 30, 90, then 180 seconds. Agent rows persist retry counts and deadlines across API restarts.
+Registration resets the agent retry state and closes the pool circuit.
+The supervisor stores scrubbed errors on the runtime, pool, and controller.
+The circuit blocks provisioning and assignments to sleeping pool agents. Existing runtimes continue their tasks.
+After the circuit expires, one provision may await registration. Registration closes the circuit. Failure opens the circuit again.
+Token rotation drains busy runtimes. Demand can create replacements within the pool cap. The supervisor terminates drained runtimes after their tasks finish.
+The failure settings accept positive integers. Socket grace also accepts zero for an immediate provider check.
+These settings apply after configuration reload. The supervisor interval requires a restart.
 
 The routing and wake settings accept nonnegative integers. Zero permits an immediate wake or reroute.
 For the routing interval, zero uses the default. Positive values below 500 use 500 milliseconds.
