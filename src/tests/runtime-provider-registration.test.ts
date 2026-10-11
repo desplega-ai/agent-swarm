@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { join } from "node:path";
-import { createRuntimeProvider } from "../runtime-providers";
+import { canProvisionKind, createRuntimeProvider } from "../runtime-providers";
 import { type RuntimeProviderKind, RuntimeProviderKindSchema } from "../types";
 
 const repoRoot = join(import.meta.dir, "..", "..");
@@ -90,6 +90,12 @@ describe("runtime provider registration", () => {
       }
     });
   }
+
+  test("static provisioning lookup matches adapter traits", async () => {
+    expect(canProvisionKind("k8s")).toBe(false);
+    for (const kind of kinds.filter((kind) => kind !== "k8s"))
+      expect(canProvisionKind(kind)).toBe((await createRuntimeProvider(kind)).traits.canProvision);
+  });
 
   for (const kind of kinds.filter((kind) => kind !== "k8s")) {
     test(`factory creates ${kind}`, async () => {

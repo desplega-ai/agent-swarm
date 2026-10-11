@@ -394,14 +394,16 @@ Every consumer of the `unassigned` pool calls the **same** `isAgentEligibleForTa
 ### Server routing for runtime pools
 
 `RUNTIME_POOLS_ENABLED` defaults to false. The heartbeat keeps its legacy routing when the flag is disabled.
-With the flag enabled, the API routes committed unassigned tasks immediately.
+Pool routing also requires `MULTI_RUNTIME_ENABLED=true`. Otherwise, routing keeps the legacy behavior and logs one warning at boot.
+Listeners and the timer remain registered while the flag is off. They check both flags before each invocation.
+With both flags enabled, the API routes committed unassigned tasks immediately.
 The task creation listener reads the task because its event omits status and the offered recipient.
 The timer handles grace expiry and missed events independently of the heartbeat.
 Routing creates demand for the supervisor. Routing does not provision runtimes.
 
 ```mermaid
 flowchart TD
-  trigger["Creation, release, rejection, timer, heartbeat"] --> flag{"Runtime pools enabled?"}
+  trigger["Creation, release, rejection, timer, heartbeat"] --> flag{"Runtime pools and multi-runtime enabled?"}
   flag -->|no| legacy["Heartbeat: legacy idle workers and polling gates"]
   flag -->|yes| reroute["Release expired pending wake assignments<br/>or assignments on an open circuit<br/>Keep human pins"]
   reroute --> warm{"Eligible live worker with free capacity?"}
@@ -417,9 +419,13 @@ flowchart TD
 A busy worker can receive another task if it has a live runtime and spare capacity.
 Both tiers apply `isAgentEligibleForTask` and `poolTaskRunsOnHarness`.
 Tier 2 also applies `canClaim`, including the task requester budget.
+A budget refusal skips that agent and tries the next eligible candidate because agent budgets can differ.
 Wake assignments use `pool_wake_at`. They retain the existing routing reason.
 The router releases only marked pending wake assignments after the timeout or when their pool circuit opens.
 Human pins remain assigned.
+The sweep excludes the released agent for that pass when another eligible wake candidate exists.
+It retries the same agent only when it is the sole candidate and its pool circuit is closed.
+Routing reads snapshots before writing. Each assignment CAS checks task state, agent state, pool state, and current capacity.
 
 ### Pseudocode (current)
 
@@ -468,34 +474,35 @@ cascadeFailDependents(task.id, "failed")   # whatever still depends on the swept
 
 # autoAssignPoolTasks calls routePoolTasks({}) each heartbeat sweep.
 # With RUNTIME_POOLS_ENABLED=false, keep the legacy idle-worker scan and gates.
-# With the flag enabled, task.created and task.unassigned request targeted routing.
-# releaseTask and rejectTask emit task.unassigned only after commit.
+# With both flags enabled, task.created and task.unassigned request targeted routing.
+# With runtime pools enabled, releaseTask and rejectTask emit task.unassigned after commit.
 # A timer repeats routing every RUNTIME_ROUTING_INTERVAL_MS (default 5000).
 routePoolTasks(taskIds?, now):
-    in one write transaction:
-        if runtime pools enabled:
-            for pending task with pool_wake_at and routingReason != human_pinned:
-                if wake age >= RUNTIME_WAKE_REROUTE_SEC (default 600)
-                   or its pool circuit is open:
-                    releaseTask(task)                     # clear wake marker, return to pool
-        warm = live non-Lead agents with pending + in_progress < maxTasks
-        if runtime pools disabled:
-            warm = legacy idle workers with capacity
-            require a live runtime only when multi-runtime mode is enabled
-        exclude offline and waiting_for_credentials from warm
-        exclude legacy warm agents at MAX_EMPTY_POLLS
-        scan unassigned tasks by priority, creation time, rowid within heartbeat limits:
-            worker = first warm agent passing eligibility and harness compatibility
-            if no worker and runtime pools enabled and task age >= RUNTIME_WAKE_GRACE_SEC (default 15):
-                wake = non-Lead agents bound to enabled provisionable pools with closed circuits
-                exclude waiting_for_credentials and agents without headroom
-                filter by eligibility and harness compatibility
-                order by headroom descending, then name
-                worker = first candidate allowed by canClaim(agent, now, requestedByUserId)
-                if worker: pool_wake_at = now
-            if worker:
-                assignUnassignedTaskPending(task, worker) # atomic unassigned-to-pending CAS
-                reserve one slot                         # pending assignments consume headroom
+    read pools and agent snapshots without a write transaction
+    if no taskIds and both runtime pools and multi-runtime enabled:
+        for pending task with pool_wake_at and routingReason != human_pinned:
+            if wake age >= RUNTIME_WAKE_REROUTE_SEC (default 600)
+               or its pool circuit is open:
+                releaseTask(task, wake snapshot)       # CAS pending wake, remember old agent
+    warm = live non-Lead agents with pending + in_progress < maxTasks
+    if runtime pools disabled or multi-runtime disabled:
+        warm = legacy idle workers with capacity
+        require a live runtime only when multi-runtime mode is enabled
+    exclude offline and waiting_for_credentials from warm
+    exclude legacy warm agents at MAX_EMPTY_POLLS
+    scan unassigned tasks by priority, creation time, rowid within heartbeat limits:
+        worker = first warm agent passing eligibility and harness compatibility
+        if no worker and both flags enabled and task age >= RUNTIME_WAKE_GRACE_SEC (default 15):
+            wake = non-Lead agents bound to enabled provisionable pools with closed circuits
+            exclude waiting_for_credentials and agents without headroom
+            filter by eligibility and harness compatibility
+            exclude released agent unless it is the only eligible wake candidate
+            order by headroom descending, then name
+            worker = first candidate allowed by canClaim(agent, now, requestedByUserId)
+            if worker: pool_wake_at = now
+        if worker:
+            assignUnassignedTaskPending(task, worker, snapshots) # CAS state and capacity
+            reserve one slot                         # pending assignments consume headroom
 
 # HTTP poll auto-claim (getUnassignedTaskIdsForAgent(agent, 5, accept)):
 accept = task -> poolTaskRunsOnHarness(task, agent.harnessProvider)

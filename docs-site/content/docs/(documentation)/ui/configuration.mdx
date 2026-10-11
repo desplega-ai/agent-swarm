@@ -281,6 +281,18 @@ disable, and version activation. See [extension trust controls](/docs/guides/ext
 `RUNTIME_POOLS_ENABLED` enables runtime pool and controller configuration. It defaults to `false`.
 Restart the API after enabling it to seed built-in controllers and the default static pool.
 Agents remain unbound until an operator assigns a pool.
+Pool routing requires `MULTI_RUNTIME_ENABLED=true`. Otherwise, the heartbeat uses legacy routing.
+The API checks the pool flag for each routing event and timer tick.
+
+| Setting | Default | Behavior |
+|---------|---------|----------|
+| `RUNTIME_WAKE_GRACE_SEC` | `15` | Seconds to wait for a live worker before selecting a sleeping pool agent. |
+| `RUNTIME_WAKE_REROUTE_SEC` | `600` | Seconds before the router releases a pending wake assignment and tries another eligible agent. |
+| `RUNTIME_ROUTING_INTERVAL_MS` | `5000` | Milliseconds between routing sweeps. Restart the API after changing this value. |
+
+These settings accept nonnegative integers. Zero permits an immediate wake or reroute.
+For the routing interval, zero uses the default. Positive values below 500 use 500 milliseconds.
+Negative or invalid deployment values use the default interval.
 
 `RUNTIME_DEFAULT_DELIVERY` selects `poll` or `push` for pools without an explicit delivery mode.
 It defaults to `poll`. A pool's explicit mode takes precedence.

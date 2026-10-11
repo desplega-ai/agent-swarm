@@ -1,5 +1,15 @@
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  spyOn,
+  test,
+} from "bun:test";
+import {
+  assignUnassignedTaskPending,
   closeDb,
   createAgent,
   createTaskExtended,
@@ -14,6 +24,7 @@ import {
   updateAgentProfile,
   upsertBudget,
 } from "../be/db";
+import { isInTransaction } from "../be/db-client";
 import { upsertRuntimeInstance } from "../be/multi-runtime";
 import {
   createPoolAgent,
@@ -22,8 +33,10 @@ import {
   updateRuntimePool,
 } from "../be/runtime-pools/db";
 import { routePoolTasks, startPoolRouting, stopPoolRouting } from "../be/runtime-pools/routing";
+import { validateConfigValue } from "../be/swarm-config-guard";
 import { codeLevelTriage } from "../heartbeat/heartbeat";
 import type { Agent, RuntimePool } from "../types";
+import { workflowEventBus } from "../workflows/event-bus";
 
 const dbPath = "./test-runtime-pool-routing.sqlite";
 const envKeys = [
@@ -106,7 +119,135 @@ async function waitForAssignment(id: string, agentId: string) {
   expect(await getTaskById(id)).toMatchObject({ status: "pending", agentId });
 }
 
+async function createAfterEventDelivery(options: Parameters<typeof createTaskExtended>[1] = {}) {
+  const emitted = Promise.withResolvers<void>();
+  const onCreated = () => emitted.resolve();
+  workflowEventBus.on("task.created", onCreated);
+  try {
+    const task = await createTaskExtended("event sentinel", options);
+    await emitted.promise;
+    return task;
+  } finally {
+    workflowEventBus.off("task.created", onCreated);
+  }
+}
+
 describe("server pool routing", () => {
+  test.each([
+    "RUNTIME_WAKE_GRACE_SEC",
+    "RUNTIME_WAKE_REROUTE_SEC",
+    "RUNTIME_ROUTING_INTERVAL_MS",
+  ])("%s validates nonnegative integers", (key) => {
+    for (const value of ["0", "5000"]) expect(validateConfigValue(key, value)).toBeNull();
+    for (const value of ["-1", "0.5", "invalid"])
+      expect(validateConfigValue(key, value)).not.toBeNull();
+  });
+  test.each(["release", "reject"])("flag off suppresses %s routing events", async (action) => {
+    process.env.RUNTIME_POOLS_ENABLED = "false";
+    const holder = await sleeper();
+    const task = await createAfterEventDelivery(
+      action === "release" ? { agentId: holder.id } : { offeredTo: holder.id },
+    );
+    const events = spyOn(workflowEventBus, "emit");
+    try {
+      if (action === "release") await releaseTask(task.id);
+      else await rejectTask(task.id, holder.id);
+      // A creation event proves preceding post-commit event callbacks have completed.
+      await createAfterEventDelivery({ offeredTo: holder.id });
+      expect(events.mock.calls.filter(([event]) => event === "task.unassigned")).toHaveLength(0);
+    } finally {
+      events.mockRestore();
+    }
+  });
+  test("assignment CAS rejects changed snapshots", async () => {
+    const agent = await sleeper();
+    const task = await createTaskExtended("pool work");
+    await updateAgentProfile(agent.id, { role: "changed" });
+    await getDbClient().run("UPDATE agents SET lastUpdatedAt = ? WHERE id = ?", [
+      "changed",
+      agent.id,
+    ]);
+    expect(
+      await assignUnassignedTaskPending(task.id, agent.id, { routingSnapshot: { task, agent } }),
+    ).toBeNull();
+    expect((await getTaskById(task.id))?.status).toBe("unassigned");
+  });
+  test("wake release CAS preserves work claimed after its snapshot", async () => {
+    const agent = await sleeper();
+    const task = await createTaskExtended("pool work");
+    await routePoolTasks({ taskIds: [task.id], now: afterGrace(task) });
+    const snapshot = await getTaskById(task.id);
+    expect(snapshot?.agentId).toBe(agent.id);
+    await startTask(task.id);
+    expect(await releaseTask(task.id, snapshot!)).toBeNull();
+    expect((await getTaskById(task.id))?.status).toBe("in_progress");
+  });
+  test("pools require multi-runtime and warn once at startup", async () => {
+    process.env.MULTI_RUNTIME_ENABLED = "false";
+    await sleeper();
+    await live("busy", 2);
+    const task = await createTaskExtended("pool work");
+    expect(await routePoolTasks({ now: afterGrace(task) })).toEqual([]);
+    const idle = await createAgent({ name: "legacy", isLead: false, status: "idle" });
+    expect(await routePoolTasks()).toEqual([{ taskId: task.id, agentId: idle.id }]);
+    const warning = spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      startPoolRouting();
+      startPoolRouting();
+      expect(warning).toHaveBeenCalledTimes(1);
+      expect(warning.mock.calls[0]?.[0]).toContain("MULTI_RUNTIME_ENABLED");
+    } finally {
+      warning.mockRestore();
+    }
+  });
+  test("listeners route when the flag is enabled after startup", async () => {
+    process.env.RUNTIME_POOLS_ENABLED = "false";
+    const warm = await live();
+    startPoolRouting();
+    process.env.RUNTIME_POOLS_ENABLED = "true";
+    const task = await createTaskExtended("enabled later");
+    await waitForAssignment(task.id, warm.id);
+  });
+  test.each([
+    ["0", 5000],
+    ["-1", 5000],
+    ["20", 500],
+    ["750", 750],
+  ] as const)("interval %s uses %d milliseconds", (configured, expected) => {
+    process.env.RUNTIME_ROUTING_INTERVAL_MS = configured;
+    const interval = spyOn(globalThis, "setInterval");
+    try {
+      startPoolRouting();
+      expect(interval.mock.calls[0]?.[1]).toBe(expected);
+    } finally {
+      stopPoolRouting();
+      interval.mockRestore();
+    }
+  });
+  test("targeted routing reads snapshots outside a write transaction and skips releases", async () => {
+    const sleeping = await sleeper("sleeping", 2);
+    const held = await createTaskExtended("wake");
+    const at = afterGrace(held);
+    await routePoolTasks({ taskIds: [held.id], now: at });
+    const task = await createTaskExtended("targeted");
+    const client = getDbClient();
+    const query = client.query.bind(client);
+    const reads = spyOn(client, "query").mockImplementation(async (sql, params) => {
+      expect(isInTransaction()).toBe(false);
+      expect(sql).not.toContain("pool_wake_at IS NOT NULL");
+      return await query(sql, params);
+    });
+    try {
+      await routePoolTasks({ taskIds: [task.id], now: new Date(at.getTime() + 600001) });
+      expect(await getTaskById(held.id)).toMatchObject({
+        agentId: sleeping.id,
+        poolWakeAt: at.toISOString(),
+      });
+      expect(reads).toHaveBeenCalled();
+    } finally {
+      reads.mockRestore();
+    }
+  });
   test("tier 1 wins over a wakeable agent after grace", async () => {
     await sleeper();
     const warm = await live();
@@ -240,6 +381,55 @@ describe("server pool routing", () => {
     expect(await routePoolTasks({ now: afterGrace(task) })).toEqual([]);
     expect(await getTaskById(task.id)).toMatchObject({ status: "unassigned" });
   });
+  test("agent A refused, agent B allowed", async () => {
+    const a = await sleeper("A");
+    const b = await sleeper("B");
+    await upsertBudget("agent", a.id, 0);
+    const task = await createTaskExtended("pool work");
+    expect(await routePoolTasks({ now: afterGrace(task) })).toEqual([
+      { taskId: task.id, agentId: b.id },
+    ]);
+  });
+  test("timeout chooses another sleeping agent without a warm agent", async () => {
+    const first = await sleeper("A");
+    const second = await sleeper("B");
+    const task = await createTaskExtended("pool work");
+    const at = afterGrace(task);
+    await routePoolTasks({ now: at });
+    expect((await getTaskById(task.id))?.agentId).toBe(first.id);
+    await routePoolTasks({ now: new Date(at.getTime() + 600001) });
+    expect((await getTaskById(task.id))?.agentId).toBe(second.id);
+  });
+  test("timeout cannot retry the old agent when the alternative refuses budget", async () => {
+    await sleeper("A");
+    const other = await sleeper("B");
+    const task = await createTaskExtended("pool work");
+    const at = afterGrace(task);
+    await routePoolTasks({ now: at });
+    await upsertBudget("agent", other.id, 0);
+    expect(await routePoolTasks({ now: new Date(at.getTime() + 600001) })).toEqual([]);
+    expect((await getTaskById(task.id))?.status).toBe("unassigned");
+  });
+  test.each([
+    false,
+    true,
+  ])("sole sleeping candidate retries only with a closed circuit (open=%s)", async (open) => {
+    const sleeping = await sleeper();
+    const task = await createTaskExtended("pool work");
+    const at = afterGrace(task);
+    await routePoolTasks({ now: at });
+    const now = new Date(at.getTime() + 600001);
+    if (open)
+      await getDbClient().run("UPDATE runtime_pools SET circuit_open_until = ?", [
+        new Date(now.getTime() + 60000).toISOString(),
+      ]);
+    await routePoolTasks({ now });
+    expect(await getTaskById(task.id)).toMatchObject(
+      open
+        ? { status: "unassigned" }
+        : { status: "pending", agentId: sleeping.id, poolWakeAt: now.toISOString() },
+    );
+  });
   test("selects most headroom and breaks ties by name, reserving pending slots", async () => {
     const beta = await sleeper("beta", 3);
     const alpha = await sleeper("alpha", 3);
@@ -298,7 +488,7 @@ describe("server pool routing", () => {
     const task = await createTaskExtended("pool work");
     await waitForAssignment(task.id, warm.id);
     const offer = await createTaskExtended("offered work", { offeredTo: warm.id });
-    await Bun.sleep(30);
+    expect(await routePoolTasks({ taskIds: [offer.id] })).toEqual([]);
     expect((await getTaskById(offer.id))?.status).toBe("offered");
   });
   test.each([
@@ -317,12 +507,12 @@ describe("server pool routing", () => {
     await expect(
       getDbClient().transaction(async () => {
         await mutation();
-        await Bun.sleep(20);
+
         expect((await getTaskById(task.id))?.status).toBe("unassigned");
         throw new Error("rollback");
       }),
     ).rejects.toThrow("rollback");
-    await Bun.sleep(20);
+    expect(await routePoolTasks({ taskIds: [task.id] })).toEqual([]);
     expect((await getTaskById(task.id))?.status).toBe(action === "release" ? "pending" : "offered");
     await mutation();
     await waitForAssignment(task.id, warm.id);
@@ -331,12 +521,18 @@ describe("server pool routing", () => {
     process.env.RUNTIME_WAKE_GRACE_SEC = "0";
     process.env.RUNTIME_ROUTING_INTERVAL_MS = "20";
     const sleeping = await sleeper("sleeping", 2);
-    const task = await createTaskExtended("before startup");
+    const task = await createAfterEventDelivery();
     startPoolRouting();
     await waitForAssignment(task.id, sleeping.id);
-    stopPoolRouting();
+    const off = spyOn(workflowEventBus, "off");
+    try {
+      stopPoolRouting();
+      expect(off.mock.calls.map(([event]) => event)).toEqual(["task.created", "task.unassigned"]);
+    } finally {
+      off.mockRestore();
+    }
     const later = await createTaskExtended("after stop");
-    await Bun.sleep(50);
+
     expect((await getTaskById(later.id))?.status).toBe("unassigned");
   });
 });
