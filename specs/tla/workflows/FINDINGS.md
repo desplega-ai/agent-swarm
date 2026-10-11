@@ -370,3 +370,36 @@ verdict as on `262770f33`; every config that holds has the same distinct-state c
 | `Probe-cancel-finalize.cfg` | CX13 found | 773 | 17 |
 | `Probe-input-await.cfg` | CX6 found | 309 | 12 |
 | `Probe-replay-unreadable.cfg` / control | CX14 found / holds | 1,408 / 13,005 | 20 / - |
+
+## Sync with #2030 (`main` @ `c7baedb48`)
+
+#2030 adds a `sub-workflow` node: the step starts a child run, parks `waiting`, and resumes
+through `resumeFromChildRun` from three places: the `workflow.child.finished` event, an inline
+call right after the park, and a new heartbeat case (Case 5) with no run-status filter. The new
+`ChildRunResume` constant models it (see ACTIONS.md, "Sub-workflow steps"). Every other config
+sets it `FALSE` and gives the same verdict as on `7912fff73`; every config that holds has the
+same distinct-state count. `src/tests/workflow-tla-races.test.ts`: 8 pass / 0 fail / 0
+`test.failing`; `src/tests/workflow-sub-workflow.test.ts`: 12 pass / 0 fail.
+
+`Probe-child-run.cfg` (two leaf branches, every branch a sub-workflow step, no crash, no user
+actions) holds every invariant and property: the three resume paths race only through the
+step CAS, so at most one claims the row. Its control, the same graph with agent-task steps,
+finds CX12: a sub-workflow step has no task retry, so the poller never claims it. A converging
+variant (`Branches = {"A", "B"}`, `Converge = TRUE`, `MaxSteps = 5`) also holds, 111,336
+distinct states. With a crash, both values reach the open crash traces (`AtMostOneExecuting`,
+`CompletedRunQuiescent`), so the probe leaves crashes out.
+
+| Config | Result | Distinct states | Trace |
+|---|---|---|---|
+| `Workflows.cfg` | `JoinWaitsForBranches` violated (CX8) | 26,661 | 25 |
+| `Long.cfg` | `AtMostOneExecuting` violated (crash trace) | 12,844 | 18 |
+| `Cal-bf12ab53.cfg` / control | found / holds | 405 / 160 | 11 / - |
+| `Cal-d4753302.cfg` / control | found / found | 4,605 / 3,216 | 32 / 32 |
+| `Fix-CX1` .. `Fix-CX7` | all hold | 4,073 / 471,850 / 308,120 / 113,010 / 26,296 / 3,325 / 3,778 | - |
+| `Ctl-CX2` .. `Ctl-CX7` | all find their CX | 1,878 / 2,607 / 33,328 / 9,508 / 475 / 928 | 23 / 19 / 28 / 32 / 12 / 27 |
+| `Fix-CX11` / `Ctl-CX11` | holds / found | 78,384 / 1,141 | - / 20 |
+| `Probe-task-retry.cfg` | CX12 found | 944,972 | 34 |
+| `Probe-cancel-finalize.cfg` | CX13 found | 1,023 | 18 |
+| `Probe-input-await.cfg` | CX6 found | 339 | 12 |
+| `Probe-replay-unreadable.cfg` / control | CX14 found / holds | 1,437 / 13,005 | 19 / - |
+| `Probe-child-run.cfg` / control | holds / CX12 found | 14,004 / 176,483 | - / 34 |
