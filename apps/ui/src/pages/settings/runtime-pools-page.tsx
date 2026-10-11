@@ -3,11 +3,7 @@ import { Boxes, Plus } from "lucide-react";
 import { useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAgents } from "@/api/hooks/use-agents";
-import {
-  useRuntimeControllers,
-  useRuntimePools,
-  useRuntimePoolsRuntimes,
-} from "@/api/hooks/use-runtime-pools";
+import { useRuntimeControllers, useRuntimePools } from "@/api/hooks/use-runtime-pools";
 import type { RuntimePool } from "@/api/types";
 import { DataGrid } from "@/components/shared/data-grid";
 import { EmptyState } from "@/components/shared/empty-state";
@@ -17,6 +13,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/ui/page-header";
+import { Skeleton } from "@/components/ui/skeleton";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { deliveryLabel, RUNTIME_KIND_LABEL, RUNTIME_LIFECYCLE_LABEL } from "@/lib/runtime-pools";
 import {
@@ -26,15 +23,35 @@ import {
   RuntimePoolsTabs,
 } from "./runtime-pools-shared";
 
+/** A value from a secondary query: a number, or why there is none yet. */
+type Pending<T> = T | "loading" | "error";
+
 interface PoolRow extends RuntimePool {
-  controllerName: string;
-  agentCount: number;
-  liveRuntimes: number;
-  provisioningRuntimes: number;
+  controllerName: Pending<string>;
+  agentCount: Pending<number>;
 }
 
-function runtimeCounts(row: PoolRow): string {
-  return `${row.liveRuntimes} live · ${row.provisioningRuntimes} provisioning`;
+/** Plain text for a pending value, for the phone list meta line. */
+function pendingText<T>(value: Pending<T>, format: (value: T) => string): string {
+  if (value === "loading") return "Loading…";
+  if (value === "error") return "Unavailable";
+  return format(value);
+}
+
+function PendingCell<T>({
+  value,
+  children,
+}: {
+  value: Pending<T>;
+  children: (value: T) => string;
+}) {
+  if (value === "loading") return <Skeleton className="h-3 w-12" />;
+  if (value === "error") return <span className="text-muted-foreground">Unavailable</span>;
+  return <>{children(value)}</>;
+}
+
+function agentsText(count: number): string {
+  return `${count} agent${count === 1 ? "" : "s"}`;
 }
 
 function RuntimePoolsList() {
@@ -43,32 +60,39 @@ function RuntimePoolsList() {
   const pools = useRuntimePools();
   const controllers = useRuntimeControllers();
   const agents = useAgents();
-  const poolIds = useMemo(() => (pools.data ?? []).map((pool) => pool.id), [pools.data]);
-  const runtimes = useRuntimePoolsRuntimes(poolIds);
 
+  // Runtime counts live on the detail page only: the API has no aggregate
+  // route, and one `/runtimes` poll per listed pool does not scale.
   const rows = useMemo<PoolRow[]>(() => {
     const controllerNames = new Map((controllers.data ?? []).map((c) => [c.id, c.name]));
-    return (pools.data ?? []).map((pool, index) => {
-      const poolRuntimes = runtimes[index]?.data ?? [];
+    return (pools.data ?? []).map((pool) => {
       const controllerId = pool.placements[0] ?? "";
       return {
         ...pool,
-        controllerName: controllerNames.get(controllerId) ?? controllerId,
-        agentCount: (agents.data ?? []).filter((agent) => agent.runtimePoolId === pool.id).length,
-        liveRuntimes: poolRuntimes.filter((runtime) => runtime.status === "active").length,
-        provisioningRuntimes: poolRuntimes.filter((runtime) => runtime.status === "provisioning")
-          .length,
+        controllerName: controllers.data
+          ? (controllerNames.get(controllerId) ?? controllerId)
+          : controllers.isError
+            ? "error"
+            : "loading",
+        agentCount: agents.data
+          ? agents.data.filter((agent) => agent.runtimePoolId === pool.id).length
+          : agents.isError
+            ? "error"
+            : "loading",
       };
     });
-  }, [pools.data, controllers.data, agents.data, runtimes]);
+  }, [pools.data, controllers.data, controllers.isError, agents.data, agents.isError]);
 
   const columnDefs = useMemo<ColDef<PoolRow>[]>(
     () => [
       {
         headerName: "Name",
-        field: "name",
+        colId: "name",
         flex: 1,
         minWidth: 170,
+        // The cell also shows the controller name: put it in the value so the
+        // grid repaints the cell when the controllers query settles.
+        valueGetter: (p) => (p.data ? `${p.data.name} ${String(p.data.controllerName)}` : ""),
         cellRenderer: (p: ICellRendererParams<PoolRow>) =>
           p.data ? (
             <div className="leading-tight py-1">
@@ -80,9 +104,11 @@ function RuntimePoolsList() {
                   </Badge>
                 )}
               </div>
-              <div className="text-xs text-muted-foreground truncate">
+              <div className="flex items-center gap-1 text-xs text-muted-foreground truncate">
                 {RUNTIME_KIND_LABEL[p.data.kind]} ·{" "}
-                <span className="font-mono">{p.data.controllerName}</span>
+                <span className="font-mono">
+                  <PendingCell value={p.data.controllerName}>{(name) => name}</PendingCell>
+                </span>
               </div>
             </div>
           ) : null,
@@ -101,17 +127,11 @@ function RuntimePoolsList() {
       {
         headerName: "Agents",
         field: "agentCount",
-        width: 90,
+        width: 110,
         suppressSizeToFit: true,
         cellClass: "tabular-nums",
-      },
-      {
-        headerName: "Runtimes",
-        colId: "runtimes",
-        width: 160,
-        suppressSizeToFit: true,
-        valueGetter: (p) => (p.data ? runtimeCounts(p.data) : ""),
-        cellClass: "text-xs tabular-nums",
+        cellRenderer: (p: ICellRendererParams<PoolRow>) =>
+          p.data ? <PendingCell value={p.data.agentCount}>{String}</PendingCell> : null,
       },
       {
         headerName: "Health",
@@ -143,13 +163,28 @@ function RuntimePoolsList() {
       />
       <RuntimePoolsTabs />
 
-      {pools.error && (
+      {pools.error ? (
         <Alert variant="destructive">
           <AlertDescription>Failed to load runtime pools: {pools.error.message}</AlertDescription>
         </Alert>
-      )}
+      ) : null}
+      {agents.error ? (
+        <Alert variant="destructive">
+          <AlertDescription>
+            Failed to load agents, so agent counts are unavailable: {agents.error.message}
+          </AlertDescription>
+        </Alert>
+      ) : null}
+      {controllers.error ? (
+        <Alert variant="destructive">
+          <AlertDescription>
+            Failed to load controllers, so controller names are unavailable:{" "}
+            {controllers.error.message}
+          </AlertDescription>
+        </Alert>
+      ) : null}
 
-      {!pools.error && rows.length === 0 ? (
+      {pools.error ? null : rows.length === 0 ? (
         <EmptyState
           icon={Boxes}
           title="No runtime pools"
@@ -166,8 +201,7 @@ function RuntimePoolsList() {
               status={<PoolHealthBadge pool={row} />}
               meta={[
                 RUNTIME_KIND_LABEL[row.kind],
-                `${row.agentCount} agent${row.agentCount === 1 ? "" : "s"}`,
-                runtimeCounts(row),
+                pendingText(row.agentCount, agentsText),
                 !row.enabled && "Disabled",
               ]}
             />

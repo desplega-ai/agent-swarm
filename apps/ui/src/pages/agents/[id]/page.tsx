@@ -13,12 +13,12 @@ import type {
   AgentTask,
   McpServerWithInstallInfo,
 } from "@/api/types";
-import { BetaTag } from "@/components/layout/app-sidebar";
 import { AgentActivityGraph } from "@/components/shared/agent-activity-graph";
 import { AgentAppearancePicker } from "@/components/shared/agent-appearance-picker";
 import { AgentAvatar as AgentAvatarDisc } from "@/components/shared/agent-avatar";
 import { AgentRuntimePoolSelect } from "@/components/shared/agent-runtime-pool-select";
 import { AgentRuntimeSettings } from "@/components/shared/agent-runtime-settings";
+import { BetaTag } from "@/components/shared/beta-tag";
 import { HarnessCell } from "@/components/shared/harness-cell";
 import { MobileList, MobileListRow } from "@/components/shared/mobile-list";
 import { StatusBadge } from "@/components/shared/status-badge";
@@ -441,7 +441,7 @@ export default function AgentDetailPage() {
                           label={
                             <span className="inline-flex items-center gap-2">
                               Runtime pool
-                              <BetaTag tooltip="Run agents on Docker or E2B runtimes" />
+                              <BetaTag tooltip="Run agents on Docker or E2B runtimes" side="top" />
                             </span>
                           }
                         >

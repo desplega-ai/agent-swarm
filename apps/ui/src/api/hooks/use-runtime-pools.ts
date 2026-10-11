@@ -1,10 +1,11 @@
-import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
+  Agent,
   RuntimeControllerInput,
   RuntimePoolCreateAgentInput,
   RuntimePoolInput,
 } from "@/api/types";
-import { api } from "../client";
+import { api, RuntimePoolApiError } from "../client";
 
 /** Runtimes poll cadence while a pool detail page is open (no realtime channel in v1). */
 const RUNTIMES_REFETCH_MS = 5_000;
@@ -22,6 +23,9 @@ export function useRuntimePool(id: string | undefined) {
     queryKey: ["runtime-pool", id],
     queryFn: () => api.fetchRuntimePool(id as string),
     enabled: !!id,
+    // A missing pool stays missing: show "not found" at once instead of retrying.
+    retry: (failures, error) =>
+      !(error instanceof RuntimePoolApiError && error.status === 404) && failures < 3,
   });
 }
 
@@ -31,20 +35,6 @@ export function useRuntimePoolRuntimes(id: string | undefined) {
     queryFn: () => api.fetchRuntimePoolRuntimes(id as string),
     enabled: !!id,
     refetchInterval: RUNTIMES_REFETCH_MS,
-  });
-}
-
-/**
- * Runtimes for every listed pool, for the list page's live/provisioning
- * counts. The API has no aggregate route, so this is one request per pool on
- * the default poll.
- */
-export function useRuntimePoolsRuntimes(ids: string[]) {
-  return useQueries({
-    queries: ids.map((id) => ({
-      queryKey: ["runtime-pool-runtimes", id],
-      queryFn: () => api.fetchRuntimePoolRuntimes(id),
-    })),
   });
 }
 
@@ -119,12 +109,26 @@ export function useCreateRuntimePoolAgent(poolId: string) {
   });
 }
 
+/**
+ * The agent page polls `["agent", id]`. A GET that started before the PUT
+ * would answer with the old pool and snap the select back, so cancel it first
+ * and write the PUT response into the cache (dashboard-ui rule).
+ */
 export function useBindAgentRuntimePool() {
   const invalidate = useRuntimePoolInvalidator();
+  const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ agentId, poolId }: { agentId: string; poolId: string | null }) =>
       api.bindAgentRuntimePool(agentId, poolId),
-    onSuccess: () => invalidate(),
+    onMutate: async ({ agentId }) => {
+      await queryClient.cancelQueries({ queryKey: ["agent", agentId] });
+    },
+    onSuccess: (agent) => {
+      queryClient.setQueryData<Agent>(["agent", agent.id], (old) =>
+        old ? { ...old, runtimePoolId: agent.runtimePoolId ?? null } : old,
+      );
+      invalidate();
+    },
   });
 }
 

@@ -4,6 +4,7 @@ import { Navigate, useLocation } from "react-router-dom";
 import type { RuntimePool } from "@/api/types";
 import { PageSkeleton } from "@/components/shared/page-skeleton";
 import { SectionTabs } from "@/components/shared/section-tabs";
+import { StatusBadge } from "@/components/shared/status-badge";
 import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { isCircuitOpen, useRuntimePoolsGate } from "@/lib/runtime-pools";
@@ -39,7 +40,11 @@ export function RuntimePoolsTabs() {
   );
 }
 
-/** Pool health as one chip: circuit open, last error, or healthy. */
+/**
+ * Pool health as one chip. Healthy and circuit-open use `StatusBadge`
+ * (`healthy` / `unhealthy`). Failures under the circuit threshold have no
+ * `StatusBadge` state, so they keep a local warning tag with the count.
+ */
 export function PoolHealthBadge({
   pool,
 }: {
@@ -49,17 +54,13 @@ export function PoolHealthBadge({
     return (
       <Tooltip>
         <TooltipTrigger asChild>
-          <Badge
-            variant="outline"
-            size="tag"
-            className="border-status-error/30 text-status-error-strong"
-          >
-            Circuit open
-          </Badge>
+          <span className="inline-flex">
+            <StatusBadge status="unhealthy" />
+          </span>
         </TooltipTrigger>
         <TooltipContent className="max-w-80">
-          Provisioning paused until {formatSmartTime(pool.circuitOpenUntil as string)}.
-          {pool.lastError ? ` Last error: ${pool.lastError}` : ""}
+          Circuit open: provisioning paused until {formatSmartTime(pool.circuitOpenUntil as string)}
+          .{pool.lastError ? ` Last error: ${pool.lastError}` : ""}
         </TooltipContent>
       </Tooltip>
     );
@@ -80,13 +81,5 @@ export function PoolHealthBadge({
       </Tooltip>
     );
   }
-  return (
-    <Badge
-      variant="outline"
-      size="tag"
-      className="border-status-success/30 text-status-success-strong"
-    >
-      Healthy
-    </Badge>
-  );
+  return <StatusBadge status="healthy" />;
 }

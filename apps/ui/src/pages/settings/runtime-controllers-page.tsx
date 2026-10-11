@@ -20,6 +20,7 @@ import {
 } from "@/components/shared/key-value-editor";
 import { MobileList } from "@/components/shared/mobile-list";
 import { PageSkeleton } from "@/components/shared/page-skeleton";
+import { StatusBadge } from "@/components/shared/status-badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { AlertCallout } from "@/components/ui/alert-callout";
 import {
@@ -57,10 +58,11 @@ import { useIsMobile } from "@/hooks/use-mobile";
 import { formatRelative } from "@/lib/relative-time";
 import {
   COMING_SOON_KINDS,
+  CONTROLLER_STATUS_BADGE,
   RUNTIME_KIND_LABEL,
   RUNTIME_PROVIDER_KINDS,
-  RUNTIME_STATE_TONE,
 } from "@/lib/runtime-pools";
+import { errorProps, FieldError } from "./runtime-pool-fields";
 import { RuntimePoolsGuard, RuntimePoolsTabs } from "./runtime-pools-shared";
 
 type Placement = RuntimeController["placement"];
@@ -69,12 +71,48 @@ function placementLabel(placement: Placement): string {
   return placement === "builtin" ? "Built in" : "Remote";
 }
 
+/** `StatusBadge` where a state fits; `unknown` has no equivalent and stays a neutral tag. */
 function StatusChip({ controller }: { controller: RuntimeController }) {
+  const status = CONTROLLER_STATUS_BADGE[controller.status];
+  if (status) return <StatusBadge status={status} />;
   return (
-    <Badge variant="outline" size="tag" className={RUNTIME_STATE_TONE[controller.status]}>
-      {controller.status}
+    <Badge variant="outline" size="tag" className="text-status-neutral-strong">
+      Unknown
     </Badge>
   );
+}
+
+/**
+ * Secret rows to the write-only `secretConfig` patch. A blank value keeps a
+ * stored key and is invalid for a new key. Only an explicit Remove sends `null`.
+ */
+function secretPatch(
+  rows: KeyValueRow[],
+  stored: string[],
+  removed: string[],
+): { patch: Record<string, string | null>; error: string | null } {
+  const patch: Record<string, string | null> = {};
+  const missingValue: string[] = [];
+  let missingKey = false;
+  for (const row of rows) {
+    const key = row.key.trim();
+    if (!key) {
+      if (row.value) missingKey = true;
+      continue;
+    }
+    if (row.value) patch[key] = row.value;
+    else if (!stored.includes(key)) missingValue.push(key);
+  }
+  for (const key of removed) if (!(key in patch)) patch[key] = null;
+  const duplicates = duplicateKeys(rows);
+  const error = missingKey
+    ? "Enter a key for every secret value."
+    : missingValue.length > 0
+      ? `Enter a value for ${missingValue.join(", ")}, or remove the row.`
+      : duplicates.length > 0
+        ? `Duplicate keys: ${duplicates.join(", ")}.`
+        : null;
+  return { patch, error };
 }
 
 function SecretKeyChips({ controller }: { controller: RuntimeController }) {
@@ -136,16 +174,16 @@ function ControllerDialog({
       ? "Use 200 characters or fewer."
       : null;
   const configDuplicates = duplicateKeys(config);
-  const secretDuplicates = duplicateKeys(secrets);
-  const valid = !nameError && configDuplicates.length === 0 && secretDuplicates.length === 0;
+  const secretState = secretPatch(secrets, controller?.secretConfigKeys ?? [], removedSecrets);
+  const valid = !nameError && configDuplicates.length === 0 && !secretState.error;
   const pending = create.isPending || update.isPending;
+  const shownNameError = showErrors ? (nameError ?? undefined) : undefined;
 
   function submit() {
     setShowErrors(true);
     setError(null);
     if (!valid) return;
-    const secretConfig: Record<string, string | null> = recordFromRows(secrets);
-    for (const key of removedSecrets) if (!(key in secretConfig)) secretConfig[key] = null;
+    const secretConfig = secretState.patch;
     const hasSecrets = Object.keys(secretConfig).length > 0;
     const done = {
       onSuccess: (saved: RuntimeController) => {
@@ -160,6 +198,9 @@ function ControllerDialog({
           id: controller.id,
           input: {
             name: trimmedName,
+            // The API rejects a kind change while a pool of another kind uses
+            // this controller; that error shows in the dialog.
+            ...(kind !== controller.kind ? { kind } : {}),
             placement,
             config: recordFromRows(config),
             ...(hasSecrets ? { secretConfig } : {}),
@@ -202,24 +243,20 @@ function ControllerDialog({
               id="controller-name"
               value={name}
               onChange={(event) => setName(event.target.value)}
-              aria-invalid={showErrors && Boolean(nameError)}
               autoFocus
+              {...errorProps("controller-name", shownNameError)}
             />
-            {showErrors && nameError ? (
-              <p className="text-xs text-status-error-strong">{nameError}</p>
-            ) : null}
+            <FieldError fieldId="controller-name" message={shownNameError} />
           </SettingsRow>
           <div className="grid gap-4 sm:grid-cols-2">
             <SettingsRow
               label="Provider"
               htmlFor="controller-kind"
-              helper={controller ? "Fixed after create." : undefined}
+              helper={
+                controller ? "Pools on this controller must use the same provider." : undefined
+              }
             >
-              <Select
-                value={kind}
-                onValueChange={(v) => setKind(v as RuntimeProviderKind)}
-                disabled={Boolean(controller)}
-              >
+              <Select value={kind} onValueChange={(v) => setKind(v as RuntimeProviderKind)}>
                 <SelectTrigger id="controller-kind" className="w-full">
                   <SelectValue />
                 </SelectTrigger>
@@ -292,6 +329,7 @@ function ControllerDialog({
                         type="button"
                         size="sm"
                         variant="ghost"
+                        aria-label={removed ? `Keep secret ${key}` : `Remove secret ${key}`}
                         onClick={() =>
                           setRemovedSecrets(
                             removed
@@ -316,10 +354,8 @@ function ControllerDialog({
               valuePlaceholder="secret value"
               secret
             />
-            {secretDuplicates.length > 0 ? (
-              <p className="text-xs text-status-error-strong">
-                Duplicate keys: {secretDuplicates.join(", ")}.
-              </p>
+            {showErrors && secretState.error ? (
+              <p className="text-xs text-status-error-strong">{secretState.error}</p>
             ) : null}
           </SettingsRow>
           {error ? (
@@ -347,7 +383,9 @@ function RuntimeControllersList() {
   const remove = useDeleteRuntimeController();
   // `undefined` = closed, `null` = create, a controller = edit.
   const [editing, setEditing] = useState<RuntimeController | null | undefined>(undefined);
+  // The target outlives `open`, so the title keeps its name while the dialog closes.
   const [deleting, setDeleting] = useState<RuntimeController | null>(null);
+  const [deleteOpen, setDeleteOpen] = useState(false);
 
   const columnDefs = useMemo<ColDef<RuntimeController>[]>(
     () => [
@@ -418,6 +456,7 @@ function RuntimeControllersList() {
                   onClick={(event) => {
                     event.stopPropagation();
                     setDeleting(p.data ?? null);
+                    setDeleteOpen(true);
                   }}
                 >
                   <Trash2 className="h-4 w-4" />
@@ -515,12 +554,7 @@ function RuntimeControllersList() {
         />
       ) : null}
 
-      <AlertDialog
-        open={deleting !== null}
-        onOpenChange={(open) => {
-          if (!open) setDeleting(null);
-        }}
-      >
+      <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Delete {deleting?.name}?</AlertDialogTitle>

@@ -17,8 +17,8 @@ import {
 import { useCallback, useEffect } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { useOnboarding } from "@/api/hooks/use-onboarding";
-import { BetaTag } from "@/components/layout/app-sidebar";
 import { AnimatedReveal } from "@/components/shared/animated-reveal";
+import { BetaTag } from "@/components/shared/beta-tag";
 import { SectionTabs } from "@/components/shared/section-tabs";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -157,7 +157,7 @@ export function SettingsLayout() {
             >
               <item.icon className="size-4 shrink-0" />
               <span>{item.title}</span>
-              {item.beta ? <BetaTag tooltip={item.beta.tooltip} /> : null}
+              {item.beta ? <BetaTag tooltip={item.beta.tooltip} className="ml-auto" /> : null}
             </NavLink>
           ))}
         </nav>

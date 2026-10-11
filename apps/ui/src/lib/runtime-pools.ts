@@ -61,17 +61,25 @@ export function deliveryLabel(delivery: RuntimeDeliveryMode | null): string {
   return RUNTIME_DELIVERY_LABEL[delivery ?? "default"];
 }
 
-/** Chip classes per runtime or controller state. Status tokens only. */
-export const RUNTIME_STATE_TONE: Record<
-  RuntimePoolRuntime["status"] | RuntimeController["status"],
-  string
-> = {
-  active: "border-status-success/30 text-status-success-strong",
-  online: "border-status-success/30 text-status-success-strong",
-  provisioning: "border-status-pending/30 text-status-pending-strong",
-  offline: "border-status-neutral/30 text-status-neutral-strong",
-  unknown: "border-status-neutral/30 text-status-neutral-strong",
-};
+/**
+ * `StatusBadge` status per runtime state: a live runtime is "running", one the
+ * controller is still starting is "starting".
+ */
+export const RUNTIME_STATUS_BADGE = {
+  active: "running",
+  provisioning: "starting",
+  offline: "offline",
+} as const satisfies Record<RuntimePoolRuntime["status"], string>;
+
+/**
+ * `StatusBadge` status per controller state. `unknown` has no `StatusBadge`
+ * equivalent, so it maps to `null` and renders a neutral tag.
+ */
+export const CONTROLLER_STATUS_BADGE = {
+  online: "healthy",
+  offline: "offline",
+  unknown: null,
+} as const satisfies Record<RuntimeController["status"], string | null>;
 
 /** The circuit breaker is open while `circuitOpenUntil` is in the future. */
 export function isCircuitOpen(pool: Pick<RuntimePool, "circuitOpenUntil">): boolean {
