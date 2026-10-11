@@ -31818,6 +31818,16 @@
               }
             }
           },
+          "403": {
+            "description": "Task belongs to another token agent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "404": {
             "description": "Task not found",
             "content": {
@@ -45268,8 +45278,8 @@
     },
     "/api/sessions/tokens": {
       "post": {
-        "summary": "Mint an ephemeral session token for an ACP provider session",
-        "description": "Returns a short-lived aseph_ bearer for use by the ACP adapter in place of the full operator key. The token expires at the requested TTL and is actively revoked when the session ends. Only the operator key may mint session tokens.",
+        "summary": "Mint an ephemeral task or runtime token",
+        "description": "Operators can mint task or runtime tokens. Runtime tokens can mint task tokens for their own assigned tasks. Child tokens expire with their parent runtime.",
         "tags": [
           "Sessions"
         ],
@@ -45292,6 +45302,10 @@
                     "type": "string",
                     "minLength": 1
                   },
+                  "runtimeId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
                   "ttlMs": {
                     "type": "integer",
                     "exclusiveMinimum": 0,
@@ -45299,9 +45313,7 @@
                   }
                 },
                 "required": [
-                  "agentId",
-                  "taskId",
-                  "ttlMs"
+                  "agentId"
                 ]
               }
             }
@@ -45342,6 +45354,16 @@
           },
           "401": {
             "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Token cannot mint for this agent or task",
             "content": {
               "application/json": {
                 "schema": {

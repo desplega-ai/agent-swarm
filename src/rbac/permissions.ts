@@ -25,6 +25,10 @@ export const PERMISSIONS = {
     description: "Update another agent's profile.",
     namespace: "agent",
   },
+  "agent.act.any": {
+    description: "Act on another agent's scope over HTTP.",
+    namespace: "agent",
+  },
   "agent.context.read.any": {
     description: "View or diff another agent's context history.",
     namespace: "agent",

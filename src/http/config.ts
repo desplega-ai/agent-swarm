@@ -28,11 +28,11 @@ import { getRequestAuth } from "../utils/request-auth-context";
 import { registerVolatileSecret } from "../utils/secret-scrubber";
 import { reloadGlobalConfigsAndIntegrations, scheduleIntegrationsReload } from "./core";
 import { route } from "./route-def";
-import { jsonError } from "./utils";
+import { duplicateGuardedQueryKey, jsonError } from "./utils";
 
 const MAX_ENV_PRESENCE_KEYS = 200;
 const SECRETS_FORCE_MASK_NOTE =
-  " (secret values masked: reading unmasked secrets requires the lead agent)";
+  " (secret values masked: this token cannot read secrets in this scope)";
 
 // Config keys the API server owns for its own use and must NEVER hand out over
 // HTTP — workers/entrypoints read config to build their env, and the agent-fs
@@ -52,32 +52,47 @@ function singleHeader(req: IncomingMessage, name: string): string | undefined {
   return Array.isArray(raw) ? raw[0] : raw;
 }
 
-async function requestMayReadSecrets(req: IncomingMessage): Promise<boolean> {
+async function requestSecretReadScope(
+  req: IncomingMessage,
+  resolvedScope?: { agentId?: string; repoId?: string },
+): Promise<"all" | "self" | "none"> {
   const auth = getRequestAuth(req);
-  if (auth?.kind === "operator") return true;
+  if (auth?.kind === "operator") return "all";
   if (auth?.kind === "agent") {
     const agent = await getAgentById(auth.agentId);
-    return can({
-      principal: { kind: "agent", agentId: auth.agentId, isLead: agent?.isLead ?? false },
-      verb: "config.read.secrets",
-      resource: { kind: "none" },
-      source: "http",
-    }).allow;
+    if (
+      can({
+        principal: { kind: "agent", agentId: auth.agentId, isLead: agent?.isLead ?? false },
+        verb: "config.read.secrets",
+        resource: { kind: "none" },
+        source: "http",
+      }).allow
+    )
+      return "all";
+    if (!auth.runtimeId || resolvedScope?.agentId !== auth.agentId) return "none";
+    return "self";
   }
-  if (auth?.kind === "guest") return false;
+  if (auth?.kind === "guest") return "none";
   // Preserve legacy reads without a user or session-token principal.
-  if (auth?.kind !== "user") return true;
-  if (!isRbacEnabled()) return true;
+  if (auth?.kind !== "user") return "all";
+  if (!isRbacEnabled()) return "all";
 
   const grant = await getUserGrant(auth.userId);
-  return grant.grantsAll || grant.verbs.has("config.read.secrets");
+  return grant.grantsAll || grant.verbs.has("config.read.secrets") ? "all" : "none";
 }
 
-async function resolveSecretsRead(req: IncomingMessage, includeSecrets: boolean) {
-  if (!includeSecrets || (await requestMayReadSecrets(req))) {
-    return { effectiveIncludeSecrets: includeSecrets, secretsNote: "" };
-  }
-  return { effectiveIncludeSecrets: false, secretsNote: SECRETS_FORCE_MASK_NOTE };
+async function resolveSecretsRead(
+  req: IncomingMessage,
+  includeSecrets: boolean,
+  resolvedScope?: { agentId?: string; repoId?: string },
+) {
+  const scope = await requestSecretReadScope(req, resolvedScope);
+  const auth = getRequestAuth(req);
+  return {
+    effectiveIncludeSecrets: includeSecrets && scope !== "none",
+    includeRepoSecrets: !(auth?.kind === "agent" && auth.runtimeId && scope !== "all"),
+    secretsNote: includeSecrets && scope === "none" ? SECRETS_FORCE_MASK_NOTE : "",
+  };
 }
 
 /**
@@ -293,16 +308,34 @@ export async function handleConfig(
   pathSegments: string[],
   queryParams: URLSearchParams,
 ): Promise<boolean> {
+  if (getRequestAuth(req)?.kind === "agent") {
+    const duplicate = duplicateGuardedQueryKey(queryParams);
+    if (duplicate) {
+      jsonError(res, `Duplicate query parameter: ${duplicate}`, 400);
+      return true;
+    }
+  }
   if (getResolvedConfigRoute.match(req.method, pathSegments)) {
     const parsed = await getResolvedConfigRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     const includeSecrets = parsed.query.includeSecrets === "true";
-    const { effectiveIncludeSecrets, secretsNote } = await resolveSecretsRead(req, includeSecrets);
     const key = parsed.query.key;
+    const auth = getRequestAuth(req);
+    const resolvedScope = {
+      agentId:
+        parsed.query.agentId ||
+        (auth?.kind === "agent" && auth.runtimeId ? auth.agentId : undefined),
+      repoId: parsed.query.repoId || undefined,
+    };
+    const { effectiveIncludeSecrets, includeRepoSecrets, secretsNote } = await resolveSecretsRead(
+      req,
+      includeSecrets,
+      resolvedScope,
+    );
     // Filter by key before masking and before any secret is registered, so a
     // caller asking for one key never receives the rest (matches get-config).
     const configs = stripApiOnlyKeys(
-      await getResolvedConfig(parsed.query.agentId || undefined, parsed.query.repoId || undefined),
+      await getResolvedConfig(resolvedScope.agentId, resolvedScope.repoId, { includeRepoSecrets }),
     ).filter((c) => !key || c.key === key);
     const result = effectiveIncludeSecrets ? configs : maskSecrets(configs);
     if (effectiveIncludeSecrets) {

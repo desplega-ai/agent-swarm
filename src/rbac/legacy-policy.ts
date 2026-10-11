@@ -263,6 +263,7 @@ export const LEGACY_RULES = {
 export const LEGACY_POLICY = {
   "user.manage": leadOnly,
   "agent.profile.update.any": leadOnly,
+  "agent.act.any": leadOnly,
   "agent.context.read.any": leadOnly,
   "task.cancel.any": leadOrTaskCreator,
   "approval.cancel.any": humanOrLeadOrResourceOwner,
@@ -302,6 +303,8 @@ export const LEGACY_POLICY = {
   "config.write.any": leadOnly,
   "config.delete.any": leadOnly,
   "config.read.secrets": leadOnly,
+  // HTTP runtime tokens can read their own resolved config in src/http/config.ts.
+  // Lead tokens retain config.read.secrets. This exception does not grant config administration.
   "models.catalog.write": leadOrOperator,
   "models.harness-support.write": agentOrOperator,
   "skill.create.swarm": leadOnly,

@@ -204,9 +204,17 @@ function validateFloatRange(
   return null;
 }
 
+export function validateRuntimeTokenTtlHours(value: unknown): string | null {
+  const hours = Number(value);
+  return typeof value === "string" && Number.isFinite(hours) && hours > 0 && hours <= 168
+    ? null
+    : "Invalid RUNTIME_TOKEN_TTL_HOURS (must be greater than zero and at most 168)";
+}
+
 const VALIDATED_KEYS: Record<string, ConfigValidator> = {
   ...booleanValidators(["RUNTIME_POOLS_ENABLED"]),
   ...enumValidator("RUNTIME_DEFAULT_DELIVERY", ["poll", "push"]),
+  RUNTIME_TOKEN_TTL_HOURS: validateRuntimeTokenTtlHours,
   TASK_TOOL_MANIFESTS: (value) => {
     try {
       if (typeof value !== "string") throw new Error("Expected JSON string");

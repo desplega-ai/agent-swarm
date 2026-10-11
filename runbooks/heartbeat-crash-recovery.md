@@ -110,6 +110,9 @@ just that row. Neither can revive a retired or expired runtime: the refresh
 only matches a row that is already live, and registration is the sole path
 back to `active`.
 
+Workers preserve an injected `SWARM_RUNTIME_INSTANCE_ID` instead of generating a new runtime ID.
+Runtime tokens bind authentication to that agent and runtime, and central authentication rejects conflicting headers.
+
 A crashed, OOM-killed, or network-partitioned process never reaches `/close`,
 so status alone would leave it `active` forever and keep its agent falsely
 available. Liveness is therefore the conjunction of `status = 'active'` and a

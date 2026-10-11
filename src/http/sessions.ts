@@ -1,9 +1,20 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
-import { countSessions, getRootTaskChain, getTaskById, listRecentSessions } from "../be/db";
+import {
+  countSessions,
+  getDbClient,
+  getRootTaskChain,
+  getTaskById,
+  listRecentSessions,
+} from "../be/db";
 import { getTaskSteeringFieldsForTasks } from "../be/steering";
 import { getTaskCitationsForTasks, TaskCitationSchema } from "../be/task-citations";
-import { mintSessionToken, revokeSessionToken } from "../be/users";
+import {
+  InvalidRuntimeTokenError,
+  mintRuntimeToken,
+  mintSessionToken,
+  revokeSessionToken,
+} from "../be/users";
 import { type AgentTask, AgentTaskSchema, AgentTaskStatusSchema, SteerModeSchema } from "../types";
 import { getRequestAuth } from "../utils/request-auth-context";
 import { route } from "./route-def";
@@ -79,17 +90,23 @@ const mintSessionTokenRoute = route({
   method: "post",
   path: "/api/sessions/tokens",
   pattern: ["api", "sessions", "tokens"],
-  summary: "Mint an ephemeral session token for an ACP provider session",
+  summary: "Mint an ephemeral task or runtime token",
   description:
-    "Returns a short-lived aseph_ bearer for use by the ACP adapter in place of the full " +
-    "operator key. The token expires at the requested TTL and is actively revoked when the " +
-    "session ends. Only the operator key may mint session tokens.",
+    "Operators can mint task or runtime tokens. Runtime tokens can mint task tokens for their own assigned tasks. Child tokens expire with their parent runtime.",
   tags: ["Sessions"],
-  body: z.object({
-    agentId: z.string().min(1),
-    taskId: z.string().min(1),
-    ttlMs: z.number().int().positive().max(MAX_SESSION_TOKEN_TTL_MS),
-  }),
+  body: z
+    .object({
+      agentId: z.string().min(1),
+      taskId: z.string().min(1).optional(),
+      runtimeId: z.string().min(1).optional(),
+      ttlMs: z.number().int().positive().max(MAX_SESSION_TOKEN_TTL_MS).optional(),
+    })
+    .refine((body) => Boolean(body.taskId) !== Boolean(body.runtimeId), {
+      message: "Provide exactly one of taskId or runtimeId",
+    })
+    .refine((body) => !body.taskId || body.ttlMs !== undefined, {
+      message: "ttlMs is required for a task token",
+    }),
   responses: {
     200: {
       description: "Minted token plaintext (returned once) and its stable token ID",
@@ -100,9 +117,12 @@ const mintSessionTokenRoute = route({
     },
     400: { description: "Validation error" },
     401: { description: "Unauthorized" },
+    403: { description: "Token cannot mint for this agent or task" },
   },
   auth: { apiKey: true },
-  rbac: { ungated: "operator-only: minting is gated on the full operator key in auth middleware" },
+  rbac: {
+    ungated: "operator or runtime token minting for its own assigned task, enforced in the handler",
+  },
 });
 
 const revokeSessionTokenRoute = route({
@@ -198,17 +218,54 @@ export async function handleSessions(
   queryParams: URLSearchParams,
 ): Promise<boolean> {
   if (mintSessionTokenRoute.match(req.method, pathSegments)) {
-    // Restrict to the full operator key — aseph_ and aswt_ bearers must not be
-    // able to mint new session tokens.
-    if (getRequestAuth(req)?.kind !== "operator") {
+    const auth = getRequestAuth(req);
+    if (auth?.kind !== "operator" && !(auth?.kind === "agent" && auth.runtimeId)) {
       jsonError(res, "Unauthorized", 401);
       return true;
     }
     const parsed = await mintSessionTokenRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const { agentId, taskId, ttlMs } = parsed.body;
-    const token = await mintSessionToken(agentId, taskId, ttlMs);
-    mintSessionTokenRoute.respond(res, 200, { tokenId: token.tokenId, plaintext: token.plaintext });
+    const { agentId, taskId, runtimeId, ttlMs } = parsed.body;
+    try {
+      const result = await getDbClient().transaction(async () => {
+        if (auth.kind === "agent") {
+          const task = taskId ? await getTaskById(taskId) : null;
+          if (
+            agentId !== auth.agentId ||
+            runtimeId ||
+            !task ||
+            task.agentId !== auth.agentId ||
+            (task.status !== "pending" && task.status !== "in_progress")
+          ) {
+            return { error: "Token can mint only for its own live assigned task" };
+          }
+          return {
+            token: await mintSessionToken(agentId, taskId!, ttlMs!, {
+              tokenId: auth.tokenId,
+              runtimeId: auth.runtimeId!,
+            }),
+          };
+        }
+        return {
+          token: runtimeId
+            ? await mintRuntimeToken(agentId, runtimeId, ttlMs)
+            : await mintSessionToken(agentId, taskId!, ttlMs!),
+        };
+      });
+      if (result.error) {
+        jsonError(res, result.error, 403);
+        return true;
+      }
+      const token = result.token!;
+      mintSessionTokenRoute.respond(res, 200, {
+        tokenId: token.tokenId,
+        plaintext: token.plaintext,
+      });
+    } catch (error) {
+      if (!(error instanceof InvalidRuntimeTokenError)) throw error;
+      jsonError(res, "Unauthorized", 401);
+      return true;
+    }
     return true;
   }
 

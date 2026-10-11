@@ -622,6 +622,8 @@ describe("script connections", () => {
       // 206 alters agents, agent_tasks and runtime_instances, which this
       // migration-112-only fixture does not create.
       markMigrationApplied(database, "206_runtime_pools.sql");
+      // 207 rebuilds session_tokens, which this migration-112-only fixture does not create.
+      markMigrationApplied(database, "207_runtime_session_tokens.sql");
 
       const id = crypto.randomUUID();
       const now = new Date().toISOString();

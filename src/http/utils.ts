@@ -4,6 +4,12 @@ import type { SwarmSpan } from "../otel";
 import { isEnvFlagEnabled } from "../utils/env-flag";
 import { scrubSecrets } from "../utils/secret-scrubber";
 
+export function duplicateGuardedQueryKey(query: URLSearchParams): string | undefined {
+  return ["agentId", "repoId", "includeSecrets", "resolveSecrets"].find(
+    (key) => query.getAll(key).length > 1,
+  );
+}
+
 const DEFAULT_ALLOWED_ORIGINS = [
   "https://*.agent-swarm.dev",
   "https://*.agent-swarm.cloud",

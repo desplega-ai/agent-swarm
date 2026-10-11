@@ -1032,6 +1032,16 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
     icon: Shield,
     entries: [
       {
+        key: "RUNTIME_TOKEN_TTL_HOURS",
+        label: "Runtime token lifetime",
+        description:
+          "Lifetime for new runtime tokens. Task tokens cannot outlive their runtime token.",
+        kind: "number",
+        unit: "h",
+        defaultValue: "168",
+        docsUrl: `${DOCS}ui/configuration#runtime-tokens`,
+      },
+      {
         key: "RBAC_ENABLED",
         label: "Enable RBAC",
         description:

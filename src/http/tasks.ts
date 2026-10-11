@@ -665,6 +665,7 @@ const updateTaskVcsRoute = route({
   }),
   responses: {
     200: { description: "VCS info updated", schema: AgentTaskSchema },
+    403: { description: "Task belongs to another token agent" },
     404: { description: "Task not found" },
   },
   auth: { apiKey: true },
@@ -1724,7 +1725,19 @@ export async function handleTasks(
   if (updateTaskVcsRoute.match(req.method, pathSegments)) {
     const parsed = await updateTaskVcsRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const task = await updateTaskVcs(parsed.params.id, parsed.body);
+    const auth = getRequestAuth(req);
+    const task = await getDbClient().transaction(async () => {
+      if (auth?.kind === "agent") {
+        const existing = await getTaskById(parsed.params.id);
+        if (!existing) return null;
+        if (existing.agentId !== auth.agentId) return "forbidden";
+      }
+      return await updateTaskVcs(parsed.params.id, parsed.body);
+    });
+    if (task === "forbidden") {
+      jsonError(res, "Task belongs to another token agent", 403);
+      return true;
+    }
     if (!task) {
       jsonError(res, "Task not found", 404);
       return true;

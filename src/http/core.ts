@@ -27,7 +27,7 @@ import { initGitHub, resetGitHub } from "../github";
 import { initGitLab, isGitLabEnabled, resetGitLab } from "../gitlab";
 import { initJira, resetJira } from "../jira";
 import { initLinear, resetLinear } from "../linear";
-import { decideAdmission, isRbacEnabled } from "../rbac";
+import { can, decideAdmission, isRbacEnabled } from "../rbac";
 import { startSlackApp, stopSlackApp } from "../slack";
 import type { AgentStatus } from "../types";
 import { isMultiRuntimeEnabled } from "../utils/multi-runtime";
@@ -40,7 +40,13 @@ import { refreshSecretScrubberCache, registerSensitiveKeyName } from "../utils/s
 import { resolveHttpRequestAuth } from "./auth";
 import { generateOpenApiSpec, SCALAR_HTML } from "./openapi";
 import { findRoute, isPublicRoute, route, runtimeInstanceHeader } from "./route-def";
-import { agentWithCapacity, getPathSegments, jsonError, parseQueryParams } from "./utils";
+import {
+  agentWithCapacity,
+  duplicateGuardedQueryKey,
+  getPathSegments,
+  jsonError,
+  parseQueryParams,
+} from "./utils";
 
 /**
  * Load global swarm_config entries into process.env.
@@ -470,6 +476,65 @@ export async function handleCore(
       return true;
     }
     setRequestAuth(req, auth);
+  }
+
+  if (auth?.kind === "agent") {
+    const query = parseQueryParams(req.url || "");
+    const duplicate = duplicateGuardedQueryKey(query);
+    if (duplicate) {
+      jsonError(res, `Duplicate query parameter: ${duplicate}`, 400);
+      return true;
+    }
+    if (req.headers["x-page-id"] !== undefined) {
+      jsonError(res, "Agent tokens cannot send X-Page-Id", 403);
+      return true;
+    }
+    const header = req.headers["x-agent-id"];
+    const agentId = Array.isArray(header) ? header[0] : header;
+    if (agentId !== undefined && agentId !== auth.agentId) {
+      jsonError(res, "X-Agent-ID does not match token", 403);
+      return true;
+    }
+    req.headers["x-agent-id"] = auth.agentId;
+    myAgentId = auth.agentId;
+    if (auth.runtimeId) {
+      const header = req.headers["x-runtime-instance-id"];
+      const runtimeId = Array.isArray(header) ? header[0] : header;
+      if (runtimeId !== undefined && runtimeId !== auth.runtimeId) {
+        jsonError(res, "X-Runtime-Instance-ID does not match token", 403);
+        return true;
+      }
+      req.headers["x-runtime-instance-id"] = auth.runtimeId;
+      const sourceHeader = req.headers["x-source-task-id"];
+      const taskId = Array.isArray(sourceHeader) ? sourceHeader[0] : sourceHeader;
+      if (taskId !== undefined && (await getTaskById(taskId))?.agentId !== auth.agentId) {
+        jsonError(res, "X-Source-Task-Id does not belong to token agent", 403);
+        return true;
+      }
+    }
+    const targetAgentId = pathSegments[2];
+    if (
+      pathSegments[0] === "api" &&
+      pathSegments[1] === "agents" &&
+      targetAgentId &&
+      targetAgentId !== auth.agentId &&
+      (req.method !== "GET" ||
+        query.get("resolveSecrets") === "true" ||
+        query.get("includeSecrets") === "true")
+    ) {
+      const agent = await getAgentById(auth.agentId);
+      if (
+        !can({
+          principal: { kind: "agent", agentId: auth.agentId, isLead: agent?.isLead ?? false },
+          verb: "agent.act.any",
+          resource: { kind: "agent", agentId: targetAgentId },
+          source: "http",
+        }).allow
+      ) {
+        jsonError(res, "Token cannot access another agent's scope", 403);
+        return true;
+      }
+    }
   }
 
   if (auth?.kind === "user" && isRbacEnabled()) {

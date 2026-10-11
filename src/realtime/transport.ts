@@ -9,6 +9,7 @@ import { getApiKey } from "../utils/api-key";
 import { extractAndVerifyCookie } from "../utils/page-session";
 import type { HttpRequestAuth } from "../utils/request-auth-context";
 import { scrubSecrets } from "../utils/secret-scrubber";
+import { registerSessionTokenConnection } from "../utils/session-token-connections";
 import { authorizeRoomNamespace, resolveRoomNamespace } from "./auth";
 import { realtimeBus } from "./bus";
 import {
@@ -69,6 +70,7 @@ type AuthenticatedConnection = {
   identity: Identity;
   me: Viewer;
   expiresAt: number | undefined;
+  sessionToken?: { tokenId: string; check: () => Promise<void> };
 };
 
 function header(req: IncomingMessage, name: string): string | undefined {
@@ -80,12 +82,26 @@ function identityFromHttpAuth(
   req: IncomingMessage,
   auth: HttpRequestAuth,
 ): AuthenticatedConnection {
-  const agentId = auth.kind === "operator" ? header(req, "x-agent-id") : undefined;
+  if (auth.kind === "agent") {
+    const agentId = header(req, "x-agent-id");
+    const runtimeId = header(req, "x-runtime-instance-id");
+    if (agentId !== undefined && agentId !== auth.agentId)
+      throw new Error("X-Agent-ID does not match token");
+    if (auth.runtimeId && runtimeId !== undefined && runtimeId !== auth.runtimeId)
+      throw new Error("X-Runtime-Instance-ID does not match token");
+  }
+  const agentId =
+    auth.kind === "agent"
+      ? auth.agentId
+      : auth.kind === "operator"
+        ? header(req, "x-agent-id")
+        : undefined;
   const guestId = `guest-${crypto.randomUUID()}`;
   return {
     identity: {
       agentId,
-      sourceTaskId: header(req, "x-source-task-id"),
+      sourceTaskId:
+        auth.kind === "agent" ? (auth.taskId ?? undefined) : header(req, "x-source-task-id"),
       userId: auth.kind === "user" ? auth.userId : undefined,
       isOperator: auth.kind === "operator",
     } satisfies Identity,
@@ -94,7 +110,21 @@ function identityFromHttpAuth(
       name: auth.kind === "user" ? auth.user.name : (agentId ?? `Guest ${guestId.slice(-6)}`),
       kind: auth.kind === "user" ? "user" : agentId ? "agent" : "guest",
     } as Viewer,
-    expiresAt: undefined,
+    expiresAt: auth.kind === "agent" ? Date.parse(auth.expiresAt) : undefined,
+    ...(auth.kind === "agent"
+      ? {
+          sessionToken: {
+            tokenId: auth.tokenId,
+            check: async () => {
+              const current = await resolveHttpRequestAuth(req, getApiKey(), {
+                touchSessionToken: false,
+              });
+              if (current?.kind !== "agent" || current.tokenId !== auth.tokenId)
+                throw new Error("Session token revoked or expired");
+            },
+          },
+        }
+      : {}),
   };
 }
 
@@ -186,6 +216,12 @@ function connect(
   auth: Awaited<ReturnType<typeof authenticate>>,
   runtimeId?: string,
 ): void {
+  const unregisterToken = auth.sessionToken
+    ? registerSessionTokenConnection(auth.sessionToken.tokenId, () =>
+        ws.close(1008, "Session token revoked"),
+      )
+    : undefined;
+  void auth.sessionToken?.check().catch(() => ws.close(1008, "Session token revoked or expired"));
   const rooms = new Map<string, { room: LiveRoom; version: number; stop: () => void }>();
   const channels = new Map<string, () => void>();
   const pending = new Map<number, number>();
@@ -233,7 +269,9 @@ function connect(
     rooms.delete(key);
   };
   const checkSession = async () => {
-    if (auth.expiresAt && Date.now() >= auth.expiresAt) throw new Error("Page session expired");
+    await auth.sessionToken?.check();
+    if (auth.expiresAt && Date.now() >= auth.expiresAt)
+      throw new Error(auth.sessionToken ? "Session token expired" : "Page session expired");
     if (auth.identity.pageId && !(await getPage(auth.identity.pageId)))
       throw new Error("Page no longer exists");
     if (auth.identity.userId && (await findUserById(auth.identity.userId))?.status !== "active")
@@ -435,13 +473,22 @@ function connect(
   });
   ws.on("error", () => ws.close(1011, "Connection failed"));
   const timer = setInterval(() => {
-    if (!alive || (auth.expiresAt && Date.now() >= auth.expiresAt)) {
-      ws.close(1008, "Session expired or peer unavailable");
+    if (!alive) {
+      ws.close(1008, "Peer unavailable");
+      return;
+    }
+    if (auth.expiresAt && Date.now() >= auth.expiresAt) {
+      ws.close(1008, auth.sessionToken ? "Session token expired" : "Page session expired");
       return;
     }
     alive = false;
     ws.ping();
-    void checkSession().catch(() => ws.close(1008, "Session no longer valid"));
+    void checkSession().catch(() =>
+      ws.close(
+        1008,
+        auth.sessionToken ? "Session token revoked or expired" : "Session no longer valid",
+      ),
+    );
     for (const { room } of rooms.values()) {
       const meta = room.awareness.meta.get(clientId);
       if (meta) meta.lastUpdated = Date.now();
@@ -449,6 +496,7 @@ function connect(
   }, 15_000);
   timer.unref();
   ws.on("close", () => {
+    unregisterToken?.();
     closed = true;
     clearInterval(timer);
     for (const key of rooms.keys()) leave(key);

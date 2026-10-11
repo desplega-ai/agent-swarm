@@ -1,4 +1,13 @@
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  spyOn,
+  test,
+} from "bun:test";
 import {
   applyResolvedEnvToProcessEnv,
   fetchRepoConfig,
@@ -6,6 +15,8 @@ import {
   RELOADABLE_ENV_KEYS,
 } from "../commands/runner";
 import { checkCodexCredentials } from "../providers/codex-adapter";
+import { MASKED_SECRET_VALUE } from "../utils/config-secrets";
+import { registerVolatileSecret } from "../utils/secret-scrubber";
 
 const noFiles = { existsSync: () => false };
 
@@ -28,6 +39,7 @@ const defaultMockResponse: MockResponse = {
 };
 const mockResponsesByAgentId = new Map<string, MockResponse>();
 const requestedRepoIds = new Map<string, string | null>();
+const requestedTaskIds = new Map<string, string | null>();
 /** Every `GET /api/keys/available` query string observed by the mock server, most recent last. */
 const keysAvailableRequests: string[] = [];
 
@@ -36,6 +48,8 @@ beforeAll(() => {
     port: 0,
     fetch(req) {
       const url = new URL(req.url);
+      const agentId = url.searchParams.get("agentId");
+      if (agentId) requestedTaskIds.set(agentId, req.headers.get("X-Source-Task-Id"));
 
       if (url.pathname === "/api/config/resolved") {
         const agentId = url.searchParams.get("agentId") ?? "";
@@ -65,6 +79,47 @@ afterAll(() => {
 });
 
 describe("fetchResolvedEnv", () => {
+  test("masked secrets never replace boot credentials and produce one scrubbed warning", async () => {
+    const agentId = crypto.randomUUID();
+    const sensitiveKey = `aseph_${"a".repeat(48)}`;
+    registerVolatileSecret(sensitiveKey, "masked-key-fixture");
+    mockResponsesByAgentId.set(agentId, {
+      status: 200,
+      body: {
+        configs: [
+          { key: "BOOT_CREDENTIAL", value: MASKED_SECRET_VALUE, isSecret: true },
+          { key: "MISSING_CREDENTIAL", value: MASKED_SECRET_VALUE, isSecret: true },
+          { key: sensitiveKey, value: MASKED_SECRET_VALUE, isSecret: true },
+          { key: "PUBLIC_MASK_TEXT", value: MASKED_SECRET_VALUE, isSecret: false },
+          { key: "ALLOWED_CREDENTIAL", value: "allowed-secret", isSecret: true },
+        ],
+      },
+    });
+    const warning = spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const result = await fetchResolvedEnv(
+        testUrl,
+        "key",
+        agentId,
+        { BOOT_CREDENTIAL: "working-boot-secret" },
+        undefined,
+        { repoId: crypto.randomUUID() },
+      );
+      expect(result.env.BOOT_CREDENTIAL).toBe("working-boot-secret");
+      expect(result.env.MISSING_CREDENTIAL).toBeUndefined();
+      expect(result.env[sensitiveKey]).toBeUndefined();
+      expect(result.env.PUBLIC_MASK_TEXT).toBe(MASKED_SECRET_VALUE);
+      expect(result.env.ALLOWED_CREDENTIAL).toBe("allowed-secret");
+      expect(warning).toHaveBeenCalledTimes(1);
+      const message = String(warning.mock.calls[0]?.[0]);
+      expect(message).toContain("BOOT_CREDENTIAL, MISSING_CREDENTIAL");
+      expect(message).not.toContain(sensitiveKey);
+      expect(message).not.toContain("working-boot-secret");
+      expect(message).not.toContain("allowed-secret");
+    } finally {
+      warning.mockRestore();
+    }
+  });
   test("repository scope requires the requested repository identity", async () => {
     const repoId = crypto.randomUUID();
     let url = "https://github.com/another-owner/fixture";
@@ -141,6 +196,7 @@ describe("fetchResolvedEnv", () => {
   test("passes repository scope and restores the transport default after deletion", async () => {
     const agentId = crypto.randomUUID();
     const repoId = crypto.randomUUID();
+    const taskId = crypto.randomUUID();
     const baseEnv = { CLAUDE_TRANSPORT: "cli" };
     mockResponsesByAgentId.set(agentId, {
       status: 200,
@@ -148,8 +204,10 @@ describe("fetchResolvedEnv", () => {
     });
     const assigned = await fetchResolvedEnv(testUrl, "key", agentId, baseEnv, undefined, {
       repoId,
+      taskId,
     });
     expect(requestedRepoIds.get(agentId)).toBe(repoId);
+    expect(requestedTaskIds.get(agentId)).toBe(taskId);
     expect(assigned.env.CLAUDE_TRANSPORT).toBe("sdk");
     expect(baseEnv.CLAUDE_TRANSPORT).toBe("cli");
     expect(RELOADABLE_ENV_KEYS.has("CLAUDE_TRANSPORT")).toBe(false);

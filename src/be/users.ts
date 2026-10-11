@@ -22,7 +22,9 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { scheduleOrgDomainRecompute } from "../telemetry-identity";
 import type { User } from "../types";
+import { closeSessionTokenConnections } from "../utils/session-token-connections";
 import { getDbClient } from "./db";
+import { validateRuntimeTokenTtlHours } from "./swarm-config-guard";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -539,10 +541,16 @@ export async function resolveUserByToken(plaintext: string): Promise<User | null
 }
 
 // ---------------------------------------------------------------------------
-// Session tokens (ephemeral, ACP provider)
+// Session tokens (ephemeral, tasks and runtimes)
 // ---------------------------------------------------------------------------
 
 const SESSION_TOKEN_PREFIX = "aseph_"; // agent-swarm-ephemeral
+
+export class InvalidRuntimeTokenError extends Error {
+  constructor() {
+    super("Runtime token is no longer valid");
+  }
+}
 
 /**
  * Mint a short-lived `aseph_<base62-24>` token scoped to an ACP session.
@@ -554,18 +562,74 @@ export async function mintSessionToken(
   agentId: string,
   taskId: string,
   ttlMs: number,
+  parent?: { tokenId: string; runtimeId: string },
+): Promise<{ tokenId: string; plaintext: string }> {
+  if (parent) {
+    return await getDbClient().transaction(async (client) => {
+      const row = await client.get<{ expiresAt: string }>(
+        `SELECT expiresAt FROM session_tokens WHERE id = ? AND agentId = ? AND runtimeId = ?
+         AND revokedAt IS NULL AND expiresAt > ?`,
+        [parent.tokenId, agentId, parent.runtimeId, new Date().toISOString()],
+      );
+      if (!row) throw new InvalidRuntimeTokenError();
+      return await insertSessionToken(
+        agentId,
+        taskId,
+        null,
+        ttlMs,
+        parent.runtimeId,
+        row.expiresAt,
+      );
+    });
+  }
+  return await insertSessionToken(agentId, taskId, null, ttlMs);
+}
+
+function runtimeTokenTtlMs(): number {
+  const hours = process.env.RUNTIME_TOKEN_TTL_HOURS ?? "168";
+  return (validateRuntimeTokenTtlHours(hours) === null ? Number(hours) : 168) * 60 * 60 * 1000;
+}
+
+export async function mintRuntimeToken(
+  agentId: string,
+  runtimeId: string,
+  ttlMs = runtimeTokenTtlMs(),
+): Promise<{ tokenId: string; plaintext: string }> {
+  return await insertSessionToken(agentId, null, runtimeId, ttlMs);
+}
+
+async function insertSessionToken(
+  agentId: string,
+  taskId: string | null,
+  runtimeId: string | null,
+  ttlMs: number,
+  parentRuntimeId: string | null = null,
+  expiresAtCeiling?: string,
 ): Promise<{ tokenId: string; plaintext: string }> {
   const plaintext = `${SESSION_TOKEN_PREFIX}${base62(randomBytes(24))}`;
   const tokenId = randomUUID().replace(/-/g, "");
   const hash = sha256Hex(plaintext);
   const preview = plaintext.slice(-4);
   const now = new Date();
-  const expiresAt = new Date(now.getTime() + ttlMs).toISOString();
+  const expiresAt = new Date(
+    Math.min(now.getTime() + ttlMs, expiresAtCeiling ? Date.parse(expiresAtCeiling) : Infinity),
+  ).toISOString();
 
   await getDbClient().run(
-    `INSERT INTO session_tokens (id, tokenHash, tokenPreview, agentId, taskId, expiresAt, createdAt)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    [tokenId, hash, preview, agentId, taskId, expiresAt, now.toISOString()],
+    `INSERT INTO session_tokens
+     (id, tokenHash, tokenPreview, agentId, taskId, runtimeId, parentRuntimeId, expiresAt, createdAt)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      tokenId,
+      hash,
+      preview,
+      agentId,
+      taskId,
+      runtimeId,
+      parentRuntimeId,
+      expiresAt,
+      now.toISOString(),
+    ],
   );
 
   return { tokenId, plaintext };
@@ -573,20 +637,53 @@ export async function mintSessionToken(
 
 /** Revoke a session token by id. No-op if already revoked. */
 export async function revokeSessionToken(tokenId: string): Promise<void> {
-  await getDbClient().run(
-    "UPDATE session_tokens SET revokedAt = ? WHERE id = ? AND revokedAt IS NULL",
-    [new Date().toISOString(), tokenId],
-  );
+  await getDbClient().transaction(async (client) => {
+    const row = await client.get<{ runtimeId: string | null }>(
+      "SELECT runtimeId FROM session_tokens WHERE id = ?",
+      [tokenId],
+    );
+    if (row?.runtimeId) {
+      await revokeRuntimeTokensForRuntime(row.runtimeId);
+    } else {
+      await client.run(
+        "UPDATE session_tokens SET revokedAt = ? WHERE id = ? AND revokedAt IS NULL",
+        [new Date().toISOString(), tokenId],
+      );
+      getDbClient().afterCommit(() => closeSessionTokenConnections([tokenId]));
+    }
+  });
+}
+
+export async function revokeRuntimeTokensForRuntime(runtimeId: string): Promise<void> {
+  await getDbClient().transaction(async (client) => {
+    const rows = await client.query<{ id: string }>(
+      "SELECT id FROM session_tokens WHERE runtimeId = ? OR parentRuntimeId = ?",
+      [runtimeId, runtimeId],
+    );
+    await client.run(
+      `UPDATE session_tokens SET revokedAt = ?
+       WHERE (runtimeId = ? OR parentRuntimeId = ?) AND revokedAt IS NULL`,
+      [new Date().toISOString(), runtimeId, runtimeId],
+    );
+    getDbClient().afterCommit(() => closeSessionTokenConnections(rows.map((row) => row.id)));
+  });
 }
 
 /**
  * Resolve a plaintext `aseph_` token to its principal. Returns null when the
  * token is unknown, revoked, or past its expiry. On a hit, touches `lastUsedAt`
- * best-effort.
+ * best-effort unless `touch` is false.
  */
 export async function resolveBySessionToken(
   plaintext: string,
-): Promise<{ agentId: string; taskId: string } | null> {
+  options: { touch?: boolean } = {},
+): Promise<{
+  tokenId: string;
+  agentId: string;
+  taskId: string | null;
+  runtimeId: string | null;
+  expiresAt: string;
+} | null> {
   if (!plaintext.startsWith(SESSION_TOKEN_PREFIX)) return null;
   const hash = sha256Hex(plaintext);
   const client = getDbClient();
@@ -594,25 +691,36 @@ export async function resolveBySessionToken(
   const row = await client.get<{
     id: string;
     agentId: string;
-    taskId: string;
+    taskId: string | null;
+    runtimeId: string | null;
+    controllerId: string | null;
     expiresAt: string;
     revokedAt: string | null;
-  }>("SELECT id, agentId, taskId, expiresAt, revokedAt FROM session_tokens WHERE tokenHash = ?", [
-    hash,
-  ]);
-  if (!row || row.revokedAt !== null) return null;
+  }>(
+    "SELECT id, agentId, taskId, runtimeId, controllerId, expiresAt, revokedAt FROM session_tokens WHERE tokenHash = ?",
+    [hash],
+  );
+  if (!row || row.revokedAt !== null || row.controllerId !== null) return null;
   if (new Date(row.expiresAt) <= new Date()) return null;
 
-  try {
-    await client.run("UPDATE session_tokens SET lastUsedAt = ? WHERE id = ?", [
-      new Date().toISOString(),
-      row.id,
-    ]);
-  } catch {
-    // best-effort
+  if (options.touch !== false) {
+    try {
+      await client.run("UPDATE session_tokens SET lastUsedAt = ? WHERE id = ?", [
+        new Date().toISOString(),
+        row.id,
+      ]);
+    } catch {
+      // best-effort
+    }
   }
 
-  return { agentId: row.agentId, taskId: row.taskId };
+  return {
+    tokenId: row.id,
+    agentId: row.agentId,
+    taskId: row.taskId,
+    runtimeId: row.runtimeId,
+    expiresAt: row.expiresAt,
+  };
 }
 
 // ---------------------------------------------------------------------------

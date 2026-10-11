@@ -13034,6 +13034,15 @@ export interface paths {
                         "application/json": components["schemas"]["AgentTask"];
                     };
                 };
+                /** @description Task belongs to another token agent */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
                 /** @description Task not found */
                 404: {
                     headers: {
@@ -17453,8 +17462,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Mint an ephemeral session token for an ACP provider session
-         * @description Returns a short-lived aseph_ bearer for use by the ACP adapter in place of the full operator key. The token expires at the requested TTL and is actively revoked when the session ends. Only the operator key may mint session tokens.
+         * Mint an ephemeral task or runtime token
+         * @description Operators can mint task or runtime tokens. Runtime tokens can mint task tokens for their own assigned tasks. Child tokens expire with their parent runtime.
          */
         post: {
             parameters: {
@@ -17467,8 +17476,9 @@ export interface paths {
                 content: {
                     "application/json": {
                         agentId: string;
-                        taskId: string;
-                        ttlMs: number;
+                        taskId?: string;
+                        runtimeId?: string;
+                        ttlMs?: number;
                     };
                 };
             };
@@ -17496,6 +17506,15 @@ export interface paths {
                 };
                 /** @description Unauthorized */
                 401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Token cannot mint for this agent or task */
+                403: {
                     headers: {
                         [name: string]: unknown;
                     };

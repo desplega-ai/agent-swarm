@@ -78,6 +78,7 @@ import {
   IdentityFieldBudgetError,
 } from "../utils/identity-field-budget";
 import { isMultiRuntimeEnabled } from "../utils/multi-runtime";
+import { getRequestAuth } from "../utils/request-auth-context";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { route, runtimeInstanceHeader } from "./route-def";
 import { agentWithCapacity, json, jsonError } from "./utils";
@@ -634,6 +635,14 @@ export async function handleAgentRegister(
     }
 
     const agentId = myAgentId || crypto.randomUUID();
+    const auth = getRequestAuth(req);
+    if (auth?.kind === "agent") {
+      parsed.body = { ...parsed.body, isLead: (await getAgentById(auth.agentId))?.isLead ?? false };
+      if (auth.runtimeId && parsed.body.runtimeInstanceId !== auth.runtimeId) {
+        jsonError(res, "runtimeInstanceId does not match token", 403);
+        return true;
+      }
+    }
     // Read once so one mode applies consistently even if a config reload
     // flips the flag mid-request.
     const multiRuntime = isMultiRuntimeEnabled();

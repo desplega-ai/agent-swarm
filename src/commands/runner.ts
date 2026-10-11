@@ -64,6 +64,7 @@ import { getApiKey } from "../utils/api-key.ts";
 import { computeBudgetBackoffMs } from "../utils/budget-backoff.ts";
 import { ensure, initialize } from "../utils/business-use";
 import { isCodexAuthFailureReason } from "../utils/codex-auth-failure.ts";
+import { MASKED_SECRET_VALUE } from "../utils/config-secrets.ts";
 import { getMcpBaseUrl } from "../utils/constants.ts";
 import { getContextWindowSize } from "../utils/context-window.ts";
 import {
@@ -826,6 +827,7 @@ export async function fetchResolvedEnv(
   taskModel?: string,
   sessionContext?: {
     repoId?: string;
+    taskId?: string;
     provider?: ProviderName;
     modelTier?: string;
     /**
@@ -857,6 +859,7 @@ export async function fetchResolvedEnv(
     try {
       const headers: Record<string, string> = { "X-Agent-ID": agentId };
       if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+      if (sessionContext?.taskId) headers["X-Source-Task-Id"] = sessionContext.taskId;
 
       const url = `${apiUrl}/api/config/resolved?agentId=${encodeURIComponent(agentId)}&includeSecrets=true${repoId ? `&repoId=${encodeURIComponent(repoId)}` : ""}`;
       const response = await fetch(url, { headers });
@@ -880,10 +883,15 @@ export async function fetchResolvedEnv(
         }
 
         if (data.configs?.length) {
+          const skippedSecretKeys: string[] = [];
           scriptsOnlyConfigValue = data.configs.find(
             (config) => config.key === "SCRIPTS_ONLY_MCP",
           )?.value;
           for (const config of data.configs) {
+            if (config.isSecret && config.value === MASKED_SECRET_VALUE) {
+              skippedSecretKeys.push(config.key);
+              continue;
+            }
             // Read on demand via codex-oauth/storage.ts; see env-keys.ts.
             if (isCodexOAuthConfigKey(config.key)) continue;
             // Lets the scrubber redact `KEY=value` dumps of secret rows whose
@@ -916,6 +924,11 @@ export async function fetchResolvedEnv(
               continue;
             }
             env[config.key] = config.value;
+          }
+          if (skippedSecretKeys.length) {
+            console.warn(
+              scrubSecrets(`[env-reload] Skipped masked secrets: ${skippedSecretKeys.join(", ")}`),
+            );
           }
           console.log(`[env-reload] Loaded ${data.configs.length} config entries from API`);
         }
@@ -3868,6 +3881,7 @@ async function spawnProviderProcess(
       opts.resolvedModel || opts.model,
       {
         repoId: sessionRepo?.id,
+        taskId: realTaskId,
         provider: adapter.name as ProviderName,
         modelTier: opts.modelTier,
         localBlocks: opts.localBlocks,
@@ -5646,7 +5660,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
 
   // Fresh per boot and shared by registration, ping, and close: a restarted
   // process is a new runtime, but one process presents one identity.
-  const runtimeInstanceId = crypto.randomUUID();
+  const runtimeInstanceId = process.env.SWARM_RUNTIME_INSTANCE_ID || crypto.randomUUID();
 
   // Session MCP configs are built in provider adapters, which read this to
   // stamp the runtime identity onto worker tool calls.

@@ -26,6 +26,7 @@ function singleHeader(req: IncomingMessage, name: string): string | null {
 export async function resolveHttpRequestAuth(
   req: IncomingMessage,
   apiKey: string | undefined,
+  options: { touchSessionToken?: boolean } = {},
 ): Promise<HttpRequestAuth | null> {
   const bearer = extractBearer(req);
   if (!bearer) return null;
@@ -61,9 +62,9 @@ export async function resolveHttpRequestAuth(
   }
 
   if (bearer.startsWith("aseph_")) {
-    const principal = await resolveBySessionToken(bearer);
+    const principal = await resolveBySessionToken(bearer, { touch: options.touchSessionToken });
     if (principal) {
-      return { kind: "agent", agentId: principal.agentId, taskId: principal.taskId };
+      return { kind: "agent", ...principal };
     }
   }
 

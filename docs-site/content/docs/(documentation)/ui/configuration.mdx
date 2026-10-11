@@ -21,6 +21,15 @@ Each row shows a source chip when the underlying environment variable is set on 
 
 ## Groups
 
+### Runtime tokens
+
+The **Security & access** group includes `RUNTIME_TOKEN_TTL_HOURS`, with a default of `168` hours.
+The value must exceed zero and cannot exceed 168 hours.
+A change applies to newly minted runtime tokens without a restart.
+Runtime tokens can read their own resolved secrets and mint tokens for their assigned tasks.
+Task tokens cannot outlive their parent runtime token.
+Runtime revocation revokes its task tokens and closes their realtime sockets.
+
 ### Dev mode
 
 Set `SWARM_DEV_MODE=true` on the API server, or enable **Dev mode** under **Harness & tools**.
