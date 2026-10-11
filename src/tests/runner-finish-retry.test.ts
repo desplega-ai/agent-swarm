@@ -7,7 +7,9 @@ import {
   exitAfterTasksIfFinished,
   type RunnerState,
   type RunningTask,
+  reconcileActiveTasks,
 } from "../commands/runner";
+import type { CostData } from "../providers/types";
 import { registerVolatileSecret } from "../utils/secret-scrubber";
 import { listenOnFreePort } from "./test-net";
 
@@ -22,6 +24,8 @@ let requests: Array<{ path: string; method: string | undefined; body: Record<str
 let waits: number[];
 let sleep: ReturnType<typeof spyOn<typeof Bun, "sleep">>;
 let finishGate: Promise<void> | undefined;
+let costGate: Promise<void> | undefined;
+let savedCosts: unknown[];
 let hang: boolean;
 let blockedTaskId: string | undefined;
 let errorBody: string;
@@ -34,6 +38,7 @@ beforeAll(async () => {
     requests.push({ path, method: req.method, body: text ? JSON.parse(text) : {} });
     if (path === "finish" && hang) return;
     if (path === "finish" && (!blockedTaskId || req.url?.includes(blockedTaskId))) await finishGate;
+    if (path === "session-costs") await costGate;
     if ((failures[path] ?? 0) > 0) {
       failures[path]!--;
       if (disconnect) {
@@ -43,6 +48,7 @@ beforeAll(async () => {
       res.writeHead(status).end(errorBody);
       return;
     }
+    if (path === "session-costs") savedCosts.push(JSON.parse(text));
     res.writeHead(200, { "Content-Type": "application/json" }).end("{}");
   });
   config = {
@@ -59,6 +65,8 @@ beforeEach(() => {
   requests = [];
   waits = [];
   finishGate = undefined;
+  costGate = undefined;
+  savedCosts = [];
   hang = false;
   blockedTaskId = undefined;
   errorBody = "API unavailable";
@@ -214,6 +222,168 @@ function completedState(ids: string[]): RunnerState {
   };
 }
 
+function sessionCost(): CostData {
+  return {
+    agentId: config.agentId,
+    taskId,
+    sessionId: crypto.randomUUID(),
+    totalCostUsd: 0.25,
+    inputTokens: 100,
+    outputTokens: 20,
+    durationMs: 1000,
+    numTurns: 1,
+    model: "gpt-5",
+    provider: "codex",
+    isError: false,
+  };
+}
+
+for (const network of [false, true]) {
+  test(`cost POST survives repeated ${network ? "network" : "5xx"} failures`, async () => {
+    const runner = completedState([taskId]);
+    const cost = sessionCost();
+    runner.activeTasks.get(taskId)!.result!.cost = cost;
+    failures["session-costs"] = 2;
+    disconnect = network;
+    const warn = spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      await checkCompletedProcesses(runner, "worker", config);
+      const bodies = requests
+        .filter((request) => request.path === "session-costs")
+        .map(({ body }) => body);
+      const id = bodies[0]?.id;
+      expect(id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+      expect(bodies).toEqual(Array(3).fill({ ...cost, id }));
+      expect(savedCosts).toEqual([{ ...cost, id }]);
+      expect(waits).toEqual([1000, 2000]);
+      expect(runner.tasksProcessed).toBe(1);
+      expect(warn.mock.calls.flat().join(" ")).toContain("Session cost POST failed.");
+    } finally {
+      warn.mockRestore();
+    }
+  });
+}
+
+for (const code of [400, 401, 403, 404, 409, 429]) {
+  test(`cost POST does not retry HTTP ${code}`, async () => {
+    const runner = completedState([taskId]);
+    runner.activeTasks.get(taskId)!.result!.cost = sessionCost();
+    failures["session-costs"] = 10;
+    status = code;
+    const warn = spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      await checkCompletedProcesses(runner, "worker", config);
+      expect(requests.filter((request) => request.path === "session-costs")).toHaveLength(1);
+      expect(savedCosts).toEqual([]);
+      expect(waits).toEqual([]);
+      if (code === 401)
+        expect(warn.mock.calls.flat().join(" ")).toContain("runtime token revoked or expired");
+    } finally {
+      warn.mockRestore();
+    }
+  });
+}
+
+for (const unresponsive of [false, true]) {
+  test(`cost retry budget bounds ${unresponsive ? "a hung request" : "persistent 5xx failures"}`, async () => {
+    sleep.mockRestore();
+    process.env.RUNNER_FINISH_RETRY_MAX_SEC = "0.05";
+    const runner = completedState([taskId]);
+    runner.activeTasks.get(taskId)!.result!.cost = sessionCost();
+    failures["session-costs"] = 100;
+    let release = () => {};
+    if (unresponsive)
+      costGate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+    try {
+      const startedAt = Date.now();
+      await checkCompletedProcesses(runner, "worker", config);
+      expect(Date.now() - startedAt).toBeLessThan(1000);
+      expect(requests.filter((request) => request.path === "session-costs")).toHaveLength(1);
+      expect(savedCosts).toEqual([]);
+      expect(runner.tasksProcessed).toBe(1);
+    } finally {
+      release();
+    }
+  });
+}
+
+test("cost and finish POSTs run concurrently and exit-after-N waits for cost before runtime close", async () => {
+  const runner = completedState([taskId]);
+  const cost = sessionCost();
+  runner.activeTasks.get(taskId)!.result!.cost = cost;
+  let releaseCost!: () => void;
+  let releaseFinish!: () => void;
+  costGate = new Promise<void>((resolve) => {
+    releaseCost = resolve;
+  });
+  finishGate = new Promise<void>((resolve) => {
+    releaseFinish = resolve;
+  });
+  failures["session-costs"] = 2;
+  const shutdown = mock(async (_signal: string) => {
+    await fetch(`${config.apiUrl}/close`, {
+      method: "POST",
+      body: JSON.stringify({ runtimeShutdown: true }),
+    });
+  });
+  const completion = checkCompletedProcesses(runner, "worker", config);
+  try {
+    const deadline = Date.now() + 1000;
+    while (
+      (!requests.some((request) => request.path === "finish") ||
+        !requests.some((request) => request.path === "session-costs")) &&
+      Date.now() < deadline
+    )
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(requests.some((request) => request.path === "finish")).toBe(true);
+    expect(requests.some((request) => request.path === "session-costs")).toBe(true);
+    releaseFinish();
+    expect(await exitAfterTasksIfFinished(runner, 1, shutdown)).toBe(false);
+    expect(runner.activeTasks.has(taskId)).toBe(true);
+    expect(requests.some((request) => request.method === "DELETE")).toBe(false);
+    expect(requests.some((request) => request.path === "close")).toBe(false);
+  } finally {
+    releaseFinish();
+    releaseCost();
+    await completion;
+  }
+  expect(savedCosts).toMatchObject([cost]);
+  expect(await exitAfterTasksIfFinished(runner, 1, shutdown)).toBe(true);
+  expect(shutdown).toHaveBeenCalledTimes(1);
+  expect(requests.at(-1)?.body).toEqual({ runtimeShutdown: true });
+});
+
+test("abort after server task completion still posts collected cost", async () => {
+  const runner = completedState([taskId]);
+  const task = runner.activeTasks.get(taskId)!;
+  const result = { ...task.result!, cost: sessionCost() };
+  task.result = null;
+  const abort = mock(async () => {
+    task.result = result;
+  });
+  task.session = {
+    sessionId: result.cost.sessionId,
+    onEvent: () => {},
+    waitForCompletion: async () => result,
+    abort,
+  };
+  await reconcileActiveTasks(runner, "worker", {
+    cancelledSignaled: new Set(),
+    isCancelled: async () => false,
+    fetchStatus: async () => "completed",
+    intervalMs: 1,
+    now: () => task.startTime.getTime() + 2,
+  });
+  await checkCompletedProcesses(runner, "worker", config);
+  expect(abort).toHaveBeenCalledTimes(1);
+  expect(task.serverTerminalStatus).toBe("completed");
+  expect(savedCosts).toMatchObject([result.cost]);
+  expect(requests.some((request) => request.path === "finish")).toBe(false);
+  expect(runner.activeTasks.size).toBe(0);
+});
+
 test("a blocked finish does not delay a sibling's retries or slot release", async () => {
   const siblingId = crypto.randomUUID();
   const runner = completedState([taskId, siblingId]);
@@ -287,6 +457,7 @@ test("5xx diagnostics scrub secrets before truncating the response body", async 
     const diagnostic = warn.mock.calls.flat().join(" ");
     expect(diagnostic).not.toContain(secret);
     expect(diagnostic).toContain("REDACTED");
+    expect(diagnostic).toContain("Final task finish POST failed.");
     expect(diagnostic).not.toContain("END_OF_BODY");
     expect(diagnostic.length).toBeLessThan(400);
   } finally {

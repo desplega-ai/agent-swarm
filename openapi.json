@@ -44600,6 +44600,10 @@
               "schema": {
                 "type": "object",
                 "properties": {
+                  "id": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
                   "sessionId": {
                     "type": "string",
                     "minLength": 1

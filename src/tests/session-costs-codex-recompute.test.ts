@@ -97,6 +97,55 @@ interface CreatedCostResponse {
   };
 }
 
+describe("POST /api/session-costs: client record IDs", () => {
+  test("repeated IDs return the stored row without increasing spend", async () => {
+    const input = {
+      id: crypto.randomUUID(),
+      sessionId: crypto.randomUUID(),
+      agentId: testAgent.id,
+      totalCostUsd: 0.25,
+    };
+    const first = await authedFetch("/api/session-costs", {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+    expect(first.status).toBe(201);
+    const firstBody = (await first.json()) as CreatedCostResponse;
+    expect(firstBody.cost.id).toBe(input.id);
+    for (const totalCostUsd of [input.totalCostUsd, 100]) {
+      const repeat = await authedFetch("/api/session-costs", {
+        method: "POST",
+        body: JSON.stringify({ ...input, totalCostUsd }),
+      });
+      expect(repeat.status).toBe(201);
+      expect(await repeat.json()).toEqual(firstBody);
+    }
+    const totals = await getDbClient().get<{ count: number; spend: number }>(
+      "SELECT COUNT(*) AS count, SUM(totalCostUsd) AS spend FROM session_costs WHERE id = ?",
+      [input.id],
+    );
+    expect(totals).toEqual({ count: 1, spend: input.totalCostUsd });
+  });
+
+  for (const id of ["", "not-a-uuid", "12345678-1234-1234-1234-123456789012", 123, null]) {
+    test(`rejects invalid record ID ${JSON.stringify(id)}`, async () => {
+      const res = await authedFetch("/api/session-costs", {
+        method: "POST",
+        body: JSON.stringify({
+          id,
+          sessionId: crypto.randomUUID(),
+          agentId: testAgent.id,
+          totalCostUsd: 0.25,
+        }),
+      });
+      expect(res.status).toBe(400);
+      expect(
+        await getDbClient().get<{ count: number }>("SELECT COUNT(*) AS count FROM session_costs"),
+      ).toEqual({ count: 0 });
+    });
+  }
+});
+
 describe("Phase 6 — POST /api/session-costs: Codex USD recompute", () => {
   test("provider=codex with all three pricing rows present → recompute uses DB prices, costSource='pricing-table'", async () => {
     // Mid-range custom rates: input=2.0/M, cached=0.2/M, output=10.0/M

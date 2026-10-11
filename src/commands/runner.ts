@@ -1738,11 +1738,17 @@ function jsonOutputCandidates(text: string): string[] {
   return [...new Set(candidates)];
 }
 
-async function postFinalTaskUpdate(
+function finalUpdateDeadline(): number {
+  const maxSec = Number(process.env.RUNNER_FINISH_RETRY_MAX_SEC);
+  return Date.now() + (Number.isFinite(maxSec) && maxSec > 0 ? maxSec : 300) * 1000;
+}
+
+async function postWithRetry(
   url: string,
   headers: Record<string, string>,
-  body: Record<string, string>,
+  body: Record<string, string> | CostData,
   deadline: number,
+  label: string,
 ): Promise<Response> {
   let delay = 1000;
   for (;;) {
@@ -1761,7 +1767,7 @@ async function postFinalTaskUpdate(
       const remaining = deadline - Date.now();
       if (remaining <= 0) throw error;
       const wait = Math.min(delay, remaining);
-      console.warn(scrubSecrets(`[runner] Final task update failed. Retry in ${wait}ms: ${error}`));
+      console.warn(scrubSecrets(`[runner] ${label} failed. Retry in ${wait}ms: ${error}`));
       await Bun.sleep(wait);
       if (Date.now() >= deadline) throw error;
       delay = Math.min(30_000, delay * 2);
@@ -1784,6 +1790,7 @@ export async function ensureTaskFinished(
   provider?: ProviderName,
   failureDiagnostics?: string,
   finalProgress?: string,
+  retryDeadline?: number,
 ): Promise<void> {
   const headers: Record<string, string> = {
     "X-Agent-ID": config.agentId,
@@ -1868,28 +1875,26 @@ export async function ensureTaskFinished(
   }
 
   try {
-    const DEFAULT_FINISH_RETRY_MAX_SEC = 300;
-    const maxSec = Number(process.env.RUNNER_FINISH_RETRY_MAX_SEC);
-    const deadline =
-      Date.now() +
-      (Number.isFinite(maxSec) && maxSec > 0 ? maxSec : DEFAULT_FINISH_RETRY_MAX_SEC) * 1000;
+    const deadline = retryDeadline ?? finalUpdateDeadline();
     if (finalProgress) {
-      const progress = await postFinalTaskUpdate(
+      const progress = await postWithRetry(
         `${config.apiUrl}/api/tasks/${taskId}/progress`,
         headers,
         { progress: scrubSecrets(finalProgress) },
         deadline,
+        "Final task progress POST",
       );
       if (progress.status === 401) {
         console.warn(`[${role}] Final task update rejected: HTTP 401`);
         return;
       }
     }
-    const response = await postFinalTaskUpdate(
+    const response = await postWithRetry(
       `${config.apiUrl}/api/tasks/${taskId}/finish`,
       headers,
       body,
       deadline,
+      "Final task finish POST",
     );
 
     if (response.ok) {
@@ -2754,7 +2759,12 @@ async function flushLogBuffer(
 }
 
 /** Save session cost data to the API */
-async function saveCostData(cost: CostData, apiUrl: string, apiKey: string): Promise<void> {
+async function saveCostData(
+  cost: CostData,
+  apiUrl: string,
+  apiKey: string,
+  deadline: number,
+): Promise<void> {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     "X-Agent-ID": cost.agentId,
@@ -2764,17 +2774,22 @@ async function saveCostData(cost: CostData, apiUrl: string, apiKey: string): Pro
   }
 
   try {
-    const response = await fetch(`${apiUrl}/api/session-costs`, {
-      method: "POST",
+    const body = { ...cost, id: crypto.randomUUID() };
+    const response = await postWithRetry(
+      `${apiUrl}/api/session-costs`,
       headers,
-      body: JSON.stringify(cost),
-    });
+      body,
+      deadline,
+      "Session cost POST",
+    );
 
-    if (!response.ok) {
+    if (response.status === 401) {
+      console.warn("[runner] Cost data: runtime token revoked or expired. Cost saving stopped.");
+    } else if (!response.ok) {
       console.warn(`[runner] Failed to save cost data: ${response.status}`);
     }
   } catch (error) {
-    console.warn(`[runner] Error saving cost data: ${error}`);
+    console.warn(scrubSecrets(`[runner] Error saving cost data: ${error}`));
   }
 }
 
@@ -4745,8 +4760,9 @@ async function spawnProviderProcess(
           }
         }
 
-        // Save cost data (awaited to ensure it completes before container exits)
+        // Retain cost data for the concurrent final API writes.
         if (result.cost) {
+          result.cost = { ...result.cost, taskId: realTaskId, sessionId: opts.runnerSessionId };
           sessionSpan.setAttributes({
             "gen_ai.response.model": result.cost.model,
             "gen_ai.usage.input_tokens": result.cost.inputTokens ?? 0,
@@ -4775,15 +4791,6 @@ async function spawnProviderProcess(
             },
             { userId: opts.requestedByUserId ?? null },
           );
-          try {
-            await saveCostData(
-              { ...result.cost, taskId: realTaskId, sessionId: opts.runnerSessionId },
-              opts.apiUrl,
-              opts.apiKey,
-            );
-          } catch (err) {
-            console.warn(`[runner] Failed to save cost: ${err}`);
-          }
         }
 
         // Post completion context usage snapshot
@@ -5197,6 +5204,12 @@ export async function checkCompletedProcesses(
         finalProgress,
         serverTerminalStatus,
       }) => {
+        const deadline = finalUpdateDeadline();
+        // Cost and finish share one budget, including sessions aborted after task completion.
+        const costSave =
+          apiConfig && result.cost
+            ? saveCostData(result.cost, apiConfig.apiUrl, apiConfig.apiKey, deadline)
+            : Promise.resolve();
         const credentialReport = credentialReports.then(async () => {
           if (apiConfig && credentialInfo && !serverTerminalStatus) {
             await reportKeyCompletionOutcome({
@@ -5306,6 +5319,7 @@ export async function checkCompletedProcesses(
                   harnessProvider,
                   bridgeFailureDiagnostics,
                   finalProgress?.value,
+                  deadline,
                 ),
             );
 
@@ -5388,6 +5402,7 @@ export async function checkCompletedProcesses(
           }
         } finally {
           try {
+            await costSave;
             if (apiConfig) await removeActiveSession(apiConfig, taskId);
           } finally {
             state.activeTasks.delete(taskId);
