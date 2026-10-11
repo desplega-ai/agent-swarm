@@ -106,7 +106,14 @@ Runner shutdown permits immediate teardown. Otherwise, teardown waits `RUNTIME_P
 The API inserts the provisioning row and mints a scoped runtime token before the infrastructure request.
 Registration activates that row. Termination revokes its runtime and child tokens and reconciles agent liveness.
 Registration timeouts and provision failures use persisted retry deadlines and a pool circuit breaker.
-Provider death triggers heartbeat recovery for sessions owned by that runtime.
+Provider death triggers heartbeat recovery for sessions and sessionless tasks dispatched to that runtime.
+With runtime pools enabled, dispatch records each task's runtime in `agent_tasks.runtime_instance_id` within the claim transaction.
+This record covers every slot before the worker's best-effort session registration.
+Recovery also checks `runtime_instances.task_id` for earlier dispatches without that record.
+Registered sessions determine ownership when they exist. Recovery preserves terminal tasks and prevents duplicate resumes through guarded state updates.
+Runtime credentials can revoke their own ACP child tokens after completion or setup failure.
+Revocation requires matching `agentId` and `parentRuntimeId`. Unrelated tokens receive 403.
+Child revocation retains the parent runtime credential. With runtime pools disabled, revocation remains operator-only.
 See [heartbeat and crash recovery](./heartbeat-crash-recovery.md#1a-runtime-liveness-multi_runtime_enabled-only) for recovery rules and environment settings.
 See the [operator guide](../docs-site/content/docs/(documentation)/guides/runtime-pools.mdx) for setup and troubleshooting.
 

@@ -45428,7 +45428,7 @@
     "/api/sessions/tokens/{tokenId}": {
       "delete": {
         "summary": "Revoke an ephemeral session token",
-        "description": "Revokes an aseph_ bearer token by ID. No-op if already revoked.",
+        "description": "Operators can revoke any ephemeral token. With runtime pools enabled, runtime tokens can revoke their own child task tokens. Repeated revocation has no effect.",
         "tags": [
           "Sessions"
         ],
@@ -45453,6 +45453,16 @@
           },
           "401": {
             "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Token cannot revoke this child",
             "content": {
               "application/json": {
                 "schema": {

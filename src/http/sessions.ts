@@ -17,6 +17,7 @@ import {
 } from "../be/users";
 import { type AgentTask, AgentTaskSchema, AgentTaskStatusSchema, SteerModeSchema } from "../types";
 import { getRequestAuth } from "../utils/request-auth-context";
+import { isRuntimePoolsEnabled } from "../utils/runtime-pools-flag";
 import { route } from "./route-def";
 import { jsonError } from "./utils";
 
@@ -130,16 +131,18 @@ const revokeSessionTokenRoute = route({
   path: "/api/sessions/tokens/{tokenId}",
   pattern: ["api", "sessions", "tokens", null],
   summary: "Revoke an ephemeral session token",
-  description: "Revokes an aseph_ bearer token by ID. No-op if already revoked.",
+  description:
+    "Operators can revoke any ephemeral token. With runtime pools enabled, runtime tokens can revoke their own child task tokens. Repeated revocation has no effect.",
   tags: ["Sessions"],
   params: z.object({ tokenId: z.string() }),
   responses: {
     204: { description: "Token revoked (or was already revoked)" },
     401: { description: "Unauthorized" },
+    403: { description: "Token cannot revoke this child" },
   },
   auth: { apiKey: true },
   rbac: {
-    ungated: "operator-only: revocation is gated on the full operator key in auth middleware",
+    ungated: "operator or runtime token revoking its own child, enforced in the handler",
   },
 });
 
@@ -270,14 +273,31 @@ export async function handleSessions(
   }
 
   if (revokeSessionTokenRoute.match(req.method, pathSegments)) {
-    // Restrict revocation to the operator key as well.
-    if (getRequestAuth(req)?.kind !== "operator") {
+    const auth = getRequestAuth(req);
+    if (
+      auth?.kind !== "operator" &&
+      !(isRuntimePoolsEnabled() && auth?.kind === "agent" && auth.runtimeId)
+    ) {
       jsonError(res, "Unauthorized", 401);
       return true;
     }
     const parsed = await revokeSessionTokenRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    await revokeSessionToken(parsed.params.tokenId);
+    const revoked = await getDbClient().transaction(async (client) => {
+      if (auth.kind === "agent") {
+        const child = await client.get(
+          "SELECT id FROM session_tokens WHERE id = ? AND agentId = ? AND parentRuntimeId = ? AND taskId IS NOT NULL",
+          [parsed.params.tokenId, auth.agentId, auth.runtimeId!],
+        );
+        if (!child) return false;
+      }
+      await revokeSessionToken(parsed.params.tokenId);
+      return true;
+    });
+    if (!revoked) {
+      jsonError(res, "Token can revoke only its own child task token", 403);
+      return true;
+    }
     res.writeHead(204);
     res.end();
     return true;

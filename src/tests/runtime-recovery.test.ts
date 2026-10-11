@@ -29,6 +29,7 @@ import * as dispatcher from "../extensions/dispatcher";
 import * as heartbeat from "../heartbeat/heartbeat";
 import { codeLevelTriage, setBeforeHeartbeatSupersedeForTests } from "../heartbeat/heartbeat";
 import { resolveHttpRequestAuth } from "../http/auth";
+import { handlePoll } from "../http/poll";
 import { realtimeBus } from "../realtime/bus";
 import { attachRealtimeTransport } from "../realtime/transport";
 import { runtimeFailureFixture } from "./runtime-pools-test-utils";
@@ -85,6 +86,128 @@ async function assertRecovered(taskId: string, runtimeId: string, agentId: strin
   expect(resume?.status).toBe("pending");
   return resume!;
 }
+
+test.each([
+  1, 2,
+])("provider death before session POST recovers every dispatched task with %s slots", async (slots) => {
+  const { pool, agent, task } = await setup({ slotsPerRuntime: slots, maxRuntimes: 1 }, slots);
+  const tasks = [task];
+  for (let n = 1; n < slots; n++)
+    tasks.push(await createTaskExtended("Additional slot", { agentId: agent.id }));
+  await reconcileOnce();
+  const runtime = (await listRuntimeInstancesForPool(pool.id))[0]!;
+  const token = state.fake.requests[0]!.env.API_KEY!;
+  await upsertRuntimeInstance({ id: runtime.id, agentId: agent.id, reportedSlots: slots });
+  const server = createServer((req, res) => {
+    void handlePoll(req, res, ["api", "poll"], new URLSearchParams(), agent.id).catch(() => {
+      res.writeHead(500).end();
+    });
+  });
+  const port = await listenOnFreePort(server);
+  try {
+    for (let n = 0; n < slots; n++) {
+      const response = await fetch(`http://localhost:${port}/api/poll`, {
+        headers: { "X-Runtime-Instance-ID": runtime.id },
+      });
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as { trigger: { taskId: string } };
+      expect(tasks.map((t) => t.id)).toContain(body.trigger.taskId);
+      expect((await getRuntimeInstanceById(runtime.id))?.taskId).toBe(body.trigger.taskId);
+    }
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+  for (const dispatched of tasks) {
+    expect((await getTaskById(dispatched.id))?.status).toBe("in_progress");
+    expect(await getActiveSessionForTask(dispatched.id)).toBeNull();
+  }
+  state.fake.runtimes.clear();
+  await reconcileOnce();
+  for (const dispatched of tasks) await assertRecovered(dispatched.id, runtime.id, agent.id, token);
+  await Promise.all([
+    recoverRuntime(runtime.id, "Repeated death"),
+    recoverRuntime(runtime.id, "Repeated death"),
+  ]);
+  for (const dispatched of tasks)
+    expect(
+      (await getChildTasks(dispatched.id)).filter((t) => t.taskType === "resume"),
+    ).toHaveLength(1);
+});
+
+test("runtime task fallback recovers without a session and preserves concurrent completion", async () => {
+  const { task, runtime } = await running();
+  await getDbClient().run("DELETE FROM active_sessions WHERE taskId = ?", [task.id]);
+  await getDbClient().run("UPDATE runtime_instances SET task_id = ? WHERE id = ?", [
+    task.id,
+    runtime.id,
+  ]);
+  let attempted = false;
+  setBeforeHeartbeatSupersedeForTests(async () => {
+    attempted = true;
+    await completeTask(task.id, "Finished before remediation");
+  });
+  try {
+    await recoverRuntime(runtime.id, "Provider disappeared");
+    expect(attempted).toBe(true);
+    expect((await getTaskById(task.id))?.status).toBe("completed");
+    expect(await getChildTasks(task.id)).toHaveLength(0);
+  } finally {
+    setBeforeHeartbeatSupersedeForTests(null);
+  }
+});
+
+test("runtime task fallback creates one resume without a dispatch column or session", async () => {
+  const { agent, task, runtime, token } = await running();
+  await getDbClient().run("DELETE FROM active_sessions WHERE taskId = ?", [task.id]);
+  await getDbClient().run("UPDATE runtime_instances SET task_id = ? WHERE id = ?", [
+    task.id,
+    runtime.id,
+  ]);
+  await recoverRuntime(runtime.id, "Provider disappeared");
+  await assertRecovered(task.id, runtime.id, agent.id, token);
+  await recoverRuntime(runtime.id, "Repeated check");
+  expect((await getChildTasks(task.id)).filter((t) => t.taskType === "resume")).toHaveLength(1);
+});
+
+test("dispatch recovery preserves a task registered on a surviving runtime", async () => {
+  const { agent, task, runtime } = await running();
+  const survivingId = crypto.randomUUID();
+  await upsertRuntimeInstance({ id: survivingId, agentId: agent.id, reportedSlots: 1 });
+  await getDbClient().run("UPDATE agent_tasks SET runtime_instance_id = ? WHERE id = ?", [
+    runtime.id,
+    task.id,
+  ]);
+  await getDbClient().run("UPDATE runtime_instances SET task_id = ? WHERE id = ?", [
+    task.id,
+    runtime.id,
+  ]);
+  await getDbClient().run("UPDATE active_sessions SET runtimeInstanceId = ? WHERE taskId = ?", [
+    survivingId,
+    task.id,
+  ]);
+  await recoverRuntime(runtime.id, "Provider disappeared");
+  expect((await getTaskById(task.id))?.status).toBe("in_progress");
+  expect((await getActiveSessionForTask(task.id))?.runtimeInstanceId).toBe(survivingId);
+  expect(await getChildTasks(task.id)).toHaveLength(0);
+});
+
+test("sessionless dispatch recovery is disabled with runtime pools off", async () => {
+  const { task, runtime } = await running();
+  await getDbClient().run("DELETE FROM active_sessions WHERE taskId = ?", [task.id]);
+  await getDbClient().run("UPDATE agent_tasks SET runtime_instance_id = ? WHERE id = ?", [
+    runtime.id,
+    task.id,
+  ]);
+  await getDbClient().run("UPDATE runtime_instances SET task_id = ? WHERE id = ?", [
+    task.id,
+    runtime.id,
+  ]);
+  process.env.RUNTIME_POOLS_ENABLED = "false";
+  await recoverRuntime(runtime.id, "Provider disappeared");
+  expect((await getTaskById(task.id))?.status).toBe("in_progress");
+  expect(await getChildTasks(task.id)).toHaveLength(0);
+});
 
 for (const status of ["exited", "failed"] as const) {
   test(`provider ${status} fences the runtime and creates one pinned resume before replacement`, async () => {
