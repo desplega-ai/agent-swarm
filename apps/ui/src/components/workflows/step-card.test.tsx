@@ -183,7 +183,7 @@ describe("SubWorkflowOutput", () => {
           status: "completed",
           output: {
             runId: "61a5d1a2-0000-4000-8000-000000000003",
-            outputs: { check: { passed: true }, summarize: "done" },
+            outputs: { run: { id: "61a5d1a2" }, check: { passed: true }, summarize: "done" },
           },
           startedAt: "2026-09-28T10:00:00.000Z",
         }}

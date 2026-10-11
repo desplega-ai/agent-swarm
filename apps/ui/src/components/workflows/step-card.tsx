@@ -735,7 +735,8 @@ export function SubWorkflowOutput({ step }: { step: WorkflowRunStep }) {
   const nodes = childWorkflow?.definition.nodes;
   // Latest step per node wins, as on the graph.
   const childSteps = new Map((childRun?.steps ?? []).map((s) => [s.nodeId, s]));
-  const results = Object.entries(output.outputs ?? {});
+  // `run` is the engine's `{ id }` context entry, not a node result.
+  const results = Object.entries(output.outputs ?? {}).filter(([key]) => key !== "run");
 
   return (
     <div className="space-y-2">
