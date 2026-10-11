@@ -107,6 +107,12 @@ import {
   registerRoomGetTool,
   registerRoomResetTool,
 } from "./tools/rooms";
+import { registerRuntimeControllerListTool } from "./tools/runtime-controller-list";
+import { registerRuntimePoolBindAgentTool } from "./tools/runtime-pool-bind-agent";
+import { registerRuntimePoolCreateAgentTool } from "./tools/runtime-pool-create-agent";
+import { registerRuntimePoolDeleteTool } from "./tools/runtime-pool-delete";
+import { registerRuntimePoolListTool } from "./tools/runtime-pool-list";
+import { registerRuntimePoolUpsertTool } from "./tools/runtime-pool-upsert";
 // Scheduling capability
 import {
   registerCreateScheduleTool,
@@ -425,6 +431,12 @@ export async function createServer(
     registerExtensionCatalogTool(server);
     registerExtensionInstallTool(server);
     registerExtensionListTool(server);
+    registerRuntimePoolListTool(server);
+    registerRuntimePoolUpsertTool(server);
+    registerRuntimePoolDeleteTool(server);
+    registerRuntimePoolBindAgentTool(server);
+    registerRuntimePoolCreateAgentTool(server);
+    registerRuntimeControllerListTool(server);
     registerScriptDeleteTool(server);
     registerScriptQueryTypesTool(server);
     registerScriptRunsTools(server);
@@ -496,6 +508,12 @@ export async function createServer(
     registerExtensionCatalogTool(server);
     registerExtensionInstallTool(server);
     registerExtensionListTool(server);
+    registerRuntimePoolListTool(server);
+    registerRuntimePoolUpsertTool(server);
+    registerRuntimePoolDeleteTool(server);
+    registerRuntimePoolBindAgentTool(server);
+    registerRuntimePoolCreateAgentTool(server);
+    registerRuntimeControllerListTool(server);
     registerScriptDeleteTool(server);
     registerScriptQueryTypesTool(server);
     registerScriptRunsTools(server);

@@ -25,6 +25,7 @@ import {
   stopAuditGc,
   stopAuditWriter,
 } from "../be/rbac-audit";
+import { seedRuntimePools } from "../be/runtime-pools/seed";
 import { startScratchScriptGc, stopScratchScriptGc } from "../be/scripts/retention";
 import { loadSecretRegistry } from "../be/secret-registry";
 import { seedLegacyCapabilitiesConfig } from "../be/seed-capabilities";
@@ -114,6 +115,7 @@ import { handleRealtimeAsset, handleRealtimeTicket } from "./realtime";
 import { handleRepos } from "./repos";
 import { handleRooms } from "./rooms";
 import { describeRequestRoute } from "./route-def";
+import { handleRuntimePools } from "./runtime-pools";
 import { handleSchedules } from "./schedules";
 import { handleScriptConnectionProxy } from "./script-connection-proxy";
 import { handleScriptConnections } from "./script-connections";
@@ -390,6 +392,7 @@ const httpServer = createHttpServer(async (req, res) => {
         () => handleApiKeys(req, res, pathSegments, queryParams),
         () => handleHeartbeat(req, res, pathSegments),
         () => handleEvents(req, res, pathSegments, queryParams, myAgentId),
+        () => handleRuntimePools(req, res, pathSegments, queryParams, myAgentId),
         () => handleExtensions(req, res, pathSegments, queryParams, myAgentId),
         () => handleFavorites(req, res, pathSegments, queryParams, myAgentId),
         () => handleUsers(req, res, pathSegments, queryParams),
@@ -602,11 +605,20 @@ warnIfCorsAllowsAnyOrigin();
 try {
   const loaded = await loadSecretRegistry();
   console.log(
-    `[secret-registry] registered config=${loaded.config} oauth=${loaded.oauth} scriptApi=${loaded.scriptApi} failed=${loaded.failed}`,
+    `[secret-registry] registered config=${loaded.config} oauth=${loaded.oauth} scriptApi=${loaded.scriptApi} runtimeController=${loaded.runtimeController} failed=${loaded.failed}`,
   );
 } catch (err) {
   console.error(
     "[secret-registry] load failed (non-fatal):",
+    scrubSecrets(err instanceof Error ? err.message : String(err)),
+  );
+}
+
+try {
+  await seedRuntimePools();
+} catch (err) {
+  console.error(
+    "[startup] Failed to seed runtime pools:",
     scrubSecrets(err instanceof Error ? err.message : String(err)),
   );
 }

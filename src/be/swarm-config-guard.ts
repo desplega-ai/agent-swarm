@@ -205,6 +205,8 @@ function validateFloatRange(
 }
 
 const VALIDATED_KEYS: Record<string, ConfigValidator> = {
+  ...booleanValidators(["RUNTIME_POOLS_ENABLED"]),
+  ...enumValidator("RUNTIME_DEFAULT_DELIVERY", ["poll", "push"]),
   TASK_TOOL_MANIFESTS: (value) => {
     try {
       if (typeof value !== "string") throw new Error("Expected JSON string");

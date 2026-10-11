@@ -214,6 +214,12 @@ export const DEFERRED_TOOLS = new Set([
   "extension-catalog",
   "extension-install",
   "extension-list",
+  "runtime-pool-list",
+  "runtime-pool-upsert",
+  "runtime-pool-delete",
+  "runtime-pool-bind-agent",
+  "runtime-pool-create-agent",
+  "runtime-controller-list",
 
   // External command routes (1)
   "swarm_x",

@@ -51,6 +51,7 @@ export type AgentTaskRow = {
   routing_reason: RoutingReason | null;
   routing_source: RoutingSource | null;
   routing_note: string | null;
+  pool_wake_at: string | null;
   taskType: string | null;
   tags: string | null;
   priority: number;
@@ -273,6 +274,7 @@ export function rowToAgentTask(row: AgentTaskRow): AgentTask {
     routingReason: row.routing_reason ?? undefined,
     routingSource: row.routing_source ?? undefined,
     routingNote: row.routing_note ?? undefined,
+    poolWakeAt: row.pool_wake_at ?? undefined,
     taskType: row.taskType ?? undefined,
     tags: row.tags ? JSON.parse(row.tags) : [],
     priority: row.priority ?? 50,

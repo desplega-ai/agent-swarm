@@ -275,3 +275,13 @@ If you are contributing a new operator-facing environment variable to Agent Swar
 editable here. Set it to `false` in the API server environment and restart all
 API replicas to require operator/user authentication for extension enable,
 disable, and version activation. See [extension trust controls](/docs/guides/extensions#lead-activation-and-trust).
+
+## Runtime pools
+
+`RUNTIME_POOLS_ENABLED` enables runtime pool and controller configuration. It defaults to `false`.
+Restart the API after enabling it to seed built-in controllers and the default static pool.
+Agents remain unbound until an operator assigns a pool.
+
+`RUNTIME_DEFAULT_DELIVERY` selects `poll` or `push` for pools without an explicit delivery mode.
+It defaults to `poll`. A pool's explicit mode takes precedence.
+Controller credentials remain encrypted in the controller record. Workers do not receive them through global configuration.

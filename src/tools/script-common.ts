@@ -185,7 +185,7 @@ export async function proxyScriptsApi(args: {
 }
 
 export async function proxySwarmApi<T extends Record<string, unknown>>(args: {
-  method: "GET" | "POST" | "PATCH" | "DELETE";
+  method: "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
   path: string;
   body?: unknown;
   requestInfo: RequestInfo;

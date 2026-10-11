@@ -311,6 +311,14 @@ export const PERMISSIONS = {
     description: "Delete an external script API endpoint.",
     namespace: "script",
   },
+  "runtime_pool.write": {
+    description: "Create, update, delete, or bind runtime pools.",
+    namespace: "runtime_pool",
+  },
+  "runtime_controller.write": {
+    description: "Create, update, or delete runtime controllers.",
+    namespace: "runtime_controller",
+  },
   "extension.write": {
     description: "Install, update, or uninstall a swarm extension.",
     namespace: "extension",

@@ -406,6 +406,25 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
     icon: Cpu,
     entries: [
       {
+        key: "RUNTIME_POOLS_ENABLED",
+        label: "Runtime pools (beta)",
+        description:
+          "Enable runtime pool and controller configuration. Restart the API to seed built-in controllers.",
+        kind: "boolean",
+        defaultValue: "false",
+        restartRequired: true,
+        docsUrl: `${DOCS}ui/configuration#runtime-pools`,
+      },
+      {
+        key: "RUNTIME_DEFAULT_DELIVERY",
+        label: "Default worker delivery",
+        description: "Default delivery for pools without an explicit mode. Choose poll or push.",
+        kind: "enum",
+        options: ["poll", "push"],
+        defaultValue: "poll",
+        docsUrl: `${DOCS}ui/configuration#runtime-pools`,
+      },
+      {
         key: "CLAUDE_TRUST_PRESEED",
         label: "Claude workspace trust pre-seed",
         description:

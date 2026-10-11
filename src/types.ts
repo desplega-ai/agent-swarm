@@ -595,6 +595,7 @@ export const AgentTaskSchema = z
       "Origin of the routing reason: declared by the caller or chosen by the engine. Absent for unknown historical provenance or no reason.",
     ),
     routingNote: z.string().max(200).optional(),
+    poolWakeAt: z.string().optional(),
 
     // Task metadata
     taskType: z.string().max(50).optional(), // e.g., "bug", "feature", "chore"
@@ -1159,6 +1160,9 @@ export const AgentSchema = z
     name: z.string().min(1),
     isLead: z.boolean().default(false),
     status: AgentStatusSchema,
+    runtimePoolId: z.string().nullable().optional(),
+    runtimeProvisionAttempts: z.number().int().min(0).optional(),
+    runtimeProvisionRetryAt: z.string().nullable().optional(),
 
     // Profile fields
     description: z.string().optional(),
@@ -1973,7 +1977,7 @@ export type WorkerNudge = z.infer<typeof WorkerNudgeSchema>;
  * values — the SQL column has no CHECK constraint (migration 132) so adding a
  * state doesn't require a table rebuild.
  */
-export const RuntimeInstanceStatusSchema = z.enum(["active", "offline"]);
+export const RuntimeInstanceStatusSchema = z.enum(["active", "offline", "provisioning"]);
 
 /**
  * Infrastructure kind a runtime pool provisions on. `k8s` is reserved: write
@@ -1981,6 +1985,99 @@ export const RuntimeInstanceStatusSchema = z.enum(["active", "offline"]);
  */
 export const RuntimeProviderKindSchema = z.enum(["static", "docker", "e2b", "k8s"]);
 export type RuntimeProviderKind = z.infer<typeof RuntimeProviderKindSchema>;
+
+export const DeliveryModeSchema = z.enum(["poll", "push"]);
+export type DeliveryMode = z.infer<typeof DeliveryModeSchema>;
+export const PoolLifecycleSchema = z.enum(["idle", "per-task"]);
+const RuntimeResourcesSchema = z
+  .object({
+    cpu: z.number().positive().optional(),
+    memoryMb: z.number().int().positive().optional(),
+  })
+  .strict();
+
+export const RuntimeControllerCreateSchema = z
+  .object({
+    name: z.string().min(1).max(200),
+    kind: RuntimeProviderKindSchema,
+    placement: z.enum(["builtin", "remote"]).default("remote"),
+    config: z.record(z.string(), z.string()).default({}),
+    secretConfig: z.record(z.string(), z.string().nullable()).optional(),
+  })
+  .strict();
+export const RuntimeControllerUpdateSchema = RuntimeControllerCreateSchema.partial().extend({
+  placement: z.enum(["builtin", "remote"]).optional(),
+  config: z.record(z.string(), z.string()).optional(),
+});
+export const RuntimeControllerSchema = RuntimeControllerCreateSchema.omit({ secretConfig: true })
+  .extend({
+    id: z.string(),
+    secretConfigKeys: z.array(z.string()),
+    secretConfigError: z.boolean().optional(),
+    status: z.enum(["online", "offline", "unknown"]),
+    lastSeenAt: z.string().nullable(),
+    lastError: z.string().nullable(),
+    lastErrorAt: z.string().nullable(),
+    createdBy: z.string().nullable(),
+    updatedBy: z.string().nullable(),
+    createdAt: z.string(),
+    updatedAt: z.string(),
+  })
+  .openapi("RuntimeController");
+export type RuntimeController = z.infer<typeof RuntimeControllerSchema>;
+
+export const RuntimePoolCreateSchema = z
+  .object({
+    name: z.string().min(1).max(200),
+    kind: RuntimeProviderKindSchema,
+    placements: z.array(z.string().min(1)).length(1),
+    image: z.string().min(1).nullable().optional(),
+    lifecycle: PoolLifecycleSchema.default("idle"),
+    idleMinutes: z.number().int().positive().nullable().default(null),
+    slotsPerRuntime: z.number().int().min(1).default(1),
+    maxRuntimes: z.number().int().min(0).nullable().default(null),
+    minRuntimes: z.number().int().min(0).default(0),
+    delivery: DeliveryModeSchema.nullable().default(null),
+    env: z.record(z.string(), z.string()).default({}),
+    resources: RuntimeResourcesSchema.nullable().default(null),
+    ttlSec: z.number().int().positive().nullable().default(null),
+    enabled: z.boolean().default(true),
+  })
+  .strict();
+export const RuntimePoolUpdateSchema = RuntimePoolCreateSchema.partial().extend({
+  lifecycle: PoolLifecycleSchema.optional(),
+  idleMinutes: z.number().int().positive().nullable().optional(),
+  slotsPerRuntime: z.number().int().min(1).optional(),
+  maxRuntimes: z.number().int().min(0).nullable().optional(),
+  minRuntimes: z.number().int().min(0).optional(),
+  delivery: DeliveryModeSchema.nullable().optional(),
+  env: z.record(z.string(), z.string()).optional(),
+  resources: RuntimeResourcesSchema.nullable().optional(),
+  ttlSec: z.number().int().positive().nullable().optional(),
+  enabled: z.boolean().optional(),
+});
+export const RuntimePoolSchema = RuntimePoolCreateSchema.extend({
+  id: z.string(),
+  resolvedImage: z.string().nullable(),
+  consecutiveFailures: z.number().int(),
+  circuitOpenUntil: z.string().nullable(),
+  lastError: z.string().nullable(),
+  lastErrorAt: z.string().nullable(),
+  createdBy: z.string().nullable(),
+  updatedBy: z.string().nullable(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+}).openapi("RuntimePool");
+export type RuntimePool = z.infer<typeof RuntimePoolSchema>;
+export const RuntimePoolCreateAgentSchema = z
+  .object({
+    name: z.string().min(1),
+    isLead: z.boolean().optional(),
+    harnessProvider: ProviderNameSchema.optional(),
+    maxTasks: z.number().int().min(1).max(100).optional(),
+    templateId: z.string().min(1).optional(),
+  })
+  .strict();
 
 /**
  * One worker process serving a logical agent. The `agents` row (AGENT_ID /
@@ -1995,6 +2092,16 @@ export const RuntimeInstanceSchema = z
     id: z.string(),
     agentId: z.string(),
     status: RuntimeInstanceStatusSchema,
+    poolId: z.string().nullable().optional(),
+    controllerId: z.string().nullable().optional(),
+    externalHandle: z.record(z.string(), z.unknown()).nullable().optional(),
+    provisionAttempts: z.number().int().optional(),
+    provisionError: z.string().nullable().optional(),
+    provisionRequestedAt: z.string().nullable().optional(),
+    draining: z.boolean().optional(),
+    idleSince: z.string().nullable().optional(),
+    leaseExpiresAt: z.string().nullable().optional(),
+    taskId: z.string().nullable().optional(),
     /** Runtime-local concurrent task capacity, self-reported at registration. */
     reportedSlots: z.number().int(),
     /** Process-local credential readiness; null when never reported. */

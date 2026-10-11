@@ -85,6 +85,7 @@ export interface SecretRegistryLoadResult {
   config: number;
   oauth: number;
   scriptApi: number;
+  runtimeController: number;
   /** Rows that could not be read or decrypted (wrong or missing key). */
   failed: number;
 }
@@ -96,7 +97,13 @@ export interface SecretRegistryLoadResult {
  * failure and the other sources still load.
  */
 export async function loadSecretRegistry(): Promise<SecretRegistryLoadResult> {
-  const result: SecretRegistryLoadResult = { config: 0, oauth: 0, scriptApi: 0, failed: 0 };
+  const result: SecretRegistryLoadResult = {
+    config: 0,
+    oauth: 0,
+    scriptApi: 0,
+    runtimeController: 0,
+    failed: 0,
+  };
 
   try {
     const { secrets, failed } = await listStoredConfigSecrets();
@@ -123,6 +130,15 @@ export async function loadSecretRegistry(): Promise<SecretRegistryLoadResult> {
     for (const { id, token } of secrets) registerStoredSecret(token, scriptApiSecretName(id));
     result.scriptApi = secrets.length;
     result.failed += failed;
+  } catch {
+    result.failed += 1;
+  }
+
+  try {
+    const { loadRuntimeControllerSecrets } = await import("./runtime-pools/db");
+    const loaded = await loadRuntimeControllerSecrets();
+    result.runtimeController = loaded.count;
+    result.failed += loaded.failed;
   } catch {
     result.failed += 1;
   }

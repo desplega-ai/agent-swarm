@@ -64,6 +64,12 @@ export const SDK_TOOL_NAME_MAP = {
   extension_catalog: "extension-catalog",
   extension_install: "extension-install",
   extension_list: "extension-list",
+  runtime_pool_list: "runtime-pool-list",
+  runtime_pool_upsert: "runtime-pool-upsert",
+  runtime_pool_delete: "runtime-pool-delete",
+  runtime_pool_bind_agent: "runtime-pool-bind-agent",
+  runtime_pool_create_agent: "runtime-pool-create-agent",
+  runtime_controller_list: "runtime-controller-list",
 
   // ── swarm / agent ──
   swarm_get: "get-swarm",

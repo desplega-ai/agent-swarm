@@ -572,6 +572,21 @@ declare module "swarm-sdk" {
     extension_disable(args: { id: string }): Promise<unknown>;
     extension_activate_version(args: { id: string; version: number }): Promise<unknown>;
 
+    // --- runtime pools ---
+    runtime_pool_list(args?: Record<string, never>): Promise<unknown>;
+    runtime_pool_upsert(args: Record<string, unknown>): Promise<unknown>;
+    runtime_pool_delete(args: { poolId: string; force?: boolean }): Promise<unknown>;
+    runtime_pool_bind_agent(args: { agentId: string; poolId: string | null }): Promise<unknown>;
+    runtime_pool_create_agent(args: {
+      poolId: string;
+      name: string;
+      isLead?: boolean;
+      harnessProvider?: string;
+      maxTasks?: number;
+      templateId?: string;
+    }): Promise<unknown>;
+    runtime_controller_list(args?: Record<string, never>): Promise<unknown>;
+
     // --- write: repos ---
     repo_update(args: Record<string, unknown>): Promise<unknown>;
 

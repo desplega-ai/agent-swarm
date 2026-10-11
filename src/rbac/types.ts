@@ -40,6 +40,8 @@ export type RbacResource =
   | { kind: "owned"; ownerAgentId?: string | null; scope?: string }
   /** An omitted extensionId denotes a new install; existing rows retain their creator. */
   | { kind: "extension"; extensionId?: string; createdByAgentId?: string | null }
+  | { kind: "runtime_pool"; poolId?: string }
+  | { kind: "runtime_controller"; controllerId?: string }
   | { kind: "none" };
 
 export type RbacDecision =
