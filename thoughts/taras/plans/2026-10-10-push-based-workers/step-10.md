@@ -2,9 +2,7 @@
 id: step-10
 name: Remote controller
 depends_on: [step-2, step-5]
-status: claimed
-assignee: codex-gpt-6.1-sol-pw-step-10
-claimed_at: 2026-10-11T17:00:00Z
+status: done
 ---
 
 <!-- During /v-implement, `desplega:step-running` adds `assignee` and `claimed_at` while
@@ -45,16 +43,16 @@ A standalone `agent-swarm controller` process provisions runtimes on infra the A
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Tests pass: `bun run test:root -- src/tests/runtime-remote-controller.test.ts src/tests/runtime-controller-token.test.ts`
-- [ ] `bun run test:root -- src/tests/runtime-remote-controller.test.ts src/tests/runtime-controller-token.test.ts` (API on `port: 0`, in-process controller client with a fake provider) cover: hello + online; kind mismatch rejected; provision/terminate/status/list round trips; command timeout; controller token rejected on `/api/poll` and other routes; token mint revokes the previous one; lead agent mint → 403; controller token rejected on `/api/realtime`; disconnect → no provisioning and no recovery during grace; reconnect within grace keeps runtimes; grace expiry → recovery; offline errors do not trip the circuit
-- [ ] `bun run src/cli.tsx controller --help` prints the usage
-- [ ] `bun run docs:openapi` run and committed, no diff afterwards
-- [ ] `bash scripts/check-db-boundary.sh && bun run check:api-key-boundary && bun run check:rbac-coverage && bun run check:openapi-response-coverage` pass
-- [ ] `bun run lint && bun run tsc:check:tsc` pass
+- [x] Tests pass: `bun run test:root -- src/tests/runtime-remote-controller.test.ts src/tests/runtime-controller-token.test.ts`
+- [x] `bun run test:root -- src/tests/runtime-remote-controller.test.ts src/tests/runtime-controller-token.test.ts` (API on `port: 0`, in-process controller client with a fake provider) cover: hello + online; kind mismatch rejected; provision/terminate/status/list round trips; command timeout; controller token rejected on `/api/poll` and other routes; token mint revokes the previous one; lead agent mint → 403; controller token rejected on `/api/realtime`; disconnect → no provisioning and no recovery during grace; reconnect within grace keeps runtimes; grace expiry → recovery; offline errors do not trip the circuit
+- [x] `bun run src/cli.tsx controller --help` prints the usage
+- [x] `bun run docs:openapi` run and committed, no diff afterwards
+- [x] `bash scripts/check-db-boundary.sh && bun run check:api-key-boundary && bun run check:rbac-coverage && bun run check:openapi-response-coverage` pass
+- [x] `bun run lint && bun run tsc:check:tsc` pass
 
 #### Automated QA:
-- [ ] Local Docker, API on a temp DB with the flag on. Create a `remote` docker controller, mint its token, run `bun run src/cli.tsx controller --api-url http://localhost:<port> --token <t> --kind docker` in the background. Controller shows `online`. Create a docker pool placed on it, an agent, a pinned task: a container starts through the controller process (its log shows the provision command), the task completes, the container is reaped.
-- [ ] Kill the controller process while a runtime is idle: controller `offline`, no new container for new demand during the grace, then restart the controller within the grace: the runtime is kept. Repeat and stay down past the grace: the runtime is recovered/fenced.
+- [x] Local Docker, API on a temp DB with the flag on. Create a `remote` docker controller, mint its token, run `bun run src/cli.tsx controller --api-url http://localhost:<port> --token <t> --kind docker` in the background. Controller shows `online`. Create a docker pool placed on it, an agent, a pinned task: a container starts through the controller process (its log shows the provision command), the task completes, the container is reaped.
+- [x] Kill the controller process while a runtime is idle: controller `offline`, no new container for new demand during the grace, then restart the controller within the grace: the runtime is kept. Repeat and stay down past the grace: the runtime is recovered/fenced.
 
 #### Manual Verification:
 - [ ] None.
