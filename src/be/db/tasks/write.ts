@@ -643,10 +643,12 @@ export async function cancelTask(id: string, reason?: string): Promise<AgentTask
   );
 
   if (row && oldTask) {
-    if (row.agentId) {
-      const agentId = row.agentId;
-      getDbClient().afterCommit(() => publishWorkerNudge(agentId, { kind: "cancel", taskId: id }));
-    }
+    const recipients = new Set([row.agentId, row.offeredTo]);
+    getDbClient().afterCommit(() => {
+      for (const agentId of recipients) {
+        if (agentId) publishWorkerNudge(agentId, { kind: "cancel", taskId: id });
+      }
+    });
     dependencies.emitTaskLifecycleTelemetryAfterCommit(
       "cancelled",
       {

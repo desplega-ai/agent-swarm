@@ -8,10 +8,14 @@ import { resolveHttpRequestAuth } from "../http/auth";
 import { getApiKey } from "../utils/api-key";
 import { extractAndVerifyCookie } from "../utils/page-session";
 import type { HttpRequestAuth } from "../utils/request-auth-context";
-import { isRuntimePoolsEnabled } from "../utils/runtime-pools-flag";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { authorizeRoomNamespace, resolveRoomNamespace } from "./auth";
 import { realtimeBus } from "./bus";
+import {
+  addWorkerSubscription,
+  channelTopic,
+  removeWorkerSubscription as unregisterWorkerSubscription,
+} from "./channels";
 import { RoomOperationSchema } from "./document";
 import {
   applyRoomUpdate,
@@ -23,6 +27,8 @@ import {
   roomView,
 } from "./rooms";
 import { redeemRealtimeTicket } from "./tickets";
+
+export { channelTopic, listSubscribedWorkerAgents } from "./channels";
 
 const nameSchema = z.string().regex(/^[a-zA-Z0-9_-]{1,64}$/);
 const messageSchema = z.object({
@@ -129,16 +135,6 @@ async function authenticate(req: IncomingMessage): Promise<AuthenticatedConnecti
   return identityFromHttpAuth(req, auth);
 }
 
-export function channelTopic(namespace: string, name: string): string {
-  return `channel:${JSON.stringify([namespace, name])}`;
-}
-
-const subscribedWorkerSockets = new Map<string, Set<WebSocket>>();
-
-export function listSubscribedWorkerAgents(): string[] {
-  return [...subscribedWorkerSockets.keys()];
-}
-
 export function attachRealtimeTransport(server: Server): () => void {
   const wss = new WebSocketServer({ noServer: true, maxPayload: 3 * 1024 * 1024 });
   let pendingUpgrades = 0;
@@ -204,10 +200,10 @@ function connect(
 
   const removeWorkerSubscription = () => {
     if (!workerAgentId) return;
-    const sockets = subscribedWorkerSockets.get(workerAgentId);
-    sockets?.delete(ws);
-    if (sockets?.size === 0) subscribedWorkerSockets.delete(workerAgentId);
+    const agentId = workerAgentId;
     workerAgentId = undefined;
+    unregisterWorkerSubscription(agentId, ws);
+    realtimeBus.publish("worker.socket.disconnected", { agentId, runtimeId });
   };
 
   const send = (payload: Record<string, unknown>) => {
@@ -289,9 +285,7 @@ function connect(
           );
           if (namespace.startsWith("worker:")) {
             workerAgentId = auth.identity.agentId!;
-            const sockets = subscribedWorkerSockets.get(workerAgentId) ?? new Set<WebSocket>();
-            sockets.add(ws);
-            subscribedWorkerSockets.set(workerAgentId, sockets);
+            addWorkerSubscription(workerAgentId, ws);
             realtimeBus.publish("worker.socket.connected", { agentId: workerAgentId, runtimeId });
           }
         }
@@ -460,11 +454,7 @@ function connect(
     for (const key of rooms.keys()) leave(key);
     for (const stop of channels.values()) stop();
     channels.clear();
-    const agentId = workerAgentId;
     removeWorkerSubscription();
-    if (agentId && isRuntimePoolsEnabled()) {
-      realtimeBus.publish("worker.socket.disconnected", { agentId, runtimeId });
-    }
   });
   send({ type: "hello", me: auth.me });
 }

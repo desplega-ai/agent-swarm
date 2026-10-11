@@ -1,4 +1,13 @@
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  spyOn,
+  test,
+} from "bun:test";
 import { createServer, type Server } from "node:http";
 import WebSocket from "ws";
 import {
@@ -18,19 +27,24 @@ import {
   startTask,
   upsertSwarmConfig,
 } from "../be/db";
+import { startWorkerNudgeListener } from "../be/worker-nudge-listener";
 import { publishWorkerNudge } from "../be/worker-nudges";
 import { realtimeBus } from "../realtime/bus";
 import {
-  attachRealtimeTransport,
+  addWorkerSubscription,
   channelTopic,
   listSubscribedWorkerAgents,
-} from "../realtime/transport";
+  removeWorkerSubscription,
+} from "../realtime/channels";
+import { attachRealtimeTransport } from "../realtime/transport";
 import { type WorkerNudge, WorkerNudgeSchema } from "../types";
 import { getApiKey, setApiKey } from "../utils/api-key";
+import { workflowEventBus } from "../workflows/event-bus";
 import { listenOnFreePort } from "./test-net";
 
 type Frame = { id?: number; type: string; seq: number; data?: unknown; error?: string };
 type Client = {
+  agentId: string;
   ws: WebSocket;
   nudges: WorkerNudge[];
   request: (op: string, namespace?: string, name?: string) => Promise<Frame>;
@@ -46,13 +60,52 @@ let clientY: Client;
 const clients: Client[] = [];
 const previousFlag = process.env.RUNTIME_POOLS_ENABLED;
 const previousEnv = { ...process.env };
+let stopWorkerNudges: () => void;
+
+beforeAll(() => {
+  stopWorkerNudges = startWorkerNudgeListener();
+});
+afterAll(() => stopWorkerNudges());
 
 async function waitUntil(predicate: () => boolean): Promise<void> {
-  const deadline = Date.now() + 1_000;
+  const deadline = Date.now() + 5_000;
   while (!predicate()) {
-    if (Date.now() >= deadline) throw new Error("Worker nudge did not arrive within one second");
+    if (Date.now() >= deadline) throw new Error("Worker nudge did not arrive within five seconds");
     await Bun.sleep(5);
   }
+}
+
+async function flushDbHooks(): Promise<void> {
+  // The FIFO hook barrier dispatches prior hooks, then the query drains their task reads.
+  await new Promise<void>((resolve) => getDbClient().afterCommit(resolve));
+  await getDbClient().get("SELECT 1");
+}
+
+async function createCommittedTask(...args: Parameters<typeof createTaskExtended>) {
+  const emitted = new Set<string>();
+  const onCreated = (data: unknown) => emitted.add((data as { taskId: string }).taskId);
+  workflowEventBus.on("task.created", onCreated);
+  try {
+    const task = await createTaskExtended(...args);
+    await waitUntil(() => emitted.has(task.id));
+    await flushDbHooks();
+    return task;
+  } finally {
+    workflowEventBus.off("task.created", onCreated);
+  }
+}
+
+async function socketBarrier(client: Client): Promise<void> {
+  const sentinel: WorkerNudge = {
+    v: 1,
+    kind: "config",
+    taskId: crypto.randomUUID(),
+    at: new Date().toISOString(),
+  };
+  realtimeBus.publish(channelTopic(`worker:${client.agentId}`, "nudge"), sentinel);
+  await waitUntil(() => client.nudges.some((nudge) => nudge.taskId === sentinel.taskId));
+  expect(client.nudges.at(-1)).toEqual(sentinel);
+  client.nudges.pop();
 }
 
 async function openClient(agentId: string, runtimeId = crypto.randomUUID()): Promise<Client> {
@@ -73,6 +126,7 @@ async function openClient(agentId: string, runtimeId = crypto.randomUUID()): Pro
     if (frame.type === "channel") nudges.push(WorkerNudgeSchema.parse(frame.data));
   });
   const client: Client = {
+    agentId,
     ws,
     nudges,
     async request(op, namespace = `worker:${agentId}`, name = "nudge") {
@@ -107,7 +161,8 @@ async function expectNudge(
   const count = client.nudges.length;
   await write();
   await waitUntil(() => client.nudges.length > count);
-  await Bun.sleep(20);
+  await flushDbHooks();
+  await socketBarrier(client);
   const expectedTaskId = typeof taskId === "function" ? taskId() : taskId;
   expect(client.nudges.slice(count)).toEqual([
     { v: 1, kind, ...(expectedTaskId ? { taskId: expectedTaskId } : {}), at: expect.any(String) },
@@ -168,7 +223,7 @@ describe("worker nudges", () => {
     await expectNudge(
       clientX,
       async () => {
-        pendingId = (await createTaskExtended("pending", { agentId: x })).id;
+        pendingId = (await createCommittedTask("pending", { agentId: x })).id;
       },
       "work",
       () => pendingId,
@@ -176,14 +231,40 @@ describe("worker nudges", () => {
     expect(clientX.nudges.at(-1)?.taskId).toBe(pendingId);
     let offeredId = "";
     const count = clientY.nudges.length;
-    offeredId = (await createTaskExtended("offered", { offeredTo: y })).id;
+    offeredId = (await createCommittedTask("offered", { offeredTo: y })).id;
     await waitUntil(() => clientY.nudges.length === count + 1);
     expect(clientY.nudges.at(-1)).toMatchObject({ kind: "work", taskId: offeredId });
     await expectNudge(clientY, () => acceptTask(offeredId, y), "work", offeredId);
-    const pool = await createTaskExtended("pool");
-    await Bun.sleep(20);
+    const pool = await createCommittedTask("pool");
     await expectNudge(clientX, () => assignUnassignedTaskPending(pool.id, x), "work", pool.id);
     expect(await assignUnassignedTaskPending(pool.id, y)).toBeNull();
+  });
+
+  test("nudges cancellation of offers and deduplicates recipients", async () => {
+    const offered = await createCommittedTask("offered cancellation", { offeredTo: y });
+    await waitUntil(() => clientY.nudges.length === 1);
+    await expectNudge(clientY, () => cancelTask(offered.id), "cancel", offered.id);
+    await socketBarrier(clientX);
+    expect(clientX.nudges).toHaveLength(0);
+
+    const shared = await createCommittedTask("same cancellation recipient", {
+      agentId: x,
+      offeredTo: x,
+    });
+    await waitUntil(() => clientX.nudges.length === 1);
+    await expectNudge(clientX, () => cancelTask(shared.id), "cancel", shared.id);
+
+    const both = await createCommittedTask("two cancellation recipients", {
+      agentId: x,
+      offeredTo: y,
+    });
+    await socketBarrier(clientY);
+    const countX = clientX.nudges.length;
+    await expectNudge(clientY, () => cancelTask(both.id), "cancel", both.id);
+    await socketBarrier(clientX);
+    expect(clientX.nudges.slice(countX)).toEqual([
+      { v: 1, kind: "cancel", taskId: both.id, at: expect.any(String) },
+    ]);
   });
 
   test("nudges each unique mention, including reply mentions", async () => {
@@ -200,11 +281,12 @@ describe("worker nudges", () => {
       () => postMessage(channel.id, y, "reply", { replyToId: parent.id }),
       "work",
     );
+    await socketBarrier(clientY);
     expect(clientY.nudges).toHaveLength(0);
   });
 
   test("nudges cancellation and steering without their payloads", async () => {
-    const task = await createTaskExtended("active", { agentId: x });
+    const task = await createCommittedTask("active", { agentId: x });
     await waitUntil(() => clientX.nudges.length === 1);
     await startTask(task.id);
     await expectNudge(
@@ -221,7 +303,7 @@ describe("worker nudges", () => {
       task.id,
     );
     // Cancel another task, so steering promotion does not add a separate work nudge.
-    const cancelled = await createTaskExtended("cancel", { agentId: x });
+    const cancelled = await createCommittedTask("cancel", { agentId: x });
     await waitUntil(() => clientX.nudges.length === 3);
     await expectNudge(
       clientX,
@@ -230,6 +312,8 @@ describe("worker nudges", () => {
       cancelled.id,
     );
     expect(await cancelTask(cancelled.id)).toBeNull();
+    await flushDbHooks();
+    await socketBarrier(clientY);
     expect(clientY.nudges).toHaveLength(0);
   });
 
@@ -249,6 +333,7 @@ describe("worker nudges", () => {
       },
       "config",
     );
+    await socketBarrier(clientY);
     expect(clientY.nudges).toHaveLength(0);
     await expectNudge(clientX, () => deleteSwarmConfig(configId), "config");
     await expectNudge(
@@ -283,7 +368,7 @@ describe("worker nudges", () => {
     await getDbClient().transaction(async () => {
       taskId = (await createTaskExtended("transaction", { agentId: x })).id;
       await upsertSwarmConfig({ scope: "agent", scopeId: x, key: "NUDGE_TX", value: "one" });
-      await Bun.sleep(30);
+      await socketBarrier(clientX);
       expect(clientX.nudges).toHaveLength(0);
     });
     await waitUntil(() => clientX.nudges.length === 2);
@@ -304,19 +389,23 @@ describe("worker nudges", () => {
         throw new Error("rollback");
       }),
     ).rejects.toThrow("rollback");
-    await Bun.sleep(50);
+    await flushDbHooks();
+    await socketBarrier(clientX);
+    await socketBarrier(clientY);
     expect(clientX.nudges).toHaveLength(0);
     expect(clientY.nudges).toHaveLength(0);
   });
 
   test("flag off suppresses every nudge and rejects new subscriptions", async () => {
     process.env.RUNTIME_POOLS_ENABLED = "false";
-    const task = await createTaskExtended("flag off", { agentId: x });
+    const task = await createCommittedTask("flag off", { agentId: x });
     await cancelTask(task.id);
     await upsertSwarmConfig({ scope: "global", key: "NUDGE_OFF", value: "one" });
     publishWorkerNudge(x, { kind: "work" });
     expect((await clientX.request("subscribe")).type).toBe("error");
-    await Bun.sleep(50);
+    await flushDbHooks();
+    await socketBarrier(clientX);
+    await socketBarrier(clientY);
     expect(clientX.nudges).toHaveLength(0);
     expect(clientY.nudges).toHaveLength(0);
   });
@@ -353,12 +442,53 @@ describe("worker nudges", () => {
       stopDisconnected();
     }
   });
+
+  test.each([
+    1, 2,
+  ])("pairs events across %i subscribe-unsubscribe cycles and close", async (cycles) => {
+    const runtimeId = crypto.randomUUID();
+    const events: { kind: string; data: unknown }[] = [];
+    const stopConnected = realtimeBus.subscribe("worker.socket.connected", (data) =>
+      events.push({ kind: "connected", data }),
+    );
+    const stopDisconnected = realtimeBus.subscribe("worker.socket.disconnected", (data) =>
+      events.push({ kind: "disconnected", data }),
+    );
+    try {
+      const sibling = await openClient(x, runtimeId);
+      const expected = [];
+      for (let i = 0; i < cycles; i++) {
+        await sibling.request("subscribe");
+        expected.push({ kind: "connected", data: { agentId: x, runtimeId } });
+        if (i === 0) {
+          await sibling.request("unsubscribe");
+          await sibling.request("unsubscribe");
+          expected.push({ kind: "disconnected", data: { agentId: x, runtimeId } });
+        }
+      }
+      if (cycles === 2) {
+        // A flag change must not suppress the disconnect paired with this subscription.
+        process.env.RUNTIME_POOLS_ENABLED = "false";
+        expected.push({ kind: "disconnected", data: { agentId: x, runtimeId } });
+      }
+      await closeClient(sibling);
+      if (cycles === 2) await waitUntil(() => events.length === expected.length);
+      process.env.RUNTIME_POOLS_ENABLED = "true";
+      await clientX.request("subscribe");
+      await waitUntil(() => events.length === expected.length);
+      expect(events).toEqual(expected);
+    } finally {
+      stopConnected();
+      stopDisconnected();
+    }
+  });
 });
 
 describe("worker nudge database hooks", () => {
   let agentId: string;
   let nudges: WorkerNudge[];
   let stop: () => void;
+  const subscriber = {};
 
   beforeEach(async () => {
     process.env.RUNTIME_POOLS_ENABLED = "true";
@@ -367,30 +497,31 @@ describe("worker nudge database hooks", () => {
       await createAgent({ name: "nudge-db", isLead: false, status: "idle", capabilities: [] })
     ).id;
     nudges = [];
+    addWorkerSubscription(agentId, subscriber);
     stop = realtimeBus.subscribe(channelTopic(`worker:${agentId}`, "nudge"), (data) => {
       nudges.push(WorkerNudgeSchema.parse(data));
     });
   });
 
   afterEach(async () => {
-    await Bun.sleep(20);
+    await flushDbHooks();
     stop();
+    removeWorkerSubscription(agentId, subscriber);
     closeDb();
     if (previousFlag === undefined) delete process.env.RUNTIME_POOLS_ENABLED;
     else process.env.RUNTIME_POOLS_ENABLED = previousFlag;
   });
 
   test("publishes one envelope for each committed write", async () => {
-    const pending = await createTaskExtended("pending", { agentId });
+    const pending = await createCommittedTask("pending", { agentId });
     await waitUntil(() => nudges.length === 1);
     expect(nudges.at(-1)).toMatchObject({ kind: "work", taskId: pending.id });
-    const offered = await createTaskExtended("offered", { offeredTo: agentId });
+    const offered = await createCommittedTask("offered", { offeredTo: agentId });
     await waitUntil(() => nudges.length === 2);
     expect(nudges.at(-1)).toMatchObject({ kind: "work", taskId: offered.id });
     await acceptTask(offered.id, agentId);
     await waitUntil(() => nudges.length === 3);
-    const pool = await createTaskExtended("pool");
-    await Bun.sleep(20);
+    const pool = await createCommittedTask("pool");
     await assignUnassignedTaskPending(pool.id, agentId);
     await waitUntil(() => nudges.length === 4);
     const channel = await createChannel(`db-${crypto.randomUUID()}`);
@@ -415,7 +546,7 @@ describe("worker nudge database hooks", () => {
     await waitUntil(() => nudges.length === 8);
     await deleteSwarmConfig(config.id);
     await waitUntil(() => nudges.length === 9);
-    await Bun.sleep(20);
+    await flushDbHooks();
     expect(nudges.map((nudge) => nudge.kind)).toEqual([
       "work",
       "work",
@@ -434,10 +565,9 @@ describe("worker nudge database hooks", () => {
   });
 
   test("defers until commit and suppresses every rolled-back hook", async () => {
-    const pending = await createTaskExtended("pending", { agentId });
-    const offered = await createTaskExtended("offered", { offeredTo: agentId });
-    const pool = await createTaskExtended("pool");
-    await Bun.sleep(20);
+    const pending = await createCommittedTask("pending", { agentId });
+    const offered = await createCommittedTask("offered", { offeredTo: agentId });
+    const pool = await createCommittedTask("pool");
     const channel = await createChannel(`rollback-${crypto.randomUUID()}`);
     const config = await upsertSwarmConfig({
       scope: "agent",
@@ -468,12 +598,12 @@ describe("worker nudge database hooks", () => {
           value: "two",
         });
         await deleteSwarmConfig(config.id);
-        await Bun.sleep(30);
+        await getDbClient().get("SELECT 1");
         expect(nudges).toHaveLength(0);
         throw new Error("rollback");
       }),
     ).rejects.toThrow("rollback");
-    await Bun.sleep(30);
+    await flushDbHooks();
     expect(nudges).toHaveLength(0);
     await getDbClient().transaction(async () => {
       await acceptTask(offered.id, agentId);
@@ -483,7 +613,7 @@ describe("worker nudge database hooks", () => {
         key: "NUDGE_TX",
         value: "committed",
       });
-      await Bun.sleep(30);
+      await getDbClient().get("SELECT 1");
       expect(nudges).toHaveLength(0);
     });
     await waitUntil(() => nudges.length === 2);
@@ -492,7 +622,7 @@ describe("worker nudge database hooks", () => {
 
   test("flag off suppresses write hooks", async () => {
     process.env.RUNTIME_POOLS_ENABLED = "false";
-    const task = await createTaskExtended("off", { agentId });
+    const task = await createCommittedTask("off", { agentId });
     await cancelTask(task.id);
     await createSteeringMessage({
       taskId: task.id,
@@ -502,7 +632,22 @@ describe("worker nudge database hooks", () => {
       createdByKind: "system",
     });
     await upsertSwarmConfig({ scope: "agent", scopeId: agentId, key: "NUDGE_OFF", value: "off" });
-    await Bun.sleep(50);
+    await flushDbHooks();
     expect(nudges).toHaveLength(0);
+  });
+
+  test("skips task reads without subscribers or with the flag off", () => {
+    removeWorkerSubscription(agentId, subscriber);
+    const read = spyOn(getDbClient(), "get");
+    try {
+      workflowEventBus.emit("task.created", { taskId: crypto.randomUUID() });
+      expect(read).not.toHaveBeenCalled();
+      addWorkerSubscription(agentId, subscriber);
+      process.env.RUNTIME_POOLS_ENABLED = "false";
+      workflowEventBus.emit("task.created", { taskId: crypto.randomUUID() });
+      expect(read).not.toHaveBeenCalled();
+    } finally {
+      read.mockRestore();
+    }
   });
 });

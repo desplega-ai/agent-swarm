@@ -29,14 +29,16 @@ Rollback suppresses their nudges.
 | `acceptTask` | `work` | Assignee |
 | `assignUnassignedTaskPending` | `work` | Assignee |
 | `postMessage` | `work` | Each unique mentioned agent, including inherited reply mentions |
-| `cancelTask` | `cancel` | Assignee |
+| `cancelTask` | `cancel` | Assignee and offered recipient, deduplicated |
 | `createSteeringMessage` | `steer` | Task assignee |
 | Configuration upsert or delete | `config` | Agent scope: that agent. Global or repo scope: every subscribed worker agent |
 
 The transport tracks subscriptions separately for each socket.
 One socket closing does not remove another runtime's subscription for the same agent.
 The process bus publishes `worker.socket.connected` when a socket first subscribes to its worker channel.
-It publishes `worker.socket.disconnected` when a socket closes with that subscription.
+It publishes `worker.socket.disconnected` when the socket unsubscribes or closes with that subscription.
+Each subscription emits one connected event and one disconnected event.
 Both events carry `{agentId, runtimeId?}`. The upgrade reads `runtimeId` from `X-Runtime-Instance-ID`.
 An unsubscribe removes the socket from configuration broadcasts.
-The feature flag disables subscriptions, nudges, and socket events.
+The feature flag disables new subscriptions and nudges.
+An existing subscription still emits its disconnected event if the flag changes before it ends.
