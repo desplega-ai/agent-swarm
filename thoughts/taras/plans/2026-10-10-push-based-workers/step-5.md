@@ -2,9 +2,7 @@
 id: step-5
 name: Supervisor core on docker pools
 depends_on: [step-1, step-2, step-3]
-status: claimed
-assignee: codex-gpt-6.1-sol-pw-step-5
-claimed_at: 2026-10-11T08:00:00Z
+status: done
 ---
 
 <!-- During /v-implement, `desplega:step-running` adds `assignee` and `claimed_at` while
@@ -69,17 +67,17 @@ This step is large (controller layer, liveness changes, runner exit, supervisor)
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Tests pass: `bun run test:root -- src/tests/runtime-supervisor.test.ts src/tests/runtime-demand.test.ts src/tests/multi-runtime-registration.test.ts src/tests/runner-exit-after-tasks.test.ts src/tests/heartbeat.test.ts`
-- [ ] `bun run test:root -- src/tests/runtime-supervisor.test.ts` drives `reconcileOnce()` with a fake provider (in-memory `RuntimeProvider`) and covers: wake on pending task; no wake when a live free slot exists; budget refusal = no provision; dedupe (two ticks, one runtime while `provisioning`); `maxTasks/slotsPerRuntime` and `max_runtimes` caps; `minRuntimes` floor; idle reap with draining two-phase; per-task reap; orphan kill; owner filter; env contents (token, runtime id, no pool override of identity keys); terminate marks agent offline immediately; static pools never provisioned; flag off = loop not started; `MULTI_RUNTIME_ENABLED=false` = loop refuses to start with the status reason; controller secrets absent from runtime env
-- [ ] `bun run test:root -- src/tests/runtime-demand.test.ts` covers `pendingWorkForAgent` (pending with deps, offered, mentions) and `computeDesired` table cases
-- [ ] `bun run test:root -- src/tests/multi-runtime-registration.test.ts src/tests/runtime-supervisor.test.ts`: registration adopts a `provisioning` row; reaper skips `provisioning`; poll refuses a draining runtime
-- [ ] `bash scripts/check-db-boundary.sh && bash scripts/check-async-db-seam.sh && bun scripts/check-floating-promises.ts && bun scripts/check-promise-sinks.ts` pass
-- [ ] `bun run lint && bun run tsc:check:tsc` pass
+- [x] Tests pass: `bun run test:root -- src/tests/runtime-supervisor.test.ts src/tests/runtime-demand.test.ts src/tests/multi-runtime-registration.test.ts src/tests/runner-exit-after-tasks.test.ts src/tests/heartbeat.test.ts`
+- [x] `bun run test:root -- src/tests/runtime-supervisor.test.ts` drives `reconcileOnce()` with a fake provider (in-memory `RuntimeProvider`) and covers: wake on pending task; no wake when a live free slot exists; budget refusal = no provision; dedupe (two ticks, one runtime while `provisioning`); `maxTasks/slotsPerRuntime` and `max_runtimes` caps; `minRuntimes` floor; idle reap with draining two-phase; per-task reap; orphan kill; owner filter; env contents (token, runtime id, no pool override of identity keys); terminate marks agent offline immediately; static pools never provisioned; flag off = loop not started; `MULTI_RUNTIME_ENABLED=false` = loop refuses to start with the status reason; controller secrets absent from runtime env
+- [x] `bun run test:root -- src/tests/runtime-demand.test.ts` covers `pendingWorkForAgent` (pending with deps, offered, mentions) and `computeDesired` table cases
+- [x] `bun run test:root -- src/tests/multi-runtime-registration.test.ts src/tests/runtime-supervisor.test.ts`: registration adopts a `provisioning` row; reaper skips `provisioning`; poll refuses a draining runtime
+- [x] `bash scripts/check-db-boundary.sh && bash scripts/check-async-db-seam.sh && bun scripts/check-floating-promises.ts && bun scripts/check-promise-sinks.ts` pass
+- [x] `bun run lint && bun run tsc:check:tsc` pass
 
 #### Automated QA:
-- [ ] Local Docker/OrbStack, API on a temp DB: `RUNTIME_POOLS_ENABLED=true RUNTIME_WORKER_API_URL=http://host.docker.internal:<port> DATABASE_PATH=/tmp/rp5.sqlite PORT=<port> bun run start:http`. Create a `docker` pool (`image: ghcr.io/desplega-ai/agent-swarm-worker:slim`, `lifecycle: idle`, `idleMinutes: 1`) on `builtin-docker`, create an agent on it, create a task pinned to it ("store-progress 'pong'", `modelTier: smol`). Observe: a `swarm-rt-*` container appears (`docker ps`), the runtime row goes `provisioning → active`, the task completes, after about 1-2 min the container is gone, the runtime row is `offline`, the agent is `offline`, the token is revoked.
-- [ ] Same with `lifecycle: per-task` and 2 tasks: 2 containers, each exits after its task.
-- [ ] Orphan: start a container by hand with the swarm labels and this swarm's owner id. Within one tick it is removed.
+- [x] Local Docker/OrbStack, API on a temp DB: `RUNTIME_POOLS_ENABLED=true RUNTIME_WORKER_API_URL=http://host.docker.internal:<port> DATABASE_PATH=/tmp/rp5.sqlite PORT=<port> bun run start:http`. Create a `docker` pool (`image: ghcr.io/desplega-ai/agent-swarm-worker:slim`, `lifecycle: idle`, `idleMinutes: 1`) on `builtin-docker`, create an agent on it, create a task pinned to it ("store-progress 'pong'", `modelTier: smol`). Observe: a `swarm-rt-*` container appears (`docker ps`), the runtime row goes `provisioning → active`, the task completes, after about 1-2 min the container is gone, the runtime row is `offline`, the agent is `offline`, the token is revoked.
+- [x] Same with `lifecycle: per-task` and 2 tasks: 2 containers, each exits after its task.
+- [x] Orphan: start a container by hand with the swarm labels and this swarm's owner id. Within one tick it is removed.
 
 #### Manual Verification:
 - [ ] None.
