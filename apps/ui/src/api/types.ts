@@ -212,6 +212,13 @@ export interface RuntimeController {
   updatedAt: string;
 }
 
+/** `POST /api/runtime-controllers/{id}/token`. The plaintext is returned once and never stored. */
+export interface RuntimeControllerToken {
+  tokenId: string;
+  plaintext: string;
+  expiresAt: string;
+}
+
 export interface RuntimeControllerInput {
   name?: string;
   kind?: RuntimeProviderKind;

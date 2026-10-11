@@ -1,5 +1,5 @@
 import type { ColDef, ICellRendererParams } from "ag-grid-community";
-import { AlertCircle, Plus, Server, Trash2, Undo2 } from "lucide-react";
+import { AlertCircle, KeyRound, Plus, Server, Trash2, Undo2 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import {
@@ -62,6 +62,7 @@ import {
   RUNTIME_KIND_LABEL,
   RUNTIME_PROVIDER_KINDS,
 } from "@/lib/runtime-pools";
+import { RuntimeControllerTokenDialog } from "./runtime-controller-token-dialog";
 import { errorProps, FieldError } from "./runtime-pool-fields";
 import { RuntimePoolsGuard, RuntimePoolsTabs } from "./runtime-pools-shared";
 
@@ -149,10 +150,13 @@ function ControllerDialog({
   controller,
   open,
   onOpenChange,
+  onMintToken,
 }: {
   controller: RuntimeController | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** Set for a saved remote controller. Opens the token dialog. */
+  onMintToken?: () => void;
 }) {
   const create = useCreateRuntimeController();
   const update = useUpdateRuntimeController();
@@ -364,6 +368,12 @@ function ControllerDialog({
             </AlertCallout>
           ) : null}
           <DialogFooter>
+            {onMintToken ? (
+              <Button type="button" variant="outline" className="sm:mr-auto" onClick={onMintToken}>
+                <KeyRound className="h-4 w-4" />
+                Mint token
+              </Button>
+            ) : null}
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
               Cancel
             </Button>
@@ -386,6 +396,8 @@ function RuntimeControllersList() {
   // The target outlives `open`, so the title keeps its name while the dialog closes.
   const [deleting, setDeleting] = useState<RuntimeController | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  // The token dialog unmounts on close, which drops the plaintext.
+  const [minting, setMinting] = useState<RuntimeController | null>(null);
 
   const columnDefs = useMemo<ColDef<RuntimeController>[]>(
     () => [
@@ -432,7 +444,7 @@ function RuntimeControllersList() {
       {
         headerName: "Secret keys",
         colId: "secretKeys",
-        width: 220,
+        width: 180,
         suppressSizeToFit: true,
         cellRenderer: (p: ICellRendererParams<RuntimeController>) =>
           p.data ? <SecretKeyChips controller={p.data} /> : null,
@@ -440,30 +452,52 @@ function RuntimeControllersList() {
       {
         headerName: "",
         colId: "actions",
-        width: 64,
+        width: 96,
         suppressSizeToFit: true,
         sortable: false,
         cellRenderer: (p: ICellRendererParams<RuntimeController>) =>
           p.data ? (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  type="button"
-                  size="icon"
-                  variant="destructive-outline"
-                  className="h-7 w-7"
-                  aria-label={`Delete ${p.data.name}`}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    setDeleting(p.data ?? null);
-                    setDeleteOpen(true);
-                  }}
-                >
-                  <Trash2 className="h-4 w-4" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Delete</TooltipContent>
-            </Tooltip>
+            <span className="flex h-full w-full items-center justify-end gap-1.5">
+              {p.data.placement === "remote" ? (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      type="button"
+                      size="icon"
+                      variant="outline"
+                      className="h-7 w-7"
+                      aria-label={`Mint token for ${p.data.name}`}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        setMinting(p.data ?? null);
+                      }}
+                    >
+                      <KeyRound className="h-4 w-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Mint token</TooltipContent>
+                </Tooltip>
+              ) : null}
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="destructive-outline"
+                    className="h-7 w-7"
+                    aria-label={`Delete ${p.data.name}`}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setDeleting(p.data ?? null);
+                      setDeleteOpen(true);
+                    }}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Delete</TooltipContent>
+              </Tooltip>
+            </span>
           ) : null,
       },
     ],
@@ -538,6 +572,10 @@ function RuntimeControllersList() {
           rowHeight={56}
           getRowId={(p) => p.data.id}
           onRowClicked={(event) => {
+            // AG Grid sees the native click before React's stopPropagation, so
+            // a click on a row action button must not also open the editor.
+            const target = event.event?.target as HTMLElement | null;
+            if (target?.closest("button")) return;
             if (event.data) setEditing(event.data);
           }}
         />
@@ -551,6 +589,22 @@ function RuntimeControllersList() {
           onOpenChange={(open) => {
             if (!open) setEditing(undefined);
           }}
+          onMintToken={
+            editing?.placement === "remote"
+              ? () => {
+                  setMinting(editing);
+                  setEditing(undefined);
+                }
+              : undefined
+          }
+        />
+      ) : null}
+
+      {minting ? (
+        <RuntimeControllerTokenDialog
+          key={minting.id}
+          controller={minting}
+          onClose={() => setMinting(null)}
         />
       ) : null}
 

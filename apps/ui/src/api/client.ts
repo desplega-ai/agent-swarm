@@ -99,6 +99,7 @@ import type {
   ResolveUnmappedInput,
   RuntimeController,
   RuntimeControllerInput,
+  RuntimeControllerToken,
   RuntimePool,
   RuntimePoolCreateAgentInput,
   RuntimePoolInput,
@@ -1864,6 +1865,16 @@ class ApiClient {
     const url = `${this.getBaseUrl()}/api/runtime-controllers/${encodeURIComponent(id)}`;
     const res = await fetch(url, { method: "DELETE", headers: this.getHeaders() });
     await runtimePoolResponse<{ deleted: true }>(res, "Failed to delete runtime controller");
+  }
+
+  /** Mint a remote controller token. Revokes the previous token. The plaintext comes back once. */
+  async mintRuntimeControllerToken(id: string): Promise<RuntimeControllerToken> {
+    const url = `${this.getBaseUrl()}/api/runtime-controllers/${encodeURIComponent(id)}/token`;
+    const res = await fetch(url, { method: "POST", headers: this.getHeaders() });
+    return await runtimePoolResponse<RuntimeControllerToken>(
+      res,
+      "Failed to mint controller token",
+    );
   }
 
   // ── Script connections ──

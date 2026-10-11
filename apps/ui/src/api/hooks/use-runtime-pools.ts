@@ -149,6 +149,21 @@ export function useUpdateRuntimeController() {
   });
 }
 
+/**
+ * Mint a remote controller token (revokes the previous one). `gcTime: 0` drops
+ * the finished mutation from the cache at once, so the plaintext lives only in
+ * the dialog that shows it.
+ */
+export function useMintRuntimeControllerToken() {
+  const invalidate = useRuntimePoolInvalidator();
+  return useMutation({
+    mutationFn: (id: string) => api.mintRuntimeControllerToken(id),
+    gcTime: 0,
+    // The old session disconnects, so the controller status can change.
+    onSuccess: () => invalidate(),
+  });
+}
+
 export function useDeleteRuntimeController() {
   const invalidate = useRuntimePoolInvalidator();
   return useMutation({

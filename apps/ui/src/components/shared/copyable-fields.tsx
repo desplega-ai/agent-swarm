@@ -27,10 +27,13 @@ export function CopyableField({
   label,
   value,
   mono = true,
+  onCopyError,
 }: {
   label: string;
   value: string;
   mono?: boolean;
+  /** Called when the clipboard is unavailable or denied. */
+  onCopyError?: () => void;
 }) {
   const { copied, copy } = useCopyToClipboard();
   return (
@@ -47,7 +50,9 @@ export function CopyableField({
           type="button"
           variant="outline"
           size="icon"
-          onClick={() => copy(value)}
+          onClick={async () => {
+            if (!(await copy(value))) onCopyError?.();
+          }}
           aria-label={`Copy ${label}`}
           className="shrink-0"
         >
