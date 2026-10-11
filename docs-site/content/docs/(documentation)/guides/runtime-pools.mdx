@@ -168,6 +168,83 @@ On reconnect, it lists runtimes belonging to this swarm before becoming online.
 Disconnect stops new provisioning. Existing runtime records survive the controller grace, which defaults to 120 seconds.
 After grace expiry, the API revokes their tokens and recovers active tasks.
 
+### Run the controller as a service
+
+Run the controller under a supervisor so it restarts after a crash or a host reboot.
+The controller reconnects by itself after network loss. A revoked token makes it exit, so mint a new token and restart it.
+Pass each flag and its value as two separate arguments. The CLI rejects the `--flag=value` form.
+
+**Docker Compose.** The worker image contains the `agent-swarm` binary, so the host needs no Bun install.
+Use the same image tag as your workers. Create the worker network first: `docker network create swarm-workers`.
+
+```yaml title="compose.yml"
+services:
+  swarm-controller:
+    image: ghcr.io/desplega-ai/agent-swarm-worker:latest
+    entrypoint: ["/usr/local/bin/agent-swarm", "controller"]
+    command:
+      - --api-url
+      - https://api.example.test
+      - --kind
+      - docker
+      - --docker-host
+      - unix:///var/run/docker.sock
+      - --docker-network
+      - swarm-workers
+    user: root # needed to open the Docker socket
+    environment:
+      AGENT_SWARM_CONTROLLER_TOKEN: ${AGENT_SWARM_CONTROLLER_TOKEN:?set the controller token}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    restart: unless-stopped
+```
+
+```bash
+AGENT_SWARM_CONTROLLER_TOKEN=<controller-token> docker compose up -d
+docker compose logs -f swarm-controller
+```
+
+For an E2B controller, set `--kind e2b`, remove the Docker flags and the socket volume, and add `E2B_API_KEY` to `environment`.
+
+**systemd.** Run the CLI with Bun under a dedicated user in the `docker` group.
+Membership in the `docker` group gives root-equivalent access to the host, so keep this user for the controller only.
+
+```bash
+sudo useradd --system --create-home --shell /usr/sbin/nologin --groups docker swarm-controller
+sudo -u swarm-controller bash -c 'curl -fsSL https://bun.sh/install | bash'
+sudo install -d -m 700 /etc/agent-swarm
+sudo install -m 600 /dev/null /etc/agent-swarm/controller.env
+echo 'AGENT_SWARM_CONTROLLER_TOKEN=<controller-token>' | sudo tee /etc/agent-swarm/controller.env >/dev/null
+```
+
+```ini title="/etc/systemd/system/agent-swarm-controller.service"
+[Unit]
+Description=Agent Swarm runtime controller
+Wants=network-online.target
+After=network-online.target docker.service
+Requires=docker.service
+
+[Service]
+User=swarm-controller
+EnvironmentFile=/etc/agent-swarm/controller.env
+ExecStart=/home/swarm-controller/.bun/bin/bunx @desplega.ai/agent-swarm@<version> controller \
+  --api-url https://api.example.test --kind docker \
+  --docker-host unix:///var/run/docker.sock --docker-network swarm-workers
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now agent-swarm-controller
+journalctl -u agent-swarm-controller -f
+```
+
+Pin `<version>` to your API version. For an E2B controller, put `E2B_API_KEY` in the environment file and drop the Docker flags and the `docker` unit dependency.
+
 ## Benchmarks
 
 These numbers come from the v1 test runs on 2026-10-11. Use them as a rough guide, not as a guarantee.
