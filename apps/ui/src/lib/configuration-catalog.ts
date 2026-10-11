@@ -455,6 +455,56 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         docsUrl: `${DOCS}ui/configuration#runtime-pools`,
       },
       {
+        key: "RUNTIME_SUPERVISOR_INTERVAL_MS",
+        label: "Runtime supervisor interval",
+        description:
+          "Check runtime demand and lifecycle at this interval. Restart the API after changing this value.",
+        kind: "number",
+        unit: "ms",
+        defaultValue: "5000",
+        restartRequired: true,
+        docsUrl: `${DOCS}ui/configuration#runtime-pools`,
+      },
+      {
+        key: "RUNTIME_WORKER_API_URL",
+        label: "Runtime worker API URL",
+        description:
+          "API URL reachable by provisioned workers. Controller WORKER_API_URL overrides this fallback.",
+        kind: "string",
+        defaultValue: "",
+        placeholder: "http://api:3013",
+        docsUrl: `${DOCS}ui/configuration#runtime-pools`,
+      },
+      {
+        key: "DOCKER_HOST",
+        label: "Docker socket",
+        description:
+          "Unix socket for built-in Docker controllers. Controller configuration overrides this fallback. Restart the API to seed a controller.",
+        kind: "string",
+        defaultValue: "unix:///var/run/docker.sock",
+        docsUrl: `${DOCS}ui/configuration#runtime-pools`,
+      },
+      {
+        key: "DOCKER_NETWORK",
+        label: "Docker network",
+        description:
+          "Network for provisioned Docker workers. Controller configuration overrides this fallback.",
+        kind: "string",
+        defaultValue: "",
+        placeholder: "swarm-local",
+        docsUrl: `${DOCS}ui/configuration#runtime-pools`,
+      },
+      {
+        key: "DOCKER_EXTRA_HOSTS",
+        label: "Docker extra hosts",
+        description:
+          "Comma-separated host:address entries for provisioned workers. Controller configuration overrides this fallback.",
+        kind: "string",
+        defaultValue: "",
+        placeholder: "service:10.1.0.2,other:10.1.0.3",
+        docsUrl: `${DOCS}ui/configuration#runtime-pools`,
+      },
+      {
         key: "CLAUDE_TRUST_PRESEED",
         label: "Claude workspace trust pre-seed",
         description:

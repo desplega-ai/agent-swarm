@@ -205,6 +205,15 @@ async function readResponseBody(response: Response): Promise<string> {
   return text.trim();
 }
 
+export class E2BApiError extends Error {
+  constructor(
+    readonly statusCode: number,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
 export async function e2bFetchJson<T>(
   path: string,
   apiKey: string,
@@ -221,7 +230,10 @@ export async function e2bFetchJson<T>(
 
   if (!response.ok) {
     const body = await readResponseBody(response);
-    throw new Error(`E2B API ${response.status} ${response.statusText}: ${body}`);
+    throw new E2BApiError(
+      response.status,
+      `E2B API ${response.status} ${response.statusText}: ${body}`,
+    );
   }
 
   if (response.status === 204) {

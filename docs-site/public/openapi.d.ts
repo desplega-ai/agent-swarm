@@ -490,8 +490,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Mark an agent or runtime offline on shutdown
-         * @description Retires the calling process. Workers may send `X-Runtime-Instance-ID`, the per-boot identifier of the calling process. It is ignored unless MULTI_RUNTIME_ENABLED is set. With multi-runtime mode on, the header is required and only that runtime is retired; the agent goes offline once no live runtime remains. With the flag off, the agent is marked offline as before.
+         * End a session or terminate an agent runtime
+         * @description Closes the calling session. Workers may send `X-Runtime-Instance-ID`, the per-boot identifier of the calling process. It is ignored unless MULTI_RUNTIME_ENABLED is set. Pooled runtimes remain active unless runtimeShutdown is true. With multi-runtime mode on, the header is required and static runtimes retire independently. With the flag off, static agents are marked offline.
          */
         post: {
             parameters: {
@@ -503,9 +503,15 @@ export interface paths {
                 path?: never;
                 cookie?: never;
             };
-            requestBody?: never;
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        runtimeShutdown?: boolean;
+                    };
+                };
+            };
             responses: {
-                /** @description Runtime (and agent, when last) marked offline */
+                /** @description Session closed or runtime retired */
                 204: {
                     headers: {
                         [name: string]: unknown;
@@ -10887,6 +10893,7 @@ export interface paths {
                         "application/json": {
                             runtime_pools: {
                                 enabled: boolean;
+                                supervisor: string;
                             };
                             identity: {
                                 name: string;

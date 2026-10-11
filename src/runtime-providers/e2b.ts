@@ -1,5 +1,6 @@
 import {
   createSandbox,
+  E2BApiError,
   e2bSdkConnectionOptions,
   killSandbox,
   listSandboxes,
@@ -118,9 +119,13 @@ export class E2BRuntimeProvider implements RuntimeProvider {
   }
 
   async terminate(target: RuntimeTargetConfig, handle: RuntimeHandle): Promise<void> {
-    return withRedactedErrors(target, () =>
-      killSandbox(handle.externalId, this.apiKey(target), target.E2B_API_BASE),
-    );
+    return withRedactedErrors(target, async () => {
+      try {
+        await killSandbox(handle.externalId, this.apiKey(target), target.E2B_API_BASE);
+      } catch (err) {
+        if (!(err instanceof E2BApiError) || err.statusCode !== 404) throw err;
+      }
+    });
   }
 
   async status(target: RuntimeTargetConfig, handle: RuntimeHandle): Promise<RuntimeStatus> {
@@ -146,7 +151,12 @@ export class E2BRuntimeProvider implements RuntimeProvider {
             row.metadata?.[RUNTIME_LABELS.runtimeId] &&
             row.metadata[RUNTIME_LABELS.owner] === ownerId,
         )
-        .map((row) => ({ kind: "e2b", externalId: row.sandboxID, meta: row.metadata }));
+        .map((row) => ({
+          kind: "e2b",
+          externalId: row.sandboxID,
+          createdAt: row.startedAt,
+          meta: row.metadata,
+        }));
     });
   }
 

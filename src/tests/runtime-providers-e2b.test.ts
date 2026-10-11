@@ -126,8 +126,9 @@ describe("E2B runtime provider", () => {
       [RUNTIME_LABELS.runtimeId]: request.runtimeId,
       [RUNTIME_LABELS.owner]: request.ownerId,
     };
+    const startedAt = "2026-10-11T12:00:00.000Z";
     listSandboxes.mockImplementation(async () => [
-      { ...sandbox, metadata },
+      { ...sandbox, metadata, startedAt },
       {
         ...sandbox,
         sandboxID: "other-owner",
@@ -141,7 +142,7 @@ describe("E2B runtime provider", () => {
       { ...sandbox, sandboxID: "unrelated", metadata: { [RUNTIME_LABELS.owner]: request.ownerId } },
     ]);
     expect(await new E2BRuntimeProvider().list(target, request.ownerId)).toEqual([
-      { ...handle, meta: metadata },
+      { ...handle, meta: metadata, createdAt: startedAt },
     ]);
     expect(listSandboxes).toHaveBeenCalledWith(target.E2B_API_KEY, target.E2B_API_BASE);
   });

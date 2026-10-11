@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { z } from "zod";
 import { initAgentMail, resetAgentMail } from "../agentmail";
 import {
   initAzureDevOps,
@@ -17,7 +18,9 @@ import {
   updateAgentStatus,
 } from "../be/db";
 import {
+  getRuntimeInstanceById,
   markRuntimeInstanceOffline,
+  markRuntimeTerminated,
   reconcileAgentStatusFromRuntimes,
   touchRuntimeInstance,
 } from "../be/multi-runtime";
@@ -386,17 +389,18 @@ const closeRoute = route({
   method: "post",
   path: "/close",
   pattern: ["close"],
-  summary: "Mark an agent or runtime offline on shutdown",
+  summary: "End a session or terminate an agent runtime",
   description:
-    `Retires the calling process. ${RUNTIME_HEADER_DOC} With multi-runtime mode on, the header ` +
-    "is required and only that runtime is retired; the agent goes offline once no live runtime " +
-    "remains. With the flag off, the agent is marked offline as before.",
+    `Closes the calling session. ${RUNTIME_HEADER_DOC} Pooled runtimes remain active unless ` +
+    "runtimeShutdown is true. With multi-runtime mode on, the header is required and static " +
+    "runtimes retire independently. With the flag off, static agents are marked offline.",
   tags: ["Core"],
   auth: { apiKey: true, agentId: true },
   headers: runtimeInstanceHeader("retire a runtime"),
+  body: z.object({ runtimeShutdown: z.boolean().optional() }).optional(),
   rbac: { ungated: "self-scoped: an agent retires its own runtime" },
   responses: {
-    204: { description: "Runtime (and agent, when last) marked offline" },
+    204: { description: "Session closed or runtime retired" },
     400: {
       description: "Missing X-Agent-ID, or missing X-Runtime-Instance-ID in multi-runtime mode",
     },
@@ -747,6 +751,14 @@ export async function handleCore(
       return true;
     }
 
+    const parsed = await closeRoute.parse(
+      req,
+      res,
+      getPathSegments(req.url || ""),
+      new URLSearchParams(),
+    );
+    if (!parsed) return true;
+
     const found = await getDbClient().transaction(async () => {
       const agent = await getAgentById(myAgentId);
 
@@ -754,10 +766,14 @@ export async function handleCore(
         return false;
       }
 
-      if (multiRuntime && runtimeInstanceId) {
-        // One process exiting retires only its own runtime; the logical state
-        // is then recomputed from whatever is left — offline when nothing is,
-        // otherwise reflecting the surviving runtimes' readiness and work.
+      const runtime = runtimeInstanceId ? await getRuntimeInstanceById(runtimeInstanceId) : null;
+      if (runtime?.agentId === agent.id && runtime.poolId) {
+        // Session hooks do not end the runtime that owns their sessions.
+        if (parsed.body?.runtimeShutdown) {
+          await markRuntimeTerminated(runtime.id, "Runner shutdown");
+        }
+      } else if (multiRuntime && runtimeInstanceId) {
+        // Static runtimes retain independent close behavior.
         await markRuntimeInstanceOffline(runtimeInstanceId, agent.id);
         await reconcileAgentStatusFromRuntimes(agent.id);
       } else {

@@ -55,6 +55,16 @@ Codex access depends on account, client, and sign-in method. GPT-5.5 retires fro
 ChatGPT-authenticated Codex on October 14, 2026, but its API availability is
 unchanged. Keep API and ChatGPT lifecycle decisions separate.
 
+## Worker exit limit
+
+`SWARM_EXIT_AFTER_TASKS=N` stops a worker after N completed assigned or resumed task executions.
+Offer review and mention sessions do not count toward this limit.
+The worker accepts no further work once completed and active sessions reach N.
+It waits for active sessions, then uses the normal shutdown routine and exits with code 0.
+Shutdown terminates process groups, emits telemetry, saves PM2 state, and sends `/close` with `runtimeShutdown: true`.
+Unset or invalid values preserve continuous operation.
+Per-task Docker pools set N to 1.
+
 ## Credential readiness recovery
 
 After boot, a live provider change triggers a fresh credential report. A not-ready report parks the worker in `waiting_for_credentials`; the runner continues polling and rechecks credentials at most once every 30 seconds after reconciling its environment. Once a ready report succeeds, the API restores dispatch eligibility without a restart, using the same runtime identity in multi-runtime mode. Failed checks or report deliveries also retry on that interval, and only one check/report runs at a time.

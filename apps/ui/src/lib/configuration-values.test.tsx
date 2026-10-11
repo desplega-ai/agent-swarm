@@ -57,6 +57,23 @@ describe("configuration duration storage", () => {
   });
 });
 
+test("runtime supervisor and Docker fallbacks are operator settings", () => {
+  const entries = CONFIGURATION_GROUPS.flatMap((group) => group.entries);
+  expect(entries.find((entry) => entry.key === "RUNTIME_SUPERVISOR_INTERVAL_MS")).toMatchObject({
+    kind: "number",
+    unit: "ms",
+    defaultValue: "5000",
+    restartRequired: true,
+  });
+  for (const key of [
+    "RUNTIME_WORKER_API_URL",
+    "DOCKER_HOST",
+    "DOCKER_NETWORK",
+    "DOCKER_EXTRA_HOSTS",
+  ])
+    expect(entries.find((entry) => entry.key === key)).toMatchObject({ kind: "string" });
+});
+
 test("CSV empty selections and unknown entries survive editing", () => {
   expect(parseConfigList("")).toEqual([]);
   expect(parseConfigList("llm, future-rater, llm,")).toEqual(["llm", "future-rater"]);

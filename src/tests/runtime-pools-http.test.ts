@@ -307,9 +307,12 @@ describe("runtime pools HTTP", () => {
     ).toBe(409);
   });
   test("status exposes the runtime pools flag", async () => {
-    expect((await buildStatusPayload()).runtime_pools).toEqual({ enabled: true });
+    expect((await buildStatusPayload()).runtime_pools).toMatchObject({ enabled: true });
     process.env.RUNTIME_POOLS_ENABLED = "false";
-    expect((await buildStatusPayload()).runtime_pools).toEqual({ enabled: false });
+    expect((await buildStatusPayload()).runtime_pools).toEqual({
+      enabled: false,
+      supervisor: "disabled",
+    });
   });
   test("flag off returns the disabled 404 on every route", async () => {
     process.env.RUNTIME_POOLS_ENABLED = "false";

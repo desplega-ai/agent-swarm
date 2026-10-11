@@ -34,7 +34,7 @@ import {
   setAgentModelTierOverrides,
 } from "../be/model-tier-resolution";
 import { poolTaskRunsOnHarness } from "../be/model-validation";
-import { touchRuntimeInstance } from "../be/multi-runtime";
+import { getRuntimeInstanceById, touchRuntimeInstance } from "../be/multi-runtime";
 import { hasCapability } from "../server";
 import { fetchChannelActivity } from "../slack/channel-activity";
 import { emitTaskTelemetry, resolveTriggerSurface } from "../telemetry-trigger";
@@ -309,6 +309,13 @@ export async function handlePoll(
   const modelTierOverrides = parseModelTierOverridesHeader(
     ((h) => (Array.isArray(h) ? h[0] : h))(req.headers["x-model-tier-overrides"]),
   );
+  const recordRuntimeTask = async (taskId: string): Promise<void> => {
+    if (!isMultiRuntimeEnabled() || !runtimeInstanceId) return;
+    await getDbClient().run(
+      "UPDATE runtime_instances SET task_id = ? WHERE id = ? AND agent_id = ?",
+      [taskId, runtimeInstanceId, myAgentId!],
+    );
+  };
   // Handle cursor commit endpoint
   if (commitCursorsRoute.match(req.method, pathSegments)) {
     const parsed = await commitCursorsRoute.parse(req, res, pathSegments, queryParams);
@@ -344,6 +351,7 @@ export async function handlePoll(
            */
           refusalSideEffects?: { context: BudgetRefusalContext; inserted: boolean };
         };
+    let runtimeDraining = false;
     let result: PollTxnResult;
     try {
       result = await getDbClient().transaction(async () => {
@@ -377,6 +385,15 @@ export async function handlePoll(
           return { trigger: null };
         }
 
+        if (
+          isMultiRuntimeEnabled() &&
+          runtimeInstanceId &&
+          (await getRuntimeInstanceById(runtimeInstanceId))?.draining
+        ) {
+          runtimeDraining = true;
+          return { trigger: null };
+        }
+
         // A draining API dispatches nothing: offers, assignments and pool claims
         // wait for the next API. Workers learn to hand off from the
         // X-Swarm-Draining header the HTTP pipeline adds (src/be/api-drain.ts).
@@ -397,6 +414,7 @@ export async function handlePoll(
         if (firstOfferedTask) {
           const claimedTask = await claimOfferedTask(firstOfferedTask.id, myAgentId);
           if (claimedTask) {
+            await recordRuntimeTask(claimedTask.id);
             const offeredRequestedBy = await buildTriggerRequestedBy(claimedTask);
             return {
               trigger: {
@@ -463,6 +481,7 @@ export async function handlePoll(
 
             // Mark task as in_progress immediately to prevent duplicate polling
             await startTask(pendingTask.id);
+            await recordRuntimeTask(pendingTask.id);
             await updateAgentStatusFromCapacity(myAgentId);
 
             // Lifecycle announcements go through `afterCommit`, not straight
@@ -630,6 +649,7 @@ export async function handlePoll(
             for (const candidateId of unassignedIds) {
               const claimed = await claimTask(candidateId, myAgentId);
               if (claimed) {
+                await recordRuntimeTask(claimed.id);
                 await updateAgentStatusFromCapacity(myAgentId);
                 // Post-commit (see the `started` path above): a rolled-back
                 // claim must not report the task as claimed.
@@ -699,6 +719,7 @@ export async function handlePoll(
     // Throttled to avoid Slack API rate limits (~50 calls/min).
     if (
       result.trigger === null &&
+      !runtimeDraining &&
       !isApiDraining() &&
       isLeadChannelMonitoringEnabled() &&
       Date.now() - lastChannelActivityCheckAt >= CHANNEL_ACTIVITY_INTERVAL_MS

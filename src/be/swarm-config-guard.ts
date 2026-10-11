@@ -31,14 +31,16 @@ const RESERVED_KEYS = new Set([
 ]);
 
 /** Config rows owned by dedicated API surfaces, not the generic config API. */
-export const INTERNAL_CONFIG_KEYS = new Set(["onboarding_state"]);
+export const INTERNAL_CONFIG_KEYS = new Set(["onboarding_state", "runtime_owner_id"]);
 
 export function isInternalConfigKey(key: string): boolean {
   return INTERNAL_CONFIG_KEYS.has(key.toLowerCase());
 }
 
 export function internalConfigKeyError(key: string): Error {
-  return new Error(`Key '${key}' is managed by /api/onboarding`);
+  const owner =
+    key.toLowerCase() === "runtime_owner_id" ? "the runtime supervisor" : "/api/onboarding";
+  return new Error(`Key '${key}' is managed by ${owner}`);
 }
 
 export function isReservedConfigKey(key: string): boolean {

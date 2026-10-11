@@ -181,3 +181,49 @@ Both events carry `{agentId, runtimeId?}`. The upgrade reads `runtimeId` from `X
 An unsubscribe removes the socket from configuration broadcasts.
 The feature flag disables new subscriptions and nudges.
 An existing subscription still emits its disconnected event if the flag changes before it ends.
+
+## Docker pools in compose
+
+The API supervisor starts only with `RUNTIME_POOLS_ENABLED=true` and multi-runtime mode enabled.
+`/status` reports `runtime_pools.supervisor`. It explains when multi-runtime mode disables the supervisor.
+`RUNTIME_SUPERVISOR_INTERVAL_MS` defaults to 5000 milliseconds. Changes to the interval require an API restart.
+Committed pending or offered tasks request a reconcile after a 250 millisecond debounce.
+
+In `docker-compose.local.yml`, enable the commented Docker socket mount on the API service.
+Set `RUNTIME_POOLS_ENABLED=true`, then start the stack:
+
+```bash
+docker compose -f docker-compose.local.yml up --build
+```
+
+The stack names its network `swarm-local` and sets `DOCKER_NETWORK` on the API.
+Provisioned workers join this network and reach `RUNTIME_WORKER_API_URL=http://api:3013`.
+Builtin Docker controllers use the API's Docker environment defaults. Controller configuration overrides these defaults.
+The defaults are `DOCKER_HOST`, `DOCKER_NETWORK`, and `DOCKER_EXTRA_HOSTS` from the API process environment.
+Stored global settings override deployment environment values after configuration reload.
+Public controller configuration overrides the process environment. Encrypted controller configuration overrides public controller configuration.
+Seeding selects `RUNTIME_DOCKER_HOST`, then `DOCKER_HOST`, then `unix:///var/run/docker.sock`.
+An explicit `RUNTIME_DOCKER_HOST` seeds a controller even when Docker is offline and becomes controller configuration.
+Otherwise, the selected host must identify an existing Unix socket.
+The controller's public `WORKER_API_URL` selects a worker URL before `RUNTIME_WORKER_API_URL` and the public API URL.
+Choose image `swarm-worker:local` for a pool after the compose worker image builds.
+Store harness credentials as agent or global secrets. Workers receive these credentials through their scoped runtime token during boot.
+
+The API stores a stable global `runtime_owner_id`. Every provision and infrastructure list uses that owner.
+Controller credentials remain in encrypted controller configuration. The API registers their plaintext values for secret scrubbing.
+Workers receive pool environment values plus API-owned identity, token, slots, delivery, and template values.
+Pool environment values cannot replace those API-owned values.
+
+Demand counts ready pending tasks, offered tasks, and unclaimed mention channels.
+Provisioning rows reserve capacity until workers register with the injected runtime ID.
+`slotsPerRuntime` and agent `maxTasks` bound each agent. `maxRuntimes` bounds the pool.
+`minRuntimes` maintains a warm floor per agent, within those caps.
+An idle lifecycle with no `idleMinutes` keeps runtimes indefinitely.
+An idle timeout first drains the runtime. The next reconcile terminates it if it remains idle above its warm floor.
+A per-task lifecycle injects `SWARM_EXIT_AFTER_TASKS=1`. The runner closes after its task finishes.
+The supervisor removes exited runtimes and owner-filtered orphans, marks rows offline, and revokes runtime tokens.
+Provider list handles can include `createdAt` as an ISO timestamp from infrastructure metadata.
+The supervisor gives newly created orphans two minutes before termination to permit database registration.
+Disabled pools stop provisioning but retain runtime cleanup.
+Provision failures retire the row and store a scrubbed error. Retry policy and crash recovery belong to the failure supervisor.
+E2B provisioning requires its separate lease reconciliation.

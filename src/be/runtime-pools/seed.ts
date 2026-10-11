@@ -9,11 +9,14 @@ import {
 
 export async function seedRuntimePools(env: NodeJS.ProcessEnv = process.env): Promise<void> {
   if (!isRuntimePoolsEnabled(env)) return;
+  const dockerHost = env.RUNTIME_DOCKER_HOST || env.DOCKER_HOST || "unix:///var/run/docker.sock";
   const dockerAvailable =
-    !!env.RUNTIME_DOCKER_HOST || (await Bun.file("/var/run/docker.sock").exists());
+    !!env.RUNTIME_DOCKER_HOST ||
+    (dockerHost.startsWith("unix:///") &&
+      (await Bun.$`test -S ${dockerHost.slice(7)}`.quiet().nothrow()).exitCode === 0);
   let dockerOnline = false;
   if (dockerAvailable) {
-    const host = env.RUNTIME_DOCKER_HOST || "unix:///var/run/docker.sock";
+    const host = dockerHost;
     try {
       const response = await fetch(
         host.startsWith("unix://")

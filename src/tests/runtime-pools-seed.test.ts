@@ -1,4 +1,6 @@
-import { afterAll, beforeAll, beforeEach, expect, test } from "bun:test";
+import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { closeDb, getDbClient, initDb } from "../be/db";
 import {
   deleteRuntimePool,
@@ -134,4 +136,56 @@ test("e2b without a key is offline, and delivery resolves at call time", async (
   expect(resolvePoolDelivery({ delivery: "poll" }, { RUNTIME_DEFAULT_DELIVERY: "push" })).toBe(
     "poll",
   );
+});
+
+describe("runtime pool Docker seed", () => {
+  test("DOCKER_HOST seeds an online controller through a Unix socket", async () => {
+    const socket = join(tmpdir(), `seed-${crypto.randomUUID().slice(0, 16)}.sock`);
+    const requests: string[] = [];
+    const server = Bun.serve({
+      unix: socket,
+      fetch(req) {
+        requests.push(new URL(req.url).pathname);
+        return new Response("OK");
+      },
+    });
+    try {
+      await seedRuntimePools({ RUNTIME_POOLS_ENABLED: "true", DOCKER_HOST: `unix://${socket}` });
+      expect(requests).toEqual(["/_ping"]);
+      expect(await getRuntimeController("builtin-docker")).toMatchObject({
+        status: "online",
+        config: {},
+      });
+    } finally {
+      await server.stop(true);
+      await Bun.file(socket)
+        .delete()
+        .catch(() => {});
+    }
+  });
+
+  test("RUNTIME_DOCKER_HOST overrides DOCKER_HOST and preserves offline seeding", async () => {
+    const missing = `unix://${join(tmpdir(), `seed-${crypto.randomUUID()}.sock`)}`;
+    await seedRuntimePools({
+      RUNTIME_POOLS_ENABLED: "true",
+      RUNTIME_DOCKER_HOST: missing,
+      DOCKER_HOST: "tcp://unsupported:2375",
+    });
+    expect(await getRuntimeController("builtin-docker")).toMatchObject({
+      status: "offline",
+      config: { DOCKER_HOST: missing },
+    });
+  });
+
+  test("DOCKER_HOST rejects regular files and unsupported hosts", async () => {
+    const file = join(tmpdir(), `seed-${crypto.randomUUID()}.txt`);
+    await Bun.write(file, "not a socket");
+    try {
+      for (const host of [`unix://${file}`, `${file}`, "unix://", "tcp://unsupported:2375"])
+        await seedRuntimePools({ RUNTIME_POOLS_ENABLED: "true", DOCKER_HOST: host });
+      expect(await getRuntimeController("builtin-docker")).toBeNull();
+    } finally {
+      await Bun.file(file).delete();
+    }
+  });
 });
