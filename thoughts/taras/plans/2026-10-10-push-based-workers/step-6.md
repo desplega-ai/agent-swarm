@@ -20,7 +20,7 @@ Make the supervisor safe when things go wrong. Provisioning failures retry with 
 **File**: `src/be/runtime-pools/supervisor.ts`
 **Changes**:
 - A failed `provision()` or a `provisioning` row not `active` within `RUNTIME_PROVISION_TIMEOUT_SEC` (default 300) counts as one attempt. Timeout error text: `runtime did not register within <N>s (image may lack the swarm runner, or WORKER_API_URL is unreachable)`. The timed-out runtime is terminated.
-- Backoff between attempts for the same agent demand: 30 s, 90 s, 180 s. `RUNTIME_PROVISION_MAX_ATTEMPTS` (default 3).
+- Backoff between attempts for the same agent demand: 30 s, 90 s, 180 s. `RUNTIME_PROVISION_MAX_ATTEMPTS` (default 3). Persist the count and next-attempt time on the agent row (`agents.runtime_provision_attempts`, `agents.runtime_provision_retry_at`, added in migration 206) so backoff survives an API restart and the pruning of old runtime rows. Reset both on a successful registration and after the task is failed (orchestrator amendment 2026-10-11).
 - Each failure writes `last_error`/`last_error_at` on the pool and the controller, `provision_error` on the row, and increments `runtime_pools.consecutive_failures`. A successful registration resets it to 0.
 - After the last attempt: fail the agent's oldest `pending` task that triggered the demand (`failTask`, `src/be/db/tasks/write.ts:477`) with reason `provisioning failed after <n> attempts: <scrubbed error>`. The existing failure follow-up path notifies the lead.
 
