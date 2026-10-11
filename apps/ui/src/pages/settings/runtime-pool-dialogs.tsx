@@ -197,7 +197,7 @@ export function DeletePoolDialog({
 }) {
   const navigate = useNavigate();
   const remove = useDeleteRuntimePool(pool.id);
-  // A 409 means agents are still bound: the dialog then offers a forced delete.
+  // A 409 can require runtime teardown or forced unbinding.
   const [needsForce, setNeedsForce] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -233,12 +233,12 @@ export function DeletePoolDialog({
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>
-            {needsForce ? `${pool.name} has bound agents` : `Delete ${pool.name}?`}
+            {needsForce ? `${pool.name} requires teardown or unbinding` : `Delete ${pool.name}?`}
           </AlertDialogTitle>
           <AlertDialogDescription>
             {needsForce
-              ? "Force delete unbinds every agent from this pool, then deletes the pool. Bind the agents to another pool to run them again."
-              : "Deletes the pool. A pool with bound agents asks again before a forced delete."}
+              ? "Force delete only unbinds agents after every runtime is offline. Scale to zero or disable the pool and wait before deleting."
+              : "Deleting requires every runtime to be offline. Disable the pool and wait for teardown. Bound agents require a forced delete."}
           </AlertDialogDescription>
         </AlertDialogHeader>
         {error ? (

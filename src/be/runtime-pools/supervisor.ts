@@ -63,6 +63,7 @@ let warnedMultiRuntime = false;
 const orphanFirstSeen = new Map<string, number>();
 const ORPHAN_GRACE_MS = 120_000;
 const TERMINAL_TASK_STATUS_PLACEHOLDERS = TERMINAL_TASK_STATUSES.map(() => "?").join(", ");
+const TASKLESS_TRIGGER_SQL = "'unread_mentions', 'pool_tasks_available', 'channel_activity'";
 
 export function runtimeSupervisorStatus(): string {
   if (!isRuntimePoolsEnabled()) return "disabled";
@@ -335,6 +336,12 @@ export async function reapPoolRuntimes(
   listedHandles?: RuntimeHandle[] | null,
   rotatingIds?: ReadonlySet<string>,
   countedFailures = new Set<string>(),
+  controllers: ReadonlyMap<string, ControllerCommands> = new Map([
+    [pool.placements[0]!, controller],
+  ]),
+  listings: ReadonlyMap<string, RuntimeHandle[] | null | undefined> = new Map([
+    [pool.placements[0]!, listedHandles],
+  ]),
 ): Promise<void> {
   const rotations =
     rotatingIds ??
@@ -347,33 +354,46 @@ export async function reapPoolRuntimes(
       controller.traits.maxContinuousSec,
     ));
   const cutoff = now.getTime() - runtimeStaleThresholdMinutes() * 60_000;
+  const sessionCutoff = new Date(
+    now.getTime() - runtimeNumber("HEARTBEAT_STALE_CLEANUP_MIN", 30) * 60_000,
+  ).toISOString();
   const remaining = new Map<string, number>();
-  const handles = runtimes
-    .filter(
-      (r) => r.status !== "offline" && (pool.kind === "e2b" || Date.parse(r.lastSeenAt) >= cutoff),
-    )
-    .map(runtimeHandle)
-    .filter((h): h is RuntimeHandle => h !== null);
-  let statuses: Awaited<ReturnType<ControllerCommands["status"]>> = {};
-  try {
-    if (handles.length) statuses = await controller.status(handles);
-  } catch (error) {
-    reportSupervisorError(error);
-    // One lookup failure must not prevent sibling recovery.
-    for (const handle of handles) {
-      try {
-        Object.assign(statuses, await controller.status([handle]));
-      } catch (lookupError) {
-        reportSupervisorError(lookupError);
+  const statusesByController = new Map<string, Awaited<ReturnType<ControllerCommands["status"]>>>();
+  for (const [controllerId, controller] of controllers) {
+    const handles = runtimes
+      .filter(
+        (r) =>
+          (r.controllerId ?? pool.placements[0]) === controllerId &&
+          r.status !== "offline" &&
+          (runtimeHandle(r)?.kind === "e2b" || Date.parse(r.lastSeenAt) >= cutoff),
+      )
+      .map(runtimeHandle)
+      .filter((h): h is RuntimeHandle => h !== null);
+    let statuses: Awaited<ReturnType<ControllerCommands["status"]>> = {};
+    try {
+      if (handles.length) statuses = await controller.status(handles);
+    } catch (error) {
+      reportSupervisorError(error);
+      // One lookup failure must not prevent sibling recovery.
+      for (const handle of handles) {
+        try {
+          Object.assign(statuses, await controller.status([handle]));
+        } catch (lookupError) {
+          reportSupervisorError(lookupError);
+        }
       }
     }
+    statusesByController.set(controllerId, statuses);
   }
   for (const runtime of runtimes)
     if (
       runtime.status === "provisioning" ||
       (runtime.status === "active" &&
         (Date.parse(runtime.lastSeenAt) >= cutoff ||
-          (pool.kind === "e2b" && statuses[runtimeHandle(runtime)?.externalId ?? ""] === "paused")))
+          (runtimeHandle(runtime)?.kind === "e2b" &&
+            statusesByController.get(runtime.controllerId ?? pool.placements[0]!)?.[
+              runtimeHandle(runtime)?.externalId ?? ""
+            ] === "paused")))
     )
       remaining.set(runtime.agentId, (remaining.get(runtime.agentId) ?? 0) + 1);
   for (const candidate of runtimes) {
@@ -388,16 +408,18 @@ export async function reapPoolRuntimes(
                 `SELECT id FROM active_sessions WHERE runtimeInstanceId = ? AND NOT EXISTS (
             SELECT 1 FROM agent_tasks WHERE id = active_sessions.taskId
               AND status NOT IN (${TERMINAL_TASK_STATUS_PLACEHOLDERS})
-          ) LIMIT 1`,
-                [runtime.id, ...TERMINAL_TASK_STATUSES],
+          ) AND (EXISTS (SELECT 1 FROM agent_tasks WHERE id = active_sessions.taskId)
+            OR triggerType NOT IN (${TASKLESS_TRIGGER_SQL}) OR lastHeartbeatAt < ?) LIMIT 1`,
+                [runtime.id, ...TERMINAL_TASK_STATUSES, sessionCutoff],
               );
         if (staleSession)
           await getDbClient().run(
             `DELETE FROM active_sessions WHERE runtimeInstanceId = ? AND NOT EXISTS (
               SELECT 1 FROM agent_tasks WHERE id = active_sessions.taskId
                 AND status NOT IN (${TERMINAL_TASK_STATUS_PLACEHOLDERS})
-            )`,
-            [runtime.id, ...TERMINAL_TASK_STATUSES],
+            ) AND (EXISTS (SELECT 1 FROM agent_tasks WHERE id = active_sessions.taskId)
+              OR triggerType NOT IN (${TASKLESS_TRIGGER_SQL}) OR lastHeartbeatAt < ?)`,
+            [runtime.id, ...TERMINAL_TASK_STATUSES, sessionCutoff],
           );
         if (runtime.status === "offline") {
           const session = await getDbClient().get<{ taskId: string }>(
@@ -408,19 +430,26 @@ export async function reapPoolRuntimes(
             await recoverRuntime(runtime.id, runtime.provisionError ?? "Runtime offline");
           return;
         }
+        const controllerId = runtime.controllerId ?? pool.placements[0]!;
+        const controller = controllers.get(controllerId);
+        if (!controller) return;
+        const listedHandles = listings.get(controllerId);
         const handle = runtimeHandle(runtime);
-        let status = handle ? statuses[handle.externalId] : undefined;
-        if (pool.kind === "e2b" && status === "paused" && handle)
+        let status = handle
+          ? statusesByController.get(controllerId)?.[handle.externalId]
+          : undefined;
+        const isE2b = handle?.kind === "e2b";
+        if (isE2b && status === "paused" && handle)
           status = (await controller.status([handle]))[handle.externalId];
         const stale =
           runtime.status === "active" &&
           Date.parse(runtime.lastSeenAt) < cutoff &&
-          !(pool.kind === "e2b" && status === "paused");
+          !(isE2b && status === "paused");
         const missing =
           handle &&
           listedHandles &&
           !listedHandles.some((h) => h.externalId === handle.externalId) &&
-          !(pool.kind === "e2b" && status === "paused");
+          !(isE2b && status === "paused");
         const timeoutSec = runtimeNumber("RUNTIME_PROVISION_TIMEOUT_SEC", 300);
         const timedOut =
           runtime.status === "provisioning" &&
@@ -444,14 +473,15 @@ export async function reapPoolRuntimes(
           return;
         }
         const busy = await getDbClient().get<{ taskId: string }>(
-          `SELECT s.taskId FROM active_sessions s JOIN agent_tasks t ON t.id = s.taskId
-           WHERE s.runtimeInstanceId = ? AND t.status NOT IN (${TERMINAL_TASK_STATUS_PLACEHOLDERS}) LIMIT 1`,
-          [runtime.id, ...TERMINAL_TASK_STATUSES],
+          `SELECT s.taskId FROM active_sessions s LEFT JOIN agent_tasks t ON t.id = s.taskId
+           WHERE s.runtimeInstanceId = ? AND (t.status NOT IN (${TERMINAL_TASK_STATUS_PLACEHOLDERS})
+             OR (t.id IS NULL AND s.triggerType IN (${TASKLESS_TRIGGER_SQL}) AND s.lastHeartbeatAt >= ?)) LIMIT 1`,
+          [runtime.id, ...TERMINAL_TASK_STATUSES, sessionCutoff],
         );
         const task = runtime.taskId ? await getTaskById(runtime.taskId) : null;
         const taskRunning = task?.status === "in_progress" || task?.status === "reviewing";
         const rotating = rotations.has(runtime.id);
-        if (status === "paused" && pool.kind === "e2b") {
+        if (status === "paused" && isE2b) {
           await recoverPausedRuntime(
             runtime,
             controller,
@@ -472,7 +502,7 @@ export async function reapPoolRuntimes(
         if (runtime.status !== "active" && pool.enabled) return;
         if (busy || taskRunning) {
           await getDbClient().run(
-            "UPDATE runtime_instances SET idle_since = NULL, draining = ?, task_id = COALESCE(?, task_id) WHERE id = ?",
+            "UPDATE runtime_instances SET idle_since = NULL, draining = ?, task_id = COALESCE((SELECT id FROM agent_tasks WHERE id = ?), task_id) WHERE id = ?",
             [rotating || !pool.enabled ? 1 : 0, busy?.taskId ?? null, runtime.id],
           );
           return;
@@ -553,25 +583,25 @@ export async function reapPoolRuntimes(
 
 async function renewPoolLeases(
   pool: RuntimePool,
-  controller: ControllerCommands,
+  controllers: ReadonlyMap<string, ControllerCommands>,
   now: Date,
 ): Promise<void> {
-  if (pool.kind !== "e2b" || !controller.renew) return;
-  const renewBy =
-    now.getTime() +
-    Math.min(
-      runtimeNumber("RUNTIME_LEASE_RENEW_BEFORE_SEC", 300),
-      poolLeaseTtl(pool, controller) - Math.min(60, poolLeaseTtl(pool, controller) / 2),
-    ) *
-      1000;
   for (const runtime of await listRuntimeInstancesForPool(pool.id)) {
+    const controller = controllers.get(runtime.controllerId ?? pool.placements[0]!);
+    const handle = runtimeHandle(runtime);
+    if (handle?.kind !== "e2b" || !controller?.renew) continue;
+    const renewBy =
+      now.getTime() +
+      Math.min(
+        runtimeNumber("RUNTIME_LEASE_RENEW_BEFORE_SEC", 300),
+        poolLeaseTtl(pool, controller) - Math.min(60, poolLeaseTtl(pool, controller) / 2),
+      ) *
+        1000;
     if (
       runtime.status === "offline" ||
       (runtime.leaseExpiresAt && Date.parse(runtime.leaseExpiresAt) > renewBy)
     )
       continue;
-    const handle = runtimeHandle(runtime);
-    if (!handle) continue;
     try {
       const { endAt } = await controller.renew(handle, poolLeaseTtl(pool, controller));
       if (!Number.isFinite(Date.parse(endAt)))
@@ -660,45 +690,61 @@ async function reconcilePools(
     if (!canProvisionKind(pool.kind)) continue;
     const controllerId = pool.placements[0]!;
     try {
-      const controller = controllers.get(controllerId) ?? (await commands(controllerId));
-      controllers.set(controllerId, controller);
-      if (!controller.traits.canProvision) continue;
-      if (!listed.has(controllerId)) {
+      const poolRuntimes = await listRuntimeInstancesForPool(pool.id);
+      const poolControllerIds = new Set([
+        controllerId,
+        ...poolRuntimes.map((r) => r.controllerId ?? controllerId),
+      ]);
+      const rotatingIds = new Set<string>();
+      for (const id of poolControllerIds) {
         try {
-          listed.set(controllerId, await controller.list(ownerId));
+          const controller = controllers.get(id) ?? (await commands(id));
+          controllers.set(id, controller);
+          if (!controller.traits.canProvision) continue;
+          if (!listed.has(id)) {
+            try {
+              listed.set(id, await controller.list(ownerId));
+            } catch (error) {
+              reportSupervisorError(error);
+              listed.set(id, null);
+            }
+            const handles = listed.get(id);
+            if (handles && remoteControllerSession(id) === controller)
+              await reconcileRemoteProvisions(id, handles, ownerId);
+            if (handles) await reconcileControllerOrphans(id, controller, ownerId, now, handles);
+          }
+          const rotations = await rotatingRuntimes(
+            pool.id,
+            rotationCutoff,
+            now,
+            controller.traits.maxContinuousSec,
+          );
+          for (const runtime of poolRuntimes)
+            if ((runtime.controllerId ?? controllerId) === id && rotations.has(runtime.id))
+              rotatingIds.add(runtime.id);
         } catch (error) {
           reportSupervisorError(error);
-          listed.set(controllerId, null);
         }
-        const handles = listed.get(controllerId);
-        if (handles && remoteControllerSession(controllerId) === controller)
-          await reconcileRemoteProvisions(controllerId, handles, ownerId);
-        if (listed.get(controllerId))
-          await reconcileControllerOrphans(
-            controllerId,
-            controller,
-            ownerId,
-            now,
-            listed.get(controllerId),
-          );
       }
-      const rotatingIds = await rotatingRuntimes(
-        pool.id,
-        rotationCutoff,
-        now,
-        controller.traits.maxContinuousSec,
-      );
+      const controller = controllers.get(controllerId);
+      const existingController =
+        controller ??
+        [...poolControllerIds].map((id) => controllers.get(id)).find((c) => c?.traits.canProvision);
+      if (!existingController) continue;
       await reapPoolRuntimes(
         pool,
         await listRuntimeInstancesForPool(pool.id),
-        controller,
+        existingController,
         now,
         listed.get(controllerId),
         rotatingIds,
         countedFailures,
+        controllers,
+        listed,
       );
-      await renewPoolLeases(pool, controller, now);
+      await renewPoolLeases(pool, controllers, now);
       if (signal.aborted) return;
+      if (!controller?.traits.canProvision) continue;
       const currentPool = await getRuntimePool(pool.id);
       const agents = await listAgentsForPool(pool.id);
       const demands: AgentDemand[] = [];

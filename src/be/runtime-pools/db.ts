@@ -347,6 +347,17 @@ export async function updateRuntimePool(
     const existing = await getRuntimePool(id);
     if (!existing) throw new RuntimePoolError("Pool not found", 404);
     const data = { ...existing, ...patch };
+    if (
+      (data.kind !== existing.kind || data.placements[0] !== existing.placements[0]) &&
+      (await tx.get(
+        "SELECT id FROM runtime_instances WHERE pool_id = ? AND status != 'offline' LIMIT 1",
+        [id],
+      ))
+    )
+      throw new RuntimePoolError(
+        "Pool has non-offline runtimes. Disable the pool and wait for teardown before changing its placement or provider kind.",
+        409,
+      );
     await validatePool(data);
     if (await tx.get("SELECT id FROM runtime_pools WHERE name = ? AND id != ?", [data.name, id]))
       throw new RuntimePoolError("Pool name already exists", 409);
@@ -387,6 +398,16 @@ export async function deleteRuntimePool(
 ): Promise<void> {
   await getDbClient().transaction(async (tx) => {
     if (!(await getRuntimePool(id))) throw new RuntimePoolError("Pool not found", 404);
+    if (
+      await tx.get(
+        "SELECT id FROM runtime_instances WHERE pool_id = ? AND status != 'offline' LIMIT 1",
+        [id],
+      )
+    )
+      throw new RuntimePoolError(
+        "Pool has non-offline runtimes. Scale to zero or disable the pool and wait for teardown before deletion.",
+        409,
+      );
     if (!force && (await listAgentsForPool(id)).length)
       throw new RuntimePoolError("Pool has bound agents", 409);
     if (force) {
@@ -406,6 +427,19 @@ export async function bindAgentToPool(
   return await getDbClient().transaction(async (tx) => {
     if (poolId !== null && !(await getRuntimePool(poolId)))
       throw new RuntimePoolError("Pool not found", 404);
+    const agent = await getAgentById(agentId);
+    if (!agent) throw new RuntimePoolError("Agent not found", 404);
+    if (
+      agent.runtimePoolId !== poolId &&
+      (await tx.get(
+        "SELECT id FROM runtime_instances WHERE agent_id = ? AND pool_id IS NOT NULL AND status != 'offline' LIMIT 1",
+        [agentId],
+      ))
+    )
+      throw new RuntimePoolError(
+        "Agent has non-offline pool runtimes. Disable its pool and wait for teardown before changing its binding.",
+        409,
+      );
     const row = await tx.get<AgentRow>(
       "UPDATE agents SET runtime_pool_id = ?, lastUpdatedAt = ?, updated_by = COALESCE(?, updated_by) WHERE id = ? RETURNING *",
       [poolId, new Date().toISOString(), actor, agentId],
