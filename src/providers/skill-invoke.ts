@@ -129,24 +129,16 @@ function shellSkillReads(command: string): SkillInvoke[] {
   ) {
     return words.length === 3 ? shellSkillReads(words[2] as string) : [];
   }
+  // Only plain cat is supported: exit 0 must prove every operand was read.
+  // Reject compound commands, comments, expansions and redirections in full.
+  if (/[\n\r;|&<>`$*?\\(){}#]/.test(command)) return [];
+  if (!/^(?:.*\/)?cat$/.test(words[0] ?? "")) return [];
+  if (words.slice(1).some((word) => word.startsWith("-"))) return [];
+  // Reject unmatched quotes and concatenated quoted/unquoted words.
+  if (tokens.join(" ") !== command.trim().replace(/[ \t]+/g, " ")) return [];
   const invokes = new Map<string, SkillInvoke>();
-  let reading = false;
-  let commandStart = true;
-  for (const word of words) {
-    if (/^[;|&]+$/.test(word)) {
-      reading = false;
-      commandStart = true;
-      continue;
-    }
-    if (commandStart) {
-      commandStart = false;
-      reading = /^(?:.*\/)?cat$/.test(word);
-      continue;
-    }
-    if (/[<>]/.test(word)) reading = false;
-    if (!reading) continue;
-    // Redirections, substitutions and globs are not explicit file reads.
-    if (/[<>`$*?\\]/.test(word)) continue;
+  for (const word of words.slice(1)) {
+    if (/["']/.test(word)) return [];
     const skillName = INSTALLED_SKILL_FILE_REGEX.exec(word)?.[1];
     if (skillName) invokes.set(skillName, { via: "read", skillName });
   }

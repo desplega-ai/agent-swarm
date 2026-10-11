@@ -21,6 +21,7 @@ import {
   skillInvokeFromToolStart,
 } from "../providers/skill-invoke";
 import type { ProviderEvent, ProviderSessionConfig } from "../providers/types";
+import { CHILD_PROCESS_TEST_BUDGET_MS, runChild } from "./test-proc";
 
 describe("Codex shell skill reads", () => {
   test.each([0, 1])("command_execution exit %i reaches the tracker", async (exitCode) => {
@@ -242,6 +243,50 @@ describe("createSkillInvokeTracker", () => {
     tracker.onEvent(toolEnd("shell", false));
     expect(emitted).toEqual([]);
   });
+
+  test.each(
+    [
+      "true || cat ~/.agents/skills/pages/SKILL.md",
+      "cat ~/.agents/skills/pages/SKILL.md | cat",
+      "cat ~/.agents/skills/pages/SKILL.md; true",
+      "cat ~/.agents/skills/pages/SKILL.md & true",
+      "cat ~/.agents/skills/pages/SKILL.md\ntrue",
+      "cat ~/.agents/skills/pages/SKILL.md && true || true",
+      "cat ~/.agents/skills/pages/SKILL.md > /dev/null; true",
+      "cat --help ~/.agents/skills/pages/SKILL.md",
+      "cat README.md # ~/.agents/skills/pages/SKILL.md",
+    ].flatMap((command) => [command, `/bin/bash -lc '${command}'`]),
+  )("unsupported shell syntax cannot claim session dedup: %s", (command) => {
+    const { tracker, emitted, attach } = track();
+    attach();
+    tracker.onEvent(toolStart("shell", "bash", { command }));
+    tracker.onEvent(toolEnd("shell", false));
+    expect(emitted).toEqual([]);
+    tracker.onEvent(toolStart("real", "read", skillMd("pages")));
+    tracker.onEvent(toolEnd("real", false));
+    expect(emitted).toEqual([{ via: "read", skillName: "pages" }]);
+  });
+
+  test.each(
+    ["true || cat", "cat", "cat"].flatMap((prefix, index) => {
+      const path = `/tmp/nonexistent-review-${crypto.randomUUID()}/.agents/skills/pages/SKILL.md`;
+      const command = `${prefix} ${path}${["", " | cat", "; true"][index]}`;
+      return [command, `/bin/bash -lc '${command}'`];
+    }),
+  )(
+    "actual bash success does not prove a skill read: %s",
+    async (command) => {
+      const result = await runChild(["bash", "-lc", command]);
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toBe("");
+      const { tracker, emitted, attach } = track();
+      attach();
+      tracker.onEvent(toolStart("shell", "bash", { command }));
+      tracker.onEvent(toolEnd("shell", result.exitCode !== 0));
+      expect(emitted).toEqual([]);
+    },
+    CHILD_PROCESS_TEST_BUDGET_MS,
+  );
 
   test("holds invocations recorded before attach, then emits each skill once", () => {
     const { tracker, emitted, attach } = track();
