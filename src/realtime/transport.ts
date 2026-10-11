@@ -109,9 +109,11 @@ function identityFromHttpAuth(
           sessionToken: {
             tokenId: auth.tokenId,
             check: async () => {
-              const current = await resolveHttpRequestAuth(req, getApiKey());
+              const current = await resolveHttpRequestAuth(req, getApiKey(), {
+                touchSessionToken: false,
+              });
               if (current?.kind !== "agent" || current.tokenId !== auth.tokenId)
-                throw new Error("Session token is no longer valid");
+                throw new Error("Session token revoked or expired");
             },
           },
         }
@@ -210,7 +212,7 @@ function connect(ws: WebSocket, auth: Awaited<ReturnType<typeof authenticate>>):
         ws.close(1008, "Session token revoked"),
       )
     : undefined;
-  void auth.sessionToken?.check().catch(() => ws.close(1008, "Session no longer valid"));
+  void auth.sessionToken?.check().catch(() => ws.close(1008, "Session token revoked or expired"));
   const rooms = new Map<string, { room: LiveRoom; version: number; stop: () => void }>();
   const channels = new Map<string, () => void>();
   const pending = new Map<number, number>();
@@ -250,7 +252,8 @@ function connect(ws: WebSocket, auth: Awaited<ReturnType<typeof authenticate>>):
   };
   const checkSession = async () => {
     await auth.sessionToken?.check();
-    if (auth.expiresAt && Date.now() >= auth.expiresAt) throw new Error("Page session expired");
+    if (auth.expiresAt && Date.now() >= auth.expiresAt)
+      throw new Error(auth.sessionToken ? "Session token expired" : "Page session expired");
     if (auth.identity.pageId && !(await getPage(auth.identity.pageId)))
       throw new Error("Page no longer exists");
     if (auth.identity.userId && (await findUserById(auth.identity.userId))?.status !== "active")
@@ -446,13 +449,22 @@ function connect(ws: WebSocket, auth: Awaited<ReturnType<typeof authenticate>>):
   });
   ws.on("error", () => ws.close(1011, "Connection failed"));
   const timer = setInterval(() => {
-    if (!alive || (auth.expiresAt && Date.now() >= auth.expiresAt)) {
-      ws.close(1008, "Session expired or peer unavailable");
+    if (!alive) {
+      ws.close(1008, "Peer unavailable");
+      return;
+    }
+    if (auth.expiresAt && Date.now() >= auth.expiresAt) {
+      ws.close(1008, auth.sessionToken ? "Session token expired" : "Page session expired");
       return;
     }
     alive = false;
     ws.ping();
-    void checkSession().catch(() => ws.close(1008, "Session no longer valid"));
+    void checkSession().catch(() =>
+      ws.close(
+        1008,
+        auth.sessionToken ? "Session token revoked or expired" : "Session no longer valid",
+      ),
+    );
     for (const { room } of rooms.values()) {
       const meta = room.awareness.meta.get(clientId);
       if (meta) meta.lastUpdated = Date.now();

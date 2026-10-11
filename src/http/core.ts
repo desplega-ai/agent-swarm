@@ -40,7 +40,13 @@ import { refreshSecretScrubberCache, registerSensitiveKeyName } from "../utils/s
 import { resolveHttpRequestAuth } from "./auth";
 import { generateOpenApiSpec, SCALAR_HTML } from "./openapi";
 import { findRoute, isPublicRoute, route, runtimeInstanceHeader } from "./route-def";
-import { agentWithCapacity, getPathSegments, jsonError, parseQueryParams } from "./utils";
+import {
+  agentWithCapacity,
+  duplicateGuardedQueryKey,
+  getPathSegments,
+  jsonError,
+  parseQueryParams,
+} from "./utils";
 
 /**
  * Load global swarm_config entries into process.env.
@@ -473,6 +479,16 @@ export async function handleCore(
   }
 
   if (auth?.kind === "agent") {
+    const query = parseQueryParams(req.url || "");
+    const duplicate = duplicateGuardedQueryKey(query);
+    if (duplicate) {
+      jsonError(res, `Duplicate query parameter: ${duplicate}`, 400);
+      return true;
+    }
+    if (req.headers["x-page-id"] !== undefined) {
+      jsonError(res, "Agent tokens cannot send X-Page-Id", 403);
+      return true;
+    }
     const header = req.headers["x-agent-id"];
     const agentId = Array.isArray(header) ? header[0] : header;
     if (agentId !== undefined && agentId !== auth.agentId) {
@@ -489,9 +505,14 @@ export async function handleCore(
         return true;
       }
       req.headers["x-runtime-instance-id"] = auth.runtimeId;
+      const sourceHeader = req.headers["x-source-task-id"];
+      const taskId = Array.isArray(sourceHeader) ? sourceHeader[0] : sourceHeader;
+      if (taskId !== undefined && (await getTaskById(taskId))?.agentId !== auth.agentId) {
+        jsonError(res, "X-Source-Task-Id does not belong to token agent", 403);
+        return true;
+      }
     }
     const targetAgentId = pathSegments[2];
-    const query = parseQueryParams(req.url || "");
     if (
       pathSegments[0] === "api" &&
       pathSegments[1] === "agents" &&
@@ -505,7 +526,7 @@ export async function handleCore(
       if (
         !can({
           principal: { kind: "agent", agentId: auth.agentId, isLead: agent?.isLead ?? false },
-          verb: "agent.profile.update.any",
+          verb: "agent.act.any",
           resource: { kind: "agent", agentId: targetAgentId },
           source: "http",
         }).allow

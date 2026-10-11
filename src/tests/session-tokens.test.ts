@@ -258,7 +258,16 @@ describe("/mcp aseph_ token identity enforcement", () => {
         "Content-Type": "application/json",
         "X-Source-Task-Id": "mcp-task-E",
       },
-      body: JSON.stringify({ jsonrpc: "2.0", method: "initialize", id: 1, params: {} }),
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        method: "initialize",
+        id: 1,
+        params: {
+          protocolVersion: "2024-11-05",
+          clientInfo: { name: "session-token-test", version: "1" },
+          capabilities: {},
+        },
+      }),
     });
     expect(res.status).toBe(401);
     expect(await res.json()).toEqual({ error: "Agent not found" });

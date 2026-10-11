@@ -826,6 +826,7 @@ export async function fetchResolvedEnv(
   taskModel?: string,
   sessionContext?: {
     repoId?: string;
+    taskId?: string;
     provider?: ProviderName;
     modelTier?: string;
     /**
@@ -857,6 +858,7 @@ export async function fetchResolvedEnv(
     try {
       const headers: Record<string, string> = { "X-Agent-ID": agentId };
       if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+      if (sessionContext?.taskId) headers["X-Source-Task-Id"] = sessionContext.taskId;
 
       const url = `${apiUrl}/api/config/resolved?agentId=${encodeURIComponent(agentId)}&includeSecrets=true${repoId ? `&repoId=${encodeURIComponent(repoId)}` : ""}`;
       const response = await fetch(url, { headers });
@@ -3868,6 +3870,7 @@ async function spawnProviderProcess(
       opts.resolvedModel || opts.model,
       {
         repoId: sessionRepo?.id,
+        taskId: realTaskId,
         provider: adapter.name as ProviderName,
         modelTier: opts.modelTier,
         localBlocks: opts.localBlocks,

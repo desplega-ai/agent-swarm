@@ -65,7 +65,7 @@ afterAll(async () => {
 
 describe("config HTTP session-token authorization", () => {
   for (const route of ["list", "resolved", "by-id"] as const) {
-    test(`${route} masks task-token secrets and rejects a spoofed lead header`, async () => {
+    test(`${route} masks worker task-token secrets, permits lead tokens, and rejects spoofing`, async () => {
       const token = await mint(workerId);
       const lead = await mint(leadId);
       const path =
@@ -75,15 +75,11 @@ describe("config HTTP session-token authorization", () => {
             ? "/api/config/resolved"
             : "/api/config";
       const url = `${baseUrl}${path}?includeSecrets=true&agentId=${workerId}`;
-      // The operator can read secrets. Task tokens remain masked, including lead tokens.
-      for (const bearer of [API_KEY]) {
+      for (const bearer of [API_KEY, lead.plaintext]) {
         const res = await fetch(url, { headers: headers(bearer) });
         expect(res.status).toBe(200);
         expect(await res.text()).toContain(SECRET);
       }
-      const leadRead = await fetch(url, { headers: headers(lead.plaintext) });
-      expect(leadRead.status).toBe(200);
-      expect(await leadRead.text()).not.toContain(SECRET);
       const responses: string[] = [];
       for (const agentId of [undefined, workerId]) {
         const res = await fetch(url, { headers: headers(token.plaintext, agentId) });
@@ -103,6 +99,22 @@ describe("config HTTP session-token authorization", () => {
       }
     });
   }
+
+  test("ACP resolved config without agentId preserves the global default", async () => {
+    await upsertSwarmConfig({ scope: "global", key: "ACP_DEFAULT_SCOPE", value: "global" });
+    await upsertSwarmConfig({
+      scope: "agent",
+      scopeId: workerId,
+      key: "ACP_DEFAULT_SCOPE",
+      value: "agent",
+    });
+    const token = await mint(workerId);
+    const response = await fetch(`${baseUrl}/api/config/resolved?key=ACP_DEFAULT_SCOPE`, {
+      headers: headers(token.plaintext),
+    });
+    expect(response.status).toBe(200);
+    expect((await response.json()).configs[0].value).toBe("global");
+  });
 
   for (const method of ["PUT", "DELETE"] as const) {
     test(`${method} cannot escalate a non-lead session by changing only X-Agent-ID`, async () => {

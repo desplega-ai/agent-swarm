@@ -5,6 +5,7 @@ import WebSocket from "ws";
 import {
   closeDb,
   createAgent,
+  createSwarmRepo,
   createTaskExtended,
   getAgentById,
   getDbClient,
@@ -21,6 +22,7 @@ import {
 import { handleAgentRegister, handleAgentsRest } from "../http/agents";
 import { handleConfig } from "../http/config";
 import { handleCore } from "../http/core";
+import { handleKv } from "../http/kv";
 import { handleMcp } from "../http/mcp";
 import { handleMcpServers } from "../http/mcp-servers";
 import { handlePoll } from "../http/poll";
@@ -80,6 +82,7 @@ async function dispatch(req: IncomingMessage, res: ServerResponse) {
   if (await handleTasks(req, res, segments, query, id)) return;
   if (await handleSessions(req, res, segments, query)) return;
   if (await handleConfig(req, res, segments, query)) return;
+  if (await handleKv(req, res, segments, query)) return;
   if (await handleMcpServers(req, res, segments, query, id)) return;
   if (await handleMcp(req, res, {})) return;
   res.writeHead(404).end();
@@ -269,7 +272,7 @@ test("runtime token lifecycle preserves binding and revokes child tokens", async
   expect(principal).toMatchObject({ agentId, taskId: null, runtimeId: id });
   const child = await mintSessionToken(agentId, ownTaskId, 120_000, {
     runtimeId: id,
-    expiresAt: principal.expiresAt,
+    tokenId: parent.tokenId,
   });
   expect(Date.parse((await resolveBySessionToken(child.plaintext))!.expiresAt)).toBeLessThanOrEqual(
     Date.parse(principal.expiresAt),
@@ -278,7 +281,7 @@ test("runtime token lifecycle preserves binding and revokes child tokens", async
   expect(await resolveBySessionToken(parent.plaintext)).toBeNull();
   expect(await resolveBySessionToken(child.plaintext)).toBeNull();
   await expect(
-    mintSessionToken(agentId, ownTaskId, 60_000, { runtimeId: id, expiresAt: principal.expiresAt }),
+    mintSessionToken(agentId, ownTaskId, 60_000, { runtimeId: id, tokenId: parent.tokenId }),
   ).rejects.toThrow("Runtime token is no longer valid");
   const expired = await mintRuntimeToken(agentId, crypto.randomUUID(), -1);
   expect(await resolveBySessionToken(expired.plaintext)).toBeNull();
@@ -313,6 +316,174 @@ test("runtime revocation closes registered connections only after commit", async
 
 describe("runtime token HTTP and realtime auth", () => {
   beforeAll(startServer);
+
+  test("agent tokens reject repeated guarded query keys before handlers resolve scopes", async () => {
+    const acp = await mintSessionToken(agentId, ownTaskId, 60_000);
+    for (const bearer of [token.plaintext, acp.plaintext]) {
+      for (const path of [
+        `/api/config/resolved?agentId=${agentId}&agentId=${otherId}&includeSecrets=true`,
+        "/api/config/resolved?repoId=self&repoId=other&includeSecrets=true",
+        "/api/config/resolved?includeSecrets=false&includeSecrets=true",
+        `/api/agents/${otherId}/mcp-servers?resolveSecrets=false&resolveSecrets=true`,
+      ]) {
+        expect((await request(path, bearer)).status).toBe(400);
+      }
+    }
+    expect(
+      (await request("/api/config/resolved?includeSecrets=false&includeSecrets=true", key)).status,
+    ).toBe(200);
+  });
+
+  test("runtime repo secrets require its assigned task and that task's repository", async () => {
+    const ownRepo = await createSwarmRepo({
+      name: "review-own",
+      url: "https://github.com/review/own.git",
+    });
+    const otherRepo = await createSwarmRepo({
+      name: "review-other",
+      url: "https://github.com/review/other.git",
+    });
+    const task = await createTaskExtended("Repo scope task", {
+      agentId,
+      vcsRepo: "review/own",
+      source: "system",
+    });
+    for (const [repo, value] of [
+      [ownRepo, "own-repo-secret"],
+      [otherRepo, "other-repo-secret"],
+    ] as const) {
+      await upsertSwarmConfig({
+        scope: "repo",
+        scopeId: repo.id,
+        key: "REVIEW_REPO_SECRET",
+        value,
+        isSecret: true,
+      });
+    }
+    const read = async (repoId: string, taskId?: string) => {
+      const response = await request(
+        `/api/config/resolved?repoId=${repoId}&includeSecrets=true`,
+        token.plaintext,
+        {
+          headers: taskId ? { "X-Source-Task-Id": taskId } : {},
+        },
+      );
+      expect(response.status).toBe(200);
+      return await response.text();
+    };
+    expect(await read(ownRepo.id, task.id)).toContain("own-repo-secret");
+    expect(await read(ownRepo.id)).not.toContain("own-repo-secret");
+    expect(await read(otherRepo.id, task.id)).not.toContain("other-repo-secret");
+    expect(await read(ownRepo.id, ownTaskId)).not.toContain("own-repo-secret");
+  });
+
+  test("runtime task headers bind KV and MCP context, and agent tokens cannot impersonate pages", async () => {
+    for (const taskId of [otherTaskId, crypto.randomUUID()]) {
+      for (const path of ["/api/kv/review-binding", "/api/poll", "/mcp"]) {
+        expect(
+          (await request(path, token.plaintext, { headers: { "X-Source-Task-Id": taskId } }))
+            .status,
+        ).toBe(403);
+      }
+    }
+    const write = await request("/api/kv/review-binding", token.plaintext, {
+      method: "PUT",
+      body: { value: "own-task-value" },
+      headers: { "X-Source-Task-Id": ownTaskId },
+    });
+    expect(write.status).toBe(200);
+    const read = await request("/api/kv/review-binding", token.plaintext, {
+      headers: { "X-Source-Task-Id": ownTaskId },
+    });
+    expect(read.status).toBe(200);
+    expect(await read.text()).toContain("own-task-value");
+    const acp = await mintSessionToken(agentId, ownTaskId, 60_000);
+    for (const bearer of [token.plaintext, acp.plaintext]) {
+      for (const method of ["GET", "PUT"]) {
+        expect(
+          (
+            await request("/api/kv/review-binding", bearer, {
+              method,
+              headers: { "X-Page-Id": crypto.randomUUID() },
+              body: method === "PUT" ? { value: "spoofed" } : undefined,
+            })
+          ).status,
+        ).toBe(403);
+      }
+    }
+  });
+
+  test("lead-equivalent tokens retain cross-agent access and legacy secret permissions", async () => {
+    const leadId = crypto.randomUUID();
+    await createAgent({ id: leadId, name: "Review lead", isLead: true, status: "idle" });
+    const lead = await mintRuntimeToken(leadId, crypto.randomUUID(), 60_000);
+    await upsertSwarmConfig({
+      scope: "agent",
+      scopeId: otherId,
+      key: "REVIEW_LEAD_SECRET",
+      value: "lead-readable-secret",
+      isSecret: true,
+    });
+    for (const bearer of [key, lead.plaintext]) {
+      for (const path of [
+        "/api/config?includeSecrets=true",
+        `/api/config/resolved?agentId=${otherId}&includeSecrets=true`,
+      ]) {
+        const response = await request(path, bearer);
+        expect(response.status).toBe(200);
+        expect(await response.text()).toContain("lead-readable-secret");
+      }
+    }
+    for (const bearer of [token.plaintext, lead.plaintext]) {
+      const expected = bearer === token.plaintext ? 403 : 200;
+      expect(
+        (await request(`/api/agents/${otherId}/mcp-servers?resolveSecrets=true`, bearer)).status,
+      ).toBe(expected);
+      expect(
+        (
+          await request(`/api/agents/${otherId}/profile`, bearer, {
+            method: "PUT",
+            body: { role: "review-worker" },
+          })
+        ).status,
+      ).toBe(expected);
+    }
+  });
+
+  test("realtime expiry uses an agent-token message and keepalive does not touch lastUsedAt", async () => {
+    const valid = await mintRuntimeToken(agentId, crypto.randomUUID(), 60_000);
+    const expired = await mintRuntimeToken(agentId, crypto.randomUUID(), 500);
+    const sockets: WebSocket[] = [];
+    const open = async (bearer: string) => {
+      const ws = new WebSocket(`${baseUrl.replace("http:", "ws:")}/api/realtime`, {
+        headers: { Authorization: `Bearer ${bearer}` },
+      });
+      sockets.push(ws);
+      await new Promise<void>((resolve, reject) => {
+        ws.once("message", () => resolve());
+        ws.on("error", reject);
+      });
+      return ws;
+    };
+    try {
+      await open(valid.plaintext);
+      const before = await getDbClient().get("SELECT lastUsedAt FROM session_tokens WHERE id = ?", [
+        valid.tokenId,
+      ]);
+      const expiring = await open(expired.plaintext);
+      const closed = await new Promise<{ code: number; reason: string }>((resolve) => {
+        expiring.once("close", (code, reason) => resolve({ code, reason: reason.toString() }));
+      });
+      expect(closed).toEqual({ code: 1008, reason: "Session token expired" });
+      expect(
+        await getDbClient().get("SELECT lastUsedAt FROM session_tokens WHERE id = ?", [
+          valid.tokenId,
+        ]),
+      ).toEqual(before);
+    } finally {
+      for (const ws of sockets) ws.terminate();
+    }
+  }, 25_000);
 
   test("runtime and ACP tokens initialize MCP with the token agent", async () => {
     const acp = await mintSessionToken(agentId, ownTaskId, 60_000);
@@ -524,6 +695,16 @@ describe("runtime token HTTP and realtime auth", () => {
 
   test("realtime rejects mismatched identities and closes runtime and child sockets on revoke", async () => {
     const url = `${baseUrl.replace("http:", "ws:")}/api/realtime`;
+    const rejected = await request("/api/realtime", token.plaintext, {
+      headers: {
+        "X-Agent-ID": otherId,
+        Connection: "Upgrade",
+        Upgrade: "websocket",
+        "Sec-WebSocket-Version": "13",
+        "Sec-WebSocket-Key": "dGhlIHNhbXBsZSBub25jZQ==",
+      },
+    });
+    expect(rejected.status).toBe(401);
     await new Promise<void>((resolve, reject) => {
       const ws = new WebSocket(url, {
         headers: { Authorization: `Bearer ${token.plaintext}`, "X-Agent-ID": otherId },
@@ -532,17 +713,13 @@ describe("runtime token HTTP and realtime auth", () => {
         ws.close();
         reject(new Error("Spoofed socket opened"));
       });
-      ws.once("error", (error) => {
-        if (error.message.includes("401")) resolve();
-        else reject(error);
-      });
+      ws.on("error", () => resolve());
     });
     const parentRuntime = crypto.randomUUID();
     const parent = await mintRuntimeToken(agentId, parentRuntime, 60_000);
-    const principal = (await resolveBySessionToken(parent.plaintext))!;
     const child = await mintSessionToken(agentId, ownTaskId, 60_000, {
       runtimeId: parentRuntime,
-      expiresAt: principal.expiresAt,
+      tokenId: parent.tokenId,
     });
     const sockets: WebSocket[] = [];
     try {

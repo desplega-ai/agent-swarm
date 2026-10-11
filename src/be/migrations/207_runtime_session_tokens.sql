@@ -28,3 +28,4 @@ DROP TABLE session_tokens;
 ALTER TABLE session_tokens_new RENAME TO session_tokens;
 CREATE INDEX idx_session_tokens_agentId ON session_tokens(agentId);
 CREATE INDEX idx_session_tokens_runtimeId ON session_tokens(runtimeId);
+CREATE INDEX idx_session_tokens_parentRuntimeId ON session_tokens(parentRuntimeId);

@@ -37,6 +37,7 @@ test("migration 207 preserves ACP rows and enforces exclusive token bindings", a
     const indexes = db.query<{ name: string }, []>("PRAGMA index_list(session_tokens)").all();
     expect(indexes.map((row) => row.name)).toContain("idx_session_tokens_agentId");
     expect(indexes.map((row) => row.name)).toContain("idx_session_tokens_runtimeId");
+    expect(indexes.map((row) => row.name)).toContain("idx_session_tokens_parentRuntimeId");
     db.exec("PRAGMA integrity_check");
   } finally {
     db.close();

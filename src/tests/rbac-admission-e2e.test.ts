@@ -293,9 +293,7 @@ describe("RBAC admission over real HTTP", () => {
     expect(maskedSecretRead.status).toBe(200);
     expect(configValue(maskedSecretRead.body, CONFIG_SECRET_KEY)).toBe("********");
     expect(maskedSecretRead.body.message).toContain("secret values masked");
-    expect(maskedSecretRead.body.message).toContain(
-      "reading unmasked secrets requires the lead agent",
-    );
+    expect(maskedSecretRead.body.message).toContain("this token cannot read secrets in this scope");
 
     const secretlessMcpList = await api(server.base, "GET", `/api/agents/${WORKER_A}/mcp-servers`, {
       bearer: userToken,

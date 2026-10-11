@@ -28,6 +28,7 @@ const defaultMockResponse: MockResponse = {
 };
 const mockResponsesByAgentId = new Map<string, MockResponse>();
 const requestedRepoIds = new Map<string, string | null>();
+const requestedTaskIds = new Map<string, string | null>();
 /** Every `GET /api/keys/available` query string observed by the mock server, most recent last. */
 const keysAvailableRequests: string[] = [];
 
@@ -36,6 +37,8 @@ beforeAll(() => {
     port: 0,
     fetch(req) {
       const url = new URL(req.url);
+      const agentId = url.searchParams.get("agentId");
+      if (agentId) requestedTaskIds.set(agentId, req.headers.get("X-Source-Task-Id"));
 
       if (url.pathname === "/api/config/resolved") {
         const agentId = url.searchParams.get("agentId") ?? "";
@@ -141,6 +144,7 @@ describe("fetchResolvedEnv", () => {
   test("passes repository scope and restores the transport default after deletion", async () => {
     const agentId = crypto.randomUUID();
     const repoId = crypto.randomUUID();
+    const taskId = crypto.randomUUID();
     const baseEnv = { CLAUDE_TRANSPORT: "cli" };
     mockResponsesByAgentId.set(agentId, {
       status: 200,
@@ -148,8 +152,10 @@ describe("fetchResolvedEnv", () => {
     });
     const assigned = await fetchResolvedEnv(testUrl, "key", agentId, baseEnv, undefined, {
       repoId,
+      taskId,
     });
     expect(requestedRepoIds.get(agentId)).toBe(repoId);
+    expect(requestedTaskIds.get(agentId)).toBe(taskId);
     expect(assigned.env.CLAUDE_TRANSPORT).toBe("sdk");
     expect(baseEnv.CLAUDE_TRANSPORT).toBe("cli");
     expect(RELOADABLE_ENV_KEYS.has("CLAUDE_TRANSPORT")).toBe(false);

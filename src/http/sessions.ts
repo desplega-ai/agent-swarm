@@ -9,7 +9,12 @@ import {
 } from "../be/db";
 import { getTaskSteeringFieldsForTasks } from "../be/steering";
 import { getTaskCitationsForTasks, TaskCitationSchema } from "../be/task-citations";
-import { mintRuntimeToken, mintSessionToken, revokeSessionToken } from "../be/users";
+import {
+  InvalidRuntimeTokenError,
+  mintRuntimeToken,
+  mintSessionToken,
+  revokeSessionToken,
+} from "../be/users";
 import { type AgentTask, AgentTaskSchema, AgentTaskStatusSchema, SteerModeSchema } from "../types";
 import { getRequestAuth } from "../utils/request-auth-context";
 import { route } from "./route-def";
@@ -221,32 +226,40 @@ export async function handleSessions(
     const parsed = await mintSessionTokenRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     const { agentId, taskId, runtimeId, ttlMs } = parsed.body;
-    const token = await getDbClient().transaction(async () => {
-      if (auth.kind === "agent") {
-        const task = taskId ? await getTaskById(taskId) : null;
-        if (agentId !== auth.agentId || runtimeId || !task || task.agentId !== auth.agentId) {
-          jsonError(res, "Token can mint only for its own assigned task", 403);
-          return null;
+    try {
+      const result = await getDbClient().transaction(async () => {
+        if (auth.kind === "agent") {
+          const task = taskId ? await getTaskById(taskId) : null;
+          if (agentId !== auth.agentId || runtimeId || !task || task.agentId !== auth.agentId) {
+            return { error: "Token can mint only for its own assigned task" };
+          }
+          return {
+            token: await mintSessionToken(agentId, taskId!, ttlMs!, {
+              tokenId: auth.tokenId,
+              runtimeId: auth.runtimeId!,
+            }),
+          };
         }
-        const parent = await getDbClient().get<{ expiresAt: string }>(
-          "SELECT expiresAt FROM session_tokens WHERE id = ? AND revokedAt IS NULL AND expiresAt > ?",
-          [auth.tokenId, new Date().toISOString()],
-        );
-        if (!parent) {
-          jsonError(res, "Unauthorized", 401);
-          return null;
-        }
-        return await mintSessionToken(agentId, taskId!, ttlMs!, {
-          runtimeId: auth.runtimeId!,
-          expiresAt: parent.expiresAt,
-        });
+        return {
+          token: runtimeId
+            ? await mintRuntimeToken(agentId, runtimeId, ttlMs)
+            : await mintSessionToken(agentId, taskId!, ttlMs!),
+        };
+      });
+      if (result.error) {
+        jsonError(res, result.error, 403);
+        return true;
       }
-      return runtimeId
-        ? await mintRuntimeToken(agentId, runtimeId, ttlMs)
-        : await mintSessionToken(agentId, taskId!, ttlMs!);
-    });
-    if (!token) return true;
-    mintSessionTokenRoute.respond(res, 200, { tokenId: token.tokenId, plaintext: token.plaintext });
+      const token = result.token!;
+      mintSessionTokenRoute.respond(res, 200, {
+        tokenId: token.tokenId,
+        plaintext: token.plaintext,
+      });
+    } catch (error) {
+      if (!(error instanceof InvalidRuntimeTokenError)) throw error;
+      jsonError(res, "Unauthorized", 401);
+      return true;
+    }
     return true;
   }
 

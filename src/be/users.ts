@@ -24,6 +24,7 @@ import { scheduleOrgDomainRecompute } from "../telemetry-identity";
 import type { User } from "../types";
 import { closeSessionTokenConnections } from "../utils/session-token-connections";
 import { getDbClient } from "./db";
+import { validateRuntimeTokenTtlHours } from "./swarm-config-guard";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -545,6 +546,12 @@ export async function resolveUserByToken(plaintext: string): Promise<User | null
 
 const SESSION_TOKEN_PREFIX = "aseph_"; // agent-swarm-ephemeral
 
+export class InvalidRuntimeTokenError extends Error {
+  constructor() {
+    super("Runtime token is no longer valid");
+  }
+}
+
 /**
  * Mint a short-lived `aseph_<base62-24>` token scoped to an ACP session.
  * The token is handed to the ACP target process instead of the full operator
@@ -555,23 +562,23 @@ export async function mintSessionToken(
   agentId: string,
   taskId: string,
   ttlMs: number,
-  parent?: { runtimeId: string; expiresAt: string },
+  parent?: { tokenId: string; runtimeId: string },
 ): Promise<{ tokenId: string; plaintext: string }> {
   if (parent) {
     return await getDbClient().transaction(async (client) => {
       const row = await client.get<{ expiresAt: string }>(
-        `SELECT expiresAt FROM session_tokens WHERE agentId = ? AND runtimeId = ?
-         AND revokedAt IS NULL AND expiresAt > ? ORDER BY expiresAt DESC LIMIT 1`,
-        [agentId, parent.runtimeId, new Date().toISOString()],
+        `SELECT expiresAt FROM session_tokens WHERE id = ? AND agentId = ? AND runtimeId = ?
+         AND revokedAt IS NULL AND expiresAt > ?`,
+        [parent.tokenId, agentId, parent.runtimeId, new Date().toISOString()],
       );
-      if (!row) throw new Error("Runtime token is no longer valid");
+      if (!row) throw new InvalidRuntimeTokenError();
       return await insertSessionToken(
         agentId,
         taskId,
         null,
         ttlMs,
         parent.runtimeId,
-        new Date(Math.min(Date.parse(row.expiresAt), Date.parse(parent.expiresAt))).toISOString(),
+        row.expiresAt,
       );
     });
   }
@@ -579,8 +586,8 @@ export async function mintSessionToken(
 }
 
 function runtimeTokenTtlMs(): number {
-  const hours = Number(process.env.RUNTIME_TOKEN_TTL_HOURS ?? 168);
-  return (Number.isFinite(hours) && hours > 0 && hours <= 168 ? hours : 168) * 60 * 60 * 1000;
+  const hours = process.env.RUNTIME_TOKEN_TTL_HOURS ?? "168";
+  return (validateRuntimeTokenTtlHours(hours) === null ? Number(hours) : 168) * 60 * 60 * 1000;
 }
 
 export async function mintRuntimeToken(
@@ -665,9 +672,12 @@ export async function revokeRuntimeTokensForRuntime(runtimeId: string): Promise<
 /**
  * Resolve a plaintext `aseph_` token to its principal. Returns null when the
  * token is unknown, revoked, or past its expiry. On a hit, touches `lastUsedAt`
- * best-effort.
+ * best-effort unless `touch` is false.
  */
-export async function resolveBySessionToken(plaintext: string): Promise<{
+export async function resolveBySessionToken(
+  plaintext: string,
+  options: { touch?: boolean } = {},
+): Promise<{
   tokenId: string;
   agentId: string;
   taskId: string | null;
@@ -693,13 +703,15 @@ export async function resolveBySessionToken(plaintext: string): Promise<{
   if (!row || row.revokedAt !== null || row.controllerId !== null) return null;
   if (new Date(row.expiresAt) <= new Date()) return null;
 
-  try {
-    await client.run("UPDATE session_tokens SET lastUsedAt = ? WHERE id = ?", [
-      new Date().toISOString(),
-      row.id,
-    ]);
-  } catch {
-    // best-effort
+  if (options.touch !== false) {
+    try {
+      await client.run("UPDATE session_tokens SET lastUsedAt = ? WHERE id = ?", [
+        new Date().toISOString(),
+        row.id,
+      ]);
+    } catch {
+      // best-effort
+    }
   }
 
   return {
