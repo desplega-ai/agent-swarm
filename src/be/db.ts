@@ -148,6 +148,7 @@ import {
 } from "../utils/identity-field-budget";
 import { activeModelBlock, type ModelFamily } from "../utils/model-rate-limit-windows";
 import { getCurrentRequestUserId } from "../utils/request-auth-context";
+import { isRuntimePoolsEnabled } from "../utils/runtime-pools-flag";
 import {
   registerSensitiveKeyName,
   type ScrubbedText,
@@ -3024,17 +3025,26 @@ export async function claimTask(taskId: string, agentId: string): Promise<AgentT
   return result;
 }
 
-export async function releaseTask(taskId: string): Promise<AgentTask | null> {
-  const task = await getTaskById(taskId);
+export async function releaseTask(
+  taskId: string,
+  wakeSnapshot?: AgentTask,
+): Promise<AgentTask | null> {
+  const task = wakeSnapshot ?? (await getTaskById(taskId));
   if (!task) return null;
   // Allow releasing both 'pending' (directly assigned) and 'in_progress' (pool-claimed) tasks
   if (task.status !== "pending" && task.status !== "in_progress") return null;
 
   const now = new Date().toISOString();
   const row = await getDbClient().get<AgentTaskRow>(
-    `UPDATE agent_tasks SET agentId = NULL, status = 'unassigned', lastUpdatedAt = ?
-       WHERE id = ? AND status IN ('pending', 'in_progress') RETURNING *`,
-    [now, taskId],
+    `UPDATE agent_tasks SET agentId = NULL, status = 'unassigned', lastUpdatedAt = ?, pool_wake_at = NULL
+       WHERE id = ? AND status IN ('pending', 'in_progress')
+       ${wakeSnapshot ? "AND status = 'pending' AND agentId = ? AND pool_wake_at = ? AND COALESCE(routing_reason, '') != 'human_pinned'" : ""}
+       RETURNING *`,
+    [
+      now,
+      taskId,
+      ...(wakeSnapshot ? [wakeSnapshot.agentId ?? null, wakeSnapshot.poolWakeAt ?? null] : []),
+    ],
   );
 
   if (row) {
@@ -3047,6 +3057,15 @@ export async function releaseTask(taskId: string): Promise<AgentTask | null> {
         newValue: "unassigned",
       });
     } catch {}
+    // The sweep routes released wakes itself, preserving its exclusion of the old agent.
+    if (isRuntimePoolsEnabled() && !wakeSnapshot)
+      getDbClient().afterCommit(() => {
+        void import("../workflows/event-bus")
+          .then(({ workflowEventBus }) => workflowEventBus.emit("task.unassigned", { taskId }))
+          .catch((error) =>
+            console.error("[db] Routing event failed:", scrubSecrets(String(error))),
+          );
+      });
   }
 
   return row ? rowToAgentTask(row) : null;
@@ -3119,7 +3138,7 @@ export async function rejectTask(
   const row = await getDbClient().get<AgentTaskRow>(
     `UPDATE agent_tasks SET
         status = 'unassigned', offeredTo = NULL, offeredAt = NULL,
-        rejectionReason = ?, lastUpdatedAt = ?
+        rejectionReason = ?, lastUpdatedAt = ?, pool_wake_at = NULL
        WHERE id = ? AND status IN ('offered', 'reviewing') RETURNING *`,
     [reason ?? null, now, taskId],
   );
@@ -3135,6 +3154,14 @@ export async function rejectTask(
         metadata: reason ? { reason } : undefined,
       });
     } catch {}
+    if (isRuntimePoolsEnabled())
+      getDbClient().afterCommit(() => {
+        void import("../workflows/event-bus")
+          .then(({ workflowEventBus }) => workflowEventBus.emit("task.unassigned", { taskId }))
+          .catch((error) =>
+            console.error("[db] Routing event failed:", scrubSecrets(String(error))),
+          );
+      });
   }
 
   return row ? rowToAgentTask(row) : null;

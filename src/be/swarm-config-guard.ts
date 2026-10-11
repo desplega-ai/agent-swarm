@@ -215,6 +215,10 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
   ...booleanValidators(["RUNTIME_POOLS_ENABLED"]),
   ...enumValidator("RUNTIME_DEFAULT_DELIVERY", ["poll", "push"]),
   RUNTIME_TOKEN_TTL_HOURS: validateRuntimeTokenTtlHours,
+  ...integerValidators(
+    ["RUNTIME_WAKE_GRACE_SEC", "RUNTIME_WAKE_REROUTE_SEC", "RUNTIME_ROUTING_INTERVAL_MS"],
+    0,
+  ),
   TASK_TOOL_MANIFESTS: (value) => {
     try {
       if (typeof value !== "string") throw new Error("Expected JSON string");

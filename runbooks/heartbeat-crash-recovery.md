@@ -375,7 +375,7 @@ The consumer cross-product has three distinct policies. Pool selection always ap
 | `acceptTask` / `claimOfferedTask` | Re-check invalid affinity and Lead-only authorization on the established offer |
 | `claimTask` / `assignUnassignedTaskPending` | Full eligibility before the atomic pool claim |
 | `getUnassignedTaskIdsForAgent` / HTTP poll | Filter by full eligibility and harness model compatibility inside the paginated scan, before budget admission and claim |
-| `autoAssignPoolTasks` | Select only idle, capable workers that pass full eligibility and can run the task's pinned model |
+| `routePoolTasks` / `autoAssignPoolTasks` | Apply eligibility and harness compatibility to live capacity first, then eligible wake demand when runtime pools are enabled |
 | `escalateStarvedPoolTasks` | Count only registered agents that pass full eligibility and can run the task's pinned model |
 | `resolveLeadOnlyRecoveryAssignment` | Full eligibility for the source candidate and replacement Lead |
 
@@ -393,6 +393,42 @@ Every consumer of the `unassigned` pool calls the **same** `isAgentEligibleForTa
 3. **`send-task`** / **`task-action create`** accept an optional `requiredCapabilities: string[]` — written into a fresh pool task's `routingAffinity` with `role` left unset. Per the predicate above, a capabilities-only snapshot (no `role`) is eligible for nobody but its declaring agent (n/a here — there is none), so such a task always ends up escalated to the Lead by §4's starvation check below; it's a way to *record* a requirement for the Lead's judgment, not to auto-route today.
 
 **Starvation escalation** (`escalateStarvedPoolTasks`, wired into `cleanupStaleResources` — runs every sweep): an `unassigned` task carrying a `routingAffinity`, queued longer than `POOL_AFFINITY_ESCALATION_MIN`, with **zero eligible registered agents** (eligible = passes the predicate **and** `poolTaskRunsOnHarness` for its harness; any status — an offline-but-matching agent still counts as "not starved"; this is "nobody of that role exists", not "everyone's busy right now") gets a Lead `task.pool.starved.decision` follow-up (`createPoolStarvationDecisionTask`, same `taskType: "reroute-decision"` discriminator and idempotency check as §3's `createRerouteDecisionTask` — no `staleResume`/generation budget since the task was never pinned).
+
+### Server routing for runtime pools
+
+`RUNTIME_POOLS_ENABLED` defaults to false. The heartbeat keeps its legacy routing when the flag is disabled.
+Pool routing also requires `MULTI_RUNTIME_ENABLED=true`. Otherwise, routing keeps the legacy behavior and logs one warning at boot.
+Listeners and the timer remain registered while the flag is off. They check both flags before each invocation.
+With both flags enabled, the API routes committed unassigned tasks immediately.
+The task creation listener reads the task because its event omits status and the offered recipient.
+The timer handles grace expiry and missed events independently of the heartbeat.
+Routing creates demand for the supervisor. Routing does not provision runtimes.
+
+```mermaid
+flowchart TD
+  trigger["Creation, release, rejection, timer, heartbeat"] --> flag{"Runtime pools and multi-runtime enabled?"}
+  flag -->|no| legacy["Heartbeat: legacy idle workers and polling gates"]
+  flag -->|yes| reroute["Release expired pending wake assignments<br/>or assignments on an open circuit<br/>Keep human pins"]
+  reroute --> warm{"Eligible live worker with free capacity?"}
+  warm -->|yes| assign["CAS to pending<br/>Publish work nudge after commit"]
+  warm -->|no| grace{"Task age reaches wake grace?"}
+  grace -->|no| queued["Leave unassigned"]
+  grace -->|yes| wake["Enabled provisionable pool, closed circuit<br/>Eligible worker with headroom<br/>Most headroom first, ties by name"]
+  wake --> budget{"Budget admission allows assignment?"}
+  budget -->|yes| mark["CAS to pending with pool_wake_at<br/>Supervisor sees demand"]
+  budget -->|no eligible candidate| queued
+```
+
+A busy worker can receive another task if it has a live runtime and spare capacity.
+Both tiers apply `isAgentEligibleForTask` and `poolTaskRunsOnHarness`.
+Tier 2 also applies `canClaim`, including the task requester budget.
+A budget refusal skips that agent and tries the next eligible candidate because agent budgets can differ.
+Wake assignments use `pool_wake_at`. They retain the existing routing reason.
+The router releases only marked pending wake assignments after the timeout or when their pool circuit opens.
+Human pins remain assigned.
+The sweep excludes the released agent for that pass when another eligible wake candidate exists.
+It retries the same agent only when it is the sole candidate and its pool circuit is closed.
+Routing reads snapshots before writing. Each assignment CAS checks task state, agent state, pool state, and current capacity.
 
 ### Pseudocode (current)
 
@@ -439,18 +475,37 @@ if retryTaskId:
         log task_dependency_repointed(dep, old=task.id, new=retryTaskId)
 cascadeFailDependents(task.id, "failed")   # whatever still depends on the swept task
 
-# autoAssignPoolTasks, per heartbeat sweep — paginated pool scan (PR #954 fix):
-assignedCount, offset = 0, 0
-while assignedCount < MAX_AUTO_ASSIGN_PER_SWEEP and offset < POOL_SCAN_CAP:
-    batch = getUnassignedPoolTasks(POOL_SCAN_BATCH_SIZE, offset)   # priority DESC, createdAt ASC, rowid ASC
-    if batch is empty: break
-    for task in batch:
-        if assignedCount >= MAX_AUTO_ASSIGN_PER_SWEEP: break
-        worker = first idle worker w/ capacity where isAgentEligibleForTask(w, task)
-                 and poolTaskRunsOnHarness(task, w.harnessProvider)     # pinned model runs here
-        if worker: assign(task, worker); assignedCount += 1        # else: leave queued, keep scanning
-    offset += len(batch)
-    if len(batch) < POOL_SCAN_BATCH_SIZE: break                    # pool exhausted
+# autoAssignPoolTasks calls routePoolTasks({}) each heartbeat sweep.
+# With RUNTIME_POOLS_ENABLED=false, keep the legacy idle-worker scan and gates.
+# With both flags enabled, task.created and task.unassigned request targeted routing.
+# With runtime pools enabled, releaseTask and rejectTask emit task.unassigned after commit.
+# A timer repeats routing every RUNTIME_ROUTING_INTERVAL_MS (default 5000).
+routePoolTasks(taskIds?, now):
+    read pools and agent snapshots without a write transaction
+    if no taskIds and both runtime pools and multi-runtime enabled:
+        for pending task with pool_wake_at and routingReason != human_pinned:
+            if wake age >= RUNTIME_WAKE_REROUTE_SEC (default 600)
+               or its pool circuit is open:
+                releaseTask(task, wake snapshot)       # CAS pending wake, remember old agent
+    warm = live non-Lead agents with pending + in_progress < maxTasks
+    if runtime pools disabled or multi-runtime disabled:
+        warm = legacy idle workers with capacity
+        require a live runtime only when multi-runtime mode is enabled
+    exclude offline and waiting_for_credentials from warm
+    exclude legacy warm agents at MAX_EMPTY_POLLS
+    scan unassigned tasks by priority, creation time, rowid within heartbeat limits:
+        worker = first warm agent passing eligibility and harness compatibility
+        if no worker and both flags enabled and task age >= RUNTIME_WAKE_GRACE_SEC (default 15):
+            wake = non-Lead agents bound to enabled provisionable pools with closed circuits
+            exclude waiting_for_credentials and agents without headroom
+            filter by eligibility and harness compatibility
+            exclude released agent unless it is the only eligible wake candidate
+            order by headroom descending, then name
+            worker = first candidate allowed by canClaim(agent, now, requestedByUserId)
+            if worker: pool_wake_at = now
+        if worker:
+            assignUnassignedTaskPending(task, worker, snapshots) # CAS state and capacity
+            reserve one slot                         # pending assignments consume headroom
 
 # HTTP poll auto-claim (getUnassignedTaskIdsForAgent(agent, 5, accept)):
 accept = task -> poolTaskRunsOnHarness(task, agent.harnessProvider)
@@ -481,6 +536,18 @@ escalateStarvedPoolTasks():
 The function dispatches `pre.task.followUp` before it creates the follow-up task. An extension can block creation or modify the description, assignee, priority, and `followUpConfig`.
 
 The resulting task also dispatches `pre.task.create` with origin `followUp`. Both extension events run before any database transaction begins.
+
+### Reachability for sleeping agents
+
+`isAgentReachable(agent)` accepts agents whose status is not offline.
+With runtime pools enabled, it also accepts offline agents bound to enabled provisionable pools with closed circuits.
+Static pools, disabled pools, and pools with open circuits cannot wake sleeping agents.
+
+User MCP ingress can assign work to a reachable sleeping Lead.
+Slack thread follow-ups can return to reachable sleeping workers or a reachable sleeping Lead.
+Lead-only recovery and stale-resume escalation accept reachable sleeping Leads.
+Boot triage excludes pending and offered tasks held by reachable sleeping agents from its orphan list.
+With the flag disabled, these gates retain their previous behavior.
 
 ### `followUpConfig` inheritance
 

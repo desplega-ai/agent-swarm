@@ -2,6 +2,10 @@ import type { RuntimeProvider, RuntimeProviderKind, RuntimeTargetConfig } from "
 
 export type * from "./types";
 
+export function canProvisionKind(kind: RuntimeProviderKind): boolean {
+  return kind === "docker" || kind === "e2b";
+}
+
 /**
  * Lazy factory, same pattern as `createProviderAdapter` in src/providers/index.ts:
  * adapters are imported on demand so unused provider SDKs never load.

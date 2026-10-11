@@ -8,6 +8,7 @@ import type {
   AgentTask,
   AgentTaskSource,
   ProviderName,
+  RuntimePool,
   TaskAttachment,
 } from "../../../types";
 import { isTerminalTaskStatus } from "../../../types";
@@ -197,12 +198,16 @@ export async function getPendingTaskForAgent(agentId: string): Promise<AgentTask
 export async function assignUnassignedTaskPending(
   taskId: string,
   agentId: string,
+  options: {
+    poolWakeAt?: string;
+    routingSnapshot?: { task: AgentTask; agent: Agent; pool?: RuntimePool };
+  } = {},
 ): Promise<AgentTask | null> {
   // This guard is always needed for lead-only tasks; the predicate itself
   // handles the optional role/capability kill-switch.
   {
-    const task = await getTaskById(taskId);
-    const agent = await getAgentById(agentId);
+    const task = options.routingSnapshot?.task ?? (await getTaskById(taskId));
+    const agent = options.routingSnapshot?.agent ?? (await getAgentById(agentId));
     if (task && (!agent || !isAgentEligibleForTask(agent, task))) {
       try {
         await dependencies.createLogEntry({
@@ -222,10 +227,31 @@ export async function assignUnassignedTaskPending(
   }
 
   const now = new Date().toISOString();
+  const snapshot = options.routingSnapshot;
+  // Revalidate snapshots and capacity in the write itself, without holding a lock during routing.
+  const guards = snapshot
+    ? ` AND lastUpdatedAt = ?
+        AND EXISTS (SELECT 1 FROM agents WHERE id = ? AND lastUpdatedAt = ?
+          AND (SELECT COUNT(*) FROM agent_tasks WHERE agentId = agents.id
+            AND status IN ('pending', 'in_progress')) < COALESCE(maxTasks, 1))`
+    : "";
+  const poolGuard = snapshot?.pool
+    ? ` AND EXISTS (SELECT 1 FROM runtime_pools WHERE id = ? AND updated_at = ?
+        AND enabled = 1 AND (circuit_open_until IS NULL OR circuit_open_until <= ?))`
+    : "";
   const row = await getDbClient().get<AgentTaskRow>(
-    `UPDATE agent_tasks SET agentId = ?, status = 'pending', lastUpdatedAt = ?
-       WHERE id = ? AND status = 'unassigned' RETURNING *`,
-    [agentId, now, taskId],
+    `UPDATE agent_tasks SET agentId = ?, status = 'pending', lastUpdatedAt = ?, pool_wake_at = ?
+       WHERE id = ? AND status = 'unassigned'${guards}${poolGuard} RETURNING *`,
+    [
+      agentId,
+      now,
+      options.poolWakeAt ?? null,
+      taskId,
+      ...(snapshot ? [snapshot.task.lastUpdatedAt, agentId, snapshot.agent.lastUpdatedAt] : []),
+      ...(snapshot?.pool
+        ? [snapshot.pool.id, snapshot.pool.updatedAt, options.poolWakeAt ?? now]
+        : []),
+    ],
   );
 
   if (row) {

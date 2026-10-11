@@ -425,6 +425,33 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         docsUrl: `${DOCS}ui/configuration#runtime-pools`,
       },
       {
+        key: "RUNTIME_WAKE_GRACE_SEC",
+        label: "Runtime wake grace (seconds)",
+        description: "Wait for a live worker before assigning a task to a sleeping pool agent.",
+        kind: "number",
+        defaultValue: "15",
+        docsUrl: `${DOCS}ui/configuration#runtime-pools`,
+      },
+      {
+        key: "RUNTIME_WAKE_REROUTE_SEC",
+        label: "Runtime wake timeout (seconds)",
+        description:
+          "Release pending wake assignments after this timeout and try another eligible agent.",
+        kind: "number",
+        defaultValue: "600",
+        docsUrl: `${DOCS}ui/configuration#runtime-pools`,
+      },
+      {
+        key: "RUNTIME_ROUTING_INTERVAL_MS",
+        label: "Runtime routing interval (milliseconds)",
+        description:
+          "Check queued tasks at this interval. Zero uses 5000 ms. Positive values below 500 use 500 ms.",
+        kind: "number",
+        defaultValue: "5000",
+        restartRequired: true,
+        docsUrl: `${DOCS}ui/configuration#runtime-pools`,
+      },
+      {
         key: "CLAUDE_TRUST_PRESEED",
         label: "Claude workspace trust pre-seed",
         description:

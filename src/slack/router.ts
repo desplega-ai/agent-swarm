@@ -1,4 +1,5 @@
 import { getAgentById, getAgentWorkingOnThread, getAllAgents } from "../be/db";
+import { isAgentReachable } from "../be/runtime-pools/reachability";
 import type { Agent } from "../types";
 import { isEnvFlagEnabled } from "../utils/env-flag";
 import type { AgentMatch } from "./types";
@@ -45,7 +46,9 @@ export async function routeMessage(
     "SLACK_THREAD_FOLLOWUP_REQUIRE_MENTION",
     false,
   );
-  const agents = (await getAllAgents()).filter((a) => a.status !== "offline");
+  const allAgents = await getAllAgents();
+  const reachable = await Promise.all(allAgents.map((agent) => isAgentReachable(agent)));
+  const agents = allAgents.filter((_, index) => reachable[index]);
 
   // Check for explicit swarm#<id> syntax
   const idMatches = text.matchAll(/swarm#([a-f0-9-]{36})/gi);
@@ -53,7 +56,7 @@ export async function routeMessage(
     const agentId = match[1];
     if (!agentId) continue;
     const agent = await getAgentById(agentId);
-    if (agent && agent.status !== "offline") {
+    if (agent && (await isAgentReachable(agent))) {
       matches.push({ agent, matchedText: match[0] });
     }
   }
@@ -83,7 +86,7 @@ export async function routeMessage(
       threadContext.channelId,
       threadContext.threadTs,
     );
-    if (workingAgent && workingAgent.status !== "offline") {
+    if (workingAgent && (await isAgentReachable(workingAgent))) {
       console.log(
         `[Slack] Thread follow-up: routing to agent ${workingAgent.name} (${workingAgent.id}) in thread ${threadContext.threadTs}`,
       );
@@ -93,8 +96,7 @@ export async function routeMessage(
       console.log(
         `[Slack] Thread follow-up: agent ${workingAgent.name} is offline, routing to lead`,
       );
-      const allAgents = await getAllAgents();
-      const lead = allAgents.find((a) => a.isLead && a.status !== "offline");
+      const lead = agents.find((a) => a.isLead);
       if (lead) {
         matches.push({ agent: lead, matchedText: "thread follow-up (lead fallback)" });
       }
