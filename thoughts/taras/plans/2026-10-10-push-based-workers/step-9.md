@@ -2,9 +2,7 @@
 id: step-9
 name: E2B pools
 depends_on: [step-5, step-6]
-status: claimed
-assignee: codex-gpt-6.1-sol-pw-step-9
-claimed_at: 2026-10-11T19:00:00Z
+status: done
 ---
 
 <!-- During /v-implement, `desplega:step-running` adds `assignee` and `claimed_at` while
@@ -45,12 +43,12 @@ working, then transitions `status` to `done` (success) or back to `ready` (retry
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Tests pass: `bun run test:root -- src/tests/runtime-e2b-pools.test.ts src/tests/runtime-providers-e2b.test.ts`
-- [ ] Fake provider + fake clock cover: renew before lease end; no renew for a reaped runtime; rotation idle vs busy (drain, replacement, terminate after task); unplanned pause idle → resume, busy → recover, unwanted → terminate; `docker://` build once, cache in `resolved_image`, rebuild after image PATCH, build failure → provision failure; `checkConfig` https rule
-- [ ] `bun run lint && bun run tsc:check:tsc` pass
+- [x] Tests pass: `bun run test:root -- src/tests/runtime-e2b-pools.test.ts src/tests/runtime-providers-e2b.test.ts`
+- [x] Fake provider + fake clock cover: renew before lease end; no renew for a reaped runtime; rotation idle vs busy (drain, replacement, terminate after task); unplanned pause idle → resume, busy → recover, unwanted → terminate; `docker://` build once, cache in `resolved_image`, rebuild after image PATCH, build failure → provision failure; `checkConfig` https rule
+- [x] `bun run lint && bun run tsc:check:tsc` pass
 
 #### Automated QA:
-- [ ] Only if `E2B_API_KEY` is available to the executor and an HTTPS tunnel can be opened (ngrok or cloudflared, random API key, closed afterwards): API on a temp DB with the flag on, `e2b` pool with the published worker template, `ttl_sec: 300`, `idle_minutes: 2`. Pin a "store-progress 'pong'" task (`modelTier: smol`) to its agent. The sandbox appears (`bun run src/cli.tsx e2b list`), the task completes, at least one renew is logged, the sandbox is gone after the idle window. If the key or tunnel is unavailable, record "skipped: no E2B credentials" and move this check to Manual.
+- [ ] (deferred to step-12 E2B legs) Only if `E2B_API_KEY` is available to the executor and an HTTPS tunnel can be opened (ngrok or cloudflared, random API key, closed afterwards): API on a temp DB with the flag on, `e2b` pool with the published worker template, `ttl_sec: 300`, `idle_minutes: 2`. Pin a "store-progress 'pong'" task (`modelTier: smol`) to its agent. The sandbox appears (`bun run src/cli.tsx e2b list`), the task completes, at least one renew is logged, the sandbox is gone after the idle window. If the key or tunnel is unavailable, record "skipped: no E2B credentials" and move this check to Manual.
 
 #### Manual Verification:
 - [ ] If the automated E2B run was skipped, Taras runs the same scenario (costs about one sandbox-hour or less).
