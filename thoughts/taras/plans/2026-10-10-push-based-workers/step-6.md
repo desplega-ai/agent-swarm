@@ -2,7 +2,9 @@
 id: step-6
 name: Provision failures + runtime-death recovery
 depends_on: [step-5]
-status: ready
+status: claimed
+assignee: codex-gpt-6.1-sol-pw-step-6
+claimed_at: 2026-10-11T17:00:00Z
 ---
 
 <!-- During /v-implement, `desplega:step-running` adds `assignee` and `claimed_at` while
