@@ -68,7 +68,7 @@ export async function seedRuntimePools(env: NodeJS.ProcessEnv = process.env): Pr
           !stored.secretConfigKeys.includes("E2B_API_KEY")
         )
           await updateRuntimeController(controller.id, {
-            secretConfig: { E2B_API_KEY: env.E2B_API_KEY },
+            secretConfig: { E2B_API_KEY: env.E2B_API_KEY }, // gitleaks:allow (env reference)
           });
         controller.status =
           !stored.secretConfigError &&
