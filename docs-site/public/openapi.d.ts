@@ -2288,6 +2288,7 @@ export interface paths {
                             enabledCapabilities: ("core" | "task-pool" | "scripts" | "config" | "prompt-templates" | "mcp" | "profiles" | "services" | "scheduling" | "memory" | "workflows" | "pages" | "metrics" | "kv" | "slack" | "tracker" | "skills" | "messaging" | "repo" | "agentmail" | "kapso" | "swarm-x")[];
                             /** @enum {string} */
                             deliveryMode: "poll" | "push";
+                            pollRequired?: boolean;
                         };
                     };
                 };
@@ -2301,6 +2302,7 @@ export interface paths {
                             enabledCapabilities: ("core" | "task-pool" | "scripts" | "config" | "prompt-templates" | "mcp" | "profiles" | "services" | "scheduling" | "memory" | "workflows" | "pages" | "metrics" | "kv" | "slack" | "tracker" | "skills" | "messaging" | "repo" | "agentmail" | "kapso" | "swarm-x")[];
                             /** @enum {string} */
                             deliveryMode: "poll" | "push";
+                            pollRequired?: boolean;
                         };
                     };
                 };

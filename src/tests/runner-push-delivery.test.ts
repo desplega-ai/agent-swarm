@@ -1,18 +1,21 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
+  deliverySchedule,
   RunnerPushDelivery,
   resolvePushSafetyPollMs,
   resolveWorkerDeliveryMode,
+  shouldRunDeliveryLoop,
+  taskReconciliation,
 } from "../commands/push-delivery";
 import {
   createSteeringDispatchState,
   fetchResolvedEnv,
-  pollAndDispatchSteering,
   pollForTrigger,
   type RunnerState,
   type RunningTask,
   reconcileActiveTasks,
   registerAgent,
+  scheduleSteeringDispatch,
 } from "../commands/runner";
 import type { ProviderSession } from "../providers/types";
 import { WorkerRealtimeClient } from "../realtime/worker-client";
@@ -26,6 +29,10 @@ let apiUrl: string;
 let requests: string[];
 let cancelledId: string | undefined;
 let steeringId: string | undefined;
+let pollStatus: number;
+let steeringReadGate: Promise<void> | undefined;
+let pollRequired: boolean | undefined;
+let pollTriggerAfter: number | undefined;
 const agentId = crypto.randomUUID();
 const apiKey = "test-runner-push-delivery-key";
 
@@ -41,21 +48,37 @@ beforeEach(async () => {
   requests = [];
   cancelledId = undefined;
   steeringId = undefined;
+  pollStatus = 200;
+  steeringReadGate = undefined;
+  pollRequired = undefined;
+  pollTriggerAfter = undefined;
   socket = undefined;
   server = Bun.serve<undefined>({
     port: 0,
-    fetch(req, srv) {
+    async fetch(req, srv) {
       const url = new URL(req.url);
       if (url.pathname === "/api/realtime" && srv.upgrade(req, { data: undefined })) return;
       requests.push(`${req.method} ${url.pathname}`);
-      if (url.pathname === "/api/agents") return Response.json({ deliveryMode: "push" });
+      if (url.pathname === "/api/agents")
+        return Response.json({ deliveryMode: "push", pollRequired });
       if (url.pathname === "/api/config/resolved")
         return Response.json({ configs: [{ key: "MAX_CONCURRENT_TASKS", value: "3" }] });
-      if (url.pathname === "/api/poll") return Response.json({ trigger: null });
+      if (url.pathname === "/api/poll") {
+        const count = requests.filter((r) => r === "GET /api/poll").length;
+        return Response.json(
+          {
+            trigger:
+              pollTriggerAfter && count >= pollTriggerAfter
+                ? { type: "task_assigned", taskId: crypto.randomUUID() }
+                : null,
+          },
+          { status: pollStatus },
+        );
+      }
       if (url.pathname === "/cancelled-tasks")
         return Response.json({ cancelled: cancelledId ? [{ id: cancelledId }] : [] });
-      if (url.pathname === "/api/steering-messages")
-        return Response.json({
+      if (url.pathname === "/api/steering-messages") {
+        const response = Response.json({
           messages:
             url.searchParams.get("taskId") === steeringId
               ? [
@@ -69,6 +92,9 @@ beforeEach(async () => {
                 ]
               : [],
         });
+        await steeringReadGate;
+        return response;
+      }
       return Response.json({});
     },
     websocket: {
@@ -92,8 +118,6 @@ beforeEach(async () => {
   delivery = new RunnerPushDelivery(client);
   client.start();
   await waitUntil(() => client.isConnected());
-  await client.waitForNudge(["work"], 10);
-  await client.waitForNudge(["config"], 10);
 });
 afterEach(async () => {
   client.stop();
@@ -116,17 +140,27 @@ async function nudge(kind: WorkerNudge["kind"], taskId?: string) {
 
 async function poll(now: number, mode: DeliveryMode = "push") {
   const checks = delivery.checks(mode, now);
-  if (!checks.work) return checks;
-  delivery.beginPoll();
-  const trigger = await pollForTrigger({
-    apiUrl,
-    apiKey,
-    agentId,
+  const schedule = delivery.schedule({
+    mode,
+    push: checks.push,
+    activeCount: 0,
+    maxConcurrent: 2,
+    lastPushPingAt: now,
     pollInterval: 2,
-    pollTimeout: 8,
-    singlePoll: checks.push,
+    now,
   });
-  if (trigger) delivery.wakeWork();
+  if (!schedule.poll) return checks;
+  await delivery.poll(schedule.singlePoll, (onPollFailure) =>
+    pollForTrigger({
+      apiUrl,
+      apiKey,
+      agentId,
+      pollInterval: 2,
+      pollTimeout: 5000,
+      singlePoll: schedule.singlePoll,
+      onPollFailure,
+    }),
+  );
   return checks;
 }
 
@@ -177,8 +211,25 @@ describe("runner push delivery", () => {
 
   test("a nudge during fetch survives the empty response", async () => {
     delivery.checks("push", 0);
-    delivery.beginPoll();
-    await nudge("work");
+    const schedule = delivery.schedule({
+      mode: "push",
+      push: true,
+      activeCount: 0,
+      maxConcurrent: 2,
+      lastPushPingAt: Date.now(),
+      pollInterval: 2000,
+    });
+    await delivery.poll(true, async () => {
+      await nudge("work");
+      return null;
+    });
+    const wait = spyOn(client, "waitForNudge").mockResolvedValue(null);
+    try {
+      await delivery.waitForSchedule(schedule);
+      expect(wait).not.toHaveBeenCalled();
+    } finally {
+      wait.mockRestore();
+    }
     expect(delivery.checks("push", 1).work).toBe(true);
   });
 
@@ -202,8 +253,7 @@ describe("runner push delivery", () => {
     const fetched: string[] = [];
     await reconcileActiveTasks(state, "worker", {
       cancelledSignaled,
-      cancelTaskIds: checks.cancelTaskIds,
-      checkStatus: checks.safety,
+      ...taskReconciliation(checks),
       intervalMs: 30_000,
       now: () => 1000,
       isCancelled: async (taskId) => {
@@ -251,18 +301,164 @@ describe("runner push delivery", () => {
     ];
     await nudge("steer", targetId);
     const checks = delivery.checks("push", 1000);
+    const dispatchState = createSteeringDispatchState();
+    const errors: unknown[] = [];
     for (const task of tasks) {
-      if (!checks.safety && !checks.steerTaskIds.has(task.taskId)) continue;
-      await pollAndDispatchSteering(
-        { apiUrl, apiKey, agentId },
-        task.taskId,
-        task.session,
-        createSteeringDispatchState(),
+      delivery.dispatchSteering(checks, task.taskId, () =>
+        scheduleSteeringDispatch(
+          { apiUrl, apiKey, agentId },
+          task.taskId,
+          task.session,
+          dispatchState,
+          (error) => errors.push(error),
+        ),
       );
     }
+    await waitUntil(() => delivered.length === 1);
+    await waitUntil(
+      () => dispatchState.pollingTaskIds.size === 0 && dispatchState.inFlightMessageIds.size === 0,
+    );
+    expect(errors).toEqual([]);
     expect(delivered).toHaveLength(1);
     expect(requests.filter((r) => r === "GET /api/steering-messages")).toHaveLength(1);
     expect(checks.work).toBe(false);
+  });
+
+  test("a steering nudge during an in-flight queue read retries that task", async () => {
+    await poll(0);
+    const taskId = crypto.randomUUID();
+    const delivered: string[] = [];
+    const task = activeTask(
+      taskId,
+      async () => {},
+      async (message) => {
+        delivered.push(message.text);
+        return { delivered: true, mode: "queue" };
+      },
+    );
+    const dispatchState = createSteeringDispatchState();
+    const errors: unknown[] = [];
+    const dispatch = () =>
+      scheduleSteeringDispatch(
+        { apiUrl, apiKey, agentId },
+        taskId,
+        task.session,
+        dispatchState,
+        (error) => errors.push(error),
+      );
+    let release!: () => void;
+    steeringReadGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await nudge("steer", taskId);
+    delivery.dispatchSteering(delivery.checks("push", 1), taskId, dispatch);
+    await waitUntil(() => requests.includes("GET /api/steering-messages"));
+    steeringId = taskId;
+    await nudge("steer", taskId);
+    delivery.dispatchSteering(delivery.checks("push", 2), taskId, dispatch);
+    release();
+    await waitUntil(() => !dispatchState.pollingTaskIds.has(taskId));
+    delivery.dispatchSteering(delivery.checks("push", 3), taskId, dispatch);
+    await waitUntil(() => delivered.length === 1);
+    await waitUntil(
+      () => dispatchState.pollingTaskIds.size === 0 && dispatchState.inFlightMessageIds.size === 0,
+    );
+    expect(errors).toEqual([]);
+    expect(requests.filter((r) => r === "GET /api/steering-messages")).toHaveLength(2);
+  });
+
+  test.each([
+    "http",
+    "network",
+  ])("a %s poll failure retries after the poll interval", async (failure) => {
+    await poll(0);
+    await nudge("work");
+    const checks = delivery.checks("push", 1);
+    const schedule = delivery.schedule({
+      mode: "push",
+      push: checks.push,
+      activeCount: 0,
+      maxConcurrent: 2,
+      lastPushPingAt: Date.now(),
+      pollInterval: 2,
+    });
+    pollStatus = 503;
+    const fetchSpy =
+      failure === "network"
+        ? spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("connection lost"))
+        : undefined;
+    const warning = spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const result = await delivery.poll(true, (onPollFailure) =>
+        pollForTrigger({
+          apiUrl,
+          apiKey,
+          agentId,
+          pollInterval: 2,
+          pollTimeout: 8,
+          singlePoll: true,
+          onPollFailure,
+        }),
+      );
+      expect(result).toEqual({ trigger: null, failed: true });
+      const sleep = spyOn(Bun, "sleep").mockResolvedValue(undefined);
+      try {
+        await delivery.waitForSchedule(schedule, result.failed, 2);
+        expect(sleep).toHaveBeenCalledWith(2);
+      } finally {
+        sleep.mockRestore();
+      }
+      expect(
+        delivery.schedule({
+          mode: "push",
+          push: true,
+          activeCount: 0,
+          maxConcurrent: 2,
+          lastPushPingAt: 0,
+          pollInterval: 2,
+          now: 2,
+        }).poll,
+      ).toBe(true);
+      pollStatus = 200;
+      await poll(2);
+      expect(delivery.checks("push", 3).work).toBe(false);
+    } finally {
+      fetchSpy?.mockRestore();
+      warning.mockRestore();
+    }
+  });
+
+  test("fallback fetches once, then waits for a nudge at poll cadence", async () => {
+    const schedule = deliverySchedule({
+      mode: "push",
+      push: false,
+      work: false,
+      activeCount: 1,
+      maxConcurrent: 2,
+      lastPushPingAt: 0,
+      pollInterval: 2000,
+      now: 1,
+    });
+    const before = requests.filter((r) => r === "GET /api/poll").length;
+    await delivery.poll(schedule.singlePoll, (onPollFailure) =>
+      pollForTrigger({
+        apiUrl,
+        apiKey,
+        agentId,
+        pollInterval: 2,
+        pollTimeout: 8,
+        singlePoll: schedule.singlePoll,
+        onPollFailure,
+      }),
+    );
+    expect(requests.filter((r) => r === "GET /api/poll").length).toBe(before + 1);
+    const wait = spyOn(client, "waitForNudge").mockResolvedValue(null);
+    try {
+      await delivery.waitForSchedule(schedule);
+      expect(wait).toHaveBeenCalledWith(["work", "cancel", "steer", "config"], 2000);
+    } finally {
+      wait.mockRestore();
+    }
   });
 
   test("config nudges request reconciliation immediately and safety ticks repeat it", async () => {
@@ -303,6 +499,7 @@ describe("runner push delivery", () => {
   });
 
   test("poll mode retains repeated fetching and maintenance eligibility", async () => {
+    pollTriggerAfter = 2;
     const checks = await poll(0, "poll");
     expect(checks.push).toBe(false);
     expect(checks.work).toBe(true);
@@ -318,13 +515,19 @@ test("delivery resolution honors worker overrides, older APIs, and channel-monit
     expect(resolveWorkerDeliveryMode("push", false, { SWARM_DELIVERY_MODE: "poll" })).toBe("poll");
     expect(resolveWorkerDeliveryMode("poll", false, { SWARM_DELIVERY_MODE: "push" })).toBe("push");
     expect(resolveWorkerDeliveryMode("push", true, { LEAD_MONITOR_CHANNELS: "true" })).toBe("poll");
+    expect(resolveWorkerDeliveryMode("poll", true, { SWARM_DELIVERY_MODE: "push" }, true)).toBe(
+      "poll",
+    );
+    for (const flag of ["1", "TRUE", "yes"]) {
+      expect(resolveWorkerDeliveryMode("push", true, { LEAD_MONITOR_CHANNELS: flag })).toBe("push");
+    }
     expect(resolveWorkerDeliveryMode("push", true, { LEAD_MONITOR_CHANNELS: "false" })).toBe(
       "push",
     );
     expect(resolveWorkerDeliveryMode("push", false, { LEAD_MONITOR_CHANNELS: "true" })).toBe(
       "push",
     );
-    expect(warning).toHaveBeenCalledTimes(1);
+    expect(warning).toHaveBeenCalledTimes(2);
     expect(resolvePushSafetyPollMs({})).toBe(30_000);
     expect(resolvePushSafetyPollMs({ RUNNER_PUSH_SAFETY_POLL_MS: "5000" })).toBe(5000);
     expect(resolvePushSafetyPollMs({ RUNNER_PUSH_SAFETY_POLL_MS: "0" })).toBe(30_000);
@@ -332,6 +535,65 @@ test("delivery resolution honors worker overrides, older APIs, and channel-monit
   } finally {
     warning.mockRestore();
   }
+});
+
+test("scheduling bounds idle waits by ping time and preserves capacity and drain waits", () => {
+  const options = {
+    mode: "push" as const,
+    push: true,
+    work: false,
+    activeCount: 0,
+    maxConcurrent: 2,
+    lastPushPingAt: 1000,
+    pollInterval: 2000,
+    now: 26_000,
+  };
+  expect(deliverySchedule(options)).toMatchObject({
+    poll: false,
+    singlePoll: true,
+    waitKind: "push",
+    waitMs: 5000,
+  });
+  expect(deliverySchedule({ ...options, now: 32_000 }).waitMs).toBe(0);
+  expect(deliverySchedule({ ...options, activeCount: 1 }).waitMs).toBe(1000);
+  for (const blocked of [{ activeCount: 2 }, { draining: true }]) {
+    expect(deliverySchedule({ ...options, work: true, ...blocked })).toMatchObject({
+      poll: false,
+      waitKind: "push",
+      waitMs: 1000,
+    });
+    expect(deliverySchedule({ ...options, mode: "poll", push: false, ...blocked })).toMatchObject({
+      poll: false,
+      singlePoll: false,
+      waitKind: "sleep",
+      waitMs: 1000,
+    });
+  }
+  expect(deliverySchedule({ ...options, mode: "poll", push: false })).toMatchObject({
+    poll: true,
+    singlePoll: false,
+  });
+  expect(shouldRunDeliveryLoop("poll", true)).toBe(true);
+  expect(shouldRunDeliveryLoop(undefined, true)).toBe(true);
+  expect(shouldRunDeliveryLoop("push", true)).toBe(false);
+  expect(shouldRunDeliveryLoop("push", false)).toBe(true);
+});
+
+test("completion wakes work after checks have already consumed the current iteration", async () => {
+  await poll(0);
+  expect(delivery.checks("push", 1).work).toBe(false);
+  delivery.wakeWork();
+  expect(
+    delivery.schedule({
+      mode: "push",
+      push: true,
+      activeCount: 0,
+      maxConcurrent: 2,
+      lastPushPingAt: 0,
+      pollInterval: 2000,
+      now: 1,
+    }).poll,
+  ).toBe(true);
 });
 
 test("registration preserves delivery mode when an API omits capability flags", async () => {
@@ -345,4 +607,30 @@ test("registration preserves delivery mode when an API omits capability flags", 
   });
   expect(result.deliveryMode).toBe("push");
   expect(result.serverCapabilities).toBeUndefined();
+});
+
+test("registration preserves the API poll restriction without worker-side channel configuration", async () => {
+  pollRequired = true;
+  const result = await registerAgent({
+    apiUrl,
+    apiKey,
+    agentId,
+    name: "lead",
+    isLead: true,
+    harnessProvider: "acp",
+  });
+  expect(result.pollRequired).toBe(true);
+  const warning = spyOn(console, "warn").mockImplementation(() => {});
+  try {
+    expect(
+      resolveWorkerDeliveryMode(
+        result.deliveryMode,
+        true,
+        { SWARM_DELIVERY_MODE: "push" },
+        result.pollRequired,
+      ),
+    ).toBe("poll");
+  } finally {
+    warning.mockRestore();
+  }
 });

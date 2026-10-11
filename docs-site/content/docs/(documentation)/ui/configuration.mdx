@@ -295,7 +295,8 @@ Set these variables in the worker environment:
 
 Push workers fetch work on nudges and safety ticks. They also fetch current state after reconnecting.
 They retain a 30-second ping interval and temporarily use poll delivery after 60 seconds without a socket.
-A lead with `LEAD_MONITOR_CHANNELS=true` always uses poll delivery and logs a warning if push was requested.
+A lead uses poll delivery when the API enables `LEAD_MONITOR_CHANNELS=true`.
+The runner honors this restriction, including when a worker override requests push, and logs a warning.
 
 It defaults to `poll`. A pool's explicit mode takes precedence.
 Controller credentials remain encrypted in the controller record. Workers do not receive them through global configuration.

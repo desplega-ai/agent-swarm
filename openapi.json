@@ -10233,6 +10233,9 @@
                             "poll",
                             "push"
                           ]
+                        },
+                        "pollRequired": {
+                          "type": "boolean"
                         }
                       },
                       "required": [
@@ -10293,6 +10296,9 @@
                             "poll",
                             "push"
                           ]
+                        },
+                        "pollRequired": {
+                          "type": "boolean"
                         }
                       },
                       "required": [

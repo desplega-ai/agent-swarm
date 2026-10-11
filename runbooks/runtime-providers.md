@@ -134,7 +134,7 @@ Nudges are ephemeral. Workers must fetch current state after reconnecting.
 The registration response includes `deliveryMode`. With the feature flag off, the API returns `poll`.
 With the flag on, the API selects the bound pool's `delivery`, then `RUNTIME_DEFAULT_DELIVERY`, then `poll`.
 An unbound agent also uses that default. A pool change takes effect at the worker's next registration.
-Push workers register again when they reconcile configuration, including on safety ticks.
+Workers register again when configuration drift changes agent-visible values or the five-minute capability refresh is due.
 
 Worker environment:
 
@@ -146,6 +146,7 @@ Worker environment:
 Push workers subscribe with Bun's WebSocket client and include `X-Runtime-Instance-ID`.
 After subscription succeeds, synthetic `work` and `config` nudges fetch current state.
 Reconnect uses exponential backoff with jitter, bounded between 1 and 30 seconds.
+Backoff resets after a subscription stays connected for at least 30 seconds.
 A socket unavailable for more than 60 seconds causes poll fallback and one warning.
 A successful reconnect restores push delivery.
 
@@ -155,7 +156,8 @@ Configuration nudges trigger reconciliation immediately. Task completion also pe
 Workers send `/ping` at least every 30 seconds, independently of budget backoff.
 
 A lead with `LEAD_MONITOR_CHANNELS=true` must use `poll` because channel activity is computed during polling.
-The runner warns and forces poll delivery for that lead, including when a worker override requests push.
+The API forces poll delivery and returns `pollRequired` for that lead.
+The runner warns and honors this restriction, including when a worker override requests push.
 
 All write hooks publish through `getDbClient().afterCommit()`.
 Rollback suppresses their nudges.

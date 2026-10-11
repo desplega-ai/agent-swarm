@@ -79,6 +79,7 @@ import {
   IDENTITY_FIELD_BUDGETS,
   IdentityFieldBudgetError,
 } from "../utils/identity-field-budget";
+import { isLeadChannelMonitoringEnabled } from "../utils/lead-monitor-channels";
 import { isMultiRuntimeEnabled } from "../utils/multi-runtime";
 import { isRuntimePoolsEnabled } from "../utils/runtime-pools-flag";
 import { scrubSecrets } from "../utils/secret-scrubber";
@@ -120,6 +121,7 @@ const AgentWithCapacityAndTasksSchema = AgentWithTasksSchema.extend({
 const RegisterAgentResponseSchema = AgentSchema.extend({
   enabledCapabilities: z.array(CapabilitySchema),
   deliveryMode: DeliveryModeSchema,
+  pollRequired: z.boolean().optional(),
 });
 
 /** Shape shared by the single- and bulk- credential-status endpoints. */
@@ -806,12 +808,15 @@ export async function handleAgentRegister(
     // transaction right after confirming the row exists — it cannot actually
     // be null here. (Same value as before; this only affects the compile-time
     // type used to check the response schema.)
+    const pollRequired = result.agent!.isLead && isLeadChannelMonitoringEnabled();
     registerAgent.respond(res, result.created ? 201 : 200, {
       ...result.agent!,
       enabledCapabilities: getEnabledCapabilities(),
-      deliveryMode: isRuntimePoolsEnabled()
-        ? resolvePoolDelivery((await getPoolForAgent(agentId)) ?? { delivery: null })
-        : "poll",
+      pollRequired,
+      deliveryMode:
+        !pollRequired && isRuntimePoolsEnabled()
+          ? resolvePoolDelivery((await getPoolForAgent(agentId)) ?? { delivery: null })
+          : "poll",
     });
     return true;
   }

@@ -141,7 +141,10 @@ function createTestServer(): Server {
 async function register(
   agentId: string,
   body: Record<string, unknown> = {},
-): Promise<{ status: number; agent: { maxTasks?: number; deliveryMode?: string } }> {
+): Promise<{
+  status: number;
+  agent: { maxTasks?: number; deliveryMode?: string; pollRequired?: boolean };
+}> {
   const res = await fetch(`${baseUrl}/api/agents`, {
     method: "POST",
     headers: { "Content-Type": "application/json", "X-Agent-ID": agentId },
@@ -149,7 +152,11 @@ async function register(
   });
   return {
     status: res.status,
-    agent: (await res.json()) as { maxTasks?: number; deliveryMode?: string },
+    agent: (await res.json()) as {
+      maxTasks?: number;
+      deliveryMode?: string;
+      pollRequired?: boolean;
+    },
   };
 }
 
@@ -2948,15 +2955,44 @@ describe("worker registration delivery mode", () => {
   const originalPoolsFlag = process.env.RUNTIME_POOLS_ENABLED;
   const originalDefaultDelivery = process.env.RUNTIME_DEFAULT_DELIVERY;
   const originalWorkerMode = process.env.SWARM_DELIVERY_MODE;
+  const originalLeadMonitor = process.env.LEAD_MONITOR_CHANNELS;
 
   afterAll(() => {
     for (const [key, value] of Object.entries({
       RUNTIME_POOLS_ENABLED: originalPoolsFlag,
       RUNTIME_DEFAULT_DELIVERY: originalDefaultDelivery,
       SWARM_DELIVERY_MODE: originalWorkerMode,
+      LEAD_MONITOR_CHANNELS: originalLeadMonitor,
     })) {
       if (value === undefined) delete process.env[key];
       else process.env[key] = value;
+    }
+  });
+
+  test("API channel monitoring forces leads to poll with the same strict flag predicate", async () => {
+    process.env.RUNTIME_POOLS_ENABLED = "true";
+    process.env.RUNTIME_DEFAULT_DELIVERY = "push";
+    const agentId = crypto.randomUUID();
+    try {
+      process.env.LEAD_MONITOR_CHANNELS = "true";
+      expect((await register(agentId, { isLead: true })).agent).toMatchObject({
+        deliveryMode: "poll",
+        pollRequired: true,
+      });
+      expect((await register(crypto.randomUUID())).agent).toMatchObject({
+        deliveryMode: "push",
+        pollRequired: false,
+      });
+      for (const flag of ["false", "1", "TRUE"]) {
+        process.env.LEAD_MONITOR_CHANNELS = flag;
+        expect((await register(agentId, { isLead: true })).agent).toMatchObject({
+          deliveryMode: "push",
+          pollRequired: false,
+        });
+      }
+    } finally {
+      if (originalLeadMonitor === undefined) delete process.env.LEAD_MONITOR_CHANNELS;
+      else process.env.LEAD_MONITOR_CHANNELS = originalLeadMonitor;
     }
   });
 

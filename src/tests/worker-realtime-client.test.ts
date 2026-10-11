@@ -1,4 +1,13 @@
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  spyOn,
+  test,
+} from "bun:test";
 import { createServer, type Server } from "node:http";
 import { closeDb, createAgent, initDb } from "../be/db";
 import { realtimeBus } from "../realtime/bus";
@@ -16,6 +25,7 @@ let client: WorkerRealtimeClient;
 let agentId: string;
 let runtimeInstanceId: string;
 let nudges: WorkerNudge[];
+let removeListener: () => void;
 
 async function waitUntil(predicate: () => boolean) {
   const deadline = Date.now() + 5000;
@@ -54,7 +64,7 @@ beforeEach(async () => {
     runtimeInstanceId,
   });
   nudges = [];
-  client.onNudge((nudge) => nudges.push(nudge));
+  removeListener = client.onNudge((nudge) => nudges.push(nudge));
 });
 afterEach(async () => {
   client.stop();
@@ -79,14 +89,53 @@ describe("worker realtime client through the real transport", () => {
       expect(connected).toEqual([{ agentId, runtimeId: runtimeInstanceId }]);
       expect(listSubscribedWorkerAgents()).toContain(agentId);
       expect(nudges.map((n) => n.kind)).toEqual(["work", "config"]);
-      expect((await client.waitForNudge(["work"], 100))?.kind).toBe("work");
-      expect((await client.waitForNudge(["config"], 100))?.kind).toBe("config");
+      expect(await client.waitForNudge(["work"], 5)).toBeNull();
+      expect(await client.waitForNudge(["config"], 5)).toBeNull();
       expect(await client.waitForNudge(["work"], 5)).toBeNull();
       const waiting = client.waitForNudge(["cancel"], 1000);
       const nudge = publish("cancel", crypto.randomUUID());
       expect(await waiting).toEqual(nudge);
     } finally {
       stop();
+    }
+  });
+
+  test("queues nudges only when neither listeners nor waiters consumed them", async () => {
+    removeListener();
+    client.start();
+    await waitUntil(() => client.isConnected());
+    expect((await client.waitForNudge(["work"], 5))?.kind).toBe("work");
+    expect((await client.waitForNudge(["config"], 5))?.kind).toBe("config");
+    const waiting = client.waitForNudge(["cancel"], 1000);
+    const nudge = publish("cancel", crypto.randomUUID());
+    expect(await waiting).toEqual(nudge);
+    expect(await client.waitForNudge(["cancel"], 5)).toBeNull();
+  });
+
+  test("short subscriptions keep exponential backoff and a stable subscription resets it", async () => {
+    const timers = spyOn(globalThis, "setTimeout");
+    const random = spyOn(Math, "random").mockReturnValue(0.5);
+    let clock: ReturnType<typeof spyOn> | undefined;
+    try {
+      client.start();
+      await waitUntil(() => client.isConnected());
+      for (const delay of [1000, 2000]) {
+        detach();
+        await waitUntil(() => !client.isConnected());
+        expect(timers.mock.calls.at(-1)?.[1]).toBe(delay);
+        detach = attachRealtimeTransport(server);
+        await waitUntil(() => client.isConnected());
+      }
+      const stableAt = Date.now() + 31_000;
+      clock = spyOn(Date, "now").mockReturnValue(stableAt);
+      detach();
+      await waitUntil(() => !client.isConnected());
+      expect(timers.mock.calls.at(-1)?.[1]).toBe(1000);
+      detach = attachRealtimeTransport(server);
+    } finally {
+      clock?.mockRestore();
+      timers.mockRestore();
+      random.mockRestore();
     }
   });
 

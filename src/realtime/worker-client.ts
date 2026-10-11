@@ -12,6 +12,7 @@ export class WorkerRealtimeClient {
   private connectTimeout?: ReturnType<typeof setTimeout>;
   private stopped = true;
   private connected = false;
+  private connectedAt = 0;
   private disconnectedAt = Date.now();
   private attempt = 0;
   private readonly listeners = new Set<(nudge: WorkerNudge) => void>();
@@ -88,8 +89,8 @@ export class WorkerRealtimeClient {
   }
 
   private emit(nudge: WorkerNudge): void {
+    let delivered = this.listeners.size > 0;
     for (const listener of this.listeners) listener(nudge);
-    let delivered = false;
     for (const waiter of this.waiters) {
       if (!waiter.kinds.includes(nudge.kind)) continue;
       delivered = true;
@@ -132,7 +133,7 @@ export class WorkerRealtimeClient {
           if (frame.id === 1 && frame.type === "result") {
             clearTimeout(this.connectTimeout);
             this.connected = true;
-            this.attempt = 0;
+            this.connectedAt = Date.now();
             for (const kind of ["work", "config"] as const)
               this.emit({ v: 1, kind, at: new Date().toISOString() });
           } else if (frame.id === 1 && frame.type === "error") {
@@ -154,7 +155,10 @@ export class WorkerRealtimeClient {
       socket.onclose = () => {
         if (this.socket !== socket) return;
         clearTimeout(this.connectTimeout);
-        if (this.connected) this.disconnectedAt = Date.now();
+        if (this.connected) {
+          this.disconnectedAt = Date.now();
+          if (this.disconnectedAt - this.connectedAt >= 30_000) this.attempt = 0;
+        }
         this.connected = false;
         this.socket = undefined;
         this.scheduleReconnect();
