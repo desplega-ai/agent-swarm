@@ -113,6 +113,11 @@ back to `active`.
 Workers preserve an injected `SWARM_RUNTIME_INSTANCE_ID` instead of generating a new runtime ID.
 Runtime tokens bind authentication to that agent and runtime, and central authentication rejects conflicting headers.
 
+Push workers send `/ping` at least every 30 seconds, including during budget backoff.
+Their safety tick fetches work, cancellation, steering, and configuration every 30 seconds by default.
+`RUNNER_PUSH_SAFETY_POLL_MS` changes that fetch interval without changing the ping interval.
+Poll workers retain their existing ping and poll cadence.
+
 A crashed, OOM-killed, or network-partitioned process never reaches `/close`,
 so status alone would leave it `active` forever and keep its agent falsely
 available. Liveness is therefore the conjunction of `status = 'active'` and a

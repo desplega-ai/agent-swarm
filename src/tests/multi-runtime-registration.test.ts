@@ -35,6 +35,12 @@ import {
   hasReadyLiveRuntime,
 } from "../be/multi-runtime";
 import {
+  bindAgentToPool,
+  createRuntimeController,
+  createRuntimePool,
+  updateRuntimePool,
+} from "../be/runtime-pools/db";
+import {
   CREDENTIAL_RETRY_INTERVAL_MS,
   type CredentialRefreshState,
   refreshCredentialStatus,
@@ -135,13 +141,23 @@ function createTestServer(): Server {
 async function register(
   agentId: string,
   body: Record<string, unknown> = {},
-): Promise<{ status: number; agent: { maxTasks?: number } }> {
+): Promise<{
+  status: number;
+  agent: { maxTasks?: number; deliveryMode?: string; pollRequired?: boolean };
+}> {
   const res = await fetch(`${baseUrl}/api/agents`, {
     method: "POST",
     headers: { "Content-Type": "application/json", "X-Agent-ID": agentId },
     body: JSON.stringify({ name: "mr-test-agent", ...body }),
   });
-  return { status: res.status, agent: (await res.json()) as { maxTasks?: number } };
+  return {
+    status: res.status,
+    agent: (await res.json()) as {
+      maxTasks?: number;
+      deliveryMode?: string;
+      pollRequired?: boolean;
+    },
+  };
 }
 
 async function putAgentMaxTasks(agentId: string, value: string): Promise<number> {
@@ -2933,4 +2949,88 @@ describe("post-task credential recovery without a restart", () => {
       }
     });
   }
+});
+
+describe("worker registration delivery mode", () => {
+  const originalPoolsFlag = process.env.RUNTIME_POOLS_ENABLED;
+  const originalDefaultDelivery = process.env.RUNTIME_DEFAULT_DELIVERY;
+  const originalWorkerMode = process.env.SWARM_DELIVERY_MODE;
+  const originalLeadMonitor = process.env.LEAD_MONITOR_CHANNELS;
+
+  afterAll(() => {
+    for (const [key, value] of Object.entries({
+      RUNTIME_POOLS_ENABLED: originalPoolsFlag,
+      RUNTIME_DEFAULT_DELIVERY: originalDefaultDelivery,
+      SWARM_DELIVERY_MODE: originalWorkerMode,
+      LEAD_MONITOR_CHANNELS: originalLeadMonitor,
+    })) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  });
+
+  test("API channel monitoring forces leads to poll with the same strict flag predicate", async () => {
+    process.env.RUNTIME_POOLS_ENABLED = "true";
+    process.env.RUNTIME_DEFAULT_DELIVERY = "push";
+    const agentId = crypto.randomUUID();
+    try {
+      process.env.LEAD_MONITOR_CHANNELS = "true";
+      expect((await register(agentId, { isLead: true })).agent).toMatchObject({
+        deliveryMode: "poll",
+        pollRequired: true,
+      });
+      expect((await register(crypto.randomUUID())).agent).toMatchObject({
+        deliveryMode: "push",
+        pollRequired: false,
+      });
+      for (const flag of ["false", "1", "TRUE"]) {
+        process.env.LEAD_MONITOR_CHANNELS = flag;
+        expect((await register(agentId, { isLead: true })).agent).toMatchObject({
+          deliveryMode: "push",
+          pollRequired: false,
+        });
+      }
+    } finally {
+      if (originalLeadMonitor === undefined) delete process.env.LEAD_MONITOR_CHANNELS;
+      else process.env.LEAD_MONITOR_CHANNELS = originalLeadMonitor;
+    }
+  });
+
+  test("flag off forces poll even with a push default and worker override", async () => {
+    process.env.RUNTIME_POOLS_ENABLED = "false";
+    process.env.RUNTIME_DEFAULT_DELIVERY = "push";
+    process.env.SWARM_DELIVERY_MODE = "push";
+    expect((await register(crypto.randomUUID())).agent.deliveryMode).toBe("poll");
+  });
+
+  test("unbound workers use the default and ignore the worker-side override", async () => {
+    process.env.RUNTIME_POOLS_ENABLED = "true";
+    process.env.RUNTIME_DEFAULT_DELIVERY = "push";
+    process.env.SWARM_DELIVERY_MODE = "poll";
+    expect((await register(crypto.randomUUID())).agent.deliveryMode).toBe("push");
+    delete process.env.RUNTIME_DEFAULT_DELIVERY;
+    expect((await register(crypto.randomUUID())).agent.deliveryMode).toBe("poll");
+  });
+
+  test("pool delivery wins and changes at the next registration", async () => {
+    process.env.RUNTIME_POOLS_ENABLED = "true";
+    process.env.RUNTIME_DEFAULT_DELIVERY = "poll";
+    const controller = await createRuntimeController({ name: crypto.randomUUID(), kind: "static" });
+    const pool = await createRuntimePool({
+      name: crypto.randomUUID(),
+      kind: "static",
+      placements: [controller.id],
+      delivery: "push",
+    });
+    const agentId = await makeAgent(1);
+    await bindAgentToPool(agentId, pool.id);
+    expect((await register(agentId)).agent.deliveryMode).toBe("push");
+    await updateRuntimePool(pool.id, { delivery: "poll" });
+    expect((await register(agentId)).agent.deliveryMode).toBe("poll");
+    await updateRuntimePool(pool.id, { delivery: null });
+    process.env.RUNTIME_DEFAULT_DELIVERY = "push";
+    expect((await register(agentId)).agent.deliveryMode).toBe("push");
+    delete process.env.RUNTIME_DEFAULT_DELIVERY;
+    expect((await register(agentId)).agent.deliveryMode).toBe("poll");
+  });
 });

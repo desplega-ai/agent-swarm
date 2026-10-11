@@ -44,6 +44,7 @@ import {
   setRuntimeCredentialReady,
   upsertRuntimeInstance,
 } from "../be/multi-runtime";
+import { getPoolForAgent, resolvePoolDelivery } from "../be/runtime-pools/db";
 import { ACP_TARGET_IDS } from "../providers/acp-target-catalog";
 import { reasoningCapability } from "../providers/reasoning-effort";
 import { ALL_CAPABILITIES, getEnabledCapabilities } from "../server";
@@ -57,6 +58,7 @@ import {
   AgentSchema,
   AgentStatusSchema,
   AgentWithTasksSchema,
+  DeliveryModeSchema,
   type ProfileSyncConflict,
   type ProviderName,
   ProviderNameSchema,
@@ -77,8 +79,10 @@ import {
   IDENTITY_FIELD_BUDGETS,
   IdentityFieldBudgetError,
 } from "../utils/identity-field-budget";
+import { isLeadChannelMonitoringEnabled } from "../utils/lead-monitor-channels";
 import { isMultiRuntimeEnabled } from "../utils/multi-runtime";
 import { getRequestAuth } from "../utils/request-auth-context";
+import { isRuntimePoolsEnabled } from "../utils/runtime-pools-flag";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { route, runtimeInstanceHeader } from "./route-def";
 import { agentWithCapacity, json, jsonError } from "./utils";
@@ -117,6 +121,8 @@ const AgentWithCapacityAndTasksSchema = AgentWithTasksSchema.extend({
 /** POST /api/agents response: the agent row plus the server's capability flags. */
 const RegisterAgentResponseSchema = AgentSchema.extend({
   enabledCapabilities: z.array(CapabilitySchema),
+  deliveryMode: DeliveryModeSchema,
+  pollRequired: z.boolean().optional(),
 });
 
 /** Shape shared by the single- and bulk- credential-status endpoints. */
@@ -811,9 +817,15 @@ export async function handleAgentRegister(
     // transaction right after confirming the row exists — it cannot actually
     // be null here. (Same value as before; this only affects the compile-time
     // type used to check the response schema.)
+    const pollRequired = result.agent!.isLead && isLeadChannelMonitoringEnabled();
     registerAgent.respond(res, result.created ? 201 : 200, {
       ...result.agent!,
       enabledCapabilities: getEnabledCapabilities(),
+      pollRequired,
+      deliveryMode:
+        !pollRequired && isRuntimePoolsEnabled()
+          ? resolvePoolDelivery((await getPoolForAgent(agentId)) ?? { delivery: null })
+          : "poll",
     });
     return true;
   }

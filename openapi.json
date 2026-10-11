@@ -10226,10 +10226,21 @@
                               "swarm-x"
                             ]
                           }
+                        },
+                        "deliveryMode": {
+                          "type": "string",
+                          "enum": [
+                            "poll",
+                            "push"
+                          ]
+                        },
+                        "pollRequired": {
+                          "type": "boolean"
                         }
                       },
                       "required": [
-                        "enabledCapabilities"
+                        "enabledCapabilities",
+                        "deliveryMode"
                       ]
                     }
                   ]
@@ -10278,10 +10289,21 @@
                               "swarm-x"
                             ]
                           }
+                        },
+                        "deliveryMode": {
+                          "type": "string",
+                          "enum": [
+                            "poll",
+                            "push"
+                          ]
+                        },
+                        "pollRequired": {
+                          "type": "boolean"
                         }
                       },
                       "required": [
-                        "enabledCapabilities"
+                        "enabledCapabilities",
+                        "deliveryMode"
                       ]
                     }
                   ]

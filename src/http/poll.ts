@@ -46,6 +46,7 @@ import {
   UserSchema,
 } from "../types";
 import { ensure } from "../utils/business-use";
+import { isLeadChannelMonitoringEnabled } from "../utils/lead-monitor-channels";
 import { isMultiRuntimeEnabled } from "../utils/multi-runtime";
 import { getUserCommsPrefs } from "../utils/requester-comms";
 import { route, runtimeInstanceHeader } from "./route-def";
@@ -699,7 +700,7 @@ export async function handlePoll(
     if (
       result.trigger === null &&
       !isApiDraining() &&
-      process.env.LEAD_MONITOR_CHANNELS === "true" &&
+      isLeadChannelMonitoringEnabled() &&
       Date.now() - lastChannelActivityCheckAt >= CHANNEL_ACTIVITY_INTERVAL_MS
     ) {
       const agent = await getAgentById(myAgentId);

@@ -47,9 +47,11 @@ import {
   skillFromToolArgs,
 } from "../providers/skill-invoke.ts";
 import type { SteerDeliveryResult } from "../providers/types.ts";
+import { WorkerRealtimeClient } from "../realtime/worker-client";
 import { initTelemetry, telemetry } from "../telemetry.ts";
 import { mapTriggerSurface } from "../telemetry-context.ts";
 import {
+  type DeliveryMode,
   isTerminalTaskStatus,
   type ModelTierOverrides,
   type ProviderName,
@@ -122,6 +124,13 @@ import {
   reportLatestModel,
   sendCredStatusReport,
 } from "./provider-credentials.ts";
+import {
+  RunnerPushDelivery,
+  resolveWorkerDeliveryMode,
+  shouldRunDeliveryLoop,
+  taskReconciliation,
+  type WorkerRegistration,
+} from "./push-delivery";
 import {
   type ResumeSessionCandidate,
   type ResumeSessionResolution,
@@ -2360,11 +2369,13 @@ function setupShutdownHandlers(
   role: string,
   apiConfig?: ApiConfig,
   getRunnerState?: () => RunnerState | undefined,
+  onShutdown?: () => void,
 ): void {
   let shutdownInProgress = false;
   const shutdown = async (signal: string, exitCode = 0) => {
     if (shutdownInProgress) return;
     shutdownInProgress = true;
+    onShutdown?.();
     console.log(`\n[${role}] Received ${signal}, shutting down...`);
 
     // Wait for active tasks with timeout
@@ -2565,6 +2576,8 @@ export interface RunningTask {
 
 /** Runner state for tracking concurrent tasks */
 export interface RunnerState {
+  /** Older callers without a mode retain poll delivery. */
+  deliveryMode?: DeliveryMode;
   activeTasks: Map<string, RunningTask>;
   maxConcurrent: number;
   startedAt: number;
@@ -3115,6 +3128,10 @@ export interface PollOptions {
   runtimeInstanceId?: string;
   pollInterval: number;
   pollTimeout: number;
+  /** Push scheduling fetches once, then returns control to the runner. */
+  singlePoll?: boolean;
+  /** Distinguishes a failed fetch from an empty successful response. */
+  onPollFailure?: () => void;
   since?: string; // Optional: for filtering finished tasks
   /** Live harness provider; keys the MODEL_TIER_* overrides sent with the poll. */
   harnessProvider?: ProviderName;
@@ -3201,7 +3218,7 @@ const REGISTRATION_RETRY_MAX_DELAY_MS = 30_000;
  * the caller still exits and a restart policy can take over.
  */
 export async function registerAgentWithRetry(
-  register: () => Promise<{ serverCapabilities?: string[] }>,
+  register: () => Promise<WorkerRegistration>,
   opts: {
     label: string;
     budgetMs?: number;
@@ -3210,7 +3227,7 @@ export async function registerAgentWithRetry(
     sleep?: (ms: number) => Promise<void>;
     now?: () => number;
   },
-): Promise<{ serverCapabilities?: string[] }> {
+): Promise<WorkerRegistration> {
   const budgetMs = opts.budgetMs ?? REGISTRATION_RETRY_BUDGET_MS;
   const baseDelayMs = opts.baseDelayMs ?? REGISTRATION_RETRY_BASE_DELAY_MS;
   const maxDelayMs = opts.maxDelayMs ?? REGISTRATION_RETRY_MAX_DELAY_MS;
@@ -3257,7 +3274,7 @@ export async function registerAgent(opts: {
    */
   harnessProvider?: ProviderName;
   runtimeInstanceId?: string;
-}): Promise<{ serverCapabilities?: string[] }> {
+}): Promise<WorkerRegistration> {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     "X-Agent-ID": opts.agentId,
@@ -3303,11 +3320,22 @@ export async function registerAgent(opts: {
   // MCP tool groups it registers). Older servers omit the field — callers must
   // treat `undefined` as "unknown" and fall back to legacy prompt behavior.
   try {
-    const body = (await response.json()) as { enabledCapabilities?: unknown };
+    const body = (await response.json()) as {
+      enabledCapabilities?: unknown;
+      deliveryMode?: unknown;
+      pollRequired?: unknown;
+    };
+    const deliveryMode =
+      body.deliveryMode === "push" || body.deliveryMode === "poll" ? body.deliveryMode : undefined;
+    const mode: WorkerRegistration = {
+      ...(deliveryMode ? { deliveryMode } : {}),
+      ...(typeof body.pollRequired === "boolean" ? { pollRequired: body.pollRequired } : {}),
+    };
     const caps = body.enabledCapabilities;
     if (Array.isArray(caps) && caps.every((c) => typeof c === "string")) {
-      return { serverCapabilities: caps };
+      return { serverCapabilities: caps, ...mode };
     }
+    return mode;
   } catch {
     // Non-JSON / unexpected body — ignore, registration itself succeeded.
   }
@@ -3375,6 +3403,8 @@ async function pollForTriggerOnce(opts: PollOptions): Promise<Trigger | null> {
 
       if (!response.ok) {
         console.warn(`[runner] Poll request failed: ${response.status}`);
+        opts.onPollFailure?.();
+        if (opts.singlePoll) return null;
         await Bun.sleep(opts.pollInterval);
         continue;
       }
@@ -3389,9 +3419,11 @@ async function pollForTriggerOnce(opts: PollOptions): Promise<Trigger | null> {
       // A draining API dispatches nothing: end the window so the loop can hand off.
       if (draining) return null;
     } catch (error) {
-      console.warn(`[runner] Poll request error: ${error}`);
+      console.warn(scrubSecrets(`[runner] Poll request error: ${error}`));
+      opts.onPollFailure?.();
     }
 
+    if (opts.singlePoll) return null;
     await Bun.sleep(opts.pollInterval);
   }
 
@@ -4827,6 +4859,10 @@ export interface ReconcileActiveTasksOptions {
   intervalMs: number;
   abortGraceMs?: number;
   now?: () => number;
+  /** In push mode, fetch cancellation only for these tasks. Abort settlement still runs. */
+  cancelTaskIds?: ReadonlySet<string>;
+  /** In push mode, fetch terminal status on safety ticks. */
+  checkStatus?: boolean;
 }
 
 function requestSessionAbort(task: RunningTask, reason: string, at: number): void {
@@ -4920,7 +4956,10 @@ export async function reconcileActiveTasks(
   for (const [taskId, task] of state.activeTasks) {
     if (task.result !== null) continue;
 
-    if (!opts.cancelledSignaled.has(taskId)) {
+    if (
+      !opts.cancelledSignaled.has(taskId) &&
+      (!opts.cancelTaskIds || opts.cancelTaskIds.has(taskId))
+    ) {
       try {
         if (await opts.isCancelled(taskId)) {
           console.log(
@@ -4934,7 +4973,7 @@ export async function reconcileActiveTasks(
       }
     }
 
-    if (task.abortRequestedAt === undefined) {
+    if (task.abortRequestedAt === undefined && opts.checkStatus !== false) {
       const lastCheck = task.lastReconcileAt ?? task.startTime.getTime();
       if (now() - lastCheck >= opts.intervalMs) {
         task.lastReconcileAt = now();
@@ -5624,6 +5663,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   // Initialize runner state for parallel execution
   const state: RunnerState = {
     activeTasks: new Map(),
+    deliveryMode: "poll",
     maxConcurrent,
     startedAt: Date.now(),
     tasksProcessed: 0,
@@ -5669,8 +5709,49 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   // Create API config for ping/close
   const apiConfig: ApiConfig = { apiUrl, apiKey, agentId, runtimeInstanceId };
 
+  const pushDelivery = new RunnerPushDelivery(
+    new WorkerRealtimeClient({ apiUrl, apiKey, agentId, runtimeInstanceId }),
+  );
+  let shuttingDown = false;
+  let lastPushPingAt = 0;
+  let pushPingTimer: ReturnType<typeof setInterval> | undefined;
+  const applyDeliveryMode = (registration: WorkerRegistration) => {
+    const mode = resolveWorkerDeliveryMode(
+      registration.deliveryMode,
+      isLead,
+      process.env,
+      registration.pollRequired,
+    );
+    if (mode !== state.deliveryMode) {
+      state.deliveryMode = mode;
+      pushDelivery.wakeWork();
+      clearInterval(pushPingTimer);
+      if (mode === "push") {
+        pushDelivery.client.start();
+        lastPushPingAt = Date.now();
+        // Budget backoff and provider startup must not interrupt runtime liveness.
+        pushPingTimer = setInterval(() => {
+          lastPushPingAt = Date.now();
+          void pingServer(apiConfig, role).then((draining) =>
+            applyApiDrainSignal(state, role, draining),
+          );
+        }, 30_000);
+        pushPingTimer.unref();
+      } else pushDelivery.client.stop();
+    }
+  };
+
   // Setup graceful shutdown handlers with API config and runner state access
-  setupShutdownHandlers(role, apiConfig, () => state);
+  setupShutdownHandlers(
+    role,
+    apiConfig,
+    () => state,
+    () => {
+      shuttingDown = true;
+      clearInterval(pushPingTimer);
+      pushDelivery.client.stop();
+    },
+  );
 
   // Register agent before starting
   const agentName =
@@ -5804,6 +5885,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
     });
     lastServerCapsRefreshAt = Date.now();
     await applyServerCapabilities(reg.serverCapabilities);
+    applyDeliveryMode(reg);
   };
 
   /**
@@ -5840,6 +5922,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
     // registration (serverCapabilities unknown), and the later identity
     // rebuild only happens when the profile fetch succeeds.
     await applyServerCapabilities(reg.serverCapabilities);
+    applyDeliveryMode(reg);
     console.log(`[${role}] Registered as "${agentName}" (ID: ${agentId})`);
   } catch (error) {
     console.error(`[${role}] Failed to register: ${error}`);
@@ -6530,17 +6613,21 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   const ORPHAN_RECOVERY_INTERVAL_MS = 60_000;
   const taskReconcileIntervalMs = resolveTaskReconcileIntervalMs();
 
-  while (true) {
-    // Ping server on each iteration to keep status updated. The answer also
-    // carries the API's drain signal, which reaches workers at capacity that
-    // do not poll.
-    applyApiDrainSignal(state, role, await pingServer(apiConfig, role));
+  while (shouldRunDeliveryLoop(state.deliveryMode, shuttingDown)) {
+    const deliveryChecks = pushDelivery.checks(state.deliveryMode ?? "poll");
+    // Poll workers ping each iteration. Push workers retain a 30 second ping.
+    // The response also signals drain to workers at capacity.
+    if (state.deliveryMode !== "push") {
+      applyApiDrainSignal(state, role, await pingServer(apiConfig, role));
+    }
     if (state.apiDraining) {
       await handOffTasksForApiDrain(state, role, apiConfig);
     }
 
     // Check for completed processes first and ensure tasks are marked as finished
+    const activeBeforeCompletion = state.activeTasks.size;
     await checkCompletedProcesses(state, role, apiConfig, cancelledSignaled);
+    if (state.activeTasks.size < activeBeforeCompletion) pushDelivery.wakeWork();
 
     // Live HARNESS_PROVIDER reconciliation. Re-fetches `swarm_config` (overlaid
     // on env) and swaps the adapter if the resolved provider changed —
@@ -6552,7 +6639,10 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
     // the current `adapter` binding and pick up the swap. `basePrompt` is
     // rebuilt because traits (and therefore prompt content) may differ across
     // providers.
-    if (Date.now() - lastHarnessReconcileAt > HARNESS_RECONCILE_INTERVAL_MS) {
+    if (
+      deliveryChecks.config &&
+      (deliveryChecks.push || Date.now() - lastHarnessReconcileAt > HARNESS_RECONCILE_INTERVAL_MS)
+    ) {
       lastHarnessReconcileAt = Date.now();
       try {
         const {
@@ -6624,6 +6714,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
         isCancelled: (taskId) => fetchTaskCancelled(apiUrl, apiKey, agentId, taskId),
         fetchStatus: (taskId) => fetchTaskStatus(apiUrl, apiKey, taskId),
         intervalMs: taskReconcileIntervalMs,
+        ...taskReconciliation(deliveryChecks),
       });
     }
 
@@ -6631,20 +6722,36 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
     if (steeringDispatchState && state.activeTasks.size > 0) {
       const dispatchState = steeringDispatchState;
       for (const [taskId, task] of state.activeTasks) {
-        scheduleSteeringDispatch(apiConfig, taskId, task.session, dispatchState, (error) => {
-          console.warn(
-            `[${role}] Steering dispatch failed for task ${taskId.slice(0, 8)} (non-fatal): ${scrubSecrets(
-              (error as Error).message,
-            )}`,
-          );
-        });
+        pushDelivery.dispatchSteering(deliveryChecks, taskId, () =>
+          scheduleSteeringDispatch(apiConfig, taskId, task.session, dispatchState, (error) => {
+            console.warn(
+              `[${role}] Steering dispatch failed for task ${taskId.slice(0, 8)} (non-fatal): ${scrubSecrets(
+                (error as Error).message,
+              )}`,
+            );
+          }),
+        );
       }
     }
 
     // Only poll if we have capacity and the API is not draining
-    if (state.apiDraining) {
-      await Bun.sleep(1000);
-    } else if (state.activeTasks.size < state.maxConcurrent) {
+    const schedule = pushDelivery.schedule({
+      mode: state.deliveryMode ?? "poll",
+      push: deliveryChecks.push,
+      activeCount: state.activeTasks.size,
+      maxConcurrent: state.maxConcurrent,
+      draining: state.apiDraining,
+      lastPushPingAt,
+      pollInterval: PollIntervalMs,
+    });
+    if (!schedule.poll) {
+      if (!state.apiDraining && state.activeTasks.size >= state.maxConcurrent) {
+        console.log(
+          `[${role}] At capacity (${state.activeTasks.size}/${state.maxConcurrent}), waiting for completion...`,
+        );
+      }
+      await pushDelivery.waitForSchedule(schedule);
+    } else {
       if (Date.now() - lastOrphanRecoveryAt > ORPHAN_RECOVERY_INTERVAL_MS) {
         lastOrphanRecoveryAt = Date.now();
         const recoveredOrphans = await recoverOrphanedInProgressTasks(apiConfig);
@@ -6662,16 +6769,20 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
       // Use shorter timeout if tasks are running (to check completion more often)
       const effectiveTimeout = state.activeTasks.size > 0 ? 5000 : PollTimeoutMs;
 
-      const trigger = await pollForTrigger({
-        apiUrl,
-        apiKey,
-        agentId,
-        pollInterval: PollIntervalMs,
-        runtimeInstanceId,
-        pollTimeout: effectiveTimeout,
-        harnessProvider: state.harnessProvider,
-        onApiDrainSignal: (draining) => applyApiDrainSignal(state, role, draining),
-      });
+      const { trigger, failed } = await pushDelivery.poll(schedule.singlePoll, (onPollFailure) =>
+        pollForTrigger({
+          apiUrl,
+          apiKey,
+          agentId,
+          pollInterval: PollIntervalMs,
+          runtimeInstanceId,
+          pollTimeout: effectiveTimeout,
+          singlePoll: schedule.singlePoll,
+          onPollFailure,
+          harnessProvider: state.harnessProvider,
+          onApiDrainSignal: (draining) => applyApiDrainSignal(state, role, draining),
+        }),
+      );
 
       if (trigger) {
         // Phase 4 — server refused to admit a claim because the agent or
@@ -7110,12 +7221,9 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
         console.log(
           `[${role}] Started task ${runningTask.taskId.slice(0, 8)} (${state.activeTasks.size}/${state.maxConcurrent} active, trigger: ${trigger.type})`,
         );
+      } else if (schedule.singlePoll) {
+        await pushDelivery.waitForSchedule(schedule, failed, PollIntervalMs);
       }
-    } else {
-      console.log(
-        `[${role}] At capacity (${state.activeTasks.size}/${state.maxConcurrent}), waiting for completion...`,
-      );
-      await Bun.sleep(1000);
     }
   }
 }
