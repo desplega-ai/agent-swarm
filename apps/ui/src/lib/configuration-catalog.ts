@@ -571,7 +571,7 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         docsUrl: `${DOCS}ui/configuration#runtime-pools`,
       },
       {
-        key: "E2B_MAX_CONTINUOUS_SEC",
+        key: "E2B_MAX_CONTINUOUS_SEC", // gitleaks:allow (env var name)
         label: "E2B continuous runtime limit",
         description:
           "Use 3600 seconds for Hobby or 86400 seconds for Pro. Controller configuration overrides this default.",
