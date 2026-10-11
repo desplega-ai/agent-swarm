@@ -2,7 +2,9 @@
 id: step-5
 name: Supervisor core on docker pools
 depends_on: [step-1, step-2, step-3]
-status: ready
+status: claimed
+assignee: codex-gpt-6.1-sol-pw-step-5
+claimed_at: 2026-10-11T08:00:00Z
 ---
 
 <!-- During /v-implement, `desplega:step-running` adds `assignee` and `claimed_at` while
