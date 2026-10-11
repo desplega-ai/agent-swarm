@@ -431,12 +431,6 @@ export async function createServer(
     registerExtensionCatalogTool(server);
     registerExtensionInstallTool(server);
     registerExtensionListTool(server);
-    registerRuntimePoolListTool(server);
-    registerRuntimePoolUpsertTool(server);
-    registerRuntimePoolDeleteTool(server);
-    registerRuntimePoolBindAgentTool(server);
-    registerRuntimePoolCreateAgentTool(server);
-    registerRuntimeControllerListTool(server);
     registerScriptDeleteTool(server);
     registerScriptQueryTypesTool(server);
     registerScriptRunsTools(server);

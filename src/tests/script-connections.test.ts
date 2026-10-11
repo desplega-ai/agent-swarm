@@ -619,6 +619,9 @@ describe("script connections", () => {
       markMigrationApplied(database, "203_workflow_run_parent_step.sql");
       // 205 copies user_favorites rows, which this migration-112-only fixture does not create.
       markMigrationApplied(database, "205_favorites_per_dashboard_user.sql");
+      // 206 alters agents, agent_tasks and runtime_instances, which this
+      // migration-112-only fixture does not create.
+      markMigrationApplied(database, "206_runtime_pools.sql");
 
       const id = crypto.randomUUID();
       const now = new Date().toISOString();
