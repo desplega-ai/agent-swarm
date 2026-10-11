@@ -151,6 +151,7 @@ declare module "swarm-extension" {
       | undefined;
     routingSource?: "declared" | "engine_default" | undefined;
     routingNote?: string | undefined;
+    poolWakeAt?: string | undefined;
     taskType?: string | undefined;
     offeredTo?: string | undefined;
     offeredAt?: string | undefined;

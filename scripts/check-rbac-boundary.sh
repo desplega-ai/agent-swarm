@@ -30,7 +30,10 @@
 #                                     (increment-4 hardening surface)
 #        src/tools/send-task.ts     — target-shape guard (task TO lead)
 #                                     and user-ingress Lead availability.
-#        src/http/poll.ts           — lead-vs-worker trigger routing
+#        src/http/poll.ts           — lead-vs-worker trigger routing, and
+#                                     the lead channel-monitoring flag import
+#        src/http/agents.ts         — register response: a monitoring lead
+#                                     must use poll delivery (delivery shape)
 #   4. Principal-construction plumbing:
 #        src/http/kv.ts             — buildAuthCtx isLead local feeding can()
 
@@ -52,8 +55,12 @@ ALLOWED_PATTERNS=(
   'src/tools/join-swarm.ts|agents\.find\(\(agent\) => agent\.isLead\)'
   'src/tools/join-swarm.ts|agent\.isLead \? "Lead" : "Worker"'
   'src/tools/send-task.ts|if \(taskOptions\.routingAffinity\?\.leadOnly && !agent\.isLead\) \{'
-  'src/tools/send-task.ts|if \(ctx\.kind === "user" && \(!agent\.isLead \|\| agent\.status === "offline"\)\) \{'
+  'src/tools/send-task.ts|if \(ctx\.kind === "user" && \(!agent\.isLead \|\| !\(await isAgentReachable\(agent\)\)\)\) \{'
   'src/http/poll.ts|if \(agent\??\.isLead\) \{'
+  'src/http/poll.ts|^import \{ isLeadChannelMonitoringEnabled \} from "\.\./utils/lead-monitor-channels";$'
+  'src/http/poll.ts|^ *isLeadChannelMonitoringEnabled\(\) &&$'
+  'src/http/agents.ts|^import \{ isLeadChannelMonitoringEnabled \} from "\.\./utils/lead-monitor-channels";$'
+  'src/http/agents.ts|const pollRequired = result\.agent!\.isLead && isLeadChannelMonitoringEnabled\(\);'
   'src/http/kv.ts|let isLead = false;'
   'src/http/kv.ts|isLead = agent\?\.isLead === true;'
   # Response-schema FIELD declarations (`isLeadTask` on the steering-fields
