@@ -80,7 +80,22 @@ beforeEach(() => {
 
 describe("E2B runtime provider", () => {
   test("requires a controller key and configures the continuous limit", () => {
-    expect(new E2BRuntimeProvider().checkConfig({})).toEqual({
+    // The worker URL falls back to the API's public base URL; keep a developer
+    // .env (MCP_BASE_URL / PUBLIC_MCP_BASE_URL) from satisfying the check.
+    const saved = {
+      MCP_BASE_URL: process.env.MCP_BASE_URL,
+      PUBLIC: process.env.PUBLIC_MCP_BASE_URL,
+    };
+    delete process.env.MCP_BASE_URL;
+    delete process.env.PUBLIC_MCP_BASE_URL;
+    let missing: ReturnType<E2BRuntimeProvider["checkConfig"]>;
+    try {
+      missing = new E2BRuntimeProvider().checkConfig({});
+    } finally {
+      if (saved.MCP_BASE_URL !== undefined) process.env.MCP_BASE_URL = saved.MCP_BASE_URL;
+      if (saved.PUBLIC !== undefined) process.env.PUBLIC_MCP_BASE_URL = saved.PUBLIC;
+    }
+    expect(missing).toEqual({
       ready: false,
       missing: ["E2B_API_KEY", "WORKER_API_URL"],
       hint: "E2B requires E2B_API_KEY and WORKER_API_URL. WORKER_API_URL must use HTTPS.",
