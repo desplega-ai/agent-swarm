@@ -8,6 +8,9 @@ Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true, __APP_VERSION__: "te
 const { createRoot } = await import("react-dom/client");
 
 let telemetry = true;
+/** Outcomes for the next requests, in order; empty means success. */
+let outcomes: Array<"error" | "defer"> = [];
+let deferred: Array<() => void> = [];
 const posted: FeedbackInput[] = [];
 const events: Array<{ event: string; properties: Record<string, unknown> }> = [];
 const Box = ({ children }: { children?: ReactNode }) => <div>{children}</div>;
@@ -24,9 +27,12 @@ mock.module("@/api/hooks/use-config-api", () => ({
 mock.module("@/api/hooks/use-feedback", () => ({
   useSubmitFeedback: () => ({
     isPending: false,
-    mutate: (input: FeedbackInput, opts?: { onSuccess?: () => void }) => {
+    mutate: (input: FeedbackInput, opts?: { onSuccess?: () => void; onError?: () => void }) => {
       posted.push(input);
-      opts?.onSuccess?.();
+      const outcome = outcomes.shift();
+      if (outcome === "error") opts?.onError?.();
+      else if (outcome === "defer") deferred.push(() => opts?.onSuccess?.());
+      else opts?.onSuccess?.();
     },
   }),
 }));
@@ -111,6 +117,8 @@ const button = (container: HTMLElement, label: string) =>
 
 beforeEach(() => {
   telemetry = true;
+  outcomes = [];
+  deferred = [];
   posted.length = 0;
   events.length = 0;
   localStorage.clear();
@@ -193,4 +201,47 @@ test("'Not now' before a score reports a dismissal", async () => {
   });
   expect(posted).toEqual([]);
   expect(container.querySelector('[role="dialog"]')).toBeNull();
+});
+
+const storedState = () =>
+  JSON.parse(Object.values({ ...localStorage }).find((v) => v.includes("submissionCount")) ?? "{}");
+
+test("a rejected score is not recorded and a second tap retries the same submission", async () => {
+  outcomes = ["error"];
+  const container = await mount();
+  await act(async () => button(container, "8")?.click());
+  expect(posted).toHaveLength(1);
+  expect(container.textContent).not.toContain("your score is in");
+  expect(button(container, "5")?.disabled).toBe(false);
+  expect(storedState()).toMatchObject({ lastSubmittedAt: null, submissionCount: 0 });
+
+  await act(async () => button(container, "8")?.click());
+  expect(posted).toHaveLength(2);
+  expect(posted[1]?.submission_id).toBe(posted[0]?.submission_id as string);
+  expect(container.textContent).toContain("your score is in");
+  expect(storedState().submissionCount).toBe(1);
+  expect(typeof storedState().lastSubmittedAt).toBe("string");
+});
+
+test("closing after a rejected score reports a dismissal, not a submission", async () => {
+  outcomes = ["error"];
+  const container = await mount();
+  await act(async () => button(container, "8")?.click());
+  await act(async () => button(container, "Not now")?.click());
+  expect(events.filter((e) => e.event === "popup.submitted")).toEqual([]);
+  expect(events.at(-1)).toMatchObject({ event: "popup.dismissed" });
+  expect(storedState().submissionCount).toBe(0);
+});
+
+test("a score in flight blocks other taps and is recorded only once it lands", async () => {
+  outcomes = ["defer"];
+  const container = await mount();
+  await act(async () => button(container, "6")?.click());
+  await act(async () => button(container, "6")?.click());
+  expect(posted).toHaveLength(1);
+  expect(button(container, "2")?.disabled).toBe(true);
+  expect(storedState().submissionCount).toBe(0);
+  await act(async () => deferred.shift()?.());
+  expect(storedState().submissionCount).toBe(1);
+  expect(container.textContent).toContain("your score is in");
 });

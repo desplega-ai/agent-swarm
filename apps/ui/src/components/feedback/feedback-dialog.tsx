@@ -85,6 +85,12 @@ export function FeedbackDialog() {
     null,
   );
   const [score, setScore] = useState<number | null>(null);
+  const [sendingScore, setSendingScore] = useState<number | null>(null);
+  // Read from request callbacks, which outlive the render that started them.
+  const activeRef = useRef(active);
+  activeRef.current = active;
+  const popupStateRef = useRef(popupState);
+  popupStateRef.current = popupState;
   const [message, setMessage] = useState("");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -162,6 +168,7 @@ export function FeedbackDialog() {
     setActive({ submissionId: crypto.randomUUID(), trigger });
     // A fresh card: nothing carries over from an earlier one in this mount.
     setScore(null);
+    setSendingScore(null);
     setMessage("");
     setName("");
     setEmail("");
@@ -205,7 +212,9 @@ export function FeedbackDialog() {
   }
 
   function close(method: PopupDismissMethod) {
-    if (score === null) {
+    if (sendingScore !== null) {
+      // The in-flight score reports itself when it lands; nothing to dismiss.
+    } else if (score === null) {
       sendEvent({ event: "popup.dismissed", properties: { popup: "feedback", method } });
       savePopupState({ lastDismissedAt: new Date().toISOString() });
     } else {
@@ -214,16 +223,36 @@ export function FeedbackDialog() {
     setActive(null);
   }
 
+  // `score` is the delivered score: it is set, and the 90-day suppression saved,
+  // only once the proxy accepts it. A failed send keeps the card and its
+  // submission ID, so a second tap retries the same submission.
   function pickScore(value: number) {
-    const input = score === null ? buildInput(value) : null;
+    if (score !== null || sendingScore !== null) return;
+    const input = buildInput(value);
     if (!input) return;
-    setScore(value);
+    const submissionId = input.submission_id;
+    setSendingScore(value);
     submitFeedback.mutate(input, {
-      onError: () => toast.error("Could not send your score. Please try again."),
-    });
-    savePopupState({
-      lastSubmittedAt: new Date().toISOString(),
-      submissionCount: popupState.submissionCount + 1,
+      onSuccess: () => {
+        setSendingScore(null);
+        savePopupState({
+          lastSubmittedAt: new Date().toISOString(),
+          submissionCount: popupStateRef.current.submissionCount + 1,
+        });
+        if (activeRef.current?.submissionId === submissionId) {
+          setScore(value);
+        } else {
+          // Closed while the score was in flight: the score still landed.
+          sendEvent({
+            event: "popup.submitted",
+            properties: { popup: "feedback", score: value, has_message: false, has_contact: false },
+          });
+        }
+      },
+      onError: () => {
+        setSendingScore(null);
+        toast.error("Could not send your score. Please try again.");
+      },
     });
   }
 
@@ -300,10 +329,10 @@ export function FeedbackDialog() {
               key={value}
               type="button"
               size="sm"
-              variant={score === value ? "default" : "outline"}
-              aria-pressed={score === value}
+              variant={(score ?? sendingScore) === value ? "default" : "outline"}
+              aria-pressed={(score ?? sendingScore) === value}
               aria-label={`${value} out of 10`}
-              disabled={score !== null && score !== value}
+              disabled={sendingScore !== null || (score !== null && score !== value)}
               onClick={() => pickScore(value)}
               className={cn("h-8 px-0 tabular-nums", score === value && "shadow-sm")}
             >
