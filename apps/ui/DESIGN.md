@@ -151,7 +151,7 @@ Eight canonical tones, each with a `-strong` text-emphasis variant and a `-foreg
 - **Paused** (violet-blue, oklch(0.71 0.1 262) light): paused, reviewing.
 - **Neutral** (zinc, oklch(0.62 0.014 286) light): offline, backlog, cancelled, skipped.
 
-Classic-theme presets (`src/lib/theme-classics.ts`: github, vscode, material, solarized, tokyo, monokai, gruvbox) are the ONLY presets allowed to override status tokens: their identity includes a status palette. Hue semantics never change.
+Classic-theme presets (`src/lib/theme-classics.ts`: github, vscode, material, solarized, tokyo, monokai, gruvbox, catppuccin) are the ONLY presets allowed to override status tokens: their identity includes a status palette. Hue semantics never change.
 
 Eleven `action-*` tokens (violet, cyan, teal, orange, indigo, pink, purple, blue, amber, yellow, sky) color workflow node types the same way: colored border/text with a `/10` translucent fill. All defined in `src/styles/globals.css`.
 
