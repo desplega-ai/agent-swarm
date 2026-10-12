@@ -45387,7 +45387,7 @@
     "/api/sessions/tokens": {
       "post": {
         "summary": "Mint an ephemeral task or runtime token",
-        "description": "Operators can mint task or runtime tokens. Runtime tokens can mint task tokens for their own assigned tasks. Child tokens expire with their parent runtime.",
+        "description": "Operators can mint task or runtime tokens. Runtime and agent tokens can mint task tokens for their own assigned tasks. A child token never outlives its parent and is revoked with it.",
         "tags": [
           "Sessions"
         ],
@@ -45486,7 +45486,7 @@
     "/api/sessions/tokens/{tokenId}": {
       "delete": {
         "summary": "Revoke an ephemeral session token",
-        "description": "Operators can revoke any ephemeral token. With runtime pools enabled, runtime tokens can revoke their own child task tokens. Repeated revocation has no effect.",
+        "description": "Operators can revoke any ephemeral token. Agent tokens, and runtime tokens when runtime pools are enabled, can revoke their own child task tokens. Repeated revocation has no effect.",
         "tags": [
           "Sessions"
         ],
@@ -45521,6 +45521,285 @@
           },
           "403": {
             "description": "Token cannot revoke this child",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/agents/{id}/token": {
+      "post": {
+        "operationId": "agents_mintWorkerToken",
+        "summary": "Mint an agent-bound worker token",
+        "description": "Returns the token once. A worker runs on it in place of the swarm API key and acts only as this agent. Creates the agent when it does not exist and `name` is given. Fails with 409 when the agent already holds an active token.",
+        "tags": [
+          "Sessions"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "ttlMs": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "description": "Token lifetime in ms. Omit for the default (no expiry)."
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Minted worker token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "agentId": {
+                      "type": "string"
+                    },
+                    "tokenId": {
+                      "type": "string"
+                    },
+                    "plaintext": {
+                      "type": "string"
+                    },
+                    "expiresAt": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "null when the token does not expire"
+                    },
+                    "agentCreated": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "agentId",
+                    "tokenId",
+                    "plaintext",
+                    "expiresAt",
+                    "agentCreated"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Operator or user credentials required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Agent not found and no name given",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Agent already holds an active token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "agents_revokeWorkerToken",
+        "summary": "Revoke an agent-bound worker token",
+        "description": "Revokes every active worker token of the agent and the task tokens they minted. Open realtime connections on them close.",
+        "tags": [
+          "Sessions"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Number of worker tokens revoked (0 when none was active)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "revoked": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "revoked"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Operator or user credentials required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/agents/{id}/token/rotate": {
+      "post": {
+        "operationId": "agents_rotateWorkerToken",
+        "summary": "Rotate an agent-bound worker token",
+        "description": "Returns a new token once. The previous token keeps working for `graceSec` (default 300), then expires. Use revoke for a token that must stop now.",
+        "tags": [
+          "Sessions"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "graceSec": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 86400
+                  },
+                  "ttlMs": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "description": "Token lifetime in ms. Omit for the default (no expiry)."
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "New worker token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "agentId": {
+                      "type": "string"
+                    },
+                    "tokenId": {
+                      "type": "string"
+                    },
+                    "plaintext": {
+                      "type": "string"
+                    },
+                    "expiresAt": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "null when the token does not expire"
+                    },
+                    "previousExpiresAt": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "agentId",
+                    "tokenId",
+                    "plaintext",
+                    "expiresAt",
+                    "previousExpiresAt"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Operator or user credentials required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Agent holds no active token",
             "content": {
               "application/json": {
                 "schema": {

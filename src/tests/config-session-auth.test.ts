@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { createServer, type Server } from "node:http";
 import { closeDb, createAgent, initDb, upsertSwarmConfig } from "../be/db";
+import { mintAgentToken, revokeAgentTokens } from "../be/users";
 import { handleConfig } from "../http/config";
 import { handleCore } from "../http/core";
 import { handleSessions } from "../http/sessions";
@@ -114,6 +115,19 @@ describe("config HTTP session-token authorization", () => {
     });
     expect(response.status).toBe(200);
     expect((await response.json()).configs[0].value).toBe("global");
+  });
+
+  test("agent token resolved config without agentId reads its own agent scope", async () => {
+    const token = await mintAgentToken(workerId);
+    try {
+      const response = await fetch(`${baseUrl}/api/config/resolved?includeSecrets=true`, {
+        headers: headers(token.plaintext),
+      });
+      expect(response.status).toBe(200);
+      expect(await response.text()).toContain(SECRET);
+    } finally {
+      await revokeAgentTokens(workerId);
+    }
   });
 
   for (const method of ["PUT", "DELETE"] as const) {

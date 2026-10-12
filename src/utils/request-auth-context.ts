@@ -8,9 +8,10 @@ export type HttpRequestAuth = (
   /** Password-page viewer with no user identity. Least privilege: every gate denies it. */
   | { kind: "guest" }
   | { kind: "controller"; controllerId: string; tokenId: string; expiresAt: string }
-  /** Ephemeral token bound to an ACP task or a worker runtime (aseph_ prefix). */
+  /** Session token bound to an ACP task, a worker runtime, or only its agent (aseph_ prefix). */
   | {
       kind: "agent";
+      tokenKind: "task" | "runtime" | "agent";
       agentId: string;
       taskId: string | null;
       runtimeId: string | null;

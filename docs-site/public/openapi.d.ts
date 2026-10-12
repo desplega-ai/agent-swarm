@@ -17484,7 +17484,7 @@ export interface paths {
         put?: never;
         /**
          * Mint an ephemeral task or runtime token
-         * @description Operators can mint task or runtime tokens. Runtime tokens can mint task tokens for their own assigned tasks. Child tokens expire with their parent runtime.
+         * @description Operators can mint task or runtime tokens. Runtime and agent tokens can mint task tokens for their own assigned tasks. A child token never outlives its parent and is revoked with it.
          */
         post: {
             parameters: {
@@ -17563,7 +17563,7 @@ export interface paths {
         post?: never;
         /**
          * Revoke an ephemeral session token
-         * @description Operators can revoke any ephemeral token. With runtime pools enabled, runtime tokens can revoke their own child task tokens. Repeated revocation has no effect.
+         * @description Operators can revoke any ephemeral token. Agent tokens, and runtime tokens when runtime pools are enabled, can revoke their own child task tokens. Repeated revocation has no effect.
          */
         delete: {
             parameters: {
@@ -17603,6 +17603,50 @@ export interface paths {
                 };
             };
         };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/agents/{id}/token": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mint an agent-bound worker token
+         * @description Returns the token once. A worker runs on it in place of the swarm API key and acts only as this agent. Creates the agent when it does not exist and `name` is given. Fails with 409 when the agent already holds an active token.
+         */
+        post: operations["agents_mintWorkerToken"];
+        /**
+         * Revoke an agent-bound worker token
+         * @description Revokes every active worker token of the agent and the task tokens they minted. Open realtime connections on them close.
+         */
+        delete: operations["agents_revokeWorkerToken"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/agents/{id}/token/rotate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Rotate an agent-bound worker token
+         * @description Returns a new token once. The previous token keeps working for `graceSec` (default 300), then expires. Use revoke for a token that must stop now.
+         */
+        post: operations["agents_rotateWorkerToken"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -28709,6 +28753,158 @@ export interface operations {
                 };
             };
             /** @description Script run not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    agents_mintWorkerToken: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    name?: string;
+                    /** @description Token lifetime in ms. Omit for the default (no expiry). */
+                    ttlMs?: number;
+                };
+            };
+        };
+        responses: {
+            /** @description Minted worker token */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        agentId: string;
+                        tokenId: string;
+                        plaintext: string;
+                        /** @description null when the token does not expire */
+                        expiresAt: string | null;
+                        agentCreated: boolean;
+                    };
+                };
+            };
+            /** @description Operator or user credentials required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Agent not found and no name given */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Agent already holds an active token */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    agents_revokeWorkerToken: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Number of worker tokens revoked (0 when none was active) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        revoked: number;
+                    };
+                };
+            };
+            /** @description Operator or user credentials required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    agents_rotateWorkerToken: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    graceSec?: number;
+                    /** @description Token lifetime in ms. Omit for the default (no expiry). */
+                    ttlMs?: number;
+                };
+            };
+        };
+        responses: {
+            /** @description New worker token */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        agentId: string;
+                        tokenId: string;
+                        plaintext: string;
+                        /** @description null when the token does not expire */
+                        expiresAt: string | null;
+                        previousExpiresAt: string;
+                    };
+                };
+            };
+            /** @description Operator or user credentials required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Agent holds no active token */
             404: {
                 headers: {
                     [name: string]: unknown;

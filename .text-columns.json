@@ -2609,6 +2609,7 @@
     "runtimeId": { "exempt": "identifier" },
     "parentRuntimeId": { "exempt": "identifier" },
     "controllerId": { "exempt": "identifier" },
+    "parentTokenId": { "exempt": "identifier" },
     "id": {
       "exempt": "identifier"
     },
