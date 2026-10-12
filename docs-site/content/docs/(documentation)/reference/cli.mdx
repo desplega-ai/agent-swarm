@@ -45,6 +45,8 @@ bunx @desplega.ai/agent-swarm onboard --container-engine=podman
 | `--pull-policy <policy>` | Docker Compose image pull policy: `always`, `missing`, or `never` (default: `always`) |
 | `--container-engine <engine>` | `auto`, `docker`, or `podman` (default: `AGENT_SWARM_CONTAINER_ENGINE` if set, else `auto`, which prefers Docker). See [Rootless Podman](/docs/guides/podman-rootless) |
 
+With `--yes`, a missing Claude, OpenAI or OpenRouter credential is no longer fatal: workers wait in credential-wait until `/setup` supplies one. Bedrock settings stay required. `--yes` stops after the health check. The one-shot `install.sh` installer wraps `onboard --yes`; see [Getting Started](/docs/getting-started).
+
 ### connect
 
 Connect this project to an existing swarm. Creates `.mcp.json` and `.claude/settings.local.json` with server URL and API key. Auto-reads `AGENT_SWARM_API_KEY` (or legacy `API_KEY`) from `.env` if present.
@@ -122,6 +124,25 @@ Run Claude as lead agent in headless loop mode. Same options as `worker`.
 agent-swarm lead
 agent-swarm lead --yolo
 ```
+
+### controller
+
+Run a remote runtime controller next to the infrastructure that starts workers (beta). See [Runtime pools](/docs/guides/runtime-pools#remote-controllers).
+
+```bash
+export AGENT_SWARM_CONTROLLER_TOKEN=<controller-token>
+agent-swarm controller --api-url https://api.example.test --kind docker \
+  --docker-host unix:///var/run/docker.sock --docker-network swarm-workers
+```
+
+| Option | Description |
+|--------|-------------|
+| `--api-url <url>` | Swarm API URL (default: `MCP_BASE_URL`) |
+| `--kind <kind>` | Runtime provider (default: `docker`) |
+| `--docker-host <url>` | Docker Unix socket (or `DOCKER_HOST`) |
+| `--docker-network <name>` | Worker network (or `DOCKER_NETWORK`) |
+
+The token comes from the `AGENT_SWARM_CONTROLLER_TOKEN` environment variable. There is no `--token` flag.
 
 ### codex-login
 

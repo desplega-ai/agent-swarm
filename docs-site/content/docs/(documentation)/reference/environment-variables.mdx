@@ -99,6 +99,12 @@ Complete reference for all environment variables used by Agent Swarm.
 | `HEARTBEAT_PIN_GRACEFUL_RESUME` | `true` (on) | Rollback kill-switch for pinning `graceful_shutdown` resumes back to their original agent. Set to `0` to restore the old pool-based follow-up path |
 | `HEARTBEAT_RESUME_PIN_GRACE_MIN` | `10` | Grace window (minutes) a same-agent-pinned crash-recovery or graceful-shutdown resume waits before the reaper escalates it to a Lead re-delegation decision. Set to `0` to disable the reaper |
 | `RUNTIME_STALE_THRESHOLD_MIN` | `5` | Minutes without runtime traffic before an active runtime stops counting and the heartbeat sweep retires it. Used only when `MULTI_RUNTIME_ENABLED` is on. |
+| `RUNTIME_POOLS_ENABLED` | `false` | Enables runtime pools (beta): push-based, on-demand workers that the API starts through Docker or E2B controllers. Keep `MULTI_RUNTIME_ENABLED=true` too. See [Runtime pools](/docs/guides/runtime-pools) for the full list of `RUNTIME_*` tuning variables |
+| `RUNTIME_DEFAULT_DELIVERY` | `poll` | Delivery mode (`poll` or `push`) for pool workers whose pool does not set one |
+| `RUNTIME_WAKE_GRACE_SEC` | `15` | Seconds a task waits for an awake agent before routing can assign it to an eligible sleeping pool agent |
+| `RUNTIME_PROVISION_CONCURRENCY` | `8` | Maximum runtimes the supervisor provisions at once |
+| `RUNTIME_WORKER_API_URL` | - | API origin that pool workers use to reach the swarm, when it differs from the public API URL |
+| `RUNTIME_DOCKER_HOST` | - | Docker socket seeded into the built-in controller, even when Docker is offline. Falls back to `DOCKER_HOST`, then `unix:///var/run/docker.sock` |
 | `APPROVAL_REQUEST_AUTO_CANCELLATION_DAYS` | `7` | Days a pending approval request with no explicit timeout waits before the heartbeat cancels it. A request that gates a running or waiting workflow run cancels that run too. Set to `0` to disable |
 | `MODEL_LATEST_SOAK_DAYS` | `2` | Days a newly released model must age before a `latest:<provider>/<target>@stable` model-tier alias can resolve to it. `0` disables the soak. `@any` aliases ignore it |
 | `MODEL_AUTO_UPGRADE` | `true` | Set to `false` or `0` to freeze each `latest:` model-tier alias at its last recorded resolution (an alias never resolved before still resolves once). See [Model tiers](https://github.com/desplega-ai/agent-swarm/blob/main/runbooks/model-tiers.md) |
@@ -262,6 +268,7 @@ Run the one-time `bunx @desplega.ai/agent-swarm claude-managed-setup` from your 
 | `STARTUP_SCRIPT_STRICT` | No | `false` | Exit on startup script failure. By default, per-agent `setupScript` failures log a v1.106.0 privilege-boundary migration warning and the worker continues booting |
 | `SHUTDOWN_TIMEOUT` | No | `30000` | Grace period (ms) before pausing tasks |
 | `MAX_CONCURRENT_TASKS` | No | `1` | Maximum parallel tasks per worker |
+| `SWARM_DELIVERY_MODE` | No | Pool setting | `poll` or `push`. Overrides the delivery mode a runtime pool worker gets at registration. Pool supervisors set it on the workers they start. See [Runtime pools](/docs/guides/runtime-pools#push-and-poll-delivery) |
 | `SWARM_URL` | No | `localhost` | Base domain for service URLs |
 | `LEAD_PORT` | No | `3020` | Host port for lead service. Example variable used in `docker-compose.example.yml` — adjust to your setup. In isolated network namespaces all services can share the same port. |
 | `WORKER1_PORT` | No | `3021` | Host port for worker-1 service. Example — see `LEAD_PORT`. |

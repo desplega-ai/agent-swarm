@@ -85,6 +85,12 @@ The plugin's [privacy](https://www.agent-swarm.dev/privacy) and
 [terms](https://www.agent-swarm.dev/terms) links describe the Agent Swarm website and
 Cloud service. The self-hosted software remains covered by the [MIT License](./LICENSE).
 
+Or self-host with the one-shot installer. It checks Docker and Compose v2, installs Bun when missing, runs `agent-swarm onboard --yes`, and prints the dashboard `/setup` link:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/desplega-ai/agent-swarm/main/install.sh | bash
+```
+
 Or use the examples directly:
 
 ```bash

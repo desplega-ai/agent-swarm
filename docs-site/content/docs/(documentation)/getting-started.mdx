@@ -47,6 +47,16 @@ The fastest way to get a full swarm running. The interactive wizard collects cre
 bunx @desplega.ai/agent-swarm onboard
 ```
 
+Or use the one-shot installer. It checks Docker and Compose v2, installs Bun when missing, runs `onboard --yes` (preset `solo` by default) in `~/agent-swarm`, waits for `/health`, and prints the dashboard `/setup` link:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/desplega-ai/agent-swarm/main/install.sh | bash
+# Options: --dir <path>, --preset <name>, --version <ver>, --tunnel, --dry-run
+curl -fsSL https://raw.githubusercontent.com/desplega-ai/agent-swarm/main/install.sh | bash -s -- --tunnel
+```
+
+`--tunnel` exposes the API through localtunnel and sets `PUBLIC_MCP_BASE_URL`. It is off by default.
+
 Or in non-interactive mode with a preset:
 
 ```bash
@@ -54,6 +64,7 @@ ANTHROPIC_API_KEY=sk-... bunx @desplega.ai/agent-swarm onboard --yes --preset=de
 ```
 
 Available presets: `full`, `dev`, `content`, `research`, `solo`. Use `--max-concurrent-tasks` to set each generated agent's task capacity from 1 to 100 (defaults: lead 2, worker 1), or `--dry-run` to preview without writing files.
+`--yes` no longer requires a Claude, OpenAI or OpenRouter credential: without one, workers wait in credential-wait until you add a credential on `/setup` (Bedrock settings stay required). It stops after the health check instead of opening the post-deploy prompts.
 When the wizard finishes, it prints a dashboard URL that already includes the generated `apiUrl` and `apiKey`, so the first dashboard session auto-connects to the new swarm.
 
 Fresh self-hosted installs also seed a disabled starter catalog of schedules and workflows. Each bundled automation declares the parameters and integrations it needs. When you enable one with missing setup, Agent Swarm marks it `needs_setup`, shows the missing fields in the dashboard, and does not dispatch it until configuration is complete.

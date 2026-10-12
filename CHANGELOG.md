@@ -6,6 +6,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.170.0] - 2026-10-12
+
+### Added
+- Runtime pools (beta, `RUNTIME_POOLS_ENABLED`): push-based, on-demand workers that the API starts through Docker or E2B controllers, with push or poll delivery, an `agent-swarm controller` command for remote controllers, and `runtime-pool-*` / `runtime-controller-list` MCP tools (#2045).
+- Install: a one-shot self-host installer (`curl -fsSL .../install.sh | bash`) that checks Docker, installs Bun, runs `onboard --yes` and prints the `/setup` link. `onboard --yes` no longer fails without a harness credential (#2064).
+- ACP: qwen, kiro and goose target presets (#2067).
+- Dashboard: skill usage and adoption views (#2068), and descriptions of what sub-workflow and system-one-decision nodes do (#2077).
+
+### Changed
+- Worker image: opencode 1.19.0 and amp bumps (#2055, #2061); agent-fs 0.15.4 then 0.16.0 (#2057, #2063).
+- Tests: shorter wall time for the five slowest unit-test files, and runner headroom for the scrubber's escaped-JSON scan (#2065, #2062).
+- Docs: onboarding docs aligned with main, TLA+ specs synced, and dreaming-v2 skill seed patches (#2060, #2059, #2051).
+
+### Fixed
+- Tasks: resumes and reboot retries keep the parent's model pin, including an explicit model alias that fell back next to a tier (#2052, #2053).
+- Skills: Codex shell skill reads are counted, and ambiguous shell skill reads are rejected (#2066, #2069).
+- Telemetry: harness-session and test API boots are tagged as test installs (#2070).
+- Evals: a scheduled run cut by a service redeploy resumes (#2056).
+- Dashboard: favorites are per dashboard user and the star never opens the row (#2049); the explicit-model CLI fallback model source is labelled (#2054).
+
 ## [1.169.0] - 2026-10-11
 
 ### Added
