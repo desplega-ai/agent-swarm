@@ -24,6 +24,8 @@ const ENV_KEYS = [
   "JIRA_CLIENT_ID",
   "LINEAR_DISABLE",
   "LINEAR_CLIENT_ID",
+  "JIRA_ENABLED",
+  "LINEAR_ENABLED",
   "AGENTMAIL_DISABLE",
   "AGENTMAIL_WEBHOOK_SECRET",
 ] as const;
@@ -109,6 +111,49 @@ describe("Linear LINEAR_DISABLE", () => {
     for (const value of NON_DISABLING) {
       if (value === undefined) delete process.env.LINEAR_DISABLE;
       else process.env.LINEAR_DISABLE = value;
+      expect(isLinearEnabled()).toBe(true);
+    }
+  });
+});
+
+// `*_ENABLED` is the inverse twin: only falsy spellings switch it off, and
+// unset or unrecognized values keep the default (enabled).
+const FALSY_SPELLINGS = ["false", "FALSE", "False", "0", " 0 ", " False "];
+const KEEP_ENABLED = ["true", "TRUE", "1", "", "treu", undefined];
+
+describe("Jira JIRA_ENABLED", () => {
+  test("every falsy spelling disables the integration", () => {
+    process.env.JIRA_CLIENT_ID = "client-id";
+    for (const spelling of FALSY_SPELLINGS) {
+      process.env.JIRA_ENABLED = spelling;
+      expect(isJiraEnabled()).toBe(false);
+    }
+  });
+
+  test("truthy, unset and unrecognized values keep the integration enabled", () => {
+    process.env.JIRA_CLIENT_ID = "client-id";
+    for (const value of KEEP_ENABLED) {
+      if (value === undefined) delete process.env.JIRA_ENABLED;
+      else process.env.JIRA_ENABLED = value;
+      expect(isJiraEnabled()).toBe(true);
+    }
+  });
+});
+
+describe("Linear LINEAR_ENABLED", () => {
+  test("every falsy spelling disables the integration", () => {
+    process.env.LINEAR_CLIENT_ID = "client-id";
+    for (const spelling of FALSY_SPELLINGS) {
+      process.env.LINEAR_ENABLED = spelling;
+      expect(isLinearEnabled()).toBe(false);
+    }
+  });
+
+  test("truthy, unset and unrecognized values keep the integration enabled", () => {
+    process.env.LINEAR_CLIENT_ID = "client-id";
+    for (const value of KEEP_ENABLED) {
+      if (value === undefined) delete process.env.LINEAR_ENABLED;
+      else process.env.LINEAR_ENABLED = value;
       expect(isLinearEnabled()).toBe(true);
     }
   });
