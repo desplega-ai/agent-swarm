@@ -644,7 +644,7 @@ export async function createSessionMcpConfig(
   // match the names the plugin's hooks reference in guidance text. With the bare
   // key `context-mode`, the tools would be `mcp__context-mode__ctx_*` — callable,
   // but invisible to the hook nudges that point agents at the plugin-prefixed name.
-  if (process.env.CONTEXT_MODE_DISABLED !== "true") {
+  if (!isEnvFlagEnabled("CONTEXT_MODE_DISABLED", false)) {
     mergedServers["plugin_context-mode_context-mode"] = { command: "context-mode" };
   }
 
