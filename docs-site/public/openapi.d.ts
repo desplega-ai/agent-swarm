@@ -21150,7 +21150,7 @@ export interface paths {
                         };
                     };
                 };
-                /** @description Organization name or website is not set */
+                /** @description Organization name or website is not set (a revoke falls back to the identity of the last grant) */
                 400: {
                     headers: {
                         [name: string]: unknown;

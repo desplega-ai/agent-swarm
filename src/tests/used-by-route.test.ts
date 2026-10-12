@@ -150,6 +150,30 @@ describe("POST /api/used-by", () => {
     expect(await configValue("SWARM_USED_BY_CONSENT")).toBe("false");
   });
 
+  test("a revoke after the website is cleared or changed uses the granted identity", async () => {
+    expect((await post({ granted: true }, OPERATOR)).statusCode).toBe(200);
+    await upsertSwarmConfig({ scope: "global", key: "SWARM_ORG_WEBSITE", value: "" });
+    const revoke = await post({ granted: false }, OPERATOR);
+    expect(revoke.statusCode).toBe(200);
+    expect(proxied[1]?.body).toMatchObject({
+      org_name: "Acme",
+      org_website: "acme.com",
+      granted: false,
+    });
+
+    await upsertSwarmConfig({ scope: "global", key: "SWARM_ORG_NAME", value: "Acme Labs" });
+    await upsertSwarmConfig({ scope: "global", key: "SWARM_ORG_WEBSITE", value: "acme.io" });
+    expect((await post({ granted: false }, OPERATOR)).statusCode).toBe(200);
+    expect(proxied[2]?.body).toMatchObject({ org_name: "Acme", org_website: "acme.com" });
+
+    // A new grant sends, and from then on revokes with, the current identity.
+    expect((await post({ granted: true }, OPERATOR)).statusCode).toBe(200);
+    expect(proxied[3]?.body).toMatchObject({ org_name: "Acme Labs", org_website: "acme.io" });
+    await upsertSwarmConfig({ scope: "global", key: "SWARM_ORG_WEBSITE", value: "" });
+    await post({ granted: false }, OPERATOR);
+    expect(proxied[4]?.body).toMatchObject({ org_name: "Acme Labs", org_website: "acme.io" });
+  });
+
   test("without a website it is a 400", async () => {
     await upsertSwarmConfig({ scope: "global", key: "SWARM_ORG_WEBSITE", value: "" });
     const result = await post({ granted: true }, OPERATOR);
@@ -191,6 +215,17 @@ describe("fillOrgLogoFromWebsite", () => {
     });
     expect(await fillOrgLogoFromWebsite("acme.com")).toBe(false);
     expect(await configValue("SWARM_ORG_LOGO_URL")).toBe("https://cdn.acme.com/logo.svg");
+  });
+
+  test("a person-set logo on the proxy's path or origin is never overwritten", async () => {
+    for (const custom of [
+      "https://brand.acme.com/v1/logo?domain=acme.com",
+      "https://proxy.desplega.sh/v1/logo?domain=other.com",
+    ]) {
+      await upsertSwarmConfig({ scope: "global", key: "SWARM_ORG_LOGO_URL", value: custom });
+      expect(await fillOrgLogoFromWebsite("acme.com")).toBe(false);
+      expect(await configValue("SWARM_ORG_LOGO_URL")).toBe(custom);
+    }
   });
 
   test("a logo set in the deployment env is not overwritten either", async () => {

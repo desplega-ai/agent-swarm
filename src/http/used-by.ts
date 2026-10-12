@@ -11,6 +11,10 @@ import { jsonError } from "./utils";
 
 const CONSENT_KEY = "SWARM_USED_BY_CONSENT";
 const CONSENT_AT_KEY = "SWARM_USED_BY_CONSENT_AT";
+// The identity sent with the last accepted grant: a revoke reuses it, so it
+// still reaches the proxy after the name or website is changed or cleared.
+const GRANTED_NAME_KEY = "SWARM_USED_BY_ORG_NAME";
+const GRANTED_WEBSITE_KEY = "SWARM_USED_BY_ORG_WEBSITE";
 const TIMEOUT_MS = 10_000;
 
 // ─── Route Definitions ───────────────────────────────────────────────────────
@@ -29,7 +33,10 @@ const usedBy = route({
       description: "Consent recorded",
       schema: z.object({ granted: z.boolean(), changedAt: z.string() }),
     },
-    400: { description: "Organization name or website is not set" },
+    400: {
+      description:
+        "Organization name or website is not set (a revoke falls back to the identity of the last grant)",
+    },
     401: { description: "Unauthorized" },
     403: { description: "Only a config admin can change the consent" },
     502: { description: "The telemetry proxy did not accept the consent" },
@@ -68,8 +75,14 @@ export async function handleUsedBy(
   if (!(await ensureConfigAdmin(req, res, "config.write.any"))) return true;
 
   const { granted } = parsed.body;
-  const orgName = await globalConfig("SWARM_ORG_NAME");
-  const orgWebsite = normalizeOrgWebsite(await globalConfig("SWARM_ORG_WEBSITE"));
+  const currentName = await globalConfig("SWARM_ORG_NAME");
+  const currentWebsite = normalizeOrgWebsite(await globalConfig("SWARM_ORG_WEBSITE"));
+  const grantedName = granted ? undefined : await globalConfig(GRANTED_NAME_KEY);
+  const grantedWebsite = granted
+    ? null
+    : normalizeOrgWebsite(await globalConfig(GRANTED_WEBSITE_KEY));
+  const [orgName, orgWebsite] =
+    grantedName && grantedWebsite ? [grantedName, grantedWebsite] : [currentName, currentWebsite];
   if (!orgName || !orgWebsite) {
     jsonError(res, "Set the organization name and website first", 400);
     return true;
@@ -106,6 +119,10 @@ export async function handleUsedBy(
 
   await upsertSwarmConfig({ scope: "global", key: CONSENT_KEY, value: String(granted) });
   await upsertSwarmConfig({ scope: "global", key: CONSENT_AT_KEY, value: changedAt });
+  if (granted) {
+    await upsertSwarmConfig({ scope: "global", key: GRANTED_NAME_KEY, value: orgName });
+    await upsertSwarmConfig({ scope: "global", key: GRANTED_WEBSITE_KEY, value: orgWebsite });
+  }
   scheduleIntegrationsReload();
 
   const owner = await resolveHttpFavoriteOwner(req, myAgentId);

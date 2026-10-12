@@ -51,14 +51,21 @@ export function orgLogoUrl(host: string, origin = TELEMETRY_PROXY_ORIGIN): strin
 }
 
 /**
- * Whether `url` is a logo URL this code filled in from the website, rather
- * than one a person set. Only such a URL may be replaced when the website changes.
+ * Whether `url` has the shape of a logo URL `orgLogoUrl` builds for `origin`:
+ * the proxy origin itself, never just a matching path on another host.
  */
-export function isFilledOrgLogoUrl(url: string | null | undefined): boolean {
+export function isFilledOrgLogoUrl(
+  url: string | null | undefined,
+  origin = TELEMETRY_PROXY_ORIGIN,
+): boolean {
   if (!url) return false;
   try {
     const parsed = new URL(url);
-    return parsed.pathname === "/v1/logo" && parsed.searchParams.has("domain");
+    return (
+      parsed.origin === new URL(origin).origin &&
+      parsed.pathname === "/v1/logo" &&
+      parsed.searchParams.has("domain")
+    );
   } catch {
     return false;
   }

@@ -60,6 +60,13 @@ describe("org logo URL", () => {
     expect(isFilledOrgLogoUrl("")).toBe(false);
     expect(isFilledOrgLogoUrl("not a url")).toBe(false);
   });
+
+  test("the logo path on another origin is not a filled one", () => {
+    expect(isFilledOrgLogoUrl("https://brand.acme.com/v1/logo?domain=acme.com")).toBe(false);
+    expect(isFilledOrgLogoUrl("http://stub.test/v1/logo?domain=acme.com", "http://stub.test")).toBe(
+      true,
+    );
+  });
 });
 
 describe("websiteSuggestion", () => {

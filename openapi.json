@@ -53069,7 +53069,7 @@
             }
           },
           "400": {
-            "description": "Organization name or website is not set",
+            "description": "Organization name or website is not set (a revoke falls back to the identity of the last grant)",
             "content": {
               "application/json": {
                 "schema": {
