@@ -11,11 +11,13 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useCurrentUser } from "@/contexts/current-user-context";
+import { useConfig } from "@/hooks/use-config";
 import {
   NOTIFICATION_DEFINITIONS,
   ORGANIZATION_NAME_NOTIFICATION,
 } from "@/lib/notifications/definitions";
 import { unreadBadgeLabel } from "@/lib/notifications/unread";
+import { useOrgNamePromptDeferred } from "@/lib/org-name-prompt";
 import { isAdminLike } from "@/lib/user-role";
 import { NotificationPanel } from "./notification-panel";
 
@@ -34,6 +36,8 @@ export function NotificationBell() {
   const { pathname } = useLocation();
   const presence = useEnvPresence(["SWARM_ORG_NAME"]);
   const onboardingOwnsName = useOnboardingOwnsFirstRun();
+  const { config } = useConfig();
+  const orgPromptDeferred = useOrgNamePromptDeferred(config.apiUrl);
   const inboxState = useInboxState({ userId: currentUser.userId, itemType: "notification" });
   const { trackEvent } = useNotificationEvents();
   const updateInboxItem = useUpdateInboxItem();
@@ -48,8 +52,9 @@ export function NotificationBell() {
 
   const stateByKey = new Map((inboxState.data ?? []).map((row) => [row.itemId, row]));
   const orgState = stateByKey.get(ORGANIZATION_NAME_NOTIFICATION.key);
+  // Home asks with the org-name dialog until Later; only then does the bell ask there.
   const showOrgName =
-    pathname !== "/" &&
+    (pathname !== "/" || orgPromptDeferred) &&
     isAdminLike(currentUser.user) &&
     !onboardingOwnsName &&
     !presence.isError &&

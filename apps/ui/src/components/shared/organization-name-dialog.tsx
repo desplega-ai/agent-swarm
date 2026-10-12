@@ -22,6 +22,7 @@ import { SettingsRow } from "@/components/ui/settings-row";
 import { useCurrentUser } from "@/contexts/current-user-context";
 import { useConfig } from "@/hooks/use-config";
 import { markPromptShownThisLoad } from "@/hooks/use-other-dialog-open";
+import { deferOrgNamePrompt, useOrgNamePromptDeferred } from "@/lib/org-name-prompt";
 import { isAdminLike } from "@/lib/user-role";
 import { cn } from "@/lib/utils";
 import {
@@ -38,7 +39,7 @@ export function OrganizationNameDialog() {
   const { config, pendingConnection } = useConfig();
   const { pathname } = useLocation();
   const { state: identityState, user } = useCurrentUser();
-  const laterKey = `swarm:org-name-prompt:later:v1:${config.apiUrl}`;
+  const deferred = useOrgNamePromptDeferred(config.apiUrl);
   const presence = useEnvPresence([ORG_NAME_KEY]);
   // Open onboarding owns naming (step 2). Stay closed until its query settles.
   const onboardingOwnsName = useOnboardingOwnsFirstRun();
@@ -65,12 +66,6 @@ export function OrganizationNameDialog() {
     presence.dataUpdatedAt >= mountedAt &&
     presence.data?.[ORG_NAME_KEY] === false &&
     !presence.isError;
-  let deferred = false;
-  try {
-    deferred = sessionStorage.getItem(laterKey) !== null;
-  } catch {
-    // In-memory dismissal still works when browser storage is unavailable.
-  }
   const open =
     pathname === "/" &&
     !dismissed &&
@@ -99,11 +94,8 @@ export function OrganizationNameDialog() {
 
   function dismiss(method: PopupDismissMethod) {
     sendEvent({ event: "popup.dismissed", properties: { popup: "org_name", method } });
-    try {
-      sessionStorage.setItem(laterKey, "1");
-    } catch {
-      // In-memory dismissal still works when browser storage is unavailable.
-    }
+    // Later hands the ask to the bell item for the rest of this session.
+    deferOrgNamePrompt(config.apiUrl);
     setDismissed(true);
   }
 

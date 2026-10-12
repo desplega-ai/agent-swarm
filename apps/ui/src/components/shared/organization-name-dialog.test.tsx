@@ -66,6 +66,7 @@ mock.module("@/components/shared/image-preview", () => require("./image-preview"
 mock.module("@/components/ui/label", () => ({ Label: Box }));
 mock.module("@/components/ui/textarea", () => ({ Textarea: () => <textarea /> }));
 mock.module("@/lib/user-role", () => require("../../lib/user-role"));
+mock.module("@/lib/org-name-prompt", () => require("../../lib/org-name-prompt"));
 mock.module("@/components/ui/button", () => ({
   Button: ({
     children,

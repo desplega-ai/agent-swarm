@@ -170,7 +170,20 @@ test.describe("organization name onboarding", () => {
     });
   }
 
-  test("shows the org nudge in the existing bell off Home, marks it read, and dismisses it", async ({
+  test("a fresh Home load asks for the name only with the dialog", async ({ page }) => {
+    await page.goto("/");
+    const dialog = page.getByRole("dialog", { name: "Name your organization" });
+    await expect(dialog).toBeVisible();
+    await expect(page.getByText("Name it to compare your swarm")).toHaveCount(0);
+    // Only the Slack invite counts while the dialog asks; the org item waits for Later.
+    const bell = page.locator('button[aria-label^="Notifications"]');
+    await expect(bell).toHaveAttribute("aria-label", "Notifications, 1 unread");
+    await dialog.getByRole("button", { name: "Later" }).click();
+    await expect(bell).toHaveAttribute("aria-label", "Notifications, 2 unread");
+    await expect(page.getByText("Name it to compare your swarm")).toHaveCount(0);
+  });
+
+  test("after Later the bell carries the org nudge, marks it read, and dismisses it", async ({
     page,
     api,
     seed,
@@ -180,12 +193,7 @@ test.describe("organization name onboarding", () => {
       .getByRole("dialog", { name: "Name your organization" })
       .getByRole("button", { name: "Later" })
       .click();
-    await expect(page.getByRole("link", { name: "Add name", exact: true })).toBeVisible();
-    await page.getByRole("button", { name: /^Notifications/ }).click();
-    await expect(page.getByText("Add a name for your dashboard and messages.")).not.toBeVisible();
-    await page.keyboard.press("Escape");
-    await page.getByRole("link", { name: "Tasks", exact: true }).click();
-    await page.getByRole("button", { name: "Notifications, 1 unread", exact: true }).click();
+    await page.getByRole("button", { name: "Notifications, 2 unread", exact: true }).click();
     await expect(page.getByText("Add a name for your dashboard and messages.")).toBeVisible();
     await expect
       .poll(async () => {

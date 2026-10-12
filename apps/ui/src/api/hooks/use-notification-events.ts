@@ -12,7 +12,8 @@
  *     (e.g. to open a Slack Connect channel). It goes to the feedback proxy
  *     (`/v1/feedback`, overridable via the `feedback_endpoint` global config
  *     key) with the RAW address, because that is the whole point of the ask.
- *     It is an explicit user action, so it is NOT gated. It sends no
+ *     It is an explicit user action, so it is NOT gated, but it carries
+ *     `install_id` / `installed_at` only while telemetry is on. It sends no
  *     telemetry: the proxy keeps the lead in feedback_submissions, and the
  *     API refuses `lead.captured` from the dashboard because it cannot
  *     verify the submission.
@@ -67,8 +68,10 @@ export function useNotificationEvents() {
     submitFeedback.mutate({
       submission_id: crypto.randomUUID(),
       user_id: currentUser.userId,
-      install_id: installId ?? undefined,
-      installed_at: installedAt,
+      // The install id is telemetry identity: with telemetry off, leave it out.
+      ...(isUiTelemetryEnabled(status.data) && installId
+        ? { install_id: installId, installed_at: installedAt }
+        : {}),
       org_name: orgName,
       swarm_version: __APP_VERSION__,
       email,
