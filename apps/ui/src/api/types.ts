@@ -3797,3 +3797,37 @@ export interface CodexDevicePollResponse {
   slot?: number;
   error?: string;
 }
+
+// ─── Fleet benchmark (`GET /api/fleet-benchmark`) ───────────────────────────
+
+export type FleetBenchmarkState =
+  | "ready"
+  | "telemetry_off"
+  | "no_org_name"
+  | "not_enough_tasks"
+  | "unavailable";
+export type FleetBucket = "1" | "2-5" | "6+";
+export type FleetBand = "top_10" | "top_25" | "above_median" | "below_median" | "bottom_25";
+
+export interface FleetComparison {
+  key: "tasksPerWeek" | "taskSuccessRate";
+  value: number;
+  p50: number;
+  band: FleetBand;
+  peers: FleetBucket | "all";
+  installs: number;
+}
+
+export interface FleetBenchmarkResponse {
+  state: FleetBenchmarkState;
+  local: {
+    tasksPerWeek: number;
+    taskSuccessRate: number | null;
+    finishedTasks: number;
+    agents: number;
+    bucket: FleetBucket | null;
+  } | null;
+  minFinishedTasks: number;
+  generatedAt: string | null;
+  comparisons: FleetComparison[];
+}

@@ -51,13 +51,17 @@ async function globalConfig(key: string): Promise<string | undefined> {
   return stored || process.env[key]?.trim() || undefined;
 }
 
-/** `/v1/used-by` next to the configured `/v1/feedback` endpoint, so a stubbed proxy gets both. */
-export async function usedByEndpoint(): Promise<string> {
+/** A proxy path next to the configured `/v1/feedback` endpoint, so a stubbed proxy gets every route. */
+export async function telemetryProxyEndpoint(path: `/v1/${string}`): Promise<string> {
   const feedback = await globalConfig("feedback_endpoint");
   if (feedback && /^https?:\/\/[^/]+\/v1\/feedback\/?$/.test(feedback)) {
-    return feedback.replace(/\/v1\/feedback\/?$/, "/v1/used-by");
+    return feedback.replace(/\/v1\/feedback\/?$/, path);
   }
-  return `${TELEMETRY_PROXY_ORIGIN}/v1/used-by`;
+  return `${TELEMETRY_PROXY_ORIGIN}${path}`;
+}
+
+export function usedByEndpoint(): Promise<string> {
+  return telemetryProxyEndpoint("/v1/used-by");
 }
 
 // ─── Handler ─────────────────────────────────────────────────────────────────

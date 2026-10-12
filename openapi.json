@@ -53111,6 +53111,173 @@
         }
       }
     },
+    "/api/fleet-benchmark": {
+      "get": {
+        "summary": "Compare this swarm with similar swarms",
+        "description": "Places this swarm's tasks per week and task success rate (last 30 days) in the fleet percentiles published by the telemetry proxy, against swarms with the same agent count when enough exist. Needs telemetry on and an organization name; otherwise `state` says what is missing and the proxy is not called. The fleet numbers are cached for a day.",
+        "tags": [
+          "Telemetry"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Benchmark, or the reason it is not shown",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "state": {
+                      "type": "string",
+                      "enum": [
+                        "ready",
+                        "telemetry_off",
+                        "no_org_name",
+                        "not_enough_tasks",
+                        "unavailable"
+                      ]
+                    },
+                    "local": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "properties": {
+                        "tasksPerWeek": {
+                          "type": "number"
+                        },
+                        "taskSuccessRate": {
+                          "type": [
+                            "number",
+                            "null"
+                          ]
+                        },
+                        "finishedTasks": {
+                          "type": "integer"
+                        },
+                        "agents": {
+                          "type": "integer"
+                        },
+                        "bucket": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "enum": [
+                            "1",
+                            "2-5",
+                            "6+",
+                            null
+                          ]
+                        }
+                      },
+                      "required": [
+                        "tasksPerWeek",
+                        "taskSuccessRate",
+                        "finishedTasks",
+                        "agents",
+                        "bucket"
+                      ]
+                    },
+                    "minFinishedTasks": {
+                      "type": "integer"
+                    },
+                    "generatedAt": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "comparisons": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "key": {
+                            "type": "string",
+                            "enum": [
+                              "tasksPerWeek",
+                              "taskSuccessRate"
+                            ]
+                          },
+                          "value": {
+                            "type": "number"
+                          },
+                          "p50": {
+                            "type": "number"
+                          },
+                          "band": {
+                            "type": "string",
+                            "enum": [
+                              "top_10",
+                              "top_25",
+                              "above_median",
+                              "below_median",
+                              "bottom_25"
+                            ]
+                          },
+                          "peers": {
+                            "type": "string",
+                            "enum": [
+                              "1",
+                              "2-5",
+                              "6+",
+                              "all"
+                            ]
+                          },
+                          "installs": {
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "key",
+                          "value",
+                          "p50",
+                          "band",
+                          "peers",
+                          "installs"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "state",
+                    "local",
+                    "minFinishedTasks",
+                    "generatedAt",
+                    "comparisons"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Guest page sessions cannot read the benchmark",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/whoami": {
       "get": {
         "summary": "Resolve the authenticated principal behind the presented bearer",

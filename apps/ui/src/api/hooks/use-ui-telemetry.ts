@@ -1,5 +1,5 @@
 /**
- * Dashboard telemetry events (`popup.*`, `notification.*`).
+ * Dashboard telemetry events (`popup.*`, `notification.*`, `fleet_benchmark.viewed`).
  *
  * The browser never talks to the telemetry proxy. It posts each event to
  * `POST /api/telemetry/ui-event`, and the API sends it with the normal v2
@@ -38,7 +38,8 @@ export type UiTelemetryEvent =
   | {
       event: "org.profile_updated";
       properties: { fields: Array<"name" | "website">; surface: "prompt" | "setup" | "settings" };
-    };
+    }
+  | { event: "fleet_benchmark.viewed"; properties: { has_org_name: boolean } };
 
 /**
  * Whether dashboard events may leave the browser.

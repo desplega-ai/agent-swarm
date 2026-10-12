@@ -55,6 +55,7 @@ import type {
   FavoriteSetResponse,
   FavoritesResponse,
   FeedbackInput,
+  FleetBenchmarkResponse,
   IdentitiesResponse,
   IdentityEvent,
   IdentityEventsResponse,
@@ -3405,6 +3406,14 @@ class ApiClient {
       throw new Error(err.error || `Failed to update the consent: ${res.status}`);
     }
     return (await res.json()) as { granted: boolean; changedAt: string };
+  }
+
+  /** This swarm against similar swarms (fleet percentiles from the telemetry proxy). */
+  async getFleetBenchmark(): Promise<FleetBenchmarkResponse> {
+    const url = `${this.getBaseUrl()}/api/fleet-benchmark`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to load the fleet benchmark: ${res.status}`);
+    return (await res.json()) as FleetBenchmarkResponse;
   }
 
   // ─── Credential-Missing Agents (Phase 6 ≥1.76.0) ──────────────────────────

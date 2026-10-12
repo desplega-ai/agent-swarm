@@ -68,6 +68,7 @@ import "./telemetry-ui";
 import "./trackers/jira";
 import "./trackers/linear";
 import "./used-by";
+import "./fleet-benchmark";
 import "./users";
 import "./webhooks";
 import "./workflow-events";

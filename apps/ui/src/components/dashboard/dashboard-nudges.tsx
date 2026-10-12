@@ -115,8 +115,8 @@ export function DashboardNudges() {
           title="Telemetry is off"
           description={
             <>
-              Turn it on to send usage counts, never prompts or task content. You get faster fixes;
-              we see which features matter.{" "}
+              Turn it on to send usage counts, never prompts or task content. You get a benchmark
+              against similar swarms and faster fixes; we see which features matter.{" "}
               <a
                 href={TELEMETRY_DOCS_URL}
                 target="_blank"
@@ -150,6 +150,7 @@ export function DashboardNudges() {
           priority="secondary"
           icon={Building2}
           title="Organization name"
+          description="Name it to compare your swarm with similar swarms."
           action={
             <Button asChild size="sm" variant="outline">
               <Link to="/settings/configuration?search=SWARM_ORG_NAME#setting-SWARM_ORG_NAME">

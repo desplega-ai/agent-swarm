@@ -22,6 +22,7 @@ import { Link } from "react-router-dom";
 import { useFeatureGate } from "@/api/hooks/use-feature-gate";
 import { AgentActivityTimeline } from "@/components/dashboard/agent-activity-timeline";
 import { DashboardNudges } from "@/components/dashboard/dashboard-nudges";
+import { FleetBenchmarkCard } from "@/components/dashboard/fleet-benchmark-card";
 import { MobileNow } from "@/components/dashboard/mobile-now";
 import { SetupChecklistCard } from "@/components/onboarding/setup-checklist-card";
 import { AlertCallout } from "@/components/ui/alert-callout";
@@ -47,6 +48,7 @@ export function UnifiedHome() {
         <SetupChecklistCard />
         <div className="flex flex-1 min-h-0 min-w-0 flex-col gap-4">
           <DashboardNudges />
+          <FleetBenchmarkCard />
           {/* Below `md` the timeline cannot show a useful window, so phones
               get the stacked "Now" view (approvals, running, failures). */}
           <div className={isMobile ? "flex-1 min-h-0 overflow-y-auto" : "flex-1 min-h-0"}>

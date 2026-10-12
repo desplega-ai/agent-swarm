@@ -85,6 +85,7 @@ import { handleEcosystem } from "./ecosystem";
 import { handleEvents } from "./events";
 import { handleExtensions } from "./extensions";
 import { handleFavorites } from "./favorites";
+import { handleFleetBenchmark } from "./fleet-benchmark";
 import { handleFs } from "./fs";
 import { handleHeartbeat } from "./heartbeat";
 import { handleInboxState } from "./inbox-state";
@@ -405,6 +406,7 @@ const httpServer = createHttpServer(async (req, res) => {
         () => handleInboxState(req, res, pathSegments, queryParams),
         () => handleTelemetryUi(req, res, pathSegments, queryParams, myAgentId),
         () => handleUsedBy(req, res, pathSegments, queryParams, myAgentId),
+        () => handleFleetBenchmark(req, res, pathSegments, queryParams),
         () => handleTaskTemplates(req, res, pathSegments, queryParams),
         () => handleMcp(req, res, transports, transportActivity, mcpSessionAgents),
         () => handleMcpUser(req, res, transportsUser, sessionUsers, transportActivityUser),

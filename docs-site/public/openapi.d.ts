@@ -21194,6 +21194,87 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/fleet-benchmark": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Compare this swarm with similar swarms
+         * @description Places this swarm's tasks per week and task success rate (last 30 days) in the fleet percentiles published by the telemetry proxy, against swarms with the same agent count when enough exist. Needs telemetry on and an organization name; otherwise `state` says what is missing and the proxy is not called. The fleet numbers are cached for a day.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Benchmark, or the reason it is not shown */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @enum {string} */
+                            state: "ready" | "telemetry_off" | "no_org_name" | "not_enough_tasks" | "unavailable";
+                            local: {
+                                tasksPerWeek: number;
+                                taskSuccessRate: number | null;
+                                finishedTasks: number;
+                                agents: number;
+                                /** @enum {string|null} */
+                                bucket: "1" | "2-5" | "6+" | null;
+                            } | null;
+                            minFinishedTasks: number;
+                            generatedAt: string | null;
+                            comparisons: {
+                                /** @enum {string} */
+                                key: "tasksPerWeek" | "taskSuccessRate";
+                                value: number;
+                                p50: number;
+                                /** @enum {string} */
+                                band: "top_10" | "top_25" | "above_median" | "below_median" | "bottom_25";
+                                /** @enum {string} */
+                                peers: "1" | "2-5" | "6+" | "all";
+                                installs: number;
+                            }[];
+                        };
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Guest page sessions cannot read the benchmark */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/whoami": {
         parameters: {
             query?: never;
