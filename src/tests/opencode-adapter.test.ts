@@ -1373,8 +1373,12 @@ describe("OpencodeAdapter — context-mode plugin wiring (phase 4)", () => {
     expect(built.plugin).not.toContain("context-mode");
   });
 
-  test("plugin array excludes context-mode when CONTEXT_MODE_DISABLED=true", async () => {
-    process.env.CONTEXT_MODE_DISABLED = "true";
+  test.each([
+    "true",
+    "1",
+    "TRUE",
+  ])("plugin array excludes context-mode when CONTEXT_MODE_DISABLED=%s", async (value) => {
+    process.env.CONTEXT_MODE_DISABLED = value;
     writeFileSync(fakePluginPath, "// test plugin\n");
     process.env.CONTEXT_MODE_OPENCODE_PLUGIN_PATH = fakePluginPath;
     const events: OpencodeEvent[] = [
