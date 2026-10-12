@@ -28,12 +28,12 @@ import {
   getAgentHarnessProviders,
   getDbClient,
   getInstanceActivity,
-  getInstanceFeedbackSignals,
   getLiveAgentCounts,
   hasFirstCompletedTask,
   listAgentsWithCredStatusByProvider,
   NOT_EXTENSION_AGENT_SQL,
 } from "../be/db";
+import { getInstanceFeedbackSignals } from "../be/db/instance-signals";
 import { getEmbeddingProvider } from "../be/memory";
 import { runtimeSupervisorStatus } from "../be/runtime-pools/supervisor";
 import { getCombServiceUserId } from "../comb/agent-fs";

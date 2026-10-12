@@ -8,10 +8,10 @@ import {
   createWorkflow,
   createWorkflowRun,
   failTask,
-  getInstanceFeedbackSignals,
   initDb,
   updateWorkflowRun,
 } from "../be/db";
+import { getInstanceFeedbackSignals } from "../be/db/instance-signals";
 
 const TEST_DB_PATH = "./test-status-instance.sqlite";
 const LEAD_ID = "aaaa0000-0000-4000-8000-0000000000f1";
