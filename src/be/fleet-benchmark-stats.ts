@@ -6,7 +6,7 @@
  * `agents_total`).
  *
  * Null when that start is unknown: no accepted event is recorded yet, or the
- * earliest one is inside the window and may not be the proxy's first.
+ * earliest one is inside the window.
  */
 import { fleetCountStart, type LocalFleetStats } from "../fleet-benchmark";
 import { getDbClient } from "./db/runtime";

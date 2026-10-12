@@ -46,19 +46,10 @@ const TIMEOUT_MS = 5_000;
 
 let installationId: string | null = null;
 let installedAt: string | null = null;
-/**
- * When this process minted the install ID, read just before the ID was
- * persisted: no other process can send an event for the ID before it. The
- * first event sent with `firstOfInstall` carries it as `occurred_at`, once.
- */
-let mintedAt: string | null = null;
-
 /** An event the ingest endpoint answered with 2xx. */
 export interface TelemetryIngested {
   installationId: string;
   occurredAt: string;
-  /** The install's first event ever: sent by the process that minted the ID, dated at the mint. */
-  firstOfInstall: boolean;
 }
 let ingestObserver: ((ingested: TelemetryIngested) => void) | null = null;
 
@@ -408,10 +399,8 @@ export async function initTelemetry(
       }
     } else if (generateIfMissing) {
       const candidateId = `install_${randomUUID().replace(/-/g, "").slice(0, 16)}`;
-      const candidateMintedAt = new Date().toISOString();
       await setConfig("telemetry_installation_id", candidateId);
       installationId = candidateId;
-      mintedAt = candidateMintedAt;
       await tryPersistInstalledAt(setConfig);
     }
     // else: leave installationId = null; track() will no-op
@@ -565,11 +554,6 @@ export interface TrackOptions<E extends SwarmEventName> {
   metadata?: Record<string, unknown>;
   /** Who caused the event. Omit for system events (`user_ref` is then null). */
   actor?: TelemetryActor;
-  /**
-   * Send as the install's first event when this process just minted the ID
-   * (dated at the mint). Ignored otherwise.
-   */
-  firstOfInstall?: boolean;
 }
 
 /**
@@ -621,8 +605,6 @@ export function track<E extends SwarmEventName>(options: TrackOptions<E>): void 
     options.properties as Record<string, unknown>,
     options.metadata,
     options.actor,
-    source,
-    options.firstOfInstall === true,
   );
 }
 
@@ -647,16 +629,13 @@ function emit(
   metadata?: Record<string, unknown>,
   actor?: TelemetryActor,
   emitter: string = source,
-  firstOfInstall = false,
 ): void {
   if (!isTelemetryEnabled() || !installationId) return;
   maybeRefreshOrgIdentity();
   const orgId = currentOrgId();
   if (!orgId) return;
   try {
-    const first = firstOfInstall && mintedAt !== null;
-    const occurredAt = first && mintedAt ? mintedAt : new Date().toISOString();
-    if (first) mintedAt = null;
+    const occurredAt = new Date().toISOString();
     const sentFor = installationId;
     const isCloud = cachedIsCloud || isCloudDeployment();
     const orgIdentity = getOrgIdentity();
@@ -735,8 +714,7 @@ function emit(
       signal: AbortSignal.timeout(TIMEOUT_MS),
     })
       .then((response) => {
-        if (response.ok)
-          ingestObserver?.({ installationId: sentFor, occurredAt, firstOfInstall: first });
+        if (response.ok) ingestObserver?.({ installationId: sentFor, occurredAt });
       })
       .catch(() => {});
   } catch {
@@ -751,7 +729,6 @@ function emit(
 export function _resetTelemetryStateForTests(): void {
   installationId = null;
   installedAt = null;
-  mintedAt = null;
   ingestObserver = null;
   source = "unknown";
   cachedIsCloud = false;

@@ -71,24 +71,19 @@ export function fleetBucketFor(agents: number): FleetBucket | null {
 }
 
 /**
- * Where the proxy starts counting this install: the window start, or the
- * install's first event (`min(occurred_at)`) when newer. Null when that is
- * unknown, so the comparison is withheld.
+ * Where the proxy starts counting this install: the window start, when this
+ * install can prove the proxy saw it by then. Null otherwise, so the
+ * comparison is withheld.
  *
  * `ingest` is the earliest event the ingest endpoint accepted from the API
- * server. The proxy's first event is no later, so an accepted event at or
- * before the window start means the window start. A later one is the anchor
- * only when it was the install's first event ever.
+ * server. The proxy's first event is no later, so one at or before the window
+ * start means the window start. A later one proves nothing: workers send on
+ * their own clocks, so the proxy may hold an earlier `occurred_at`.
  */
-export function fleetCountStart(
-  ingest: { occurredAt: string; firstOfInstall: boolean } | null,
-  now: Date,
-): Date | null {
+export function fleetCountStart(ingest: { occurredAt: string } | null, now: Date): Date | null {
   const windowStart = now.getTime() - FLEET_WINDOW_DAYS * 86_400_000;
   const accepted = ingest ? Date.parse(ingest.occurredAt) : Number.NaN;
-  if (!ingest || !Number.isFinite(accepted)) return null;
-  if (accepted <= windowStart) return new Date(windowStart);
-  return ingest.firstOfInstall ? new Date(accepted) : null;
+  return Number.isFinite(accepted) && accepted <= windowStart ? new Date(windowStart) : null;
 }
 
 /** Tasks per week since `countStart`, with a 7-day floor, as the proxy computes it. */
