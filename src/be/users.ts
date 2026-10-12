@@ -798,8 +798,8 @@ export async function mintAgentToken(
 /**
  * Replace the agent's active token. The old token keeps working for
  * `graceMs` so a running worker can pick up the new one, then expires. Its
- * child task tokens keep their own expiry. Returns null when the agent holds
- * no active token.
+ * child task tokens expire with it, so no credential it delegated outlives
+ * it. Returns null when the agent holds no active token.
  */
 export async function rotateAgentToken(
   agentId: string,
@@ -810,10 +810,11 @@ export async function rotateAgentToken(
     const previous = await activeAgentTokenIds(client, agentId);
     if (previous.length === 0) return null;
     const previousExpiresAt = new Date(Date.now() + graceMs).toISOString();
+    const placeholders = previous.map(() => "?").join(", ");
     await client.run(
       `UPDATE session_tokens SET expiresAt = ?
-       WHERE id IN (${previous.map(() => "?").join(", ")}) AND expiresAt > ?`,
-      [previousExpiresAt, ...previous, previousExpiresAt],
+       WHERE (id IN (${placeholders}) OR parentTokenId IN (${placeholders})) AND expiresAt > ?`,
+      [previousExpiresAt, ...previous, ...previous, previousExpiresAt],
     );
     return { ...(await insertAgentToken(agentId, ttlMs)), previousExpiresAt };
   });

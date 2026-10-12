@@ -174,6 +174,10 @@ describe("worker token management routes", () => {
       404,
     );
     const first = await mintAgentToken(workerId);
+    const firstChild = await mintSessionToken(workerId, ownTaskId, 7 * 86_400_000, {
+      tokenId: first.tokenId,
+      runtimeId: null,
+    });
     const rotated = await request(`/api/agents/${workerId}/token/rotate`, key, {
       body: { graceSec: 60 },
     });
@@ -182,12 +186,21 @@ describe("worker token management routes", () => {
     expect(Date.parse(rotated.body.previousExpiresAt)).toBeLessThanOrEqual(Date.now() + 60_000);
     expect((await request("/api/poll", first.plaintext)).status).toBe(200);
     expect((await request("/api/poll", rotated.body.plaintext)).status).toBe(200);
+    // A child of the rotated token expires with it, not at its own longer TTL.
+    expect((await resolveBySessionToken(firstChild.plaintext))?.expiresAt).toBe(
+      rotated.body.previousExpiresAt,
+    );
+    const rotatedChild = await mintSessionToken(workerId, ownTaskId, 7 * 86_400_000, {
+      tokenId: rotated.body.tokenId,
+      runtimeId: null,
+    });
 
     const again = await request(`/api/agents/${workerId}/token/rotate`, key, {
       body: { graceSec: 0 },
     });
     expect(again.status).toBe(200);
     expect((await request("/api/poll", rotated.body.plaintext)).status).toBe(401);
+    expect((await request("/api/poll", rotatedChild.plaintext)).status).toBe(401);
     expect((await request("/api/poll", again.body.plaintext)).status).toBe(200);
     expect(
       (await request(`/api/agents/${workerId}/token`, key, { method: "DELETE" })).body,
