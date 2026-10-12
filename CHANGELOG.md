@@ -6,6 +6,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.171.0] - 2026-10-12
+
+1.170.0 was bumped on `main` but never published (no tag, npm package or GitHub release), so this release ships the 1.170.0 changes below as well.
+
+### Added
+- Dashboard: a one-tap 0-10 feedback card shown to admins at a moment of success or friction, then once a quarter (#2080).
+- Dashboard: admins can set a company website that brands the dashboard, opt in to a revocable "used by" logo listing, and turn telemetry on from a banner without a restart (#2081).
+- Dashboard: a fleet benchmark card on Home that compares the swarm with similar swarms, its API route, and the Slack Connect channel offered as a perk (#2086).
+- Dashboard: `catppuccin` (Latte light / Mocha dark) classic theme preset for the dashboard and app canvases (#2100).
+- Telemetry: pop-up impression and bell events are sent as catalogued events through the API, and the bell card drops "I already have one" (#2079).
+
+### Changed
+- agent-fs bumped to 0.16.1 (#2091); amp bumped in the worker image (#2092).
+- Docs: TLA+ specs synced with main (heartbeat, workflows) (#2093), the review skill sweeps repeated findings across the whole PR diff (#2089), and release notes for the week of 2026-10-12 (#2101).
+
+### Fixed
+- Dashboard: the org-name prompt remembers "Later" per session, shows only to admins, and appears once per page load (#2076).
+- Integrations: `LINEAR_ENABLED` and `JIRA_ENABLED` are parsed with the shared env-flag parser (#2096); so is `CONTEXT_MODE_DISABLED` (#2097).
+- pi: swarm MCP setup is retried before its tools are dropped (#2090).
+- Tests: Slack attachment URL environment is isolated per test (#2088).
+
 ## [1.170.0] - 2026-10-12
 
 ### Added
