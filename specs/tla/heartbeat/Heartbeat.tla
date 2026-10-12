@@ -1,7 +1,7 @@
 ---------------------------- MODULE Heartbeat ----------------------------
 (***************************************************************************)
 (* Server-side heartbeat + the task lifecycle it races with, as the code   *)
-(* behaves on main @ eaf5d0cc. Every action maps to file:line and the SQL  *)
+(* behaves on main @ ba5bb0d7. Every action maps to file:line and the SQL  *)
 (* guard it models in ACTIONS.md. Time is abstracted: `stale[t]` means     *)
 (* "lastUpdatedAt older than the stall threshold", and `Age` sets it.     *)
 (*                                                                         *)
@@ -28,7 +28,8 @@ CONSTANTS
     HYPO_REOFFER,     \* hypothetical path that re-offers an unassigned task
     BOOT_TRIAGE_ALWAYS, \* HEARTBEAT_BOOT_TRIAGE_ALWAYS: Lead task on every boot (#1973)
     G_STATUS_FALLBACK,  \* boot triage: a failed gatherSystemStatus still creates the task (#1973)
-    TIMER_RACE          \* boot triage may fire before runRebootSweep finishes (timing assumption off)
+    TIMER_RACE,         \* boot triage may fire before runRebootSweep finishes (timing assumption off)
+    RUNTIME_POOLS       \* RUNTIME_POOLS_ENABLED (#2045, default off): pool routing, wake release, runtime recovery
 
 None == "none"
 Tasks == 1..NTasks
@@ -323,9 +324,11 @@ HbRepair(t) ==
     /\ UNCHANGED <<offTo, ver, stale, sess, touched, running, alive, cl, acc, hb, rb,
                    apiUp, wc, ac, liveKill, badAcc, bt>>
 
-\* autoAssignPoolTasks: UPDATE SET agentId=?, status='pending' WHERE status='unassigned' (tx)
+\* autoAssignPoolTasks -> routePoolTasks (#2045) -> assignUnassignedTaskPending:
+\* UPDATE SET agentId=?, status='pending' WHERE status='unassigned' (+ snapshot CAS).
+\* With runtime pools on, routing may also pick a sleeping pool agent and wake it.
 AutoAssign(t, w) ==
-    /\ apiUp /\ alive[w] /\ running[w] = {} /\ st[t] = "unassigned"
+    /\ apiUp /\ (alive[w] \/ RUNTIME_POOLS) /\ running[w] = {} /\ st[t] = "unassigned"
     /\ st' = [st EXCEPT ![t] = "pending"]
     /\ own' = [own EXCEPT ![t] = w]
     /\ UNCHANGED <<offTo, par, gen, pin, ver, stale, sess, touched, running, alive,
@@ -354,6 +357,54 @@ CleanupSession(t) ==
     /\ sess' = [sess EXCEPT ![t] = "none"]
     /\ UNCHANGED <<st, own, offTo, par, gen, pin, ver, stale, touched, running,
                    alive, cl, acc, hb, rb, apiUp, wc, ac, liveKill, badAcc, bt>>
+
+---------------------------------------------------------------------------
+(* Runtime pools (#2045): API-side writes gated by RUNTIME_POOLS_ENABLED.  *)
+(* A pool agent with no runtime is a worker that is not alive; a wake is   *)
+(* WorkerRestart, and terminateRuntime is WorkerCrash.                     *)
+
+\* routePoolTasks release: a pending task whose agent's wake expired or that
+\* is stranded (no runtime, pool not wakeable) goes back to the pool.
+\* releaseTask(wake snapshot): WHERE status='pending' AND agentId=? AND
+\* pool_wake_at=?; stranded: WHERE status='pending' AND agentId=? AND
+\* pool_wake_at IS NULL. human_pinned tasks are skipped (not modeled).
+WakeRelease(t) ==
+    /\ RUNTIME_POOLS /\ apiUp /\ st[t] = "pending" /\ own[t] # None /\ ~alive[own[t]]
+    /\ st' = [st EXCEPT ![t] = "unassigned"]
+    /\ own' = [own EXCEPT ![t] = None]
+    /\ UNCHANGED <<offTo, par, gen, pin, ver, stale, sess, touched, running, alive,
+                   cl, acc, hb, rb, apiUp, wc, ac, liveKill, badAcc, bt>>
+
+\* recordProvisionFailure: after the last provisioning attempt, failTask on the
+\* agent's oldest ready pending task (WHERE status NOT IN terminal).
+ProvisionFail(t) ==
+    /\ RUNTIME_POOLS /\ apiUp /\ st[t] = "pending" /\ own[t] # None /\ ~alive[own[t]]
+    /\ st' = [st EXCEPT ![t] = "failed"]
+    /\ UNCHANGED <<own, offTo, par, gen, pin, ver, stale, sess, touched, running, alive,
+                   cl, acc, hb, rb, apiUp, wc, ac, liveKill, badAcc, bt>>
+
+\* recoverRuntime -> recoverSessions -> remediateTaskForDeadRuntime: a runtime
+\* declared dead (supervisor, socket-disconnect check) has each in_progress task
+\* it held remediated with no staleness gate. Its process no longer runs t.
+\* The lastUpdatedAt CAS reads the row right before the write, so read and
+\* write are one step; supersede and resume are collapsed as in DrainHandoff
+\* (HbRepair closes a crash between them). The session row is deleted.
+RuntimeRecover(t) ==
+    /\ RUNTIME_POOLS /\ apiUp /\ st[t] = "in_progress" /\ own[t] # None
+    /\ t \notin running[own[t]]
+    /\ sess' = [sess EXCEPT ![t] = "none"]
+    /\ liveKill' = (liveKill \/ LiveNow(t))
+    /\ IF ~HasActiveChild(t) /\ gen[t] < MaxGen /\ Free # {}
+         THEN \E s \in Free :
+                /\ st'  = [st  EXCEPT ![t] = "superseded", ![s] = "pending"]
+                /\ own' = [own EXCEPT ![s] = own[t]]
+                /\ par' = [par EXCEPT ![s] = t]
+                /\ gen' = [gen EXCEPT ![s] = gen[t] + 1]
+                /\ pin' = [pin EXCEPT ![s] = TRUE]
+         ELSE /\ st' = [st EXCEPT ![t] = "failed"]
+              /\ UNCHANGED <<own, par, gen, pin>>
+    /\ UNCHANGED <<offTo, ver, stale, touched, running, alive, cl, acc, hb, rb,
+                   apiUp, wc, ac, badAcc, bt>>
 
 ---------------------------------------------------------------------------
 (* API crash + boot + runRebootSweep.                                     *)
@@ -457,6 +508,7 @@ Next ==
     \/ \E w \in Workers : ClaimWrite(w) \/ AcceptWrite(w) \/ WorkerCrash(w) \/ WorkerRestart(w)
     \/ \E t \in Tasks : Reject(t) \/ Age(t) \/ HbRead(t) \/ HbRepair(t) \/ Reaper(t)
          \/ CleanupSession(t) \/ RebootFail(t)
+         \/ WakeRelease(t) \/ ProvisionFail(t) \/ RuntimeRecover(t)
     \/ HbWrite \/ HbResume \/ RebootRetry \/ ApiCrash \/ ApiBoot \/ BootTriage
 
 Fairness ==
