@@ -7,6 +7,7 @@ import { useOnboardingOwnsFirstRun } from "@/api/hooks/use-onboarding";
 import { useSetUsedByConsent } from "@/api/hooks/use-org-profile";
 import { type PopupDismissMethod, useUiTelemetry } from "@/api/hooks/use-ui-telemetry";
 import { useStatusContext } from "@/app/status-context";
+import { ImagePreview } from "@/components/shared/image-preview";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -23,7 +24,12 @@ import { useConfig } from "@/hooks/use-config";
 import { markPromptShownThisLoad } from "@/hooks/use-other-dialog-open";
 import { isAdminLike } from "@/lib/user-role";
 import { cn } from "@/lib/utils";
-import { normalizeOrgWebsite, websiteSuggestion } from "../../../../../src/utils/org-website";
+import {
+  isFilledOrgLogoUrl,
+  normalizeOrgWebsite,
+  orgLogoUrl,
+  websiteSuggestion,
+} from "../../../../../src/utils/org-website";
 
 const ORG_NAME_KEY = "SWARM_ORG_NAME";
 const ORG_WEBSITE_KEY = "SWARM_ORG_WEBSITE";
@@ -80,7 +86,8 @@ export function OrganizationNameDialog() {
   }, [open, config.apiUrl]);
 
   // Wait for /status: sendEvent drops events until it knows whether telemetry is on.
-  const statusLoaded = useStatusContext().data !== undefined;
+  const status = useStatusContext().data;
+  const statusLoaded = status !== undefined;
   useEffect(() => {
     if (!open || !statusLoaded || shownReported.current) return;
     shownReported.current = true;
@@ -107,6 +114,11 @@ export function OrganizationNameDialog() {
   const websiteError =
     website.trim() && !host ? "Enter a public website, such as example.com." : null;
   const canConsent = Boolean(name.trim() && host);
+  // The logo the shell will show after save: a logo a person set stays; otherwise
+  // the server fills it from the website.
+  const currentLogo = status?.identity.logo_url ?? "";
+  const previewLogo =
+    currentLogo && !isFilledOrgLogoUrl(currentLogo) ? currentLogo : host ? orgLogoUrl(host) : "";
 
   async function handleSave() {
     const value = name.trim();
@@ -196,16 +208,19 @@ export function OrganizationNameDialog() {
               ) : undefined
             }
           >
-            <Input
-              id="organization-website"
-              placeholder={suggestion ?? "example.com"}
-              autoComplete="url"
-              inputMode="url"
-              value={website}
-              onChange={(event) => setWebsite(event.target.value)}
-              aria-invalid={websiteError !== null}
-              disabled={saving}
-            />
+            <div className="flex items-center gap-2">
+              <ImagePreview src={previewLogo} label="Company logo" />
+              <Input
+                id="organization-website"
+                placeholder={suggestion ?? "example.com"}
+                autoComplete="url"
+                inputMode="url"
+                value={website}
+                onChange={(event) => setWebsite(event.target.value)}
+                aria-invalid={websiteError !== null}
+                disabled={saving}
+              />
+            </div>
           </SettingsRow>
           <label
             className={cn(

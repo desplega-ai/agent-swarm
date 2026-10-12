@@ -62,6 +62,7 @@ mock.module("@/api/hooks/use-tasks", () => ({ useTasks: () => ({ data: { tasks: 
 mock.module("@/api/hooks/use-feedback", () => ({ useSubmitFeedback: () => ({}) }));
 mock.module("@/lib/feedback-popup", () => require("../../lib/feedback-popup"));
 mock.module("@/lib/utils", () => require("../../lib/utils"));
+mock.module("@/components/shared/image-preview", () => require("./image-preview"));
 mock.module("@/components/ui/label", () => ({ Label: Box }));
 mock.module("@/components/ui/textarea", () => ({ Textarea: () => <textarea /> }));
 mock.module("@/lib/user-role", () => require("../../lib/user-role"));
@@ -243,6 +244,18 @@ test("saves the normalized website and the used-by consent with the name", async
     event: "org.profile_updated",
     properties: { fields: ["name", "website"], surface: "prompt" },
   });
+});
+
+test("previews the logo the website will fill as you type", async () => {
+  const container = await mount();
+  expect(container.querySelector('[data-testid="image-preview"] img')).toBeNull();
+  await typeInto(
+    container.querySelector("#organization-website") as HTMLInputElement,
+    "https://www.Acme.com/about",
+  );
+  expect(container.querySelector('[data-testid="image-preview"] img')?.getAttribute("src")).toBe(
+    "https://proxy.desplega.sh/v1/logo?domain=acme.com",
+  );
 });
 
 test("an invalid website blocks saving", async () => {

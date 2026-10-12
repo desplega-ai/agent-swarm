@@ -21,7 +21,11 @@ import { useTheme } from "@/hooks/use-theme";
 import { AVATAR_COLOR_INPUT_FALLBACK, AVATAR_SUGGESTED_SWATCHES } from "@/lib/agent-color";
 import { resolveCssVarToHex } from "@/lib/css-color";
 import { cn } from "@/lib/utils";
-import { normalizeOrgWebsite, websiteSuggestion } from "../../../../../../src/utils/org-website";
+import {
+  normalizeOrgWebsite,
+  orgLogoUrl,
+  websiteSuggestion,
+} from "../../../../../../src/utils/org-website";
 import { httpUrlError } from "../components/http-url";
 import { DEFAULT_SWARM_NAME, initialSwarmName } from "../components/swarm-name";
 import type { StepProps } from "../step-contract";
@@ -375,7 +379,8 @@ export function StepName({ onboarding, act, setContinueBlocker, setContinueActio
           <SetupCard title="Sidebar preview" bodyClassName="rounded-b-xl bg-surface">
             <SidebarPreview
               name={name || DEFAULT_SWARM_NAME}
-              logo={logo.valid && logo.value ? logo.value : null}
+              // An empty logo is filled from the website on save; preview that one.
+              logo={logo.valid && logo.value ? logo.value : website ? orgLogoUrl(website) : null}
               color={color && colorValid ? color : null}
             />
           </SetupCard>
