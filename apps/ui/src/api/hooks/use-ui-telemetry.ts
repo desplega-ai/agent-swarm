@@ -1,5 +1,5 @@
 /**
- * Dashboard telemetry events (`popup.*`, `notification.*`, `lead.captured`).
+ * Dashboard telemetry events (`popup.*`, `notification.*`).
  *
  * The browser never talks to the telemetry proxy. It posts each event to
  * `POST /api/telemetry/ui-event`, and the API sends it with the normal v2
@@ -34,11 +34,7 @@ export type UiTelemetryEvent =
     }
   | { event: "notification.viewed"; properties: { key: string } }
   | { event: "notification.dismissed"; properties: { key: string } }
-  | { event: "notification.submitted"; properties: { key: string; email_domain?: string } }
-  | {
-      event: "lead.captured";
-      properties: { channel: "slack_connect"; consent: true; submission_id: string };
-    };
+  | { event: "notification.submitted"; properties: { key: string; email_domain?: string } };
 
 /**
  * Whether dashboard events may leave the browser.

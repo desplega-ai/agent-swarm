@@ -12,8 +12,10 @@
  *     (e.g. to open a Slack Connect channel). It goes to the feedback proxy
  *     (`/v1/feedback`, overridable via the `feedback_endpoint` global config
  *     key) with the RAW address, because that is the whole point of the ask.
- *     It is an explicit user action, so it is NOT gated. When telemetry is
- *     on it also sends `lead.captured` with the same submission ID.
+ *     It is an explicit user action, so it is NOT gated. It sends no
+ *     telemetry: the proxy keeps the lead in feedback_submissions, and the
+ *     API refuses `lead.captured` from the dashboard because it cannot
+ *     verify the submission.
  */
 import { useConfigs } from "@/api/hooks/use-config-api";
 import { useSubmitFeedback } from "@/api/hooks/use-feedback";
@@ -62,9 +64,8 @@ export function useNotificationEvents() {
 
   function notifyUs(notificationKey: string, note: string, email: string) {
     if (!currentUser.userId) return;
-    const submissionId = crypto.randomUUID();
     submitFeedback.mutate({
-      submission_id: submissionId,
+      submission_id: crypto.randomUUID(),
       user_id: currentUser.userId,
       install_id: installId,
       installed_at: installedAt,
@@ -74,10 +75,6 @@ export function useNotificationEvents() {
       newsletter_consent: false,
       message: `[notification] key=${notificationKey} ${note}`,
       submitted_at: new Date().toISOString(),
-    });
-    sendUiTelemetry(status.data, {
-      event: "lead.captured",
-      properties: { channel: "slack_connect", consent: true, submission_id: submissionId },
     });
   }
 

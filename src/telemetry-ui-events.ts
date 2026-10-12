@@ -32,12 +32,14 @@ const file = catalog as unknown as {
 
 /**
  * Events the API relays for the dashboard: every catalog event whose emitter
- * is `ui`, plus `lead.captured` (the Slack Connect invite form is the only
- * dashboard surface that captures a lead). `used_by.consent_changed` is left
- * out: the API sends it itself after an admin-only consent change, so a
- * non-admin cannot fake one.
+ * is `ui`, and nothing the catalog attributes to the API server. The route
+ * cannot verify a server-attributed claim: `lead.captured` would let any
+ * signed-in user invent a consented lead, because the Slack Connect email goes
+ * from the browser straight to the feedback proxy, which keeps the lead in
+ * feedback_submissions. `used_by.consent_changed` is left out too: the API
+ * sends it itself after an admin-only consent change, so a non-admin cannot
+ * fake one.
  */
-const RELAYED_API_EVENTS = new Set(["lead.captured"]);
 const SERVER_ONLY_UI_EVENTS = new Set(["used_by.consent_changed"]);
 /** Longest string property the route relays. Catalog strings are keys and IDs, never prose. */
 const MAX_STRING_LENGTH = 200;
@@ -46,9 +48,7 @@ const relayable = new Map(
   file.events
     .filter(
       (e) =>
-        e.product === "agent-swarm" &&
-        !SERVER_ONLY_UI_EVENTS.has(e.event) &&
-        (e.source === "ui" || RELAYED_API_EVENTS.has(e.event)),
+        e.product === "agent-swarm" && e.source === "ui" && !SERVER_ONLY_UI_EVENTS.has(e.event),
     )
     .map((e) => [e.event, e]),
 );

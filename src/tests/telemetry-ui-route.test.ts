@@ -106,14 +106,16 @@ describe("POST /api/telemetry/ui-event", () => {
     expect(sent[0]?.properties).toMatchObject({ popup: "org_name", trigger: "missing_org_name" });
   });
 
-  test("lead.captured keeps its api-server emitter", async () => {
+  test("lead.captured with an invented submission_id gets 400 and sends nothing", async () => {
+    // The API never sees the Slack Connect submission, so it cannot vouch for a lead.
     const result = await post({
       event: "lead.captured",
-      properties: { channel: "slack_connect", consent: true, submission_id: "sub_1" },
+      properties: { channel: "slack_connect", consent: true, submission_id: "invented" },
     });
     await flush();
-    expect(result.statusCode).toBe(204);
-    expect(sent[0]?.source).toBe("api-server");
+    expect(result.statusCode).toBe(400);
+    expect(result.body).toContain("unknown event");
+    expect(sent).toHaveLength(0);
   });
 
   test("an unknown event name gets 400 and sends nothing", async () => {
@@ -158,10 +160,11 @@ describe("POST /api/telemetry/ui-event", () => {
 });
 
 describe("validateUiEvent", () => {
-  test("allows only ui events plus lead.captured", () => {
+  test("allows only ui events", () => {
     expect(UI_EVENT_NAMES).toContain("popup.shown");
     expect(UI_EVENT_NAMES).toContain("notification.submitted");
-    expect(UI_EVENT_NAMES).toContain("lead.captured");
+    // Server-attributed; the route cannot verify the submission behind it.
+    expect(UI_EVENT_NAMES).not.toContain("lead.captured");
     expect(UI_EVENT_NAMES).not.toContain("task.created");
     // The API sends it after an admin-only change; a dashboard user cannot fake it.
     expect(UI_EVENT_NAMES).not.toContain("used_by.consent_changed");

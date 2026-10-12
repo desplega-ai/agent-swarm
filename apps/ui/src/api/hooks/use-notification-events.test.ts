@@ -108,24 +108,16 @@ describe("useNotificationEvents", () => {
     expect(events).toHaveLength(1);
   });
 
-  test("notifyUs sends the email to /v1/feedback and lead.captured with the same submission", () => {
+  test("notifyUs sends the email to /v1/feedback and no telemetry event", () => {
     useNotificationEvents().notifyUs("slack-connect-invite", "please invite me", "me@acme.com");
 
     expect(submitted).toHaveLength(1);
     expect(submitted[0]?.email).toBe("me@acme.com");
-    expect(events).toEqual([
-      {
-        event: "lead.captured",
-        properties: {
-          channel: "slack_connect",
-          consent: true,
-          submission_id: submitted[0]?.submission_id as string,
-        },
-      },
-    ]);
+    expect(typeof submitted[0]?.submission_id).toBe("string");
+    expect(events).toEqual([]);
   });
 
-  test("notifyUs is a user-typed submission and stays ungated; lead.captured does not", () => {
+  test("notifyUs is a user-typed submission and stays ungated", () => {
     statusData = status({ enabled: false });
     useNotificationEvents().notifyUs("slack-connect-invite", "please invite me", "me@acme.com");
 

@@ -164,7 +164,6 @@ The dashboard never sends telemetry to Desplega itself. It posts each event to i
 | `notification.viewed` | Someone opens the notification bell with an item in it | `key`: the notification |
 | `notification.dismissed` | Someone dismisses a notification card | `key` |
 | `notification.submitted` | Someone submits a notification card | `key`, and `email_domain` when they typed an email: the **domain** only, never the address |
-| `lead.captured` | Someone asks for a Slack Connect channel | `channel: slack_connect`, `consent: true`, and the `submission_id` of the request |
 | `popup.shown` | The organization-name prompt or the feedback pop-up opens | `popup` (`org_name`, `feedback`) and `trigger`: why it opened |
 | `popup.dismissed` | It closes without being submitted | `popup` and `method`: `later`, `close` or `escape` |
 | `popup.submitted` | It is submitted | `popup`, `has_message` and `has_contact`: whether a message or a name or email was filled in, never the text |
