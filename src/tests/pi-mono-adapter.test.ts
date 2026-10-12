@@ -174,9 +174,9 @@ describe("PiMonoAdapter.createSession — OPENROUTER_BASE_URL gateway", () => {
   });
 });
 
-// ─── MCP runtime identity (multi-runtime dispatch gate) ──────────────────────
+// ─── MCP setup and runtime identity ─────────────────────────────────────────
 
-describe("PiMonoAdapter.createSession — MCP runtime identity header", () => {
+describe("PiMonoAdapter.createSession — MCP setup", () => {
   let createAgentSessionSpy: ReturnType<typeof spyOn>;
 
   afterEach(() => {
@@ -215,19 +215,42 @@ describe("PiMonoAdapter.createSession — MCP runtime identity header", () => {
     };
   }
 
-  /** Stub swarm API: records the runtime header on every /mcp request. */
-  function serveStub(seen: Array<string | null>) {
+  /** Stub swarm API: records headers and fails the requested setup steps once. */
+  function serveStub(
+    seen: Array<string | null>,
+    failures: string[] = [],
+    initializeSessions: Array<string | null> = [],
+  ) {
     return Bun.serve({
       port: 0,
-      fetch(req) {
+      async fetch(req) {
         const url = new URL(req.url);
         if (url.pathname === "/mcp") {
           seen.push(req.headers.get("x-runtime-instance-id"));
-          return Response.json({
-            jsonrpc: "2.0",
-            id: 1,
-            result: { protocolVersion: "2025-03-26", capabilities: {}, tools: [] },
-          });
+          const body = (await req.json()) as { id?: number; method: string };
+          if (body.method === "initialize") {
+            initializeSessions.push(req.headers.get("mcp-session-id"));
+          }
+          if (body.method === failures[0]) {
+            failures.shift();
+            return new Response("Temporary MCP failure", { status: 503 });
+          }
+          if (body.method === "notifications/initialized") {
+            return new Response(null, { status: 202 });
+          }
+          return Response.json(
+            {
+              jsonrpc: "2.0",
+              id: body.id,
+              result:
+                body.method === "tools/list"
+                  ? { tools: [{ name: "get-tasks", inputSchema: { type: "object" } }] }
+                  : { protocolVersion: "2025-03-26", capabilities: {} },
+            },
+            body.method === "initialize"
+              ? { headers: { "mcp-session-id": `test-session-${initializeSessions.length}` } }
+              : undefined,
+          );
         }
         return Response.json({ servers: [] });
       },
@@ -268,6 +291,47 @@ describe("PiMonoAdapter.createSession — MCP runtime identity header", () => {
     } finally {
       if (prev === undefined) delete process.env.SWARM_RUNTIME_INSTANCE_ID;
       else process.env.SWARM_RUNTIME_INSTANCE_ID = prev;
+      server.stop(true);
+    }
+  });
+
+  test.each([
+    "initialize",
+    "notifications/initialized",
+    "tools/list",
+  ])("retries a transient %s failure and registers swarm tools with a fresh MCP session", async (failedMethod) => {
+    const seen: Array<string | null> = [];
+    const initializeSessions: Array<string | null> = [];
+    const server = serveStub(seen, [failedMethod], initializeSessions);
+    const prev = process.env.SWARM_RUNTIME_INSTANCE_ID;
+    process.env.SWARM_RUNTIME_INSTANCE_ID = "pi-retry-runtime";
+    try {
+      spyOnCreateAgentSession();
+      const adapter = new PiMonoAdapter();
+      await adapter.createSession(makeMcpConfig(`http://localhost:${server.port}`));
+      const options = createAgentSessionSpy.mock.calls[0]?.[0];
+      expect(options?.customTools?.map((tool) => tool.name)).toEqual(["get-tasks"]);
+      expect(initializeSessions).toEqual([null, null]);
+      expect(new Set(seen)).toEqual(new Set(["pi-retry-runtime"]));
+    } finally {
+      if (prev === undefined) delete process.env.SWARM_RUNTIME_INSTANCE_ID;
+      else process.env.SWARM_RUNTIME_INSTANCE_ID = prev;
+      server.stop(true);
+    }
+  });
+
+  test("stops after three failed MCP setup attempts and retains the no-tools fallback", async () => {
+    const initializeSessions: Array<string | null> = [];
+    const failures = ["initialize", "initialize", "initialize", "initialize"];
+    const server = serveStub([], failures, initializeSessions);
+    try {
+      spyOnCreateAgentSession();
+      const adapter = new PiMonoAdapter();
+      await adapter.createSession(makeMcpConfig(`http://localhost:${server.port}`));
+      expect(initializeSessions).toEqual([null, null, null]);
+      expect(failures).toEqual(["initialize"]);
+      expect(createAgentSessionSpy.mock.calls[0]?.[0]?.customTools).toEqual([]);
+    } finally {
       server.stop(true);
     }
   });

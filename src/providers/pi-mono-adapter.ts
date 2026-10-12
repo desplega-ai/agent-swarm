@@ -1567,33 +1567,48 @@ export class PiMonoAdapter implements ProviderAdapter {
     const deferTools = isPiToolDeferralEnabled();
     let customTools: ToolDefinition[] = [];
     if (config.apiUrl && config.apiKey) {
-      try {
-        const mcpClient = new McpHttpClient(
-          config.apiUrl,
-          config.apiKey,
-          config.agentId,
-          config.taskId,
-        );
-        // Same per-boot runtime identity the runner registers with — dispatch
-        // tools require it in multi-runtime mode, and it travels as request
-        // context, not as a tool argument.
-        const runtimeInstanceId = swarmRuntimeInstanceId();
-        if (runtimeInstanceId) {
-          mcpClient.customHeaders["X-Runtime-Instance-ID"] = runtimeInstanceId;
+      const maxAttempts = 3;
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        try {
+          const mcpClient = new McpHttpClient(
+            config.apiUrl,
+            config.apiKey,
+            config.agentId,
+            config.taskId,
+          );
+          // Same per-boot runtime identity the runner registers with — dispatch
+          // tools require it in multi-runtime mode, and it travels as request
+          // context, not as a tool argument.
+          const runtimeInstanceId = swarmRuntimeInstanceId();
+          if (runtimeInstanceId) {
+            mcpClient.customHeaders["X-Runtime-Instance-ID"] = runtimeInstanceId;
+          }
+          await mcpClient.initialize();
+          const tools = await mcpClient.listTools();
+          customTools = mcpToolsToDefinitions(mcpClient, tools, {
+            deferNonCore: deferTools,
+            namespace: SWARM_TOOL_NAMESPACE,
+          });
+          const deferredCount = deferTools ? tools.filter((t) => !isCoreSwarmTool(t)).length : 0;
+          console.log(
+            `\x1b[2m[${config.role}]\x1b[0m Discovered ${tools.length} MCP tools from swarm` +
+              (deferTools ? ` (${deferredCount} deferred behind tool_search)` : ""),
+          );
+          break;
+        } catch (err) {
+          const error = scrubSecrets(String(err));
+          if (attempt === maxAttempts) {
+            console.warn(
+              `\x1b[33m[${config.role}] Failed to discover MCP tools after ${maxAttempts} attempts: ${error}\x1b[0m`,
+            );
+          } else {
+            const delayMs = 500 * 2 ** (attempt - 1);
+            console.warn(
+              `\x1b[33m[${config.role}] MCP setup attempt ${attempt}/${maxAttempts} failed: ${error}; retrying in ${delayMs}ms\x1b[0m`,
+            );
+            await Bun.sleep(delayMs);
+          }
         }
-        await mcpClient.initialize();
-        const tools = await mcpClient.listTools();
-        customTools = mcpToolsToDefinitions(mcpClient, tools, {
-          deferNonCore: deferTools,
-          namespace: SWARM_TOOL_NAMESPACE,
-        });
-        const deferredCount = deferTools ? tools.filter((t) => !isCoreSwarmTool(t)).length : 0;
-        console.log(
-          `\x1b[2m[${config.role}]\x1b[0m Discovered ${tools.length} MCP tools from swarm` +
-            (deferTools ? ` (${deferredCount} deferred behind tool_search)` : ""),
-        );
-      } catch (err) {
-        console.warn(`\x1b[33m[${config.role}] Failed to discover MCP tools: ${err}\x1b[0m`);
       }
     }
 
