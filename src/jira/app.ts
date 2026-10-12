@@ -12,8 +12,7 @@ let initialized = false;
 
 export function isJiraEnabled(): boolean {
   if (isEnvFlagEnabled("JIRA_DISABLE", false)) return false;
-  const enabled = process.env.JIRA_ENABLED;
-  if (enabled === "false" || enabled === "0") return false;
+  if (!isEnvFlagEnabled("JIRA_ENABLED", true)) return false;
   return !!process.env.JIRA_CLIENT_ID;
 }
 
