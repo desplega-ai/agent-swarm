@@ -403,3 +403,28 @@ distinct states. With a crash, both values reach the open crash traces (`AtMostO
 | `Probe-input-await.cfg` | CX6 found | 339 | 12 |
 | `Probe-replay-unreadable.cfg` / control | CX14 found / holds | 1,437 / 13,005 | 19 / - |
 | `Probe-child-run.cfg` / control | holds / CX12 found | 14,004 / 176,483 | - / 34 |
+
+## Sync with #2077 (`main` @ `ba5bb0d79`)
+
+#2077 adds a read path only: `GET /api/workflow-runs/{id}` now returns the parent run and
+`sub-workflow` step of a child run (`getWorkflowRunParent`, a single `SELECT`), and
+`rowToWorkflowRun` exposes `parentStepId`. No guard, write path or ordering changes, so the
+`.tla` and `.cfg` files are unchanged; ACTIONS.md re-pins the `db.ts` and `workflow-runs.ts`
+line numbers. Every config gives the same verdict as on `c7baedb48`, and every config that
+holds has the same distinct-state count. `src/tests/workflow-tla-races.test.ts` +
+`src/tests/workflow-sub-workflow.test.ts`: 21 pass / 0 fail / 0 `test.failing`.
+
+| Config | Result | Distinct states | Trace |
+|---|---|---|---|
+| `Workflows.cfg` | `JoinWaitsForBranches` violated (CX8) | 26,760 | 23 |
+| `Long.cfg` | `AtMostOneExecuting` violated (crash trace) | 17,568 | 18 |
+| `Cal-bf12ab53.cfg` / control | found / holds | 343 / 160 | 11 / - |
+| `Cal-d4753302.cfg` / control | found / found | 4,697 / 3,222 | 32 / 32 |
+| `Fix-CX1` .. `Fix-CX7` | all hold | 4,073 / 471,850 / 308,120 / 113,010 / 26,296 / 3,325 / 3,778 | - |
+| `Ctl-CX2` .. `Ctl-CX7` | all find their CX | 1,823 / 2,136 / 30,015 / 8,172 / 514 / 1,094 | 22 / 20 / 29 / 32 / 12 / 27 |
+| `Fix-CX11` / `Ctl-CX11` | holds / found | 78,384 / 1,208 | - / 20 |
+| `Probe-task-retry.cfg` | CX12 found | 543,298 | 34 |
+| `Probe-cancel-finalize.cfg` | CX13 found | 880 | 17 |
+| `Probe-input-await.cfg` | CX6 found | 416 | 12 |
+| `Probe-replay-unreadable.cfg` / control | CX14 found / holds | 1,178 / 13,005 | 19 / - |
+| `Probe-child-run.cfg` / control | holds / CX12 found | 14,004 / 145,327 | - / 34 |
