@@ -9,6 +9,7 @@ import type { ConfigCatalogEntry } from "../../lib/configuration-catalog";
 mock.module("@/api/hooks/status-query", () => require("../../api/hooks/status-query"));
 mock.module("@/api/hooks/use-agents", () => require("../../api/hooks/use-agents"));
 mock.module("@/api/hooks/use-config-api", () => require("../../api/hooks/use-config-api"));
+mock.module("@/components/shared/image-preview", () => require("../shared/image-preview"));
 mock.module("@/components/ui/badge", () => require("../ui/badge"));
 mock.module("@/components/ui/button", () => require("../ui/button"));
 mock.module("@/components/ui/dropdown-menu", () => require("../ui/dropdown-menu"));
