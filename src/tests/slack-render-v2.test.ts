@@ -297,7 +297,11 @@ async function removeDbFiles() {
   }
 }
 
+let originalCombEnabled: string | undefined;
+
 beforeAll(() => {
+  originalCombEnabled = process.env.COMB_ENABLED;
+  delete process.env.COMB_ENABLED;
   process.env.APP_URL = "https://app.agent-swarm.dev";
   process.env.SLACK_RENDER_V2 = "true";
 });
@@ -330,6 +334,8 @@ beforeEach(async () => {
 });
 
 afterAll(async () => {
+  if (originalCombEnabled === undefined) delete process.env.COMB_ENABLED;
+  else process.env.COMB_ENABLED = originalCombEnabled;
   _resetSlackRenderV2ForTests();
   closeDb();
   await removeDbFiles();
