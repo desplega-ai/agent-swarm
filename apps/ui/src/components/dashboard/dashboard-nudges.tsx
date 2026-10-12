@@ -115,12 +115,8 @@ export function DashboardNudges() {
           title="Telemetry is off"
           description={
             <>
-              Turning it on sends usage counts to Desplega: lifecycle and usage events (task and
-              agent counts, outcomes, versions), your organization name and website, and your
-              admin's email domain. Never prompts, task content, outputs, error messages, names or
-              email addresses. <strong>You get</strong> faster fixes for the errors you actually
-              hit. <strong>We get</strong> to see which features matter and which bugs hurt real
-              installs, so we build the right things.{" "}
+              Turn it on to send usage counts, never prompts or task content. You get faster fixes;
+              we see which features matter.{" "}
               <a
                 href={TELEMETRY_DOCS_URL}
                 target="_blank"
@@ -204,7 +200,9 @@ export function NudgeBanner({
 
         <div className="min-w-0 flex-1">
           <div className="flex flex-col gap-0.5 sm:flex-row sm:items-baseline sm:gap-2">
-            <p className="truncate text-sm font-medium leading-snug text-foreground">{title}</p>
+            <p className="truncate text-sm font-medium leading-snug text-foreground sm:shrink-0">
+              {title}
+            </p>
             {description && <div className="text-sm text-muted-foreground">{description}</div>}
           </div>
         </div>
