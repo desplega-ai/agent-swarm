@@ -49,8 +49,12 @@ export interface LocalFleetStats {
   tasksCreated: number;
   tasksCompleted: number;
   tasksFailed: number;
-  /** First task ever, ISO; null when there is none. */
-  firstTaskAt: string | null;
+  /**
+   * The install's first telemetry event, ISO, the anchor the proxy uses
+   * (`min(occurred_at)`); null when unknown. Counts start here when it is
+   * inside the window, as the proxy never saw earlier tasks.
+   */
+  firstSeenAt: string | null;
   agents: number;
 }
 
@@ -70,11 +74,16 @@ export function fleetBucketFor(agents: number): FleetBucket | null {
   return agents <= 5 ? "2-5" : "6+";
 }
 
-/** Tasks per week over the window, or since the first task when newer, with a 7-day floor. */
-export function localTasksPerWeek(stats: LocalFleetStats, now: Date): number {
+/** Where the counts start: the window start, or the install's first event when newer. */
+export function fleetCountStart(firstSeenAt: string | null, now: Date): Date {
   const windowStart = now.getTime() - FLEET_WINDOW_DAYS * 86_400_000;
-  const first = stats.firstTaskAt ? Date.parse(stats.firstTaskAt) : Number.NaN;
-  const start = Number.isFinite(first) ? Math.max(first, windowStart) : windowStart;
+  const first = firstSeenAt ? Date.parse(firstSeenAt) : Number.NaN;
+  return new Date(Number.isFinite(first) ? Math.max(first, windowStart) : windowStart);
+}
+
+/** Tasks per week since `fleetCountStart`, with a 7-day floor, as the proxy computes it. */
+export function localTasksPerWeek(stats: LocalFleetStats, now: Date): number {
+  const start = fleetCountStart(stats.firstSeenAt, now).getTime();
   const days = Math.max(MIN_OBSERVED_DAYS, (now.getTime() - start) / 86_400_000);
   return round(stats.tasksCreated / (days / 7), 1);
 }

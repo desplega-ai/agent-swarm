@@ -7,10 +7,15 @@ import {
   fleetBucketFor,
   localTasksPerWeek,
 } from "../fleet-benchmark";
-import {
-  _resetFleetBenchmarkCacheForTests,
-  buildFleetBenchmarkResponse,
-} from "../http/fleet-benchmark";
+
+type FleetBenchmarkRoute = typeof import("../http/fleet-benchmark");
+
+/** A fresh module instance per test, so each starts with empty caches. */
+let instances = 0;
+async function freshRoute(): Promise<FleetBenchmarkRoute> {
+  instances += 1;
+  return (await import(`../http/fleet-benchmark?instance=${instances}`)) as FleetBenchmarkRoute;
+}
 
 const NOW = new Date("2026-10-12T00:00:00.000Z");
 const DAY = 86_400_000;
@@ -66,13 +71,25 @@ describe("fleet benchmark comparison", () => {
     const fresh = { tasksCreated: 70, tasksCompleted: 0, tasksFailed: 0, agents: 1 };
     expect(
       localTasksPerWeek(
-        { ...fresh, firstTaskAt: new Date(NOW.getTime() - 2 * DAY).toISOString() },
+        { ...fresh, firstSeenAt: new Date(NOW.getTime() - 2 * DAY).toISOString() },
         NOW,
       ),
     ).toBe(70);
     expect(
-      localTasksPerWeek({ ...fresh, tasksCreated: 300, firstTaskAt: "2025-01-01T00:00:00Z" }, NOW),
+      localTasksPerWeek({ ...fresh, tasksCreated: 300, firstSeenAt: "2025-01-01T00:00:00Z" }, NOW),
     ).toBe(70);
+  });
+
+  test("an older install with a recent first task is measured from its first event", () => {
+    const stats = {
+      tasksCreated: 70,
+      tasksCompleted: 0,
+      tasksFailed: 0,
+      firstSeenAt: new Date(NOW.getTime() - 30 * DAY).toISOString(),
+      agents: 1,
+    };
+    // The proxy's reference: 70 tasks over 30 days.
+    expect(localTasksPerWeek(stats, NOW)).toBe(16.3);
   });
 
   test("uses the bucket where published and falls back to the whole fleet per metric", () => {
@@ -80,7 +97,7 @@ describe("fleet benchmark comparison", () => {
       tasksCreated: 300,
       tasksCompleted: 95,
       tasksFailed: 5,
-      firstTaskAt: "2025-01-01T00:00:00Z",
+      firstSeenAt: "2025-01-01T00:00:00Z",
       agents: 3,
     };
     expect(compareWithFleet(stats, FLEET, NOW)).toEqual([
@@ -108,7 +125,7 @@ describe("fleet benchmark comparison", () => {
       tasksCreated: 3000,
       tasksCompleted: 10,
       tasksFailed: 0,
-      firstTaskAt: null,
+      firstSeenAt: null,
       agents: 1,
     };
     const [tasks, success] = compareWithFleet(stats, FLEET, NOW);
@@ -122,11 +139,13 @@ describe("GET /api/fleet-benchmark", () => {
   const savedTelemetry = process.env.ANONYMIZED_TELEMETRY;
   let fetched: string[];
   let proxyStatus: number;
+  let proxyBody: unknown;
+  let buildFleetBenchmarkResponse: FleetBenchmarkRoute["buildFleetBenchmarkResponse"];
 
   beforeAll(() => {
     globalThis.fetch = (async (url: string) => {
       fetched.push(String(url));
-      return new Response(JSON.stringify(FLEET), { status: proxyStatus });
+      return new Response(JSON.stringify(proxyBody), { status: proxyStatus });
     }) as unknown as typeof fetch;
   });
 
@@ -138,9 +157,10 @@ describe("GET /api/fleet-benchmark", () => {
 
   beforeEach(async () => {
     db.initDb(":memory:");
-    _resetFleetBenchmarkCacheForTests();
+    ({ buildFleetBenchmarkResponse } = await freshRoute());
     fetched = [];
     proxyStatus = 200;
+    proxyBody = FLEET;
     process.env.ANONYMIZED_TELEMETRY = "true";
     await db.upsertSwarmConfig({ scope: "global", key: "SWARM_ORG_NAME", value: "Acme" });
     await db.upsertSwarmConfig({
@@ -219,6 +239,55 @@ describe("GET /api/fleet-benchmark", () => {
 
     await buildFleetBenchmarkResponse(new Date(NOW.getTime() + 23 * 3_600_000));
     expect(fetched).toHaveLength(1);
+  });
+
+  async function mintInstallId(daysAgo: number): Promise<void> {
+    await db.upsertSwarmConfig({
+      scope: "global",
+      key: "telemetry_installation_id",
+      value: "install_0123456789abcdef",
+    });
+    await db
+      .getDbClient()
+      .run("UPDATE swarm_config SET createdAt = ? WHERE key = 'telemetry_installation_id'", [
+        new Date(NOW.getTime() - daysAgo * DAY).toISOString(),
+      ]);
+  }
+
+  test("an install first seen 30 days ago with its first task yesterday: the proxy's rate", async () => {
+    await mintInstallId(30);
+    await addTasks(70, "completed", 1);
+    const response = await buildFleetBenchmarkResponse(NOW);
+    expect(response.local).toMatchObject({ tasksPerWeek: 16.3, finishedTasks: 70 });
+  });
+
+  test("tasks from before the install's first event are not counted", async () => {
+    await addTasks(50, "completed", 20);
+    await mintInstallId(10);
+    await addTasks(20, "completed", 5);
+    const response = await buildFleetBenchmarkResponse(NOW);
+    expect(response.local).toMatchObject({ tasksPerWeek: 14, finishedTasks: 20 });
+  });
+
+  test.each([
+    ["null agent-count buckets", { ...FLEET, byAgentCount: null }],
+    [
+      "a nonnumeric percentile",
+      {
+        ...FLEET,
+        overall: { ...FLEET.overall, tasksPerWeek: { ...FLEET.overall.tasksPerWeek, p50: "95.6" } },
+      },
+    ],
+  ])("malformed proxy body (%s): unavailable, not cached for a day", async (_label, body) => {
+    await addTasks(10, "completed", 1);
+    proxyBody = body;
+    expect((await buildFleetBenchmarkResponse(NOW)).state).toBe("unavailable");
+    expect((await buildFleetBenchmarkResponse(NOW)).state).toBe("unavailable");
+    expect(fetched).toHaveLength(1);
+    proxyBody = FLEET;
+    const later = await buildFleetBenchmarkResponse(new Date(NOW.getTime() + 61 * 60_000));
+    expect(later.state).toBe("ready");
+    expect(fetched).toHaveLength(2);
   });
 
   test("proxy failure: unavailable, retried after an hour, not on every load", async () => {

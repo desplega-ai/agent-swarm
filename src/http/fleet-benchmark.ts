@@ -84,22 +84,35 @@ const fleetBenchmark = route({
 let fleetCache: { value: FleetBenchmarks | null; until: number } | null = null;
 let localCache: { value: LocalFleetStats; until: number } | null = null;
 
-export function _resetFleetBenchmarkCacheForTests(): void {
-  fleetCache = null;
-  localCache = null;
-}
-
-function isFleetBenchmarks(value: unknown): value is FleetBenchmarks {
-  const body = value as Partial<FleetBenchmarks> | null;
-  return (
-    typeof body === "object" &&
-    body !== null &&
-    typeof body.generatedAt === "string" &&
-    typeof body.overall === "object" &&
-    body.overall !== null &&
-    typeof body.byAgentCount === "object"
-  );
-}
+const ProxyMetricSchema = z.object({
+  n: z.number(),
+  p25: z.number().optional(),
+  p50: z.number().optional(),
+  p75: z.number().optional(),
+  p90: z.number().optional(),
+  omitted: z.string().optional(),
+});
+const ProxyBlockSchema = z.object({
+  installs: z.number(),
+  tasksPerWeek: ProxyMetricSchema,
+  taskSuccessRate: ProxyMetricSchema,
+});
+/**
+ * Everything `compareWithFleet` reads from `GET /v1/fleet/benchmarks`. A body
+ * that fails it counts as a failed call, so a malformed 200 is never cached.
+ */
+const ProxyFleetBenchmarksSchema = z.object({
+  window: z.string(),
+  generatedAt: z.string(),
+  minInstallsPerBucket: z.number(),
+  minFinishedTasks: z.number(),
+  overall: ProxyBlockSchema,
+  byAgentCount: z.object({
+    "1": ProxyBlockSchema.optional(),
+    "2-5": ProxyBlockSchema.optional(),
+    "6+": ProxyBlockSchema.optional(),
+  }),
+}) satisfies z.ZodType<FleetBenchmarks>;
 
 /** The proxy's fleet percentiles. The request carries no install ID. */
 async function fleetBenchmarks(now: number): Promise<FleetBenchmarks | null> {
@@ -113,8 +126,8 @@ async function fleetBenchmarks(now: number): Promise<FleetBenchmarks | null> {
       },
     );
     if (response.ok) {
-      const body: unknown = await response.json();
-      if (isFleetBenchmarks(body)) value = body;
+      const parsed = ProxyFleetBenchmarksSchema.safeParse(await response.json());
+      if (parsed.success) value = parsed.data;
     }
   } catch {
     // Unreachable proxy: the card says the comparison is unavailable.
