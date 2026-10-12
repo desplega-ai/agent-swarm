@@ -1,30 +1,22 @@
 /**
  * Local numbers for the fleet benchmark card, with the definitions the
  * telemetry proxy uses for the fleet: tasks created and tasks finished since
- * the window start (or the install's first event, when newer), and the
+ * the proxy started counting this install (`fleetCountStart`), and the
  * registered agent count (the same count `org.snapshot` reports as
  * `agents_total`).
  *
- * The proxy anchors an install at its first event ever. Locally that is when
- * the install ID was minted: the `telemetry_installation_id` row's `createdAt`,
- * which upserts never change and which exists for installs older than the
- * `telemetry_installed_at` anchor too. Without that row, the first task stands in.
+ * Null when that start is unknown: no accepted event is recorded yet, or the
+ * earliest one is inside the window and may not be the proxy's first.
  */
 import { fleetCountStart, type LocalFleetStats } from "../fleet-benchmark";
 import { getDbClient } from "./db/runtime";
+import { getTelemetryIngestAnchor } from "./telemetry-ingest-anchor";
 
-export async function getLocalFleetStats(now = new Date()): Promise<LocalFleetStats> {
+export async function getLocalFleetStats(now = new Date()): Promise<LocalFleetStats | null> {
+  const start = fleetCountStart(await getTelemetryIngestAnchor(), now);
+  if (!start) return null;
+  const since = start.toISOString();
   const client = getDbClient();
-  const anchor = await client.get<{ firstSeenAt: string | null }>(
-    `SELECT COALESCE(
-              (SELECT createdAt FROM swarm_config
-                WHERE scope = 'global' AND key = 'telemetry_installation_id'
-                ORDER BY createdAt LIMIT 1),
-              (SELECT MIN(createdAt) FROM agent_tasks)
-            ) AS firstSeenAt`,
-  );
-  const firstSeenAt = anchor?.firstSeenAt ?? null;
-  const since = fleetCountStart(firstSeenAt, now).toISOString();
   const tasks = await client.get<{
     created: number | null;
     completed: number | null;
@@ -41,7 +33,7 @@ export async function getLocalFleetStats(now = new Date()): Promise<LocalFleetSt
     tasksCreated: Number(tasks?.created ?? 0),
     tasksCompleted: Number(tasks?.completed ?? 0),
     tasksFailed: Number(tasks?.failed ?? 0),
-    firstSeenAt,
+    countStart: since,
     agents: Number(agents?.n ?? 0),
   };
 }

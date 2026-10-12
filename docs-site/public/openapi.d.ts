@@ -21203,7 +21203,7 @@ export interface paths {
         };
         /**
          * Compare this swarm with similar swarms
-         * @description Places this swarm's tasks per week and task success rate (last 30 days) in the fleet percentiles published by the telemetry proxy, against swarms with the same agent count when enough exist. Needs telemetry on and an organization name; otherwise `state` says what is missing and the proxy is not called. The fleet numbers are cached for a day.
+         * @description Places this swarm's tasks per week and task success rate (last 30 days) in the fleet percentiles published by the telemetry proxy, against swarms with the same agent count when enough exist. Needs telemetry on and an organization name; otherwise `state` says what is missing and the proxy is not called. `unavailable` also covers an install whose first event the proxy saw cannot be established locally (until 30 days after the first accepted event, unless it was the install's first event). The fleet numbers are cached for a day.
          */
         get: {
             parameters: {

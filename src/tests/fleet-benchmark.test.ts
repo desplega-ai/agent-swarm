@@ -1,12 +1,25 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import * as db from "../be/db";
 import {
+  _resetTelemetryIngestAnchorForTests,
+  getTelemetryIngestAnchor,
+  recordTelemetryIngest,
+} from "../be/telemetry-ingest-anchor";
+import {
   compareWithFleet,
   type FleetBenchmarks,
   fleetBand,
   fleetBucketFor,
+  fleetCountStart,
   localTasksPerWeek,
 } from "../fleet-benchmark";
+import {
+  _resetTelemetryStateForTests,
+  initTelemetry,
+  setTelemetryIngestObserver,
+  type TelemetryIngested,
+  track,
+} from "../telemetry";
 
 type FleetBenchmarkRoute = typeof import("../http/fleet-benchmark");
 
@@ -19,6 +32,8 @@ async function freshRoute(): Promise<FleetBenchmarkRoute> {
 
 const NOW = new Date("2026-10-12T00:00:00.000Z");
 const DAY = 86_400_000;
+const INSTALL_ID = "install_0123456789abcdef";
+const ago = (days: number) => new Date(NOW.getTime() - days * DAY).toISOString();
 
 const metric = (p25: number, p50: number, p75: number, p90: number, n = 40) => ({
   n,
@@ -69,27 +84,21 @@ describe("fleet benchmark comparison", () => {
 
   test("a new swarm's rate uses a 7-day floor, an old one the 30-day window", () => {
     const fresh = { tasksCreated: 70, tasksCompleted: 0, tasksFailed: 0, agents: 1 };
-    expect(
-      localTasksPerWeek(
-        { ...fresh, firstSeenAt: new Date(NOW.getTime() - 2 * DAY).toISOString() },
-        NOW,
-      ),
-    ).toBe(70);
-    expect(
-      localTasksPerWeek({ ...fresh, tasksCreated: 300, firstSeenAt: "2025-01-01T00:00:00Z" }, NOW),
-    ).toBe(70);
+    expect(localTasksPerWeek({ ...fresh, countStart: ago(2) }, NOW)).toBe(70);
+    expect(localTasksPerWeek({ ...fresh, tasksCreated: 300, countStart: ago(30) }, NOW)).toBe(70);
   });
 
-  test("an older install with a recent first task is measured from its first event", () => {
-    const stats = {
-      tasksCreated: 70,
-      tasksCompleted: 0,
-      tasksFailed: 0,
-      firstSeenAt: new Date(NOW.getTime() - 30 * DAY).toISOString(),
-      agents: 1,
-    };
-    // The proxy's reference: 70 tasks over 30 days.
-    expect(localTasksPerWeek(stats, NOW)).toBe(16.3);
+  test("counts start where the proxy's do, or nowhere when that is unknown", () => {
+    const start = (daysAgo: number, firstOfInstall: boolean) =>
+      fleetCountStart({ occurredAt: ago(daysAgo), firstOfInstall }, NOW)?.toISOString() ?? null;
+    // Nothing accepted yet.
+    expect(fleetCountStart(null, NOW)).toBeNull();
+    // Accepted before the window: the proxy's first event is no later.
+    expect(start(45, false)).toBe(ago(30));
+    expect(start(30, false)).toBe(ago(30));
+    // Inside the window: exact only for the install's first event.
+    expect(start(10, true)).toBe(ago(10));
+    expect(start(10, false)).toBeNull();
   });
 
   test("uses the bucket where published and falls back to the whole fleet per metric", () => {
@@ -97,7 +106,7 @@ describe("fleet benchmark comparison", () => {
       tasksCreated: 300,
       tasksCompleted: 95,
       tasksFailed: 5,
-      firstSeenAt: "2025-01-01T00:00:00Z",
+      countStart: ago(30),
       agents: 3,
     };
     expect(compareWithFleet(stats, FLEET, NOW)).toEqual([
@@ -125,7 +134,7 @@ describe("fleet benchmark comparison", () => {
       tasksCreated: 3000,
       tasksCompleted: 10,
       tasksFailed: 0,
-      firstSeenAt: null,
+      countStart: ago(30),
       agents: 1,
     };
     const [tasks, success] = compareWithFleet(stats, FLEET, NOW);
@@ -168,6 +177,12 @@ describe("GET /api/fleet-benchmark", () => {
       key: "feedback_endpoint",
       value: "http://proxy.test/v1/feedback",
     });
+    await db.upsertSwarmConfig({
+      scope: "global",
+      key: "telemetry_installation_id",
+      value: INSTALL_ID,
+    });
+    await accepted(40, false);
     for (const id of ["a1", "a2", "a3"]) {
       await db.createAgent({
         id: `${id}000000-0000-4000-8000-000000000000`,
@@ -179,6 +194,17 @@ describe("GET /api/fleet-benchmark", () => {
   });
 
   afterEach(() => db.closeDb());
+
+  /** Record an event the ingest endpoint accepted `daysAgo` days before NOW. */
+  async function accepted(daysAgo: number, firstOfInstall: boolean): Promise<void> {
+    await db.getDbClient().run("DELETE FROM swarm_config WHERE key = 'telemetry_first_ingest'");
+    _resetTelemetryIngestAnchorForTests();
+    await recordTelemetryIngest({
+      installationId: INSTALL_ID,
+      occurredAt: ago(daysAgo),
+      firstOfInstall,
+    });
+  }
 
   async function addTasks(count: number, status: string, daysAgo: number): Promise<void> {
     const at = new Date(NOW.getTime() - daysAgo * DAY).toISOString();
@@ -221,7 +247,7 @@ describe("GET /api/fleet-benchmark", () => {
   test("ready: compares 30-day counts and caches the fleet for a day", async () => {
     await addTasks(57, "completed", 20);
     await addTasks(3, "failed", 20);
-    await addTasks(40, "completed", 45); // Outside the window, but the first task.
+    await addTasks(40, "completed", 45); // Outside the window.
     const response = await buildFleetBenchmarkResponse(NOW);
     expect(response.state).toBe("ready");
     expect(response.local).toEqual({
@@ -242,28 +268,52 @@ describe("GET /api/fleet-benchmark", () => {
   });
 
   async function mintInstallId(daysAgo: number): Promise<void> {
-    await db.upsertSwarmConfig({
-      scope: "global",
-      key: "telemetry_installation_id",
-      value: "install_0123456789abcdef",
-    });
     await db
       .getDbClient()
       .run("UPDATE swarm_config SET createdAt = ? WHERE key = 'telemetry_installation_id'", [
-        new Date(NOW.getTime() - daysAgo * DAY).toISOString(),
+        ago(daysAgo),
       ]);
   }
 
-  test("an install first seen 30 days ago with its first task yesterday: the proxy's rate", async () => {
+  test("an install accepted 30+ days ago with its first task yesterday: the proxy's rate", async () => {
     await mintInstallId(30);
     await addTasks(70, "completed", 1);
     const response = await buildFleetBenchmarkResponse(NOW);
+    // The proxy's reference: 70 tasks over 30 days.
     expect(response.local).toMatchObject({ tasksPerWeek: 16.3, finishedTasks: 70 });
   });
 
-  test("tasks from before the install's first event are not counted", async () => {
+  test("mint time precedes the first accepted event: withheld, no proxy call", async () => {
+    // Minted 30 days ago while the endpoint was unreachable; the first event
+    // got through yesterday, and workers may have sent earlier ones.
+    await mintInstallId(30);
+    await accepted(1, false);
+    await addTasks(70, "completed", 1);
+    const response = await buildFleetBenchmarkResponse(NOW);
+    expect(response).toMatchObject({ state: "unavailable", local: null, comparisons: [] });
+    expect(fetched).toEqual([]);
+  });
+
+  test("no accepted event recorded, or one for another install ID: withheld", async () => {
+    await addTasks(70, "completed", 1);
+    await db.getDbClient().run("DELETE FROM swarm_config WHERE key = 'telemetry_first_ingest'");
+    expect((await buildFleetBenchmarkResponse(NOW)).state).toBe("unavailable");
+
+    const other = await freshRoute();
+    _resetTelemetryIngestAnchorForTests();
+    await recordTelemetryIngest({
+      installationId: "install_ffffffffffffffff",
+      occurredAt: ago(40),
+      firstOfInstall: true,
+    });
+    expect((await other.buildFleetBenchmarkResponse(NOW)).state).toBe("unavailable");
+    expect(fetched).toEqual([]);
+  });
+
+  test("the install's first event was accepted: counts start there", async () => {
     await addTasks(50, "completed", 20);
     await mintInstallId(10);
+    await accepted(10, true);
     await addTasks(20, "completed", 5);
     const response = await buildFleetBenchmarkResponse(NOW);
     expect(response.local).toMatchObject({ tasksPerWeek: 14, finishedTasks: 20 });
@@ -300,5 +350,117 @@ describe("GET /api/fleet-benchmark", () => {
     const later = await buildFleetBenchmarkResponse(new Date(NOW.getTime() + 61 * 60_000));
     expect(later.state).toBe("ready");
     expect(fetched).toHaveLength(2);
+  });
+});
+
+describe("telemetry ingest anchor", () => {
+  const originalFetch = globalThis.fetch;
+  const savedTelemetry = process.env.ANONYMIZED_TELEMETRY;
+  let status: number;
+  let sent: { event: string; occurred_at: string }[];
+  let ingested: TelemetryIngested[];
+  let store: Map<string, string>;
+  const getConfig = async (key: string) => store.get(key);
+  const setConfig = async (key: string, value: string) => {
+    store.set(key, value);
+  };
+
+  async function flush(): Promise<void> {
+    for (let i = 0; i < 8; i++) await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+
+  beforeAll(() => {
+    globalThis.fetch = (async (_url: string, init?: { body?: string }) => {
+      const body = JSON.parse(init?.body ?? "{}");
+      // Other suites' timers can send through this mock; keep only ours.
+      if (body.event === "telemetry.enabled") sent.push(body);
+      return new Response(null, { status });
+    }) as unknown as typeof fetch;
+  });
+
+  afterAll(() => {
+    globalThis.fetch = originalFetch;
+    if (savedTelemetry === undefined) delete process.env.ANONYMIZED_TELEMETRY;
+    else process.env.ANONYMIZED_TELEMETRY = savedTelemetry;
+    _resetTelemetryStateForTests();
+  });
+
+  beforeEach(() => {
+    process.env.ANONYMIZED_TELEMETRY = "true";
+    status = 202;
+    sent = [];
+    ingested = [];
+    store = new Map();
+    _resetTelemetryStateForTests();
+  });
+
+  async function boot(): Promise<void> {
+    await initTelemetry("api-server", getConfig, setConfig, { generateIfMissing: true });
+    setTelemetryIngestObserver((event) => {
+      if (sent.some((body) => body.occurred_at === event.occurredAt)) ingested.push(event);
+    });
+  }
+
+  test("the minting boot's first event is dated at the mint and reported once accepted", async () => {
+    const before = new Date().toISOString();
+    await boot();
+    track({ event: "telemetry.enabled", properties: { via: "env" }, firstOfInstall: true });
+    track({ event: "telemetry.enabled", properties: { via: "env" }, firstOfInstall: true });
+    await flush();
+    expect(sent).toHaveLength(2);
+    expect((sent[0]?.occurred_at ?? "") >= before).toBe(true);
+    expect(ingested.map((event) => event.firstOfInstall)).toEqual([true, false]);
+    expect(ingested[0]).toMatchObject({
+      installationId: store.get("telemetry_installation_id"),
+      occurredAt: sent[0]?.occurred_at,
+    });
+  });
+
+  test("a refused send is not reported, and a later boot never claims the first event", async () => {
+    status = 503;
+    await boot();
+    track({ event: "telemetry.enabled", properties: { via: "env" }, firstOfInstall: true });
+    await flush();
+    expect(sent).toHaveLength(1);
+    expect(ingested).toEqual([]);
+
+    status = 202;
+    _resetTelemetryStateForTests();
+    await boot();
+    track({ event: "telemetry.enabled", properties: { via: "env" }, firstOfInstall: true });
+    await flush();
+    expect(ingested.map((event) => event.firstOfInstall)).toEqual([false]);
+  });
+
+  test("the record keeps the earliest accepted event; the install's first one sticks", async () => {
+    db.initDb(":memory:");
+    _resetTelemetryIngestAnchorForTests();
+    try {
+      await db.upsertSwarmConfig({
+        scope: "global",
+        key: "telemetry_installation_id",
+        value: INSTALL_ID,
+      });
+      const record = (daysAgo: number, firstOfInstall = false, installationId = INSTALL_ID) =>
+        recordTelemetryIngest({ installationId, occurredAt: ago(daysAgo), firstOfInstall });
+
+      await record(5);
+      await record(3);
+      expect(await getTelemetryIngestAnchor()).toMatchObject({ occurredAt: ago(5) });
+      await record(8);
+      expect(await getTelemetryIngestAnchor()).toMatchObject({ occurredAt: ago(8) });
+      await record(6, true);
+      await record(9);
+      expect(await getTelemetryIngestAnchor()).toMatchObject({
+        occurredAt: ago(6),
+        firstOfInstall: true,
+      });
+
+      // A new install ID starts over; the current install has no record then.
+      await record(1, false, "install_ffffffffffffffff");
+      expect(await getTelemetryIngestAnchor()).toBeNull();
+    } finally {
+      db.closeDb();
+    }
   });
 });

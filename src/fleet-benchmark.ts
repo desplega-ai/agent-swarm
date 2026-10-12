@@ -49,12 +49,8 @@ export interface LocalFleetStats {
   tasksCreated: number;
   tasksCompleted: number;
   tasksFailed: number;
-  /**
-   * The install's first telemetry event, ISO, the anchor the proxy uses
-   * (`min(occurred_at)`); null when unknown. Counts start here when it is
-   * inside the window, as the proxy never saw earlier tasks.
-   */
-  firstSeenAt: string | null;
+  /** Where the counts start, ISO: `fleetCountStart`. */
+  countStart: string;
   agents: number;
 }
 
@@ -74,16 +70,30 @@ export function fleetBucketFor(agents: number): FleetBucket | null {
   return agents <= 5 ? "2-5" : "6+";
 }
 
-/** Where the counts start: the window start, or the install's first event when newer. */
-export function fleetCountStart(firstSeenAt: string | null, now: Date): Date {
+/**
+ * Where the proxy starts counting this install: the window start, or the
+ * install's first event (`min(occurred_at)`) when newer. Null when that is
+ * unknown, so the comparison is withheld.
+ *
+ * `ingest` is the earliest event the ingest endpoint accepted from the API
+ * server. The proxy's first event is no later, so an accepted event at or
+ * before the window start means the window start. A later one is the anchor
+ * only when it was the install's first event ever.
+ */
+export function fleetCountStart(
+  ingest: { occurredAt: string; firstOfInstall: boolean } | null,
+  now: Date,
+): Date | null {
   const windowStart = now.getTime() - FLEET_WINDOW_DAYS * 86_400_000;
-  const first = firstSeenAt ? Date.parse(firstSeenAt) : Number.NaN;
-  return new Date(Number.isFinite(first) ? Math.max(first, windowStart) : windowStart);
+  const accepted = ingest ? Date.parse(ingest.occurredAt) : Number.NaN;
+  if (!ingest || !Number.isFinite(accepted)) return null;
+  if (accepted <= windowStart) return new Date(windowStart);
+  return ingest.firstOfInstall ? new Date(accepted) : null;
 }
 
-/** Tasks per week since `fleetCountStart`, with a 7-day floor, as the proxy computes it. */
+/** Tasks per week since `countStart`, with a 7-day floor, as the proxy computes it. */
 export function localTasksPerWeek(stats: LocalFleetStats, now: Date): number {
-  const start = fleetCountStart(stats.firstSeenAt, now).getTime();
+  const start = Date.parse(stats.countStart);
   const days = Math.max(MIN_OBSERVED_DAYS, (now.getTime() - start) / 86_400_000);
   return round(stats.tasksCreated / (days / 7), 1);
 }

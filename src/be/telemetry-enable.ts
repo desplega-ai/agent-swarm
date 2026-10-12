@@ -8,7 +8,8 @@
  * (`via: banner`) or any config reload (`via: settings`). Each off-to-on
  * transition sends `telemetry.enabled` once.
  */
-import { initTelemetry, isTelemetryEnabled, track } from "../telemetry";
+import { initTelemetry, isTelemetryEnabled, setTelemetryIngestObserver, track } from "../telemetry";
+import { recordTelemetryIngest } from "./telemetry-ingest-anchor";
 
 type GetConfig = (key: string) => Promise<string | undefined>;
 type SetConfig = (key: string, value: string) => Promise<void>;
@@ -20,10 +21,14 @@ let lastEnabled = false;
 /**
  * Boot-time `initTelemetry` for the API server. Sends `telemetry.enabled
  * { via: "env" }` when this boot minted the install ID: the first boot of an
- * install with telemetry on.
+ * install with telemetry on, as the install's first event.
  */
 export async function initApiTelemetry(getConfig: GetConfig, setConfig: SetConfig): Promise<void> {
   accessors = { getConfig, setConfig };
+  // Accepted events anchor the fleet benchmark (see telemetry-ingest-anchor).
+  setTelemetryIngestObserver((ingested) => {
+    recordTelemetryIngest(ingested).catch(() => {});
+  });
   lastEnabled = isTelemetryEnabled();
   if (!lastEnabled) return;
   let hadInstallId = true;
@@ -33,7 +38,8 @@ export async function initApiTelemetry(getConfig: GetConfig, setConfig: SetConfi
     // Unknown: do not claim a first boot.
   }
   await initTelemetry("api-server", getConfig, setConfig, { generateIfMissing: true });
-  if (!hadInstallId) track({ event: "telemetry.enabled", properties: { via: "env" } });
+  if (!hadInstallId)
+    track({ event: "telemetry.enabled", properties: { via: "env" }, firstOfInstall: true });
 }
 
 /**
@@ -49,7 +55,7 @@ export async function syncTelemetryEnabled(via: TelemetryEnabledVia): Promise<bo
   await initTelemetry("api-server", accessors.getConfig, accessors.setConfig, {
     generateIfMissing: true,
   });
-  track({ event: "telemetry.enabled", properties: { via } });
+  track({ event: "telemetry.enabled", properties: { via }, firstOfInstall: true });
   return true;
 }
 

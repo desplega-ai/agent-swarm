@@ -67,7 +67,7 @@ const fleetBenchmark = route({
   pattern: ["api", "fleet-benchmark"],
   summary: "Compare this swarm with similar swarms",
   description:
-    "Places this swarm's tasks per week and task success rate (last 30 days) in the fleet percentiles published by the telemetry proxy, against swarms with the same agent count when enough exist. Needs telemetry on and an organization name; otherwise `state` says what is missing and the proxy is not called. The fleet numbers are cached for a day.",
+    "Places this swarm's tasks per week and task success rate (last 30 days) in the fleet percentiles published by the telemetry proxy, against swarms with the same agent count when enough exist. Needs telemetry on and an organization name; otherwise `state` says what is missing and the proxy is not called. `unavailable` also covers an install whose first event the proxy saw cannot be established locally (until 30 days after the first accepted event, unless it was the install's first event). The fleet numbers are cached for a day.",
   tags: ["Telemetry"],
   responses: {
     200: {
@@ -82,7 +82,7 @@ const fleetBenchmark = route({
 // ─── Caches ──────────────────────────────────────────────────────────────────
 
 let fleetCache: { value: FleetBenchmarks | null; until: number } | null = null;
-let localCache: { value: LocalFleetStats; until: number } | null = null;
+let localCache: { value: LocalFleetStats | null; until: number } | null = null;
 
 const ProxyMetricSchema = z.object({
   n: z.number(),
@@ -136,7 +136,7 @@ async function fleetBenchmarks(now: number): Promise<FleetBenchmarks | null> {
   return value;
 }
 
-async function localStats(now: Date): Promise<LocalFleetStats> {
+async function localStats(now: Date): Promise<LocalFleetStats | null> {
   if (localCache && localCache.until > now.getTime()) return localCache.value;
   const value = await getLocalFleetStats(now);
   localCache = { value, until: now.getTime() + LOCAL_TTL_MS };
@@ -164,6 +164,8 @@ export async function buildFleetBenchmarkResponse(
   if (!(await orgName())) return { state: "no_org_name", ...empty };
 
   const stats = await localStats(now);
+  // Where the proxy started counting this install is unknown: no comparison.
+  if (!stats) return { state: "unavailable", ...empty };
   const finishedTasks = stats.tasksCompleted + stats.tasksFailed;
   const local = {
     tasksPerWeek: localTasksPerWeek(stats, now),
