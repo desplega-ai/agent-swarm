@@ -60,6 +60,8 @@ export interface ConfigCatalogEntry {
   /** Read once at boot — saving is not enough, the server must restart. */
   restartRequired?: boolean;
   placeholder?: string;
+  /** `"image"`: the value is an image URL, previewed live next to the field. */
+  preview?: "image";
   /**
    * Model tier rows only: what the value resolves to on the server right now
    * (from `GET /api/models-catalog/tiers`), shown under the description.
@@ -1528,6 +1530,7 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
           "Publicly reachable URL of the logo shown alongside the organization name. Filled from the company website when empty; a URL you set here is never replaced.",
         kind: "string",
         placeholder: "https://example.com/logo.svg",
+        preview: "image",
         docsUrl: `${DOCS}guides/personalization`,
       },
       {

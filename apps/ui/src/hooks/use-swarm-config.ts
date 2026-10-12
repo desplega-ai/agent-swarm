@@ -2,6 +2,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import type { RowClickedEvent } from "ag-grid-community";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
+import { applySavedIdentity } from "@/api/hooks/status-query";
 import { useAgents } from "@/api/hooks/use-agents";
 import { useConfigs, useDeleteConfig, useUpsertConfig } from "@/api/hooks/use-config-api";
 import type { SwarmConfig, SwarmConfigScope } from "@/api/types";
@@ -94,6 +95,7 @@ export function useSwarmConfig(key: string): UseSwarmConfigResult {
         {
           onSuccess: () => {
             invalidate();
+            applySavedIdentity(queryClient, key, value);
             toast.success(`Saved ${key}`);
           },
           onError: (err) => {
@@ -102,7 +104,7 @@ export function useSwarmConfig(key: string): UseSwarmConfigResult {
         },
       );
     },
-    [invalidate, key, upsertConfig],
+    [invalidate, key, queryClient, upsertConfig],
   );
 
   const reset = useCallback(() => {
@@ -110,13 +112,14 @@ export function useSwarmConfig(key: string): UseSwarmConfigResult {
     deleteConfig.mutate(config.id, {
       onSuccess: () => {
         invalidate();
+        applySavedIdentity(queryClient, key, null);
         toast.success(`Reset ${key} to its default`);
       },
       onError: (err) => {
         toast.error(`Failed to reset ${key}: ${errorMessage(err)}`);
       },
     });
-  }, [config, deleteConfig, invalidate, key]);
+  }, [config, deleteConfig, invalidate, key, queryClient]);
 
   return {
     config,

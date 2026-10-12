@@ -1,4 +1,4 @@
-import { ExternalLink, RotateCcw } from "lucide-react";
+import { ExternalLink, ImageOff, RotateCcw } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -61,6 +61,38 @@ function deriveSourceChip(inDb: boolean, inEnv: boolean): SourceChip | null {
           "Set via deployment env (.env / docker) only. No saved value — saving here creates one that takes over on reload.",
       }
     : null;
+}
+
+/** Live preview of an image URL as it is typed, before it is saved. */
+function ImagePreview({ src, label }: { src: string; label: string }) {
+  const [failedSrc, setFailedSrc] = useState<string | null>(null);
+  const url = src.trim();
+  const failed = url !== "" && failedSrc === url;
+  return (
+    <span
+      data-testid="image-preview"
+      title={failed ? "This URL did not load as an image" : undefined}
+      className={cn(
+        "flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded border bg-muted/40",
+        !url && "border-dashed",
+      )}
+    >
+      {url && !failed ? (
+        <img
+          key={url}
+          src={url}
+          alt={`${label} preview`}
+          className="h-full w-full object-contain"
+          onError={() => setFailedSrc(url)}
+        />
+      ) : failed ? (
+        <ImageOff
+          className="h-3.5 w-3.5 text-status-error-strong"
+          aria-label="Image did not load"
+        />
+      ) : null}
+    </span>
+  );
 }
 
 export interface ConfigurationRowProps {
@@ -184,6 +216,19 @@ export function ConfigurationRow({ entry, inEnv, normalize, onSave }: Configurat
     </Tooltip>
   ) : (
     <span aria-hidden="true" className="hidden h-8 w-8 shrink-0 sm:block" />
+  );
+
+  const textInput = (
+    <Input
+      id={inputId}
+      type={entry.kind === "number" ? "number" : "text"}
+      step={entry.kind === "number" ? "any" : undefined}
+      value={draft}
+      placeholder={entry.placeholder ?? entry.defaultValue}
+      disabled={isPending}
+      onChange={(event) => setDraft(event.target.value)}
+      className="min-w-0 w-full font-mono text-xs"
+    />
   );
 
   return (
@@ -419,16 +464,14 @@ export function ConfigurationRow({ entry, inEnv, normalize, onSave }: Configurat
                     className="w-10 shrink-0 p-1"
                   />
                 )}
-                <Input
-                  id={inputId}
-                  type={entry.kind === "number" ? "number" : "text"}
-                  step={entry.kind === "number" ? "any" : undefined}
-                  value={draft}
-                  placeholder={entry.placeholder ?? entry.defaultValue}
-                  disabled={isPending}
-                  onChange={(event) => setDraft(event.target.value)}
-                  className="min-w-0 w-full font-mono text-xs"
-                />
+                {entry.preview === "image" ? (
+                  <div className="flex w-full min-w-0 items-center gap-2">
+                    <ImagePreview src={draft} label={entry.label} />
+                    {textInput}
+                  </div>
+                ) : (
+                  textInput
+                )}
               </>
             )}
             <Button
