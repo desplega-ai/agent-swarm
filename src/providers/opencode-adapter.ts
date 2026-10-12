@@ -18,6 +18,7 @@ import {
   getContextWindowSize,
 } from "../utils/context-window";
 import { validateOpencodeCredentials } from "../utils/credentials";
+import { isEnvFlagEnabled } from "../utils/env-flag";
 import { fetchInstalledMcpServers } from "../utils/mcp-server-fetcher";
 import { swarmRuntimeInstanceId } from "../utils/multi-runtime";
 import {
@@ -856,7 +857,7 @@ export class OpencodeAdapter implements ProviderAdapter {
     // resolveContextModePluginPath for why a bare name fails to resolve offline).
     // Gated by CONTEXT_MODE_DISABLED so builds/deploys without it opt out.
     const plugins = [pluginPath];
-    if (process.env.CONTEXT_MODE_DISABLED !== "true") {
+    if (!isEnvFlagEnabled("CONTEXT_MODE_DISABLED", false)) {
       const contextModePluginPath = resolveContextModePluginPath();
       if (contextModePluginPath) {
         plugins.push(contextModePluginPath);
