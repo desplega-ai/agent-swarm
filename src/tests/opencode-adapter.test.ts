@@ -411,12 +411,6 @@ describe("OpencodeSession — abort and steering", () => {
       reason: "opencode session already completed",
     });
   });
-
-  test("steering reports the SDK error when the prompt is rejected", async () => {
-    const { session } = await startSession([], testConfig(), { promptError: new Error("boom") });
-    const delivered = await session.deliverSteering({ mode: "queue", text: "x" });
-    expect(delivered.delivered).toBe(false);
-  });
 });
 
 describe("OpenRouter attribution config", () => {

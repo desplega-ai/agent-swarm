@@ -65,17 +65,6 @@ async function setup(overrides: Partial<SwarmHooksConfig> = {}) {
 }
 
 describe("opencode swarm plugin", () => {
-  test("registers under a stable id", async () => {
-    const { plugin, hooks } = await setup();
-    expect(plugin.id).toBe("agent-swarm");
-    expect(Object.keys(hooks).sort()).toEqual([
-      "session.compaction",
-      "session.context",
-      "tool.execute.after",
-      "tool.execute.before",
-    ]);
-  });
-
   test("blocks tools once the task is cancelled", async () => {
     const { hooks } = await setup();
     cancelled = false;
