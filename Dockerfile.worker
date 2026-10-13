@@ -189,15 +189,20 @@ RUN mkdir -p /home/worker/.codex && \
 # Install OpenCode 2 (HARNESS_PROVIDER=opencode, and the `opencode acp` target).
 # The adapter runs `@opencode/sdk` in-process, loading it from the global npm
 # root at runtime: its native modules (pty, file watcher) cannot be bundled into
-# the compiled binary. The CLI is only needed by the ACP target. One version
-# for both: they ship from the same release. The SDK installs with
-# --ignore-scripts: its optional tree-sitter grammars try a node-gyp build (no
-# `make` here) and the runtime does not need them; the CLI's postinstall must run.
+# the compiled binary. The SDK installs as root with --ignore-scripts, so no
+# package code runs (its optional tree-sitter grammars would try a node-gyp
+# build). The CLI, needed only by the ACP target, must run its postinstall to
+# fetch its platform binary, so it installs as `worker` into ~/.opencode.
+# One version for both: they ship from the same release.
 ARG OPENCODE_VERSION=2.0.28
+RUN NPM_CONFIG_CACHE=/tmp/npm-cache-worker \
+    npm install -g --prefix /home/worker/.opencode @opencode/cli@${OPENCODE_VERSION} \
+    && rm -rf /tmp/npm-cache-worker /home/worker/.npm \
+    && /home/worker/.opencode/bin/opencode --version
+ENV PATH="/home/worker/.opencode/bin:$PATH"
 USER root
-RUN export HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache \
-    && npm install -g @opencode/cli@${OPENCODE_VERSION} \
-    && npm install -g --ignore-scripts @opencode/sdk@${OPENCODE_VERSION} \
+RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache \
+    npm install -g --ignore-scripts @opencode/sdk@${OPENCODE_VERSION} \
     && rm -rf /tmp/npm-cache /root/.npm
 USER worker
 
