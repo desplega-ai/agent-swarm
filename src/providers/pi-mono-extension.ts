@@ -34,7 +34,7 @@ export interface SwarmHooksConfig {
 }
 
 /** Standard headers for swarm API requests */
-function apiHeaders(config: SwarmHooksConfig): Record<string, string> {
+export function apiHeaders(config: SwarmHooksConfig): Record<string, string> {
   return {
     "Content-Type": "application/json",
     ...(config.apiKey ? { Authorization: `Bearer ${config.apiKey}` } : {}),
@@ -43,12 +43,12 @@ function apiHeaders(config: SwarmHooksConfig): Record<string, string> {
 }
 
 /** Fire-and-forget fetch — logs nothing, swallows errors */
-function fireAndForget(url: string, init: RequestInit): void {
+export function fireAndForget(url: string, init: RequestInit): void {
   void fetch(url, init).catch(() => {});
 }
 
 /** Check if a task has been cancelled */
-async function isTaskCancelled(
+export async function isTaskCancelled(
   config: SwarmHooksConfig,
 ): Promise<{ cancelled: boolean; reason?: string }> {
   try {
@@ -68,7 +68,7 @@ async function isTaskCancelled(
 }
 
 /** Check if agent should stop polling */
-async function checkShouldBlockPolling(config: SwarmHooksConfig): Promise<boolean> {
+export async function checkShouldBlockPolling(config: SwarmHooksConfig): Promise<boolean> {
   try {
     const resp = await fetch(`${config.apiUrl}/me`, {
       method: "GET",
@@ -83,7 +83,7 @@ async function checkShouldBlockPolling(config: SwarmHooksConfig): Promise<boolea
 }
 
 /** Fetch task details for goal reminder */
-async function fetchTaskDetails(
+export async function fetchTaskDetails(
   config: SwarmHooksConfig,
 ): Promise<{ id: string; task: string; progress?: string } | null> {
   try {
@@ -99,7 +99,7 @@ async function fetchTaskDetails(
 }
 
 /** Sync identity files (SOUL.md, IDENTITY.md, TOOLS.md) to server */
-async function syncIdentityFilesToServer(
+export async function syncIdentityFilesToServer(
   config: SwarmHooksConfig,
   changeSource: "self_edit" | "session_sync" = "session_sync",
 ): Promise<void> {
@@ -174,7 +174,7 @@ async function syncSetupScriptToServer(
 }
 
 /** Auto-index a file written to memory directory */
-async function autoIndexMemoryFile(config: SwarmHooksConfig, editedPath: string): Promise<void> {
+export async function autoIndexMemoryFile(config: SwarmHooksConfig, editedPath: string): Promise<void> {
   try {
     const fileContent = await Bun.file(editedPath).text();
     const isShared = editedPath.startsWith("/workspace/shared/");
@@ -198,7 +198,7 @@ async function autoIndexMemoryFile(config: SwarmHooksConfig, editedPath: string)
 }
 
 /** Fetch concurrent context for lead agents */
-async function fetchConcurrentContext(config: SwarmHooksConfig): Promise<string | null> {
+export async function fetchConcurrentContext(config: SwarmHooksConfig): Promise<string | null> {
   try {
     const resp = await fetch(`${config.apiUrl}/api/concurrent-context`, {
       method: "GET",
@@ -313,26 +313,38 @@ export async function summarizeSessionForPi(
     return;
   }
 
+  let transcript = "";
+  try {
+    const fullTranscript = await Bun.file(sessionFile).text();
+    transcript = fullTranscript.length > 20000 ? fullTranscript.slice(-20000) : fullTranscript;
+  } catch (err) {
+    console.warn(
+      scrubSecrets(`session_summary skipped (pi): cannot read ${sessionFile}: ${String(err)}`),
+    );
+    return;
+  }
+  await summarizeTranscript(config, "pi", transcript, deps);
+}
+
+/**
+ * Summarize an already-loaded session transcript and index the result. Shared
+ * by pi (transcript file) and opencode (transcript read from its session API).
+ */
+export async function summarizeTranscript(
+  config: SwarmHooksConfig,
+  harness: "pi" | "opencode",
+  transcript: string,
+  deps: SummarizeSessionForPiDeps = {},
+): Promise<void> {
   const _runSummarize = deps.runSummarize ?? runSummarize;
   const _fetchRetrievals = deps.fetchRetrievalsForTask ?? fetchRetrievalsForTask;
   const _postRatings = deps.postRatings ?? postRatings;
   const _buildRatings = deps.buildRatingsFromLlm ?? buildRatingsFromLlm;
 
   try {
-    let transcript = "";
-    try {
-      const fullTranscript = await Bun.file(sessionFile).text();
-      transcript = fullTranscript.length > 20000 ? fullTranscript.slice(-20000) : fullTranscript;
-    } catch (err) {
-      console.warn(
-        scrubSecrets(`session_summary skipped (pi): cannot read ${sessionFile}: ${String(err)}`),
-      );
-      return;
-    }
-
     if (transcript.length <= 100) {
       console.warn(
-        `session_summary skipped (pi): transcript too short (${transcript.length} chars)`,
+        `session_summary skipped (${harness}): transcript too short (${transcript.length} chars)`,
       );
       return;
     }
@@ -341,7 +353,7 @@ export async function summarizeSessionForPi(
     const agentId = config.agentId;
     if (!sourceTaskId || !agentId) {
       console.warn(
-        `session_summary skipped (pi): ${!sourceTaskId ? "task id unavailable" : "agent id unavailable"}`,
+        `session_summary skipped (${harness}): ${!sourceTaskId ? "task id unavailable" : "agent id unavailable"}`,
       );
       return;
     }
@@ -359,7 +371,7 @@ export async function summarizeSessionForPi(
       : [];
 
     const result = await _runSummarize({
-      harness: "pi",
+      harness,
       transcript,
       retrievals,
       taskContext: {
@@ -375,14 +387,14 @@ export async function summarizeSessionForPi(
     });
     // null = no auth resolved or wrapper exhausted retries (already logged inside)
     if (!result) {
-      console.warn("session_summary skipped (pi): summarizer returned no result");
+      console.warn(`session_summary skipped (${harness}): summarizer returned no result`);
       return;
     }
 
     const summary = result.summary.trim();
     if (summary.length <= 20 || summary.toLowerCase().includes("no significant learnings")) {
       console.debug(
-        `session_summary skipped (pi): summary failed quality gate (${summary.length} chars)`,
+        `session_summary skipped (${harness}): summary failed quality gate (${summary.length} chars)`,
       );
       return;
     }
@@ -401,7 +413,7 @@ export async function summarizeSessionForPi(
     });
     if (!indexResp.ok) {
       const text = await indexResp.text().catch(() => "");
-      console.error("session_summary: /api/memory/index POST failed (pi):", indexResp.status, text);
+      console.error(`session_summary: /api/memory/index POST failed (${harness}):`, indexResp.status, text);
       return;
     }
 
@@ -414,11 +426,11 @@ export async function summarizeSessionForPi(
           agentId,
           taskId: sourceTaskId,
           events: ratingEvents,
-        }).catch((err) => console.error("session_summary: postRatings failed (pi):", err));
+        }).catch((err) => console.error(`session_summary: postRatings failed (${harness}):`, err));
       }
     }
   } catch (err) {
-    console.error("session_summary failed (pi):", err);
+    console.error(`session_summary failed (${harness}):`, err);
   }
 }
 

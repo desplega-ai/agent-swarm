@@ -13,7 +13,6 @@ type ReadPkgVersionOptions = {
 
 const cliVersionCommands: Record<string, { command: string; args: string[] }> = {
   "@earendil-works/pi-coding-agent": { command: "pi", args: ["--version"] },
-  "@opencode-ai/sdk": { command: "opencode", args: ["--version"] },
 };
 
 // The CLI does not change under a running process, so spawn it at most once.

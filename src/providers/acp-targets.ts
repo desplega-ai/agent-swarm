@@ -2,7 +2,6 @@ import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { normalizeGrokModel } from "@desplega/model-catalog";
-import type { Config } from "@opencode-ai/sdk";
 import { clampContextPercent, getContextWindowSize } from "../utils/context-window";
 import {
   ACP_TARGET_IDS,
@@ -10,7 +9,7 @@ import {
   getAcpTargetCatalogEntry,
   isAcpTarget,
 } from "./acp-target-catalog";
-import { applyOpenRouterBaseUrlOverride } from "./opencode-adapter";
+import { applyOpenRouterBaseUrlOverride, type OpencodeConfig } from "./opencode-adapter";
 import { applyReasoningEffort } from "./reasoning-effort";
 import type { CostData, CostModelUsage, ProviderEvent, ProviderSessionConfig } from "./types";
 
@@ -141,7 +140,7 @@ function withOpencodeConfig(env: Record<string, string>, model: string): void {
     }
   }
   if (model.trim()) value.model = model.trim();
-  applyOpenRouterBaseUrlOverride(value as Config, env);
+  applyOpenRouterBaseUrlOverride(value as OpencodeConfig, env);
   env[key] = JSON.stringify(value);
 }
 
