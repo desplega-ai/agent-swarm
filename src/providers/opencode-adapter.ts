@@ -27,7 +27,7 @@ import {
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { resolveSlashSkillPrompt } from "./codex-skill-resolver";
 import { CTX_MODE_NUDGE_EVERY } from "./ctx-mode-env";
-import { createOpencodeSwarmPlugin } from "./opencode-swarm-plugin";
+import { createOpencodeSwarmPlugin, type OpencodeToolLister } from "./opencode-swarm-plugin";
 import {
   apiHeaders,
   autoIndexMemoryFile,
@@ -220,6 +220,81 @@ const SWARM_AGENT_NAME = "swarm";
 const TRANSCRIPT_TAIL_CHARS = 20_000;
 const TOOL_RESULT_PREVIEW_CHARS = 500;
 
+/** The swarm MCP server's name in the OpenCode config. */
+const SWARM_MCP_SERVER = "swarm";
+/** Swarm tools a session cannot report without. OpenCode keys them `swarm_<tool>`. */
+const REQUIRED_SWARM_TOOLS = ["store-progress"];
+const ADMISSION_POLL_MS = 250;
+
+type SessionEndHooks = {
+  /** Cap on session-end network work; host close and completion never wait longer. */
+  budgetMs: number;
+  /** Cap on swarm MCP connect plus tool discovery before the first prompt. */
+  admissionTimeoutMs: number;
+  syncIdentity: typeof syncIdentityFilesToServer;
+};
+const DEFAULT_SESSION_HOOKS: SessionEndHooks = {
+  budgetMs: 10_000,
+  admissionTimeoutMs: 30_000,
+  syncIdentity: syncIdentityFilesToServer,
+};
+let sessionHooks = DEFAULT_SESSION_HOOKS;
+
+export function _setOpencodeSessionHooksForTests(hooks: Partial<SessionEndHooks> | null): void {
+  sessionHooks = hooks ? { ...DEFAULT_SESSION_HOOKS, ...hooks } : DEFAULT_SESSION_HOOKS;
+}
+
+/** Resolve after `promise` settles or `ms` elapses, whichever is first. Never rejects. */
+async function settleWithin(promise: Promise<unknown>, ms: number, signal?: AbortSignal) {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const cut = new Promise<void>((resolve) => {
+    timer = setTimeout(resolve, ms);
+    signal?.addEventListener("abort", () => resolve(), { once: true });
+  });
+  try {
+    await Promise.race([promise.catch(() => {}), cut]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Wait until the swarm MCP server is connected and its required tools are
+ * registered. OpenCode turns a refused or unauthorized server into a status
+ * and keeps going, so without this check a session would run without
+ * `store-progress`. Returns null when admitted, else the reason.
+ */
+export async function checkSwarmMcpAdmission(
+  host: Pick<OpenCode.Interface, "mcp">,
+  directory: string,
+  listTools: () => OpencodeToolLister | undefined,
+  timeoutMs: number,
+  isCancelled: () => boolean = () => false,
+): Promise<string | null> {
+  const deadline = Date.now() + timeoutMs;
+  let last = "swarm MCP server is not registered";
+  while (!isCancelled()) {
+    const servers = await host.mcp.list({ location: { directory } });
+    const status = servers.data.find((server) => server.name === SWARM_MCP_SERVER)?.status;
+    if (status?.status === "failed" || status?.status === "needs_auth") {
+      return `swarm MCP server ${status.status}: ${status.error}`;
+    }
+    if (status?.status === "disabled") return "swarm MCP server is disabled";
+    if (status?.status === "connected") {
+      const lister = listTools();
+      const ids = new Set(lister ? (await lister()).map((tool) => tool.id) : []);
+      const missing = REQUIRED_SWARM_TOOLS.filter((tool) => !ids.has(`swarm_${tool}`));
+      if (missing.length === 0) return null;
+      last = `swarm MCP server connected without required tools: ${missing.join(", ")}`;
+    } else if (status) {
+      last = `swarm MCP server still ${status.status}`;
+    }
+    if (Date.now() >= deadline) return `${last} after ${timeoutMs}ms`;
+    await Bun.sleep(ADMISSION_POLL_MS);
+  }
+  return null;
+}
+
 function errorMessage(error: unknown, fallback: string): string {
   if (error && typeof error === "object" && "message" in error) {
     return String((error as { message?: unknown }).message ?? fallback);
@@ -242,6 +317,8 @@ export class OpencodeSession implements ProviderSession {
   private completionPromise: Promise<ProviderResult>;
   private aborted = false;
   private completed = false;
+  // Cancels session-end network work when the session is aborted mid-finish.
+  private readonly sessionEnd = new AbortController();
   private startedAt = Date.now();
 
   // `session.usage.updated` carries the cumulative session totals.
@@ -488,8 +565,8 @@ export class OpencodeSession implements ProviderSession {
   }
 
   /** Identity sync, session summary, and session close (Stop-hook parity). */
-  private async runSessionEnd(): Promise<void> {
-    await syncIdentityFilesToServer(this.swarm);
+  private async runSessionEnd(signal: AbortSignal): Promise<void> {
+    await sessionHooks.syncIdentity(this.swarm, "session_sync", signal);
     if (process.env.SKIP_SESSION_SUMMARY) {
       console.debug("session_summary skipped (opencode): SKIP_SESSION_SUMMARY is set");
     } else {
@@ -502,16 +579,34 @@ export class OpencodeSession implements ProviderSession {
     });
   }
 
+  /**
+   * Settle the session. Session-end work is bounded and cancellable, so the
+   * host always closes and completion always resolves.
+   */
   private async finish(result: ProviderResult): Promise<void> {
     if (this.completed) return;
     this.completed = true;
-    if (!this.aborted) await this.runSessionEnd().catch(() => {});
-    await this.host.close().catch(() => {});
-    this.completionResolve({ ...result, appliedReasoningEffort: this.appliedReasoningEffort });
+    const { signal } = this.sessionEnd;
+    try {
+      if (!this.aborted) {
+        await settleWithin(this.runSessionEnd(signal), sessionHooks.budgetMs, signal);
+      }
+    } finally {
+      this.sessionEnd.abort();
+      await settleWithin(this.host.close(), sessionHooks.budgetMs);
+      this.completionResolve({ ...result, appliedReasoningEffort: this.appliedReasoningEffort });
+    }
   }
 
   async abort(): Promise<void> {
-    if (this.aborted || this.completed) return;
+    if (this.aborted) return;
+    if (this.completed) {
+      // Already finishing: cut the session-end work short and wait for cleanup.
+      this.aborted = true;
+      this.sessionEnd.abort();
+      await this.completionPromise;
+      return;
+    }
     this.aborted = true;
     await this.host.sessions.interrupt({ sessionID: this._sessionId }).catch(() => {});
     await this.finish({
@@ -653,9 +748,16 @@ export class OpencodeAdapter implements ProviderAdapter {
       env: config.env,
     };
     const { sdk, version: opencodeVersion } = await loadOpencodeSdkImpl();
+    let listTools: OpencodeToolLister | undefined;
     const host = await sdk.OpenCode.create({
       config: { content: JSON.stringify(opencodeConfig) },
-      plugins: [createOpencodeSwarmPlugin(swarm)],
+      plugins: [
+        createOpencodeSwarmPlugin(swarm, {
+          onToolRegistry: (lister) => {
+            listTools = lister;
+          },
+        }),
+      ],
       log: {
         level: "warn",
         emit: (entry) => console.warn(scrubSecrets(`[opencode] ${entry.message}`)),
@@ -699,6 +801,19 @@ export class OpencodeAdapter implements ProviderAdapter {
     })();
 
     void (async () => {
+      // Without the swarm tools the model cannot report; fail before prompting.
+      const refused = await checkSwarmMcpAdmission(
+        host,
+        config.cwd,
+        () => listTools,
+        sessionHooks.admissionTimeoutMs,
+        () => session.isFinished,
+      );
+      if (refused) {
+        session.fail(scrubSecrets(`swarm MCP admission failed: ${refused}`));
+        return;
+      }
+      if (session.isFinished) return;
       const prompt = await resolveSlashSkillPrompt(config.prompt, {
         providerLabel: "opencode",
         skillsDir: defaultOpencodeSkillsDir(),
@@ -707,7 +822,7 @@ export class OpencodeAdapter implements ProviderAdapter {
       });
       session.recordUserPrompt(prompt);
       await host.sessions.prompt({ sessionID: sessionId, text: prompt, delivery: "queue" });
-    })().catch((err: unknown) => session.fail(errorMessage(err, String(err))));
+    })().catch((err: unknown) => session.fail(scrubSecrets(errorMessage(err, String(err)))));
 
     return session;
   }

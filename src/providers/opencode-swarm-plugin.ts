@@ -22,10 +22,23 @@ import {
   type SwarmHooksConfig,
 } from "./pi-mono-extension";
 
-export function createOpencodeSwarmPlugin(config: SwarmHooksConfig): Plugin.Plugin {
+/** The host's registered tools (MCP tools included), keyed by effective name. */
+export type OpencodeToolLister = () => Promise<ReadonlyArray<{ readonly id: string }>>;
+
+export interface OpencodeSwarmPluginOptions {
+  /** Receives the tool lister once OpenCode sets the plugin up. */
+  onToolRegistry?: (listTools: OpencodeToolLister) => void;
+}
+
+export function createOpencodeSwarmPlugin(
+  config: SwarmHooksConfig,
+  options: OpencodeSwarmPluginOptions = {},
+): Plugin.Plugin {
   return {
     id: "agent-swarm",
     async setup(ctx) {
+      options.onToolRegistry?.(() => ctx.tool.list());
+
       // A throw blocks the tool; OpenCode hands the message back to the model.
       await ctx.tool.hook("execute.before", async (event) => {
         if (!config.isLead && config.taskId) {

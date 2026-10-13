@@ -11,6 +11,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test
 import type { OpenCodeEvent } from "@opencode/sdk";
 import {
   _setOpencodeSdkLoaderForTests,
+  _setOpencodeSessionHooksForTests,
   applyOpenRouterBaseUrlOverride,
   OpencodeAdapter,
   type OpencodeSession,
@@ -50,14 +51,26 @@ const tokens = (input: number, output: number, read = 0, write = 0) => ({
 
 type FakeHost = ReturnType<typeof makeFakeHost>;
 
+type McpStatus =
+  | { status: "connected" | "pending" | "disabled" }
+  | { status: "failed" | "needs_auth"; error: string };
+
+type FakeHostOptions = {
+  endStream?: boolean;
+  promptError?: Error;
+  /** Swarm MCP status per `mcp.list` call; the last entry repeats. Omit the server with `null`. */
+  mcpStatuses?: Array<McpStatus | null>;
+  /** Registered tool ids the plugin's tool lister returns. */
+  tools?: string[];
+};
+
 /**
  * An embedded host whose event stream replays `events`, then either ends
- * (`endStream`) or stays open until `close()`.
+ * (`endStream`) or stays open until `close()`. By default its swarm MCP
+ * server is connected with `store-progress` registered.
  */
-function makeFakeHost(
-  events: OpenCodeEvent[],
-  opts: { endStream?: boolean; promptError?: Error } = {},
-) {
+function makeFakeHost(events: OpenCodeEvent[], opts: FakeHostOptions = {}) {
+  const statuses = opts.mcpStatuses ?? [{ status: "connected" }];
   let release: () => void = () => {};
   const closed = new Promise<void>((resolve) => {
     release = resolve;
@@ -68,6 +81,15 @@ function makeFakeHost(
     prompts: [] as Array<Record<string, unknown>>,
     interrupts: [] as unknown[],
     closeCalls: 0,
+    mcpListCalls: 0,
+    mcp: {
+      list: async () => {
+        const status = statuses[Math.min(host.mcpListCalls, statuses.length - 1)];
+        host.mcpListCalls++;
+        return { location: {}, data: status ? [{ name: "swarm", status }] : [] };
+      },
+    },
+    tools: opts.tools ?? ["read", "swarm_store-progress"],
     sessions: {
       create: async (input: unknown) => {
         host.created.push(input);
@@ -104,6 +126,17 @@ function installHost(host: FakeHost) {
       OpenCode: {
         create: async (options: Record<string, unknown>) => {
           host.createOptions = options;
+          // Set the plugins up the way OpenCode does, with a stub context.
+          const plugins = options.plugins as Array<{ setup: (ctx: unknown) => Promise<void> }>;
+          for (const plugin of plugins) {
+            await plugin.setup({
+              tool: {
+                hook: async () => {},
+                list: async () => host.tools.map((id) => ({ id })),
+              },
+              session: { hook: async () => {} },
+            });
+          }
           return host;
         },
       },
@@ -114,7 +147,7 @@ function installHost(host: FakeHost) {
 async function startSession(
   events: OpenCodeEvent[],
   cfg: ProviderSessionConfig = testConfig(),
-  opts: { endStream?: boolean; promptError?: Error } = {},
+  opts: FakeHostOptions = {},
 ) {
   const host = makeFakeHost(events, opts);
   installHost(host);
@@ -127,11 +160,19 @@ async function startSession(
 async function runSession(
   events: OpenCodeEvent[],
   cfg?: ProviderSessionConfig,
-  opts?: { endStream?: boolean; promptError?: Error },
+  opts?: FakeHostOptions,
 ) {
   const started = await startSession(events, cfg, opts);
   const result = await started.session.waitForCompletion();
   return { ...started, result };
+}
+
+async function waitFor(check: () => boolean, timeoutMs = 2_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (!check()) {
+    if (Date.now() > deadline) throw new Error("waitFor timed out");
+    await Bun.sleep(5);
+  }
 }
 
 function configOf(host: FakeHost): Record<string, any> {
@@ -155,7 +196,10 @@ afterAll(() => {
     else process.env[key] = value;
   }
 });
-afterEach(() => _setOpencodeSdkLoaderForTests(null));
+afterEach(() => {
+  _setOpencodeSdkLoaderForTests(null);
+  _setOpencodeSessionHooksForTests(null);
+});
 
 describe("OpencodeAdapter — host and config wiring", () => {
   test("passes the per-task config as content and the swarm plugin as an object", async () => {
@@ -183,13 +227,15 @@ describe("OpencodeAdapter — host and config wiring", () => {
   });
 
   test("creates the session in the task cwd with the swarm agent and queues the prompt", async () => {
-    const { host } = await runSession([succeeded]);
+    const { host, session } = await startSession([]);
+    await waitFor(() => host.prompts.length > 0);
     expect(host.created).toEqual([
       { location: { directory: "/tmp/opencode-adapter-test" }, agent: "swarm" },
     ]);
     expect(host.prompts).toEqual([
       { sessionID: SESSION_ID, text: "do something", delivery: "queue" },
     ]);
+    await session.abort();
   });
 
   test("context-mode is not wired when CONTEXT_MODE_DISABLED is set", async () => {
@@ -378,6 +424,100 @@ describe("OpencodeSession — event mapping", () => {
       promptError: new Error("model not found: x/y"),
     });
     expect(result).toMatchObject({ isError: true, failureReason: "model not found: x/y" });
+  });
+});
+
+describe("OpencodeSession — session end is bounded", () => {
+  test("a profile sync that never answers cannot strand the host or completion", async () => {
+    let syncCalls = 0;
+    _setOpencodeSessionHooksForTests({
+      budgetMs: 50,
+      // A held profile PUT that ignores cancellation: the worst case.
+      syncIdentity: () => {
+        syncCalls++;
+        return new Promise<void>(() => {});
+      },
+    });
+    const { result, host } = await runSession([succeeded]);
+    expect(syncCalls).toBe(1);
+    expect(host.closeCalls).toBe(1);
+    expect(result).toMatchObject({ exitCode: 0, isError: false });
+  });
+
+  test("abort while finishing cancels the sync, closes the host, and completes", async () => {
+    let syncSignal: AbortSignal | undefined;
+    _setOpencodeSessionHooksForTests({
+      budgetMs: 60_000,
+      // A deferred profile response that only ends when the request is cancelled.
+      syncIdentity: (_config, _source, signal) => {
+        syncSignal = signal;
+        return new Promise<void>((resolve) =>
+          signal?.addEventListener("abort", () => resolve(), { once: true }),
+        );
+      },
+    });
+    const { session, host } = await startSession([succeeded]);
+    await waitFor(() => syncSignal !== undefined);
+    expect(session.isFinished).toBe(true);
+    expect(host.closeCalls).toBe(0);
+
+    await session.abort();
+    const result = await session.waitForCompletion();
+    expect(syncSignal?.aborted).toBe(true);
+    expect(host.closeCalls).toBe(1);
+    expect(result).toMatchObject({ exitCode: 0, isError: false });
+  });
+});
+
+describe("OpencodeAdapter — swarm MCP admission", () => {
+  test("waits for a pending server, then prompts once store-progress is registered", async () => {
+    const { host, session } = await startSession([], testConfig(), {
+      mcpStatuses: [null, { status: "pending" }, { status: "connected" }],
+    });
+    await waitFor(() => host.prompts.length > 0);
+    expect(host.mcpListCalls).toBeGreaterThanOrEqual(3);
+    await session.abort();
+  });
+
+  test("a refused server fails the session before the first prompt and closes the host", async () => {
+    const { result, host } = await runSession([], testConfig(), {
+      mcpStatuses: [
+        { status: "pending" },
+        { status: "failed", error: "Unable to connect. (ConnectionRefused)" },
+      ],
+    });
+    expect(host.prompts).toEqual([]);
+    expect(host.closeCalls).toBe(1);
+    expect(result).toMatchObject({ exitCode: 1, isError: true });
+    expect(result.failureReason).toBe(
+      "swarm MCP admission failed: swarm MCP server failed: Unable to connect. (ConnectionRefused)",
+    );
+  });
+
+  test("an unauthorized server fails with a scrubbed reason", async () => {
+    const leaked = `sk-or-v1-${"a1B2c3D4e5".repeat(5)}`;
+    const { result, host, emitted } = await runSession([], testConfig(), {
+      mcpStatuses: [{ status: "needs_auth", error: `401 for bearer ${leaked}` }],
+    });
+    expect(host.prompts).toEqual([]);
+    expect(host.closeCalls).toBe(1);
+    expect(result.failureReason).toContain(
+      "swarm MCP admission failed: swarm MCP server needs_auth",
+    );
+    expect(result.failureReason).not.toContain(leaked);
+    expect(JSON.stringify(emitted)).not.toContain(leaked);
+  });
+
+  test("a connected server without store-progress fails once admission times out", async () => {
+    _setOpencodeSessionHooksForTests({ admissionTimeoutMs: 50 });
+    const { result, host } = await runSession([], testConfig(), {
+      tools: ["read", "swarm_poll-task"],
+    });
+    expect(host.prompts).toEqual([]);
+    expect(host.closeCalls).toBe(1);
+    expect(result.failureReason).toContain(
+      "swarm MCP server connected without required tools: store-progress",
+    );
   });
 });
 

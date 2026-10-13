@@ -103,6 +103,7 @@ export async function fetchTaskDetails(
 export async function syncIdentityFilesToServer(
   config: SwarmHooksConfig,
   changeSource: "self_edit" | "session_sync" = "session_sync",
+  signal?: AbortSignal,
 ): Promise<void> {
   const updates: Record<string, string> = {};
   const paths: Record<string, string> = {
@@ -132,6 +133,7 @@ export async function syncIdentityFilesToServer(
       method: "PUT",
       headers: apiHeaders(config),
       body: JSON.stringify({ ...updates, changeSource }),
+      signal,
     });
   } catch {
     /* silently fail */
