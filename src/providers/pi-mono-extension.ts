@@ -419,7 +419,7 @@ export async function summarizeTranscript(
       console.error(
         `session_summary: /api/memory/index POST failed (${harness}):`,
         indexResp.status,
-        text,
+        scrubSecrets(text),
       );
       return;
     }
@@ -433,12 +433,19 @@ export async function summarizeTranscript(
           agentId,
           taskId: sourceTaskId,
           events: ratingEvents,
-        }).catch((err) => console.error(`session_summary: postRatings failed (${harness}):`, err));
+        }).catch((err) =>
+          console.error(`session_summary: postRatings failed (${harness}):`, scrubError(err)),
+        );
       }
     }
   } catch (err) {
-    console.error(`session_summary failed (${harness}):`, err);
+    console.error(`session_summary failed (${harness}):`, scrubError(err));
   }
+}
+
+/** An error as scrubbed text: the session-summary diagnostics go to stderr. */
+function scrubError(err: unknown): string {
+  return scrubSecrets(err instanceof Error ? (err.stack ?? err.message) : String(err));
 }
 
 /** `customType` of the advisory messages this extension sends to the model. */
