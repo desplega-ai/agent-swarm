@@ -78,6 +78,34 @@ describe("ui logs parser", () => {
     expect(result.items.some((item) => item.kind === "unknown")).toBe(false);
   });
 
+  test("renders only the last cumulative opencode message mirror when no text part exists", () => {
+    const result = normalizeSessionLogs([
+      log("m1", "opencode", 1, {
+        type: "message",
+        role: "assistant",
+        content: "One.",
+        messageId: "msg_1",
+      }),
+      log("m2", "opencode", 2, {
+        type: "message",
+        role: "assistant",
+        content: "One. Two.",
+        messageId: "msg_1",
+      }),
+      log("perm", "opencode", 3, {
+        id: "evt_1",
+        created: 0,
+        type: "permission.asked",
+        data: { sessionID: "ses_1", id: "per_1" },
+      }),
+    ]);
+
+    expect(result.items.map((item) => [item.kind, item.text])).toEqual([
+      ["text", "One. Two."],
+      ["lifecycle", undefined],
+    ]);
+  });
+
   test("drops opencode server transport noise", () => {
     const result = normalizeSessionLogs([
       log("heartbeat", "opencode", 1, { type: "server.heartbeat", properties: {} }),

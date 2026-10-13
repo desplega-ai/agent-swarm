@@ -9,6 +9,7 @@
 
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import type { OpenCodeEvent } from "@opencode/sdk";
+import { normalizeSessionLogs, type SessionLogRecord } from "../../apps/ui/src/logs-parser";
 import {
   _setOpencodeSdkLoaderForTests,
   _setOpencodeSessionHooksForTests,
@@ -441,6 +442,86 @@ describe("OpencodeSession — event mapping", () => {
       promptError: new Error("model not found: x/y"),
     });
     expect(result).toMatchObject({ isError: true, failureReason: "model not found: x/y" });
+  });
+});
+
+describe("OpencodeSession — persisted rows render in the dashboard", () => {
+  test("text, tools and errors render once each, in order", async () => {
+    const text = (ordinal: number, value: string, messageID = "msg_1") => [
+      ev("session.text.started", { sessionID: SESSION_ID, assistantMessageID: messageID, ordinal }),
+      ev("session.text.delta", {
+        sessionID: SESSION_ID,
+        assistantMessageID: messageID,
+        ordinal,
+        delta: value,
+      }),
+      ev("session.text.ended", {
+        sessionID: SESSION_ID,
+        assistantMessageID: messageID,
+        ordinal,
+        text: value,
+      }),
+    ];
+    const { emitted } = await runSession([
+      ...text(0, "Listing files."),
+      ev("session.tool.input.started", { sessionID: SESSION_ID, id: "call_1", name: "shell" }),
+      ev("session.tool.called", { sessionID: SESSION_ID, id: "call_1", input: { command: "ls" } }),
+      ev("session.tool.success", {
+        sessionID: SESSION_ID,
+        id: "call_1",
+        content: [{ type: "text", text: "file.txt\n" }],
+      }),
+      ...text(1, " Found one."),
+      ev("session.tool.input.started", { sessionID: SESSION_ID, id: "call_2", name: "read" }),
+      ev("session.tool.called", { sessionID: SESSION_ID, id: "call_2", input: { path: "x" } }),
+      ev("session.tool.failed", {
+        sessionID: SESSION_ID,
+        id: "call_2",
+        error: { type: "unknown", message: "no such file" },
+      }),
+      ev("session.step.ended", { sessionID: SESSION_ID, tokens: tokens(1000, 10) }),
+      ev("session.execution.failed", {
+        sessionID: SESSION_ID,
+        error: { type: "unknown", message: "provider overloaded" },
+      }),
+    ]);
+
+    // The runner stores every raw_log line verbatim as a session log row.
+    const rows: SessionLogRecord[] = emitted
+      .filter((e) => e.type === "raw_log")
+      .map((e, index) => ({
+        id: `row-${index}`,
+        taskId: "task-1",
+        sessionId: "session-1",
+        iteration: 1,
+        cli: "opencode",
+        content: (e as { content: string }).content,
+        lineNumber: index + 1,
+        createdAt: "2026-10-13T10:00:00.000Z",
+      }));
+    const { items } = normalizeSessionLogs(rows);
+
+    const visible = items
+      .filter((item) => item.kind !== "lifecycle")
+      .map((item) =>
+        item.kind === "text"
+          ? `${item.role} text: ${item.text}`
+          : item.kind === "tool_call"
+            ? `tool_call ${item.tool?.name} ${JSON.stringify(item.tool?.input)}`
+            : item.kind === "tool_result"
+              ? `tool_result ${item.result?.id} error=${item.result?.isError} ${item.result?.payload}`
+              : item.kind,
+      );
+    expect(visible).toEqual([
+      "assistant text: Listing files.",
+      'tool_call shell {"command":"ls"}',
+      "tool_result call_1 error=false file.txt\n",
+      "assistant text:  Found one.",
+      'tool_call read {"path":"x"}',
+      "tool_result call_2 error=true no such file",
+      "system text: opencode error: provider overloaded",
+    ]);
+    expect(items.some((item) => item.kind === "unknown")).toBe(false);
   });
 });
 
