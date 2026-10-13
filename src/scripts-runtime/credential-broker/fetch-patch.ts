@@ -1,4 +1,9 @@
-import { MAX_REDIRECTS, nextHopRequest, REDIRECT_STATUSES } from "../../utils/egress-guard";
+import {
+  MAX_REDIRECTS,
+  nextHopRequest,
+  REDIRECT_STATUSES,
+  replayableBody,
+} from "../../utils/egress-guard";
 import type { FailedCredentialBinding, ResolvedCredentialBinding } from "./types";
 
 function hostnameForFetchInput(input: string | URL | Request): string | null {
@@ -129,10 +134,14 @@ export function patchFetchWithCredentialBroker(
 
     const urlModified = applyQueryTemplates(url, bindings);
 
-    if (!headersModified && !urlModified) return originalFetch(input, init);
+    // Once the broker follows a redirect it keeps following every later hop,
+    // so the chain has one hop budget even where the fetch below also counts.
+    if (!headersModified && !urlModified && hop === 0) return originalFetch(input, init);
 
     const callerInit = cloneRequestInit(input, init);
     const redirectMode = callerInit.redirect ?? "follow";
+    // A 307/308 sends the body again, so a stream (a Request body) is read once here.
+    if (redirectMode === "follow") callerInit.body = await replayableBody(callerInit.body);
     const mergedInit: RequestInit = {
       ...callerInit,
       headers: headersModified || input instanceof Request ? newHeaders : init?.headers,

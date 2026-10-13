@@ -308,23 +308,30 @@ function matchesAllowlist(url: URL, allowlist: string[]): boolean {
   });
 }
 
-/** Throws `EgressDeniedError` when `url` may not be fetched under `options`. */
-export async function assertEgressAllowed(url: URL, options: GuardedFetchOptions): Promise<void> {
+/**
+ * Throws `EgressDeniedError` when `url` may not be fetched under `options`.
+ * For a hostname it had to resolve, returns the checked address the request
+ * must connect to; otherwise null (the URL is used as is).
+ */
+export async function assertEgressAllowed(
+  url: URL,
+  options: GuardedFetchOptions,
+): Promise<string | null> {
   if (url.protocol !== "http:" && url.protocol !== "https:") {
     // data:/blob: never leave the process.
-    if (url.protocol === "data:" || url.protocol === "blob:") return;
+    if (url.protocol === "data:" || url.protocol === "blob:") return null;
     throw new EgressDeniedError(`Script egress refused: unsupported protocol ${url.protocol}`);
   }
-  if (options.isTrusted?.(url)) return;
+  if (options.isTrusted?.(url)) return null;
 
   const { policy } = options;
   if (policy.allowlist && policy.allowlist.length > 0) {
-    if (matchesAllowlist(url, policy.allowlist)) return;
+    if (matchesAllowlist(url, policy.allowlist)) return null;
     throw new EgressDeniedError(
       `Script egress refused: ${url.host} is not in SCRIPT_EGRESS_ALLOWLIST`,
     );
   }
-  if (policy.allowPrivate) return;
+  if (policy.allowPrivate) return null;
 
   const host = stripBrackets(url.hostname);
   const denied = () =>
@@ -334,7 +341,7 @@ export async function assertEgressAllowed(url: URL, options: GuardedFetchOptions
   if (isLoopbackName(host)) throw denied();
   if (isIPv4Literal(host) || isIPv6Literal(host)) {
     if (isPrivateAddress(host)) throw denied();
-    return;
+    return null;
   }
   let addresses: string[];
   try {
@@ -349,17 +356,40 @@ export async function assertEgressAllowed(url: URL, options: GuardedFetchOptions
   }
   // Deny when ANY answer is private: a mixed answer set is a rebinding setup.
   if (addresses.some(isPrivateAddress)) throw denied();
+  return addresses.find(isIPv4Literal) ?? (addresses[0] as string);
+}
+
+/**
+ * The URL and init that connect to `address` instead of resolving `url` again.
+ * The Host header, TLS SNI and certificate hostname check stay on `url`'s name.
+ */
+export function pinToAddress(url: URL, address: string, init: RequestInit): [URL, RequestInit] {
+  const target = new URL(url.href);
+  target.hostname = isIPv6Literal(address) ? `[${stripBrackets(address)}]` : address;
+  const headers = new Headers(init.headers);
+  if (!headers.has("host")) headers.set("host", url.host);
+  const pinned: RequestInit & { tls?: Record<string, unknown> } = { ...init, headers };
+  if (url.protocol === "https:") {
+    const callerTls = (init as { tls?: Record<string, unknown> }).tls;
+    pinned.tls = { ...callerTls, serverName: url.hostname.replace(/\.$/, "") };
+  }
+  return [target, pinned];
+}
+
+/** A body that can be sent again on a 307/308 hop: a stream is read into memory once. */
+export async function replayableBody(
+  body: RequestInit["body"] | undefined,
+): Promise<RequestInit["body"] | undefined> {
+  if (body instanceof ReadableStream) return await new Response(body).arrayBuffer();
+  return body ?? undefined;
 }
 
 /**
  * Wraps `baseFetch` so every request, and every redirect hop, passes
- * `assertEgressAllowed`. Redirects are followed manually (at most 5). A
- * cross-origin hop drops credential headers. `redirect: "manual"` and
- * `"error"` keep their usual meaning.
- *
- * Residual risk: the address checked here is resolved again by `baseFetch`
- * when it connects, so a DNS answer that changes between the two lookups is
- * not caught. The check stops names that point at private ranges.
+ * `assertEgressAllowed`, and a checked hostname connects to the address that
+ * was checked. Redirects are followed manually (at most 5). A cross-origin hop
+ * drops credential headers. `redirect: "manual"` and `"error"` keep their
+ * usual meaning.
  */
 export function createGuardedFetch(
   baseFetch: typeof fetch,
@@ -374,18 +404,24 @@ export function createGuardedFetch(
     let method = (init?.method ?? request?.method ?? "GET").toUpperCase();
     let headers = new Headers(init?.headers ?? request?.headers);
     let body: RequestInit["body"] | undefined = init?.body ?? (request ? request.body : undefined);
+    if (mode === "follow") body = await replayableBody(body);
     const signal = init?.signal ?? request?.signal;
 
     for (let hop = 0; ; hop++) {
-      await assertEgressAllowed(url, options);
-      const response = await baseFetch(url, {
+      const address = await assertEgressAllowed(url, options);
+      const hopInit: RequestInit = {
         ...init,
         method,
         headers,
         body,
         signal,
         redirect: "manual",
-      });
+      };
+      const response = address
+        ? await baseFetch(...pinToAddress(url, address, hopInit))
+        : await baseFetch(url, hopInit);
+      // A pinned request reports the address it connected to; show the name.
+      if (address) Object.defineProperty(response, "url", { value: url.href });
       if (!REDIRECT_STATUSES.has(response.status) || mode === "manual") return response;
       const location = response.headers.get("location");
       if (!location) return response;

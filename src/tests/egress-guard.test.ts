@@ -1,4 +1,10 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
+import { lookup } from "node:dns/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import https from "node:https";
+import { hostname, tmpdir } from "node:os";
+import { join } from "node:path";
+import type { TLSSocket } from "node:tls";
 import { patchFetchWithCredentialBroker } from "../scripts-runtime/credential-broker";
 import { scriptEgressPolicy } from "../scripts-runtime/loader";
 import {
@@ -7,8 +13,11 @@ import {
   type EgressPolicy,
   isPrivateAddress,
   parseEgressAllowlist,
+  pinToAddress,
   validateEgressAllowlist,
 } from "../utils/egress-guard";
+import { listenOnFreePort } from "./test-net";
+import { CHILD_PROCESS_TEST_BUDGET_MS, runChild } from "./test-proc";
 
 const BLOCKED_URLS = [
   "https://127.0.0.1/",
@@ -94,12 +103,21 @@ describe("assertUrlSafe ranges", () => {
 
 type Hop = { url: string; method: string; auth: string | null; apiKey: string | null };
 
-/** A fake network: `routes` maps a URL to a response; every request is recorded. */
+/**
+ * A fake network: `routes` maps a URL to a response; every request is
+ * recorded. A request pinned to an address is recorded under its Host name in
+ * `hops`, and as sent (address and TLS server name) in `connects`.
+ */
 function fakeNetwork(routes: Record<string, () => Response>) {
   const hops: Hop[] = [];
+  const connects: Array<{ url: string; serverName: string | null }> = [];
   const base = (async (input: string | URL | Request, init?: RequestInit) => {
-    const url = String(input instanceof Request ? input.url : input);
+    const raw = new URL(String(input instanceof Request ? input.url : input));
     const headers = new Headers(init?.headers);
+    const tls = (init as { tls?: { serverName?: string } } | undefined)?.tls;
+    connects.push({ url: raw.href, serverName: tls?.serverName ?? null });
+    const host = headers.get("host");
+    const url = host ? `${raw.protocol}//${host}${raw.pathname}${raw.search}` : raw.href;
     hops.push({
       url,
       method: init?.method ?? "GET",
@@ -109,7 +127,7 @@ function fakeNetwork(routes: Record<string, () => Response>) {
     const route = routes[url];
     return route ? route() : new Response("ok", { status: 200 });
   }) as typeof fetch;
-  return { base, hops };
+  return { base, hops, connects };
 }
 
 const redirect =
@@ -234,6 +252,107 @@ describe("createGuardedFetch", () => {
     const guarded = createGuardedFetch(base, { policy: DENY, resolve });
     await expect(guarded("file:///etc/hostname")).rejects.toThrow(/unsupported protocol/);
   });
+
+  test("a checked name connects to the checked address, keeping its name for Host and TLS", async () => {
+    const { base, hops, connects } = fakeNetwork({
+      "https://public.example/a": redirect("http://other.example:8080/b"),
+    });
+    const guarded = createGuardedFetch(base, { policy: DENY, resolve });
+    const response = await guarded("https://public.example/a");
+    expect(response.status).toBe(200);
+    expect(response.url).toBe("http://other.example:8080/b");
+    expect(connects).toEqual([
+      { url: "https://93.184.216.34/a", serverName: "public.example" },
+      { url: "http://93.184.216.35:8080/b", serverName: null },
+    ]);
+    expect(hops.map((hop) => hop.url)).toEqual([
+      "https://public.example/a",
+      "http://other.example:8080/b",
+    ]);
+  });
+
+  test("an allowlisted name and an IP literal are not re-pinned", async () => {
+    const { base, connects } = fakeNetwork({});
+    const guarded = createGuardedFetch(base, {
+      policy: { allowPrivate: false, allowlist: ["internal.example", "93.184.216.34"] },
+      resolve,
+    });
+    await guarded("https://internal.example/");
+    await guarded("https://93.184.216.34/");
+    expect(connects).toEqual([
+      { url: "https://internal.example/", serverName: null },
+      { url: "https://93.184.216.34/", serverName: null },
+    ]);
+  });
+});
+
+describe("pinToAddress over real TLS", () => {
+  let dir = "";
+  let ready = false;
+  const servers: https.Server[] = [];
+
+  beforeAll(async () => {
+    dir = await mkdtemp(join(tmpdir(), "egress-pin-"));
+    // A throwaway CA and two leaf certificates, for good.test and other.test.
+    const openssl = async (args: string) =>
+      (await runChild(["openssl", ...args.split(" ")], { cwd: dir })).exitCode === 0;
+    try {
+      ready = await openssl(
+        "req -x509 -newkey rsa:2048 -nodes -keyout ca.key -out ca.crt -days 1 -subj /CN=egress-test-ca -addext basicConstraints=critical,CA:TRUE -addext keyUsage=critical,keyCertSign",
+      );
+      for (const name of ["good", "other"]) {
+        await writeFile(join(dir, `${name}.ext`), `subjectAltName=DNS:${name}.test\n`);
+        ready &&= await openssl(
+          `req -newkey rsa:2048 -nodes -keyout ${name}.key -out ${name}.csr -subj /CN=${name}.test`,
+        );
+        ready &&= await openssl(
+          `x509 -req -in ${name}.csr -CA ca.crt -CAkey ca.key -CAcreateserial -out ${name}.crt -days 1 -extfile ${name}.ext`,
+        );
+      }
+    } catch {
+      ready = false;
+    }
+  }, CHILD_PROCESS_TEST_BUDGET_MS);
+
+  afterAll(async () => {
+    for (const server of servers) server.close();
+    if (dir) await rm(dir, { recursive: true, force: true });
+  });
+
+  async function tlsServer(cert: string) {
+    const seen: Array<{ sni: string | false; host: string | undefined }> = [];
+    const server = https.createServer(
+      {
+        key: await readFile(join(dir, `${cert}.key`)),
+        cert: await readFile(join(dir, `${cert}.crt`)),
+      },
+      (req, res) => {
+        seen.push({ sni: (req.socket as TLSSocket).servername, host: req.headers.host });
+        res.end("ok");
+      },
+    );
+    servers.push(server);
+    const port = await listenOnFreePort(server, "127.0.0.1");
+    return { port, seen };
+  }
+
+  test("connects to the address with the name's Host, SNI and certificate check", async () => {
+    expect(ready).toBe(true); // openssl created the test certificates
+    const ca = await readFile(join(dir, "ca.crt"), "utf8");
+    const good = await tlsServer("good");
+    const url = new URL(`https://good.test:${good.port}/x`);
+    const response = await fetch(...pinToAddress(url, "127.0.0.1", { tls: { ca } } as RequestInit));
+    expect(await response.text()).toBe("ok");
+    expect(good.seen).toEqual([{ sni: "good.test", host: `good.test:${good.port}` }]);
+
+    // The certificate is checked against the name, not the address.
+    const other = await tlsServer("other");
+    const wrong = new URL(`https://good.test:${other.port}/x`);
+    await expect(
+      fetch(...pinToAddress(wrong, "127.0.0.1", { tls: { ca } } as RequestInit)),
+    ).rejects.toThrow();
+    expect(other.seen).toHaveLength(0);
+  });
 });
 
 describe("credential broker redirects", () => {
@@ -290,6 +409,171 @@ describe("credential broker redirects", () => {
       },
     ]);
   });
+
+  test("the broker and the guard share one 5-hop redirect budget", async () => {
+    // public.example (credential substituted) -> other.example/1 -> ... -> /<hops>
+    const chain = (hops: number) => {
+      const routes: Record<string, () => Response> = {
+        "https://public.example/start": redirect("https://other.example/1"),
+      };
+      for (let i = 1; i < hops; i++) routes[`https://other.example/${i}`] = redirect(`/${i + 1}`);
+      return routes;
+    };
+    const run = async (hops: number) => {
+      const { base } = fakeNetwork(chain(hops));
+      globalThis.fetch = createGuardedFetch(base, { policy: DENY, resolve });
+      patchFetchWithCredentialBroker([
+        {
+          configKey: "EXAMPLE_TOKEN",
+          allowedHosts: ["public.example"],
+          headerTemplate: "Bearer {value}",
+          scope: "global",
+          active: true,
+          authKind: "config",
+          placeholder: "[REDACTED:EXAMPLE_TOKEN]",
+          value: "real-secret-value",
+        },
+      ]);
+      return globalThis.fetch("https://public.example/start", {
+        headers: { authorization: "Bearer [REDACTED:EXAMPLE_TOKEN]" },
+      });
+    };
+    expect((await run(5)).status).toBe(200);
+    await expect(run(6)).rejects.toThrow(/5 redirects/);
+  });
+});
+
+describe("redirect bodies over real fetch", () => {
+  const originalFetch = globalThis.fetch;
+  const received: Array<{ path: string; method: string; body: string; apiKey: string | null }> = [];
+  let server: ReturnType<typeof Bun.serve> | null = null;
+
+  beforeAll(() => {
+    server = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      async fetch(req) {
+        const { pathname } = new URL(req.url);
+        received.push({
+          path: pathname,
+          method: req.method,
+          body: await req.text(),
+          apiKey: req.headers.get("x-api-key"),
+        });
+        if (pathname === "/307")
+          return new Response(null, { status: 307, headers: { location: "/end" } });
+        if (pathname === "/308")
+          return new Response(null, { status: 308, headers: { location: "/end" } });
+        if (pathname === "/303")
+          return new Response(null, { status: 303, headers: { location: "/end" } });
+        return new Response("done");
+      },
+    });
+  });
+  afterAll(() => {
+    server?.stop(true);
+  });
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    received.length = 0;
+  });
+
+  const BINDING = {
+    configKey: "EXAMPLE_TOKEN",
+    allowedHosts: ["127.0.0.1"],
+    headerTemplate: "{value}",
+    scope: "global" as const,
+    active: true,
+    authKind: "config" as const,
+    placeholder: "[REDACTED:EXAMPLE_TOKEN]",
+    value: "real-secret-value",
+  };
+  const post = (path: string) =>
+    new Request(`http://127.0.0.1:${server?.port}${path}`, {
+      method: "POST",
+      body: "payload",
+      headers: { "x-api-key": "[REDACTED:EXAMPLE_TOKEN]", "content-type": "text/plain" },
+    });
+
+  for (const layers of ["broker", "guard + broker"] as const) {
+    test(`${layers}: a Request POST body is sent again on 307/308 and dropped on 303`, async () => {
+      if (layers === "guard + broker") {
+        globalThis.fetch = createGuardedFetch(originalFetch, {
+          policy: { allowPrivate: true, allowlist: null },
+        });
+      }
+      patchFetchWithCredentialBroker([BINDING]);
+      for (const status of ["307", "308"]) {
+        const response = await globalThis.fetch(post(`/${status}`));
+        expect(await response.text()).toBe("done");
+      }
+      const seeOther = await globalThis.fetch(post("/303"));
+      expect(await seeOther.text()).toBe("done");
+      const secret = BINDING.value;
+      expect(received).toEqual([
+        { path: "/307", method: "POST", body: "payload", apiKey: secret },
+        { path: "/end", method: "POST", body: "payload", apiKey: secret },
+        { path: "/308", method: "POST", body: "payload", apiKey: secret },
+        { path: "/end", method: "POST", body: "payload", apiKey: secret },
+        { path: "/303", method: "POST", body: "payload", apiKey: secret },
+        { path: "/end", method: "GET", body: "", apiKey: secret },
+      ]);
+    });
+  }
+
+  test("guard alone: a Request POST body is sent again on 307", async () => {
+    const guarded = createGuardedFetch(originalFetch, {
+      policy: { allowPrivate: true, allowlist: null },
+    });
+    const response = await guarded(post("/307"));
+    expect(await response.text()).toBe("done");
+    expect(received.map(({ path, body }) => ({ path, body }))).toEqual([
+      { path: "/307", body: "payload" },
+      { path: "/end", body: "payload" },
+    ]);
+  });
+});
+
+// The name this machine is called by: the system resolver answers with one of
+// its own (private) addresses, so a server on all interfaces receives it.
+const machineName = hostname();
+const machineAnswer = await lookup(machineName).then(
+  (record) => record.address,
+  () => null,
+);
+
+describe("DNS answers at check time and connect time", () => {
+  test.skipIf(!machineAnswer || !isPrivateAddress(machineAnswer))(
+    "the connection uses the checked answer, not a fresh lookup",
+    async () => {
+      let hits = 0;
+      const server = Bun.serve({
+        hostname: "0.0.0.0",
+        port: 0,
+        fetch() {
+          hits++;
+          return new Response("reached");
+        },
+      });
+      try {
+        const url = `http://${machineName}:${server.port}/`;
+        // Control: the system resolver sends a plain fetch of this name to the server.
+        expect(await (await fetch(url)).text()).toBe("reached");
+        expect(hits).toBe(1);
+
+        // The check sees a public (documentation-range) answer; a fresh lookup
+        // at connect time would reach the private server instead.
+        const guarded = createGuardedFetch(fetch, {
+          policy: DENY,
+          resolve: async () => ["192.0.2.10"],
+        });
+        await expect(guarded(url, { signal: AbortSignal.timeout(500) })).rejects.toThrow();
+        expect(hits).toBe(1);
+      } finally {
+        server.stop(true);
+      }
+    },
+  );
 });
 
 describe("egress config", () => {

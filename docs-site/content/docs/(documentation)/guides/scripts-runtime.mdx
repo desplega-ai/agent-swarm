@@ -316,9 +316,11 @@ substitution. By default it refuses these destinations:
   NAT64 forms of any of these
 
 The check runs on the resolved addresses, so a public name that points at a
-private address is refused. It runs again on every redirect hop, with at most
-5 hops. A redirect to another origin drops `Authorization` and `Cookie`. The
-refusal error names the setting to change.
+private address is refused. The request then connects to the address that was
+checked, with the original name kept for the `Host` header and TLS
+certificate check. The check runs again on every redirect hop, with at most 5
+hops for the whole chain. A redirect to another origin drops `Authorization`
+and `Cookie`. The refusal error names the setting to change.
 
 Two settings control the policy. Both apply to new runs after a config reload.
 
@@ -327,9 +329,10 @@ Two settings control the policy. Both apply to new runs after a config reload.
 | `SCRIPT_EGRESS_ALLOW_PRIVATE` | `false` | `true` allows private, loopback and link-local destinations. |
 | `SCRIPT_EGRESS_ALLOWLIST` | empty | Comma-separated `host[:port]` patterns. A leading `*.` matches subdomains. When set, scripts can reach only these hosts, public or private. Empty means any public host. |
 
-`ctx.swarm` and `ctx.mcp` still reach the swarm API. Script code cannot fetch
-the swarm API's address directly, and it cannot read the credential the host
-uses for those calls: `Redacted.value(ctx.swarm.config.apiKey)` and
+`ctx.swarm` and `ctx.mcp` still reach the swarm API: only those host calls are
+exempt from the policy. A direct script request to the swarm API's address
+follows the configured policy like any other host. Script code cannot read the
+credential the host uses for those calls: `Redacted.value(ctx.swarm.config.apiKey)` and
 `Redacted.value(ctx.swarm.config.runtimeInstanceId)` throw
 `host-only credential`. `agentId`, `mcpBaseUrl` and your own config values stay
 readable.
