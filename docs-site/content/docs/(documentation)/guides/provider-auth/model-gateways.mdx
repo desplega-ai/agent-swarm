@@ -239,7 +239,7 @@ OPENROUTER_BASE_URL=https://gateway.example.com/v1
 MODEL_OVERRIDE=openrouter/qwen/qwen3-coder-flash
 ```
 
-The adapter writes `provider.openrouter.options.baseURL` into its per-task OpenCode config. It also mirrors the resolved value into the spawned OpenCode process environment so the bundled summarize plugin uses the same gateway instead of calling openrouter.ai directly.
+The adapter writes `provider.openrouter.options.baseURL` into its per-task OpenCode config. The session summary runs in the worker with the same per-task env, so it uses the same gateway instead of calling openrouter.ai directly.
 
 ### pi-mono through a gateway
 
