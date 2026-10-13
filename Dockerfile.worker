@@ -195,8 +195,8 @@ RUN mkdir -p /home/worker/.codex && \
 # `make` here) and the runtime does not need them; the CLI's postinstall must run.
 ARG OPENCODE_VERSION=2.0.28
 USER root
-RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache \
-    npm install -g @opencode/cli@${OPENCODE_VERSION} \
+RUN export HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache \
+    && npm install -g @opencode/cli@${OPENCODE_VERSION} \
     && npm install -g --ignore-scripts @opencode/sdk@${OPENCODE_VERSION} \
     && rm -rf /tmp/npm-cache /root/.npm
 USER worker
