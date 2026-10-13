@@ -28,7 +28,8 @@ export type AgentTaskSource =
   | "workflow"
   | "linear"
   | "jira"
-  | "comb";
+  | "comb"
+  | "chat";
 export type RoutingReason = "skill" | "continuity" | "overflow" | "human_pinned" | "reroute_fault";
 export type ChannelType = "public" | "dm";
 export type ModelTier = "smol" | "regular" | "smart" | "ultra";

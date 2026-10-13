@@ -172,7 +172,8 @@
               "workflow",
               "linear",
               "jira",
-              "comb"
+              "comb",
+              "chat"
             ],
             "default": "mcp"
           },
@@ -2923,7 +2924,8 @@
               "mcp",
               "script",
               "slack",
-              "api"
+              "api",
+              "chat"
             ]
           },
           "senderLabel": {
@@ -10269,6 +10271,7 @@
                               "repo",
                               "agentmail",
                               "kapso",
+                              "chat-sdk",
                               "swarm-x"
                             ]
                           }
@@ -10332,6 +10335,7 @@
                               "repo",
                               "agentmail",
                               "kapso",
+                              "chat-sdk",
                               "swarm-x"
                             ]
                           }
@@ -29856,7 +29860,8 @@
                                   "workflow",
                                   "linear",
                                   "jira",
-                                  "comb"
+                                  "comb",
+                                  "chat"
                                 ],
                                 "default": "mcp"
                               },
@@ -30170,7 +30175,8 @@
                       "workflow",
                       "linear",
                       "jira",
-                      "comb"
+                      "comb",
+                      "chat"
                     ]
                   },
                   "outputSchema": {
@@ -30613,7 +30619,8 @@
                       "mcp",
                       "script",
                       "slack",
-                      "api"
+                      "api",
+                      "chat"
                     ]
                   },
                   "requestedByUserId": {
@@ -45694,7 +45701,8 @@
                                       "workflow",
                                       "linear",
                                       "jira",
-                                      "comb"
+                                      "comb",
+                                      "chat"
                                     ],
                                     "default": "mcp"
                                   },
@@ -56088,6 +56096,61 @@
           },
           "503": {
             "description": "Kapso integration not configured",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/integrations/chat/{adapter}/webhook": {
+      "post": {
+        "summary": "Handle Chat SDK platform webhooks (Telegram, Slack, Discord, Teams)",
+        "tags": [
+          "Webhooks"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Chat SDK adapter name, e.g. telegram"
+            },
+            "required": true,
+            "description": "Chat SDK adapter name, e.g. telegram",
+            "name": "adapter",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Adapter response"
+          },
+          "401": {
+            "description": "Invalid platform signature or secret token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Chat SDK disabled or adapter not configured",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Adapter configured but failed to start",
             "content": {
               "application/json": {
                 "schema": {

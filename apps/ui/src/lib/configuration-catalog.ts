@@ -1173,6 +1173,16 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         docsUrl: `${DOCS}integrations/agentmail`,
       },
       {
+        key: "CHAT_SDK_ENABLED",
+        label: "Enable Chat SDK channel",
+        description:
+          "Start the Chat SDK channel (Telegram and more) for the adapters configured in CHAT_SDK_ADAPTERS.",
+        kind: "boolean",
+        defaultValue: "false",
+        restartRequired: true,
+        docsUrl: `${DOCS}integrations/chat-sdk`,
+      },
+      {
         key: "ADDITIVE_SLACK",
         label: "Additive Slack mode",
         description:

@@ -14,6 +14,9 @@
  * Key schema:
  *   task:slack:{channelId}:{threadTs}
  *   task:agentmail:{threadId}
+ *   task:chat-sdk:{adapter}:{encodeURIComponent(platformThreadId)}
+ *                                                 (Chat SDK thread ids carry `:`, so the
+ *                                                  part after the adapter is URI-encoded)
  *   task:trackers:github:{owner}:{repo}:{issue|pr}:{number}
  *   task:trackers:gitlab:{projectId}:{mr|issue}:{iid}
  *   task:trackers:azure-devops:{repositoryId}:pr:{pullRequestId}
@@ -38,13 +41,20 @@
 
 const SEPARATOR = ":";
 
-export type ContextKeyFamily = "slack" | "agentmail" | "trackers" | "schedule" | "workflow";
+export type ContextKeyFamily =
+  | "slack"
+  | "agentmail"
+  | "chat-sdk"
+  | "trackers"
+  | "schedule"
+  | "workflow";
 
 export type TrackerProvider = "github" | "gitlab" | "azure-devops" | "linear" | "jira";
 
 export type ParsedContextKey =
   | { family: "slack"; parts: { channelId: string; threadTs: string } }
   | { family: "agentmail"; parts: { threadId: string } }
+  | { family: "chat-sdk"; parts: { adapter: string; threadId: string } }
   | {
       family: "trackers";
       subFamily: "github";
@@ -93,6 +103,26 @@ export function slackContextKey(input: { channelId: string; threadTs: string }):
   const channelId = assertSafePart(input.channelId, "channelId");
   const threadTs = assertSafePart(input.threadTs, "threadTs");
   return ["task", "slack", channelId, threadTs].join(SEPARATOR);
+}
+
+/**
+ * Chat SDK thread ids are `<adapter>:<platform id>` and the platform id itself
+ * may contain `:` (Telegram `telegram:<chatId>:<topicId>`, Slack
+ * `slack:<channel>:<ts>`). The adapter stays a plain key part; the rest is
+ * URI-encoded so the key keeps a fixed part count. `parseContextKey` returns
+ * the original thread id in `parts.threadId`.
+ */
+export function chatSdkContextKey(threadId: string): string {
+  const raw = typeof threadId === "string" ? threadId : "";
+  const separatorIndex = raw.indexOf(SEPARATOR);
+  if (separatorIndex <= 0 || separatorIndex === raw.length - 1) {
+    throw new Error(
+      `context-key: chat-sdk thread id must be "<adapter>:<id>" (got ${JSON.stringify(threadId)})`,
+    );
+  }
+  const adapter = assertSafePart(raw.slice(0, separatorIndex), "adapter");
+  const rest = encodeURIComponent(raw.slice(separatorIndex + 1));
+  return ["task", "chat-sdk", adapter, rest].join(SEPARATOR);
 }
 
 export function agentmailContextKey(input: { threadId: string }): string {
@@ -234,6 +264,19 @@ export function parseContextKey(key: string): ParsedContextKey {
         throw new Error(`context-key: malformed agentmail key: ${JSON.stringify(key)}`);
       }
       return { family: "agentmail", parts: { threadId: parts[2] as string } };
+    }
+    case "chat-sdk": {
+      if (parts.length !== 4 || !parts[2] || !parts[3]) {
+        throw new Error(`context-key: malformed chat-sdk key: ${JSON.stringify(key)}`);
+      }
+      const adapter = parts[2];
+      let rest: string;
+      try {
+        rest = decodeURIComponent(parts[3]);
+      } catch {
+        throw new Error(`context-key: malformed chat-sdk key: ${JSON.stringify(key)}`);
+      }
+      return { family: "chat-sdk", parts: { adapter, threadId: `${adapter}:${rest}` } };
     }
     case "schedule": {
       if (parts.length !== 3) {

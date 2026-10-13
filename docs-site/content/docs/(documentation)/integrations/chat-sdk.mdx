@@ -1,0 +1,69 @@
+---
+title: Chat SDK
+description: One channel for chat platforms through Vercel's Chat SDK. Telegram mentions and DMs become Lead tasks. Slack, Teams and Discord adapters follow.
+---
+
+Agent Swarm can use [Chat SDK](https://chat-sdk.dev) as an input channel. One API process runs one Chat SDK instance for each configured adapter. The bespoke [Slack](/docs/integrations/slack), [AgentMail](/docs/integrations/agentmail) and [Kapso](/docs/integrations/kapso) integrations are not changed.
+
+<Callout type="warn">
+**Status: Telegram only.** This release supports the Telegram adapter end to end. The Slack, Teams and Discord adapters are bundled but not yet supported. Outbound replies, thread follow-ups, buffering and MCP tools come in later releases.
+</Callout>
+
+## What it does
+
+- **Inbound on mention or DM.** A bot mention or a direct message creates a task for the Lead with `source: "chat"`.
+- **Thread identity.** The task gets a context key of the form `task:chat-sdk:{adapter}:{encoded thread id}`. Later tasks for the same thread share this key.
+- **State in SQLite.** Chat SDK state (subscriptions, locks, dedupe keys, message history) lives in dedicated `chat_*` tables in the swarm database.
+- **Signature checks by the adapter.** The webhook endpoint is public. The adapter checks the platform signature (for Telegram, the secret token header) before it reads the update.
+
+## Configuration
+
+Set two keys, as environment variables or on the dashboard (**Settings → Configuration**). Both take effect after an API restart.
+
+| Key | Value |
+|---|---|
+| `CHAT_SDK_ENABLED` | `true` to start the channel. Default `false`. |
+| `CHAT_SDK_ADAPTERS` | JSON object. Each key is an adapter name, each value is the adapter config. |
+
+A value can reference another config key as `{"$config": "KEY"}`. The API resolves the reference at boot from the global swarm config (secrets included). It never reads the reference from the process environment, and it rejects reserved keys such as `API_KEY`. For env-only deployments, put the raw values in `CHAT_SDK_ADAPTERS`.
+
+```json
+{
+  "telegram": {
+    "botToken": { "$config": "TELEGRAM_BOT_TOKEN" },
+    "secretToken": { "$config": "TELEGRAM_WEBHOOK_SECRET" },
+    "mode": "webhook",
+    "userName": "my_swarm_bot"
+  }
+}
+```
+
+The API refuses `apiUrl`, `apiBaseUrl`, `webhookVerifier` and `allowUnverifiedWebhooks` in this JSON. These keys would send secrets to another host or skip the signature check.
+
+### Telegram fields
+
+| Field | Required | Notes |
+|---|---|---|
+| `botToken` | yes | The token from BotFather. |
+| `secretToken` | in webhook mode | Telegram sends it in the `X-Telegram-Bot-Api-Secret-Token` header. |
+| `mode` | no | `webhook` (default) or `polling`. Use `polling` for local development without a public URL. |
+| `allowedUserIds` | no | Telegram user ids allowed to trigger the bot. All users are allowed when empty. |
+| `userName` | no | The bot username, used for mention detection. Default `swarm`. |
+
+### Webhook URL
+
+Each adapter has its own webhook URL:
+
+```
+{PUBLIC_MCP_BASE_URL}/api/integrations/chat/{adapter}/webhook
+```
+
+For Telegram, register it with the Bot API:
+
+```bash
+curl "https://api.telegram.org/bot<token>/setWebhook" \
+  -d "url=https://<your-api-host>/api/integrations/chat/telegram/webhook" \
+  -d "secret_token=<secretToken>"
+```
+
+The endpoint answers `404` when the channel is off or the adapter is not configured. It answers `503` when the adapter is configured but failed to start (see the API boot log).

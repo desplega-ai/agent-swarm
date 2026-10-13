@@ -1,3 +1,4 @@
+import { validateChatSdkAdaptersValue } from "../integrations/chat-sdk/schema";
 import { validateQuickJSPoolSize } from "../scripts-runtime/executors/quickjs-pool-config";
 import { normalizeSlackReactionShortcode } from "../slack/reaction-shortcode";
 import { ProviderNameSchema } from "../types";
@@ -24,11 +25,14 @@ import { isTierConfigKey, validateTierConfigValue } from "./model-tier-keys";
  * rejected at every write path (DB helpers, HTTP routes, MCP tools).
  */
 // Lead activation is also deployment-only: leads can write ordinary global config.
+// CHAT_SDK_API_URL_OVERRIDES points Chat SDK adapters (and the secrets they carry)
+// at another host, so it must never come from a config row.
 const RESERVED_KEYS = new Set([
   "API_KEY",
   "SECRETS_ENCRYPTION_KEY",
   "CORS_ALLOW_ANY_ORIGIN",
   "EXTENSION_ALLOW_LEAD_ACTIVATION",
+  "CHAT_SDK_API_URL_OVERRIDES",
 ]);
 
 /** Config rows owned by dedicated API surfaces, not the generic config API. */
@@ -254,6 +258,7 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
     ["RUNTIME_WAKE_GRACE_SEC", "RUNTIME_WAKE_REROUTE_SEC", "RUNTIME_ROUTING_INTERVAL_MS"],
     0,
   ),
+  CHAT_SDK_ADAPTERS: validateChatSdkAdaptersValue,
   TASK_TOOL_MANIFESTS: (value) => {
     try {
       if (typeof value !== "string") throw new Error("Expected JSON string");
@@ -380,6 +385,7 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
     "OPENROUTER_APP_ATTRIBUTION",
     "CURSOR_NATIVE_SYSTEM_PROMPT",
     "SLACK_DISABLE",
+    "CHAT_SDK_ENABLED",
     "SLACK_RENDER_V2",
     "SLACK_RENDER_V2_DELEGATION",
     "GITHUB_DISABLE",

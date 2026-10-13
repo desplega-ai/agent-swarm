@@ -2,7 +2,7 @@
 date: 2026-10-13
 author: Taras
 topic: "Chat SDK (chat-sdk.dev) as a swarm input/output channel"
-status: reviewed
+status: in-progress
 autonomy: verbose
 commit_per_phase: true
 brainstorm: thoughts/taras/brainstorms/2026-10-13-chat-sdk-channel.md
@@ -255,27 +255,27 @@ When this phase is done, the API boots with `CHAT_SDK_ENABLED=true` and a Telegr
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Compile gate passes (the binary has no `--help`; it boots the API, so ALWAYS give it a throwaway `DATABASE_PATH`, otherwise it migrates `./agent-swarm-db.sqlite`): `bun build ./src/http.ts ./src/scripts-runtime/executors/quickjs-worker.ts --compile --compile-exec-argv='--expose-gc' --outfile /tmp/agent-swarm-api-trial && d=$(mktemp -d) && port=$(bun -e 'const s=Bun.serve({port:0,fetch(){return new Response("")}});console.log(s.port);s.stop()') && (PORT=$port DATABASE_PATH=$d/db.sqlite DESPLEGA_TELEMETRY_ENV=test SLACK_DISABLE=true HEARTBEAT_DISABLE=true /tmp/agent-swarm-api-trial & echo $! > $d/pid) && for i in $(seq 1 40); do curl -sf http://127.0.0.1:$port/health >/dev/null && break; sleep 1; done; curl -sf http://127.0.0.1:$port/health; echo health=$?; kill $(cat $d/pid)` (`health=0` required; a build error or a non-zero health stops the phase)
-- [ ] Docker API image builds: `docker build -f Dockerfile -t agent-swarm-api:chat-sdk .`
-- [ ] Bun pin lockstep: `bun run check:bun-version`
-- [ ] Phase tests: `bun run test:root -- src/tests/chat-sdk-state.test.ts src/tests/config-refs.test.ts src/tests/chat-sdk-config.test.ts src/tests/chat-sdk-webhook-telegram.test.ts src/tests/migration-213-chat-sdk-state.test.ts`
-- [ ] Migration runner regressions still pass: `bun run test:root -- src/tests/migration-runner-regressions.test.ts`
-- [ ] Migration ordinal and immutability: `bash scripts/check-migration-conflicts.sh`
-- [ ] Audit columns: `bash scripts/check-audit-columns.sh`
-- [ ] Boundaries: `bash scripts/check-db-boundary.sh && bash scripts/check-api-key-boundary.sh && bun run check:dep-graph`
-- [ ] Async seam hygiene: `bun scripts/check-floating-promises.ts && bun scripts/check-promise-sinks.ts`
-- [ ] Route contracts: `bun run check:rbac-coverage && bun run check:openapi-response-coverage && bun run docs:openapi && git diff --exit-code openapi.json`
-- [ ] Inner loop: `bun run check` and `bun run tsc:check:tsc` and `bun run lint:slop`
-- [ ] Fresh DB boots and applies 213 (no GNU `timeout` on macOS, so background + kill): `d=$(mktemp -d) && port=$(bun -e 'const s=Bun.serve({port:0,fetch(){return new Response("")}});console.log(s.port);s.stop()') && (PORT=$port DATABASE_PATH=$d/db.sqlite DESPLEGA_TELEMETRY_ENV=test SLACK_DISABLE=true HEARTBEAT_DISABLE=true bun run start:http & echo $! > $d/pid) && for i in $(seq 1 40); do curl -sf http://127.0.0.1:$port/health >/dev/null && break; sleep 1; done; kill $(cat $d/pid); sqlite3 $d/db.sqlite "select name from _migrations order by name desc limit 1"`
-- [ ] Generated extension types committed: `bun run build:extension-types && git diff --exit-code src/extensions/contract-types.generated.ts src/scripts-runtime/types/swarm-extension.d.ts`
+- [x] Compile gate passes (the binary has no `--help`; it boots the API, so ALWAYS give it a throwaway `DATABASE_PATH`, otherwise it migrates `./agent-swarm-db.sqlite`): `bun build ./src/http.ts ./src/scripts-runtime/executors/quickjs-worker.ts --compile --compile-exec-argv='--expose-gc' --outfile /tmp/agent-swarm-api-trial && d=$(mktemp -d) && port=$(bun -e 'const s=Bun.serve({port:0,fetch(){return new Response("")}});console.log(s.port);s.stop()') && (PORT=$port DATABASE_PATH=$d/db.sqlite DESPLEGA_TELEMETRY_ENV=test SLACK_DISABLE=true HEARTBEAT_DISABLE=true /tmp/agent-swarm-api-trial & echo $! > $d/pid) && for i in $(seq 1 40); do curl -sf http://127.0.0.1:$port/health >/dev/null && break; sleep 1; done; curl -sf http://127.0.0.1:$port/health; echo health=$?; kill $(cat $d/pid)` (`health=0` required; a build error or a non-zero health stops the phase)
+- [x] Docker API image builds: `docker build -f Dockerfile -t agent-swarm-api:chat-sdk .`
+- [x] Bun pin lockstep: `bun run check:bun-version`
+- [x] Phase tests: `bun run test:root -- src/tests/chat-sdk-state.test.ts src/tests/config-refs.test.ts src/tests/chat-sdk-config.test.ts src/tests/chat-sdk-webhook-telegram.test.ts src/tests/migration-213-chat-sdk-state.test.ts`
+- [x] Migration runner regressions still pass: `bun run test:root -- src/tests/migration-runner-regressions.test.ts`
+- [x] Migration ordinal and immutability: `bash scripts/check-migration-conflicts.sh`
+- [x] Audit columns: `bash scripts/check-audit-columns.sh`
+- [x] Boundaries: `bash scripts/check-db-boundary.sh && bash scripts/check-api-key-boundary.sh && bun run check:dep-graph`
+- [x] Async seam hygiene: `bun scripts/check-floating-promises.ts && bun scripts/check-promise-sinks.ts`
+- [x] Route contracts: `bun run check:rbac-coverage && bun run check:openapi-response-coverage && bun run docs:openapi && git diff --exit-code openapi.json`
+- [x] Inner loop: `bun run check` and `bun run tsc:check:tsc` and `bun run lint:slop`
+- [x] Fresh DB boots and applies 213 (no GNU `timeout` on macOS, so background + kill): `d=$(mktemp -d) && port=$(bun -e 'const s=Bun.serve({port:0,fetch(){return new Response("")}});console.log(s.port);s.stop()') && (PORT=$port DATABASE_PATH=$d/db.sqlite DESPLEGA_TELEMETRY_ENV=test SLACK_DISABLE=true HEARTBEAT_DISABLE=true bun run start:http & echo $! > $d/pid) && for i in $(seq 1 40); do curl -sf http://127.0.0.1:$port/health >/dev/null && break; sleep 1; done; kill $(cat $d/pid); sqlite3 $d/db.sqlite "select name from _migrations order by name desc limit 1"`
+- [x] Generated extension types committed: `bun run build:extension-types && git diff --exit-code src/extensions/contract-types.generated.ts src/scripts-runtime/types/swarm-extension.d.ts`
 
 #### Automated QA:
-- [ ] Start the fake Bot API (`bun scripts/dev/telegram-bot-api-mock.ts`, new tiny `Bun.serve` script shared with the test above, prints its port), boot the API with `CHAT_SDK_ENABLED=true CHAT_SDK_ADAPTERS='{"telegram":{"botToken":"fake","secretToken":"s","mode":"webhook"}}' CHAT_SDK_API_URL_OVERRIDES='{"telegram":"http://127.0.0.1:<port>"}' SLACK_DISABLE=true HEARTBEAT_DISABLE=true DESPLEGA_TELEMETRY_ENV=test bun run start:http`, confirm the boot log shows `[chat-sdk] telegram ready` and no secret in the log.
-- [ ] `$config` path: `curl -X PUT http://localhost:3013/api/config -H "Authorization: Bearer 123123" -H 'content-type: application/json' -d '[{"key":"TG_TOKEN","value":"fake","isSecret":true,"scope":"global"},{"key":"CHAT_SDK_ADAPTERS","value":"{\\"telegram\\":{\\"botToken\\":{\\"$config\\":\\"TG_TOKEN\\"},\\"secretToken\\":\\"s\\",\\"mode\\":\\"webhook\\"}}","scope":"global"}]'`, restart, confirm `telegram ready`; then PUT the same JSON with `{"$config":"API_KEY"}`, restart, confirm the boot log shows the reserved-key rejection and `GET /health` still answers.
-- [ ] `curl -s -o /dev/null -w '%{http_code}\n' -X POST http://localhost:3013/api/integrations/chat/telegram/webhook -H 'X-Telegram-Bot-Api-Secret-Token: wrong' -d '{}'` prints `401`; `.../chat/discord/webhook` prints `404`.
-- [ ] `curl -s -X POST http://localhost:3013/api/integrations/chat/telegram/webhook -H 'X-Telegram-Bot-Api-Secret-Token: s' -H 'content-type: application/json' -d @src/tests/fixtures/chat-sdk/telegram-private-text.json` returns 200, then `curl -s -H "Authorization: Bearer 123123" 'http://localhost:3013/api/tasks?source=chat' | jq '.[0] | {source, contextKey, agentId, status}'` shows the new task.
-- [ ] Boot with `CHAT_SDK_ADAPTERS='{"slack":{...}}'` and no `SLACK_DISABLE`: the log shows the clash error and the API still serves `GET /health`.
-- [ ] Boot with `CHAT_SDK_ADAPTERS='{"telegram":{"botToken":"x"}}'` (the schema defaults `mode` to `webhook`, never the SDK's `auto`, which would start long polling against the real Bot API; webhook mode without a secret makes the constructor throw): the Telegram adapter is marked `error` in `getChatSdkHealth()` (log line) and the API still serves `GET /health`.
+- [x] Start the fake Bot API (`bun scripts/dev/telegram-bot-api-mock.ts`, new tiny `Bun.serve` script shared with the test above, prints its port), boot the API with `CHAT_SDK_ENABLED=true CHAT_SDK_ADAPTERS='{"telegram":{"botToken":"fake","secretToken":"s","mode":"webhook"}}' CHAT_SDK_API_URL_OVERRIDES='{"telegram":"http://127.0.0.1:<port>"}' SLACK_DISABLE=true HEARTBEAT_DISABLE=true DESPLEGA_TELEMETRY_ENV=test bun run start:http`, confirm the boot log shows `[chat-sdk] telegram ready` and no secret in the log.
+- [x] `$config` path: `curl -X PUT http://localhost:3013/api/config -H "Authorization: Bearer 123123" -H 'content-type: application/json' -d '[{"key":"TG_TOKEN","value":"fake","isSecret":true,"scope":"global"},{"key":"CHAT_SDK_ADAPTERS","value":"{\\"telegram\\":{\\"botToken\\":{\\"$config\\":\\"TG_TOKEN\\"},\\"secretToken\\":\\"s\\",\\"mode\\":\\"webhook\\"}}","scope":"global"}]'`, restart, confirm `telegram ready`; then PUT the same JSON with `{"$config":"API_KEY"}`, restart, confirm the boot log shows the reserved-key rejection and `GET /health` still answers.
+- [x] `curl -s -o /dev/null -w '%{http_code}\n' -X POST http://localhost:3013/api/integrations/chat/telegram/webhook -H 'X-Telegram-Bot-Api-Secret-Token: wrong' -d '{}'` prints `401`; `.../chat/discord/webhook` prints `404`.
+- [x] `curl -s -X POST http://localhost:3013/api/integrations/chat/telegram/webhook -H 'X-Telegram-Bot-Api-Secret-Token: s' -H 'content-type: application/json' -d @src/tests/fixtures/chat-sdk/telegram-private-text.json` returns 200, then `curl -s -H "Authorization: Bearer 123123" 'http://localhost:3013/api/tasks?source=chat' | jq '.[0] | {source, contextKey, agentId, status}'` shows the new task.
+- [x] Boot with `CHAT_SDK_ADAPTERS='{"slack":{...}}'` and no `SLACK_DISABLE`: the log shows the clash error and the API still serves `GET /health`.
+- [x] Boot with `CHAT_SDK_ADAPTERS='{"telegram":{"botToken":"x"}}'` (the schema defaults `mode` to `webhook`, never the SDK's `auto`, which would start long polling against the real Bot API; webhook mode without a secret makes the constructor throw): the Telegram adapter is marked `error` in `getChatSdkHealth()` (log line) and the API still serves `GET /health`.
 
 #### Manual Verification:
 - [ ] Optional real-bot check: with a BotFather token and `mode: "polling"`, DM the bot and confirm a `source: "chat"` task appears in the dashboard task list.
@@ -671,3 +671,20 @@ _Reviewed: 2026-10-14 by Claude (independent Opus critique, 30 file:line refs sp
 
 ### Remaining
 - [ ] None. The reviewer's suggestion to shrink the six state tables to two was not applied: Taras chose dedicated tables in the brainstorm review; recorded in the Appendix with the traffic note.
+
+---
+
+## Implementation Errata
+
+_Recorded by the orchestrator during autopilot implementation (2026-10-14). Each entry changes or clarifies plan text; the code is the reference._
+
+### Phase 1
+- Boot does not await `startChatSdk()`; adapters initialize in parallel. Reason: the Slack adapter's `auth.test` retry can block for minutes and would stall the scheduler, heartbeat and supervisor. Cost: the webhook answers 404 while an adapter is still initializing, 503 when it failed to start.
+- `userName` is passed to an adapter only when the operator sets it. Passing `"swarm"` to Telegram sets `hasExplicitUserName` and blocks the `getMe` username, which breaks mention detection. `Chat` itself gets `userName ?? "swarm"`.
+- Every adapter gets an explicit default `apiUrl` (Telegram `https://api.telegram.org`, Slack `https://slack.com/api/`, Discord `https://discord.com/api/v10`, Teams unset) and Telegram gets `allowUnverifiedWebhooks: false`. Reason: adapters fall back to `process.env.*_API_URL`, and global swarm_config rows are injected into env. The schema also rejects `allowUnverifiedWebhooks`.
+- `@slack/web-api` is pinned to `7.13.0` as a direct dependency. `@chat-adapter/slack` needs `^7.18`; without the pin bun hoists 7.19 and `src/slack` (which gets web-api through bolt) fails tsc with two `WebClient` declarations. The adapter keeps a nested 7.19.0.
+- UI: only the `AgentTaskSource` union, two icon maps and a "Chat" label changed. The unions near `apps/ui/src/api/types.ts:1262` and `:3048` are `AutomationIntegrationId` and `MilestoneId`, and `people/integration-icons.tsx` maps identity kinds. None are task sources.
+- `CHAT_SDK_API_URL_OVERRIDES` is also in the SQL denylist inside `getInjectableGlobalConfigs` (defense in depth with `RESERVED_KEYS`).
+- The compile-gate command needs `MIGRATIONS_DIR=$PWD/src/be/migrations` for the compiled binary (the Dockerfile sets it). `PUT /api/config` takes one object, not an array; the QA examples send one PUT per key.
+- Deferred to Phase 3 on purpose (review 2026-10-14): `sweepExpired` is exported but not yet scheduled, so `chat_state_kv` dedupe rows accumulate until the Phase 3 watcher runs it. The relay-obligation triggers likewise fill `chat_relay_obligations` ahead of the Phase 3 consumer. Both are fine because all phases ship in one PR.
+- **Phase 3 must gate tool registration on `getEnabledCapabilities()` / `isChatSdkEnabled()`, not `hasCapability("chat-sdk")`**: `hasCapability` reads only `CAPABILITIES`, so tools gated on it never register when the operator enables Chat SDK via `CHAT_SDK_ENABLED` alone.

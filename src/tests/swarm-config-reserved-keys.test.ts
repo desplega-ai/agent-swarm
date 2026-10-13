@@ -139,6 +139,7 @@ describe("swarm-config reserved keys guard", () => {
     "cors_allow_any_origin",
     "EXTENSION_ALLOW_LEAD_ACTIVATION",
     "extension_allow_lead_activation",
+    "CHAT_SDK_API_URL_OVERRIDES",
   ]) {
     test(`rejects deployment-only ${key} through DB, HTTP, and MCP`, async () => {
       const config = { scope: "global" as const, key, value: "true" };

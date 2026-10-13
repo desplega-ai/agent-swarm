@@ -53,6 +53,9 @@ import {
   verifyGitLabWebhook,
 } from "../gitlab";
 import { gitlabWorkflowActionName } from "../gitlab/workflow-action-name";
+import { trackBackground } from "../integrations/chat-sdk/background";
+import { isChatSdkEnabled } from "../integrations/chat-sdk/config";
+import { getChatInstance, isChatAdapterConfigured } from "../integrations/chat-sdk/runtime";
 import {
   type KapsoMessageActionResult,
   markKapsoMessageRead,
@@ -63,6 +66,8 @@ import { getKapsoConfig } from "../integrations/kapso/config";
 import type { KapsoWebhookPayload } from "../integrations/kapso/inbound";
 import { resolveKapsoRequestedByUserId, routeKapsoInbound } from "../integrations/kapso/inbound";
 import { TaskCreationBlockedError } from "../tasks/errors";
+import { getPublicMcpBaseUrl } from "../utils/constants";
+import { scrubSecrets } from "../utils/secret-scrubber";
 import { canonicalAzureDevOpsRepoUrl } from "../vcs/azure-devops";
 import { getExecutorRegistry } from "../workflows";
 import { workflowEventBus } from "../workflows/event-bus";
@@ -190,7 +195,52 @@ const kapsoWebhook = route({
   },
 });
 
+const chatSdkWebhook = route({
+  method: "post",
+  path: "/api/integrations/chat/{adapter}/webhook",
+  pattern: ["api", "integrations", "chat", null, "webhook"],
+  summary: "Handle Chat SDK platform webhooks (Telegram, Slack, Discord, Teams)",
+  tags: ["Webhooks"],
+  params: z.object({ adapter: z.string().describe("Chat SDK adapter name, e.g. telegram") }),
+  auth: { apiKey: false },
+  rbac: {
+    ungated:
+      "provider webhook: the Chat SDK adapter verifies the platform signature (Telegram secret token, Slack signing secret, Discord Ed25519, Teams JWT)",
+  },
+  responses: {
+    200: { description: "Adapter response", unstructured: "adapter response proxied as-is" },
+    401: { description: "Invalid platform signature or secret token" },
+    404: { description: "Chat SDK disabled or adapter not configured" },
+    503: { description: "Adapter configured but failed to start" },
+  },
+});
+
 // ─── Handler ─────────────────────────────────────────────────────────────────
+
+/**
+ * Rebuild a Fetch `Request` from the raw Node request. Headers come from
+ * `rawHeaders` pairs: building `Headers` from `IncomingMessage.headers`
+ * comma-joins repeated values, which breaks signature checks.
+ */
+function toFetchRequest(req: IncomingMessage, rawBody: Buffer, fallbackPath: string): Request {
+  const headers = new Headers();
+  if (Array.isArray(req.rawHeaders) && req.rawHeaders.length > 0) {
+    for (let i = 0; i + 1 < req.rawHeaders.length; i += 2) {
+      headers.append(req.rawHeaders[i] as string, req.rawHeaders[i + 1] as string);
+    }
+  } else {
+    for (const [name, value] of Object.entries(req.headers)) {
+      for (const item of Array.isArray(value) ? value : value === undefined ? [] : [value]) {
+        headers.append(name, item);
+      }
+    }
+  }
+  return new Request(`${getPublicMcpBaseUrl()}${req.url ?? fallbackPath}`, {
+    method: req.method ?? "POST",
+    headers,
+    body: rawBody.length > 0 ? new Uint8Array(rawBody) : undefined,
+  });
+}
 
 function logKapsoAckResult(action: string, result: KapsoMessageActionResult): void {
   if (result.ok) return;
@@ -791,6 +841,56 @@ export async function handleWebhooks(
         console.error(`[Kapso] Error handling inbound event: ${errorMessage}`);
       }
       kapsoWebhook.respond(res, 200, { received: true, routing: "error" });
+    }
+    return true;
+  }
+
+  // Chat SDK webhook: the adapter verifies the platform signature over the raw
+  // body, so the request is proxied as-is and the adapter's response returned.
+  if (chatSdkWebhook.match(req.method, pathSegments)) {
+    const adapterName = pathSegments[3] ?? "";
+    if (!isChatSdkEnabled() || !isChatAdapterConfigured(adapterName)) {
+      res.writeHead(404, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Chat SDK adapter not configured" }));
+      return true;
+    }
+    const chat = getChatInstance(adapterName);
+    const handler = chat?.webhooks[adapterName];
+    if (!handler) {
+      res.writeHead(503, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Chat SDK adapter failed to start" }));
+      return true;
+    }
+
+    const chunks: Buffer[] = [];
+    for await (const chunk of req) {
+      chunks.push(chunk as Buffer);
+    }
+    const request = toFetchRequest(
+      req,
+      Buffer.concat(chunks),
+      `/api/integrations/chat/${adapterName}/webhook`,
+    );
+
+    try {
+      const response = await handler(request, {
+        waitUntil: trackBackground,
+        propagateHandlerErrors: true,
+      });
+      const responseHeaders: Record<string, string> = {};
+      response.headers.forEach((value, name) => {
+        responseHeaders[name] = value;
+      });
+      const body = Buffer.from(await response.arrayBuffer());
+      res.writeHead(response.status, responseHeaders);
+      res.end(body);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`[chat-sdk] ${adapterName} webhook failed: ${scrubSecrets(message)}`);
+      if (!res.headersSent) {
+        res.writeHead(500, { "Content-Type": "application/json" });
+      }
+      res.end(JSON.stringify({ error: "Chat SDK webhook failed" }));
     }
     return true;
   }

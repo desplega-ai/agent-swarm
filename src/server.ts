@@ -6,6 +6,7 @@ import { startPricingRefreshLoop } from "./be/pricing-refresh";
 import { isSteeringEnabled } from "./be/steering";
 import { registerGithubTaskReactions } from "./github/task-reactions";
 import { loadGlobalConfigsIntoEnv } from "./http/core";
+import { isChatSdkEnabled } from "./integrations/chat-sdk/config";
 import { resolveTemplate } from "./prompts/resolver";
 import { isRbacEnabled } from "./rbac";
 import { getSlackConfiguration } from "./slack/config";
@@ -230,6 +231,7 @@ export const ALL_CAPABILITIES = [
   "repo",
   "agentmail",
   "kapso",
+  "chat-sdk",
   "swarm-x",
 ] as const;
 
@@ -262,6 +264,7 @@ const DEFAULT_CAPABILITIES: string = [
   // "swarm-x",
   // "agentmail",
   // "kapso",
+  // "chat-sdk", (added by getEnabledCapabilities when CHAT_SDK_ENABLED is true)
 ].join(",");
 
 // Note: unknown names are kept (they never match hasCapability); workers
@@ -281,7 +284,11 @@ export function hasCapability(cap: CAPABILITIES_T): boolean {
 }
 
 export function getEnabledCapabilities(): CAPABILITIES_T[] {
-  const capabilities = Array.from(getCapabilities());
+  const capabilities: CAPABILITIES_T[] = Array.from(getCapabilities()).filter(
+    (capability) => capability !== "chat-sdk",
+  );
+  // The Chat SDK channel follows CHAT_SDK_ENABLED, not the CAPABILITIES list.
+  if (isChatSdkEnabled()) capabilities.push("chat-sdk");
   // Phase 1 has no HTTP receiver. Do not advertise usable Slack tools to
   // workers when HTTP (or an invalid transport) was selected.
   return getSlackConfiguration().mode === "socket"

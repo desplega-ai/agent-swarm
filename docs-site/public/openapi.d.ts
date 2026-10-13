@@ -2291,7 +2291,7 @@ export interface paths {
                     };
                     content: {
                         "application/json": components["schemas"]["Agent"] & {
-                            enabledCapabilities: ("core" | "task-pool" | "scripts" | "config" | "prompt-templates" | "mcp" | "profiles" | "services" | "scheduling" | "memory" | "workflows" | "pages" | "metrics" | "kv" | "slack" | "tracker" | "skills" | "messaging" | "repo" | "agentmail" | "kapso" | "swarm-x")[];
+                            enabledCapabilities: ("core" | "task-pool" | "scripts" | "config" | "prompt-templates" | "mcp" | "profiles" | "services" | "scheduling" | "memory" | "workflows" | "pages" | "metrics" | "kv" | "slack" | "tracker" | "skills" | "messaging" | "repo" | "agentmail" | "kapso" | "chat-sdk" | "swarm-x")[];
                             /** @enum {string} */
                             deliveryMode: "poll" | "push";
                             pollRequired?: boolean;
@@ -2305,7 +2305,7 @@ export interface paths {
                     };
                     content: {
                         "application/json": components["schemas"]["Agent"] & {
-                            enabledCapabilities: ("core" | "task-pool" | "scripts" | "config" | "prompt-templates" | "mcp" | "profiles" | "services" | "scheduling" | "memory" | "workflows" | "pages" | "metrics" | "kv" | "slack" | "tracker" | "skills" | "messaging" | "repo" | "agentmail" | "kapso" | "swarm-x")[];
+                            enabledCapabilities: ("core" | "task-pool" | "scripts" | "config" | "prompt-templates" | "mcp" | "profiles" | "services" | "scheduling" | "memory" | "workflows" | "pages" | "metrics" | "kv" | "slack" | "tracker" | "skills" | "messaging" | "repo" | "agentmail" | "kapso" | "chat-sdk" | "swarm-x")[];
                             /** @enum {string} */
                             deliveryMode: "poll" | "push";
                             pollRequired?: boolean;
@@ -11736,7 +11736,7 @@ export interface paths {
                                  * @default mcp
                                  * @enum {string}
                                  */
-                                source: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "azure-devops" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira" | "comb";
+                                source: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "azure-devops" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira" | "comb" | "chat";
                                 taskType?: string;
                                 /** @default [] */
                                 tags: string[];
@@ -11829,7 +11829,7 @@ export interface paths {
                         /** @description Non-unique asset directory namespace (for example shared/ or personal/<user-id>/drafts/). Runtime write boundaries normalize and validate the canonical form. */
                         key?: string;
                         /** @enum {string} */
-                        source?: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "azure-devops" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira" | "comb";
+                        source?: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "azure-devops" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira" | "comb" | "chat";
                         outputSchema?: {
                             [key: string]: unknown;
                         };
@@ -12124,7 +12124,7 @@ export interface paths {
                          */
                         onUnsupported?: "degrade" | "fail";
                         /** @enum {string} */
-                        source?: "ui" | "mcp" | "script" | "slack" | "api";
+                        source?: "ui" | "mcp" | "script" | "slack" | "api" | "chat";
                         requestedByUserId?: string;
                     };
                 };
@@ -17659,7 +17659,7 @@ export interface paths {
                                      * @default mcp
                                      * @enum {string}
                                      */
-                                    source: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "azure-devops" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira" | "comb";
+                                    source: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "azure-devops" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira" | "comb" | "chat";
                                     taskType?: string;
                                     /** @default [] */
                                     tags: string[];
@@ -22817,6 +22817,70 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/integrations/chat/{adapter}/webhook": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Handle Chat SDK platform webhooks (Telegram, Slack, Discord, Teams) */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Chat SDK adapter name, e.g. telegram */
+                    adapter: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Adapter response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Invalid platform signature or secret token */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Chat SDK disabled or adapter not configured */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Adapter configured but failed to start */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/workflow-runs/{runId}/events": {
         parameters: {
             query?: never;
@@ -24354,7 +24418,7 @@ export interface components {
              * @default mcp
              * @enum {string}
              */
-            source: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "azure-devops" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira" | "comb";
+            source: "mcp" | "slack" | "api" | "ui" | "github" | "gitlab" | "azure-devops" | "agentmail" | "system" | "schedule" | "workflow" | "linear" | "jira" | "comb" | "chat";
             /** @enum {string} */
             routingReason?: "skill" | "continuity" | "overflow" | "human_pinned" | "reroute_fault";
             /**
@@ -25050,7 +25114,7 @@ export interface components {
             /** @enum {string} */
             deliveredMode?: "steer" | "queue";
             /** @enum {string} */
-            source: "ui" | "mcp" | "script" | "slack" | "api";
+            source: "ui" | "mcp" | "script" | "slack" | "api" | "chat";
             senderLabel?: string;
             /** @enum {string} */
             createdByKind: "user" | "agent" | "system";

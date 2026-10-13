@@ -19,6 +19,7 @@ declare module "swarm-extension" {
       | "linear"
       | "jira"
       | "comb"
+      | "chat"
       | undefined;
     routingReason?:
       | "skill"
@@ -132,7 +133,8 @@ declare module "swarm-extension" {
       | "system"
       | "linear"
       | "jira"
-      | "comb";
+      | "comb"
+      | "chat";
     tags: string[];
     priority: number;
     dependsOn: string[];
