@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.171.1] - 2026-10-13
+
+### Changed
+- amp bumped in the worker image (#2103).
+
+### Fixed
+- Dashboard: the organization-name prompt is asked once, and `notifyUs` drops `install_id` when telemetry is off (#2104).
+
 ## [1.171.0] - 2026-10-12
 
 1.170.0 was bumped on `main` but never published (no tag, npm package or GitHub release), so this release ships the 1.170.0 changes below as well.
