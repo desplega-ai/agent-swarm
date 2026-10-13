@@ -640,6 +640,59 @@ describe("redirect body collection", () => {
       expect((outcome as Error).message).toBe("source broke");
       expect(source.locked).toBe(false);
     });
+
+    // A source whose cancel cleanup stays pending until the test ends it.
+    const slowCancelSource = (pull: (controller: ReadableStreamDefaultController) => void) => {
+      let finishCleanup = () => {};
+      const state = { cancelled: false, cleanedUp: false };
+      const cleanup = new Promise<void>((resolve) => {
+        finishCleanup = resolve;
+      });
+      const source = new ReadableStream({
+        pull,
+        async cancel() {
+          state.cancelled = true;
+          await cleanup;
+          state.cleanedUp = true;
+        },
+      });
+      return { source, state, finishCleanup: () => finishCleanup() };
+    };
+
+    test(`${layer}: a body over the cap rejects before slow source cleanup ends`, async () => {
+      sent.length = 0;
+      const { source, state, finishCleanup } = slowCancelSource((controller) => {
+        controller.enqueue(new Uint8Array(1024 * 1024));
+      });
+      try {
+        const outcome = await settled(upload(make(), source));
+        expect(outcome).toBeInstanceOf(RequestBodyTooLargeError);
+        expect(state.cancelled).toBe(true);
+        expect(state.cleanedUp).toBe(false);
+        expect(source.locked).toBe(false);
+        expect(sent).toEqual([]);
+      } finally {
+        finishCleanup();
+      }
+    });
+
+    test(`${layer}: an already-aborted signal rejects before slow source cleanup ends`, async () => {
+      sent.length = 0;
+      const { source, state, finishCleanup } = slowCancelSource((controller) => {
+        controller.enqueue(new Uint8Array(8));
+      });
+      try {
+        const outcome = await settled(upload(make(), source, AbortSignal.abort()));
+        expect(outcome).toBeInstanceOf(Error);
+        expect((outcome as Error).name).toBe("AbortError");
+        expect(state.cancelled).toBe(true);
+        expect(state.cleanedUp).toBe(false);
+        expect(source.locked).toBe(false);
+        expect(sent).toEqual([]);
+      } finally {
+        finishCleanup();
+      }
+    });
   }
 
   test("control: a body at the cap is sent whole", async () => {

@@ -432,7 +432,8 @@ export async function replayableBody(
       chunks.push(bytes);
     }
   } catch (error) {
-    await reader.cancel(error).catch(() => {});
+    // Start cancellation but never wait on the source's cleanup to reject.
+    reader.cancel(error).catch(() => {});
     throw error;
   } finally {
     signal?.removeEventListener("abort", onAbort);
