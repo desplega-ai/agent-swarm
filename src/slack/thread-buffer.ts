@@ -6,8 +6,9 @@ import {
 } from "../be/db";
 import { findUserByExternalId } from "../be/users";
 import { createAdditiveBuffer } from "../tasks/additive-buffer";
-import { TaskCreationBlockedError } from "../tasks/errors";
 import { slackContextKey } from "../tasks/context-key";
+import { TaskCreationBlockedError } from "../tasks/errors";
+import { scrubSecrets } from "../utils/secret-scrubber";
 import { getSlackApp } from "./app";
 import { ackSlackMessage } from "./ack";
 import { buildBufferFlushBlocks } from "./blocks";
@@ -25,7 +26,6 @@ import { ensureSlackThreadTree, isSlackRenderV2Enabled } from "./render-v2";
 import { getAgentDisplayName, getAgentEmoji } from "./responses";
 import { formatSlackSteeringAck, requestSlackThreadSteering } from "./steering";
 import { registerTreeMessage } from "./watcher";
-import { scrubSecrets } from "../utils/secret-scrubber";
 
 interface BufferedMessage {
   text: string;
