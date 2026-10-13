@@ -11,6 +11,7 @@ import type {
 } from "../scripts-runtime/executors/types";
 import { DEFAULT_SCRIPT_RESOURCES } from "../scripts-runtime/executors/types";
 import { SKIP_SANDBOX_SPAWN_TESTS } from "./sandbox-spawn-test-helpers";
+import { CHILD_PROCESS_TEST_BUDGET_MS } from "./test-proc";
 
 const payload = {
   system: {
@@ -178,6 +179,41 @@ const PARITY_PROBES: Record<string, string> = {
   u.hash = "";
   return { parsed, linked, mutated: u.href, json: JSON.stringify({ u }), canParse: [URL.canParse("x"), URL.canParse("x", "https://a/")] };
 }`,
+  "URL relative state": `async () => {
+  const base = "http://a/b?q#f";
+  const cases = [
+    "http:/x", "http:/", "http:", "http:?y", "http:#g", "http:x/../y", "http:\\\\x", "http://x", "http:///x",
+    "http:/\\\\x", "https:/x", "ws:/x", "foo:/x", "file:/x",
+  ];
+  return cases.map((url) => {
+    try { return new URL(url, base).href; } catch (error) { return error.name; }
+  });
+}`,
+  "URL setters": `async () => {
+  const run = (start, key, values) => values.map((value) => {
+    const u = new URL(start);
+    u[key] = value;
+    return u.href;
+  });
+  return {
+    hostname: run("http://a.b:81/p", "hostname", [
+      "[::1]", "[::1]:90", "example.net:90", "c.d/e", "c.d?x", "user@c.d", "", "exa mple", "C.D", "[::1", "0x7f.1",
+    ]),
+    host: run("http://a.b:81/p", "host", [
+      "[::1]", "[::1]:90", "c.d:90", "c.d:", "c.d:80", "c.d:99999", "c.d:9x", "user@c.d", "user:pw@c.d:9", "", "c.d/e:1", ":90",
+      "user:pw@c.d", "c.d:1:2", "c.d:9/x:1", "c.d:080", "c.d:65536", "c.d:x", "[::1]:80",
+    ]),
+    hostNoPort: run("http://a.b/p", "host", ["c.d:80", "c.d:99999"]),
+    nonSpecialHost: run("foo://a:5/p", "host", ["", "b:1", "[::1]", "b@c", "b:", "b:99999"]),
+    nonSpecialEmptyHost: run("foo://a/p", "host", [""]),
+    nonSpecialHostname: run("foo://u@a:5/p", "hostname", ["", "b"]),
+    protocol: run("http://a.b/p", "protocol", [
+      "https", "https:", "https:foo", "https://x", "ht tps", "https!", "1http", "foo", "ws:", "HTTPS", "\\thttps",
+    ]),
+    fileProtocol: run("file:///p", "protocol", ["http"]),
+    opaqueHost: run("mailto:x@y", "host", ["z"]),
+  };
+}`,
   URLSearchParams: `async () => {
   const p = new URLSearchParams("?b=2&a=1&a=3&sp=a+b%20c&uni=%C3%A9&bad=%E0%A4%A");
   p.append("x y", "ä&=+");
@@ -191,6 +227,58 @@ const PARITY_PROBES: Record<string, string> = {
     has: [p.has("a"), p.has("a", "1"), p.has("zz")],
     fromObject: new URLSearchParams({ q: "hello world", n: 5 }).toString(),
     fromPairs: new URLSearchParams([["k", "v"], ["k", "w"]]).toString(),
+  };
+}`,
+  "URLSearchParams live traversal": `async () => {
+  const appended = new URLSearchParams("a=1&b=2");
+  const keys = appended.keys();
+  appended.append("c", "3");
+  const keysAfterAppend = [...keys];
+
+  const deleted = new URLSearchParams("a=1&b=2&c=3");
+  const visited = [];
+  deleted.forEach((value, key) => {
+    visited.push(key + value);
+    if (key === "a") deleted.delete("c");
+  });
+
+  const grown = new URLSearchParams("x=1");
+  const grownVisits = [];
+  grown.forEach((value, key) => {
+    grownVisits.push(key);
+    if (grownVisits.length < 3) grown.append("y" + grownVisits.length, value);
+  });
+
+  const shifted = new URLSearchParams("a=1&b=2&c=3");
+  const entries = shifted.entries();
+  const first = entries.next().value;
+  shifted.delete("a");
+  const rest = [...entries];
+
+  const reset = new URLSearchParams("a=1&b=2");
+  const values = reset.values();
+  values.next();
+  reset.set("a", "9");
+  reset.sort();
+  const drained = values.next();
+  reset.append("z", "0");
+  const afterDone = values.next();
+
+  const linked = new URL("https://h/?a=1&b=2");
+  const linkedKeys = linked.searchParams.keys();
+  linked.search = "?c=3&d=4&e=5";
+  const linkedRest = [...linkedKeys];
+
+  return { keysAfterAppend, visited, grownVisits, first, rest, drained, afterDone, linkedRest };
+}`,
+  base64: `async () => {
+  const attempt = (run) => { try { return run(); } catch (error) { return error.name; } };
+  return {
+    encode: ["", "f", "fo", "foo", "foob", "fooba", "foobar", "\\u00ff\\u0000\\u0080", 123, null, undefined].map((value) => btoa(value)),
+    decode: ["", "Zg", "Zg==", "Zm8=", "Zm9v", " Zm 9v\\n", "Zm9vYg", "/+8=", "AP+A"].map((value) => atob(value)),
+    decodeBad: ["Z", "Zg=", "Zg===", "Z=g=", "Zm9v!", "Zm9v=", "===="].map((value) => attempt(() => atob(value))),
+    encodeBad: attempt(() => btoa("é👋")),
+    roundTrip: atob(btoa(String.fromCharCode(...Array.from({ length: 256 }, (_, i) => i)))).length,
   };
 }`,
   TextEncoder: `async () => {
@@ -273,18 +361,24 @@ describe("quickjs parity shims match native and Bun", () => {
   ];
   for (const [name, probe] of Object.entries(PARITY_PROBES)) {
     for (const [executorName, makeExecutor, spawns] of executors) {
-      test.skipIf(spawns && SKIP_SANDBOX_SPAWN_TESTS)(`${name} (${executorName})`, async () => {
-        const expected = await runInBun(probe, args);
-        const output = await makeExecutor().run(
-          input({
-            source: `export default ${probe};`,
-            args,
-            resources: { ...DEFAULT_SCRIPT_RESOURCES, memoryMb: 2048, wallClockMs: 10_000 },
-          }),
-        );
-        expect(output.error).toBeUndefined();
-        expect(output.result).toEqual(expected);
-      });
+      // The native case spawns a bun subprocess with a 10s script budget, so
+      // the test timeout must outlast it (runbooks/testing.md hard rule 5).
+      test.skipIf(spawns && SKIP_SANDBOX_SPAWN_TESTS)(
+        `${name} (${executorName})`,
+        async () => {
+          const expected = await runInBun(probe, args);
+          const output = await makeExecutor().run(
+            input({
+              source: `export default ${probe};`,
+              args,
+              resources: { ...DEFAULT_SCRIPT_RESOURCES, memoryMb: 2048, wallClockMs: 10_000 },
+            }),
+          );
+          expect(output.error).toBeUndefined();
+          expect(output.result).toEqual(expected);
+        },
+        CHILD_PROCESS_TEST_BUDGET_MS,
+      );
     }
   }
 });

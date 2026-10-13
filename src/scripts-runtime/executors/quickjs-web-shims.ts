@@ -1,6 +1,6 @@
 /**
  * Pure-JS web globals that the QuickJS build lacks: `URL`, `URLSearchParams`,
- * `TextEncoder` and `TextDecoder` (UTF-8 only). The quickjs runner evaluates
+ * `TextEncoder`, `TextDecoder` (UTF-8 only), `atob` and `btoa`. The quickjs runner evaluates
  * this before `SANDBOX_PRELUDE`, so the prelude's fetch can serialize a
  * `URLSearchParams` body. Nothing here calls the host.
  *
@@ -256,6 +256,18 @@ const parseQuery = (input) => {
   return list;
 };
 const toUSVString = (value) => utf8Decode(utf8Encode(value), false, false).text;
+const liveIterator = (params, pick) => {
+  let index = 0;
+  return {
+    next() {
+      if (index >= params._list.length) return { value: undefined, done: true };
+      return { value: pick(params._list[index++]), done: false };
+    },
+    [Symbol.iterator]() {
+      return this;
+    },
+  };
+};
 
 class URLSearchParams {
   constructor(init) {
@@ -326,17 +338,22 @@ class URLSearchParams {
       .map(({ entry }) => entry);
     this._update();
   }
+  // Traversal is live, as in the spec: each step reads the current list, so
+  // entries appended or deleted during iteration are seen or skipped.
   forEach(callback, thisArg) {
-    for (const [k, v] of this._list.slice()) callback.call(thisArg, v, k, this);
+    for (let i = 0; i < this._list.length; i++) {
+      const [k, v] = this._list[i];
+      callback.call(thisArg, v, k, this);
+    }
   }
   keys() {
-    return this._list.map(([k]) => k)[Symbol.iterator]();
+    return liveIterator(this, ([k]) => k);
   }
   values() {
-    return this._list.map(([, v]) => v)[Symbol.iterator]();
+    return liveIterator(this, ([, v]) => v);
   }
   entries() {
-    return this._list.map(([k, v]) => [k, v])[Symbol.iterator]();
+    return liveIterator(this, ([k, v]) => [k, v]);
   }
   [Symbol.iterator]() {
     return this.entries();
@@ -723,7 +740,9 @@ const parseURL = (rawInput, base) => {
   const record = blankRecord(schemeMatch[1].toLowerCase());
   const rest = input.slice(schemeMatch[0].length);
   if (isSpecial(record.scheme)) {
-    if (base && base.scheme === record.scheme && !/^[/\\]/.test(rest)) {
+    // Same special scheme as the base: "http:x", "http:/x" and "http:?q"
+    // resolve against the base; two slashes start a new authority.
+    if (base && base.scheme === record.scheme && (record.scheme !== "file" || !/^[/\\]/.test(rest))) {
       return parseRelative(record, rest, base, rawInput);
     }
     if (record.scheme === "file") {
@@ -771,6 +790,62 @@ const hrefOf = (record) => {
   return out;
 };
 
+// The host and hostname setters: the host state of the URL parser with a state
+// override. Invalid input leaves the URL unchanged; it never throws. Where Bun
+// departs from the spec, the host setter follows Bun (the native executor):
+// it ignores input with a second ":" outside brackets, keeps the old port when
+// the new one is the default, and clears the port when the new one is out of range.
+const setHost = (record, value, withPort) => {
+  if (record.opaque) return;
+  const special = isSpecial(record.scheme);
+  const input = String(value).replace(/[\t\n\r]/g, "");
+  let end = 0;
+  let brackets = false;
+  let colons = 0;
+  let colon = -1;
+  for (let i = 0; i < input.length; i++) {
+    const c = input[i];
+    if (c === "[") brackets = true;
+    else if (c === "]") brackets = false;
+    else if (c === ":" && !brackets && record.scheme !== "file") colons++;
+  }
+  brackets = false;
+  for (; end < input.length; end++) {
+    const c = input[end];
+    if (c === "/" || c === "?" || c === "#" || (special && c === "\\")) break;
+    if (c === ":" && !brackets && record.scheme !== "file") {
+      colon = end;
+      break;
+    }
+    if (c === "[") brackets = true;
+    else if (c === "]") brackets = false;
+  }
+  const buffer = input.slice(0, end);
+  if (colon !== -1 && (!withPort || colons > 1)) return;
+  if (record.scheme === "file") {
+    if (buffer === "") {
+      record.host = "";
+      return;
+    }
+  } else if (buffer === "") {
+    if (special || colon !== -1) return;
+    if (record.username || record.password || record.port !== "") return;
+  }
+  let host;
+  try {
+    host = parseHost(buffer, special || record.scheme === "file", value);
+  } catch {
+    return;
+  }
+  record.host = record.scheme === "file" && host === "localhost" ? "" : host;
+  if (colon === -1) return;
+  const digits = /^[0-9]*/.exec(input.slice(colon + 1))[0];
+  if (digits === "") return;
+  const port = Number(digits);
+  if (port > 65535) record.port = "";
+  else if (String(port) !== SPECIAL_PORTS[record.scheme]) record.port = String(port);
+};
+
 class URL {
   constructor(url, base) {
     const baseRecord = base === undefined ? null : parseURL(base instanceof URL ? base.href : base, null);
@@ -815,11 +890,13 @@ class URL {
     return this._record.scheme + ":";
   }
   set protocol(value) {
-    const match = /^([A-Za-z][A-Za-z0-9+.\-]*)/.exec(String(value));
+    // The scheme must end the input or be followed by ":"; anything else is invalid.
+    const match = /^([A-Za-z][A-Za-z0-9+.\-]*)(:|$)/.exec(String(value).replace(/[\t\n\r]/g, ""));
     if (!match) return;
     const scheme = match[1].toLowerCase();
     if (isSpecial(scheme) !== isSpecial(this._record.scheme)) return;
     if (scheme === "file" && (this._record.username || this._record.password || this._record.port)) return;
+    if (this._record.scheme === "file" && this._record.host === "") return;
     this._record.scheme = scheme;
     if (this._record.port === SPECIAL_PORTS[scheme]) this._record.port = "";
   }
@@ -841,21 +918,13 @@ class URL {
     return hostOf(this._record);
   }
   set host(value) {
-    if (this._record.opaque) return;
-    try {
-      const next = parseURL(this._record.scheme + "://" + String(value).split(/[/?#\\]/)[0], null);
-      this._record.host = next.host;
-      if (next.port !== "" || /:\d/.test(String(value))) this._record.port = next.port;
-    } catch {}
+    setHost(this._record, value, true);
   }
   get hostname() {
     return this._record.host === null ? "" : this._record.host;
   }
   set hostname(value) {
-    if (this._record.opaque) return;
-    try {
-      this._record.host = parseURL(this._record.scheme + "://" + String(value).split(/[/?#\\:]/)[0], null).host;
-    } catch {}
+    setHost(this._record, value, false);
   }
   get port() {
     return this._record.port;
@@ -916,8 +985,54 @@ class URL {
   }
 }
 
+// ── base64 (forgiving-base64, latin1 strings) ──
+const B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+const invalidCharacter = (message) => {
+  const error = new Error(message);
+  error.name = "InvalidCharacterError";
+  return error;
+};
+function btoa(data) {
+  if (arguments.length === 0) throw new TypeError("btoa requires 1 argument");
+  const text = String(data);
+  let out = "";
+  for (let i = 0; i < text.length; i += 3) {
+    const a = text.charCodeAt(i);
+    const b = i + 1 < text.length ? text.charCodeAt(i + 1) : 0;
+    const c = i + 2 < text.length ? text.charCodeAt(i + 2) : 0;
+    if (a > 255 || b > 255 || c > 255) throw invalidCharacter("The string contains characters outside of the Latin1 range");
+    const n = (a << 16) | (b << 8) | c;
+    out += B64[n >> 18] + B64[(n >> 12) & 63];
+    out += i + 1 < text.length ? B64[(n >> 6) & 63] : "=";
+    out += i + 2 < text.length ? B64[n & 63] : "=";
+  }
+  return out;
+}
+function atob(data) {
+  if (arguments.length === 0) throw new TypeError("atob requires 1 argument");
+  let text = String(data).replace(/[\t\n\f\r ]/g, "");
+  if (text.length % 4 === 0) text = text.replace(/==?$/, "");
+  if (text.length % 4 === 1 || /[^A-Za-z0-9+/]/.test(text)) {
+    throw invalidCharacter("The string contains invalid characters");
+  }
+  let out = "";
+  let bits = 0;
+  let buffer = 0;
+  for (let i = 0; i < text.length; i++) {
+    buffer = ((buffer << 6) | B64.indexOf(text[i])) & 0xffffff;
+    bits += 6;
+    if (bits >= 8) {
+      bits -= 8;
+      out += String.fromCharCode((buffer >> bits) & 255);
+    }
+  }
+  return out;
+}
+
 const define = (name, value) =>
   Object.defineProperty(globalThis, name, { value, writable: true, configurable: true, enumerable: false });
+define("atob", atob);
+define("btoa", btoa);
 define("URL", URL);
 define("URLSearchParams", URLSearchParams);
 define("TextEncoder", TextEncoder);
