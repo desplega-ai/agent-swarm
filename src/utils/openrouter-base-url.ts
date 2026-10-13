@@ -8,8 +8,6 @@
  * the default OpenRouter URL is used and behavior is unchanged.
  *
  * Worker-safe: pure env read, no `src/be/db` / `bun:sqlite` imports.
- * The opencode summarize plugin (`plugin/opencode-plugins/lib/summarize.ts`)
- * vendors this logic — keep the two in sync.
  */
 
 export const DEFAULT_OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";

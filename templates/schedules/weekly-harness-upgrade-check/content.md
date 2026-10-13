@@ -18,26 +18,24 @@ The worker image pins these harnesses via `ARG`. Each week, check upstream for n
 | `CLAUDE_CODE_VERSION` | npm `@anthropic-ai/claude-code` | none |
 | `PI_CODING_AGENT_VERSION` | npm `@earendil-works/pi-coding-agent` | MUST match `@earendil-works/pi-agent-core`, `@earendil-works/pi-ai`, and `@earendil-works/pi-coding-agent` in `package.json` (family-pin, all same version) — bump all together |
 | `CODEX_VERSION` | npm `@openai/codex` | MUST match direct `@openai/codex` in `package.json` (enforced by `scripts/check-codex-default-model.sh`) |
-| `OPENCODE_VERSION` | https://opencode.ai (latest release) | MUST match `OPENCODE_SDK_VERSION` |
-| `OPENCODE_SDK_VERSION` | npm `@opencode-ai/sdk` | MUST match `OPENCODE_VERSION` — bump both together |
+| `OPENCODE_VERSION` | npm `@opencode/sdk` | Installs both `@opencode/cli` and `@opencode/sdk`. MUST match `@opencode/sdk` and `@opencode/plugin` in `package.json` devDependencies. OpenCode 2 ships under the `@opencode/*` scope; never take a version from `opencode-ai`, `@opencode-ai/sdk`, or the `sst/opencode` GitHub releases (still the 1.x line, which would be a downgrade) |
 
 ## Steps
 
 1. `cd /workspace/repo && git fetch origin && git checkout main && git pull --ff-only`
-2. Read current pinned versions from `Dockerfile.worker` (the `ARG` lines) and from `package.json` (for the pi family + `@openai/codex` + `@opencode-ai/sdk`).
+2. Read current pinned versions from `Dockerfile.worker` (the `ARG` lines) and from `package.json` (for the pi family + `@openai/codex` + `@opencode/sdk`).
 3. For each harness, fetch the latest version:
    - npm claude-code: `npm view @anthropic-ai/claude-code version`
    - npm pi: `npm view @earendil-works/pi-coding-agent version` (use the SAME version for `@earendil-works/pi-agent-core` and `@earendil-works/pi-ai` — they're a family pin)
    - npm codex: `npm view @openai/codex version`
-   - npm opencode-sdk: `npm view @opencode-ai/sdk version`
-   - opencode: `curl -fsSL https://api.github.com/repos/sst/opencode/releases/latest | jq -r .tag_name`
+   - npm opencode: `npm view @opencode/sdk version` (one version for `@opencode/cli`, `@opencode/sdk`, `@opencode/plugin`)
 4. Check for an existing open bundled PR — `gh pr list --search "harness upgrade in:title" --state open --repo {{REPO_URL}}`. Look at the branch prefix `harness-upgrade/`. If one is already open AND was created within the last 48h (sibling schedule may have just opened it), skip and complete with `"Skipped: sibling harness upgrade PR already open"` + the existing PR URL.
 5. Collect ALL outdated harnesses. If none are outdated, complete with output `"All harnesses up to date as of YYYY-MM-DD"` (no PR).
 6. Branch: `harness-upgrade/weekly-YYYY-MM-DD` (e.g. `harness-upgrade/weekly-2026-06-03`).
 7. Edit `Dockerfile.worker` — bump every outdated ARG. Also update `package.json`:
    - Codex: bump direct `@openai/codex` to match `CODEX_VERSION`.
    - Pi family: bump `@earendil-works/pi-agent-core`, `@earendil-works/pi-ai`, and `@earendil-works/pi-coding-agent` to the same new version as `PI_CODING_AGENT_VERSION`.
-   - Opencode: bump `OPENCODE_SDK_VERSION` and `@opencode-ai/sdk` to match `OPENCODE_VERSION`.
+   - Opencode: bump `@opencode/sdk` and `@opencode/plugin` (devDependencies) to match `OPENCODE_VERSION`.
    Then re-run `bun install` so `bun.lock` updates.
 8. Local verification (all must pass before pushing):
    ```bash
