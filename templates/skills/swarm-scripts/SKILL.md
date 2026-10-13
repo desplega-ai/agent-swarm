@@ -64,6 +64,7 @@ export default async function (args: z.infer<typeof argsSchema>, ctx: ScriptCont
 
 - `args` can be `undefined` when a caller passes none. Guard with `argsSchema.safeParse(args ?? {})` or optional chaining.
 - Export a Zod `argsSchema` from every named script. `script-upsert` converts it to JSON Schema, so callers, schedules, and workflows see the input contract.
+- Both `zod` and `zod/mini` imports work. Use `import * as z from "zod/mini"` for smaller QuickJS bundles. Mini uses functional forms: `z.optional(z.string())`, `z._default(z.number(), 10)`, and `z.string().check(z.minLength(1))`; its schemas still have `.parse()` and `.safeParse()`.
 - Inline source through `script-run` runs without a typecheck. `script-upsert` typechecks before it saves. Import `ScriptContext` from `"swarm-sdk"` in inline code too, so promotion to a named script works.
 - SDK methods return `Promise<unknown>`. Responses are usually wrapped: read `res?.data ?? res`. Exception: `app_query` with a literal `appId` and `query` returns rows typed from the app's columns.
 - `agentId` is propagated through the `X-Agent-ID` header, so SDK calls run as you. `taskId` is not ambient: pass it in `args` when the script calls `task_storeProgress`.

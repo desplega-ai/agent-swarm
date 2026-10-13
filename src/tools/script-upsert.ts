@@ -25,7 +25,7 @@ export const registerScriptUpsertTool = (server: McpServer) => {
           .string()
           .min(1)
           .describe(
-            'TypeScript source, typechecked before saving. Must `export default async function (args, ctx)` — args FIRST, ctx second. Import `ScriptContext` from "swarm-sdk" to type `ctx`.',
+            'TypeScript source, typechecked before saving. Must `export default async function (args, ctx)` — args FIRST, ctx second. Import `ScriptContext` from "swarm-sdk" to type `ctx`. Schemas can import "zod" or "zod/mini"; Mini uses functional forms such as z.optional(z.string()).',
           ),
         description: z.string().default("").describe("Human-readable script description."),
         intent: z.string().default("").describe("Why this script exists."),

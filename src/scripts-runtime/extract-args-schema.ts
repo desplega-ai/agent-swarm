@@ -7,14 +7,32 @@
  *   SWARM_SCHEMA_RESULT_FILE  path where JSON Schema (or "null") is written
  *   SWARM_SCHEMA_TMPDIR       tmpdir used for shims + the user module
  */
+import { pathToFileURL } from "node:url";
 import { toJSONSchema } from "zod";
 
 async function createShims(tmpdir: string): Promise<void> {
-  const zodEntry = Bun.resolveSync("zod", import.meta.dir);
+  const runtimeDir = process.env.SCRIPT_RUNTIME_DIR;
   const shims: [string, URL][] = [
-    ["stdlib", new URL("./stdlib/index.ts", import.meta.url)],
-    ["swarm-sdk", new URL("./swarm-sdk.ts", import.meta.url)],
-    ["zod", new URL(`file://${zodEntry}`)],
+    [
+      "stdlib",
+      runtimeDir
+        ? pathToFileURL(`${runtimeDir}/stdlib.bundle.js`)
+        : new URL("./stdlib/index.ts", import.meta.url),
+    ],
+    [
+      "swarm-sdk",
+      runtimeDir
+        ? pathToFileURL(`${runtimeDir}/swarm-sdk.bundle.js`)
+        : new URL("./swarm-sdk.ts", import.meta.url),
+    ],
+    ...["zod", "zod/mini"].map((name): [string, URL] => [
+      name,
+      pathToFileURL(
+        runtimeDir
+          ? `${runtimeDir}/${name === "zod" ? "zod" : "zod-mini"}.bundle.js`
+          : Bun.resolveSync(name, import.meta.dir),
+      ),
+    ]),
   ];
   for (const [name, url] of shims) {
     const dir = `${tmpdir}/node_modules/${name}`;

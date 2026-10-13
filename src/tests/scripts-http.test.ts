@@ -600,27 +600,35 @@ describe("/api/scripts HTTP", () => {
     ).toBeNull();
   });
 
-  test("script_query_types returns argsJsonSchema for a script with argsSchema export", async () => {
-    const source = `
-      import { z } from "zod";
+  for (const [moduleName, limit] of [
+    ["zod", "z.number().default(10)"],
+    ["zod/mini", "z._default(z.number(), 10)"],
+  ]) {
+    test(`upsert typechecks ${moduleName} and exposes its argsSchema`, async () => {
+      const source = `
+      import * as z from "${moduleName}";
       export const argsSchema = z.object({
         repo: z.string(),
-        limit: z.number().default(10),
+        limit: ${limit},
       });
       export default async (args: z.infer<typeof argsSchema>) => ({ repo: args.repo });
     `;
-    await upsert({ name: "schema-script", source });
+      const saved = await upsert({ name: "schema-script", source });
+      expect(saved.status).toBe(200);
 
-    const types = await dispatch("/api/scripts/schema-script/types", { agentId: workerId });
-    expect(types.status).toBe(200);
-    const body = (await types.json()) as { argsJsonSchema: unknown };
-    expect(body.argsJsonSchema).not.toBeNull();
-    expect(typeof body.argsJsonSchema).toBe("object");
-    // JSON Schema should describe the repo and limit properties
-    const schema = body.argsJsonSchema as { properties?: Record<string, unknown> };
-    expect(schema.properties).toHaveProperty("repo");
-    expect(schema.properties).toHaveProperty("limit");
-  });
+      const types = await dispatch("/api/scripts/schema-script/types", { agentId: workerId });
+      expect(types.status).toBe(200);
+      const body = (await types.json()) as { argsJsonSchema: unknown };
+      expect(body.argsJsonSchema).not.toBeNull();
+      expect(typeof body.argsJsonSchema).toBe("object");
+      // JSON Schema should describe the repo and limit properties
+      const schema = body.argsJsonSchema as { properties?: Record<string, unknown> };
+      expect(schema.properties).toMatchObject({
+        repo: { type: "string" },
+        limit: { type: "number", default: 10 },
+      });
+    });
+  }
 
   test("script_query_types returns argsJsonSchema: null for a script without argsSchema", async () => {
     await upsert({ name: "no-schema-script", source: validSource(3) });
