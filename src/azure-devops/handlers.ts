@@ -36,7 +36,7 @@ type HandlerResult = { created: boolean; taskId?: string };
 const processedEvents = new Map<string, number>();
 const DEDUP_TTL_MS = 60_000;
 
-function isDuplicate(key: string): boolean {
+export function isDuplicate(key: string): boolean {
   const now = Date.now();
   // Cleanup expired
   for (const [k, ts] of processedEvents) {
@@ -49,7 +49,7 @@ function isDuplicate(key: string): boolean {
 
 // ── Helpers ──
 
-function escapeRegExp(value: string): string {
+export function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
@@ -143,13 +143,15 @@ export function commentedPayloadOf(
   return { comment, pullRequest };
 }
 
-function warnMalformed(event: { eventType?: string; resourceVersion?: string } | null | undefined) {
+export function warnMalformed(
+  event: { eventType?: string; resourceVersion?: string } | null | undefined,
+) {
   console.warn(
     `[AzureDevOps] Ignoring ${event?.eventType} event with resourceVersion ${event?.resourceVersion ?? "unknown"}: required resource fields are missing`,
   );
 }
 
-async function findLeadAgent() {
+export async function findLeadAgent() {
   const agents = await getAllAgents();
   return (
     agents.find((a) => a.role === "lead" && a.status === "idle") ??
@@ -173,7 +175,7 @@ function externalIdOf(identity: AzureDevOpsIdentityRef): string {
  * linked identity (`uniqueName`) → email when `uniqueName` is one → unmapped
  * tracker entry for operator triage.
  */
-async function resolveAzureDevOpsSender(
+export async function resolveAzureDevOpsSender(
   identity: AzureDevOpsIdentityRef,
   sampleEventType: string,
   sampleContext: string,
@@ -211,7 +213,7 @@ async function resolveAzureDevOpsSender(
  * Render an Azure DevOps identity for agent-visible text: the resolved
  * canonical name or the explicit UNKNOWN sentinel.
  */
-async function renderAzureDevOpsIdentity(identity: AzureDevOpsIdentityRef): Promise<string> {
+export async function renderAzureDevOpsIdentity(identity: AzureDevOpsIdentityRef): Promise<string> {
   return renderIdentity(await resolveIdentity("azure-devops", externalIdOf(identity)));
 }
 

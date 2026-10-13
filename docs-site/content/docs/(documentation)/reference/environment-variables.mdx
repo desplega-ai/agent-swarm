@@ -345,7 +345,7 @@ Run the one-time `bunx @desplega.ai/agent-swarm claude-managed-setup` from your 
 
 | Variable | Description |
 |----------|-------------|
-| `AZURE_DEVOPS_TOKEN` | Personal Access Token (scope: Code, Read & write) for git, `az repos`, and API calls |
+| `AZURE_DEVOPS_TOKEN` | Personal Access Token (scope: Code, Read & write; add Work Items, Read & write for Azure Boards) for git, `az repos`, `az boards`, and API calls |
 | `AZURE_DEVOPS_ORG_URL` | Organization URL, e.g. `https://dev.azure.com/your-org` |
 | `AZURE_DEVOPS_WEBHOOK_SECRET` | Basic auth password the service-hook subscriptions send; enables the webhook endpoint |
 | `AZURE_DEVOPS_BOT_ID` | Identity GUID of the bot user for `@<GUID>` mentions (default: the PAT owner) |

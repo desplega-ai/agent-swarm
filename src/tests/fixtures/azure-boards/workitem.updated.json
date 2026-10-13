@@ -1,0 +1,130 @@
+{
+  "subscriptionId": "7a0f02b3-9c09-4ef2-82f7-ce5cb31ac236",
+  "notificationId": 1,
+  "id": "02a678cc-3de4-428a-9ff4-8e0e069f9b52",
+  "eventType": "workitem.updated",
+  "publisherId": "tfs",
+  "message": {
+    "text": "Task #9 ([Swarm test] List the 5 most recently modified files in the vn-tag_smart-lab-platform_web-app repository) assigned to Lab Thinker Software (VN.MIL-PT-LAB) by Zero Phan Minh Dang Khoa (VN.MIL-PT-LAB)\r\n(https://dev.azure.com/PTTestAutomation/web/wi.aspx?pcguid=b51292df-d230-4305-a9da-cdee48c0d617&id=9)",
+    "html": "<a href=\"https://dev.azure.com/PTTestAutomation/web/wi.aspx?pcguid=b51292df-d230-4305-a9da-cdee48c0d617&amp;id=9\">Task #9</a> ([Swarm test] List the 5 most recently modified files in the vn-tag_smart-lab-platform_web-app repository) assigned to Lab Thinker Software (VN.MIL-PT-LAB) by Zero Phan Minh Dang Khoa (VN.MIL-PT-LAB)",
+    "markdown": "[Task #9](https://dev.azure.com/PTTestAutomation/web/wi.aspx?pcguid=b51292df-d230-4305-a9da-cdee48c0d617&id=9) ([Swarm test] List the 5 most recently modified files in the vn-tag_smart-lab-platform_web-app repository) assigned to Lab Thinker Software (VN.MIL-PT-LAB) by Zero Phan Minh Dang Khoa (VN.MIL-PT-LAB)"
+  },
+  "detailedMessage": {
+    "text": "Task #9 ([Swarm test] List the 5 most recently modified files in the vn-tag_smart-lab-platform_web-app repository) assigned to Lab Thinker Software (VN.MIL-PT-LAB) by Zero Phan Minh Dang Khoa (VN.MIL-PT-LAB)\r\n(https://dev.azure.com/PTTestAutomation/web/wi.aspx?pcguid=b51292df-d230-4305-a9da-cdee48c0d617&id=9)\r\n\r\n- New Assigned to: Lab Thinker Software (VN.MIL-PT-LAB) <LabThinker@ttigroup.com.vn>\r\n",
+    "html": "<a href=\"https://dev.azure.com/PTTestAutomation/web/wi.aspx?pcguid=b51292df-d230-4305-a9da-cdee48c0d617&amp;id=9\">Task #9</a> ([Swarm test] List the 5 most recently modified files in the vn-tag_smart-lab-platform_web-app repository) assigned to Lab Thinker Software (VN.MIL-PT-LAB) by Zero Phan Minh Dang Khoa (VN.MIL-PT-LAB)<ul>\r\n<li>New Assigned to: Lab Thinker Software (VN.MIL-PT-LAB) <LabThinker@ttigroup.com.vn></li></ul>",
+    "markdown": "[Task #9](https://dev.azure.com/PTTestAutomation/web/wi.aspx?pcguid=b51292df-d230-4305-a9da-cdee48c0d617&id=9) ([Swarm test] List the 5 most recently modified files in the vn-tag_smart-lab-platform_web-app repository) assigned to Lab Thinker Software (VN.MIL-PT-LAB) by Zero Phan Minh Dang Khoa (VN.MIL-PT-LAB)\r\n\r\n* New Assigned to: Lab Thinker Software (VN.MIL-PT-LAB) <LabThinker@ttigroup.com.vn>\r\n"
+  },
+  "resource": {
+    "id": 2,
+    "workItemId": 9,
+    "rev": 2,
+    "revisedBy": {
+      "id": "3a9a0823-7970-6056-85b0-fa927bad6a02",
+      "name": "Zero Phan Minh Dang Khoa (VN.MIL-PT-LAB) <MinhDangKhoa.Phan@ttigroup.com.vn>",
+      "displayName": "Zero Phan Minh Dang Khoa (VN.MIL-PT-LAB)",
+      "url": "https://spsprodcus7.vssps.visualstudio.com/Abf998297-d284-4c84-b338-e4558a468208/_apis/Identities/3a9a0823-7970-6056-85b0-fa927bad6a02",
+      "_links": {
+        "avatar": {
+          "href": "https://dev.azure.com/PTTestAutomation/_apis/GraphProfile/MemberAvatars/aad.M2E5YTA4MjMtNzk3MC03MDU2LTg1YjAtZmE5MjdiYWQ2YTAy"
+        }
+      },
+      "uniqueName": "MinhDangKhoa.Phan@ttigroup.com.vn",
+      "imageUrl": "https://dev.azure.com/PTTestAutomation/_apis/GraphProfile/MemberAvatars/aad.M2E5YTA4MjMtNzk3MC03MDU2LTg1YjAtZmE5MjdiYWQ2YTAy",
+      "descriptor": "aad.M2E5YTA4MjMtNzk3MC03MDU2LTg1YjAtZmE5MjdiYWQ2YTAy"
+    },
+    "revisedDate": "9999-01-01T00:00:00Z",
+    "fields": {
+      "System.Rev": {
+        "oldValue": 1,
+        "newValue": 2
+      },
+      "System.AuthorizedDate": {
+        "oldValue": "2026-10-13T10:47:49.627Z",
+        "newValue": "2026-10-13T10:48:32.36Z"
+      },
+      "System.RevisedDate": {
+        "oldValue": "2026-10-13T10:48:32.36Z",
+        "newValue": "9999-01-01T00:00:00Z"
+      },
+      "System.AssignedTo": {
+        "newValue": "Lab Thinker Software (VN.MIL-PT-LAB) <LabThinker@ttigroup.com.vn>"
+      },
+      "System.ChangedDate": {
+        "oldValue": "2026-10-13T10:47:49.627Z",
+        "newValue": "2026-10-13T10:48:32.36Z"
+      },
+      "System.Watermark": {
+        "oldValue": 41,
+        "newValue": 42
+      }
+    },
+    "_links": {
+      "self": {
+        "href": "https://dev.azure.com/PTTestAutomation/0d526892-c851-4fc5-b38a-8a401faa117e/_apis/wit/workItems/9/updates/2"
+      },
+      "workItemUpdates": {
+        "href": "https://dev.azure.com/PTTestAutomation/0d526892-c851-4fc5-b38a-8a401faa117e/_apis/wit/workItems/9/updates"
+      },
+      "parent": {
+        "href": "https://dev.azure.com/PTTestAutomation/0d526892-c851-4fc5-b38a-8a401faa117e/_apis/wit/workItems/9"
+      },
+      "html": {
+        "href": "https://dev.azure.com/PTTestAutomation/web/wi.aspx?pcguid=b51292df-d230-4305-a9da-cdee48c0d617&id=9"
+      }
+    },
+    "url": "https://dev.azure.com/PTTestAutomation/0d526892-c851-4fc5-b38a-8a401faa117e/_apis/wit/workItems/9/updates/2",
+    "revision": {
+      "id": 9,
+      "rev": 2,
+      "fields": {
+        "System.AreaPath": "VN-TAG",
+        "System.TeamProject": "VN-TAG",
+        "System.IterationPath": "VN-TAG",
+        "System.WorkItemType": "Task",
+        "System.State": "To Do",
+        "System.Reason": "Added to backlog",
+        "System.AssignedTo": "Lab Thinker Software (VN.MIL-PT-LAB) <LabThinker@ttigroup.com.vn>",
+        "System.CreatedDate": "2026-10-13T10:47:49.627Z",
+        "System.CreatedBy": "Zero Phan Minh Dang Khoa (VN.MIL-PT-LAB) <MinhDangKhoa.Phan@ttigroup.com.vn>",
+        "System.ChangedDate": "2026-10-13T10:48:32.36Z",
+        "System.ChangedBy": "Zero Phan Minh Dang Khoa (VN.MIL-PT-LAB) <MinhDangKhoa.Phan@ttigroup.com.vn>",
+        "System.CommentCount": 0,
+        "System.Title": "[Swarm test] List the 5 most recently modified files in the vn-tag_smart-lab-platform_web-app repository",
+        "Microsoft.VSTS.Common.Priority": 2,
+        "Microsoft.VSTS.Common.StateChangeDate": "2026-10-13T10:47:49.627Z",
+        "System.Description": "<div>Test task for Azure Boards integration. List the 5 most recent commits on the `main` branch of the `smart-lab-platform web-app` repository (SHA, author, title). Read-only; do not modify code or create a PR.<br> </div>"
+      },
+      "multilineFieldsFormat": {
+        "System.Description": "html"
+      },
+      "_links": {
+        "self": {
+          "href": "https://dev.azure.com/PTTestAutomation/0d526892-c851-4fc5-b38a-8a401faa117e/_apis/wit/workItems/9/revisions/2"
+        },
+        "workItemRevisions": {
+          "href": "https://dev.azure.com/PTTestAutomation/0d526892-c851-4fc5-b38a-8a401faa117e/_apis/wit/workItems/9/revisions"
+        },
+        "parent": {
+          "href": "https://dev.azure.com/PTTestAutomation/0d526892-c851-4fc5-b38a-8a401faa117e/_apis/wit/workItems/9"
+        }
+      },
+      "url": "https://dev.azure.com/PTTestAutomation/0d526892-c851-4fc5-b38a-8a401faa117e/_apis/wit/workItems/9/revisions/2"
+    }
+  },
+  "resourceVersion": "1.0",
+  "resourceContainers": {
+    "collection": {
+      "id": "b51292df-d230-4305-a9da-cdee48c0d617",
+      "baseUrl": "https://dev.azure.com/PTTestAutomation/"
+    },
+    "account": {
+      "id": "bf998297-d284-4c84-b338-e4558a468208",
+      "baseUrl": "https://dev.azure.com/PTTestAutomation/"
+    },
+    "project": {
+      "id": "0d526892-c851-4fc5-b38a-8a401faa117e",
+      "baseUrl": "https://dev.azure.com/PTTestAutomation/"
+    }
+  },
+  "createdDate": "2026-10-13T10:48:38.9033359Z"
+}

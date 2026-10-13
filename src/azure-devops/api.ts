@@ -68,9 +68,45 @@ export async function resolveAzureDevOpsBotId(
   }
 }
 
+let cachedBotUniqueName: { orgUrl: string; uniqueName: string } | null = null;
+
+/**
+ * Sign-in name (usually the email) of the identity that owns the PAT, from
+ * `_apis/connectionData` (`authenticatedUser.properties.Account.$value`),
+ * cached per org. Work-item payloads carry people as the string
+ * `"Display Name <unique@name>"` with no GUID, so this is what identifies the
+ * bot in `System.AssignedTo`. Returns null when it cannot be resolved.
+ */
+export async function resolveAzureDevOpsBotUniqueName(
+  orgBaseUrl: string | null | undefined,
+): Promise<string | null> {
+  const orgUrl = normalizeOrgUrl(orgBaseUrl) ?? getAzureDevOpsOrgUrl();
+  if (!orgUrl || !getAzureDevOpsToken()) return null;
+  if (cachedBotUniqueName?.orgUrl === orgUrl) return cachedBotUniqueName.uniqueName;
+
+  try {
+    const resp = await fetch(`${orgUrl}/_apis/connectionData`, { headers: headers() });
+    if (!resp.ok) {
+      console.error(`[AzureDevOps] Failed to resolve bot sign-in name: ${resp.status}`);
+      return null;
+    }
+    const data = (await resp.json()) as {
+      authenticatedUser?: { properties?: { Account?: { $value?: string } } };
+    };
+    const uniqueName = data.authenticatedUser?.properties?.Account?.$value?.trim();
+    if (!uniqueName) return null;
+    cachedBotUniqueName = { orgUrl, uniqueName };
+    return uniqueName;
+  } catch (err) {
+    console.error(`[AzureDevOps] Error resolving bot sign-in name:`, err);
+    return null;
+  }
+}
+
 /** Reset the cached bot identity (tests, config reloads). */
 export function resetAzureDevOpsBotIdCache(): void {
   cachedBotId = null;
+  cachedBotUniqueName = null;
 }
 
 /**
