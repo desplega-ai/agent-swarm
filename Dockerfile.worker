@@ -190,11 +190,14 @@ RUN mkdir -p /home/worker/.codex && \
 # The adapter runs `@opencode/sdk` in-process, loading it from the global npm
 # root at runtime: its native modules (pty, file watcher) cannot be bundled into
 # the compiled binary. The CLI is only needed by the ACP target. One version
-# for both: they ship from the same release.
+# for both: they ship from the same release. The SDK installs with
+# --ignore-scripts: its optional tree-sitter grammars try a node-gyp build (no
+# `make` here) and the runtime does not need them; the CLI's postinstall must run.
 ARG OPENCODE_VERSION=2.0.28
 USER root
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache \
-    npm install -g @opencode/cli@${OPENCODE_VERSION} @opencode/sdk@${OPENCODE_VERSION} \
+    npm install -g @opencode/cli@${OPENCODE_VERSION} \
+    && npm install -g --ignore-scripts @opencode/sdk@${OPENCODE_VERSION} \
     && rm -rf /tmp/npm-cache /root/.npm
 USER worker
 
