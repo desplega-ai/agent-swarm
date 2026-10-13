@@ -47,7 +47,6 @@ RUN for attempt in 1 2 3; do \
 COPY packages/model-catalog/ ./packages/model-catalog/
 COPY packages/model-routing/ ./packages/model-routing/
 COPY src/ ./src/
-COPY plugin/opencode-plugins/lib/memory-raters.ts ./plugin/opencode-plugins/lib/memory-raters.ts
 COPY templates/ ./templates/
 # Bundled into the binary by src/slack/manifest.ts (onboarding Slack step).
 COPY slack-manifest.json ./
@@ -55,7 +54,9 @@ COPY tsconfig.json ./
 # --bytecode --format=esm (Bun 1.4 lifted the CJS-only restriction): the binary
 # boots on every container start AND every hook invocation, so the ~4x faster
 # startup (388 -> 81 ms measured) is worth the ~130 MB larger binary.
-RUN bun build ./src/cli.tsx ./src/providers/pi-binary-root/src/extensions/codemode/worker.ts --root ./src/providers/pi-binary-root --compile --bytecode --format=esm --compile-exec-argv='--expose-gc' --outfile ./agent-swarm
+# --compile-autoload-package-json lets modules loaded from disk at runtime
+# (the global `@opencode/sdk`) resolve their own node_modules imports.
+RUN bun build ./src/cli.tsx ./src/providers/pi-binary-root/src/extensions/codemode/worker.ts --root ./src/providers/pi-binary-root --compile --bytecode --format=esm --compile-autoload-package-json --compile-exec-argv='--expose-gc' --outfile ./agent-swarm
 
 # ─── Stage: worker-base — minimal system + all harness CLIs ──────────────────
 FROM ubuntu:24.04 AS worker-base
@@ -185,19 +186,23 @@ RUN mkdir -p /home/worker/.codex && \
       > /home/worker/.codex/config.toml && \
     chown -R worker:worker /home/worker/.codex
 
-# Install opencode CLI + SDK (alternative harness, selected via HARNESS_PROVIDER=opencode)
-# CLI version must match SDK version — the SDK spawns `opencode serve` and parses
-# its stdout for the listening URL (see node_modules/@opencode-ai/sdk/dist/server.js).
-# The installer drops the binary at ~/.opencode/bin/opencode and only modifies
-# ~/.bashrc — non-interactive shells (entrypoint, gosu drops) miss that PATH
-# update, so we extend ENV PATH explicitly.
-ARG OPENCODE_VERSION=1.19.0
-RUN curl -fsSL https://opencode.ai/install | VERSION=${OPENCODE_VERSION} bash
+# Install OpenCode 2 (HARNESS_PROVIDER=opencode, and the `opencode acp` target).
+# The adapter runs `@opencode/sdk` in-process, loading it from the global npm
+# root at runtime: its native modules (pty, file watcher) cannot be bundled into
+# the compiled binary. The SDK installs as root with --ignore-scripts, so no
+# package code runs (its optional tree-sitter grammars would try a node-gyp
+# build). The CLI, needed only by the ACP target, must run its postinstall to
+# fetch its platform binary, so it installs as `worker` into ~/.opencode.
+# One version for both: they ship from the same release.
+ARG OPENCODE_VERSION=2.0.28
+RUN NPM_CONFIG_CACHE=/tmp/npm-cache-worker \
+    npm install -g --prefix /home/worker/.opencode @opencode/cli@${OPENCODE_VERSION} \
+    && rm -rf /tmp/npm-cache-worker /home/worker/.npm \
+    && /home/worker/.opencode/bin/opencode --version
 ENV PATH="/home/worker/.opencode/bin:$PATH"
-ARG OPENCODE_SDK_VERSION=1.19.0
 USER root
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache \
-    npm install -g @opencode-ai/sdk@${OPENCODE_SDK_VERSION} \
+    npm install -g --ignore-scripts @opencode/sdk@${OPENCODE_VERSION} \
     && rm -rf /tmp/npm-cache /root/.npm
 USER worker
 
@@ -381,7 +386,6 @@ ENV STARTUP_SCRIPT_STRICT=false
 ENV TEMPLATE_REGISTRY_URL=https://templates.agent-swarm.dev
 ENV PM2_HOME=/workspace/.pm2
 ENV PATH="/home/worker/.local/bin:/home/worker/.bun/bin:$PATH"
-ENV OPENCODE_SWARM_PLUGIN_PATH=/home/worker/.config/opencode/plugins/agent-swarm.ts
 
 VOLUME ["/logs"]
 
@@ -441,18 +445,10 @@ RUN mkdir -p /home/worker/.pi/agent/skills /home/worker/.codex/skills /home/work
     chown -R worker:worker /home/worker/.pi/agent/skills /home/worker/.codex/skills \
       /home/worker/.opencode/skills /home/worker/.agents
 
-# Copy opencode plugin (used when HARNESS_PROVIDER=opencode).
-# OPENCODE_SWARM_PLUGIN_PATH (ENV in worker-base) tells OpencodeAdapter exactly
-# where to find the plugin. The plugin entrypoint imports adjacent vendored
-# helpers (`./opencode-auth`, `./summarize`) — opencode's plugin loader runs
-# the TS files inside its own bundled Bun runtime, which only exposes
-# `@opencode-ai/{plugin,sdk}`, so the helpers are vendored next to it. Tests
-# live in a sibling `tests/` subdirectory and are intentionally NOT copied
-# (opencode auto-discovers `.ts` files here and would load them as plugins).
-RUN mkdir -p /home/worker/.config/opencode/plugins/lib && \
+# OpenCode 2 runs in-process with the swarm plugin passed as an object, so no
+# plugin files are copied; only the config dir must stay worker-owned.
+RUN mkdir -p /home/worker/.config/opencode && \
     chown -R worker:worker /home/worker/.config
-COPY --chown=worker:worker plugin/opencode-plugins/agent-swarm.ts /home/worker/.config/opencode/plugins/agent-swarm.ts
-COPY --chown=worker:worker plugin/opencode-plugins/lib/ /home/worker/.config/opencode/plugins/lib/
 
 # Workspace directories (bind-mounted or volume-backed at runtime) + entrypoint
 RUN mkdir -p /workspace/personal /workspace/shared /logs && \
@@ -883,18 +879,10 @@ RUN mkdir -p /home/worker/.pi/agent/skills /home/worker/.codex/skills /home/work
     chown -R worker:worker /home/worker/.pi/agent/skills /home/worker/.codex/skills \
       /home/worker/.opencode/skills /home/worker/.agents
 
-# Copy opencode plugin (used when HARNESS_PROVIDER=opencode).
-# OPENCODE_SWARM_PLUGIN_PATH (ENV in worker-base) tells OpencodeAdapter exactly
-# where to find the plugin. The plugin entrypoint imports adjacent vendored
-# helpers (`./opencode-auth`, `./summarize`) — opencode's plugin loader runs
-# the TS files inside its own bundled Bun runtime, which only exposes
-# `@opencode-ai/{plugin,sdk}`, so the helpers are vendored next to it. Tests
-# live in a sibling `tests/` subdirectory and are intentionally NOT copied
-# (opencode auto-discovers `.ts` files here and would load them as plugins).
-RUN mkdir -p /home/worker/.config/opencode/plugins/lib && \
+# OpenCode 2 runs in-process with the swarm plugin passed as an object, so no
+# plugin files are copied; only the config dir must stay worker-owned.
+RUN mkdir -p /home/worker/.config/opencode && \
     chown -R worker:worker /home/worker/.config
-COPY --chown=worker:worker plugin/opencode-plugins/agent-swarm.ts /home/worker/.config/opencode/plugins/agent-swarm.ts
-COPY --chown=worker:worker plugin/opencode-plugins/lib/ /home/worker/.config/opencode/plugins/lib/
 
 # Workspace directories (bind-mounted or volume-backed at runtime) + entrypoint
 RUN mkdir -p /workspace/personal /workspace/shared /logs && \

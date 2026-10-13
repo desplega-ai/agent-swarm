@@ -42,26 +42,6 @@ describe("readPkgVersion", () => {
     expect(requirePackageJson).not.toHaveBeenCalled();
   });
 
-  test("reads opencode version from the CLI before package.json probes", () => {
-    const spawn = mock(() => ({ stdout: "opencode 1.16.2\n", stderr: "", status: 0 }));
-    const requirePackageJson = mock(() => ({ version: "0.0.0" }));
-
-    const version = readPkgVersion("@opencode-ai/sdk", {
-      requirePackageJson,
-      spawn,
-      readInstalledVersion: () => undefined,
-    });
-
-    expect(version).toBe("1.16.2");
-    expect(spawn).toHaveBeenCalledWith("opencode", ["--version"], {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"],
-      timeout: 5_000,
-      killSignal: "SIGKILL",
-    });
-    expect(requirePackageJson).not.toHaveBeenCalled();
-  });
-
   test("falls back to package.json when no CLI mapping returns a version", () => {
     const version = readPkgVersion("@earendil-works/pi-coding-agent", {
       requirePackageJson: () => ({ version: "0.79.1" }),

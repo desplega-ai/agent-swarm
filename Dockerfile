@@ -29,7 +29,6 @@ COPY packages/model-routing/ ./packages/model-routing/
 
 # Copy source files
 COPY src/ ./src/
-COPY plugin/opencode-plugins/lib/memory-raters.ts ./plugin/opencode-plugins/lib/memory-raters.ts
 COPY templates/ ./templates/
 # Bundled into the binary by src/slack/manifest.ts (onboarding Slack step).
 COPY slack-manifest.json ./

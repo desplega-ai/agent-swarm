@@ -12,7 +12,7 @@
 
 // Worker-side code (see scripts/check-db-boundary.sh WORKER_PATHS).
 const WORKER_SIDE =
-  "^src/(commands|hooks|providers|prompts|scripts-runtime|utils)/|^src/(cli\\.tsx|claude\\.ts)$|^plugin/opencode-plugins/";
+  "^src/(commands|hooks|providers|prompts|scripts-runtime|utils)/|^src/(cli\\.tsx|claude\\.ts)$";
 
 module.exports = {
   forbidden: [

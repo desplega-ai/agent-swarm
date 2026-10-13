@@ -330,13 +330,22 @@ elif [ "$HARNESS_PROVIDER" = "claude-managed" ]; then
 elif [ "$HARNESS_PROVIDER" = "devin" ]; then
     echo "Devin: cloud API (no local binary required)"
 elif [ "$HARNESS_PROVIDER" = "opencode" ]; then
-    OPENCODE_BIN="${OPENCODE_BINARY:-opencode}"
-    if ! command -v "$OPENCODE_BIN" > /dev/null 2>&1; then
-        echo "FATAL: opencode CLI not found: '$OPENCODE_BIN'"
-        echo "  PATH=$PATH"
+    # OpenCode 2 runs in-process from the globally installed @opencode/sdk
+    # (same lookup as resolveOpencodeSdkSpecifier in opencode-adapter.ts).
+    OPENCODE_SDK_ENTRY="${OPENCODE_SDK_PATH:-}"
+    if [ -z "$OPENCODE_SDK_ENTRY" ]; then
+        for root in /usr/lib/node_modules /usr/local/lib/node_modules; do
+            if [ -f "$root/@opencode/sdk/dist/index.js" ]; then
+                OPENCODE_SDK_ENTRY="$root/@opencode/sdk/dist/index.js"
+                break
+            fi
+        done
+    fi
+    if [ -z "$OPENCODE_SDK_ENTRY" ] || [ ! -f "$OPENCODE_SDK_ENTRY" ]; then
+        echo "FATAL: @opencode/sdk not found. Install it with 'npm install -g @opencode/sdk' or set OPENCODE_SDK_PATH."
         exit 1
     fi
-    echo "opencode CLI: $(command -v "$OPENCODE_BIN")"
+    echo "OpenCode SDK: $OPENCODE_SDK_ENTRY"
 elif [ "$HARNESS_PROVIDER" = "dsh" ]; then
     DSH_BIN="${DSH_BINARY:-dsh}"
     if ! command -v "$DSH_BIN" >/dev/null 2>&1; then

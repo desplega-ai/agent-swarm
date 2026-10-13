@@ -222,10 +222,10 @@ At least one credential source is required. The Docker entrypoint validates this
 |----------|----------|---------|-------------|
 | `HARNESS_PROVIDER` | Yes | — | Must be set to `opencode` |
 | `OPENROUTER_API_KEY` | One of* | — | OpenRouter API key (primary — gives access to all OpenRouter models) |
-| `OPENROUTER_BASE_URL` | No | `https://openrouter.ai/api/v1` | Route OpenRouter provider, model-refresh, and session-summary traffic through an OpenAI-compatible gateway |
+| `OPENROUTER_BASE_URL` | No | `https://openrouter.ai/api/v1` | Route OpenRouter provider and session-summary traffic through an OpenAI-compatible gateway |
 | `ANTHROPIC_API_KEY` | One of* | — | Anthropic API key for Claude models |
 | `OPENAI_API_KEY` | One of* | — | OpenAI API key for GPT models |
-| `OPENCODE_BINARY` | No | `opencode` | Path to the opencode CLI binary (if not in `$PATH`) |
+| `OPENCODE_SDK_PATH` | No | Global npm root | Absolute path to `@opencode/sdk/dist/index.js`, when it is not under `/usr/lib/node_modules` or `/usr/local/lib/node_modules` |
 
 \* At least one credential source is required (`OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `~/.local/share/opencode/auth.json`).
 
@@ -241,13 +241,14 @@ The default model is `openrouter/qwen/qwen3-coder-flash`. Set `MODEL_OVERRIDE` t
 
 ### Reasoning / Effort
 
-Set the per-agent reasoning/effort level (`off | low | medium | high | xhigh`) via `PATCH /api/agents/{id}/runtime`. opencode has no single reasoning knob — the swarm translates the level into provider-keyed options in the per-task `opencode.json`: `anthropic/*` models get `thinking.budgetTokens` (an internal numeric translation, not a user-facing knob), `openrouter/*` models get `reasoning.effort`, and OpenAI-compatible models get `reasoningEffort`. `off` omits reasoning keys entirely — opencode has no explicit off switch.
+Set the per-agent reasoning/effort level (`off | low | medium | high | xhigh`) via `PATCH /api/agents/{id}/runtime`. opencode has no single reasoning knob — the swarm translates the level into provider-keyed options in the per-task opencode config: `anthropic/*` models get `thinking.budgetTokens` (an internal numeric translation, not a user-facing knob), `openrouter/*` models get `reasoning.effort`, and OpenAI-compatible models get `reasoningEffort`. `off` omits reasoning keys entirely — opencode has no explicit off switch.
 
 ### opencode Specifics
 
-- **Agent-swarm plugin**: the `plugin/opencode-plugins/agent-swarm.ts` plugin is automatically injected at session creation. It handles heartbeat, task cancellation, identity sync, system-prompt transformation, compaction, and idle hooks — no manual configuration needed.
-- **Per-task isolation**: each session gets its own agent file (`.opencode/agents/swarm-<taskId>.md`), config file (`/tmp/opencode-<taskId>.json`), and data directory (`/tmp/opencode-data-<taskId>`) to prevent cross-task state bleed.
-- **MCP tool discovery**: the swarm MCP endpoint is wired in automatically via the per-task config; installed MCP servers are also discovered and merged in.
+- **In-process OpenCode 2**: each task runs its own embedded `@opencode/sdk` host inside the worker process. There is no `opencode serve` child. Config is passed as a string, the session database is in memory, and nothing is written into the task's working directory.
+- **Agent-swarm plugin**: `src/providers/opencode-swarm-plugin.ts` is passed to the host as a plugin object. It handles task cancellation, the polling limit, the activity heartbeat, lead concurrent context, and the compaction goal reminder. The adapter runs identity sync, memory auto-indexing, the session summary, and session close from the event stream.
+- **MCP tool discovery**: the swarm MCP endpoint is wired in automatically via the per-task config; installed MCP servers are also discovered and merged in. context-mode is added as a stdio MCP server unless `CONTEXT_MODE_DISABLED=true`. Before the first prompt the adapter waits up to 30 seconds for the swarm server to connect and register `store-progress`; a refused, unauthorized, or tool-less server fails the task with the reason instead of running without swarm tools.
+- **Session summaries do not read `auth.json`**: the end-of-session summary uses the shared internal-ai credentials, not OpenCode's `~/.local/share/opencode/auth.json`. A worker that authenticates OpenCode only through that file runs tasks normally but skips summaries (`session_summary skipped (opencode)`). To keep them, give the worker `OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`, Codex OAuth (see [Provider Auth: Codex OAuth](/docs/guides/provider-auth/codex-oauth)), or `CLAUDE_CODE_OAUTH_TOKEN`; the first one found wins, in that order.
 
 ---
 

@@ -27,6 +27,7 @@ import {
   createSwarmHooksExtension,
   SWARM_NUDGE_CUSTOM_TYPE,
   summarizeSessionForPi,
+  summarizeTranscript,
 } from "../providers/pi-mono-extension";
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -350,6 +351,64 @@ describe("summarizeSessionForPi", () => {
     expect((lastPostRatingsArgs as unknown as Record<string, unknown>).ratings).toBeUndefined();
 
     expect(consoleErrors.length).toBe(0);
+  });
+});
+
+describe("summarizeTranscript stderr is scrubbed", () => {
+  // Matches the OpenRouter key shape, so the scrubber redacts it by pattern.
+  const SENTINEL = `sk-or-v1-${"a1B2c3D4e5".repeat(5)}`;
+  const validSummary = async () =>
+    ({ summary: "A valid long-enough summary that passes the length gate." }) as RunSummarizeResult;
+  const loggedText = () => consoleErrors.map((args) => args.map(String).join(" ")).join("\n");
+
+  test("index error body echoing a key is redacted", async () => {
+    fetchHandler = async (url) => {
+      if (url.includes("/api/memory/index")) {
+        return {
+          ok: false,
+          status: 400,
+          text: async () => `bad request: OPENROUTER_API_KEY=${SENTINEL}`,
+          json: async () => ({}),
+        };
+      }
+      return { ok: true, status: 200, text: async () => "", json: async () => ({}) };
+    };
+    await summarizeTranscript(makeConfig(), "opencode", longTranscript(), {
+      runSummarize: validSummary,
+    });
+    expect(consoleErrors.length).toBe(1);
+    expect(loggedText()).toContain("/api/memory/index POST failed (opencode)");
+    expect(loggedText()).not.toContain(SENTINEL);
+  });
+
+  test("postRatings rejection carrying a key is redacted", async () => {
+    process.env.MEMORY_RATERS = "llm";
+    await summarizeTranscript(makeConfig(), "opencode", longTranscript(), {
+      runSummarize: async () =>
+        ({
+          summary: "A valid long-enough summary that passes the length gate.",
+          ratings: [{ id: "mem-A", score: 1, reasoning: "x" }],
+        }) as RunSummarizeResult,
+      fetchRetrievalsForTask: async () => [{ id: "mem-A" }] as unknown as FetchRetrievalsResult,
+      buildRatingsFromLlm: () => [
+        { memoryId: "mem-A", signal: 1, weight: 1, source: "llm", reasoning: "x" },
+      ],
+      postRatings: async () => {
+        throw new Error(`401 for key ${SENTINEL}`);
+      },
+    });
+    expect(loggedText()).toContain("postRatings failed (opencode)");
+    expect(loggedText()).not.toContain(SENTINEL);
+  });
+
+  test("an unexpected throw carrying a key is redacted", async () => {
+    await summarizeTranscript(makeConfig(), "opencode", longTranscript(), {
+      runSummarize: async () => {
+        throw new Error(`upstream rejected ${SENTINEL}`);
+      },
+    });
+    expect(loggedText()).toContain("session_summary failed (opencode)");
+    expect(loggedText()).not.toContain(SENTINEL);
   });
 });
 
