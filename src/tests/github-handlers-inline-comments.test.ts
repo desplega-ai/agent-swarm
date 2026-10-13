@@ -409,7 +409,8 @@ describe("inline review comment surfacing", () => {
 // ── No-op approvals ──
 
 type ActionItemsFixture = {
-  threads?: { isResolved: boolean; isOutdated: boolean }[];
+  // isOutdated mirrors GitHub's thread shape; the handler must ignore it.
+  threads?: { isResolved: boolean; isOutdated?: boolean }[];
   reviews?: { state: string; submittedAt: string; author: { login: string } }[];
   headOid?: string;
   mergeState?: string | null;
@@ -455,7 +456,7 @@ describe("no-op approved reviews", () => {
     const fetchSpy = mockFetchForApproval({
       threads: [
         { isResolved: true, isOutdated: false },
-        { isResolved: false, isOutdated: true },
+        { isResolved: true, isOutdated: true },
       ],
       reviews: [
         {
@@ -636,6 +637,25 @@ describe("review fetch without an App installation", () => {
     process.env.GITHUB_TOKEN = "pat-for-tests";
     const fetchSpy = mockFetchForApproval({
       threads: [{ isResolved: false, isOutdated: false }],
+      reviews: [APPROVED_BY_REVIEWER],
+    });
+
+    try {
+      const result = await handlePullRequestReview(
+        makeReviewEvent({ state: "approved", body: null }),
+      );
+      expect(result.created).toBe(true);
+      expect(await getLastTaskText()).toContain("1 unresolved review thread(s)");
+    } finally {
+      fetchSpy.mockRestore();
+      delete process.env.GITHUB_TOKEN;
+    }
+  });
+
+  test("GITHUB_TOKEN set: empty-body approval with an unresolved outdated thread still creates a task", async () => {
+    process.env.GITHUB_TOKEN = "pat-for-tests";
+    const fetchSpy = mockFetchForApproval({
+      threads: [{ isResolved: false, isOutdated: true }],
       reviews: [APPROVED_BY_REVIEWER],
     });
 

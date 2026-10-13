@@ -1172,7 +1172,7 @@ const PR_REVIEW_ACTION_ITEMS_QUERY = `query($owner: String!, $name: String!, $nu
   repository(owner: $owner, name: $name) {
     pullRequest(number: $number) {
       mergeStateStatus
-      reviewThreads(first: 100) { pageInfo { hasNextPage } nodes { isResolved isOutdated } }
+      reviewThreads(first: 100) { pageInfo { hasNextPage } nodes { isResolved } }
       reviews(first: 100) { pageInfo { hasNextPage } nodes { state submittedAt author { login } } }
       commits(last: 1) { nodes { commit { oid } } }
     }
@@ -1185,7 +1185,7 @@ function skipNoopApprovalsEnabled(): boolean {
 }
 
 /**
- * Count the PR's open review action items: unresolved, non-outdated review threads plus
+ * Count the PR's open review action items: unresolved review threads (outdated included) plus
  * CHANGES_REQUESTED reviews not superseded by a later APPROVED from the same reviewer.
  * Returns null when the counts cannot be trusted (no token, API error, or more than one page),
  * so callers fail open and still notify.
@@ -1219,7 +1219,7 @@ async function fetchPrReviewActionCounts(
             mergeStateStatus?: string | null;
             reviewThreads: {
               pageInfo: { hasNextPage: boolean };
-              nodes: { isResolved: boolean; isOutdated: boolean }[];
+              nodes: { isResolved: boolean }[];
             };
             reviews: {
               pageInfo: { hasNextPage: boolean };
@@ -1243,8 +1243,9 @@ async function fetchPrReviewActionCounts(
       return null;
     }
 
+    // Outdated threads still count: an unresolved thread whose lines moved can carry unaddressed feedback.
     const unresolvedThreads = pull.reviewThreads.nodes.filter(
-      (thread) => !thread.isResolved && !thread.isOutdated,
+      (thread) => !thread.isResolved,
     ).length;
 
     const reviews = pull.reviews.nodes.filter((r) => r.author?.login && r.submittedAt);
