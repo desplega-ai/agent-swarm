@@ -1,3 +1,4 @@
+import { MAX_REDIRECTS, nextHopRequest, REDIRECT_STATUSES } from "../../utils/egress-guard";
 import type { FailedCredentialBinding, ResolvedCredentialBinding } from "./types";
 
 function hostnameForFetchInput(input: string | URL | Request): string | null {
@@ -89,9 +90,10 @@ export function patchFetchWithCredentialBroker(
   // guaranteed 401 and optional-auth APIs stop serving public data.
   const originalFetch = globalThis.fetch;
 
-  globalThis.fetch = function patchedFetch(
+  async function patchedFetch(
     input: string | URL | Request,
     init?: RequestInit,
+    hop = 0,
   ): Promise<Response> {
     const url = urlForFetchInput(input);
     const hostname = url?.hostname ?? hostnameForFetchInput(input);
@@ -129,11 +131,43 @@ export function patchFetchWithCredentialBroker(
 
     if (!headersModified && !urlModified) return originalFetch(input, init);
 
+    const callerInit = cloneRequestInit(input, init);
+    const redirectMode = callerInit.redirect ?? "follow";
     const mergedInit: RequestInit = {
-      ...cloneRequestInit(input, init),
+      ...callerInit,
       headers: headersModified || input instanceof Request ? newHeaders : init?.headers,
+      // Never let the fetch follow a redirect with the substituted credential
+      // attached: each hop goes back through the broker, which substitutes
+      // again only for an allowed host.
+      redirect: "manual",
     };
     const nextUrl = urlModified ? url.href : input instanceof Request ? input.url : input;
-    return originalFetch(nextUrl, mergedInit);
-  } as typeof fetch;
+    const response = await originalFetch(nextUrl, mergedInit);
+    const location = response.headers.get("location");
+    if (redirectMode === "manual" || !REDIRECT_STATUSES.has(response.status) || !location) {
+      return response;
+    }
+    if (redirectMode === "error")
+      throw new TypeError(`fetch redirect refused (redirect: "error"): ${url.href}`);
+    if (hop >= MAX_REDIRECTS)
+      throw new TypeError(`fetch exceeded ${MAX_REDIRECTS} redirects: ${url.href}`);
+    await response.body?.cancel().catch(() => {});
+    const next = new URL(location, url);
+    // Re-enter with the caller's placeholder headers, not the substituted ones.
+    const hopRequest = nextHopRequest(response.status, url, next, {
+      method: callerInit.method ?? "GET",
+      headers,
+      body: callerInit.body ?? undefined,
+    });
+    return patchedFetch(
+      next.href,
+      { ...callerInit, ...hopRequest, redirect: redirectMode },
+      hop + 1,
+    );
+  }
+
+  globalThis.fetch = Object.assign(
+    (input: string | URL | Request, init?: RequestInit) => patchedFetch(input, init),
+    { preconnect: originalFetch.preconnect },
+  ) as typeof fetch;
 }

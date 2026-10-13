@@ -1,3 +1,4 @@
+import type { EgressPolicy } from "../../utils/egress-guard";
 import type { ScriptApiConnectionDescriptor, ScriptMcpConnectionDescriptor } from "../api-types";
 import type { FailedCredentialBinding, ResolvedCredentialBinding } from "../credential-broker";
 
@@ -44,7 +45,11 @@ export type ExecutorInput = {
   configPayload: SwarmConfigPayload;
   resources: ScriptResourcePolicy;
   fsMode: ScriptFsMode;
-  network: "open" | { allowlist: string[] };
+  /**
+   * Egress policy for the run's outbound fetches. Only the quickjs executor
+   * enforces it today; native ignores it (see the scripts-runtime guide).
+   */
+  network: "open" | EgressPolicy;
   signal?: AbortSignal;
 };
 

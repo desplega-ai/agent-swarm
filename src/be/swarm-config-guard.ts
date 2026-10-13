@@ -2,6 +2,7 @@ import { validateQuickJSPoolSize } from "../scripts-runtime/executors/quickjs-po
 import { normalizeSlackReactionShortcode } from "../slack/reaction-shortcode";
 import { ProviderNameSchema } from "../types";
 import { API_DRAIN_MAX_MS_LIMIT } from "../utils/api-drain";
+import { validateEgressAllowlist } from "../utils/egress-guard";
 import { parseEnabledTools } from "../utils/enabled-tools";
 import { normalizeOrgWebsite } from "../utils/org-website";
 import { parseTaskToolManifest } from "../utils/task-tool-manifest";
@@ -315,6 +316,9 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
   ...enumValidator("CLAUDE_TRANSPORT", ["cli", "sdk"]),
   ...enumValidator("SCRIPT_EXECUTOR", ["native", "quickjs"]),
   SCRIPT_QUICKJS_POOL_SIZE: validateQuickJSPoolSize,
+  ...booleanValidators(["SCRIPT_EGRESS_ALLOW_PRIVATE"]),
+  SCRIPT_EGRESS_ALLOWLIST: (value) =>
+    typeof value === "string" ? validateEgressAllowlist(value) : "Invalid SCRIPT_EGRESS_ALLOWLIST",
   // fail: worker fails a task fast when every key has exhausted the task
   // model's weekly window (Fable/Opus/Sonnet). fallback: legacy random pick.
   ...enumValidator("MODEL_WINDOW_EXHAUSTED_POLICY", ["fail", "fallback"]),

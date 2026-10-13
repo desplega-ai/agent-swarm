@@ -1384,6 +1384,25 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         docsUrl: `${DOCS}ui/configuration#script-executor`,
       },
       {
+        key: "SCRIPT_EGRESS_ALLOW_PRIVATE",
+        label: "Allow private egress from QuickJS scripts",
+        description:
+          "When off, QuickJS scripts cannot fetch loopback, private, link-local, CGNAT or cloud-metadata addresses, checked after DNS and on every redirect. The native executor does not enforce this yet.",
+        kind: "boolean",
+        defaultValue: "false",
+        docsUrl: `${DOCS}guides/scripts-runtime#egress-policy`,
+      },
+      {
+        key: "SCRIPT_EGRESS_ALLOWLIST",
+        label: "QuickJS egress allowlist",
+        description:
+          "Comma-separated host[:port] patterns (a leading *. matches subdomains). When set, QuickJS scripts can fetch only these hosts, public or private. Empty means any public host. The native executor does not enforce this yet.",
+        kind: "string",
+        defaultValue: "",
+        placeholder: "api.example.com, *.internal.example:8443",
+        docsUrl: `${DOCS}guides/scripts-runtime#egress-policy`,
+      },
+      {
         key: "SCRIPT_QUICKJS_POOL_SIZE",
         label: "QuickJS worker pool size",
         description:

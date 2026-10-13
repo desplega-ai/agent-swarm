@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import type {
   QuickJSContext,
   QuickJSDeferredPromise,
@@ -15,6 +16,7 @@ import { bundleForQuickJS, USER_SCRIPT_FILE } from "./quickjs-bundle";
 import { SANDBOX_EPILOGUE, SANDBOX_PRELUDE } from "./quickjs-prelude";
 import type { SourceMapReader } from "./sourcemap";
 import type {
+  ExecutorInput,
   ExecutorOutput,
   ScriptExecutorError,
   ScriptResourcePolicy,
@@ -28,7 +30,21 @@ export type QuickJSJob = {
   args: unknown;
   configPayload: SwarmConfigPayload;
   resources: ScriptResourcePolicy;
+  network: ExecutorInput["network"];
 };
+
+// Set while a ctx.swarm or ctx.mcp host call runs. Those calls go to the swarm
+// API (mcpBaseUrl) with the host bearer; the egress guard trusts that origin
+// only inside this scope, so script code cannot fetch it directly.
+const swarmHostCalls = new AsyncLocalStorage<true>();
+
+/** True inside a ctx.swarm / ctx.mcp host call. */
+export function isSwarmHostCall(): boolean {
+  return swarmHostCalls.getStore() === true;
+}
+
+// Values the host uses for swarm calls. Script code gets an opaque handle only.
+const HOST_ONLY_REDACTED = new Set(["system:apiKey", "system:runtimeInstanceId"]);
 
 const BUNDLE_FILE = USER_SCRIPT_FILE.replace(/\.ts$/, ".js");
 // Host calls (fetch, ctx.swarm, ctx.api, ctx.mcp) for one run: at most this
@@ -186,17 +202,24 @@ async function dispatchCall(
   const [kind, first, ...rest] = path.split(".");
   if (kind === "swarm" && first === "room" && rest.length === 1) {
     const name = rest[0] as string;
-    return callable(own(hostCtx.swarm.room, name), `ctx.swarm.room.${name}`)(...args);
+    const method = callable(own(hostCtx.swarm.room, name), `ctx.swarm.room.${name}`);
+    return swarmHostCalls.run(true, () => method(...args));
   }
   if (kind === "swarm" && first && rest.length === 0) {
     // ctx.swarm is a Proxy that maps any tool name to a call (allowlisted inside).
-    const method = first in Object.prototype ? undefined : hostCtx.swarm[first];
-    return callable(method, `ctx.swarm.${first}`)(...args);
+    const method = callable(
+      first in Object.prototype ? undefined : hostCtx.swarm[first],
+      `ctx.swarm.${first}`,
+    );
+    return swarmHostCalls.run(true, () => method(...args));
   }
   if ((kind === "api" || kind === "mcp") && first && rest.length > 0) {
     const name = rest.join(".");
     const client = own(hostCtx[kind], first);
-    return callable(own(client, name), `ctx.${kind}.${first}.${name}`)(...args);
+    const method = callable(own(client, name), `ctx.${kind}.${first}.${name}`);
+    // ctx.mcp goes through the swarm API's MCP proxy; ctx.api calls the
+    // connection's own host and stays under the egress policy.
+    return kind === "mcp" ? swarmHostCalls.run(true, () => method(...args)) : method(...args);
   }
   throw new Error(`unknown quickjs host call: ${path}`);
 }
@@ -218,6 +241,9 @@ function redactedFor(config: SwarmConfig, hostId: unknown): RedactedValue<unknow
 function dispatchSync(config: SwarmConfig, op: string, value: unknown): unknown {
   switch (op) {
     case "redacted.value":
+      if (typeof value === "string" && HOST_ONLY_REDACTED.has(value)) {
+        throw new Error("host-only credential: ctx.swarm uses it, script code cannot read it");
+      }
       return Redacted.value(redactedFor(config, value));
     case "redacted.meta":
       return Redacted.meta(redactedFor(config, value));

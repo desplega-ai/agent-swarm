@@ -13,7 +13,7 @@ Two new primitives ship together:
 
 - **Typed API connection registry** (`56919945`) — Register connections with OpenAPI specs and get generated TypeScript types. Agents write `ctx.api.<slug>.getCustomers()` instead of hand-rolling fetch calls. Connections are scoped (global, agent, repo) and managed via the `script-connections` tool, so teams can share integrations without sharing raw keys. Generated types are verified at authoring time through a typecheck pass, catching mismatches before runtime.
 
-- **Credential broker with scoped bindings** (`3747d6a6`) — Secrets stay on the server. Scripts declare a credential binding (config key → allowed hosts) and the broker injects tokens at fetch time via header or query templates. Nothing leaks into source code, logs, or the KV store. The broker also blocks egress to unregistered hosts, giving operators a clear audit trail of which services each script can reach.
+- **Credential broker with scoped bindings** (`3747d6a6`) — Secrets stay on the server. Scripts declare a credential binding (config key → allowed hosts) and the broker injects tokens at fetch time via header or query templates. Nothing leaks into source code, logs, or the KV store. The broker substitutes a credential only for its binding's allowed hosts. *Correction (2026-10):* an earlier version of this note said the broker also blocks egress to unregistered hosts. It does not: requests to other hosts go out without the credential. Host-level egress control for scripts is described in [Scripts runtime § Egress policy](/docs/guides/scripts-runtime#egress-policy).
 
 ### Agent Memory Upgrades
 

@@ -302,6 +302,47 @@ access except the host calls below. These are the differences from `native`:
   run ends, the executor aborts every host call that is still open, including
   a `fetch` that the script did not await.
 
+## Egress policy
+
+**The `quickjs` executor** checks every outbound request it makes for a
+script: `fetch`, `ctx.stdlib.fetch`, `ctx.stdlib.fetchJson`, `ctx.api.*`, and
+requests that carry a [credential broker](/docs/guides/scripts-credential-broker)
+substitution. By default it refuses these destinations:
+
+- loopback (`127.0.0.0/8`, `::1`), `localhost`, and `*.localhost`
+- private ranges (`10/8`, `172.16/12`, `192.168/16`, `fc00::/7`)
+- link-local, including cloud metadata (`169.254/16`, `fe80::/10`)
+- CGNAT (`100.64/10`), `0/8`, multicast, reserved ranges, and IPv4-mapped or
+  NAT64 forms of any of these
+
+The check runs on the resolved addresses, so a public name that points at a
+private address is refused. It runs again on every redirect hop, with at most
+5 hops. A redirect to another origin drops `Authorization` and `Cookie`. The
+refusal error names the setting to change.
+
+Two settings control the policy. Both apply to new runs after a config reload.
+
+| Key | Default | Effect |
+|---|---|---|
+| `SCRIPT_EGRESS_ALLOW_PRIVATE` | `false` | `true` allows private, loopback and link-local destinations. |
+| `SCRIPT_EGRESS_ALLOWLIST` | empty | Comma-separated `host[:port]` patterns. A leading `*.` matches subdomains. When set, scripts can reach only these hosts, public or private. Empty means any public host. |
+
+`ctx.swarm` and `ctx.mcp` still reach the swarm API. Script code cannot fetch
+the swarm API's address directly, and it cannot read the credential the host
+uses for those calls: `Redacted.value(ctx.swarm.config.apiKey)` and
+`Redacted.value(ctx.swarm.config.runtimeInstanceId)` throw
+`host-only credential`. `agentId`, `mcpBaseUrl` and your own config values stay
+readable.
+
+**The `native` executor enforces none of this yet.** Native scripts can reach
+any host, including private ones, and can read the host credential. Run only
+trusted code under `native`.
+
+**The credential broker is not an egress filter.** It substitutes a secret
+only for a binding's allowed hosts, but it does not block requests to other
+hosts. A redirect goes back through the broker, so a substituted credential
+never follows a redirect to another host.
+
 ## Exposing a script externally
 
 A saved script can be opted in to a public HTTP endpoint —
