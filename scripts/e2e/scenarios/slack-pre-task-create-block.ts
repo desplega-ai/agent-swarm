@@ -1,6 +1,14 @@
 import { asRecord, expect, expectStatus } from "../http";
 import type { Scenario, ScenarioContext } from "../run";
-import { ask, findSlackTask, waitForBotReply, waitForReaction } from "./slack-helpers";
+import {
+  ask,
+  claim,
+  findSlackTask,
+  finish,
+  registerLead,
+  waitForBotReply,
+  waitForReaction,
+} from "./slack-helpers";
 
 async function installBlockingTemplate(ctx: ScenarioContext): Promise<string> {
   const installed = await ctx.api("POST", "/api/extensions/install", {
@@ -29,9 +37,16 @@ export const slackPreTaskCreateBlock: Scenario = {
     try {
       // Create an existing task first so the next human reply goes through the
       // additive thread buffer rather than the top-level mention path.
+      const leadId = await registerLead(ctx, `e2e-blocked-flush-lead-${ctx.nonce}`);
       const root = await ask(ctx, `start a thread for block test ${ctx.nonce}`);
       await waitForBotReply(ctx, root.ts);
-      await findSlackTask(ctx, root.ts);
+      const rootTask = await findSlackTask(ctx, root.ts);
+      const rootTaskId = String(rootTask.id);
+      await claim(ctx, leadId, rootTaskId);
+      await finish(ctx, leadId, rootTaskId, {
+        status: "completed",
+        output: "The original task is complete.",
+      });
 
       extensionId = await installBlockingTemplate(ctx);
       const followUp = await ctx.slack.postMessage({
