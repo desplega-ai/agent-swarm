@@ -12,6 +12,7 @@ import {
   parseAppDefinition,
   SORTABLE_SYSTEM_DATE_COLUMNS,
   SYSTEM_COLUMN_KINDS,
+  scriptCompatWarnings,
 } from "../apps/definition";
 import {
   type AppRow,
@@ -227,9 +228,14 @@ const AppUserConfigFieldSchema = z.object({
 /** Mirrors an app definition's `userConfig` declaration map. */
 const AppUserConfigSchema = z.record(AppNameSchema, AppUserConfigFieldSchema);
 
+const compatWarningsSchema = z
+  .array(z.string())
+  .optional()
+  .describe("Advisory quickjs-executor compatibility findings for the app's scripts.");
 const appWriteResponseSchema = z.object({
   app: AppRecordSchema,
   migration: AppMigrationReportSchema,
+  warnings: compatWarningsSchema,
 });
 const userConfigBodySchema = z.object({ values: z.record(z.string(), z.unknown()) }).strict();
 
@@ -307,7 +313,10 @@ const createAppRoute = route({
     forceElementBreak: ForceElementBreakSchema.optional(),
   }),
   responses: {
-    201: { description: "Created app", schema: z.object({ app: AppRecordSchema }) },
+    201: {
+      description: "Created app",
+      schema: z.object({ app: AppRecordSchema, warnings: compatWarningsSchema }),
+    },
     400: { description: "Invalid app definition" },
     403: { description: "Permission denied" },
   },
@@ -1020,12 +1029,14 @@ export async function handleApps(
       invalidDefinition(res, definition.issues);
       return true;
     }
+    const warnings = await scriptCompatWarnings(definition.definition);
     createAppRoute.respond(res, 201, {
       app: await createApp({
         name: parsed.body.name,
         description: parsed.body.description,
         definition: definition.definition,
       }),
+      ...(warnings.length > 0 ? { warnings } : {}),
     });
     return true;
   }
@@ -1482,6 +1493,7 @@ export async function handleApps(
     }
     let app: Awaited<ReturnType<typeof updateApp>> = null;
     let migration!: AppMigrationReport;
+    let writtenDefinition: unknown;
     let responseHandled = false;
     try {
       await withAppDefinitionLock(parsed.params.id, async () => {
@@ -1513,6 +1525,7 @@ export async function handleApps(
           responseHandled = true;
           return;
         }
+        if (parsed.body.definition !== undefined) writtenDefinition = definition.definition;
         const migrated = await migrateAppSchema({
           appId: parsed.params.id,
           previousDefinition: existing.definition,
@@ -1553,7 +1566,13 @@ export async function handleApps(
       jsonError(res, "app not found", 404);
       return true;
     }
-    patchAppRoute.respond(res, 200, { app, migration });
+    const warnings =
+      writtenDefinition === undefined ? [] : await scriptCompatWarnings(writtenDefinition);
+    patchAppRoute.respond(res, 200, {
+      app,
+      migration,
+      ...(warnings.length > 0 ? { warnings } : {}),
+    });
     return true;
   }
 
@@ -1568,6 +1587,7 @@ export async function handleApps(
     }
     let app: Awaited<ReturnType<typeof updateApp>> = null;
     let migration!: AppMigrationReport;
+    let writtenDefinition: unknown;
     let responseHandled = false;
     try {
       await withAppDefinitionLock(parsed.params.id, async () => {
@@ -1597,6 +1617,7 @@ export async function handleApps(
           return;
         }
         const nextDefinition = definition ?? existing.definition;
+        writtenDefinition = definition;
         const migrated = await migrateAppSchema({
           appId: parsed.params.id,
           previousDefinition: appDefinitionNeedsRepair(existing) ? undefined : existing.definition,
@@ -1637,7 +1658,13 @@ export async function handleApps(
       jsonError(res, "app not found", 404);
       return true;
     }
-    updateAppRoute.respond(res, 200, { app, migration });
+    const warnings =
+      writtenDefinition === undefined ? [] : await scriptCompatWarnings(writtenDefinition);
+    updateAppRoute.respond(res, 200, {
+      app,
+      migration,
+      ...(warnings.length > 0 ? { warnings } : {}),
+    });
     return true;
   }
 

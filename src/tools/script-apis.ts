@@ -149,7 +149,11 @@ export const registerScriptApisTool = (server: McpServer) => {
             agentId: args.agentId,
           },
           requestInfo,
-          successMessage: (data) => `Endpoint ${(data as ScriptApiWithSecret).id} created.`,
+          successMessage: (data) => {
+            const warnings = (data as { warnings?: string[] }).warnings ?? [];
+            const note = warnings.length > 0 ? `\n${warnings.join("\n")}` : "";
+            return `Endpoint ${(data as ScriptApiWithSecret).id} created.${note}`;
+          },
           successDetails: (data) => {
             const token = (data as ScriptApiWithSecret).token;
             return token ? `Bearer token (shown once — save it now): ${token}` : undefined;

@@ -987,6 +987,41 @@ describe("custom app actions", () => {
     );
   });
 
+  test("app writes return quickjs compat warnings for wired scripts without rejecting", async () => {
+    const saved = await upsertScriptByName({
+      name: `app_compat_${crypto.randomUUID().replaceAll("-", "")}`,
+      scope: "agent",
+      scopeId: AGENT_ID,
+      source: "export default async () => Buffer.from('aGk=', 'base64').toString();",
+      description: "Apps compat warning fixture",
+      intent: "Exercise quickjs compat warnings on app writes",
+      signatureJson: JSON.stringify({ args: { type: "object" }, result: { type: "string" } }),
+      agentId: AGENT_ID,
+      typeChecked: true,
+    });
+    const created = await request<{ app: { id: string }; warnings?: string[] }>("/api/apps", {
+      method: "POST",
+      body: JSON.stringify({
+        name: "Compat",
+        definition: {
+          ...baseDefinition,
+          actions: { decode: { kind: "script", scriptId: saved.script.id } },
+        },
+      }),
+    });
+    expect(created.status).toBe(201);
+    expect(created.body.warnings).toEqual([
+      "actions.decode: quickjs compat (unsupportedGlobal, line 1): Buffer is not available under quickjs",
+    ]);
+
+    const cleared = await request<{ warnings?: string[] }>(`/api/apps/${created.body.app.id}`, {
+      method: "PUT",
+      body: JSON.stringify({ definition: baseDefinition }),
+    });
+    expect(cleared.status).toBe(200);
+    expect(cleared.body.warnings).toBeUndefined();
+  });
+
   test("agent writers cannot wire another agent's script; operator wiring is grandfathered", async () => {
     const OTHER_AGENT_ID = crypto.randomUUID();
     const foreign = await upsertScriptByName({

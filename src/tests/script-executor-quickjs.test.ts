@@ -289,6 +289,35 @@ export default async (args: T) => explode(args);
     expect(output.runtimeError?.message).toContain("fetch body must be a string");
   });
 
+  // Parity with native lives in script-executor-conformance.test.ts. These
+  // are the documented limits of the shims.
+  test("shims refuse what they do not implement, with a clear error", async () => {
+    const output = await executor.run(
+      input(`export default async () => {
+  const attempt = (run) => { try { run(); return "ok"; } catch (e) { return e.name + ": " + e.message; } };
+  return {
+    latin1: attempt(() => new TextDecoder("latin1")),
+    floatRandom: attempt(() => crypto.getRandomValues(new Float64Array(2))),
+    subtle: typeof crypto.subtle,
+  };
+};`),
+    );
+    expect(output.result).toEqual({
+      latin1: 'RangeError: quickjs executor: TextDecoder supports utf-8 only, not "latin1"',
+      floatRandom: "TypeError: crypto.getRandomValues: the argument must be an integer TypedArray",
+      subtle: "undefined",
+    });
+  });
+
+  test("binary bodies reach the host through ctx.stdlib.fetch too", async () => {
+    const output = await executor.run(
+      input(
+        `export default async (_args, ctx) => (await ctx.stdlib.fetch("${baseUrl}/echo", { method: "POST", body: new TextEncoder().encode("é!") })).json();`,
+      ),
+    );
+    expect(output.result).toMatchObject({ method: "POST", body: "é!" });
+  });
+
   test("user config values stay redacted until unwrapped", async () => {
     const output = await executor.run(
       input(`export default async (_args, ctx) => {

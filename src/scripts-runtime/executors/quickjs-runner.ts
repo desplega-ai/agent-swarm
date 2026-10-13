@@ -13,6 +13,7 @@ import { table } from "../stdlib/table";
 import { SwarmConfig } from "../swarm-config";
 import { bundleForQuickJS, USER_SCRIPT_FILE } from "./quickjs-bundle";
 import { SANDBOX_EPILOGUE, SANDBOX_PRELUDE } from "./quickjs-prelude";
+import { SANDBOX_WEB_SHIMS } from "./quickjs-web-shims";
 import type { SourceMapReader } from "./sourcemap";
 import type {
   ExecutorOutput,
@@ -46,6 +47,9 @@ export type QuickJSJobResult = {
   leakedHostCalls: number;
 };
 const MAX_STACK_BYTES = 1024 * 1024;
+// Bun's getRandomValues has no 64 KiB quota, so neither does the sandbox. This
+// bound only keeps one sync host call's JSON reply small.
+const MAX_RANDOM_BYTES = 1024 * 1024;
 const TIMEOUT_EXIT_CODE = 124;
 
 type ErrorPayload = { name: string; message: string; stack: string };
@@ -126,12 +130,18 @@ type SandboxRequest = {
   method?: string;
   headers?: [string, string][];
   body?: string;
+  /** Binary body, base64-encoded by the sandbox. */
+  bodyBase64?: string;
   retries?: number;
   timeoutMs?: number;
 };
 
 function requestInit(request: SandboxRequest): RequestInit {
-  return { method: request.method, headers: request.headers, body: request.body };
+  const body =
+    request.bodyBase64 === undefined
+      ? request.body
+      : new Uint8Array(Buffer.from(request.bodyBase64, "base64"));
+  return { method: request.method, headers: request.headers, body };
 }
 
 async function serializeResponse(response: Response, operation: string) {
@@ -223,6 +233,16 @@ function dispatchSync(config: SwarmConfig, op: string, value: unknown): unknown 
       return Redacted.meta(redactedFor(config, value));
     case "config.has":
       return typeof value === "string" && config.get(value) !== undefined;
+    case "crypto.random": {
+      if (
+        !Number.isInteger(value) ||
+        (value as number) < 0 ||
+        (value as number) > MAX_RANDOM_BYTES
+      ) {
+        throw new Error(`crypto.random needs a byte count between 0 and ${MAX_RANDOM_BYTES}`);
+      }
+      return Array.from(crypto.getRandomValues(new Uint8Array(value as number)));
+    }
     case "table":
       return table(value as Array<Record<string, unknown>>);
     default:
@@ -538,6 +558,7 @@ async function evaluateJob(
     const init = `globalThis.__swarm_shape = ${JSON.stringify(shape)};\nglobalThis.__swarm_args = ${JSON.stringify(args)};`;
     const ok =
       evaluate(init, "swarm-init.js") &&
+      evaluate(SANDBOX_WEB_SHIMS, "swarm-web-shims.js") &&
       evaluate(SANDBOX_PRELUDE, "swarm-prelude.js") &&
       evaluate(bundle.code, BUNDLE_FILE) &&
       evaluate(SANDBOX_EPILOGUE, "swarm-epilogue.js");

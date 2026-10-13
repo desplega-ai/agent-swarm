@@ -2,6 +2,7 @@ import * as z from "zod";
 import { listScriptConnections } from "../be/script-connections";
 import { getScriptById } from "../be/scripts/db";
 import { getSavedScriptOwnerAgentId } from "../be/scripts/run-saved";
+import { checkQuickJSCompat, quickJSCompatWarnings } from "../scripts-runtime/quickjs-compat";
 import catalog from "./catalog.generated.json";
 import {
   crossPageDefinitionIssues,
@@ -590,6 +591,21 @@ export function collectScriptReferences(definition: unknown): Map<string, string
     }
   }
   return references;
+}
+
+/**
+ * Advisory quickjs compatibility warnings for every script that the
+ * definition's actions and sync sources run. Never a validation issue.
+ */
+export async function scriptCompatWarnings(definition: unknown): Promise<string[]> {
+  const warnings: string[] = [];
+  for (const [scriptId, paths] of collectScriptReferences(definition)) {
+    const script = await getScriptById(scriptId);
+    if (!script) continue;
+    const report = checkQuickJSCompat(script.source, { fsMode: script.fsMode });
+    warnings.push(...quickJSCompatWarnings(report, paths.join(", ")));
+  }
+  return warnings;
 }
 
 /**
