@@ -1090,13 +1090,28 @@ function dedupeReviewComments(comments: ReviewInlineComment[]): ReviewInlineComm
   return [...byId.values()];
 }
 
+/**
+ * Credential for reading review state: the App installation token when the event
+ * carried an installation id, else `GITHUB_TOKEN`. Deployments on a plain repo
+ * webhook plus a PAT never get an installation id, so without the fallback every
+ * fetch below reported degraded and every review reached the lead with the
+ * "could NOT be auto-fetched" banner. Same order as reaction posting.
+ */
+async function resolveReviewReadToken(installationId?: number | null): Promise<string | null> {
+  if (installationId) {
+    const appToken = await getInstallationToken(installationId);
+    if (appToken) return appToken;
+  }
+  return process.env.GITHUB_TOKEN?.trim() || null;
+}
+
 async function fetchReviewComments(
   repo: string,
   prNumber: number,
   reviewId: number,
-  installationId: number,
+  installationId?: number | null,
 ): Promise<FetchReviewCommentsResult> {
-  const token = await getInstallationToken(installationId);
+  const token = await resolveReviewReadToken(installationId);
   if (!token) {
     return { comments: [], degraded: true };
   }
@@ -1143,13 +1158,23 @@ Reply to and resolve EVERY unresolved inline thread. Do NOT dispatch off the rev
 interface PrReviewActionCounts {
   unresolvedThreads: number;
   outstandingChangeRequests: number;
+  /** Current PR head commit, or null when GitHub did not return one. */
+  headOid: string | null;
+  /**
+   * GitHub's mergeStateStatus (CLEAN, BLOCKED, DIRTY, UNSTABLE, UNKNOWN, ...), or null.
+   * CLEAN means no conflicts and passing required checks. The raw check rollup is not
+   * used: a superseded, cancelled workflow run turns it FAILURE on an otherwise green PR.
+   */
+  mergeState: string | null;
 }
 
 const PR_REVIEW_ACTION_ITEMS_QUERY = `query($owner: String!, $name: String!, $number: Int!) {
   repository(owner: $owner, name: $name) {
     pullRequest(number: $number) {
+      mergeStateStatus
       reviewThreads(first: 100) { pageInfo { hasNextPage } nodes { isResolved isOutdated } }
       reviews(first: 100) { pageInfo { hasNextPage } nodes { state submittedAt author { login } } }
+      commits(last: 1) { nodes { commit { oid } } }
     }
   }
 }`;
@@ -1168,10 +1193,10 @@ function skipNoopApprovalsEnabled(): boolean {
 async function fetchPrReviewActionCounts(
   repo: string,
   prNumber: number,
-  installationId: number,
+  installationId?: number | null,
 ): Promise<PrReviewActionCounts | null> {
   const [owner, name] = repo.split("/");
-  const token = await getInstallationToken(installationId);
+  const token = await resolveReviewReadToken(installationId);
   if (!token || !owner || !name) return null;
 
   try {
@@ -1191,6 +1216,7 @@ async function fetchPrReviewActionCounts(
       data?: {
         repository?: {
           pullRequest?: {
+            mergeStateStatus?: string | null;
             reviewThreads: {
               pageInfo: { hasNextPage: boolean };
               nodes: { isResolved: boolean; isOutdated: boolean }[];
@@ -1201,6 +1227,11 @@ async function fetchPrReviewActionCounts(
                 state: string;
                 submittedAt: string | null;
                 author: { login: string } | null;
+              }[];
+            };
+            commits?: {
+              nodes: {
+                commit: { oid: string } | null;
               }[];
             };
           } | null;
@@ -1228,7 +1259,12 @@ async function fetchPrReviewActionCounts(
         ),
     ).length;
 
-    return { unresolvedThreads, outstandingChangeRequests };
+    return {
+      unresolvedThreads,
+      outstandingChangeRequests,
+      headOid: pull.commits?.nodes?.[0]?.commit?.oid ?? null,
+      mergeState: pull.mergeStateStatus ?? null,
+    };
   } catch (error) {
     console.error("[GitHub] Error fetching PR review action items:", error);
     return null;
@@ -1275,9 +1311,12 @@ export async function handlePullRequestReview(
     return { created: false };
   }
 
-  const { comments: inlineComments, degraded } = installation?.id
-    ? await fetchReviewComments(repository.full_name, pr.number, review.id, installation.id)
-    : { comments: [], degraded: true };
+  const { comments: inlineComments, degraded } = await fetchReviewComments(
+    repository.full_name,
+    pr.number,
+    review.id,
+    installation?.id,
+  );
 
   // Skip "commented" reviews only when there is neither an overall body nor any inline
   // comments — a body-less review with inline comments carries real reviewer feedback.
@@ -1285,26 +1324,29 @@ export async function handlePullRequestReview(
     return { created: false };
   }
 
-  // An approval with no body, no inline comments and no open review items leaves the lead
-  // nothing to act on. A body is always forwarded: it can carry a live human ask.
+  // An approval with no body, no inline comments and no open review items, on the current
+  // head of a CLEAN PR, leaves the lead nothing to act on. A body is always forwarded: it
+  // can carry a live human ask. A stale-head, conflicting or not-yet-green approval notifies.
   let approvalActionCounts: PrReviewActionCounts | null = null;
   if (
     review.state === "approved" &&
     !review.body?.trim() &&
     inlineComments.length === 0 &&
     !degraded &&
-    installation?.id &&
     skipNoopApprovalsEnabled()
   ) {
     approvalActionCounts = await fetchPrReviewActionCounts(
       repository.full_name,
       pr.number,
-      installation.id,
+      installation?.id,
     );
     if (
       approvalActionCounts &&
       approvalActionCounts.unresolvedThreads === 0 &&
-      approvalActionCounts.outstandingChangeRequests === 0
+      approvalActionCounts.outstandingChangeRequests === 0 &&
+      !!review.commit_id &&
+      review.commit_id === approvalActionCounts.headOid &&
+      approvalActionCounts.mergeState === "CLEAN"
     ) {
       console.log(
         `[GitHub] Skipped lead task for no-op approval of ${repository.full_name}#${pr.number} by ${sender.login} (review ${review.id})`,
@@ -1345,7 +1387,7 @@ export async function handlePullRequestReview(
         ? "💡 Suggested: Address the requested changes and update the PR"
         : "💡 Suggested: Review the feedback and respond if needed";
   const openItemsSuggestion = approvalActionCounts
-    ? `\n📋 Still open on the PR: ${approvalActionCounts.unresolvedThreads} unresolved review thread(s), ${approvalActionCounts.outstandingChangeRequests} outstanding change request(s)`
+    ? `\n📋 Still open on the PR: ${approvalActionCounts.unresolvedThreads} unresolved review thread(s), ${approvalActionCounts.outstandingChangeRequests} outstanding change request(s); head ${approvalActionCounts.headOid?.slice(0, 9) ?? "unknown"}${review.commit_id && review.commit_id !== approvalActionCounts.headOid ? ` (approved ${review.commit_id.slice(0, 9)})` : ""}, merge state ${approvalActionCounts.mergeState ?? "unknown"}`
     : "";
   const reviewSuggestions =
     (hasInlineComments || degraded
