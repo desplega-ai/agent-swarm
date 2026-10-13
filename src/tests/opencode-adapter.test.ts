@@ -419,6 +419,23 @@ describe("OpencodeSession — event mapping", () => {
     expect(result.failureReason).toBe("runner exited without result: opencode event stream ended");
   });
 
+  test("a step on a different model than requested fails the session", async () => {
+    const step = (providerID: string, id: string) =>
+      ev("session.step.started", { sessionID: SESSION_ID, model: { id, providerID } });
+
+    const ok = await runSession([step("openrouter", "google/gemini-3-flash-preview"), succeeded]);
+    expect(ok.result.isError).toBe(false);
+
+    const { result } = await runSession([
+      step("openrouter", "anthropic/claude-haiku-5.5"),
+      succeeded,
+    ]);
+    expect(result.isError).toBe(true);
+    expect(result.failureReason).toBe(
+      "opencode ran openrouter/anthropic/claude-haiku-5.5 instead of the requested model openrouter/google/gemini-3-flash-preview; the requested model is not in OpenCode's catalog",
+    );
+  });
+
   test("a rejected prompt fails the session", async () => {
     const { result } = await runSession([], testConfig(), {
       promptError: new Error("model not found: x/y"),

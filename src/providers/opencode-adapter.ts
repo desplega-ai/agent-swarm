@@ -409,6 +409,19 @@ export class OpencodeSession implements ProviderSession {
     this.emitDirect({ type: "raw_log", content: scrubSecrets(JSON.stringify(ev)) });
 
     switch (ev.type) {
+      case "session.step.started": {
+        // OpenCode 2 runs its default model when the configured one is not in
+        // its catalog, with no error event. Fail instead of billing the task
+        // to a model nobody asked for.
+        const actual = `${ev.data.model.providerID}/${ev.data.model.id}`;
+        if (this.model.includes("/") && actual !== this.model) {
+          this.fail(
+            `opencode ran ${actual} instead of the requested model ${this.model}; the requested model is not in OpenCode's catalog`,
+          );
+        }
+        break;
+      }
+
       case "session.tool.input.started":
         this.toolNames.set(ev.data.id, ev.data.name);
         break;
