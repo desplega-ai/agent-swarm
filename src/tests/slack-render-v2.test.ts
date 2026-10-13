@@ -2523,7 +2523,7 @@ describe("Slack renderer v2", () => {
       (call) => call.method === "chat.update" && call.payload.ts === card?.ts,
     );
     expect(rewrite?.payload.text).toBe(
-      `↪️ Resumed by ${lead.name} and deferred again — ${nextCard?.permalink}`,
+      `↪️ Resumed by ${lead.name} and deferred again — <${nextCard?.permalink}|next update>`,
     );
   });
 
@@ -3659,7 +3659,9 @@ describe("Slack renderer v2 delegation (SLACK_RENDER_V2_DELEGATION)", () => {
         String(call.payload.markdown_text).includes("**Results**"),
     );
     expect(conclusionStream).toBeDefined();
-    expect(String(conclusionStream?.payload.markdown_text)).toContain(childCard!.permalink);
+    expect(String(conclusionStream?.payload.markdown_text)).toContain(
+      `↳ ✅ ${worker.name} — <${childCard!.permalink}|result>`,
+    );
     expect(calls).toContainEqual({
       method: "reactions.add",
       payload: { channel: channelId, name: "white_check_mark", timestamp: triggerTs },

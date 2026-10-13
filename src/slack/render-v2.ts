@@ -1016,7 +1016,7 @@ async function conclusionResultsLines(closure: AgentTask[]): Promise<string[]> {
     const agentName = await agentDisplayNameFor(member);
     const card = await getSlackOutcomeMessage(member.id);
     if (card?.permalink) {
-      lines.push(`↳ ${glyph} ${agentName} — ${card.permalink}`);
+      lines.push(`↳ ${glyph} ${agentName} — <${card.permalink}|result>`);
       continue;
     }
     const raw = outcomeText(
@@ -1452,7 +1452,7 @@ async function resolvedDeferralContent(
     return { text: presentation, blocks: [{ type: "markdown", text: presentation }, ...captions] };
   }
   const card = await getSlackOutcomeMessage(wake.id);
-  const pointer = card?.permalink ? ` — ${card.permalink}` : ".";
+  const pointer = card?.permalink ? ` — <${card.permalink}|next update>` : ".";
   return { text: `↪️ Resumed by ${await agentDisplayNameFor(wake)} and deferred again${pointer}` };
 }
 
