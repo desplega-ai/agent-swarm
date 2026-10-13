@@ -11,6 +11,7 @@
  */
 
 import type { Plugin } from "@opencode/plugin";
+import { renderGoalReminder } from "../prompts/goal-reminder";
 import {
   apiHeaders,
   checkShouldBlockPolling,
@@ -66,14 +67,8 @@ export function createOpencodeSwarmPlugin(config: SwarmHooksConfig): Plugin.Plug
         if (!config.taskId) return;
         const task = await fetchTaskDetails(config);
         if (!task) return;
-        const reminder = [
-          "=== GOAL REMINDER (injected before context compaction) ===",
-          `Task ID: ${task.id}`,
-          `Task: ${task.task}`,
-          ...(task.progress ? [`Current Progress: ${task.progress}`] : []),
-          "=== Continue working on this task after compaction ===",
-        ];
-        event.system.push({ type: "text", text: reminder.join("\n") });
+        const reminder = await renderGoalReminder(task);
+        if (reminder) event.system.push({ type: "text", text: reminder });
       });
     },
   };

@@ -4,6 +4,7 @@
  */
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { resolveTemplateFromCode } from "../prompts/resolver";
 import { createOpencodeSwarmPlugin } from "../providers/opencode-swarm-plugin";
 import type { SwarmHooksConfig } from "../providers/pi-mono-extension";
 
@@ -104,12 +105,19 @@ describe("opencode swarm plugin", () => {
     expect(leadEvent.system[0]?.text).toContain("other work");
   });
 
-  test("adds the task goal to compaction", async () => {
+  test("adds the task goal to compaction from the registered template", async () => {
     const { hooks } = await setup();
     const event = { system: [] as Array<{ type: string; text: string }> };
     await hooks["session.compaction"]?.(event);
     expect(event.system[0]?.text).toContain("Task: ship the thing");
     expect(event.system[0]?.text).toContain("Current Progress: half way");
+    expect(event.system[0]?.text).toBe(
+      resolveTemplateFromCode("system.agent.compaction.goal_reminder", {
+        taskId: "task-1",
+        task: "ship the thing",
+        progressLine: "\nCurrent Progress: half way",
+      }).text,
+    );
   });
 
   test("heartbeats after a worker tool call", async () => {

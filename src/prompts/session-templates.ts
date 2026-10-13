@@ -332,6 +332,28 @@ registerTemplate({
 });
 
 /**
+ * Re-anchors the model on its task around context compaction. Rendered by the
+ * pi and opencode compaction hooks (`renderGoalReminder`).
+ */
+registerTemplate({
+  eventType: "system.agent.compaction.goal_reminder",
+  header: "",
+  defaultBody: `=== GOAL REMINDER (injected before context compaction) ===
+Task ID: {{taskId}}
+Task: {{task}}{{progressLine}}
+=== Continue working on this task after compaction ===`,
+  variables: [
+    { name: "taskId", description: "ID of the task the session is working on" },
+    { name: "task", description: "The task description" },
+    {
+      name: "progressLine",
+      description: 'Empty, or a newline plus "Current Progress: <latest progress>"',
+    },
+  ],
+  category: "system",
+});
+
+/**
  * First message of a cursor session on the first-message path. Cursor keeps
  * its own system prompt there, so the swarm's rides on top of the task prompt.
  */

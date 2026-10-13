@@ -9,6 +9,7 @@
 import type { ExtensionFactory, McpServerConfig } from "@earendil-works/pi-coding-agent";
 import { buildRatingsFromLlm, fetchRetrievalsForTask, postRatings } from "../be/memory/raters/llm";
 import { checkToolLoop, clearToolHistory } from "../hooks/tool-loop-detection";
+import { renderGoalReminder } from "../prompts/goal-reminder";
 import { summarizeSession as runSummarize } from "../utils/internal-ai";
 import { getMemoryRaterNames } from "../utils/memory-raters";
 import { getOpenRouterAttributionHeaders } from "../utils/openrouter-base-url";
@@ -655,16 +656,8 @@ export function createSwarmHooksExtension(config: SwarmHooksConfig): ExtensionFa
 
       const taskDetails = await fetchTaskDetails(config);
       if (taskDetails) {
-        const reminder = [
-          "=== GOAL REMINDER (injected before context compaction) ===",
-          `Task ID: ${taskDetails.id}`,
-          `Task: ${taskDetails.task}`,
-        ];
-        if (taskDetails.progress) {
-          reminder.push(`Current Progress: ${taskDetails.progress}`);
-        }
-        reminder.push("=== Continue working on this task after compaction ===");
-        sendNudge(pi, reminder.join("\n"));
+        const reminder = await renderGoalReminder(taskDetails);
+        if (reminder) sendNudge(pi, reminder);
       }
     });
 
