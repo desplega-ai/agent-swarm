@@ -141,7 +141,9 @@ export function patchFetchWithCredentialBroker(
     const callerInit = cloneRequestInit(input, init);
     const redirectMode = callerInit.redirect ?? "follow";
     // A 307/308 sends the body again, so a stream (a Request body) is read once here.
-    if (redirectMode === "follow") callerInit.body = await replayableBody(callerInit.body);
+    if (redirectMode === "follow") {
+      callerInit.body = await replayableBody(callerInit.body, callerInit.signal);
+    }
     const mergedInit: RequestInit = {
       ...callerInit,
       headers: headersModified || input instanceof Request ? newHeaders : init?.headers,

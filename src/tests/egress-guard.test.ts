@@ -12,8 +12,10 @@ import {
   createGuardedFetch,
   type EgressPolicy,
   isPrivateAddress,
+  MAX_REPLAY_BODY_BYTES,
   parseEgressAllowlist,
   pinToAddress,
+  RequestBodyTooLargeError,
   validateEgressAllowlist,
 } from "../utils/egress-guard";
 import { listenOnFreePort } from "./test-net";
@@ -531,6 +533,127 @@ describe("redirect bodies over real fetch", () => {
       { path: "/307", body: "payload" },
       { path: "/end", body: "payload" },
     ]);
+  });
+});
+
+describe("redirect body collection", () => {
+  const originalFetch = globalThis.fetch;
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  const URL_ = "https://api.example.com/upload";
+  const sent: number[] = [];
+  const base = (async (_input: string | URL | Request, init?: RequestInit) => {
+    sent.push(init?.body ? (await new Response(init.body).arrayBuffer()).byteLength : 0);
+    return new Response("ok");
+  }) as typeof fetch;
+
+  // Each layer gets a streamed POST body; the broker takes its substituting path.
+  const LAYERS = {
+    broker: () => {
+      globalThis.fetch = base;
+      patchFetchWithCredentialBroker([
+        {
+          configKey: "EXAMPLE_TOKEN",
+          allowedHosts: ["api.example.com"],
+          headerTemplate: "{value}",
+          scope: "global",
+          active: true,
+          authKind: "config",
+          placeholder: "[REDACTED:EXAMPLE_TOKEN]",
+          value: "real-secret-value",
+        },
+      ]);
+      return globalThis.fetch;
+    },
+    guard: () => createGuardedFetch(base, { policy: { allowPrivate: true, allowlist: null } }),
+  };
+  const upload = (doFetch: typeof fetch, body: ReadableStream, signal?: AbortSignal) =>
+    doFetch(URL_, {
+      method: "POST",
+      body,
+      signal,
+      headers: { "x-api-key": "[REDACTED:EXAMPLE_TOKEN]" },
+      duplex: "half",
+    } as RequestInit);
+  const settled = (promise: Promise<unknown>) =>
+    Promise.race([
+      promise.then(
+        () => "resolved",
+        (error: Error) => error,
+      ),
+      Bun.sleep(1_000).then(() => "pending"),
+    ]);
+
+  for (const [layer, make] of Object.entries(LAYERS)) {
+    test(`${layer}: an abort during body collection rejects and cancels the source`, async () => {
+      let cancelReason: unknown = null;
+      const source = new ReadableStream({
+        start(controller) {
+          controller.enqueue(new Uint8Array(8));
+        },
+        cancel(reason) {
+          cancelReason = reason;
+        },
+      });
+      const controller = new AbortController();
+      const pending = upload(make(), source, controller.signal);
+      await Bun.sleep(20);
+      controller.abort();
+      const outcome = await settled(pending);
+      expect(outcome).toBeInstanceOf(Error);
+      expect((outcome as Error).name).toBe("AbortError");
+      expect((cancelReason as Error | null)?.name).toBe("AbortError");
+    });
+
+    test(`${layer}: a body over the cap rejects and cancels the source`, async () => {
+      sent.length = 0;
+      let pulled = 0;
+      let cancelled = false;
+      const source = new ReadableStream({
+        pull(controller) {
+          // One MiB per pull, closing just past the cap.
+          if (pulled * 1024 * 1024 > MAX_REPLAY_BODY_BYTES) controller.close();
+          else controller.enqueue(new Uint8Array(1024 * 1024));
+          pulled++;
+        },
+        cancel() {
+          cancelled = true;
+        },
+      });
+      const outcome = await settled(upload(make(), source));
+      expect(outcome).toBeInstanceOf(RequestBodyTooLargeError);
+      expect((outcome as Error).message).toContain("32 MiB");
+      expect(cancelled).toBe(true);
+      expect(sent).toEqual([]);
+    });
+
+    test(`${layer}: a failing source rejects with its error and releases the stream`, async () => {
+      const source = new ReadableStream({
+        start(controller) {
+          controller.enqueue(new Uint8Array(8));
+          controller.error(new Error("source broke"));
+        },
+      });
+      const outcome = await settled(upload(make(), source));
+      expect((outcome as Error).message).toBe("source broke");
+      expect(source.locked).toBe(false);
+    });
+  }
+
+  test("control: a body at the cap is sent whole", async () => {
+    sent.length = 0;
+    const chunks = MAX_REPLAY_BODY_BYTES / (1024 * 1024);
+    let pulled = 0;
+    const source = new ReadableStream({
+      pull(controller) {
+        if (pulled++ < chunks) controller.enqueue(new Uint8Array(1024 * 1024));
+        else controller.close();
+      },
+    });
+    expect(await settled(upload(LAYERS.guard(), source))).toBe("resolved");
+    expect(sent).toEqual([MAX_REPLAY_BODY_BYTES]);
   });
 });
 
