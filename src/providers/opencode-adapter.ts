@@ -175,9 +175,7 @@ async function loadOpencodeSdk(): Promise<LoadedOpencodeSdk> {
 
 let loadOpencodeSdkImpl = loadOpencodeSdk;
 
-export function _setOpencodeSdkLoaderForTests(
-  fn: (() => Promise<LoadedOpencodeSdk>) | null,
-): void {
+export function _setOpencodeSdkLoaderForTests(fn: (() => Promise<LoadedOpencodeSdk>) | null): void {
   loadOpencodeSdkImpl = fn ?? loadOpencodeSdk;
 }
 

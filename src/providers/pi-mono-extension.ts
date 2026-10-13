@@ -174,7 +174,10 @@ async function syncSetupScriptToServer(
 }
 
 /** Auto-index a file written to memory directory */
-export async function autoIndexMemoryFile(config: SwarmHooksConfig, editedPath: string): Promise<void> {
+export async function autoIndexMemoryFile(
+  config: SwarmHooksConfig,
+  editedPath: string,
+): Promise<void> {
   try {
     const fileContent = await Bun.file(editedPath).text();
     const isShared = editedPath.startsWith("/workspace/shared/");
@@ -413,7 +416,11 @@ export async function summarizeTranscript(
     });
     if (!indexResp.ok) {
       const text = await indexResp.text().catch(() => "");
-      console.error(`session_summary: /api/memory/index POST failed (${harness}):`, indexResp.status, text);
+      console.error(
+        `session_summary: /api/memory/index POST failed (${harness}):`,
+        indexResp.status,
+        text,
+      );
       return;
     }
 
