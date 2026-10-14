@@ -1140,6 +1140,9 @@ export function AppSurface({
           the app canvas below scrolls. The gear is unconditional: even a
           schema-less app has the per-viewer theme override to offer. */}
       <PageHeader
+        // Below sm the actions take their own row under a full-width
+        // description; side by side they squeezed it to one word per line.
+        className="max-sm:flex-col max-sm:items-stretch"
         title={app.name}
         description={app.description ?? undefined}
         action={<AppHeaderActions appIds={[...definitionsByApp.keys()]} settingsApp={app} />}
@@ -1151,6 +1154,9 @@ export function AppSurface({
         ref={scrollRef}
         className={cn(
           "flex flex-col flex-1 min-h-0 gap-4 overflow-y-auto rounded-lg border border-border p-4",
+          // Below md the canvas bleeds through `<main>`'s gutter to the screen
+          // edges, so a phone gives the app its full width.
+          "max-md:-mx-4 max-md:w-[calc(100%+2rem)] max-md:max-w-none max-md:rounded-none max-md:border-x-0",
           // A themed canvas shows its OWN field color so the preset reads at a
           // glance; the unthemed canvas keeps the card step against the page.
           appThemeAttr ? "bg-background" : "bg-card",
@@ -1209,7 +1215,7 @@ function AppHeaderActions({
   const chromelessUrl = `${window.location.origin}${urlWithMode(location, "chromeless")}`;
 
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex flex-wrap items-center gap-2">
       <Link to="/apps" className="text-sm text-muted-foreground hover:underline">
         All apps
       </Link>
