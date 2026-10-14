@@ -129,7 +129,7 @@ RUN if ! gh extension install github/gh-stack; then \
     fi
 
 # Install Claude CLI (pinned version — bump ARG to update)
-ARG CLAUDE_CODE_VERSION=2.1.296
+ARG CLAUDE_CODE_VERSION=2.1.299
 USER root
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache \
     npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} \
@@ -583,9 +583,9 @@ RUN curl -fsSL "https://registry.npmjs.org/@deepseek-ai/dsh/-/dsh-${DSH_VERSION}
 # "disabled". Bump AMP_VERSION, both SHA-512 pins and AMP_PACKAGE in
 # src/providers/amp-adapter.ts together. The vendor licence is proprietary
 # (https://ampcode.com/terms): confirm it before publishing this image.
-ARG AMP_VERSION=0.0.1791878731-g2f7fd0
-ARG AMP_SHA512_AMD64=9ff33cb89bcadf271ea4330e71c07619341d2ed15b00ff9c8a06a706887ff3dcb00892574c98f50d328fb3fcf163863233358ed8b737bf2a26ff987ba5bef449
-ARG AMP_SHA512_ARM64=1f03438ecc6059f948984c0edf445a039626fcf703992247f7e2e7a62d7e5ef508b8247863d5b6c4319d685220e158fd4672d7ef67fababaf15ff5b26364c201
+ARG AMP_VERSION=0.0.1791950451-g165091
+ARG AMP_SHA512_AMD64=bd6ec048a695a06e3f9db581fb804e04f4ad5f8a22f510a6894d07500fc099555ba60d4e47b307482bd01a7555612938ef6ff7fe008dae420a9c8a22f7845413
+ARG AMP_SHA512_ARM64=b4a555eb18eb19a61ffb587ec34b13553c6367f8d344284536af6a6589651d21265f6c928f9fdc622f677c2a37eed00fc0cf3b9b157fb9e097abf5d33a2c66e8
 RUN case "$TARGETARCH" in \
       amd64) amp_platform=linux-x64; amp_sha512="$AMP_SHA512_AMD64" ;; \
       arm64) amp_platform=linux-arm64; amp_sha512="$AMP_SHA512_ARM64" ;; \
@@ -620,7 +620,7 @@ ENV CURSOR_RIPGREP_PATH=/opt/cursor-sdk/platform/bin/rg \
 # Gemini CLI (Apache-2.0) for HARNESS_PROVIDER=acp with ACP_TARGET=gemini; the
 # adapter launches `gemini --acp`. Its own prefix keeps the ~100 MB install out
 # of the shared global-deps layer. Lifecycle scripts are not needed for ACP.
-ARG GEMINI_CLI_VERSION=0.63.0
+ARG GEMINI_CLI_VERSION=0.64.0
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
       --prefix /opt/gemini-cli --ignore-scripts --no-audit --no-fund \
       "@google/gemini-cli@${GEMINI_CLI_VERSION}" \
@@ -633,7 +633,7 @@ RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
 # than the CLI, with that licence included. npm keeps LICENSE.md in the
 # package dir; the copy under /usr/share/doc makes it easy to find. The adapter
 # sets COPILOT_AUTO_UPDATE=false, so the pinned binary is the one that runs.
-ARG COPILOT_CLI_VERSION=1.0.96
+ARG COPILOT_CLI_VERSION=1.0.97
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
       --prefix /opt/copilot-cli --no-audit --no-fund "@github/copilot@${COPILOT_CLI_VERSION}" \
     && ln -sf /opt/copilot-cli/node_modules/.bin/copilot /usr/local/bin/copilot \
@@ -673,9 +673,9 @@ RUN case "$TARGETARCH" in \
 # manifest lists. `kiro-cli` dispatches to `kiro-cli-chat`, so both are kept;
 # the terminal helper is not needed for ACP. Bump KIRO_CLI_VERSION and both
 # pins together. Proprietary (AWS): confirm its licence before publishing.
-ARG KIRO_CLI_VERSION=2.30.0
-ARG KIRO_CLI_SHA256_AMD64=df252365e8f8a3aa9ddf543060892c915af072b660a5527c0895351654b912f8
-ARG KIRO_CLI_SHA256_ARM64=6788ac56d4e10d08fd488aff083a64b0dd7edc440f45f8e5a21f6130995f6850
+ARG KIRO_CLI_VERSION=2.31.0
+ARG KIRO_CLI_SHA256_AMD64=8b3a8c3b032178e2662a6a530fa0bb7ee92e223528613f8f03b51d18b23a5e11
+ARG KIRO_CLI_SHA256_ARM64=4b00b411437520298d28ae8a1c51f63f4bfdb490c07170b4d5ae91cbeadabc0f
 RUN case "$TARGETARCH" in \
       amd64) kiro_arch=x86_64; kiro_sha256="$KIRO_CLI_SHA256_AMD64" ;; \
       arm64) kiro_arch=aarch64; kiro_sha256="$KIRO_CLI_SHA256_ARM64" ;; \
