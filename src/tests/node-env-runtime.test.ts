@@ -6,7 +6,8 @@ import { CHILD_PROCESS_TEST_BUDGET_MS, expectChildOk, runChild } from "./test-pr
 
 // `bun build --compile` inlines `process.env.NODE_ENV` dot reads as
 // "development". Compile a tiny entry with the API Dockerfile's flags and
-// check that the SSRF guard and `getNodeEnv` see the runtime value.
+// check that the SSRF guards (public endpoints and MCP OAuth) and `getNodeEnv`
+// see the runtime value.
 // scripts/check-node-env-access.sh keeps new dot reads out of src/.
 
 const SRC = resolve(import.meta.dir, "..");
@@ -30,9 +31,16 @@ describe("NODE_ENV in compiled binaries", () => {
     await Bun.write(
       entry,
       [
-        `import { publicEndpointSsrfOptions } from ${JSON.stringify(join(SRC, "oauth/mcp-wrapper.ts"))};`,
+        `import { assertUrlSafe, discoverAuthorizationServerMetadata, mcpOAuthSsrfOptions, publicEndpointSsrfOptions } from ${JSON.stringify(join(SRC, "oauth/mcp-wrapper.ts"))};`,
         `import { getNodeEnv } from ${JSON.stringify(join(SRC, "utils/node-env.ts"))};`,
-        "console.log(JSON.stringify({ nodeEnv: getNodeEnv() ?? null, ssrf: publicEndpointSsrfOptions() }));",
+        // The guard src/http/mcp-oauth.ts applies to stored and discovered endpoints.
+        "let routeGuardAllowsHttp = true;",
+        'try { assertUrlSafe("http://example.com/mcp", mcpOAuthSsrfOptions()); } catch { routeGuardAllowsHttp = false; }',
+        // safeFetch in mcp-wrapper.ts: count fetches reaching the network.
+        "let fetches = 0;",
+        'globalThis.fetch = (async () => { fetches++; return Response.json({ issuer: "http://example.com" }); }) as typeof fetch;',
+        'await discoverAuthorizationServerMetadata("http://example.com").catch(() => {});',
+        "console.log(JSON.stringify({ nodeEnv: getNodeEnv() ?? null, ssrf: publicEndpointSsrfOptions(), oauthHttp: { routeGuardAllowsHttp, fetches } }));",
       ].join("\n"),
     );
     // Same flags as the API binary in Dockerfile.
@@ -53,11 +61,12 @@ describe("NODE_ENV in compiled binaries", () => {
   });
 
   test(
-    "NODE_ENV unset: the SSRF guard blocks private and insecure endpoints",
+    "NODE_ENV unset: the SSRF guards block private and insecure endpoints, including MCP OAuth",
     async () => {
       expect(await runBinary(undefined)).toEqual({
         nodeEnv: null,
         ssrf: { allowPrivateHosts: false, allowInsecure: false },
+        oauthHttp: { routeGuardAllowsHttp: false, fetches: 0 },
       });
     },
     CHILD_PROCESS_TEST_BUDGET_MS,
@@ -69,6 +78,7 @@ describe("NODE_ENV in compiled binaries", () => {
       expect(await runBinary("production")).toEqual({
         nodeEnv: "production",
         ssrf: { allowPrivateHosts: false, allowInsecure: false },
+        oauthHttp: { routeGuardAllowsHttp: false, fetches: 0 },
       });
     },
     CHILD_PROCESS_TEST_BUDGET_MS,
@@ -80,6 +90,7 @@ describe("NODE_ENV in compiled binaries", () => {
       expect(await runBinary("development")).toEqual({
         nodeEnv: "development",
         ssrf: { allowPrivateHosts: true, allowInsecure: true },
+        oauthHttp: { routeGuardAllowsHttp: true, fetches: 1 },
       });
     },
     CHILD_PROCESS_TEST_BUDGET_MS,

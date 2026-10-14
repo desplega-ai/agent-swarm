@@ -13,3 +13,12 @@ const NODE_ENV_KEY = "NODE_ENV";
 export function getNodeEnv(): string | undefined {
   return process.env[NODE_ENV_KEY];
 }
+
+/**
+ * True only for an explicit development or test environment. Deployed images
+ * leave NODE_ENV unset, so unset (and any other value) fails closed.
+ */
+export function isDevOrTestNodeEnv(): boolean {
+  const env = getNodeEnv();
+  return env === "development" || env === "test";
+}

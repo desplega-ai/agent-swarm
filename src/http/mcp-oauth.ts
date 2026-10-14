@@ -24,6 +24,7 @@ import {
   discoverProtectedResourceMetadata,
   exchangeCodeForTokens,
   isInvalidClientError,
+  mcpOAuthSsrfOptions,
   normalizeTokenEndpointAuthMethod,
   refreshMcpToken,
   registerClient,
@@ -33,19 +34,10 @@ import {
 } from "../oauth/mcp-wrapper";
 import { McpAuthMethodSchema } from "../types";
 import { getAppUrl, getPublicMcpBaseUrl } from "../utils/constants";
-import { isEnvFlagEnabled } from "../utils/env-flag";
-import { getNodeEnv } from "../utils/node-env";
 import { route } from "./route-def";
 import { jsonError } from "./utils";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
-
-function ssrfOptions() {
-  return {
-    allowPrivateHosts: isEnvFlagEnabled("MCP_OAUTH_ALLOW_PRIVATE_HOSTS", false),
-    allowInsecure: getNodeEnv() !== "production",
-  };
-}
 
 function callbackRedirectUri(): string {
   // The callback route lives on the API server, so it must use the PUBLIC MCP
@@ -166,10 +158,10 @@ function manualClientFromToken(token: McpOAuthToken | null): OAuthClientForAutho
 
   // The manual-client route validates these on write. Re-check before using the
   // stored endpoints because /authorize redirects the browser to authorizeUrl.
-  assertUrlSafe(token.resourceUrl, ssrfOptions());
-  assertUrlSafe(token.authorizeUrl, ssrfOptions());
-  assertUrlSafe(token.tokenUrl, ssrfOptions());
-  if (token.revocationUrl) assertUrlSafe(token.revocationUrl, ssrfOptions());
+  assertUrlSafe(token.resourceUrl, mcpOAuthSsrfOptions());
+  assertUrlSafe(token.authorizeUrl, mcpOAuthSsrfOptions());
+  assertUrlSafe(token.tokenUrl, mcpOAuthSsrfOptions());
+  if (token.revocationUrl) assertUrlSafe(token.revocationUrl, mcpOAuthSsrfOptions());
 
   return {
     clientId: token.dcrClientId,
@@ -185,7 +177,7 @@ function manualClientFromToken(token: McpOAuthToken | null): OAuthClientForAutho
 }
 
 async function discoverForMcp(resourceUrl: string): Promise<DiscoveryResult | null> {
-  assertUrlSafe(resourceUrl, ssrfOptions());
+  assertUrlSafe(resourceUrl, mcpOAuthSsrfOptions());
 
   const prmd = await discoverProtectedResourceMetadata(resourceUrl);
   if (!prmd) return null;
