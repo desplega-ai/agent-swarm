@@ -556,6 +556,40 @@ describe("Slack renderer v2", () => {
     });
   }
 
+  for (const delegationEnabled of [false, true]) {
+    for (const status of ["completed", "failed"] as const) {
+      test(`worker deferred ${status} wake posts no outcome with delegation=${delegationEnabled}`, async () => {
+        process.env.SLACK_RENDER_V2_DELEGATION = String(delegationEnabled);
+        if (delegationEnabled) await ensureSlackDelegationActivation();
+        const worker = await createAgent({ name: "Fast Coder", isLead: false, status: "idle" });
+        const { channelId, threadTs } = uniqueSlackAddress("C_WORKER_WAKE");
+        const wake = await createTaskExtended("Check PR #2136 CI at the expected head", {
+          agentId: worker.id,
+          source: "schedule",
+          taskType: "deferred",
+          slackChannelId: channelId,
+          slackThreadTs: threadTs,
+          contextKey: slackContextKey({ channelId, threadTs }),
+        });
+        await startTask(wake.id);
+        await ensureSlackThreadTree([wake.id]);
+        await processSlackRenderV2();
+        if (status === "failed") {
+          await failTask(wake.id, "CI is failing at expected head");
+        } else {
+          await completeTask(wake.id, "CI is green at expected head");
+        }
+        calls.length = 0;
+
+        await processSlackRenderV2();
+        await processSlackRenderV2();
+
+        expect(await getSlackOutcomeMessage(wake.id)).toBeNull();
+        expect(calls.filter((call) => call.method === "chat.startStream")).toHaveLength(0);
+      });
+    }
+  }
+
   test("does not relay an ordinary scheduled task without Slack context", async () => {
     const schedule = await createScheduledTask({
       name: "ordinary-maintenance",
