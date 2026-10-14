@@ -70,9 +70,9 @@ export const slackPreTaskCreateBlock: Scenario = {
       // Wait past the normal debounce/flush window and ensure no standard
       // "batched into task" or "queued pending completion" feedback was posted.
       await new Promise((resolve) => setTimeout(resolve, 12_000));
-      const threadMessages = ctx.slack.messages("general").filter(
-        (message) => message.thread_ts === root.ts,
-      );
+      const threadMessages = ctx.slack
+        .messages("general")
+        .filter((message) => message.thread_ts === root.ts);
       expect(
         !threadMessages.some((message) =>
           /follow-up message\(s\) (?:batched into task|queued pending completion)/i.test(
