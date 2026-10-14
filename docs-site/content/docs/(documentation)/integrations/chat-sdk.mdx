@@ -207,9 +207,9 @@ Agents get these tools when the channel is on (capability `chat-sdk`). The param
 | Tool | What it does |
 |---|---|
 | `chat-reply` | Post to the thread of the current chat task. Use it for a question or a progress note. The final output posts by itself. |
-| `chat-post` | Post to any thread or channel id (for example `telegram:12345`). |
-| `chat-read-thread` | Read the recent messages of a thread, oldest first. |
-| `chat-open-dm` | Open or find the direct-message thread with a user. |
+| `chat-post` | Lead only. Post to any thread or channel id (for example `telegram:12345`). |
+| `chat-read-thread` | Read the recent messages of a thread, oldest first. Every agent can read the thread of its current task. Other threads are lead only. |
+| `chat-open-dm` | Lead only. Open or find the direct-message thread with a user. |
 | `register-chat-channel` | Lead only. Route a channel to a fixed agent or workflow. |
 | `unregister-chat-channel` | Lead only. Remove that mapping. |
 

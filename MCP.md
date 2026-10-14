@@ -2285,7 +2285,7 @@ Post a message to the Telegram, Slack, Discord or Teams thread your current task
 
 **Post to a chat thread or channel**
 
-Post a message to any Chat SDK thread or channel (Telegram, Slack, Discord, Teams), outside the thread of your current task. Give threadId to reply in a thread, or channelId to start a new message in a channel. Ids carry the adapter prefix, such as telegram:12345. To answer the user of your current chat task, use chat-reply instead.
+Lead only. Post a message to any Chat SDK thread or channel (Telegram, Slack, Discord, Teams), outside the thread of your current task. Give threadId to reply in a thread, or channelId to start a new message in a channel. Ids carry the adapter prefix, such as telegram:12345. To answer the user of your current chat task, use chat-reply instead.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
@@ -2298,7 +2298,7 @@ Post a message to any Chat SDK thread or channel (Telegram, Slack, Discord, Team
 
 **Open a direct message on a chat platform**
 
-Open (or find) the direct-message thread with a user on a Chat SDK adapter and return its threadId. Post to it with chat-post. The userId is the platform user id from a chat message (Telegram numeric id, Slack U..., Discord snowflake, Teams 29:...). Telegram bots can message only users who started a chat with the bot.
+Lead only. Open (or find) the direct-message thread with a user on a Chat SDK adapter and return its threadId. Post to it with chat-post. The userId is the platform user id from a chat message (Telegram numeric id, Slack U..., Discord snowflake, Teams 29:...). Telegram bots can message only users who started a chat with the bot.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
@@ -2309,7 +2309,7 @@ Open (or find) the direct-message thread with a user on a Chat SDK adapter and r
 
 **Read recent messages of a chat thread**
 
-Read the most recent messages of a Chat SDK thread, oldest first. Limits per platform: Telegram has no history API, so you get the history the SDK stored in the swarm database, capped at 100 messages and 7 days. Teams needs the Chat.Read.* Graph permission. Slack and Discord return platform history.
+Read the most recent messages of a Chat SDK thread, oldest first. Every agent can read the thread of its current task. Other threads are lead only. Limits per platform: Telegram has no history API, so you get the history the SDK stored in the swarm database, capped at 100 messages and 7 days. Teams needs the Chat.Read.* Graph permission. Slack and Discord return platform history.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|

@@ -50,7 +50,7 @@ Files and images the user sends in the thread are stored as attachments of the t
 
 ## `chat-read-thread` limits per platform
 
-`chat-read-thread { threadId, limit? }` returns the most recent messages of a thread, oldest first. The thread id is the adapter name plus the URI-decoded remainder of the contextKey. Telegram ids have no escaping, so `telegram:555001` stays as it is. Slack, Discord, and Teams ids contain `%3A` in the contextKey, so do not build the id by hand. `chat-reply` resolves the thread itself. For `chat-read-thread`, use the thread id returned by `chat-reply`, `chat-post`, or `chat-open-dm`.
+`chat-read-thread { threadId, limit? }` returns the most recent messages of a thread, oldest first. The thread id is the adapter name plus the URI-decoded remainder of the contextKey. Telegram ids have no escaping, so `telegram:555001` stays as it is. Slack, Discord, and Teams ids contain `%3A` in the contextKey, so do not build the id by hand. `chat-reply` resolves the thread itself. For `chat-read-thread`, use the thread id returned by `chat-reply`, `chat-post`, or `chat-open-dm`. You can read the thread of your current task. Any other thread needs lead privileges.
 
 - Telegram has no history API. The SDK keeps the Telegram thread history it saw in the swarm database, capped at 100 messages and 7 days.
 - Teams needs the `Chat.Read.*` Graph permission on the bot. Without it, the call fails.
@@ -60,8 +60,8 @@ The task text already holds the earlier swarm messages of the thread, so read th
 
 ## Other tools
 
-- `chat-post { adapter, threadId | channelId, text }` posts outside your task's thread. Use it only when the task asks you to message another thread or channel.
-- `chat-open-dm { adapter, userId }` returns the direct-message thread id for a user. Then post to it with `chat-post`.
+- `chat-post { adapter, threadId | channelId, text }` posts outside your task's thread. Lead only. Use it only when the task asks you to message another thread or channel.
+- `chat-open-dm { adapter, userId }` returns the direct-message thread id for a user. Lead only. Then post to it with `chat-post`.
 
 ## Leads: `register-chat-channel`
 

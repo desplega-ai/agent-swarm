@@ -128,6 +128,18 @@ export const PERMISSIONS = {
     description: "Register or unregister a Chat SDK channel route.",
     namespace: "integration",
   },
+  "integration.chat.post": {
+    description: "Post to a Chat SDK thread or channel other than the thread of the current task.",
+    namespace: "integration",
+  },
+  "integration.chat.read": {
+    description: "Read a Chat SDK thread other than the thread of the current task.",
+    namespace: "integration",
+  },
+  "integration.chat.dm": {
+    description: "Open a direct-message thread with a user on a Chat SDK adapter.",
+    namespace: "integration",
+  },
   "integration.slack.post": {
     description: "Post to a direct Slack channel.",
     namespace: "integration",

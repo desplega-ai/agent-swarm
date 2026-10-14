@@ -5,6 +5,9 @@ import { closeDb, createAgent, createTaskExtended, getKv, initDb } from "../be/d
 import { CHAT_CHANNELS_NAMESPACE } from "../integrations/chat-sdk/router";
 import { createServer } from "../server";
 import { chatSdkContextKey } from "../tasks/context-key";
+import { registerChatOpenDmTool } from "../tools/chat-open-dm";
+import { registerChatPostTool } from "../tools/chat-post";
+import { registerChatReadThreadTool } from "../tools/chat-read-thread";
 import { registerChatReplyTool } from "../tools/chat-reply";
 import {
   registerRegisterChatChannelTool,
@@ -90,6 +93,9 @@ beforeAll(async () => {
   });
   server = new McpServer({ name: "chat-tools-test", version: "1.0.0" });
   registerChatReplyTool(server);
+  registerChatPostTool(server);
+  registerChatOpenDmTool(server);
+  registerChatReadThreadTool(server);
   registerRegisterChatChannelTool(server);
   registerUnregisterChatChannelTool(server);
 });
@@ -244,5 +250,107 @@ describe("register-chat-channel", () => {
     );
     expect(removed.structuredContent.success).toBe(true);
     expect(await getKv(CHAT_CHANNELS_NAMESPACE, "telegram:-100556")).toBeNull();
+  });
+});
+
+describe("chat tool permissions", () => {
+  let harness: TelegramHarness;
+
+  beforeAll(async () => {
+    harness = await startTelegramHarness();
+  });
+
+  afterAll(async () => {
+    await harness.stop();
+  });
+
+  const sendsTo = (chatId: string) =>
+    harness.mock.calls.filter(
+      (call) =>
+        /^send(Rich)?Message$/.test(call.method) &&
+        String((call.body as { chat_id?: unknown }).chat_id) === chatId,
+    );
+
+  test("chat-post is refused for a worker and sends nothing", async () => {
+    const result = await callTool(
+      "chat-post",
+      { "x-agent-id": worker.id },
+      { adapter: "telegram", threadId: "telegram:991010", text: "hello" },
+    );
+    expect(result.structuredContent.success).toBe(false);
+    expect(result.structuredContent.message).toContain("Permission denied");
+    expect(sendsTo("991010")).toHaveLength(0);
+  });
+
+  test("chat-post lets the lead post to any thread", async () => {
+    const result = await callTool(
+      "chat-post",
+      { "x-agent-id": lead.id },
+      { adapter: "telegram", threadId: "telegram:991010", text: "hello" },
+    );
+    expect(result.structuredContent.success).toBe(true);
+    expect(result.structuredContent.threadId).toBe("telegram:991010");
+    expect(sendsTo("991010")).toHaveLength(1);
+  });
+
+  test("chat-open-dm is refused for a worker and allowed for the lead", async () => {
+    const refused = await callTool(
+      "chat-open-dm",
+      { "x-agent-id": worker.id },
+      { adapter: "telegram", userId: "991011" },
+    );
+    expect(refused.structuredContent.success).toBe(false);
+    expect(refused.structuredContent.message).toContain("Permission denied");
+
+    const opened = await callTool(
+      "chat-open-dm",
+      { "x-agent-id": lead.id },
+      { adapter: "telegram", userId: "991011" },
+    );
+    expect(opened.structuredContent.success).toBe(true);
+    expect(opened.structuredContent.threadId).toBe("telegram:991011");
+  });
+
+  test("chat-read-thread: a worker reads its task thread, not another one", async () => {
+    const task = await createTaskExtended("worker chat task", {
+      agentId: worker.id,
+      source: "chat",
+      contextKey: chatSdkContextKey("telegram:991012"),
+    });
+    const own = await callTool(
+      "chat-read-thread",
+      { "x-agent-id": worker.id, "x-source-task-id": task.id },
+      { threadId: "telegram:991012" },
+    );
+    expect(own.structuredContent.success).toBe(true);
+    expect(own.structuredContent.threadId).toBe("telegram:991012");
+
+    const other = await callTool(
+      "chat-read-thread",
+      { "x-agent-id": worker.id, "x-source-task-id": task.id },
+      { threadId: "telegram:991013" },
+    );
+    expect(other.structuredContent.success).toBe(false);
+    expect(other.structuredContent.message).toContain("Permission denied");
+    expect(other.structuredContent.message).toContain("telegram:991012");
+
+    // Without a task binding at all, a worker gets nothing.
+    const noTask = await callTool(
+      "chat-read-thread",
+      { "x-agent-id": worker.id },
+      { threadId: "telegram:991013" },
+    );
+    expect(noTask.structuredContent.success).toBe(false);
+    expect(noTask.structuredContent.message).toContain("Permission denied");
+  });
+
+  test("chat-read-thread lets the lead read any thread", async () => {
+    const result = await callTool(
+      "chat-read-thread",
+      { "x-agent-id": lead.id },
+      { threadId: "telegram:991013" },
+    );
+    expect(result.structuredContent.success).toBe(true);
+    expect(result.structuredContent.threadId).toBe("telegram:991013");
   });
 });

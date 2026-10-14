@@ -3,6 +3,7 @@ import * as z from "zod";
 import { CHAT_SDK_ADAPTER_NAMES } from "@/integrations/chat-sdk/config";
 import { errorMessage } from "@/integrations/chat-sdk/logger";
 import { adapterOfChatId, postChatMessage } from "@/integrations/chat-sdk/outbound";
+import { canUseChatVerb } from "@/tools/chat-access";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 
 export const registerChatPostTool = (server: McpServer) => {
@@ -11,7 +12,7 @@ export const registerChatPostTool = (server: McpServer) => {
     {
       title: "Post to a chat thread or channel",
       description:
-        "Post a message to any Chat SDK thread or channel (Telegram, Slack, Discord, Teams), outside the thread of your current task. Give threadId to reply in a thread, or channelId to start a new message in a channel. Ids carry the adapter prefix, such as telegram:12345. To answer the user of your current chat task, use chat-reply instead.",
+        "Lead only. Post a message to any Chat SDK thread or channel (Telegram, Slack, Discord, Teams), outside the thread of your current task. Give threadId to reply in a thread, or channelId to start a new message in a channel. Ids carry the adapter prefix, such as telegram:12345. To answer the user of your current chat task, use chat-reply instead.",
       annotations: { openWorldHint: true },
       inputSchema: z.object({
         adapter: z.enum(CHAT_SDK_ADAPTER_NAMES).describe("Chat SDK adapter name."),
@@ -41,6 +42,12 @@ export const registerChatPostTool = (server: McpServer) => {
       if (!target) return toolErr("Give a threadId or a channelId.", { data });
       if (adapterOfChatId(target) !== adapter) {
         return toolErr(`The id ${target} does not belong to the ${adapter} adapter.`, { data });
+      }
+      if (!(await canUseChatVerb(requestInfo, "integration.chat.post"))) {
+        return toolErr(
+          "Permission denied. Only the lead can post outside the thread of its task. Use chat-reply for the thread of your current task.",
+          { data },
+        );
       }
       try {
         const sent = await postChatMessage({
