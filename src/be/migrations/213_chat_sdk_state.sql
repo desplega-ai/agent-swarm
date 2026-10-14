@@ -59,14 +59,27 @@ CREATE INDEX idx_chat_relay_obligations_pending
   WHERE delivered_at IS NULL AND given_up_at IS NULL;
 
 -- Lead follow-ups (`source='system'`, `taskType='follow-up'`) inherit the chat
--- contextKey and carry the lead's final answer, so they relay too. GLOB, not
--- LIKE: LIKE is case-insensitive in SQLite.
+-- contextKey and carry the lead's final answer, so they relay too. A resume
+-- (`source='system'`, `taskType='resume'`, from `createResumeFollowUp` after a
+-- graceful shutdown or crash recovery) inherits the contextKey too. It relays
+-- only when a lead owns it: a worker task (resumed or not) reports back through
+-- a lead follow-up, and the lead never gets one for its own tasks. Other system
+-- tasks that inherit the key stay silent. GLOB, not LIKE: LIKE is
+-- case-insensitive in SQLite.
 CREATE TRIGGER enqueue_chat_relay_after_terminal_update
 AFTER UPDATE OF status ON agent_tasks
 WHEN OLD.status NOT IN ('completed', 'failed', 'cancelled', 'superseded')
   AND NEW.status IN ('completed', 'failed', 'cancelled')
   AND NEW.contextKey GLOB 'task:chat-sdk:*'
-  AND (NEW.source = 'chat' OR (NEW.source = 'system' AND NEW.taskType = 'follow-up'))
+  AND (
+    NEW.source = 'chat'
+    OR (NEW.source = 'system' AND NEW.taskType = 'follow-up')
+    OR (
+      NEW.source = 'system'
+      AND NEW.taskType = 'resume'
+      AND EXISTS (SELECT 1 FROM agents WHERE agents.id = NEW.agentId AND agents.isLead = 1)
+    )
+  )
 BEGIN
   INSERT OR IGNORE INTO chat_relay_obligations (task_id)
   VALUES (NEW.id);
@@ -76,7 +89,15 @@ CREATE TRIGGER enqueue_chat_relay_after_terminal_insert
 AFTER INSERT ON agent_tasks
 WHEN NEW.status IN ('completed', 'failed', 'cancelled')
   AND NEW.contextKey GLOB 'task:chat-sdk:*'
-  AND (NEW.source = 'chat' OR (NEW.source = 'system' AND NEW.taskType = 'follow-up'))
+  AND (
+    NEW.source = 'chat'
+    OR (NEW.source = 'system' AND NEW.taskType = 'follow-up')
+    OR (
+      NEW.source = 'system'
+      AND NEW.taskType = 'resume'
+      AND EXISTS (SELECT 1 FROM agents WHERE agents.id = NEW.agentId AND agents.isLead = 1)
+    )
+  )
 BEGIN
   INSERT OR IGNORE INTO chat_relay_obligations (task_id)
   VALUES (NEW.id);

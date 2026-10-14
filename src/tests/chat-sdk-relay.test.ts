@@ -9,6 +9,8 @@ import {
   failTask,
   getDbClient,
   initDb,
+  startTask,
+  supersedeTask,
 } from "../be/db";
 import { installExtension, setExtensionState } from "../be/extensions/db";
 import { listRegistered, registerLoaded, unregister } from "../extensions/dispatcher";
@@ -23,6 +25,7 @@ import {
   stopChatRelayWatcher,
 } from "../integrations/chat-sdk/relay";
 import { chatSdkContextKey } from "../tasks/context-key";
+import { createResumeFollowUp } from "../tasks/worker-follow-up";
 import type { Agent, AgentTask } from "../types";
 import { startTelegramHarness, type TelegramHarness } from "./chat-sdk-harness";
 import { loadBundleFixture } from "./fixtures/extensions/load";
@@ -365,6 +368,90 @@ describe("chat relay watcher", () => {
     await processPendingChatRelays(base + 601_000);
     expect(sendsTo(chatId)).toHaveLength(1);
     expect((await obligation(task.id))?.delivered_at).not.toBeNull();
+  });
+
+  test("a resumed lead chat task relays its final answer", async () => {
+    // A fresh lead with spare capacity, so the graceful-shutdown resume pins to it.
+    const resumeLead = await createAgent({
+      id: crypto.randomUUID(),
+      name: "ChatRelayResumeLead",
+      isLead: true,
+      status: "idle",
+      maxTasks: 5,
+    });
+    const chatId = nextChatId;
+    const parent = await createTaskExtended("chat task to resume", {
+      agentId: resumeLead.id,
+      source: "chat",
+      contextKey: chatSdkContextKey(`telegram:${chatId}`),
+    });
+    await startTask(parent.id);
+    await supersedeTask(parent.id, { reason: "graceful_shutdown", resumeTaskId: null });
+    const result = await createResumeFollowUp({ parentId: parent.id, reason: "graceful_shutdown" });
+    expect(result.kind).toBe("created");
+    if (result.kind !== "created") return;
+    const resume = result.task;
+    expect(resume.source).toBe("system");
+    expect(resume.taskType).toBe("resume");
+    expect(resume.agentId).toBe(resumeLead.id);
+    expect(resume.contextKey).toBe(parent.contextKey);
+
+    await completeTask(resume.id, "Resumed answer: 7.");
+    // The superseded parent never relays; the resume carries the answer.
+    expect(await obligation(parent.id)).toBeNull();
+    expect(await obligation(resume.id)).not.toBeNull();
+
+    await processPendingChatRelays();
+    const texts = sendsTo(chatId).map(sentText);
+    expect(texts).toHaveLength(1);
+    expect(texts[0]).toContain("Resumed answer: 7.");
+    expect((await obligation(resume.id))?.delivered_at).not.toBeNull();
+  });
+
+  test("delegated worker tasks and their resumes stay silent", async () => {
+    const worker = await createAgent({
+      id: crypto.randomUUID(),
+      name: "ChatRelayWorker",
+      isLead: false,
+      status: "idle",
+      maxTasks: 5,
+    });
+    const chatId = nextChatId;
+    const leadTask = await createChatTask(chatId);
+    // Inherits the chat contextKey from its parent.
+    const delegated = await createTaskExtended("worker part", {
+      agentId: worker.id,
+      source: "system",
+      taskType: "delegated",
+      parentTaskId: leadTask.id,
+    });
+    expect(delegated.contextKey).toBe(leadTask.contextKey);
+    await completeTask(delegated.id, "raw worker output");
+
+    // A worker resume reports back through a lead follow-up, not on its own.
+    const interrupted = await createTaskExtended("worker part 2", {
+      agentId: worker.id,
+      source: "system",
+      taskType: "delegated",
+      parentTaskId: leadTask.id,
+    });
+    await startTask(interrupted.id);
+    await supersedeTask(interrupted.id, { reason: "graceful_shutdown", resumeTaskId: null });
+    const result = await createResumeFollowUp({
+      parentId: interrupted.id,
+      reason: "graceful_shutdown",
+    });
+    expect(result.kind).toBe("created");
+    if (result.kind !== "created") return;
+    expect(result.task.agentId).toBe(worker.id);
+    expect(result.task.contextKey).toBe(leadTask.contextKey);
+    await completeTask(result.task.id, "raw resumed worker output");
+
+    expect(await obligation(delegated.id)).toBeNull();
+    expect(await obligation(interrupted.id)).toBeNull();
+    expect(await obligation(result.task.id)).toBeNull();
+    await processPendingChatRelays();
+    expect(sendsTo(chatId)).toHaveLength(0);
   });
 
   // Last on purpose: the give-up sweep retires every pending row older than 24h
