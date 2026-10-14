@@ -332,7 +332,7 @@ jobs:
       # include-hidden-files: upload-artifact treats every path under a
       # dot-directory as hidden and would upload nothing from .bun-test-timings.
       - name: Hand the snapshot to the shards
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: timings-snapshot
           path: .bun-test-timings
@@ -416,7 +416,7 @@ jobs:
 
       - name: Upload this shard's test timings
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: test-timings-${{ matrix.shard }}
           path: .bun-test-timings/next/${{ matrix.shard }}.json
@@ -427,7 +427,7 @@ jobs:
       # console reporter). The JUnit file is the full-fidelity record.
       - name: Upload this shard's test results
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: unit-test-results-${{ matrix.shard }}
           path: .bun-test-results/junit-${{ matrix.shard }}.xml
