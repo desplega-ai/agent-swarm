@@ -98,9 +98,18 @@ describe("SqliteChatState lists", () => {
     await state.appendToList("list:b", "two", { ttlMs: 60_000 });
     expect(await state.getList("list:b")).toEqual(["two"]);
 
-    await state.appendToList("list:c", "x", { ttlMs: 1 });
+    // The second append moves every row of the list to the new expiry. A short
+    // first TTL would race the second append under CI load, so read the
+    // stored expiries instead of sleeping past them.
+    await state.appendToList("list:c", "x", { ttlMs: 30_000 });
+    const before = Date.now();
     await state.appendToList("list:c", "y", { ttlMs: 60_000 });
-    await Bun.sleep(5);
+    const row = await getDbClient().get<{ lo: number; hi: number }>(
+      "SELECT MIN(expires_at) AS lo, MAX(expires_at) AS hi FROM chat_lists WHERE key = ?",
+      ["list:c"],
+    );
+    expect(row?.lo).toBe(row?.hi);
+    expect(row?.lo).toBeGreaterThanOrEqual(before + 60_000);
     expect(await state.getList("list:c")).toEqual(["x", "y"]);
   });
 });
