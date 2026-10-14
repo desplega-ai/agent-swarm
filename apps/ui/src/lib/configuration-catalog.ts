@@ -1183,6 +1183,17 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         docsUrl: `${DOCS}integrations/chat-sdk`,
       },
       {
+        key: "CHAT_SDK_BUFFER_MS",
+        label: "Chat SDK buffer window",
+        description:
+          "How long the Chat SDK channel waits for more messages in a thread before it creates one task from them. Start a message with !now to skip the wait.",
+        kind: "number",
+        unit: "ms",
+        defaultValue: "10000",
+        placeholder: "10000",
+        docsUrl: `${DOCS}integrations/chat-sdk`,
+      },
+      {
         key: "ADDITIVE_SLACK",
         label: "Additive Slack mode",
         description:

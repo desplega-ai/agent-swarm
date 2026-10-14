@@ -479,6 +479,10 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
   ...integerValidators(["APPROVAL_REQUEST_AUTO_CANCELLATION_DAYS"], 0),
   // 0 turns the shutdown drain off; the shutdown path clamps to the same limit.
   ...boundedIntegerValidators(["API_DRAIN_MAX_MS"], 0, API_DRAIN_MAX_MS_LIMIT),
+  // Chat SDK thread buffer window. 0 or an invalid value falls back to the 10 s
+  // default in thread-buffer.ts; above 10 minutes a
+  // reply waits longer than any operator expects.
+  ...boundedIntegerValidators(["CHAT_SDK_BUFFER_MS"], 1, 600_000),
   // Below ~100 tokens the preamble can't fit a useful summary; above 20000
   // (~80k chars) it risks the SIGTERM-143 context-saturation failure mode
   // the cap exists to prevent (see context-preamble.ts).

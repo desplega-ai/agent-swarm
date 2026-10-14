@@ -260,6 +260,7 @@ value:getAgentMcpServers
 value:getAgentSkills
 value:getAgentStatusCounts
 value:getAgentWithTasks
+value:getAgentWorkingOnContextKey
 value:getAgentWorkingOnThread
 value:getAllAgentMailInboxMappings
 value:getAllAgents
@@ -321,8 +322,10 @@ value:getKv
 value:getLastReadAt
 value:getLastRunStart
 value:getLastSuccessfulRun
+value:getLatestActiveTaskByContextKey
 value:getLatestActiveTaskInThread
 value:getLatestContextVersion
+value:getLatestLeadTaskByContextKey
 value:getLatestLeadTaskInThread
 value:getLatestPageBySlug
 value:getLatestScriptRunStepTaskByContextKey

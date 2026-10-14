@@ -12,6 +12,7 @@ import {
 import { registerChatHandlers } from "./handlers";
 import { createScrubbingLogger } from "./logger";
 import { SqliteChatState } from "./state";
+import { flushAllChatBuffers } from "./thread-buffer";
 
 export interface ChatAdapterHealth {
   status: "ok" | "error";
@@ -29,6 +30,12 @@ export interface ChatAdapterHealth {
  */
 const instances = new Map<ChatSdkAdapterName, Chat>();
 const health = new Map<ChatSdkAdapterName, ChatAdapterHealth>();
+let stopping = false;
+
+/** True while shutdown drains; the webhook path refuses new work. */
+export function isChatSdkStopping(): boolean {
+  return stopping;
+}
 
 const DEFAULT_CHAT_USER_NAME = "swarm";
 
@@ -108,6 +115,7 @@ async function startAdapter(
  * are logged and recorded in health, and the API keeps booting.
  */
 export async function startChatSdk(): Promise<void> {
+  stopping = false;
   const config = await getChatSdkConfig();
   if (!config.enabled) {
     console.log("[chat-sdk] Disabled (CHAT_SDK_ENABLED is not true)");
@@ -151,15 +159,21 @@ export function getChatSdkHealth(): Partial<Record<ChatSdkAdapterName, ChatAdapt
 }
 
 export async function stopChatSdk(): Promise<void> {
+  // Refuse new webhook work, let in-flight handlers finish buffering, then
+  // turn waiting threads into tasks while adapters and the DB are still up.
+  stopping = true;
+  const timeoutMs = 10_000;
+  let drained = await drainBackground(timeoutMs);
+  await flushAllChatBuffers();
+  drained = (await drainBackground(timeoutMs)) && drained;
   for (const [name, chat] of instances) {
     try {
       await chat.shutdown();
     } catch (error) {
-      console.error(`[chat-sdk] ${name} shutdown failed: ${errorMessage(error)}`);
+      console.error(`[chat-sdk] ${name} shutdown failed: ${scrubSecrets(errorMessage(error))}`);
     }
   }
   instances.clear();
   health.clear();
-  const drained = await drainBackground(10_000);
   if (!drained) console.warn("[chat-sdk] Background handlers still running after 10s drain");
 }

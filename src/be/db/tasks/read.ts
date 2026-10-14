@@ -1335,6 +1335,69 @@ export async function getLatestLeadTaskInThread(
 }
 
 /**
+ * ContextKey twins of the Slack thread lookups above, for channels that key a
+ * conversation by `contextKey` only (Chat SDK). `source` narrows to the
+ * channel's ingress tasks, as the Slack twins do with `source = 'slack'`:
+ * follow-ups and delegated worker tasks inherit the parent's contextKey.
+ * All three use `idx_agent_tasks_context_key_status`.
+ */
+export async function getAgentWorkingOnContextKey(
+  contextKey: string,
+  source?: string,
+): Promise<Agent | null> {
+  const taskRow = await getDbClient().get<AgentTaskRow>(
+    `SELECT agentId FROM agent_tasks
+       WHERE contextKey = ?
+       AND (? IS NULL OR source = ?)
+       ORDER BY createdAt DESC, rowid DESC
+       LIMIT 1`,
+    [contextKey, source ?? null, source ?? null],
+  );
+
+  if (taskRow?.agentId) return getAgentById(taskRow.agentId);
+
+  return null;
+}
+
+/** Latest `in_progress` or `pending` task on a contextKey (dependency chaining). */
+export async function getLatestActiveTaskByContextKey(
+  contextKey: string,
+  source?: string,
+): Promise<AgentTask | null> {
+  const row = await getDbClient().get<AgentTaskRow>(
+    `SELECT * FROM agent_tasks
+       WHERE contextKey = ?
+       AND (? IS NULL OR source = ?)
+       AND status IN ('in_progress', 'pending')
+       ORDER BY createdAt DESC, rowid DESC
+       LIMIT 1`,
+    [contextKey, source ?? null, source ?? null],
+  );
+
+  return row ? rowToAgentTask(row) : null;
+}
+
+/** Latest task assigned to a lead agent on a contextKey (the steering target). */
+export async function getLatestLeadTaskByContextKey(
+  contextKey: string,
+  source?: string,
+): Promise<AgentTask | null> {
+  const row = await getDbClient().get<AgentTaskRow>(
+    `SELECT t.*
+       FROM agent_tasks t
+       JOIN agents a ON a.id = t.agentId
+       WHERE t.contextKey = ?
+         AND (? IS NULL OR t.source = ?)
+         AND a.isLead = 1
+       ORDER BY t.createdAt DESC, t.rowid DESC
+       LIMIT 1`,
+    [contextKey, source ?? null, source ?? null],
+  );
+
+  return row ? rowToAgentTask(row) : null;
+}
+
+/**
  * Find the most recent task in a Slack thread, regardless of source or status.
  * Unlike getAgentWorkingOnThread (which filters source='slack'), this finds ALL tasks
  * including worker tasks that inherited Slack metadata via parentTaskId.

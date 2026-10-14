@@ -9,6 +9,7 @@ import { closeDb, createAgent, getDbClient, initDb } from "../be/db";
 import { handleWebhooks } from "../http/webhooks";
 import { drainBackground } from "../integrations/chat-sdk/background";
 import { getChatSdkHealth, startChatSdk, stopChatSdk } from "../integrations/chat-sdk/runtime";
+import { flushAllChatBuffers } from "../integrations/chat-sdk/thread-buffer";
 import { getEnabledCapabilities } from "../server";
 import privateText from "./fixtures/chat-sdk/telegram-private-text.json";
 
@@ -119,6 +120,9 @@ describe("Chat SDK Telegram webhook", () => {
     });
     expect(captured.status).toBe(200);
     expect(await drainBackground(5_000)).toBe(true);
+    // Messages wait in the thread buffer; flush it instead of waiting 10 s.
+    await flushAllChatBuffers();
+    expect(await drainBackground(5_000)).toBe(true);
 
     const tasks = await getDbClient().query<{
       id: string;
@@ -149,6 +153,7 @@ describe("Chat SDK Telegram webhook", () => {
     });
     expect(captured.status).toBe(200);
     expect(await drainBackground(5_000)).toBe(true);
+    await flushAllChatBuffers();
     const row = await getDbClient().get<{ n: number }>(
       "SELECT COUNT(*) AS n FROM agent_tasks WHERE source = 'chat'",
     );

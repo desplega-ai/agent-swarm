@@ -237,6 +237,7 @@ value:getAgentMcpServers
 value:getAgentSkills
 value:getAgentStatusCounts
 value:getAgentWithTasks
+value:getAgentWorkingOnContextKey
 value:getAgentWorkingOnThread
 value:getAllAgentMailInboxMappings
 value:getAllAgents
@@ -298,8 +299,10 @@ value:getKv
 value:getLastReadAt
 value:getLastRunStart
 value:getLastSuccessfulRun
+value:getLatestActiveTaskByContextKey
 value:getLatestActiveTaskInThread
 value:getLatestContextVersion
+value:getLatestLeadTaskByContextKey
 value:getLatestLeadTaskInThread
 value:getLatestPageBySlug
 value:getLatestScriptRunStepTaskByContextKey
@@ -605,13 +608,16 @@ value:findRecentCancelledTaskInThread
 value:findTaskByGitHub
 value:findTaskByVcs
 value:getAgentCurrentTask
+value:getAgentWorkingOnContextKey
 value:getAgentWorkingOnThread
 value:getAllTasks
 value:getChildTasks
 value:getCompletedSlackTasks
 value:getInProgressSlackTasks
 value:getInProgressTasksByContextKey
+value:getLatestActiveTaskByContextKey
 value:getLatestActiveTaskInThread
+value:getLatestLeadTaskByContextKey
 value:getLatestLeadTaskInThread
 value:getLatestScriptRunStepTaskByContextKey
 value:getLatestTaskByContextKey

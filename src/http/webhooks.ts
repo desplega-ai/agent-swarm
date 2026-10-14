@@ -55,7 +55,11 @@ import {
 import { gitlabWorkflowActionName } from "../gitlab/workflow-action-name";
 import { trackBackground } from "../integrations/chat-sdk/background";
 import { isChatSdkEnabled } from "../integrations/chat-sdk/config";
-import { getChatInstance, isChatAdapterConfigured } from "../integrations/chat-sdk/runtime";
+import {
+  getChatInstance,
+  isChatAdapterConfigured,
+  isChatSdkStopping,
+} from "../integrations/chat-sdk/runtime";
 import {
   type KapsoMessageActionResult,
   markKapsoMessageRead,
@@ -852,6 +856,11 @@ export async function handleWebhooks(
     if (!isChatSdkEnabled() || !isChatAdapterConfigured(adapterName)) {
       res.writeHead(404, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "Chat SDK adapter not configured" }));
+      return true;
+    }
+    if (isChatSdkStopping()) {
+      res.writeHead(503, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Chat SDK is shutting down" }));
       return true;
     }
     const chat = getChatInstance(adapterName);

@@ -339,18 +339,18 @@ When this phase is done, every inbound Chat SDK message goes through a 10 s per-
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Phase tests: `bun run test:root -- src/tests/chat-sdk-inbound.test.ts src/tests/extensions-example-route-chat-channel.test.ts src/tests/extensions-post-bridge.test.ts src/tests/chat-sdk-webhook-telegram.test.ts`
-- [ ] Extension suite: `bun run test:root -- src/tests/extensions-*.test.ts`
-- [ ] Generated types committed: `bun run build:extension-types && git diff --exit-code src/extensions/contract-types.generated.ts src/scripts-runtime/types/swarm-extension.d.ts`
-- [ ] Template enumeration guard: `grep -rn "slack.message.thread_context" src/be/seed-scripts/catalog src/tests` and add `chat.message.thread_context` next to every hit; the full suite in Phase 5 catches any audit test
-- [ ] Hygiene: `bun scripts/check-floating-promises.ts && bun scripts/check-promise-sinks.ts && bash scripts/check-db-boundary.sh`
-- [ ] Inner loop: `bun run check && bun run tsc:check:tsc && bun run lint:slop`
+- [x] Phase tests: `bun run test:root -- src/tests/chat-sdk-inbound.test.ts src/tests/extensions-example-route-chat-channel.test.ts src/tests/extensions-post-bridge.test.ts src/tests/chat-sdk-webhook-telegram.test.ts`
+- [x] Extension suite: `bun run test:root -- src/tests/extensions-*.test.ts`
+- [x] Generated types committed: `bun run build:extension-types && git diff --exit-code src/extensions/contract-types.generated.ts src/scripts-runtime/types/swarm-extension.d.ts`
+- [x] Template enumeration guard: `grep -rn "slack.message.thread_context" src/be/seed-scripts/catalog src/tests` and add `chat.message.thread_context` next to every hit; the full suite in Phase 5 catches any audit test
+- [x] Hygiene: `bun scripts/check-floating-promises.ts && bun scripts/check-promise-sinks.ts && bash scripts/check-db-boundary.sh`
+- [x] Inner loop: `bun run check && bun run tsc:check:tsc && bun run lint:slop`
 
 #### Automated QA:
-- [ ] With the Phase 1 local boot (fake Bot API) and `CHAT_SDK_BUFFER_MS=2000`: POST two updates for the same chat 500 ms apart, wait 3 s, `GET /api/tasks?source=chat` shows exactly one new task whose description contains `2 message(s) buffered`.
-- [ ] Mark that task `in_progress` through the API (claim it with a test agent registered as `AGENT_ID=$(uuidgen)`, never a slug), POST a third update in the same chat, confirm no new task and a steering entry for the task (`GET /api/tasks/<id>` steering list or the DB `task_steering` table).
-- [ ] Load the `route-chat-channel-to-agent` fixture as an extension (`POST /api/extensions` per `runbooks/extensions.md`), POST an update in the configured channel, confirm the task's `agentId` is the fixture's agent.
-- [ ] POST an update with a `document` attachment pointing at a file served by the fake Bot API (`getFile` + download path), confirm `GET /api/tasks/<id>/attachments` lists it.
+- [x] With the Phase 1 local boot (fake Bot API) and `CHAT_SDK_BUFFER_MS=2000`: POST two updates for the same chat 500 ms apart, wait 3 s, `GET /api/tasks?source=chat` shows exactly one new task whose description contains `2 message(s) buffered`.
+- [x] Mark that task `in_progress` through the API (claim it with a test agent registered as `AGENT_ID=$(uuidgen)`, never a slug), POST a third update in the same chat, confirm no new task and a steering entry for the task (`GET /api/tasks/<id>` steering list or the DB `task_steering` table).
+- [x] Load the `route-chat-channel-to-agent` fixture as an extension (`POST /api/extensions` per `runbooks/extensions.md`), POST an update in the configured channel, confirm the task's `agentId` is the fixture's agent.
+- [x] POST an update with a `document` attachment pointing at a file served by the fake Bot API (`getFile` + download path), confirm `GET /api/tasks/<id>/attachments` lists it.
 
 #### Manual Verification:
 - [ ] None required.
@@ -688,3 +688,17 @@ _Recorded by the orchestrator during autopilot implementation (2026-10-14). Each
 - The compile-gate command needs `MIGRATIONS_DIR=$PWD/src/be/migrations` for the compiled binary (the Dockerfile sets it). `PUT /api/config` takes one object, not an array; the QA examples send one PUT per key.
 - Deferred to Phase 3 on purpose (review 2026-10-14): `sweepExpired` is exported but not yet scheduled, so `chat_state_kv` dedupe rows accumulate until the Phase 3 watcher runs it. The relay-obligation triggers likewise fill `chat_relay_obligations` ahead of the Phase 3 consumer. Both are fine because all phases ship in one PR.
 - **Phase 3 must gate tool registration on `getEnabledCapabilities()` / `isChatSdkEnabled()`, not `hasCapability("chat-sdk")`**: `hasCapability` reads only `CAPABILITIES`, so tools gated on it never register when the operator enables Chat SDK via `CHAT_SDK_ENABLED` alone.
+
+### Phase 2
+- `ChatRouteModifySchema` lives in `src/integrations/chat-sdk/inbound.ts` next to its use. `contract.ts` imports zod as a type only, and a runtime schema there could break the type bundler.
+- `src/workflows/event-bus.ts` has no event map; names are plain strings. The `chat.message.received` row was added to the built-in events table in `runbooks/workflows.md`. `chat.message.sent` is subscribed by the post-bridge and first emitted in Phase 3.
+- The contextKey lookups (`getAgentWorkingOnContextKey`, `getLatestActiveTaskByContextKey`, `getLatestLeadTaskByContextKey`) take an optional `source`; chat passes `"chat"` so delegated worker tasks and follow-ups that inherit the contextKey cannot become the thread owner or the steering target.
+- Steering: target is the latest lead task on the contextKey in `in_progress`. Skipped for `!now`, attachments, and threads that already have buffered messages (order kept). A `SteeringRequestError` falls back to buffering. The ack is a constant markdown line and emits no outbound bus event.
+- KV channel-mapping key is `chatChannelKey(adapter, channelId)` in `router.ts`; SDK channel ids already carry the adapter prefix, so the key is the channel id itself. Phase 3 register tools must use the same helper.
+- Attachments are fetched once per flush and shared across matched tasks. File ids are `<messageId>-<n>` with characters outside `[\w.-]` replaced by `_`. Missing MIME becomes `application/octet-stream`.
+- `CHAT_SDK_BUFFER_MS` is read lazily (buffer rebuilt when the value changes and no thread is waiting), so it is not `restartRequired`. Guard bounds 1..600000. Timer flushes are registered with `trackBackground`; `stopChatSdk` flushes waiting threads before adapters shut down.
+- Workflow target uses `handleWebhookTrigger(..., { alreadyAuthenticated: true })` like Kapso.
+- No reachable lead: the task goes to `getLeadAgent()` and waits (or is created unassigned), like Slack's queued path.
+- QA adaptations: `GET /api/tasks` needs `fields=full` to return `contextKey`; attachments are read from `GET /api/tasks/<id>` and `/api/fs/tasks/<id>/files` (there is no `/attachments` route); a local boot needs `MULTI_RUNTIME_ENABLED=false` or agent registration requires `runtimeInstanceId`.
+- Deferred: `templates/skills/swarm-extensions/content.md` lists extension events but not the chat ones (Phase 6 docs, needs `build:skill-md`).
+- Known limitation (review 2026-10-14): `subscribe()` runs when the flush creates the first task, as planned. In an unsubscribed group thread, a reply without a mention inside the first buffer window reaches no SDK handler and is dropped. Extension `broadcast` targets every non-lead agent with no reachability filter, matching Slack.
