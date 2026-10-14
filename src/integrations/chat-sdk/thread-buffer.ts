@@ -27,6 +27,25 @@ let buffer: AdditiveBuffer<ChatBufferedMessage> | undefined;
 let bufferMs = 0;
 /** Set while shutdown flushes every waiting thread; those flushes keep `dependsOn`. */
 let draining = false;
+/**
+ * Tail of each thread's flush chain. The additive buffer clears a key before
+ * it awaits `onFlush`, so a second flush of one thread can start while the
+ * first still routes, downloads files or creates its task. Chaining keeps the
+ * task order (and `dependsOn`) of one thread; different threads run in parallel.
+ */
+const flushChains = new Map<string, Promise<void>>();
+
+/** Run `work` after every earlier flush of `threadId`. A failed flush does not block the next one. */
+function runInThreadOrder(threadId: string, work: () => Promise<void>): Promise<void> {
+  const previous = flushChains.get(threadId) ?? Promise.resolve();
+  const run = previous.then(work);
+  const tail = run.catch(() => {});
+  flushChains.set(threadId, tail);
+  void tail.then(() => {
+    if (flushChains.get(threadId) === tail) flushChains.delete(threadId);
+  });
+  return run;
+}
 
 /**
  * Keyed by the raw SDK `thread.id` (`<adapter>:<platform id>`, colons
@@ -41,8 +60,10 @@ function getBuffer(): AdditiveBuffer<ChatBufferedMessage> {
       timeoutMs: ms,
       label: "chat",
       onFlush: async (items, threadId, reason) => {
+        // Read now: `draining` can change while this flush waits in the chain.
+        const immediate = reason === "manual" && !draining;
         // Tracked so shutdown drains timer-driven flushes before the DB closes.
-        const work = flushChatThread(threadId, items, reason === "manual" && !draining);
+        const work = runInThreadOrder(threadId, () => flushChatThread(threadId, items, immediate));
         trackBackground(work);
         await work.catch(() => {});
       },

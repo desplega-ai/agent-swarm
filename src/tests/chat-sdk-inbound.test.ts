@@ -12,14 +12,18 @@ import {
   upsertKv,
 } from "../be/db";
 import { resetFileStorageProviderForTests } from "../fs/registry";
+import { drainBackground } from "../integrations/chat-sdk/background";
 import { CHAT_CHANNELS_NAMESPACE } from "../integrations/chat-sdk/router";
 import { getChatInstance } from "../integrations/chat-sdk/runtime";
+import { isChatThreadBuffered } from "../integrations/chat-sdk/thread-buffer";
 import { chatSdkContextKey } from "../tasks/context-key";
 import type { Agent } from "../types";
 import {
   flushChatBuffers,
+  postChatWebhook,
   postTelegramUpdate,
   startTelegramHarness,
+  TELEGRAM_SECRET,
   type TelegramChat,
   type TelegramHarness,
   telegramUpdate,
@@ -247,6 +251,84 @@ describe("Chat SDK inbound pipeline", () => {
     const attachments = await getTaskAttachments(tasks[0]!.id);
     expect(attachments).toHaveLength(1);
     expect(attachments[0]).toMatchObject({ name: "notes.txt", sizeBytes: bytes.byteLength });
+  });
+
+  test("overlapping timer flushes of one thread create their tasks in order", async () => {
+    // Hold the first message's file download so its flush is still running
+    // when the second message's timer flush starts.
+    const bytes = new TextEncoder().encode("held file\n");
+    harness.mock.addFile("documents/held.txt", bytes);
+    let releaseDownload!: () => void;
+    const downloadHeld = new Promise<void>((resolve) => {
+      releaseDownload = resolve;
+    });
+    let downloadStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      downloadStarted = resolve;
+    });
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+      const url = input instanceof Request ? input.url : String(input);
+      if (url.includes("/file/bot") && url.endsWith("documents/held.txt")) {
+        downloadStarted();
+        await downloadHeld;
+      }
+      return realFetch(input, init);
+    }) as typeof fetch;
+    process.env.CHAT_SDK_BUFFER_MS = "50";
+    const threadId = "telegram:2010";
+    try {
+      await postTelegramUpdate(
+        telegramUpdate(dm(2010), "", {
+          caption: "first: read the held file",
+          document: {
+            file_id: "documents/held.txt",
+            file_unique_id: "held-unique",
+            file_name: "held.txt",
+            mime_type: "text/plain",
+            file_size: bytes.byteLength,
+          },
+        }),
+      );
+      await started;
+      // A longer window for the second message, so the wait below sees it buffered.
+      process.env.CHAT_SDK_BUFFER_MS = "300";
+
+      // Not `postTelegramUpdate`: its background drain would wait on the held download.
+      const response = await postChatWebhook(
+        "telegram",
+        JSON.stringify(telegramUpdate(dm(2010), "second: then summarize it")),
+        {
+          "content-type": "application/json",
+          "x-telegram-bot-api-secret-token": TELEGRAM_SECRET,
+        },
+      );
+      expect(response.status).toBe(200);
+      const waitFor = async (condition: () => boolean) => {
+        const deadline = Date.now() + 3_000;
+        while (!condition() && Date.now() < deadline) await Bun.sleep(5);
+        expect(condition()).toBe(true);
+      };
+      await waitFor(() => isChatThreadBuffered(threadId));
+      await waitFor(() => !isChatThreadBuffered(threadId));
+      // The second flush has fired. Without the per-thread chain it would
+      // create its task now, before the first one.
+      await Bun.sleep(200);
+      expect(await chatTasks(2010)).toHaveLength(0);
+
+      releaseDownload();
+      expect(await drainBackground(5_000)).toBe(true);
+    } finally {
+      releaseDownload();
+      globalThis.fetch = realFetch;
+    }
+
+    const tasks = await chatTasks(2010);
+    expect(tasks).toHaveLength(2);
+    expect(tasks[0]!.task).toContain("first: read the held file");
+    expect(tasks[1]!.task).toContain("second: then summarize it");
+    const second = await getTaskById(tasks[1]!.id);
+    expect(second?.dependsOn).toEqual([tasks[0]!.id]);
   });
 
   test("a message in an unmapped group that does not mention the bot is ignored", async () => {
