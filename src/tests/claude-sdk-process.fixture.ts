@@ -1,8 +1,15 @@
+import { appendFileSync } from "node:fs";
 import { rename } from "node:fs/promises";
 
 const mode = process.env.CLAUDE_SDK_FIXTURE_MODE;
 const stateFile = process.env.CLAUDE_SDK_FIXTURE_STATE_FILE;
 const sessionId = "11111111-1111-4111-8111-111111111111";
+
+// Record every invocation, the `--version` probe included, before any exit, so
+// a test can assert that no Claude child started at all.
+if (stateFile) {
+  appendFileSync(`${stateFile}.spawns`, `${JSON.stringify(process.argv.slice(2))}\n`);
+}
 
 if (process.argv.includes("--version")) {
   if (process.env.CLAUDE_SDK_FIXTURE_UNKNOWN_VERSION === "1") process.exit(1);

@@ -30,7 +30,7 @@ import {
   runClaudeSessionSummary,
 } from "./claude-adapter";
 import { ClaudeBackgroundKeepalive } from "./claude-background-keepalive";
-import { mergeClaudeSettingsArgs } from "./claude-flag-settings";
+import type { ClaudeFlagSettings } from "./claude-flag-settings";
 import type { ClaudeProtocolMessage } from "./claude-session-events";
 import { normalizeClaudeMessage } from "./claude-session-events";
 import type {
@@ -282,7 +282,10 @@ export type CreateClaudeSdkSessionOptions = {
   taskFilePath: string;
   taskFileKey: string;
   sessionMcpConfig: string | null;
+  /** Claude argv prefix with caller `--settings` already stripped. */
   claudeBinaryArgv: readonly string[];
+  /** Validated session settings, caller `--settings` merged in. */
+  settings: ClaudeFlagSettings;
   systemPromptFile: string | null;
   harnessVariant?: string;
   harnessVariantMeta?: Record<string, unknown>;
@@ -450,17 +453,7 @@ class ClaudeSdkSession implements ProviderSession {
         this.options.claudeBinaryArgv[0] ?? "claude",
         sessionEnvironment.env.PATH,
       );
-      // Caller `--settings` (prefix or additionalArgs) folds into the SDK's
-      // own `settings`, so the spawned Claude sees one settings flag. Unusable
-      // caller settings throw here, before query(), so no child ever starts.
-      const {
-        argLists: [prefixArgs = [], additionalArgs = []],
-        settings,
-      } = mergeClaudeSettingsArgs(
-        [this.options.claudeBinaryArgv.slice(1), config.additionalArgs ?? []],
-        config.cwd,
-      );
-      const binaryPrefix = [executable, ...prefixArgs];
+      const binaryPrefix = [executable, ...this.options.claudeBinaryArgv.slice(1)];
       const finalArgs = [
         ...(this.options.systemPromptFile
           ? ["--append-system-prompt-file", this.options.systemPromptFile]
@@ -481,7 +474,9 @@ class ClaudeSdkSession implements ProviderSession {
           pathToClaudeCodeExecutable: executable,
           systemPrompt: { type: "preset", preset: "claude_code" },
           settingSources: ["user", "project", "local"],
-          settings,
+          // createSession merged caller `--settings` into these; the SDK passes
+          // them as the spawned Claude's one `--settings` flag.
+          settings: this.options.settings,
           permissionMode: "bypassPermissions",
           allowDangerouslySkipPermissions: true,
           stderr: (text) => {
@@ -495,7 +490,7 @@ class ClaudeSdkSession implements ProviderSession {
             this.spawnedProcess = spawnClaudeSdkProcess(
               spawnOptions,
               binaryPrefix,
-              additionalArgs,
+              config.additionalArgs ?? [],
               finalArgs,
               (text) => {
                 stderrOutput += text;
@@ -543,10 +538,7 @@ class ClaudeSdkSession implements ProviderSession {
         }
       }
       await this.spawnedProcess?.stderrDone;
-      // A session refused before query() (invalid caller --settings) never ran.
-      if (this.query) {
-        await runClaudeSessionSummary(config, this.transcript, this.options.runSessionSummary);
-      }
+      await runClaudeSessionSummary(config, this.transcript, this.options.runSessionSummary);
       await cleanupTaskFile(this.options.taskFileKey);
       for (const path of [this.options.sessionMcpConfig, this.options.systemPromptFile]) {
         if (!path) continue;

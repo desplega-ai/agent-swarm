@@ -42,7 +42,11 @@ import {
 } from "../utils/process-group";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { ClaudeBackgroundKeepalive } from "./claude-background-keepalive";
-import { mergeClaudeSettingsArgs } from "./claude-flag-settings";
+import {
+  type ClaudeFlagSettings,
+  claudeFlagSettings,
+  mergeClaudeSettingsArgs,
+} from "./claude-flag-settings";
 import { normalizeClaudeMessage } from "./claude-session-events";
 import { resolveSlashSkillPrompt } from "./codex-skill-resolver";
 import { CTX_MODE_NUDGE_EVERY } from "./ctx-mode-env";
@@ -924,6 +928,8 @@ class ClaudeSession implements ProviderSession {
     private readonly runSessionSummary: (
       opts: RunStopHookSessionSummaryOpts,
     ) => Promise<void> = runStopHookSessionSummarySubprocess,
+    /** Validated session settings; `createSession` already merged caller `--settings` into them. */
+    private readonly flagSettings: ClaudeFlagSettings = claudeFlagSettings(),
   ) {
     this.taskFileKey = taskFileKey;
     this.contextWindowSize = getContextWindowSize(model);
@@ -1024,14 +1030,8 @@ class ClaudeSession implements ProviderSession {
   }
 
   private buildCommand(): string[] {
-    const [executable = "claude", ...binaryArgs] = this.claudeBinaryArgv;
-    const {
-      argLists: [prefixArgs = [], additionalArgs = []],
-      settings,
-    } = mergeClaudeSettingsArgs([binaryArgs, this.config.additionalArgs ?? []], this.config.cwd);
     const cmd = [
-      executable,
-      ...prefixArgs,
+      ...this.claudeBinaryArgv,
       "--model",
       this.model,
       "--verbose",
@@ -1042,10 +1042,9 @@ class ClaudeSession implements ProviderSession {
       "--permission-mode",
       "bypassPermissions",
       // Skip the workspace copy of claudeMd; ~/.claude/CLAUDE.md already carries it.
-      // Caller `--settings` values are merged in here, so this is the only one;
-      // an unusable caller value throws and the session never spawns.
+      // createSession merged caller `--settings` into these, so this is the only one.
       "--settings",
-      JSON.stringify(settings),
+      JSON.stringify(this.flagSettings),
     ];
 
     // Queued steering needs `--input-format stream-json`, which is mutually
@@ -1059,8 +1058,8 @@ class ClaudeSession implements ProviderSession {
       cmd.push("-p", this.config.prompt);
     }
 
-    if (additionalArgs.length) {
-      cmd.push(...additionalArgs);
+    if (this.config.additionalArgs?.length) {
+      cmd.push(...this.config.additionalArgs);
     }
 
     // System prompt is staged on disk and read via the file-flag — see
@@ -1372,9 +1371,20 @@ export class ClaudeAdapter implements ProviderAdapter {
       );
     }
     const isLegacyBridgeCompat = isLegacyClaudeBridgeCompatBinary(claudeBinaryRaw);
-    const effectiveClaudeBinaryArgv = useClaudeBridge
+    const [claudeExecutable = "claude", ...claudePrefixArgs] = useClaudeBridge
       ? withClaudeBridgeAuthArgs(claudeBinaryArgv, sourceEnv)
       : claudeBinaryArgv;
+    // Validate and merge caller `--settings` (CLAUDE_BINARY prefix and
+    // additionalArgs) once, before any log, write, or Claude spawn. An unusable
+    // value throws here, so nothing below runs. Every spawn (the version probe
+    // and the session) then gets the stripped argv plus this one settings value.
+    const {
+      argLists: [prefixArgs = [], additionalArgs = []],
+      settings: flagSettings,
+    } = mergeClaudeSettingsArgs([claudePrefixArgs, config.additionalArgs ?? []], config.cwd);
+    const effectiveClaudeBinaryArgv = [claudeExecutable, ...prefixArgs];
+    sessionConfig.additionalArgs = additionalArgs;
+    const flagSettingsArgs = ["--settings", JSON.stringify(flagSettings)];
     const isInteractiveTmuxClaude = isLegacyBridgeCompat || useClaudeBridge;
     const configuredClaudeBinaryRaw = resolveClaudeBinary(sourceEnv);
     if (isLegacyClaudeBridgeCompatBinary(configuredClaudeBinaryRaw)) {
@@ -1383,6 +1393,7 @@ export class ClaudeAdapter implements ProviderAdapter {
       );
     }
 
+    // Caller settings are already stripped from this argv; never log their contents.
     console.log(
       `\x1b[2m[${config.role}]\x1b[0m Resolved claude binary: ${effectiveClaudeBinaryArgv.join(" ")} (useClaudeBridge: ${useClaudeBridge}, legacyBridgeCompat: ${isLegacyBridgeCompat})`,
     );
@@ -1468,7 +1479,7 @@ export class ClaudeAdapter implements ProviderAdapter {
     let harnessVersion: string | undefined;
     try {
       const probe = registerProcessGroup(
-        Bun.spawn([...effectiveClaudeBinaryArgv, "--version"], {
+        Bun.spawn([...effectiveClaudeBinaryArgv, ...flagSettingsArgs, "--version"], {
           detached: detachedProcessGroup,
           env: sourceEnv,
           stdin: "ignore",
@@ -1516,6 +1527,7 @@ export class ClaudeAdapter implements ProviderAdapter {
         taskFileKey,
         sessionMcpConfig,
         claudeBinaryArgv: effectiveClaudeBinaryArgv,
+        settings: flagSettings,
         systemPromptFile,
         harnessVariant,
         harnessVariantMeta,
@@ -1524,29 +1536,20 @@ export class ClaudeAdapter implements ProviderAdapter {
       });
     }
 
-    try {
-      return new ClaudeSession(
-        sessionConfig,
-        model,
-        taskFilePath,
-        taskFileKey,
-        sessionMcpConfig,
-        effectiveClaudeBinaryArgv,
-        systemPromptFile,
-        harnessVariant,
-        harnessVariantMeta,
-        queueSteeringSupported,
-        this.runSessionSummary,
-      );
-    } catch (err) {
-      // buildCommand refused to start (e.g. invalid caller --settings) before
-      // any spawn; drop the files staged for the session that never ran.
-      await cleanupTaskFile(taskFileKey);
-      for (const path of [sessionMcpConfig, systemPromptFile]) {
-        if (path) await unlink(path).catch(() => {});
-      }
-      throw err;
-    }
+    return new ClaudeSession(
+      sessionConfig,
+      model,
+      taskFilePath,
+      taskFileKey,
+      sessionMcpConfig,
+      effectiveClaudeBinaryArgv,
+      systemPromptFile,
+      harnessVariant,
+      harnessVariantMeta,
+      queueSteeringSupported,
+      this.runSessionSummary,
+      flagSettings,
+    );
   }
 
   async canResume(_sessionId: string): Promise<boolean> {
