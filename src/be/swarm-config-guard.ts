@@ -27,6 +27,26 @@ import { isTierConfigKey, validateTierConfigValue } from "./model-tier-keys";
 // Lead activation is also deployment-only: leads can write ordinary global config.
 // CHAT_SDK_API_URL_OVERRIDES points Chat SDK adapters (and the secrets they carry)
 // at another host, so it must never come from a config row.
+/**
+ * Teams SDK env fallbacks; a config row must not redirect the bot token.
+ * `@microsoft/teams.apps` reads these from `process.env`. Operators may still
+ * store them (they are not reserved), they just never reach env through
+ * `getInjectableGlobalConfigs`.
+ */
+export const TEAMS_SDK_ENV_KEYS = [
+  "SERVICE_URL",
+  "TENANT_ID",
+  "CLIENT_ID",
+  "CLIENT_SECRET",
+  "MANAGED_IDENTITY_CLIENT_ID",
+  "CLOUD",
+] as const;
+
+/** SQL literal list for the `NOT IN (...)` injection denylist in db.ts. */
+export function teamsSdkEnvKeysSql(): string {
+  return TEAMS_SDK_ENV_KEYS.map((key) => `'${key}'`).join(", ");
+}
+
 const RESERVED_KEYS = new Set([
   "API_KEY",
   "SECRETS_ENCRYPTION_KEY",
