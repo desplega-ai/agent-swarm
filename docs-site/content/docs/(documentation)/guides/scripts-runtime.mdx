@@ -180,6 +180,10 @@ The TypeScript import allowlist (`src/scripts-runtime/import-allowlist.ts`):
 - `stdlib`
 - `swarm-sdk`
 - `zod` — for declaring `export const argsSchema = z.object({...})`
+- `zod/mini` — the same schemas with a smaller bundle (useful under
+  `quickjs`). Mini uses functional forms: `z.optional(z.string())`,
+  `z._default(z.number(), 10)`, `z.string().check(z.minLength(1))`. Its
+  schemas still have `.parse()` and `.safeParse()`.
 
 `import "fs"` / `"node:fs"` / `"path"` / any unlisted bare specifier is
 rejected at upsert and at run time.
@@ -281,7 +285,7 @@ access except the host calls below. These are the differences from `native`:
 - **Available:** `ctx.swarm`, `ctx.api`, `ctx.mcp`, `ctx.stdlib.fetch`,
   `ctx.stdlib.fetchJson`, `ctx.stdlib.table`, `ctx.stdlib.Redacted`,
   `ctx.logger`, `console`, `fetch`, `Headers`, `Response`, `setTimeout`,
-  `clearTimeout`, and the `zod`, `stdlib`, and `swarm-sdk` imports.
+  `clearTimeout`, and the `zod`, `zod/mini`, `stdlib`, and `swarm-sdk` imports.
 - **`fetch` is text-only.** A request body must be a string. A response
   exposes `status`, `ok`, `headers`, `text()`, and `json()`. Streams, binary
   bodies, and `AbortSignal` are not supported.
