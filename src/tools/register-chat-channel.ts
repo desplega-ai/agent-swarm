@@ -18,7 +18,7 @@ import {
   toolOk,
 } from "@/tools/utils";
 
-async function isLeadAllowed(requestInfo: RequestInfo): Promise<boolean> {
+async function canManageChatChannels(requestInfo: RequestInfo): Promise<boolean> {
   const caller = requestInfo.agentId ? await getAgentById(requestInfo.agentId) : null;
   return can({
     principal: {
@@ -69,7 +69,7 @@ export const registerRegisterChatChannelTool = (server: McpServer) => {
     async ({ adapter, channelId, agentId, workflowId, name }, requestInfo) => {
       const data = { yourAgentId: requestInfo.agentId };
       try {
-        if (!(await isLeadAllowed(requestInfo))) {
+        if (!(await canManageChatChannels(requestInfo))) {
           return toolErr("Permission denied. Only the lead can register a chat channel.", {
             data,
           });
@@ -121,7 +121,7 @@ export const registerUnregisterChatChannelTool = (server: McpServer) => {
     async ({ adapter, channelId }, requestInfo) => {
       const data = { yourAgentId: requestInfo.agentId };
       try {
-        if (!(await isLeadAllowed(requestInfo))) {
+        if (!(await canManageChatChannels(requestInfo))) {
           return toolErr("Permission denied. Only the lead can unregister a chat channel.", {
             data,
           });
