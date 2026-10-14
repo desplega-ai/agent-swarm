@@ -83,9 +83,18 @@ export interface AlertCalloutProps {
   title?: ReactNode;
   className?: string;
   children: ReactNode;
+  /** A control at the callout's end (e.g. a small Button), vertically centered. */
+  action?: ReactNode;
 }
 
-export function AlertCallout({ tone, icon: Icon, title, className, children }: AlertCalloutProps) {
+export function AlertCallout({
+  tone,
+  icon: Icon,
+  title,
+  className,
+  children,
+  action,
+}: AlertCalloutProps) {
   const t = TONE_CLASSES[tone];
   return (
     <div
@@ -103,6 +112,7 @@ export function AlertCallout({ tone, icon: Icon, title, className, children }: A
         {title ? <p className="font-medium">{title}</p> : null}
         {title ? <div className="text-xs mt-0.5">{children}</div> : <div>{children}</div>}
       </div>
+      {action ? <div className="shrink-0 self-center">{action}</div> : null}
     </div>
   );
 }

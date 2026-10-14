@@ -46,8 +46,11 @@ import {
   ExternalLink,
   Inbox,
   Info,
+  Minus,
   MoreHorizontal,
   SearchX,
+  TrendingDown,
+  TrendingUp,
   X,
 } from "lucide-react";
 import type { ReactNode } from "react";
@@ -55,6 +58,7 @@ import { Children, useCallback, useEffect, useMemo, useRef, useState } from "rea
 import { useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { Streamdown } from "streamdown";
+import { AvatarStack } from "@/components/kibo-ui/avatar-stack";
 import {
   CalendarBody,
   CalendarDatePagination,
@@ -82,12 +86,21 @@ import {
   KanbanProvider,
 } from "@/components/kibo-ui/kanban";
 import { Spinner } from "@/components/kibo-ui/spinner";
+import { BetaTag } from "@/components/shared/beta-tag";
+import { CollapsibleSection } from "@/components/shared/collapsible-section";
 import { CopyValueButton } from "@/components/shared/copy-value-button";
 import { EmptyState } from "@/components/shared/empty-state";
+import { JsonViewer } from "@/components/shared/json-viewer";
 import { ListView, type ListViewMobileRow } from "@/components/shared/list-view";
 import { SearchBox } from "@/components/shared/search-box";
 import { StatusBadge } from "@/components/shared/status-badge";
-import { taskStatusVariant } from "@/components/shared/task-status-icon";
+import { ChipButton } from "@/components/shared/suggestion-chips";
+import {
+  ProgressRing,
+  TASK_STATUS_TEXT,
+  TaskStatusIcon,
+  taskStatusVariant,
+} from "@/components/shared/task-status-icon";
 import { userInitials } from "@/components/shared/user-chip";
 import { AlertCallout } from "@/components/ui/alert-callout";
 import {
@@ -100,8 +113,9 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button, type ButtonStatus } from "@/components/ui/button";
 import {
   CardContent,
   CardDescription,
@@ -117,9 +131,11 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { DefinitionList, InfoRow } from "@/components/ui/info-row";
 import { Input } from "@/components/ui/input";
+import { Kbd } from "@/components/ui/kbd";
 import { Label } from "@/components/ui/label";
 import { MiddleTruncation } from "@/components/ui/middle-truncation";
 import { Progress } from "@/components/ui/progress";
+import { SegmentedControl } from "@/components/ui/segmented-control";
 import {
   Select,
   SelectContent,
@@ -133,10 +149,12 @@ import {
   Sheet,
   SheetContent,
   SheetDescription,
+  SheetFooter,
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
+import { StatPanel } from "@/components/ui/stat-panel";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
@@ -147,10 +165,13 @@ import { resolveScopedParams } from "./action-params";
 import type {
   ActionChain,
   BadgeTone,
+  ChipOption,
   DetailListField,
+  DrawerAction,
   FormField,
   GridColumns,
   KanbanColumn,
+  MetricTrend,
   SelectOption,
   SpacingToken,
   swarmCatalog,
@@ -162,6 +183,7 @@ import type {
 } from "./catalog";
 import { CatalogIcon, catalogIcon } from "./icons";
 import { useJsonRenderThemeAttr } from "./theme-scope";
+import { usePageShortcut } from "./use-page-shortcut";
 
 // ─── Style maps (moved verbatim from json-page-renderer.tsx) ────────────────
 
@@ -243,6 +265,93 @@ type StatusBadgeStatus = Parameters<typeof StatusBadge>[0]["status"];
 function StatusCell({ value, tones }: { value: string; tones?: Record<string, BadgeTone> }) {
   if (taskStatusVariant(value)) return <StatusBadge status={value as StatusBadgeStatus} />;
   return <StatusPill text={value} tone={badgeToneFor(tones, value)} />;
+}
+
+/** Compact rounded numeric pill (Badge `variant: "count"`, Tabs `count`). */
+function CountPill({ value, tone = "neutral" }: { value: string | number; tone?: BadgeTone }) {
+  return (
+    <Badge
+      variant="secondary"
+      className={cn(
+        "h-4.5 min-w-4.5 rounded-full px-1.5 text-[10px] leading-none tabular-nums",
+        tone === "neutral" ? "text-muted-foreground" : badgeToneText[tone],
+      )}
+    >
+      {value}
+    </Badge>
+  );
+}
+
+/**
+ * Badge `variant: "status"` — the 11px sentence-case pill: the lifecycle icon
+ * for a lifecycle `status`, else the author icon or the tone dot.
+ */
+function SentencePill({
+  text,
+  tone,
+  status,
+  icon,
+}: {
+  text: string;
+  tone: BadgeTone;
+  status?: string;
+  icon?: unknown;
+}) {
+  const lifecycle = status ? taskStatusVariant(status) : null;
+  return (
+    <Badge variant="outline" className="h-5 gap-1.5 rounded-full px-2 text-[11px] leading-none">
+      {lifecycle ? (
+        // Wrapped so the badge's `[&>svg]:size-3` rule does not shrink the icon.
+        <span className="inline-flex size-3.5 shrink-0">
+          <TaskStatusIcon variant={lifecycle} className="size-full" />
+        </span>
+      ) : catalogIcon(icon) ? (
+        <CatalogIcon name={icon} size="sm" className={cn("size-3", badgeToneText[tone])} />
+      ) : (
+        <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", badgeToneDot[tone])} />
+      )}
+      <span className={lifecycle ? TASK_STATUS_TEXT[lifecycle] : badgeToneText[tone]}>{text}</span>
+    </Badge>
+  );
+}
+
+/** Wraps a node in a hover tooltip when `hint` is set. */
+function WithHint({ hint, children }: { hint?: string; children: ReactNode }) {
+  if (!hint) return children;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className="inline-flex">{children}</span>
+      </TooltipTrigger>
+      <TooltipContent>{hint}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+/**
+ * Value plus copy button (Table `kind: "copy"`, DetailList `kind: "copy"`).
+ * Stops propagation so a copy never also clicks the row, card or drag handle.
+ */
+function CopyCell({ value, middle }: { value: string; middle?: boolean }) {
+  const stop = (event: { stopPropagation: () => void }) => event.stopPropagation();
+  return (
+    <span
+      className="flex w-full min-w-0 items-center gap-1"
+      onClick={stop}
+      onMouseDown={stop}
+      onTouchStart={stop}
+      onKeyDown={stop}
+    >
+      {middle ? (
+        <MiddleTruncation className="min-w-0 flex-1 font-mono text-xs">{value}</MiddleTruncation>
+      ) : (
+        <span className="min-w-0 flex-1 truncate font-mono text-xs" title={value}>
+          {value}
+        </span>
+      )}
+      <CopyValueButton value={value} label={`Copy ${value}`} size="icon-xs" />
+    </span>
+  );
 }
 
 /** `kind: "user"` / `"agent"` — an initials (or bot) avatar and the name. */
@@ -481,6 +590,17 @@ const stackRowFromClass: Record<"sm" | "md" | "lg", string> = {
   lg: "lg:flex-row",
 };
 
+/**
+ * `Stack.motion` → the entrance class (`styles/json-render.css`). CSS keyframes
+ * run when an element is first inserted and never on a React re-render, so the
+ * 5s poll cannot replay them.
+ */
+const stackMotionClass: Record<"rise" | "fade" | "none", string | undefined> = {
+  rise: "json-render-motion-rise",
+  fade: "json-render-motion-fade",
+  none: undefined,
+};
+
 function StackComponent({ props, children }: { props: StackProps; children: ReactNode }) {
   const direction = props.direction ?? "column";
   // A collapsible row is a column below its breakpoint (Split semantics).
@@ -499,6 +619,7 @@ function StackComponent({ props, children }: { props: StackProps; children: Reac
         props.justify ? justifyClass[props.justify] : undefined,
         props.wrap ? "flex-wrap" : undefined,
         props.padding ? paddingClass[props.padding] : undefined,
+        stackMotionClass[props.motion ?? "rise"],
       )}
     >
       {children}
@@ -625,6 +746,48 @@ function TabsComponent({ props, children }: { props: TabsComponentProps; childre
 
   if (tabs.length === 0) return null;
 
+  // Extra children past the tab count join the last panel rather than
+  // vanishing silently.
+  const bodyFor = (index: number) =>
+    index === tabs.length - 1 ? panels.slice(index) : (panels[index] ?? null);
+  const tabLabel = (tab: TabsTab) => (
+    <>
+      <CatalogIcon name={tab.icon} size="sm" />
+      {tab.label ?? tab.key}
+      {typeof tab.count === "number" && Number.isFinite(tab.count) ? (
+        <CountPill value={tab.count} />
+      ) : null}
+    </>
+  );
+
+  if (props.variant === "segmented") {
+    // Same state and the same warm panels as the tab strip: every body stays
+    // mounted, the inactive ones hidden.
+    return (
+      <div className="flex min-w-0 flex-col gap-3" data-testid="json-render-tabs">
+        <SegmentedControl
+          aria-label="Sections"
+          value={active}
+          onValueChange={(next) => set(path, next)}
+          options={tabs.map((tab) => ({
+            value: tab.key,
+            label: <span className="inline-flex items-center gap-1.5">{tabLabel(tab)}</span>,
+          }))}
+          className="self-start"
+        />
+        {tabs.map((tab, index) => (
+          <div
+            key={tab.key}
+            hidden={tab.key !== active}
+            className={cn("flex min-w-0 flex-col gap-4", tab.key !== active && "hidden")}
+          >
+            {bodyFor(index)}
+          </div>
+        ))}
+      </div>
+    );
+  }
+
   return (
     <Tabs
       value={active}
@@ -635,16 +798,12 @@ function TabsComponent({ props, children }: { props: TabsComponentProps; childre
       <TabsList>
         {tabs.map((tab) => (
           <TabsTrigger key={tab.key} value={tab.key}>
-            <CatalogIcon name={tab.icon} size="sm" />
-            {tab.label ?? tab.key}
+            {tabLabel(tab)}
           </TabsTrigger>
         ))}
       </TabsList>
       {tabs.map((tab, index) => {
         const isActive = tab.key === active;
-        // Extra children past the tab count join the last panel rather than
-        // vanishing silently.
-        const body = index === tabs.length - 1 ? panels.slice(index) : (panels[index] ?? null);
         return (
           // `forceMount` keeps every panel mounted (polled Tables in background
           // tabs stay warm) — it also forces them VISIBLE, so `hidden` is set
@@ -656,7 +815,7 @@ function TabsComponent({ props, children }: { props: TabsComponentProps; childre
             hidden={!isActive}
             className={cn("flex min-w-0 flex-col gap-4", !isActive && "hidden")}
           >
-            {body}
+            {bodyFor(index)}
           </TabsContent>
         );
       })}
@@ -699,16 +858,21 @@ function SearchInputComponent({ props }: { props: SearchInputProps }) {
     setText(next);
   }, [stored]);
 
+  const inputRef = useRef<HTMLInputElement>(null);
+  usePageShortcut(props.shortcut, inputRef, () => inputRef.current?.focus());
+
   return (
     <div className="flex min-w-0 flex-col gap-1.5">
       {props.label ? <Label htmlFor={inputId}>{props.label}</Label> : null}
       <SearchBox
         id={inputId}
+        inputRef={inputRef}
         value={text}
         onChange={setText}
         ariaLabel={props.label ?? props.placeholder ?? "Search"}
         placeholder={props.placeholder ?? "Search…"}
         clearable
+        hint={props.shortcut ? <Kbd aria-hidden>{props.shortcut}</Kbd> : undefined}
       />
     </div>
   );
@@ -802,6 +966,93 @@ function SelectFilterComponent({ props }: { props: SelectFilterProps }) {
   );
 }
 
+// ─── Chips ──────────────────────────────────────────────────────────────────
+
+type ChipsComponentProps = InferComponentProps<typeof swarmCatalog, "Chips">;
+
+function normalizeChipOptions(
+  options: ChipOption[],
+): { value: string; label: string; icon?: string }[] {
+  const seen = new Set<string>();
+  const normalized: { value: string; label: string; icon?: string }[] = [];
+  for (const option of options) {
+    const value = typeof option === "string" ? option : option.value;
+    if (!value || seen.has(value)) continue;
+    seen.add(value);
+    normalized.push(
+      typeof option === "string"
+        ? { value, label: value }
+        : { value, label: option.label ?? value, icon: option.icon },
+    );
+  }
+  return normalized;
+}
+
+/**
+ * Toggle chips writing `/ui/<id>/value`: one string or `null`, or with
+ * `multiple` a string array (in option order). Bound into Table `filters`, an
+ * array means "cell is one of", and an empty one disables the filter.
+ */
+function ChipsComponent({ props }: { props: ChipsComponentProps }) {
+  const { state, get, set } = useStateStore();
+  const path = `/ui/${props.id}/value`;
+  const multiple = props.multiple === true;
+  const options = normalizeChipOptions((props.options ?? []) as ChipOption[]);
+
+  const stored = getByPath(state, path);
+  const selected = multiple
+    ? Array.isArray(stored)
+      ? stored.filter((entry): entry is string => typeof entry === "string")
+      : []
+    : typeof stored === "string"
+      ? [stored]
+      : [];
+
+  // Seed the slot so a bound filter reads "off" (`null` / `[]`) before the
+  // first press, the way Select seeds `null`.
+  const getRef = useRef(get);
+  getRef.current = get;
+  const setRef = useRef(set);
+  setRef.current = set;
+  useEffect(() => {
+    if (getRef.current(path) === undefined) setRef.current(path, multiple ? [] : null);
+  }, [path, multiple]);
+
+  const toggle = (value: string) => {
+    if (!multiple) {
+      set(path, selected[0] === value ? null : value);
+      return;
+    }
+    const on = new Set(selected);
+    if (on.has(value)) on.delete(value);
+    else on.add(value);
+    set(
+      path,
+      options.filter((option) => on.has(option.value)).map((option) => option.value),
+    );
+  };
+
+  return (
+    // biome-ignore lint/a11y/useSemanticElements: a fieldset groups form controls; these are toggle buttons
+    <div
+      role="group"
+      aria-label={props.label ?? "Filters"}
+      className="flex min-w-0 flex-wrap items-center gap-1.5"
+    >
+      {options.map((option) => (
+        <ChipButton
+          key={option.value}
+          pressed={selected.includes(option.value)}
+          onClick={() => toggle(option.value)}
+        >
+          <CatalogIcon name={option.icon} size="sm" />
+          {option.label}
+        </ChipButton>
+      ))}
+    </div>
+  );
+}
+
 // ─── Table ──────────────────────────────────────────────────────────────────
 
 type TableProps = InferComponentProps<typeof swarmCatalog, "Table">;
@@ -825,7 +1076,7 @@ const DESTRUCTIVE_VARIANTS = new Set(["destructive", "destructive-outline"]);
 
 /** Row deletes are unrecoverable (rows have no version history), so `confirm:
  * false` cannot opt an `app.mutate` delete out of the dialog. */
-function chainDeletesRows(rowAction: TableRowAction): boolean {
+function chainDeletesRows(rowAction: TableRowAction | DrawerAction): boolean {
   return rowAction.actions.some(
     (action) => action.action === "app.mutate" && action.params?.op === "delete",
   );
@@ -839,7 +1090,7 @@ function chainDeletesRows(rowAction: TableRowAction): boolean {
  * `confirm: false` opt-out exists for destructive-looking-but-reversible
  * actions; a chain that actually deletes rows always confirms.
  */
-function confirmConfigFor(rowAction: TableRowAction): TableRowActionConfirm | null {
+function confirmConfigFor(rowAction: TableRowAction | DrawerAction): TableRowActionConfirm | null {
   const confirm = rowAction.confirm;
   if (confirm === false) return chainDeletesRows(rowAction) ? {} : null;
   if (confirm === undefined)
@@ -951,8 +1202,9 @@ const AUTO_HEIGHT_MAX_ROWS = 12;
 // query-override machinery. `search` / `filters` are normal props, so they can
 // be bound to `/ui/<id>/value` or pinned to a constant.
 
-/** `null` / `""` / `undefined` mean "this filter is off". */
+/** `null` / `""` / `undefined` / `[]` mean "this filter is off". */
 function isFilterActive(value: unknown): boolean {
+  if (Array.isArray(value)) return value.some(isFilterActive);
   return value !== null && value !== undefined && value !== "";
 }
 
@@ -977,7 +1229,16 @@ function rowMatchesSearch(
   });
 }
 
-/** Per-column equality; strings compare case-insensitively (enum/tag columns). */
+/** One cell against one filter value; strings compare case-insensitively (enum/tag columns). */
+function cellMatchesFilter(cell: unknown, filter: unknown): boolean {
+  if (typeof filter === "boolean") return toFilterBoolean(cell) === filter;
+  if (typeof filter === "number") {
+    return cell !== null && cell !== undefined && Number(cell) === filter;
+  }
+  return String(cell ?? "").toLowerCase() === String(filter).toLowerCase();
+}
+
+/** Per-column equality; an array filter means "cell is one of" (a multiple `Chips`). */
 function rowMatchesFilters(
   row: Record<string, unknown>,
   filters: NonNullable<TableFilters>,
@@ -985,13 +1246,8 @@ function rowMatchesFilters(
   for (const [key, filter] of Object.entries(filters)) {
     if (!isFilterActive(filter)) continue;
     const cell = row[key];
-    if (typeof filter === "boolean") {
-      if (toFilterBoolean(cell) !== filter) return false;
-    } else if (typeof filter === "number") {
-      if (cell === null || cell === undefined || Number(cell) !== filter) return false;
-    } else if (String(cell ?? "").toLowerCase() !== String(filter).toLowerCase()) {
-      return false;
-    }
+    const accepted = Array.isArray(filter) ? filter.filter(isFilterActive) : [filter];
+    if (!accepted.some((value) => cellMatchesFilter(cell, value))) return false;
   }
   return true;
 }
@@ -1182,20 +1438,7 @@ function TableComponent({ props }: { props: TableProps }) {
           case "progress":
             return <ProgressCell value={value} max={column.max} />;
           case "copy":
-            return raw ? (
-              <span className="flex w-full min-w-0 items-center gap-1">
-                {column.truncate === "middle" ? (
-                  <MiddleTruncation className="min-w-0 flex-1 font-mono text-xs">
-                    {raw}
-                  </MiddleTruncation>
-                ) : (
-                  <span className="min-w-0 flex-1 truncate font-mono text-xs" title={raw}>
-                    {raw}
-                  </span>
-                )}
-                <CopyValueButton value={raw} label={`Copy ${raw}`} size="icon-xs" />
-              </span>
-            ) : null;
+            return raw ? <CopyCell value={raw} middle={column.truncate === "middle"} /> : null;
           case "switch": {
             const chain = column.onChange as ActionChain | undefined;
             return (
@@ -1371,8 +1614,6 @@ function TableComponent({ props }: { props: TableProps }) {
   const confirmingAction = pendingRowAction
     ? rowActions[pendingRowAction.rowActionIndex]
     : undefined;
-  const confirmCopy = confirmingAction ? confirmConfigFor(confirmingAction) : null;
-  const confirmIsDestructive = DESTRUCTIVE_VARIANTS.has(confirmingAction?.variant ?? "outline");
 
   return (
     // `min-w-0` lets the grid shrink below its column total inside flex/grid
@@ -1412,39 +1653,61 @@ function TableComponent({ props }: { props: TableProps }) {
         cellFocus={rowActions.length > 0 || hasRowClick}
         onCellKeyDown={rowActions.length > 0 || hasRowClick ? onCellKeyDown : undefined}
       />
-      <AlertDialog
-        open={pendingRowAction !== null}
-        onOpenChange={(open) => {
-          if (!open) setPendingRowAction(null);
+      <ChainConfirmDialog
+        action={confirmingAction}
+        onCancel={() => setPendingRowAction(null)}
+        onConfirm={() => {
+          const pending = pendingRowAction;
+          setPendingRowAction(null);
+          if (pending) {
+            void runRowAction(pending.rowActionIndex, pending.row, pending.rowIndex);
+          }
         }}
-      >
-        <AlertDialogContent {...themeAttr}>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
-              {confirmCopy?.title ?? `${confirmingAction?.label ?? "Confirm"}?`}
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              {confirmCopy?.description ?? "This action cannot be undone."}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              variant={confirmIsDestructive ? "destructive" : "default"}
-              onClick={() => {
-                const pending = pendingRowAction;
-                setPendingRowAction(null);
-                if (pending) {
-                  void runRowAction(pending.rowActionIndex, pending.row, pending.rowIndex);
-                }
-              }}
-            >
-              {confirmCopy?.confirmLabel ?? confirmingAction?.label ?? "Confirm"}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      />
     </div>
+  );
+}
+
+/**
+ * The confirmation step for a chain-carrying action (Table row actions,
+ * Drawer footer actions): open while `action` is set, copy from
+ * `confirmConfigFor`. Lives on the owning block, never inside a cell
+ * renderer, so a 5s poll cannot tear it down mid-decision.
+ */
+function ChainConfirmDialog({
+  action,
+  onCancel,
+  onConfirm,
+}: {
+  action: TableRowAction | DrawerAction | undefined;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const themeAttr = useJsonRenderThemeAttr();
+  const copy = action ? confirmConfigFor(action) : null;
+  const destructive = DESTRUCTIVE_VARIANTS.has(action?.variant ?? "outline");
+  return (
+    <AlertDialog
+      open={action !== undefined}
+      onOpenChange={(open) => {
+        if (!open) onCancel();
+      }}
+    >
+      <AlertDialogContent {...themeAttr}>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{copy?.title ?? `${action?.label ?? "Confirm"}?`}</AlertDialogTitle>
+          <AlertDialogDescription>
+            {copy?.description ?? "This action cannot be undone."}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogAction variant={destructive ? "destructive" : "default"} onClick={onConfirm}>
+            {copy?.confirmLabel ?? action?.label ?? "Confirm"}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   );
 }
 
@@ -1458,6 +1721,11 @@ function TableComponent({ props }: { props: TableProps }) {
  * bound element the assembler rewrites `busyWith` to the defining app's full
  * `/refs/<app>/actions/<name>` path (where the `$app`-tagged dispatch
  * actually writes), so a path-shaped value is used as-is.
+ *
+ * `busyWith` drives `ui/button`'s status variant: `loading` while the slot is
+ * `"running"`, then `success` for the button's ~1.5s success window when THIS
+ * mount saw it flip to `"ok"` (an `ok` left over from an earlier visit never
+ * flashes, and a poll re-render never re-triggers it).
  */
 function ActionButtonComponent({
   props,
@@ -1473,53 +1741,118 @@ function ActionButtonComponent({
       : props.busyWith.startsWith("/")
         ? props.busyWith
         : `/actions/${props.busyWith}`;
-  const busy = busySlot !== null && getByPath(state, `${busySlot}/status`) === "running";
-  // An author icon replaces the default trailing arrow; the spinner takes its slot while busy.
+  const slotStatus = busySlot === null ? undefined : getByPath(state, `${busySlot}/status`);
+  const busy = slotStatus === "running";
+
+  const [succeeded, setSucceeded] = useState(false);
+  const lastStatusRef = useRef(slotStatus);
+  useEffect(() => {
+    const previous = lastStatusRef.current;
+    lastStatusRef.current = slotStatus;
+    if (previous === "running" && slotStatus === "ok") setSucceeded(true);
+    else if (slotStatus !== "ok") setSucceeded(false);
+  }, [slotStatus]);
+  const onStatusChange = useCallback((next: ButtonStatus) => {
+    if (next === "idle") setSucceeded(false);
+  }, []);
+  const status: ButtonStatus | undefined =
+    busySlot === null ? undefined : busy ? "loading" : succeeded ? "success" : "idle";
+
+  const disabled = props.disabled === true;
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  usePageShortcut(props.shortcut, buttonRef, () => {
+    if (!disabled && !busy) emit("press");
+  });
+
+  // An author icon replaces the default trailing arrow.
   const hasIcon = catalogIcon(props.icon) !== undefined;
   const iconAtStart = hasIcon && props.iconPosition !== "end";
-  const trailing = busy ? (
-    <Spinner className="size-3.5" />
-  ) : hasIcon ? (
-    iconAtStart ? null : (
-      <CatalogIcon name={props.icon} size="sm" />
-    )
-  ) : (
-    <ArrowRight className="h-3.5 w-3.5" />
-  );
-  return (
+  const variant = props.variant ?? "default";
+  const filled = variant === "default" || variant === "destructive";
+
+  const button = (
     <Button
-      variant={props.variant ?? "default"}
-      disabled={props.disabled === true || busy}
+      ref={buttonRef}
+      variant={variant}
+      size={props.size ?? "default"}
+      disabled={disabled}
+      status={status}
+      successLabel={props.successLabel}
+      onStatusChange={onStatusChange}
+      aria-keyshortcuts={props.shortcut}
       onClick={() => emit("press")}
     >
-      {iconAtStart && !busy ? <CatalogIcon name={props.icon} size="sm" /> : null}
+      {iconAtStart ? <CatalogIcon name={props.icon} size="sm" /> : null}
       {props.label}
-      {trailing}
+      {hasIcon ? (
+        iconAtStart ? null : (
+          <CatalogIcon name={props.icon} size="sm" />
+        )
+      ) : (
+        <ArrowRight className="h-3.5 w-3.5" />
+      )}
+      {props.shortcut ? (
+        <Kbd aria-hidden tone={filled ? "inverted" : "default"}>
+          {props.shortcut}
+        </Kbd>
+      ) : null}
     </Button>
+  );
+  if (!props.hint) return button;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{button}</TooltipTrigger>
+      <TooltipContent>{props.hint}</TooltipContent>
+    </Tooltip>
   );
 }
 
+const trendTone: Record<MetricTrend["direction"], { icon: typeof Info; text: string }> = {
+  up: { icon: TrendingUp, text: "text-status-success-strong" },
+  down: { icon: TrendingDown, text: "text-status-error-strong" },
+  flat: { icon: Minus, text: "text-muted-foreground" },
+};
+
 /**
- * Label/value stat tile, sized to `StatPanel`'s value type (text-lg/600) so an
- * app metric strip matches the native stat cards. A bound value is undefined
+ * Stat tile on the dashboard's own `StatPanel`. A bound value is undefined
  * while its query loads — `loading` turns that window into a skeleton, and a
  * genuinely absent value renders an em dash, never the string "undefined".
  */
 function MetricComponent({ props }: { props: MetricComponentProps }) {
   const value = props.value as unknown;
   const empty = value === undefined || value === null || value === "";
-  return (
-    <div className="flex flex-col gap-1">
-      <span className="inline-flex items-center gap-1.5 text-xs uppercase tracking-wide text-muted-foreground">
-        <CatalogIcon name={props.icon} size="sm" />
-        {props.label}
+  const trend = props.trend as MetricTrend | undefined;
+  const trendStyle = trend ? trendTone[trend.direction] : undefined;
+  const TrendIcon = trendStyle?.icon;
+  const detail =
+    trend || props.detail ? (
+      <span className="inline-flex flex-wrap items-center gap-x-1.5">
+        {trend && trendStyle && TrendIcon ? (
+          <span className={cn("inline-flex items-center gap-1 font-medium", trendStyle.text)}>
+            <TrendIcon aria-hidden className="size-3" />
+            {trend.label}
+          </span>
+        ) : null}
+        {props.detail ? <span>{props.detail}</span> : null}
       </span>
-      {props.loading && empty ? (
-        <Skeleton className="h-7 w-16" />
-      ) : (
-        <span className="text-lg font-semibold text-foreground">{empty ? "—" : String(value)}</span>
-      )}
-    </div>
+    ) : undefined;
+  return (
+    <StatPanel
+      icon={catalogIcon(props.icon)}
+      label={props.label}
+      value={
+        props.loading && empty ? (
+          <Skeleton inline className="h-7 w-16 align-middle" />
+        ) : empty ? (
+          "—"
+        ) : (
+          String(value)
+        )
+      }
+      detail={detail}
+      info={props.info}
+      tone={props.tone ?? "neutral"}
+    />
   );
 }
 
@@ -1769,19 +2102,89 @@ function DrawerComponent({
           )}
         </SheetHeader>
         <div className="flex min-w-0 flex-1 flex-col gap-4 overflow-y-auto p-4">{children}</div>
+        {props.actions && props.actions.length > 0 ? (
+          <DrawerActionsFooter actions={props.actions as DrawerAction[]} />
+        ) : null}
       </SheetContent>
     </Sheet>
   );
 }
 
+/**
+ * The Drawer's sticky footer: one button per action, under the scrolling
+ * body. Confirmation follows Table row actions (`confirmConfigFor`). Chains
+ * run with no `$row`; `$state` reads (the open record's route param) resolve
+ * against the live state.
+ */
+function DrawerActionsFooter({ actions }: { actions: DrawerAction[] }) {
+  const runChain = useRowActionRunner();
+  const [pending, setPending] = useState<number | null>(null);
+  const run = (action: DrawerAction | undefined) => {
+    if (action) void runChain(action.actions as ActionChain, {});
+  };
+  return (
+    <SheetFooter className="mt-0 shrink-0 flex-row flex-wrap justify-end gap-2 border-t border-border px-4 py-3">
+      {actions.map((action, index) => (
+        <Button
+          key={`${index}-${action.label}`}
+          size="sm"
+          variant={action.variant ?? "outline"}
+          onClick={() => (confirmConfigFor(action) ? setPending(index) : run(action))}
+        >
+          <CatalogIcon name={action.icon} size="sm" />
+          {action.label}
+        </Button>
+      ))}
+      <ChainConfirmDialog
+        action={pending === null ? undefined : actions[pending]}
+        onCancel={() => setPending(null)}
+        onConfirm={() => {
+          const action = pending === null ? undefined : actions[pending];
+          setPending(null);
+          run(action);
+        }}
+      />
+    </SheetFooter>
+  );
+}
+
 // ─── DetailList ─────────────────────────────────────────────────────────────
 
-/** One field value, rendered by kind. `code` gets a monospace block. */
+/** A JSON-ish field value as a tree: objects as-is, a JSON string parsed. */
+function jsonFieldData(value: unknown): unknown {
+  if (typeof value !== "string") return value;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return value;
+  }
+}
+
+/**
+ * One field value, rendered by kind with the same renderers as Table cells
+ * (status chip, person, relative time, copy). `code` gets a monospace block;
+ * `json` the collapsible `JsonViewer` tree.
+ */
 function DetailFieldValue({ field, value }: { field: DetailListField; value: unknown }) {
-  if (field.kind === "badge") {
-    const raw = value === null || value === undefined ? "" : String(value);
-    if (!raw) return <span className="text-muted-foreground">—</span>;
-    return <StatusPill text={raw} tone={badgeToneFor(field.tones, raw)} />;
+  const raw = value === null || value === undefined ? "" : String(value);
+  const dash = <span className="text-muted-foreground">—</span>;
+  switch (field.kind) {
+    case "badge":
+      return raw ? <StatusPill text={raw} tone={badgeToneFor(field.tones, raw)} /> : dash;
+    case "status":
+      return raw ? <StatusCell value={raw} tones={field.tones} /> : dash;
+    case "user":
+      return raw ? <PersonCell name={raw} /> : dash;
+    case "relative":
+      return raw ? <RelativeTimeCell value={value} /> : dash;
+    case "copy":
+      return raw ? <CopyCell value={raw} /> : dash;
+    case "json":
+      return value === null || value === undefined ? (
+        dash
+      ) : (
+        <JsonViewer data={jsonFieldData(value)} />
+      );
   }
   if (field.kind === "code") {
     const text =
@@ -2202,6 +2605,259 @@ function ContributionGraphComponent({ props }: { props: ContributionGraphCompone
   );
 }
 
+// ─── Status, feedback and loaders ───────────────────────────────────────────
+
+type BadgeComponentProps = InferComponentProps<typeof swarmCatalog, "Badge">;
+type ProgressComponentProps = InferComponentProps<typeof swarmCatalog, "Progress">;
+type SkeletonComponentProps = InferComponentProps<typeof swarmCatalog, "Skeleton">;
+type AvatarStackComponentProps = InferComponentProps<typeof swarmCatalog, "AvatarStack">;
+type SectionComponentProps = InferComponentProps<typeof swarmCatalog, "Section">;
+
+/**
+ * Badge variants. `tag` (default) keeps the original uppercase chip, except
+ * that a lifecycle `status` renders the dashboard `StatusBadge`; `status` is
+ * the sentence-case pill; `count` the numeric pill; `beta` the `BetaTag`.
+ */
+function BadgeComponent({ props }: { props: BadgeComponentProps }) {
+  // Unset bindings resolve to undefined — render nothing instead of "undefined".
+  const text = props.text === null || props.text === undefined ? "" : String(props.text);
+  const tone = props.tone ?? "neutral";
+  const status = typeof props.status === "string" && props.status ? props.status : undefined;
+  switch (props.variant ?? "tag") {
+    case "beta":
+      return <BetaTag tooltip={props.hint ?? "Experimental"} side="top" />;
+    case "count":
+      return text === "" ? null : (
+        <WithHint hint={props.hint}>
+          <CountPill value={text} tone={tone} />
+        </WithHint>
+      );
+    case "status": {
+      const label = text || status || "";
+      return label === "" ? null : (
+        <WithHint hint={props.hint}>
+          <SentencePill text={label} tone={tone} status={status} icon={props.icon} />
+        </WithHint>
+      );
+    }
+    default: {
+      if (status && taskStatusVariant(status)) {
+        return (
+          <WithHint hint={props.hint}>
+            <StatusBadge status={status as StatusBadgeStatus} />
+          </WithHint>
+        );
+      }
+      const label = text || status || "";
+      return label === "" ? null : (
+        <WithHint hint={props.hint}>
+          <StatusPill text={label} tone={tone} icon={props.icon} />
+        </WithHint>
+      );
+    }
+  }
+}
+
+/** Progress bar indicator color per tone (whole class names for the scanner). */
+const progressToneClass: Record<BadgeTone, string | undefined> = {
+  neutral: undefined,
+  success: "[&>[data-slot=progress-indicator]]:bg-status-success",
+  active: "[&>[data-slot=progress-indicator]]:bg-status-active",
+  error: "[&>[data-slot=progress-indicator]]:bg-status-error",
+  info: "[&>[data-slot=progress-indicator]]:bg-status-info",
+  pending: "[&>[data-slot=progress-indicator]]:bg-status-pending",
+  warning: "[&>[data-slot=progress-indicator]]:bg-status-warning",
+  paused: "[&>[data-slot=progress-indicator]]:bg-status-paused",
+};
+
+function ProgressComponent({ props }: { props: ProgressComponentProps }) {
+  const max = typeof props.max === "number" && props.max > 0 ? props.max : 100;
+  const raw = typeof props.value === "number" && Number.isFinite(props.value) ? props.value : 0;
+  const value = Math.max(0, Math.min(max, raw));
+  const percent = Math.round((value / max) * 100);
+  const showValue = props.showValue !== false;
+
+  if (props.variant === "ring") {
+    return (
+      <span className="inline-flex min-w-0 items-center gap-2 text-sm">
+        <ProgressRing done={value} total={max} label={props.label} className="size-5 shrink-0" />
+        {props.label ? <span className="truncate text-foreground">{props.label}</span> : null}
+        {showValue ? (
+          <span className="tabular-nums text-muted-foreground">
+            {value} / {max}
+          </span>
+        ) : null}
+      </span>
+    );
+  }
+
+  return (
+    <div className="flex min-w-0 flex-col gap-1.5">
+      {props.label || showValue ? (
+        <div className="flex items-center justify-between gap-2 text-xs">
+          <span className="min-w-0 truncate text-muted-foreground">{props.label}</span>
+          {showValue ? (
+            <span className="shrink-0 tabular-nums text-muted-foreground">{percent}%</span>
+          ) : null}
+        </div>
+      ) : null}
+      <Progress
+        value={percent}
+        aria-label={props.label ?? `${percent}%`}
+        className={cn("h-1.5", progressToneClass[props.tone ?? "neutral"])}
+      />
+    </div>
+  );
+}
+
+/** Repeats `node` `count` times (static placeholders, so index keys are stable). */
+function repeat(count: number, node: (index: number) => ReactNode): ReactNode[] {
+  return Array.from({ length: count }, (_, index) => node(index));
+}
+
+function SkeletonComponent({ props }: { props: SkeletonComponentProps }) {
+  const shape = props.shape ?? "line";
+  const count = Math.max(
+    1,
+    Math.min(20, props.count ?? (shape === "rows" ? 5 : shape === "line" ? 3 : 1)),
+  );
+  let body: ReactNode;
+  switch (shape) {
+    case "block":
+      body = repeat(count, (index) => (
+        <Skeleton
+          key={index}
+          className="w-full"
+          // inline-style: author-supplied pixel height
+          style={{ height: props.height ?? 128 }}
+        />
+      ));
+      break;
+    case "rows":
+      body = repeat(count, (index) => <Skeleton key={index} className="h-9 w-full" />);
+      break;
+    case "metric":
+      body = (
+        <div
+          className={cn(
+            "grid min-w-0 gap-4",
+            gridColsClass[1],
+            count > 1 ? gridColsSmClass[2] : undefined,
+            gridColsMdClass[Math.min(count, 4)],
+          )}
+        >
+          {repeat(count, (index) => (
+            <UiCard key={index} className="py-0">
+              <CardContent className="flex flex-col gap-2 p-4">
+                <Skeleton className="h-3 w-20" />
+                <Skeleton className="h-6 w-16" />
+              </CardContent>
+            </UiCard>
+          ))}
+        </div>
+      );
+      break;
+    case "card":
+      body = repeat(count, (index) => (
+        <UiCard key={index}>
+          <CardHeader className="gap-2">
+            <Skeleton className="h-4 w-1/3" />
+            <Skeleton className="h-3 w-1/2" />
+          </CardHeader>
+          <CardContent className="flex flex-col gap-2">
+            <Skeleton className="h-4 w-full" />
+            <Skeleton className="h-4 w-full" />
+            <Skeleton className="h-4 w-3/5" />
+          </CardContent>
+        </UiCard>
+      ));
+      break;
+    default:
+      body = repeat(count, (index) => (
+        <Skeleton
+          key={index}
+          className={cn("h-4", count > 1 && index === count - 1 ? "w-3/5" : "w-full")}
+        />
+      ));
+  }
+  return (
+    // biome-ignore lint/a11y/useSemanticElements: <output> means a computed result; this is a loading placeholder
+    <div
+      role="status"
+      aria-label="Loading"
+      aria-busy="true"
+      className={cn("flex min-w-0 flex-col", shape === "rows" ? "gap-1.5" : "gap-3")}
+    >
+      {body}
+    </div>
+  );
+}
+
+function AvatarStackComponent({ props }: { props: AvatarStackComponentProps }) {
+  const users = [
+    ...new Set(
+      ((props.users ?? []) as unknown[]).filter(
+        (user): user is string => typeof user === "string" && user.trim() !== "",
+      ),
+    ),
+  ];
+  if (users.length === 0) return null;
+  const visible = users.slice(0, props.max ?? 4);
+  const extra = users.length - visible.length;
+  const names = users.join(", ");
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+          <AvatarStack size={24}>
+            {visible.map((name) => (
+              <Avatar key={name} className="size-full">
+                <AvatarFallback className="text-[10px] font-medium">
+                  {userInitials(name)}
+                </AvatarFallback>
+              </Avatar>
+            ))}
+          </AvatarStack>
+          {extra > 0 ? <span className="tabular-nums">+{extra}</span> : null}
+          <span className="sr-only">{names}</span>
+        </span>
+      </TooltipTrigger>
+      <TooltipContent>{names}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+function SectionComponent({
+  props,
+  children,
+}: {
+  props: SectionComponentProps;
+  children: ReactNode;
+}) {
+  const description = props.description ? (
+    <p className="text-sm text-muted-foreground">{props.description}</p>
+  ) : null;
+  if (props.collapsible) {
+    return (
+      <CollapsibleSection title={props.title} defaultOpen={props.defaultOpen ?? true} heading="h3">
+        <div className="flex min-w-0 flex-col gap-3 pt-1">
+          {description}
+          {children}
+        </div>
+      </CollapsibleSection>
+    );
+  }
+  return (
+    <section className="flex min-w-0 flex-col gap-3">
+      <div className="flex flex-col gap-1">
+        <h3 className={headingClass.h3}>{props.title}</h3>
+        {description}
+      </div>
+      {children}
+    </section>
+  );
+}
+
 // ─── Component registry ─────────────────────────────────────────────────────
 
 const iconToneClass: Record<
@@ -2268,25 +2924,74 @@ export const swarmComponents: Components<typeof swarmCatalog> = {
   ),
   Button: ({ props, emit }) => <ActionButtonComponent props={props} emit={emit} />,
   Metric: ({ props }) => <MetricComponent props={props} />,
-  Alert: ({ props }) => {
+  Alert: ({ props, emit }) => {
     const tone = alertTone[props.tone ?? "info"];
     return (
       <AlertCallout
         tone={tone.tone}
         icon={catalogIcon(props.icon) ?? tone.icon}
         title={props.title}
+        action={
+          props.actionLabel ? (
+            <Button type="button" size="xs" variant="outline" onClick={() => emit("press")}>
+              {props.actionLabel}
+            </Button>
+          ) : undefined
+        }
       >
         {props.message}
       </AlertCallout>
     );
   },
-  Badge: ({ props }) => {
-    // Unset bindings resolve to undefined — render nothing instead of "undefined".
-    const text = props.text === null || props.text === undefined ? "" : String(props.text);
-    return text === "" ? null : (
-      <StatusPill text={text} tone={props.tone ?? "neutral"} icon={props.icon} />
+  Badge: ({ props }) => <BadgeComponent props={props} />,
+  Progress: ({ props }) => <ProgressComponent props={props} />,
+  EmptyState: ({ props, emit }) => (
+    <EmptyState
+      icon={catalogIcon(props.icon) ?? Inbox}
+      title={props.title}
+      description={props.body}
+      action={
+        props.actionLabel ? (
+          <Button type="button" size="sm" onClick={() => emit("press")}>
+            {props.actionLabel}
+          </Button>
+        ) : undefined
+      }
+    />
+  ),
+  CopyButton: ({ props }) => {
+    const value = props.value === null || props.value === undefined ? "" : String(props.value);
+    if (value === "") return null;
+    return props.label ? (
+      <CopyValueButton value={value} variant="outline">
+        {props.label}
+      </CopyValueButton>
+    ) : (
+      <CopyValueButton value={value} label="Copy value" size="icon-sm" />
     );
   },
+  Kbd: ({ props }) => (
+    <span className="inline-flex items-center gap-1">
+      {((props.keys ?? []) as string[]).map((key, index) => (
+        <Kbd key={`${index}-${key}`}>{key}</Kbd>
+      ))}
+    </span>
+  ),
+  Skeleton: ({ props }) => <SkeletonComponent props={props} />,
+  Spinner: ({ props }) => (
+    // biome-ignore lint/a11y/useSemanticElements: <output> means a computed result; this is a busy indicator
+    <span role="status" className="inline-flex items-center gap-2 text-sm text-muted-foreground">
+      <Spinner
+        aria-hidden
+        variant={props.variant}
+        className={props.size === "md" ? "size-6" : "size-4"}
+      />
+      {props.label ? <span>{props.label}</span> : <span className="sr-only">Loading</span>}
+    </span>
+  ),
+  AvatarStack: ({ props }) => <AvatarStackComponent props={props} />,
+  Section: ({ props, children }) => <SectionComponent props={props}>{children}</SectionComponent>,
+  Chips: ({ props }) => <ChipsComponent props={props} />,
   Icon: ({ props }) => (
     <CatalogIcon
       name={props.name}
