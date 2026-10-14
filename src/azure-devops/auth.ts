@@ -66,6 +66,38 @@ export function normalizeOrgUrl(url: string | null | undefined): string | null {
   return trimmed ? trimmed : null;
 }
 
+/**
+ * Organization identity of an Azure DevOps URL: `dev.azure.com/{org}` or the
+ * `{org}.visualstudio.com` host, lowercased. Null for anything that is not a
+ * plain HTTPS URL, so credentials are never attached to it.
+ */
+export function orgKeyOf(url: string | null | undefined): string | null {
+  if (!url) return null;
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return null;
+  }
+  if (parsed.protocol !== "https:" || parsed.username || parsed.password) return null;
+  const host = parsed.host.toLowerCase();
+  if (host !== "dev.azure.com") return host;
+  const org = parsed.pathname.split("/").find(Boolean);
+  return org ? `${host}/${org.toLowerCase()}` : null;
+}
+
+/**
+ * Whether the PAT may be sent to `url`. With a configured organization only
+ * that organization qualifies; without one, only the public Azure DevOps hosts.
+ */
+export function isTrustedOrgUrl(url: string | null | undefined): boolean {
+  const key = orgKeyOf(url);
+  if (!key) return false;
+  const configured = orgKeyOf(orgUrl);
+  if (orgUrl) return key === configured;
+  return key.startsWith("dev.azure.com/") || key.endsWith(".visualstudio.com");
+}
+
 /** Bot name for plain-text `@name` mentions. */
 export const AZURE_DEVOPS_BOT_NAME = process.env.AZURE_DEVOPS_BOT_NAME ?? "agent-swarm-bot";
 

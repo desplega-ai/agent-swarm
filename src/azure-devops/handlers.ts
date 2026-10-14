@@ -10,7 +10,12 @@
 
 import { findTaskByVcs, getAllAgents, incrKv, upsertKv } from "../be/db";
 import { renderIdentity, resolveIdentity } from "../be/identity";
-import { findOrCreateUserByEmail, findUserByExternalId, linkIdentity } from "../be/users";
+import {
+  findOrCreateUserByEmail,
+  findUserByEmail,
+  findUserByExternalId,
+  linkIdentity,
+} from "../be/users";
 import { resolveTemplate } from "../prompts/resolver";
 import { azureDevOpsContextKey } from "../tasks/context-key";
 import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
@@ -194,6 +199,15 @@ export async function resolveAzureDevOpsSender(
     return linked.id;
   }
 
+  await recordUnmappedIdentity(externalId, sampleEventType, sampleContext);
+  return undefined;
+}
+
+async function recordUnmappedIdentity(
+  externalId: string,
+  sampleEventType: string,
+  sampleContext: string,
+): Promise<void> {
   await upsertKv({
     namespace: UNMAPPED_NAMESPACE,
     key: `${externalId}:meta`,
@@ -206,7 +220,35 @@ export async function resolveAzureDevOpsSender(
     expiresAt: Date.now() + UNMAPPED_TTL_MS,
   });
   await incrKv(UNMAPPED_NAMESPACE, `${externalId}:count`, 1);
-  return undefined;
+}
+
+/**
+ * Authorize an actor to trigger a task: a swarm user already linked to the
+ * identity (or owning its sign-in email), or a sign-in name listed in
+ * AZURE_DEVOPS_ALLOWED_ACTORS (comma-separated). Unlike
+ * `resolveAzureDevOpsSender` this never creates users for strangers. Returns
+ * the `users.id`, or null after recording the actor for operator triage.
+ */
+export async function authorizeAzureDevOpsActor(
+  identity: AzureDevOpsIdentityRef,
+  sampleEventType: string,
+  sampleContext: string,
+): Promise<string | null> {
+  const externalId = externalIdOf(identity);
+  const known =
+    (await findUserByExternalId("azure-devops", externalId)) ??
+    (externalId.includes("@") ? await findUserByEmail(externalId) : null);
+  if (known) return known.id;
+
+  const allowed = (process.env.AZURE_DEVOPS_ALLOWED_ACTORS ?? "")
+    .split(",")
+    .map((name) => name.trim().toLowerCase())
+    .filter(Boolean);
+  if (allowed.includes(externalId.toLowerCase())) {
+    return (await resolveAzureDevOpsSender(identity, sampleEventType, sampleContext)) ?? null;
+  }
+  await recordUnmappedIdentity(externalId, sampleEventType, sampleContext);
+  return null;
 }
 
 /**

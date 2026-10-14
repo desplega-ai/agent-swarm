@@ -5,6 +5,7 @@ import {
   beforeEach,
   describe,
   expect,
+  mock,
   spyOn,
   test,
 } from "bun:test";
@@ -14,6 +15,7 @@ import { resetAzureDevOpsBotIdCache } from "../azure-devops/api";
 import { initAzureDevOps, resetAzureDevOps } from "../azure-devops/auth";
 import { closeDb, createAgent, getTaskById, initDb } from "../be/db";
 import {
+  createTrackerSyncIfAbsent,
   deleteTrackerSync,
   getAllTrackerSyncs,
   getTrackerSyncByExternalId,
@@ -27,20 +29,23 @@ import deletedFixture from "./fixtures/azure-boards/workitem.deleted.json";
 import restoredFixture from "./fixtures/azure-boards/workitem.restored.json";
 import updatedFixture from "./fixtures/azure-boards/workitem.updated.json";
 
-// Fixtures are real service-hook deliveries (Task #9 in PTTestAutomation/VN-TAG),
+// Fixtures are real service-hook deliveries (Task #9 in acme-org/Contoso),
 // copied verbatim. Every delivery in production has its own notification id and
 // comment id, so `fixture()` rewrites both to keep tests from deduplicating each other.
 const TEST_DB_PATH = "./test-azure-devops-boards-sync.sqlite";
 const SECRET = "boards-secret";
 const BOT_ID = "7d40ac7f-6bdb-6baf-a2e2-dc9594e967d4";
-const BOT_EMAIL = "LabThinker@ttigroup.com.vn";
-const ORG_URL = "https://dev.azure.com/PTTestAutomation";
+const BOT_EMAIL = "swarm-bot@example.com";
+const ORG_URL = "https://dev.azure.com/acme-org";
+const LINK_9 = "dev.azure.com/acme-org#9";
+const ACTOR = "alex.example@example.com";
 const ENV_KEYS = [
   "AZURE_DEVOPS_WEBHOOK_SECRET",
   "AZURE_DEVOPS_TOKEN",
   "AZURE_DEVOPS_ORG_URL",
   "AZURE_DEVOPS_BOT_ID",
   "AZURE_DEVOPS_DISABLE",
+  "AZURE_DEVOPS_ALLOWED_ACTORS",
 ] as const;
 
 type Json = Record<string, any>;
@@ -90,7 +95,7 @@ async function post(body: Json, password = SECRET): Promise<{ status: number; js
 
 function assignedToBot(sample: Json): Json {
   const event = fixture(sample);
-  event.resource.fields["System.AssignedTo"] = `Lab Thinker Software <${BOT_EMAIL}>`;
+  event.resource.fields["System.AssignedTo"] = `Swarm Bot <${BOT_EMAIL}>`;
   return event;
 }
 
@@ -118,6 +123,7 @@ beforeEach(async () => {
   process.env.AZURE_DEVOPS_TOKEN = "pat";
   process.env.AZURE_DEVOPS_ORG_URL = ORG_URL;
   process.env.AZURE_DEVOPS_BOT_ID = BOT_ID;
+  process.env.AZURE_DEVOPS_ALLOWED_ACTORS = ACTOR;
   initAzureDevOps();
   // The bot's sign-in name comes from connectionData; work-item identities carry no GUID.
   globalThis.fetch = (async (input: RequestInfo | URL) => {
@@ -136,6 +142,7 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
+  mock.restore();
   globalThis.fetch = originalFetch;
   clearEnv();
 });
@@ -151,29 +158,29 @@ describe("workitem.created", () => {
     expect(task?.taskType).toBe("azure-devops-work-item");
     expect(task?.task).toContain("[Azure DevOps Task #9]");
     expect(task?.task).toContain("Test task for Azure Boards integration");
-    expect(task?.task).toContain("https://dev.azure.com/PTTestAutomation/VN-TAG/_workitems/edit/9");
+    expect(task?.task).toContain("https://dev.azure.com/acme-org/Contoso/_workitems/edit/9");
     expect(parseContextKey(task!.contextKey!)).toEqual({
       family: "trackers",
       subFamily: "azure-devops",
-      parts: { organization: "PTTestAutomation", kind: "workitem", workItemId: 9 },
+      parts: { organization: "acme-org", kind: "workitem", workItemId: 9 },
     });
 
-    const sync = await getTrackerSyncByExternalId("azure-devops", "task", "9");
+    const sync = await getTrackerSyncByExternalId("azure-devops", "task", LINK_9);
     expect(sync?.swarmId).toBe(json.taskId);
     expect(sync?.providerEntityType).toBe("WorkItem");
-    expect(sync?.externalIdentifier).toBe("VN-TAG#9");
+    expect(sync?.externalIdentifier).toBe("Contoso#9");
   });
 
   test("the real payload, with no assignee, creates nothing", async () => {
     const { json } = await post(fixture(createdFixture));
     expect(json).toEqual({ created: false });
-    expect(await getTrackerSyncByExternalId("azure-devops", "task", "9")).toBeNull();
+    expect(await getTrackerSyncByExternalId("azure-devops", "task", LINK_9)).toBeNull();
   });
 
   test("a bot mention in the description creates a task", async () => {
     const event = fixture(createdFixture);
     event.resource.fields["System.Description"] =
-      `<div><a href="#" data-vss-mention="version:2.0,${BOT_ID}">@Lab Thinker Software</a> please look</div>`;
+      `<div><a href="#" data-vss-mention="version:2.0,${BOT_ID}">@Swarm Bot</a> please look</div>`;
     const { json } = await post(event);
     expect(json.created).toBe(true);
     expect((await getTaskById(json.taskId))?.task).toContain("please look");
@@ -200,7 +207,7 @@ describe("workitem.updated", () => {
     expect(json.created).toBe(true);
     const task = await getTaskById(json.taskId);
     expect(task?.task).toContain("[Azure DevOps Task #9]");
-    const sync = await getTrackerSyncByExternalId("azure-devops", "task", "9");
+    const sync = await getTrackerSyncByExternalId("azure-devops", "task", LINK_9);
     expect(sync?.swarmId).toBe(json.taskId);
   });
 
@@ -209,7 +216,7 @@ describe("workitem.updated", () => {
     delete event.resource.fields["System.AssignedTo"];
     const { json } = await post(event);
     expect(json).toEqual({ created: false });
-    expect(await getTrackerSyncByExternalId("azure-devops", "task", "9")).toBeNull();
+    expect(await getTrackerSyncByExternalId("azure-devops", "task", LINK_9)).toBeNull();
   });
 
   test("a second assignment while the task is active creates no new task", async () => {
@@ -222,7 +229,7 @@ describe("workitem.updated", () => {
   test("assignment away from the bot is ignored", async () => {
     const event = fixture(updatedFixture);
     event.resource.fields["System.AssignedTo"] = {
-      oldValue: `Lab Thinker Software <${BOT_EMAIL}>`,
+      oldValue: `Swarm Bot <${BOT_EMAIL}>`,
       newValue: "Someone Else <someone@example.com>",
     };
     expect((await post(event)).json).toEqual({ created: false });
@@ -237,13 +244,13 @@ describe("workitem.commented", () => {
     expect(task?.task).toContain("please do this task.");
     expect(task?.task).not.toContain("data-vss-mention");
     expect(task?.task).toContain("mentioned bot");
-    const sync = await getTrackerSyncByExternalId("azure-devops", "task", "9");
+    const sync = await getTrackerSyncByExternalId("azure-devops", "task", LINK_9);
     expect(sync?.swarmId).toBe(json.taskId);
   });
 
-  test("a plain-text @labthinker mention triggers", async () => {
+  test("a plain-text @swarm-bot mention triggers", async () => {
     const event = fixture(commentedFixture);
-    event.resource.fields["System.History"] = "<div>@LabThinker can you check this?</div>";
+    event.resource.fields["System.History"] = "<div>@swarm-bot can you check this?</div>";
     const { json } = await post(event);
     expect(json.created).toBe(true);
   });
@@ -259,14 +266,14 @@ describe("workitem.commented", () => {
     const second = await post(fixture(commentedFixture));
     expect(second.json.created).toBe(true);
     expect(second.json.taskId).not.toBe(first.json.taskId);
-    const sync = await getTrackerSyncByExternalId("azure-devops", "task", "9");
+    const sync = await getTrackerSyncByExternalId("azure-devops", "task", LINK_9);
     expect(sync?.swarmId).toBe(first.json.taskId);
     expect((await getTaskById(second.json.taskId))?.parentTaskId).toBe(first.json.taskId);
   });
 
   test("a comment written by the bot is ignored", async () => {
     const event = fixture(commentedFixture);
-    event.resource.fields["System.ChangedBy"] = `Lab Thinker Software <${BOT_EMAIL}>`;
+    event.resource.fields["System.ChangedBy"] = `Swarm Bot <${BOT_EMAIL}>`;
     expect((await post(event)).json).toEqual({ created: false });
   });
 });
@@ -283,7 +290,7 @@ describe("workitem.deleted and workitem.restored", () => {
     const restored = await post(fixture(restoredFixture));
     expect(restored.json.created).toBe(true);
     expect(restored.json.taskId).not.toBe(taskId);
-    const sync = await getTrackerSyncByExternalId("azure-devops", "task", "9");
+    const sync = await getTrackerSyncByExternalId("azure-devops", "task", LINK_9);
     expect(sync?.swarmId).toBe(restored.json.taskId);
     expect((await getTaskById(restored.json.taskId))?.task).toContain("Follow-up");
   });
@@ -300,7 +307,7 @@ describe("workitem.deleted and workitem.restored", () => {
   test("restoring a never-linked work item behaves like created", async () => {
     const { json } = await post(fixture(restoredFixture));
     expect(json.created).toBe(true);
-    const sync = await getTrackerSyncByExternalId("azure-devops", "task", "9");
+    const sync = await getTrackerSyncByExternalId("azure-devops", "task", LINK_9);
     expect(sync?.swarmId).toBe(json.taskId);
   });
 
@@ -315,6 +322,212 @@ describe("webhook auth", () => {
   test("a bad Basic password returns 401 and creates nothing", async () => {
     const { status } = await post(fixture(updatedFixture), "wrong");
     expect(status).toBe(401);
+    expect(await getTrackerSyncByExternalId("azure-devops", "task", LINK_9)).toBeNull();
+  });
+});
+
+// ── Review regressions (PR #2119) ──
+
+function countingFetch(calls: string[], failures = { remaining: 0 }) {
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    calls.push(`${String(input)} ${init?.redirect ?? ""}`);
+    if (failures.remaining > 0) {
+      failures.remaining--;
+      return new Response("unavailable", { status: 503 });
+    }
+    return Response.json({
+      authenticatedUser: { id: BOT_ID, properties: { Account: { $value: BOT_EMAIL } } },
+    });
+  }) as typeof fetch;
+}
+
+function inOrg(event: Json, baseUrl: string): Json {
+  event.resourceContainers = {
+    account: { baseUrl },
+    collection: { baseUrl },
+  };
+  event.resource.url = `${baseUrl}/proj/_apis/wit/workItems/9`;
+  return event;
+}
+
+describe("organization URL validation", () => {
+  test.each([
+    ["a foreign host", "https://attacker.example.com/acme-org/"],
+    ["plain http", "http://dev.azure.com/acme-org/"],
+    ["another organization", "https://dev.azure.com/other-org/"],
+    ["embedded credentials", "https://user:pw@dev.azure.com/acme-org/"],
+  ])("a hostile payload (%s) makes zero credentialed requests", async (_name, baseUrl) => {
+    delete process.env.AZURE_DEVOPS_BOT_ID; // forces connectionData lookups
+    const calls: string[] = [];
+    countingFetch(calls);
+    resetAzureDevOpsBotIdCache();
+    const event = inOrg(assignedToBot(createdFixture), baseUrl);
+    expect((await post(event)).json).toEqual({ created: false });
+    expect(calls).toEqual([]);
+    expect(await getAllTrackerSyncs("azure-devops")).toHaveLength(0);
+  });
+
+  test("a hostile resource.url alone is rejected as well", async () => {
+    delete process.env.AZURE_DEVOPS_BOT_ID;
+    const calls: string[] = [];
+    countingFetch(calls);
+    const event = assignedToBot(createdFixture);
+    delete event.resourceContainers;
+    event.resource.url = "https://attacker.example.com/x/_apis/wit/workItems/9";
+    expect((await post(event)).json).toEqual({ created: false });
+    expect(calls).toEqual([]);
+  });
+
+  test("credentialed lookups refuse redirects", async () => {
+    delete process.env.AZURE_DEVOPS_BOT_ID;
+    const calls: string[] = [];
+    countingFetch(calls);
+    await post(assignedToBot(createdFixture));
+    expect(calls.length).toBeGreaterThan(0);
+    expect(calls.every((c) => c.endsWith("error"))).toBe(true);
+  });
+});
+
+describe("organization-scoped tracker identity", () => {
+  test("deleting work item 9 in organization B does not cancel organization A's task", async () => {
+    const first = await post(assignedToBot(createdFixture));
+    const taskId = first.json.taskId as string;
+    // A second organization is only reachable when it is not pinned by config.
+    delete process.env.AZURE_DEVOPS_ORG_URL;
+    initAzureDevOps();
+    resetAzureDevOps();
+    process.env.AZURE_DEVOPS_WEBHOOK_SECRET = SECRET;
+    process.env.AZURE_DEVOPS_TOKEN = "pat";
+    initAzureDevOps();
+    const deleted = inOrg(fixture(deletedFixture), "https://dev.azure.com/other-org/");
+    await post(deleted);
+    expect((await getTaskById(taskId))?.status).not.toBe("cancelled");
+
+    const sync = await getTrackerSyncByExternalId("azure-devops", "task", LINK_9);
+    expect(sync?.swarmId).toBe(taskId);
     expect(await getTrackerSyncByExternalId("azure-devops", "task", "9")).toBeNull();
+  });
+
+  test("the same work item id in two organizations gets two links and two tasks", async () => {
+    delete process.env.AZURE_DEVOPS_ORG_URL;
+    resetAzureDevOps();
+    process.env.AZURE_DEVOPS_WEBHOOK_SECRET = SECRET;
+    process.env.AZURE_DEVOPS_TOKEN = "pat";
+    initAzureDevOps();
+    const a = await post(inOrg(assignedToBot(createdFixture), "https://dev.azure.com/acme-org/"));
+    const b = await post(inOrg(assignedToBot(createdFixture), "https://dev.azure.com/other-org/"));
+    expect(a.json.created).toBe(true);
+    expect(b.json.created).toBe(true);
+    expect(b.json.taskId).not.toBe(a.json.taskId);
+    expect(await getAllTrackerSyncs("azure-devops")).toHaveLength(2);
+  });
+});
+
+describe("concurrent deliveries", () => {
+  test("two overlapping assignments create exactly one task and one link", async () => {
+    const [a, b] = await Promise.all([
+      post(fixture(updatedFixture)),
+      post(fixture(updatedFixture)),
+    ]);
+    expect([a.json.created, b.json.created].filter(Boolean)).toHaveLength(1);
+    const syncs = await getAllTrackerSyncs("azure-devops");
+    expect(syncs).toHaveLength(1);
+    expect(syncs[0]?.swarmId).toBe(a.json.created ? a.json.taskId : b.json.taskId);
+  });
+
+  test("the same notification delivered twice at once is handled once", async () => {
+    const event = fixture(updatedFixture);
+    const [a, b] = await Promise.all([post(event), post(event)]);
+    expect([a.json.created, b.json.created].filter(Boolean)).toHaveLength(1);
+  });
+
+  test("a stale pending claim does not hide the link: the next delivery recovers it", async () => {
+    await createTrackerSyncIfAbsent({
+      provider: "azure-devops",
+      entityType: "task",
+      swarmId: `pending:azure-devops:${LINK_9}`,
+      externalId: LINK_9,
+    });
+    const { json } = await post(fixture(updatedFixture));
+    expect(json.created).toBe(true);
+    expect((await getTrackerSyncByExternalId("azure-devops", "task", LINK_9))?.swarmId).toBe(
+      json.taskId,
+    );
+  });
+});
+
+describe("failed deliveries stay retryable", () => {
+  test("a transient connectionData failure returns 500 and the retry succeeds", async () => {
+    delete process.env.AZURE_DEVOPS_BOT_ID;
+    const calls: string[] = [];
+    countingFetch(calls, { remaining: 1 });
+    spyOn(console, "error").mockImplementation(() => {});
+    const event = assignedToBot(createdFixture);
+    expect((await post(event)).status).toBe(500);
+    expect(await hasTrackerDelivery("azure-devops", event.id)).toBe(false);
+    const retry = await post(event);
+    expect(retry.status).toBe(200);
+    expect(retry.json.created).toBe(true);
+  });
+
+  test("a failed task creation leaves no claim or receipt, and the retry creates the task", async () => {
+    const event = assignedToBot(createdFixture);
+    const spy = spyOn(await import("../tasks/sibling-awareness"), "createTaskWithSiblingAwareness");
+    spy.mockRejectedValueOnce(new Error("boom"));
+    spyOn(console, "error").mockImplementation(() => {});
+    expect((await post(event)).status).toBe(500);
+    expect(await getAllTrackerSyncs("azure-devops")).toHaveLength(0);
+    expect(await hasTrackerDelivery("azure-devops", event.id)).toBe(false);
+    spy.mockRestore();
+    expect((await post(event)).json.created).toBe(true);
+  });
+
+  test("lastDeliveryId is written only after the task exists", async () => {
+    const event = assignedToBot(createdFixture);
+    const { json } = await post(event);
+    const sync = await getTrackerSyncByExternalId("azure-devops", "task", LINK_9);
+    expect(sync?.swarmId).toBe(json.taskId);
+    expect(sync?.lastDeliveryId).toBe(event.id);
+  });
+});
+
+function byStranger(event: Json, email: string): Json {
+  const who = `Stranger <${email}>`;
+  if (event.resource.fields) event.resource.fields["System.ChangedBy"] = who;
+  if (event.resource.revisedBy) event.resource.revisedBy.uniqueName = email;
+  return event;
+}
+
+describe("actor authorization", () => {
+  test("an unmapped actor creates no task", async () => {
+    delete process.env.AZURE_DEVOPS_ALLOWED_ACTORS;
+    spyOn(console, "warn").mockImplementation(() => {});
+    const email = "stranger@example.net";
+    expect((await post(byStranger(assignedToBot(createdFixture), email))).json).toEqual({
+      created: false,
+    });
+    expect((await post(byStranger(fixture(commentedFixture), email))).json).toEqual({
+      created: false,
+    });
+    expect((await post(byStranger(fixture(updatedFixture), email))).json).toEqual({
+      created: false,
+    });
+    expect(await getAllTrackerSyncs("azure-devops")).toHaveLength(0);
+  });
+
+  test("an allowlisted actor creates a task", async () => {
+    expect((await post(assignedToBot(createdFixture))).json.created).toBe(true);
+  });
+
+  test("an actor linked to a swarm user creates a task without the allowlist", async () => {
+    delete process.env.AZURE_DEVOPS_ALLOWED_ACTORS;
+    const email = "linked@example.org";
+    const actor = { kind: "system", id: "test" } as const;
+    const { findOrCreateUserByEmail, linkIdentity } = await import("../be/users");
+    const { user } = await findOrCreateUserByEmail(email, { name: "Linked" }, actor);
+    await linkIdentity(user.id, "azure-devops", email, actor);
+    const { json } = await post(byStranger(assignedToBot(createdFixture), email));
+    expect(json.created).toBe(true);
+    expect((await getTaskById(json.taskId))?.requestedByUserId).toBe(user.id);
   });
 });

@@ -20,6 +20,8 @@ Mentions are matched against the PAT owner, so `@agent-swarm-bot` in a PR is wha
 
 As with GitHub and GitLab, anyone who can comment on a pull request in a connected repository can trigger the swarm with a mention. Give the bot user access only to repositories where you accept that.
 
+**Work item triggers are stricter.** Work item text reaches a PAT-enabled agent, so a work item assignment, description mention, or comment mention creates a task only when the person who caused the event maps to a known swarm user, or their sign-in name is listed in `AZURE_DEVOPS_ALLOWED_ACTORS`. Events from anyone else are dropped and logged, and the actor shows up in the unmapped-identity list for triage. Work item events are also dropped unless they belong to the organization in `AZURE_DEVOPS_ORG_URL` (without it, only `dev.azure.com` and `*.visualstudio.com` HTTPS organizations qualify), and the PAT is never sent to any other URL. Scope the PAT to the one organization and to the projects the swarm serves; the Work Items scope should be granted only if you use Azure Boards.
+
 ## 2. Configure the swarm
 
 Set these as swarm config values (secret where marked) or as environment variables on the API server and the workers:
@@ -34,6 +36,10 @@ AZURE_DEVOPS_WEBHOOK_SECRET=a-long-random-string
 
 # Optional: identity GUID of the bot (default: the identity that owns the PAT)
 AZURE_DEVOPS_BOT_ID=00000000-0000-0000-0000-000000000000
+
+# Optional: sign-in names (comma-separated) allowed to trigger work item tasks
+# without a linked swarm user
+AZURE_DEVOPS_ALLOWED_ACTORS=alex@your-company.com
 
 # Optional: name for plain-text @mentions (default: agent-swarm-bot)
 AZURE_DEVOPS_BOT_NAME=agent-swarm-bot
@@ -130,6 +136,8 @@ Azure DevOps events can trigger [workflows](/docs/concepts/workflows):
 | Deliveries fail with `401 {"error":"Invalid credentials"}` | The Basic authentication password does not match `AZURE_DEVOPS_WEBHOOK_SECRET`. |
 | Deliveries fail with `503` | `AZURE_DEVOPS_WEBHOOK_SECRET` is not set on the API server, or `AZURE_DEVOPS_DISABLE=true`. |
 | A mention returns `{"created":false}` and no task appears | The author is the bot identity, usually the PAT owner. Mention from another account. |
+| A work item event returns `{"created":false}` and the log says the actor is not a known swarm user | Link the person's Azure DevOps sign-in name to a swarm user, or add it to `AZURE_DEVOPS_ALLOWED_ACTORS`. |
+| A work item delivery returns `500` | The bot identity lookup or task creation failed. Azure DevOps retries the delivery; nothing was recorded as handled. |
 | Assigning a work item does nothing | The **Work item updated** subscription is missing, or the item was assigned by the bot identity itself. |
 | Every comment returns `{"created":false}` and the API logs `required resource fields are missing` | The comment subscription uses resource version 1.0. Edit it and pick 2.0. |
 

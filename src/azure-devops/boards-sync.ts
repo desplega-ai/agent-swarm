@@ -6,7 +6,13 @@
  *   comment, creates a swarm task linked to the work item via `tracker_sync`
  * - `createTrackerSyncIfAbsent` claims the work item before the task exists,
  *   so concurrent deliveries cannot create two tasks
- * - Deliveries are deduplicated on the service-hook notification id
+ * - Deliveries are deduplicated on the service-hook notification id: an
+ *   in-flight claim blocks concurrent retries, and a durable receipt is written
+ *   only after the delivery was handled, so a failed one stays retryable
+ * - Work-item ids are organization-local, so tracker keys carry the organization
+ * - Events from an organization other than the configured one are dropped
+ *   before any credentialed request; only actors mapped to a swarm user (or
+ *   listed in AZURE_DEVOPS_ALLOWED_ACTORS) can create tasks
  * - Deleting a work item cancels its task; restoring it re-engages the swarm
  *
  * Payload facts (verified against real deliveries, resourceVersion 1.0):
@@ -17,9 +23,10 @@
  * - `workitem.commented`: the comment HTML is `fields["System.History"]`
  */
 
-import { cancelTask, getTaskById } from "../be/db";
+import { cancelTask, getKv, getTaskById, upsertKv } from "../be/db";
 import {
   createTrackerSyncIfAbsent,
+  deleteTrackerSync,
   getTrackerSyncByExternalId,
   hasTrackerDelivery,
   markTrackerDelivery,
@@ -30,15 +37,20 @@ import { azureDevOpsWorkItemContextKey } from "../tasks/context-key";
 import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
 import type { TrackerSync } from "../tracker/types";
 import { isTerminalTaskStatus } from "../types";
-import { resolveAzureDevOpsBotId, resolveAzureDevOpsBotUniqueName } from "./api";
-import { AZURE_DEVOPS_BOT_NAME, getAzureDevOpsOrgUrl, normalizeOrgUrl } from "./auth";
+import { resolveAzureDevOpsBotIdentity } from "./api";
 import {
+  AZURE_DEVOPS_BOT_NAME,
+  getAzureDevOpsOrgUrl,
+  isTrustedOrgUrl,
+  normalizeOrgUrl,
+  orgKeyOf,
+} from "./auth";
+import {
+  authorizeAzureDevOpsActor,
   detectMention,
   escapeRegExp,
   findLeadAgent,
-  isDuplicate,
   renderAzureDevOpsIdentity,
-  resolveAzureDevOpsSender,
   warnMalformed,
 } from "./handlers";
 import { htmlToText } from "./html";
@@ -108,11 +120,9 @@ interface Bot {
   uniqueName: string | null;
 }
 
+/** Throws AzureDevOpsLookupError on a transient failure, so the delivery is retried. */
 async function resolveBot(orgUrl: string | null): Promise<Bot> {
-  return {
-    id: await resolveAzureDevOpsBotId(orgUrl),
-    uniqueName: await resolveAzureDevOpsBotUniqueName(orgUrl),
-  };
+  return await resolveAzureDevOpsBotIdentity(orgUrl);
 }
 
 function isBotIdentity(identity: AzureDevOpsIdentityRef | null, bot: Bot): boolean {
@@ -166,20 +176,53 @@ function inspectMention(
 
 // ── Work item location ──
 
-function orgUrlFor(event: {
+interface Org {
+  /** Trusted organization URL, no trailing slash. */
+  url: string;
+  /** Canonical, lowercased organization identity, e.g. `dev.azure.com/acme`. */
+  key: string;
+}
+
+/**
+ * The organization a delivery belongs to, or null when it must be dropped.
+ * Payload URLs are attacker-influenced, so they only select among trusted
+ * organizations: with AZURE_DEVOPS_ORG_URL set they must match it, otherwise
+ * they must be public Azure DevOps HTTPS URLs. Nothing credentialed runs
+ * before this check.
+ */
+function orgFor(event: {
   resource?: { url?: string };
   resourceContainers?: {
     account?: { baseUrl?: string };
     collection?: { baseUrl?: string };
   };
-}): string | null {
+}): Org | null {
   const containers = event.resourceContainers;
-  const fromContainer = normalizeOrgUrl(
-    containers?.account?.baseUrl ?? containers?.collection?.baseUrl,
-  );
-  if (fromContainer) return fromContainer;
   const fromUrl = event.resource?.url?.split("/_apis/")[0];
-  return (fromUrl?.includes("://") ? normalizeOrgUrl(fromUrl) : null) ?? getAzureDevOpsOrgUrl();
+  const candidates = [
+    containers?.account?.baseUrl,
+    containers?.collection?.baseUrl,
+    fromUrl?.includes("://") ? fromUrl : undefined,
+  ]
+    .map((url) => normalizeOrgUrl(url))
+    .filter((url): url is string => !!url);
+  const configured = getAzureDevOpsOrgUrl();
+  const url = candidates[0] ?? configured;
+  if (!url || !isTrustedOrgUrl(url)) return null;
+  // Every payload source must agree on one organization.
+  const key = orgKeyOf(url);
+  if (!key || candidates.some((c) => orgKeyOf(c) !== key)) return null;
+  return { url, key };
+}
+
+function dropUntrustedOrg(eventType: string): HandlerResult {
+  console.warn(`[AzureDevOps] Dropping ${eventType} event from an untrusted organization`);
+  return { created: false };
+}
+
+/** Tracker `externalId`: work-item ids repeat across organizations. */
+function trackerKey(org: Org, workItemId: number): string {
+  return `${org.key}#${workItemId}`;
 }
 
 /** Organization name: the path segment of `dev.azure.com/{org}`, or the host label of `{org}.visualstudio.com`. */
@@ -199,25 +242,77 @@ interface WorkItemContext {
   eventType: string;
   workItemId: number;
   fields: AzureDevOpsWorkItemFields;
-  orgUrl: string | null;
+  org: Org;
   /** Person that caused the event, as an identity object. */
   actor: AzureDevOpsIdentityRef | null;
 }
 
 function workItemUrl(ctx: WorkItemContext): string {
   const project = ctx.fields["System.TeamProject"];
-  const base = ctx.orgUrl ?? "";
+  const base = ctx.org.url;
   return project
     ? `${base}/${encodeURIComponent(project)}/_workitems/edit/${ctx.workItemId}`
     : `${base}/_workitems/edit/${ctx.workItemId}`;
 }
 
-// ── Dedup ──
+// ── Dedup and serialization ──
 
-/** True when this notification id was already handled (in memory or in `tracker_sync`). */
-async function alreadyDelivered(eventId: string): Promise<boolean> {
-  if (isDuplicate(`azure-devops-workitem-event-${eventId}`)) return true;
-  return await hasTrackerDelivery(PROVIDER, eventId);
+const RECEIPT_NAMESPACE = "integration:azure-devops:deliveries";
+const RECEIPT_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const inFlight = new Set<string>();
+
+/**
+ * Run `fn` once per `key`. A concurrent delivery with the same key is skipped
+ * while the first is in flight; the durable receipt is only written after `fn`
+ * returned, so a thrown error leaves the delivery retryable.
+ */
+async function withReceipt(key: string, fn: () => Promise<HandlerResult>): Promise<HandlerResult> {
+  if (inFlight.has(key)) return { created: false };
+  inFlight.add(key);
+  try {
+    if ((await getKv(RECEIPT_NAMESPACE, key)) || (await hasTrackerDelivery(PROVIDER, key))) {
+      return { created: false };
+    }
+    const result = await fn();
+    await upsertKv({
+      namespace: RECEIPT_NAMESPACE,
+      key,
+      value: { handledAt: new Date().toISOString() },
+      valueType: "json",
+      expiresAt: Date.now() + RECEIPT_TTL_MS,
+    });
+    return result;
+  } finally {
+    inFlight.delete(key);
+  }
+}
+
+const workItemLocks = new Map<string, Promise<unknown>>();
+
+/** Serialize handling per work item (the API server is the single DB owner, so in-process is enough). */
+async function withWorkItemLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
+  const run = (workItemLocks.get(key) ?? Promise.resolve()).then(fn);
+  const tail = run.catch(() => {});
+  workItemLocks.set(key, tail);
+  try {
+    return await run;
+  } finally {
+    if (workItemLocks.get(key) === tail) workItemLocks.delete(key);
+  }
+}
+
+/** Gate, receipt and lock shared by every work-item event. */
+async function handleDelivery(
+  org: Org,
+  eventId: string,
+  workItemId: number,
+  fn: () => Promise<HandlerResult>,
+  extraReceiptKey?: string,
+): Promise<HandlerResult> {
+  const locked = () => withWorkItemLock(trackerKey(org, workItemId), fn);
+  return await withReceipt(eventId, () =>
+    extraReceiptKey ? withReceipt(extraReceiptKey, locked) : locked(),
+  );
 }
 
 // ── Task creation ──
@@ -234,7 +329,13 @@ const TRIGGER_LABEL: Record<Trigger, string> = {
 async function createWorkItemTask(
   ctx: WorkItemContext,
   trigger: Trigger,
-  opts: { followup: boolean; commentText?: string; parentTaskId?: string; existingTaskId?: string },
+  opts: {
+    followup: boolean;
+    requestedByUserId: string;
+    commentText?: string;
+    parentTaskId?: string;
+    existingTaskId?: string;
+  },
 ): Promise<string | null> {
   const { fields } = ctx;
   const description = htmlToText(fields["System.Description"]).slice(0, DESCRIPTION_LIMIT);
@@ -273,9 +374,6 @@ async function createWorkItemTask(
   const result = resolveTemplate(templateName, variables);
   if (result.skipped) return null;
 
-  const requestedByUserId = ctx.actor
-    ? await resolveAzureDevOpsSender(ctx.actor, "work_item", `#${ctx.workItemId}: ${common.title}`)
-    : undefined;
   const lead = await findLeadAgent();
   const task = await createTaskWithSiblingAwareness(
     result.text,
@@ -285,10 +383,10 @@ async function createWorkItemTask(
       routingSource: lead ? "engine_default" : undefined,
       source: "azure-devops",
       taskType: "azure-devops-work-item",
-      requestedByUserId,
+      requestedByUserId: opts.requestedByUserId,
       parentTaskId: opts.parentTaskId,
       contextKey: azureDevOpsWorkItemContextKey({
-        organization: organizationOf(ctx.orgUrl),
+        organization: organizationOf(ctx.org.url),
         workItemId: ctx.workItemId,
       }),
     },
@@ -298,41 +396,77 @@ async function createWorkItemTask(
 }
 
 /**
+ * Only actors mapped to a swarm user (or allowlisted) may create tasks: the
+ * task text is untrusted work-item content handed to a PAT-enabled agent.
+ */
+async function authorizeActor(ctx: WorkItemContext, trigger: Trigger): Promise<string | null> {
+  const userId = ctx.actor
+    ? await authorizeAzureDevOpsActor(ctx.actor, "work_item", `${trigger} #${ctx.workItemId}`)
+    : null;
+  if (!userId) {
+    console.warn(
+      `[AzureDevOps] Ignoring ${TRIGGER_LABEL[trigger]} on work item #${ctx.workItemId}: actor is not a known swarm user`,
+    );
+  }
+  return userId;
+}
+
+/**
  * Claim the work item in `tracker_sync`, then create or follow up a task:
  * - new link → initial task
  * - linked task still active → assignment is ignored; a mention creates a
  *   child task and leaves the link on the original task
  * - linked task terminal (or orphan link) → follow-up task, link repointed
+ *
+ * Callers hold the work-item lock, so a `pending:` link seen here is an
+ * abandoned claim from a crashed delivery, not one in flight.
  */
 async function routeToTask(
   ctx: WorkItemContext,
   trigger: Trigger,
   commentText?: string,
 ): Promise<HandlerResult> {
+  const requestedByUserId = await authorizeActor(ctx, trigger);
+  if (!requestedByUserId) return { created: false };
+
+  const externalId = trackerKey(ctx.org, ctx.workItemId);
   const claim = await createTrackerSyncIfAbsent({
     provider: PROVIDER,
     entityType: "task",
     providerEntityType: "WorkItem",
     // Unique placeholder (UNIQUE(provider, entityType, swarmId)), replaced once the task exists.
-    swarmId: `pending:${PROVIDER}:${ctx.workItemId}`,
-    externalId: String(ctx.workItemId),
+    swarmId: `pending:${PROVIDER}:${externalId}`,
+    externalId,
     externalIdentifier: `${ctx.fields["System.TeamProject"] ?? "unknown"}#${ctx.workItemId}`,
     externalUrl: workItemUrl(ctx),
     lastSyncOrigin: "external",
-    lastDeliveryId: ctx.eventId,
     syncDirection: "inbound",
   });
   const mentioned = trigger === "mentioned_comment" || trigger === "mentioned_description";
 
   if (claim.inserted) {
-    const taskId = await createWorkItemTask(ctx, trigger, { followup: false, commentText });
-    if (!taskId) return { created: false };
-    await updateTrackerSyncSwarmId(claim.sync.id, taskId);
-    return { created: true, taskId };
+    let taskId: string | null = null;
+    try {
+      taskId = await createWorkItemTask(ctx, trigger, {
+        followup: false,
+        requestedByUserId,
+        commentText,
+      });
+      if (taskId) {
+        await updateTrackerSyncSwarmId(claim.sync.id, taskId);
+        await markTrackerDelivery(PROVIDER, "task", externalId, ctx.eventId);
+      }
+    } finally {
+      // No task: release the claim so a retry starts clean.
+      if (!taskId) await deleteTrackerSync(claim.sync.id);
+    }
+    return taskId ? { created: true, taskId } : { created: false };
   }
 
-  await markTrackerDelivery(PROVIDER, "task", String(ctx.workItemId), ctx.eventId);
-  const prior = claim.sync.swarmId ? await getTaskById(claim.sync.swarmId) : null;
+  const prior =
+    claim.sync.swarmId && !claim.sync.swarmId.startsWith("pending:")
+      ? await getTaskById(claim.sync.swarmId)
+      : null;
   if (prior && !isTerminalTaskStatus(prior.status)) {
     if (!mentioned) {
       console.log(
@@ -342,16 +476,23 @@ async function routeToTask(
     }
     const taskId = await createWorkItemTask(ctx, trigger, {
       followup: false,
+      requestedByUserId,
       commentText,
       parentTaskId: prior.id,
       existingTaskId: prior.id,
     });
+    if (taskId) await markTrackerDelivery(PROVIDER, "task", externalId, ctx.eventId);
     return taskId ? { created: true, taskId } : { created: false };
   }
 
-  const taskId = await createWorkItemTask(ctx, trigger, { followup: true, commentText });
+  const taskId = await createWorkItemTask(ctx, trigger, {
+    followup: true,
+    requestedByUserId,
+    commentText,
+  });
   if (!taskId) return { created: false };
   await updateTrackerSyncSwarmId(claim.sync.id, taskId);
+  await markTrackerDelivery(PROVIDER, "task", externalId, ctx.eventId);
   return { created: true, taskId };
 }
 
@@ -375,27 +516,29 @@ export async function handleWorkItemCreated(event: WorkItemCreatedEvent): Promis
     warnMalformed(event);
     return { created: false };
   }
-  if (await alreadyDelivered(event.id)) return { created: false };
+  const org = orgFor(event);
+  if (!org) return dropUntrustedOrg(event.eventType);
 
-  const orgUrl = orgUrlFor(event);
-  const bot = await resolveBot(orgUrl);
-  const actor = parseIdentityString(item.fields["System.ChangedBy"]);
-  if (isBotIdentity(actor, bot)) return { created: false };
+  return await handleDelivery(org, event.id, item.id, async () => {
+    const bot = await resolveBot(org.url);
+    const actor = parseIdentityString(item.fields["System.ChangedBy"]);
+    if (isBotIdentity(actor, bot)) return { created: false };
 
-  const trigger = await triggerFromFields(item.fields, bot);
-  if (!trigger) return { created: false };
+    const trigger = await triggerFromFields(item.fields, bot);
+    if (!trigger) return { created: false };
 
-  return await routeToTask(
-    {
-      eventId: event.id,
-      eventType: event.eventType,
-      workItemId: item.id,
-      fields: item.fields,
-      orgUrl,
-      actor,
-    },
-    trigger,
-  );
+    return await routeToTask(
+      {
+        eventId: event.id,
+        eventType: event.eventType,
+        workItemId: item.id,
+        fields: item.fields,
+        org,
+        actor,
+      },
+      trigger,
+    );
+  });
 }
 
 /**
@@ -411,26 +554,28 @@ export async function handleWorkItemUpdated(event: WorkItemUpdatedEvent): Promis
   }
   const change = update.fields?.["System.AssignedTo"];
   if (!change) return { created: false };
-  if (await alreadyDelivered(event.id)) return { created: false };
+  const org = orgFor(event);
+  if (!org) return dropUntrustedOrg(event.eventType);
 
-  const orgUrl = orgUrlFor(event);
-  const bot = await resolveBot(orgUrl);
-  if (!isBotString(change.newValue, bot) || isBotString(change.oldValue, bot)) {
-    return { created: false };
-  }
-  if (isBotIdentity(update.revisedBy ?? null, bot)) return { created: false };
+  return await handleDelivery(org, event.id, update.workItemId, async () => {
+    const bot = await resolveBot(org.url);
+    if (!isBotString(change.newValue, bot) || isBotString(change.oldValue, bot)) {
+      return { created: false };
+    }
+    if (isBotIdentity(update.revisedBy ?? null, bot)) return { created: false };
 
-  return await routeToTask(
-    {
-      eventId: event.id,
-      eventType: event.eventType,
-      workItemId: update.workItemId,
-      fields: update.revision.fields,
-      orgUrl,
-      actor: update.revisedBy ?? null,
-    },
-    "assigned",
-  );
+    return await routeToTask(
+      {
+        eventId: event.id,
+        eventType: event.eventType,
+        workItemId: update.workItemId,
+        fields: update.revision.fields,
+        org,
+        actor: update.revisedBy ?? null,
+      },
+      "assigned",
+    );
+  });
 }
 
 /** `workitem.commented`: a bot mention in a newly published comment. */
@@ -446,30 +591,36 @@ export async function handleWorkItemCommented(
   // version triggers, so fixing a typo in a mention does not spawn a second task.
   const ref = item.commentVersionRef;
   if (ref && ref.version > 1) return { created: false };
-  if (await alreadyDelivered(event.id)) return { created: false };
-  if (ref && isDuplicate(`azure-devops-workitem-${item.id}-comment-${ref.commentId}`)) {
-    return { created: false };
-  }
+  const org = orgFor(event);
+  if (!org) return dropUntrustedOrg(event.eventType);
 
-  const orgUrl = orgUrlFor(event);
-  const bot = await resolveBot(orgUrl);
-  const actor = parseIdentityString(item.fields["System.ChangedBy"]);
-  if (isBotIdentity(actor, bot)) return { created: false };
+  const commentKey = ref ? `comment:${trackerKey(org, item.id)}:${ref.commentId}` : undefined;
+  return await handleDelivery(
+    org,
+    event.id,
+    item.id,
+    async () => {
+      const bot = await resolveBot(org.url);
+      const actor = parseIdentityString(item.fields["System.ChangedBy"]);
+      if (isBotIdentity(actor, bot)) return { created: false };
 
-  const { mentioned, text } = inspectMention(item.fields["System.History"], bot);
-  if (!mentioned) return { created: false };
+      const { mentioned, text } = inspectMention(item.fields["System.History"], bot);
+      if (!mentioned) return { created: false };
 
-  return await routeToTask(
-    {
-      eventId: event.id,
-      eventType: event.eventType,
-      workItemId: item.id,
-      fields: item.fields,
-      orgUrl,
-      actor,
+      return await routeToTask(
+        {
+          eventId: event.id,
+          eventType: event.eventType,
+          workItemId: item.id,
+          fields: item.fields,
+          org,
+          actor,
+        },
+        "mentioned_comment",
+        text,
+      );
     },
-    "mentioned_comment",
-    text,
+    commentKey,
   );
 }
 
@@ -480,18 +631,23 @@ export async function handleWorkItemDeleted(event: WorkItemDeletedEvent): Promis
     warnMalformed(event);
     return { created: false };
   }
-  if (await alreadyDelivered(event.id)) return { created: false };
+  const org = orgFor(event);
+  if (!org) return dropUntrustedOrg(event.eventType);
 
-  const sync = await getTrackerSyncByExternalId(PROVIDER, "task", String(item.id));
-  if (!sync) return { created: false };
+  return await handleDelivery(org, event.id, item.id, async () => {
+    const externalId = trackerKey(org, item.id);
+    const sync = await getTrackerSyncByExternalId(PROVIDER, "task", externalId);
+    if (!sync) return { created: false };
 
-  const task = sync.swarmId ? await getTaskById(sync.swarmId) : null;
-  if (task && !isTerminalTaskStatus(task.status)) {
-    await cancelTask(task.id, DELETED_REASON);
-    console.log(`[AzureDevOps] Cancelled task ${task.id} (work item #${item.id} deleted)`);
-  }
-  await markTrackerDelivery(PROVIDER, "task", String(item.id), event.id);
-  return { created: false };
+    const task =
+      sync.swarmId && !sync.swarmId.startsWith("pending:") ? await getTaskById(sync.swarmId) : null;
+    if (task && !isTerminalTaskStatus(task.status)) {
+      await cancelTask(task.id, DELETED_REASON);
+      console.log(`[AzureDevOps] Cancelled task ${task.id} (work item #${item.id} deleted)`);
+    }
+    await markTrackerDelivery(PROVIDER, "task", externalId, event.id);
+    return { created: false };
+  });
 }
 
 /**
@@ -507,39 +663,42 @@ export async function handleWorkItemRestored(event: WorkItemRestoredEvent): Prom
     warnMalformed(event);
     return { created: false };
   }
-  if (await alreadyDelivered(event.id)) return { created: false };
+  const org = orgFor(event);
+  if (!org) return dropUntrustedOrg(event.eventType);
 
-  const orgUrl = orgUrlFor(event);
-  const bot = await resolveBot(orgUrl);
-  const actor = parseIdentityString(item.fields["System.ChangedBy"]);
-  const ctx: WorkItemContext = {
-    eventId: event.id,
-    eventType: event.eventType,
-    workItemId: item.id,
-    fields: item.fields,
-    orgUrl,
-    actor,
-  };
+  return await handleDelivery(org, event.id, item.id, async () => {
+    const bot = await resolveBot(org.url);
+    const actor = parseIdentityString(item.fields["System.ChangedBy"]);
+    const ctx: WorkItemContext = {
+      eventId: event.id,
+      eventType: event.eventType,
+      workItemId: item.id,
+      fields: item.fields,
+      org,
+      actor,
+    };
 
-  const sync: TrackerSync | null = await getTrackerSyncByExternalId(
-    PROVIDER,
-    "task",
-    String(item.id),
-  );
-  if (!sync) {
-    if (isBotIdentity(actor, bot)) return { created: false };
-    const trigger = await triggerFromFields(item.fields, bot);
-    return trigger ? await routeToTask(ctx, trigger) : { created: false };
-  }
+    const externalId = trackerKey(org, item.id);
+    const sync: TrackerSync | null = await getTrackerSyncByExternalId(PROVIDER, "task", externalId);
+    if (!sync) {
+      if (isBotIdentity(actor, bot)) return { created: false };
+      const trigger = await triggerFromFields(item.fields, bot);
+      return trigger ? await routeToTask(ctx, trigger) : { created: false };
+    }
 
-  await markTrackerDelivery(PROVIDER, "task", String(item.id), event.id);
-  const task = sync.swarmId ? await getTaskById(sync.swarmId) : null;
-  const cancelledByDelete = task?.status === "cancelled" && task.failureReason === DELETED_REASON;
-  if (!cancelledByDelete || !isBotString(item.fields["System.AssignedTo"], bot)) {
-    return { created: false };
-  }
-  const taskId = await createWorkItemTask(ctx, "restored", { followup: true });
-  if (!taskId) return { created: false };
-  await updateTrackerSyncSwarmId(sync.id, taskId);
-  return { created: true, taskId };
+    const task =
+      sync.swarmId && !sync.swarmId.startsWith("pending:") ? await getTaskById(sync.swarmId) : null;
+    const cancelledByDelete = task?.status === "cancelled" && task.failureReason === DELETED_REASON;
+    if (!cancelledByDelete || !isBotString(item.fields["System.AssignedTo"], bot)) {
+      await markTrackerDelivery(PROVIDER, "task", externalId, event.id);
+      return { created: false };
+    }
+    const requestedByUserId = await authorizeActor(ctx, "restored");
+    if (!requestedByUserId) return { created: false };
+    const taskId = await createWorkItemTask(ctx, "restored", { followup: true, requestedByUserId });
+    if (!taskId) return { created: false };
+    await updateTrackerSyncSwarmId(sync.id, taskId);
+    await markTrackerDelivery(PROVIDER, "task", externalId, event.id);
+    return { created: true, taskId };
+  });
 }
