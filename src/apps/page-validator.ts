@@ -46,10 +46,11 @@ const UI_STATE_COMPONENTS = new Set(["SearchInput", "Select", "Tabs"]);
 
 /**
  * Props that hold a plain action chain (an array of `{ action, params }`),
- * keyed by component type. Table's `rowActions[].actions` is nested one level
- * deeper and handled separately.
+ * keyed by component type. Table's `rowActions[].actions` and
+ * `columns[].onChange` are nested one level deeper and handled separately.
  */
 const PROP_ACTION_CHAINS: Record<string, readonly string[]> = {
+  Table: ["onRowClick"],
   Form: ["onSubmit"],
   Kanban: ["onMove", "onCardClick"],
   Calendar: ["onSelect"],
@@ -723,6 +724,17 @@ function visitPageActionSteps(
         );
       }
     }
+    if (rawElement.type === "Table" && Array.isArray(rawElement.props.columns)) {
+      for (const [index, column] of rawElement.props.columns.entries()) {
+        if (!isPlainObject(column) || !Object.hasOwn(column, "onChange")) continue;
+        visitActionChain(
+          column.onChange,
+          `${elementPath}.props.columns.${index}.onChange`,
+          visit,
+          false,
+        );
+      }
+    }
     for (const prop of PROP_ACTION_CHAINS[String(rawElement.type)] ?? []) {
       visitActionChain(rawElement.props[prop], `${elementPath}.props.${prop}`, visit, false);
     }
@@ -1253,7 +1265,7 @@ export function validatePage(
       const propsPath = appendPath(elementPath, "props");
       const actionChainPath = (path: string): boolean =>
         (PROP_ACTION_CHAINS[String(type)] ?? []).some((prop) => path === `${propsPath}.${prop}`) ||
-        (type === "Table" && /^.+\.rowActions\.\d+\.actions$/.test(path));
+        (type === "Table" && /^.+\.(rowActions\.\d+\.actions|columns\.\d+\.onChange)$/.test(path));
       const propsResult = validateSchema(
         Object.hasOwn(rawElement, "props") ? rawElement.props : {},
         component.props,
@@ -1334,6 +1346,15 @@ export function validatePage(
             queryModel.model,
             issues,
           );
+          for (const prop of ["onRowClick", "columns"] as const) {
+            collectRowFieldIssues(
+              rawElement.props[prop],
+              `${elementPath}.props.${prop}`,
+              queryModel.modelName,
+              queryModel.model,
+              issues,
+            );
+          }
         }
       } else if (type === "DetailList") {
         const queryModel = queryModelFromDataBinding(definition, rawElement.props.data);
@@ -1489,6 +1510,23 @@ export function validatePage(
         const chainResult = validateActionChain(
           rowAction.actions,
           `${elementPath}.props.rowActions.${rowActionIndex}.actions`,
+          definition,
+          catalog,
+        );
+        issues.push(...chainResult.issues);
+        stateRefs.push(...chainResult.stateRefs);
+      }
+    }
+    if (
+      type === "Table" &&
+      isPlainObject(rawElement.props) &&
+      Array.isArray(rawElement.props.columns)
+    ) {
+      for (const [columnIndex, column] of rawElement.props.columns.entries()) {
+        if (!isPlainObject(column) || !Object.hasOwn(column, "onChange")) continue;
+        const chainResult = validateActionChain(
+          column.onChange,
+          `${elementPath}.props.columns.${columnIndex}.onChange`,
           definition,
           catalog,
         );

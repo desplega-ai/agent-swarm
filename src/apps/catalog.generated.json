@@ -17,6 +17,7 @@
     "Metric",
     "Alert",
     "Badge",
+    "Icon",
     "Table",
     "Form",
     "Drawer",
@@ -172,7 +173,7 @@
       }
     },
     "Tabs": {
-      "description": "Tabbed sections. POSITIONAL children: children[i] is the body of tabs[i], so declare exactly as many children as tabs, in the same order. Only the active tab is visible but every child stays mounted, so polled Tables in background tabs keep their data warm. The active key is mirrored into state at `/ui/<id>/tab`, so other components can bind `{ \"$state\": \"/ui/<id>/tab\" }`. `defaultTab` picks the initial key (defaults to the first tab).",
+      "description": "Tabbed sections. POSITIONAL children: children[i] is the body of tabs[i], so declare exactly as many children as tabs, in the same order. Only the active tab is visible but every child stays mounted, so polled Tables in background tabs keep their data warm. The active key is mirrored into state at `/ui/<id>/tab`, so other components can bind `{ \"$state\": \"/ui/<id>/tab\" }`. `defaultTab` picks the initial key (defaults to the first tab). Tab entries take an optional `icon`.",
       "slots": ["default"],
       "props": {
         "$schema": "http://json-schema.org/draft-07/schema#",
@@ -192,6 +193,51 @@
                 },
                 "label": {
                   "type": "string"
+                },
+                "icon": {
+                  "type": "string",
+                  "enum": [
+                    "plus",
+                    "refresh-cw",
+                    "search",
+                    "filter",
+                    "download",
+                    "upload",
+                    "external-link",
+                    "copy",
+                    "check",
+                    "x",
+                    "trash-2",
+                    "pencil",
+                    "eye",
+                    "calendar",
+                    "clock",
+                    "user",
+                    "users",
+                    "bot",
+                    "git-pull-request",
+                    "git-branch",
+                    "github",
+                    "slack",
+                    "mail",
+                    "link",
+                    "file-text",
+                    "folder",
+                    "database",
+                    "zap",
+                    "sparkles",
+                    "flag",
+                    "star",
+                    "tag",
+                    "alert-triangle",
+                    "info",
+                    "circle-check",
+                    "trending-up",
+                    "trending-down",
+                    "dollar-sign",
+                    "activity",
+                    "rocket"
+                  ]
                 }
               },
               "required": ["key"],
@@ -360,7 +406,7 @@
       }
     },
     "Button": {
-      "description": "Interactive button. Wire to actions via `on.press`. `variant: \"destructive-outline\"` is the canonical red-outlined destructive look (standalone deletes should use it, not solid red). `disabled` accepts a constant or a bound boolean; `busyWith: \"<actionName>\"` disables the button and shows a spinner while that custom action is running.",
+      "description": "Interactive button. Wire to actions via `on.press`. `variant: \"destructive-outline\"` is the canonical red-outlined destructive look (standalone deletes should use it, not solid red). `disabled` accepts a constant or a bound boolean; `busyWith: \"<actionName>\"` disables the button and shows a spinner while that custom action is running. `icon` + `iconPosition` (start|end) add an icon from the curated set.",
       "props": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "type": "object",
@@ -384,6 +430,55 @@
           },
           "busyWith": {
             "type": "string"
+          },
+          "icon": {
+            "type": "string",
+            "enum": [
+              "plus",
+              "refresh-cw",
+              "search",
+              "filter",
+              "download",
+              "upload",
+              "external-link",
+              "copy",
+              "check",
+              "x",
+              "trash-2",
+              "pencil",
+              "eye",
+              "calendar",
+              "clock",
+              "user",
+              "users",
+              "bot",
+              "git-pull-request",
+              "git-branch",
+              "github",
+              "slack",
+              "mail",
+              "link",
+              "file-text",
+              "folder",
+              "database",
+              "zap",
+              "sparkles",
+              "flag",
+              "star",
+              "tag",
+              "alert-triangle",
+              "info",
+              "circle-check",
+              "trending-up",
+              "trending-down",
+              "dollar-sign",
+              "activity",
+              "rocket"
+            ]
+          },
+          "iconPosition": {
+            "type": "string",
+            "enum": ["start", "end"]
           }
         },
         "required": ["label"],
@@ -391,7 +486,7 @@
       }
     },
     "Metric": {
-      "description": "Single label/value tile for status pages. Bind `loading` to the backing query (`{ \"$state\": \"/queries/<name>/loading\" }`) to show a skeleton instead of a blank value while it loads.",
+      "description": "Single label/value tile for status pages. Bind `loading` to the backing query (`{ \"$state\": \"/queries/<name>/loading\" }`) to show a skeleton instead of a blank value while it loads. `icon` adds an icon from the curated set.",
       "props": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "type": "object",
@@ -411,6 +506,51 @@
           },
           "loading": {
             "type": "boolean"
+          },
+          "icon": {
+            "type": "string",
+            "enum": [
+              "plus",
+              "refresh-cw",
+              "search",
+              "filter",
+              "download",
+              "upload",
+              "external-link",
+              "copy",
+              "check",
+              "x",
+              "trash-2",
+              "pencil",
+              "eye",
+              "calendar",
+              "clock",
+              "user",
+              "users",
+              "bot",
+              "git-pull-request",
+              "git-branch",
+              "github",
+              "slack",
+              "mail",
+              "link",
+              "file-text",
+              "folder",
+              "database",
+              "zap",
+              "sparkles",
+              "flag",
+              "star",
+              "tag",
+              "alert-triangle",
+              "info",
+              "circle-check",
+              "trending-up",
+              "trending-down",
+              "dollar-sign",
+              "activity",
+              "rocket"
+            ]
           }
         },
         "required": ["label", "value"],
@@ -418,7 +558,7 @@
       }
     },
     "Alert": {
-      "description": "Status-toned inline alert.",
+      "description": "Status-toned inline alert. `icon` overrides the tone's default icon.",
       "props": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "type": "object",
@@ -432,6 +572,51 @@
           },
           "title": {
             "type": "string"
+          },
+          "icon": {
+            "type": "string",
+            "enum": [
+              "plus",
+              "refresh-cw",
+              "search",
+              "filter",
+              "download",
+              "upload",
+              "external-link",
+              "copy",
+              "check",
+              "x",
+              "trash-2",
+              "pencil",
+              "eye",
+              "calendar",
+              "clock",
+              "user",
+              "users",
+              "bot",
+              "git-pull-request",
+              "git-branch",
+              "github",
+              "slack",
+              "mail",
+              "link",
+              "file-text",
+              "folder",
+              "database",
+              "zap",
+              "sparkles",
+              "flag",
+              "star",
+              "tag",
+              "alert-triangle",
+              "info",
+              "circle-check",
+              "trending-up",
+              "trending-down",
+              "dollar-sign",
+              "activity",
+              "rocket"
+            ]
           }
         },
         "required": ["message"],
@@ -439,7 +624,7 @@
       }
     },
     "Badge": {
-      "description": "Status pill (uppercase tag chip) with a semantic tone.",
+      "description": "Status pill (uppercase tag chip) with a semantic tone. `icon` (a name from the curated icon set) replaces the dot.",
       "props": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "type": "object",
@@ -466,14 +651,126 @@
               "warning",
               "paused"
             ]
+          },
+          "icon": {
+            "type": "string",
+            "enum": [
+              "plus",
+              "refresh-cw",
+              "search",
+              "filter",
+              "download",
+              "upload",
+              "external-link",
+              "copy",
+              "check",
+              "x",
+              "trash-2",
+              "pencil",
+              "eye",
+              "calendar",
+              "clock",
+              "user",
+              "users",
+              "bot",
+              "git-pull-request",
+              "git-branch",
+              "github",
+              "slack",
+              "mail",
+              "link",
+              "file-text",
+              "folder",
+              "database",
+              "zap",
+              "sparkles",
+              "flag",
+              "star",
+              "tag",
+              "alert-triangle",
+              "info",
+              "circle-check",
+              "trending-up",
+              "trending-down",
+              "dollar-sign",
+              "activity",
+              "rocket"
+            ]
           }
         },
         "required": ["text"],
         "additionalProperties": false
       }
     },
+    "Icon": {
+      "description": "One icon from the curated lucide set (`plus`, `refresh-cw`, `search`, `filter`, `download`, `upload`, `external-link`, `copy`, `check`, `x`, `trash-2`, `pencil`, `eye`, `calendar`, `clock`, `user`, `users`, `bot`, `git-pull-request`, `git-branch`, `github`, `slack`, `mail`, `link`, `file-text`, `folder`, `database`, `zap`, `sparkles`, `flag`, `star`, `tag`, `alert-triangle`, `info`, `circle-check`, `trending-up`, `trending-down`, `dollar-sign`, `activity`, `rocket`). The same names work on every `icon` prop (Button, Badge, Metric, Alert, Tabs entries, Table columns and row actions). Decorative unless `label` is set. `size` sm|md|lg, `tone` default|muted|success|warning|error|info.",
+      "props": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "enum": [
+              "plus",
+              "refresh-cw",
+              "search",
+              "filter",
+              "download",
+              "upload",
+              "external-link",
+              "copy",
+              "check",
+              "x",
+              "trash-2",
+              "pencil",
+              "eye",
+              "calendar",
+              "clock",
+              "user",
+              "users",
+              "bot",
+              "git-pull-request",
+              "git-branch",
+              "github",
+              "slack",
+              "mail",
+              "link",
+              "file-text",
+              "folder",
+              "database",
+              "zap",
+              "sparkles",
+              "flag",
+              "star",
+              "tag",
+              "alert-triangle",
+              "info",
+              "circle-check",
+              "trending-up",
+              "trending-down",
+              "dollar-sign",
+              "activity",
+              "rocket"
+            ]
+          },
+          "size": {
+            "type": "string",
+            "enum": ["sm", "md", "lg"]
+          },
+          "tone": {
+            "type": "string",
+            "enum": ["default", "muted", "success", "warning", "error", "info"]
+          },
+          "label": {
+            "type": "string"
+          }
+        },
+        "required": ["name"],
+        "additionalProperties": false
+      }
+    },
     "Table": {
-      "description": "Data table. Bind `data`/`loading`/`error` to a named query (`/queries/<name>/...`). `rowActions` chains receive `{ \"$row\": \"<col>\" }` (or `{ \"$row\": \"\" }` for the whole row) and `{ \"$rowIndex\": true }`. Destructive row actions always confirm via a dialog; override the copy with `confirm: { title, description, confirmLabel }`. `search` (case-insensitive substring across every listed column) and `filters` (per-column equality, `null`/`\"\"` disables one) narrow the polled rows client-side — bind them to a `SearchInput` / `Select` via `/ui/<id>/value`, or pin a constant (e.g. `\"filters\": { \"pinned\": true }`). Columns take `pinned: \"left\"|\"right\"` to survive horizontal scroll; `pagination` pages large row sets (auto past 200 rows); `density: \"compact\"` tightens row height.",
+      "description": "Data table. Bind `data`/`loading`/`error` to a named query (`/queries/<name>/...`). `rowActions` chains receive `{ \"$row\": \"<col>\" }` (or `{ \"$row\": \"\" }` for the whole row) and `{ \"$rowIndex\": true }`. Destructive row actions always confirm via a dialog; override the copy with `confirm: { title, description, confirmLabel }`. `search` (case-insensitive substring across every listed column) and `filters` (per-column equality, `null`/`\"\"` disables one) narrow the polled rows client-side — bind them to a `SearchInput` / `Select` via `/ui/<id>/value`, or pin a constant (e.g. `\"filters\": { \"pinned\": true }`). Columns take `pinned: \"left\"|\"right\"` to survive horizontal scroll; `pagination` pages large row sets (auto past 200 rows); `density: \"compact\"` tightens row height. Column kinds: `status` (lifecycle values like pending/in_progress/completed/failed get the dashboard status icon, anything else a `tones` pill), `user` / `agent` (avatar + name), `relative` (smart time with the exact time on hover), `duration` (ms → 1m 23s), `progress` (bar, `max` default 100), `copy` (value + copy button), `switch` (runs the column's `onChange` chain with `$row` set to the new value; read-only without it), `link` (http(s) URL, opens in a new tab). Columns also take `align`, `truncate: \"middle\"` (ids, paths), a header `icon` and `tooltip` (a row field shown on hover). `onRowClick` runs a chain with `$row` when a row is clicked — pair it with `app.navigate` + a Drawer and bind `selectedId` to the drawer param to highlight the open row. `rowId` names the id field (default `id`). Below 768px the table renders as a phone list (`mobile: \"list\"`, fields picked by `mobileFields: { title, subtitle?, meta?, status? }`); `mobile: \"scroll\"` keeps the grid. `emptyState: { icon?, title, body? }` replaces the empty message. Row actions take `icon` and `placement: \"menu\"` (collected into a More menu).",
       "props": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "type": "object",
@@ -501,7 +798,24 @@
                 },
                 "kind": {
                   "type": "string",
-                  "enum": ["text", "string", "number", "boolean", "date", "badge", "enum"]
+                  "enum": [
+                    "text",
+                    "string",
+                    "number",
+                    "boolean",
+                    "date",
+                    "badge",
+                    "enum",
+                    "status",
+                    "user",
+                    "agent",
+                    "relative",
+                    "duration",
+                    "progress",
+                    "copy",
+                    "switch",
+                    "link"
+                  ]
                 },
                 "tones": {
                   "type": "object",
@@ -528,6 +842,86 @@
                 "pinned": {
                   "type": "string",
                   "enum": ["left", "right"]
+                },
+                "align": {
+                  "type": "string",
+                  "enum": ["start", "end"]
+                },
+                "truncate": {
+                  "type": "string",
+                  "enum": ["end", "middle"]
+                },
+                "icon": {
+                  "type": "string",
+                  "enum": [
+                    "plus",
+                    "refresh-cw",
+                    "search",
+                    "filter",
+                    "download",
+                    "upload",
+                    "external-link",
+                    "copy",
+                    "check",
+                    "x",
+                    "trash-2",
+                    "pencil",
+                    "eye",
+                    "calendar",
+                    "clock",
+                    "user",
+                    "users",
+                    "bot",
+                    "git-pull-request",
+                    "git-branch",
+                    "github",
+                    "slack",
+                    "mail",
+                    "link",
+                    "file-text",
+                    "folder",
+                    "database",
+                    "zap",
+                    "sparkles",
+                    "flag",
+                    "star",
+                    "tag",
+                    "alert-triangle",
+                    "info",
+                    "circle-check",
+                    "trending-up",
+                    "trending-down",
+                    "dollar-sign",
+                    "activity",
+                    "rocket"
+                  ]
+                },
+                "tooltip": {
+                  "type": "string"
+                },
+                "max": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                "onChange": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "action": {
+                        "type": "string"
+                      },
+                      "params": {
+                        "type": "object",
+                        "propertyNames": {
+                          "type": "string"
+                        },
+                        "additionalProperties": {}
+                      }
+                    },
+                    "required": ["action"],
+                    "additionalProperties": false
+                  }
                 }
               },
               "required": ["key"],
@@ -597,6 +991,55 @@
                     "required": ["action"],
                     "additionalProperties": false
                   }
+                },
+                "icon": {
+                  "type": "string",
+                  "enum": [
+                    "plus",
+                    "refresh-cw",
+                    "search",
+                    "filter",
+                    "download",
+                    "upload",
+                    "external-link",
+                    "copy",
+                    "check",
+                    "x",
+                    "trash-2",
+                    "pencil",
+                    "eye",
+                    "calendar",
+                    "clock",
+                    "user",
+                    "users",
+                    "bot",
+                    "git-pull-request",
+                    "git-branch",
+                    "github",
+                    "slack",
+                    "mail",
+                    "link",
+                    "file-text",
+                    "folder",
+                    "database",
+                    "zap",
+                    "sparkles",
+                    "flag",
+                    "star",
+                    "tag",
+                    "alert-triangle",
+                    "info",
+                    "circle-check",
+                    "trending-up",
+                    "trending-down",
+                    "dollar-sign",
+                    "activity",
+                    "rocket"
+                  ]
+                },
+                "placement": {
+                  "type": "string",
+                  "enum": ["inline", "menu"]
                 }
               },
               "required": ["label", "actions"],
@@ -654,6 +1097,137 @@
           "density": {
             "type": "string",
             "enum": ["comfortable", "compact"]
+          },
+          "rowId": {
+            "type": "string"
+          },
+          "onRowClick": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "action": {
+                  "type": "string"
+                },
+                "params": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {}
+                }
+              },
+              "required": ["action"],
+              "additionalProperties": false
+            }
+          },
+          "selectedId": {
+            "anyOf": [
+              {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "number"
+                  }
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "mobile": {
+            "type": "string",
+            "enum": ["list", "scroll"]
+          },
+          "mobileFields": {
+            "type": "object",
+            "properties": {
+              "title": {
+                "type": "string"
+              },
+              "subtitle": {
+                "type": "string"
+              },
+              "meta": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                ]
+              },
+              "status": {
+                "type": "string"
+              }
+            },
+            "required": ["title"],
+            "additionalProperties": false
+          },
+          "emptyState": {
+            "type": "object",
+            "properties": {
+              "icon": {
+                "type": "string",
+                "enum": [
+                  "plus",
+                  "refresh-cw",
+                  "search",
+                  "filter",
+                  "download",
+                  "upload",
+                  "external-link",
+                  "copy",
+                  "check",
+                  "x",
+                  "trash-2",
+                  "pencil",
+                  "eye",
+                  "calendar",
+                  "clock",
+                  "user",
+                  "users",
+                  "bot",
+                  "git-pull-request",
+                  "git-branch",
+                  "github",
+                  "slack",
+                  "mail",
+                  "link",
+                  "file-text",
+                  "folder",
+                  "database",
+                  "zap",
+                  "sparkles",
+                  "flag",
+                  "star",
+                  "tag",
+                  "alert-triangle",
+                  "info",
+                  "circle-check",
+                  "trending-up",
+                  "trending-down",
+                  "dollar-sign",
+                  "activity",
+                  "rocket"
+                ]
+              },
+              "title": {
+                "type": "string"
+              },
+              "body": {
+                "type": "string"
+              }
+            },
+            "required": ["title"],
+            "additionalProperties": false
           }
         },
         "required": ["columns"],

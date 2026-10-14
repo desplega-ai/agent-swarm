@@ -427,9 +427,11 @@ Param `kind` is `string` by default, or `number` / `boolean`; `required` default
 
 Within each page, `root` names one entry in its non-empty `elements` map. Elements are a flat, single-parent tree: ids are map keys, `children` contains ids (not nested elements), all elements must be reachable from `root`, and cycles, missing children, or shared children are invalid. Element and Form/UI ids are page-local. Element keys are `type`, `props`, `children`, `on`, `visible`, `repeat`, and `watch`; only components with a `default` child slot accept `children` (Stack, Grid, Split, Tabs, Container, Card, and Drawer). `watch` maps state paths to an action step or chain.
 
-## Component catalog (all 23)
+## Component catalog (all 24)
 
 Props reject unknown keys. A `{"$state":"..."}` binding may replace a literal prop value at any depth.
+
+Icons: every `icon` prop (and the `Icon` block) takes one name from a curated lucide set: `plus`, `refresh-cw`, `search`, `filter`, `download`, `upload`, `external-link`, `copy`, `check`, `x`, `trash-2`, `pencil`, `eye`, `calendar`, `clock`, `user`, `users`, `bot`, `git-pull-request`, `git-branch`, `github`, `slack`, `mail`, `link`, `file-text`, `folder`, `database`, `zap`, `sparkles`, `flag`, `star`, `tag`, `alert-triangle`, `info`, `circle-check`, `trending-up`, `trending-down`, `dollar-sign`, `activity`, `rocket`. Any other name is rejected.
 
 | Component | Required props | Optional props / values |
 |---|---|---|
@@ -437,7 +439,7 @@ Props reject unknown keys. A `{"$state":"..."}` binding may replace a literal pr
 | `Grid` | none | Responsive `columns`: integer 1 through 6, or `{ base, sm, md, lg }` counts 1 through 6; `gap` uses the Stack spacing values; has the `default` child slot. |
 | `Split` | none | `ratio: "1-1", "1-2", "2-1", "1-3", "3-1"`, `gap`, `collapseBelow: "sm", "md", "lg"`, `reverse`; has the positional `default` child slot. |
 | `Divider` | none | `label`; no children. |
-| `Tabs` | `id`, `tabs` | `tabs` entries are `{ key, label? }`; `defaultTab`; has the positional `default` child slot. |
+| `Tabs` | `id`, `tabs` | `tabs` entries are `{ key, label?, icon? }`; `defaultTab`; has the positional `default` child slot. |
 | `Container` | none | Legacy layout primitive; prefer Stack. `direction: "row", "column"`, `gap: "none", "sm", "md", "lg"`; has the `default` child slot. |
 | `Card` | none | `title`, `description`; has the `default` child slot. |
 | `Heading` | `text` | `level: "h1", "h2", or "h3"`. |
@@ -445,11 +447,12 @@ Props reject unknown keys. A `{"$state":"..."}` binding may replace a literal pr
 | `Markdown` | `content` | Rendered Markdown for help, instructions, and rich prose; no children. |
 | `SearchInput` | `id` | `placeholder`, `label`; writes debounced text to `/ui/<id>/value`; no children. |
 | `Select` | `id`, `options` | `options` are strings or `{ value, label? }`; `placeholder`, `label`, `clearable`; writes a string or null to `/ui/<id>/value`; no children. |
-| `Button` | `label` | `variant: "default", "secondary", "outline", "ghost", "destructive", or "destructive-outline"` (use `destructive-outline` for standalone deletes); `disabled` (constant or bound boolean); `busyWith: "<actionName>"` disables and spins while that custom action's `/actions/<name>/status` is `"running"`; dispatch with element-level `on.press`. |
-| `Metric` | `label`, `value` | `value` is string or number; bind `loading` to `/queries/<name>/loading` for a skeleton while the query loads. |
-| `Alert` | `message` | `title`, `tone: "info", "success", "warning", or "error"`. |
-| `Badge` | `text` | `text` is string or number; `tone: "neutral", "success", "active", "error", "info", "pending", "warning", or "paused"`. |
-| `Table` | `columns` | `data`, `loading`, `error`, `emptyMessage`, `rowActions`, `search`, `filters`; see below. |
+| `Button` | `label` | `variant: "default", "secondary", "outline", "ghost", "destructive", or "destructive-outline"` (use `destructive-outline` for standalone deletes); `disabled` (constant or bound boolean); `busyWith: "<actionName>"` disables and spins while that custom action's `/actions/<name>/status` is `"running"`; `icon`, `iconPosition: "start" or "end"`; dispatch with element-level `on.press`. |
+| `Metric` | `label`, `value` | `value` is string or number; bind `loading` to `/queries/<name>/loading` for a skeleton while the query loads; `icon`. |
+| `Alert` | `message` | `title`, `tone: "info", "success", "warning", or "error"`, `icon` (overrides the tone icon). |
+| `Badge` | `text` | `text` is string or number; `tone: "neutral", "success", "active", "error", "info", "pending", "warning", or "paused"`; `icon` replaces the dot. |
+| `Icon` | `name` | `size: "sm", "md", or "lg"`, `tone: "default", "muted", "success", "warning", "error", or "info"`, `label` (accessible name; decorative without it). |
+| `Table` | `columns` | `data`, `loading`, `error`, `emptyMessage`, `emptyState`, `rowActions`, `onRowClick`, `selectedId`, `rowId`, `mobile`, `mobileFields`, `search`, `filters`; see below. |
 | `Form` | `id`, `fields`, `onSubmit` | `title`, `submitLabel`; see below. |
 | `Drawer` | `param` | `title`, `description`, `side: "right" or "left"`, `size: "sm", "md", "lg", or "xl"`; has the `default` child slot. |
 | `DetailList` | `fields` | `data`, `emptyMessage`, `columns: 1 or 2`, `loading` (bind `/queries/<name>/loading` for skeleton fields while loading); renders one record without edit controls. |
@@ -459,9 +462,16 @@ Props reject unknown keys. A `{"$state":"..."}` binding may replace a literal pr
 
 Table details:
 
-- `columns[]`: `{ key, label?, kind?, tones?: {value: badgeTone}, width?: number, pinned?: "left" or "right" }`. `kind` is `text`, `string`, `enum`, `number`, `boolean`, `date`, or `badge`; `string` and `enum` render as text. Pin id/actions columns so they survive horizontal scroll on narrow viewports.
+- `columns[]`: `{ key, label?, kind?, tones?: {value: badgeTone}, width?: number, pinned?: "left" or "right", align?: "start" or "end", truncate?: "end" or "middle", icon?, tooltip?: "<row field>", max?: number, onChange?: chain }`. `kind` is `text`, `string`, `enum`, `number`, `boolean`, `date`, `badge`, `status`, `user`, `agent`, `relative`, `duration`, `progress`, `copy`, `switch`, or `link`; `string` and `enum` render as text. Pin id/actions columns so they survive horizontal scroll on narrow viewports.
+  - `status`: lifecycle values (`pending`, `in_progress`, `running`, `completed`, `failed`, `cancelled`, `paused`, `reviewing`, ...) render the dashboard status chip with its icon; other values use `tones` like `badge`.
+  - `user` / `agent`: avatar plus name. `relative` (and `date`): smart time, exact time on hover. `duration`: milliseconds as `1m 23s`. `progress`: a bar against `max` (default 100). `copy`: the value plus a copy button. `link`: an http(s) URL opening in a new tab (other values render as text).
+  - `switch`: a toggle. `onChange` runs with `$row` = the row with this column already set to the new value, e.g. `[{ "action": "app.mutate", "params": { "model": "m", "op": "update", "rowId": { "$row": "id" }, "values": { "enabled": { "$row": "enabled" } } } }]`. Without `onChange` the switch is read-only.
+  - Numbers, durations and progress right-align by default. `truncate: "middle"` keeps both ends of ids and paths. `icon` shows in the header; `tooltip` names a row field shown on hover.
+- `onRowClick`: action chain with `$row` / `$rowIndex`, run when a row is clicked (or Enter on a focused cell). Pair it with `app.navigate` that sets a Drawer param, and bind `selectedId` to `{ "$state": "/route/params/<param>" }` so the open row stays highlighted. `rowId` names the id field (default `id`).
+- Phones (below 768px): the table renders as a card list. `mobileFields: { title, subtitle?, meta?: string or string[], status? }` picks the columns; by default the first text column is the title and the first `status`/`badge` column the chip. `mobile: "scroll"` keeps the grid; it is the default when the table has `rowActions` but no `onRowClick`.
+- `emptyState: { icon?, title, body? }` replaces the plain empty message. A search or filter that hides every row shows its own "No rows match" state.
 - `pagination`: boolean; defaults to auto-enabling past 200 rows (set `false` to force one scroll region). `density: "compact"` tightens row height for dense readouts.
-- `rowActions[]`: `{ label, variant?, confirm?, actions }`. Variants add `destructive-outline` to the Button variants. `destructive` and `destructive-outline` confirm by default; customize with `{ "title": ..., "description": ..., "confirmLabel": ... }`, or use a bare `confirm` string as the dialog description (use `confirm: false` only for a reversible action).
+- `rowActions[]`: `{ label, variant?, icon?, placement?: "inline" or "menu", confirm?, actions }`. `placement: "menu"` moves the action into the row's More menu. Variants add `destructive-outline` to the Button variants. `destructive` and `destructive-outline` confirm by default; customize with `{ "title": ..., "description": ..., "confirmLabel": ... }`, or use a bare `confirm` string as the dialog description (use `confirm: false` only for a reversible action).
 - `search`: optional string; case-insensitive substring matching across the listed string and number columns. Bind a SearchInput value for client-side search.
 - `filters`: optional record of per-column string, number, boolean, or null values. Null, empty, or absent values disable one filter. Bind Select values for client-side equality filters.
 

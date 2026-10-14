@@ -37,7 +37,19 @@ import type {
 } from "ag-grid-community";
 import { eachDayOfInterval, format, parseISO, startOfDay, subDays } from "date-fns";
 import { Provider as JotaiProvider } from "jotai";
-import { AlertCircle, AlertTriangle, ArrowRight, CheckCircle, Info, X } from "lucide-react";
+import {
+  AlertCircle,
+  AlertTriangle,
+  ArrowRight,
+  Bot,
+  CheckCircle,
+  ExternalLink,
+  Inbox,
+  Info,
+  MoreHorizontal,
+  SearchX,
+  X,
+} from "lucide-react";
 import type { ReactNode } from "react";
 import { Children, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
@@ -70,8 +82,13 @@ import {
   KanbanProvider,
 } from "@/components/kibo-ui/kanban";
 import { Spinner } from "@/components/kibo-ui/spinner";
-import { DataGrid } from "@/components/shared/data-grid";
+import { CopyValueButton } from "@/components/shared/copy-value-button";
+import { EmptyState } from "@/components/shared/empty-state";
+import { ListView, type ListViewMobileRow } from "@/components/shared/list-view";
 import { SearchBox } from "@/components/shared/search-box";
+import { StatusBadge } from "@/components/shared/status-badge";
+import { taskStatusVariant } from "@/components/shared/task-status-icon";
+import { userInitials } from "@/components/shared/user-chip";
 import { AlertCallout } from "@/components/ui/alert-callout";
 import {
   AlertDialog,
@@ -92,9 +109,17 @@ import {
   CardTitle,
   Card as UiCard,
 } from "@/components/ui/card";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { DefinitionList, InfoRow } from "@/components/ui/info-row";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { MiddleTruncation } from "@/components/ui/middle-truncation";
+import { Progress } from "@/components/ui/progress";
 import {
   Select,
   SelectContent,
@@ -115,8 +140,9 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
-import { cn, formatSmartTime } from "@/lib/utils";
+import { cn, formatDuration, formatSmartTime } from "@/lib/utils";
 import { resolveScopedParams } from "./action-params";
 import type {
   ActionChain,
@@ -134,6 +160,7 @@ import type {
   TableRowActionConfirm,
   TabsTab,
 } from "./catalog";
+import { CatalogIcon, catalogIcon } from "./icons";
 import { useJsonRenderThemeAttr } from "./theme-scope";
 
 // ─── Style maps (moved verbatim from json-page-renderer.tsx) ────────────────
@@ -193,13 +220,92 @@ const badgeToneText: Record<BadgeTone, string> = {
   paused: "text-status-paused-strong",
 };
 
-function StatusPill({ text, tone }: { text: string; tone: BadgeTone }) {
+function StatusPill({ text, tone, icon }: { text: string; tone: BadgeTone; icon?: unknown }) {
   return (
     <Badge variant="outline" size="tag" className="gap-1.5">
-      <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", badgeToneDot[tone])} />
+      {catalogIcon(icon) ? (
+        <CatalogIcon name={icon} size="sm" className={cn("size-3", badgeToneText[tone])} />
+      ) : (
+        <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", badgeToneDot[tone])} />
+      )}
       <span className={badgeToneText[tone]}>{text}</span>
     </Badge>
   );
+}
+
+type StatusBadgeStatus = Parameters<typeof StatusBadge>[0]["status"];
+
+/**
+ * `kind: "status"` — lifecycle values (pending, in_progress, completed,
+ * failed, ...) render the dashboard's own `StatusBadge` with its lifecycle
+ * icon; any other value falls back to the toned pill.
+ */
+function StatusCell({ value, tones }: { value: string; tones?: Record<string, BadgeTone> }) {
+  if (taskStatusVariant(value)) return <StatusBadge status={value as StatusBadgeStatus} />;
+  return <StatusPill text={value} tone={badgeToneFor(tones, value)} />;
+}
+
+/** `kind: "user"` / `"agent"` — an initials (or bot) avatar and the name. */
+function PersonCell({ name, agent }: { name: string; agent?: boolean }) {
+  return (
+    <span className="inline-flex min-w-0 max-w-full items-center gap-1.5">
+      <span
+        aria-hidden
+        className="inline-flex size-5 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-medium text-muted-foreground"
+      >
+        {agent ? <Bot className="size-3" /> : userInitials(name)}
+      </span>
+      <span className="min-w-0 truncate">{name}</span>
+    </span>
+  );
+}
+
+/** `kind: "relative"` / `"date"` — smart relative time, exact time on hover. */
+function RelativeTimeCell({ value }: { value: unknown }) {
+  const text = String(value);
+  const time = Date.parse(text);
+  if (Number.isNaN(time)) return <span className="block min-w-0 truncate">{text}</span>;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className="block min-w-0 truncate">{formatSmartTime(text)}</span>
+      </TooltipTrigger>
+      <TooltipContent>{new Date(time).toLocaleString()}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+/** Percent (0-100) of a progress value against `max`, or null when not numeric. */
+function progressPercent(value: unknown, max: number | undefined): number | null {
+  const number = typeof value === "number" ? value : Number(value);
+  if (value === null || value === undefined || value === "" || !Number.isFinite(number))
+    return null;
+  const ceiling = max && max > 0 ? max : 100;
+  return Math.max(0, Math.min(100, Math.round((number / ceiling) * 100)));
+}
+
+function ProgressCell({ value, max }: { value: unknown; max?: number }) {
+  const percent = progressPercent(value, max);
+  if (percent === null) return null;
+  return (
+    <span className="flex w-full min-w-0 items-center gap-2">
+      <Progress value={percent} className="h-1.5 flex-1" aria-label={`${percent}%`} />
+      <span className="w-9 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
+        {percent}%
+      </span>
+    </span>
+  );
+}
+
+/** Only absolute http(s) URLs become links — never `javascript:` or relative paths. */
+function safeHttpUrl(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:" ? url.href : null;
+  } catch {
+    return null;
+  }
 }
 
 // ─── Shared value formatting (Table cells + DetailList fields) ──────────────
@@ -214,11 +320,20 @@ type ValueKind = NonNullable<TableColumn["kind"] | DetailListField["kind"]>;
  */
 function formatValue(kind: ValueKind | undefined, value: unknown): string {
   if (value === null || value === undefined) return "";
-  if (kind === "date") {
+  if (kind === "duration") {
+    const ms = typeof value === "number" ? value : Number(value);
+    return Number.isFinite(ms) ? formatDuration(ms) : String(value);
+  }
+  if (kind === "progress") {
+    const percent = progressPercent(value, undefined);
+    return percent === null ? String(value) : `${percent}%`;
+  }
+  if (kind === "date" || kind === "relative") {
     const text = String(value);
     return Number.isNaN(Date.parse(text)) ? text : formatSmartTime(text);
   }
   if (kind === "boolean") return value ? "yes" : "no";
+  if (kind === "number" && typeof value === "number") return value.toLocaleString();
   if (typeof value === "object") return JSON.stringify(value);
   return String(value);
 }
@@ -520,6 +635,7 @@ function TabsComponent({ props, children }: { props: TabsComponentProps; childre
       <TabsList>
         {tabs.map((tab) => (
           <TabsTrigger key={tab.key} value={tab.key}>
+            <CatalogIcon name={tab.icon} size="sm" />
             {tab.label ?? tab.key}
           </TabsTrigger>
         ))}
@@ -748,14 +864,20 @@ interface PendingRowAction {
 function minWidthForKind(kind: TableColumn["kind"]): number {
   switch (kind) {
     case "boolean":
+    case "switch":
       return 85;
     case "number":
+    case "duration":
       return 95;
     case "badge":
     case "enum":
       return 105;
     case "date":
+    case "relative":
       return 110;
+    case "status":
+    case "progress":
+      return 120;
     default:
       return 130;
   }
@@ -769,18 +891,50 @@ function flexForKind(kind: TableColumn["kind"]): number {
   return kind === undefined || kind === "text" || kind === "string" ? 2 : 1;
 }
 
-/** Roughly `sm` button metrics: 24px of label padding + ~7px per character. */
-function rowActionButtonWidth(label: string): number {
-  return Math.max(56, Math.round(label.trim().length * 7 + 24));
+/** Columns whose values read best right-aligned with tabular digits. */
+const END_ALIGNED_KINDS = new Set<TableColumn["kind"]>(["number", "duration", "progress"]);
+
+/** Roughly `sm` button metrics: 24px of label padding + ~7px per character (+18px for an icon). */
+function rowActionButtonWidth(rowAction: TableRowAction): number {
+  const icon = catalogIcon(rowAction.icon) ? 18 : 0;
+  return Math.max(56, Math.round(rowAction.label.trim().length * 7 + 24 + icon));
 }
 
-/** Cell padding + every button at its natural width + the 6px gaps between them. */
+/**
+ * Cell padding + every inline button at its natural width + the 6px gaps
+ * between them + the 32px "More" button when any action sits in the menu.
+ */
 function rowActionsColumnWidth(rowActions: TableRowAction[]): number {
-  const buttons = rowActions.reduce(
-    (total, rowAction) => total + rowActionButtonWidth(rowAction.label),
-    0,
+  const inline = rowActions.filter((rowAction) => rowAction.placement !== "menu");
+  const buttons = inline.reduce((total, rowAction) => total + rowActionButtonWidth(rowAction), 0);
+  const hasMenu = inline.length < rowActions.length;
+  const slots = inline.length + (hasMenu ? 1 : 0);
+  return 28 + buttons + (hasMenu ? 32 : 0) + 6 * Math.max(0, slots - 1);
+}
+
+/** A row's id from its `rowId` field, falling back to its JSON (DataGrid's default). */
+function rowIdOf(row: Record<string, unknown>, field: string): string {
+  const value = row[field];
+  if (typeof value === "string" || typeof value === "number") return String(value);
+  return JSON.stringify(row);
+}
+
+/** Header label with a leading icon (AG Grid inner header component). */
+function IconHeader(params: { displayName: string; icon?: string }) {
+  return (
+    <span className="flex min-w-0 items-center gap-1.5">
+      <CatalogIcon name={params.icon} size="sm" className="size-3 text-muted-foreground" />
+      <span className="ag-header-cell-text">{params.displayName}</span>
+    </span>
   );
-  return 28 + buttons + 6 * Math.max(0, rowActions.length - 1);
+}
+
+/** The phone row's status slot, rendered like the grid cell. */
+function statusNode(column: TableColumn, value: unknown): ReactNode {
+  if (value === null || value === undefined || value === "") return undefined;
+  const raw = String(value);
+  if (column.kind === "status") return <StatusCell value={raw} tones={column.tones} />;
+  return <StatusPill text={raw} tone={badgeToneFor(column.tones, raw)} />;
 }
 
 /**
@@ -855,12 +1009,11 @@ function TableComponent({ props }: { props: TableProps }) {
   const snapshotRef = useRef(getSnapshot);
   snapshotRef.current = getSnapshot;
 
-  const runRowAction = useCallback(
-    async (rowActionIndex: number, row: Record<string, unknown>, index: number) => {
-      const rowAction = propsRef.current.rowActions?.[rowActionIndex] as TableRowAction | undefined;
-      if (!rowAction) return;
+  const runChain = useCallback(
+    async (chain: ActionChain | undefined, row: Record<string, unknown>, index: number) => {
+      if (!chain) return;
       const scope = { row, rowIndex: index, state: snapshotRef.current() };
-      for (const binding of rowAction.actions) {
+      for (const binding of chain) {
         await executeRef.current({
           ...binding,
           params: resolveScopedParams(binding.params, scope),
@@ -868,6 +1021,15 @@ function TableComponent({ props }: { props: TableProps }) {
       }
     },
     [],
+  );
+
+  const runRowAction = useCallback(
+    async (rowActionIndex: number, row: Record<string, unknown>, index: number) => {
+      const rowAction = propsRef.current.rowActions?.[rowActionIndex] as TableRowAction | undefined;
+      if (!rowAction) return;
+      await runChain(rowAction.actions, row, index);
+    },
+    [runChain],
   );
 
   /**
@@ -900,21 +1062,38 @@ function TableComponent({ props }: { props: TableProps }) {
         | CellKeyDownEvent<Record<string, unknown>>
         | FullWidthCellKeyDownEvent<Record<string, unknown>>,
     ) => {
-      if (!("column" in event) || event.column.getColId() !== "__rowActions") return;
+      if (!("column" in event)) return;
       const browserEvent = event.event as KeyboardEvent | undefined;
       if (!browserEvent || browserEvent.key !== "Enter") return;
       const target = browserEvent.target as HTMLElement | null;
       // Only when the CELL itself is focused — a button inside the cell
       // handles its own Enter as a click.
       if (!target || !target.classList.contains("ag-cell")) return;
-      target.querySelector<HTMLButtonElement>("button")?.focus();
+      if (event.column.getColId() === "__rowActions") {
+        target.querySelector<HTMLButtonElement>("button")?.focus();
+        return;
+      }
+      // Enter on any other cell opens the row, like a click.
+      const chain = propsRef.current.onRowClick as ActionChain | undefined;
+      if (chain && event.data) void runChain(chain, event.data, event.rowIndex ?? 0);
     },
-    [],
+    [runChain],
   );
 
   const columns = (props.columns ?? []) as TableColumn[];
   const rowActions = (props.rowActions ?? []) as TableRowAction[];
+  const onRowClickChain = props.onRowClick as ActionChain | undefined;
+  const hasRowClick = Boolean(onRowClickChain?.length);
   const allRows = Array.isArray(props.data) ? (props.data as Record<string, unknown>[]) : [];
+  const rowIdField = props.rowId ?? "id";
+  const rowId = useCallback(
+    (row: Record<string, unknown>) => rowIdOf(row, rowIdField),
+    [rowIdField],
+  );
+  const selectedId =
+    props.selectedId === null || props.selectedId === undefined || props.selectedId === ""
+      ? null
+      : String(props.selectedId);
 
   const search = typeof props.search === "string" ? props.search.trim().toLowerCase() : "";
   // Held by signature, not identity: a bound `columns` / `filters` object is
@@ -943,51 +1122,137 @@ function TableComponent({ props }: { props: TableProps }) {
   const emptyMessage = narrowedToEmpty
     ? "No rows match the current search or filters"
     : (props.emptyMessage ?? "No rows yet");
+  const emptyState = props.emptyState;
+  const empty = narrowedToEmpty ? (
+    <EmptyState
+      icon={SearchX}
+      title={emptyMessage}
+      description="Clear a filter to see more rows."
+    />
+  ) : (
+    <EmptyState
+      icon={catalogIcon(emptyState?.icon) ?? Inbox}
+      title={emptyState?.title ?? emptyMessage}
+      description={emptyState?.body}
+    />
+  );
 
-  const builtColumnDefs: ColDef<Record<string, unknown>>[] = columns.map((column) => ({
-    headerName: column.label ?? column.key,
-    field: column.key,
-    // Explicit `width` pins a column; everything else stretches (`flex: 1`) from
-    // a kind-appropriate floor. Never `sizeColumnsToFit` here — see the
-    // `columnSizing="flex"` note on `DataGrid`.
-    width: column.width,
-    flex: column.width ? undefined : flexForKind(column.kind),
-    minWidth: column.width ? undefined : minWidthForKind(column.kind),
-    // Pinned columns survive horizontal scroll (id on the left, status on the
-    // right) — the mobile answer for wide tables.
-    pinned: column.pinned,
-    // AG Grid's cell-data-type inference turns a boolean column into a disabled
-    // checkbox renderer, which contradicts the documented `formatCell` contract
-    // (yes / no text) and reads as a broken toggle. Opt every app column out of
-    // inference and let the value formatter own the rendering.
-    cellDataType: false,
-    valueFormatter:
-      column.kind === "badge" ? undefined : (params) => formatValue(column.kind, params.value),
-    cellRenderer:
-      column.kind === "badge"
-        ? (params: ICellRendererParams<Record<string, unknown>>) => {
-            const raw =
-              params.value === null || params.value === undefined ? "" : String(params.value);
-            if (!raw) return null;
-            return <StatusPill text={raw} tone={badgeToneFor(column.tones, raw)} />;
-          }
-        : // AG Grid drops a plain value straight into the cell, which is a flex
-          // row — the text becomes an anonymous flex item, and `text-overflow`
-          // never applies to one, so long titles hard-clip mid-word. Wrapping
-          // the value in a real element gives the ellipsis something to bite on
-          // (and a native tooltip carrying the full text).
-          (params: ICellRendererParams<Record<string, unknown>>) => {
-            const text = params.valueFormatted ?? formatValue(column.kind, params.value);
-            if (!text) return null;
+  const builtColumnDefs: ColDef<Record<string, unknown>>[] = columns.map((column) => {
+    const endAligned = column.align ? column.align === "end" : END_ALIGNED_KINDS.has(column.kind);
+    return {
+      headerName: column.label ?? column.key,
+      field: column.key,
+      // Explicit `width` pins a column; everything else stretches (`flex: 1`) from
+      // a kind-appropriate floor. Never `sizeColumnsToFit` here — see the
+      // `columnSizing="flex"` note on `DataGrid`.
+      width: column.width,
+      flex: column.width ? undefined : flexForKind(column.kind),
+      minWidth: column.width ? undefined : minWidthForKind(column.kind),
+      // Pinned columns survive horizontal scroll (id on the left, status on the
+      // right) — the mobile answer for wide tables.
+      pinned: column.pinned,
+      type: endAligned ? "rightAligned" : undefined,
+      // `cellClass` replaces the `rightAligned` type's own class, so keep it.
+      cellClass: endAligned ? ["ag-right-aligned-cell", "tabular-nums"] : undefined,
+      tooltipField: column.tooltip,
+      headerComponentParams: catalogIcon(column.icon)
+        ? { innerHeaderComponent: IconHeader, icon: column.icon }
+        : undefined,
+      // AG Grid's cell-data-type inference turns a boolean column into a disabled
+      // checkbox renderer, which contradicts the documented `formatCell` contract
+      // (yes / no text) and reads as a broken toggle. Opt every app column out of
+      // inference and let the value formatter own the rendering.
+      cellDataType: false,
+      valueFormatter: (params) => formatValue(column.kind, params.value),
+      cellRenderer: (params: ICellRendererParams<Record<string, unknown>>) => {
+        const value = params.value;
+        const row = (params.data ?? {}) as Record<string, unknown>;
+        const raw = value === null || value === undefined ? "" : String(value);
+        switch (column.kind) {
+          case "badge":
+            return raw ? <StatusPill text={raw} tone={badgeToneFor(column.tones, raw)} /> : null;
+          case "status":
+            return raw ? <StatusCell value={raw} tones={column.tones} /> : null;
+          case "user":
+          case "agent":
+            return raw ? <PersonCell name={raw} agent={column.kind === "agent"} /> : null;
+          case "date":
+          case "relative":
+            return raw ? <RelativeTimeCell value={value} /> : null;
+          case "progress":
+            return <ProgressCell value={value} max={column.max} />;
+          case "copy":
+            return raw ? (
+              <span className="flex w-full min-w-0 items-center gap-1">
+                {column.truncate === "middle" ? (
+                  <MiddleTruncation className="min-w-0 flex-1 font-mono text-xs">
+                    {raw}
+                  </MiddleTruncation>
+                ) : (
+                  <span className="min-w-0 flex-1 truncate font-mono text-xs" title={raw}>
+                    {raw}
+                  </span>
+                )}
+                <CopyValueButton value={raw} label={`Copy ${raw}`} size="icon-xs" />
+              </span>
+            ) : null;
+          case "switch": {
+            const chain = column.onChange as ActionChain | undefined;
             return (
-              <span className="block w-full truncate" title={text}>
+              <Switch
+                checked={toFilterBoolean(value)}
+                disabled={!chain?.length}
+                aria-label={column.label ?? column.key}
+                onCheckedChange={(checked) =>
+                  void runChain(chain, { ...row, [column.key]: checked }, params.node.rowIndex ?? 0)
+                }
+              />
+            );
+          }
+          case "link": {
+            const href = safeHttpUrl(value);
+            if (!href) return raw ? <span className="block min-w-0 truncate">{raw}</span> : null;
+            return (
+              <a
+                href={href}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex min-w-0 max-w-full items-center gap-1 text-primary hover:underline"
+              >
+                <span className="min-w-0 truncate">{raw}</span>
+                <ExternalLink aria-hidden className="size-3 shrink-0" />
+              </a>
+            );
+          }
+          default: {
+            // AG Grid drops a plain value straight into the cell, which is a flex
+            // row — the text becomes an anonymous flex item, and `text-overflow`
+            // never applies to one, so long titles hard-clip mid-word. Wrapping
+            // the value in a real element gives the ellipsis something to bite on
+            // (and a native tooltip carrying the full text).
+            const text = params.valueFormatted ?? formatValue(column.kind, value);
+            if (!text) return null;
+            if (column.truncate === "middle") {
+              return <MiddleTruncation className="block w-full">{text}</MiddleTruncation>;
+            }
+            return (
+              <span className="block w-full truncate" title={column.tooltip ? undefined : text}>
                 {text}
               </span>
             );
-          },
-  }));
+          }
+        }
+      },
+    };
+  });
 
   if (rowActions.length > 0) {
+    const inlineActions = rowActions
+      .map((rowAction, index) => ({ rowAction, index }))
+      .filter(({ rowAction }) => rowAction.placement !== "menu");
+    const menuActions = rowActions
+      .map((rowAction, index) => ({ rowAction, index }))
+      .filter(({ rowAction }) => rowAction.placement === "menu");
     builtColumnDefs.push({
       headerName: "",
       colId: "__rowActions",
@@ -999,27 +1264,58 @@ function TableComponent({ props }: { props: TableProps }) {
       width: rowActionsColumnWidth(rowActions),
       minWidth: rowActionsColumnWidth(rowActions),
       suppressSizeToFit: true,
-      cellRenderer: (params: ICellRendererParams<Record<string, unknown>>) => (
-        <div className="flex items-center gap-1.5">
-          {rowActions.map((rowAction, rowActionIndex) => (
-            <Button
-              key={rowAction.label}
-              size="sm"
-              variant={rowAction.variant ?? "outline"}
-              onClick={(event) => {
-                event.stopPropagation();
-                requestRowAction(
-                  rowActionIndex,
-                  (params.data ?? {}) as Record<string, unknown>,
-                  params.node.rowIndex ?? 0,
-                );
-              }}
-            >
-              {rowAction.label}
-            </Button>
-          ))}
-        </div>
-      ),
+      cellRenderer: (params: ICellRendererParams<Record<string, unknown>>) => {
+        const row = (params.data ?? {}) as Record<string, unknown>;
+        const rowIndex = params.node.rowIndex ?? 0;
+        return (
+          <div className="flex items-center gap-1.5">
+            {inlineActions.map(({ rowAction, index }) => (
+              <Button
+                key={rowAction.label}
+                size="sm"
+                variant={rowAction.variant ?? "outline"}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  requestRowAction(index, row, rowIndex);
+                }}
+              >
+                <CatalogIcon name={rowAction.icon} size="sm" />
+                {rowAction.label}
+              </Button>
+            ))}
+            {menuActions.length > 0 ? (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    size="icon-sm"
+                    variant="ghost"
+                    aria-label="More actions"
+                    onClick={(event) => event.stopPropagation()}
+                  >
+                    <MoreHorizontal className="size-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" {...themeAttr}>
+                  {menuActions.map(({ rowAction, index }) => (
+                    <DropdownMenuItem
+                      key={rowAction.label}
+                      variant={
+                        DESTRUCTIVE_VARIANTS.has(rowAction.variant ?? "")
+                          ? "destructive"
+                          : "default"
+                      }
+                      onSelect={() => requestRowAction(index, row, rowIndex)}
+                    >
+                      <CatalogIcon name={rowAction.icon} size="sm" />
+                      {rowAction.label}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            ) : null}
+          </div>
+        );
+      },
     });
   }
 
@@ -1027,6 +1323,50 @@ function TableComponent({ props }: { props: TableProps }) {
   const hugsContent = rows.length <= AUTO_HEIGHT_MAX_ROWS;
   // Endless-scroll guard: unless the author decided, big row sets paginate.
   const paginated = props.pagination ?? rows.length > 200;
+
+  // Phone layout: a card list, unless the author keeps the grid, or the table
+  // only exposes its actions as row buttons (a list row has no room for them).
+  const mobileMode = props.mobile ?? (rowActions.length > 0 && !hasRowClick ? "scroll" : "list");
+  const mobileFields = props.mobileFields;
+  const columnByKey = new Map(columns.map((column) => [column.key, column]));
+  const titleKey =
+    mobileFields?.title ??
+    columns.find((column) => !column.kind || column.kind === "text" || column.kind === "string")
+      ?.key ??
+    columns[0]?.key;
+  const statusKey =
+    mobileFields?.status ??
+    columns.find((column) => column.kind === "status" || column.kind === "badge")?.key;
+  const metaKeys: string[] = mobileFields
+    ? [
+        ...(mobileFields.subtitle ? [mobileFields.subtitle] : []),
+        ...(Array.isArray(mobileFields.meta)
+          ? mobileFields.meta
+          : mobileFields.meta
+            ? [mobileFields.meta]
+            : []),
+      ]
+    : columns
+        .map((column) => column.key)
+        .filter((key) => key !== titleKey && key !== statusKey)
+        .slice(0, 2);
+  const mobileRow =
+    mobileMode === "list"
+      ? (row: Record<string, unknown>): ListViewMobileRow => ({
+          title:
+            formatValue(
+              titleKey ? columnByKey.get(titleKey)?.kind : undefined,
+              titleKey ? row[titleKey] : "",
+            ) || "Untitled",
+          status: statusKey
+            ? statusNode(
+                columnByKey.get(statusKey) ?? { key: statusKey, kind: "badge" },
+                row[statusKey],
+              )
+            : undefined,
+          meta: metaKeys.map((key) => formatValue(columnByKey.get(key)?.kind, row[key])),
+        })
+      : undefined;
 
   const confirmingAction = pendingRowAction
     ? rowActions[pendingRowAction.rowActionIndex]
@@ -1043,11 +1383,21 @@ function TableComponent({ props }: { props: TableProps }) {
           {props.error}
         </AlertCallout>
       ) : null}
-      <DataGrid
-        rowData={rows}
+      <ListView
+        rows={rows}
+        label={props.emptyState?.title ?? "Rows"}
+        rowId={rowId}
         columnDefs={columnDefs}
         loading={props.loading ?? false}
         emptyMessage={emptyMessage}
+        empty={empty}
+        selectedId={selectedId}
+        onRowClick={
+          hasRowClick
+            ? (row, index) => void runChain(onRowClickChain, row as Record<string, unknown>, index)
+            : undefined
+        }
+        mobileRow={mobileRow}
         // Hug the content while the table is short (a 1-row filtered result
         // shouldn't sit on a slab of dead space), then cap into a scroll region.
         domLayout={hugsContent ? "autoHeight" : "normal"}
@@ -1059,8 +1409,8 @@ function TableComponent({ props }: { props: TableProps }) {
         columnSizing="flex"
         pagination={paginated}
         rowHeight={props.density === "compact" ? 34 : undefined}
-        cellFocus={rowActions.length > 0}
-        onCellKeyDown={rowActions.length > 0 ? onCellKeyDown : undefined}
+        cellFocus={rowActions.length > 0 || hasRowClick}
+        onCellKeyDown={rowActions.length > 0 || hasRowClick ? onCellKeyDown : undefined}
       />
       <AlertDialog
         open={pendingRowAction !== null}
@@ -1124,14 +1474,27 @@ function ActionButtonComponent({
         ? props.busyWith
         : `/actions/${props.busyWith}`;
   const busy = busySlot !== null && getByPath(state, `${busySlot}/status`) === "running";
+  // An author icon replaces the default trailing arrow; the spinner takes its slot while busy.
+  const hasIcon = catalogIcon(props.icon) !== undefined;
+  const iconAtStart = hasIcon && props.iconPosition !== "end";
+  const trailing = busy ? (
+    <Spinner className="size-3.5" />
+  ) : hasIcon ? (
+    iconAtStart ? null : (
+      <CatalogIcon name={props.icon} size="sm" />
+    )
+  ) : (
+    <ArrowRight className="h-3.5 w-3.5" />
+  );
   return (
     <Button
       variant={props.variant ?? "default"}
       disabled={props.disabled === true || busy}
       onClick={() => emit("press")}
     >
+      {iconAtStart && !busy ? <CatalogIcon name={props.icon} size="sm" /> : null}
       {props.label}
-      {busy ? <Spinner className="size-3.5" /> : <ArrowRight className="h-3.5 w-3.5" />}
+      {trailing}
     </Button>
   );
 }
@@ -1147,7 +1510,10 @@ function MetricComponent({ props }: { props: MetricComponentProps }) {
   const empty = value === undefined || value === null || value === "";
   return (
     <div className="flex flex-col gap-1">
-      <span className="text-xs uppercase tracking-wide text-muted-foreground">{props.label}</span>
+      <span className="inline-flex items-center gap-1.5 text-xs uppercase tracking-wide text-muted-foreground">
+        <CatalogIcon name={props.icon} size="sm" />
+        {props.label}
+      </span>
       {props.loading && empty ? (
         <Skeleton className="h-7 w-16" />
       ) : (
@@ -1838,6 +2204,18 @@ function ContributionGraphComponent({ props }: { props: ContributionGraphCompone
 
 // ─── Component registry ─────────────────────────────────────────────────────
 
+const iconToneClass: Record<
+  "default" | "muted" | "success" | "warning" | "error" | "info",
+  string
+> = {
+  default: "text-foreground",
+  muted: "text-muted-foreground",
+  success: "text-status-success-strong",
+  warning: "text-status-warning-strong",
+  error: "text-status-error-strong",
+  info: "text-status-info-strong",
+};
+
 export const swarmComponents: Components<typeof swarmCatalog> = {
   Drawer: ({ props, children }) => <DrawerComponent props={props}>{children}</DrawerComponent>,
   DetailList: ({ props }) => <DetailListComponent props={props} />,
@@ -1893,7 +2271,11 @@ export const swarmComponents: Components<typeof swarmCatalog> = {
   Alert: ({ props }) => {
     const tone = alertTone[props.tone ?? "info"];
     return (
-      <AlertCallout tone={tone.tone} icon={tone.icon} title={props.title}>
+      <AlertCallout
+        tone={tone.tone}
+        icon={catalogIcon(props.icon) ?? tone.icon}
+        title={props.title}
+      >
         {props.message}
       </AlertCallout>
     );
@@ -1901,8 +2283,18 @@ export const swarmComponents: Components<typeof swarmCatalog> = {
   Badge: ({ props }) => {
     // Unset bindings resolve to undefined — render nothing instead of "undefined".
     const text = props.text === null || props.text === undefined ? "" : String(props.text);
-    return text === "" ? null : <StatusPill text={text} tone={props.tone ?? "neutral"} />;
+    return text === "" ? null : (
+      <StatusPill text={text} tone={props.tone ?? "neutral"} icon={props.icon} />
+    );
   },
+  Icon: ({ props }) => (
+    <CatalogIcon
+      name={props.name}
+      size={props.size ?? "md"}
+      label={props.label}
+      className={iconToneClass[props.tone ?? "default"]}
+    />
+  ),
   Table: ({ props }) => <TableComponent props={props} />,
   Form: ({ props }) => <FormComponent props={props} />,
   Kanban: ({ props }) => <KanbanComponent props={props} />,
