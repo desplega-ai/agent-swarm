@@ -45,6 +45,7 @@ import {
 import { getTaskCitations, TaskCitationSchema } from "../be/task-citations";
 import { findUserById } from "../be/users";
 import { can, type RbacPrincipal, type RbacResource } from "../rbac";
+import { chatThreadOfContextKey } from "../tasks/context-key";
 import { TaskCreationBlockedError } from "../tasks/errors";
 import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
 import { guardTerminalTaskResultWrite } from "../tasks/terminal-result-guard";
@@ -307,6 +308,10 @@ const createTask = route({
     400: {
       description:
         "Validation error, an unknown `model` (set `allowCustomModel` to store a custom id), or agentId/offeredTo targets an extension identity",
+    },
+    403: {
+      description:
+        "An agent caller names a parentTaskId it neither owns nor created, or a non-lead agent binds the task to a chat thread",
     },
     422: {
       description: "Task creation blocked by an extension",
@@ -954,6 +959,41 @@ export async function handleTasks(
     const parentTask = parsed.body.parentTaskId
       ? await getTaskById(parsed.body.parentTaskId)
       : null;
+    // The child inherits the parent's thread context, so an agent caller must own or
+    // have created the parent. Operator and user callers keep their access.
+    const principal = await resolveTaskWritePrincipal(req, myAgentId);
+    if (
+      parentTask &&
+      !can({
+        principal,
+        verb: "task.parent.attach",
+        resource: {
+          kind: "task",
+          taskId: parentTask.id,
+          requestedByUserId: parentTask.requestedByUserId,
+          creatorAgentId: parentTask.creatorAgentId,
+          agentId: parentTask.agentId,
+        },
+        source: "http",
+      }).allow
+    ) {
+      jsonError(res, `You don't have context for parent task ${parentTask.id}.`, 403);
+      return true;
+    }
+    // A chat-sdk contextKey binds the task to a chat thread that its assignee and creator
+    // may then read and post to. An agent may only name a thread other than the parent's
+    // with the lead's chat post permission.
+    if (
+      principal.kind === "agent" &&
+      parsed.body.contextKey &&
+      parsed.body.contextKey !== parentTask?.contextKey &&
+      chatThreadOfContextKey(parsed.body.contextKey) &&
+      !can({ principal, verb: "integration.chat.post", resource: { kind: "none" }, source: "http" })
+        .allow
+    ) {
+      jsonError(res, "Permission denied: only a lead can bind a task to a chat thread.", 403);
+      return true;
+    }
     let assetKey: string | undefined;
     try {
       const inheritedKey = parentTask?.key;

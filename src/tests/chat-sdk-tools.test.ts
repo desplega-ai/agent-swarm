@@ -1,7 +1,15 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { closeDb, createAgent, createTaskExtended, getKv, initDb } from "../be/db";
+import {
+  closeDb,
+  createAgent,
+  createTaskExtended,
+  getDbClient,
+  getKv,
+  getTaskById,
+  initDb,
+} from "../be/db";
 import { CHAT_CHANNELS_NAMESPACE } from "../integrations/chat-sdk/router";
 import { createServer } from "../server";
 import { chatSdkContextKey } from "../tasks/context-key";
@@ -13,6 +21,7 @@ import {
   registerRegisterChatChannelTool,
   registerUnregisterChatChannelTool,
 } from "../tools/register-chat-channel";
+import { registerSendTaskTool } from "../tools/send-task";
 import type { Agent } from "../types";
 import { startTelegramHarness, type TelegramHarness } from "./chat-sdk-harness";
 
@@ -98,6 +107,7 @@ beforeAll(async () => {
   registerChatReadThreadTool(server);
   registerRegisterChatChannelTool(server);
   registerUnregisterChatChannelTool(server);
+  registerSendTaskTool(server);
 });
 
 afterAll(async () => {
@@ -352,5 +362,159 @@ describe("chat tool permissions", () => {
     );
     expect(result.structuredContent.success).toBe(true);
     expect(result.structuredContent.threadId).toBe("telegram:991013");
+  });
+});
+
+describe("chat thread binding through send-task", () => {
+  let harness: TelegramHarness;
+
+  beforeAll(async () => {
+    harness = await startTelegramHarness();
+  });
+
+  afterAll(async () => {
+    await harness.stop();
+  });
+
+  const sendsTo = (chatId: string) =>
+    harness.mock.calls.filter(
+      (call) =>
+        /^send(Rich)?Message$/.test(call.method) &&
+        String((call.body as { chat_id?: unknown }).chat_id) === chatId,
+    );
+
+  const childrenOf = async (parentId: string) =>
+    await getDbClient().query<{ id: string }>("SELECT id FROM agent_tasks WHERE parentTaskId = ?", [
+      parentId,
+    ]);
+
+  test("a worker cannot create a child under a foreign chat task, so it gains no thread access", async () => {
+    const own = await createTaskExtended("worker chat task A", {
+      agentId: worker.id,
+      source: "chat",
+      contextKey: chatSdkContextKey("telegram:111111"),
+    });
+    const foreign = await createTaskExtended("lead chat task B", {
+      agentId: lead.id,
+      source: "chat",
+      contextKey: chatSdkContextKey("telegram:222222"),
+    });
+
+    // An explicit foreign parentTaskId, routed to the parent's assignee or offered to the
+    // worker itself, and a foreign X-Source-Task-ID as the implicit parent: all refused.
+    const attempts: Array<{ headers: Record<string, string>; args: Record<string, unknown> }> = [
+      {
+        headers: { "x-agent-id": worker.id, "x-source-task-id": own.id },
+        args: { task: "child under B", parentTaskId: foreign.id, allowDuplicate: true },
+      },
+      {
+        headers: { "x-agent-id": worker.id, "x-source-task-id": own.id },
+        args: {
+          task: "child under B offered to me",
+          parentTaskId: foreign.id,
+          offerMode: true,
+          allowDuplicate: true,
+        },
+      },
+      {
+        headers: { "x-agent-id": worker.id, "x-source-task-id": foreign.id },
+        args: { task: "child under the header task", allowDuplicate: true },
+      },
+    ];
+    for (const { headers, args } of attempts) {
+      const result = await callTool("send-task", headers, args);
+      expect(result.structuredContent.success, String(args.task)).toBe(false);
+      expect(result.structuredContent.message).toContain(
+        `You don't have context for parent task ${foreign.id}`,
+      );
+    }
+    expect(await childrenOf(foreign.id)).toHaveLength(0);
+
+    // Without a manufactured child, the worker's only binding is its own thread.
+    const read = await callTool(
+      "chat-read-thread",
+      { "x-agent-id": worker.id, "x-source-task-id": own.id },
+      { threadId: "telegram:222222" },
+    );
+    expect(read.structuredContent.success).toBe(false);
+    expect(read.structuredContent.message).toContain("Permission denied");
+    const reply = await callTool(
+      "chat-reply",
+      { "x-agent-id": worker.id, "x-source-task-id": foreign.id },
+      { text: "hijack" },
+    );
+    expect(reply.structuredContent.success).toBe(false);
+    expect(sendsTo("222222")).toHaveLength(0);
+  });
+
+  test("the lead delegates its chat task, and the assigned worker replies in that thread", async () => {
+    const delegate = await createAgent({
+      id: crypto.randomUUID(),
+      name: "ChatToolsDelegate",
+      isLead: false,
+      status: "idle",
+      maxTasks: 5,
+    });
+    const parent = await createTaskExtended("lead chat task", {
+      agentId: lead.id,
+      source: "chat",
+      contextKey: chatSdkContextKey("telegram:333333"),
+    });
+
+    const sent = await callTool(
+      "send-task",
+      { "x-agent-id": lead.id, "x-source-task-id": parent.id },
+      {
+        task: "do the chat work",
+        agentId: delegate.id,
+        routingReason: "skill",
+        routingNote: "Delegate owns this kind of chat work.",
+        allowDuplicate: true,
+      },
+    );
+    expect(sent.structuredContent.success).toBe(true);
+    const childId = (sent.structuredContent.task as { id: string }).id;
+    const child = await getTaskById(childId);
+    expect(child?.parentTaskId).toBe(parent.id);
+    expect(child?.contextKey).toBe(chatSdkContextKey("telegram:333333"));
+
+    const reply = await callTool(
+      "chat-reply",
+      { "x-agent-id": delegate.id, "x-source-task-id": childId },
+      { text: "Working on it." },
+    );
+    expect(reply.structuredContent.success).toBe(true);
+    expect(reply.structuredContent.threadId).toBe("telegram:333333");
+    expect(sendsTo("333333")).toHaveLength(1);
+  });
+
+  test("a worker sub-delegates under its own chat task", async () => {
+    const helper = await createAgent({
+      id: crypto.randomUUID(),
+      name: "ChatToolsHelper",
+      isLead: false,
+      status: "idle",
+      maxTasks: 5,
+    });
+    const own = await createTaskExtended("worker chat task to split", {
+      agentId: worker.id,
+      source: "chat",
+      contextKey: chatSdkContextKey("telegram:444444"),
+    });
+    const sent = await callTool(
+      "send-task",
+      { "x-agent-id": worker.id, "x-source-task-id": own.id },
+      {
+        task: "do half of the chat work",
+        agentId: helper.id,
+        routingReason: "skill",
+        routingNote: "Helper takes the second half of the work.",
+        allowDuplicate: true,
+      },
+    );
+    expect(sent.structuredContent.success).toBe(true);
+    const child = await getTaskById((sent.structuredContent.task as { id: string }).id);
+    expect(child?.parentTaskId).toBe(own.id);
+    expect(child?.contextKey).toBe(chatSdkContextKey("telegram:444444"));
   });
 });

@@ -79,6 +79,11 @@ export const PERMISSIONS = {
     description: "Mutate a task's filesystem artifacts and attachments.",
     namespace: "task",
   },
+  "task.parent.attach": {
+    description:
+      "Create a task under an existing parent task. The child inherits the parent's thread context (contextKey, Slack thread, requester).",
+    namespace: "task",
+  },
   "task.progress.write": {
     description:
       "Write a task's progress, status, or output (its assignee, a lead, a human, or anyone while unassigned).",

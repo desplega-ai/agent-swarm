@@ -30466,6 +30466,16 @@
               }
             }
           },
+          "403": {
+            "description": "An agent caller names a parentTaskId it neither owns nor created, or a non-lead agent binds the task to a chat thread",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "422": {
             "description": "Task creation blocked by an extension",
             "content": {

@@ -20,6 +20,7 @@ export async function callerChatThread(
     ? await getTaskById(requestInfo.sourceTaskId)
     : await getAgentCurrentTask(requestInfo.agentId);
   if (!task) return null;
+  // Creator is safe: a non-lead agent can only create a chat-bound task under a parent it owns or created.
   if (task.agentId !== requestInfo.agentId && task.creatorAgentId !== requestInfo.agentId) {
     return null;
   }

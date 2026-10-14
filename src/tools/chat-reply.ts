@@ -34,6 +34,7 @@ export const registerChatReplyTool = (server: McpServer) => {
         ? await getTaskById(requestInfo.sourceTaskId)
         : await getAgentCurrentTask(requestInfo.agentId);
       if (!task) return toolErr("No current task found for chat-reply.", { data });
+      // Creator is safe: a non-lead agent can only create a chat-bound task under a parent it owns or created.
       if (task.agentId !== requestInfo.agentId && task.creatorAgentId !== requestInfo.agentId) {
         return toolErr("You don't have context for this task.", { data });
       }

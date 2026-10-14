@@ -213,6 +213,8 @@ Agents get these tools when the channel is on (capability `chat-sdk`). The param
 | `register-chat-channel` | Lead only. Route a channel to a fixed agent or workflow. |
 | `unregister-chat-channel` | Lead only. Remove that mapping. |
 
+A worker gets thread access only through a chat task that it is assigned or created. `send-task` and `POST /api/tasks` refuse a `parentTaskId` that a non-lead agent neither owns nor created, so a child task cannot inherit a foreign thread.
+
 The `chat-sdk` skill is seeded for every agent, so there is nothing to install. It covers formatting per platform, reply etiquette and thread ids.
 
 ## Extensions
