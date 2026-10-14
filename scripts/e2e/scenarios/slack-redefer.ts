@@ -23,18 +23,21 @@ export const slackRedefer: Scenario = {
     await registerLead(ctx, "e2e-lead-redefer");
     const message = await ask(ctx, "wait for both staging checks before publishing");
     ctx.markThread("redefer", "C0GENERAL0", message.ts);
-    await waitForEyes(ctx, message.ts);
-    const task = await findSlackTask(ctx, message.ts);
-    const taskId = String(task.id);
-    const leadId = String(task.agentId);
-    await claim(ctx, leadId, taskId);
-    const firstCheck = await createChildTask(ctx, taskId, leadId, "First staging check");
-    const thread = () =>
-      ctx.slack.messages("general").filter((row) => row.thread_ts === message.ts);
-    // Exclude the thread tree, which also contains a waiting glyph.
-    const cards = () => thread().filter((row) => String(row.text ?? "").startsWith("⏳"));
-    const mcp = await ctx.connectMcp(leadId);
+    let mcp: Awaited<ReturnType<typeof ctx.connectMcp>> | undefined;
     try {
+      await waitForEyes(ctx, message.ts);
+      const task = await findSlackTask(ctx, message.ts);
+      const taskId = String(task.id);
+      const leadId = String(task.agentId);
+      await claim(ctx, leadId, taskId);
+      const lead = ctx.db.get<{ name: string }>("SELECT name FROM agents WHERE id = ?", [leadId]);
+      expect(lead, "Assigned lead was not found");
+      const firstCheck = await createChildTask(ctx, taskId, leadId, "First staging check");
+      const thread = () =>
+        ctx.slack.messages("general").filter((row) => row.thread_ts === message.ts);
+      // Exclude the thread tree, which also contains a waiting glyph.
+      const cards = () => thread().filter((row) => String(row.text ?? "").startsWith("⏳"));
+      mcp = await ctx.connectMcp(leadId);
       const deferred = await mcp.callTool("defer-task", {
         taskId,
         delayMs: 86_400_000,
@@ -43,7 +46,7 @@ export const slackRedefer: Scenario = {
         note: "Check the next staging result.",
       });
       expect(!deferred.isError, `Initial defer failed: ${JSON.stringify(deferred)}`);
-      const card = await waitForOutcome(ctx, message.ts, "Waiting on e2e-lead-redefer");
+      const card = await waitForOutcome(ctx, message.ts, `Waiting on ${lead!.name}`);
       await ctx.slack.waitForApiCall("chat.stopStream", {
         timeoutMs: 30_000,
         where: (call) => call.args.ts === card.ts,
@@ -125,7 +128,38 @@ export const slackRedefer: Scenario = {
       expect(!duplicate, "Re-defer or refused watcher added a card or a redundant resume line");
       expectNoWakeTime(ctx, message.ts, "re-defer");
     } finally {
-      await mcp.close();
+      try {
+        // Remove deadlines/watchers before cancelling dependencies, so cleanup cannot wake them.
+        const tasks = ctx.db.query<{ id: string; agentId: string; status: string }>(
+          "SELECT id, agentId, status FROM agent_tasks WHERE slackThreadTs = ?",
+          [message.ts],
+        );
+        for (const task of tasks) {
+          for (const schedule of ctx.db.query<{ id: string }>(
+            "SELECT id FROM scheduled_tasks WHERE parentTaskId = ?",
+            [task.id],
+          )) {
+            expectStatus(
+              await ctx.api("DELETE", `/api/schedules/${schedule.id}`),
+              [200],
+              "delete re-defer schedule and watcher",
+            );
+          }
+        }
+        for (const task of tasks) {
+          if (["completed", "failed", "cancelled", "superseded"].includes(task.status)) continue;
+          expectStatus(
+            await ctx.api("POST", `/api/tasks/${task.id}/cancel`, {
+              agentId: task.agentId,
+              body: { reason: "Slack re-defer scenario cleanup" },
+            }),
+            [200],
+            "cancel unfinished re-defer task",
+          );
+        }
+      } finally {
+        await mcp?.close();
+      }
     }
   },
 };
