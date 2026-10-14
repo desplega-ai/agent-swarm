@@ -46,7 +46,8 @@ const DEFAULT_MODES: Partial<Record<ChatSdkAdapterName, string>> = {
   slack: "webhook",
 };
 
-const NOT_RUNNING = "Restart the API to apply the configuration, or wait for startup to finish.";
+const NOT_RUNNING =
+  "The adapter is starting, or the last configuration save is still applying. Refresh in a few seconds.";
 
 const SLACK_CLASH_CAUSE =
   "the Slack adapter conflicts with the built-in Slack integration (set SLACK_DISABLE=true)";

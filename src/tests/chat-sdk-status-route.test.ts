@@ -205,13 +205,13 @@ describe("GET /api/integrations/chat/status", () => {
     }
   });
 
-  test("a configured adapter that is not running says to restart the API", async () => {
+  test("a configured adapter that is not running says it is still starting", async () => {
     await withEnv(
       { CHAT_SDK_ADAPTERS: JSON.stringify({ ...BOOT_ADAPTERS, discord: DISCORD_ENTRY }) },
       async () => {
         const discord = (await getStatus()).adapters.find((a) => a.name === "discord");
         expect(discord).toMatchObject({ configured: true, health: "disabled" });
-        expect(discord?.error).toStartWith("Restart the API to apply");
+        expect(discord?.error).toStartWith("The adapter is starting");
       },
     );
   });

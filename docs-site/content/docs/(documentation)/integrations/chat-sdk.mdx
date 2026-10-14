@@ -6,7 +6,7 @@ description: One channel for Telegram, Slack, Discord and Microsoft Teams throug
 Agent Swarm can use [Chat SDK](https://chat-sdk.dev) as an input and output channel. One API process runs one Chat SDK instance for each configured adapter: Telegram, Slack, Discord and Microsoft Teams. The bespoke [Slack](/docs/integrations/slack), [AgentMail](/docs/integrations/agentmail) and [Kapso](/docs/integrations/kapso) integrations do not change.
 
 <Callout type="info">
-The channel is off by default. It starts at API boot, so every configuration change needs an API restart.
+The channel is off by default. A configuration change saved on the dashboard applies within a few seconds: the API restarts the adapters, with no API restart. Only a change to a boot-time environment value needs an API restart.
 </Callout>
 
 ## What it does
@@ -28,8 +28,8 @@ The channel reads these keys from the environment or from global swarm config:
 
 | Key | Value |
 |---|---|
-| `CHAT_SDK_ENABLED` | `true` to start the channel. Default `false`. Restart required. |
-| `CHAT_SDK_ADAPTERS` | JSON object. Each key is an adapter name (`telegram`, `slack`, `discord`, `teams`), each value is the adapter config. Restart required. |
+| `CHAT_SDK_ENABLED` | `true` to start the channel. Default `false`. A saved change applies within a few seconds. |
+| `CHAT_SDK_ADAPTERS` | JSON object. Each key is an adapter name (`telegram`, `slack`, `discord`, `teams`), each value is the adapter config. A saved change applies within a few seconds. |
 | `CHAT_SDK_BUFFER_MS` | How long a thread collects messages before it creates one task. Default `10000` (10 s), 1 to 600000. No restart needed. |
 | `CHAT_SDK_API_URL_OVERRIDES` | Environment only, for development and tests. JSON of platform API base URLs by adapter name, for example `{"telegram":"http://127.0.0.1:8081"}`. Never set it in production. |
 
@@ -72,7 +72,7 @@ The adapter checks the platform signature on every request (Telegram secret toke
 
 1. Create a bot with [BotFather](https://t.me/BotFather) (`/newbot`) and copy the token.
 2. Pick a random secret token (letters, digits, `_` and `-`, up to 256 characters).
-3. On the Chat SDK card, turn on **Telegram**, enter both values, and save. Restart the API.
+3. On the Chat SDK card, turn on **Telegram**, enter both values, and save. The adapter starts within a few seconds.
 4. Click **Register webhook**. The API calls the Bot API `setWebhook` with the public webhook URL and the secret token. Then it shows the `getWebhookInfo` result.
 
 For local development without a public URL, set `mode` to `polling`. The adapter then reads updates with long polling, and no webhook is needed. Do not register a webhook in polling mode: while a webhook is set, Telegram does not deliver updates to a poller.
@@ -247,12 +247,12 @@ Platform notes:
 
 | Symptom | Cause and fix |
 |---|---|
-| The card shows **Not running** for a saved adapter. | The API has not restarted since the change, or the adapter is still starting. Restart the API. |
-| The card shows **Failed to start** with an error. | The adapter failed to initialize (bad token, network error). Fix the value and restart. |
+| The card shows **Not running** for a saved adapter. | The adapter is still starting, or the last save is still applying. Refresh in a few seconds. |
+| The card shows **Failed to start** with an error. | The adapter failed to initialize (bad token, network error). Fix the value and save. A save with no change does not restart the adapter, so restart the API to retry a network error. |
 | **Configuration error** on the card. | `CHAT_SDK_ADAPTERS` is not valid JSON, fails the schema, or references a missing or reserved `$config` key. |
 | **Slack conflict** on the card, and no adapter starts. | `CHAT_SDK_ADAPTERS` has `slack` and `SLACK_DISABLE` is not `true`. Set `SLACK_DISABLE=true` or remove the Slack adapter. |
-| The webhook answers `404`. | The channel is off, the adapter is not in `CHAT_SDK_ADAPTERS`, or the adapter is still initializing after a restart. |
-| The webhook answers `503`. | The adapter failed to start, or the API is shutting down. Check the card or the API boot log (`[chat-sdk]` lines). |
+| The webhook answers `404`. | The channel is off, the adapter is not in `CHAT_SDK_ADAPTERS`, or the adapter is still initializing after a restart or a save. |
+| The webhook answers `503`. | The adapter failed to start, a save is restarting the adapters, or the API is shutting down. Check the card or the API boot log (`[chat-sdk]` lines). |
 | The Slack webhook answers `405`. | The Slack adapter runs in socket mode, which needs no request URL. Remove the URL from the Slack app, or switch to webhook mode. |
 | Telegram gets no updates. | In webhook mode, click **Register webhook** and check `last_error_message` in the result. In polling mode, make sure no webhook is registered. |
 | Discord mentions create no task. | Turn on the **Message Content** intent, and check the Gateway state on the card. |

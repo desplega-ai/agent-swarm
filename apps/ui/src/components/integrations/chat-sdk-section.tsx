@@ -53,7 +53,7 @@ import { cn } from "@/lib/utils";
 
 // ---------------------------------------------------------------------------
 // Chat SDK card: one panel per adapter. Form logic lives in
-// `lib/chat-sdk-form.ts`. Every change needs an API restart (`restartRequired`).
+// `lib/chat-sdk-form.ts`. A save applies on the debounced config reload, no restart.
 // ---------------------------------------------------------------------------
 
 export function ChatSdkSection({ configs }: SpecialFlowSectionProps) {
@@ -71,8 +71,8 @@ export function ChatSdkSection({ configs }: SpecialFlowSectionProps) {
   return (
     <div className="space-y-6">
       {savedNotice && (
-        <AlertCallout tone="warning" icon={RotateCw} title="Restart required">
-          Saved. Restart the API to apply the Chat SDK configuration.
+        <AlertCallout tone="info" icon={RotateCw} title="Applying">
+          Saved. The adapters restart with the new configuration within a few seconds.
         </AlertCallout>
       )}
       {status.data?.slackClash && (
@@ -90,8 +90,8 @@ export function ChatSdkSection({ configs }: SpecialFlowSectionProps) {
       {envOnlyAdapters && (
         <AlertCallout tone="info" icon={Info} title="Set by the deployment environment">
           <CodeChip>CHAT_SDK_ADAPTERS</CodeChip> comes from the API environment. The switches show
-          the running configuration and are locked. To store config rows, which take precedence
-          after a restart, edit the Advanced fields below.
+          the running configuration and are locked. To store config rows, which take precedence on
+          save, edit the Advanced fields below.
         </AlertCallout>
       )}
       {/* Remount when the stored values change, so the form follows the Advanced editor. */}
@@ -211,7 +211,7 @@ function ChatSdkForm({
   if (statusError) channelLabel = "Status unavailable";
   const channelDescription = envOnlyEnabled
     ? "Set by the deployment environment (CHAT_SDK_ENABLED). Starts the Chat SDK channel at API boot."
-    : "Starts the Chat SDK channel at API boot. Restart the API after you save.";
+    : "Starts the Chat SDK channel. A save applies within a few seconds.";
 
   return (
     <div className="space-y-6">

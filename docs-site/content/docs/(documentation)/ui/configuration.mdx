@@ -276,7 +276,7 @@ already created on this install.
 
 ## Chat SDK
 
-`CHAT_SDK_ENABLED` (boolean, default `false`, restart required) starts the [Chat SDK channel](/docs/integrations/chat-sdk) for the adapters defined in `CHAT_SDK_ADAPTERS`. Edit `CHAT_SDK_ADAPTERS` (JSON, restart required) on the Chat SDK card under **Settings → Integrations**, not on this page.
+`CHAT_SDK_ENABLED` (boolean, default `false`, applies on save) starts the [Chat SDK channel](/docs/integrations/chat-sdk) for the adapters defined in `CHAT_SDK_ADAPTERS`. Edit `CHAT_SDK_ADAPTERS` (JSON, applies on save) on the Chat SDK card under **Settings → Integrations**, not on this page.
 
 `CHAT_SDK_BUFFER_MS` (number, default `10000`, 1 to 600000) is how long the channel waits for more messages in a thread before it creates one task from them. A message that starts with `!now` creates the task at once. A new value applies when no thread is waiting.
 

@@ -320,22 +320,19 @@ export const INTEGRATIONS: IntegrationDef[] = [
     iconKey: "message-square",
     docsUrl: "https://docs.agent-swarm.dev/docs/integrations/chat-sdk",
     specialFlow: "chat-sdk",
-    restartRequired: true,
     // No recommendedSkills: the chat-sdk skill is seeded for every agent.
     fields: [
       {
         key: "CHAT_SDK_ENABLED",
         label: "Enabled",
         type: "boolean",
-        affectsRestart: true,
-        helpText: "Start the Chat SDK channel at API boot. Restart the API after a change.",
+        helpText: "Start the Chat SDK channel. A change applies within a few seconds.",
       },
       {
         key: "CHAT_SDK_ADAPTERS",
         label: "Adapters (JSON)",
         type: "textarea",
         advanced: true,
-        affectsRestart: true,
         placeholder:
           '{"telegram":{"botToken":{"$config":"CHAT_SDK_TELEGRAM_BOT_TOKEN"},"secretToken":{"$config":"CHAT_SDK_TELEGRAM_SECRET_TOKEN"},"mode":"webhook"}}',
         helpText:

@@ -1,4 +1,6 @@
+import { createHash } from "node:crypto";
 import type { Chat } from "chat";
+import { isEnvFlagEnabled } from "@/utils/env-flag";
 import { registerVolatileSecret, scrubSecrets } from "@/utils/secret-scrubber";
 import { loadAdapter, watchSocketConnection } from "./adapters";
 import { drainBackground } from "./background";
@@ -6,6 +8,7 @@ import {
   assertNoSlackClash,
   CHAT_SDK_ADAPTER_NAMES,
   type ChatSdkAdapterName,
+  type ChatSdkConfig,
   getChatSdkConfig,
   type ResolvedAdapterConfig,
 } from "./config";
@@ -43,6 +46,8 @@ export interface ChatAdapterHealth {
 const instances = new Map<ChatSdkAdapterName, Chat>();
 const health = new Map<ChatSdkAdapterName, ChatAdapterHealth>();
 let stopping = false;
+/** Fingerprint of the config the last `startChatSdk` applied. */
+let appliedFingerprint: string | undefined;
 
 /** True while shutdown drains; the webhook path refuses new work. */
 export function isChatSdkStopping(): boolean {
@@ -53,6 +58,8 @@ const DEFAULT_CHAT_USER_NAME = "swarm";
 
 /** Total wait for every step of `stopChatSdk`, inside the 15 s SIGTERM budget. */
 const SHUTDOWN_BUDGET_MS = 10_000;
+/** A config reload waits this long for the adapters to come back before it answers. */
+const RELOAD_START_BUDGET_MS = 15_000;
 
 /** Fields whose string value is a credential, registered with the scrubber. */
 const SECRET_FIELDS = ["botToken", "secretToken", "signingSecret", "appToken", "appPassword"];
@@ -145,6 +152,7 @@ async function startAdapter(
 export async function startChatSdk(): Promise<void> {
   stopping = false;
   const config = await getChatSdkConfig();
+  appliedFingerprint = await configFingerprint(config);
   if (!config.enabled) {
     console.log("[chat-sdk] Disabled (CHAT_SDK_ENABLED is not true)");
     return;
@@ -205,7 +213,7 @@ async function withTimeout(work: Promise<unknown>, ms: number, step: string): Pr
   const settled = work.then(
     () => true as const,
     (error: unknown) => {
-      console.error(`[chat-sdk] ${step} failed during shutdown: ${errorMessage(error)}`);
+      console.error(`[chat-sdk] ${step} failed: ${errorMessage(error)}`);
       return true as const;
     },
   );
@@ -273,5 +281,54 @@ export async function stopChatSdk(budgetMs: number = SHUTDOWN_BUDGET_MS): Promis
     console.warn(
       `[chat-sdk] Background handlers still running after the ${budgetMs / 1000}s shutdown budget`,
     );
+  }
+}
+
+/**
+ * Hash of the resolved config plus `SLACK_DISABLE` (the Slack clash input).
+ * Resolver fields are functions, so their values are read first: a rotated
+ * `$config` secret changes the hash. The hashed JSON holds secrets: never log it.
+ */
+async function configFingerprint(config: ChatSdkConfig): Promise<string> {
+  const adapters: Record<string, Record<string, unknown>> = {};
+  for (const [name, adapterConfig] of Object.entries(config.adapters)) {
+    const fields: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(adapterConfig ?? {})) {
+      fields[key] = typeof value === "function" ? await (value as () => Promise<unknown>)() : value;
+    }
+    adapters[name] = fields;
+  }
+  const slackDisabled = isEnvFlagEnabled("SLACK_DISABLE", false);
+  return createHash("sha256")
+    .update(JSON.stringify({ ...config, adapters, slackDisabled }))
+    .digest("hex");
+}
+
+/**
+ * Config reload hook: restart the adapters when the config differs from the
+ * one the last `startChatSdk` applied, so a dashboard save applies without an
+ * API restart. Compared against the applied config, not the pre-reload one:
+ * `$config` secrets resolve from the DB, which already holds the new row. An
+ * equal config leaves Telegram polling and the Discord Gateway alone. Never
+ * throws. Returns true when the restart left at least one adapter configured.
+ */
+export async function restartChatSdkIfConfigChanged(): Promise<boolean> {
+  try {
+    if ((await configFingerprint(await getChatSdkConfig())) === appliedFingerprint) return false;
+    console.log("[chat-sdk] Configuration changed, restarting adapters");
+    await stopChatSdk();
+    // Bounded: a Slack adapter can retry auth.test for a long time, and the
+    // reload must not hold every later config save behind it. The start
+    // continues in the background after the budget.
+    const started = await withTimeout(startChatSdk(), RELOAD_START_BUDGET_MS, "start after reload");
+    console.log(
+      started
+        ? `[chat-sdk] Restart done, adapters configured: ${health.size}`
+        : "[chat-sdk] Restart still in progress after the reload budget; check the card status",
+    );
+    return health.size > 0;
+  } catch (error) {
+    console.error(`[chat-sdk] Restart after configuration change failed: ${errorMessage(error)}`);
+    return false;
   }
 }

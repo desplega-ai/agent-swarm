@@ -1176,10 +1176,10 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         key: "CHAT_SDK_ENABLED",
         label: "Enable Chat SDK channel",
         description:
-          "Start the Chat SDK channel (Telegram and more) for the adapters configured in CHAT_SDK_ADAPTERS.",
+          "Start the Chat SDK channel (Telegram and more) for the adapters configured in CHAT_SDK_ADAPTERS. A change applies within a few seconds.",
         kind: "boolean",
         defaultValue: "false",
-        restartRequired: true,
+        restartRequired: false,
         docsUrl: `${DOCS}integrations/chat-sdk`,
       },
       {
