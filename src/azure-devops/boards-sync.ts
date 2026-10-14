@@ -259,17 +259,19 @@ function workItemUrl(ctx: WorkItemContext): string {
 
 const RECEIPT_NAMESPACE = "integration:azure-devops:deliveries";
 const RECEIPT_TTL_MS = 7 * 24 * 60 * 60 * 1000;
-const inFlight = new Set<string>();
+const inFlight = new Map<string, Promise<HandlerResult>>();
 
 /**
- * Run `fn` once per `key`. A concurrent delivery with the same key is skipped
- * while the first is in flight; the durable receipt is only written after `fn`
- * returned, so a thrown error leaves the delivery retryable.
+ * Run `fn` once per `key`. A concurrent delivery with the same key shares the
+ * first attempt's promise, so it observes that attempt's success or failure
+ * instead of being acknowledged early. The durable receipt is only written after
+ * `fn` returned, so a thrown error leaves every waiting delivery retryable.
  */
-async function withReceipt(key: string, fn: () => Promise<HandlerResult>): Promise<HandlerResult> {
-  if (inFlight.has(key)) return { created: false };
-  inFlight.add(key);
-  try {
+function withReceipt(key: string, fn: () => Promise<HandlerResult>): Promise<HandlerResult> {
+  const pending = inFlight.get(key);
+  // A waiter rethrows the first attempt's failure; on success it is a duplicate, so it creates nothing.
+  if (pending) return pending.then(() => ({ created: false }));
+  const attempt = (async (): Promise<HandlerResult> => {
     if ((await getKv(RECEIPT_NAMESPACE, key)) || (await hasTrackerDelivery(PROVIDER, key))) {
       return { created: false };
     }
@@ -282,9 +284,11 @@ async function withReceipt(key: string, fn: () => Promise<HandlerResult>): Promi
       expiresAt: Date.now() + RECEIPT_TTL_MS,
     });
     return result;
-  } finally {
+  })().finally(() => {
     inFlight.delete(key);
-  }
+  });
+  inFlight.set(key, attempt);
+  return attempt;
 }
 
 const workItemLocks = new Map<string, Promise<unknown>>();

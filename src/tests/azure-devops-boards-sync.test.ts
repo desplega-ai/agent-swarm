@@ -456,6 +456,22 @@ describe("concurrent deliveries", () => {
   });
 });
 
+async function holdFirstCreate() {
+  let release!: (err: Error) => void;
+  const gate = new Promise<never>((_, reject) => {
+    release = reject;
+  });
+  const spy = spyOn(await import("../tasks/sibling-awareness"), "createTaskWithSiblingAwareness");
+  spy.mockImplementationOnce(() => gate);
+  spyOn(console, "error").mockImplementation(() => {});
+  return { release, spy };
+}
+
+async function spyCalled(spy: { mock: { calls: unknown[] } }) {
+  for (let i = 0; i < 200 && spy.mock.calls.length === 0; i++) await Bun.sleep(5);
+  expect(spy.mock.calls.length).toBeGreaterThan(0);
+}
+
 describe("failed deliveries stay retryable", () => {
   test("a transient connectionData failure returns 500 and the retry succeeds", async () => {
     delete process.env.AZURE_DEVOPS_BOT_ID;
@@ -480,6 +496,41 @@ describe("failed deliveries stay retryable", () => {
     expect(await hasTrackerDelivery("azure-devops", event.id)).toBe(false);
     spy.mockRestore();
     expect((await post(event)).json.created).toBe(true);
+  });
+
+  test("a replay of the same notification waits for an in-flight create that then fails", async () => {
+    const event = fixture(commentedFixture);
+    const { release, spy } = await holdFirstCreate();
+    const first = post(event);
+    await spyCalled(spy);
+    const second = post(event);
+    await Bun.sleep(20);
+    release(new Error("boom"));
+    expect((await first).status).toBe(500);
+    expect((await second).status).toBe(500);
+    expect(await getAllTrackerSyncs("azure-devops")).toHaveLength(0);
+    spy.mockRestore();
+    const retry = await post(event);
+    expect(retry.status).toBe(200);
+    expect(retry.json.created).toBe(true);
+  });
+
+  test("another notification for the same comment is not acknowledged while the first create fails", async () => {
+    const first = fixture(commentedFixture);
+    const other = fixture(commentedFixture);
+    other.resource.commentVersionRef.commentId = first.resource.commentVersionRef.commentId;
+    const { release, spy } = await holdFirstCreate();
+    const firstPost = post(first);
+    await spyCalled(spy);
+    const otherPost = post(other);
+    await Bun.sleep(20);
+    release(new Error("boom"));
+    expect((await firstPost).status).toBe(500);
+    expect((await otherPost).status).toBe(500);
+    spy.mockRestore();
+    const replay = await post(other);
+    expect(replay.status).toBe(200);
+    expect(replay.json.created).toBe(true);
   });
 
   test("lastDeliveryId is written only after the task exists", async () => {
