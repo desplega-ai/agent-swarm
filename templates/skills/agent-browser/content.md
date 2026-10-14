@@ -79,7 +79,7 @@ agent-fs share-create thoughts/<agent-id>/qa/<topic>-screenshots/<name>.png --js
 - In `store-progress`, list the upload in the `attachments` field with `kind: "agent-fs"` and the path, and paste the `share-create` link for people who need to open the file.
 - If `agent-fs auth whoami` fails, report the local path, say the upload was skipped, and continue.
 
-The `artifacts` skill holds the full agent-fs recipe and the naming conventions.
+The `agent-fs` skill holds the full agent-fs recipe.
 
 ## Gotchas
 

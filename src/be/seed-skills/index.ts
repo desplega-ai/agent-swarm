@@ -16,8 +16,6 @@ import agentBrowserContent from "../../../templates/skills/agent-browser/content
 };
 import appsConfig from "../../../templates/skills/apps/config.json" with { type: "text" };
 import appsContent from "../../../templates/skills/apps/content.md" with { type: "text" };
-import artifactsConfig from "../../../templates/skills/artifacts/config.json" with { type: "text" };
-import artifactsContent from "../../../templates/skills/artifacts/content.md" with { type: "text" };
 import askUserConfig from "../../../templates/skills/ask-user/config.json" with { type: "text" };
 import askUserContent from "../../../templates/skills/ask-user/content.md" with { type: "text" };
 import assetNamespacesConfig from "../../../templates/skills/asset-namespaces/config.json" with {
@@ -273,6 +271,7 @@ import wtsExpertContent from "../../../templates/skills/wts-expert/content.md" w
 import {
   computeContentHash,
   createSkill,
+  deleteSkill,
   deleteSkillFile,
   getDbClient,
   getSkillByName,
@@ -280,6 +279,7 @@ import {
   updateSkill,
   upsertSkillFiles,
 } from "../db";
+import { deleteSeedState, getSeedState } from "../seed/state-db";
 import type { Seeder, SeedItem } from "../seed/types";
 import bundledFilesManifest from "./bundled-files.generated.json";
 import { buildSkillContent, type SkillTemplateConfig } from "./render";
@@ -321,7 +321,6 @@ const BUILT_IN_SKILL_FILES = bundledFilesManifest as Record<string, SeedSkillFil
 const BUILT_IN_SKILL_SOURCES = [
   { config: agentBrowserConfig, body: agentBrowserContent },
   { config: appsConfig, body: appsContent },
-  { config: artifactsConfig, body: artifactsContent },
   { config: askUserConfig, body: askUserContent },
   { config: assetNamespacesConfig, body: assetNamespacesContent },
   { config: attioInteractionConfig, body: attioInteractionContent },
@@ -527,6 +526,56 @@ async function syncSeededSkillFiles(skillId: string, files: SeedSkillFile[]): Pr
   if (files.length > 0) await upsertSkillFiles(skillId, files);
 }
 
+/**
+ * Skills this catalog used to seed and no longer ships. Dropping a template
+ * alone leaves its last seeded row live on every existing install, so agents
+ * keep reading instructions for a removed feature. `artifacts` documented the
+ * PM2 + localtunnel serving path, removed together with PM2.
+ */
+export const RETIRED_SEED_SKILLS: readonly string[] = ["artifacts"];
+
+/**
+ * Delete each retired skill the seeder still owns: a `seed_state` row exists
+ * and the live copy hashes to what was last seeded. A skill the seeder never
+ * recorded, or one a user edited since, is left in place.
+ */
+export async function retireSeedSkills(
+  names: readonly string[] = RETIRED_SEED_SKILLS,
+): Promise<string[]> {
+  const retired: string[] = [];
+
+  for (const name of names) {
+    const existing = await getSkillByName(name, "swarm");
+    if (!existing) continue;
+
+    const state = await getSeedState("skill", name);
+    if (!state) continue;
+
+    const liveFiles = (await getSkillFiles(existing.id)).map((file) => ({
+      path: file.path,
+      content: file.content,
+    }));
+    const liveHash = skillSeedHash(
+      existing.content,
+      existing.systemDefault,
+      liveFiles,
+      existing.userInvocable,
+    );
+    if (liveHash !== state.seededHash) {
+      console.warn(`[seed:skill] kept retired skill "${name}": edited since it was seeded`);
+      continue;
+    }
+
+    await getDbClient().transaction(async () => {
+      await deleteSkill(existing.id);
+      await deleteSeedState("skill", name);
+    });
+    retired.push(name);
+  }
+
+  return retired;
+}
+
 type SkillSeedItem = SeedItem & { skill: SeedSkill };
 
 export const skillsSeeder: Seeder<SkillSeedItem> = {
@@ -614,4 +663,6 @@ export const skillsSeeder: Seeder<SkillSeedItem> = {
       await syncSeededSkillFiles(created.id, skill.files);
     });
   },
+
+  retire: () => retireSeedSkills(),
 };

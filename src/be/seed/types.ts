@@ -53,6 +53,11 @@ export interface Seeder<TItem extends SeedItem = SeedItem> {
   upstreamHash(item: TItem): string | null | Promise<string | null>;
   /** Create or update the upstream entity so it matches the source definition. */
   apply(item: TItem, action: "create" | "update", opts?: SeederRunOptions): void | Promise<void>;
+  /**
+   * Optional: remove upstream entities for keys the source no longer ships.
+   * Must leave user-modified entities in place. Returns the removed keys.
+   */
+  retire?(): Promise<string[]>;
 }
 
 export type SeederResult = {
@@ -61,5 +66,6 @@ export type SeederResult = {
   updated: number;
   skippedUnchanged: number;
   skippedUserModified: number;
+  retired: number;
   failed: Array<{ key: string; error: string }>;
 };
