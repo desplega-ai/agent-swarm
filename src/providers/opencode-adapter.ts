@@ -27,6 +27,7 @@ import {
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { resolveSlashSkillPrompt } from "./codex-skill-resolver";
 import { CTX_MODE_NUDGE_EVERY } from "./ctx-mode-env";
+import { OpenRouterBilling } from "./opencode-billing";
 import { createOpencodeSwarmPlugin, type OpencodeToolLister } from "./opencode-swarm-plugin";
 import {
   apiHeaders,
@@ -219,6 +220,9 @@ export function applyOpenRouterBaseUrlOverride(
 const SWARM_AGENT_NAME = "swarm";
 const TRANSCRIPT_TAIL_CHARS = 20_000;
 const TOOL_RESULT_PREVIEW_CHARS = 500;
+// The last response body finishes streaming with the step; this only covers
+// a read still in flight when the session ends.
+const BILLING_SETTLE_MS = 2_000;
 
 /** The swarm MCP server's name in the OpenCode config. */
 const SWARM_MCP_SERVER = "swarm";
@@ -339,6 +343,7 @@ export class OpencodeSession implements ProviderSession {
     private readonly swarm: SwarmHooksConfig,
     private readonly cwd: string,
     private readonly appliedReasoningEffort: ReasoningEffort | null = null,
+    private readonly billing?: OpenRouterBilling,
   ) {
     this.completionPromise = new Promise<ProviderResult>((resolve) => {
       this.completionResolve = resolve;
@@ -494,12 +499,13 @@ export class OpencodeSession implements ProviderSession {
         this.usage = { cost: ev.data.cost, tokens: ev.data.tokens };
         break;
 
-      case "session.execution.succeeded": {
-        const cost = this.buildCostData(false);
-        this.emit({ type: "result", cost, isError: false });
-        void this.finish({ exitCode: 0, sessionId: this._sessionId, cost, isError: false });
+      case "session.execution.succeeded":
+        void this.finish(async () => {
+          const cost = await this.buildCostData(false);
+          this.emit({ type: "result", cost, isError: false });
+          return { exitCode: 0, sessionId: this._sessionId, cost, isError: false };
+        });
         break;
-      }
 
       case "session.execution.failed":
         this.fail(errorMessage(ev.data.error, "opencode session error"));
@@ -544,24 +550,28 @@ export class OpencodeSession implements ProviderSession {
   fail(message: string): void {
     if (this.aborted || this.completed) return;
     this.emit({ type: "error", message });
-    void this.finish({
+    void this.finish(async () => ({
       exitCode: 1,
       sessionId: this._sessionId,
-      cost: this.buildCostData(true),
+      cost: await this.buildCostData(true),
       isError: true,
       failureReason: message,
-    });
+    }));
   }
 
-  private buildCostData(isError: boolean): CostData {
+  private async buildCostData(isError: boolean): Promise<CostData> {
     const { cost, tokens } = this.usage;
+    const billed = await this.billing?.settle(BILLING_SETTLE_MS);
     return {
       sessionId: this._sessionId,
       taskId: this.swarm.taskId,
       agentId: this.swarm.agentId,
-      totalCostUsd: cost,
+      ...(billed?.complete
+        ? { totalCostUsd: billed.costUsd, harnessCostBilled: true }
+        : { totalCostUsd: cost }),
       inputTokens: tokens.input,
-      outputTokens: tokens.output,
+      // OpenCode 2's `output` excludes reasoning; both bill at the output rate.
+      outputTokens: tokens.output + tokens.reasoning,
       reasoningOutputTokens: tokens.reasoning,
       cacheReadTokens: tokens.cache.read,
       cacheWriteTokens: tokens.cache.write,
@@ -596,10 +606,11 @@ export class OpencodeSession implements ProviderSession {
    * Settle the session. Session-end work is bounded and cancellable, so the
    * host always closes and completion always resolves.
    */
-  private async finish(result: ProviderResult): Promise<void> {
+  private async finish(settle: ProviderResult | (() => Promise<ProviderResult>)): Promise<void> {
     if (this.completed) return;
     this.completed = true;
     const { signal } = this.sessionEnd;
+    const result = typeof settle === "function" ? await settle() : settle;
     try {
       if (!this.aborted) {
         await settleWithin(this.runSessionEnd(signal), sessionHooks.budgetMs, signal);
@@ -762,6 +773,7 @@ export class OpencodeAdapter implements ProviderAdapter {
     };
     const { sdk, version: opencodeVersion } = await loadOpencodeSdkImpl();
     let listTools: OpencodeToolLister | undefined;
+    const billing = config.model.startsWith("openrouter/") ? new OpenRouterBilling() : undefined;
     const host = await sdk.OpenCode.create({
       config: { content: JSON.stringify(opencodeConfig) },
       plugins: [
@@ -769,6 +781,7 @@ export class OpencodeAdapter implements ProviderAdapter {
           onToolRegistry: (lister) => {
             listTools = lister;
           },
+          ...(billing ? { onOpenRouterResponse: (response) => billing.observe(response) } : {}),
         }),
       ],
       log: {
@@ -796,6 +809,7 @@ export class OpencodeAdapter implements ProviderAdapter {
       swarm,
       config.cwd,
       appliedReasoningEffort,
+      billing,
     );
     session.emitSessionInit(opencodeVersion ? { version: opencodeVersion } : undefined);
 

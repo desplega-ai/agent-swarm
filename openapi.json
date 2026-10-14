@@ -44673,6 +44673,9 @@
                   "totalCostUsd": {
                     "type": "number"
                   },
+                  "harnessCostBilled": {
+                    "type": "boolean"
+                  },
                   "taskId": {
                     "type": "string"
                   },

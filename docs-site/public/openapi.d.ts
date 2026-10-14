@@ -17220,6 +17220,7 @@ export interface paths {
                         sessionId: string;
                         agentId: string;
                         totalCostUsd: number;
+                        harnessCostBilled?: boolean;
                         taskId?: string;
                         inputTokens?: number;
                         outputTokens?: number;
