@@ -3,6 +3,7 @@ import { CHAT_SDK_ADAPTER_DEFS } from "./chat-sdk-fields";
 import {
   buildAll,
   initialDrafts,
+  localTunnelPort,
   MASKED_SECRET,
   maskSecretsForPreview,
   secretFieldProblem,
@@ -84,5 +85,32 @@ describe("Chat SDK form: Telegram secret token", () => {
     };
     const { problems } = buildAll(drafts, {});
     expect(problems.some((problem) => problem.includes("Webhook secret token"))).toBe(true);
+  });
+});
+
+describe("Chat SDK form: local webhook URL detection", () => {
+  test("a localhost URL returns its port", () => {
+    expect(localTunnelPort("http://localhost:3013/api/integrations/chat/telegram/webhook")).toBe(
+      "3013",
+    );
+    expect(localTunnelPort("http://127.0.0.1:3913/api/integrations/chat/slack/webhook")).toBe(
+      "3913",
+    );
+    expect(localTunnelPort("http://[::1]:3013/api/integrations/chat/teams/webhook")).toBe("3013");
+    expect(localTunnelPort("http://LOCALHOST:3013/x")).toBe("3013");
+  });
+
+  test("a local URL without a port returns the protocol default", () => {
+    expect(localTunnelPort("http://localhost/api")).toBe("80");
+    expect(localTunnelPort("https://localhost/api")).toBe("443");
+  });
+
+  test("a public host or a value that is not a URL returns undefined", () => {
+    expect(localTunnelPort("https://abc123.ngrok-free.app/api/integrations/chat/x/webhook")).toBe(
+      undefined,
+    );
+    expect(localTunnelPort("https://localhost.example.com/api")).toBe(undefined);
+    expect(localTunnelPort("not a url")).toBe(undefined);
+    expect(localTunnelPort("")).toBe(undefined);
   });
 });

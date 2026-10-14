@@ -22,7 +22,7 @@ Each adapter has its own state. When one adapter fails to start, the other adapt
 
 ## Configuration
 
-The fastest path is the dashboard: **Settings → Integrations → Chat SDK**. The card has one panel for each adapter. It saves each secret as its own secret config row named `CHAT_SDK_<ADAPTER>_<FIELD>` (for example `CHAT_SDK_TELEGRAM_BOT_TOKEN`). The JSON in `CHAT_SDK_ADAPTERS` then holds a reference to the row, not the secret. The card also shows each webhook URL, the adapter health, and a **Register webhook** button for Telegram.
+The fastest path is the dashboard: **Settings → Integrations → Chat SDK**. The card has one panel for each adapter. It saves each secret as its own secret config row named `CHAT_SDK_<ADAPTER>_<FIELD>` (for example `CHAT_SDK_TELEGRAM_BOT_TOKEN`). The JSON in `CHAT_SDK_ADAPTERS` then holds a reference to the row, not the secret. The card also shows the setup steps for each adapter, each webhook URL with a copy button, the adapter health, and a **Register webhook** button for Telegram. The setup steps start expanded, and collapse when the adapter already runs healthy.
 
 The channel reads these keys from the environment or from global swarm config:
 
@@ -66,6 +66,16 @@ Each adapter has its own public URL:
 
 The adapter checks the platform signature on every request (Telegram secret token, Slack signing secret, Discord Ed25519 key, Teams Bot Framework token). Set `PUBLIC_MCP_BASE_URL` to the public HTTPS address of the API.
 
+#### Local development with a tunnel
+
+A platform cannot reach `localhost`. When the webhook URL on the card starts with `localhost`, `127.0.0.1` or `[::1]`, the card shows a tunnel hint. To receive webhooks on a local API:
+
+1. Expose the API port with a tunnel, for example `ngrok http 3013`.
+2. Set `PUBLIC_MCP_BASE_URL` to the HTTPS tunnel URL, for example `https://abc123.ngrok-free.app`, in the API environment. Then restart the API.
+3. Check that the card shows the tunnel URL, then register the webhook: click **Register webhook** for Telegram, or paste the URL in the platform settings.
+
+When the tunnel URL changes, do steps 2 and 3 again. Telegram polling and Slack socket mode need no public URL, so they need no tunnel.
+
 ## Platform setup
 
 ### Telegram
@@ -85,7 +95,7 @@ For local development without a public URL, set `mode` to `polling`. The adapter
 | `allowedUserIds` | no | Telegram user ids allowed to use the bot. Everyone is allowed when empty. |
 | `userName` | no | The bot username for mention detection. Default: the name from `getMe`. |
 
-In a group with BotFather privacy mode on (the default), Telegram sends the bot only commands and messages that mention it.
+In a group with BotFather privacy mode on (the default), Telegram sends the bot only commands and messages that mention it. To let the bot see every group message, send `/setprivacy` to BotFather, turn privacy off, then remove the bot from the group and add it again.
 
 ### Slack
 
@@ -175,6 +185,7 @@ Discord sends channel messages and mentions only over the Gateway WebSocket, not
 3. For a single-tenant bot, copy the tenant id.
 4. Set the bot's **Messaging endpoint** to the Teams webhook URL.
 5. Add the **Microsoft Teams** channel to the bot, and install the bot in Teams.
+6. Optional: to let agents read thread history with `chat-read-thread`, grant the app a Microsoft Graph `Chat.Read.*` permission (see [Limits](#limits)).
 
 | Field | Required | Notes |
 |---|---|---|
@@ -194,7 +205,8 @@ A Teams thread id contains the service URL of the conversation, and the adapter 
 4. **Steer or follow up.** When the Lead's task for the thread is in progress, a new plain reply steers that task, and the bot posts a short acknowledgement. Otherwise the reply waits in the buffer and becomes a follow-up task that depends on the previous one.
 5. **Attachments.** Files are downloaded once per flush and attached to each new task. Files larger than 50 MB are skipped, and the task text says so.
 6. **Relay.** When a task ends (completed, failed or cancelled), a database trigger records a relay obligation. A watcher posts the task output to the thread and marks the row delivered. Lead follow-up tasks on the same thread are relayed too, so delegated results reach the user. When a Lead task is resumed after a shutdown or a crash, the resume task relays the final answer. A worker task, or its resume, does not relay: its result reaches the thread through the Lead follow-up. A failed post retries with backoff, up to 10 minutes between tries. After 24 hours the swarm stops and records the last error. Delivery is at least once: a crash between the post and the record can send a message twice.
-7. **Shutdown.** On API shutdown the channel stops inside one 10 s budget. First, webhooks answer `503` and refuse new work. Then the relay watcher stops claiming rows. Next, in-flight handlers finish and every waiting thread buffer becomes its task. Then the swarm waits for a relay post that is still in flight. Last, the adapters shut down. Each step gets only the time that is left. A step that runs out of time is abandoned and logged as `Shutdown budget spent, abandoned: ...`.
+7. **Typing.** The bot shows the typing indicator from the first buffered message until it posts the reply. The indicator stops when the flush creates no task, and it stops after 15 minutes at most.
+8. **Shutdown.** On API shutdown the channel stops inside one 10 s budget. First, webhooks answer `503` and refuse new work. Then the relay watcher stops claiming rows. Next, in-flight handlers finish and every waiting thread buffer becomes its task. Then the swarm waits for a relay post that is still in flight. Last, the adapters shut down. Each step gets only the time that is left. A step that runs out of time is abandoned and logged as `Shutdown budget spent, abandoned: ...`.
    - **Relay post.** An abandoned post keeps its claimed row, which stays pending. After the restart, the row is sent again after the normal backoff (up to 10 minutes), within the 24 hour limit. If the platform did accept the abandoned post, the user can see the message twice.
    - **Buffered messages.** Thread buffers exist only in API memory, not in the Chat SDK tables. The platform already got its webhook acknowledgement, so it does not send those messages again. If the flush runs out of time, the threads not yet turned into tasks are lost, and the log line says so.
 

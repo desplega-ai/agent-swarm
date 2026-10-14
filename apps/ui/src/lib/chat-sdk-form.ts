@@ -215,3 +215,22 @@ export function maskSecretsForPreview(adapters: JsonObject): JsonObject {
   }
   return out;
 }
+
+const LOCAL_HOSTNAMES = new Set(["localhost", "127.0.0.1", "[::1]"]);
+
+/**
+ * The port to expose with a tunnel when `webhookUrl` points at this machine
+ * (localhost, 127.0.0.1 or [::1]). Undefined for a public host or a value
+ * that is not a URL.
+ */
+export function localTunnelPort(webhookUrl: string): string | undefined {
+  let url: URL;
+  try {
+    url = new URL(webhookUrl);
+  } catch {
+    return undefined;
+  }
+  if (!LOCAL_HOSTNAMES.has(url.hostname.toLowerCase())) return undefined;
+  if (url.port) return url.port;
+  return url.protocol === "https:" ? "443" : "80";
+}

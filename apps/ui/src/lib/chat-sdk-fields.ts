@@ -23,6 +23,8 @@ export interface ChatSdkField {
   /** Only required while another field of the same adapter has this value. */
   requiredWhen?: { field: string; value: string };
   options?: string[];
+  /** One line per select option, shown under the select. */
+  optionHints?: Record<string, string>;
   placeholder?: string;
   hint?: string;
 }
@@ -60,7 +62,17 @@ export const CHAT_SDK_ADAPTER_DEFS: ChatSdkAdapterDef[] = [
         requiredWhen: { field: "mode", value: "webhook" },
         hint: "1 to 256 characters from A-Z, a-z, 0-9, underscore and hyphen. Telegram sends it with every webhook call.",
       },
-      { key: "mode", label: "Mode", kind: "select", options: ["webhook", "polling"] },
+      {
+        key: "mode",
+        label: "Mode",
+        kind: "select",
+        options: ["webhook", "polling"],
+        optionHints: {
+          webhook:
+            "Telegram calls the webhook URL. Needs a public HTTPS URL on port 443, 80, 88 or 8443.",
+          polling: "The API asks Telegram for updates. No public URL needed, good for local.",
+        },
+      },
       {
         key: "allowedUserIds",
         label: "Allowed user IDs",
@@ -95,7 +107,16 @@ export const CHAT_SDK_ADAPTER_DEFS: ChatSdkAdapterDef[] = [
         requiredWhen: { field: "mode", value: "socket" },
         placeholder: "xapp-...",
       },
-      { key: "mode", label: "Mode", kind: "select", options: ["webhook", "socket"] },
+      {
+        key: "mode",
+        label: "Mode",
+        kind: "select",
+        options: ["webhook", "socket"],
+        optionHints: {
+          webhook: "Slack calls the request URL. Needs a public HTTPS URL and the signing secret.",
+          socket: "The API connects to Slack. No public URL needed, needs the app token.",
+        },
+      },
       USER_NAME,
     ],
   },

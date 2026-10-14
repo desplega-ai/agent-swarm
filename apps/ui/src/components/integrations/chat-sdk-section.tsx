@@ -7,6 +7,7 @@ import {
 } from "@/api/hooks/use-chat-sdk";
 import { useUpsertConfigsBatch } from "@/api/hooks/use-config-api";
 import type { ChatSdkAdapterStatus, ChatSdkStatusResponse, SwarmConfig } from "@/api/types";
+import { ChatSdkSetup, CodeChip } from "@/components/integrations/chat-sdk-setup";
 import type { SpecialFlowSectionProps } from "@/components/integrations/special-flows";
 import {
   OAuthSection,
@@ -43,6 +44,7 @@ import {
   isObject,
   isRequired,
   type JsonObject,
+  localTunnelPort,
   maskSecretsForPreview,
   parseAdapters,
   secretFieldProblem,
@@ -56,7 +58,7 @@ import { cn } from "@/lib/utils";
 // `lib/chat-sdk-form.ts`. A save applies on the debounced config reload, no restart.
 // ---------------------------------------------------------------------------
 
-export function ChatSdkSection({ configs }: SpecialFlowSectionProps) {
+export function ChatSdkSection({ def, configs }: SpecialFlowSectionProps) {
   const status = useChatSdkStatus();
   const [savedNotice, setSavedNotice] = useState(false);
   const storedAdapters = findConfigForKey(configs, "CHAT_SDK_ADAPTERS")?.value;
@@ -98,6 +100,7 @@ export function ChatSdkSection({ configs }: SpecialFlowSectionProps) {
       <ChatSdkForm
         key={`${storedEnabled ?? ""}|${storedAdapters ?? ""}`}
         configs={configs}
+        docsUrl={def.docsUrl}
         storedAdapters={storedAdapters}
         storedEnabled={
           storedEnabled !== undefined && TRUTHY_VALUES.has(storedEnabled.trim().toLowerCase())
@@ -114,6 +117,7 @@ export function ChatSdkSection({ configs }: SpecialFlowSectionProps) {
 
 interface ChatSdkFormProps {
   configs: SwarmConfig[];
+  docsUrl: string | undefined;
   storedAdapters: string | undefined;
   storedEnabled: boolean;
   envOnlyAdapters: boolean;
@@ -129,6 +133,7 @@ function batchErrorText(errors: Array<{ key: string; message: string }>): string
 
 function ChatSdkForm({
   configs,
+  docsUrl,
   storedAdapters,
   storedEnabled,
   envOnlyAdapters,
@@ -254,6 +259,7 @@ function ChatSdkForm({
           statusError={statusError}
           envOnly={envOnlyAdapters}
           configs={configs}
+          docsUrl={docsUrl}
           onChange={(patch) => update(def.name, patch)}
         />
       ))}
@@ -323,6 +329,7 @@ interface AdapterPanelProps {
   /** The adapters come from the deployment env: the switch shows the running state, locked. */
   envOnly: boolean;
   configs: SwarmConfig[];
+  docsUrl: string | undefined;
   onChange: (patch: (draft: AdapterDraft) => AdapterDraft) => void;
 }
 
@@ -334,6 +341,7 @@ function AdapterPanel({
   statusError,
   envOnly,
   configs,
+  docsUrl,
   onChange,
 }: AdapterPanelProps) {
   const { copied, copy } = useCopyToClipboard();
@@ -345,6 +353,9 @@ function AdapterPanel({
   const mode = draft.included ? draft.values.mode : savedMode;
   const webhookUnused =
     (def.name === "telegram" && mode === "polling") || (def.name === "slack" && mode === "socket");
+  const tunnelPort = status && !webhookUnused ? localTunnelPort(status.webhookUrl) : undefined;
+  // Wait for the first status (or its error), so the default fits the health.
+  const statusKnown = status !== undefined || statusError !== undefined;
 
   return (
     <OAuthSection title={def.label}>
@@ -361,62 +372,74 @@ function AdapterPanel({
           />
         }
       />
-      {showDetails && (
-        <>
-          {draft.included && (
-            <OAuthSectionRow>
-              <div className="grid gap-4 sm:grid-cols-2">
-                {def.fields.map((field) => (
-                  <FieldInput
-                    key={field.key}
-                    adapter={def.name}
-                    field={field}
-                    draft={draft}
-                    storedValue={storedEntry?.[field.key]}
-                    configs={configs}
-                    onChange={onChange}
-                  />
-                ))}
-              </div>
-            </OAuthSectionRow>
-          )}
-          {status && (
-            <OAuthSectionRow>
-              <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                {WEBHOOK_LABEL[def.name]}
-              </div>
-              <div className="flex items-center gap-2">
-                <code className="flex-1 truncate rounded bg-muted px-2 py-1 font-mono text-xs">
-                  {status.webhookUrl}
-                </code>
-                <Button
-                  type="button"
-                  size="icon"
-                  variant="outline"
-                  className="size-8 shrink-0"
-                  onClick={() => void copy(status.webhookUrl)}
-                  aria-label={copied ? "Copied" : `Copy the ${def.label} webhook URL`}
-                >
-                  {copied ? (
-                    <Check className="size-3.5 text-status-success-strong" />
-                  ) : (
-                    <Copy className="size-3.5" />
-                  )}
-                </Button>
-              </div>
-              {webhookUnused && (
-                <p className="text-xs text-muted-foreground">Not used in {mode} mode.</p>
+      {statusKnown && (
+        <OAuthSectionRow>
+          <ChatSdkSetup
+            adapter={def.name}
+            docsUrl={docsUrl}
+            defaultOpen={view.tone !== "success"}
+          />
+        </OAuthSectionRow>
+      )}
+      {draft.included && (
+        <OAuthSectionRow>
+          <div className="grid gap-4 sm:grid-cols-2">
+            {def.fields.map((field) => (
+              <FieldInput
+                key={field.key}
+                adapter={def.name}
+                field={field}
+                draft={draft}
+                storedValue={storedEntry?.[field.key]}
+                configs={configs}
+                onChange={onChange}
+              />
+            ))}
+          </div>
+        </OAuthSectionRow>
+      )}
+      {status && (
+        <OAuthSectionRow>
+          <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+            {WEBHOOK_LABEL[def.name]}
+          </div>
+          <div className="flex items-center gap-2">
+            <code className="flex-1 truncate rounded bg-muted px-2 py-1 font-mono text-xs">
+              {status.webhookUrl}
+            </code>
+            <Button
+              type="button"
+              size="icon"
+              variant="outline"
+              className="size-8 shrink-0"
+              onClick={() => void copy(status.webhookUrl)}
+              aria-label={copied ? "Copied" : `Copy the ${def.label} webhook URL`}
+            >
+              {copied ? (
+                <Check className="size-3.5 text-status-success-strong" />
+              ) : (
+                <Copy className="size-3.5" />
               )}
-            </OAuthSectionRow>
+            </Button>
+          </div>
+          {webhookUnused && (
+            <p className="text-xs text-muted-foreground">Not used in {mode} mode.</p>
           )}
-          {def.name === "telegram" && (
-            <TelegramWebhookRow
-              configured={status?.configured === true}
-              savedMode={savedMode}
-              draftMode={mode}
-            />
+          {tunnelPort && (
+            <p className="text-xs text-muted-foreground">
+              Behind localhost? Expose the API with a tunnel, for example{" "}
+              <CodeChip>ngrok http {tunnelPort}</CodeChip>, set{" "}
+              <CodeChip>PUBLIC_MCP_BASE_URL</CodeChip> to the tunnel URL, then register the webhook.
+            </p>
           )}
-        </>
+        </OAuthSectionRow>
+      )}
+      {showDetails && def.name === "telegram" && (
+        <TelegramWebhookRow
+          configured={status?.configured === true}
+          savedMode={savedMode}
+          draftMode={mode}
+        />
       )}
     </OAuthSection>
   );
@@ -474,8 +497,17 @@ function FieldInput({ adapter, field, draft, storedValue, configs, onChange }: F
 
   const value = draft.values[field.key] ?? "";
   if (field.kind === "select") {
+    const hints = field.optionHints;
+    const helper: ReactNode = hints
+      ? field.options?.map((option) => (
+          <span key={option} className="block">
+            <span className={cn(option === value && "font-medium text-foreground")}>{option}</span>:{" "}
+            {hints[option]}
+          </span>
+        ))
+      : field.hint;
     return (
-      <SettingsRow label={field.label} htmlFor={id} helper={field.hint}>
+      <SettingsRow label={field.label} htmlFor={id} helper={helper}>
         <Select value={value} onValueChange={setValue}>
           <SelectTrigger id={id} className="w-full">
             <SelectValue />
@@ -576,19 +608,5 @@ function TelegramWebhookRow({ configured, savedMode, draftMode }: TelegramWebhoo
         </AlertCallout>
       )}
     </OAuthSectionRow>
-  );
-}
-
-/** Inline mono chip. `breakable` lets a long key wrap inside the chip only. */
-function CodeChip({ children, breakable }: { children: ReactNode; breakable?: boolean }) {
-  return (
-    <code
-      className={cn(
-        breakable ? "break-all" : "whitespace-nowrap",
-        "rounded bg-muted px-1 py-0.5 font-mono text-xs",
-      )}
-    >
-      {children}
-    </code>
   );
 }
