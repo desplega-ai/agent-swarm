@@ -7,6 +7,27 @@ build() {
 
 cd "$(dirname "$0")/.." || build 'cannot enter repository root'
 [ "$#" -gt 0 ] || build 'no input paths'
+# Queue commits are built again after landing on main.
+case "${VERCEL_GIT_COMMIT_REF:-}" in
+  gh-readonly-queue/*) echo 'vercel-ignore: skip (merge queue)'; exit 0 ;;
+esac
+
+# Demo shares apps/ui/vercel.json, so restore its production-only policy here.
+if [ "${VERCEL_PROJECT_ID:-}" = prj_nOzXgZ0UxkNDpSsACdHcslXVkxEN ] &&
+   [ "${VERCEL_ENV:-}" != production ]; then
+  echo 'vercel-ignore: skip (demo non-production)'
+  exit 0
+fi
+
+# Opt-in still goes through the existing owner and changed-input checks.
+if [ "${VERCEL_ENV:-}" = preview ] &&
+   [ "${VERCEL_GIT_COMMIT_AUTHOR_LOGIN:-}" = desplega-bot ]; then
+  case "${VERCEL_GIT_COMMIT_MESSAGE:-}" in
+    *'[preview]'*) echo 'vercel-ignore: bot preview requested' ;;
+    *) echo 'vercel-ignore: skip (bot preview without [preview])'; exit 0 ;;
+  esac
+fi
+
 # Always read owners from fetched main, never from the proposed commit.
 fetch_main() {
   # Vercel removes the clone's origin remote; this repository is public.
