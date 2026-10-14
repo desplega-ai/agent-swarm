@@ -9,13 +9,13 @@ import { useUpsertConfigsBatch } from "@/api/hooks/use-config-api";
 import type { ChatSdkAdapterStatus, ChatSdkStatusResponse, SwarmConfig } from "@/api/types";
 import { ChatSdkSetup, CodeChip } from "@/components/integrations/chat-sdk-setup";
 import type { SpecialFlowSectionProps } from "@/components/integrations/special-flows";
+import { BetaTag } from "@/components/shared/beta-tag";
 import {
   OAuthSection,
   OAuthSectionRow,
   OAuthStatusRow,
   type OAuthStatusTone,
 } from "@/components/shared/oauth-section";
-import { BetaTag } from "@/components/shared/beta-tag";
 import { SecretInput } from "@/components/shared/secret-input";
 import { AlertCallout } from "@/components/ui/alert-callout";
 import { Button } from "@/components/ui/button";

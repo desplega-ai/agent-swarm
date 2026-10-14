@@ -30,10 +30,10 @@ function obligations(db: Database): string[] {
     .map((row) => row.task_id);
 }
 
-test("migration 213 creates the chat state tables and the pending index", async () => {
+test("migration 214 creates the chat state tables and the pending index", async () => {
   const db = setup();
   try {
-    db.exec(await Bun.file("src/be/migrations/213_chat_sdk_state.sql").text());
+    db.exec(await Bun.file("src/be/migrations/214_chat_sdk_state.sql").text());
     const tables = db
       .query<{ name: string }, []>("SELECT name FROM sqlite_master WHERE type = 'table'")
       .all()
@@ -66,10 +66,10 @@ test("migration 213 creates the chat state tables and the pending index", async 
   }
 });
 
-test("migration 213 triggers enqueue a relay obligation only for chat-rooted terminal tasks", async () => {
+test("migration 214 triggers enqueue a relay obligation only for chat-rooted terminal tasks", async () => {
   const db = setup();
   try {
-    db.exec(await Bun.file("src/be/migrations/213_chat_sdk_state.sql").text());
+    db.exec(await Bun.file("src/be/migrations/214_chat_sdk_state.sql").text());
     const insert = db.prepare(
       "INSERT INTO agent_tasks (id, status, source, taskType, contextKey, agentId) VALUES (?, ?, ?, ?, ?, ?)",
     );
