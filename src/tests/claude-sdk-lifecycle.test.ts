@@ -199,6 +199,43 @@ describe("Claude SDK production adapter lifecycle", () => {
   );
 
   test(
+    "invalid caller --settings refuses to start: no Claude child spawns",
+    async () => {
+      const directory = await temporaryDirectory();
+      await Bun.write(join(directory, "broken.json"), "{nope");
+      await Bun.write(join(directory, "array.json"), "[1]");
+      const cases: [string[], string][] = [
+        [["--settings", "missing.json"], "cannot be read (ENOENT)"],
+        [["--settings", "broken.json"], "is not valid JSON"],
+        [["--settings", '{"env":{"TOKEN":"sk-ant-oat01-should-not-leak"'], "is not valid JSON"],
+        [["--settings=array.json"], "is not a JSON object"],
+        [["--settings", "--max-turns", "3"], "--settings has no value"],
+        [["--settings", '--settings={"model":"x"}'], "--settings has no value"],
+      ];
+      for (const [index, [additionalArgs, message]] of cases.entries()) {
+        // Cancel mode writes its state file as soon as the fixture starts.
+        const stateFile = join(directory, `invalid-${index}.json`);
+        const sessionConfig = { ...config(directory, "cancel", stateFile), additionalArgs };
+        let summaries = 0;
+        const session = await new ClaudeAdapter(async () => {
+          summaries++;
+        }).createSession(sessionConfig);
+        const result = await session.waitForCompletion();
+
+        expect(result.isError).toBeTrue();
+        expect(result.failureReason).toContain(message);
+        expect(result.failureReason).not.toContain("should-not-leak");
+        expect(await Bun.file(stateFile).exists()).toBeFalse();
+        expect(summaries).toBe(0);
+        expect(
+          await Bun.file(getTaskFilePath(`${process.pid}-${sessionConfig.taskId}`)).exists(),
+        ).toBeFalse();
+      }
+    },
+    { timeout: CHILD_PROCESS_TEST_BUDGET_MS },
+  );
+
+  test(
     "classifies cancellation and stops the fixture process group",
     async () => {
       const directory = await temporaryDirectory();

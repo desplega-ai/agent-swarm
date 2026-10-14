@@ -24,6 +24,23 @@ export function claudeFlagSettings(): ClaudeFlagSettings {
 
 const SETTINGS_FLAG = "--settings";
 
+/**
+ * Explicit caller `--settings` that cannot be used. The session refuses to
+ * start: launching without them would drop the caller's sandbox rules and
+ * blocking hooks while still running with bypassPermissions. The message is
+ * scrubbed and never echoes inline JSON.
+ */
+export class ClaudeSettingsConfigError extends Error {
+  constructor(detail: string) {
+    super(
+      scrubSecrets(
+        `Invalid caller --settings: ${detail}. Refusing to start Claude without the caller's settings.`,
+      ),
+    );
+    this.name = "ClaudeSettingsConfigError";
+  }
+}
+
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -31,27 +48,23 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 /**
  * Parses one caller `--settings` value the way Claude Code reads it: inline
  * JSON when it starts with `{`, otherwise a settings file path (relative paths
- * resolve against the session cwd). Returns null and logs a scrubbed warning
- * when the value cannot be used; the warning never echoes the JSON itself.
+ * resolve against the session cwd). Throws ClaudeSettingsConfigError when the
+ * value cannot be used.
  */
-function parseCallerSettings(value: string, cwd: string): Record<string, unknown> | null {
+function parseCallerSettings(value: string, cwd: string): Record<string, unknown> {
   const inline = value.trimStart().startsWith("{");
   const source = inline ? "inline JSON" : `file ${resolve(cwd, value)}`;
   let parsed: unknown;
   try {
     parsed = JSON.parse(inline ? value : readFileSync(resolve(cwd, value), "utf8"));
   } catch (err) {
-    const reason = inline ? "invalid JSON" : String((err as NodeJS.ErrnoException).code ?? err);
-    console.warn(
-      `[claude] ${scrubSecrets(`Ignoring caller --settings (${source}): ${reason}. The workspace CLAUDE.md exclusion still applies.`)}`,
+    const code = (err as NodeJS.ErrnoException).code;
+    throw new ClaudeSettingsConfigError(
+      `${source} ${inline || !code ? "is not valid JSON" : `cannot be read (${code})`}`,
     );
-    return null;
   }
   if (!isPlainObject(parsed)) {
-    console.warn(
-      `[claude] ${scrubSecrets(`Ignoring caller --settings (${source}): not a JSON object. The workspace CLAUDE.md exclusion still applies.`)}`,
-    );
-    return null;
+    throw new ClaudeSettingsConfigError(`${source} is not a JSON object`);
   }
   return parsed;
 }
@@ -61,8 +74,11 @@ function parseCallerSettings(value: string, cwd: string): Record<string, unknown
  * (CLAUDE_BINARY prefix args, additionalArgs) and folds those values into the
  * session's own flag settings, so the spawned Claude sees exactly one settings
  * value. Caller keys are kept (later values win); `claudeMdExcludes` becomes
- * the deduped union of the caller lists and the workspace exclusion. An
- * unusable value is dropped with a warning; the exclusion always survives.
+ * the deduped union of the caller lists and the workspace exclusion.
+ *
+ * Fails closed: a missing value (end of argv, or a next token that is another
+ * flag) or an unreadable, invalid or non-object value throws
+ * ClaudeSettingsConfigError instead of starting without the caller's settings.
  */
 export function mergeClaudeSettingsArgs(
   argLists: readonly (readonly string[])[],
@@ -72,12 +88,8 @@ export function mergeClaudeSettingsArgs(
   const excludes = new Set<string>();
 
   const absorb = (value: string | undefined) => {
-    if (value === undefined) {
-      console.warn("[claude] Ignoring caller --settings with no value.");
-      return;
-    }
+    if (!value) throw new ClaudeSettingsConfigError("--settings has no value");
     const parsed = parseCallerSettings(value, cwd);
-    if (!parsed) return;
     Object.assign(merged, parsed);
     if (Array.isArray(parsed.claudeMdExcludes)) {
       for (const entry of parsed.claudeMdExcludes) {
@@ -91,7 +103,9 @@ export function mergeClaudeSettingsArgs(
     for (let i = 0; i < args.length; i++) {
       const arg = args[i] ?? "";
       if (arg === SETTINGS_FLAG) {
-        absorb(args[i + 1]);
+        const value = args[i + 1];
+        // Never consume the next flag (`--max-turns`, `--settings=...`) as the value.
+        absorb(value?.startsWith("-") ? undefined : value);
         i++;
       } else if (arg.startsWith(`${SETTINGS_FLAG}=`)) {
         absorb(arg.slice(SETTINGS_FLAG.length + 1));

@@ -451,7 +451,8 @@ class ClaudeSdkSession implements ProviderSession {
         sessionEnvironment.env.PATH,
       );
       // Caller `--settings` (prefix or additionalArgs) folds into the SDK's
-      // own `settings`, so the spawned Claude sees one settings flag.
+      // own `settings`, so the spawned Claude sees one settings flag. Unusable
+      // caller settings throw here, before query(), so no child ever starts.
       const {
         argLists: [prefixArgs = [], additionalArgs = []],
         settings,
@@ -542,7 +543,10 @@ class ClaudeSdkSession implements ProviderSession {
         }
       }
       await this.spawnedProcess?.stderrDone;
-      await runClaudeSessionSummary(config, this.transcript, this.options.runSessionSummary);
+      // A session refused before query() (invalid caller --settings) never ran.
+      if (this.query) {
+        await runClaudeSessionSummary(config, this.transcript, this.options.runSessionSummary);
+      }
       await cleanupTaskFile(this.options.taskFileKey);
       for (const path of [this.options.sessionMcpConfig, this.options.systemPromptFile]) {
         if (!path) continue;

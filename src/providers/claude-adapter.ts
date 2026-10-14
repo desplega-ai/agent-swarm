@@ -1042,7 +1042,8 @@ class ClaudeSession implements ProviderSession {
       "--permission-mode",
       "bypassPermissions",
       // Skip the workspace copy of claudeMd; ~/.claude/CLAUDE.md already carries it.
-      // Caller `--settings` values are merged in here, so this is the only one.
+      // Caller `--settings` values are merged in here, so this is the only one;
+      // an unusable caller value throws and the session never spawns.
       "--settings",
       JSON.stringify(settings),
     ];
@@ -1523,19 +1524,29 @@ export class ClaudeAdapter implements ProviderAdapter {
       });
     }
 
-    return new ClaudeSession(
-      sessionConfig,
-      model,
-      taskFilePath,
-      taskFileKey,
-      sessionMcpConfig,
-      effectiveClaudeBinaryArgv,
-      systemPromptFile,
-      harnessVariant,
-      harnessVariantMeta,
-      queueSteeringSupported,
-      this.runSessionSummary,
-    );
+    try {
+      return new ClaudeSession(
+        sessionConfig,
+        model,
+        taskFilePath,
+        taskFileKey,
+        sessionMcpConfig,
+        effectiveClaudeBinaryArgv,
+        systemPromptFile,
+        harnessVariant,
+        harnessVariantMeta,
+        queueSteeringSupported,
+        this.runSessionSummary,
+      );
+    } catch (err) {
+      // buildCommand refused to start (e.g. invalid caller --settings) before
+      // any spawn; drop the files staged for the session that never ran.
+      await cleanupTaskFile(taskFileKey);
+      for (const path of [sessionMcpConfig, systemPromptFile]) {
+        if (path) await unlink(path).catch(() => {});
+      }
+      throw err;
+    }
   }
 
   async canResume(_sessionId: string): Promise<boolean> {

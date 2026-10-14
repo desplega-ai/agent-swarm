@@ -49,6 +49,7 @@ import {
   resolveClaudeBridgeEnabled,
   resolveClaudeTrustDirs,
 } from "../providers/claude-adapter";
+import { ClaudeSettingsConfigError } from "../providers/claude-flag-settings";
 import type { ProviderSessionConfig } from "../providers/types";
 import { setFlockForTests } from "../utils/file-lock";
 import { holdFileLock } from "./fixtures/hold-file-lock";
@@ -822,6 +823,38 @@ describe("CLAUDE_BINARY env override", () => {
         "--max-turns",
         "3",
       ]);
+    } finally {
+      await rm(settingsDir, { recursive: true, force: true });
+    }
+  });
+
+  test("invalid caller --settings refuses to start: no Claude child spawns", async () => {
+    const settingsDir = await mkdtemp(join(tmpdir(), "claude-settings-invalid-"));
+    try {
+      await writeFile(join(settingsDir, "broken.json"), "{nope");
+      await writeFile(join(settingsDir, "array.json"), "[1]");
+      const cases: [string[], string][] = [
+        [["--settings", "missing.json"], "cannot be read (ENOENT)"],
+        [["--settings", "broken.json"], "is not valid JSON"],
+        [["--settings", '{"env":{"TOKEN":"sk-ant-oat01-should-not-leak"'], "is not valid JSON"],
+        [["--settings=array.json"], "is not a JSON object"],
+        [["--settings", "--max-turns", "3"], "--settings has no value"],
+        [["--settings", '--settings={"model":"x"}'], "--settings has no value"],
+      ];
+      for (const [additionalArgs, message] of cases) {
+        spawnedArgs = [];
+        const adapter = new ClaudeAdapter();
+        const error = await adapter
+          .createSession(makeConfig({ cwd: settingsDir, additionalArgs }))
+          .then(
+            () => undefined,
+            (err: unknown) => err,
+          );
+        expect(error).toBeInstanceOf(ClaudeSettingsConfigError);
+        expect((error as Error).message).toContain(message);
+        expect((error as Error).message).not.toContain("should-not-leak");
+        expect(spawnedArgs).toEqual([]);
+      }
     } finally {
       await rm(settingsDir, { recursive: true, force: true });
     }
