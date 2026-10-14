@@ -30,7 +30,7 @@ import {
   runClaudeSessionSummary,
 } from "./claude-adapter";
 import { ClaudeBackgroundKeepalive } from "./claude-background-keepalive";
-import { claudeFlagSettings } from "./claude-flag-settings";
+import { mergeClaudeSettingsArgs } from "./claude-flag-settings";
 import type { ClaudeProtocolMessage } from "./claude-session-events";
 import { normalizeClaudeMessage } from "./claude-session-events";
 import type {
@@ -450,7 +450,16 @@ class ClaudeSdkSession implements ProviderSession {
         this.options.claudeBinaryArgv[0] ?? "claude",
         sessionEnvironment.env.PATH,
       );
-      const binaryPrefix = [executable, ...this.options.claudeBinaryArgv.slice(1)];
+      // Caller `--settings` (prefix or additionalArgs) folds into the SDK's
+      // own `settings`, so the spawned Claude sees one settings flag.
+      const {
+        argLists: [prefixArgs = [], additionalArgs = []],
+        settings,
+      } = mergeClaudeSettingsArgs(
+        [this.options.claudeBinaryArgv.slice(1), config.additionalArgs ?? []],
+        config.cwd,
+      );
+      const binaryPrefix = [executable, ...prefixArgs];
       const finalArgs = [
         ...(this.options.systemPromptFile
           ? ["--append-system-prompt-file", this.options.systemPromptFile]
@@ -471,7 +480,7 @@ class ClaudeSdkSession implements ProviderSession {
           pathToClaudeCodeExecutable: executable,
           systemPrompt: { type: "preset", preset: "claude_code" },
           settingSources: ["user", "project", "local"],
-          settings: claudeFlagSettings(),
+          settings,
           permissionMode: "bypassPermissions",
           allowDangerouslySkipPermissions: true,
           stderr: (text) => {
@@ -485,7 +494,7 @@ class ClaudeSdkSession implements ProviderSession {
             this.spawnedProcess = spawnClaudeSdkProcess(
               spawnOptions,
               binaryPrefix,
-              config.additionalArgs ?? [],
+              additionalArgs,
               finalArgs,
               (text) => {
                 stderrOutput += text;

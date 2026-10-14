@@ -42,7 +42,7 @@ import {
 } from "../utils/process-group";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { ClaudeBackgroundKeepalive } from "./claude-background-keepalive";
-import { claudeFlagSettings } from "./claude-flag-settings";
+import { mergeClaudeSettingsArgs } from "./claude-flag-settings";
 import { normalizeClaudeMessage } from "./claude-session-events";
 import { resolveSlashSkillPrompt } from "./codex-skill-resolver";
 import { CTX_MODE_NUDGE_EVERY } from "./ctx-mode-env";
@@ -1024,8 +1024,14 @@ class ClaudeSession implements ProviderSession {
   }
 
   private buildCommand(): string[] {
+    const [executable = "claude", ...binaryArgs] = this.claudeBinaryArgv;
+    const {
+      argLists: [prefixArgs = [], additionalArgs = []],
+      settings,
+    } = mergeClaudeSettingsArgs([binaryArgs, this.config.additionalArgs ?? []], this.config.cwd);
     const cmd = [
-      ...this.claudeBinaryArgv,
+      executable,
+      ...prefixArgs,
       "--model",
       this.model,
       "--verbose",
@@ -1036,8 +1042,9 @@ class ClaudeSession implements ProviderSession {
       "--permission-mode",
       "bypassPermissions",
       // Skip the workspace copy of claudeMd; ~/.claude/CLAUDE.md already carries it.
+      // Caller `--settings` values are merged in here, so this is the only one.
       "--settings",
-      JSON.stringify(claudeFlagSettings()),
+      JSON.stringify(settings),
     ];
 
     // Queued steering needs `--input-format stream-json`, which is mutually
@@ -1051,8 +1058,8 @@ class ClaudeSession implements ProviderSession {
       cmd.push("-p", this.config.prompt);
     }
 
-    if (this.config.additionalArgs?.length) {
-      cmd.push(...this.config.additionalArgs);
+    if (additionalArgs.length) {
+      cmd.push(...additionalArgs);
     }
 
     // System prompt is staged on disk and read via the file-flag — see

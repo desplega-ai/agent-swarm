@@ -782,6 +782,51 @@ describe("CLAUDE_BINARY env override", () => {
     });
   });
 
+  test("merges caller --settings from additionalArgs and CLAUDE_BINARY into one flag", async () => {
+    const settingsDir = await mkdtemp(join(tmpdir(), "claude-settings-merge-"));
+    try {
+      await writeFile(
+        join(settingsDir, "caller.json"),
+        JSON.stringify({ model: "from-file", claudeMdExcludes: ["/repo/CLAUDE.md"] }),
+      );
+      process.env.CLAUDE_BINARY = `claude --settings=${join(settingsDir, "caller.json")}`;
+      const adapter = new ClaudeAdapter();
+      await createCompletedSession(
+        adapter,
+        makeConfig({
+          cwd: settingsDir,
+          additionalArgs: [
+            "--settings",
+            JSON.stringify({
+              env: { X: "kept" },
+              claudeMdExcludes: [WORKSPACE_CLAUDE_MD_PATH, "/other/CLAUDE.md"],
+            }),
+            "--max-turns",
+            "3",
+          ],
+        }),
+      );
+
+      const argv = spawnedArgs[0];
+      const settingsFlags = argv.filter(
+        (arg) => arg === "--settings" || arg.startsWith("--settings="),
+      );
+      expect(settingsFlags).toEqual(["--settings"]);
+      expect(JSON.parse(argv[argv.indexOf("--settings") + 1] ?? "")).toEqual({
+        model: "from-file",
+        env: { X: "kept" },
+        claudeMdExcludes: ["/repo/CLAUDE.md", WORKSPACE_CLAUDE_MD_PATH, "/other/CLAUDE.md"],
+      });
+      expect(argv[0]).toBe("claude");
+      expect(argv.slice(argv.indexOf("--max-turns"), argv.indexOf("--max-turns") + 2)).toEqual([
+        "--max-turns",
+        "3",
+      ]);
+    } finally {
+      await rm(settingsDir, { recursive: true, force: true });
+    }
+  });
+
   test("legacy bridge override: argv[0] comes from CLAUDE_BINARY", async () => {
     process.env.CLAUDE_BINARY = LEGACY_BRIDGE_COMPAT_BINARY;
 

@@ -159,6 +159,46 @@ describe("Claude SDK production adapter lifecycle", () => {
   );
 
   test(
+    "merges caller --settings from additionalArgs and CLAUDE_BINARY into the SDK's one flag",
+    async () => {
+      const directory = await temporaryDirectory();
+      const stateFile = join(directory, "settings-state.json");
+      const settingsFile = join(directory, "caller-settings.json");
+      await Bun.write(
+        settingsFile,
+        JSON.stringify({ model: "from-file", claudeMdExcludes: ["/repo/CLAUDE.md"] }),
+      );
+      const sessionConfig = config(directory, "queue", stateFile);
+      sessionConfig.env = {
+        ...sessionConfig.env,
+        CLAUDE_BINARY: `${process.execPath} ${fixturePath} --settings ${settingsFile}`,
+      };
+      sessionConfig.additionalArgs = [
+        `--settings=${JSON.stringify({ env: { X: "kept" }, claudeMdExcludes: ["/other/CLAUDE.md"] })}`,
+      ];
+      const session = await new ClaudeAdapter(async () => {}).createSession(sessionConfig);
+      // Queue mode records argv once it has the initial plus two queued messages.
+      await session.deliverSteering?.({ mode: "queue", text: "queued-message-a" });
+      await session.deliverSteering?.({ mode: "queue", text: "queued-message-b" });
+      await session.waitForCompletion();
+
+      await waitForFile(stateFile);
+      const { argv } = JSON.parse(await Bun.file(stateFile).text()) as { argv: string[] };
+      const settingsFlags = argv.filter(
+        (arg) => arg === "--settings" || arg.startsWith("--settings="),
+      );
+      expect(settingsFlags).toEqual(["--settings"]);
+      expect(JSON.parse(argv[argv.indexOf("--settings") + 1] ?? "")).toEqual({
+        model: "from-file",
+        env: { X: "kept" },
+        claudeMdExcludes: ["/repo/CLAUDE.md", "/other/CLAUDE.md", "/workspace/CLAUDE.md"],
+      });
+      expect(argv).not.toContain(settingsFile);
+    },
+    { timeout: CHILD_PROCESS_TEST_BUDGET_MS },
+  );
+
+  test(
     "classifies cancellation and stops the fixture process group",
     async () => {
       const directory = await temporaryDirectory();
