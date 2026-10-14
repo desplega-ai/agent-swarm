@@ -298,8 +298,10 @@ export function getEnabledCapabilities(): CAPABILITIES_T[] {
   // The Chat SDK channel follows CHAT_SDK_ENABLED, not the CAPABILITIES list.
   if (isChatSdkEnabled()) capabilities.push("chat-sdk");
   // Phase 1 has no HTTP receiver. Do not advertise usable Slack tools to
-  // workers when HTTP (or an invalid transport) was selected.
-  return getSlackConfiguration().mode === "socket"
+  // workers when HTTP (or an invalid transport) was selected, or when the
+  // built-in Slack app is off (SLACK_DISABLE, required by the Chat SDK Slack adapter).
+  const slack = getSlackConfiguration();
+  return slack.mode === "socket" && !slack.disabled
     ? capabilities
     : capabilities.filter((capability) => capability !== "slack");
 }

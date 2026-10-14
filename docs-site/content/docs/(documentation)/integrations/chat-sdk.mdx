@@ -1,12 +1,12 @@
 ---
 title: Chat SDK
-description: One channel for chat platforms through Vercel's Chat SDK. Telegram mentions and DMs become Lead tasks. Slack, Teams and Discord adapters follow.
+description: One channel for chat platforms through Vercel's Chat SDK. Telegram, Slack and Teams mentions and DMs become Lead tasks. The Discord adapter follows.
 ---
 
 Agent Swarm can use [Chat SDK](https://chat-sdk.dev) as an input channel. One API process runs one Chat SDK instance for each configured adapter. The bespoke [Slack](/docs/integrations/slack), [AgentMail](/docs/integrations/agentmail) and [Kapso](/docs/integrations/kapso) integrations are not changed.
 
 <Callout type="warn">
-**Status: Telegram only.** This release supports the Telegram adapter end to end. The Slack, Teams and Discord adapters are bundled but not yet supported. Outbound replies, thread follow-ups, buffering and MCP tools come in later releases.
+**Status: Telegram, Slack and Teams.** The Discord adapter is bundled but not yet supported.
 </Callout>
 
 ## What it does
@@ -49,6 +49,32 @@ The API refuses `apiUrl`, `apiBaseUrl`, `webhookVerifier` and `allowUnverifiedWe
 | `mode` | no | `webhook` (default) or `polling`. Use `polling` for local development without a public URL. |
 | `allowedUserIds` | no | Telegram user ids allowed to trigger the bot. All users are allowed when empty. |
 | `userName` | no | The bot username, used for mention detection. Default `swarm`. |
+
+### Slack fields
+
+The Chat SDK Slack adapter and the built-in [Slack](/docs/integrations/slack) integration cannot run together. Set `SLACK_DISABLE=true` to use this adapter. Without it, the API logs the conflict at boot and does not start the Chat SDK channel.
+
+| Field | Required | Notes |
+|---|---|---|
+| `botToken` | yes | The bot token (`xoxb-...`). |
+| `mode` | no | `webhook` (default) or `socket`. |
+| `signingSecret` | in webhook mode | The app signing secret. The adapter checks the `X-Slack-Signature` header with it. |
+| `appToken` | in socket mode | The app-level token (`xapp-...`) with `connections:write`. |
+| `userName` | no | The bot name. Default: the name from `auth.test`. |
+
+In webhook mode, set the app's Event Subscriptions request URL to the webhook URL below. The adapter answers Slack's `url_verification` challenge. In socket mode, the adapter opens the Socket Mode connection at boot, and the webhook URL answers `405`.
+
+### Teams fields
+
+| Field | Required | Notes |
+|---|---|---|
+| `appId` | yes | The Azure Bot app (client) id. |
+| `appPassword` | yes | The app client secret. |
+| `appType` | no | `MultiTenant` (default) or `SingleTenant`. |
+| `appTenantId` | for `SingleTenant` | The Entra tenant id. |
+| `userName` | no | The bot name. |
+
+Set the Azure Bot messaging endpoint to the webhook URL below. The adapter checks the Bot Framework token on every request. A Teams start failure marks only the Teams adapter as failed. The other adapters keep running.
 
 ### Webhook URL
 

@@ -1,5 +1,6 @@
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
+import { SlackMock } from "@desplega.ai/slack-mock";
 import { closeDb, initDb, upsertSwarmConfig } from "../be/db";
 import { validateConfigValue } from "../be/swarm-config-guard";
 import {
@@ -8,16 +9,11 @@ import {
   getChatSdkConfig,
   readApiUrlOverrides,
 } from "../integrations/chat-sdk/config";
+import { getChatSdkHealth, startChatSdk, stopChatSdk } from "../integrations/chat-sdk/runtime";
+import { snapshotChatSdkEnv } from "./chat-sdk-harness";
 
 const TEST_DB_PATH = "./test-chat-sdk-config.sqlite";
-const ENV_KEYS = [
-  "CHAT_SDK_ENABLED",
-  "CHAT_SDK_ADAPTERS",
-  "CHAT_SDK_API_URL_OVERRIDES",
-  "SLACK_DISABLE",
-  "CHAT_TEST_ENV_ONLY",
-];
-const savedEnv = new Map(ENV_KEYS.map((key) => [key, process.env[key]]));
+const restoreEnv = snapshotChatSdkEnv();
 
 async function removeDbFiles(): Promise<void> {
   for (const suffix of ["", "-wal", "-shm"]) {
@@ -45,7 +41,12 @@ const BRAINSTORM_EXAMPLE = {
     mode: "polling",
     allowedUserIds: ["1", 2],
   },
-  teams: { appId: "app", appPassword: { $config: "TEAMS_PW" }, appType: "SingleTenant" },
+  teams: {
+    appId: "app",
+    appPassword: { $config: "TEAMS_PW" },
+    appType: "SingleTenant",
+    appTenantId: "tenant",
+  },
 };
 
 function setAdapters(value: unknown): void {
@@ -66,10 +67,8 @@ beforeAll(async () => {
 });
 
 afterEach(() => {
-  for (const [key, value] of savedEnv) {
-    if (value === undefined) delete process.env[key];
-    else process.env[key] = value;
-  }
+  restoreEnv();
+  delete process.env.CHAT_TEST_ENV_ONLY;
 });
 
 afterAll(async () => {
@@ -93,6 +92,23 @@ describe("ChatSdkAdaptersSchema", () => {
     expect(
       ChatSdkAdaptersSchema.safeParse({ telegram: { botToken: "x", mode: "auto" } }).success,
     ).toBe(false);
+  });
+
+  test("slack and teams defaults and mode-dependent required fields", () => {
+    const parsed = ChatSdkAdaptersSchema.parse({
+      slack: { botToken: "x", signingSecret: "s" },
+      teams: { appId: "a", appPassword: "p" },
+    });
+    expect(parsed.slack?.mode).toBe("webhook");
+    expect(parsed.teams?.appType).toBe("MultiTenant");
+    const invalid = [
+      { slack: { botToken: "x" } },
+      { slack: { botToken: "x", mode: "socket" } },
+      { teams: { appId: "a", appPassword: "p", appType: "SingleTenant" } },
+    ];
+    for (const value of invalid) {
+      expect(ChatSdkAdaptersSchema.safeParse(value).success).toBe(false);
+    }
   });
 
   test("passes unknown adapter keys through", () => {
@@ -183,6 +199,32 @@ describe("assertNoSlackClash", () => {
     expect(() => assertNoSlackClash(config)).toThrow("set SLACK_DISABLE=true");
     process.env.SLACK_DISABLE = "true";
     expect(() => assertNoSlackClash(config)).not.toThrow();
+  });
+
+  test("startChatSdk boots a slack entry only with SLACK_DISABLE=true", async () => {
+    const slack = await SlackMock.start({ port: 0 });
+    try {
+      setAdapters({
+        slack: {
+          mode: "webhook",
+          botToken: slack.env.SLACK_BOT_TOKEN,
+          signingSecret: "mock-signing-secret",
+        },
+      });
+      process.env.CHAT_SDK_API_URL_OVERRIDES = JSON.stringify({ slack: slack.env.SLACK_API_URL });
+
+      delete process.env.SLACK_DISABLE;
+      await startChatSdk();
+      expect(getChatSdkHealth()).toEqual({});
+      await stopChatSdk();
+
+      process.env.SLACK_DISABLE = "true";
+      await startChatSdk();
+      expect(getChatSdkHealth().slack?.status).toBe("ok");
+    } finally {
+      await stopChatSdk();
+      await slack.stop();
+    }
   });
 
   test("ignores configs without slack", () => {

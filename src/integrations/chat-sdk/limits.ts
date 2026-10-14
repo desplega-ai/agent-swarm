@@ -5,6 +5,9 @@
 const CHAT_MESSAGE_LIMITS: Record<string, number> = {
   telegram: 4096,
   discord: 2000,
+  // Slack messages use mrkdwn, not markdown. The SDK posts our markdown as
+  // `markdown_text` (Slack converts it, 12000 character cap). 4000 is Slack's
+  // guidance for one readable message and stays well under that cap.
   slack: 4000,
   teams: 20000,
 };

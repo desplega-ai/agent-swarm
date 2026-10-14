@@ -883,8 +883,8 @@ export async function handleWebhooks(
 
     try {
       const response = await handler(request, {
+        // Handler errors are logged by `trackBackground` in `handlers.ts`.
         waitUntil: trackBackground,
-        propagateHandlerErrors: true,
       });
       const responseHeaders: Record<string, string> = {};
       response.headers.forEach((value, name) => {

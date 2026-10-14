@@ -23,7 +23,7 @@ import {
   type TelegramChat,
   type TelegramHarness,
   telegramUpdate,
-} from "./chat-sdk-telegram-harness";
+} from "./chat-sdk-harness";
 
 const TEST_DB_PATH = "./test-chat-sdk-inbound.sqlite";
 const ENV_KEYS = ["AGENT_FS_LOCAL_DIR", "AGENT_FS_API_URL", "STEERING_ENABLED"];

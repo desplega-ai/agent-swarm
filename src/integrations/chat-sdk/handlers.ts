@@ -1,4 +1,5 @@
 import type { Chat, Message, Thread } from "chat";
+import { trackBackground } from "./background";
 import { type ChatInboundKind, handleChatInbound } from "./inbound";
 
 async function onHumanMessage(
@@ -8,7 +9,12 @@ async function onHumanMessage(
 ): Promise<void> {
   // The SDK drops the bot's own messages; other bots never become tasks.
   if (message.author.isBot === true) return;
-  await handleChatInbound(thread, message, kind);
+  // Socket-mode events (Slack) reach the SDK without a request, so it has no
+  // `waitUntil` to hand this work to. Track it here so the shutdown drain
+  // waits for it before the DB closes. The tracker logs a rejection.
+  const work = handleChatInbound(thread, message, kind);
+  trackBackground(work);
+  await work.catch(() => undefined);
 }
 
 export function registerChatHandlers(chat: Chat): void {

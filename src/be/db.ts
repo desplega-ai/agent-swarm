@@ -6536,6 +6536,21 @@ export async function getSwarmConfigs(filters?: {
 }
 
 /**
+ * Teams SDK env fallbacks; a config row must not redirect the bot token.
+ * `@microsoft/teams.apps` reads these from `process.env`. Operators may still
+ * store them, they just never reach env.
+ */
+const TEAMS_SDK_ENV_KEYS = [
+  "SERVICE_URL",
+  "TENANT_ID",
+  "CLIENT_ID",
+  "CLIENT_SECRET",
+  "MANAGED_IDENTITY_CLIENT_ID",
+  "CLOUD",
+] as const;
+const TEAMS_SDK_ENV_KEYS_SQL = TEAMS_SDK_ENV_KEYS.map((key) => `'${key}'`).join(", ");
+
+/**
  * Global configs that are allowed to flow into process.env.
  * Reserved env-only keys are filtered in SQL before decryption so a corrupted
  * legacy reserved row cannot block startup or reload.
@@ -6544,7 +6559,7 @@ export async function getInjectableGlobalConfigs(): Promise<SwarmConfig[]> {
   const rows = await getDbClient().query<SwarmConfigRow>(
     `SELECT * FROM swarm_config
        WHERE scope = 'global'
-         AND UPPER(key) NOT IN ('API_KEY', 'SECRETS_ENCRYPTION_KEY', 'CORS_ALLOW_ANY_ORIGIN', 'EXTENSION_ALLOW_LEAD_ACTIVATION', 'CHAT_SDK_API_URL_OVERRIDES')
+         AND UPPER(key) NOT IN ('API_KEY', 'SECRETS_ENCRYPTION_KEY', 'CORS_ALLOW_ANY_ORIGIN', 'EXTENSION_ALLOW_LEAD_ACTIVATION', 'CHAT_SDK_API_URL_OVERRIDES', ${TEAMS_SDK_ENV_KEYS_SQL})
        ORDER BY key ASC`,
   );
   return rows.filter((row) => !isInternalConfigKey(row.key)).map(rowToSwarmConfig);

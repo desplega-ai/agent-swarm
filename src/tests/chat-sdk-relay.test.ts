@@ -24,7 +24,7 @@ import {
 } from "../integrations/chat-sdk/relay";
 import { chatSdkContextKey } from "../tasks/context-key";
 import type { Agent, AgentTask } from "../types";
-import { startTelegramHarness, type TelegramHarness } from "./chat-sdk-telegram-harness";
+import { startTelegramHarness, type TelegramHarness } from "./chat-sdk-harness";
 import { loadBundleFixture } from "./fixtures/extensions/load";
 
 const TEST_DB_PATH = "./test-chat-sdk-relay.sqlite";

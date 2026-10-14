@@ -12,7 +12,7 @@ export type ChatSdkAdapterName = (typeof CHAT_SDK_ADAPTER_NAMES)[number];
 export const ConfigRefSchema = z.strictObject({ $config: z.string().min(1) });
 
 /** A literal string or a `{ "$config": "KEY" }` reference to a swarm_config key. */
-const Str = z.union([z.string().min(1), ConfigRefSchema]);
+const Str = z.union([z.string().trim().min(1), ConfigRefSchema]);
 
 /**
  * Keys an operator must never set. A base URL plus a `$config` ref would send
@@ -56,7 +56,24 @@ export const SlackAdapterSchema = adapterSchema({
   botToken: Str,
   signingSecret: Str.optional(),
   appToken: Str.optional(),
-  mode: z.enum(["webhook", "socket"]).optional(),
+  mode: z.enum(["webhook", "socket"]).default("webhook"),
+}).superRefine((value, ctx) => {
+  // Required here, not left to the adapter: the adapter falls back to
+  // SLACK_SIGNING_SECRET / SLACK_APP_TOKEN, which belong to the built-in Slack app.
+  if (value.mode === "webhook" && value.signingSecret === undefined) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["signingSecret"],
+      message: "signingSecret is required in webhook mode",
+    });
+  }
+  if (value.mode === "socket" && value.appToken === undefined) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["appToken"],
+      message: "appToken is required in socket mode",
+    });
+  }
 });
 
 export const DiscordAdapterSchema = adapterSchema({
@@ -71,7 +88,16 @@ export const TeamsAdapterSchema = adapterSchema({
   appId: Str,
   appPassword: Str,
   appTenantId: Str.optional(),
-  appType: z.enum(["MultiTenant", "SingleTenant"]).optional(),
+  appType: z.enum(["MultiTenant", "SingleTenant"]).default("MultiTenant"),
+}).superRefine((value, ctx) => {
+  // The adapter falls back to TEAMS_APP_TENANT_ID when a single-tenant app has no tenant.
+  if (value.appType === "SingleTenant" && value.appTenantId === undefined) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["appTenantId"],
+      message: "appTenantId is required for a SingleTenant app",
+    });
+  }
 });
 
 // Strict: a typo'd adapter name must fail loudly, not silently disable it.

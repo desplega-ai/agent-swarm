@@ -455,15 +455,15 @@ When this phase is done, the Chat SDK Slack adapter works in socket and webhook 
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Phase tests: `bun run test:root -- src/tests/chat-sdk-slack.test.ts src/tests/chat-sdk-teams.test.ts src/tests/chat-sdk-config.test.ts`
-- [ ] Bespoke Slack regression guard: `bun run e2e --only slack-mention` (the black-box suite boots the bespoke Slack app against slack-mock)
-- [ ] Hygiene: `bun scripts/check-floating-promises.ts && bun scripts/check-promise-sinks.ts && bash scripts/check-test-spawn-sync.sh`
-- [ ] Inner loop: `bun run check && bun run tsc:check:tsc && bun run lint:slop`
+- [x] Phase tests: `bun run test:root -- src/tests/chat-sdk-slack.test.ts src/tests/chat-sdk-teams.test.ts src/tests/chat-sdk-config.test.ts`
+- [x] Bespoke Slack regression guard: `bun run e2e --only slack-mention` (the black-box suite boots the bespoke Slack app against slack-mock)
+- [x] Hygiene: `bun scripts/check-floating-promises.ts && bun scripts/check-promise-sinks.ts && bash scripts/check-test-spawn-sync.sh`
+- [x] Inner loop: `bun run check && bun run tsc:check:tsc && bun run lint:slop`
 
 #### Automated QA:
-- [ ] Run `slack-mock serve --port 4040` (from `node_modules/.bin`), boot the API with `SLACK_DISABLE=true` and the socket-mode Chat SDK Slack config above (`apiUrl: http://127.0.0.1:4040/api/`), `curl -X POST http://127.0.0.1:4040/mock/messages -d '{"channel":"general","user":"alice","text":"<@U0BOT00000> hello"}'`, confirm a task; complete it; `agent-browser open http://127.0.0.1:4040/c/general` and `agent-browser screenshot /tmp/chat-sdk-slack-thread.png` shows the bot reply in the thread. Attach the screenshot to the PR (`github-attach` skill).
-- [ ] Boot without `SLACK_DISABLE` and with the slack entry: the log shows the clash error, `GET /health` is 200, and the boot log shows no Chat SDK instances.
-- [ ] Record a slack-mock journal (`--data-file`) during the socket-mode run and render `slack-mock frames --journal <file> --channel general --thread <ts> --out /tmp/chat-sdk-frames` as PR evidence.
+- [x] Run `slack-mock serve --port 4040` (from `node_modules/.bin`), boot the API with `SLACK_DISABLE=true` and the socket-mode Chat SDK Slack config above (`apiUrl: http://127.0.0.1:4040/api/`), `curl -X POST http://127.0.0.1:4040/mock/messages -d '{"channel":"general","user":"alice","text":"<@U0BOT00000> hello"}'`, confirm a task; complete it; `agent-browser open http://127.0.0.1:4040/c/general` and `agent-browser screenshot /tmp/chat-sdk-slack-thread.png` shows the bot reply in the thread. Attach the screenshot to the PR (`github-attach` skill).
+- [x] Boot without `SLACK_DISABLE` and with the slack entry: the log shows the clash error, `GET /health` is 200, and the boot log shows no Chat SDK instances.
+- [x] Record a slack-mock journal (`--data-file`) during the socket-mode run and render `slack-mock frames --journal <file> --channel general --thread <ts> --out /tmp/chat-sdk-frames` as PR evidence.
 
 #### Manual Verification:
 - [ ] Teams: against a real Azure Bot registration (public HTTPS `PUBLIC_MCP_BASE_URL`), send a message to the bot in a Teams chat and confirm the task plus the posted reply. No mock exists for the Bot Framework JWT flow.
@@ -719,3 +719,15 @@ _Recorded by the orchestrator during autopilot implementation (2026-10-14). Each
 - Known: the header comment of migration 213 still mentions an attempt cap (migrations are checksummed, so it is left as is).
 - Review fixes (2026-10-14): the pending relay query is filtered to running adapters and a separate `giveUpStaleChatRelays` UPDATE closes 24 h old rows for every adapter, so a down adapter cannot starve the 200-row window. Delivery is at-least-once (chunk failure re-posts earlier chunks; a crash between send and `markChatRelayDelivered` re-sends). Telegram thread history is persisted in our SQLite state (100 messages, 7 days), not "since restart".
 - **Open decision for Taras:** `chat-post`, `chat-read-thread`, `chat-open-dm` are open to all agents per the plan, while Slack's `slack-post` / `slack-read` are lead-gated. Parity would mean a new `integration.chat.post` verb or reusing `integration.chat.manage`.
+
+### Phase 4
+- slack-mock 0.4.0 (latest) answers `no_text` to the Chat SDK Slack adapter's `markdown_text` posts, which real Slack accepts. Tests and QA run a proxy shim `scripts/dev/slack-markdown-text-shim.ts` in front of slack-mock that copies `markdown_text` into `text`. Production outbound is unchanged. Follow-up: add `markdown_text` support to desplega-ai/slack-mock, then delete the shim.
+- Teams `initialize()` in `@microsoft/teams.apps` 2.1.0 makes no network call, so an unreachable `apiUrl` cannot fail it. The health-isolation test uses a blank `appId` (the adapter's appId resolver throws inside `initialize()`): Teams `error`, Telegram `ok`, Teams webhook 503. The Teams SDK uses axios/MSAL, not `fetch`, so no fetch stub; a first message without `aadObjectId` triggers no member/Graph/history call and `apiUrl` points at a closed local port.
+- `@chat-adapter/teams` always passes the deprecated `skipAuth` to `App` and does not forward `logger`; Teams SDK logs bypass `scrubSecrets`. Teams keeps the `SERVICE_URL` env fallback when `apiUrl` is unset (an explicit default would pin every call and break per-thread service URLs).
+- Schema: Slack `mode` defaults to `webhook`; `signingSecret` is required in webhook mode and `appToken` in socket mode. Teams `appType` defaults to `MultiTenant`; `SingleTenant` requires `appTenantId`. These rules make the adapters' env fallbacks unreachable. The Slack branch passes `socketForwardingSecret: ""` and `encryptionKey: ""` to block `SLACK_*` env fallbacks.
+- `getEnabledCapabilities()` now also drops the bespoke `slack` capability when `SLACK_DISABLE=true` (plan item 3 assumed this already held). **Taras to confirm:** this changes `serverCapabilities` prompt gating for workers on deployments with `SLACK_DISABLE=true`.
+- Handler work is wrapped in `trackBackground` so socket-mode events (which arrive without `waitUntil`) are drained on shutdown. Handler errors are logged by the tracker instead of rethrown to the SDK.
+- `watchSocketConnection` surfaces `@slack/socket-mode` reconnects as scrubbed warnings in health; the socket client's own logs bypass our logger.
+- QA artifacts (local only, no PR yet): `/tmp/chat-sdk-slack-thread.png`, `/tmp/chat-sdk-frames/`, journal `/tmp/chat-sdk-qa/slack-socket.jsonl`. New test files are outside `tsc:check`; they were type-checked with a temporary tsconfig.
+- Review fixes (2026-10-14): the Teams SDK reads `SERVICE_URL`, `TENANT_ID`, `CLIENT_ID`, `CLIENT_SECRET`, `MANAGED_IDENTITY_CLIENT_ID` and `CLOUD` from `process.env`; a `SERVICE_URL` config row could redirect the bot token. Those six keys now join the env-injection denylist in `getInjectableGlobalConfigs` (not `RESERVED_KEYS`: operators may still store them; they never reach env). Deployment env can still set them on purpose. `propagateHandlerErrors` was removed from the webhook call (moot once handlers catch their own errors; Telegram and Slack ack before processing, so no retry semantics changed). Socket reconnects log at info; only `unable_to_socket_mode_start` and `error` reach health. Harness renamed to `src/tests/chat-sdk-harness.ts`.
+- Known: `slack-*` MCP tools still register from raw `CAPABILITIES` even when `SLACK_DISABLE=true` drops the prompt capability (pre-existing mismatch for HTTP mode too).

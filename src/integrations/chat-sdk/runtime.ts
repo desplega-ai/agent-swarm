@@ -1,6 +1,6 @@
 import type { Chat } from "chat";
 import { registerVolatileSecret, scrubSecrets } from "@/utils/secret-scrubber";
-import { loadAdapter } from "./adapters";
+import { loadAdapter, watchSocketConnection } from "./adapters";
 import { drainBackground } from "./background";
 import {
   assertNoSlackClash,
@@ -99,6 +99,7 @@ async function startAdapter(
     registerChatHandlers(chat);
     instances.set(name, chat);
     await chat.initialize();
+    watchSocketConnection(adapter, logger);
     setHealth(name, "ok", undefined, lastWarning);
     console.log(`[chat-sdk] ${name} ready`);
   } catch (error) {

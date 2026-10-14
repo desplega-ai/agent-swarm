@@ -1,6 +1,8 @@
 /**
- * Shared harness for Chat SDK tests that drive Telegram updates through the
- * real webhook route against the fake Bot API (`scripts/dev/telegram-bot-api-mock.ts`).
+ * Shared harness for Chat SDK tests that drive platform webhooks through the
+ * real route. Telegram runs against the fake Bot API
+ * (`scripts/dev/telegram-bot-api-mock.ts`); `postChatWebhook` and
+ * `snapshotChatSdkEnv` serve the Slack and Teams tests too.
  */
 import { expect } from "bun:test";
 import type { IncomingMessage, ServerResponse } from "node:http";
@@ -19,7 +21,19 @@ const ENV_KEYS = [
   "CHAT_SDK_ADAPTERS",
   "CHAT_SDK_API_URL_OVERRIDES",
   "CHAT_SDK_BUFFER_MS",
+  "SLACK_DISABLE",
 ];
+
+/** Save the Chat SDK env keys; the returned function restores them. */
+export function snapshotChatSdkEnv(): () => void {
+  const saved = new Map(ENV_KEYS.map((key) => [key, process.env[key]]));
+  return () => {
+    for (const [key, value] of saved) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  };
+}
 
 let nextUpdateId = 950_000;
 let nextMessageId = 5_000;
@@ -31,7 +45,7 @@ export interface TelegramHarness {
 
 /** Start the mock Bot API and a webhook-mode Telegram adapter pointed at it. */
 export async function startTelegramHarness(bufferMs = 60_000): Promise<TelegramHarness> {
-  const saved = new Map(ENV_KEYS.map((key) => [key, process.env[key]]));
+  const restoreEnv = snapshotChatSdkEnv();
   const mock = startTelegramBotApiMock();
   process.env.CHAT_SDK_ENABLED = "true";
   process.env.CHAT_SDK_ADAPTERS = JSON.stringify({
@@ -45,10 +59,7 @@ export async function startTelegramHarness(bufferMs = 60_000): Promise<TelegramH
     stop: async () => {
       await stopChatSdk();
       mock.stop();
-      for (const [key, value] of saved) {
-        if (value === undefined) delete process.env[key];
-        else process.env[key] = value;
-      }
+      restoreEnv();
     },
   };
 }
@@ -81,35 +92,50 @@ export function telegramUpdate(
   };
 }
 
-/** POST one update to the Telegram webhook and wait for the handler work. */
-export async function postTelegramUpdate(update: unknown): Promise<void> {
-  const path = "/api/integrations/chat/telegram/webhook";
-  const body = JSON.stringify(update);
-  const headers: Record<string, string> = {
-    "content-type": "application/json",
-    "x-telegram-bot-api-secret-token": TELEGRAM_SECRET,
-  };
+export interface ChatWebhookResponse {
+  status: number;
+  body: string;
+}
+
+/** POST a raw body to `/api/integrations/chat/{adapter}/webhook` through `handleWebhooks`. */
+export async function postChatWebhook(
+  adapter: string,
+  body: string,
+  headers: Record<string, string>,
+): Promise<ChatWebhookResponse> {
+  const path = `/api/integrations/chat/${adapter}/webhook`;
   const req = {
     method: "POST",
     url: path,
-    headers,
+    headers: Object.fromEntries(Object.entries(headers).map(([k, v]) => [k.toLowerCase(), v])),
     rawHeaders: Object.entries(headers).flat(),
     async *[Symbol.asyncIterator]() {
       yield Buffer.from(body);
     },
   } as unknown as IncomingMessage;
-  const captured = { status: 0 };
+  const captured = { status: 0, body: "" };
   const res = {
+    headersSent: false,
     writeHead(status: number) {
       captured.status = status;
       return this;
     },
-    end() {
+    end(chunk?: string | Buffer) {
+      if (chunk) captured.body = chunk.toString();
       return this;
     },
   } as unknown as ServerResponse;
   expect(await handleWebhooks(req, res, path.split("/").filter(Boolean))).toBe(true);
-  expect(captured.status).toBe(200);
+  return captured;
+}
+
+/** POST one update to the Telegram webhook and wait for the handler work. */
+export async function postTelegramUpdate(update: unknown): Promise<void> {
+  const response = await postChatWebhook("telegram", JSON.stringify(update), {
+    "content-type": "application/json",
+    "x-telegram-bot-api-secret-token": TELEGRAM_SECRET,
+  });
+  expect(response.status).toBe(200);
   expect(await drainBackground(5_000)).toBe(true);
 }
 

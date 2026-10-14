@@ -11,7 +11,7 @@ import {
   registerUnregisterChatChannelTool,
 } from "../tools/register-chat-channel";
 import type { Agent } from "../types";
-import { startTelegramHarness, type TelegramHarness } from "./chat-sdk-telegram-harness";
+import { startTelegramHarness, type TelegramHarness } from "./chat-sdk-harness";
 
 const TEST_DB_PATH = "./test-chat-sdk-tools.sqlite";
 const CHAT_TOOLS = [

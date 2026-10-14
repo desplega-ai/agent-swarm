@@ -11,7 +11,7 @@ import {
   startTelegramHarness,
   type TelegramHarness,
   telegramUpdate,
-} from "./chat-sdk-telegram-harness";
+} from "./chat-sdk-harness";
 import { loadBundleFixture } from "./fixtures/extensions/load";
 
 const TEST_DB_PATH = "./test-extensions-example-route-chat-channel.sqlite";
