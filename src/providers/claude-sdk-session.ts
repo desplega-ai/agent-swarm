@@ -30,6 +30,7 @@ import {
   runClaudeSessionSummary,
 } from "./claude-adapter";
 import { ClaudeBackgroundKeepalive } from "./claude-background-keepalive";
+import { claudeFlagSettings } from "./claude-flag-settings";
 import type { ClaudeProtocolMessage } from "./claude-session-events";
 import { normalizeClaudeMessage } from "./claude-session-events";
 import type {
@@ -470,6 +471,7 @@ class ClaudeSdkSession implements ProviderSession {
           pathToClaudeCodeExecutable: executable,
           systemPrompt: { type: "preset", preset: "claude_code" },
           settingSources: ["user", "project", "local"],
+          settings: claudeFlagSettings(),
           permissionMode: "bypassPermissions",
           allowDangerouslySkipPermissions: true,
           stderr: (text) => {

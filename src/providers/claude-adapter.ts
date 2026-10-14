@@ -42,6 +42,7 @@ import {
 } from "../utils/process-group";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { ClaudeBackgroundKeepalive } from "./claude-background-keepalive";
+import { claudeFlagSettings } from "./claude-flag-settings";
 import { normalizeClaudeMessage } from "./claude-session-events";
 import { resolveSlashSkillPrompt } from "./codex-skill-resolver";
 import { CTX_MODE_NUDGE_EVERY } from "./ctx-mode-env";
@@ -1034,6 +1035,9 @@ class ClaudeSession implements ProviderSession {
       "--allow-dangerously-skip-permissions",
       "--permission-mode",
       "bypassPermissions",
+      // Skip the workspace copy of claudeMd; ~/.claude/CLAUDE.md already carries it.
+      "--settings",
+      JSON.stringify(claudeFlagSettings()),
     ];
 
     // Queued steering needs `--input-format stream-json`, which is mutually

@@ -148,6 +148,12 @@ describe("Claude SDK production adapter lifecycle", () => {
             argument === "--system-prompt" && fixtureState.argv[index + 1] === "",
         ),
       ).toBeFalse();
+      // The SDK forwards `settings` as `--settings`: Claude skips /workspace/CLAUDE.md.
+      const settingsAt = fixtureState.argv.indexOf("--settings");
+      expect(settingsAt).toBeGreaterThan(-1);
+      expect(JSON.parse(fixtureState.argv[settingsAt + 1] ?? "")).toMatchObject({
+        claudeMdExcludes: ["/workspace/CLAUDE.md"],
+      });
     },
     { timeout: CHILD_PROCESS_TEST_BUDGET_MS },
   );

@@ -13,6 +13,7 @@ interface FixtureResult {
   tools: string;
   baselineAtFirstSpawn: string;
   baselineAtSecondSpawn: string;
+  workspaceClaudeMdAtFirstSpawn: string;
 }
 
 async function runFixture(scenario: string): Promise<FixtureResult> {
@@ -63,6 +64,8 @@ describe("runner per-task identity refresh", () => {
       expect(result.captures[1]).toContain("Identity changed after task A");
       expect(result.captures[0]).toContain("Notes before boot refresh");
       expect(result.captures[1]).not.toContain("Notes before boot refresh");
+      // A non-Claude (pi) boot still materializes the workspace CLAUDE.md it reads and syncs.
+      expect(result.workspaceClaudeMdAtFirstSpawn).toBe("Notes before boot refresh");
       expect(result.captures[1]).toContain("Additional fixture instructions");
     },
     CHILD_PROCESS_TEST_BUDGET_MS,

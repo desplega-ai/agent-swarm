@@ -38,6 +38,7 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { WORKSPACE_CLAUDE_MD_PATH } from "../commands/profile-sync";
 import {
   ClaudeAdapter,
   parseClaudeBinary,
@@ -767,6 +768,18 @@ describe("CLAUDE_BINARY env override", () => {
     expect(spawnedArgs).toHaveLength(1);
     const argv = spawnedArgs[0];
     expect(argv[0]).toBe("claude");
+  });
+
+  test("excludes only /workspace/CLAUDE.md from Claude's memory load", async () => {
+    const adapter = new ClaudeAdapter();
+    await createCompletedSession(adapter, makeConfig());
+
+    const argv = spawnedArgs[0];
+    const at = argv.indexOf("--settings");
+    expect(at).toBeGreaterThan(0);
+    expect(JSON.parse(argv[at + 1] ?? "")).toEqual({
+      claudeMdExcludes: [WORKSPACE_CLAUDE_MD_PATH],
+    });
   });
 
   test("legacy bridge override: argv[0] comes from CLAUDE_BINARY", async () => {

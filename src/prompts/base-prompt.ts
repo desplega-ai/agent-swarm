@@ -244,9 +244,9 @@ export const getBasePrompt = async (args: BasePromptArgs): Promise<string> => {
     prompt += toolsResult.text;
   }
 
-  // J. Agent notes (CLAUDE.md). Claude loads ~/.claude/CLAUDE.md and
-  // /workspace/CLAUDE.md natively; the others get it here, and only when it
-  // differs from the generated default.
+  // J. Agent notes (CLAUDE.md). Claude loads ~/.claude/CLAUDE.md natively and
+  // excludes the /workspace/CLAUDE.md copy (claude-flag-settings.ts); the others
+  // get it here, and only when it differs from the generated default.
   if (
     hasLocalEnv &&
     args.claudeMd &&
