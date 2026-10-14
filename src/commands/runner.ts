@@ -113,6 +113,7 @@ import {
   prependProfileSyncRejectionBanner,
   resolveClaudeMdPath,
   syncProfileFilesToServer,
+  WORKSPACE_CLAUDE_MD_PATH,
   writeIdentityBaselines,
   writeProfileFileFromDb,
 } from "./profile-sync.ts";
@@ -6449,10 +6450,13 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
     }
   }
 
-  // Write CLAUDE.md to workspace (agent-level instructions)
+  // Write CLAUDE.md to workspace (agent-level instructions) for every harness:
+  // a live provider swap can start a non-Claude session in this container.
+  // Claude sessions exclude this copy (claude-flag-settings.ts) and read
+  // ~/.claude/CLAUDE.md instead.
   if (agentClaudeMd) {
     try {
-      const backupPath = await writeProfileFileFromDb("/workspace/CLAUDE.md", agentClaudeMd);
+      const backupPath = await writeProfileFileFromDb(WORKSPACE_CLAUDE_MD_PATH, agentClaudeMd);
       if (backupPath) console.warn(`[${role}] Archived differing CLAUDE.md at ${backupPath}`);
       console.log(`[${role}] Wrote CLAUDE.md to workspace`);
     } catch (err) {

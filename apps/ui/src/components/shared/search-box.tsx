@@ -1,4 +1,5 @@
 import { Search, X } from "lucide-react";
+import type { ReactNode, Ref } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
@@ -15,6 +16,9 @@ interface SearchBoxProps {
   /** Renders a ghost clear button inside the field once there is a value. */
   clearable?: boolean;
   clearLabel?: string;
+  /** Shown at the field's right end while it is empty, e.g. a shortcut keycap. */
+  hint?: ReactNode;
+  inputRef?: Ref<HTMLInputElement>;
 }
 
 /**
@@ -33,18 +37,27 @@ export function SearchBox({
   className,
   clearable = false,
   clearLabel = "Clear search",
+  hint,
+  inputRef,
 }: SearchBoxProps) {
+  const showHint = Boolean(hint) && !value;
   return (
     <div className={cn("relative min-w-0", className)}>
       <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
       <Input
+        ref={inputRef}
         id={id}
         aria-label={ariaLabel ?? placeholder}
         placeholder={placeholder}
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        className={cn("pl-9", clearable && value ? "pr-9" : undefined)}
+        className={cn("pl-9", (clearable && value) || showHint ? "pr-9" : undefined)}
       />
+      {showHint ? (
+        <span className="pointer-events-none absolute right-2.5 top-1/2 inline-flex -translate-y-1/2">
+          {hint}
+        </span>
+      ) : null}
       {clearable && value ? (
         <Button
           type="button"

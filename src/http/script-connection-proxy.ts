@@ -3,7 +3,9 @@ import { z } from "zod";
 import { getAgentById } from "@/be/db";
 import { callMcpServerTool } from "@/be/mcp-proxy";
 import { getScriptConnectionById } from "@/be/script-connections";
+import { resolveSqlDsn, runReadOnlyQuery } from "@/be/sql-connections";
 import { can } from "@/rbac";
+import { scrubSecrets } from "@/utils/secret-scrubber";
 import { route } from "./route-def";
 import { jsonError } from "./utils";
 
@@ -51,6 +53,37 @@ const mcpCallRoute = route({
   },
 });
 
+const SqlQueryEnvelopeSchema = z.union([
+  z.object({
+    ok: z.literal(true),
+    rows: z.array(z.record(z.string(), z.unknown())),
+    rowCount: z.number(),
+    truncated: z.boolean(),
+  }),
+  z.object({ ok: z.literal(false), error: z.string() }),
+]);
+
+const sqlQueryRoute = route({
+  method: "post",
+  path: "/api/script-connections/{id}/sql-query",
+  pattern: ["api", "script-connections", null, "sql-query"],
+  summary: "Run one read-only query on a SQL script connection",
+  tags: ["Script Connections"],
+  auth: { apiKey: true, agentId: true },
+  rbac: { permission: "script-connection.invoke" },
+  params: z.object({ id: z.string().uuid() }),
+  body: z.object({
+    sql: z.string().min(1).max(100_000),
+    params: z.array(z.unknown()).max(100).optional(),
+  }),
+  responses: {
+    200: { description: "Query rows or a scrubbed error", schema: SqlQueryEnvelopeSchema },
+    400: { description: "Invalid SQL connection or request" },
+    403: { description: "Not allowed to invoke this SQL connection" },
+    404: { description: "Script connection or agent not found" },
+  },
+});
+
 function connectionScopeMatches(
   connection: { scope: string; scopeId: string | null },
   agentId: string,
@@ -75,9 +108,12 @@ export async function handleScriptConnectionProxy(
   queryParams: URLSearchParams,
   agentId: string | undefined,
 ): Promise<boolean> {
-  if (!mcpCallRoute.match(req.method, pathSegments)) return false;
+  const isSql = sqlQueryRoute.match(req.method, pathSegments);
+  if (!isSql && !mcpCallRoute.match(req.method, pathSegments)) return false;
 
-  const parsed = await mcpCallRoute.parse(req, res, pathSegments, queryParams);
+  const parsed = isSql
+    ? await sqlQueryRoute.parse(req, res, pathSegments, queryParams)
+    : await mcpCallRoute.parse(req, res, pathSegments, queryParams);
   if (!parsed) return true;
 
   if (!agentId) {
@@ -111,12 +147,23 @@ export async function handleScriptConnectionProxy(
     jsonError(res, "Script connection is disabled", 403);
     return true;
   }
-  if (connection.kind !== "mcp") {
-    jsonError(res, "Script connection is not an MCP connection", 400);
+  if (connection.kind !== (isSql ? "sql" : "mcp")) {
+    jsonError(res, `Script connection is not ${isSql ? "a SQL" : "an MCP"} connection`, 400);
     return true;
   }
   if (!connectionScopeMatches(connection, agentId, syntheticPrincipal)) {
     jsonError(res, "Script connection is not available to this agent", 403);
+    return true;
+  }
+  if ("sql" in parsed.body) {
+    try {
+      const dsn = await resolveSqlDsn(connection, agentId);
+      const result = await runReadOnlyQuery(dsn, parsed.body.sql, parsed.body.params);
+      sqlQueryRoute.respond(res, 200, { ok: true, ...result });
+    } catch (err) {
+      const error = scrubSecrets(err instanceof Error ? err.message : String(err));
+      sqlQueryRoute.respond(res, 200, { ok: false, error });
+    }
     return true;
   }
   if (!connection.mcpServerId) {

@@ -63,6 +63,8 @@ type FakeHostOptions = {
   mcpStatuses?: Array<McpStatus | null>;
   /** Registered tool ids the plugin's tool lister returns. */
   tools?: string[];
+  /** Model responses handed to the plugin's `http.response` hook at startup. */
+  responses?: Response[];
 };
 
 /**
@@ -83,6 +85,11 @@ function makeFakeHost(events: OpenCodeEvent[], opts: FakeHostOptions = {}) {
     interrupts: [] as unknown[],
     closeCalls: 0,
     mcpListCalls: 0,
+    /** Session hooks the plugins registered, with their options. */
+    sessionHooks: {} as Record<
+      string,
+      { fn: (event: any) => unknown; options?: { providerID?: string } }
+    >,
     mcp: {
       list: async () => {
         const status = statuses[Math.min(host.mcpListCalls, statuses.length - 1)];
@@ -91,6 +98,7 @@ function makeFakeHost(events: OpenCodeEvent[], opts: FakeHostOptions = {}) {
       },
     },
     tools: opts.tools ?? ["read", "swarm_store-progress"],
+    responses: opts.responses ?? [],
     sessions: {
       create: async (input: unknown) => {
         host.created.push(input);
@@ -135,8 +143,19 @@ function installHost(host: FakeHost) {
                 hook: async () => {},
                 list: async () => host.tools.map((id) => ({ id })),
               },
-              session: { hook: async () => {} },
+              session: {
+                hook: async (
+                  name: string,
+                  fn: (event: unknown) => unknown,
+                  options?: { providerID?: string },
+                ) => {
+                  host.sessionHooks[name] = { fn, options };
+                },
+              },
             });
+          }
+          for (const response of host.responses) {
+            await host.sessionHooks["http.response"]?.fn({ response });
           }
           return host;
         },
@@ -442,6 +461,118 @@ describe("OpencodeSession — event mapping", () => {
       promptError: new Error("model not found: x/y"),
     });
     expect(result).toMatchObject({ isError: true, failureReason: "model not found: x/y" });
+  });
+});
+
+describe("OpencodeSession — cost of an OpenRouter session", () => {
+  // Task 06c031dd (opencode 2.0.28, openrouter/deepseek/deepseek-v4.1-flash),
+  // verbatim from session_logs: a title call, then three agent steps.
+  // `session.usage.updated` is cumulative; `output` excludes reasoning.
+  const deepseek = testConfig({ model: "openrouter/deepseek/deepseek-v4.1-flash" });
+  const usage = (cost: number, input: number, output: number, reasoning: number, read: number) =>
+    ev("session.usage.updated", {
+      sessionID: SESSION_ID,
+      cost,
+      tokens: { input, output, reasoning, cache: { read, write: 0 } },
+    });
+  const step = (cost: number, input: number, output: number, reasoning: number, read: number) =>
+    ev("session.step.ended", {
+      sessionID: SESSION_ID,
+      finish: "tool-calls",
+      cost,
+      tokens: { input, output, reasoning, cache: { read, write: 0 } },
+    });
+  const v2Events = [
+    usage(0.00010640000000000001, 1019, 9, 0, 0),
+    step(0.00023894900000000002, 51770, 53, 26, 0),
+    usage(0.000345349, 52789, 62, 26, 0),
+    step(0.0005280831000000001, 12963, 102, 7, 51840),
+    usage(0.0008734321000000001, 65752, 164, 33, 51840),
+    step(0.0005287785, 165, 15, 0, 64896),
+    usage(0.0014022106, 65917, 179, 33, 116736),
+    succeeded,
+  ];
+
+  // OpenRouter's final SSE chunk for deepseek/deepseek-v4.1-flash, served by
+  // Together (live probe, 2026-10-14): `usage.cost` is the billed USD.
+  const openRouterSse = (cost: number, cached: number) =>
+    new Response(
+      [
+        ": OPENROUTER PROCESSING",
+        "",
+        `data: ${JSON.stringify({ id: "gen-1", choices: [{ index: 0, delta: { content: "pong" } }] })}`,
+        "",
+        `data: ${JSON.stringify({
+          id: "gen-1",
+          provider: "Together",
+          model: "deepseek/deepseek-v4.1-flash",
+          choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+          usage: {
+            prompt_tokens: 26545,
+            completion_tokens: 15,
+            total_tokens: 26560,
+            cost,
+            is_byok: false,
+            prompt_tokens_details: { cached_tokens: cached, cache_write_tokens: 0 },
+            completion_tokens_details: { reasoning_tokens: 11 },
+          },
+        })}`,
+        "",
+        "data: [DONE]",
+        "",
+      ].join("\n"),
+      { headers: { "content-type": "text/event-stream" } },
+    );
+
+  test("reports v2 tokens with reasoning billed as output", async () => {
+    const { result } = await runSession(v2Events, deepseek);
+    expect(result.cost).toMatchObject({
+      totalCostUsd: 0.0014022106,
+      inputTokens: 65917,
+      outputTokens: 212,
+      reasoningOutputTokens: 33,
+      cacheReadTokens: 116736,
+      cacheWriteTokens: 0,
+      numTurns: 3,
+    });
+    expect(result.cost?.harnessCostBilled).toBeUndefined();
+  });
+
+  test("reports OpenRouter's billed cost when every response carried one", async () => {
+    const { result } = await runSession(v2Events, deepseek, {
+      responses: [
+        openRouterSse(0.0079815, 0),
+        openRouterSse(0.000191676, 26496),
+        new Response('{"error":{"message":"rate limited"}}', { status: 429 }),
+      ],
+    });
+    expect(result.cost?.harnessCostBilled).toBe(true);
+    expect(result.cost?.totalCostUsd).toBeCloseTo(0.0079815 + 0.000191676, 12);
+    expect(result.cost?.inputTokens).toBe(65917);
+  });
+
+  test("falls back to OpenCode's estimate when a response has no billed cost", async () => {
+    const { result } = await runSession(v2Events, deepseek, {
+      responses: [openRouterSse(0.0079815, 0), new Response("data: [DONE]\n\n")],
+    });
+    expect(result.cost?.harnessCostBilled).toBeUndefined();
+    expect(result.cost?.totalCostUsd).toBe(0.0014022106);
+  });
+
+  test("hooks only OpenRouter responses, and only for an OpenRouter model", async () => {
+    const openrouter = await runSession([succeeded], deepseek);
+    expect(openrouter.host.sessionHooks["http.response"]?.options).toEqual({
+      providerID: "openrouter",
+    });
+    const direct = await runSession([succeeded], testConfig({ model: "anthropic/claude-haiku" }));
+    expect(direct.host.sessionHooks["http.response"]).toBeUndefined();
+  });
+
+  test("skips title generation", async () => {
+    const { host } = await runSession([succeeded]);
+    const event: { result?: string } = {};
+    await host.sessionHooks.title?.fn(event);
+    expect(event.result).toBe("swarm task task-1");
   });
 });
 

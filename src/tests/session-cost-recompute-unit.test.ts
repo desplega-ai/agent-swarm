@@ -166,4 +166,52 @@ describe("recomputeSessionCost — pure branch behavior", () => {
     expect(result.costSource).toBe("unpriced");
     expect(result.totalCostUsd).toBe(0);
   });
+
+  // Task 06c031dd (opencode 2.0.28): the session's tokens at the live
+  // OpenRouter list rates, vs the billed `usage.cost` sum the adapter flags.
+  const OPENCODE_DEEPSEEK: RateBook = {
+    "opencode:deepseek/deepseek-v4.1-flash:input": 0.0441,
+    "opencode:deepseek/deepseek-v4.1-flash:output": 0.765,
+    "opencode:deepseek/deepseek-v4.1-flash:cached_input": 0.0054,
+  };
+  const OPENCODE_ROW = {
+    ...BASE,
+    provider: "opencode",
+    model: "openrouter/deepseek/deepseek-v4.1-flash",
+    inputTokens: 65_917,
+    outputTokens: 212,
+    cacheReadTokens: 116_736,
+  } as const;
+
+  test("opencode without a billed cost prices its tokens from the table", async () => {
+    const result = await recomputeSessionCost(
+      { ...OPENCODE_ROW, harnessCostUsd: 0.0014022106 },
+      lookupFrom(OPENCODE_DEEPSEEK),
+    );
+    expect(result.costSource).toBe("pricing-table");
+    expect(result.totalCostUsd).toBeCloseTo(
+      (65_917 * 0.0441 + 116_736 * 0.0054 + 212 * 0.765) / 1_000_000,
+      12,
+    );
+  });
+
+  test("a billed harness cost wins over the table", async () => {
+    const result = await recomputeSessionCost(
+      { ...OPENCODE_ROW, harnessCostUsd: 0.0207, harnessCostBilled: true },
+      lookupFrom(OPENCODE_DEEPSEEK),
+    );
+    expect(result).toEqual({
+      totalCostUsd: 0.0207,
+      costSource: "harness",
+      modelBreakdown: undefined,
+    });
+  });
+
+  test("a billed flag with no cost still prices from the table", async () => {
+    const result = await recomputeSessionCost(
+      { ...OPENCODE_ROW, harnessCostUsd: 0, harnessCostBilled: true },
+      lookupFrom(OPENCODE_DEEPSEEK),
+    );
+    expect(result.costSource).toBe("pricing-table");
+  });
 });

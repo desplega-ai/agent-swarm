@@ -16,6 +16,7 @@ let claims = 0;
 let firstCompleted = false;
 let editDuringRefresh = false;
 let baselineAtFirstSpawn = "";
+let workspaceClaudeMdAtFirstSpawn = "";
 const bootProfile = {
   name: "Fixture agent",
   description: "Runner integration fixture",
@@ -84,6 +85,7 @@ mock.module("../../providers/index", () => ({
         captures.push(config.systemPrompt);
         if (captures.length === 1) {
           baselineAtFirstSpawn = readFileSync(baselinesPath, "utf8");
+          workspaceClaudeMdAtFirstSpawn = readFileSync(join(directory, "CLAUDE.md"), "utf8");
         } else {
           writeFileSync(
             join(directory, "result.json"),
@@ -95,6 +97,7 @@ mock.module("../../providers/index", () => ({
               editDuringRefresh,
               tools: readFileSync(toolsPath, "utf8"),
               baselineAtFirstSpawn,
+              workspaceClaudeMdAtFirstSpawn,
               baselineAtSecondSpawn: readFileSync(baselinesPath, "utf8"),
             }),
           );

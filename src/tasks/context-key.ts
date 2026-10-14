@@ -20,6 +20,7 @@
  *   task:trackers:github:{owner}:{repo}:{issue|pr}:{number}
  *   task:trackers:gitlab:{projectId}:{mr|issue}:{iid}
  *   task:trackers:azure-devops:{repositoryId}:pr:{pullRequestId}
+ *   task:trackers:azure-devops:{organization}:workitem:{workItemId}
  *   task:trackers:linear:{issueIdentifier}        (e.g. DES-42 — case preserved)
  *   task:trackers:jira:{issueIdentifier}          (e.g. PROJ-123 — case preserved)
  *   task:schedule:{scheduleId}
@@ -69,6 +70,11 @@ export type ParsedContextKey =
       family: "trackers";
       subFamily: "azure-devops";
       parts: { repositoryId: string; kind: "pr"; pullRequestId: number };
+    }
+  | {
+      family: "trackers";
+      subFamily: "azure-devops";
+      parts: { organization: string; kind: "workitem"; workItemId: number };
     }
   | {
       family: "trackers";
@@ -202,6 +208,20 @@ export function azureDevOpsContextKey(input: {
     );
   }
   return ["task", "trackers", "azure-devops", repositoryId, "pr", pullRequestId].join(SEPARATOR);
+}
+
+export function azureDevOpsWorkItemContextKey(input: {
+  organization: string;
+  workItemId: number;
+}): string {
+  const organization = assertSafePart(input.organization, "organization");
+  const workItemId = assertSafePart(input.workItemId, "workItemId");
+  if (!/^\d+$/.test(workItemId)) {
+    throw new Error(
+      `context-key: azure-devops "workItemId" must be a positive integer (got ${JSON.stringify(workItemId)})`,
+    );
+  }
+  return ["task", "trackers", "azure-devops", organization, "workitem", workItemId].join(SEPARATOR);
 }
 
 export function linearContextKey(input: { issueIdentifier: string }): string {
@@ -352,10 +372,23 @@ export function parseContextKey(key: string): ParsedContextKey {
         };
       }
       if (subFamily === "azure-devops") {
-        if (parts.length !== 6 || parts[4] !== "pr") {
+        if (parts.length !== 6 || (parts[4] !== "pr" && parts[4] !== "workitem")) {
           throw new Error(`context-key: malformed azure-devops key: ${JSON.stringify(key)}`);
         }
         const idStr = parts[5] as string;
+        if (parts[4] === "workitem") {
+          const workItemId = Number.parseInt(idStr, 10);
+          if (!/^\d+$/.test(idStr) || !Number.isFinite(workItemId)) {
+            throw new Error(
+              `context-key: malformed azure-devops workItemId "${idStr}": ${JSON.stringify(key)}`,
+            );
+          }
+          return {
+            family: "trackers",
+            subFamily: "azure-devops",
+            parts: { organization: parts[3] as string, kind: "workitem", workItemId },
+          };
+        }
         const pullRequestId = Number.parseInt(idStr, 10);
         if (!Number.isFinite(pullRequestId)) {
           throw new Error(

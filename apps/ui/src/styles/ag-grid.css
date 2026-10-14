@@ -64,3 +64,30 @@
 .ag-theme-quartz.ag-grid-hug .ag-layout-auto-height .ag-center-cols-viewport {
   min-height: 0;
 }
+
+/*
+ * ListView row states: the row whose detail is open, and rows that arrive
+ * after the first paint (a create, a poll) flashing primary-soft for 1.4s.
+ */
+.ag-theme-quartz .ag-row.list-view-row-selected {
+  background-color: color-mix(in oklab, var(--color-primary) 10%, transparent);
+}
+
+.ag-theme-quartz .ag-row.list-view-row-new {
+  animation: list-view-row-flash 1.4s var(--ease-snappy, ease-out) both;
+}
+
+@keyframes list-view-row-flash {
+  from {
+    background-color: color-mix(in oklab, var(--color-primary) 18%, transparent);
+  }
+  to {
+    background-color: transparent;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ag-theme-quartz .ag-row.list-view-row-new {
+    animation: none;
+  }
+}

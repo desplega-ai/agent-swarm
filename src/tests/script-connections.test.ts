@@ -624,6 +624,8 @@ describe("script connections", () => {
       markMigrationApplied(database, "206_runtime_pools.sql");
       // 207 rebuilds session_tokens, which this migration-112-only fixture does not create.
       markMigrationApplied(database, "207_runtime_session_tokens.sql");
+      // 213 rebuilds script_connections with the post-117 columns this fixture skips.
+      markMigrationApplied(database, "213_script_connections_sql.sql");
 
       const id = crypto.randomUUID();
       const now = new Date().toISOString();
@@ -757,7 +759,9 @@ describe("script connections", () => {
           new Date().toISOString(),
           createHash("sha256").update(sql117).digest("hex"),
         );
-      runMigrations(database); // applies every migration except 117
+      // 213 rebuilds script_connections with the post-117 columns; skip it with 117.
+      markMigrationApplied(database, "213_script_connections_sql.sql");
+      runMigrations(database); // applies every migration except 117 and 213
 
       const now = new Date().toISOString();
       // A user-created STANDALONE binding: source='user', arbitrary config_key

@@ -1221,6 +1221,15 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         docsUrl: `${DOCS}integrations/slack`,
       },
       {
+        key: "SLACK_BLOCK_EXTERNAL_CHANNELS",
+        label: "Block external Slack channels",
+        description:
+          "Stop the bot in Slack Connect channels shared with another organization. The swarm ignores messages there, refuses to post or read there, and leaves the channel on join or share. Leaving needs the `channels:manage` and `groups:write` bot scopes.",
+        kind: "boolean",
+        defaultValue: "false",
+        docsUrl: `${DOCS}integrations/slack`,
+      },
+      {
         key: "LINEAR_ALLOWED_STATES",
         label: "Linear pickup states",
         description:

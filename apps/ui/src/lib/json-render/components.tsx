@@ -37,12 +37,28 @@ import type {
 } from "ag-grid-community";
 import { eachDayOfInterval, format, parseISO, startOfDay, subDays } from "date-fns";
 import { Provider as JotaiProvider } from "jotai";
-import { AlertCircle, AlertTriangle, ArrowRight, CheckCircle, Info, X } from "lucide-react";
+import {
+  AlertCircle,
+  AlertTriangle,
+  ArrowRight,
+  Bot,
+  CheckCircle,
+  ExternalLink,
+  Inbox,
+  Info,
+  Minus,
+  MoreHorizontal,
+  SearchX,
+  TrendingDown,
+  TrendingUp,
+  X,
+} from "lucide-react";
 import type { ReactNode } from "react";
 import { Children, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { Streamdown } from "streamdown";
+import { AvatarStack } from "@/components/kibo-ui/avatar-stack";
 import {
   CalendarBody,
   CalendarDatePagination,
@@ -70,8 +86,22 @@ import {
   KanbanProvider,
 } from "@/components/kibo-ui/kanban";
 import { Spinner } from "@/components/kibo-ui/spinner";
-import { DataGrid } from "@/components/shared/data-grid";
+import { BetaTag } from "@/components/shared/beta-tag";
+import { CollapsibleSection } from "@/components/shared/collapsible-section";
+import { CopyValueButton } from "@/components/shared/copy-value-button";
+import { EmptyState } from "@/components/shared/empty-state";
+import { JsonViewer } from "@/components/shared/json-viewer";
+import { ListView, type ListViewMobileRow } from "@/components/shared/list-view";
 import { SearchBox } from "@/components/shared/search-box";
+import { StatusBadge } from "@/components/shared/status-badge";
+import { ChipButton } from "@/components/shared/suggestion-chips";
+import {
+  ProgressRing,
+  TASK_STATUS_TEXT,
+  TaskStatusIcon,
+  taskStatusVariant,
+} from "@/components/shared/task-status-icon";
+import { userInitials } from "@/components/shared/user-chip";
 import { AlertCallout } from "@/components/ui/alert-callout";
 import {
   AlertDialog,
@@ -83,8 +113,9 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button, type ButtonStatus } from "@/components/ui/button";
 import {
   CardContent,
   CardDescription,
@@ -92,9 +123,20 @@ import {
   CardTitle,
   Card as UiCard,
 } from "@/components/ui/card";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { DefinitionList, InfoRow } from "@/components/ui/info-row";
 import { Input } from "@/components/ui/input";
+import { Kbd } from "@/components/ui/kbd";
 import { Label } from "@/components/ui/label";
+import { MiddleTruncation } from "@/components/ui/middle-truncation";
+import { Progress } from "@/components/ui/progress";
+import { SearchableMultiSelect, SearchableSelect } from "@/components/ui/searchable-select";
+import { SegmentedControl } from "@/components/ui/segmented-control";
 import {
   Select,
   SelectContent,
@@ -108,23 +150,29 @@ import {
   Sheet,
   SheetContent,
   SheetDescription,
+  SheetFooter,
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
+import { StatPanel } from "@/components/ui/stat-panel";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
-import { cn, formatSmartTime } from "@/lib/utils";
+import { cn, formatDuration, formatSmartTime } from "@/lib/utils";
 import { resolveScopedParams } from "./action-params";
 import type {
   ActionChain,
   BadgeTone,
+  ChipOption,
   DetailListField,
+  DrawerAction,
   FormField,
   GridColumns,
   KanbanColumn,
+  MetricTrend,
   SelectOption,
   SpacingToken,
   swarmCatalog,
@@ -134,7 +182,9 @@ import type {
   TableRowActionConfirm,
   TabsTab,
 } from "./catalog";
+import { CatalogIcon, catalogIcon } from "./icons";
 import { useJsonRenderThemeAttr } from "./theme-scope";
+import { usePageShortcut } from "./use-page-shortcut";
 
 // ─── Style maps (moved verbatim from json-page-renderer.tsx) ────────────────
 
@@ -193,13 +243,179 @@ const badgeToneText: Record<BadgeTone, string> = {
   paused: "text-status-paused-strong",
 };
 
-function StatusPill({ text, tone }: { text: string; tone: BadgeTone }) {
+function StatusPill({ text, tone, icon }: { text: string; tone: BadgeTone; icon?: unknown }) {
   return (
     <Badge variant="outline" size="tag" className="gap-1.5">
-      <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", badgeToneDot[tone])} />
+      {catalogIcon(icon) ? (
+        <CatalogIcon name={icon} size="sm" className={cn("size-3", badgeToneText[tone])} />
+      ) : (
+        <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", badgeToneDot[tone])} />
+      )}
       <span className={badgeToneText[tone]}>{text}</span>
     </Badge>
   );
+}
+
+type StatusBadgeStatus = Parameters<typeof StatusBadge>[0]["status"];
+
+/**
+ * `kind: "status"` — lifecycle values (pending, in_progress, completed,
+ * failed, ...) render the dashboard's own `StatusBadge` with its lifecycle
+ * icon; any other value falls back to the toned pill.
+ */
+function StatusCell({ value, tones }: { value: string; tones?: Record<string, BadgeTone> }) {
+  if (taskStatusVariant(value)) return <StatusBadge status={value as StatusBadgeStatus} />;
+  return <StatusPill text={value} tone={badgeToneFor(tones, value)} />;
+}
+
+/** Compact rounded numeric pill (Badge `variant: "count"`, Tabs `count`). */
+function CountPill({ value, tone = "neutral" }: { value: string | number; tone?: BadgeTone }) {
+  return (
+    <Badge
+      variant="secondary"
+      className={cn(
+        "h-4.5 min-w-4.5 rounded-full px-1.5 text-[10px] leading-none tabular-nums",
+        tone === "neutral" ? "text-muted-foreground" : badgeToneText[tone],
+      )}
+    >
+      {value}
+    </Badge>
+  );
+}
+
+/**
+ * Badge `variant: "status"` — the 11px sentence-case pill: the lifecycle icon
+ * for a lifecycle `status`, else the author icon or the tone dot.
+ */
+function SentencePill({
+  text,
+  tone,
+  status,
+  icon,
+}: {
+  text: string;
+  tone: BadgeTone;
+  status?: string;
+  icon?: unknown;
+}) {
+  const lifecycle = status ? taskStatusVariant(status) : null;
+  return (
+    <Badge variant="outline" className="h-5 gap-1.5 rounded-full px-2 text-[11px] leading-none">
+      {lifecycle ? (
+        // Wrapped so the badge's `[&>svg]:size-3` rule does not shrink the icon.
+        <span className="inline-flex size-3.5 shrink-0">
+          <TaskStatusIcon variant={lifecycle} className="size-full" />
+        </span>
+      ) : catalogIcon(icon) ? (
+        <CatalogIcon name={icon} size="sm" className={cn("size-3", badgeToneText[tone])} />
+      ) : (
+        <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", badgeToneDot[tone])} />
+      )}
+      <span className={lifecycle ? TASK_STATUS_TEXT[lifecycle] : badgeToneText[tone]}>{text}</span>
+    </Badge>
+  );
+}
+
+/** Wraps a node in a hover tooltip when `hint` is set. */
+function WithHint({ hint, children }: { hint?: string; children: ReactNode }) {
+  if (!hint) return children;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className="inline-flex">{children}</span>
+      </TooltipTrigger>
+      <TooltipContent>{hint}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+/**
+ * Value plus copy button (Table `kind: "copy"`, DetailList `kind: "copy"`).
+ * Stops propagation so a copy never also clicks the row, card or drag handle.
+ */
+function CopyCell({ value, middle }: { value: string; middle?: boolean }) {
+  const stop = (event: { stopPropagation: () => void }) => event.stopPropagation();
+  return (
+    <span
+      className="flex w-full min-w-0 items-center gap-1"
+      onClick={stop}
+      onMouseDown={stop}
+      onTouchStart={stop}
+      onKeyDown={stop}
+    >
+      {middle ? (
+        <MiddleTruncation className="min-w-0 flex-1 font-mono text-xs">{value}</MiddleTruncation>
+      ) : (
+        <span className="min-w-0 flex-1 truncate font-mono text-xs" title={value}>
+          {value}
+        </span>
+      )}
+      <CopyValueButton value={value} label={`Copy ${value}`} size="icon-xs" />
+    </span>
+  );
+}
+
+/** `kind: "user"` / `"agent"` — an initials (or bot) avatar and the name. */
+function PersonCell({ name, agent }: { name: string; agent?: boolean }) {
+  return (
+    <span className="inline-flex min-w-0 max-w-full items-center gap-1.5">
+      <span
+        aria-hidden
+        className="inline-flex size-5 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-medium text-muted-foreground"
+      >
+        {agent ? <Bot className="size-3" /> : userInitials(name)}
+      </span>
+      <span className="min-w-0 truncate">{name}</span>
+    </span>
+  );
+}
+
+/** `kind: "relative"` / `"date"` — smart relative time, exact time on hover. */
+function RelativeTimeCell({ value }: { value: unknown }) {
+  const text = String(value);
+  const time = Date.parse(text);
+  if (Number.isNaN(time)) return <span className="block min-w-0 truncate">{text}</span>;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className="block min-w-0 truncate">{formatSmartTime(text)}</span>
+      </TooltipTrigger>
+      <TooltipContent>{new Date(time).toLocaleString()}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+/** Percent (0-100) of a progress value against `max`, or null when not numeric. */
+function progressPercent(value: unknown, max: number | undefined): number | null {
+  const number = typeof value === "number" ? value : Number(value);
+  if (value === null || value === undefined || value === "" || !Number.isFinite(number))
+    return null;
+  const ceiling = max && max > 0 ? max : 100;
+  return Math.max(0, Math.min(100, Math.round((number / ceiling) * 100)));
+}
+
+function ProgressCell({ value, max }: { value: unknown; max?: number }) {
+  const percent = progressPercent(value, max);
+  if (percent === null) return null;
+  return (
+    <span className="flex w-full min-w-0 items-center gap-2">
+      <Progress value={percent} className="h-1.5 flex-1" aria-label={`${percent}%`} />
+      <span className="w-9 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
+        {percent}%
+      </span>
+    </span>
+  );
+}
+
+/** Only absolute http(s) URLs become links — never `javascript:` or relative paths. */
+function safeHttpUrl(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:" ? url.href : null;
+  } catch {
+    return null;
+  }
 }
 
 // ─── Shared value formatting (Table cells + DetailList fields) ──────────────
@@ -214,11 +430,20 @@ type ValueKind = NonNullable<TableColumn["kind"] | DetailListField["kind"]>;
  */
 function formatValue(kind: ValueKind | undefined, value: unknown): string {
   if (value === null || value === undefined) return "";
-  if (kind === "date") {
+  if (kind === "duration") {
+    const ms = typeof value === "number" ? value : Number(value);
+    return Number.isFinite(ms) ? formatDuration(ms) : String(value);
+  }
+  if (kind === "progress") {
+    const percent = progressPercent(value, undefined);
+    return percent === null ? String(value) : `${percent}%`;
+  }
+  if (kind === "date" || kind === "relative") {
     const text = String(value);
     return Number.isNaN(Date.parse(text)) ? text : formatSmartTime(text);
   }
   if (kind === "boolean") return value ? "yes" : "no";
+  if (kind === "number" && typeof value === "number") return value.toLocaleString();
   if (typeof value === "object") return JSON.stringify(value);
   return String(value);
 }
@@ -366,6 +591,17 @@ const stackRowFromClass: Record<"sm" | "md" | "lg", string> = {
   lg: "lg:flex-row",
 };
 
+/**
+ * `Stack.motion` → the entrance class (`styles/json-render.css`). CSS keyframes
+ * run when an element is first inserted and never on a React re-render, so the
+ * 5s poll cannot replay them.
+ */
+const stackMotionClass: Record<"rise" | "fade" | "none", string | undefined> = {
+  rise: "json-render-motion-rise",
+  fade: "json-render-motion-fade",
+  none: undefined,
+};
+
 function StackComponent({ props, children }: { props: StackProps; children: ReactNode }) {
   const direction = props.direction ?? "column";
   // A collapsible row is a column below its breakpoint (Split semantics).
@@ -384,6 +620,7 @@ function StackComponent({ props, children }: { props: StackProps; children: Reac
         props.justify ? justifyClass[props.justify] : undefined,
         props.wrap ? "flex-wrap" : undefined,
         props.padding ? paddingClass[props.padding] : undefined,
+        stackMotionClass[props.motion ?? "rise"],
       )}
     >
       {children}
@@ -510,6 +747,48 @@ function TabsComponent({ props, children }: { props: TabsComponentProps; childre
 
   if (tabs.length === 0) return null;
 
+  // Extra children past the tab count join the last panel rather than
+  // vanishing silently.
+  const bodyFor = (index: number) =>
+    index === tabs.length - 1 ? panels.slice(index) : (panels[index] ?? null);
+  const tabLabel = (tab: TabsTab) => (
+    <>
+      <CatalogIcon name={tab.icon} size="sm" />
+      {tab.label ?? tab.key}
+      {typeof tab.count === "number" && Number.isFinite(tab.count) ? (
+        <CountPill value={tab.count} />
+      ) : null}
+    </>
+  );
+
+  if (props.variant === "segmented") {
+    // Same state and the same warm panels as the tab strip: every body stays
+    // mounted, the inactive ones hidden.
+    return (
+      <div className="flex min-w-0 flex-col gap-3" data-testid="json-render-tabs">
+        <SegmentedControl
+          aria-label="Sections"
+          value={active}
+          onValueChange={(next) => set(path, next)}
+          options={tabs.map((tab) => ({
+            value: tab.key,
+            label: <span className="inline-flex items-center gap-1.5">{tabLabel(tab)}</span>,
+          }))}
+          className="self-start"
+        />
+        {tabs.map((tab, index) => (
+          <div
+            key={tab.key}
+            hidden={tab.key !== active}
+            className={cn("flex min-w-0 flex-col gap-4", tab.key !== active && "hidden")}
+          >
+            {bodyFor(index)}
+          </div>
+        ))}
+      </div>
+    );
+  }
+
   return (
     <Tabs
       value={active}
@@ -520,15 +799,12 @@ function TabsComponent({ props, children }: { props: TabsComponentProps; childre
       <TabsList>
         {tabs.map((tab) => (
           <TabsTrigger key={tab.key} value={tab.key}>
-            {tab.label ?? tab.key}
+            {tabLabel(tab)}
           </TabsTrigger>
         ))}
       </TabsList>
       {tabs.map((tab, index) => {
         const isActive = tab.key === active;
-        // Extra children past the tab count join the last panel rather than
-        // vanishing silently.
-        const body = index === tabs.length - 1 ? panels.slice(index) : (panels[index] ?? null);
         return (
           // `forceMount` keeps every panel mounted (polled Tables in background
           // tabs stay warm) — it also forces them VISIBLE, so `hidden` is set
@@ -540,7 +816,7 @@ function TabsComponent({ props, children }: { props: TabsComponentProps; childre
             hidden={!isActive}
             className={cn("flex min-w-0 flex-col gap-4", !isActive && "hidden")}
           >
-            {body}
+            {bodyFor(index)}
           </TabsContent>
         );
       })}
@@ -583,36 +859,47 @@ function SearchInputComponent({ props }: { props: SearchInputProps }) {
     setText(next);
   }, [stored]);
 
+  const inputRef = useRef<HTMLInputElement>(null);
+  usePageShortcut(props.shortcut, inputRef, () => inputRef.current?.focus());
+
   return (
     <div className="flex min-w-0 flex-col gap-1.5">
       {props.label ? <Label htmlFor={inputId}>{props.label}</Label> : null}
       <SearchBox
         id={inputId}
+        inputRef={inputRef}
         value={text}
         onChange={setText}
         ariaLabel={props.label ?? props.placeholder ?? "Search"}
         placeholder={props.placeholder ?? "Search…"}
         clearable
+        hint={props.shortcut ? <Kbd aria-hidden>{props.shortcut}</Kbd> : undefined}
       />
     </div>
   );
 }
 
-function normalizeSelectOptions(options: SelectOption[]): { value: string; label: string }[] {
+type NormalizedSelectOption = { value: string; label: string; icon?: string; hint?: string };
+
+function normalizeSelectOptions(options: SelectOption[]): NormalizedSelectOption[] {
   const seen = new Set<string>();
-  const normalized: { value: string; label: string }[] = [];
+  const normalized: NormalizedSelectOption[] = [];
   for (const option of options) {
     const value = typeof option === "string" ? option : option.value;
     // Radix reserves the empty string for "no selection".
     if (!value || seen.has(value)) continue;
     seen.add(value);
-    normalized.push({
-      value,
-      label: (typeof option === "string" ? undefined : option.label) ?? value,
-    });
+    if (typeof option === "string") {
+      normalized.push({ value, label: value });
+      continue;
+    }
+    normalized.push({ value, label: option.label ?? value, icon: option.icon, hint: option.hint });
   }
   return normalized;
 }
+
+/** Past this many options a Select filters as you type unless told otherwise. */
+const SELECT_SEARCHABLE_AFTER = 8;
 
 function SelectFilterComponent({ props }: { props: SelectFilterProps }) {
   const { state, get, set } = useStateStore();
@@ -622,18 +909,81 @@ function SelectFilterComponent({ props }: { props: SelectFilterProps }) {
   const options = normalizeSelectOptions((props.options ?? []) as SelectOption[]);
   const clearable = props.clearable ?? true;
 
+  const multiple = props.multiple === true;
+  const searchable = props.searchable ?? options.length > SELECT_SEARCHABLE_AFTER;
+
   const stored = getByPath(state, path);
   const value = typeof stored === "string" ? stored : "";
+  const values = Array.isArray(stored)
+    ? stored.filter((entry): entry is string => typeof entry === "string")
+    : [];
+  const hasValue = multiple ? values.length > 0 : value !== "";
 
-  // Seed `/ui/<id>/value` so a bound `filters` entry resolves to `null`
+  // Seed `/ui/<id>/value` so a bound `filters` entry resolves to `null` / `[]`
   // (= filter disabled) instead of `undefined` before the first interaction.
   const getRef = useRef(get);
   getRef.current = get;
   const setRef = useRef(set);
   setRef.current = set;
   useEffect(() => {
-    if (getRef.current(path) === undefined) setRef.current(path, null);
-  }, [path]);
+    if (getRef.current(path) === undefined) setRef.current(path, multiple ? [] : null);
+  }, [path, multiple]);
+
+  // A standalone Select (no `label`) has no accessible name — fall back to the
+  // placeholder, mirroring `SearchBox`'s ariaLabel chain.
+  const ariaLabel = props.label ? undefined : (props.placeholder ?? "Select an option");
+  const clearButton =
+    clearable && hasValue ? (
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        aria-label={`Clear ${props.label ?? "selection"}`}
+        className="absolute right-7 top-1/2 size-7 -translate-y-1/2 text-muted-foreground"
+        onClick={() => set(path, multiple ? [] : null)}
+      >
+        <X className="size-3.5" />
+      </Button>
+    ) : null;
+
+  if (multiple || searchable) {
+    const comboOptions = options.map((option) => ({
+      value: option.value,
+      label: option.label,
+      hint: option.hint,
+      icon: <CatalogIcon name={option.icon} size="sm" className="text-muted-foreground" />,
+    }));
+    const common = {
+      id: triggerId,
+      "aria-label": ariaLabel,
+      options: comboOptions,
+      placeholder: props.placeholder ?? "All",
+      searchPlaceholder: props.searchPlaceholder,
+      searchable,
+      contentAttrs: themeAttr,
+      triggerClassName: cn(
+        "w-full min-w-0",
+        hasValue && clearable ? "[&>span:first-child]:mr-7" : undefined,
+      ),
+    };
+    return (
+      <div className="flex min-w-0 flex-col gap-1.5">
+        {props.label ? <Label htmlFor={triggerId}>{props.label}</Label> : null}
+        <div className="relative min-w-0">
+          {multiple ? (
+            <SearchableMultiSelect
+              {...common}
+              values={values}
+              onChange={(next) => set(path, next)}
+            />
+          ) : (
+            <SearchableSelect {...common} value={value} onChange={(next) => set(path, next)} />
+          )}
+          {clearButton}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex min-w-0 flex-col gap-1.5">
@@ -651,9 +1001,7 @@ function SelectFilterComponent({ props }: { props: SelectFilterProps }) {
         <Select value={value} onValueChange={(next) => set(path, next)}>
           <SelectTrigger
             id={triggerId}
-            // A standalone Select (no `label`) has no accessible name — fall
-            // back to the placeholder, mirroring `SearchBox`'s ariaLabel chain.
-            aria-label={props.label ? undefined : (props.placeholder ?? "Select an option")}
+            aria-label={ariaLabel}
             className={cn(
               "w-full min-w-0",
               clearable && value ? "*:data-[slot=select-value]:mr-7" : undefined,
@@ -664,24 +1012,101 @@ function SelectFilterComponent({ props }: { props: SelectFilterProps }) {
           <SelectContent {...themeAttr}>
             {options.map((option) => (
               <SelectItem key={option.value} value={option.value}>
+                <CatalogIcon name={option.icon} size="sm" className="text-muted-foreground" />
                 {option.label}
               </SelectItem>
             ))}
           </SelectContent>
         </Select>
-        {clearable && value ? (
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            aria-label={`Clear ${props.label ?? "selection"}`}
-            className="absolute right-7 top-1/2 size-7 -translate-y-1/2 text-muted-foreground"
-            onClick={() => set(path, null)}
-          >
-            <X className="size-3.5" />
-          </Button>
-        ) : null}
+        {clearButton}
       </div>
+    </div>
+  );
+}
+
+// ─── Chips ──────────────────────────────────────────────────────────────────
+
+type ChipsComponentProps = InferComponentProps<typeof swarmCatalog, "Chips">;
+
+function normalizeChipOptions(
+  options: ChipOption[],
+): { value: string; label: string; icon?: string }[] {
+  const seen = new Set<string>();
+  const normalized: { value: string; label: string; icon?: string }[] = [];
+  for (const option of options) {
+    const value = typeof option === "string" ? option : option.value;
+    if (!value || seen.has(value)) continue;
+    seen.add(value);
+    normalized.push(
+      typeof option === "string"
+        ? { value, label: value }
+        : { value, label: option.label ?? value, icon: option.icon },
+    );
+  }
+  return normalized;
+}
+
+/**
+ * Toggle chips writing `/ui/<id>/value`: one string or `null`, or with
+ * `multiple` a string array (in option order). Bound into Table `filters`, an
+ * array means "cell is one of", and an empty one disables the filter.
+ */
+function ChipsComponent({ props }: { props: ChipsComponentProps }) {
+  const { state, get, set } = useStateStore();
+  const path = `/ui/${props.id}/value`;
+  const multiple = props.multiple === true;
+  const options = normalizeChipOptions((props.options ?? []) as ChipOption[]);
+
+  const stored = getByPath(state, path);
+  const selected = multiple
+    ? Array.isArray(stored)
+      ? stored.filter((entry): entry is string => typeof entry === "string")
+      : []
+    : typeof stored === "string"
+      ? [stored]
+      : [];
+
+  // Seed the slot so a bound filter reads "off" (`null` / `[]`) before the
+  // first press, the way Select seeds `null`.
+  const getRef = useRef(get);
+  getRef.current = get;
+  const setRef = useRef(set);
+  setRef.current = set;
+  useEffect(() => {
+    if (getRef.current(path) === undefined) setRef.current(path, multiple ? [] : null);
+  }, [path, multiple]);
+
+  const toggle = (value: string) => {
+    if (!multiple) {
+      set(path, selected[0] === value ? null : value);
+      return;
+    }
+    const on = new Set(selected);
+    if (on.has(value)) on.delete(value);
+    else on.add(value);
+    set(
+      path,
+      options.filter((option) => on.has(option.value)).map((option) => option.value),
+    );
+  };
+
+  return (
+    // biome-ignore lint/a11y/useSemanticElements: a fieldset groups form controls; these are toggle buttons
+    <div
+      role="group"
+      aria-label={props.label ?? "Filters"}
+      className="flex min-w-0 flex-wrap items-center gap-1.5"
+    >
+      {options.map((option) => (
+        <ChipButton
+          key={option.value}
+          pressed={selected.includes(option.value)}
+          onClick={() => toggle(option.value)}
+        >
+          <CatalogIcon name={option.icon} size="sm" />
+          {option.label}
+        </ChipButton>
+      ))}
     </div>
   );
 }
@@ -709,7 +1134,7 @@ const DESTRUCTIVE_VARIANTS = new Set(["destructive", "destructive-outline"]);
 
 /** Row deletes are unrecoverable (rows have no version history), so `confirm:
  * false` cannot opt an `app.mutate` delete out of the dialog. */
-function chainDeletesRows(rowAction: TableRowAction): boolean {
+function chainDeletesRows(rowAction: TableRowAction | DrawerAction): boolean {
   return rowAction.actions.some(
     (action) => action.action === "app.mutate" && action.params?.op === "delete",
   );
@@ -723,7 +1148,7 @@ function chainDeletesRows(rowAction: TableRowAction): boolean {
  * `confirm: false` opt-out exists for destructive-looking-but-reversible
  * actions; a chain that actually deletes rows always confirms.
  */
-function confirmConfigFor(rowAction: TableRowAction): TableRowActionConfirm | null {
+function confirmConfigFor(rowAction: TableRowAction | DrawerAction): TableRowActionConfirm | null {
   const confirm = rowAction.confirm;
   if (confirm === false) return chainDeletesRows(rowAction) ? {} : null;
   if (confirm === undefined)
@@ -748,14 +1173,20 @@ interface PendingRowAction {
 function minWidthForKind(kind: TableColumn["kind"]): number {
   switch (kind) {
     case "boolean":
+    case "switch":
       return 85;
     case "number":
+    case "duration":
       return 95;
     case "badge":
     case "enum":
       return 105;
     case "date":
+    case "relative":
       return 110;
+    case "status":
+    case "progress":
+      return 120;
     default:
       return 130;
   }
@@ -769,18 +1200,50 @@ function flexForKind(kind: TableColumn["kind"]): number {
   return kind === undefined || kind === "text" || kind === "string" ? 2 : 1;
 }
 
-/** Roughly `sm` button metrics: 24px of label padding + ~7px per character. */
-function rowActionButtonWidth(label: string): number {
-  return Math.max(56, Math.round(label.trim().length * 7 + 24));
+/** Columns whose values read best right-aligned with tabular digits. */
+const END_ALIGNED_KINDS = new Set<TableColumn["kind"]>(["number", "duration", "progress"]);
+
+/** Roughly `sm` button metrics: 24px of label padding + ~7px per character (+18px for an icon). */
+function rowActionButtonWidth(rowAction: TableRowAction): number {
+  const icon = catalogIcon(rowAction.icon) ? 18 : 0;
+  return Math.max(56, Math.round(rowAction.label.trim().length * 7 + 24 + icon));
 }
 
-/** Cell padding + every button at its natural width + the 6px gaps between them. */
+/**
+ * Cell padding + every inline button at its natural width + the 6px gaps
+ * between them + the 32px "More" button when any action sits in the menu.
+ */
 function rowActionsColumnWidth(rowActions: TableRowAction[]): number {
-  const buttons = rowActions.reduce(
-    (total, rowAction) => total + rowActionButtonWidth(rowAction.label),
-    0,
+  const inline = rowActions.filter((rowAction) => rowAction.placement !== "menu");
+  const buttons = inline.reduce((total, rowAction) => total + rowActionButtonWidth(rowAction), 0);
+  const hasMenu = inline.length < rowActions.length;
+  const slots = inline.length + (hasMenu ? 1 : 0);
+  return 28 + buttons + (hasMenu ? 32 : 0) + 6 * Math.max(0, slots - 1);
+}
+
+/** A row's id from its `rowId` field, falling back to its JSON (DataGrid's default). */
+function rowIdOf(row: Record<string, unknown>, field: string): string {
+  const value = row[field];
+  if (typeof value === "string" || typeof value === "number") return String(value);
+  return JSON.stringify(row);
+}
+
+/** Header label with a leading icon (AG Grid inner header component). */
+function IconHeader(params: { displayName: string; icon?: string }) {
+  return (
+    <span className="flex min-w-0 items-center gap-1.5">
+      <CatalogIcon name={params.icon} size="sm" className="size-3 text-muted-foreground" />
+      <span className="ag-header-cell-text">{params.displayName}</span>
+    </span>
   );
-  return 28 + buttons + 6 * Math.max(0, rowActions.length - 1);
+}
+
+/** The phone row's status slot, rendered like the grid cell. */
+function statusNode(column: TableColumn, value: unknown): ReactNode {
+  if (value === null || value === undefined || value === "") return undefined;
+  const raw = String(value);
+  if (column.kind === "status") return <StatusCell value={raw} tones={column.tones} />;
+  return <StatusPill text={raw} tone={badgeToneFor(column.tones, raw)} />;
 }
 
 /**
@@ -797,8 +1260,9 @@ const AUTO_HEIGHT_MAX_ROWS = 12;
 // query-override machinery. `search` / `filters` are normal props, so they can
 // be bound to `/ui/<id>/value` or pinned to a constant.
 
-/** `null` / `""` / `undefined` mean "this filter is off". */
+/** `null` / `""` / `undefined` / `[]` mean "this filter is off". */
 function isFilterActive(value: unknown): boolean {
+  if (Array.isArray(value)) return value.some(isFilterActive);
   return value !== null && value !== undefined && value !== "";
 }
 
@@ -823,7 +1287,16 @@ function rowMatchesSearch(
   });
 }
 
-/** Per-column equality; strings compare case-insensitively (enum/tag columns). */
+/** One cell against one filter value; strings compare case-insensitively (enum/tag columns). */
+function cellMatchesFilter(cell: unknown, filter: unknown): boolean {
+  if (typeof filter === "boolean") return toFilterBoolean(cell) === filter;
+  if (typeof filter === "number") {
+    return cell !== null && cell !== undefined && Number(cell) === filter;
+  }
+  return String(cell ?? "").toLowerCase() === String(filter).toLowerCase();
+}
+
+/** Per-column equality; an array filter means "cell is one of" (a multiple `Chips`). */
 function rowMatchesFilters(
   row: Record<string, unknown>,
   filters: NonNullable<TableFilters>,
@@ -831,13 +1304,8 @@ function rowMatchesFilters(
   for (const [key, filter] of Object.entries(filters)) {
     if (!isFilterActive(filter)) continue;
     const cell = row[key];
-    if (typeof filter === "boolean") {
-      if (toFilterBoolean(cell) !== filter) return false;
-    } else if (typeof filter === "number") {
-      if (cell === null || cell === undefined || Number(cell) !== filter) return false;
-    } else if (String(cell ?? "").toLowerCase() !== String(filter).toLowerCase()) {
-      return false;
-    }
+    const accepted = Array.isArray(filter) ? filter.filter(isFilterActive) : [filter];
+    if (!accepted.some((value) => cellMatchesFilter(cell, value))) return false;
   }
   return true;
 }
@@ -855,12 +1323,11 @@ function TableComponent({ props }: { props: TableProps }) {
   const snapshotRef = useRef(getSnapshot);
   snapshotRef.current = getSnapshot;
 
-  const runRowAction = useCallback(
-    async (rowActionIndex: number, row: Record<string, unknown>, index: number) => {
-      const rowAction = propsRef.current.rowActions?.[rowActionIndex] as TableRowAction | undefined;
-      if (!rowAction) return;
+  const runChain = useCallback(
+    async (chain: ActionChain | undefined, row: Record<string, unknown>, index: number) => {
+      if (!chain) return;
       const scope = { row, rowIndex: index, state: snapshotRef.current() };
-      for (const binding of rowAction.actions) {
+      for (const binding of chain) {
         await executeRef.current({
           ...binding,
           params: resolveScopedParams(binding.params, scope),
@@ -868,6 +1335,15 @@ function TableComponent({ props }: { props: TableProps }) {
       }
     },
     [],
+  );
+
+  const runRowAction = useCallback(
+    async (rowActionIndex: number, row: Record<string, unknown>, index: number) => {
+      const rowAction = propsRef.current.rowActions?.[rowActionIndex] as TableRowAction | undefined;
+      if (!rowAction) return;
+      await runChain(rowAction.actions, row, index);
+    },
+    [runChain],
   );
 
   /**
@@ -900,21 +1376,38 @@ function TableComponent({ props }: { props: TableProps }) {
         | CellKeyDownEvent<Record<string, unknown>>
         | FullWidthCellKeyDownEvent<Record<string, unknown>>,
     ) => {
-      if (!("column" in event) || event.column.getColId() !== "__rowActions") return;
+      if (!("column" in event)) return;
       const browserEvent = event.event as KeyboardEvent | undefined;
       if (!browserEvent || browserEvent.key !== "Enter") return;
       const target = browserEvent.target as HTMLElement | null;
       // Only when the CELL itself is focused — a button inside the cell
       // handles its own Enter as a click.
       if (!target || !target.classList.contains("ag-cell")) return;
-      target.querySelector<HTMLButtonElement>("button")?.focus();
+      if (event.column.getColId() === "__rowActions") {
+        target.querySelector<HTMLButtonElement>("button")?.focus();
+        return;
+      }
+      // Enter on any other cell opens the row, like a click.
+      const chain = propsRef.current.onRowClick as ActionChain | undefined;
+      if (chain && event.data) void runChain(chain, event.data, event.rowIndex ?? 0);
     },
-    [],
+    [runChain],
   );
 
   const columns = (props.columns ?? []) as TableColumn[];
   const rowActions = (props.rowActions ?? []) as TableRowAction[];
+  const onRowClickChain = props.onRowClick as ActionChain | undefined;
+  const hasRowClick = Boolean(onRowClickChain?.length);
   const allRows = Array.isArray(props.data) ? (props.data as Record<string, unknown>[]) : [];
+  const rowIdField = props.rowId ?? "id";
+  const rowId = useCallback(
+    (row: Record<string, unknown>) => rowIdOf(row, rowIdField),
+    [rowIdField],
+  );
+  const selectedId =
+    props.selectedId === null || props.selectedId === undefined || props.selectedId === ""
+      ? null
+      : String(props.selectedId);
 
   const search = typeof props.search === "string" ? props.search.trim().toLowerCase() : "";
   // Held by signature, not identity: a bound `columns` / `filters` object is
@@ -943,51 +1436,124 @@ function TableComponent({ props }: { props: TableProps }) {
   const emptyMessage = narrowedToEmpty
     ? "No rows match the current search or filters"
     : (props.emptyMessage ?? "No rows yet");
+  const emptyState = props.emptyState;
+  const empty = narrowedToEmpty ? (
+    <EmptyState
+      icon={SearchX}
+      title={emptyMessage}
+      description="Clear a filter to see more rows."
+    />
+  ) : (
+    <EmptyState
+      icon={catalogIcon(emptyState?.icon) ?? Inbox}
+      title={emptyState?.title ?? emptyMessage}
+      description={emptyState?.body}
+    />
+  );
 
-  const builtColumnDefs: ColDef<Record<string, unknown>>[] = columns.map((column) => ({
-    headerName: column.label ?? column.key,
-    field: column.key,
-    // Explicit `width` pins a column; everything else stretches (`flex: 1`) from
-    // a kind-appropriate floor. Never `sizeColumnsToFit` here — see the
-    // `columnSizing="flex"` note on `DataGrid`.
-    width: column.width,
-    flex: column.width ? undefined : flexForKind(column.kind),
-    minWidth: column.width ? undefined : minWidthForKind(column.kind),
-    // Pinned columns survive horizontal scroll (id on the left, status on the
-    // right) — the mobile answer for wide tables.
-    pinned: column.pinned,
-    // AG Grid's cell-data-type inference turns a boolean column into a disabled
-    // checkbox renderer, which contradicts the documented `formatCell` contract
-    // (yes / no text) and reads as a broken toggle. Opt every app column out of
-    // inference and let the value formatter own the rendering.
-    cellDataType: false,
-    valueFormatter:
-      column.kind === "badge" ? undefined : (params) => formatValue(column.kind, params.value),
-    cellRenderer:
-      column.kind === "badge"
-        ? (params: ICellRendererParams<Record<string, unknown>>) => {
-            const raw =
-              params.value === null || params.value === undefined ? "" : String(params.value);
-            if (!raw) return null;
-            return <StatusPill text={raw} tone={badgeToneFor(column.tones, raw)} />;
-          }
-        : // AG Grid drops a plain value straight into the cell, which is a flex
-          // row — the text becomes an anonymous flex item, and `text-overflow`
-          // never applies to one, so long titles hard-clip mid-word. Wrapping
-          // the value in a real element gives the ellipsis something to bite on
-          // (and a native tooltip carrying the full text).
-          (params: ICellRendererParams<Record<string, unknown>>) => {
-            const text = params.valueFormatted ?? formatValue(column.kind, params.value);
-            if (!text) return null;
+  const builtColumnDefs: ColDef<Record<string, unknown>>[] = columns.map((column) => {
+    const endAligned = column.align ? column.align === "end" : END_ALIGNED_KINDS.has(column.kind);
+    return {
+      headerName: column.label ?? column.key,
+      field: column.key,
+      // Explicit `width` pins a column; everything else stretches (`flex: 1`) from
+      // a kind-appropriate floor. Never `sizeColumnsToFit` here — see the
+      // `columnSizing="flex"` note on `DataGrid`.
+      width: column.width,
+      flex: column.width ? undefined : flexForKind(column.kind),
+      minWidth: column.width ? undefined : minWidthForKind(column.kind),
+      // Pinned columns survive horizontal scroll (id on the left, status on the
+      // right) — the mobile answer for wide tables.
+      pinned: column.pinned,
+      type: endAligned ? "rightAligned" : undefined,
+      // `cellClass` replaces the `rightAligned` type's own class, so keep it.
+      cellClass: endAligned ? ["ag-right-aligned-cell", "tabular-nums"] : undefined,
+      tooltipField: column.tooltip,
+      headerComponentParams: catalogIcon(column.icon)
+        ? { innerHeaderComponent: IconHeader, icon: column.icon }
+        : undefined,
+      // AG Grid's cell-data-type inference turns a boolean column into a disabled
+      // checkbox renderer, which contradicts the documented `formatCell` contract
+      // (yes / no text) and reads as a broken toggle. Opt every app column out of
+      // inference and let the value formatter own the rendering.
+      cellDataType: false,
+      valueFormatter: (params) => formatValue(column.kind, params.value),
+      cellRenderer: (params: ICellRendererParams<Record<string, unknown>>) => {
+        const value = params.value;
+        const row = (params.data ?? {}) as Record<string, unknown>;
+        const raw = value === null || value === undefined ? "" : String(value);
+        switch (column.kind) {
+          case "badge":
+            return raw ? <StatusPill text={raw} tone={badgeToneFor(column.tones, raw)} /> : null;
+          case "status":
+            return raw ? <StatusCell value={raw} tones={column.tones} /> : null;
+          case "user":
+          case "agent":
+            return raw ? <PersonCell name={raw} agent={column.kind === "agent"} /> : null;
+          case "date":
+          case "relative":
+            return raw ? <RelativeTimeCell value={value} /> : null;
+          case "progress":
+            return <ProgressCell value={value} max={column.max} />;
+          case "copy":
+            return raw ? <CopyCell value={raw} middle={column.truncate === "middle"} /> : null;
+          case "switch": {
+            const chain = column.onChange as ActionChain | undefined;
             return (
-              <span className="block w-full truncate" title={text}>
+              <Switch
+                checked={toFilterBoolean(value)}
+                disabled={!chain?.length}
+                aria-label={column.label ?? column.key}
+                onCheckedChange={(checked) =>
+                  void runChain(chain, { ...row, [column.key]: checked }, params.node.rowIndex ?? 0)
+                }
+              />
+            );
+          }
+          case "link": {
+            const href = safeHttpUrl(value);
+            if (!href) return raw ? <span className="block min-w-0 truncate">{raw}</span> : null;
+            return (
+              <a
+                href={href}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex min-w-0 max-w-full items-center gap-1 text-primary hover:underline"
+              >
+                <span className="min-w-0 truncate">{raw}</span>
+                <ExternalLink aria-hidden className="size-3 shrink-0" />
+              </a>
+            );
+          }
+          default: {
+            // AG Grid drops a plain value straight into the cell, which is a flex
+            // row — the text becomes an anonymous flex item, and `text-overflow`
+            // never applies to one, so long titles hard-clip mid-word. Wrapping
+            // the value in a real element gives the ellipsis something to bite on
+            // (and a native tooltip carrying the full text).
+            const text = params.valueFormatted ?? formatValue(column.kind, value);
+            if (!text) return null;
+            if (column.truncate === "middle") {
+              return <MiddleTruncation className="block w-full">{text}</MiddleTruncation>;
+            }
+            return (
+              <span className="block w-full truncate" title={column.tooltip ? undefined : text}>
                 {text}
               </span>
             );
-          },
-  }));
+          }
+        }
+      },
+    };
+  });
 
   if (rowActions.length > 0) {
+    const inlineActions = rowActions
+      .map((rowAction, index) => ({ rowAction, index }))
+      .filter(({ rowAction }) => rowAction.placement !== "menu");
+    const menuActions = rowActions
+      .map((rowAction, index) => ({ rowAction, index }))
+      .filter(({ rowAction }) => rowAction.placement === "menu");
     builtColumnDefs.push({
       headerName: "",
       colId: "__rowActions",
@@ -999,27 +1565,58 @@ function TableComponent({ props }: { props: TableProps }) {
       width: rowActionsColumnWidth(rowActions),
       minWidth: rowActionsColumnWidth(rowActions),
       suppressSizeToFit: true,
-      cellRenderer: (params: ICellRendererParams<Record<string, unknown>>) => (
-        <div className="flex items-center gap-1.5">
-          {rowActions.map((rowAction, rowActionIndex) => (
-            <Button
-              key={rowAction.label}
-              size="sm"
-              variant={rowAction.variant ?? "outline"}
-              onClick={(event) => {
-                event.stopPropagation();
-                requestRowAction(
-                  rowActionIndex,
-                  (params.data ?? {}) as Record<string, unknown>,
-                  params.node.rowIndex ?? 0,
-                );
-              }}
-            >
-              {rowAction.label}
-            </Button>
-          ))}
-        </div>
-      ),
+      cellRenderer: (params: ICellRendererParams<Record<string, unknown>>) => {
+        const row = (params.data ?? {}) as Record<string, unknown>;
+        const rowIndex = params.node.rowIndex ?? 0;
+        return (
+          <div className="flex items-center gap-1.5">
+            {inlineActions.map(({ rowAction, index }) => (
+              <Button
+                key={rowAction.label}
+                size="sm"
+                variant={rowAction.variant ?? "outline"}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  requestRowAction(index, row, rowIndex);
+                }}
+              >
+                <CatalogIcon name={rowAction.icon} size="sm" />
+                {rowAction.label}
+              </Button>
+            ))}
+            {menuActions.length > 0 ? (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    size="icon-sm"
+                    variant="ghost"
+                    aria-label="More actions"
+                    onClick={(event) => event.stopPropagation()}
+                  >
+                    <MoreHorizontal className="size-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" {...themeAttr}>
+                  {menuActions.map(({ rowAction, index }) => (
+                    <DropdownMenuItem
+                      key={rowAction.label}
+                      variant={
+                        DESTRUCTIVE_VARIANTS.has(rowAction.variant ?? "")
+                          ? "destructive"
+                          : "default"
+                      }
+                      onSelect={() => requestRowAction(index, row, rowIndex)}
+                    >
+                      <CatalogIcon name={rowAction.icon} size="sm" />
+                      {rowAction.label}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            ) : null}
+          </div>
+        );
+      },
     });
   }
 
@@ -1028,11 +1625,53 @@ function TableComponent({ props }: { props: TableProps }) {
   // Endless-scroll guard: unless the author decided, big row sets paginate.
   const paginated = props.pagination ?? rows.length > 200;
 
+  // Phone layout: a card list, unless the author keeps the grid, or the table
+  // only exposes its actions as row buttons (a list row has no room for them).
+  const mobileMode = props.mobile ?? (rowActions.length > 0 && !hasRowClick ? "scroll" : "list");
+  const mobileFields = props.mobileFields;
+  const columnByKey = new Map(columns.map((column) => [column.key, column]));
+  const titleKey =
+    mobileFields?.title ??
+    columns.find((column) => !column.kind || column.kind === "text" || column.kind === "string")
+      ?.key ??
+    columns[0]?.key;
+  const statusKey =
+    mobileFields?.status ??
+    columns.find((column) => column.kind === "status" || column.kind === "badge")?.key;
+  const metaKeys: string[] = mobileFields
+    ? [
+        ...(mobileFields.subtitle ? [mobileFields.subtitle] : []),
+        ...(Array.isArray(mobileFields.meta)
+          ? mobileFields.meta
+          : mobileFields.meta
+            ? [mobileFields.meta]
+            : []),
+      ]
+    : columns
+        .map((column) => column.key)
+        .filter((key) => key !== titleKey && key !== statusKey)
+        .slice(0, 2);
+  const mobileRow =
+    mobileMode === "list"
+      ? (row: Record<string, unknown>): ListViewMobileRow => ({
+          title:
+            formatValue(
+              titleKey ? columnByKey.get(titleKey)?.kind : undefined,
+              titleKey ? row[titleKey] : "",
+            ) || "Untitled",
+          status: statusKey
+            ? statusNode(
+                columnByKey.get(statusKey) ?? { key: statusKey, kind: "badge" },
+                row[statusKey],
+              )
+            : undefined,
+          meta: metaKeys.map((key) => formatValue(columnByKey.get(key)?.kind, row[key])),
+        })
+      : undefined;
+
   const confirmingAction = pendingRowAction
     ? rowActions[pendingRowAction.rowActionIndex]
     : undefined;
-  const confirmCopy = confirmingAction ? confirmConfigFor(confirmingAction) : null;
-  const confirmIsDestructive = DESTRUCTIVE_VARIANTS.has(confirmingAction?.variant ?? "outline");
 
   return (
     // `min-w-0` lets the grid shrink below its column total inside flex/grid
@@ -1043,11 +1682,21 @@ function TableComponent({ props }: { props: TableProps }) {
           {props.error}
         </AlertCallout>
       ) : null}
-      <DataGrid
-        rowData={rows}
+      <ListView
+        rows={rows}
+        label={props.emptyState?.title ?? "Rows"}
+        rowId={rowId}
         columnDefs={columnDefs}
         loading={props.loading ?? false}
         emptyMessage={emptyMessage}
+        empty={empty}
+        selectedId={selectedId}
+        onRowClick={
+          hasRowClick
+            ? (row, index) => void runChain(onRowClickChain, row as Record<string, unknown>, index)
+            : undefined
+        }
+        mobileRow={mobileRow}
         // Hug the content while the table is short (a 1-row filtered result
         // shouldn't sit on a slab of dead space), then cap into a scroll region.
         domLayout={hugsContent ? "autoHeight" : "normal"}
@@ -1059,42 +1708,64 @@ function TableComponent({ props }: { props: TableProps }) {
         columnSizing="flex"
         pagination={paginated}
         rowHeight={props.density === "compact" ? 34 : undefined}
-        cellFocus={rowActions.length > 0}
-        onCellKeyDown={rowActions.length > 0 ? onCellKeyDown : undefined}
+        cellFocus={rowActions.length > 0 || hasRowClick}
+        onCellKeyDown={rowActions.length > 0 || hasRowClick ? onCellKeyDown : undefined}
       />
-      <AlertDialog
-        open={pendingRowAction !== null}
-        onOpenChange={(open) => {
-          if (!open) setPendingRowAction(null);
+      <ChainConfirmDialog
+        action={confirmingAction}
+        onCancel={() => setPendingRowAction(null)}
+        onConfirm={() => {
+          const pending = pendingRowAction;
+          setPendingRowAction(null);
+          if (pending) {
+            void runRowAction(pending.rowActionIndex, pending.row, pending.rowIndex);
+          }
         }}
-      >
-        <AlertDialogContent {...themeAttr}>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
-              {confirmCopy?.title ?? `${confirmingAction?.label ?? "Confirm"}?`}
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              {confirmCopy?.description ?? "This action cannot be undone."}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              variant={confirmIsDestructive ? "destructive" : "default"}
-              onClick={() => {
-                const pending = pendingRowAction;
-                setPendingRowAction(null);
-                if (pending) {
-                  void runRowAction(pending.rowActionIndex, pending.row, pending.rowIndex);
-                }
-              }}
-            >
-              {confirmCopy?.confirmLabel ?? confirmingAction?.label ?? "Confirm"}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      />
     </div>
+  );
+}
+
+/**
+ * The confirmation step for a chain-carrying action (Table row actions,
+ * Drawer footer actions): open while `action` is set, copy from
+ * `confirmConfigFor`. Lives on the owning block, never inside a cell
+ * renderer, so a 5s poll cannot tear it down mid-decision.
+ */
+function ChainConfirmDialog({
+  action,
+  onCancel,
+  onConfirm,
+}: {
+  action: TableRowAction | DrawerAction | undefined;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const themeAttr = useJsonRenderThemeAttr();
+  const copy = action ? confirmConfigFor(action) : null;
+  const destructive = DESTRUCTIVE_VARIANTS.has(action?.variant ?? "outline");
+  return (
+    <AlertDialog
+      open={action !== undefined}
+      onOpenChange={(open) => {
+        if (!open) onCancel();
+      }}
+    >
+      <AlertDialogContent {...themeAttr}>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{copy?.title ?? `${action?.label ?? "Confirm"}?`}</AlertDialogTitle>
+          <AlertDialogDescription>
+            {copy?.description ?? "This action cannot be undone."}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogAction variant={destructive ? "destructive" : "default"} onClick={onConfirm}>
+            {copy?.confirmLabel ?? action?.label ?? "Confirm"}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   );
 }
 
@@ -1108,6 +1779,11 @@ function TableComponent({ props }: { props: TableProps }) {
  * bound element the assembler rewrites `busyWith` to the defining app's full
  * `/refs/<app>/actions/<name>` path (where the `$app`-tagged dispatch
  * actually writes), so a path-shaped value is used as-is.
+ *
+ * `busyWith` drives `ui/button`'s status variant: `loading` while the slot is
+ * `"running"`, then `success` for the button's ~1.5s success window when THIS
+ * mount saw it flip to `"ok"` (an `ok` left over from an earlier visit never
+ * flashes, and a poll re-render never re-triggers it).
  */
 function ActionButtonComponent({
   props,
@@ -1123,37 +1799,118 @@ function ActionButtonComponent({
       : props.busyWith.startsWith("/")
         ? props.busyWith
         : `/actions/${props.busyWith}`;
-  const busy = busySlot !== null && getByPath(state, `${busySlot}/status`) === "running";
-  return (
+  const slotStatus = busySlot === null ? undefined : getByPath(state, `${busySlot}/status`);
+  const busy = slotStatus === "running";
+
+  const [succeeded, setSucceeded] = useState(false);
+  const lastStatusRef = useRef(slotStatus);
+  useEffect(() => {
+    const previous = lastStatusRef.current;
+    lastStatusRef.current = slotStatus;
+    if (previous === "running" && slotStatus === "ok") setSucceeded(true);
+    else if (slotStatus !== "ok") setSucceeded(false);
+  }, [slotStatus]);
+  const onStatusChange = useCallback((next: ButtonStatus) => {
+    if (next === "idle") setSucceeded(false);
+  }, []);
+  const status: ButtonStatus | undefined =
+    busySlot === null ? undefined : busy ? "loading" : succeeded ? "success" : "idle";
+
+  const disabled = props.disabled === true;
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  usePageShortcut(props.shortcut, buttonRef, () => {
+    if (!disabled && !busy) emit("press");
+  });
+
+  // An author icon replaces the default trailing arrow.
+  const hasIcon = catalogIcon(props.icon) !== undefined;
+  const iconAtStart = hasIcon && props.iconPosition !== "end";
+  const variant = props.variant ?? "default";
+  const filled = variant === "default" || variant === "destructive";
+
+  const button = (
     <Button
-      variant={props.variant ?? "default"}
-      disabled={props.disabled === true || busy}
+      ref={buttonRef}
+      variant={variant}
+      size={props.size ?? "default"}
+      disabled={disabled}
+      status={status}
+      successLabel={props.successLabel}
+      onStatusChange={onStatusChange}
+      aria-keyshortcuts={props.shortcut}
       onClick={() => emit("press")}
     >
+      {iconAtStart ? <CatalogIcon name={props.icon} size="sm" /> : null}
       {props.label}
-      {busy ? <Spinner className="size-3.5" /> : <ArrowRight className="h-3.5 w-3.5" />}
+      {hasIcon ? (
+        iconAtStart ? null : (
+          <CatalogIcon name={props.icon} size="sm" />
+        )
+      ) : (
+        <ArrowRight className="h-3.5 w-3.5" />
+      )}
+      {props.shortcut ? (
+        <Kbd aria-hidden tone={filled ? "inverted" : "default"}>
+          {props.shortcut}
+        </Kbd>
+      ) : null}
     </Button>
+  );
+  if (!props.hint) return button;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{button}</TooltipTrigger>
+      <TooltipContent>{props.hint}</TooltipContent>
+    </Tooltip>
   );
 }
 
+const trendTone: Record<MetricTrend["direction"], { icon: typeof Info; text: string }> = {
+  up: { icon: TrendingUp, text: "text-status-success-strong" },
+  down: { icon: TrendingDown, text: "text-status-error-strong" },
+  flat: { icon: Minus, text: "text-muted-foreground" },
+};
+
 /**
- * Label/value stat tile, sized to `StatPanel`'s value type (text-lg/600) so an
- * app metric strip matches the native stat cards. A bound value is undefined
+ * Stat tile on the dashboard's own `StatPanel`. A bound value is undefined
  * while its query loads — `loading` turns that window into a skeleton, and a
  * genuinely absent value renders an em dash, never the string "undefined".
  */
 function MetricComponent({ props }: { props: MetricComponentProps }) {
   const value = props.value as unknown;
   const empty = value === undefined || value === null || value === "";
+  const trend = props.trend as MetricTrend | undefined;
+  const trendStyle = trend ? trendTone[trend.direction] : undefined;
+  const TrendIcon = trendStyle?.icon;
+  const detail =
+    trend || props.detail ? (
+      <span className="inline-flex flex-wrap items-center gap-x-1.5">
+        {trend && trendStyle && TrendIcon ? (
+          <span className={cn("inline-flex items-center gap-1 font-medium", trendStyle.text)}>
+            <TrendIcon aria-hidden className="size-3" />
+            {trend.label}
+          </span>
+        ) : null}
+        {props.detail ? <span>{props.detail}</span> : null}
+      </span>
+    ) : undefined;
   return (
-    <div className="flex flex-col gap-1">
-      <span className="text-xs uppercase tracking-wide text-muted-foreground">{props.label}</span>
-      {props.loading && empty ? (
-        <Skeleton className="h-7 w-16" />
-      ) : (
-        <span className="text-lg font-semibold text-foreground">{empty ? "—" : String(value)}</span>
-      )}
-    </div>
+    <StatPanel
+      icon={catalogIcon(props.icon)}
+      label={props.label}
+      value={
+        props.loading && empty ? (
+          <Skeleton inline className="h-7 w-16 align-middle" />
+        ) : empty ? (
+          "—"
+        ) : (
+          String(value)
+        )
+      }
+      detail={detail}
+      info={props.info}
+      tone={props.tone ?? "neutral"}
+    />
   );
 }
 
@@ -1326,12 +2083,12 @@ type ContributionGraphComponentProps = InferComponentProps<
   "ContributionGraph"
 >;
 
-/** Panel width per `size`, on top of `SheetContent`'s `w-3/4` base. */
+/** Keep existing tablet widths as floors; grow desktop caps; phones stay full width. */
 const drawerSizeClass: Record<"sm" | "md" | "lg" | "xl", string> = {
-  sm: "sm:max-w-sm",
-  md: "sm:max-w-md",
-  lg: "sm:max-w-2xl",
-  xl: "sm:max-w-4xl",
+  sm: "sm:max-w-[clamp(24rem,33.333vw,40rem)]",
+  md: "sm:max-w-[clamp(28rem,46vw,60rem)]",
+  lg: "sm:max-w-[clamp(42rem,62vw,80rem)]",
+  xl: "sm:max-w-[clamp(56rem,70vw,100rem)]",
 };
 
 /**
@@ -1403,19 +2160,89 @@ function DrawerComponent({
           )}
         </SheetHeader>
         <div className="flex min-w-0 flex-1 flex-col gap-4 overflow-y-auto p-4">{children}</div>
+        {props.actions && props.actions.length > 0 ? (
+          <DrawerActionsFooter actions={props.actions as DrawerAction[]} />
+        ) : null}
       </SheetContent>
     </Sheet>
   );
 }
 
+/**
+ * The Drawer's sticky footer: one button per action, under the scrolling
+ * body. Confirmation follows Table row actions (`confirmConfigFor`). Chains
+ * run with no `$row`; `$state` reads (the open record's route param) resolve
+ * against the live state.
+ */
+function DrawerActionsFooter({ actions }: { actions: DrawerAction[] }) {
+  const runChain = useRowActionRunner();
+  const [pending, setPending] = useState<number | null>(null);
+  const run = (action: DrawerAction | undefined) => {
+    if (action) void runChain(action.actions as ActionChain, {});
+  };
+  return (
+    <SheetFooter className="mt-0 shrink-0 flex-row flex-wrap justify-end gap-2 border-t border-border px-4 py-3">
+      {actions.map((action, index) => (
+        <Button
+          key={`${index}-${action.label}`}
+          size="sm"
+          variant={action.variant ?? "outline"}
+          onClick={() => (confirmConfigFor(action) ? setPending(index) : run(action))}
+        >
+          <CatalogIcon name={action.icon} size="sm" />
+          {action.label}
+        </Button>
+      ))}
+      <ChainConfirmDialog
+        action={pending === null ? undefined : actions[pending]}
+        onCancel={() => setPending(null)}
+        onConfirm={() => {
+          const action = pending === null ? undefined : actions[pending];
+          setPending(null);
+          run(action);
+        }}
+      />
+    </SheetFooter>
+  );
+}
+
 // ─── DetailList ─────────────────────────────────────────────────────────────
 
-/** One field value, rendered by kind. `code` gets a monospace block. */
+/** A JSON-ish field value as a tree: objects as-is, a JSON string parsed. */
+function jsonFieldData(value: unknown): unknown {
+  if (typeof value !== "string") return value;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return value;
+  }
+}
+
+/**
+ * One field value, rendered by kind with the same renderers as Table cells
+ * (status chip, person, relative time, copy). `code` gets a monospace block;
+ * `json` the collapsible `JsonViewer` tree.
+ */
 function DetailFieldValue({ field, value }: { field: DetailListField; value: unknown }) {
-  if (field.kind === "badge") {
-    const raw = value === null || value === undefined ? "" : String(value);
-    if (!raw) return <span className="text-muted-foreground">—</span>;
-    return <StatusPill text={raw} tone={badgeToneFor(field.tones, raw)} />;
+  const raw = value === null || value === undefined ? "" : String(value);
+  const dash = <span className="text-muted-foreground">—</span>;
+  switch (field.kind) {
+    case "badge":
+      return raw ? <StatusPill text={raw} tone={badgeToneFor(field.tones, raw)} /> : dash;
+    case "status":
+      return raw ? <StatusCell value={raw} tones={field.tones} /> : dash;
+    case "user":
+      return raw ? <PersonCell name={raw} /> : dash;
+    case "relative":
+      return raw ? <RelativeTimeCell value={value} /> : dash;
+    case "copy":
+      return raw ? <CopyCell value={raw} /> : dash;
+    case "json":
+      return value === null || value === undefined ? (
+        dash
+      ) : (
+        <JsonViewer data={jsonFieldData(value)} />
+      );
   }
   if (field.kind === "code") {
     const text =
@@ -1836,7 +2663,272 @@ function ContributionGraphComponent({ props }: { props: ContributionGraphCompone
   );
 }
 
+// ─── Status, feedback and loaders ───────────────────────────────────────────
+
+type BadgeComponentProps = InferComponentProps<typeof swarmCatalog, "Badge">;
+type ProgressComponentProps = InferComponentProps<typeof swarmCatalog, "Progress">;
+type SkeletonComponentProps = InferComponentProps<typeof swarmCatalog, "Skeleton">;
+type AvatarStackComponentProps = InferComponentProps<typeof swarmCatalog, "AvatarStack">;
+type SectionComponentProps = InferComponentProps<typeof swarmCatalog, "Section">;
+
+/**
+ * Badge variants. `tag` (default) keeps the original uppercase chip, except
+ * that a lifecycle `status` renders the dashboard `StatusBadge`; `status` is
+ * the sentence-case pill; `count` the numeric pill; `beta` the `BetaTag`.
+ */
+function BadgeComponent({ props }: { props: BadgeComponentProps }) {
+  // Unset bindings resolve to undefined — render nothing instead of "undefined".
+  const text = props.text === null || props.text === undefined ? "" : String(props.text);
+  const tone = props.tone ?? "neutral";
+  const status = typeof props.status === "string" && props.status ? props.status : undefined;
+  switch (props.variant ?? "tag") {
+    case "beta":
+      return <BetaTag tooltip={props.hint ?? "Experimental"} side="top" />;
+    case "count":
+      return text === "" ? null : (
+        <WithHint hint={props.hint}>
+          <CountPill value={text} tone={tone} />
+        </WithHint>
+      );
+    case "status": {
+      const label = text || status || "";
+      return label === "" ? null : (
+        <WithHint hint={props.hint}>
+          <SentencePill text={label} tone={tone} status={status} icon={props.icon} />
+        </WithHint>
+      );
+    }
+    default: {
+      if (status && taskStatusVariant(status)) {
+        return (
+          <WithHint hint={props.hint}>
+            <StatusBadge status={status as StatusBadgeStatus} />
+          </WithHint>
+        );
+      }
+      const label = text || status || "";
+      return label === "" ? null : (
+        <WithHint hint={props.hint}>
+          <StatusPill text={label} tone={tone} icon={props.icon} />
+        </WithHint>
+      );
+    }
+  }
+}
+
+/** Progress bar indicator color per tone (whole class names for the scanner). */
+const progressToneClass: Record<BadgeTone, string | undefined> = {
+  neutral: undefined,
+  success: "[&>[data-slot=progress-indicator]]:bg-status-success",
+  active: "[&>[data-slot=progress-indicator]]:bg-status-active",
+  error: "[&>[data-slot=progress-indicator]]:bg-status-error",
+  info: "[&>[data-slot=progress-indicator]]:bg-status-info",
+  pending: "[&>[data-slot=progress-indicator]]:bg-status-pending",
+  warning: "[&>[data-slot=progress-indicator]]:bg-status-warning",
+  paused: "[&>[data-slot=progress-indicator]]:bg-status-paused",
+};
+
+function ProgressComponent({ props }: { props: ProgressComponentProps }) {
+  const max = typeof props.max === "number" && props.max > 0 ? props.max : 100;
+  const raw = typeof props.value === "number" && Number.isFinite(props.value) ? props.value : 0;
+  const value = Math.max(0, Math.min(max, raw));
+  const percent = Math.round((value / max) * 100);
+  const showValue = props.showValue !== false;
+
+  if (props.variant === "ring") {
+    return (
+      <span className="inline-flex min-w-0 items-center gap-2 text-sm">
+        <ProgressRing done={value} total={max} label={props.label} className="size-5 shrink-0" />
+        {props.label ? <span className="truncate text-foreground">{props.label}</span> : null}
+        {showValue ? (
+          <span className="tabular-nums text-muted-foreground">
+            {value} / {max}
+          </span>
+        ) : null}
+      </span>
+    );
+  }
+
+  return (
+    <div className="flex min-w-0 flex-col gap-1.5">
+      {props.label || showValue ? (
+        <div className="flex items-center justify-between gap-2 text-xs">
+          <span className="min-w-0 truncate text-muted-foreground">{props.label}</span>
+          {showValue ? (
+            <span className="shrink-0 tabular-nums text-muted-foreground">{percent}%</span>
+          ) : null}
+        </div>
+      ) : null}
+      <Progress
+        value={percent}
+        aria-label={props.label ?? `${percent}%`}
+        className={cn("h-1.5", progressToneClass[props.tone ?? "neutral"])}
+      />
+    </div>
+  );
+}
+
+/** Repeats `node` `count` times (static placeholders, so index keys are stable). */
+function repeat(count: number, node: (index: number) => ReactNode): ReactNode[] {
+  return Array.from({ length: count }, (_, index) => node(index));
+}
+
+function SkeletonComponent({ props }: { props: SkeletonComponentProps }) {
+  const shape = props.shape ?? "line";
+  const count = Math.max(
+    1,
+    Math.min(20, props.count ?? (shape === "rows" ? 5 : shape === "line" ? 3 : 1)),
+  );
+  let body: ReactNode;
+  switch (shape) {
+    case "block":
+      body = repeat(count, (index) => (
+        <Skeleton
+          key={index}
+          className="w-full"
+          // inline-style: author-supplied pixel height
+          style={{ height: props.height ?? 128 }}
+        />
+      ));
+      break;
+    case "rows":
+      body = repeat(count, (index) => <Skeleton key={index} className="h-9 w-full" />);
+      break;
+    case "metric":
+      body = (
+        <div
+          className={cn(
+            "grid min-w-0 gap-4",
+            gridColsClass[1],
+            count > 1 ? gridColsSmClass[2] : undefined,
+            gridColsMdClass[Math.min(count, 4)],
+          )}
+        >
+          {repeat(count, (index) => (
+            <UiCard key={index} className="py-0">
+              <CardContent className="flex flex-col gap-2 p-4">
+                <Skeleton className="h-3 w-20" />
+                <Skeleton className="h-6 w-16" />
+              </CardContent>
+            </UiCard>
+          ))}
+        </div>
+      );
+      break;
+    case "card":
+      body = repeat(count, (index) => (
+        <UiCard key={index}>
+          <CardHeader className="gap-2">
+            <Skeleton className="h-4 w-1/3" />
+            <Skeleton className="h-3 w-1/2" />
+          </CardHeader>
+          <CardContent className="flex flex-col gap-2">
+            <Skeleton className="h-4 w-full" />
+            <Skeleton className="h-4 w-full" />
+            <Skeleton className="h-4 w-3/5" />
+          </CardContent>
+        </UiCard>
+      ));
+      break;
+    default:
+      body = repeat(count, (index) => (
+        <Skeleton
+          key={index}
+          className={cn("h-4", count > 1 && index === count - 1 ? "w-3/5" : "w-full")}
+        />
+      ));
+  }
+  return (
+    // biome-ignore lint/a11y/useSemanticElements: <output> means a computed result; this is a loading placeholder
+    <div
+      role="status"
+      aria-label="Loading"
+      aria-busy="true"
+      className={cn("flex min-w-0 flex-col", shape === "rows" ? "gap-1.5" : "gap-3")}
+    >
+      {body}
+    </div>
+  );
+}
+
+function AvatarStackComponent({ props }: { props: AvatarStackComponentProps }) {
+  const users = [
+    ...new Set(
+      ((props.users ?? []) as unknown[]).filter(
+        (user): user is string => typeof user === "string" && user.trim() !== "",
+      ),
+    ),
+  ];
+  if (users.length === 0) return null;
+  const visible = users.slice(0, props.max ?? 4);
+  const extra = users.length - visible.length;
+  const names = users.join(", ");
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+          <AvatarStack size={24}>
+            {visible.map((name) => (
+              <Avatar key={name} className="size-full">
+                <AvatarFallback className="text-[10px] font-medium">
+                  {userInitials(name)}
+                </AvatarFallback>
+              </Avatar>
+            ))}
+          </AvatarStack>
+          {extra > 0 ? <span className="tabular-nums">+{extra}</span> : null}
+          <span className="sr-only">{names}</span>
+        </span>
+      </TooltipTrigger>
+      <TooltipContent>{names}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+function SectionComponent({
+  props,
+  children,
+}: {
+  props: SectionComponentProps;
+  children: ReactNode;
+}) {
+  const description = props.description ? (
+    <p className="text-sm text-muted-foreground">{props.description}</p>
+  ) : null;
+  if (props.collapsible) {
+    return (
+      <CollapsibleSection title={props.title} defaultOpen={props.defaultOpen ?? true} heading="h3">
+        <div className="flex min-w-0 flex-col gap-3 pt-1">
+          {description}
+          {children}
+        </div>
+      </CollapsibleSection>
+    );
+  }
+  return (
+    <section className="flex min-w-0 flex-col gap-3">
+      <div className="flex flex-col gap-1">
+        <h3 className={headingClass.h3}>{props.title}</h3>
+        {description}
+      </div>
+      {children}
+    </section>
+  );
+}
+
 // ─── Component registry ─────────────────────────────────────────────────────
+
+const iconToneClass: Record<
+  "default" | "muted" | "success" | "warning" | "error" | "info",
+  string
+> = {
+  default: "text-foreground",
+  muted: "text-muted-foreground",
+  success: "text-status-success-strong",
+  warning: "text-status-warning-strong",
+  error: "text-status-error-strong",
+  info: "text-status-info-strong",
+};
 
 export const swarmComponents: Components<typeof swarmCatalog> = {
   Drawer: ({ props, children }) => <DrawerComponent props={props}>{children}</DrawerComponent>,
@@ -1890,19 +2982,82 @@ export const swarmComponents: Components<typeof swarmCatalog> = {
   ),
   Button: ({ props, emit }) => <ActionButtonComponent props={props} emit={emit} />,
   Metric: ({ props }) => <MetricComponent props={props} />,
-  Alert: ({ props }) => {
+  Alert: ({ props, emit }) => {
     const tone = alertTone[props.tone ?? "info"];
     return (
-      <AlertCallout tone={tone.tone} icon={tone.icon} title={props.title}>
+      <AlertCallout
+        tone={tone.tone}
+        icon={catalogIcon(props.icon) ?? tone.icon}
+        title={props.title}
+        action={
+          props.actionLabel ? (
+            <Button type="button" size="xs" variant="outline" onClick={() => emit("press")}>
+              {props.actionLabel}
+            </Button>
+          ) : undefined
+        }
+      >
         {props.message}
       </AlertCallout>
     );
   },
-  Badge: ({ props }) => {
-    // Unset bindings resolve to undefined — render nothing instead of "undefined".
-    const text = props.text === null || props.text === undefined ? "" : String(props.text);
-    return text === "" ? null : <StatusPill text={text} tone={props.tone ?? "neutral"} />;
+  Badge: ({ props }) => <BadgeComponent props={props} />,
+  Progress: ({ props }) => <ProgressComponent props={props} />,
+  EmptyState: ({ props, emit }) => (
+    <EmptyState
+      icon={catalogIcon(props.icon) ?? Inbox}
+      title={props.title}
+      description={props.body}
+      action={
+        props.actionLabel ? (
+          <Button type="button" size="sm" onClick={() => emit("press")}>
+            {props.actionLabel}
+          </Button>
+        ) : undefined
+      }
+    />
+  ),
+  CopyButton: ({ props }) => {
+    const value = props.value === null || props.value === undefined ? "" : String(props.value);
+    if (value === "") return null;
+    return props.label ? (
+      <CopyValueButton value={value} variant="outline">
+        {props.label}
+      </CopyValueButton>
+    ) : (
+      <CopyValueButton value={value} label="Copy value" size="icon-sm" />
+    );
   },
+  Kbd: ({ props }) => (
+    <span className="inline-flex items-center gap-1">
+      {((props.keys ?? []) as string[]).map((key, index) => (
+        <Kbd key={`${index}-${key}`}>{key}</Kbd>
+      ))}
+    </span>
+  ),
+  Skeleton: ({ props }) => <SkeletonComponent props={props} />,
+  Spinner: ({ props }) => (
+    // biome-ignore lint/a11y/useSemanticElements: <output> means a computed result; this is a busy indicator
+    <span role="status" className="inline-flex items-center gap-2 text-sm text-muted-foreground">
+      <Spinner
+        aria-hidden
+        variant={props.variant}
+        className={props.size === "md" ? "size-6" : "size-4"}
+      />
+      {props.label ? <span>{props.label}</span> : <span className="sr-only">Loading</span>}
+    </span>
+  ),
+  AvatarStack: ({ props }) => <AvatarStackComponent props={props} />,
+  Section: ({ props, children }) => <SectionComponent props={props}>{children}</SectionComponent>,
+  Chips: ({ props }) => <ChipsComponent props={props} />,
+  Icon: ({ props }) => (
+    <CatalogIcon
+      name={props.name}
+      size={props.size ?? "md"}
+      label={props.label}
+      className={iconToneClass[props.tone ?? "default"]}
+    />
+  ),
   Table: ({ props }) => <TableComponent props={props} />,
   Form: ({ props }) => <FormComponent props={props} />,
   Kanban: ({ props }) => <KanbanComponent props={props} />,

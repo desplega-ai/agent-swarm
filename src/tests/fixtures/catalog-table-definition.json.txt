@@ -1,0 +1,468 @@
+{
+  "models": {
+    "order": {
+      "columns": {
+        "title": {
+          "kind": "string",
+          "required": true
+        },
+        "status": {
+          "kind": "enum",
+          "enum": [
+            "pending",
+            "in_progress",
+            "completed",
+            "failed"
+          ],
+          "default": "pending"
+        },
+        "owner": {
+          "kind": "string"
+        },
+        "amount": {
+          "kind": "number"
+        },
+        "placedAt": {
+          "kind": "date"
+        }
+      }
+    }
+  },
+  "queries": {
+    "allOrders": {
+      "model": "order",
+      "sort": {
+        "column": "createdAt",
+        "dir": "asc"
+      }
+    },
+    "orderDetail": {
+      "model": "order",
+      "filter": {
+        "id": {
+          "$param": "panel"
+        }
+      },
+      "limit": 1
+    }
+  },
+  "actions": {
+    "triage": {
+      "kind": "task",
+      "prompt": "Review the current orders and flag anything stuck"
+    }
+  },
+  "pages": {
+    "main": {
+      "title": "Orders",
+      "params": {
+        "panel": {
+          "kind": "string"
+        }
+      },
+      "root": "root",
+      "elements": {
+        "root": {
+          "type": "Container",
+          "props": {},
+          "children": [
+            "heading",
+            "alert",
+            "metrics",
+            "filters",
+            "tableCard",
+            "toolbar",
+            "formCard",
+            "drawer"
+          ]
+        },
+        "heading": {
+          "type": "Heading",
+          "props": {
+            "text": "Catalog demo",
+            "level": "h1"
+          }
+        },
+        "alert": {
+          "type": "Alert",
+          "props": {
+            "tone": "warning",
+            "title": "Two orders failed",
+            "message": "Review the failed orders before the end-of-day settlement run.",
+            "icon": "rocket"
+          }
+        },
+        "metrics": {
+          "type": "Grid",
+          "props": {
+            "columns": 3,
+            "gap": "md"
+          },
+          "children": [
+            "mOpen",
+            "mRevenue",
+            "mFailed"
+          ]
+        },
+        "mOpen": {
+          "type": "Metric",
+          "props": {
+            "label": "Open orders",
+            "value": 5,
+            "loading": {
+              "$state": "/queries/allOrders/loading"
+            },
+            "icon": "activity"
+          }
+        },
+        "mRevenue": {
+          "type": "Metric",
+          "props": {
+            "label": "Revenue (EUR)",
+            "value": "4,982.50",
+            "loading": {
+              "$state": "/queries/allOrders/loading"
+            },
+            "icon": "dollar-sign"
+          }
+        },
+        "mFailed": {
+          "type": "Metric",
+          "props": {
+            "label": "Failed",
+            "value": 2,
+            "loading": {
+              "$state": "/queries/allOrders/loading"
+            },
+            "icon": "alert-triangle"
+          }
+        },
+        "filters": {
+          "type": "Stack",
+          "props": {
+            "direction": "row",
+            "gap": "sm",
+            "align": "end",
+            "collapseBelow": "sm"
+          },
+          "children": [
+            "search",
+            "statusFilter"
+          ]
+        },
+        "search": {
+          "type": "SearchInput",
+          "props": {
+            "id": "search",
+            "label": "Search",
+            "placeholder": "Search orders"
+          }
+        },
+        "statusFilter": {
+          "type": "Select",
+          "props": {
+            "id": "statusFilter",
+            "label": "Status",
+            "placeholder": "All statuses",
+            "options": [
+              {
+                "value": "pending",
+                "label": "Pending"
+              },
+              {
+                "value": "in_progress",
+                "label": "In progress"
+              },
+              {
+                "value": "completed",
+                "label": "Completed"
+              },
+              {
+                "value": "failed",
+                "label": "Failed"
+              }
+            ]
+          }
+        },
+        "tableCard": {
+          "type": "Card",
+          "props": {
+            "title": "Orders"
+          },
+          "children": [
+            "table"
+          ]
+        },
+        "table": {
+          "type": "Table",
+          "props": {
+            "data": {
+              "$state": "/queries/allOrders/data"
+            },
+            "loading": {
+              "$state": "/queries/allOrders/loading"
+            },
+            "error": {
+              "$state": "/queries/allOrders/error"
+            },
+            "search": {
+              "$state": "/ui/search/value"
+            },
+            "filters": {
+              "status": {
+                "$state": "/ui/statusFilter/value"
+              }
+            },
+            "emptyMessage": "No orders match",
+            "columns": [
+              {
+                "key": "title",
+                "label": "Order",
+                "icon": "file-text"
+              },
+              {
+                "key": "status",
+                "label": "Status",
+                "kind": "status"
+              },
+              {
+                "key": "owner",
+                "label": "Owner",
+                "kind": "user"
+              },
+              {
+                "key": "amount",
+                "label": "Amount",
+                "kind": "number",
+                "icon": "dollar-sign"
+              },
+              {
+                "key": "placedAt",
+                "label": "Placed",
+                "kind": "relative"
+              },
+              {
+                "key": "id",
+                "label": "ID",
+                "kind": "copy",
+                "truncate": "middle",
+                "width": 150
+              }
+            ],
+            "rowActions": [
+              {
+                "label": "Delete",
+                "icon": "trash-2",
+                "variant": "destructive-outline",
+                "placement": "menu",
+                "confirm": {
+                  "title": "Delete order?",
+                  "description": "This removes the row.",
+                  "confirmLabel": "Delete"
+                },
+                "actions": [
+                  {
+                    "action": "app.mutate",
+                    "params": {
+                      "model": "order",
+                      "op": "delete",
+                      "rowId": {
+                        "$row": "id"
+                      }
+                    }
+                  }
+                ]
+              }
+            ],
+            "onRowClick": [
+              {
+                "action": "app.navigate",
+                "params": {
+                  "page": "main",
+                  "params": {
+                    "panel": {
+                      "$row": "id"
+                    }
+                  }
+                }
+              }
+            ],
+            "selectedId": {
+              "$state": "/route/params/panel"
+            },
+            "emptyState": {
+              "icon": "search",
+              "title": "No orders match",
+              "body": "Try another status or clear the search."
+            },
+            "mobileFields": {
+              "title": "title",
+              "status": "status",
+              "meta": [
+                "owner",
+                "placedAt"
+              ]
+            }
+          }
+        },
+        "toolbar": {
+          "type": "Stack",
+          "props": {
+            "direction": "row",
+            "gap": "sm",
+            "align": "center"
+          },
+          "children": [
+            "badge",
+            "triageBtn"
+          ]
+        },
+        "badge": {
+          "type": "Badge",
+          "props": {
+            "text": "Live",
+            "tone": "active",
+            "icon": "zap"
+          }
+        },
+        "triageBtn": {
+          "type": "Button",
+          "props": {
+            "label": "Ask swarm to triage",
+            "variant": "secondary",
+            "busyWith": "triage",
+            "icon": "sparkles"
+          },
+          "on": {
+            "press": [
+              {
+                "action": "app.action",
+                "params": {
+                  "name": "triage"
+                }
+              }
+            ]
+          }
+        },
+        "formCard": {
+          "type": "Card",
+          "props": {
+            "title": "New order"
+          },
+          "children": [
+            "form"
+          ]
+        },
+        "form": {
+          "type": "Form",
+          "props": {
+            "id": "newOrder",
+            "fields": [
+              {
+                "name": "title",
+                "label": "Title",
+                "required": true,
+                "placeholder": "Order title"
+              },
+              {
+                "name": "owner",
+                "label": "Owner",
+                "placeholder": "Who owns it"
+              },
+              {
+                "name": "amount",
+                "label": "Amount",
+                "kind": "number"
+              },
+              {
+                "name": "status",
+                "label": "Status",
+                "kind": "enum",
+                "options": [
+                  "pending",
+                  "in_progress",
+                  "completed",
+                  "failed"
+                ]
+              }
+            ],
+            "submitLabel": "Create order",
+            "onSubmit": [
+              {
+                "action": "app.mutate",
+                "params": {
+                  "model": "order",
+                  "op": "create",
+                  "values": {
+                    "$form": ""
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "drawer": {
+          "type": "Drawer",
+          "props": {
+            "param": "panel",
+            "title": "Order detail",
+            "description": "Read-only view of one order",
+            "size": "md"
+          },
+          "children": [
+            "detail"
+          ]
+        },
+        "detail": {
+          "type": "DetailList",
+          "props": {
+            "data": {
+              "$state": "/queries/orderDetail/data/0"
+            },
+            "loading": {
+              "$state": "/queries/orderDetail/loading"
+            },
+            "emptyMessage": "Order not found",
+            "fields": [
+              {
+                "key": "title",
+                "label": "Order"
+              },
+              {
+                "key": "status",
+                "label": "Status",
+                "kind": "badge",
+                "tones": {
+                  "pending": "pending",
+                  "in_progress": "active",
+                  "completed": "success",
+                  "failed": "error"
+                }
+              },
+              {
+                "key": "owner",
+                "label": "Owner"
+              },
+              {
+                "key": "amount",
+                "label": "Amount",
+                "kind": "number"
+              },
+              {
+                "key": "placedAt",
+                "label": "Placed",
+                "kind": "date"
+              },
+              {
+                "key": "id",
+                "label": "Row id",
+                "kind": "code"
+              }
+            ]
+          }
+        }
+      }
+    }
+  },
+  "defaultPage": "main"
+}

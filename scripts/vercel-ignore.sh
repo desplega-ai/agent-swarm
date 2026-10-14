@@ -7,6 +7,27 @@ build() {
 
 cd "$(dirname "$0")/.." || build 'cannot enter repository root'
 [ "$#" -gt 0 ] || build 'no input paths'
+# Queue commits are built again after landing on main.
+case "${VERCEL_GIT_COMMIT_REF:-}" in
+  gh-readonly-queue/*) echo 'vercel-ignore: skip (merge queue)'; exit 0 ;;
+esac
+
+# Demo shares apps/ui/vercel.json, so restore its production-only policy here.
+if [ "${VERCEL_PROJECT_ID:-}" = prj_nOzXgZ0UxkNDpSsACdHcslXVkxEN ] &&
+   [ "${VERCEL_ENV:-}" != production ]; then
+  echo 'vercel-ignore: skip (demo non-production)'
+  exit 0
+fi
+
+# Opt-in still goes through the existing owner and changed-input checks.
+if [ "${VERCEL_ENV:-}" = preview ] &&
+   [ "${VERCEL_GIT_COMMIT_AUTHOR_LOGIN:-}" = desplega-bot ]; then
+  case "${VERCEL_GIT_COMMIT_MESSAGE:-}" in
+    *'[preview]'*) echo 'vercel-ignore: bot preview requested' ;;
+    *) echo 'vercel-ignore: skip (bot preview without [preview])'; exit 0 ;;
+  esac
+fi
+
 # Always read owners from fetched main, never from the proposed commit.
 fetch_main() {
   # Vercel removes the clone's origin remote; this repository is public.
@@ -24,8 +45,8 @@ fetch_main() {
 if [ "${VERCEL_ENV:-}" = production ]; then
   echo 'vercel-ignore: author gate disabled (production)'
 elif fetch_main; then
-  if git cat-file -e FETCH_HEAD:.github/CODEOWNERS 2>/dev/null; then
-    if owners=$(git show FETCH_HEAD:.github/CODEOWNERS); then
+  if git cat-file -e FETCH_HEAD:.github/vercel-build-owners 2>/dev/null; then
+    if owners=$(git show FETCH_HEAD:.github/vercel-build-owners); then
       if printf '%s\n' "$owners" | awk -v login="${VERCEL_GIT_COMMIT_AUTHOR_LOGIN:-}" '
         BEGIN { login = tolower(login) }
         /^[[:space:]]*#/ { next }
@@ -38,14 +59,14 @@ elif fetch_main; then
       '; then
         echo 'vercel-ignore: author gate passed (listed owner)'
       else
-        echo "vercel-ignore: skip (author '${VERCEL_GIT_COMMIT_AUTHOR_LOGIN:-}' is not a code owner on main)"
+        echo "vercel-ignore: skip (author '${VERCEL_GIT_COMMIT_AUTHOR_LOGIN:-}' is not a build owner on main)"
         exit 0
       fi
     else
-      echo 'vercel-ignore: author gate disabled (cannot read CODEOWNERS on main)'
+      echo 'vercel-ignore: author gate disabled (cannot read vercel-build-owners on main)'
     fi
   else
-    echo 'vercel-ignore: author gate disabled (CODEOWNERS missing on main or Git error)'
+    echo 'vercel-ignore: author gate disabled (vercel-build-owners missing on main or Git error)'
   fi
 else
   echo 'vercel-ignore: author gate disabled (fetch main failed)'

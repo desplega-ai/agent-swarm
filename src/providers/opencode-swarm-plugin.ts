@@ -28,6 +28,8 @@ export type OpencodeToolLister = () => Promise<ReadonlyArray<{ readonly id: stri
 export interface OpencodeSwarmPluginOptions {
   /** Receives the tool lister once OpenCode sets the plugin up. */
   onToolRegistry?: (listTools: OpencodeToolLister) => void;
+  /** Receives every OpenRouter model response, for the billed cost. */
+  onOpenRouterResponse?: (response: Response) => void;
 }
 
 export function createOpencodeSwarmPlugin(
@@ -74,6 +76,24 @@ export function createOpencodeSwarmPlugin(
         const concurrent = await fetchConcurrentContext(config);
         if (concurrent) event.system.push({ type: "text", text: concurrent });
       });
+
+      // Nobody reads a headless session's title. Generating one is a second
+      // model call, on OpenCode's small model, that the session usage folds
+      // into the main model's tokens.
+      await ctx.session.hook("title", (event) => {
+        event.result = config.taskId ? `swarm task ${config.taskId}` : "swarm session";
+      });
+
+      const onOpenRouterResponse = options.onOpenRouterResponse;
+      if (onOpenRouterResponse) {
+        await ctx.session.hook(
+          "http.response",
+          (event) => {
+            onOpenRouterResponse(event.response);
+          },
+          { providerID: "openrouter" },
+        );
+      }
 
       // PreCompact parity: keep the task goal in the checkpoint summary.
       await ctx.session.hook("compaction", async (event) => {

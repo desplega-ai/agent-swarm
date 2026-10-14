@@ -15,6 +15,11 @@ export interface CostData {
   taskId?: string;
   agentId: string;
   totalCostUsd: number;
+  /**
+   * `totalCostUsd` is what the model provider charged, not a token estimate,
+   * so it wins over the pricing table (opencode on OpenRouter).
+   */
+  harnessCostBilled?: boolean;
   inputTokens?: number;
   outputTokens?: number;
   cacheReadTokens?: number;

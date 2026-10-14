@@ -129,7 +129,7 @@ RUN if ! gh extension install github/gh-stack; then \
     fi
 
 # Install Claude CLI (pinned version — bump ARG to update)
-ARG CLAUDE_CODE_VERSION=2.1.296
+ARG CLAUDE_CODE_VERSION=2.1.299
 USER root
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache \
     npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} \
@@ -194,7 +194,7 @@ RUN mkdir -p /home/worker/.codex && \
 # build). The CLI, needed only by the ACP target, must run its postinstall to
 # fetch its platform binary, so it installs as `worker` into ~/.opencode.
 # One version for both: they ship from the same release.
-ARG OPENCODE_VERSION=2.0.28
+ARG OPENCODE_VERSION=2.0.29
 RUN NPM_CONFIG_CACHE=/tmp/npm-cache-worker \
     npm install -g --prefix /home/worker/.opencode @opencode/cli@${OPENCODE_VERSION} \
     && rm -rf /tmp/npm-cache-worker /home/worker/.npm \
@@ -567,8 +567,8 @@ RUN case "$TARGETARCH" in \
 # Keep dsh and its transitive lifecycle scripts out of the shared root install.
 # Verify the pinned npm release tarball before installing without lifecycle hooks.
 # Bump the version and its SHA-512 pin together.
-ARG DSH_VERSION=0.2.1-alpha.2
-ARG DSH_SHA512=0a4444d2e00e83695d2f65697c5e1c351b25d7bf021f99ccfbc62494fae5319979967d0a8557dde36749b919603976669298b3091beb552f0b00bf8629f824d3
+ARG DSH_VERSION=0.2.1-alpha.3
+ARG DSH_SHA512=46782643ac083a8e7c72b52038c708a23ec8468eb6659b8f54e449eb98e751dd66e176d1198b67eb7b8f5bcd698f0ede26f91ff28eae6a0824185f94adfcdfe7
 RUN curl -fsSL "https://registry.npmjs.org/@deepseek-ai/dsh/-/dsh-${DSH_VERSION}.tgz" -o /tmp/dsh.tgz \
     && echo "${DSH_SHA512}  /tmp/dsh.tgz" | sha512sum -c - \
     && HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
@@ -583,9 +583,9 @@ RUN curl -fsSL "https://registry.npmjs.org/@deepseek-ai/dsh/-/dsh-${DSH_VERSION}
 # "disabled". Bump AMP_VERSION, both SHA-512 pins and AMP_PACKAGE in
 # src/providers/amp-adapter.ts together. The vendor licence is proprietary
 # (https://ampcode.com/terms): confirm it before publishing this image.
-ARG AMP_VERSION=0.0.1791878731-g2f7fd0
-ARG AMP_SHA512_AMD64=9ff33cb89bcadf271ea4330e71c07619341d2ed15b00ff9c8a06a706887ff3dcb00892574c98f50d328fb3fcf163863233358ed8b737bf2a26ff987ba5bef449
-ARG AMP_SHA512_ARM64=1f03438ecc6059f948984c0edf445a039626fcf703992247f7e2e7a62d7e5ef508b8247863d5b6c4319d685220e158fd4672d7ef67fababaf15ff5b26364c201
+ARG AMP_VERSION=0.0.1791979242-g144271
+ARG AMP_SHA512_AMD64=e3c58fbdc018b913a8c881b3c841c7998db95aeaf05ed84da92f6e9cb25cc5c9b1352140dbb868be3124ae5ea73102b201ac56758c8e8993ee6f4f702d7bb76a
+ARG AMP_SHA512_ARM64=ad02981161c8ccb6617d969a08756b33d2c1ca8cddcb11a2eba20fa5ccd4bcec427eb1f427607919e9b1591e23bcec5474267489ba2fef7f212446c05065f20e
 RUN case "$TARGETARCH" in \
       amd64) amp_platform=linux-x64; amp_sha512="$AMP_SHA512_AMD64" ;; \
       arm64) amp_platform=linux-arm64; amp_sha512="$AMP_SHA512_ARM64" ;; \
@@ -620,7 +620,7 @@ ENV CURSOR_RIPGREP_PATH=/opt/cursor-sdk/platform/bin/rg \
 # Gemini CLI (Apache-2.0) for HARNESS_PROVIDER=acp with ACP_TARGET=gemini; the
 # adapter launches `gemini --acp`. Its own prefix keeps the ~100 MB install out
 # of the shared global-deps layer. Lifecycle scripts are not needed for ACP.
-ARG GEMINI_CLI_VERSION=0.63.0
+ARG GEMINI_CLI_VERSION=0.64.0
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
       --prefix /opt/gemini-cli --ignore-scripts --no-audit --no-fund \
       "@google/gemini-cli@${GEMINI_CLI_VERSION}" \
@@ -633,7 +633,7 @@ RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
 # than the CLI, with that licence included. npm keeps LICENSE.md in the
 # package dir; the copy under /usr/share/doc makes it easy to find. The adapter
 # sets COPILOT_AUTO_UPDATE=false, so the pinned binary is the one that runs.
-ARG COPILOT_CLI_VERSION=1.0.96
+ARG COPILOT_CLI_VERSION=1.0.97
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache npm install \
       --prefix /opt/copilot-cli --no-audit --no-fund "@github/copilot@${COPILOT_CLI_VERSION}" \
     && ln -sf /opt/copilot-cli/node_modules/.bin/copilot /usr/local/bin/copilot \
@@ -673,9 +673,9 @@ RUN case "$TARGETARCH" in \
 # manifest lists. `kiro-cli` dispatches to `kiro-cli-chat`, so both are kept;
 # the terminal helper is not needed for ACP. Bump KIRO_CLI_VERSION and both
 # pins together. Proprietary (AWS): confirm its licence before publishing.
-ARG KIRO_CLI_VERSION=2.30.0
-ARG KIRO_CLI_SHA256_AMD64=df252365e8f8a3aa9ddf543060892c915af072b660a5527c0895351654b912f8
-ARG KIRO_CLI_SHA256_ARM64=6788ac56d4e10d08fd488aff083a64b0dd7edc440f45f8e5a21f6130995f6850
+ARG KIRO_CLI_VERSION=2.31.0
+ARG KIRO_CLI_SHA256_AMD64=8b3a8c3b032178e2662a6a530fa0bb7ee92e223528613f8f03b51d18b23a5e11
+ARG KIRO_CLI_SHA256_ARM64=4b00b411437520298d28ae8a1c51f63f4bfdb490c07170b4d5ae91cbeadabc0f
 RUN case "$TARGETARCH" in \
       amd64) kiro_arch=x86_64; kiro_sha256="$KIRO_CLI_SHA256_AMD64" ;; \
       arm64) kiro_arch=aarch64; kiro_sha256="$KIRO_CLI_SHA256_ARM64" ;; \
@@ -726,7 +726,7 @@ RUN mkdir -p /opt/global-deps-full && cat > /opt/global-deps-full/package.json <
     "@sentry/cli": "3.3.4",
     "@desplega.ai/localtunnel": "2.2.0",
     "@desplega.ai/claude-bridge": "0.2.2",
-    "agent-browser": "0.39.0",
+    "agent-browser": "0.39.1",
     "playwright": "1.58.0"
   },
   "overrides": {

@@ -17203,6 +17203,90 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/script-connections/{id}/sql-query": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Run one read-only query on a SQL script connection */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        sql: string;
+                        params?: unknown[];
+                    };
+                };
+            };
+            responses: {
+                /** @description Query rows or a scrubbed error */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @enum {boolean} */
+                            ok: true;
+                            rows: {
+                                [key: string]: unknown;
+                            }[];
+                            rowCount: number;
+                            truncated: boolean;
+                        } | {
+                            /** @enum {boolean} */
+                            ok: false;
+                            error: string;
+                        };
+                    };
+                };
+                /** @description Invalid SQL connection or request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Not allowed to invoke this SQL connection */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Script connection or agent not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/session-logs": {
         parameters: {
             query?: never;
@@ -17366,6 +17450,7 @@ export interface paths {
                         sessionId: string;
                         agentId: string;
                         totalCostUsd: number;
+                        harnessCostBilled?: boolean;
                         taskId?: string;
                         inputTokens?: number;
                         outputTokens?: number;
@@ -26868,7 +26953,7 @@ export interface operations {
     script_connections_list: {
         parameters: {
             query?: {
-                kind?: "openapi" | "graphql" | "mcp";
+                kind?: "openapi" | "graphql" | "mcp" | "sql";
                 scope?: "global" | "agent" | "repo";
                 scopeId?: string;
             };
@@ -26890,7 +26975,7 @@ export interface operations {
                             slug: string;
                             displayName: string | null;
                             /** @enum {string} */
-                            kind: "raw" | "openapi" | "mcp" | "graphql";
+                            kind: "raw" | "openapi" | "mcp" | "graphql" | "sql";
                             /** @enum {string} */
                             scope: "global" | "agent" | "repo";
                             scopeId: string | null;
@@ -27144,6 +27229,64 @@ export interface operations {
                     kind: "mcp";
                     /** Format: uuid */
                     mcpServerId: string;
+                } | {
+                    /** Format: uuid */
+                    id?: string;
+                    slug: string;
+                    displayName?: string;
+                    /** @enum {string} */
+                    scope?: "global" | "agent" | "repo";
+                    scopeId?: string | null;
+                    allowedHosts?: string[];
+                    /** Format: uuid */
+                    credentialBindingId?: string | null;
+                    auth?: {
+                        /** @enum {string} */
+                        type: "none";
+                    } | {
+                        /** @enum {string} */
+                        type: "bearer";
+                        secret?: string;
+                        configKey?: string;
+                        template?: string;
+                        hosts?: string[];
+                    } | {
+                        /** @enum {string} */
+                        type: "header";
+                        headerName: string;
+                        secret?: string;
+                        configKey?: string;
+                        template?: string;
+                        hosts?: string[];
+                    } | {
+                        /** @enum {string} */
+                        type: "query";
+                        paramName: string;
+                        secret?: string;
+                        configKey?: string;
+                        template?: string;
+                        hosts?: string[];
+                    } | {
+                        /** @enum {string} */
+                        type: "oauth";
+                        authorizationId: string;
+                        configKey?: string;
+                        template?: string;
+                        hosts?: string[];
+                    };
+                    configKey?: string;
+                    headerTemplate?: string;
+                    queryTemplate?: string;
+                    /** @enum {string} */
+                    authKind?: "config" | "oauth";
+                    oauthAuthorizationId?: string;
+                    enabled?: boolean;
+                    /** @enum {string} */
+                    kind: "sql";
+                    dsn?: {
+                        secret?: string;
+                        configKey?: string;
+                    };
                 };
             };
         };
@@ -27160,7 +27303,7 @@ export interface operations {
                             slug: string;
                             displayName: string | null;
                             /** @enum {string} */
-                            kind: "raw" | "openapi" | "mcp" | "graphql";
+                            kind: "raw" | "openapi" | "mcp" | "graphql" | "sql";
                             /** @enum {string} */
                             scope: "global" | "agent" | "repo";
                             scopeId: string | null;
@@ -27261,7 +27404,7 @@ export interface operations {
                             slug: string;
                             displayName: string | null;
                             /** @enum {string} */
-                            kind: "raw" | "openapi" | "mcp" | "graphql";
+                            kind: "raw" | "openapi" | "mcp" | "graphql" | "sql";
                             /** @enum {string} */
                             scope: "global" | "agent" | "repo";
                             scopeId: string | null;
@@ -27428,7 +27571,7 @@ export interface operations {
                             slug: string;
                             displayName: string | null;
                             /** @enum {string} */
-                            kind: "raw" | "openapi" | "mcp" | "graphql";
+                            kind: "raw" | "openapi" | "mcp" | "graphql" | "sql";
                             /** @enum {string} */
                             scope: "global" | "agent" | "repo";
                             scopeId: string | null;
@@ -27544,7 +27687,7 @@ export interface operations {
                             slug: string;
                             displayName: string | null;
                             /** @enum {string} */
-                            kind: "raw" | "openapi" | "mcp" | "graphql";
+                            kind: "raw" | "openapi" | "mcp" | "graphql" | "sql";
                             /** @enum {string} */
                             scope: "global" | "agent" | "repo";
                             scopeId: string | null;
