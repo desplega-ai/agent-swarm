@@ -49,8 +49,15 @@ export function formatChatRelayText(task: AgentTask): string {
  * Delivery is at-least-once: a chunk failure re-posts the earlier chunks on
  * retry, and a crash between the send and `markChatRelayDelivered` re-sends the
  * message.
+ *
+ * Once `signal` aborts, no further row is claimed. A send already in flight is
+ * not cancelled (`postChatMessage` takes no signal); its row keeps the claim
+ * and retries after the normal backoff.
  */
-export async function processPendingChatRelays(now: number = Date.now()): Promise<void> {
+export async function processPendingChatRelays(
+  now: number = Date.now(),
+  signal?: AbortSignal,
+): Promise<void> {
   // Rows older than the give-up age are retired first, so rows of a stopped
   // adapter do not stay pending forever.
   const retired = await giveUpStaleChatRelays(now, RELAY_GIVE_UP_AFTER_MS);
@@ -61,6 +68,7 @@ export async function processPendingChatRelays(now: number = Date.now()): Promis
     .map(([name]) => name);
 
   for (const pending of await getPendingChatRelayTasks(now, 200, running)) {
+    if (signal?.aborted) return;
     const { task } = pending;
     const target = chatThreadOfContextKey(task.contextKey);
     // `created_at` is ISO text with a `Z` suffix (migration 213 default).
@@ -103,6 +111,7 @@ export async function processPendingChatRelays(now: number = Date.now()): Promis
 let interval: ReturnType<typeof setInterval> | undefined;
 let earlyTick: ReturnType<typeof setTimeout> | undefined;
 let processing: Promise<void> | undefined;
+let stopController: AbortController | undefined;
 let tickCount = 0;
 
 async function tick(): Promise<void> {
@@ -111,7 +120,7 @@ async function tick(): Promise<void> {
   const now = Date.now();
   processing = (async () => {
     try {
-      await processPendingChatRelays(now);
+      await processPendingChatRelays(now, stopController?.signal);
       if (tickCount % SWEEP_EVERY_N_TICKS === 0) await sweepExpired(now);
     } catch (error) {
       console.error(`[chat-sdk] Relay tick failed: ${errorMessage(error)}`);
@@ -138,13 +147,19 @@ const TERMINAL_EVENTS = ["task.completed", "task.failed", "task.cancelled"] as c
 export function startChatRelayWatcher(intervalMs = 3000): void {
   if (interval) return;
   tickCount = 0;
+  stopController = new AbortController();
   interval = setInterval(() => void tick(), intervalMs);
   for (const event of TERMINAL_EVENTS) workflowEventBus.on(event, scheduleEarlyTick);
   void tick();
 }
 
-/** Stop the watcher and wait for an in-flight tick to finish. */
+/**
+ * Stop the watcher: no new tick, no new claim. The returned promise settles
+ * when an in-flight tick finishes, which an unanswered platform call can delay
+ * without bound, so shutdown waits for it under its own deadline.
+ */
 export async function stopChatRelayWatcher(): Promise<void> {
+  stopController?.abort();
   if (interval) clearInterval(interval);
   interval = undefined;
   if (earlyTick) clearTimeout(earlyTick);

@@ -51,7 +51,7 @@ export function isChatSdkStopping(): boolean {
 
 const DEFAULT_CHAT_USER_NAME = "swarm";
 
-/** Total wait for background work in `stopChatSdk`, inside the 15 s SIGTERM budget. */
+/** Total wait for every step of `stopChatSdk`, inside the 15 s SIGTERM budget. */
 const SHUTDOWN_BUDGET_MS = 10_000;
 
 /** Fields whose string value is a credential, registered with the scrubber. */
@@ -193,35 +193,85 @@ export function getChatSdkHealth(): Partial<Record<ChatSdkAdapterName, ChatAdapt
   return out;
 }
 
-export async function stopChatSdk(): Promise<void> {
-  // Refuse new webhook work, let in-flight handlers finish buffering, then
-  // turn waiting threads into tasks while adapters and the DB are still up.
+/**
+ * Wait for `work`, at most `ms`. Never rejects: a rejection is logged, and a
+ * timeout logs the abandoned step. Returns true when `work` settled in time.
+ */
+async function withTimeout(work: Promise<unknown>, ms: number, step: string): Promise<boolean> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<false>((resolve) => {
+    timer = setTimeout(() => resolve(false), ms);
+  });
+  const settled = work.then(
+    () => true as const,
+    (error: unknown) => {
+      console.error(`[chat-sdk] ${step} failed during shutdown: ${errorMessage(error)}`);
+      return true as const;
+    },
+  );
+  try {
+    const done = await Promise.race([settled, timeout]);
+    if (!done) console.warn(`[chat-sdk] Shutdown budget spent, abandoned: ${step}`);
+    return done;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Stop the channel inside one deadline (`budgetMs`, injectable for tests). Every
+ * wait below uses the time that is left, so a stuck platform call cannot hold
+ * the API shutdown.
+ */
+export async function stopChatSdk(budgetMs: number = SHUTDOWN_BUDGET_MS): Promise<void> {
+  // Ingress first: webhooks answer 503 and refuse new work from here.
   stopping = true;
-  // One deadline for every wait below, so the total stays inside the budget.
-  const deadline = Date.now() + SHUTDOWN_BUDGET_MS;
+  const deadline = Date.now() + budgetMs;
   const remaining = (): number => Math.max(0, deadline - Date.now());
-  // The relay posts through the adapters, so it stops first.
-  await stopChatRelayWatcher();
+  // No new relay tick or claim from here. The wait for an in-flight send comes
+  // after the inbound flush, so a stuck send cannot use the flush's budget.
+  const relayStopped = stopChatRelayWatcher();
   // Discord has no `disconnect()`, so `chat.shutdown()` would leave the
   // Gateway open. Abort it before the drain: the open window is tracked
   // background work, so the drain bounds the wait for it to close.
   stopDiscordGateway();
+  // Let in-flight handlers finish buffering, then turn waiting threads into
+  // tasks while adapters and the DB are still up. Buffered messages exist only
+  // in memory: threads not flushed in time are lost (logged).
   let drained = await drainBackground(remaining());
-  await flushAllChatBuffers();
+  drained =
+    (await withTimeout(
+      flushAllChatBuffers(),
+      remaining(),
+      "inbound buffer flush (threads not yet turned into tasks are lost)",
+    )) && drained;
   drained = (await drainBackground(remaining())) && drained;
-  for (const [name, chat] of instances) {
-    try {
-      await chat.shutdown();
-    } catch (error) {
-      console.error(`[chat-sdk] ${name} shutdown failed: ${errorMessage(error)}`);
-    }
-  }
+  // The relay posts through the adapters, so it must end before they shut
+  // down. An abandoned send keeps its claimed row: it retries after restart.
+  await withTimeout(
+    relayStopped,
+    remaining(),
+    "in-flight relay send (its obligation stays pending and retries after restart)",
+  );
+  await withTimeout(
+    Promise.all(
+      [...instances].map(async ([name, chat]) => {
+        try {
+          await chat.shutdown();
+        } catch (error) {
+          console.error(`[chat-sdk] ${name} shutdown failed: ${errorMessage(error)}`);
+        }
+      }),
+    ),
+    remaining(),
+    "adapter shutdown",
+  );
   instances.clear();
   health.clear();
   resetDiscordGatewayHealth();
   if (!drained) {
     console.warn(
-      `[chat-sdk] Background handlers still running after the ${SHUTDOWN_BUDGET_MS / 1000}s shutdown budget`,
+      `[chat-sdk] Background handlers still running after the ${budgetMs / 1000}s shutdown budget`,
     );
   }
 }
