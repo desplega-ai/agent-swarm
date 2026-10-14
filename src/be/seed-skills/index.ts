@@ -144,6 +144,8 @@ import planningConfig from "../../../templates/skills/planning/config.json" with
 import planningContent from "../../../templates/skills/planning/content.md" with { type: "text" };
 import qaConfig from "../../../templates/skills/qa/config.json" with { type: "text" };
 import qaContent from "../../../templates/skills/qa/content.md" with { type: "text" };
+import qaLoomConfig from "../../../templates/skills/qa-loom/config.json" with { type: "text" };
+import qaLoomContent from "../../../templates/skills/qa-loom/content.md" with { type: "text" };
 import questioningConfig from "../../../templates/skills/questioning/config.json" with {
   type: "text",
 };
@@ -347,6 +349,7 @@ const BUILT_IN_SKILL_SOURCES = [
   { config: phaseRunningConfig, body: phaseRunningContent },
   { config: planningConfig, body: planningContent },
   { config: qaConfig, body: qaContent },
+  { config: qaLoomConfig, body: qaLoomContent },
   { config: questioningConfig, body: questioningContent },
   { config: researchingConfig, body: researchingContent },
   { config: reviewOfferedTaskConfig, body: reviewOfferedTaskContent },

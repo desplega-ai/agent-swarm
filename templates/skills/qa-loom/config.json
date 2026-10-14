@@ -1,0 +1,14 @@
+{
+  "category": "skills",
+  "description": "Narrated QA loom for UI work: record a UI QA pass with agent-browser and a timestamped step log, voice it with ElevenLabs, burn one-line subtitles with ffmpeg, and embed the narrated mp4 (plus an optional GIF preview) in the PR as GitHub user attachments. Use on UI-changing PRs and UI QA passes. Layers on the `qa` and `agent-browser` skills. Needs ELEVENLABS_API_KEY, ffmpeg with libass, and agent-browser.",
+  "displayName": "QA Loom",
+  "kind": "skill",
+  "name": "qa-loom",
+  "placeholders": [],
+  "runAllSeedersCandidate": true,
+  "slug": "qa-loom",
+  "systemDefault": true,
+  "tags": ["qa", "video", "screen-recording", "evidence", "elevenlabs"],
+  "title": "QA Loom",
+  "version": "1.0.0"
+}
