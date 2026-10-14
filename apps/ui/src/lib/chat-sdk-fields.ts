@@ -32,8 +32,13 @@ export interface ChatSdkField {
 export interface ChatSdkAdapterDef {
   name: ChatSdkAdapterName;
   label: string;
+  /** Set while the adapter has run only against fixtures: the card shows a BETA tag with this text. */
+  experimental?: string;
   fields: ChatSdkField[];
 }
+
+const EXPERIMENTAL_NOTE =
+  "Tested only against fixtures so far, not a real workspace. Setup steps may differ. Progress: github.com/desplega-ai/agent-swarm/issues/2149";
 
 const USER_NAME: ChatSdkField = {
   key: "userName",
@@ -86,6 +91,7 @@ export const CHAT_SDK_ADAPTER_DEFS: ChatSdkAdapterDef[] = [
   {
     name: "slack",
     label: "Slack",
+    experimental: EXPERIMENTAL_NOTE,
     fields: [
       {
         key: "botToken",
@@ -151,6 +157,7 @@ export const CHAT_SDK_ADAPTER_DEFS: ChatSdkAdapterDef[] = [
   {
     name: "teams",
     label: "Microsoft Teams",
+    experimental: EXPERIMENTAL_NOTE,
     fields: [
       { key: "appId", label: "App ID", kind: "text", required: true },
       { key: "appPassword", label: "App password", kind: "secret", required: true },

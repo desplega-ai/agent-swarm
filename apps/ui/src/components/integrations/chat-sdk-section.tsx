@@ -15,6 +15,7 @@ import {
   OAuthStatusRow,
   type OAuthStatusTone,
 } from "@/components/shared/oauth-section";
+import { BetaTag } from "@/components/shared/beta-tag";
 import { SecretInput } from "@/components/shared/secret-input";
 import { AlertCallout } from "@/components/ui/alert-callout";
 import { Button } from "@/components/ui/button";
@@ -358,7 +359,14 @@ function AdapterPanel({
   const statusKnown = status !== undefined || statusError !== undefined;
 
   return (
-    <OAuthSection title={def.label}>
+    <OAuthSection
+      title={
+        <span className="inline-flex items-center gap-2">
+          {def.label}
+          {def.experimental && <BetaTag tooltip={def.experimental} side="top" />}
+        </span>
+      }
+    >
       <OAuthStatusRow
         tone={view.tone}
         label={view.label}

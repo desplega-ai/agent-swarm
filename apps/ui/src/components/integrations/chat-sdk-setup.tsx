@@ -120,6 +120,14 @@ function steps(adapter: ChatSdkAdapterName, docsUrl: string | undefined): ReactN
     case "slack":
       return [
         <>
+          Experimental: this adapter has run only against fixtures, not a real workspace. Report
+          gaps on{" "}
+          <ExternalLink href="https://github.com/desplega-ai/agent-swarm/issues/2149">
+            issue #2149
+          </ExternalLink>
+          .
+        </>,
+        <>
           Turn off the built-in Slack integration: set <CodeChip>SLACK_DISABLE=true</CodeChip>.
         </>,
         <>
@@ -175,6 +183,14 @@ function steps(adapter: ChatSdkAdapterName, docsUrl: string | undefined): ReactN
       ];
     case "teams":
       return [
+        <>
+          Experimental: this adapter has run only against fixtures, not a real workspace. Report
+          gaps on{" "}
+          <ExternalLink href="https://github.com/desplega-ai/agent-swarm/issues/2149">
+            issue #2149
+          </ExternalLink>
+          .
+        </>,
         <>
           In Azure, create an <b>Azure Bot</b> resource. Pick Multi Tenant or Single Tenant (
           <b>App type</b>).

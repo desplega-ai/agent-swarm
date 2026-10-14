@@ -209,7 +209,12 @@ describe("stopChatSdk", () => {
     });
     await completeTask(late.id, "after shutdown");
     await Bun.sleep(400);
-    expect(mock.calls.slice(sendsBefore).filter((call) => /send/.test(call.method))).toEqual([]);
+    expect(
+      mock.calls
+        .slice(sendsBefore)
+        // The typing action of the buffered DM may still be in flight when `sendsBefore` is read.
+        .filter((call) => /send/.test(call.method) && call.method !== "sendChatAction"),
+    ).toEqual([]);
     expect((await obligation(late.id))?.attempt_count).toBe(0);
   });
 });

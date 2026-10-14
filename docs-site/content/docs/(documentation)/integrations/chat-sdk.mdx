@@ -20,6 +20,10 @@ The channel is off by default. A configuration change saved on the dashboard app
 
 Each adapter has its own state. When one adapter fails to start, the other adapters keep running.
 
+<Callout type="warn">
+Telegram and Discord ran against real bots. **Slack and Microsoft Teams are experimental:** they ran only against fixtures. The setup steps below may differ from what the platform shows. [Issue #2149](https://github.com/desplega-ai/agent-swarm/issues/2149) tracks the real-app verification.
+</Callout>
+
 ## Configuration
 
 The fastest path is the dashboard: **Settings → Integrations → Chat SDK**. The card has one panel for each adapter. It saves each secret as its own secret config row named `CHAT_SDK_<ADAPTER>_<FIELD>` (for example `CHAT_SDK_TELEGRAM_BOT_TOKEN`). The JSON in `CHAT_SDK_ADAPTERS` then holds a reference to the row, not the secret. The card also shows the setup steps for each adapter, each webhook URL with a copy button, the adapter health, and a **Register webhook** button for Telegram. The setup steps start expanded, and collapse when the adapter already runs healthy.
@@ -100,6 +104,10 @@ For local development without a public URL, set `mode` to `polling`. The adapter
 In a group with BotFather privacy mode on (the default), Telegram sends the bot only commands and messages that mention it. To let the bot see every group message, send `/setprivacy` to BotFather, turn privacy off, then remove the bot from the group and add it again.
 
 ### Slack
+
+<Callout type="warn">
+Experimental. The Chat SDK Slack adapter has not run against a real workspace yet ([#2149](https://github.com/desplega-ai/agent-swarm/issues/2149)). The built-in [Slack](/docs/integrations/slack) integration stays the verified path.
+</Callout>
 
 The Chat SDK Slack adapter and the built-in [Slack](/docs/integrations/slack) integration cannot run together. Set `SLACK_DISABLE=true` to use this adapter. Without it, the API logs the conflict at boot and starts no Chat SDK adapter. The Integrations card shows a **Slack conflict** banner.
 
@@ -209,6 +217,10 @@ settings:
 Discord sends channel messages and mentions only over the Gateway WebSocket, not over the webhook. The API runs a Gateway listener for the whole life of the process. See [Limits](#limits) for the gaps.
 
 ### Microsoft Teams
+
+<Callout type="warn">
+Experimental. The Teams adapter has not run against a real tenant yet ([#2149](https://github.com/desplega-ai/agent-swarm/issues/2149)).
+</Callout>
 
 1. Create an **Azure Bot** resource. Pick **Multi Tenant** or **Single Tenant**.
 2. Copy the Microsoft App ID, and create a client secret for it.
