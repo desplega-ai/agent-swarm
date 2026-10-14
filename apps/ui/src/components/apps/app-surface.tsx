@@ -24,6 +24,8 @@
  *                        reaches a terminal status.
  *      - `app.navigate`— push `/apps/:id/p/<page>?<params>` (params REPLACE the
  *                        current ones; only `?mode` survives).
+ *    Plus `ui.toast` (shared with the pages renderer): a sonner toast whose
+ *    optional Undo button runs a chain through this same handler map.
  *
  * State lives in the dashboard-global store (`@/lib/json-render/store-registry`)
  * under `/apps/<appId>/…`, reached through a prefixing view — so definitions
@@ -93,7 +95,13 @@ import { AlertCallout } from "@/components/ui/alert-callout";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/ui/page-header";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
-import { createSwarmActionHandlers, swarmCatalog, swarmComponents } from "@/lib/json-render";
+import {
+  type ActionHandlerMap,
+  createSwarmActionHandlers,
+  createToastActionHandler,
+  swarmCatalog,
+  swarmComponents,
+} from "@/lib/json-render";
 import {
   assemblePageSpec,
   collectElementRefAppIds,
@@ -863,15 +871,26 @@ export function AppSurface({
     : getThemePreset(definition.theme ?? null);
   const appThemeAttr = activePreset?.id;
 
+  // `ui.toast`'s Undo button runs its chain through this map long after the
+  // dispatch returned; `ActionProvider` snapshots handlers at mount, so the
+  // map is read through a ref.
+  const handlersRef = useRef<ActionHandlerMap | null>(null);
+
   const compiled = useMemo(() => {
     const swarmActions = createSwarmActionHandlers({
       onResponse: (result) => setLastResponse(result),
+      onError: (message) => setActionError(message),
+    });
+    const toastActions = createToastActionHandler({
+      getHandlers: () => handlersRef.current,
+      getState: () => ctxRef.current.store.getSnapshot(),
       onError: (message) => setActionError(message),
     });
     const { registry, handlers } = defineRegistry(swarmCatalog, {
       components: swarmComponents,
       actions: {
         ...swarmActions,
+        ...toastActions,
         // Client-side navigation to another page of this app. Reads the
         // router through `ctxRef` — a closure over `useNavigate()` would be
         // frozen at mount, since `ActionProvider` snapshots its handlers once.
@@ -1002,6 +1021,9 @@ export function AppSurface({
       ),
     };
   }, []);
+  useEffect(() => {
+    handlersRef.current = compiled.handlers;
+  }, [compiled]);
 
   let renderedSpec: React.ReactNode;
   if (!activePage) {
