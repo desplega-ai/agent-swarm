@@ -181,17 +181,6 @@ function scheduleRunnerGc(reason: string): boolean {
   return true;
 }
 
-/** Save PM2 process list for persistence across container restarts */
-async function savePm2State(role: string): Promise<void> {
-  try {
-    console.log(`[${role}] Saving PM2 process list...`);
-    await Bun.$`pm2 save`.quiet();
-    console.log(`[${role}] PM2 state saved`);
-  } catch {
-    // PM2 not available or no processes - silently ignore
-  }
-}
-
 /** Fetch repo config for a task's vcsRepo (e.g., "desplega-ai/agent-swarm") */
 export async function fetchRepoConfig(
   apiUrl: string,
@@ -1355,11 +1344,6 @@ const SWARM_TOOL_LABELS: Record<string, string | null> = {
   "create-channel": "📢 Creating channel",
   "list-channels": "📢 Listing channels",
   "delete-channel": "📢 Deleting channel",
-  // Services
-  "register-service": "🔌 Registering service",
-  "list-services": "🔌 Listing services",
-  "unregister-service": "🔌 Unregistering service",
-  "update-service-status": "🔌 Updating service status",
   // Reusable scripts
   "script-search": "📜 Searching scripts",
   "script-run": "📜 Running script",
@@ -2537,7 +2521,6 @@ export function setupShutdownHandlers(
       });
       await closeAgent(apiConfig, role);
     }
-    await savePm2State(role);
     process.exit(exitCode);
   };
 

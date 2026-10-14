@@ -123,7 +123,6 @@ import type {
   ScriptsResponse,
   ScriptTypeDefs,
   ScriptVersion,
-  ServicesResponse,
   SessionCostsResponse,
   SessionDetailResponse,
   SessionListItem,
@@ -1017,22 +1016,6 @@ class ApiClient {
       }),
     });
     if (!res.ok) throw new Error(`Failed to post message: ${res.status}`);
-    return res.json();
-  }
-
-  async fetchServices(filters?: {
-    status?: string;
-    agentId?: string;
-    name?: string;
-  }): Promise<ServicesResponse> {
-    const params = new URLSearchParams();
-    if (filters?.status) params.set("status", filters.status);
-    if (filters?.agentId) params.set("agentId", filters.agentId);
-    if (filters?.name) params.set("name", filters.name);
-    const queryString = params.toString();
-    const url = `${this.getBaseUrl()}/api/services${queryString ? `?${queryString}` : ""}`;
-    const res = await fetch(url, { headers: this.getHeaders() });
-    if (!res.ok) throw new Error(`Failed to fetch services: ${res.status}`);
     return res.json();
   }
 

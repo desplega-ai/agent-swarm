@@ -103,8 +103,8 @@ describe("docs API index footprint", () => {
     expect(spec.paths["/api/agents/{id}/runtime"]?.get).toBeDefined();
 
     const generatedKeys = await generatedOperationKeys();
-    expect(operationKeys).toHaveLength(424);
-    expect(generatedKeys).toHaveLength(424);
+    expect(operationKeys).toHaveLength(422);
+    expect(generatedKeys).toHaveLength(422);
     expect(new Set(generatedKeys)).toEqual(new Set(operationKeys));
   });
 

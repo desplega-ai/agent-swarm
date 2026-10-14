@@ -577,14 +577,6 @@ Compare two versions of a context file. Shows a unified diff.
 | `versionId` | uuid | Yes | The newer version ID |
 | `compareToVersionId` | uuid | No | The older version (default: previous) |
 
-## Service Tools
-
-Requires the `services` capability (**disabled by default**).
-
-### register-service / unregister-service / list-services / update-service-status
-
-Manage HTTP service discovery. Registry entries are keyed by the calling agent's ID/URL, and `register-service` only accepts project-owned executables under `/workspace` or `/home/worker` with safe interpreters/args. See [Service Discovery](/docs/concepts/services) for details.
-
 ## Scheduling Tools
 
 ### create-schedule / list-schedules / update-schedule / patch-schedule / delete-schedule / run-schedule-now

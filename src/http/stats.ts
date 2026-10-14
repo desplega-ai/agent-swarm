@@ -3,7 +3,6 @@ import { z } from "zod";
 import {
   getAgentStatusCounts,
   getAllLogs,
-  getAllServices,
   getConcurrentContext,
   getLogsByAgentId,
   getScheduledTasks,
@@ -14,7 +13,7 @@ import {
 import { getDbRetentionStats } from "../be/db-retention";
 import { isSteeringEnabled } from "../be/steering";
 import type { AgentLog } from "../types";
-import { AgentLogSchema, ScheduledTaskSchema, ServiceSchema } from "../types";
+import { AgentLogSchema, ScheduledTaskSchema } from "../types";
 import { isEnvFlagEnabled } from "../utils/env-flag";
 import { isMultiRuntimeEnabled } from "../utils/multi-runtime";
 import { resolveHttpFavoriteOwner } from "./favorite-owner";
@@ -166,22 +165,6 @@ const getMetrics = route({
   },
 });
 
-const listServices = route({
-  method: "get",
-  path: "/api/services",
-  pattern: ["api", "services"],
-  summary: "List all registered services",
-  tags: ["Stats"],
-  query: z.object({
-    status: z.string().optional(),
-    agentId: z.string().optional(),
-    name: z.string().optional(),
-  }),
-  responses: {
-    200: { description: "Service list", schema: z.object({ services: z.array(ServiceSchema) }) },
-  },
-});
-
 const listScheduledTasks = route({
   method: "get",
   path: "/api/scheduled-tasks",
@@ -292,18 +275,6 @@ export async function handleStats(
       ...(await getSwarmMetrics()),
       retention: getDbRetentionStats(),
     });
-    return true;
-  }
-
-  if (listServices.match(req.method, pathSegments)) {
-    const parsed = await listServices.parse(req, res, pathSegments, queryParams);
-    if (!parsed) return true;
-    const services = await getAllServices({
-      status: (parsed.query.status as import("../types").ServiceStatus) || undefined,
-      agentId: parsed.query.agentId || undefined,
-      name: parsed.query.name || undefined,
-    });
-    listServices.respond(res, 200, { services });
     return true;
   }
 

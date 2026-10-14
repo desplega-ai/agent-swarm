@@ -22,7 +22,7 @@ CI tracks uncompressed amd64 sizes over time via the **ci-metrics** swarm script
 prek, builder            pinned prek binary + compiled agent-swarm binary
 worker-base              minimal apt set + bun + ALL four harness CLIs +
                          context-mode CLI + npx-skills installs + base
-                         /opt/global-deps (pm2, wts, agent-fs) + settings/ENVs
+                         /opt/global-deps (wts, agent-fs) + settings/ENVs
 ├─ worker-slim (target)  worker-base + leaf block. CI + E2E image.
 └─ worker-full-base      + dev toolchain, glab, Playwright libs + chromium,
                          postgres/redis servers, /opt/global-deps-full

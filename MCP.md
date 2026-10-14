@@ -17,7 +17,7 @@ bridge always builds a full-surface server (its surface is governed by the
 SDK allowlist instead), and HTTP REST routes are generally not gated.
 
 - Enabled by default: `core`, `task-pool`, `config`, `scripts`, `mcp`, `profiles`, `repo`, `scheduling`, `memory`, `tracker`, `workflows`, `skills`, `pages`, `metrics`, `kv`, `slack`
-- Disabled by default: `prompt-templates`, `agentmail`, `kapso`, `swarm-x`, `messaging`, `services`
+- Disabled by default: `prompt-templates`, `agentmail`, `kapso`, `swarm-x`, `messaging`
 
 ## Table of Contents
 
@@ -195,11 +195,6 @@ SDK allowlist instead), and HTTP REST routes are generally not gated.
   - [list-channels](#list-channels)
   - [create-channel](#create-channel)
   - [delete-channel](#delete-channel)
-- [Services Tools](#services-tools)
-  - [register-service](#register-service)
-  - [unregister-service](#unregister-service)
-  - [list-services](#list-services)
-  - [update-service-status](#update-service-status)
 
 ---
 
@@ -2347,63 +2342,4 @@ Deletes a channel and all its messages. Only the lead agent can delete channels.
 |-----------|------|----------|---------|-------------|
 | `channelId` | `string` | No | - | The ID of the channel to delete. |
 | `name` | `string` | No | - | Channel name (alternative to channelId). |
-
-## Services Tools
-
-*Services capability - PM2/background service registry*
-
-Capability: `services` — **disabled by default**; add `services` to `CAPABILITIES` to enable.
-
-### register-service
-
-**Register Service**
-
-Register a background service (e.g., PM2 process) for discovery by other agents. The service URL is automatically derived from your agent ID (https://{AGENT_ID}.{SWARM_URL}). Each agent can only run one service on port 3000.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `script` | `string` | Yes | - | Path to the script to run (required for PM2 restart). |
-| `description` | `string` | No | - | What this service does. |
-| `healthCheckPath` | `string` | No | - | Health check endpoint path (default: /health). |
-| `cwd` | `string` | No | - | Working directory for the script. |
-| `interpreter` | `string` | No | - | Interpreter to use (e.g., 'node', 'bun'). Auto-detected from extension if not set. |
-| `args` | `array` | No | - | Command line arguments for the script. |
-| `env` | `object` | No | - | Environment variables for the process. |
-| `metadata` | `object` | No | - | Additional metadata. |
-
-### unregister-service
-
-**Unregister Service**
-
-Remove a service from the registry. Use this after stopping a PM2 process. You can only unregister your own services.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `serviceId` | `uuid` | No | - | Service ID to unregister. |
-| `name` | `string` | No | - | Service name to unregister (alternative to serviceId). |
-
-### list-services
-
-**List Services**
-
-Query services registered by agents in the swarm. Use this to discover services exposed by other agents.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `agentId` | `string` | No | - | Filter by specific agent ID. |
-| `name` | `string` | No | - | Filter by service name (partial match). |
-| `status` | `starting \| healthy \| unhealthy \| stopped` | No | - | Filter by health status. |
-| `includeOwn` | `boolean` | No | true | Include services registered by calling agent (default: true). |
-
-### update-service-status
-
-**Update Service Status**
-
-Update the health status of a registered service. Use this after a service becomes healthy or needs to be marked as stopped/unhealthy.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `serviceId` | `uuid` | No | - | Service ID to update. |
-| `name` | `string` | No | - | Service name to update (alternative to serviceId). |
-| `status` | `starting \| healthy \| unhealthy \| stopped` | Yes | - | New status: 'starting', 'healthy', 'unhealthy', or 'stopped'. |
 

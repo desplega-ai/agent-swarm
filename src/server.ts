@@ -54,7 +54,6 @@ import {
 } from "./tools/kv";
 // Messaging capability
 import { registerListChannelsTool } from "./tools/list-channels";
-import { registerListServicesTool } from "./tools/list-services";
 import { registerManageUserTool } from "./tools/manage-user";
 // MCP Servers capability
 import {
@@ -96,7 +95,6 @@ import {
   registerUnregisterKapsoNumberTool,
 } from "./tools/register-kapso-number";
 // Services capability
-import { registerRegisterServiceTool } from "./tools/register-service";
 // Repo management tools
 import { registerGetReposTool, registerUpdateRepoTool } from "./tools/repos";
 import { registerRequestHumanInputTool } from "./tools/request-human-input";
@@ -178,10 +176,8 @@ import {
   registerTrackerSyncStatusTool,
   registerTrackerUnlinkTool,
 } from "./tools/tracker";
-import { registerUnregisterServiceTool } from "./tools/unregister-service";
 // Profiles capability
 import { registerUpdateProfileTool } from "./tools/update-profile";
-import { registerUpdateServiceStatusTool } from "./tools/update-service-status";
 import { setPreloadedTools } from "./tools/utils";
 import {
   registerReplyWhatsappMessageTool,
@@ -216,7 +212,6 @@ export const ALL_CAPABILITIES = [
   "prompt-templates",
   "mcp",
   "profiles",
-  "services",
   "scheduling",
   "memory",
   "workflows",
@@ -256,7 +251,6 @@ const DEFAULT_CAPABILITIES: string = [
   //
   // Disabled by default
   //
-  // "services",
   // "prompt-templates",
   // "messaging",
   // "swarm-x",
@@ -280,8 +274,15 @@ export function hasCapability(cap: CAPABILITIES_T): boolean {
   return getCapabilities().has(cap);
 }
 
+const KNOWN_CAPABILITIES: ReadonlySet<string> = new Set(ALL_CAPABILITIES);
+
 export function getEnabledCapabilities(): CAPABILITIES_T[] {
-  const capabilities = Array.from(getCapabilities());
+  // Only known flags: the register response validates against ALL_CAPABILITIES,
+  // so a retired name still listed in CAPABILITIES (e.g. `services`) would
+  // otherwise turn every agent registration into a 500.
+  const capabilities = Array.from(getCapabilities()).filter((capability) =>
+    KNOWN_CAPABILITIES.has(capability),
+  );
   // Phase 1 has no HTTP receiver. Do not advertise usable Slack tools to
   // workers when HTTP (or an invalid transport) was selected.
   return getSlackConfiguration().mode === "socket"
@@ -691,14 +692,6 @@ export async function createServer(
     registerListChannelsTool(server);
     registerCreateChannelTool(server);
     registerDeleteChannelTool(server);
-  }
-
-  // Services capability - PM2/background service registry
-  if (hasCapability("services")) {
-    registerRegisterServiceTool(server);
-    registerUnregisterServiceTool(server);
-    registerListServicesTool(server);
-    registerUpdateServiceStatusTool(server);
   }
 
   if (toolAllowlist) applyToolAllowlist(server, toolAllowlist);

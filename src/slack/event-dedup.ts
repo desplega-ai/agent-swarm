@@ -18,7 +18,7 @@
  * safe-but-tight bound.
  *
  * Single-pod-only. The API server (which owns the Slack socket) runs as a
- * single PM2 process; if that ever changes, swap this for a DB-backed table.
+ * single API process; if that ever changes, swap this for a DB-backed table.
  */
 
 const DEFAULT_TTL_MS = 300_000; // 5 minutes

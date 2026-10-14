@@ -340,7 +340,6 @@ RUN mkdir -p /opt/global-deps && cat > /opt/global-deps/package.json <<EOF
   "name": "global-deps",
   "private": true,
   "dependencies": {
-    "pm2": "6.0.14",
     "@desplega.ai/wts": "0.2.3",
     "@desplega.ai/agent-fs": "${AGENT_FS_VERSION}"
   },
@@ -384,12 +383,11 @@ ENV LEAD_SYSTEM_PROMPT=""
 ENV LEAD_SYSTEM_PROMPT_FILE=""
 ENV STARTUP_SCRIPT_STRICT=false
 ENV TEMPLATE_REGISTRY_URL=https://templates.agent-swarm.dev
-ENV PM2_HOME=/workspace/.pm2
 ENV PATH="/home/worker/.local/bin:/home/worker/.bun/bin:$PATH"
 
 VOLUME ["/logs"]
 
-# Expose service port for PM2 processes
+# Port for web services an agent runs itself
 EXPOSE 3000
 
 ENTRYPOINT ["/docker-entrypoint.sh"]
