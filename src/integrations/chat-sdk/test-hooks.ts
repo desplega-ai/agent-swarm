@@ -11,6 +11,11 @@ export interface ChatSdkTestHooks {
    */
   teamsWebhookVerifier?: (request: Request, body: string) => boolean | Promise<boolean>;
   /**
+   * Bot token factory for the Teams adapter, so an outbound send needs no
+   * MSAL call to login.microsoftonline.com.
+   */
+  teamsToken?: () => string;
+  /**
    * Skips the Discord Gateway loop. The loop logs in through `discord.js`
    * against the real Discord API, which `apiUrl` does not redirect.
    */

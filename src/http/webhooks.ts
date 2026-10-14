@@ -60,6 +60,7 @@ import {
   isChatAdapterConfigured,
   isChatSdkStopping,
 } from "../integrations/chat-sdk/runtime";
+import { isTrustedTeamsServiceUrl } from "../integrations/chat-sdk/teams-origin";
 import {
   type KapsoMessageActionResult,
   markKapsoMessageRead,
@@ -214,12 +215,27 @@ const chatSdkWebhook = route({
   responses: {
     200: { description: "Adapter response", unstructured: "adapter response proxied as-is" },
     401: { description: "Invalid platform signature or secret token" },
+    403: { description: "Teams activity whose serviceUrl is not a Bot Framework host" },
     404: { description: "Chat SDK disabled or adapter not configured" },
     503: { description: "Adapter configured but failed to start" },
   },
 });
 
 // ─── Handler ─────────────────────────────────────────────────────────────────
+
+/** False when a Teams activity body carries a `serviceUrl` that is not a Bot Framework host. */
+function hasTrustedTeamsServiceUrl(body: Buffer): boolean {
+  let serviceUrl: unknown;
+  try {
+    serviceUrl = (JSON.parse(body.toString("utf-8")) as { serviceUrl?: unknown } | null)
+      ?.serviceUrl;
+  } catch {
+    // Not JSON: the adapter rejects it.
+    return true;
+  }
+  if (serviceUrl === undefined || serviceUrl === null || serviceUrl === "") return true;
+  return typeof serviceUrl === "string" && isTrustedTeamsServiceUrl(serviceUrl);
+}
 
 /**
  * Rebuild a Fetch `Request` from the raw Node request. Headers come from
@@ -875,11 +891,17 @@ export async function handleWebhooks(
     for await (const chunk of req) {
       chunks.push(chunk as Buffer);
     }
-    const request = toFetchRequest(
-      req,
-      Buffer.concat(chunks),
-      `/api/integrations/chat/${adapterName}/webhook`,
-    );
+    const rawBody = Buffer.concat(chunks);
+    // The Teams adapter replies, reads history and downloads files with the
+    // bot token at the activity's serviceUrl, and caches it for DMs. Refuse an
+    // untrusted one before the adapter sees the activity.
+    if (adapterName === "teams" && !hasTrustedTeamsServiceUrl(rawBody)) {
+      console.warn("[chat-sdk] teams webhook refused: serviceUrl is not a Bot Framework host");
+      res.writeHead(403, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Untrusted Teams serviceUrl" }));
+      return true;
+    }
+    const request = toFetchRequest(req, rawBody, `/api/integrations/chat/${adapterName}/webhook`);
 
     try {
       const response = await handler(request, {

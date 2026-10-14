@@ -1,10 +1,13 @@
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { closeDb, createAgent, getDbClient, initDb } from "../be/db";
 import { drainBackground } from "../integrations/chat-sdk/background";
 import { stopChatRelayWatcher } from "../integrations/chat-sdk/relay";
 import { getChatSdkHealth, startChatSdk, stopChatSdk } from "../integrations/chat-sdk/runtime";
+import { isTrustedTeamsServiceUrl } from "../integrations/chat-sdk/teams-origin";
 import { setChatSdkTestHooks } from "../integrations/chat-sdk/test-hooks";
+import { registerChatPostTool } from "../tools/chat-post";
 import { flushChatBuffers, postChatWebhook, snapshotChatSdkEnv } from "./chat-sdk-harness";
 import { getFreePort } from "./test-net";
 
@@ -126,6 +129,148 @@ describe("Chat SDK Teams adapter", () => {
     expect(response.status).toBe(401);
     const row = await getDbClient().get<{ n: number }>(
       "SELECT COUNT(*) AS n FROM agent_tasks WHERE task LIKE '%should not land%'",
+    );
+    expect(row?.n).toBe(0);
+  });
+});
+
+/** A Teams thread id in the adapter's encoding, pointing at `serviceUrl`. */
+function teamsThreadId(conversationId: string, serviceUrl: string): string {
+  const encode = (value: string) => Buffer.from(value).toString("base64url");
+  return `teams:${encode(conversationId)}:${encode(serviceUrl)}`;
+}
+
+/** An unsigned JWT the Teams SDK accepts from a token factory (it only decodes it). */
+function fakeBotToken(): string {
+  const encode = (value: Record<string, unknown>) =>
+    Buffer.from(JSON.stringify(value)).toString("base64url");
+  const exp = Math.floor(Date.now() / 1000) + 3600;
+  return `${encode({ alg: "none", typ: "JWT" })}.${encode({ exp, aud: APP_ID })}.sig`;
+}
+
+interface ConnectorListener {
+  url: string;
+  requests: { method: string; path: string; authorization: string | null }[];
+  stop: () => void;
+}
+
+/** A local stand-in for a connector host that records every request. */
+function startConnectorListener(): ConnectorListener {
+  const requests: ConnectorListener["requests"] = [];
+  const server = Bun.serve({
+    port: 0,
+    hostname: "127.0.0.1",
+    fetch(req) {
+      requests.push({
+        method: req.method,
+        path: new URL(req.url).pathname,
+        authorization: req.headers.get("authorization"),
+      });
+      return Response.json({ id: "activity-1" });
+    },
+  });
+  return { url: `http://127.0.0.1:${server.port}/`, requests, stop: () => server.stop(true) };
+}
+
+type ToolResult = {
+  isError?: boolean;
+  structuredContent: { success: boolean; message: string; [key: string]: unknown };
+};
+
+async function callChatPost(args: Record<string, unknown>): Promise<ToolResult> {
+  const server = new McpServer({ name: "chat-sdk-teams-test", version: "1.0.0" });
+  registerChatPostTool(server);
+  // biome-ignore lint/complexity/noBannedTypes: accessing internal MCP SDK type for test
+  const tools = (server as unknown as { _registeredTools: Record<string, { handler: Function }> })
+    ._registeredTools;
+  return (await tools["chat-post"]!.handler(args, {
+    sessionId: "test-session",
+    requestInfo: { headers: { "x-agent-id": leadId } },
+  })) as ToolResult;
+}
+
+describe("Chat SDK Teams service URL allowlist", () => {
+  test("only https Bot Framework hosts are trusted by default", () => {
+    const saved = process.env.CHAT_SDK_API_URL_OVERRIDES;
+    delete process.env.CHAT_SDK_API_URL_OVERRIDES;
+    try {
+      expect(isTrustedTeamsServiceUrl("https://smba.trafficmanager.net/teams/")).toBe(true);
+      expect(isTrustedTeamsServiceUrl("https://smba.trafficmanager.net/emea/")).toBe(true);
+      expect(isTrustedTeamsServiceUrl("https://smba.infra.gcc.teams.microsoft.com/teams")).toBe(
+        true,
+      );
+      expect(isTrustedTeamsServiceUrl("http://smba.trafficmanager.net/teams/")).toBe(false);
+      expect(isTrustedTeamsServiceUrl("https://smba.trafficmanager.net.evil.test/")).toBe(false);
+      expect(isTrustedTeamsServiceUrl("https://smba.trafficmanager.net@evil.test/")).toBe(false);
+      expect(isTrustedTeamsServiceUrl("http://127.0.0.1:8080/")).toBe(false);
+      expect(isTrustedTeamsServiceUrl("not a url")).toBe(false);
+    } finally {
+      if (saved === undefined) delete process.env.CHAT_SDK_API_URL_OVERRIDES;
+      else process.env.CHAT_SDK_API_URL_OVERRIDES = saved;
+    }
+  });
+
+  test("chat-post to a forged Teams id sends no request to its service URL", async () => {
+    const listener = startConnectorListener();
+    const saved = process.env.CHAT_SDK_API_URL_OVERRIDES;
+    // Production shape: no apiUrl override, so the adapter would send to the id's service URL.
+    delete process.env.CHAT_SDK_API_URL_OVERRIDES;
+    try {
+      setChatSdkTestHooks({ teamsToken: fakeBotToken });
+      await startTeams({ appId: APP_ID, appPassword: "teams-test-password" });
+      const threadId = teamsThreadId("19:forged@thread.v2", listener.url);
+
+      const result = await callChatPost({ adapter: "teams", threadId, text: "leak test" });
+
+      expect(result.isError).toBe(true);
+      expect(result.structuredContent.message).toContain("not a Microsoft Bot Framework");
+      expect(listener.requests).toHaveLength(0);
+    } finally {
+      listener.stop();
+      if (saved === undefined) delete process.env.CHAT_SDK_API_URL_OVERRIDES;
+      else process.env.CHAT_SDK_API_URL_OVERRIDES = saved;
+    }
+  });
+
+  test("chat-post to a Teams id with a Bot Framework service URL still sends", async () => {
+    const listener = startConnectorListener();
+    const saved = process.env.CHAT_SDK_API_URL_OVERRIDES;
+    // The override pins every connector call to the listener, whatever the id says.
+    process.env.CHAT_SDK_API_URL_OVERRIDES = JSON.stringify({ teams: listener.url });
+    try {
+      setChatSdkTestHooks({ teamsToken: fakeBotToken });
+      await startTeams({ appId: APP_ID, appPassword: "teams-test-password" });
+      const threadId = teamsThreadId(
+        "19:allowed@thread.v2",
+        "https://smba.trafficmanager.net/teams/",
+      );
+
+      const result = await callChatPost({ adapter: "teams", threadId, text: "hello teams" });
+
+      expect(result.isError).toBeFalsy();
+      expect(listener.requests).toHaveLength(1);
+      expect(listener.requests[0]!.method).toBe("POST");
+      expect(listener.requests[0]!.path).toContain("/v3/conversations/");
+      expect(listener.requests[0]!.authorization).toStartWith("Bearer ");
+    } finally {
+      listener.stop();
+      if (saved === undefined) delete process.env.CHAT_SDK_API_URL_OVERRIDES;
+      else process.env.CHAT_SDK_API_URL_OVERRIDES = saved;
+    }
+  });
+
+  test("a Teams activity with an untrusted serviceUrl is refused before the adapter", async () => {
+    setChatSdkTestHooks({ teamsWebhookVerifier: () => true });
+    await startTeams({ appId: APP_ID, appPassword: "teams-test-password" });
+    const activity = {
+      ...teamsMention("19:group-three@thread.v2", "hostile tenant"),
+      serviceUrl: "https://attacker.example/teams/",
+    };
+    const response = await postActivity(activity);
+    expect(response.status).toBe(403);
+    await flushChatBuffers();
+    const row = await getDbClient().get<{ n: number }>(
+      "SELECT COUNT(*) AS n FROM agent_tasks WHERE task LIKE '%hostile tenant%'",
     );
     expect(row?.n).toBe(0);
   });

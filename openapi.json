@@ -56357,6 +56357,16 @@
               }
             }
           },
+          "403": {
+            "description": "Teams activity whose serviceUrl is not a Bot Framework host",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "404": {
             "description": "Chat SDK disabled or adapter not configured",
             "content": {

@@ -94,12 +94,14 @@ export async function loadAdapter(
     }
     case "teams": {
       const { createTeamsAdapter } = await import("@chat-adapter/teams");
-      // `webhookVerifier` replaces the Bot Framework JWT check. Only tests set
-      // it (test-hooks.ts); the operator schema rejects it.
-      const { teamsWebhookVerifier } = getChatSdkTestHooks();
+      // `webhookVerifier` replaces the Bot Framework JWT check and `token` the
+      // bot token call. Only tests set them (test-hooks.ts); the operator
+      // schema rejects `webhookVerifier`, and `token` is a function.
+      const { teamsWebhookVerifier, teamsToken } = getChatSdkTestHooks();
       return createTeamsAdapter({
         ...base,
         ...(teamsWebhookVerifier ? { webhookVerifier: teamsWebhookVerifier } : {}),
+        ...(teamsToken ? { token: teamsToken } : {}),
       } as Parameters<typeof createTeamsAdapter>[0]);
     }
   }

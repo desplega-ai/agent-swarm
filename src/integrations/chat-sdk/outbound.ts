@@ -2,6 +2,7 @@ import { scrubSecrets } from "@/utils/secret-scrubber";
 import { workflowEventBus } from "@/workflows/event-bus";
 import { chatMessageLimit, splitChatMessage } from "./limits";
 import { getChatInstance } from "./runtime";
+import { assertTrustedChatTarget } from "./teams-origin";
 
 /** The adapter is not configured, failed to start, or is shutting down. */
 export class ChatAdapterUnavailableError extends Error {
@@ -65,7 +66,9 @@ async function postChunks(
  * Post markdown to a Chat SDK thread or channel. Scrubs the text, splits it by
  * the adapter limit, and emits one `chat.message.sent` for the whole message
  * once every chunk was accepted. Throws `ChatAdapterUnavailableError` when the
- * adapter is not running, and the adapter error when a send fails.
+ * adapter is not running, `UntrustedTeamsServiceUrlError` before any send
+ * when a Teams id points at a host that is not Bot Framework, and the adapter
+ * error when a send fails.
  *
  * Delivery is at-least-once: a chunk failure re-posts earlier chunks on retry,
  * and a crash between the send and `markChatRelayDelivered` re-sends the
@@ -78,6 +81,9 @@ export async function postChatMessage(args: {
   text: string;
   taskId?: string;
 }): Promise<ChatPostResult> {
+  // Ids come from tools and stored context keys. Check the Teams origin
+  // before the adapter sends its token.
+  assertTrustedChatTarget(args.threadId ?? args.channelId ?? "");
   const chat = getChatInstance(args.adapter);
   if (!chat) throw new ChatAdapterUnavailableError(args.adapter);
   const text = scrubSecrets(args.text);

@@ -3,6 +3,7 @@ import * as z from "zod";
 import { CHAT_SDK_ADAPTER_NAMES } from "@/integrations/chat-sdk/config";
 import { errorMessage } from "@/integrations/chat-sdk/logger";
 import { getChatInstance } from "@/integrations/chat-sdk/runtime";
+import { assertTrustedTeamsServiceUrl } from "@/integrations/chat-sdk/teams-origin";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 
 export const registerChatOpenDmTool = (server: McpServer) => {
@@ -34,6 +35,13 @@ export const registerChatOpenDmTool = (server: McpServer) => {
         return toolErr(`The ${adapter} adapter does not support direct messages.`, { data });
       }
       try {
+        if (adapter === "teams") {
+          // Teams opens the DM at the service URL cached from the user's last
+          // activity (adapter state key). The webhook route refuses untrusted
+          // ones; check again before the bot token goes out.
+          const cached = await chat.getState().get<string>(`teams:serviceUrl:${userId}`);
+          if (cached) assertTrustedTeamsServiceUrl(cached);
+        }
         const threadId = await platform.openDM(userId);
         return toolOk(`Direct-message thread with ${userId} on ${adapter}: ${threadId}.`, {
           data: { ...data, adapter, threadId },

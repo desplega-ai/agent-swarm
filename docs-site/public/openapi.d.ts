@@ -22992,6 +22992,15 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
+                /** @description Teams activity whose serviceUrl is not a Bot Framework host */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
                 /** @description Chat SDK disabled or adapter not configured */
                 404: {
                     headers: {

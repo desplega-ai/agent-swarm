@@ -3,6 +3,7 @@ import * as z from "zod";
 import { errorMessage } from "@/integrations/chat-sdk/logger";
 import { adapterOfChatId } from "@/integrations/chat-sdk/outbound";
 import { getChatInstance } from "@/integrations/chat-sdk/runtime";
+import { assertTrustedChatTarget } from "@/integrations/chat-sdk/teams-origin";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 import { scrubSecrets } from "@/utils/secret-scrubber";
 
@@ -52,6 +53,8 @@ export const registerChatReadThreadTool = (server: McpServer) => {
       const chat = getChatInstance(adapter);
       if (!chat) return toolErr(`Chat SDK adapter '${adapter}' is not running.`, { data });
       try {
+        // Teams reads history with the bot token from the service URL in the id.
+        assertTrustedChatTarget(threadId);
         const page = await chat.history.thread.list(threadId, {
           limit: limit ?? DEFAULT_LIMIT,
           direction: "backward",
