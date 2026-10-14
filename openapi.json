@@ -21110,6 +21110,224 @@
         }
       }
     },
+    "/api/integrations/chat/status": {
+      "get": {
+        "summary": "Chat SDK channel status: enabled flag, Slack clash, per-adapter health and webhook URL.",
+        "tags": [
+          "Integrations"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Per-adapter status. `health` is `disabled` for an adapter that is not running. Never contains secret values.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "slackClash": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "adapters": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "name": {
+                            "type": "string",
+                            "enum": [
+                              "telegram",
+                              "slack",
+                              "discord",
+                              "teams"
+                            ]
+                          },
+                          "configured": {
+                            "type": "boolean"
+                          },
+                          "health": {
+                            "type": "string",
+                            "enum": [
+                              "ok",
+                              "error",
+                              "disabled"
+                            ]
+                          },
+                          "error": {
+                            "type": "string"
+                          },
+                          "webhookUrl": {
+                            "type": "string"
+                          },
+                          "mode": {
+                            "type": "string"
+                          },
+                          "gateway": {
+                            "type": "object",
+                            "properties": {
+                              "state": {
+                                "type": "string",
+                                "enum": [
+                                  "running",
+                                  "backoff",
+                                  "stopped"
+                                ]
+                              },
+                              "since": {
+                                "type": "string"
+                              },
+                              "restarts": {
+                                "type": "number"
+                              }
+                            },
+                            "required": [
+                              "state",
+                              "since",
+                              "restarts"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "name",
+                          "configured",
+                          "health",
+                          "webhookUrl"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "enabled",
+                    "slackClash",
+                    "adapters"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/integrations/chat/telegram/register-webhook": {
+      "post": {
+        "summary": "Register this swarm's public Telegram webhook URL and secret token with the Bot API (setWebhook), then return getWebhookInfo.",
+        "tags": [
+          "Integrations"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {}
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Webhook registered",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "webhookUrl": {
+                      "type": "string"
+                    },
+                    "webhookInfo": {
+                      "type": "object",
+                      "properties": {
+                        "url": {
+                          "type": "string"
+                        },
+                        "has_custom_certificate": {
+                          "type": "boolean"
+                        },
+                        "pending_update_count": {
+                          "type": "number"
+                        },
+                        "last_error_date": {
+                          "type": "number"
+                        },
+                        "last_error_message": {
+                          "type": "string"
+                        },
+                        "max_connections": {
+                          "type": "number"
+                        },
+                        "ip_address": {
+                          "type": "string"
+                        },
+                        "allowed_updates": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      },
+                      "required": [
+                        "url"
+                      ],
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "webhookUrl",
+                    "webhookInfo"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Telegram is not configured for webhook mode",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Only the lead agent or a dashboard user can register the webhook",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "The Telegram Bot API rejected the call",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/kv/{key}": {
       "get": {
         "summary": "Get a KV entry by key (namespace resolved from request headers)",

@@ -91,8 +91,10 @@ async function startAdapter(
   ChatClass: typeof Chat,
 ): Promise<void> {
   let lastWarning: string | undefined;
-  const logger = createScrubbingLogger(name, (level, message) => {
-    lastWarning = `${level}: ${message}`;
+  // No level prefix on the stored line: the message already says what failed,
+  // and the status payload carries the tone separately.
+  const logger = createScrubbingLogger(name, (_level, message) => {
+    lastWarning = message;
     const current = health.get(name);
     if (current) health.set(name, { ...current, lastWarning });
   });

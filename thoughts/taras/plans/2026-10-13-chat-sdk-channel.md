@@ -2,7 +2,9 @@
 date: 2026-10-13
 author: Taras
 topic: "Chat SDK (chat-sdk.dev) as a swarm input/output channel"
-status: in-progress
+status: completed
+last_updated: 2026-10-14
+last_updated_by: Claude (phase 6 agent)
 autonomy: verbose
 commit_per_phase: true
 brainstorm: thoughts/taras/brainstorms/2026-10-13-chat-sdk-channel.md
@@ -555,15 +557,15 @@ When this phase is done, the dashboard has a Chat SDK integration card (per-adap
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Backend: `bun run test:root -- src/tests/chat-sdk-status-route.test.ts && bun run check:rbac-coverage && bun run check:openapi-response-coverage && bun run docs:openapi && git diff --exit-code openapi.json`
-- [ ] UI: `cd apps/ui && bun install --frozen-lockfile && bun run lint && bunx tsc -b`
-- [ ] UI E2E smoke: `bun run e2e:ui -- --grep @smoke`
-- [ ] Full gate: `bun run check && bun run tsc:check:tsc && bun run lint:slop && bun run test:root -- --parallel=4 && bun run e2e`
+- [x] Backend: `bun run test:root -- src/tests/chat-sdk-status-route.test.ts && bun run check:rbac-coverage && bun run check:openapi-response-coverage && bun run docs:openapi && git diff --exit-code openapi.json`
+- [x] UI: `cd apps/ui && bun install --frozen-lockfile && bun run lint && bunx tsc -b`
+- [x] UI E2E smoke: `bun run e2e:ui -- --grep @smoke`
+- [x] Full gate: `bun run check && bun run tsc:check:tsc && bun run lint:slop && bun run test:root -- --parallel=4 && bun run e2e`
 - [ ] Docs build: `cd docs-site && bun install --frozen-lockfile && bun run build`
 
 #### Automated QA:
 - [ ] `agent-browser open http://localhost:5274/integrations/chat-sdk` (API with the fake Bot API Telegram config): screenshot the card empty, after saving a Telegram token (the JSON preview shows `{"$config":"CHAT_SDK_TELEGRAM_BOT_TOKEN"}` and no plaintext), with the health line `ok`, and with a Slack entry while `SLACK_DISABLE` is unset (clash banner). Recording of "Register webhook" click → `getWebhookInfo` result. Upload via the `github-attach` skill into the PR `## Before / after` section.
-- [ ] Task list filter `source=chat` shows the Telegram tasks with the chat icon; task detail shows the source line.
+- [x] Task list filter `source=chat` shows the Telegram tasks with the chat icon; task detail shows the source line.
 - [ ] `GET /api/integrations/chat/status` with a bogus Discord token returns `health: "error"` for discord and `ok` for telegram.
 
 #### Manual Verification:
@@ -743,3 +745,14 @@ _Recorded by the orchestrator during autopilot implementation (2026-10-14). Each
 - Follow-ups: the adapter's own info logs print `publicKey` and signature prefixes (noisy, not secret); a single `discord.js` client across windows via the forwarding path would remove the message loss at window gaps; Phase 6 docs must state that gap.
 - Review fixes (2026-10-14): `stopChatSdk` uses one 10 s shutdown budget shared by both drains; `stopDiscordGateway()` only aborts and does not wait on its own, so SIGTERM stays inside the budget even when `discord.js` login hangs. Each Gateway window gets its own `AbortController` linked to the outer signal (the adapter never removes its abort listener, so a shared signal leaked one listener per 6 h window). The Discord adapter logger filters the per-message `Discord Gateway message received` info line (it carried user text for every guild message) and the per-interaction `publicKey`/signature-prefix noise; warn/error untouched. `publicKey` must be 64 hex chars. Health `lastWarning` now carries the scrubbed error cause. `propagateHandlerErrors` is not passed to the Gateway listener (consistent with Phase 4).
 - Known: the `stopped` gateway state is reset by `stopChatSdk` and is visible only to direct `getDiscordGatewayHealth()` callers.
+
+### Phase 6
+- Status response (`GET /api/integrations/chat/status`) carries an optional top-level `error` (config resolution error, shown as a banner). `configured` and `slackClash` derive from the raw `CHAT_SDK_ADAPTERS` keys so the card shows them even when `$config` refs do not resolve; `mode` comes only from the non-secret field. A configured adapter that is not running reports `health: "disabled"` with a restart hint.
+- Register-webhook: 400 when Telegram is not configured, is in polling mode, or has no `secretToken`; 502 when the Bot API fails; the token is redacted from error text. The Bot API base comes from `resolveAdapterApiUrl()` shared with the adapters. RBAC: operators and dashboard users may call it (same as `ensureConfigAdmin`); agents need `integration.chat.manage` (lead-only).
+- The card has an explicit Save, not autosave, because it writes one combined JSON. Order: secret rows (`CHAT_SDK_<ADAPTER>_<FIELD>`), then `CHAT_SDK_ADAPTERS`, then `CHAT_SDK_ENABLED`; no `/api/config/reload`. Unknown keys and existing inline or other `$config` refs are preserved. An info callout appears when config comes from the environment only.
+- No `recommendedSkills` (no seeded `SkillSource`); the card copy says the built-in `chat-sdk` skill needs no install. The setup wizard is unchanged: its integrations list comes from API onboarding signals, and Kapso is not in it either.
+- Docs state the webhook answers 404 while an adapter is still starting and 503 after a failure or during shutdown (what the code does). Discord Interactions Endpoint URL is documented as optional per the adapter README; Slack scopes follow the adapter README manifest plus `im:write` and `files:read`, unverified against a real app.
+- QA: the bogus-Discord item expected `health: "error"`; the Phase 5 design yields `ok` + `gateway.state: "backoff"` with the scrubbed `TokenInvalid` cause in `error`. The item wording is superseded. `cd docs-site && bun install --frozen-lockfile` fails on unmodified HEAD too (local Bun 1.4.2 vs pinned 1.4.0); the unfrozen build passes. Screenshots and the register-webhook recording are under `/tmp/chat-sdk-p6/` (nothing uploaded; no PR yet).
+- Open: whether `?source=chat` filters the tasks page with more than one source (only one task existed in QA); `chat-post` / `chat-read-thread` / `chat-open-dm` lead-only decision (Phase 3).
+- Review fixes (2026-10-14): `$config` objects on text fields are preserved unless edited (they rendered as `[object Object]` and were saved back); secret rows are written as a first batch and `CHAT_SDK_ADAPTERS` / `CHAT_SDK_ENABLED` only after every secret row succeeded (a failed row left a dangling ref that blocked boot); `ensureChatManage` reuses a parameterized `ensureConfigAdmin`; the status `error` no longer embeds the JSON parser message (it could echo an inline token) and is bounded; register-webhook has a 10 s Bot API timeout; env-only state renders effective, disabled switches; `secretToken` is validated client-side (`[A-Za-z0-9_-]{1,256}`); the card Save row is visible without scrolling; secret plaintext is masked in the JSON preview; pure form helpers moved to `apps/ui/src/lib/chat-sdk-form.ts` with tests; docs gained an unverified Slack app manifest block.
+- RBAC note: `ensureChatManage` resolves operator (shared API key) and dashboard users as allowed, like `ensureConfigAdmin`; the lead-only `integration.chat.manage` verb applies to per-agent tokens or a bare `X-Agent-ID`. Kapso registers numbers through an MCP tool, so there is no HTTP precedent.

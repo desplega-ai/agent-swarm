@@ -604,6 +604,37 @@ export interface McpUserConfigResponse {
   mcpUserUrl: string;
 }
 
+/** `GET /api/integrations/chat/status`. Never carries secret values. */
+export interface ChatSdkAdapterStatus {
+  name: "telegram" | "slack" | "discord" | "teams";
+  configured: boolean;
+  health: "ok" | "error" | "disabled";
+  error?: string;
+  webhookUrl: string;
+  mode?: string;
+  gateway?: { state: "running" | "backoff" | "stopped"; since: string; restarts: number };
+}
+
+export interface ChatSdkStatusResponse {
+  enabled: boolean;
+  slackClash: boolean;
+  /** Config problem that keeps every adapter from starting. */
+  error?: string;
+  adapters: ChatSdkAdapterStatus[];
+}
+
+/** `POST /api/integrations/chat/telegram/register-webhook`. */
+export interface ChatSdkTelegramWebhookResponse {
+  webhookUrl: string;
+  webhookInfo: {
+    url: string;
+    pending_update_count?: number;
+    last_error_date?: number;
+    last_error_message?: string;
+    [key: string]: unknown;
+  };
+}
+
 export interface CreateUserInput {
   name: string;
   email?: string;

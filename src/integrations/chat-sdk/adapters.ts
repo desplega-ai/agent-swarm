@@ -39,6 +39,15 @@ export function keepDiscordInfoLine(message: string): boolean {
 }
 
 /**
+ * Platform API base for one adapter: the env-only `CHAT_SDK_API_URL_OVERRIDES`
+ * entry, else the platform default. The adapters and the Telegram
+ * register-webhook route use the same base.
+ */
+export function resolveAdapterApiUrl(name: ChatSdkAdapterName): string {
+  return readApiUrlOverrides()[name] ?? DEFAULT_API_URLS[name];
+}
+
+/**
  * Construct one adapter. Each branch is a literal-path dynamic import so
  * `bun build --compile` bundles it (a computed specifier is not bundled).
  * `apiUrl` comes only from the env-only `CHAT_SDK_API_URL_OVERRIDES`.
@@ -48,7 +57,7 @@ export async function loadAdapter(
   config: ResolvedAdapterConfig,
   logger: Logger,
 ): Promise<Adapter> {
-  const apiUrl = readApiUrlOverrides()[name] ?? DEFAULT_API_URLS[name];
+  const apiUrl = resolveAdapterApiUrl(name);
   const base = { ...config, apiUrl, logger };
   switch (name) {
     case "telegram": {

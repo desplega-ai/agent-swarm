@@ -7611,6 +7611,143 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/integrations/chat/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Chat SDK channel status: enabled flag, Slack clash, per-adapter health and webhook URL. */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Per-adapter status. `health` is `disabled` for an adapter that is not running. Never contains secret values. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            enabled: boolean;
+                            slackClash: boolean;
+                            error?: string;
+                            adapters: {
+                                /** @enum {string} */
+                                name: "telegram" | "slack" | "discord" | "teams";
+                                configured: boolean;
+                                /** @enum {string} */
+                                health: "ok" | "error" | "disabled";
+                                error?: string;
+                                webhookUrl: string;
+                                mode?: string;
+                                gateway?: {
+                                    /** @enum {string} */
+                                    state: "running" | "backoff" | "stopped";
+                                    since: string;
+                                    restarts: number;
+                                };
+                            }[];
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/integrations/chat/telegram/register-webhook": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Register this swarm's public Telegram webhook URL and secret token with the Bot API (setWebhook), then return getWebhookInfo. */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": Record<string, never>;
+                };
+            };
+            responses: {
+                /** @description Webhook registered */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            webhookUrl: string;
+                            webhookInfo: {
+                                url: string;
+                                has_custom_certificate?: boolean;
+                                pending_update_count?: number;
+                                last_error_date?: number;
+                                last_error_message?: string;
+                                max_connections?: number;
+                                ip_address?: string;
+                                allowed_updates?: string[];
+                            } & {
+                                [key: string]: unknown;
+                            };
+                        };
+                    };
+                };
+                /** @description Telegram is not configured for webhook mode */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Only the lead agent or a dashboard user can register the webhook */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description The Telegram Bot API rejected the call */
+                502: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/kv/{key}": {
         parameters: {
             query?: never;

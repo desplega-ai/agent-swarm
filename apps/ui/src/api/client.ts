@@ -33,6 +33,8 @@ import type {
   BudgetsResponse,
   ChannelMessage,
   ChannelsResponse,
+  ChatSdkStatusResponse,
+  ChatSdkTelegramWebhookResponse,
   ClaudeRuntimeConfig,
   CombReviewBatchInput,
   CombReviewBatchResult,
@@ -3248,6 +3250,23 @@ class ApiClient {
     }
     const data = (await res.json()) as UserResponse;
     return data.user;
+  }
+
+  async getChatSdkStatus(): Promise<ChatSdkStatusResponse> {
+    const url = `${this.getBaseUrl()}/api/integrations/chat/status`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to fetch Chat SDK status: ${res.status}`);
+    return (await res.json()) as ChatSdkStatusResponse;
+  }
+
+  async registerChatSdkTelegramWebhook(): Promise<ChatSdkTelegramWebhookResponse> {
+    const url = `${this.getBaseUrl()}/api/integrations/chat/telegram/register-webhook`;
+    const res = await fetch(url, { method: "POST", headers: this.getHeaders(), body: "{}" });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: "" }));
+      throw new Error(err.error || `Failed to register the Telegram webhook: ${res.status}`);
+    }
+    return (await res.json()) as ChatSdkTelegramWebhookResponse;
   }
 
   async getMcpUserConfig(): Promise<McpUserConfigResponse> {

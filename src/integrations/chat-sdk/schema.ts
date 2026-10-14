@@ -126,6 +126,18 @@ export const ChatSdkAdaptersSchema = z
 export type ChatSdkAdapters = z.infer<typeof ChatSdkAdaptersSchema>;
 
 /**
+ * Field names per adapter, derived from the schemas. The dashboard keeps its
+ * own field list (`apps/ui/src/lib/chat-sdk-fields.ts`, it cannot import zod
+ * schemas from the API); `src/tests/chat-sdk-fields-sync.test.ts` keeps the two equal.
+ */
+export const CHAT_SDK_ADAPTER_FIELDS: Record<ChatSdkAdapterName, readonly string[]> = {
+  telegram: Object.keys(TelegramAdapterSchema.shape),
+  slack: Object.keys(SlackAdapterSchema.shape),
+  discord: Object.keys(DiscordAdapterSchema.shape),
+  teams: Object.keys(TeamsAdapterSchema.shape),
+};
+
+/**
  * `VALIDATED_KEYS` validator for `CHAT_SDK_ADAPTERS`: JSON shape only, no
  * reference resolution. Returns the first issue as a string, or null.
  */

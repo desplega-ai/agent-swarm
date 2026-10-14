@@ -103,10 +103,9 @@ export async function getChatSdkConfig(): Promise<ChatSdkConfig> {
     let parsed: unknown;
     try {
       parsed = JSON.parse(adaptersJson);
-    } catch (error) {
-      throw new ChatSdkConfigError(
-        `CHAT_SDK_ADAPTERS is not valid JSON: ${error instanceof Error ? error.message : String(error)}`,
-      );
+    } catch {
+      // Fixed text: the parser message can quote the input, which may hold an inline token.
+      throw new ChatSdkConfigError("CHAT_SDK_ADAPTERS is not valid JSON");
     }
     const validated = ChatSdkAdaptersSchema.safeParse(parsed);
     if (!validated.success) {

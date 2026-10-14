@@ -1,6 +1,7 @@
 import type { ComponentType } from "react";
 import type { EnvPresenceMap } from "@/api/hooks/use-integrations-meta";
 import type { SwarmConfig } from "@/api/types";
+import { ChatSdkSection } from "@/components/integrations/chat-sdk-section";
 import { ClaudeManagedSection } from "@/components/integrations/claude-managed-section";
 import { CodexOAuthSection } from "@/components/integrations/codex-oauth-section";
 import { JiraOAuthSection } from "@/components/integrations/jira-oauth-section";
@@ -35,4 +36,5 @@ export const SPECIAL_FLOWS: Record<IntegrationSpecialFlow, SpecialFlow> = {
   "claude-managed-cli": { Section: ClaudeManagedSection, genericFields: "shown" },
   "codex-cli": { Section: CodexOAuthSection, genericFields: "replaced" },
   "memory-embeddings": { Section: MemoryEmbeddingsSection, genericFields: "advanced" },
+  "chat-sdk": { Section: ChatSdkSection, genericFields: "advanced" },
 };
