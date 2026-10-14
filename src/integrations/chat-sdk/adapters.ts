@@ -1,5 +1,6 @@
 import type { Adapter, Logger } from "chat";
 import { type ChatSdkAdapterName, type ResolvedAdapterConfig, readApiUrlOverrides } from "./config";
+import { withInfoFilter } from "./logger";
 import { getChatSdkTestHooks } from "./test-hooks";
 
 /**
@@ -19,6 +20,23 @@ const DEFAULT_API_URLS: Record<ChatSdkAdapterName, string> = {
   discord: "https://discord.com/api/v10",
   teams: "",
 };
+
+/**
+ * Discord adapter info lines dropped from the logs. They fire per event and
+ * carry guild message content (first 100 chars), or the public key and
+ * signature prefix of every interaction. Warn and error lines are kept.
+ */
+const DISCORD_NOISY_INFO_PREFIXES = [
+  "Discord Gateway message received",
+  "Discord webhook received",
+  "Discord signature verification",
+  "Discord interaction parsed",
+  "Discord PING received",
+];
+
+export function keepDiscordInfoLine(message: string): boolean {
+  return !DISCORD_NOISY_INFO_PREFIXES.some((prefix) => message.startsWith(prefix));
+}
 
 /**
  * Construct one adapter. Each branch is a literal-path dynamic import so
@@ -56,7 +74,14 @@ export async function loadAdapter(
     }
     case "discord": {
       const { createDiscordAdapter } = await import("@chat-adapter/discord");
-      return createDiscordAdapter(base as Parameters<typeof createDiscordAdapter>[0]);
+      // `[]` (not undefined) blocks the DISCORD_RESPOND_TO_CHANNEL_IDS and
+      // DISCORD_MENTION_ROLE_IDS env fallbacks.
+      return createDiscordAdapter({
+        ...base,
+        logger: withInfoFilter(logger, keepDiscordInfoLine),
+        respondToChannelIds: config.respondToChannelIds ?? [],
+        mentionRoleIds: config.mentionRoleIds ?? [],
+      } as Parameters<typeof createDiscordAdapter>[0]);
     }
     case "teams": {
       const { createTeamsAdapter } = await import("@chat-adapter/teams");

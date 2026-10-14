@@ -30,7 +30,7 @@ const BRAINSTORM_EXAMPLE = {
   },
   discord: {
     botToken: { $config: "DISCORD_BOT_TOKEN" },
-    publicKey: "abcdef",
+    publicKey: "abababababababababababababababababababababababababababababababab",
     applicationId: "1234",
     respondToChannelIds: ["c1"],
     respondToGlobalMentions: true,
@@ -132,6 +132,38 @@ describe("CHAT_SDK_ADAPTERS validator", () => {
       );
       expect(error).toContain(`telegram.${key}`);
     }
+  });
+
+  test("Discord: typed mention fields, verifier still rejected", () => {
+    const discord = {
+      botToken: "x",
+      publicKey: "abababababababababababababababababababababababababababababababab",
+      applicationId: "1234",
+    };
+    expect(
+      validateConfigValue(
+        "CHAT_SDK_ADAPTERS",
+        JSON.stringify({ discord: { ...discord, mentionRoleIds: ["r1"] } }),
+      ),
+    ).toBeNull();
+    expect(
+      validateConfigValue(
+        "CHAT_SDK_ADAPTERS",
+        JSON.stringify({ discord: { ...discord, mentionRoleIds: "r1" } }),
+      ),
+    ).toContain("discord.mentionRoleIds");
+    expect(
+      validateConfigValue(
+        "CHAT_SDK_ADAPTERS",
+        JSON.stringify({ discord: { ...discord, webhookVerifier: "x" } }),
+      ),
+    ).toContain("discord.webhookVerifier");
+    const badKey = validateConfigValue(
+      "CHAT_SDK_ADAPTERS",
+      JSON.stringify({ discord: { ...discord, publicKey: "abcdef" } }),
+    );
+    expect(badKey).toContain("discord.publicKey");
+    expect(badKey).toContain("64 hex characters");
   });
 
   test("accepts a valid value without resolving refs", () => {

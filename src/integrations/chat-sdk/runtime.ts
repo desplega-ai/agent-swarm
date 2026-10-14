@@ -9,10 +9,19 @@ import {
   getChatSdkConfig,
   type ResolvedAdapterConfig,
 } from "./config";
+import {
+  type DiscordGatewayHealth,
+  getDiscordGatewayHealth,
+  isDiscordGatewayListener,
+  resetDiscordGatewayHealth,
+  startDiscordGateway,
+  stopDiscordGateway,
+} from "./discord-gateway";
 import { registerChatHandlers } from "./handlers";
 import { createScrubbingLogger, errorMessage } from "./logger";
 import { startChatRelayWatcher, stopChatRelayWatcher } from "./relay";
 import { SqliteChatState } from "./state";
+import { getChatSdkTestHooks } from "./test-hooks";
 import { flushAllChatBuffers } from "./thread-buffer";
 
 export interface ChatAdapterHealth {
@@ -21,6 +30,8 @@ export interface ChatAdapterHealth {
   /** Last warn/error line the adapter logged, scrubbed. */
   lastWarning?: string;
   since: string;
+  /** Discord only: the supervised Gateway listener loop. */
+  gateway?: DiscordGatewayHealth;
 }
 
 /**
@@ -39,6 +50,9 @@ export function isChatSdkStopping(): boolean {
 }
 
 const DEFAULT_CHAT_USER_NAME = "swarm";
+
+/** Total wait for background work in `stopChatSdk`, inside the 15 s SIGTERM budget. */
+const SHUTDOWN_BUDGET_MS = 10_000;
 
 /** Fields whose string value is a credential, registered with the scrubber. */
 const SECRET_FIELDS = ["botToken", "secretToken", "signingSecret", "appToken", "appPassword"];
@@ -99,9 +113,23 @@ async function startAdapter(
     registerChatHandlers(chat);
     instances.set(name, chat);
     await chat.initialize();
+    // Shutdown began while this adapter initialized: do not mark it ready or
+    // start the Gateway after `stopChatSdk` already stopped it.
+    if (stopping) {
+      console.log(`[chat-sdk] ${name} initialized during shutdown, not started`);
+      return;
+    }
     watchSocketConnection(adapter, logger);
     setHealth(name, "ok", undefined, lastWarning);
     console.log(`[chat-sdk] ${name} ready`);
+    // Discord messages arrive only over the Gateway, never the webhook.
+    if (
+      name === "discord" &&
+      isDiscordGatewayListener(adapter) &&
+      !getChatSdkTestHooks().disableDiscordGateway
+    ) {
+      startDiscordGateway(adapter);
+    }
   } catch (error) {
     setHealth(name, "error", errorMessage(error), lastWarning);
     console.error(`[chat-sdk] ${name} failed to start: ${errorMessage(error)}`);
@@ -157,19 +185,28 @@ export function isChatAdapterConfigured(name: string): boolean {
 }
 
 export function getChatSdkHealth(): Partial<Record<ChatSdkAdapterName, ChatAdapterHealth>> {
-  return Object.fromEntries(health);
+  const out: Partial<Record<ChatSdkAdapterName, ChatAdapterHealth>> = Object.fromEntries(health);
+  const gateway = getDiscordGatewayHealth();
+  if (out.discord && gateway) out.discord = { ...out.discord, gateway };
+  return out;
 }
 
 export async function stopChatSdk(): Promise<void> {
   // Refuse new webhook work, let in-flight handlers finish buffering, then
   // turn waiting threads into tasks while adapters and the DB are still up.
   stopping = true;
+  // One deadline for every wait below, so the total stays inside the budget.
+  const deadline = Date.now() + SHUTDOWN_BUDGET_MS;
+  const remaining = (): number => Math.max(0, deadline - Date.now());
   // The relay posts through the adapters, so it stops first.
   await stopChatRelayWatcher();
-  const timeoutMs = 10_000;
-  let drained = await drainBackground(timeoutMs);
+  // Discord has no `disconnect()`, so `chat.shutdown()` would leave the
+  // Gateway open. Abort it before the drain: the open window is tracked
+  // background work, so the drain bounds the wait for it to close.
+  stopDiscordGateway();
+  let drained = await drainBackground(remaining());
   await flushAllChatBuffers();
-  drained = (await drainBackground(timeoutMs)) && drained;
+  drained = (await drainBackground(remaining())) && drained;
   for (const [name, chat] of instances) {
     try {
       await chat.shutdown();
@@ -179,5 +216,10 @@ export async function stopChatSdk(): Promise<void> {
   }
   instances.clear();
   health.clear();
-  if (!drained) console.warn("[chat-sdk] Background handlers still running after 10s drain");
+  resetDiscordGatewayHealth();
+  if (!drained) {
+    console.warn(
+      `[chat-sdk] Background handlers still running after the ${SHUTDOWN_BUDGET_MS / 1000}s shutdown budget`,
+    );
+  }
 }

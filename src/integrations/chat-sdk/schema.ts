@@ -76,12 +76,25 @@ export const SlackAdapterSchema = adapterSchema({
   }
 });
 
+const DISCORD_PUBLIC_KEY_PATTERN = /^[0-9a-fA-F]{64}$/;
+
 export const DiscordAdapterSchema = adapterSchema({
   botToken: Str,
   publicKey: Str,
   applicationId: Str,
   respondToChannelIds: z.array(z.string()).optional(),
   respondToGlobalMentions: z.boolean().optional(),
+  mentionRoleIds: z.array(z.string()).optional(),
+}).superRefine((value, ctx) => {
+  // A literal key must be the hex Ed25519 public key from the Developer Portal.
+  // A `$config` value resolves at startup, where the adapter logs a bad format.
+  if (typeof value.publicKey === "string" && !DISCORD_PUBLIC_KEY_PATTERN.test(value.publicKey)) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["publicKey"],
+      message: "publicKey must be 64 hex characters (the application's Ed25519 public key)",
+    });
+  }
 });
 
 export const TeamsAdapterSchema = adapterSchema({

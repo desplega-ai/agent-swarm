@@ -10,6 +10,11 @@ export interface ChatSdkTestHooks {
    * mint a Microsoft-signed token, so they inject `() => true`.
    */
   teamsWebhookVerifier?: (request: Request, body: string) => boolean | Promise<boolean>;
+  /**
+   * Skips the Discord Gateway loop. The loop logs in through `discord.js`
+   * against the real Discord API, which `apiUrl` does not redirect.
+   */
+  disableDiscordGateway?: boolean;
 }
 
 let hooks: ChatSdkTestHooks = {};

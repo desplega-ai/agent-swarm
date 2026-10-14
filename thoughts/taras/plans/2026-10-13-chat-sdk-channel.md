@@ -501,14 +501,14 @@ When this phase is done, a configured Discord adapter runs a supervised Gateway 
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Phase tests: `bun run test:root -- src/tests/chat-sdk-discord-gateway.test.ts src/tests/chat-sdk-discord-webhook.test.ts`
-- [ ] Full root suite as CI runs it: `bun run test:root -- --parallel=4`
-- [ ] Compile and runtime: `bun build ./src/http.ts ./src/scripts-runtime/executors/quickjs-worker.ts --compile --compile-exec-argv='--expose-gc' --outfile /tmp/agent-swarm-api-trial` then the bogus-token boot above using the Phase 1 compile-gate pattern (temp `DATABASE_PATH`, free `PORT`, `/health` poll, `kill`)
-- [ ] Image size recorded: `docker build -f Dockerfile -t agent-swarm-api:chat-sdk . && docker images agent-swarm-api:chat-sdk --format '{{.Size}}'` (baseline 381 MB; `.d.ts` files are not bundled by `bun build`, so the Teams typings do not reach the image)
-- [ ] Inner loop: `bun run check && bun run tsc:check:tsc && bun run lint:slop`
+- [x] Phase tests: `bun run test:root -- src/tests/chat-sdk-discord-gateway.test.ts src/tests/chat-sdk-discord-webhook.test.ts`
+- [x] Full root suite as CI runs it: `bun run test:root -- --parallel=4`
+- [x] Compile and runtime: `bun build ./src/http.ts ./src/scripts-runtime/executors/quickjs-worker.ts --compile --compile-exec-argv='--expose-gc' --outfile /tmp/agent-swarm-api-trial` then the bogus-token boot above using the Phase 1 compile-gate pattern (temp `DATABASE_PATH`, free `PORT`, `/health` poll, `kill`)
+- [x] Image size recorded: `docker build -f Dockerfile -t agent-swarm-api:chat-sdk . && docker images agent-swarm-api:chat-sdk --format '{{.Size}}'` (baseline 381 MB; `.d.ts` files are not bundled by `bun build`, so the Teams typings do not reach the image)
+- [x] Inner loop: `bun run check && bun run tsc:check:tsc && bun run lint:slop`
 
 #### Automated QA:
-- [ ] Boot locally with a Discord entry using a bogus token: log shows `[chat-sdk] discord gateway backoff` after the login failure, no crash, `SIGTERM` exits within 15 s with `[chat-sdk] discord gateway stopped` in the log.
+- [x] Boot locally with a Discord entry using a bogus token: log shows `[chat-sdk] discord gateway backoff` after the login failure, no crash, `SIGTERM` exits within 15 s with `[chat-sdk] discord gateway stopped` in the log.
 
 #### Manual Verification:
 - [ ] Real Discord bot (Message Content intent enabled, interactions endpoint set to `${PUBLIC_MCP_BASE_URL}/api/integrations/chat/discord/webhook`): mention the bot in a channel → task; completion reply arrives in the thread; a `/ping`-style slash command, if registered, reaches the webhook (200). Record the login count in the Discord developer portal stays flat over an hour.
@@ -731,3 +731,15 @@ _Recorded by the orchestrator during autopilot implementation (2026-10-14). Each
 - QA artifacts (local only, no PR yet): `/tmp/chat-sdk-slack-thread.png`, `/tmp/chat-sdk-frames/`, journal `/tmp/chat-sdk-qa/slack-socket.jsonl`. New test files are outside `tsc:check`; they were type-checked with a temporary tsconfig.
 - Review fixes (2026-10-14): the Teams SDK reads `SERVICE_URL`, `TENANT_ID`, `CLIENT_ID`, `CLIENT_SECRET`, `MANAGED_IDENTITY_CLIENT_ID` and `CLOUD` from `process.env`; a `SERVICE_URL` config row could redirect the bot token. Those six keys now join the env-injection denylist in `getInjectableGlobalConfigs` (not `RESERVED_KEYS`: operators may still store them; they never reach env). Deployment env can still set them on purpose. `propagateHandlerErrors` was removed from the webhook call (moot once handlers catch their own errors; Telegram and Slack ack before processing, so no retry semantics changed). Socket reconnects log at info; only `unable_to_socket_mode_start` and `error` reach health. Harness renamed to `src/tests/chat-sdk-harness.ts`.
 - Known: `slack-*` MCP tools still register from raw `CAPABILITIES` even when `SLACK_DISABLE=true` drops the prompt capability (pre-existing mismatch for HTTP mode too).
+
+### Phase 5
+- `startDiscordGateway(adapter, options?)` takes no `chat` argument (`startGatewayListener` already checks `this.chat`). Tests inject `windowMs`, `sleep` and `now`.
+- A bad bot token does not set the adapter `status` to `error`. Status stays `ok`, `gateway.state` becomes `backoff`, and `lastWarning` holds the scrubbed listener error. Reason: the interactions webhook still works without the Gateway, and `status: error` would make the webhook answer 503.
+- A non-200 from `startGatewayListener` (for example 500 "not initialized") logs and backs off instead of looping.
+- New test hook `disableDiscordGateway` in `test-hooks.ts`: `discord.js` login ignores `apiUrl` and would reach real Discord. Production never sets it.
+- `respondToChannelIds` and `mentionRoleIds` default to `[]` so the `DISCORD_RESPOND_TO_CHANNEL_IDS` / `DISCORD_MENTION_ROLE_IDS` env fallbacks cannot apply. `mentionRoleIds` was added to the schema.
+- `stopChatSdk` order: stopping flag, relay watcher stop, `stopDiscordGateway()`, drain, flush, drain, adapter shutdown. Shutdown resets gateway health.
+- Verified: compiled binary with a bogus token logs `TokenInvalid` (token appears 0 times), `discord gateway backoff`, `/health` 200, SIGTERM exits in about 1 s with `discord gateway stopped`. Image 378 MB (baseline 381 MB). Parallel suite 14295 pass, 0 fail.
+- Follow-ups: the adapter's own info logs print `publicKey` and signature prefixes (noisy, not secret); a single `discord.js` client across windows via the forwarding path would remove the message loss at window gaps; Phase 6 docs must state that gap.
+- Review fixes (2026-10-14): `stopChatSdk` uses one 10 s shutdown budget shared by both drains; `stopDiscordGateway()` only aborts and does not wait on its own, so SIGTERM stays inside the budget even when `discord.js` login hangs. Each Gateway window gets its own `AbortController` linked to the outer signal (the adapter never removes its abort listener, so a shared signal leaked one listener per 6 h window). The Discord adapter logger filters the per-message `Discord Gateway message received` info line (it carried user text for every guild message) and the per-interaction `publicKey`/signature-prefix noise; warn/error untouched. `publicKey` must be 64 hex chars. Health `lastWarning` now carries the scrubbed error cause. `propagateHandlerErrors` is not passed to the Gateway listener (consistent with Phase 4).
+- Known: the `stopped` gateway state is reset by `stopChatSdk` and is visible only to direct `getDiscordGatewayHealth()` callers.
