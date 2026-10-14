@@ -1151,7 +1151,7 @@ the generated `.d.ts` and rejects on diagnostics.
 | `description` | string | No | Human-readable script description |
 | `intent` | string | No | Why this script exists |
 
-A script may also export a Zod schema named `argsSchema` describing its expected arguments. On upsert the runtime extracts it, converts it to JSON Schema via `zod`'s `toJSONSchema`, and stores it on the catalog entry as `argsJsonSchema` — so callers can discover a script's argument shape before running it. The export is optional; scripts without it simply have a `null` `argsJsonSchema`.
+A script may also export a Zod schema named `argsSchema` describing its expected arguments. On upsert the runtime extracts it, converts it to JSON Schema via `zod`'s `toJSONSchema`, and stores it on the catalog entry as `argsJsonSchema` — so callers can discover a script's argument shape before running it. The export is optional; scripts without it simply have a `null` `argsJsonSchema`. The schema can be written with either `zod` or `zod/mini` (`import * as z from "zod/mini"`); Mini uses functional forms such as `z.optional(z.string())`.
 
 There is no ambient task context: pass values such as `taskId` through `args`.
 Inline and named scripts receive `ctx.swarm`, registered `ctx.api` / `ctx.mcp`

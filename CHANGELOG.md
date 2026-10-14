@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.172.0] - 2026-10-14
+
+### Added
+- OpenCode harness runs OpenCode 2.0 in-process through `@opencode/sdk`, replacing the old `plugin/opencode-plugins` plugin (#2112).
+- Scripts can import `zod/mini` alongside `zod` for smaller `quickjs` bundles (#2111).
+
+### Changed
+- Worker image bumps for pi, amp, grok, copilot and kiro (#2108, #2110).
+- `heartbeat-runbook` skill seed patches (#2106).
+
+### Fixed
+- GitHub: review state is read with `GITHUB_TOKEN` when there is no App installation (#2107).
+- Slack: continuation and result links carry labels (#2118).
+
 ## [1.171.1] - 2026-10-13
 
 ### Changed
