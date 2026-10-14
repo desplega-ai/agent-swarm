@@ -29,6 +29,7 @@ egress — script code never holds a raw secret (see
 | `openapi` | `ctx.api.<slug>.<operationId>(args)`  | a spec URL or inline spec (JSON or YAML) |
 | `graphql` | `ctx.api.<slug>.graphql(query, vars)` | an endpoint URL                          |
 | `mcp`     | `ctx.mcp.<slug>.<toolName>(args)`     | an installed MCP server (tool discovery) |
+| `sql`     | `ctx.api.<slug>.query(sql, params)`   | a Postgres DSN (read-only queries)       |
 
 ## Registering connections
 
@@ -137,6 +138,57 @@ the API server and never enter the script subprocess. Discovery honors the
 connection's scope, so an agent-scoped server's secrets resolve as that agent.
 
 Re-run discovery after a server adds tools with `{"action": "refresh"}`.
+
+### SQL (Postgres, read-only)
+
+A lead registers a Postgres DSN with `POST /api/script-connections`. Pass the
+DSN inline as `dsn.secret` (stored encrypted as `connection.<slug>.secret`) or
+name an existing secret with `dsn.configKey`:
+
+```jsonc
+{ "kind": "sql", "slug": "analytics", "dsn": { "configKey": "ANALYTICS_DSN" } }
+```
+
+```ts
+const { rows, rowCount, truncated } = await ctx.api.analytics.query(
+  "select id, email from users where created_at > $1",
+  ["2026-01-01"],
+);
+```
+
+Queries run on the API server through
+`POST /api/script-connections/{id}/sql-query` (RBAC verb
+`script-connection.invoke`). The DSN never enters the script subprocess. Each
+call opens a fresh connection with `default_transaction_read_only=on`, runs one
+statement inside a `READ ONLY` transaction as a server-side cursor, and closes
+the connection. Only queries a cursor accepts work: `SELECT`, `VALUES`, `TABLE`
+and `WITH ... SELECT`. A response holds at most 1000 rows and 5 MiB of JSON;
+`truncated: true` means more rows existed, and `rowCount` counts the rows
+returned.
+
+<Callout type="warn">
+The transaction settings stop ordinary writes, but they do not limit what the
+role can call. A superuser DSN can still run `COPY ... TO PROGRAM`,
+`pg_read_file()` or `dblink_exec()` from a `SELECT`. Register a dedicated
+role that can only read the tables the scripts need.
+</Callout>
+
+```sql
+CREATE ROLE swarm_reader LOGIN PASSWORD '...'
+  NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+ALTER ROLE swarm_reader SET default_transaction_read_only = on;
+ALTER ROLE swarm_reader SET statement_timeout = '30s';
+GRANT CONNECT ON DATABASE analytics TO swarm_reader;
+GRANT USAGE ON SCHEMA public TO swarm_reader;
+GRANT SELECT ON ALL TABLES IN SCHEMA public TO swarm_reader;
+-- Optional: also cover tables created later by the owning role.
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO swarm_reader;
+```
+
+Do not grant `pg_read_server_files`, `pg_write_server_files`,
+`pg_execute_server_program` or `pg_signal_backend`, and do not install
+`dblink` or `postgres_fdw` in a database the role can reach. Point the DSN at a
+read replica when one exists.
 
 ## Credentials
 
@@ -275,6 +327,10 @@ receive a refresh token) and the default body/form token style.
 - **MCP credentials never leave the server.** `ctx.mcp` calls are proxied;
   the script subprocess sends tool name + arguments, the API server holds the
   MCP session and its auth.
+- **SQL DSNs never leave the server.** `ctx.api.<slug>.query` sends SQL and
+  params to the API server, which resolves the DSN and runs the query
+  read-only. Use a least-privilege role (see
+  [SQL](#sql-postgres-read-only)).
 - **Scrubbed logs.** Resolved values are registered as volatile secrets, so
   stdout/stderr and session logs render them as `[REDACTED:KEY]`.
 - **Encrypted at rest.** Config-backed secrets use the swarm secrets cipher.

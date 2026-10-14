@@ -10,6 +10,7 @@ import {
   finish,
   registerLead,
   registerWorker,
+  settleWorkerFollowUp,
   slackPace,
   waitForEyes,
   waitForOutcome,
@@ -235,6 +236,37 @@ async function deferOnChildAndWake(ctx: ScenarioContext): Promise<void> {
   const thread = JSON.stringify(threadMessages());
   expect(!thread.includes(pendingWork), "v2 Slack thread leaked the agent's internal handoff note");
   expect(!thread.includes("/schedules/"), "v2 Slack thread leaked the defer schedule link");
+  // A worker's CI self-check wake stays internal, but still reaches the lead.
+  for (const status of ["completed", "failed"] as const) {
+    const created = await ctx.api("POST", "/api/tasks", {
+      body: {
+        task: "Check CI at the expected head",
+        agentId: workerId,
+        routingReason: "human_pinned",
+        parentTaskId: childId,
+        source: "schedule",
+        taskType: "deferred",
+      },
+    });
+    expectStatus(created, [201], `create worker deferred ${status} wake`);
+    const workerWakeId = String(asRecord(created.json).id);
+    await claimTask(ctx, workerId, workerWakeId);
+    const result = `CI self-check ${status} ${ctx.nonce}`;
+    await finish(ctx, workerId, workerWakeId, {
+      status,
+      ...(status === "failed" ? { failureReason: result } : { output: result }),
+    });
+    await settleWorkerFollowUp(ctx, leadId, workerWakeId);
+    const leaked = await pollUntil(
+      () =>
+        threadMessagesOf(ctx, message.ts).some(
+          (entry) =>
+            !String(entry.text ?? "").startsWith("🧵") && JSON.stringify(entry).includes(result),
+        ),
+      10_000,
+    );
+    expect(!leaked, `Worker deferred ${status} wake posted an outcome card`);
+  }
   await slackPace("resolved");
 }
 

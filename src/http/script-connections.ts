@@ -38,6 +38,7 @@ import {
   type ScriptConnectionKind,
   type ScriptConnectionRecord,
   type ScriptCredentialBindingRecord,
+  SqlDsnInputSchema,
   setScriptConnectionEnabled,
   upsertCredentialBinding,
   upsertScriptConnection,
@@ -80,7 +81,7 @@ const providerSchema = z
   .regex(/^[A-Za-z0-9_-]+$/);
 
 const scopeSchema = z.enum(["global", "agent", "repo"]);
-const connectionKindSchema = z.enum(["openapi", "graphql", "mcp"]);
+const connectionKindSchema = z.enum(["openapi", "graphql", "mcp", "sql"]);
 
 const idParamsSchema = z.object({ id: z.string().uuid() });
 const providerParamsSchema = z.object({ provider: providerSchema });
@@ -133,6 +134,7 @@ const upsertConnectionBodySchema = z.discriminatedUnion("kind", [
     kind: z.literal("mcp"),
     mcpServerId: z.string().uuid(),
   }),
+  connectionBaseBodySchema.extend({ kind: z.literal("sql"), dsn: SqlDsnInputSchema.optional() }),
 ]);
 
 const disableConnectionBodySchema = z.object({ enabled: z.boolean() });
@@ -232,7 +234,7 @@ const connectionAuthTypeResponseSchema = z.enum(["none", "bearer", "header", "qu
 // value (never written via this handler's upsert path, but readable via the
 // list/get routes for rows written elsewhere) — wider than the HTTP-body-only
 // `connectionKindSchema` above.
-const connectionRecordKindSchema = z.enum(["raw", "openapi", "mcp", "graphql"]);
+const connectionRecordKindSchema = z.enum(["raw", "openapi", "mcp", "graphql", "sql"]);
 
 const bindingSummarySchema = z.object({
   id: z.string(),
@@ -2062,6 +2064,7 @@ export async function handleScriptConnections(
           ? existingOpenapiConnection?.openapiSpecFetchedAt
           : undefined,
         mcpServerId: parsed.body.kind === "mcp" ? parsed.body.mcpServerId : null,
+        sqlDsn: parsed.body.kind === "sql" ? parsed.body.dsn : undefined,
         enabled,
         agentId,
         userId,

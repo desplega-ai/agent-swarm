@@ -49,9 +49,17 @@ export type ScriptGraphqlConnectionDescriptor = {
   credential: ScriptApiCredentialDescriptor | null;
 };
 
+// The DSN never reaches the sandbox: queries go back to the API server by connection id.
+export type ScriptSqlConnectionDescriptor = {
+  slug: string;
+  kind: "sql";
+  connectionId: string;
+};
+
 export type ScriptApiConnectionDescriptor =
   | ScriptOpenApiConnectionDescriptor
-  | ScriptGraphqlConnectionDescriptor;
+  | ScriptGraphqlConnectionDescriptor
+  | ScriptSqlConnectionDescriptor;
 
 export type ScriptMcpToolDescriptor = {
   name: string;

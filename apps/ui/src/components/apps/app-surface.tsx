@@ -24,6 +24,8 @@
  *                        reaches a terminal status.
  *      - `app.navigate`— push `/apps/:id/p/<page>?<params>` (params REPLACE the
  *                        current ones; only `?mode` survives).
+ *    Plus `ui.toast` (shared with the pages renderer): a sonner toast whose
+ *    optional Undo button runs a chain through this same handler map.
  *
  * State lives in the dashboard-global store (`@/lib/json-render/store-registry`)
  * under `/apps/<appId>/…`, reached through a prefixing view — so definitions
@@ -93,7 +95,13 @@ import { AlertCallout } from "@/components/ui/alert-callout";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/ui/page-header";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
-import { createSwarmActionHandlers, swarmCatalog, swarmComponents } from "@/lib/json-render";
+import {
+  type ActionHandlerMap,
+  createSwarmActionHandlers,
+  createToastActionHandler,
+  swarmCatalog,
+  swarmComponents,
+} from "@/lib/json-render";
 import {
   assemblePageSpec,
   collectElementRefAppIds,
@@ -863,15 +871,26 @@ export function AppSurface({
     : getThemePreset(definition.theme ?? null);
   const appThemeAttr = activePreset?.id;
 
+  // `ui.toast`'s Undo button runs its chain through this map long after the
+  // dispatch returned; `ActionProvider` snapshots handlers at mount, so the
+  // map is read through a ref.
+  const handlersRef = useRef<ActionHandlerMap | null>(null);
+
   const compiled = useMemo(() => {
     const swarmActions = createSwarmActionHandlers({
       onResponse: (result) => setLastResponse(result),
+      onError: (message) => setActionError(message),
+    });
+    const toastActions = createToastActionHandler({
+      getHandlers: () => handlersRef.current,
+      getState: () => ctxRef.current.store.getSnapshot(),
       onError: (message) => setActionError(message),
     });
     const { registry, handlers } = defineRegistry(swarmCatalog, {
       components: swarmComponents,
       actions: {
         ...swarmActions,
+        ...toastActions,
         // Client-side navigation to another page of this app. Reads the
         // router through `ctxRef` — a closure over `useNavigate()` would be
         // frozen at mount, since `ActionProvider` snapshots its handlers once.
@@ -1002,6 +1021,9 @@ export function AppSurface({
       ),
     };
   }, []);
+  useEffect(() => {
+    handlersRef.current = compiled.handlers;
+  }, [compiled]);
 
   let renderedSpec: React.ReactNode;
   if (!activePage) {
@@ -1140,6 +1162,9 @@ export function AppSurface({
           the app canvas below scrolls. The gear is unconditional: even a
           schema-less app has the per-viewer theme override to offer. */}
       <PageHeader
+        // Below sm the actions take their own row under a full-width
+        // description; side by side they squeezed it to one word per line.
+        className="max-sm:flex-col max-sm:items-stretch"
         title={app.name}
         description={app.description ?? undefined}
         action={<AppHeaderActions appIds={[...definitionsByApp.keys()]} settingsApp={app} />}
@@ -1151,6 +1176,9 @@ export function AppSurface({
         ref={scrollRef}
         className={cn(
           "flex flex-col flex-1 min-h-0 gap-4 overflow-y-auto rounded-lg border border-border p-4",
+          // Below md the canvas bleeds through `<main>`'s gutter to the screen
+          // edges, so a phone gives the app its full width.
+          "max-md:-mx-4 max-md:w-[calc(100%+2rem)] max-md:max-w-none max-md:rounded-none max-md:border-x-0",
           // A themed canvas shows its OWN field color so the preset reads at a
           // glance; the unthemed canvas keeps the card step against the page.
           appThemeAttr ? "bg-background" : "bg-card",
@@ -1209,7 +1237,7 @@ function AppHeaderActions({
   const chromelessUrl = `${window.location.origin}${urlWithMode(location, "chromeless")}`;
 
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex flex-wrap items-center gap-2">
       <Link to="/apps" className="text-sm text-muted-foreground hover:underline">
         All apps
       </Link>

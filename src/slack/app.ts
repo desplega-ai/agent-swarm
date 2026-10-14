@@ -1,5 +1,6 @@
 import { App, LogLevel, SocketModeReceiver } from "@slack/bolt";
 import { emitBuiltInIntegrationConnectedOnce, ensureSlackRenderV2Activation } from "../be/db";
+import { getNodeEnv } from "../utils/node-env";
 import { getSlackConfiguration } from "./config";
 import { type SlackConnectionState, setSlackConnectionState } from "./connection-state";
 import { installSlackEgressScrub } from "./egress-scrub";
@@ -84,7 +85,7 @@ export async function initSlackApp(): Promise<App | null> {
   // SLACK_API_URL points Bolt (Web API and apps.connections.open) at a mock Slack server for e2e tests.
   const slackApiUrl = process.env.SLACK_API_URL;
   const clientOptions = slackApiUrl ? { slackApiUrl } : undefined;
-  const logLevel = process.env.NODE_ENV === "development" ? LogLevel.DEBUG : LogLevel.INFO;
+  const logLevel = getNodeEnv() === "development" ? LogLevel.DEBUG : LogLevel.INFO;
   // Build the receiver ourselves so its SocketModeClient lifecycle events can
   // feed /status. Bolt would otherwise forward clientOptions via installerOptions.
   receiver = new SocketModeReceiver({

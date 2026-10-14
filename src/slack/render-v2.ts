@@ -961,14 +961,16 @@ export async function childOutcomeContent(
   );
 }
 
-// A deferred wake continues a human conversation even though the scheduler
-// assigns source="schedule". Its answer must not depend on delegation cards.
-function isSlackContinuation(task: AgentTask): boolean {
+// A lead deferred wake continues the human conversation. Worker wakes report
+// through their lead follow-up instead of posting their own outcome cards.
+async function isSlackContinuation(task: AgentTask): Promise<boolean> {
   return (
     task.source === "schedule" &&
     task.taskType === "deferred" &&
     !!task.slackChannelId &&
-    !!task.slackThreadTs
+    !!task.slackThreadTs &&
+    !!task.agentId &&
+    !!(await getAgentById(task.agentId))?.isLead
   );
 }
 
@@ -981,7 +983,7 @@ function isSlackContinuation(task: AgentTask): boolean {
 function isChildCardCandidate(task: AgentTask, delegationActivatedAt: string): boolean {
   return (
     task.source !== "slack" &&
-    !isSlackContinuation(task) &&
+    !(task.source === "schedule" && task.taskType === "deferred") &&
     !!task.slackChannelId &&
     !!task.slackThreadTs &&
     (task.status === "completed" || task.status === "failed") &&
@@ -991,10 +993,10 @@ function isChildCardCandidate(task: AgentTask, delegationActivatedAt: string): b
   );
 }
 
-function taskNeedsDirectOutcome(task: AgentTask, activatedAt: string): boolean {
+async function taskNeedsDirectOutcome(task: AgentTask, activatedAt: string): Promise<boolean> {
   return (
     ((task.source === "slack" && isAskOutcomeStatus(task.status)) ||
-      (isSlackContinuation(task) && isOutcomeStatus(task.status))) &&
+      ((await isSlackContinuation(task)) && isOutcomeStatus(task.status))) &&
     task.createdAt >= activatedAt
   );
 }
@@ -1448,7 +1450,7 @@ async function isAnsweredByDeferralCard(
 ): Promise<boolean> {
   const seen = new Set<string>();
   let current = task;
-  while (isSlackContinuation(current) && current.parentTaskId && !seen.has(current.id)) {
+  while ((await isSlackContinuation(current)) && current.parentTaskId && !seen.has(current.id)) {
     seen.add(current.id);
     const deferred = threadTasks.find((candidate) => candidate.id === current.parentTaskId);
     if (!deferred?.deferredAt) return false;
@@ -1641,7 +1643,7 @@ export async function processSlackRenderV2(): Promise<void> {
       // not represent immediately active outcome work, so avoid waking an old
       // tree solely to verify its permalink on every render tick.
       const isDirectCandidate =
-        taskNeedsDirectOutcome(task, activatedAt) &&
+        (await taskNeedsDirectOutcome(task, activatedAt)) &&
         isOutcomeStatus(task.status) &&
         !(await isAnsweredByDeferralCard(task, tasks));
       const isChildCandidate =
@@ -1740,7 +1742,7 @@ export async function processSlackRenderV2(): Promise<void> {
 
     for (const task of tasks) {
       if (!isSlackRenderV2Enabled()) return;
-      if (!taskNeedsDirectOutcome(task, activatedAt)) continue;
+      if (!(await taskNeedsDirectOutcome(task, activatedAt))) continue;
       const card = await getSlackOutcomeMessage(task.id);
       if (card && isSettledSlackMessage(card)) continue;
       if (await isAnsweredByDeferralCard(task, tasks)) continue;

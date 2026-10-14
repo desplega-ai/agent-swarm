@@ -351,6 +351,20 @@ jobs:
       fail-fast: false
       matrix:
         shard: [1, 2]
+    # Real Postgres for the read-only checks in src/tests/script-connections-sql.test.ts.
+    # Without SQL_CONNECTION_TEST_URL those tests skip, so read-only would go unverified.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
 
     steps:
       - name: Checkout repository
@@ -382,6 +396,8 @@ jobs:
         # each test file in its own worker process (implies --isolate); the
         # restored per-file durations balance files across shards by total time.
         # Main's save-timings cache is what PR runs restore from.
+        env:
+          SQL_CONNECTION_TEST_URL: postgres://postgres:postgres@localhost:5432/postgres
         run: |
           start=$(date +%s%3N)
           set +e

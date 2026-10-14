@@ -34,6 +34,7 @@ import {
   PageVersionSchema,
 } from "../types";
 import { getAppUrl, getPublicMcpBaseUrl } from "../utils/constants";
+import { getNodeEnv } from "../utils/node-env";
 import { issuePageSessionCookie } from "../utils/page-session";
 import { getRequestAuth } from "../utils/request-auth-context";
 import { resolveHttpFavoriteOwner } from "./favorite-owner";
@@ -536,7 +537,7 @@ function formatFeedbackComments(comments: z.infer<typeof PageFeedbackCommentSche
 }
 
 function isDevRequest(req: IncomingMessage): boolean {
-  if (process.env.NODE_ENV === "production") return false;
+  if (getNodeEnv() === "production") return false;
   // We want `SameSite=Lax` only when the request itself comes from the same
   // local-`http://localhost` origin as the API — same-site loads tolerate
   // Lax without Secure. Anything else (including portless `*.localhost`

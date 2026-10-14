@@ -447,6 +447,11 @@ jobs:
       - name: Check sandbox-spawn skip-list sync
         run: bun run check:sandbox-spawn-skip-list
 
+      # `bun build --compile` inlines process.env.NODE_ENV as "development";
+      # src/ must read it through getNodeEnv().
+      - name: Check NODE_ENV runtime reads
+        run: bash scripts/check-node-env-access.sh
+
       # Same-run calls merge server-side. See agent-fs docs/ci-timings.md.
       # Skipped on merge_group events and forks (no secret); never blocks the gate.
       - name: Report check timings to ci-timings
@@ -627,6 +632,20 @@ jobs:
       fail-fast: false
       matrix:
         shard: [1, 2]
+    # Real Postgres for the read-only checks in src/tests/script-connections-sql.test.ts.
+    # Without SQL_CONNECTION_TEST_URL those tests skip, so read-only would go unverified.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
 
     steps:
       - name: Checkout repository
@@ -658,6 +677,8 @@ jobs:
         # per-file durations balance files across the 2 shards by total time.
         # --timeout 10000 matches ci.yml (main): 4 workers saturate the runner and
         # bunfig.toml no longer sets a global retry.
+        env:
+          SQL_CONNECTION_TEST_URL: postgres://postgres:postgres@localhost:5432/postgres
         run: |
           start=$(date +%s%3N)
           set +e
