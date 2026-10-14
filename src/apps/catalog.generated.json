@@ -385,7 +385,7 @@
       }
     },
     "Select": {
-      "description": "Dropdown filter/picker. `options` are plain strings or `{ value, label }` objects. Writes the chosen value into state at `/ui/<id>/value` (clearing writes `null`); bind it into a Table with `\"filters\": { \"<column>\": { \"$state\": \"/ui/<id>/value\" } }`. `clearable` (default true) shows a clear button.",
+      "description": "Dropdown filter/picker. `options` are plain strings or `{ value, label?, icon?, hint? }` objects. Writes the chosen value into state at `/ui/<id>/value` (clearing writes `null`); bind it into a Table with `\"filters\": { \"<column>\": { \"$state\": \"/ui/<id>/value\" } }`. `clearable` (default true) shows a clear button. `searchable` adds a type-to-filter field (on by default past 8 options; `searchPlaceholder` sets its hint). `multiple` picks several: the value is a string array (empty = nothing picked), which a Table filter reads as \"cell is one of\".",
       "props": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "type": "object",
@@ -409,6 +409,54 @@
                     },
                     "label": {
                       "type": "string"
+                    },
+                    "icon": {
+                      "type": "string",
+                      "enum": [
+                        "plus",
+                        "refresh-cw",
+                        "search",
+                        "filter",
+                        "download",
+                        "upload",
+                        "external-link",
+                        "copy",
+                        "check",
+                        "x",
+                        "trash-2",
+                        "pencil",
+                        "eye",
+                        "calendar",
+                        "clock",
+                        "user",
+                        "users",
+                        "bot",
+                        "git-pull-request",
+                        "git-branch",
+                        "github",
+                        "slack",
+                        "mail",
+                        "link",
+                        "file-text",
+                        "folder",
+                        "database",
+                        "zap",
+                        "sparkles",
+                        "flag",
+                        "star",
+                        "tag",
+                        "alert-triangle",
+                        "info",
+                        "circle-check",
+                        "trending-up",
+                        "trending-down",
+                        "dollar-sign",
+                        "activity",
+                        "rocket"
+                      ]
+                    },
+                    "hint": {
+                      "type": "string"
                     }
                   },
                   "required": ["value"],
@@ -425,6 +473,15 @@
           },
           "clearable": {
             "type": "boolean"
+          },
+          "searchable": {
+            "type": "boolean"
+          },
+          "multiple": {
+            "type": "boolean"
+          },
+          "searchPlaceholder": {
+            "type": "string"
           }
         },
         "required": ["id", "options"],

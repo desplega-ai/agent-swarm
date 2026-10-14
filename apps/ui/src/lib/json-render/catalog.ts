@@ -251,7 +251,13 @@ const chipsProps = z.object({
 
 const selectOptionSchema = z.union([
   z.string(),
-  z.object({ value: z.string(), label: z.string().optional() }),
+  z.object({
+    value: z.string(),
+    label: z.string().optional(),
+    icon: iconName.optional(),
+    /** Secondary text, right-aligned in the option row (e.g. a role). */
+    hint: z.string().optional(),
+  }),
 ]);
 
 const selectProps = z.object({
@@ -261,6 +267,12 @@ const selectProps = z.object({
   placeholder: z.string().optional(),
   label: z.string().optional(),
   clearable: z.boolean().optional(),
+  /** Type-to-filter list. On by default once there are more than 8 options. */
+  searchable: z.boolean().optional(),
+  /** Pick several: the value is a string array instead of one string. */
+  multiple: z.boolean().optional(),
+  /** Placeholder of the filter field when the list is searchable. */
+  searchPlaceholder: z.string().optional(),
 });
 
 const markdownProps = z.object({
@@ -854,7 +866,7 @@ export const swarmCatalogSpec = {
     Select: {
       props: selectProps,
       description:
-        'Dropdown filter/picker. `options` are plain strings or `{ value, label }` objects. Writes the chosen value into state at `/ui/<id>/value` (clearing writes `null`); bind it into a Table with `"filters": { "<column>": { "$state": "/ui/<id>/value" } }`. `clearable` (default true) shows a clear button.',
+        'Dropdown filter/picker. `options` are plain strings or `{ value, label?, icon?, hint? }` objects. Writes the chosen value into state at `/ui/<id>/value` (clearing writes `null`); bind it into a Table with `"filters": { "<column>": { "$state": "/ui/<id>/value" } }`. `clearable` (default true) shows a clear button. `searchable` adds a type-to-filter field (on by default past 8 options; `searchPlaceholder` sets its hint). `multiple` picks several: the value is a string array (empty = nothing picked), which a Table filter reads as "cell is one of".',
     },
     Button: {
       props: buttonProps,

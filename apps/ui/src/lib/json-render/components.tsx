@@ -135,6 +135,7 @@ import { Kbd } from "@/components/ui/kbd";
 import { Label } from "@/components/ui/label";
 import { MiddleTruncation } from "@/components/ui/middle-truncation";
 import { Progress } from "@/components/ui/progress";
+import { SearchableMultiSelect, SearchableSelect } from "@/components/ui/searchable-select";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import {
   Select,
@@ -878,21 +879,27 @@ function SearchInputComponent({ props }: { props: SearchInputProps }) {
   );
 }
 
-function normalizeSelectOptions(options: SelectOption[]): { value: string; label: string }[] {
+type NormalizedSelectOption = { value: string; label: string; icon?: string; hint?: string };
+
+function normalizeSelectOptions(options: SelectOption[]): NormalizedSelectOption[] {
   const seen = new Set<string>();
-  const normalized: { value: string; label: string }[] = [];
+  const normalized: NormalizedSelectOption[] = [];
   for (const option of options) {
     const value = typeof option === "string" ? option : option.value;
     // Radix reserves the empty string for "no selection".
     if (!value || seen.has(value)) continue;
     seen.add(value);
-    normalized.push({
-      value,
-      label: (typeof option === "string" ? undefined : option.label) ?? value,
-    });
+    if (typeof option === "string") {
+      normalized.push({ value, label: value });
+      continue;
+    }
+    normalized.push({ value, label: option.label ?? value, icon: option.icon, hint: option.hint });
   }
   return normalized;
 }
+
+/** Past this many options a Select filters as you type unless told otherwise. */
+const SELECT_SEARCHABLE_AFTER = 8;
 
 function SelectFilterComponent({ props }: { props: SelectFilterProps }) {
   const { state, get, set } = useStateStore();
@@ -902,18 +909,81 @@ function SelectFilterComponent({ props }: { props: SelectFilterProps }) {
   const options = normalizeSelectOptions((props.options ?? []) as SelectOption[]);
   const clearable = props.clearable ?? true;
 
+  const multiple = props.multiple === true;
+  const searchable = props.searchable ?? options.length > SELECT_SEARCHABLE_AFTER;
+
   const stored = getByPath(state, path);
   const value = typeof stored === "string" ? stored : "";
+  const values = Array.isArray(stored)
+    ? stored.filter((entry): entry is string => typeof entry === "string")
+    : [];
+  const hasValue = multiple ? values.length > 0 : value !== "";
 
-  // Seed `/ui/<id>/value` so a bound `filters` entry resolves to `null`
+  // Seed `/ui/<id>/value` so a bound `filters` entry resolves to `null` / `[]`
   // (= filter disabled) instead of `undefined` before the first interaction.
   const getRef = useRef(get);
   getRef.current = get;
   const setRef = useRef(set);
   setRef.current = set;
   useEffect(() => {
-    if (getRef.current(path) === undefined) setRef.current(path, null);
-  }, [path]);
+    if (getRef.current(path) === undefined) setRef.current(path, multiple ? [] : null);
+  }, [path, multiple]);
+
+  // A standalone Select (no `label`) has no accessible name — fall back to the
+  // placeholder, mirroring `SearchBox`'s ariaLabel chain.
+  const ariaLabel = props.label ? undefined : (props.placeholder ?? "Select an option");
+  const clearButton =
+    clearable && hasValue ? (
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        aria-label={`Clear ${props.label ?? "selection"}`}
+        className="absolute right-7 top-1/2 size-7 -translate-y-1/2 text-muted-foreground"
+        onClick={() => set(path, multiple ? [] : null)}
+      >
+        <X className="size-3.5" />
+      </Button>
+    ) : null;
+
+  if (multiple || searchable) {
+    const comboOptions = options.map((option) => ({
+      value: option.value,
+      label: option.label,
+      hint: option.hint,
+      icon: <CatalogIcon name={option.icon} size="sm" className="text-muted-foreground" />,
+    }));
+    const common = {
+      id: triggerId,
+      "aria-label": ariaLabel,
+      options: comboOptions,
+      placeholder: props.placeholder ?? "All",
+      searchPlaceholder: props.searchPlaceholder,
+      searchable,
+      contentAttrs: themeAttr,
+      triggerClassName: cn(
+        "w-full min-w-0",
+        hasValue && clearable ? "[&>span:first-child]:mr-7" : undefined,
+      ),
+    };
+    return (
+      <div className="flex min-w-0 flex-col gap-1.5">
+        {props.label ? <Label htmlFor={triggerId}>{props.label}</Label> : null}
+        <div className="relative min-w-0">
+          {multiple ? (
+            <SearchableMultiSelect
+              {...common}
+              values={values}
+              onChange={(next) => set(path, next)}
+            />
+          ) : (
+            <SearchableSelect {...common} value={value} onChange={(next) => set(path, next)} />
+          )}
+          {clearButton}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex min-w-0 flex-col gap-1.5">
@@ -931,9 +1001,7 @@ function SelectFilterComponent({ props }: { props: SelectFilterProps }) {
         <Select value={value} onValueChange={(next) => set(path, next)}>
           <SelectTrigger
             id={triggerId}
-            // A standalone Select (no `label`) has no accessible name — fall
-            // back to the placeholder, mirroring `SearchBox`'s ariaLabel chain.
-            aria-label={props.label ? undefined : (props.placeholder ?? "Select an option")}
+            aria-label={ariaLabel}
             className={cn(
               "w-full min-w-0",
               clearable && value ? "*:data-[slot=select-value]:mr-7" : undefined,
@@ -944,23 +1012,13 @@ function SelectFilterComponent({ props }: { props: SelectFilterProps }) {
           <SelectContent {...themeAttr}>
             {options.map((option) => (
               <SelectItem key={option.value} value={option.value}>
+                <CatalogIcon name={option.icon} size="sm" className="text-muted-foreground" />
                 {option.label}
               </SelectItem>
             ))}
           </SelectContent>
         </Select>
-        {clearable && value ? (
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            aria-label={`Clear ${props.label ?? "selection"}`}
-            className="absolute right-7 top-1/2 size-7 -translate-y-1/2 text-muted-foreground"
-            onClick={() => set(path, null)}
-          >
-            <X className="size-3.5" />
-          </Button>
-        ) : null}
+        {clearButton}
       </div>
     </div>
   );
