@@ -268,6 +268,7 @@ import wtsExpertConfig from "../../../templates/skills/wts-expert/config.json" w
 import wtsExpertContent from "../../../templates/skills/wts-expert/content.md" with {
   type: "text",
 };
+import type { Skill } from "../../types";
 import {
   computeContentHash,
   createSkill,
@@ -281,6 +282,7 @@ import {
 } from "../db";
 import { deleteSeedState, getSeedState } from "../seed/state-db";
 import type { Seeder, SeedItem } from "../seed/types";
+import { parseSkillContent } from "../skill-parser";
 import bundledFilesManifest from "./bundled-files.generated.json";
 import { buildSkillContent, type SkillTemplateConfig } from "./render";
 
@@ -535,9 +537,47 @@ async function syncSeededSkillFiles(skillId: string, files: SeedSkillFile[]): Pr
 export const RETIRED_SEED_SKILLS: readonly string[] = ["artifacts"];
 
 /**
- * Delete each retired skill the seeder still owns: a `seed_state` row exists
- * and the live copy hashes to what was last seeded. A skill the seeder never
- * recorded, or one a user edited since, is left in place.
+ * True when every user-editable column outside the seed hash still holds what
+ * `skillsSeeder.apply` writes. The seed hash covers only content,
+ * systemDefault, userInvocable and bundled files, so an edit to any other
+ * column (description, model, allowedTools, source fields, ...) is invisible
+ * to it. The seeder writes the description from the same config as the
+ * content's frontmatter, so a pristine row's description equals the
+ * frontmatter one; every other column keeps its insert default.
+ */
+function metadataAsSeeded(skill: Skill, fileCount: number): boolean {
+  let seededDescription: string;
+  try {
+    seededDescription = parseSkillContent(skill.content).description;
+  } catch {
+    return false;
+  }
+
+  return (
+    skill.description === seededDescription &&
+    skill.type === "personal" &&
+    skill.isComplex === fileCount > 0 &&
+    skill.isEnabled &&
+    !skill.disableModelInvocation &&
+    skill.allowedTools === null &&
+    skill.model === null &&
+    skill.effort === null &&
+    skill.context === null &&
+    skill.agent === null &&
+    skill.sourceUrl === null &&
+    skill.sourceRepo === null &&
+    skill.sourcePath === null &&
+    skill.sourceBranch === "main" &&
+    skill.sourceHash === null &&
+    skill.lastFetchedAt === null
+  );
+}
+
+/**
+ * Delete each retired skill the seeder still owns: a `seed_state` row exists,
+ * the live copy hashes to what was last seeded, and its metadata is as seeded.
+ * A skill the seeder never recorded, or one a user edited since (content,
+ * files or metadata), is left in place.
  */
 export async function retireSeedSkills(
   names: readonly string[] = RETIRED_SEED_SKILLS,
@@ -561,7 +601,7 @@ export async function retireSeedSkills(
       liveFiles,
       existing.userInvocable,
     );
-    if (liveHash !== state.seededHash) {
+    if (liveHash !== state.seededHash || !metadataAsSeeded(existing, liveFiles.length)) {
       console.warn(`[seed:skill] kept retired skill "${name}": edited since it was seeded`);
       continue;
     }
