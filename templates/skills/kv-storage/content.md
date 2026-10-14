@@ -291,4 +291,4 @@ value so you can detect a clobber.
 - `src/be/migrations/061_kv_store.sql` — schema (`kv_entries`)
 - `src/http/kv.ts` — REST handler + namespace resolution
 - `src/tools/kv/*` — MCP tool registrars
-- `src/artifact-sdk/browser-sdk.ts` — `swarmSdk.kv` for pages
+- `src/pages/browser-sdk.ts` — `swarmSdk.kv` for pages

@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, mock, test } from "bun:test";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { BROWSER_SDK_JS } from "../artifact-sdk/browser-sdk";
+import { BROWSER_SDK_JS } from "../pages/browser-sdk";
 import { getAvailablePort } from "../artifact-sdk/port";
 import {
   createArtifactServer,

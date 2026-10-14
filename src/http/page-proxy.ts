@@ -6,10 +6,8 @@ import { route } from "./route-def";
 import { jsonError } from "./utils";
 
 /**
- * `/@swarm/api/*` proxy. Cookie-gated equivalent of the artifact-sdk proxy
- * (src/artifact-sdk/server.ts:42-69), but lives on the MAIN API server and
- * authenticates via the page-session cookie instead of basic-auth + a per-
- * artifact tunnel.
+ * `/@swarm/api/*` proxy. Lives on the MAIN API server and authenticates via
+ * the page-session cookie.
  *
  * Flow:
  *   1. Browser hits `/@swarm/api/<rest>` from inside an iframe of `/p/:id`.
