@@ -2083,12 +2083,12 @@ type ContributionGraphComponentProps = InferComponentProps<
   "ContributionGraph"
 >;
 
-/** Desktop panel caps grow with the viewport; phones keep the full-width shell. */
+/** Keep existing tablet widths as floors; grow desktop caps; phones stay full width. */
 const drawerSizeClass: Record<"sm" | "md" | "lg" | "xl", string> = {
-  sm: "sm:max-w-[min(40rem,33.333vw)]",
-  md: "sm:max-w-[min(60rem,46vw)]",
-  lg: "sm:max-w-[min(80rem,62vw)]",
-  xl: "sm:max-w-[min(100rem,70vw)]",
+  sm: "sm:max-w-[clamp(24rem,33.333vw,40rem)]",
+  md: "sm:max-w-[clamp(28rem,46vw,60rem)]",
+  lg: "sm:max-w-[clamp(42rem,62vw,80rem)]",
+  xl: "sm:max-w-[clamp(56rem,70vw,100rem)]",
 };
 
 /**
