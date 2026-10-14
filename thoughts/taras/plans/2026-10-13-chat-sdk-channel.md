@@ -402,17 +402,17 @@ When this phase is done, a terminal chat task posts its output back to the origi
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Phase tests: `bun run test:root -- src/tests/chat-sdk-relay.test.ts src/tests/chat-sdk-tools.test.ts src/tests/task-tool-manifest.test.ts src/tests/enabled-tools.test.ts`
-- [ ] SDK registration: `bun scripts/check-sdk-tool-registration.ts && bun run build:script-types && git diff --exit-code src/scripts-runtime/types/`
-- [ ] Skill gates: `bun run check:skill-sources && bun run check:skill-md && bun run check:seed-skill-files`
-- [ ] RBAC: `bun run check:rbac-coverage` and `bun run test:root -- src/tests/rbac-charact-slack.test.ts`
-- [ ] Hygiene: `bun scripts/check-floating-promises.ts && bun scripts/check-promise-sinks.ts && bash scripts/check-db-boundary.sh`
-- [ ] Inner loop: `bun run check && bun run tsc:check:tsc && bun run lint:slop`
+- [x] Phase tests: `bun run test:root -- src/tests/chat-sdk-relay.test.ts src/tests/chat-sdk-tools.test.ts src/tests/task-tool-manifest.test.ts src/tests/enabled-tools.test.ts`
+- [x] SDK registration: `bun scripts/check-sdk-tool-registration.ts && bun run build:script-types && git diff --exit-code src/scripts-runtime/types/`
+- [x] Skill gates: `bun run check:skill-sources && bun run check:skill-md && bun run check:seed-skill-files`
+- [x] RBAC: `bun run check:rbac-coverage` and `bun run test:root -- src/tests/rbac-charact-slack.test.ts`
+- [x] Hygiene: `bun scripts/check-floating-promises.ts && bun scripts/check-promise-sinks.ts && bash scripts/check-db-boundary.sh`
+- [x] Inner loop: `bun run check && bun run tsc:check:tsc && bun run lint:slop`
 
 #### Automated QA:
-- [ ] Local boot with the fake Bot API: POST a Telegram update, claim the task as a test agent (`AGENT_ID=$(uuidgen)`) through MCP, call `store-progress` with `status: completed` and an output, confirm within 5 s the fake Bot API log shows one `sendMessage` to the originating chat with that output, and `sqlite3 <db> "select delivered_at from chat_relay_obligations"` is non-null.
-- [ ] From the same task context call `chat-reply` through MCP, confirm a second `sendMessage` and a `post.chat.message` extension run row (`GET /api/extensions/runs`).
-- [ ] From a task without a chat contextKey, `get-tasks`-style tool listing (`tools/list` over MCP with `x-source-task-id`) does not include `chat-reply`.
+- [x] Local boot with the fake Bot API: POST a Telegram update, claim the task as a test agent (`AGENT_ID=$(uuidgen)`) through MCP, call `store-progress` with `status: completed` and an output, confirm within 5 s the fake Bot API log shows one `sendMessage` to the originating chat with that output, and `sqlite3 <db> "select delivered_at from chat_relay_obligations"` is non-null.
+- [x] From the same task context call `chat-reply` through MCP, confirm a second `sendMessage` and a `post.chat.message` extension run row (`GET /api/extensions/runs`).
+- [x] From a task without a chat contextKey, `get-tasks`-style tool listing (`tools/list` over MCP with `x-source-task-id`) does not include `chat-reply`.
 - [ ] `GET /api/skills` lists `chat-sdk` after boot; a worker container's `~/.claude/skills/chat-sdk/SKILL.md` exists after `bun run docker:build:worker && bun run pm2-restart` (or the skill-sync log line).
 
 #### Manual Verification:
@@ -693,7 +693,7 @@ _Recorded by the orchestrator during autopilot implementation (2026-10-14). Each
 - `ChatRouteModifySchema` lives in `src/integrations/chat-sdk/inbound.ts` next to its use. `contract.ts` imports zod as a type only, and a runtime schema there could break the type bundler.
 - `src/workflows/event-bus.ts` has no event map; names are plain strings. The `chat.message.received` row was added to the built-in events table in `runbooks/workflows.md`. `chat.message.sent` is subscribed by the post-bridge and first emitted in Phase 3.
 - The contextKey lookups (`getAgentWorkingOnContextKey`, `getLatestActiveTaskByContextKey`, `getLatestLeadTaskByContextKey`) take an optional `source`; chat passes `"chat"` so delegated worker tasks and follow-ups that inherit the contextKey cannot become the thread owner or the steering target.
-- Steering: target is the latest lead task on the contextKey in `in_progress`. Skipped for `!now`, attachments, and threads that already have buffered messages (order kept). A `SteeringRequestError` falls back to buffering. The ack is a constant markdown line and emits no outbound bus event.
+- Steering: target is the latest lead task on the contextKey in `in_progress`. Skipped for `!now`, attachments, and threads that already have buffered messages (order kept). A `SteeringRequestError` falls back to buffering. The ack is a constant markdown line; since Phase 3 it also emits `chat.message.sent`.
 - KV channel-mapping key is `chatChannelKey(adapter, channelId)` in `router.ts`; SDK channel ids already carry the adapter prefix, so the key is the channel id itself. Phase 3 register tools must use the same helper.
 - Attachments are fetched once per flush and shared across matched tasks. File ids are `<messageId>-<n>` with characters outside `[\w.-]` replaced by `_`. Missing MIME becomes `application/octet-stream`.
 - `CHAT_SDK_BUFFER_MS` is read lazily (buffer rebuilt when the value changes and no thread is waiting), so it is not `restartRequired`. Guard bounds 1..600000. Timer flushes are registered with `trackBackground`; `stopChatSdk` flushes waiting threads before adapters shut down.
@@ -702,3 +702,20 @@ _Recorded by the orchestrator during autopilot implementation (2026-10-14). Each
 - QA adaptations: `GET /api/tasks` needs `fields=full` to return `contextKey`; attachments are read from `GET /api/tasks/<id>` and `/api/fs/tasks/<id>/files` (there is no `/attachments` route); a local boot needs `MULTI_RUNTIME_ENABLED=false` or agent registration requires `runtimeInstanceId`.
 - Deferred: `templates/skills/swarm-extensions/content.md` lists extension events but not the chat ones (Phase 6 docs, needs `build:skill-md`).
 - Known limitation (review 2026-10-14): `subscribe()` runs when the flush creates the first task, as planned. In an unsubscribed group thread, a reply without a mention inside the first buffer window reaches no SDK handler and is dropped. Extension `broadcast` targets every non-lead agent with no reachability filter, matching Slack.
+
+### Phase 3
+- Tool gate: the local `hasCapability` in `createServer` resolves `chat-sdk` through `isChatSdkEnabled()`, so the registration block stays `if (hasCapability("chat-sdk"))` and the MCP.md generator still finds it. `CAPABILITIES=core,chat-sdk` alone registers nothing. The full-surface script bridge always has the tools.
+- `chat-reply` hiding: `selectTaskTools` only controls preloading, so `tools/list` needed a session-level filter. `createServer({ excludedTools })` is set by `src/http/mcp.ts` when the `x-source-task-id` task is not chat-family. Without the header the tool stays and falls back to the agent's current task (as `request-human-input` does). It refuses tasks the caller neither owns nor created.
+- Relay DB API: `getPendingChatRelayTasks(now, limit)` returns `{task, attemptCount, createdAt, lastError}` and applies the backoff filter in SQL; `markChatRelayAttempted(taskId, now)` is conditional on the same predicate so two concurrent ticks cannot both send; failures go through a separate `recordChatRelayError`; both writers scrub `last_error` in the DB layer (`.text-columns.json` now `scrubbed`).
+- Backoff is `min(3 s × 2^attempt_count, 10 min)` on the bumped count, so the first retry is after 6 s. The 24 h give-up check runs before the adapter-health check so rows for a permanently removed adapter still close. An unparseable contextKey is given up at once.
+- `chat.message.sent` fires once per logical message (full text, last chunk id), not per chunk. A later chunk failure re-posts earlier chunks on retry (no per-chunk progress column).
+- Watcher starts before adapters initialize and stops first in `stopChatSdk`. `sweepExpired` runs every 20th tick. Bus terminal events schedule one tick after 250 ms.
+- The steering ack is posted and emitted in `inbound.ts`, not `steering.ts`.
+- `chat-open-dm` calls `chat.getAdapter(name).openDM(userId)` directly (`Chat.openDM` guesses the adapter; numeric ids are ambiguous). `chat-read-thread` uses `history.thread.list(threadId, { limit, direction: "backward" })`. `register-chat-channel` requires exactly one of `agentId` / `workflowId` and checks existence.
+- RBAC: the four non-register tools stay open to all agents as planned, with reasons in `scripts/check-rbac-coverage.ts`. `slack-post` is lead-only; whether `chat-post` / `chat-open-dm` should be too is an open decision for Taras.
+- Script SDK types are hand-written in `src/be/scripts/typecheck.ts`; the six signatures were added there before regeneration. `MCP.md` is generated (`bun run docs:mcp`) with a "Chat SDK Tools" title override and an enable hint; the regeneration also picked up a stale `script-upsert` description from main.
+- `templates/skills/chat-sdk` has no `SKILL.md`, matching `apps`.
+- QA: the Docker worker skill-file check was not run; the skill was verified through `GET /api/skills` and the seed log line.
+- Known: the header comment of migration 213 still mentions an attempt cap (migrations are checksummed, so it is left as is).
+- Review fixes (2026-10-14): the pending relay query is filtered to running adapters and a separate `giveUpStaleChatRelays` UPDATE closes 24 h old rows for every adapter, so a down adapter cannot starve the 200-row window. Delivery is at-least-once (chunk failure re-posts earlier chunks; a crash between send and `markChatRelayDelivered` re-sends). Telegram thread history is persisted in our SQLite state (100 messages, 7 days), not "since restart".
+- **Open decision for Taras:** `chat-post`, `chat-read-thread`, `chat-open-dm` are open to all agents per the plan, while Slack's `slack-post` / `slack-read` are lead-gated. Parity would mean a new `integration.chat.post` verb or reusing `integration.chat.manage`.

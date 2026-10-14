@@ -286,6 +286,7 @@ export const LEGACY_POLICY = {
   "channel.delete": leadOnly,
   "repo.merge-policy.write": leadOrOperatorOrUser,
   "integration.kapso.manage": leadOnly,
+  "integration.chat.manage": leadOnly,
   "integration.slack.post": leadOnly,
   "integration.slack.read": leadOnly,
   "integration.slack.thread.start": leadOnly,

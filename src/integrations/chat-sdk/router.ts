@@ -1,21 +1,25 @@
 import {
+  deleteKv,
   getAgentById,
   getAgentWorkingOnContextKey,
   getAllAgents,
   getKv,
   getLeadAgent,
+  upsertKv,
 } from "@/be/db";
 import { isAgentReachable } from "@/be/runtime-pools/reachability";
 import { chatSdkContextKey } from "@/tasks/context-key";
 import type { Agent, RoutingReason } from "@/types";
 import { scrubSecrets } from "@/utils/secret-scrubber";
 
-/** KV namespace of the channel-to-agent/workflow mapping. Phase 3 tools write it. */
+/** KV namespace of the channel-to-agent/workflow mapping, written by `register-chat-channel`. */
 export const CHAT_CHANNELS_NAMESPACE = "integrations:chat:channels";
 
 export interface ChatChannelMapping {
   agentId?: string;
   workflowId?: string;
+  name?: string;
+  createdAt?: string;
 }
 
 export interface ChatAgentMatch {
@@ -53,6 +57,30 @@ export async function getChatChannelMapping(
   const row = await getKv(CHAT_CHANNELS_NAMESPACE, chatChannelKey(adapter, channelId));
   if (!row || typeof row.value !== "object" || row.value === null) return null;
   return row.value as ChatChannelMapping;
+}
+
+/** Store a channel mapping under `chatChannelKey(adapter, channelId)`. Returns the key. */
+export async function putChatChannelMapping(
+  adapter: string,
+  channelId: string,
+  mapping: ChatChannelMapping,
+): Promise<string> {
+  const key = chatChannelKey(adapter, channelId);
+  await upsertKv({
+    namespace: CHAT_CHANNELS_NAMESPACE,
+    key,
+    value: mapping,
+    valueType: "json",
+    expiresAt: null,
+  });
+  return key;
+}
+
+export async function deleteChatChannelMapping(
+  adapter: string,
+  channelId: string,
+): Promise<boolean> {
+  return deleteKv(CHAT_CHANNELS_NAMESPACE, chatChannelKey(adapter, channelId));
 }
 
 /** Remove `swarm#<uuid>` and `swarm#all` routing tokens from task text. */

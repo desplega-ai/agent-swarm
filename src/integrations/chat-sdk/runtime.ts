@@ -10,7 +10,8 @@ import {
   type ResolvedAdapterConfig,
 } from "./config";
 import { registerChatHandlers } from "./handlers";
-import { createScrubbingLogger } from "./logger";
+import { createScrubbingLogger, errorMessage } from "./logger";
+import { startChatRelayWatcher, stopChatRelayWatcher } from "./relay";
 import { SqliteChatState } from "./state";
 import { flushAllChatBuffers } from "./thread-buffer";
 
@@ -41,10 +42,6 @@ const DEFAULT_CHAT_USER_NAME = "swarm";
 
 /** Fields whose string value is a credential, registered with the scrubber. */
 const SECRET_FIELDS = ["botToken", "secretToken", "signingSecret", "appToken", "appPassword"];
-
-function errorMessage(error: unknown): string {
-  return scrubSecrets(error instanceof Error ? error.message : String(error));
-}
 
 function setHealth(
   name: ChatSdkAdapterName,
@@ -135,6 +132,10 @@ export async function startChatSdk(): Promise<void> {
   const state = new SqliteChatState();
   // In parallel: one slow adapter (Slack's WebClient retries auth.test for
   // up to ~30 min on errors) must not delay the others.
+  // Before the adapters: rows for an adapter still initializing are skipped
+  // without counting an attempt, and pending rows from before a restart drain
+  // as soon as their adapter is up.
+  startChatRelayWatcher();
   await Promise.all(
     CHAT_SDK_ADAPTER_NAMES.map(async (name) => {
       const adapterConfig = config.adapters[name];
@@ -162,6 +163,8 @@ export async function stopChatSdk(): Promise<void> {
   // Refuse new webhook work, let in-flight handlers finish buffering, then
   // turn waiting threads into tasks while adapters and the DB are still up.
   stopping = true;
+  // The relay posts through the adapters, so it stops first.
+  await stopChatRelayWatcher();
   const timeoutMs = 10_000;
   let drained = await drainBackground(timeoutMs);
   await flushAllChatBuffers();
@@ -170,7 +173,7 @@ export async function stopChatSdk(): Promise<void> {
     try {
       await chat.shutdown();
     } catch (error) {
-      console.error(`[chat-sdk] ${name} shutdown failed: ${scrubSecrets(errorMessage(error))}`);
+      console.error(`[chat-sdk] ${name} shutdown failed: ${errorMessage(error)}`);
     }
   }
   instances.clear();

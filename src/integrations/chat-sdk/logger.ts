@@ -31,3 +31,8 @@ export function createScrubbingLogger(prefix: string, onIssue?: ChatLogIssueSink
     child: (childPrefix) => createScrubbingLogger(`${prefix}:${childPrefix}`, onIssue),
   };
 }
+
+/** Error text for logs and tool results, scrubbed. */
+export function errorMessage(err: unknown): string {
+  return scrubSecrets(err instanceof Error ? err.message : String(err));
+}

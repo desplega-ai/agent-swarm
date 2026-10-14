@@ -22,6 +22,10 @@ import { registerAppSyncTool } from "./tools/app-sync";
 import { registerAppUpsertTool } from "./tools/app-upsert";
 import { registerCancelApprovalRequestTool } from "./tools/cancel-approval-request";
 import { registerCancelTaskTool } from "./tools/cancel-task";
+import { registerChatOpenDmTool } from "./tools/chat-open-dm";
+import { registerChatPostTool } from "./tools/chat-post";
+import { registerChatReadThreadTool } from "./tools/chat-read-thread";
+import { registerChatReplyTool } from "./tools/chat-reply";
 import { registerContextDiffTool } from "./tools/context-diff";
 import { registerContextHistoryTool } from "./tools/context-history";
 import { registerCreateChannelTool } from "./tools/create-channel";
@@ -92,6 +96,10 @@ import {
 } from "./tools/prompt-templates";
 import { registerReadMessagesTool } from "./tools/read-messages";
 import { registerRegisterAgentmailInboxTool } from "./tools/register-agentmail-inbox";
+import {
+  registerRegisterChatChannelTool,
+  registerUnregisterChatChannelTool,
+} from "./tools/register-chat-channel";
 import {
   registerRegisterKapsoNumberTool,
   registerUnregisterKapsoNumberTool,
@@ -351,6 +359,13 @@ function applyToolAllowlist(server: McpServer, allowlist: readonly string[]): vo
   }
 }
 
+function removeTools(server: McpServer, names: readonly string[]): void {
+  // oxlint-disable-next-line anti-slop/no-chained-type-assertions -- the MCP SDK keeps its tool registry private.
+  const tools = (server as unknown as { _registeredTools: Record<string, { remove(): void }> })
+    ._registeredTools;
+  for (const name of names) tools[name]?.remove();
+}
+
 export async function createServer(
   opts: {
     scriptsOnly?: boolean;
@@ -358,6 +373,8 @@ export async function createServer(
     preloadedTools?: readonly string[];
     /** Raw SWARM_ENABLED_TOOLS value for this session; defaults to the env. */
     enabledTools?: string;
+    /** Tool names removed from this session after registration (task-context filters). */
+    excludedTools?: readonly string[];
   } = {},
 ) {
   // Reload env
@@ -375,8 +392,12 @@ export async function createServer(
   // fullSurface to register every tool group regardless of CAPABILITIES.
   // An allowlist also registers every group, then prunes to the listed names.
   // This shadows the module-level hasCapability for the registrations below.
+  // `chat-sdk` follows CHAT_SDK_ENABLED (as in getEnabledCapabilities), not
+  // the CAPABILITIES list.
   const hasCapability = (cap: CAPABILITIES_T): boolean =>
-    opts.fullSurface === true || toolAllowlist !== undefined || getCapabilities().has(cap);
+    opts.fullSurface === true ||
+    toolAllowlist !== undefined ||
+    (cap === "chat-sdk" ? isChatSdkEnabled() : getCapabilities().has(cap));
 
   // Initialize database with WAL mode
   // Uses DATABASE_PATH env var for Docker volume compatibility (WAL needs .sqlite, .sqlite-wal, .sqlite-shm on same filesystem)
@@ -684,6 +705,16 @@ export async function createServer(
     registerReplyWhatsappMessageTool(server);
   }
 
+  // Chat SDK capability - Telegram/Slack/Discord/Teams through the Chat SDK channel (reply, post, DM, read, channel routes)
+  if (hasCapability("chat-sdk")) {
+    registerChatReplyTool(server);
+    registerChatPostTool(server);
+    registerChatOpenDmTool(server);
+    registerChatReadThreadTool(server);
+    registerRegisterChatChannelTool(server);
+    registerUnregisterChatChannelTool(server);
+  }
+
   // Swarm-x capability - external command routes mirroring the `agent-swarm x ...` CLI surface
   if (hasCapability("swarm-x")) {
     registerSwarmXTool(server);
@@ -709,6 +740,9 @@ export async function createServer(
   }
 
   if (toolAllowlist) applyToolAllowlist(server, toolAllowlist);
+  if (opts.fullSurface !== true && opts.excludedTools?.length) {
+    removeTools(server, opts.excludedTools);
+  }
 
   return server;
 }

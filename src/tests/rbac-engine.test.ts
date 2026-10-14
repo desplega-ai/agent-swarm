@@ -49,6 +49,7 @@ const LEAD_ONLY_VERBS: PermissionVerb[] = [
   "memory.write.consolidated",
   "channel.delete",
   "integration.kapso.manage",
+  "integration.chat.manage",
   "integration.slack.post",
   "integration.slack.read",
   "integration.slack.thread.start",

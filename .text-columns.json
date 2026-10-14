@@ -3758,9 +3758,7 @@
     "given_up_at": {
       "exempt": "timestamp"
     },
-    "last_error": {
-      "pending": "chat-sdk relay watcher (plan Phase 3) must write it through scrubSecrets; flip to scrubbed then"
-    },
+    "last_error": "scrubbed",
     "created_at": {
       "exempt": "timestamp"
     },

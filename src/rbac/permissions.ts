@@ -124,6 +124,10 @@ export const PERMISSIONS = {
     description: "Register or unregister a Kapso inbound number.",
     namespace: "integration",
   },
+  "integration.chat.manage": {
+    description: "Register or unregister a Chat SDK channel route.",
+    namespace: "integration",
+  },
   "integration.slack.post": {
     description: "Post to a direct Slack channel.",
     namespace: "integration",

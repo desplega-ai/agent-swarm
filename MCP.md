@@ -17,7 +17,7 @@ bridge always builds a full-surface server (its surface is governed by the
 SDK allowlist instead), and HTTP REST routes are generally not gated.
 
 - Enabled by default: `core`, `task-pool`, `config`, `scripts`, `mcp`, `profiles`, `repo`, `scheduling`, `memory`, `tracker`, `workflows`, `skills`, `pages`, `metrics`, `kv`, `slack`
-- Disabled by default: `prompt-templates`, `agentmail`, `kapso`, `swarm-x`, `messaging`, `services`
+- Disabled by default: `prompt-templates`, `agentmail`, `kapso`, `chat-sdk`, `swarm-x`, `messaging`, `services`
 
 ## Table of Contents
 
@@ -187,6 +187,13 @@ SDK allowlist instead), and HTTP REST routes are generally not gated.
   - [unregister-kapso-number](#unregister-kapso-number)
   - [send-whatsapp-message](#send-whatsapp-message)
   - [reply-whatsapp-message](#reply-whatsapp-message)
+- [Chat SDK Tools](#chat-sdk-tools)
+  - [chat-reply](#chat-reply)
+  - [chat-post](#chat-post)
+  - [chat-open-dm](#chat-open-dm)
+  - [chat-read-thread](#chat-read-thread)
+  - [register-chat-channel](#register-chat-channel)
+  - [unregister-chat-channel](#unregister-chat-channel)
 - [Swarm X Tools](#swarm-x-tools)
   - [swarm_x](#swarm_x)
 - [Messaging Tools](#messaging-tools)
@@ -673,7 +680,7 @@ Manage external HTTP API endpoints for swarm scripts (POST /api/x/script/<id>). 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `name` | `unknown` | Yes | - | Stable script name within the selected scope. |
-| `source` | `string` | Yes | - | TypeScript source, typechecked before saving. Must `export default async function (args, ctx)` — args FIRST, ctx second. Import `ScriptContext` from "swarm-sdk" to type `ctx`. |
+| `source` | `string` | Yes | - | TypeScript source, typechecked before saving. Must `export default async function (args, ctx)` — args FIRST, ctx second. Import `ScriptContext` from "swarm-sdk" to type `ctx`. Schemas can import "zod" or "zod/mini"; Mini uses functional forms such as z.optional(z.string()). |
 | `description` | `string` | No | "" | Human-readable script description. |
 | `intent` | `string` | No | "" | Why this script exists. |
 | `scope` | `unknown` | No | "agent" | Persist under agent or global scope. |
@@ -2257,6 +2264,82 @@ Quote-reply a WhatsApp message via Kapso — same as send-whatsapp-message but t
 | `to` | `string` | Yes | - | Recipient phone in E.164 WITHOUT '+'. |
 | `inReplyTo` | `string` | Yes | - | The inbound WAMID to quote-reply (set as context.message_id). |
 | `body` | `string` | Yes | - | Reply text. |
+
+## Chat SDK Tools
+
+*Chat SDK capability - Telegram/Slack/Discord/Teams through the Chat SDK channel (reply, post, DM, read, channel routes)*
+
+Capability: `chat-sdk` — **disabled by default**; set `CHAT_SDK_ENABLED=true` to enable (the `CAPABILITIES` list does not switch it).
+
+### chat-reply
+
+**Reply in the chat thread of this task**
+
+Post a message to the Telegram, Slack, Discord or Teams thread your current task came from. Works only on a task whose contextKey starts with task:chat-sdk:. The task's final output is posted to the thread automatically when the task ends, so use this only for a question to the user or a short progress note on long work. Markdown is supported; long text is split into several messages.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `text` | `string` | Yes | - | Markdown text to post to the thread. |
+
+### chat-post
+
+**Post to a chat thread or channel**
+
+Post a message to any Chat SDK thread or channel (Telegram, Slack, Discord, Teams), outside the thread of your current task. Give threadId to reply in a thread, or channelId to start a new message in a channel. Ids carry the adapter prefix, such as telegram:12345. To answer the user of your current chat task, use chat-reply instead.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `adapter` | `unknown` | Yes | - | Chat SDK adapter name. |
+| `threadId` | `string` | No | - | Full SDK thread id, such as telegram:12345 or slack:C123:1700000000.000100. |
+| `channelId` | `string` | No | - | Full SDK channel id, such as slack:C123. Ignored when threadId is set. |
+| `text` | `string` | Yes | - | Markdown text to post. |
+
+### chat-open-dm
+
+**Open a direct message on a chat platform**
+
+Open (or find) the direct-message thread with a user on a Chat SDK adapter and return its threadId. Post to it with chat-post. The userId is the platform user id from a chat message (Telegram numeric id, Slack U..., Discord snowflake, Teams 29:...). Telegram bots can message only users who started a chat with the bot.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `adapter` | `unknown` | Yes | - | Chat SDK adapter name. |
+| `userId` | `string` | Yes | - | Platform user id. |
+
+### chat-read-thread
+
+**Read recent messages of a chat thread**
+
+Read the most recent messages of a Chat SDK thread, oldest first. Limits per platform: Telegram has no history API, so you get the history the SDK stored in the swarm database, capped at 100 messages and 7 days. Teams needs the Chat.Read.* Graph permission. Slack and Discord return platform history.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `threadId` | `string` | Yes | - | Full SDK thread id with the adapter prefix, such as telegram:12345. |
+| `limit` | `number` | No | - | Number of messages to return (default ${DEFAULT_LIMIT}). |
+
+### register-chat-channel
+
+**Route a chat channel to an agent or workflow**
+
+Lead-only. Route every swarm-addressed message from one Chat SDK channel (a Telegram group, Slack channel, Discord channel or Teams chat) to a fixed agent or workflow instead of the lead. Give exactly one of agentId or workflowId. A swarm#<agentId> token in a message still wins over the mapping. Remove it with unregister-chat-channel.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `adapter` | `unknown` | Yes | - | Chat SDK adapter name. |
+| `channelId` | `string` | Yes | - | SDK channel id, such as telegram:-100123 or slack:C123 (prefix optional). |
+| `agentId` | `string` | No | - | Agent that receives the channel's tasks. |
+| `workflowId` | `string` | No | - | Workflow whose webhook trigger receives the channel's messages. |
+| `name` | `string` | No | - | Display name for the mapping. |
+
+### unregister-chat-channel
+
+**Remove a chat channel route**
+
+Lead-only. Remove the channel-to-agent or channel-to-workflow route that register-chat-channel stored. Messages from the channel go back to the default route (thread owner, then the lead).
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `adapter` | `unknown` | Yes | - | Chat SDK adapter name. |
+| `channelId` | `string` | Yes | - | SDK channel id (prefix optional). |
 
 ## Swarm X Tools
 

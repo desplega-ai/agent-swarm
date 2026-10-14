@@ -23,6 +23,8 @@ import {
   fetchChatFiles,
   toChatFiles,
 } from "./attachments";
+import { errorMessage } from "./logger";
+import { emitChatMessageSent } from "./outbound";
 import {
   type ChatAgentMatch,
   type ChatRouteTarget,
@@ -56,10 +58,6 @@ export const ChatRouteModifySchema = z
 
 const THREAD_CONTEXT_LIMIT = 20;
 const AGENT_MESSAGE_TRUNCATE = 500;
-
-function errorText(error: unknown): string {
-  return scrubSecrets(error instanceof Error ? error.message : String(error));
-}
 
 function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -119,9 +117,20 @@ export async function handleChatInbound(
         `[chat-sdk] ${adapter} message steered task ${steering.task.id} (${steering.result.outcome})`,
       );
       try {
-        await thread.post({ markdown: formatChatSteeringAck(steering.result) });
+        const ack = formatChatSteeringAck(steering.result);
+        const sent = await thread.post({ markdown: ack });
+        emitChatMessageSent({
+          adapter,
+          channelId: thread.channelId,
+          threadId: thread.id,
+          text: ack,
+          taskId: steering.task.id,
+          messageId: sent.id,
+        });
       } catch (error) {
-        console.warn(`[chat-sdk] Could not post the steering acknowledgement: ${errorText(error)}`);
+        console.warn(
+          `[chat-sdk] Could not post the steering acknowledgement: ${errorMessage(error)}`,
+        );
       }
       return;
     }
@@ -161,7 +170,7 @@ async function getChatThreadContext(thread: Thread, exclude: ReadonlySet<string>
       })
       .join("\n");
   } catch (error) {
-    console.warn(`[chat-sdk] Could not read thread context: ${errorText(error)}`);
+    console.warn(`[chat-sdk] Could not read thread context: ${errorMessage(error)}`);
     return "";
   }
 }
@@ -304,7 +313,7 @@ export async function flushChatThread(
       console.log(`[chat-sdk] ${threadId}: started workflow run ${runId}`);
       await subscribe(thread);
     } catch (error) {
-      console.error(`[chat-sdk] ${threadId}: workflow dispatch failed: ${errorText(error)}`);
+      console.error(`[chat-sdk] ${threadId}: workflow dispatch failed: ${errorMessage(error)}`);
     }
     return;
   }
@@ -357,7 +366,7 @@ export async function flushChatThread(
           `[chat-sdk] ${threadId}: task creation blocked: ${scrubSecrets(error.reason)}`,
         );
       } else {
-        console.error(`[chat-sdk] ${threadId}: task creation failed: ${errorText(error)}`);
+        console.error(`[chat-sdk] ${threadId}: task creation failed: ${errorMessage(error)}`);
       }
     }
   }
@@ -373,6 +382,6 @@ async function subscribe(thread: Thread | undefined): Promise<void> {
   try {
     if (!(await thread.isSubscribed())) await thread.subscribe();
   } catch (error) {
-    console.warn(`[chat-sdk] Could not subscribe to ${thread.id}: ${errorText(error)}`);
+    console.warn(`[chat-sdk] Could not subscribe to ${thread.id}: ${errorMessage(error)}`);
   }
 }

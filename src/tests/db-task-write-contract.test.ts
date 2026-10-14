@@ -95,6 +95,7 @@ type:McpServerFilters
 type:McpServerInsert
 type:MentionPreview
 type:PageListOptions
+type:PendingChatRelay
 type:PlanSource
 type:RecordBudgetRefusalNotificationInput
 type:ScheduledTaskFilters
@@ -355,6 +356,7 @@ value:getPageVersion
 value:getPageVersions
 value:getPausedTasksForAgent
 value:getPendingApprovalVoteState
+value:getPendingChatRelayTasks
 value:getPendingEventWaitNames
 value:getPendingSlackRelayTasks
 value:getPendingSteeringForAgent
@@ -452,6 +454,7 @@ value:getWorkflowRunStepsByRunId
 value:getWorkflowVersion
 value:getWorkflowVersions
 value:getWorkflowsByScheduleId
+value:giveUpStaleChatRelays
 value:hasBudgetRefusalNotificationToday
 value:hasCapacity
 value:hasFirstCompletedTask
@@ -503,6 +506,9 @@ value:listUserFavorites
 value:listWorkflowRuns
 value:listWorkflowRunsPage
 value:listWorkflows
+value:markChatRelayAttempted
+value:markChatRelayDelivered
+value:markChatRelayGivenUp
 value:markFinalizedSlackRelaysDelivered
 value:markInboxMessageDelegated
 value:markInboxMessageRead
@@ -531,6 +537,7 @@ value:promoteDraftTask
 value:reassociateSessionLogs
 value:recordApprovalVotes
 value:recordBudgetRefusalNotification
+value:recordChatRelayError
 value:recordInlineScriptRun
 value:recordKeyAuthFailure
 value:recordKeyRateLimitWindows

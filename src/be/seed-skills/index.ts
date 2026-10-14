@@ -38,6 +38,8 @@ import brainstormingConfig from "../../../templates/skills/brainstorming/config.
 import brainstormingContent from "../../../templates/skills/brainstorming/content.md" with {
   type: "text",
 };
+import chatSdkConfig from "../../../templates/skills/chat-sdk/config.json" with { type: "text" };
+import chatSdkContent from "../../../templates/skills/chat-sdk/content.md" with { type: "text" };
 import codeQualityConfig from "../../../templates/skills/code-quality/config.json" with {
   type: "text",
 };
@@ -324,6 +326,7 @@ const BUILT_IN_SKILL_SOURCES = [
   { config: assetNamespacesConfig, body: assetNamespacesContent },
   { config: attioInteractionConfig, body: attioInteractionContent },
   { config: brainstormingConfig, body: brainstormingContent },
+  { config: chatSdkConfig, body: chatSdkContent },
   { config: codeQualityConfig, body: codeQualityContent },
   { config: codeReviewingConfig, body: codeReviewingContent },
   { config: commsConfig, body: commsContent },

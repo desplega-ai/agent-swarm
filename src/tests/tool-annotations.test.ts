@@ -376,9 +376,10 @@ describe("Tool Annotations & Classification", () => {
     // We expect all tools to be registered when all capabilities are enabled
     // (this suite forces ALL_CAPABILITIES, including default-disabled ones).
     // Includes 11 skill tools, 7 MCP server tools, reusable script tools, and the
-    // native Kapso/WhatsApp tools (register/unregister number + send/reply message).
+    // native Kapso/WhatsApp tools (register/unregister number + send/reply message),
+    // and the six Chat SDK tools (chat-* + register/unregister-chat-channel).
     expect(count).toBeGreaterThanOrEqual(45);
-    expect(count).toBeLessThanOrEqual(157);
+    expect(count).toBeLessThanOrEqual(163);
   });
 
   test("core tools are fewer than deferred tools", () => {

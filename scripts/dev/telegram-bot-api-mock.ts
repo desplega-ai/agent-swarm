@@ -5,7 +5,7 @@
  * methods the Telegram adapter calls (getMe, getWebhookInfo, sendMessage, ...)
  * and records every call. `addFile(path, bytes)` serves a file through
  * `getFile` and the `/file/bot<token>/<path>` download route (the file id is
- * the path). Point the API at it with
+ * the path). `failSends(n)` answers the next n sends with HTTP 500. Point the API at it with
  * `CHAT_SDK_API_URL_OVERRIDES='{"telegram":"http://127.0.0.1:<port>"}'`.
  *
  * Run standalone: `bun scripts/dev/telegram-bot-api-mock.ts` (prints the port).
@@ -22,6 +22,8 @@ export interface TelegramBotApiMock {
   calls: TelegramMockCall[];
   /** Serve `bytes` as the Telegram file whose `file_id` and `file_path` are `path`. */
   addFile: (path: string, bytes: Uint8Array) => void;
+  /** Answer the next `count` send calls (sendMessage, sendRichMessage) with HTTP 500. */
+  failSends: (count: number) => void;
   stop: () => void;
 }
 
@@ -83,6 +85,7 @@ async function readBody(req: Request): Promise<Record<string, unknown>> {
 export function startTelegramBotApiMock(port = 0): TelegramBotApiMock {
   const calls: TelegramMockCall[] = [];
   const files = new Map<string, Uint8Array>();
+  let failingSends = 0;
   const server = Bun.serve({
     port,
     hostname: "127.0.0.1",
@@ -98,6 +101,13 @@ export function startTelegramBotApiMock(port = 0): TelegramBotApiMock {
         return Response.json({ ok: false, description: "Not Found" }, { status: 404 });
       const body = await readBody(req);
       calls.push({ method: match[1], body });
+      if (failingSends > 0 && /^send(Rich)?Message$/.test(match[1])) {
+        failingSends -= 1;
+        return Response.json(
+          { ok: false, error_code: 500, description: "Internal Server Error" },
+          { status: 500 },
+        );
+      }
       const result = resultFor(match[1], body, files);
       if (match[1] === "getFile" && result === null) {
         return Response.json(
@@ -114,6 +124,9 @@ export function startTelegramBotApiMock(port = 0): TelegramBotApiMock {
     port: boundPort,
     calls,
     addFile: (path, bytes) => files.set(path, bytes),
+    failSends: (count) => {
+      failingSends = count;
+    },
     stop: () => server.stop(true),
   };
 }

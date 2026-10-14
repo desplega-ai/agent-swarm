@@ -72,6 +72,7 @@ type:McpServerFilters
 type:McpServerInsert
 type:MentionPreview
 type:PageListOptions
+type:PendingChatRelay
 type:PlanSource
 type:RecordBudgetRefusalNotificationInput
 type:ScheduledTaskFilters
@@ -332,6 +333,7 @@ value:getPageVersion
 value:getPageVersions
 value:getPausedTasksForAgent
 value:getPendingApprovalVoteState
+value:getPendingChatRelayTasks
 value:getPendingEventWaitNames
 value:getPendingSlackRelayTasks
 value:getPendingSteeringForAgent
@@ -429,6 +431,7 @@ value:getWorkflowRunStepsByRunId
 value:getWorkflowVersion
 value:getWorkflowVersions
 value:getWorkflowsByScheduleId
+value:giveUpStaleChatRelays
 value:hasBudgetRefusalNotificationToday
 value:hasCapacity
 value:hasFirstCompletedTask
@@ -480,6 +483,9 @@ value:listUserFavorites
 value:listWorkflowRuns
 value:listWorkflowRunsPage
 value:listWorkflows
+value:markChatRelayAttempted
+value:markChatRelayDelivered
+value:markChatRelayGivenUp
 value:markFinalizedSlackRelaysDelivered
 value:markInboxMessageDelegated
 value:markInboxMessageRead
@@ -508,6 +514,7 @@ value:promoteDraftTask
 value:reassociateSessionLogs
 value:recordApprovalVotes
 value:recordBudgetRefusalNotification
+value:recordChatRelayError
 value:recordInlineScriptRun
 value:recordKeyAuthFailure
 value:recordKeyRateLimitWindows
@@ -601,6 +608,7 @@ value:upsertSwarmConfig
 value:withFavoriteFlags`.split("\n");
 const selected = `type:ExistingTrackerContextWork
 type:ExistingTrackerContextWorkReason
+type:PendingChatRelay
 type:TaskFilters
 value:findCompletedTaskInThread
 value:findExistingLinearTrackerContextWork
@@ -622,6 +630,7 @@ value:getLatestLeadTaskInThread
 value:getLatestScriptRunStepTaskByContextKey
 value:getLatestTaskByContextKey
 value:getMostRecentTaskInThread
+value:getPendingChatRelayTasks
 value:getPendingSlackRelayTasks
 value:getRecentlyFinishedWorkerTasks
 value:getSlackTasksMissingTree
@@ -632,13 +641,18 @@ value:getTaskStats
 value:getTasksByAgentId
 value:getTasksByStatus
 value:getTasksCount
+value:giveUpStaleChatRelays
 value:hasNonTerminalRerouteDecisionChild
 value:hasNonTerminalResumeChild
 value:isLinearTrackerContextKey
+value:markChatRelayAttempted
+value:markChatRelayDelivered
+value:markChatRelayGivenUp
 value:markFinalizedSlackRelaysDelivered
 value:markSlackRelayAttempted
 value:markSlackRelayDelivered
 value:markTasksNotified
+value:recordChatRelayError
 value:resetTasksNotified`.split("\n");
 const internal = [
   "type:AgentTaskRow",

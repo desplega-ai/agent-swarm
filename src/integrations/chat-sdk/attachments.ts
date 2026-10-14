@@ -21,7 +21,7 @@ import { providerPath } from "@/fs/provider";
 import { getFileStorageProvider } from "@/fs/registry";
 import { createTaskWithSiblingAwareness } from "@/tasks/sibling-awareness";
 import type { AgentTask, CreateTaskOptions } from "@/types";
-import { scrubSecrets } from "@/utils/secret-scrubber";
+import { errorMessage } from "./logger";
 
 /** How often a draft's lease is renewed while its uploads run; the sweep waits 5 minutes. */
 const DRAFT_LEASE_REFRESH_MS = 60_000;
@@ -54,10 +54,6 @@ export type InboundChatFiles = {
   /** Deletes the downloaded copies; hold the batch with `await using`. */
   [Symbol.asyncDispose](): Promise<void>;
 };
-
-function errorText(error: unknown): string {
-  return scrubSecrets(error instanceof Error ? error.message : String(error));
-}
 
 function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -142,7 +138,7 @@ export async function fetchChatFiles(files: ChatFile[]): Promise<InboundChatFile
       file.size ??= bytes.byteLength;
       result.fetched.push({ file, path, sizeBytes: bytes.byteLength, sha256 });
     } catch (error) {
-      const reason = `download failed (${errorText(error)})`;
+      const reason = `download failed (${errorMessage(error)})`;
       console.warn(`[chat-sdk] could not fetch file ${file.id}: ${reason}`);
       result.failed.push({ file, reason });
     }
@@ -174,7 +170,7 @@ export async function createChatTaskWithFiles(
   const lease = setInterval(() => {
     void refreshDraftTaskLease(task.id).catch((error) =>
       console.warn(
-        `[chat-sdk] could not renew the draft lease of task ${task.id}: ${errorText(error)}`,
+        `[chat-sdk] could not renew the draft lease of task ${task.id}: ${errorMessage(error)}`,
       ),
     );
   }, DRAFT_LEASE_REFRESH_MS);
@@ -227,7 +223,7 @@ export async function attachChatFilesToTask(
       });
       bySha.add(sha256);
     } catch (error) {
-      const reason = `could not be stored (${errorText(error)})`;
+      const reason = `could not be stored (${errorMessage(error)})`;
       console.warn(`[chat-sdk] file ${file.id} for task ${taskId} ${reason}`);
       unattached.push({ file, reason });
     }

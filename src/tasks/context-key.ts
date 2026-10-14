@@ -125,6 +125,22 @@ export function chatSdkContextKey(threadId: string): string {
   return ["task", "chat-sdk", adapter, rest].join(SEPARATOR);
 }
 
+/**
+ * The Chat SDK thread a contextKey points at, or null when the key is missing,
+ * malformed, or of another family. Never throws.
+ */
+export function chatThreadOfContextKey(
+  key: string | null | undefined,
+): { adapter: string; threadId: string } | null {
+  if (!key) return null;
+  try {
+    const parsed = parseContextKey(key);
+    return parsed.family === "chat-sdk" ? parsed.parts : null;
+  } catch {
+    return null;
+  }
+}
+
 export function agentmailContextKey(input: { threadId: string }): string {
   const threadId = assertSafePart(input.threadId, "threadId");
   return ["task", "agentmail", threadId].join(SEPARATOR);
