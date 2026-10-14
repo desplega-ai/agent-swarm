@@ -23,7 +23,7 @@ Enable Slack for task creation, agent communication, and interactive workflows v
    - `mpim:history`, `mpim:read`, `mpim:write`
    - `reactions:write`
    - `users:read`
-6. Subscribe to bot events: `app_mention`, `assistant_thread_started`, `assistant_thread_context_changed`, `entity_details_requested`, `message.channels`, `message.groups`, `message.im`, `message.mpim`
+6. Subscribe to bot events: `app_mention`, `assistant_thread_started`, `assistant_thread_context_changed`, `entity_details_requested`, `message.channels`, `message.groups`, `message.im`, `message.mpim`, `member_joined_channel`, `channel_shared`, `channel_unshared`
 7. Install to your workspace and copy tokens
 
 A ready-to-use `slack-manifest.json` is included in the repository root — import it directly in the Slack App configuration page to set up all scopes, events, and features automatically. After adding channel-management scopes to an existing app, reinstall the app to the workspace so Slack grants them to the bot token.
@@ -279,6 +279,40 @@ These mutation tools follow the same public-channel auto-join behavior as the ot
 ### Channel Membership
 
 If the bot is not yet a member of a **public, internal** channel, `slack-read`, `slack-post`, `slack-reply`, and `slack-start-thread` automatically join it (via the `channels:join` scope) and retry — no manual `/invite` needed. **Private** channels and **external Slack Connect** channels cannot be self-joined: the tools return a clear error asking you to invite the bot with `/invite @<bot-name>` first.
+
+### External (Slack Connect) channels
+
+Set `SLACK_BLOCK_EXTERNAL_CHANNELS=true` (global swarm config, default `false`) to keep the bot out of channels shared with another organization. A channel is external when Slack reports `is_ext_shared` or `is_pending_ext_shared` for it, or when the event carries `is_ext_shared_channel`. Enterprise Grid org-shared channels stay internal. The key is read on every event, so a change on **Settings → Configuration** applies without a restart.
+
+When the flag is on:
+
+- **Inbound guard.** Messages, assistant threads, Work Object previews, follow-up buttons, and `/agent-swarm-status` in an external channel create no task and return no task data. This guard works even when the bot cannot leave.
+- **Leave on join or share.** When the bot joins an external channel (`member_joined_channel`), or a channel the bot is in becomes shared (`channel_shared`), the swarm calls `conversations.leave` and posts an alert to `SLACK_ALERTS_CHANNEL`.
+- **Outbound guard.** Every Slack write the swarm makes is checked at the Slack client: tool posts, replies, edits and file uploads, progress updates, streamed outcome cards, assistant status, and alerts. A write to an external channel fails with `external_channel_blocked`. The tools `slack-post`, `slack-reply`, `slack-start-thread`, `slack-read`, `slack-update`, and `slack-upload-file` return a clear error. A task that is already running in an external channel stops posting there as soon as the flag is on.
+- **Fail closed.** When Slack cannot tell the swarm whether a channel is external (for example, `conversations.info` fails), the swarm blocks the channel as unverified and tries again on the next event or write. Direct messages and internal channels stay usable while Slack answers.
+- **Boot scan.** At start, the swarm posts one alert for each external channel the bot is already in. It does not leave them; a human decides.
+
+Required Slack setup: bot scopes `channels:manage` (leave a public channel) and `groups:write` (leave a private channel), and bot events `member_joined_channel`, `channel_shared`, and `channel_unshared`. `slack-manifest.json` includes them. After you change an existing app, reinstall it to the workspace. Without the scopes, every leave fails, but the inbound and outbound guards still block all work in the channel.
+
+The alert looks like this:
+
+```text
+:no_entry: Swarm bot in external Slack channel #partner-channel (C0123456789)
+Trigger: joined | shared | boot-scan
+Leave: left | failed (<slack error code>) | not attempted (report only)
+Inbound guard: active. The swarm creates no task from this channel.
+```
+
+A `failed (missing_scope)` alert names the missing scope. The swarm posts at most 1 alert per channel and trigger per hour. The dedupe is stored in the database, so a restart does not repeat alerts. A failed alert post is retried on the next trigger.
+
+Slack admin check: Slack sends no event before a member adds the bot to a channel, so the swarm can only act after the join. Ask a workspace admin to check the Slack Connect and app management settings for a control that limits where the app can be used. On plans other than Enterprise Grid, Slack Connect permissions limit only the external organization, not your own members.
+
+To check the current state before you turn the flag on, run the read-only report:
+
+```bash
+SLACK_BOT_TOKEN=xoxb-... bun scripts/slack-external-channel-report.ts
+# total=132 external=0
+```
 
 ## User Filtering
 

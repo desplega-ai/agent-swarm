@@ -45,8 +45,8 @@ fetch_main() {
 if [ "${VERCEL_ENV:-}" = production ]; then
   echo 'vercel-ignore: author gate disabled (production)'
 elif fetch_main; then
-  if git cat-file -e FETCH_HEAD:.github/CODEOWNERS 2>/dev/null; then
-    if owners=$(git show FETCH_HEAD:.github/CODEOWNERS); then
+  if git cat-file -e FETCH_HEAD:.github/vercel-build-owners 2>/dev/null; then
+    if owners=$(git show FETCH_HEAD:.github/vercel-build-owners); then
       if printf '%s\n' "$owners" | awk -v login="${VERCEL_GIT_COMMIT_AUTHOR_LOGIN:-}" '
         BEGIN { login = tolower(login) }
         /^[[:space:]]*#/ { next }
@@ -59,14 +59,14 @@ elif fetch_main; then
       '; then
         echo 'vercel-ignore: author gate passed (listed owner)'
       else
-        echo "vercel-ignore: skip (author '${VERCEL_GIT_COMMIT_AUTHOR_LOGIN:-}' is not a code owner on main)"
+        echo "vercel-ignore: skip (author '${VERCEL_GIT_COMMIT_AUTHOR_LOGIN:-}' is not a build owner on main)"
         exit 0
       fi
     else
-      echo 'vercel-ignore: author gate disabled (cannot read CODEOWNERS on main)'
+      echo 'vercel-ignore: author gate disabled (cannot read vercel-build-owners on main)'
     fi
   else
-    echo 'vercel-ignore: author gate disabled (CODEOWNERS missing on main or Git error)'
+    echo 'vercel-ignore: author gate disabled (vercel-build-owners missing on main or Git error)'
   fi
 else
   echo 'vercel-ignore: author gate disabled (fetch main failed)'

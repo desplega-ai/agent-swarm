@@ -28,6 +28,7 @@ import { feedbackOverlayScripts, isPageFeedbackRequested } from "../artifact-sdk
 import { getPage, incrementPageViewCount } from "../be/db";
 import { type Page, PageSchema } from "../types";
 import { getAppUrl, getConfiguredAppUrls } from "../utils/constants";
+import { getNodeEnv } from "../utils/node-env";
 import { extractAndVerifyCookie, issuePageSessionCookie } from "../utils/page-session";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { route } from "./route-def";
@@ -318,7 +319,7 @@ function buildCsp(): string {
   // between Vite ports / portless dev doesn't require restarting the API.
   const configured = getConfiguredAppUrls();
   const devFallbacks =
-    process.env.NODE_ENV === "production"
+    getNodeEnv() === "production"
       ? []
       : [
           "http://localhost:5274",
@@ -459,7 +460,7 @@ function extractPasswordCandidate(
  * `SameSite=Lax` (dev) vs `SameSite=None; Secure` (prod).
  */
 function isLocalhostRequest(req: IncomingMessage): boolean {
-  if (process.env.NODE_ENV === "production") return false;
+  if (getNodeEnv() === "production") return false;
   // Only emit `SameSite=Lax` (no Secure) when the request comes from the
   // SAME http://localhost origin as the API — Lax cookies don't travel on
   // cross-site fetches, so portless `*.localhost` setups (SPA on https

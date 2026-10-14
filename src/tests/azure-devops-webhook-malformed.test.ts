@@ -62,6 +62,10 @@ const cases = [
       },
     },
   },
+  ...["created", "updated", "commented", "deleted", "restored"].map((kind) => ({
+    name: `workitem.${kind} with an empty resource`,
+    body: { eventType: `workitem.${kind}`, id: "evt-1", resource: {} },
+  })),
 ];
 
 let emitted: string[] = [];

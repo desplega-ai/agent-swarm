@@ -1,0 +1,82 @@
+{
+  "subscriptionId": "e2f8fec8-22c9-4324-bb8d-3fa493144922",
+  "notificationId": 1,
+  "id": "66e543cb-221e-4a68-9356-57d37174c41d",
+  "eventType": "workitem.restored",
+  "publisherId": "tfs",
+  "message": {
+    "text": "Task #9 ([Swarm test] List the 5 most recently modified files in the example-web-app repository) restored by Alex Example (CONTOSO)\r\n(https://dev.azure.com/acme-org/web/wi.aspx?pcguid=b51292df-d230-4305-a9da-cdee48c0d617&id=9)",
+    "html": "<a href=\"https://dev.azure.com/acme-org/web/wi.aspx?pcguid=b51292df-d230-4305-a9da-cdee48c0d617&amp;id=9\">Task #9</a> ([Swarm test] List the 5 most recently modified files in the example-web-app repository) restored by Alex Example (CONTOSO)",
+    "markdown": "[Task #9](https://dev.azure.com/acme-org/web/wi.aspx?pcguid=b51292df-d230-4305-a9da-cdee48c0d617&id=9) ([Swarm test] List the 5 most recently modified files in the example-web-app repository) restored by Alex Example (CONTOSO)"
+  },
+  "detailedMessage": {
+    "text": "Task #9 ([Swarm test] List the 5 most recently modified files in the example-web-app repository) restored by Alex Example (CONTOSO)\r\n(https://dev.azure.com/acme-org/web/wi.aspx?pcguid=b51292df-d230-4305-a9da-cdee48c0d617&id=9)\r\n\r\n- Area: Contoso\r\n- Iteration: Contoso\r\n- State: To Do\r\n- Assigned to: Swarm Bot (CONTOSO) <swarm-bot@example.com>\r\n",
+    "html": "<a href=\"https://dev.azure.com/acme-org/web/wi.aspx?pcguid=b51292df-d230-4305-a9da-cdee48c0d617&amp;id=9\">Task #9</a> ([Swarm test] List the 5 most recently modified files in the example-web-app repository) restored by Alex Example (CONTOSO)<ul>\r\n<li>Area: Contoso</li>\r\n<li>Iteration: Contoso</li>\r\n<li>State: To Do</li>\r\n<li>Assigned to: Swarm Bot (CONTOSO) <swarm-bot@example.com></li></ul>",
+    "markdown": "[Task #9](https://dev.azure.com/acme-org/web/wi.aspx?pcguid=b51292df-d230-4305-a9da-cdee48c0d617&id=9) ([Swarm test] List the 5 most recently modified files in the example-web-app repository) restored by Alex Example (CONTOSO)\r\n\r\n* Area: Contoso\r\n* Iteration: Contoso\r\n* State: To Do\r\n* Assigned to: Swarm Bot (CONTOSO) <swarm-bot@example.com>\r\n"
+  },
+  "resource": {
+    "id": 9,
+    "rev": 6,
+    "fields": {
+      "System.AreaPath": "Contoso",
+      "System.TeamProject": "Contoso",
+      "System.IterationPath": "Contoso",
+      "System.WorkItemType": "Task",
+      "System.State": "To Do",
+      "System.Reason": "Added to backlog",
+      "System.AssignedTo": "Swarm Bot (CONTOSO) <swarm-bot@example.com>",
+      "System.CreatedDate": "2026-10-13T10:47:49.627Z",
+      "System.CreatedBy": "Alex Example (CONTOSO) <alex.example@example.com>",
+      "System.ChangedDate": "2026-10-13T10:50:37.613Z",
+      "System.ChangedBy": "Alex Example (CONTOSO) <alex.example@example.com>",
+      "System.CommentCount": 2,
+      "System.Title": "[Swarm test] List the 5 most recently modified files in the example-web-app repository",
+      "Microsoft.VSTS.Common.Priority": 2,
+      "Microsoft.VSTS.Common.StateChangeDate": "2026-10-13T10:47:49.627Z",
+      "System.Description": "<div>Test task for Azure Boards integration. List the 5 most recent commits on the `main` branch of the `smart-lab-platform web-app` repository (SHA, author, title). Read-only; do not modify code or create a PR.<br> </div>"
+    },
+    "multilineFieldsFormat": {
+      "System.Description": "html"
+    },
+    "_links": {
+      "self": {
+        "href": "https://dev.azure.com/acme-org/0d526892-c851-4fc5-b38a-8a401faa117e/_apis/wit/workItems/9"
+      },
+      "workItemUpdates": {
+        "href": "https://dev.azure.com/acme-org/0d526892-c851-4fc5-b38a-8a401faa117e/_apis/wit/workItems/9/updates"
+      },
+      "workItemRevisions": {
+        "href": "https://dev.azure.com/acme-org/0d526892-c851-4fc5-b38a-8a401faa117e/_apis/wit/workItems/9/revisions"
+      },
+      "workItemComments": {
+        "href": "https://dev.azure.com/acme-org/0d526892-c851-4fc5-b38a-8a401faa117e/_apis/wit/workItems/9/comments"
+      },
+      "html": {
+        "href": "https://dev.azure.com/acme-org/0d526892-c851-4fc5-b38a-8a401faa117e/_workitems/edit/9"
+      },
+      "workItemType": {
+        "href": "https://dev.azure.com/acme-org/0d526892-c851-4fc5-b38a-8a401faa117e/_apis/wit/workItemTypes/Task"
+      },
+      "fields": {
+        "href": "https://dev.azure.com/acme-org/0d526892-c851-4fc5-b38a-8a401faa117e/_apis/wit/fields"
+      }
+    },
+    "url": "https://dev.azure.com/acme-org/0d526892-c851-4fc5-b38a-8a401faa117e/_apis/wit/workItems/9"
+  },
+  "resourceVersion": "1.0",
+  "resourceContainers": {
+    "collection": {
+      "id": "b51292df-d230-4305-a9da-cdee48c0d617",
+      "baseUrl": "https://dev.azure.com/acme-org/"
+    },
+    "account": {
+      "id": "bf998297-d284-4c84-b338-e4558a468208",
+      "baseUrl": "https://dev.azure.com/acme-org/"
+    },
+    "project": {
+      "id": "0d526892-c851-4fc5-b38a-8a401faa117e",
+      "baseUrl": "https://dev.azure.com/acme-org/"
+    }
+  },
+  "createdDate": "2026-10-13T10:50:43.9993374Z"
+}

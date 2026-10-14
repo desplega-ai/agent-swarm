@@ -1,5 +1,6 @@
 import * as oauth from "oauth4webapi";
 import { isEnvFlagEnabled } from "../utils/env-flag";
+import { isDevOrTestNodeEnv } from "../utils/node-env";
 import { registerVolatileSecret, scrubSecrets } from "../utils/secret-scrubber";
 
 /**
@@ -113,19 +114,22 @@ export function publicEndpointSsrfOptions(): SsrfGuardOptions {
   // or the explicit override flag — may fetch private/insecure endpoints.
   // Local dev entrypoints (`bun run dev:http` / `start:http`) set
   // NODE_ENV=development.
-  const env = process.env.NODE_ENV;
-  const dev =
-    env === "development" || env === "test" || process.env.ALLOW_PRIVATE_NETWORK_URLS === "true";
+  const dev = isDevOrTestNodeEnv() || process.env.ALLOW_PRIVATE_NETWORK_URLS === "true";
   return {
     allowPrivateHosts: dev,
     allowInsecure: dev,
   };
 }
 
-function defaultSsrfOptions(): SsrfGuardOptions {
+/**
+ * Guard for MCP OAuth endpoints (discovery, DCR, token exchange, refresh,
+ * revocation). http:// is allowed only in an explicit development/test
+ * environment; private hosts stay behind MCP_OAUTH_ALLOW_PRIVATE_HOSTS.
+ */
+export function mcpOAuthSsrfOptions(): SsrfGuardOptions {
   return {
     allowPrivateHosts: isEnvFlagEnabled("MCP_OAUTH_ALLOW_PRIVATE_HOSTS", false),
-    allowInsecure: process.env.NODE_ENV !== "production",
+    allowInsecure: isDevOrTestNodeEnv(),
   };
 }
 
@@ -144,7 +148,7 @@ async function safeFetch(
   init?: RequestInit,
   timeoutMs: number = DEFAULT_FETCH_TIMEOUT_MS,
 ): Promise<Response> {
-  assertUrlSafe(url, defaultSsrfOptions());
+  assertUrlSafe(url, mcpOAuthSsrfOptions());
   return fetch(url, { ...init, signal: init?.signal ?? AbortSignal.timeout(timeoutMs) });
 }
 

@@ -2,6 +2,8 @@ import { describe, expect, test } from "bun:test";
 import {
   agentContextKey,
   agentmailContextKey,
+  azureDevOpsContextKey,
+  azureDevOpsWorkItemContextKey,
   buildJiraContextKey,
   githubContextKey,
   gitlabContextKey,
@@ -121,6 +123,36 @@ describe("context-key separator safety", () => {
     expect(() => githubContextKey({ owner: "a", repo: "b", kind: "pr", number: "abc" })).toThrow(
       /integer/,
     );
+  });
+});
+
+describe("azure-devops work item keys", () => {
+  test("round-trips workitem keys", () => {
+    const key = azureDevOpsWorkItemContextKey({ organization: "fabrikam", workItemId: 42 });
+    expect(key).toBe("task:trackers:azure-devops:fabrikam:workitem:42");
+    expect(parseContextKey(key)).toEqual({
+      family: "trackers",
+      subFamily: "azure-devops",
+      parts: { organization: "fabrikam", kind: "workitem", workItemId: 42 },
+    });
+  });
+
+  test("the PR key still parses", () => {
+    const key = azureDevOpsContextKey({ repositoryId: "repo-1", pullRequestId: 7 });
+    expect(parseContextKey(key)).toEqual({
+      family: "trackers",
+      subFamily: "azure-devops",
+      parts: { repositoryId: "repo-1", kind: "pr", pullRequestId: 7 },
+    });
+  });
+
+  test("rejects a non-integer work item id", () => {
+    expect(() => azureDevOpsWorkItemContextKey({ organization: "o", workItemId: 1.5 })).toThrow();
+    expect(() => parseContextKey("task:trackers:azure-devops:o:workitem:abc")).toThrow();
+  });
+
+  test("rejects a workitem key with the wrong part count", () => {
+    expect(() => parseContextKey("task:trackers:azure-devops:workitem:42")).toThrow();
   });
 });
 

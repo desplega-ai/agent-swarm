@@ -19,6 +19,7 @@ Complete reference for all environment variables used by Agent Swarm.
 | `MCP_BASE_URL` | `https://api.example-swarm.dev` | Internal/worker-facing API base — the URL workers, the UI, and the setup command use to reach the API server. In split deploys this may be an internal/cluster address. |
 | `PUBLIC_MCP_BASE_URL` | Falls back to `MCP_BASE_URL` | Public, browser/externally-reachable API origin used for OAuth redirect URIs and webhook URLs. Defaults to `MCP_BASE_URL` when unset; set it in split deploys where `MCP_BASE_URL` is an internal/cluster address that external providers (Linear, Jira, GitHub) can't reach. |
 | `MCP_OAUTH_ALLOW_PRIVATE_HOSTS` | `false` | When `true`, disables the SSRF guard that otherwise refuses `localhost`/RFC1918 private-IP hosts when the server connects to an operator-registered MCP server's OAuth discovery/token endpoints. Only needed to reach an internal-only MCP server, or for local dev/testing — keep the default deny-list in production. |
+| `ALLOW_PRIVATE_NETWORK_URLS` | `false` | When `true`, allows `localhost`/private-IP hosts and `http://` URLs for MCP server registration and proxying, onboarding LLM base URLs, OAuth app endpoints, and script connections. Development and test (`NODE_ENV=development` or `test`) allow them without it. Deployed images leave `NODE_ENV` unset, so they now deny private and loopback endpoints on these paths unless this is `true`. It does not affect MCP OAuth endpoints: those accept `http://` only under `NODE_ENV=development` or `test`, and private hosts only with `MCP_OAUTH_ALLOW_PRIVATE_HOSTS`. |
 | `CORS_ALLOWED_ORIGINS` | Hosted/dev allowlist (below) | Comma-separated exact origins or wildcard-subdomain patterns. Unset or blank uses built-in defaults; a nonblank value replaces them. Unlisted origins receive neither Allow-Origin nor Allow-Credentials unless the non-credentialed compatibility option below is enabled. Applies to API and page-session endpoints. |
 | `CORS_ALLOW_ANY_ORIGIN` | `false` | Deployment-only compatibility opt-out (requires API restart; cannot be stored in Configuration): reflect any origin for non-credentialed requests only (`credentials: "omit"` for bearer clients). Cookie-authenticated responses still require an allowlisted origin; this flag never grants credentials to unlisted origins. Warns once per process when enabled. Prefer listing trusted SPA origins instead. |
 | `OAUTH_KEEPALIVE_DISABLE` | `false` | Disables the background job that proactively refreshes Linear/Jira OAuth refresh tokens every 12h to prevent silent expiry. |
@@ -344,10 +345,11 @@ Run the one-time `bunx @desplega.ai/agent-swarm claude-managed-setup` from your 
 
 | Variable | Description |
 |----------|-------------|
-| `AZURE_DEVOPS_TOKEN` | Personal Access Token (scope: Code, Read & write) for git, `az repos`, and API calls |
+| `AZURE_DEVOPS_TOKEN` | Personal Access Token (scope: Code, Read & write; add Work Items, Read & write for Azure Boards) for git, `az repos`, `az boards`, and API calls |
 | `AZURE_DEVOPS_ORG_URL` | Organization URL, e.g. `https://dev.azure.com/your-org` |
 | `AZURE_DEVOPS_WEBHOOK_SECRET` | Basic auth password the service-hook subscriptions send; enables the webhook endpoint |
 | `AZURE_DEVOPS_BOT_ID` | Identity GUID of the bot user for `@<GUID>` mentions (default: the PAT owner) |
+| `AZURE_DEVOPS_ALLOWED_ACTORS` | Comma-separated sign-in names allowed to trigger Azure Boards work item tasks without a linked swarm user |
 | `AZURE_DEVOPS_BOT_NAME` | Name for plain-text `@name` mentions (default: `agent-swarm-bot`) |
 | `AZURE_DEVOPS_EMAIL` | Git commit email for Azure Repos commits (default: `GITHUB_EMAIL`, then `worker-agent@desplega.ai`; not applied when `GITHUB_TOKEN` or `GITLAB_TOKEN` is set) |
 | `AZURE_DEVOPS_NAME` | Git commit name for Azure Repos commits (default: `GITHUB_NAME`, then `Worker Agent`; not applied when `GITHUB_TOKEN` or `GITLAB_TOKEN` is set) |

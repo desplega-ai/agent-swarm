@@ -13,6 +13,8 @@
  * debug line is emitted so unhandled cases surface during dev.
  */
 
+import { getNodeEnv } from "../utils/node-env";
+
 type AdfNode = {
   type?: string;
   text?: string;
@@ -93,7 +95,7 @@ export function extractText(adf: unknown): string {
       }
       default: {
         // Unknown node — descend into content if present.
-        if (process.env.NODE_ENV !== "production" && type) {
+        if (getNodeEnv() !== "production" && type) {
           console.log(`[jira.adf] unknown node type: ${type}`);
         }
         for (const child of asNodeArray(node.content)) visit(child);

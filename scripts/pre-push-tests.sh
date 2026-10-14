@@ -57,6 +57,7 @@ if [[ "$probe_status" -eq 134 ]]; then
     src/tests/connection-embedded-auth.test.ts \
     src/tests/sandboxed-process.test.ts \
     src/tests/schedule-target-type.test.ts \
+    src/tests/script-connections-sql.test.ts \
     src/tests/script-connections.test.ts \
     src/tests/script-executor-conformance.test.ts \
     src/tests/script-workflows-runtime-e2e.test.ts \

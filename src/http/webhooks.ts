@@ -9,12 +9,25 @@ import {
   verifyAgentMailWebhook,
 } from "../agentmail";
 import { archiveInboundMessage } from "../agentmail/inbound-archive";
-import type { PullRequestCommentedEvent, PullRequestCreatedEvent } from "../azure-devops";
+import type {
+  PullRequestCommentedEvent,
+  PullRequestCreatedEvent,
+  WorkItemCommentedEvent,
+  WorkItemCreatedEvent,
+  WorkItemDeletedEvent,
+  WorkItemRestoredEvent,
+  WorkItemUpdatedEvent,
+} from "../azure-devops";
 import {
   commentedPayloadOf,
   createdPullRequestOf,
   handlePullRequestCommented,
   handlePullRequestCreated,
+  handleWorkItemCommented,
+  handleWorkItemCreated,
+  handleWorkItemDeleted,
+  handleWorkItemRestored,
+  handleWorkItemUpdated,
   isAzureDevOpsEnabled,
   verifyAzureDevOpsWebhook,
 } from "../azure-devops";
@@ -560,6 +573,16 @@ export async function handleWebhooks(
             return await handlePullRequestCreated(body as PullRequestCreatedEvent);
           case "ms.vss-code.git-pullrequest-comment-event":
             return await handlePullRequestCommented(body as PullRequestCommentedEvent);
+          case "workitem.created":
+            return await handleWorkItemCreated(body as WorkItemCreatedEvent);
+          case "workitem.updated":
+            return await handleWorkItemUpdated(body as WorkItemUpdatedEvent);
+          case "workitem.commented":
+            return await handleWorkItemCommented(body as WorkItemCommentedEvent);
+          case "workitem.deleted":
+            return await handleWorkItemDeleted(body as WorkItemDeletedEvent);
+          case "workitem.restored":
+            return await handleWorkItemRestored(body as WorkItemRestoredEvent);
           default:
             console.log(`[AzureDevOps] Ignoring unsupported event type: ${eventType}`);
             return { created: false };

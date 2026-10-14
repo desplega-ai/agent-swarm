@@ -447,6 +447,11 @@ jobs:
       - name: Check sandbox-spawn skip-list sync
         run: bun run check:sandbox-spawn-skip-list
 
+      # `bun build --compile` inlines process.env.NODE_ENV as "development";
+      # src/ must read it through getNodeEnv().
+      - name: Check NODE_ENV runtime reads
+        run: bash scripts/check-node-env-access.sh
+
       # Same-run calls merge server-side. See agent-fs docs/ci-timings.md.
       # Skipped on merge_group events and forks (no secret); never blocks the gate.
       - name: Report check timings to ci-timings
@@ -565,7 +570,7 @@ jobs:
       # include-hidden-files: upload-artifact treats every path under a
       # dot-directory as hidden and would upload nothing from .bun-test-timings.
       - name: Hand the snapshot to the shards
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: timings-snapshot
           path: .bun-test-timings
@@ -607,7 +612,7 @@ jobs:
 
       - name: Upload E2E results
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: e2e-contract-results
           path: e2e-results.json
@@ -627,6 +632,20 @@ jobs:
       fail-fast: false
       matrix:
         shard: [1, 2]
+    # Real Postgres for the read-only checks in src/tests/script-connections-sql.test.ts.
+    # Without SQL_CONNECTION_TEST_URL those tests skip, so read-only would go unverified.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
 
     steps:
       - name: Checkout repository
@@ -644,7 +663,7 @@ jobs:
       # why both shards must read the SAME files). Each shard writes only its own
       # durations to next/N.json; save-timings merges them into the next cache.
       - name: Download test timings
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: timings-snapshot
           path: .bun-test-timings
@@ -658,6 +677,8 @@ jobs:
         # per-file durations balance files across the 2 shards by total time.
         # --timeout 10000 matches ci.yml (main): 4 workers saturate the runner and
         # bunfig.toml no longer sets a global retry.
+        env:
+          SQL_CONNECTION_TEST_URL: postgres://postgres:postgres@localhost:5432/postgres
         run: |
           start=$(date +%s%3N)
           set +e
@@ -676,7 +697,7 @@ jobs:
 
       - name: Upload this shard's test timings
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: test-timings-${{ matrix.shard }}
           path: .bun-test-timings/next/${{ matrix.shard }}.json
@@ -687,7 +708,7 @@ jobs:
       # console reporter). The JUnit file is the full-fidelity record.
       - name: Upload this shard's test results
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: unit-test-results-${{ matrix.shard }}
           path: .bun-test-results/junit-${{ matrix.shard }}.xml
@@ -775,7 +796,7 @@ jobs:
     permissions: {}
     steps:
       - name: Download per-shard timings
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: test-timings-*
           path: .bun-test-timings

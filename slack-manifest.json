@@ -66,6 +66,8 @@
         "app_mentions:read",
         "assistant:write",
         "channels:history",
+        "channels:join",
+        "channels:manage",
         "channels:read",
         "chat:write",
         "chat:write.customize",
@@ -75,6 +77,7 @@
         "files:write",
         "groups:history",
         "groups:read",
+        "groups:write",
         "im:history",
         "im:read",
         "im:write",
@@ -96,7 +99,10 @@
         "message.groups",
         "message.im",
         "message.mpim",
-        "assistant_thread_started"
+        "assistant_thread_started",
+        "member_joined_channel",
+        "channel_shared",
+        "channel_unshared"
       ]
     },
     "interactivity": {
