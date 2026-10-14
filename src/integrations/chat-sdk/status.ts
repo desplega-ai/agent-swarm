@@ -4,8 +4,8 @@ import { isEnvFlagEnabled } from "@/utils/env-flag";
 import { scrubSecrets } from "@/utils/secret-scrubber";
 import { resolveAdapterApiUrl } from "./adapters";
 import { CHAT_SDK_ADAPTER_NAMES, type ChatSdkAdapterName, getChatSdkConfig } from "./config";
-import { errorMessage } from "./logger";
 import { getChatSdkHealth } from "./runtime";
+import { callTelegramBotApi, TelegramBotApiError } from "./telegram-api";
 
 /**
  * Read-only Chat SDK status for the dashboard card, and the Telegram
@@ -54,8 +54,6 @@ const SLACK_CLASH_CAUSE =
 
 /** Bound on error text in the status payload. Adapter and parser errors can be long. */
 const MAX_STATUS_ERROR_CHARS = 300;
-
-const TELEGRAM_TIMEOUT_MS = 10_000;
 
 function statusError(message: string): string {
   return scrubSecrets(message).slice(0, MAX_STATUS_ERROR_CHARS);
@@ -151,40 +149,12 @@ async function callBotApi(
   method: string,
   body: Record<string, unknown>,
 ): Promise<unknown> {
-  let response: Response;
   try {
-    response = await fetch(`${baseUrl.replace(/\/+$/, "")}/bot${token}/${method}`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(TELEGRAM_TIMEOUT_MS),
-    });
+    return await callTelegramBotApi(baseUrl, token, method, body);
   } catch (error) {
-    if (error instanceof Error && error.name === "TimeoutError") {
-      throw new ChatSdkActionError(
-        `Telegram ${method} failed: no response from the Bot API within ${TELEGRAM_TIMEOUT_MS / 1000} s`,
-        502,
-      );
-    }
-    // Fetch errors can echo the URL, which carries the bot token.
-    throw new ChatSdkActionError(
-      `Telegram ${method} failed: ${scrubSecrets(errorMessage(error).replaceAll(token, "[REDACTED]"))}`,
-      502,
-    );
+    if (error instanceof TelegramBotApiError) throw new ChatSdkActionError(error.message, 502);
+    throw error;
   }
-  const payload = (await response.json().catch(() => null)) as {
-    ok?: boolean;
-    result?: unknown;
-    description?: string;
-  } | null;
-  if (!response.ok || !payload?.ok) {
-    const description = payload?.description ?? `HTTP ${response.status}`;
-    throw new ChatSdkActionError(
-      `Telegram ${method} failed: ${scrubSecrets(description.replaceAll(token, "[REDACTED]"))}`,
-      502,
-    );
-  }
-  return payload.result;
 }
 
 /**

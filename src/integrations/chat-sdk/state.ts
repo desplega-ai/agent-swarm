@@ -1,4 +1,4 @@
-import type { Lock, QueueEntry, StateAdapter } from "chat";
+import type { Lock, Message, QueueEntry, SerializedMessage, StateAdapter } from "chat";
 import { getDbClient } from "@/be/db";
 
 /**
@@ -218,4 +218,26 @@ export async function sweepExpired(now: number = Date.now()): Promise<void> {
     await tx.run("DELETE FROM chat_lists WHERE expires_at IS NOT NULL AND expires_at <= ?", [now]);
     await tx.run("DELETE FROM chat_locks WHERE expires_at <= ?", [now]);
   });
+}
+
+/**
+ * Key prefix of the SDK `ThreadHistoryCache` (chat 4.41): the per-thread
+ * message list for adapters with `persistThreadHistory` (Telegram, WhatsApp).
+ * Pinned by `chat-sdk-commands.test.ts` against the real SDK.
+ */
+export const SDK_THREAD_HISTORY_PREFIX = "msg-history:";
+
+/**
+ * The thread history the SDK persisted here, oldest first. The adapters that
+ * persist it answer `fetchMessages` from process memory, and the SDK reads this
+ * store only when that memory is empty. After a restart the memory holds just
+ * the newest message, so callers merge both sources themselves.
+ */
+export async function readPersistedThreadHistory(threadId: string): Promise<Message[]> {
+  const rows = await new SqliteChatState().getList<SerializedMessage>(
+    `${SDK_THREAD_HISTORY_PREFIX}${threadId}`,
+  );
+  if (rows.length === 0) return [];
+  const { Message: MessageClass } = await import("chat");
+  return rows.map((row) => MessageClass.fromJSON(row));
 }

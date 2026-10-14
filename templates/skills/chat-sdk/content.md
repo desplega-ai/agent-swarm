@@ -7,6 +7,7 @@ The swarm receives messages from Telegram, Slack, Discord, and Microsoft Teams t
 - The task has `source: "chat"`, or it is a lead follow-up of one.
 - The task `contextKey` starts with `task:chat-sdk:`. The full form is `task:chat-sdk:<adapter>:<encoded thread id>`, for example `task:chat-sdk:telegram:555001`.
 - The task text holds the user's message. Later replies in the same thread arrive as follow-up tasks with the same `contextKey`, or as steering messages on your running task.
+- The user has four slash commands that never reach you as a task: `/help`, `/status`, `/cancel` and `/reset`. `/cancel` ends the thread's active tasks, yours included, with status `cancelled`. After `/reset` the next task has no parent task and no earlier thread context, so treat it as a new conversation.
 
 Use `get-task-details` to read the `contextKey` when you are not sure.
 

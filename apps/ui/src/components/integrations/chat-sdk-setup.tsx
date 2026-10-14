@@ -111,6 +111,11 @@ function steps(adapter: ChatSdkAdapterName, docsUrl: string | undefined): ReactN
           <CodeChip>/setprivacy</CodeChip> to BotFather, turn privacy off, then add the bot to the
           group again.
         </>,
+        <>
+          The bot answers <CodeChip>/help</CodeChip>, <CodeChip>/status</CodeChip>,{" "}
+          <CodeChip>/cancel</CodeChip> and <CodeChip>/reset</CodeChip>. The command menu is
+          published to Telegram each time the adapter starts.
+        </>,
       ];
     case "slack":
       return [
@@ -134,6 +139,12 @@ function steps(adapter: ChatSdkAdapterName, docsUrl: string | undefined): ReactN
           Install the app to the workspace and copy the bot token (<CodeChip>xoxb-...</CodeChip>).
         </>,
         <>Turn on Slack, enter the values, and save.</>,
+        <>
+          Optional: under <b>Slash Commands</b>, add <CodeChip>/help</CodeChip>,{" "}
+          <CodeChip>/status</CodeChip>, <CodeChip>/cancel</CodeChip> and <CodeChip>/reset</CodeChip>
+          . In webhook mode, the request URL is the URL below. The {docsLink("Chat SDK docs")} have
+          the manifest entries.
+        </>,
       ];
     case "discord":
       return [
@@ -154,8 +165,11 @@ function steps(adapter: ChatSdkAdapterName, docsUrl: string | undefined): ReactN
           History, Add Reactions, Attach Files.
         </>,
         <>
-          Optional: set <b>Interactions Endpoint URL</b> to the URL below. Messages arrive over the
-          Gateway, so you can leave it empty.
+          Optional, for <CodeChip>/help</CodeChip>, <CodeChip>/status</CodeChip>,{" "}
+          <CodeChip>/cancel</CodeChip> and <CodeChip>/reset</CodeChip>: set{" "}
+          <b>Interactions Endpoint URL</b> to the URL below, then register the commands once with
+          the Discord API. The {docsLink("Chat SDK docs")} have the command. Messages arrive over
+          the Gateway, so without it the bot still answers mentions.
         </>,
         <>Turn on Discord, enter the values, and save.</>,
       ];

@@ -4,6 +4,7 @@ import { isEnvFlagEnabled } from "@/utils/env-flag";
 import { registerVolatileSecret, scrubSecrets } from "@/utils/secret-scrubber";
 import { loadAdapter, watchSocketConnection } from "./adapters";
 import { drainBackground } from "./background";
+import { registerTelegramCommands } from "./commands";
 import {
   assertNoSlackClash,
   CHAT_SDK_ADAPTER_NAMES,
@@ -130,6 +131,14 @@ async function startAdapter(
       return;
     }
     watchSocketConnection(adapter, logger);
+    if (name === "telegram") {
+      // The `/` menu in Telegram clients. The commands work without it.
+      try {
+        await registerTelegramCommands(config);
+      } catch (error) {
+        logger.warn(`Could not register the Telegram commands: ${errorMessage(error)}`);
+      }
+    }
     setHealth(name, "ok", undefined, lastWarning);
     console.log(`[chat-sdk] ${name} ready`);
     // Discord messages arrive only over the Gateway, never the webhook.

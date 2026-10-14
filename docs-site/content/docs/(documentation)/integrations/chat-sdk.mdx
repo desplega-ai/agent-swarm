@@ -85,6 +85,8 @@ When the tunnel URL changes, do steps 2 and 3 again. Telegram polling and Slack 
 3. On the Chat SDK card, turn on **Telegram**, enter both values, and save. The adapter starts within a few seconds.
 4. Click **Register webhook**. The API calls the Bot API `setWebhook` with the public webhook URL and the secret token. Then it shows the `getWebhookInfo` result.
 
+The bot answers the [slash commands](#slash-commands) `/help`, `/status`, `/cancel` and `/reset`. The adapter publishes the list to Telegram (`setMyCommands`) each time it starts, so the client shows the command menu. No BotFather step is needed.
+
 For local development without a public URL, set `mode` to `polling`. The adapter then reads updates with long polling, and no webhook is needed. Do not register a webhook in polling mode: while a webhook is set, Telegram does not deliver updates to a poller.
 
 | Field | Required | Notes |
@@ -108,6 +110,7 @@ The Chat SDK Slack adapter and the built-in [Slack](/docs/integrations/slack) in
    - **Webhook mode:** set the Event Subscriptions request URL to the Slack webhook URL. The adapter answers Slack's `url_verification` challenge. Copy the signing secret.
    - **Socket mode:** turn on Socket Mode and create an app-level token (`xapp-...`) with `connections:write`. No public URL is needed.
 5. Install the app to the workspace and copy the bot token (`xoxb-...`).
+6. Optional: under **Slash Commands**, create `/help`, `/status`, `/cancel` and `/reset`. In webhook mode the request URL is the Slack webhook URL. In socket mode the commands arrive over the socket. See [Slash commands](#slash-commands).
 
 To create the app from a manifest (**Create New App**, then **From a manifest**), start from this minimal one. Replace `${PUBLIC_MCP_BASE_URL}` with the public URL of your API.
 
@@ -122,6 +125,20 @@ features:
   bot_user:
     display_name: swarm
     always_online: true
+  # Optional. Webhook mode only: each url is the Slack webhook URL. In socket mode, remove the url lines.
+  slash_commands:
+    - command: /help
+      description: List the commands
+      url: ${PUBLIC_MCP_BASE_URL}/api/integrations/chat/slack/webhook
+    - command: /status
+      description: Show the latest task of this chat
+      url: ${PUBLIC_MCP_BASE_URL}/api/integrations/chat/slack/webhook
+    - command: /cancel
+      description: Cancel the running task of this chat
+      url: ${PUBLIC_MCP_BASE_URL}/api/integrations/chat/slack/webhook
+    - command: /reset
+      description: "Start over: the next message gets no earlier context"
+      url: ${PUBLIC_MCP_BASE_URL}/api/integrations/chat/slack/webhook
 oauth_config:
   scopes:
     bot:
@@ -164,7 +181,20 @@ settings:
 1. Create an application in the [Discord Developer Portal](https://discord.com/developers/applications). Copy the **Application ID** and the **Public Key** (64 hex characters).
 2. On the **Bot** page, copy the bot token and turn on the **Message Content** privileged intent.
 3. Invite the bot to your server with the `bot` scope and these permissions: Send Messages, Send Messages in Threads, Create Public Threads, Manage Threads, Read Message History, Add Reactions, Attach Files.
-4. Optional: set **Interactions Endpoint URL** to the Discord webhook URL. Discord then sends interactions (slash commands, buttons) over HTTP instead of the Gateway. This version does not handle slash commands, so you can leave it empty.
+4. Optional, for [slash commands](#slash-commands): set **Interactions Endpoint URL** to the Discord webhook URL. Discord sends slash commands only to this URL, never over the Gateway. Then register the commands once. Replace the application id and the bot token:
+
+   ```bash
+   curl -X PUT "https://discord.com/api/v10/applications/${APPLICATION_ID}/commands" \
+     -H "Authorization: Bot ${BOT_TOKEN}" -H "Content-Type: application/json" \
+     -d '[
+       {"name":"help","description":"List the commands"},
+       {"name":"status","description":"Show the latest task of this chat"},
+       {"name":"cancel","description":"Cancel the running task of this chat"},
+       {"name":"reset","description":"Start over: the next message gets no earlier context"}
+     ]'
+   ```
+
+   Global commands can take up to an hour to appear in the client. Without the endpoint URL the bot still answers messages and mentions.
 
 | Field | Required | Notes |
 |---|---|---|
@@ -212,6 +242,21 @@ A Teams thread id contains the service URL of the conversation, and the adapter 
 
 Long output is split into several messages at the platform limit.
 
+## Slash commands
+
+One handler answers the commands on every adapter that delivers them: Telegram, Slack and Discord. Teams has no slash commands. A command creates no task and is not part of the thread context. An unknown command (`/deploy`) gets the command list back, so no `/word` message is dropped.
+
+| Command | What it does |
+|---|---|
+| `/help` | Lists the commands. |
+| `/status` | Shows the latest task of the chat: short id, status, and the agent it is assigned to. |
+| `/cancel` | Cancels every pending or in-progress task of the chat, newest first, up to 20. The relay posts the cancellation like any other task end. |
+| `/reset` | Starts a new conversation. The next message creates a task with no parent task and no thread history older than the reset. A running task keeps running: send `/cancel` to stop it. The mark lives in the swarm database for 30 days. |
+
+The command acts on the chat it is typed in: a Telegram private chat or group, a Slack channel or DM, a Discord channel. In Slack and Discord the command is not tied to a thread inside the channel.
+
+Each platform learns the list in its own way. Telegram: the adapter calls `setMyCommands` at every start. Slack: the app manifest (or the **Slash Commands** page) lists the commands. Discord: a one-time application-command registration plus the **Interactions Endpoint URL**. The platform steps above show each one.
+
 ## Tools
 
 Agents get these tools when the channel is on (capability `chat-sdk`). The parameters are in `MCP.md` in the repository.
@@ -252,7 +297,7 @@ Platform notes:
 - **Discord Gateway gaps.** The Gateway listener runs in windows of 6 hours and re-arms itself after each window. Discord does not replay messages from a gap. A message sent during a re-arm, or while the listener waits 30 s after a failure, is lost. A bad bot token keeps the adapter health `ok` (the interactions webhook still works), and the Gateway state shows `backoff`.
 - **Telegram.** A bot can message a user only after the user started a chat with it. A webhook needs a public HTTPS URL on port 443, 80, 88 or 8443.
 - **Slack.** No rich rendering (blocks, cards, streaming edits) in this version.
-- **Teams.** The Teams SDK writes its own logs, which do not go through the swarm secret scrubber.
+- **Teams.** The Teams SDK writes its own logs, which do not go through the swarm secret scrubber. The adapter has no slash commands.
 - **Unsubscribed group threads.** In a group thread, the bot subscribes when the first task is created. A reply without a mention inside the first buffer window is not seen.
 
 ## Troubleshooting
@@ -268,6 +313,8 @@ Platform notes:
 | The Slack webhook answers `405`. | The Slack adapter runs in socket mode, which needs no request URL. Remove the URL from the Slack app, or switch to webhook mode. |
 | Telegram gets no updates. | In webhook mode, click **Register webhook** and check `last_error_message` in the result. In polling mode, make sure no webhook is registered. |
 | Discord mentions create no task. | Turn on the **Message Content** intent, and check the Gateway state on the card. |
+| Discord slash commands do nothing. | Set the **Interactions Endpoint URL** and register the commands (Discord step 4). Global commands can take up to an hour to show up. |
+| A follow-up task has no thread context after a restart or a save. | Fixed: the swarm merges the history it persisted with the adapter's memory. If it still happens on Telegram, check that the `chat_lists` table holds `msg-history:` rows for the thread. |
 
 ## Reference
 

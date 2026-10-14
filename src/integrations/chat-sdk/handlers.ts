@@ -1,5 +1,6 @@
 import type { Chat, Message, Thread } from "chat";
 import { trackBackground } from "./background";
+import { registerChatCommands } from "./commands";
 import { type ChatInboundKind, handleChatInbound } from "./inbound";
 
 async function onHumanMessage(
@@ -21,4 +22,7 @@ export function registerChatHandlers(chat: Chat): void {
   chat.onNewMention((thread, message) => onHumanMessage(thread, message, "mention"));
   chat.onDirectMessage((thread, message) => onHumanMessage(thread, message, "dm"));
   chat.onSubscribedMessage((thread, message) => onHumanMessage(thread, message, "subscribed"));
+  // A `/command` message never reaches the handlers above: the adapters route
+  // it here. Without a handler Telegram would drop it silently.
+  registerChatCommands(chat);
 }

@@ -23,6 +23,7 @@ import {
   fetchChatFiles,
   toChatFiles,
 } from "./attachments";
+import { getChatThreadResetAt } from "./commands";
 import { errorMessage } from "./logger";
 import { emitChatMessageSent } from "./outbound";
 import {
@@ -32,6 +33,7 @@ import {
   stripRoutingTokens,
 } from "./router";
 import { getChatInstance } from "./runtime";
+import { readPersistedThreadHistory } from "./state";
 import { formatChatSteeringAck, requestChatThreadSteering } from "./steering";
 import {
   bufferChatMessage,
@@ -157,12 +159,26 @@ export async function handleChatInbound(
   if (immediate) await instantFlushChat(thread.id);
 }
 
-/** Earlier messages of the thread for the task description, minus the flushed ones. */
-async function getChatThreadContext(thread: Thread, exclude: ReadonlySet<string>): Promise<string> {
+/**
+ * Earlier messages of the thread for the task description, minus the flushed
+ * ones and anything before the last `/reset`. The adapter's view is merged with
+ * the history the SDK persisted: Telegram answers from process memory, which an
+ * adapter restart (API restart, config reload) empties.
+ */
+async function getChatThreadContext(
+  thread: Thread,
+  exclude: ReadonlySet<string>,
+  since: Date | null,
+): Promise<string> {
   try {
     await thread.refresh();
-    return thread.recentMessages
+    const byId = new Map<string, Message>();
+    for (const m of await readPersistedThreadHistory(thread.id)) byId.set(m.id, m);
+    for (const m of thread.recentMessages) byId.set(m.id, m);
+    return [...byId.values()]
+      .sort((a, b) => a.metadata.dateSent.getTime() - b.metadata.dateSent.getTime())
       .filter((m) => !exclude.has(m.id) && m.text.trim() !== "")
+      .filter((m) => since === null || m.metadata.dateSent.getTime() > since.getTime())
       .slice(-THREAD_CONTEXT_LIMIT)
       .map((m) => {
         if (m.author.isMe || m.author.isBot === true) {
@@ -250,7 +266,14 @@ export async function flushChatThread(
   const botMentioned = items.some((item) => item.botMentioned);
   const isDirectMessage = items.some((item) => item.isDirectMessage);
 
-  const mostRecentTask = await getLatestTaskByContextKey(contextKey);
+  // After `/reset` the thread's earlier tasks are not context: the new task gets
+  // no parent and no thread history older than the reset.
+  const resetAt = await getChatThreadResetAt(threadId);
+  const previousTask = await getLatestTaskByContextKey(contextKey);
+  const mostRecentTask =
+    previousTask && resetAt && new Date(previousTask.createdAt).getTime() <= resetAt.getTime()
+      ? null
+      : previousTask;
   const routeResult = await dispatchPre(
     "pre.chat.route",
     {
@@ -339,7 +362,7 @@ export async function flushChatThread(
       : combined;
   const threadContext =
     mostRecentTask && thread
-      ? await getChatThreadContext(thread, new Set(items.map((item) => item.messageId)))
+      ? await getChatThreadContext(thread, new Set(items.map((item) => item.messageId)), resetAt)
       : "";
   const description = threadContext
     ? `${resolveTemplate("chat.message.thread_context", { thread_messages: threadContext }).text}\n\n${marked}`
