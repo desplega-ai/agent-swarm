@@ -1,6 +1,6 @@
 ---
 title: Harness Configuration
-description: Configure the AI provider (Claude Code, Codex, opencode, pi-mono, Devin, or Claude Managed Agents) that powers your agents
+description: Configure the AI provider (Claude Code, Codex, opencode, pi-mono, Devin, Claude Managed Agents, dsh, Amp, Cursor, or Grok) that powers your agents
 ---
 
 import { Tab, Tabs } from "fumadocs-ui/components/tabs";
@@ -18,6 +18,10 @@ Agent Swarm uses a **harness** abstraction to decouple task execution from the u
 | **Devin** | `devin` | Cognition's Devin via the `/sessions` API — session executes in Devin's managed cloud, ACU-based cost tracking |
 | **Claude Managed Agents** | `claude-managed` | Anthropic's managed cloud sandbox — sessions execute outside the worker. Requires one-time setup CLI to create the Anthropic-side Agent + Environment |
 | **ACP (Agent Client Protocol)** | `acp` | Any [Agent Client Protocol](https://agentclientprotocol.com) agent, spawned as a subprocess and driven over stdio. No swarm-side model-provider credential — the target owns its own model auth. It receives a session-scoped `aseph_` token as the swarm MCP bearer, granting that agent's swarm MCP access for up to 24 hours; point it only at a binary you trust |
+| **DeepSeek Harness** | `dsh` | DeepSeek's `@deepseek-ai/dsh` CLI. A model's `openrouter/` prefix selects OpenRouter; bare IDs select DeepSeek's API |
+| **Amp** | `amp` | Sourcegraph's Amp CLI in execute mode. Amp selects the model for each mode on its service |
+| **Cursor** | `cursor` | Cursor's local Agent SDK runtime with Cursor-hosted models |
+| **Grok** | `grok` | xAI's Grok CLI, run as an ACP server with a fresh session home |
 
 ## How It Works
 
@@ -35,6 +39,10 @@ HARNESS_PROVIDER=claude-managed  →  ClaudeManagedAdapter  →  opens SSE strea
                                                             (session executes server-side)
 HARNESS_PROVIDER=acp             →  ACPAdapter            →  spawns `ACP_TARGET_COMMAND`,
                                                             speaks ndjson ACP over stdio
+HARNESS_PROVIDER=dsh             →  DshAdapter            →  spawns `dsh` in headless JSON mode
+HARNESS_PROVIDER=amp             →  AmpAdapter            →  spawns `amp` in execute mode
+HARNESS_PROVIDER=cursor          →  CursorAdapter         →  creates a local Cursor SDK agent
+HARNESS_PROVIDER=grok            →  GrokAdapter           →  starts `grok agent` through ACP
 ```
 
 Both adapters implement the same `ProviderAdapter` interface, producing normalized `ProviderEvent` streams (session init, tool calls, cost data, context usage, etc.) that the runner consumes identically.
@@ -531,6 +539,57 @@ For full adapter internals (the `SwarmAcpClient`/`ACPSession` classes, MCP serve
 
 ---
 
+## DeepSeek Harness (dsh)
+
+Set `HARNESS_PROVIDER=dsh` and provide `DEEPSEEK_API_KEY` for bare DeepSeek
+model IDs, or `OPENROUTER_API_KEY` for `openrouter/<id>` models. The tier
+defaults are OpenRouter Flash, OpenRouter Flash, OpenRouter DeepSeek Pro, and
+OpenRouter Claude Opus for `smol` through `ultra`. Reasoning effort is passed
+to dsh when supported. The adapter inserts swarm MCP, has no live steering or
+native resume, and accepts `DSH_BINARY` for a trusted executable override. See
+[Provider Auth: DeepSeek Harness](/docs/guides/provider-auth/dsh) for the route
+selector and a direct-DeepSeek tier map.
+
+## Amp
+
+Set `HARNESS_PROVIDER=amp` and `AMP_API_KEY`. Its tiers map to Amp modes:
+`low`, `medium`, `high`, and `ultra`. A concrete `provider/model` pin overrides
+the mode; reasoning effort applies only to that pin. Amp inserts swarm MCP,
+supports queued steering only, and stores every thread on ampcode.com. See
+[Provider Auth: Amp](/docs/guides/provider-auth/amp) for token setup, mode
+behavior, and cost tracking.
+
+## Cursor
+
+Set `HARNESS_PROVIDER=cursor` and `CURSOR_API_KEY`. The defaults are
+`gpt-5.4-mini`, `claude-sonnet-5-5`, `claude-opus-5-5`, and
+`claude-fable-5-1` for `smol` through `ultra`; the SDK resolves them against
+the account's model list. Cursor passes supported reasoning effort through the
+model's own parameter, wires swarm MCP, and supports steer and queue. Sessions
+are not resumable. See [Provider Auth: Cursor](/docs/guides/provider-auth/cursor)
+for plans and key creation.
+
+## Grok
+
+Set `HARNESS_PROVIDER=grok` and `XAI_API_KEY`, or `OPENROUTER_API_KEY` for an
+`openrouter/<id>` model. Tier defaults are `grok-build-0.1`, `grok-4.3`,
+`grok-4.6`, and `grok-4.7`. Reasoning effort becomes the Grok CLI's effort
+setting when the model supports it. Each session has a fresh `GROK_HOME`,
+includes swarm MCP, and has no live steering or native resume. See
+[Provider Auth: Grok](/docs/guides/provider-auth/grok) for route and billing
+details.
+
+## Devin
+
+Set `HARNESS_PROVIDER=devin`, `DEVIN_API_KEY`, and `DEVIN_ORG_ID`. Every tier
+resolves to `devin`; the adapter does not select a model or apply reasoning
+effort. Sessions run in Devin's cloud, track cost in ACUs, and support queued
+steering. `HAS_MCP=true` is not supported. A suspended session can resume, but
+an exited or errored one cannot. `DEVIN_MAX_ACU_LIMIT` optionally caps a task's
+ACU usage.
+
+---
+
 ## Choosing a Provider
 
 | Consideration | Claude Code | Codex | opencode | pi-mono | Claude Managed | ACP |
@@ -542,6 +601,13 @@ For full adapter internals (the `SwarmAcpClient`/`ACPSession` classes, MCP serve
 | **MCP integration** | Native (`.mcp.json` config) | Native (`~/.codex/config.toml`) | Auto-wired per-task via config file | HTTP-based tool discovery | Server-side on the Anthropic Agent | Passed via ACP `newSession.mcpServers`; target must honor it |
 | **Where session runs** | Worker container | Worker container | Worker container | Worker container | Anthropic's managed cloud sandbox | Worker container (subprocess) |
 | **Maturity** | Production-grade, well-tested | Production-grade, well-tested | Early support (2026-05) | Community project, actively developed | Public beta (2026-04) | Experimental — one generic target, no named profiles |
+
+**DeepSeek Harness** suits direct DeepSeek or OpenRouter workloads when its
+model-prefix routing is configured deliberately. **Amp** is a managed-mode
+choice with queue-only steering. **Cursor** suits a Cursor account that needs
+native model effort controls and live steering. **Grok** suits xAI API models
+or OpenRouter models on the Grok CLI. **Devin** runs work remotely in
+Cognition's cloud and bills in ACUs rather than worker-side tokens.
 
 **Recommendation**: Use Claude Code with OAuth for most setups. Use Codex when you specifically want the OpenAI/Codex toolchain or ChatGPT OAuth-backed workers. Use opencode when you want a lightweight open-source runner with access to the full OpenRouter model catalog at low cost. Consider pi-mono when you need a library-based open-source runner. Choose `claude-managed` when you want managed sandboxing (faster cold-start, vault-based credential isolation) and don't need a local runtime. Choose `acp` when you already have (or are building) an ACP-speaking agent and want to run it as a swarm worker without writing a new adapter.
 
