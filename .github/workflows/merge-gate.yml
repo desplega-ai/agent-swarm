@@ -447,6 +447,11 @@ jobs:
       - name: Check sandbox-spawn skip-list sync
         run: bun run check:sandbox-spawn-skip-list
 
+      # `bun build --compile` inlines process.env.NODE_ENV as "development";
+      # src/ must read it through getNodeEnv().
+      - name: Check NODE_ENV runtime reads
+        run: bash scripts/check-node-env-access.sh
+
       # Same-run calls merge server-side. See agent-fs docs/ci-timings.md.
       # Skipped on merge_group events and forks (no secret); never blocks the gate.
       - name: Report check timings to ci-timings

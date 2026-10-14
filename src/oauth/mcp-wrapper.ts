@@ -1,5 +1,6 @@
 import * as oauth from "oauth4webapi";
 import { isEnvFlagEnabled } from "../utils/env-flag";
+import { getNodeEnv } from "../utils/node-env";
 import { registerVolatileSecret, scrubSecrets } from "../utils/secret-scrubber";
 
 /**
@@ -113,7 +114,7 @@ export function publicEndpointSsrfOptions(): SsrfGuardOptions {
   // or the explicit override flag — may fetch private/insecure endpoints.
   // Local dev entrypoints (`bun run dev:http` / `start:http`) set
   // NODE_ENV=development.
-  const env = process.env.NODE_ENV;
+  const env = getNodeEnv();
   const dev =
     env === "development" || env === "test" || process.env.ALLOW_PRIVATE_NETWORK_URLS === "true";
   return {
@@ -125,7 +126,7 @@ export function publicEndpointSsrfOptions(): SsrfGuardOptions {
 function defaultSsrfOptions(): SsrfGuardOptions {
   return {
     allowPrivateHosts: isEnvFlagEnabled("MCP_OAUTH_ALLOW_PRIVATE_HOSTS", false),
-    allowInsecure: process.env.NODE_ENV !== "production",
+    allowInsecure: getNodeEnv() !== "production",
   };
 }
 

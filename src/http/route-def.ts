@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import type { PermissionVerb } from "../rbac";
+import { getNodeEnv } from "../utils/node-env";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { jsonError, matchRoute, parseBody, RequestBodyTooLargeError } from "./utils";
 
@@ -310,13 +311,13 @@ export function describeRequestRoute(
  * endpoint down outside tests (2026-08-18 incident — a single priority='high'
  * row 500'd every task listing). When the gate is on outside tests
  * (NODE_ENV=development, or VALIDATE_HTTP_RESPONSES=true), `respond()` logs
- * the violation and sends the response anyway. Note: the compiled Bun binary
- * defaults NODE_ENV to "development", so deploys must also set
- * NODE_ENV=production explicitly (see the deploy-env change in the fix PR).
+ * the violation and sends the response anyway. NODE_ENV is read at runtime
+ * (`getNodeEnv`), so the compiled binary with NODE_ENV unset leaves the gate
+ * off unless VALIDATE_HTTP_RESPONSES=true.
  */
 const VALIDATE_RESPONSES =
-  process.env.NODE_ENV === "test" ||
-  process.env.NODE_ENV === "development" ||
+  getNodeEnv() === "test" ||
+  getNodeEnv() === "development" ||
   process.env.VALIDATE_HTTP_RESPONSES === "true";
 
 export function route<
@@ -343,7 +344,7 @@ export function route<
               result.error.issues
                 .map((i) => `${i.path.join(".") || "<root>"}: ${i.message}`)
                 .join("; ");
-            if (process.env.NODE_ENV === "test") {
+            if (getNodeEnv() === "test") {
               throw new Error(detail);
             }
             console.error(`[route-def] ${scrubSecrets(detail)}`);
