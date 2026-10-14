@@ -14,6 +14,7 @@ import { errorMessage } from "./logger";
 import { postChatMessage } from "./outbound";
 import { getChatInstance, getChatSdkHealth } from "./runtime";
 import { sweepExpired } from "./state";
+import { stopTypingKeepalive } from "./typing";
 
 /**
  * Stop retrying a relay row this long after its obligation was created. Time,
@@ -79,6 +80,7 @@ export async function processPendingChatRelays(
       if (await markChatRelayGivenUp(task.id, reason, now)) {
         console.warn(scrubSecrets(`[chat-sdk] Gave up relaying task ${task.id}: ${reason}`));
       }
+      if (target) stopTypingKeepalive(target.threadId);
       continue;
     }
     if (!target) {
@@ -98,6 +100,7 @@ export async function processPendingChatRelays(
         text: formatChatRelayText(task),
         taskId: task.id,
       });
+      stopTypingKeepalive(target.threadId);
       await markChatRelayDelivered(task.id, now);
       console.log(`[chat-sdk] Relayed ${task.status} task ${task.id} to ${target.adapter}`);
     } catch (error) {

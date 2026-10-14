@@ -26,6 +26,7 @@ import { startChatRelayWatcher, stopChatRelayWatcher } from "./relay";
 import { SqliteChatState } from "./state";
 import { getChatSdkTestHooks } from "./test-hooks";
 import { flushAllChatBuffers } from "./thread-buffer";
+import { stopAllTypingKeepalives } from "./typing";
 
 export interface ChatAdapterHealth {
   status: "ok" | "error";
@@ -234,6 +235,7 @@ async function withTimeout(work: Promise<unknown>, ms: number, step: string): Pr
 export async function stopChatSdk(budgetMs: number = SHUTDOWN_BUDGET_MS): Promise<void> {
   // Ingress first: webhooks answer 503 and refuse new work from here.
   stopping = true;
+  stopAllTypingKeepalives();
   const deadline = Date.now() + budgetMs;
   const remaining = (): number => Math.max(0, deadline - Date.now());
   // No new relay tick or claim from here. The wait for an in-flight send comes

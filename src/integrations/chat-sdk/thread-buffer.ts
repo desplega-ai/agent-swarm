@@ -2,6 +2,7 @@ import type { Attachment } from "chat";
 import { type AdditiveBuffer, createAdditiveBuffer } from "@/tasks/additive-buffer";
 import { trackBackground } from "./background";
 import { flushChatThread } from "./inbound";
+import { stopTypingKeepalive } from "./typing";
 
 /** One inbound message waiting in its thread's buffer. */
 export interface ChatBufferedMessage {
@@ -65,7 +66,8 @@ function getBuffer(): AdditiveBuffer<ChatBufferedMessage> {
         // Tracked so shutdown drains timer-driven flushes before the DB closes.
         const work = runInThreadOrder(threadId, () => flushChatThread(threadId, items, immediate));
         trackBackground(work);
-        await work.catch(() => {});
+        // A failed flush created no task, so no relay will stop the indicator.
+        await work.catch(() => stopTypingKeepalive(threadId));
       },
     });
   }

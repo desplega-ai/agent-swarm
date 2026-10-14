@@ -39,6 +39,7 @@ import {
   instantFlushChat,
   isChatThreadBuffered,
 } from "./thread-buffer";
+import { startTypingKeepalive, stopTypingKeepalive } from "./typing";
 // Side-effect import: registers the Chat SDK prompt templates.
 import "./templates";
 
@@ -127,6 +128,8 @@ export async function handleChatInbound(
           taskId: steering.task.id,
           messageId: sent.id,
         });
+        // The acknowledgement is the reply to this message.
+        stopTypingKeepalive(thread.id);
       } catch (error) {
         console.warn(
           `[chat-sdk] Could not post the steering acknowledgement: ${errorMessage(error)}`,
@@ -147,6 +150,9 @@ export async function handleChatInbound(
       isDirectMessage: kind === "dm" || thread.isDM,
       attachments,
     });
+    // Subscribed-thread messages may be dropped by the router at flush time;
+    // they get typing once a task exists (see flushChatThread).
+    if (kind !== "subscribed") startTypingKeepalive(adapter, thread.id);
   }
   if (immediate) await instantFlushChat(thread.id);
 }
@@ -273,6 +279,7 @@ export async function flushChatThread(
       `[chat-sdk] Extension blocked routing for ${threadId}:`,
       scrubSecrets(routeResult.reason),
     );
+    stopTypingKeepalive(threadId);
     return;
   }
 
@@ -287,10 +294,13 @@ export async function flushChatThread(
   });
   if (!target) {
     console.log(`[chat-sdk] ${threadId}: message not addressed to the swarm, ignored`);
+    stopTypingKeepalive(threadId);
     return;
   }
 
   if (target.kind === "workflow") {
+    // A workflow run has no relay that would stop the indicator.
+    stopTypingKeepalive(threadId);
     try {
       // The adapter verified the platform signature, and the workflow id comes
       // from an operator mapping or an extension, never from the message.
@@ -370,7 +380,13 @@ export async function flushChatThread(
       }
     }
   }
-  if (created > 0) await subscribe(thread);
+  if (created > 0) {
+    await subscribe(thread);
+    // Subscribed-thread messages start typing only here, once a task exists.
+    startTypingKeepalive(adapter, threadId);
+  } else {
+    stopTypingKeepalive(threadId);
+  }
 }
 
 /**

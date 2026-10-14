@@ -20,6 +20,10 @@ export interface ChatSdkTestHooks {
    * against the real Discord API, which `apiUrl` does not redirect.
    */
   disableDiscordGateway?: boolean;
+  /** Typing keepalive interval, shortened so a test sees several renewals. */
+  typingIntervalMs?: number;
+  /** Typing keepalive hard cap, shortened so a test can reach it. */
+  typingMaxMs?: number;
 }
 
 let hooks: ChatSdkTestHooks = {};
