@@ -117,7 +117,7 @@ const deleteProfile = route({
   pattern: ["api", "model-profiles", null],
   summary: "Delete a model profile",
   description:
-    "Refused (409) for a shipped `<harness>-<tier>` seed (edit it instead; it would come back at the next boot), and while an agent has the profile as its default or an unfinished task asked for it. Operator only (the shared API key).",
+    "Refused (409) for a shipped `<harness>-<tier>` seed (edit it instead; it would come back at the next boot), and while an agent has the profile as its default or a task holds it (unfinished, or superseded and still owed its resume). Operator only (the shared API key).",
   tags: ["Models"],
   rbac: { permission: "models.profiles.write" },
   params: z.object({ name: z.string() }),
@@ -275,7 +275,7 @@ export async function handleModelProfiles(
     if (refs.agentIds.length > 0 || refs.openTaskCount > 0) {
       jsonError(
         res,
-        `"${current.name}" is in use: default of ${refs.agentIds.length} agent(s), asked for by ${refs.openTaskCount} unfinished task(s).`,
+        `"${current.name}" is in use: default of ${refs.agentIds.length} agent(s), held by ${refs.openTaskCount} unfinished or awaiting-resume task(s).`,
         409,
       );
       return true;

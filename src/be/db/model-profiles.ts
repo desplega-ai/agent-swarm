@@ -13,6 +13,7 @@ import {
 } from "../../types";
 import { vcsRepoName, vcsRepoUrlMatches } from "../../utils/vcs-repo-match";
 import { getDbClient } from "./runtime";
+import { SUPERSEDED_RESUME_REPAIR_WINDOW_MS } from "./tasks/read";
 
 /** Agent-scoped swarm_config key holding the agent's default profile name. */
 export const MODEL_PROFILE_CONFIG_KEY = "MODEL_PROFILE";
@@ -146,7 +147,27 @@ export async function updateModelProfile(
   return row ? rowToModelProfile(row) : null;
 }
 
-/** Who still points at a profile: agents with it as default, and tasks not yet finished. */
+/**
+ * Tasks (alias `t`) that still hold their profile: unfinished ones, and
+ * superseded ones still owed a resume. The resume copies the profile in a
+ * later write than the supersede (HTTP supersede, heartbeat remediation), and
+ * after a restart the heartbeat's orphan repair makes it, inside the same
+ * window (`SUPERSEDED_RESUME_REPAIR_WINDOW_MS`). Binds one parameter: the
+ * oldest `finishedAt` the repair still covers.
+ */
+const TASK_HOLDS_PROFILE_SQL = `(
+  t.status NOT IN ('completed', 'failed', 'cancelled', 'superseded')
+  OR (t.status = 'superseded'
+      AND t.workflowRunStepId IS NULL
+      AND (t.finishedAt IS NULL OR t.finishedAt > ?)
+      AND NOT EXISTS (
+        SELECT 1 FROM agent_tasks c WHERE c.parentTaskId = t.id AND c.taskType = 'resume')))`;
+
+function repairWindowStart(): string {
+  return new Date(Date.now() - SUPERSEDED_RESUME_REPAIR_WINDOW_MS).toISOString();
+}
+
+/** Who still points at a profile: agents with it as default, and tasks that still hold it. */
 export async function modelProfileReferences(
   name: string,
 ): Promise<{ agentIds: string[]; openTaskCount: number }> {
@@ -155,9 +176,8 @@ export async function modelProfileReferences(
     [MODEL_PROFILE_CONFIG_KEY, name],
   );
   const tasks = await getDbClient().get<{ n: number }>(
-    `SELECT COUNT(*) AS n FROM agent_tasks
-      WHERE profile = ? AND status NOT IN ('completed', 'failed', 'cancelled', 'superseded')`,
-    [name],
+    `SELECT COUNT(*) AS n FROM agent_tasks t WHERE t.profile = ? AND ${TASK_HOLDS_PROFILE_SQL}`,
+    [name, repairWindowStart()],
   );
   return { agentIds: agents.map((a) => a.scopeId), openTaskCount: tasks?.n ?? 0 };
 }
@@ -172,24 +192,24 @@ export function modelProfileRefError(error: unknown): "missing" | null {
 }
 
 /**
- * Delete a profile unless an unfinished task or an agent default names it. The
- * check is part of the DELETE statement, so a reference written after the
- * caller's own count still makes it `in-use`; the triggers in migration 218
- * refuse the opposite order (a reference written after this delete).
+ * Delete a profile unless a task still holds it (`TASK_HOLDS_PROFILE_SQL`) or
+ * an agent default names it. The check is part of the DELETE statement, so a
+ * reference written after the caller's own count still makes it `in-use`; the
+ * triggers in migration 218 refuse the opposite order (a reference written
+ * after this delete).
  */
 export async function deleteModelProfile(name: string): Promise<"deleted" | "missing" | "in-use"> {
   const row = await getDbClient().get<{ id: string }>(
     `DELETE FROM model_profiles
       WHERE name = ?
         AND NOT EXISTS (
-          SELECT 1 FROM agent_tasks
-           WHERE profile = model_profiles.name
-             AND status NOT IN ('completed', 'failed', 'cancelled', 'superseded'))
+          SELECT 1 FROM agent_tasks t
+           WHERE t.profile = model_profiles.name AND ${TASK_HOLDS_PROFILE_SQL})
         AND NOT EXISTS (
           SELECT 1 FROM swarm_config
            WHERE scope = 'agent' AND key = ? AND trim(value) = model_profiles.name)
       RETURNING id`,
-    [name, MODEL_PROFILE_CONFIG_KEY],
+    [name, repairWindowStart(), MODEL_PROFILE_CONFIG_KEY],
   );
   if (row) return "deleted";
   return (await getModelProfileByName(name)) ? "in-use" : "missing";
@@ -209,10 +229,13 @@ export async function getAgentDefaultProfileName(agentId: string): Promise<strin
  * repo scope, exported or not. The worker env takes a repo row over the
  * agent's own (repo > agent), and a withheld one removes the key, so the
  * agent's default profile must not supply that axis. Finds the repo the way
- * the worker does (`fetchRepoConfig`).
+ * the worker does (`fetchRepoConfig`). `includeSecrets: false` leaves out
+ * secret rows, as `/api/config/resolved` does for a worker that cannot read
+ * them (`readsRepoSecrets`): that worker's env never gets them.
  */
 export async function repoModelOverrideKeys(
   vcsRepo: string | null | undefined,
+  { includeSecrets = true }: { includeSecrets?: boolean } = {},
 ): Promise<Set<string>> {
   if (!vcsRepo?.trim()) return new Set();
   const repos = await getDbClient().query<{ id: string; url: string }>(
@@ -223,7 +246,8 @@ export async function repoModelOverrideKeys(
   if (!repo) return new Set();
   const rows = await getDbClient().query<{ key: string }>(
     `SELECT key FROM swarm_config
-      WHERE scope = 'repo' AND scopeId = ? AND key IN ('MODEL_OVERRIDE', 'REASONING_EFFORT_OVERRIDE')`,
+      WHERE scope = 'repo' AND scopeId = ? AND key IN ('MODEL_OVERRIDE', 'REASONING_EFFORT_OVERRIDE')
+        ${includeSecrets ? "" : "AND isSecret = 0"}`,
     [repo.id],
   );
   return new Set(rows.map((row) => row.key));

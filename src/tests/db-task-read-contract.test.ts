@@ -109,6 +109,7 @@ value:NOT_EXTENSION_AGENT_SQL
 value:ReservedAgentRoleError
 value:SESSION_ACTIVITY_REFRESH_MIN_INTERVAL_MS
 value:SKILL_FILE_LIMITS
+value:SUPERSEDED_RESUME_REPAIR_WINDOW_MS
 value:UNATTRIBUTED_USER_ID
 value:__resetSqliteVecExtensionPathCacheForTests
 value:abandonSlackOutcomeDelivery
@@ -599,6 +600,7 @@ value:withFavoriteFlags`.split("\n");
 const selected = `type:ExistingTrackerContextWork
 type:ExistingTrackerContextWorkReason
 type:TaskFilters
+value:SUPERSEDED_RESUME_REPAIR_WINDOW_MS
 value:findCompletedTaskInThread
 value:findExistingLinearTrackerContextWork
 value:findRecentCancelledTaskInThread

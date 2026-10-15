@@ -328,6 +328,7 @@ export {
   markSlackRelayDelivered,
   markTasksNotified,
   resetTasksNotified,
+  SUPERSEDED_RESUME_REPAIR_WINDOW_MS,
   type TaskFilters,
 } from "./db/tasks/read";
 

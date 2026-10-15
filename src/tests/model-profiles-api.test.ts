@@ -11,13 +11,17 @@ import {
   getDbClient,
   getTaskById,
   initDb,
+  startTask,
+  supersedeTask,
   upsertSwarmConfig,
 } from "../be/db";
 import * as profilesDb from "../be/db/model-profiles";
 import { createModelProfile, taskProfileError } from "../be/db/model-profiles";
+import { codeLevelTriage } from "../heartbeat/heartbeat";
 import { handleAgentsRest } from "../http/agents";
 import { handleModelProfiles } from "../http/model-profiles";
 import { handleTasks } from "../http/tasks";
+import * as followUps from "../tasks/worker-follow-up";
 import type { User } from "../types";
 import { setRequestAuth } from "../utils/request-auth-context";
 import { listenOnFreePort } from "./test-net";
@@ -361,6 +365,113 @@ describe("profile references and deletion are atomic", () => {
     await getDbClient().run("UPDATE agent_tasks SET status = 'completed' WHERE id = ?", [task.id]);
     expect(await profilesDb.deleteModelProfile("claude-racy")).toBe("deleted");
     expect(await profilesDb.deleteModelProfile("claude-racy")).toBe("missing");
+  });
+});
+
+describe("a superseded task holds its profile until its resume exists", () => {
+  // Supersede and resume creation are separate writes; the resume copies the
+  // parent's profile, and after a restart the heartbeat's orphan repair makes it.
+  async function supersededWithProfile(finishedAgoMs = 0): Promise<string> {
+    await createModelProfile({ name: "claude-handoff", harness: "claude", model: "opus" });
+    const task = await createTaskExtended("handoff work", {
+      agentId: CLAUDE_ID,
+      profile: "claude-handoff",
+    });
+    await startTask(task.id);
+    expect(await supersedeTask(task.id, { reason: "crash_recovery", resumeTaskId: null })).not.toBe(
+      null,
+    );
+    if (finishedAgoMs) {
+      await getDbClient().run("UPDATE agent_tasks SET finishedAt = ? WHERE id = ?", [
+        new Date(Date.now() - finishedAgoMs).toISOString(),
+        task.id,
+      ]);
+    }
+    return task.id;
+  }
+
+  async function resumeChildren(parentId: string) {
+    return await getDbClient().query<{ id: string; profile: string | null }>(
+      "SELECT id, profile FROM agent_tasks WHERE parentTaskId = ? AND taskType = 'resume'",
+      [parentId],
+    );
+  }
+
+  test("a delete inside POST /supersede's handoff is a 409 and the resume keeps the profile", async () => {
+    await createModelProfile({ name: "claude-handoff", harness: "claude", model: "opus" });
+    const task = await createTaskExtended("handoff work", {
+      agentId: CLAUDE_ID,
+      profile: "claude-handoff",
+    });
+    await startTask(task.id);
+    const create = followUps.createResumeFollowUp;
+    let deleted: Response | null = null;
+    const spy = spyOn(followUps, "createResumeFollowUp").mockImplementation(async (args) => {
+      deleted = await call("DELETE", "/api/model-profiles/claude-handoff", undefined);
+      return await create(args);
+    });
+    try {
+      const superseded = await call(
+        "POST",
+        `/api/tasks/${task.id}/supersede`,
+        { reason: "manual_supersede" },
+        { "x-test-auth": "operator", "x-agent-id": CLAUDE_ID },
+      );
+      expect(deleted).not.toBeNull();
+      const refused = deleted as unknown as Response;
+      expect(refused.status).toBe(409);
+      expect(((await refused.json()) as { error: string }).error).toContain("awaiting-resume");
+      expect(superseded.status).toBe(200);
+      const body = (await superseded.json()) as { kind: string; resumeTaskId: string | null };
+      expect(body.kind).toBe("resumed");
+      expect(await resumeChildren(task.id)).toEqual([
+        { id: body.resumeTaskId!, profile: "claude-handoff" },
+      ]);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  test("after a restart the profile survives until orphan repair makes the resume", async () => {
+    const parentId = await supersededWithProfile(10 * 60 * 1000);
+    expect(await profilesDb.deleteModelProfile("claude-handoff")).toBe("in-use");
+    const refused = await call("DELETE", "/api/model-profiles/claude-handoff", undefined);
+    expect(refused.status).toBe(409);
+
+    await codeLevelTriage();
+    const children = await resumeChildren(parentId);
+    expect(children).toHaveLength(1);
+    expect(children[0]?.profile).toBe("claude-handoff");
+    // A second sweep finds nothing left to repair.
+    await codeLevelTriage();
+    expect(await resumeChildren(parentId)).toHaveLength(1);
+
+    // The resume now holds it; once it finishes the profile can go.
+    expect(await profilesDb.deleteModelProfile("claude-handoff")).toBe("in-use");
+    await getDbClient().run("UPDATE agent_tasks SET status = 'completed' WHERE id = ?", [
+      children[0]!.id,
+    ]);
+    expect(await profilesDb.deleteModelProfile("claude-handoff")).toBe("deleted");
+  });
+
+  test("control: a superseded task past the repair window, or with its resume, holds nothing", async () => {
+    await supersededWithProfile(25 * 60 * 60 * 1000);
+    expect(await profilesDb.modelProfileReferences("claude-handoff")).toEqual({
+      agentIds: [],
+      openTaskCount: 0,
+    });
+    expect(await profilesDb.deleteModelProfile("claude-handoff")).toBe("deleted");
+
+    const parentId = await supersededWithProfile();
+    const resume = await followUps.createResumeFollowUp({
+      parentId,
+      reason: "crash_recovery",
+    });
+    expect(resume.kind).toBe("created");
+    await getDbClient().run("UPDATE agent_tasks SET status = 'cancelled' WHERE parentTaskId = ?", [
+      parentId,
+    ]);
+    expect(await profilesDb.deleteModelProfile("claude-handoff")).toBe("deleted");
   });
 });
 

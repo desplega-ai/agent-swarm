@@ -43,6 +43,7 @@ import {
   releaseStaleOfferedTasksForOfflineAgents,
   releaseStaleProcessingInbox,
   releaseStaleReviewingTasks,
+  SUPERSEDED_RESUME_REPAIR_WINDOW_MS,
   settleSupersededTaskDependents,
   supersedeTask,
   updateAgentStatus,
@@ -588,7 +589,7 @@ async function detectAndRemediateStalledTasks(findings: HeartbeatFindings): Prom
 
 /** Repair window: skip in-flight supersedes, stop at a day of history. */
 const ORPHAN_SUPERSEDE_MIN_AGE_MS = 60 * 1000;
-const ORPHAN_SUPERSEDE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+const ORPHAN_SUPERSEDE_MAX_AGE_MS = SUPERSEDED_RESUME_REPAIR_WINDOW_MS;
 
 /**
  * Supersede and resume creation are separate writes. If the API process dies

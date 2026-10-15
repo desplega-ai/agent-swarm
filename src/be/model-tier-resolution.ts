@@ -588,6 +588,12 @@ export async function recordClaimModelResolution(
     vcsRepo?: string | null;
   },
   agent: { id: string; harnessProvider?: ProviderName | null; provider?: ProviderName | null },
+  /**
+   * Whether the claiming worker's config read includes secret repo rows
+   * (`readsRepoSecrets`). A secret repo override it never receives cannot
+   * beat its default profile. Defaults to true (an operator-key worker).
+   */
+  { includeRepoSecrets = true }: { includeRepoSecrets?: boolean } = {},
 ): Promise<ClaimModelFields> {
   const harnessProvider = agent.harnessProvider ?? agent.provider ?? null;
 
@@ -601,7 +607,9 @@ export async function recordClaimModelResolution(
     // REASONING_EFFORT_OVERRIDE on the task's repo still beats it on that axis
     // (repo > agent), as it beats the agent's own override in the worker env.
     // A task's own profile is the creator's pick and beats repo config.
-    const repoKeys = agentDefault ? await repoModelOverrideKeys(task.vcsRepo) : new Set<string>();
+    const repoKeys = agentDefault
+      ? await repoModelOverrideKeys(task.vcsRepo, { includeSecrets: includeRepoSecrets })
+      : new Set<string>();
     const defaultProfile = repoKeys.has("MODEL_OVERRIDE") ? null : agentDefault;
     const picked = taskProfile
       ? await resolveClaimProfile(taskProfile, "profile:task", harnessProvider)

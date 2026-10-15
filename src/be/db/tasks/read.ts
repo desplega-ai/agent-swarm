@@ -459,6 +459,9 @@ export async function hasNonTerminalResumeChild(parentId: string): Promise<boole
   return row !== undefined && row !== null;
 }
 
+/** How far back the heartbeat repairs a superseded task that never got a resume. */
+export const SUPERSEDED_RESUME_REPAIR_WINDOW_MS = 24 * 60 * 60 * 1000;
+
 /**
  * Superseded tasks that never got a resume child. Both supersede paths
  * (heartbeat remediation and `POST /api/tasks/:id/supersede`) supersede

@@ -9916,7 +9916,7 @@ export interface paths {
         post?: never;
         /**
          * Delete a model profile
-         * @description Refused (409) for a shipped `<harness>-<tier>` seed (edit it instead; it would come back at the next boot), and while an agent has the profile as its default or an unfinished task asked for it. Operator only (the shared API key).
+         * @description Refused (409) for a shipped `<harness>-<tier>` seed (edit it instead; it would come back at the next boot), and while an agent has the profile as its default or a task holds it (unfinished, or superseded and still owed its resume). Operator only (the shared API key).
          */
         delete: {
             parameters: {
