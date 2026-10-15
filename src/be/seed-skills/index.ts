@@ -94,6 +94,12 @@ import downloadTaskAttachmentConfig from "../../../templates/skills/download-tas
 import downloadTaskAttachmentContent from "../../../templates/skills/download-task-attachment/content.md" with {
   type: "text",
 };
+import emailDomainHealthConfig from "../../../templates/skills/email-domain-health/config.json" with {
+  type: "text",
+};
+import emailDomainHealthContent from "../../../templates/skills/email-domain-health/content.md" with {
+  type: "text",
+};
 import engineeringStandardsConfig from "../../../templates/skills/engineering-standards/config.json" with {
   type: "text",
 };
@@ -338,6 +344,7 @@ const BUILT_IN_SKILL_SOURCES = [
   { config: delegateWorkConfig, body: delegateWorkContent },
   { config: designDocsConfig, body: designDocsContent },
   { config: downloadTaskAttachmentConfig, body: downloadTaskAttachmentContent },
+  { config: emailDomainHealthConfig, body: emailDomainHealthContent },
   { config: engineeringStandardsConfig, body: engineeringStandardsContent },
   { config: heartbeatRunbookConfig, body: heartbeatRunbookContent },
   { config: implementingConfig, body: implementingContent },
