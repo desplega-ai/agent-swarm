@@ -66,6 +66,11 @@ export type StreamRow =
       iso: string;
       run: SubagentRun;
       isNew: boolean;
+      /**
+       * The sub-agent's own rows, nested under it. Only the trace layout fills
+       * this; the classic layout keeps those rows in the main stream.
+       */
+      children?: StreamRow[];
     }
   | {
       type: "toolgroup";

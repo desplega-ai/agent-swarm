@@ -452,7 +452,8 @@ summary {
 /* Shimmer text, used by the inline "chain of thought" indicator on
  * in-progress agent turns. A linear gradient slides across the text via
  * background-clip:text, giving a subtle "live / streaming" pulse. */
-.shimmer-text {
+.shimmer-text,
+[data-slot="trace-line"][data-status="running"] > [data-slot="trace-title"] {
   background: linear-gradient(
     90deg,
     var(--color-muted-foreground) 0%,
@@ -495,7 +496,8 @@ summary {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .shimmer-text {
+  .shimmer-text,
+  [data-slot="trace-line"][data-status="running"] > [data-slot="trace-title"] {
     animation: none;
     -webkit-text-fill-color: var(--color-foreground);
     color: var(--color-foreground);
