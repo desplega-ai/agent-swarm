@@ -12722,6 +12722,14 @@ export interface paths {
                         "application/json": {
                             tasks: (components["schemas"]["AgentTask"] & {
                                 attachments: components["schemas"]["TaskAttachment"][];
+                                requestedBy?: {
+                                    id?: string;
+                                    name: string;
+                                    email?: string;
+                                    role?: string;
+                                    notes?: string;
+                                    comms?: components["schemas"]["UserCommsPrefs"];
+                                };
                             })[];
                         };
                     };
@@ -25075,6 +25083,11 @@ export interface components {
             /** Format: date-time */
             createdAt: string;
         };
+        UserCommsPrefs: {
+            tone?: string;
+            language?: string;
+            verbosity?: string;
+        };
         Page: {
             id: string;
             /** @description Non-unique asset directory namespace (for example shared/ or personal/<user-id>/drafts/). Runtime write boundaries normalize and validate the canonical form. */
@@ -25142,11 +25155,6 @@ export interface components {
             changedBy: string | null;
             changedAt: string;
             changeReason: string | null;
-        };
-        UserCommsPrefs: {
-            tone?: string;
-            language?: string;
-            verbosity?: string;
         };
         BudgetRefusedTrigger: {
             /** @enum {string} */

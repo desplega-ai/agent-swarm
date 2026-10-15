@@ -76,6 +76,7 @@ import { ensure } from "../utils/business-use";
 import { getRequestAuth } from "../utils/request-auth-context";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { rejectGuest } from "./request-principal";
+import { buildTaskRequestedBy, TaskRequestedBySchema } from "./requested-by";
 import { route } from "./route-def";
 import { jsonError, parseBody } from "./utils";
 
@@ -595,7 +596,14 @@ const listPausedTasks = route({
     200: {
       description: "Paused task list",
       schema: z.object({
-        tasks: z.array(AgentTaskSchema.extend({ attachments: z.array(TaskAttachmentSchema) })),
+        tasks: z.array(
+          AgentTaskSchema.extend({
+            attachments: z.array(TaskAttachmentSchema),
+            // Same requester projection a fresh task_assigned trigger carries,
+            // so a resumed session gets the same requester-profile prompt.
+            requestedBy: TaskRequestedBySchema.optional(),
+          }),
+        ),
       }),
     },
   },
@@ -1671,10 +1679,14 @@ export async function handleTasks(
     }
     const pausedTasks = await getPausedTasksForAgent(myAgentId);
     const tasks = await Promise.all(
-      pausedTasks.map(async (task) => ({
-        ...task,
-        attachments: await getTaskAttachments(task.id),
-      })),
+      pausedTasks.map(async (task) => {
+        const requestedBy = await buildTaskRequestedBy(task);
+        return {
+          ...task,
+          attachments: await getTaskAttachments(task.id),
+          ...(requestedBy && { requestedBy }),
+        };
+      }),
     );
     listPausedTasks.respond(res, 200, { tasks });
     return true;

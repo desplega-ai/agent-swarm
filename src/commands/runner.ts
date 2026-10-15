@@ -2374,6 +2374,7 @@ export async function getPausedTasksFromAPI(config: ApiConfig): Promise<
     output?: string;
     status?: string;
     contextKey?: string;
+    requestedBy?: Trigger["requestedBy"];
   }>
 > {
   const headers: Record<string, string> = {
@@ -2410,6 +2411,7 @@ export async function getPausedTasksFromAPI(config: ApiConfig): Promise<
         finishedAt?: string;
         output?: string;
         status?: string;
+        requestedBy?: Trigger["requestedBy"];
       }>;
     };
     return data.tasks || [];
@@ -3315,6 +3317,20 @@ export async function buildRequesterProfilePrompt(
   });
 
   return result.skipped ? "" : result.text.trim();
+}
+
+/**
+ * Warning appended to the task prompt when the task's `dir` was requested but
+ * the session could not start there. Shared by the fresh and resume paths so
+ * both send the model the same text.
+ */
+export function missingTaskDirWarning(
+  taskDir: string | undefined,
+  effectiveCwd: string | undefined,
+): string | undefined {
+  return taskDir && !effectiveCwd
+    ? `Note: The task requested working directory "${taskDir}" but it does not exist. Falling back to default directory.`
+    : undefined;
 }
 
 /** Per-task context that rides in the task prompt, never the system prompt. */
@@ -6752,7 +6768,8 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
         }
 
         // Same split as the main task path: stable system prompt, per-task
-        // context (repository, scripts-only Slack note) in the task prompt.
+        // context (repository, scripts-only Slack note, requester profile,
+        // cwd warning) in the task prompt.
         const resumeSlackChannelId = (task as { slackChannelId?: string }).slackChannelId;
         const resumeSession = await buildTaskSessionPrompts({
           basePromptArgs: basePromptArgs(),
@@ -6766,6 +6783,8 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
                   threadTs: (task as { slackThreadTs?: string }).slackThreadTs,
                 }
               : undefined,
+            requestedBy: task.requestedBy,
+            cwdWarning: missingTaskDirWarning(task.dir, resumeCwd),
           },
         });
         resumePrompt = resumeSession.prompt;
@@ -7268,10 +7287,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
         }
 
         // Warn when task dir was specified but doesn't exist
-        const cwdWarning =
-          taskDir && !effectiveCwd
-            ? `Note: The task requested working directory "${taskDir}" but it does not exist. Falling back to default directory.`
-            : undefined;
+        const cwdWarning = missingTaskDirWarning(taskDir, effectiveCwd);
 
         // Per-task skill hot-reload. Reuses the boot-time helper; signature
         // probe short-circuits when nothing changed. Skipped for

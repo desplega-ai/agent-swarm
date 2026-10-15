@@ -3059,6 +3059,20 @@
           "createdAt"
         ]
       },
+      "UserCommsPrefs": {
+        "type": "object",
+        "properties": {
+          "tone": {
+            "type": "string"
+          },
+          "language": {
+            "type": "string"
+          },
+          "verbosity": {
+            "type": "string"
+          }
+        }
+      },
       "Page": {
         "type": "object",
         "properties": {
@@ -3344,20 +3358,6 @@
           "changedAt",
           "changeReason"
         ]
-      },
-      "UserCommsPrefs": {
-        "type": "object",
-        "properties": {
-          "tone": {
-            "type": "string"
-          },
-          "language": {
-            "type": "string"
-          },
-          "verbosity": {
-            "type": "string"
-          }
-        }
       },
       "BudgetRefusedTrigger": {
         "type": "object",
@@ -31410,6 +31410,33 @@
                                 "items": {
                                   "$ref": "#/components/schemas/TaskAttachment"
                                 }
+                              },
+                              "requestedBy": {
+                                "type": "object",
+                                "properties": {
+                                  "id": {
+                                    "type": "string"
+                                  },
+                                  "name": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  },
+                                  "email": {
+                                    "type": "string"
+                                  },
+                                  "role": {
+                                    "type": "string"
+                                  },
+                                  "notes": {
+                                    "type": "string"
+                                  },
+                                  "comms": {
+                                    "$ref": "#/components/schemas/UserCommsPrefs"
+                                  }
+                                },
+                                "required": [
+                                  "name"
+                                ]
                               }
                             },
                             "required": [
