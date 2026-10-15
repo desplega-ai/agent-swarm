@@ -6649,59 +6649,55 @@ export async function upsertSwarmConfig(data: {
   const row = await getDbClient().transaction(async () => {
     const existing =
       scopeId === null
-        ? await getDbClient().get<{ id: string; value: string }>(
-            "SELECT id, value FROM swarm_config WHERE scope = ? AND scopeId IS NULL AND key = ?",
+        ? await getDbClient().get<SwarmConfigRow>(
+            "SELECT * FROM swarm_config WHERE scope = ? AND scopeId IS NULL AND key = ?",
             [data.scope, data.key],
           )
-        : await getDbClient().get<{ id: string; value: string }>(
-            "SELECT id, value FROM swarm_config WHERE scope = ? AND scopeId = ? AND key = ?",
+        : await getDbClient().get<SwarmConfigRow>(
+            "SELECT * FROM swarm_config WHERE scope = ? AND scopeId = ? AND key = ?",
             [data.scope, scopeId, data.key],
           );
 
-    if (data.scope === "agent" && scopeId && existing?.value !== storedValue) {
-      await clearAgentModelProfileOnOverrideChange(scopeId, data.key);
+    // COALESCE keeps the stored flag when the caller did not send one.
+    const written = existing
+      ? await getDbClient().get<SwarmConfigRow>(
+          `UPDATE swarm_config SET value = ?, isSecret = ?, envPath = ?, description = ?, encrypted = ?, lastUpdatedAt = ?,
+             exportToEnv = CASE WHEN ? THEN 0 ELSE COALESCE(?, exportToEnv) END
+           WHERE id = ? RETURNING *`,
+          [
+            storedValue,
+            isSecret,
+            envPath,
+            description,
+            encryptedFlag,
+            now,
+            restricted ? 1 : 0,
+            data.exportToEnv === undefined ? null : data.exportToEnv ? 1 : 0,
+            existing.id,
+          ],
+        )
+      : await getDbClient().get<SwarmConfigRow>(
+          `INSERT INTO swarm_config (id, scope, scopeId, key, value, isSecret, envPath, description, createdAt, lastUpdatedAt, encrypted, exportToEnv)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+          [
+            crypto.randomUUID(),
+            data.scope,
+            scopeId,
+            data.key,
+            storedValue,
+            isSecret,
+            envPath,
+            description,
+            now,
+            now,
+            encryptedFlag,
+            restricted ? 0 : (data.exportToEnv ?? defaultExportToEnv(data.key)) ? 1 : 0,
+          ],
+        );
+    if (data.scope === "agent" && scopeId) {
+      await clearAgentModelProfileOnOverrideChange(scopeId, data.key, existing, written);
     }
-
-    if (existing) {
-      // COALESCE keeps the stored flag when the caller did not send one.
-      return await getDbClient().get<SwarmConfigRow>(
-        `UPDATE swarm_config SET value = ?, isSecret = ?, envPath = ?, description = ?, encrypted = ?, lastUpdatedAt = ?,
-           exportToEnv = CASE WHEN ? THEN 0 ELSE COALESCE(?, exportToEnv) END
-         WHERE id = ? RETURNING *`,
-        [
-          storedValue,
-          isSecret,
-          envPath,
-          description,
-          encryptedFlag,
-          now,
-          restricted ? 1 : 0,
-          data.exportToEnv === undefined ? null : data.exportToEnv ? 1 : 0,
-          existing.id,
-        ],
-      );
-    }
-
-    const id = crypto.randomUUID();
-    const exportToEnv = restricted ? 0 : (data.exportToEnv ?? defaultExportToEnv(data.key)) ? 1 : 0;
-    return await getDbClient().get<SwarmConfigRow>(
-      `INSERT INTO swarm_config (id, scope, scopeId, key, value, isSecret, envPath, description, createdAt, lastUpdatedAt, encrypted, exportToEnv)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
-      [
-        id,
-        data.scope,
-        scopeId,
-        data.key,
-        storedValue,
-        isSecret,
-        envPath,
-        description,
-        now,
-        now,
-        encryptedFlag,
-        exportToEnv,
-      ],
-    );
+    return written;
   });
 
   if (!row) throw new Error("Failed to upsert swarm config");
@@ -6750,12 +6746,12 @@ export async function emitBuiltInIntegrationConnectedOnce(
  * predate hardening must remain removable through remediation paths.
  */
 export async function deleteSwarmConfig(id: string): Promise<boolean> {
-  const row = await getDbClient().get<Pick<SwarmConfigRow, "scope" | "scopeId" | "key">>(
-    "DELETE FROM swarm_config WHERE id = ? RETURNING scope, scopeId, key",
+  const row = await getDbClient().get<SwarmConfigRow>(
+    "DELETE FROM swarm_config WHERE id = ? RETURNING *",
     [id],
   );
   if (row?.scope === "agent" && row.scopeId) {
-    await clearAgentModelProfileOnOverrideChange(row.scopeId, row.key);
+    await clearAgentModelProfileOnOverrideChange(row.scopeId, row.key, row, null);
   }
   if (row) getDbClient().afterCommit(() => publishWorkerConfigNudge(row.scope, row.scopeId));
   return row !== null;

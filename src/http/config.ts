@@ -9,6 +9,7 @@ import {
   getSwarmConfigs,
   maskSecrets,
 } from "../be/db";
+import { modelProfileRefError } from "../be/db/model-profiles";
 import {
   AGENT_MAX_TASKS_CONFIG_KEY,
   resetAgentMaxTasksMirror,
@@ -502,7 +503,11 @@ export async function handleConfig(
       }
       const result = includeSecrets || !config.isSecret ? config : maskSecrets([config])[0]!;
       upsertConfig.respond(res, 200, result);
-    } catch (_error) {
+    } catch (error) {
+      if (modelProfileRefError(error) === "missing") {
+        jsonError(res, `Unknown model profile "${String(value)}"`, 400);
+        return true;
+      }
       jsonError(res, "Failed to upsert config", 500);
     }
     return true;

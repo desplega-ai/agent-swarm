@@ -18,7 +18,7 @@ import {
   isExtensionAgent,
   isLinearTrackerContextKey,
 } from "@/be/db";
-import { taskProfileError } from "@/be/db/model-profiles";
+import { modelProfileRefError, taskProfileError } from "@/be/db/model-profiles";
 import { repointTrackerSyncBySwarmId } from "@/be/db-queries/tracker";
 import { explicitModelErrorForAgent } from "@/be/model-validation";
 import { applyPreTaskCreate } from "@/extensions/apply-task-create";
@@ -641,7 +641,7 @@ export async function sendTaskHandler(
       : toolErr(guard.message, { data: guardData });
   }
 
-  const result = await getDbClient().transaction(async () => {
+  const created = getDbClient().transaction(async () => {
     // Authoritative re-check: the reads above are separated from the INSERT by
     // the whole handler, so only a guard inside this transaction can see a
     // concurrent send-task's committed task.
@@ -736,6 +736,11 @@ export async function sendTaskHandler(
       message: `Task "${newTask.id}" sent to agent "${agent.name}".`,
       task: newTask,
     };
+  });
+  const result = await created.catch((error: unknown) => {
+    // The profile was deleted between taskProfileError and the insert.
+    if (modelProfileRefError(error) !== "missing") throw error;
+    return { success: false, message: `Unknown model profile "${profile}".`, task: undefined };
   });
 
   const data = {

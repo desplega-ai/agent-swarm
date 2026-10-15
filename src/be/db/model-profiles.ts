@@ -11,6 +11,7 @@ import {
   type ReasoningEffort,
   ReasoningEffortSchema,
 } from "../../types";
+import { vcsRepoName, vcsRepoUrlMatches } from "../../utils/vcs-repo-match";
 import { getDbClient } from "./runtime";
 
 /** Agent-scoped swarm_config key holding the agent's default profile name. */
@@ -161,12 +162,37 @@ export async function modelProfileReferences(
   return { agentIds: agents.map((a) => a.scopeId), openTaskCount: tasks?.n ?? 0 };
 }
 
-export async function deleteModelProfile(name: string): Promise<boolean> {
+/**
+ * Which migration-218 reference trigger refused a write: `missing` when a task
+ * or an agent default names a profile that does not exist.
+ */
+export function modelProfileRefError(error: unknown): "missing" | null {
+  const message = error instanceof Error ? error.message : "";
+  return message.includes("model-profile-missing:") ? "missing" : null;
+}
+
+/**
+ * Delete a profile unless an unfinished task or an agent default names it. The
+ * check is part of the DELETE statement, so a reference written after the
+ * caller's own count still makes it `in-use`; the triggers in migration 218
+ * refuse the opposite order (a reference written after this delete).
+ */
+export async function deleteModelProfile(name: string): Promise<"deleted" | "missing" | "in-use"> {
   const row = await getDbClient().get<{ id: string }>(
-    "DELETE FROM model_profiles WHERE name = ? RETURNING id",
-    [name],
+    `DELETE FROM model_profiles
+      WHERE name = ?
+        AND NOT EXISTS (
+          SELECT 1 FROM agent_tasks
+           WHERE profile = model_profiles.name
+             AND status NOT IN ('completed', 'failed', 'cancelled', 'superseded'))
+        AND NOT EXISTS (
+          SELECT 1 FROM swarm_config
+           WHERE scope = 'agent' AND key = ? AND trim(value) = model_profiles.name)
+      RETURNING id`,
+    [name, MODEL_PROFILE_CONFIG_KEY],
   );
-  return row !== null;
+  if (row) return "deleted";
+  return (await getModelProfileByName(name)) ? "in-use" : "missing";
 }
 
 /** The agent's default profile name (agent-scoped MODEL_PROFILE), or null. */
@@ -176,6 +202,31 @@ export async function getAgentDefaultProfileName(agentId: string): Promise<strin
     [agentId, MODEL_PROFILE_CONFIG_KEY],
   );
   return row?.value.trim() || null;
+}
+
+/**
+ * Which of MODEL_OVERRIDE / REASONING_EFFORT_OVERRIDE the task's repo sets at
+ * repo scope, exported or not. The worker env takes a repo row over the
+ * agent's own (repo > agent), and a withheld one removes the key, so the
+ * agent's default profile must not supply that axis. Finds the repo the way
+ * the worker does (`fetchRepoConfig`).
+ */
+export async function repoModelOverrideKeys(
+  vcsRepo: string | null | undefined,
+): Promise<Set<string>> {
+  if (!vcsRepo?.trim()) return new Set();
+  const repos = await getDbClient().query<{ id: string; url: string }>(
+    "SELECT id, url FROM swarm_repos WHERE name = ? ORDER BY name ASC",
+    [vcsRepoName(vcsRepo)],
+  );
+  const repo = repos.find((r) => vcsRepoUrlMatches(r.url, vcsRepo));
+  if (!repo) return new Set();
+  const rows = await getDbClient().query<{ key: string }>(
+    `SELECT key FROM swarm_config
+      WHERE scope = 'repo' AND scopeId = ? AND key IN ('MODEL_OVERRIDE', 'REASONING_EFFORT_OVERRIDE')`,
+    [repo.id],
+  );
+  return new Set(rows.map((row) => row.key));
 }
 
 /**
@@ -210,16 +261,29 @@ export async function taskProfileError(check: {
   return null;
 }
 
+type OverrideRowState = { value: string; exportToEnv?: number } | null;
+
+/** What a config row does to the worker env: its value, withheld (exportToEnv off), or absent. */
+function effectiveOverride(row: OverrideRowState): string | null {
+  if (!row) return null;
+  return row.exportToEnv === 0 ? "\u0000withheld" : row.value;
+}
+
 /**
  * An agent's default model profile (MODEL_PROFILE) beats its MODEL_OVERRIDE and
- * REASONING_EFFORT_OVERRIDE at claim. A change to either override, by any path,
- * drops the profile default, so a stale default never beats a fresh override.
+ * REASONING_EFFORT_OVERRIDE at claim. An effective change to either override, by
+ * any path, drops the profile default, so a stale default never beats a fresh
+ * override. Effective means what the worker env sees: the value, and whether
+ * the row is exported (`exportToEnv`).
  */
 export async function clearAgentModelProfileOnOverrideChange(
   agentId: string,
   key: string,
+  before: OverrideRowState,
+  after: OverrideRowState,
 ): Promise<void> {
   if (key !== "MODEL_OVERRIDE" && key !== "REASONING_EFFORT_OVERRIDE") return;
+  if (effectiveOverride(before) === effectiveOverride(after)) return;
   await getDbClient().run(
     "DELETE FROM swarm_config WHERE scope = 'agent' AND scopeId = ? AND key = ?",
     [agentId, MODEL_PROFILE_CONFIG_KEY],

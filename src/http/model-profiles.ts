@@ -18,7 +18,7 @@ import {
   updateModelProfile,
 } from "../be/db/model-profiles";
 import { explicitModelError } from "../be/model-validation";
-import { effectiveReasoningEffort } from "../providers/reasoning-effort";
+import { supportedReasoningLevels } from "../providers/reasoning-effort";
 import { can } from "../rbac";
 import {
   ModelProfileNameSchema,
@@ -142,11 +142,13 @@ async function profileValueError(input: {
     harnessProvider: input.harness,
   });
   if (modelError) return modelError;
-  // The same decision the adapter makes at spawn; an alias is judged once it resolves.
+  // The levels the harness and model accept (as PATCH /runtime checks them); a
+  // supported level may still be a transport no-op, like Opencode `off`. An
+  // alias is judged once it resolves.
   if (
     input.effort &&
     !isAlias(input.model) &&
-    effectiveReasoningEffort(input.harness, input.model, input.effort) === null
+    !supportedReasoningLevels(input.harness, input.model).includes(input.effort)
   ) {
     return `Effort "${input.effort}" is not supported by ${input.model} on ${input.harness}.`;
   }
@@ -278,7 +280,21 @@ export async function handleModelProfiles(
       );
       return true;
     }
-    await deleteModelProfile(current.name);
+    // The count above is for the message; the delete re-checks in the same
+    // statement (migration 218 trigger), so a reference written since is a 409.
+    const outcome = await deleteModelProfile(current.name);
+    if (outcome === "in-use") {
+      jsonError(
+        res,
+        `"${current.name}" is in use by a task or an agent default created just now.`,
+        409,
+      );
+      return true;
+    }
+    if (outcome === "missing") {
+      jsonError(res, "Model profile not found", 404);
+      return true;
+    }
     deleteProfile.respond(res, 200, { deleted: true });
     return true;
   }

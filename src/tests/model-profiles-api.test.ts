@@ -1,17 +1,19 @@
 // Model profiles over HTTP: CRUD and its RBAC gate, the agent default set through
 // PATCH /api/agents/{id}/runtime, and the harness check on task creation.
 
-import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import {
   closeDb,
   createAgent,
+  createTaskExtended,
   getDbClient,
   getTaskById,
   initDb,
   upsertSwarmConfig,
 } from "../be/db";
+import * as profilesDb from "../be/db/model-profiles";
 import { createModelProfile, taskProfileError } from "../be/db/model-profiles";
 import { handleAgentsRest } from "../http/agents";
 import { handleModelProfiles } from "../http/model-profiles";
@@ -90,8 +92,10 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
-  await getDbClient().run("DELETE FROM model_profiles");
+  // References first: migration 218's triggers refuse deleting a named profile.
+  await getDbClient().run("DELETE FROM agent_tasks");
   await getDbClient().run("DELETE FROM swarm_config WHERE key = 'MODEL_PROFILE'");
+  await getDbClient().run("DELETE FROM model_profiles");
 });
 
 function call(
@@ -199,6 +203,37 @@ describe("profile CRUD", () => {
     expect(((await effort.json()) as { error: string }).error).toContain("not supported");
   });
 
+  test("a supported level with no transport effect (Opencode off) is accepted on POST and PATCH", async () => {
+    const body = { harness: "opencode", model: "openai/gpt-5.6-sol" };
+    const off = await call("POST", "/api/model-profiles", {
+      ...body,
+      name: "oc-off",
+      effort: "off",
+    });
+    expect(off.status).toBe(201);
+    expect(((await off.json()) as { effort: string }).effort).toBe("off");
+
+    expect(
+      (await call("POST", "/api/model-profiles", { ...body, name: "oc-low", effort: "low" }))
+        .status,
+    ).toBe(201);
+    const patched = await call("PATCH", "/api/model-profiles/oc-low", { effort: "off" });
+    expect(patched.status).toBe(200);
+    // A PATCH that leaves `off` in place (a description edit) re-validates it too.
+    expect(
+      (await call("PATCH", "/api/model-profiles/oc-off", { description: "kept" })).status,
+    ).toBe(200);
+
+    // Control: a level this model does not list is still refused, on both verbs.
+    const max = await call("POST", "/api/model-profiles", {
+      ...body,
+      name: "oc-max",
+      effort: "max",
+    });
+    expect(max.status).toBe(400);
+    expect((await call("PATCH", "/api/model-profiles/oc-low", { effort: "max" })).status).toBe(400);
+  });
+
   test("a tier seed and a profile in use cannot be deleted", async () => {
     await createModelProfile({
       name: "claude-smart",
@@ -219,6 +254,113 @@ describe("profile CRUD", () => {
     const inUse = await call("DELETE", "/api/model-profiles/claude-mine", undefined);
     expect(inUse.status).toBe(409);
     expect(((await inUse.json()) as { error: string }).error).toContain("1 agent(s)");
+  });
+});
+
+describe("profile references and deletion are atomic", () => {
+  const taskBody = {
+    task: "racing work",
+    agentId: CLAUDE_ID,
+    routingReason: "continuity",
+    profile: "claude-racy",
+  };
+
+  async function taskCount(): Promise<number> {
+    return (
+      (await getDbClient().get<{ n: number }>("SELECT COUNT(*) AS n FROM agent_tasks"))?.n ?? 0
+    );
+  }
+
+  test("a delete that lands after create validated the profile makes the create a 400", async () => {
+    await createModelProfile({ name: "claude-racy", harness: "claude", model: "opus" });
+    const validate = profilesDb.taskProfileError;
+    let deleteStatus = 0;
+    const spy = spyOn(profilesDb, "taskProfileError").mockImplementation(async (check) => {
+      const error = await validate(check);
+      deleteStatus = (await call("DELETE", "/api/model-profiles/claude-racy", undefined)).status;
+      return error;
+    });
+    try {
+      const created = await call("POST", "/api/tasks", taskBody);
+      expect(deleteStatus).toBe(200);
+      expect(created.status).toBe(400);
+      expect(((await created.json()) as { error: string }).error).toContain("claude-racy");
+      expect(await taskCount()).toBe(0);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  test("a create that lands after delete counted references makes the delete a 409", async () => {
+    await createModelProfile({ name: "claude-racy", harness: "claude", model: "opus" });
+    const count = profilesDb.modelProfileReferences;
+    let createStatus = 0;
+    const spy = spyOn(profilesDb, "modelProfileReferences").mockImplementation(async (name) => {
+      const refs = await count(name);
+      createStatus = (await call("POST", "/api/tasks", taskBody)).status;
+      return refs;
+    });
+    try {
+      const deleted = await call("DELETE", "/api/model-profiles/claude-racy", undefined);
+      expect(createStatus).toBe(201);
+      expect(deleted.status).toBe(409);
+      expect(await profilesDb.getModelProfileByName("claude-racy")).not.toBeNull();
+      expect(await taskCount()).toBe(1);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  test("a delete that lands after PATCH /runtime validated the default makes the PATCH a 400", async () => {
+    await createModelProfile({ name: "claude-racy", harness: "claude", model: "opus" });
+    const lookup = profilesDb.getModelProfileByName;
+    let deleteStatus = 0;
+    const spy = spyOn(profilesDb, "getModelProfileByName").mockImplementation(async (name) => {
+      const profile = await lookup(name);
+      if (!deleteStatus) {
+        deleteStatus = -1;
+        spy.mockImplementation(lookup);
+        deleteStatus = (await call("DELETE", "/api/model-profiles/claude-racy", undefined)).status;
+      }
+      return profile;
+    });
+    try {
+      const set = await call("PATCH", `/api/agents/${CLAUDE_ID}/runtime`, {
+        harness_provider: "claude",
+        profile: "claude-racy",
+      });
+      expect(deleteStatus).toBe(200);
+      expect(set.status).toBe(400);
+      expect(await modelProfileConfig(CLAUDE_ID)).toBeNull();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  test("every write path is held to it: tasks, agent defaults and deletes", async () => {
+    await expect(
+      createTaskExtended("work", { agentId: CLAUDE_ID, profile: "nope" }),
+    ).rejects.toThrow("model-profile-missing");
+    await expect(
+      upsertSwarmConfig({
+        scope: "agent",
+        scopeId: CLAUDE_ID,
+        key: "MODEL_PROFILE",
+        value: "nope",
+      }),
+    ).rejects.toThrow("model-profile-missing");
+
+    await createModelProfile({ name: "claude-racy", harness: "claude", model: "opus" });
+    const task = await createTaskExtended("work", { agentId: CLAUDE_ID, profile: "claude-racy" });
+    expect(await profilesDb.deleteModelProfile("claude-racy")).toBe("in-use");
+    await expect(
+      getDbClient().run("UPDATE agent_tasks SET profile = 'nope' WHERE id = ?", [task.id]),
+    ).rejects.toThrow("model-profile-missing");
+
+    // Control: a finished task no longer holds the profile.
+    await getDbClient().run("UPDATE agent_tasks SET status = 'completed' WHERE id = ?", [task.id]);
+    expect(await profilesDb.deleteModelProfile("claude-racy")).toBe("deleted");
+    expect(await profilesDb.deleteModelProfile("claude-racy")).toBe("missing");
   });
 });
 

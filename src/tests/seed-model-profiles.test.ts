@@ -52,9 +52,12 @@ afterAll(async () => {
 
 beforeEach(async () => {
   const client = getDbClient();
-  await client.run("DELETE FROM model_profiles");
-  await client.run("DELETE FROM agents");
+  // References first: migration 218's triggers refuse deleting a named profile.
+  await client.run("DELETE FROM agent_tasks");
   await client.run("DELETE FROM swarm_config");
+  await client.run("DELETE FROM swarm_repos");
+  await client.run("DELETE FROM agents");
+  await client.run("DELETE FROM model_profiles");
 });
 
 describe("tier seeds", () => {

@@ -258,6 +258,16 @@ const REASONING_HARNESSES: ReadonlySet<string> = new Set<ReasoningHarness>([
 ]);
 
 /**
+ * The levels a session on this harness and model accepts; empty for a harness
+ * this feature does not cover. Unlike `effectiveReasoningEffort`, a supported
+ * level with no transport effect (Opencode `off`) is still listed.
+ */
+export function supportedReasoningLevels(harness: string, model: string): ReasoningEffort[] {
+  if (!REASONING_HARNESSES.has(harness)) return [];
+  return reasoningCapability(harness as ReasoningHarness, model).levels;
+}
+
+/**
  * The effort a session on this harness and model actually runs at: `level`
  * when the adapter applies it, null when it is unset or dropped (the harness
  * default applies). Same decision the adapters make in `applyReasoningEffort`.

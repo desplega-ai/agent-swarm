@@ -264,7 +264,12 @@ async function attachmentsForTrigger(
  * previous claim record is overwritten for the same reason.
  */
 async function claimModelFields(
-  task: TaskModelPinFields & { id: string; profile?: string | null; effort?: string | null },
+  task: TaskModelPinFields & {
+    id: string;
+    profile?: string | null;
+    effort?: string | null;
+    vcsRepo?: string | null;
+  },
   agent: Parameters<typeof recordClaimModelResolution>[1],
 ): Promise<Awaited<ReturnType<typeof recordClaimModelResolution>> & { model: string | undefined }> {
   const pin = taskModelPin(task);

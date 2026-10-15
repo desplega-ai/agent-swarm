@@ -11,7 +11,8 @@
  *   3. the claiming worker's MODEL_TIER_*   → "worker-env"  (agents.modelTierOverrides)
  *   4. swarm_config MODEL_TIER_<PROV>_<TIER> → "tier-config"
  *   5. DEFAULT_MODEL_TIER_MAP                → "tier-default"
- *   6. the agent's default profile          → "profile:agent-default" (no model, no tier)
+ *   6. the agent's default profile          → "profile:agent-default" (no model, no tier,
+ *      no repo-scoped MODEL_OVERRIDE on the task's repo)
  *
  * Any layer may hold a `latest:` alias. An alias that resolves to nothing
  * (empty catalog, everything filtered) falls through to the next layer.
@@ -50,7 +51,11 @@ import {
   type ReasoningEffort,
 } from "../types";
 import { getDbClient } from "./db";
-import { getAgentDefaultProfileName, getModelProfileByName } from "./db/model-profiles";
+import {
+  getAgentDefaultProfileName,
+  getModelProfileByName,
+  repoModelOverrideKeys,
+} from "./db/model-profiles";
 import {
   CLI_PINNED_HARNESSES,
   fallbackForUnsupportedModel,
@@ -580,6 +585,7 @@ export async function recordClaimModelResolution(
     modelTier?: string | null;
     profile?: string | null;
     effort?: string | null;
+    vcsRepo?: string | null;
   },
   agent: { id: string; harnessProvider?: ProviderName | null; provider?: ProviderName | null },
 ): Promise<ClaimModelFields> {
@@ -587,10 +593,16 @@ export async function recordClaimModelResolution(
 
   if (!task.model?.trim()) {
     const taskProfile = task.profile?.trim();
-    const defaultProfile =
+    const agentDefault =
       taskProfile || parseModelTier(task.modelTier)
         ? null
         : await getAgentDefaultProfileName(agent.id);
+    // The agent default is agent-scoped config: a repo-scoped MODEL_OVERRIDE or
+    // REASONING_EFFORT_OVERRIDE on the task's repo still beats it on that axis
+    // (repo > agent), as it beats the agent's own override in the worker env.
+    // A task's own profile is the creator's pick and beats repo config.
+    const repoKeys = agentDefault ? await repoModelOverrideKeys(task.vcsRepo) : new Set<string>();
+    const defaultProfile = repoKeys.has("MODEL_OVERRIDE") ? null : agentDefault;
     const picked = taskProfile
       ? await resolveClaimProfile(taskProfile, "profile:task", harnessProvider)
       : defaultProfile
@@ -621,8 +633,11 @@ export async function recordClaimModelResolution(
         modelSource: resolution.modelSource,
         ...(resolution.modelAlias ? { modelAlias: resolution.modelAlias } : {}),
         resolvedProfile: picked.profile.name,
-        // A task's own effort stays the pin; the profile's fills only an unset one.
-        ...(!task.effort && picked.profile.effort ? { effort: picked.profile.effort } : {}),
+        // A task's own effort stays the pin; the profile's fills only an unset one,
+        // and an agent default's yields to the repo's effort override.
+        ...(!task.effort && picked.profile.effort && !repoKeys.has("REASONING_EFFORT_OVERRIDE")
+          ? { effort: picked.profile.effort }
+          : {}),
       };
     }
   }

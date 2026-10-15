@@ -35,7 +35,7 @@ import {
   updateTaskTitle,
   updateTaskVcs,
 } from "../be/db";
-import { taskProfileError } from "../be/db/model-profiles";
+import { modelProfileRefError, taskProfileError } from "../be/db/model-profiles";
 import { explicitModelErrorForAgent } from "../be/model-validation";
 import {
   getTaskSteeringFields,
@@ -1050,6 +1050,11 @@ export async function handleTasks(
       }
       if (error instanceof ExtensionAgentAssignmentError) {
         jsonError(res, error.message, 400);
+        return true;
+      }
+      // The profile was deleted between taskProfileError and the insert.
+      if (modelProfileRefError(error) === "missing") {
+        jsonError(res, `Unknown model profile "${parsed.body.profile}"`, 400);
         return true;
       }
       console.error("[HTTP] Failed to create task:", error);

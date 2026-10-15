@@ -28,7 +28,11 @@ import {
   updateAgentStatus,
   upsertSwarmConfig,
 } from "../be/db";
-import { getModelProfileByName, MODEL_PROFILE_CONFIG_KEY } from "../be/db/model-profiles";
+import {
+  getModelProfileByName,
+  MODEL_PROFILE_CONFIG_KEY,
+  modelProfileRefError,
+} from "../be/db/model-profiles";
 import { createEvent } from "../be/events";
 import { setAgentHarnessCliVersion } from "../be/harness-model-support";
 import {
@@ -1377,6 +1381,11 @@ export async function handleAgentsRest(
     } catch (error) {
       if (error instanceof ClaudeTransportConflictError) {
         jsonError(res, error.message, 400);
+        return true;
+      }
+      // The profile was deleted between the check above and this write.
+      if (modelProfileRefError(error) === "missing") {
+        jsonError(res, `Unknown model profile "${profile}"`, 400);
         return true;
       }
       throw error;

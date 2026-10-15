@@ -24,10 +24,51 @@ CREATE TABLE IF NOT EXISTS model_profiles (
 ALTER TABLE agent_tasks ADD COLUMN profile TEXT;
 ALTER TABLE agent_tasks ADD COLUMN resolvedProfile TEXT;
 
+-- A profile name a task asks for, or an agent has as its default, must exist
+-- when the row is written. Enforced here so the check and the write are one
+-- statement: an app-level check before a separate insert races a concurrent
+-- delete. The delete side is the matching single-statement guard in
+-- deleteModelProfile (src/be/db/model-profiles.ts). It is not a trigger on
+-- model_profiles because one reading agent_tasks would break every later
+-- migration that rebuilds agent_tasks (DROP + RENAME re-parses that trigger).
+CREATE TRIGGER IF NOT EXISTS model_profiles_task_ref_insert
+BEFORE INSERT ON agent_tasks
+WHEN NEW.profile IS NOT NULL
+  AND NOT EXISTS (SELECT 1 FROM model_profiles WHERE name = NEW.profile)
+BEGIN
+  SELECT RAISE(ABORT, 'model-profile-missing: the task''s model profile does not exist');
+END;
+
+CREATE TRIGGER IF NOT EXISTS model_profiles_task_ref_update
+BEFORE UPDATE OF profile ON agent_tasks
+WHEN NEW.profile IS NOT NULL
+  AND NOT EXISTS (SELECT 1 FROM model_profiles WHERE name = NEW.profile)
+BEGIN
+  SELECT RAISE(ABORT, 'model-profile-missing: the task''s model profile does not exist');
+END;
+
+CREATE TRIGGER IF NOT EXISTS model_profiles_default_ref_insert
+BEFORE INSERT ON swarm_config
+WHEN NEW.scope = 'agent' AND NEW.key = 'MODEL_PROFILE'
+  AND NOT EXISTS (SELECT 1 FROM model_profiles WHERE name = trim(NEW.value))
+BEGIN
+  SELECT RAISE(ABORT, 'model-profile-missing: the agent''s default model profile does not exist');
+END;
+
+CREATE TRIGGER IF NOT EXISTS model_profiles_default_ref_update
+BEFORE UPDATE OF scope, key, value ON swarm_config
+WHEN NEW.scope = 'agent' AND NEW.key = 'MODEL_PROFILE'
+  AND NOT EXISTS (SELECT 1 FROM model_profiles WHERE name = trim(NEW.value))
+BEGIN
+  SELECT RAISE(ABORT, 'model-profile-missing: the agent''s default model profile does not exist');
+END;
+
 -- Each agent's MODEL_OVERRIDE + REASONING_EFFORT_OVERRIDE pair becomes a
 -- profile, deduped by (harness, model, effort), and that agent's default
 -- (agent-scoped MODEL_PROFILE, never exported to the worker env). Claim then
 -- supplies the same model and effort the worker read from its env before.
+-- A row with exportToEnv = 0 never reached the worker, so it is not carried
+-- over: a withheld model makes no default, a withheld effort no profile effort.
 -- ACP keeps MODEL_OVERRIDE (no portable mapping); `latest:` aliases are not
 -- valid agent defaults, so they are left alone too.
 CREATE TEMP TABLE _model_profile_overrides AS
@@ -42,10 +83,10 @@ SELECT
 FROM agents a
 JOIN swarm_config m
   ON m.scope = 'agent' AND m.scopeId = a.id AND m.key = 'MODEL_OVERRIDE'
-  AND m.isSecret = 0 AND m.encrypted = 0
+  AND m.isSecret = 0 AND m.encrypted = 0 AND m.exportToEnv = 1
 LEFT JOIN swarm_config e
   ON e.scope = 'agent' AND e.scopeId = a.id AND e.key = 'REASONING_EFFORT_OVERRIDE'
-  AND e.isSecret = 0 AND e.encrypted = 0
+  AND e.isSecret = 0 AND e.encrypted = 0 AND e.exportToEnv = 1
 WHERE COALESCE(a.harness_provider, a.provider) IS NOT NULL
   AND COALESCE(a.harness_provider, a.provider) <> 'acp'
   AND trim(m.value) <> ''

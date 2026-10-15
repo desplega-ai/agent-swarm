@@ -13,7 +13,8 @@ import {
   initDb,
   upsertSwarmConfig,
 } from "../be/db";
-import { createModelProfile } from "../be/db/model-profiles";
+import { createModelProfile, getAgentDefaultProfileName } from "../be/db/model-profiles";
+import { recordClaimModelResolution } from "../be/model-tier-resolution";
 import { handlePoll } from "../http/poll";
 import { taskModelPin } from "../tasks/model-pin";
 import { inheritedModelSelection } from "../tasks/worker-follow-up";
@@ -84,10 +85,12 @@ afterAll(async () => {
 
 beforeEach(async () => {
   const client = getDbClient();
+  // References first: migration 218's triggers refuse deleting a named profile.
   await client.run("DELETE FROM agent_tasks");
+  await client.run("DELETE FROM swarm_config WHERE scope IN ('agent', 'repo')");
+  await client.run("DELETE FROM swarm_repos");
   await client.run("DELETE FROM agents");
   await client.run("DELETE FROM model_profiles");
-  await client.run("DELETE FROM swarm_config WHERE scope = 'agent'");
   await createModelProfile({
     name: "claude-opus-high",
     harness: "claude",
@@ -145,12 +148,16 @@ describe("a task's own profile", () => {
     expect(String(trigger?.task.modelUnsupported)).toContain("[model-harness-mismatch]");
   });
 
-  test("a profile deleted after creation fails fast with a tagged reason", async () => {
+  test("a task naming a missing profile fails fast with a tagged reason", async () => {
+    // Migration 218's triggers keep such a row from existing; the claim still
+    // refuses one rather than run a model nobody picked.
     const w = await worker("p-missing", "claude");
-    await createTaskExtended("work", { agentId: w.id, profile: "claude-haiku" });
-    await getDbClient().run("DELETE FROM model_profiles WHERE name = 'claude-haiku'");
-    const trigger = await callPoll(w.id);
-    expect(String(trigger?.task.modelUnsupported)).toContain("[model-profile-missing]");
+    const task = await createTaskExtended("work", { agentId: w.id });
+    const fields = await recordClaimModelResolution(
+      { id: task.id, profile: "claude-gone" },
+      { id: w.id, harnessProvider: "claude" },
+    );
+    expect(String(fields.modelUnsupported)).toContain("[model-profile-missing]");
   });
 
   test("a pool task waits for a worker on the profile's harness", async () => {
@@ -199,7 +206,7 @@ describe("the agent's default profile", () => {
     });
   });
 
-  test("a default for another harness, or a deleted one, is ignored", async () => {
+  test("a default for another harness is ignored; a missing one cannot be stored", async () => {
     const w = await worker("d-ignored", "claude", 2);
     await setDefault(w.id, "codex-sol");
     const first = await createTaskExtended("work", { agentId: w.id });
@@ -212,10 +219,8 @@ describe("the agent's default profile", () => {
       resolvedProfile: null,
     });
 
-    await setDefault(w.id, "gone");
-    const second = await createTaskExtended("work", { agentId: w.id });
-    expect((await callPoll(w.id))?.task.modelUnsupported).toBeUndefined();
-    expect((await claimRecord(second.id))?.resolvedProfile).toBeNull();
+    await expect(setDefault(w.id, "gone")).rejects.toThrow("model-profile-missing");
+    expect(await getAgentDefaultProfileName(w.id)).toBe("codex-sol");
   });
 });
 

@@ -28,7 +28,7 @@ import {
   releaseTask,
   updateTaskClaudeSessionId,
 } from "@/be/db";
-import { taskProfileError } from "@/be/db/model-profiles";
+import { modelProfileRefError, taskProfileError } from "@/be/db/model-profiles";
 import { explicitModelErrorForAgent } from "@/be/model-validation";
 import { touchRuntimeInstance } from "@/be/multi-runtime";
 import { applyPreTaskCreate } from "@/extensions/apply-task-create";
@@ -358,7 +358,7 @@ export async function taskActionHandler(
     };
   }
 
-  const result = await getDbClient().transaction(async (): Promise<TaskActionResult> => {
+  const transacted = getDbClient().transaction(async (): Promise<TaskActionResult> => {
     switch (action) {
       case "create": {
         const newTask = await createTaskExtended(
@@ -659,6 +659,11 @@ export async function taskActionHandler(
       default:
         return { success: false, message: `Unknown action: ${action}` };
     }
+  });
+  const result = await transacted.catch((error: unknown): TaskActionResult => {
+    // A create whose profile was deleted between taskProfileError and the insert.
+    if (modelProfileRefError(error) !== "missing") throw error;
+    return { success: false, message: `Unknown model profile "${input.profile}".` };
   });
 
   // Phase 5: when the accept gate refused, run after-commit side
