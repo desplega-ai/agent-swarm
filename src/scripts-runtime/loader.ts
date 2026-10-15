@@ -94,12 +94,21 @@ export async function runScript(input: RunScriptInput): Promise<RunScriptOutput>
     };
   }
 
+  // The global scrubber skips values under its length floor, so this run's own
+  // secret config is redacted here at any length before the global pass. Built
+  // before the import check: its diagnostic quotes source, which can hold a value.
+  const runSecrets = createValueScrubber(
+    Object.entries(input.userConfig ?? {})
+      .filter(([, entry]) => entry.isSecret)
+      .map(([key, entry]) => ({ value: entry.value, name: `config:${key}` })),
+  );
+
   const imports = validateScriptImports(input.source);
   if (!imports.ok) {
     return {
       result: undefined,
       stdout: "",
-      stderr: imports.diagnostic,
+      stderr: scrubSecrets(runSecrets.text(imports.diagnostic)),
       truncated: { stdout: false, stderr: false },
       durationMs: 0,
       exitCode: 1,
@@ -131,13 +140,6 @@ export async function runScript(input: RunScriptInput): Promise<RunScriptOutput>
     output = await getScriptExecutor().run(executorInput);
   }
 
-  // The global scrubber skips values under its length floor, so this run's own
-  // secret config is redacted here at any length before the global pass.
-  const runSecrets = createValueScrubber(
-    Object.entries(input.userConfig ?? {})
-      .filter(([, entry]) => entry.isSecret)
-      .map(([key, entry]) => ({ value: entry.value, name: `config:${key}` })),
-  );
   return {
     ...output,
     result: scrubObject(runSecrets.object(output.result)),

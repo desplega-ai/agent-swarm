@@ -913,4 +913,27 @@ describe("ctx.swarm.config.get through POST /api/scripts/run", () => {
     },
     CHILD_PROCESS_TEST_BUDGET_MS,
   );
+
+  test("an import rejection quoting a short secret stays out of stderr and the stored run row", async () => {
+    // The import check returns before any process spawns, so its diagnostic
+    // needs the run-local scrub too.
+    const source = `import nope from "${shortSecretValue}"; export default async () => nope;`;
+    const response = await dispatch("/api/scripts/run", {
+      method: "POST",
+      agentId: workerId,
+      body: JSON.stringify({ source, intent: "short config secret in import diagnostic" }),
+    });
+    expect(response.status).toBe(200);
+    const out = (await response.json()) as { stderr: string; error?: string };
+    expect(out.error).toBe("import_violation");
+    expect(out.stderr).toContain("[REDACTED:config:SCRIPT_CFG_SHORT_SECRET]");
+    expect(out.stderr).not.toContain(shortSecretValue);
+
+    const row = await getDbClient().get<{ error: string | null }>(
+      "SELECT error FROM script_runs WHERE agentId = ? AND source = ?",
+      [workerId, source],
+    );
+    expect(row?.error).toBeTruthy();
+    expect(row?.error).not.toContain(shortSecretValue);
+  });
 });
