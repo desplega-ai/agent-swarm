@@ -9,7 +9,12 @@ import {
   getAcpTargetCatalogEntry,
   isAcpTarget,
 } from "./acp-target-catalog";
-import { applyOpenRouterBaseUrlOverride, type OpencodeConfig } from "./opencode-adapter";
+import { providerForModel } from "./openai-compatible-providers";
+import {
+  applyOpenRouterBaseUrlOverride,
+  buildOpenAICompatibleProviderBlock,
+  type OpencodeConfig,
+} from "./opencode-adapter";
 import { applyReasoningEffort } from "./reasoning-effort";
 import type { CostData, CostModelUsage, ProviderEvent, ProviderSessionConfig } from "./types";
 
@@ -140,8 +145,36 @@ function withOpencodeConfig(env: Record<string, string>, model: string): void {
     }
   }
   if (model.trim()) value.model = model.trim();
+  withCustomProviderBlock(value as OpencodeConfig, model.trim());
   applyOpenRouterBaseUrlOverride(value as OpencodeConfig, env);
   env[key] = JSON.stringify(value);
+}
+
+/**
+ * OpenCode ships no `helmcode` provider, so a `helmcode/*` model needs the
+ * custom block. The key stays an `{env:…}` reference: the ACP subprocess env
+ * is the forwarded per-task env, where the var holds one picked key, so no
+ * literal key lands in `OPENCODE_CONFIG_CONTENT`. Values the operator already
+ * set in `OPENCODE_CONFIG_CONTENT` win over the defaults.
+ */
+function withCustomProviderBlock(config: OpencodeConfig, model: string): void {
+  const provider = providerForModel(model);
+  if (provider?.id !== "helmcode") return;
+  const block = buildOpenAICompatibleProviderBlock(
+    provider,
+    `{env:${provider.envVar}}`,
+    model.slice(provider.id.length + 1),
+  );
+  const existing = config.provider?.[provider.id];
+  config.provider = {
+    ...config.provider,
+    [provider.id]: {
+      ...block,
+      ...existing,
+      options: { ...block.options, ...existing?.options },
+      models: { ...block.models, ...existing?.models },
+    },
+  };
 }
 
 function parseCommand(command: string, args: string | undefined): string[] {

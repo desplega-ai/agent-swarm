@@ -654,6 +654,37 @@ describe("checkOpencodeCredentials", () => {
     ).toBe(true);
   });
 
+  test("strict: nan/* needs NAN_API_KEY or its HELMCODE_API_NAN alias", () => {
+    const env = { MODEL_OVERRIDE: "nan/glm5.3-flash", OPENROUTER_API_KEY: "x" };
+    const missing = checkOpencodeCredentials(env, { homeDir: HOME, fs: noFiles });
+    expect(missing.ready).toBe(false);
+    expect(missing.missing).toContain("NAN_API_KEY");
+    for (const name of ["NAN_API_KEY", "HELMCODE_API_NAN"]) {
+      expect(
+        checkOpencodeCredentials({ ...env, [name]: "x" }, { homeDir: HOME, fs: noFiles }).ready,
+      ).toBe(true);
+    }
+  });
+
+  test("strict: helmcode/* needs HELMCODE_API_KEY, not the NaN alias", () => {
+    const env = { MODEL_OVERRIDE: "helmcode/glm5.3", HELMCODE_API_NAN: "x" };
+    const missing = checkOpencodeCredentials(env, { homeDir: HOME, fs: noFiles });
+    expect(missing.ready).toBe(false);
+    expect(missing.missing).toContain("HELMCODE_API_KEY");
+    expect(
+      checkOpencodeCredentials({ ...env, HELMCODE_API_KEY: "x" }, { homeDir: HOME, fs: noFiles })
+        .ready,
+    ).toBe(true);
+  });
+
+  test("permissive: a NaN or Helmcode key alone is enough", () => {
+    for (const name of ["NAN_API_KEY", "HELMCODE_API_NAN", "HELMCODE_API_KEY"]) {
+      expect(checkOpencodeCredentials({ [name]: "x" }, { homeDir: HOME, fs: noFiles }).ready).toBe(
+        true,
+      );
+    }
+  });
+
   test("not ready when nothing is set", () => {
     const status = checkOpencodeCredentials({}, { homeDir: HOME, fs: noFiles });
     expect(status.ready).toBe(false);

@@ -228,7 +228,7 @@ function isJsonObject(value: string): boolean {
  * Falls back to random selection from all credentials if no available indices match.
  * A JSON object value (the CODEX_OAUTH blob) is always one credential.
  */
-function splitCredentialPool(value: string): string[] {
+export function splitCredentialPool(value: string): string[] {
   return isJsonObject(value)
     ? [value.trim()]
     : value

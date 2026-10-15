@@ -15,7 +15,11 @@ import {
   clampContextPercent,
   getContextWindowSize,
 } from "../utils/context-window";
-import { validateOpencodeCredentials } from "../utils/credentials";
+import {
+  NAN_KEY_VARS,
+  splitCredentialPool,
+  validateOpencodeCredentials,
+} from "../utils/credentials";
 import { isEnvFlagEnabled } from "../utils/env-flag";
 import { fetchInstalledMcpServers } from "../utils/mcp-server-fetcher";
 import { swarmRuntimeInstanceId } from "../utils/multi-runtime";
@@ -24,9 +28,13 @@ import {
   getOpenRouterAttributionHeaders,
   getOpenRouterBaseUrl,
 } from "../utils/openrouter-base-url";
-import { scrubSecrets } from "../utils/secret-scrubber";
+import { registerVolatileSecret, scrubSecrets } from "../utils/secret-scrubber";
 import { resolveSlashSkillPrompt } from "./codex-skill-resolver";
 import { CTX_MODE_NUDGE_EVERY } from "./ctx-mode-env";
+import {
+  OPENAI_COMPATIBLE_PROVIDERS,
+  type OpenAICompatibleProvider,
+} from "./openai-compatible-providers";
 import { OpenRouterBilling } from "./opencode-billing";
 import { createOpencodeSwarmPlugin, type OpencodeToolLister } from "./opencode-swarm-plugin";
 import {
@@ -61,8 +69,12 @@ export type OpencodeConfig = {
   provider?: Record<
     string,
     {
+      /** Env var names OpenCode reads the key from; `[]` stops it reading `process.env`. */
+      env?: string[];
+      npm?: string;
+      name?: string;
       options?: Record<string, unknown>;
-      models?: Record<string, { options?: Record<string, unknown> }>;
+      models?: Record<string, { options?: Record<string, unknown>; [key: string]: unknown }>;
     }
   >;
   [key: string]: unknown;
@@ -80,18 +92,39 @@ function opencodeModelToCredKey(modelStr: string | undefined): string | null {
     if (provider === "anthropic") return "ANTHROPIC_API_KEY";
     if (provider === "openrouter") return "OPENROUTER_API_KEY";
     if (provider === "openai") return "OPENAI_API_KEY";
+    if (provider === "nan") return "NAN_API_KEY";
+    if (provider === "helmcode") return "HELMCODE_API_KEY";
   }
   return null;
 }
+
+/**
+ * Env var names that satisfy `requiredKey`. The runner copies the
+ * `HELMCODE_API_NAN` alias into `NAN_API_KEY` per task, but a check that reads
+ * `process.env` directly sees only the alias.
+ */
+function credKeyNames(requiredKey: string): readonly string[] {
+  return requiredKey === "NAN_API_KEY" ? NAN_KEY_VARS : [requiredKey];
+}
+
+/** Keys that satisfy opencode when no model pins a provider. */
+const OPENCODE_ANY_KEY_VARS = [
+  "OPENROUTER_API_KEY",
+  "ANTHROPIC_API_KEY",
+  "OPENAI_API_KEY",
+  ...NAN_KEY_VARS,
+  "HELMCODE_API_KEY",
+] as const;
 
 /**
  * Opencode is satisfied by ANY of:
  *   1. `~/.local/share/opencode/auth.json` exists (the file `opencode auth login`
  *      writes; OpenCode 2 imports it into its credential store on start).
  *   2. `MODEL_OVERRIDE` resolves to a provider-prefixed model — only that
- *      provider's key is required.
+ *      provider's key is required (`nan/*` also accepts `HELMCODE_API_NAN`).
  *   3. Otherwise any one of OPENROUTER_API_KEY / ANTHROPIC_API_KEY /
- *      OPENAI_API_KEY suffices.
+ *      OPENAI_API_KEY / NAN_API_KEY (or HELMCODE_API_NAN) / HELMCODE_API_KEY
+ *      suffices.
  */
 export function checkOpencodeCredentials(
   env: Record<string, string | undefined>,
@@ -106,7 +139,7 @@ export function checkOpencodeCredentials(
 
   const requiredKey = opencodeModelToCredKey(env.MODEL_OVERRIDE);
   if (requiredKey) {
-    if (env[requiredKey]) {
+    if (credKeyNames(requiredKey).some((name) => env[name])) {
       return { ready: true, missing: [], satisfiedBy: "env" };
     }
     return {
@@ -116,13 +149,20 @@ export function checkOpencodeCredentials(
     };
   }
 
-  if (env.OPENROUTER_API_KEY || env.ANTHROPIC_API_KEY || env.OPENAI_API_KEY) {
+  if (OPENCODE_ANY_KEY_VARS.some((name) => env[name])) {
     return { ready: true, missing: [], satisfiedBy: "env" };
   }
   return {
     ready: false,
-    missing: ["OPENROUTER_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY", authFile],
-    hint: "Set one of OPENROUTER_API_KEY / ANTHROPIC_API_KEY / OPENAI_API_KEY (any one suffices), or run `opencode auth login` to create ~/.local/share/opencode/auth.json.",
+    missing: [
+      "OPENROUTER_API_KEY",
+      "ANTHROPIC_API_KEY",
+      "OPENAI_API_KEY",
+      "NAN_API_KEY",
+      "HELMCODE_API_KEY",
+      authFile,
+    ],
+    hint: "Set one of OPENROUTER_API_KEY / ANTHROPIC_API_KEY / OPENAI_API_KEY / NAN_API_KEY (or HELMCODE_API_NAN) / HELMCODE_API_KEY (any one suffices), or run `opencode auth login` to create ~/.local/share/opencode/auth.json.",
   };
 }
 
@@ -215,6 +255,124 @@ export function applyOpenRouterBaseUrlOverride(
       },
     },
   };
+}
+
+/**
+ * OpenCode provider block for a custom OpenAI-compatible provider from the
+ * worker-side table (`helmcode`). `apiKey` is a literal key (embedded host) or
+ * an `{env:NAME}` reference (ACP subprocess). `env: []` keeps OpenCode from
+ * reading a key out of `process.env`. A `modelId` missing from the table
+ * (accepted through `allowCustomModel`) gets a bare entry so OpenCode still
+ * resolves it instead of falling back to its default model.
+ */
+export function buildOpenAICompatibleProviderBlock(
+  provider: OpenAICompatibleProvider,
+  apiKey: string,
+  modelId?: string,
+): NonNullable<OpencodeConfig["provider"]>[string] {
+  const models: Record<string, Record<string, unknown>> = {};
+  for (const m of provider.models) {
+    models[m.id] = {
+      name: m.name,
+      tool_call: true,
+      reasoning: m.reasoning,
+      limit: { context: m.contextWindow, output: m.maxOutputTokens },
+    };
+  }
+  if (modelId && !models[modelId]) models[modelId] = { name: modelId, tool_call: true };
+  return {
+    npm: provider.npm,
+    name: provider.displayName,
+    env: [],
+    options: { baseURL: provider.baseUrl, apiKey },
+    models,
+  };
+}
+
+/** Built-in OpenCode providers whose key OpenCode reads from `process.env`. */
+const ENV_BOUND_KEY_VARS: Readonly<Record<string, readonly string[]>> = {
+  openrouter: ["OPENROUTER_API_KEY"],
+  nan: [OPENAI_COMPATIBLE_PROVIDERS.nan.envVar, ...OPENAI_COMPATIBLE_PROVIDERS.nan.aliasEnvVars],
+};
+
+/** Providers OpenCode does not ship; they get a full custom block. */
+const CUSTOM_BLOCK_PROVIDERS: Readonly<Record<string, OpenAICompatibleProvider>> = {
+  helmcode: OPENAI_COMPATIBLE_PROVIDERS.helmcode,
+};
+
+/**
+ * One key from the first non-empty var in `names`. The runner's per-task env
+ * already holds one picked pool member; a value that still carries a comma
+ * pool (no runner, or `process.env`) yields its first member.
+ */
+function pickProviderKey(
+  env: Record<string, string | undefined>,
+  names: readonly string[],
+): { key: string; name: string } | undefined {
+  for (const name of names) {
+    const value = env[name]?.trim();
+    if (!value) continue;
+    const key = splitCredentialPool(value)[0];
+    if (key) return { key, name };
+  }
+  return undefined;
+}
+
+/**
+ * Hand the embedded host exactly one key for the active model's provider.
+ *
+ * Embedded OpenCode reads a built-in provider's key from the shared
+ * `process.env`, and that value beats `options.apiKey`. The entrypoint exports
+ * a credential pool there as a raw comma list, and a key saved from the
+ * dashboard after boot never reaches `process.env` at all, so both 401 without
+ * this splice. For `openrouter` and `nan` it sets `env: []` plus
+ * `options.apiKey`; for `helmcode` it writes the full custom provider block.
+ * No splice when the key is absent (credStatus reports that).
+ *
+ * The key lives only in the in-memory config string handed to the SDK.
+ * Mutates `opencodeConfig` in place and returns the env var the key came from,
+ * or `undefined` when nothing was spliced.
+ */
+export function applyProviderKeySplice(
+  opencodeConfig: OpencodeConfig,
+  model: string | undefined,
+  env: Record<string, string | undefined>,
+): { key: string; name: string } | undefined {
+  const slash = model?.indexOf("/") ?? -1;
+  if (!model || slash <= 0) return undefined;
+  const providerId = model.slice(0, slash);
+  const existing = opencodeConfig.provider?.[providerId];
+
+  const custom = CUSTOM_BLOCK_PROVIDERS[providerId];
+  if (custom) {
+    const picked = pickProviderKey(env, [custom.envVar, ...custom.aliasEnvVars]);
+    if (!picked) return undefined;
+    const block = buildOpenAICompatibleProviderBlock(custom, picked.key, model.slice(slash + 1));
+    opencodeConfig.provider = {
+      ...opencodeConfig.provider,
+      [providerId]: {
+        ...existing,
+        ...block,
+        options: { ...existing?.options, ...block.options },
+        models: { ...existing?.models, ...block.models },
+      },
+    };
+    return picked;
+  }
+
+  const names = ENV_BOUND_KEY_VARS[providerId];
+  if (!names) return undefined;
+  const picked = pickProviderKey(env, names);
+  if (!picked) return undefined;
+  opencodeConfig.provider = {
+    ...opencodeConfig.provider,
+    [providerId]: {
+      ...existing,
+      env: [],
+      options: { ...existing?.options, apiKey: picked.key },
+    },
+  };
+  return picked;
 }
 
 const SWARM_AGENT_NAME = "swarm";
@@ -547,8 +705,11 @@ export class OpencodeSession implements ProviderSession {
   }
 
   /** Settle the session as failed; also used when the event stream dies. */
-  fail(message: string): void {
+  fail(rawMessage: string): void {
     if (this.aborted || this.completed) return;
+    // SDK and provider errors can echo request details; the message reaches
+    // the runner's logs and the task's failure reason.
+    const message = scrubSecrets(rawMessage);
     this.emit({ type: "error", message });
     void this.finish(async () => ({
       exitCode: 1,
@@ -733,6 +894,12 @@ export class OpencodeAdapter implements ProviderAdapter {
       },
     };
 
+    // One picked key for the model's provider (D3). It stays in this
+    // in-memory config; registering it lets every scrubbed egress redact it
+    // even when it never reached `process.env` (a key saved after boot).
+    const splicedKey = applyProviderKeySplice(opencodeConfig, config.model, env);
+    if (splicedKey) registerVolatileSecret(splicedKey.key, splicedKey.name);
+
     // Splice the provider-keyed reasoning options into
     // `provider[providerId].models[modelId].options`. `off` (and any
     // capability-rejected level) resolves to `noop`.
@@ -774,21 +941,30 @@ export class OpencodeAdapter implements ProviderAdapter {
     const { sdk, version: opencodeVersion } = await loadOpencodeSdkImpl();
     let listTools: OpencodeToolLister | undefined;
     const billing = config.model.startsWith("openrouter/") ? new OpenRouterBilling() : undefined;
-    const host = await sdk.OpenCode.create({
-      config: { content: JSON.stringify(opencodeConfig) },
-      plugins: [
-        createOpencodeSwarmPlugin(swarm, {
-          onToolRegistry: (lister) => {
-            listTools = lister;
-          },
-          ...(billing ? { onOpenRouterResponse: (response) => billing.observe(response) } : {}),
-        }),
-      ],
-      log: {
-        level: "warn",
-        emit: (entry) => console.warn(scrubSecrets(`[opencode] ${entry.message}`)),
-      },
-    });
+    // The config string carries the spliced provider key and the swarm MCP
+    // bearer. It goes to the SDK only; nothing logs, writes, or uploads it,
+    // and errors raised while the SDK parses it are scrubbed before they
+    // propagate to the runner.
+    let host: OpenCode.Interface;
+    try {
+      host = await sdk.OpenCode.create({
+        config: { content: JSON.stringify(opencodeConfig) },
+        plugins: [
+          createOpencodeSwarmPlugin(swarm, {
+            onToolRegistry: (lister) => {
+              listTools = lister;
+            },
+            ...(billing ? { onOpenRouterResponse: (response) => billing.observe(response) } : {}),
+          }),
+        ],
+        log: {
+          level: "warn",
+          emit: (entry) => console.warn(scrubSecrets(`[opencode] ${entry.message}`)),
+        },
+      });
+    } catch (err) {
+      throw new Error(scrubSecrets(`opencode host failed to start: ${errorMessage(err, "")}`));
+    }
 
     let sessionId: string;
     try {
@@ -799,7 +975,7 @@ export class OpencodeAdapter implements ProviderAdapter {
       sessionId = created.id;
     } catch (err) {
       await host.close().catch(() => {});
-      throw err;
+      throw new Error(scrubSecrets(`opencode session create failed: ${errorMessage(err, "")}`));
     }
 
     const session = new OpencodeSession(
