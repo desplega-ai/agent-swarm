@@ -91,6 +91,7 @@ import { getExecutorRegistry } from "../workflows";
 import { workflowEventBus } from "../workflows/event-bus";
 import { handleWebhookTrigger, verifyHmacSignature, WebhookError } from "../workflows/triggers";
 import { route } from "./route-def";
+import { BODY_TOO_LARGE, enforceContentLengthCap, jsonError } from "./utils";
 
 // ─── Route Definitions (documentation only — webhooks handle their own body parsing) ─
 
@@ -230,9 +231,16 @@ const chatSdkWebhook = route({
     401: { description: "Invalid platform signature or secret token" },
     403: { description: "Teams activity whose serviceUrl is not a Bot Framework host" },
     404: { description: "Chat SDK disabled or adapter not configured" },
+    413: { description: "Body exceeds 1 MiB" },
     503: { description: "Adapter configured but failed to start" },
   },
 });
+
+/**
+ * Upper bound for a Chat SDK webhook body. Platform payloads are a few KB and
+ * files travel by URL, so anything larger is not a platform delivery.
+ */
+const CHAT_SDK_WEBHOOK_MAX_BODY_BYTES = 1024 * 1024;
 
 // ─── Handler ─────────────────────────────────────────────────────────────────
 
@@ -910,10 +918,28 @@ export async function handleWebhooks(
       return true;
     }
 
+    // The route is unauthenticated and the adapter verifies the signature over
+    // the buffered body, so the body is bounded before it is buffered. An
+    // oversized stream is answered at once and drained without buffering, the
+    // same way `parseBody` keeps the connection usable.
+    if (enforceContentLengthCap(req, res, CHAT_SDK_WEBHOOK_MAX_BODY_BYTES) === BODY_TOO_LARGE) {
+      return true;
+    }
     const chunks: Buffer[] = [];
+    let receivedBytes = 0;
+    let tooLarge = false;
     for await (const chunk of req) {
+      if (tooLarge) continue;
+      receivedBytes += (chunk as Buffer).byteLength;
+      if (receivedBytes > CHAT_SDK_WEBHOOK_MAX_BODY_BYTES) {
+        tooLarge = true;
+        chunks.length = 0;
+        jsonError(res, `Payload too large (max ${CHAT_SDK_WEBHOOK_MAX_BODY_BYTES} bytes)`, 413);
+        continue;
+      }
       chunks.push(chunk as Buffer);
     }
+    if (tooLarge) return true;
     const rawBody = Buffer.concat(chunks);
     // The Teams adapter replies, reads history and downloads files with the
     // bot token at the activity's serviceUrl, and caches it for DMs. Refuse an

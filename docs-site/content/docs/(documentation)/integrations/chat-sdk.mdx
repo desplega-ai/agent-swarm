@@ -79,6 +79,8 @@ Each adapter has its own public URL:
 
 The adapter checks the platform signature on every request (Telegram secret token, Slack signing secret, Discord Ed25519 key, Teams Bot Framework token). Set `PUBLIC_MCP_BASE_URL` to the public HTTPS address of the API.
 
+The API rejects a webhook body above 1 MiB with `413` before the adapter reads it. Platform payloads are a few KB, and files arrive as URLs.
+
 #### Local development with a tunnel
 
 A platform cannot reach `localhost`. When the webhook URL on the card starts with `localhost`, `127.0.0.1` or `[::1]`, the card shows a tunnel hint. To receive webhooks on a local API:

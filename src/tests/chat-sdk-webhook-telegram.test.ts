@@ -109,6 +109,29 @@ describe("Chat SDK Telegram webhook", () => {
     expect(captured.status).toBe(401);
   });
 
+  test("a body above 1 MiB is rejected with 413 before the adapter runs", async () => {
+    const path = "/api/integrations/chat/telegram/webhook";
+    const segments = path.split("/").filter(Boolean);
+    const oversized = "x".repeat(1024 * 1024 + 1);
+    const secretHeader = { "X-Telegram-Bot-Api-Secret-Token": SECRET };
+    const sentBefore = mock.calls.length;
+
+    // Declared up front: rejected before any chunk is read.
+    const declared = fakeReqRes(path, "{}", {
+      ...secretHeader,
+      "Content-Length": String(oversized.length),
+    });
+    expect(await handleWebhooks(declared.req, declared.res, segments)).toBe(true);
+    expect(declared.captured.status).toBe(413);
+
+    // Streamed without Content-Length: rejected once the cap is crossed.
+    const streamed = fakeReqRes(path, oversized, secretHeader);
+    expect(await handleWebhooks(streamed.req, streamed.res, segments)).toBe(true);
+    expect(streamed.captured.status).toBe(413);
+    expect(JSON.parse(streamed.captured.body).error).toContain("Payload too large");
+    expect(mock.calls.length).toBe(sentBefore);
+  });
+
   test("an unconfigured adapter answers 404", async () => {
     const captured = await post("discord", {}, {});
     expect(captured.status).toBe(404);
