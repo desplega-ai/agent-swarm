@@ -97,11 +97,11 @@ export function ChatSdkSection({ def, configs }: SpecialFlowSectionProps) {
       {envOnlyAdapters && (
         <AlertCallout tone="info" icon={Info} title="Set by the deployment environment">
           <CodeChip>CHAT_SDK_ADAPTERS</CodeChip> comes from the API environment. The switches show
-          the running configuration and are locked. To store config rows, which take precedence on
-          save, edit the Advanced fields below.
+          the running configuration and are locked. To store config rows, which take precedence, add{" "}
+          <CodeChip>CHAT_SDK_ADAPTERS</CodeChip> under Settings, Secrets.
         </AlertCallout>
       )}
-      {/* Remount when the stored values change, so the form follows the Advanced editor. */}
+      {/* Remount when the stored values change, so the form follows an edit made elsewhere. */}
       <ChatSdkForm
         key={`${storedEnabled ?? ""}|${storedAdapters ?? ""}`}
         configs={configs}
@@ -643,7 +643,7 @@ function FieldInput({ adapter, field, draft, storedValue, configs, onChange }: F
       </SettingsRow>
     );
   }
-  // An object value (a `$config` reference from the Advanced JSON) is kept
+  // An object value (a `$config` reference written in the raw JSON) is kept
   // until the user types a replacement, like a saved secret.
   let helper: ReactNode = field.hint;
   if (!value.trim() && isObject(storedValue)) {

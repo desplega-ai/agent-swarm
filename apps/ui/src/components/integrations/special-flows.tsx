@@ -36,5 +36,6 @@ export const SPECIAL_FLOWS: Record<IntegrationSpecialFlow, SpecialFlow> = {
   "claude-managed-cli": { Section: ClaudeManagedSection, genericFields: "shown" },
   "codex-cli": { Section: CodexOAuthSection, genericFields: "replaced" },
   "memory-embeddings": { Section: MemoryEmbeddingsSection, genericFields: "advanced" },
-  "chat-sdk": { Section: ChatSdkSection, genericFields: "advanced" },
+  // The card edits every key itself; a second generic form only duplicated the save bar.
+  "chat-sdk": { Section: ChatSdkSection, genericFields: "replaced" },
 };
