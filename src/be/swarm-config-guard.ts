@@ -32,6 +32,17 @@ const RESERVED_KEYS = new Set([
   "EXTENSION_ALLOW_LEAD_ACTIVATION",
 ]);
 
+// Config keys the API server owns for its own use and must NEVER hand out over
+// HTTP or to a script — workers/entrypoints read config to build their env, and
+// the agent-fs bootstrap admin key would let a compromised worker administer the
+// shared org. The API materializes these into its own process.env at boot via
+// getInjectableGlobalConfigs, so no HTTP consumer legitimately needs them.
+const API_ONLY_CONFIG_KEYS = new Set(["API_AGENT_FS_API_KEY", "SLACK_SIGNING_SECRET"]);
+
+export function isApiOnlyConfigKey(key: string): boolean {
+  return API_ONLY_CONFIG_KEYS.has(key);
+}
+
 /** Config rows owned by dedicated API surfaces, not the generic config API. */
 export const INTERNAL_CONFIG_KEYS = new Set(["onboarding_state", "runtime_owner_id"]);
 

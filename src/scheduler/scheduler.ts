@@ -23,7 +23,7 @@ import {
   getScriptApiConnectionDescriptors,
   getScriptMcpConnectionDescriptors,
 } from "@/be/script-connections";
-import { buildScriptCredentialBindings } from "@/be/script-credential-broker";
+import { buildScriptCredentialBindingsWithFailures } from "@/be/script-credential-broker";
 import { getScript } from "@/be/scripts/db";
 import { runScript } from "@/scripts-runtime/loader";
 import { telemetry } from "@/telemetry";
@@ -99,12 +99,14 @@ async function executeScheduleScript(schedule: ScheduledTask): Promise<void> {
 
   let output: Awaited<ReturnType<typeof runScript>>;
   try {
+    const credentials = await buildScriptCredentialBindingsWithFailures({ agentId });
     output = await runScript({
       source: script.source,
       args,
       fsMode: "none",
       agentId,
-      egressSecrets: await buildScriptCredentialBindings({ agentId }),
+      egressSecrets: credentials.egressSecrets,
+      userConfig: credentials.userConfig,
       apiConnections: getScriptApiConnectionDescriptors({ agentId }),
       mcpConnections: getScriptMcpConnectionDescriptors({ agentId }),
       timeoutMs: 60_000,
