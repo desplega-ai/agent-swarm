@@ -10,6 +10,7 @@ import {
   type ComponentType,
   cloneElement,
   createContext,
+  Fragment,
   isValidElement,
   type ReactNode,
   useContext,
@@ -18,6 +19,7 @@ import {
 import { Link } from "react-router-dom";
 import { type Components, defaultRehypePlugins, Streamdown } from "streamdown";
 import { HIGHLIGHT_MAX_CHARS, prismLanguageForFence } from "../../../lib/comb/code-language";
+import { type Frontmatter, splitFrontmatter } from "../../../lib/comb/frontmatter";
 import { combPathForLink } from "../../../lib/comb/links";
 import {
   baseName,
@@ -29,6 +31,7 @@ import {
 } from "../../../lib/comb/paths";
 import { rehypeSourceLines } from "../../../lib/comb/rehype-source-lines";
 import { type CodeTheme, HighlightedCode } from "./code-tokens";
+import { MermaidBlock } from "./mermaid-block";
 
 type Pluggable = (typeof defaultRehypePlugins)[string];
 
@@ -198,6 +201,7 @@ function CombCode({ node: _node, children, className }: ElementProps<"code">) {
 
 /**
  * Component overrides:
+ * - A ```mermaid fence draws as a diagram (`MermaidBlock`, mermaid loads lazily).
  * - Fenced code is a `<pre><code>` text block, highlighted by `CombCode`.
  *   Monaco (used by `MarkdownView`) builds its own DOM, which comment anchors
  *   cannot address. `pre` marks its child the way Streamdown's own `pre` does,
@@ -207,21 +211,50 @@ function CombCode({ node: _node, children, className }: ElementProps<"code">) {
  * - Web images load. Drive images load through `DriveImage`. Without it, they
  *   show a placeholder that links to the file.
  */
-export const COMB_MD_COMPONENTS: Components = {
-  pre({ node: _node, children, ...rest }: ElementProps<"pre">) {
+const PRE_CLASS =
+  "my-4 overflow-x-auto rounded-md border border-border bg-muted/40 p-3 font-mono text-xs leading-relaxed";
+
+/** The text of a fence's `<code>` child, when it is a ```mermaid fence. */
+function mermaidSource(children: ReactNode): string | null {
+  if (!isValidElement(children)) return null;
+  const props = children.props as { className?: unknown; children?: unknown };
+  if (typeof props.className !== "string" || !/\blanguage-mermaid\b/.test(props.className)) {
+    return null;
+  }
+  const text = props.children;
+  if (typeof text === "string") return text;
+  if (Array.isArray(text) && text.every((part) => typeof part === "string")) return text.join("");
+  return null;
+}
+
+function CombPre({ node: _node, children, ...rest }: ElementProps<"pre">) {
+  const codeTheme = useContext(CombDocContext)?.codeTheme ?? "dark";
+  const block = isValidElement(children)
+    ? cloneElement(children as React.ReactElement<Record<string, unknown>>, {
+        "data-block": "true",
+      })
+    : children;
+  const mermaid = mermaidSource(children);
+  if (mermaid !== null) {
+    // The wrapper takes the fence's `data-line-*` stamps.
     return (
-      <pre
-        className="my-4 overflow-x-auto rounded-md border border-border bg-muted/40 p-3 font-mono text-xs leading-relaxed"
-        {...rest}
-      >
-        {isValidElement(children)
-          ? cloneElement(children as React.ReactElement<Record<string, unknown>>, {
-              "data-block": "true",
-            })
-          : children}
-      </pre>
+      <MermaidBlock
+        source={mermaid}
+        theme={codeTheme}
+        fallback={<pre className={PRE_CLASS}>{block}</pre>}
+        {...(rest as ComponentProps<"div">)}
+      />
     );
-  },
+  }
+  return (
+    <pre className={PRE_CLASS} {...rest}>
+      {block}
+    </pre>
+  );
+}
+
+export const COMB_MD_COMPONENTS: Components = {
+  pre: CombPre,
   code: CombCode,
   inlineCode({ node: _node, children, className: _className, ...rest }: ElementProps<"code">) {
     return (
@@ -260,8 +293,12 @@ export function CombMarkdown({
     () => ({ doc: { orgId, driveId, path }, DriveImage, liveUrl, codeTheme }),
     [orgId, driveId, path, DriveImage, liveUrl, codeTheme],
   );
+  // A leading YAML block shows as a key/value table. Its lines stay in the
+  // body as blank lines, so the blocks below keep the file's line numbers.
+  const { frontmatter, body } = useMemo(() => splitFrontmatter(text), [text]);
   return (
     <CombDocContext.Provider value={ctx}>
+      {frontmatter && <FrontmatterBlock frontmatter={frontmatter} />}
       {/* step-11: remount per text. Streamdown memoizes each block by its
           source position only, so an edit that keeps a block's line and
           columns (a same-length fix) never rendered. */}
@@ -273,8 +310,42 @@ export function CombMarkdown({
         rehypePlugins={COMB_REHYPE_PLUGINS}
         components={COMB_MD_COMPONENTS}
       >
-        {text}
+        {body}
       </Streamdown>
     </CombDocContext.Provider>
+  );
+}
+
+/**
+ * Frontmatter as a compact key/value table above the document. YAML that does
+ * not parse to a mapping shows as the raw block. Not document text
+ * (`data-comb-skip`): comments anchor on the markdown below.
+ */
+function FrontmatterBlock({ frontmatter }: { frontmatter: Frontmatter }): ReactNode {
+  const { entries, raw, error } = frontmatter;
+  if (entries === null) {
+    return (
+      <div data-comb-skip data-frontmatter="raw" className="mb-6">
+        <pre className={PRE_CLASS}>{raw}</pre>
+        <p className="-mt-2 text-xs text-muted-foreground">
+          Frontmatter could not be parsed: {error}
+        </p>
+      </div>
+    );
+  }
+  if (entries.length === 0) return null;
+  return (
+    <dl
+      data-comb-skip
+      data-frontmatter="table"
+      className="mb-6 grid grid-cols-[max-content_minmax(0,1fr)] gap-x-4 gap-y-1 rounded-md border border-border bg-muted/30 px-4 py-3 text-xs"
+    >
+      {entries.map(({ key, value }) => (
+        <Fragment key={key}>
+          <dt className="font-medium text-muted-foreground">{key}</dt>
+          <dd className="m-0 min-w-0 whitespace-pre-wrap [overflow-wrap:anywhere]">{value}</dd>
+        </Fragment>
+      ))}
+    </dl>
   );
 }

@@ -34,6 +34,7 @@ export function SwarmConfigSection() {
     agentMap,
     dialogOpen,
     setDialogOpen,
+    dialogSession,
     editEntry,
     deleteTarget,
     setDeleteTarget,
@@ -228,10 +229,14 @@ export function SwarmConfigSection() {
         config={detailEntry}
         onOpenChange={(open) => !open && setDetailEntry(null)}
         agentName={detailEntry?.scopeId ? agentMap.get(detailEntry.scopeId) : undefined}
+        onEdit={(entry) => {
+          setDetailEntry(null);
+          handleEdit(entry);
+        }}
       />
 
       <ConfigEntryDialog
-        key={editEntry?.id ?? "new"}
+        key={`${editEntry?.id ?? "new"}:${dialogSession}`}
         open={dialogOpen}
         onOpenChange={setDialogOpen}
         editEntry={editEntry}
