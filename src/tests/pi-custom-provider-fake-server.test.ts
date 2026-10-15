@@ -9,16 +9,20 @@
  * comma list. No real NaN or Helmcode endpoint is contacted: the provider
  * block's baseUrl is pointed at a local `Bun.serve` on a free port.
  */
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { afterAll, afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
+import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createAgentSession, SessionManager } from "@earendil-works/pi-coding-agent";
 import {
   createPiRuntimeAuth,
-  ensureCustomProvidersModelsJson,
+  PiMonoAdapter,
   resolveModel,
+  writeSessionModelsJson,
 } from "../providers/pi-mono-adapter";
+import type { ProviderEvent, ProviderResult } from "../providers/types";
+import { clearVolatileSecretsForTesting, registerVolatileSecret } from "../utils/secret-scrubber";
+import { randomToken } from "./synthetic-secret-helpers";
 
 const PICKED = "example-helmcode-picked";
 const POOL = "example-helmcode-pool-a,example-helmcode-pool-b";
@@ -110,16 +114,16 @@ describe("pi SDK + helmcode custom provider against a fake OpenAI-compatible ser
     async () => {
       // The runner's per-task env: one picked key.
       const taskEnv = { HELMCODE_API_KEY: PICKED };
-      await ensureCustomProvidersModelsJson(dir, taskEnv);
-
-      // Point the block we wrote at the fake server (the only edit).
-      const modelsPath = join(dir, "models.json");
+      const models = await writeSessionModelsJson(dir, {
+        ...taskEnv,
+        HELMCODE_BASE_URL: `http://127.0.0.1:${server.port}/v1`,
+      });
+      const modelsPath = models.modelsPath as string;
       const written = JSON.parse(await Bun.file(modelsPath).text());
       expect(written.providers.helmcode.apiKey).toBe("$HELMCODE_API_KEY");
-      written.providers.helmcode.baseUrl = `http://127.0.0.1:${server.port}/v1`;
-      await Bun.write(modelsPath, JSON.stringify(written));
 
-      const modelRuntime = await createPiRuntimeAuth(taskEnv);
+      const modelRuntime = await createPiRuntimeAuth(taskEnv, modelsPath);
+      await models.dispose();
       const model = resolveModel("helmcode/glm5.3", taskEnv, modelRuntime);
       expect(model?.provider).toBe("helmcode");
       expect(model?.id).toBe("glm5.3");
@@ -149,4 +153,220 @@ describe("pi SDK + helmcode custom provider against a fake OpenAI-compatible ser
     },
     { timeout: 30_000 },
   );
+});
+
+// ─── Real PiMonoAdapter sessions: endpoint/key isolation and error scrubbing ───
+
+interface FakeServer {
+  url: string;
+  seen: SeenRequest[];
+  stop(): void;
+}
+
+/** A fake OpenAI-compatible server that answers `pong`, or 401 echoing the bearer key. */
+function startFakeServer(mode: "pong" | "echo-401"): FakeServer {
+  const seen: SeenRequest[] = [];
+  const server = Bun.serve({
+    port: 0,
+    hostname: "127.0.0.1",
+    async fetch(req) {
+      const url = new URL(req.url);
+      const body = req.method === "POST" ? ((await req.json()) as Record<string, unknown>) : {};
+      const authorization = req.headers.get("authorization");
+      seen.push({ path: url.pathname, authorization, body });
+      if (!url.pathname.endsWith("/chat/completions")) {
+        return Response.json({ object: "list", data: [] });
+      }
+      if (mode === "echo-401") {
+        const key = (authorization ?? "").replace(/^Bearer /, "");
+        return Response.json(
+          {
+            error: { message: `Incorrect API key provided: ${key}`, type: "invalid_request_error" },
+          },
+          { status: 401 },
+        );
+      }
+      const base = {
+        id: "chatcmpl-fake",
+        object: "chat.completion.chunk",
+        created: Math.floor(Date.now() / 1000),
+        model: String(body.model),
+      };
+      const stream =
+        sseChunk({
+          ...base,
+          choices: [
+            { index: 0, delta: { role: "assistant", content: "pong" }, finish_reason: null },
+          ],
+        }) +
+        sseChunk({
+          ...base,
+          choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+          usage: { prompt_tokens: 5, completion_tokens: 1, total_tokens: 6 },
+        }) +
+        "data: [DONE]\n\n";
+      return new Response(stream, {
+        headers: { "content-type": "text/event-stream", "cache-control": "no-cache" },
+      });
+    },
+  });
+  return { url: `http://127.0.0.1:${server.port}/v1`, seen, stop: () => server.stop(true) };
+}
+
+/** Every file under `root`, recursively. */
+function filesUnder(root: string): string[] {
+  return readdirSync(root, { recursive: true, withFileTypes: true })
+    .filter((entry) => entry.isFile())
+    .map((entry) => join(entry.parentPath, entry.name));
+}
+
+describe("PiMonoAdapter sessions against fake OpenAI-compatible servers", () => {
+  let agentDir: string;
+  let scratch: string;
+  const originalAgentDir = process.env.PI_CODING_AGENT_DIR;
+  const servers: FakeServer[] = [];
+  let log: ReturnType<typeof spyOn>;
+
+  beforeAll(() => {
+    agentDir = mkdtempSync(join(tmpdir(), "pi-adapter-agentdir-"));
+    scratch = mkdtempSync(join(tmpdir(), "pi-adapter-scratch-"));
+    // Every session shares this agent dir, as all sessions of one worker do.
+    process.env.PI_CODING_AGENT_DIR = agentDir;
+    log = spyOn(console, "log").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    for (const server of servers.splice(0)) server.stop();
+    clearVolatileSecretsForTesting();
+  });
+
+  afterAll(() => {
+    log.mockRestore();
+    if (originalAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+    else process.env.PI_CODING_AGENT_DIR = originalAgentDir;
+    rmSync(agentDir, { recursive: true, force: true });
+    rmSync(scratch, { recursive: true, force: true });
+  });
+
+  async function runSession(
+    name: string,
+    model: string,
+    env: Record<string, string>,
+  ): Promise<{ result: ProviderResult; events: ProviderEvent[]; logFile: string }> {
+    const cwd = mkdtempSync(join(scratch, `${name}-cwd-`));
+    const logFile = join(scratch, `${name}-${crypto.randomUUID()}.jsonl`);
+    const session = await new PiMonoAdapter().createSession({
+      prompt: "Reply with the single word pong.",
+      systemPrompt: "test",
+      model,
+      role: "worker",
+      agentId: "test-agent",
+      taskId: `task-${name}`,
+      // No swarm API: skips MCP discovery.
+      apiUrl: "",
+      apiKey: "",
+      cwd,
+      logFile,
+      env,
+    });
+    const events: ProviderEvent[] = [];
+    session.onEvent((event) => events.push(event));
+    const result = await session.waitForCompletion();
+    return { result, events, logFile };
+  }
+
+  test(
+    "two concurrent sessions each reach their own endpoint with their own key",
+    async () => {
+      const a = startFakeServer("pong");
+      const b = startFakeServer("pong");
+      servers.push(a, b);
+      const keyA = `example-helmcode-a-${randomToken(16)}`;
+      const keyB = `example-helmcode-b-${randomToken(16)}`;
+      const [first, second] = await Promise.all([
+        runSession("a", "helmcode/glm5.3", { HELMCODE_API_KEY: keyA, HELMCODE_BASE_URL: a.url }),
+        runSession("b", "helmcode/glm5.3", { HELMCODE_API_KEY: keyB, HELMCODE_BASE_URL: b.url }),
+      ]);
+      expect(first.result.isError).toBe(false);
+      expect(second.result.isError).toBe(false);
+
+      const chatA = a.seen.filter((r) => r.path.endsWith("/chat/completions"));
+      const chatB = b.seen.filter((r) => r.path.endsWith("/chat/completions"));
+      expect(chatA.length).toBeGreaterThanOrEqual(1);
+      expect(chatB.length).toBeGreaterThanOrEqual(1);
+      expect(new Set(chatA.map((r) => r.authorization))).toEqual(new Set([`Bearer ${keyA}`]));
+      expect(new Set(chatB.map((r) => r.authorization))).toEqual(new Set([`Bearer ${keyB}`]));
+      // Nothing was written into the shared agent dir's models.json.
+      expect(filesUnder(agentDir).some((f) => f.endsWith("/models.json"))).toBe(false);
+    },
+    { timeout: 30_000 },
+  );
+
+  // Opaque keys: no token-shape regex matches them, and none is in process.env.
+  const cases: Array<{
+    label: string;
+    model: string;
+    keyVar: string;
+    preRegister: boolean;
+  }> = [
+    {
+      label: "canonical var",
+      model: "helmcode/glm5.3",
+      keyVar: "HELMCODE_API_KEY",
+      preRegister: false,
+    },
+    {
+      label: "already registered",
+      model: "helmcode/glm5.3",
+      keyVar: "HELMCODE_API_KEY",
+      preRegister: true,
+    },
+    {
+      label: "HELMCODE_API_NAN alias",
+      model: "nan/glm5.3",
+      keyVar: "HELMCODE_API_NAN",
+      preRegister: false,
+    },
+  ];
+
+  for (const { label, model, keyVar, preRegister } of cases) {
+    test(
+      `a 401 echoing the key (${label}) never reaches the failure reason, events, adapter log or pi's session file`,
+      async () => {
+        const server = startFakeServer("echo-401");
+        servers.push(server);
+        const key = `opaque${randomToken(28)}`;
+        expect(process.env[keyVar]).not.toBe(key);
+        if (preRegister) registerVolatileSecret(key, keyVar);
+        const baseVar = model.startsWith("nan/") ? "NAN_BASE_URL" : "HELMCODE_BASE_URL";
+        const warn = spyOn(console, "warn").mockImplementation(() => {});
+        let run: Awaited<ReturnType<typeof runSession>>;
+        try {
+          run = await runSession(`leak-${keyVar}`, model, { [keyVar]: key, [baseVar]: server.url });
+        } finally {
+          warn.mockRestore();
+        }
+
+        // Control: the key really went out and the provider echoed it.
+        const chat = server.seen.filter((r) => r.path.endsWith("/chat/completions"));
+        expect(chat.map((r) => r.authorization)).toContain(`Bearer ${key}`);
+
+        expect(run.result.isError).toBe(true);
+        expect(run.result.failureReason).toContain("Incorrect API key provided");
+        expect(run.result.failureReason).not.toContain(key);
+        expect(JSON.stringify(run.events)).not.toContain(key);
+        expect(run.events.some((e) => e.type === "error")).toBe(true);
+        expect(readFileSync(run.logFile, "utf-8")).not.toContain(key);
+
+        const sessionFiles = filesUnder(join(agentDir, "sessions")).filter((f) =>
+          f.endsWith(".jsonl"),
+        );
+        expect(sessionFiles.length).toBeGreaterThanOrEqual(1);
+        const native = sessionFiles.map((f) => readFileSync(f, "utf-8")).join("\n");
+        expect(native).toContain("Incorrect API key provided");
+        expect(native).not.toContain(key);
+      },
+      { timeout: 30_000 },
+    );
+  }
 });

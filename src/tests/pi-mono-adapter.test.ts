@@ -16,11 +16,12 @@ import { configureHttpResolver, resetHttpResolver } from "../prompts/resolver";
 import {
   checkPiMonoCredentials,
   createPiRuntimeAuth,
-  ensureCustomProvidersModelsJson,
   ensureOpenRouterModelsOverride,
   extractPiAssistantText,
   PiMonoAdapter,
   resolveModel,
+  type SessionModelsJson,
+  writeSessionModelsJson,
 } from "../providers/pi-mono-adapter";
 import type { ProviderSessionConfig } from "../providers/types";
 
@@ -561,10 +562,9 @@ describe("createPiRuntimeAuth", () => {
 
 const NAN_ENV = { NAN_API_KEY: "example-nan-picked" };
 const HELMCODE_ENV = { HELMCODE_API_KEY: "example-helmcode-picked" };
-const MARKER = ".agent-swarm-custom-providers.json";
-
-async function readModelsJson(dir: string): Promise<Record<string, any>> {
-  return JSON.parse(await Bun.file(join(dir, "models.json")).text());
+async function readModelsJson(path: string | undefined): Promise<Record<string, any>> {
+  if (!path) throw new Error("expected a per-session models.json");
+  return JSON.parse(await Bun.file(path).text());
 }
 
 function withTempDir(prefix: string, fn: (dir: string) => Promise<void>): () => Promise<void> {
@@ -578,83 +578,108 @@ function withTempDir(prefix: string, fn: (dir: string) => Promise<void>): () => 
   };
 }
 
-describe("ensureCustomProvidersModelsJson (pi)", () => {
+/** Compose a session's models.json and always remove it afterwards. */
+async function withSessionModels(
+  dir: string,
+  env: Record<string, string | undefined>,
+  model: string | undefined,
+  fn: (session: SessionModelsJson) => Promise<void>,
+): Promise<void> {
+  const session = await writeSessionModelsJson(dir, env, model);
+  try {
+    await fn(session);
+  } finally {
+    await session.dispose();
+  }
+}
+
+describe("writeSessionModelsJson (pi)", () => {
   test(
-    "fresh dir: writes both blocks with $VAR apiKeys and never the key value",
+    "writes both blocks with $VAR apiKeys to a private file, never the key value or the shared file",
     withTempDir("pi-custom-fresh-", async (dir) => {
-      await ensureCustomProvidersModelsJson(dir, { ...NAN_ENV, ...HELMCODE_ENV });
-      const raw = await Bun.file(join(dir, "models.json")).text();
-      expect(raw).not.toContain("example-nan-picked");
-      expect(raw).not.toContain("example-helmcode-picked");
-      const written = JSON.parse(raw);
-      expect(written.providers.nan).toMatchObject({
-        baseUrl: OPENAI_COMPATIBLE_PROVIDERS.nan.baseUrl,
-        api: "openai-completions",
-        apiKey: "$NAN_API_KEY",
+      await withSessionModels(dir, { ...NAN_ENV, ...HELMCODE_ENV }, undefined, async (s) => {
+        expect(s.modelsPath).toBeDefined();
+        expect(s.modelsPath?.startsWith(dir)).toBe(false);
+        expect(existsSync(join(dir, "models.json"))).toBe(false);
+        const raw = await Bun.file(s.modelsPath as string).text();
+        expect(raw).not.toContain("example-nan-picked");
+        expect(raw).not.toContain("example-helmcode-picked");
+        const written = JSON.parse(raw);
+        expect(written.providers.nan).toMatchObject({
+          baseUrl: OPENAI_COMPATIBLE_PROVIDERS.nan.baseUrl,
+          api: "openai-completions",
+          apiKey: "$NAN_API_KEY",
+        });
+        expect(written.providers.helmcode).toMatchObject({
+          baseUrl: OPENAI_COMPATIBLE_PROVIDERS.helmcode.baseUrl,
+          api: "openai-completions",
+          apiKey: "$HELMCODE_API_KEY",
+        });
+        expect(written.providers.helmcode.models.map((m: { id: string }) => m.id)).toEqual(
+          OPENAI_COMPATIBLE_PROVIDERS.helmcode.models.map((m) => m.id),
+        );
+        const glm = written.providers.nan.models.find((m: { id: string }) => m.id === "glm5.3");
+        expect(glm).toMatchObject({
+          contextWindow: 1000000,
+          maxTokens: 131072,
+          reasoning: true,
+          compat: { supportsDeveloperRole: true },
+        });
       });
-      expect(written.providers.helmcode).toMatchObject({
-        baseUrl: OPENAI_COMPATIBLE_PROVIDERS.helmcode.baseUrl,
-        api: "openai-completions",
-        apiKey: "$HELMCODE_API_KEY",
-      });
-      expect(written.providers.helmcode.models.map((m: { id: string }) => m.id)).toEqual(
-        OPENAI_COMPATIBLE_PROVIDERS.helmcode.models.map((m) => m.id),
-      );
-      const glm = written.providers.nan.models.find((m: { id: string }) => m.id === "glm5.3");
-      expect(glm).toMatchObject({
-        contextWindow: 1000000,
-        maxTokens: 131072,
-        reasoning: true,
-        compat: { supportsDeveloperRole: true },
-      });
-      const marker = JSON.parse(await Bun.file(join(dir, MARKER)).text());
-      expect(Object.keys(marker.written).sort()).toEqual(["helmcode", "nan"]);
+    }),
+  );
+
+  test(
+    "dispose removes the private file",
+    withTempDir("pi-custom-dispose-", async (dir) => {
+      const s = await writeSessionModelsJson(dir, NAN_ENV);
+      expect(existsSync(s.modelsPath as string)).toBe(true);
+      await s.dispose();
+      await s.dispose();
+      expect(existsSync(s.modelsPath as string)).toBe(false);
     }),
   );
 
   test(
     "only the HELMCODE_API_NAN alias set: nan block still uses $NAN_API_KEY",
     withTempDir("pi-custom-alias-", async (dir) => {
-      await ensureCustomProvidersModelsJson(dir, { HELMCODE_API_NAN: "example-alias" });
-      const written = await readModelsJson(dir);
-      expect(written.providers.nan.apiKey).toBe("$NAN_API_KEY");
-      expect(written.providers.helmcode).toBeUndefined();
-      expect(JSON.stringify(written)).not.toContain("example-alias");
+      await withSessionModels(dir, { HELMCODE_API_NAN: "example-alias" }, undefined, async (s) => {
+        const written = await readModelsJson(s.modelsPath);
+        expect(written.providers.nan.apiKey).toBe("$NAN_API_KEY");
+        expect(written.providers.helmcode).toBeUndefined();
+        expect(JSON.stringify(written)).not.toContain("example-alias");
+      });
     }),
   );
 
   test(
-    "no key and no marker: never creates or touches models.json",
+    "no key, default gateway, no marker: the session loads the shared file",
     withTempDir("pi-custom-noop-", async (dir) => {
-      await ensureCustomProvidersModelsJson(dir, {});
-      expect(await Bun.file(join(dir, "models.json")).exists()).toBe(false);
       const userConfig = { providers: { nan: { baseUrl: "https://mine.example/v1" } } };
       await Bun.write(join(dir, "models.json"), JSON.stringify(userConfig));
-      await ensureCustomProvidersModelsJson(dir, {});
-      expect(await readModelsJson(dir)).toEqual(userConfig);
+      const s = await writeSessionModelsJson(dir, {});
+      expect(s.modelsPath).toBeUndefined();
+      expect(JSON.parse(readFileSync(join(dir, "models.json"), "utf-8"))).toEqual(userConfig);
     }),
   );
 
   test(
-    "never overwrites a user-authored providers.nan; still writes helmcode",
+    "a user-authored providers.nan in the shared file wins; helmcode is still added",
     withTempDir("pi-custom-user-", async (dir) => {
       const userNan = { baseUrl: "https://mine.example/v1", apiKey: "$MY_VAR", models: [] };
-      await Bun.write(join(dir, "models.json"), JSON.stringify({ providers: { nan: userNan } }));
-      await ensureCustomProvidersModelsJson(dir, { ...NAN_ENV, ...HELMCODE_ENV });
-      const written = await readModelsJson(dir);
-      expect(written.providers.nan).toEqual(userNan);
-      expect(written.providers.helmcode.apiKey).toBe("$HELMCODE_API_KEY");
-      const marker = JSON.parse(await Bun.file(join(dir, MARKER)).text());
-      expect(Object.keys(marker.written)).toEqual(["helmcode"]);
-      // Key removed: only our helmcode block goes; the user's nan block stays.
-      await ensureCustomProvidersModelsJson(dir, {});
-      expect(await readModelsJson(dir)).toEqual({ providers: { nan: userNan } });
-      expect(await Bun.file(join(dir, MARKER)).exists()).toBe(false);
+      const shared = JSON.stringify({ providers: { nan: userNan } });
+      await Bun.write(join(dir, "models.json"), shared);
+      await withSessionModels(dir, { ...NAN_ENV, ...HELMCODE_ENV }, undefined, async (s) => {
+        const written = await readModelsJson(s.modelsPath);
+        expect(written.providers.nan).toEqual(userNan);
+        expect(written.providers.helmcode.apiKey).toBe("$HELMCODE_API_KEY");
+      });
+      expect(readFileSync(join(dir, "models.json"), "utf-8")).toBe(shared);
     }),
   );
 
   test(
-    "preserves other providers, top-level keys and the OpenRouter gateway override",
+    "keeps other providers and top-level keys; the gateway comes from this session's env",
     withTempDir("pi-custom-merge-", async (dir) => {
       const gateway = "https://control-plane.example/proxy/v1";
       await Bun.write(
@@ -667,85 +692,86 @@ describe("ensureCustomProvidersModelsJson (pi)", () => {
         }),
       );
       await ensureOpenRouterModelsOverride(dir, { OPENROUTER_BASE_URL: gateway });
-      await ensureCustomProvidersModelsJson(dir, NAN_ENV);
-      let written = await readModelsJson(dir);
-      expect(written.$schema).toBe("https://pi.dev/schemas/models.schema.json");
-      expect(written.providers.openrouter).toEqual({ baseUrl: gateway });
-      expect(written.providers.custom.baseUrl).toBe("https://custom.example/v1");
-      expect(written.providers.nan.apiKey).toBe("$NAN_API_KEY");
-
-      // Revert: only our nan block goes; everything else is untouched.
-      await ensureCustomProvidersModelsJson(dir, {});
-      written = await readModelsJson(dir);
-      expect(written.providers.nan).toBeUndefined();
-      expect(written.providers.openrouter).toEqual({ baseUrl: gateway });
-      expect(written.providers.custom.baseUrl).toBe("https://custom.example/v1");
-
-      // And the OpenRouter revert still works with our writer having run.
-      await ensureOpenRouterModelsOverride(dir, {});
-      written = await readModelsJson(dir);
-      expect(written.providers.openrouter).toBeUndefined();
-      expect(written.providers.custom.baseUrl).toBe("https://custom.example/v1");
+      const sharedBefore = readFileSync(join(dir, "models.json"), "utf-8");
+      await withSessionModels(dir, NAN_ENV, undefined, async (s) => {
+        // This session uses the default gateway: the other session's override
+        // recorded in the marker is reverted in its copy.
+        const written = await readModelsJson(s.modelsPath);
+        expect(written.$schema).toBe("https://pi.dev/schemas/models.schema.json");
+        expect(written.providers.openrouter).toBeUndefined();
+        expect(written.providers.custom.baseUrl).toBe("https://custom.example/v1");
+        expect(written.providers.nan.apiKey).toBe("$NAN_API_KEY");
+      });
+      const other = "https://other-gateway.example/v1";
+      await withSessionModels(dir, { OPENROUTER_BASE_URL: other }, undefined, async (s) => {
+        expect((await readModelsJson(s.modelsPath)).providers.openrouter).toEqual({
+          baseUrl: other,
+        });
+      });
+      // The shared file is never written by the composer.
+      expect(readFileSync(join(dir, "models.json"), "utf-8")).toBe(sharedBefore);
     }),
   );
 
   test(
-    "revert of a file that held only our blocks removes the file and the marker",
-    withTempDir("pi-custom-revert-", async (dir) => {
-      await ensureCustomProvidersModelsJson(dir, { ...NAN_ENV, ...HELMCODE_ENV });
-      await ensureCustomProvidersModelsJson(dir, HELMCODE_ENV);
-      let written = await readModelsJson(dir);
-      expect(written.providers.nan).toBeUndefined();
-      expect(written.providers.helmcode).toBeDefined();
-      await ensureCustomProvidersModelsJson(dir, {});
-      expect(await Bun.file(join(dir, "models.json")).exists()).toBe(false);
-      expect(await Bun.file(join(dir, MARKER)).exists()).toBe(false);
-      // Re-adding after a revert works (no stale state).
-      await ensureCustomProvidersModelsJson(dir, NAN_ENV);
-      written = await readModelsJson(dir);
-      expect(written.providers.nan.apiKey).toBe("$NAN_API_KEY");
+    "sibling sessions get their own endpoints, providers and model ids",
+    withTempDir("pi-custom-siblings-", async (dir) => {
+      const a = await writeSessionModelsJson(
+        dir,
+        { HELMCODE_API_KEY: "a", HELMCODE_BASE_URL: "http://127.0.0.1:1/v1", ...NAN_ENV },
+        "nan/glm5.2",
+      );
+      const b = await writeSessionModelsJson(
+        dir,
+        { HELMCODE_API_KEY: "b", HELMCODE_BASE_URL: "http://127.0.0.1:2/v1" },
+        "helmcode/glm5.3",
+      );
+      try {
+        expect(a.modelsPath).not.toBe(b.modelsPath);
+        const first = await readModelsJson(a.modelsPath);
+        const second = await readModelsJson(b.modelsPath);
+        expect(first.providers.helmcode.baseUrl).toBe("http://127.0.0.1:1/v1");
+        expect(second.providers.helmcode.baseUrl).toBe("http://127.0.0.1:2/v1");
+        // B has no NaN key: no nan block, even while A's session holds one.
+        expect(first.providers.nan.models.map((m: { id: string }) => m.id)).toContain("glm5.2");
+        expect(second.providers.nan).toBeUndefined();
+      } finally {
+        await a.dispose();
+        await b.dispose();
+      }
     }),
   );
 
   test(
-    "a block the user edited after we wrote it is left alone on revert and on re-write",
-    withTempDir("pi-custom-edited-", async (dir) => {
-      await ensureCustomProvidersModelsJson(dir, NAN_ENV);
-      const edited = await readModelsJson(dir);
-      edited.providers.nan.baseUrl = "https://edited.example/v1";
-      await Bun.write(join(dir, "models.json"), JSON.stringify(edited));
-      await ensureCustomProvidersModelsJson(dir, NAN_ENV);
-      expect((await readModelsJson(dir)).providers.nan.baseUrl).toBe("https://edited.example/v1");
-      await ensureCustomProvidersModelsJson(dir, {});
-      expect((await readModelsJson(dir)).providers.nan.baseUrl).toBe("https://edited.example/v1");
-      expect(await Bun.file(join(dir, MARKER)).exists()).toBe(false);
-    }),
-  );
-
-  test(
-    "corrupt models.json: rewritten when a key is present, untouched otherwise",
+    "corrupt shared models.json: the copy holds our blocks only, the shared file is untouched",
     withTempDir("pi-custom-corrupt-", async (dir) => {
       await Bun.write(join(dir, "models.json"), "{not json");
-      await ensureCustomProvidersModelsJson(dir, {});
-      expect(await Bun.file(join(dir, "models.json")).text()).toBe("{not json");
-      await ensureCustomProvidersModelsJson(dir, NAN_ENV);
-      expect((await readModelsJson(dir)).providers.nan.apiKey).toBe("$NAN_API_KEY");
+      const warn = spyOn(console, "warn").mockImplementation(() => {});
+      try {
+        await withSessionModels(dir, NAN_ENV, undefined, async (s) => {
+          expect((await readModelsJson(s.modelsPath)).providers.nan.apiKey).toBe("$NAN_API_KEY");
+        });
+      } finally {
+        warn.mockRestore();
+      }
+      expect(readFileSync(join(dir, "models.json"), "utf-8")).toBe("{not json");
     }),
   );
 
   test(
     "ModelRuntime resolves the written blocks as nan/<id> and helmcode/<id>",
     withTempDir("pi-custom-runtime-", async (dir) => {
-      await ensureCustomProvidersModelsJson(dir, { ...NAN_ENV, ...HELMCODE_ENV });
-      const runtime = await piCodingAgent.ModelRuntime.create({
-        authPath: join(dir, "auth.json"),
-        modelsPath: join(dir, "models.json"),
+      await withSessionModels(dir, { ...NAN_ENV, ...HELMCODE_ENV }, undefined, async (s) => {
+        const runtime = await piCodingAgent.ModelRuntime.create({
+          authPath: join(dir, "auth.json"),
+          modelsPath: s.modelsPath,
+        });
+        expect(runtime.getError()).toBeUndefined();
+        expect(runtime.getModel("nan", "qwen3.8-flash")?.baseUrl).toBe(
+          OPENAI_COMPATIBLE_PROVIDERS.nan.baseUrl,
+        );
+        expect(runtime.getModel("helmcode", "glm5.3")?.contextWindow).toBe(1048576);
       });
-      expect(runtime.getError()).toBeUndefined();
-      expect(runtime.getModel("nan", "qwen3.8-flash")?.baseUrl).toBe(
-        OPENAI_COMPATIBLE_PROVIDERS.nan.baseUrl,
-      );
-      expect(runtime.getModel("helmcode", "glm5.3")?.contextWindow).toBe(1048576);
     }),
   );
 });
@@ -754,20 +780,22 @@ describe("createPiRuntimeAuth — NaN and Helmcode", () => {
   test(
     "HELMCODE_API_NAN alone sets the nan runtime key; NAN_API_KEY wins when both are set",
     withTempDir("pi-custom-auth-", async (dir) => {
-      await ensureCustomProvidersModelsJson(dir, { NAN_API_KEY: "x", HELMCODE_API_KEY: "y" });
-      // pi's own agent-dir env var points the runtime at the temp dir.
+      const models = await writeSessionModelsJson(dir, { NAN_API_KEY: "x", HELMCODE_API_KEY: "y" });
+      // pi's own agent-dir env var points auth.json at the temp dir.
       const origAgentDir = process.env.PI_CODING_AGENT_DIR;
       process.env.PI_CODING_AGENT_DIR = dir;
       try {
-        const aliasOnly = await createPiRuntimeAuth({ HELMCODE_API_NAN: "a" });
+        const path = models.modelsPath;
+        const aliasOnly = await createPiRuntimeAuth({ HELMCODE_API_NAN: "a" }, path);
         await expect(aliasOnly.getAuth("nan")).resolves.toMatchObject({ auth: { apiKey: "a" } });
 
-        const both = await createPiRuntimeAuth({ HELMCODE_API_NAN: "a", NAN_API_KEY: "b" });
+        const both = await createPiRuntimeAuth({ HELMCODE_API_NAN: "a", NAN_API_KEY: "b" }, path);
         await expect(both.getAuth("nan")).resolves.toMatchObject({ auth: { apiKey: "b" } });
 
-        const helm = await createPiRuntimeAuth({ HELMCODE_API_KEY: "h" });
+        const helm = await createPiRuntimeAuth({ HELMCODE_API_KEY: "h" }, path);
         await expect(helm.getAuth("helmcode")).resolves.toMatchObject({ auth: { apiKey: "h" } });
       } finally {
+        await models.dispose();
         if (origAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
         else process.env.PI_CODING_AGENT_DIR = origAgentDir;
       }
@@ -787,11 +815,12 @@ describe("resolveModel — models.json custom providers", () => {
   test(
     "falls back to the runtime for nan/qwen3.8-flash and helmcode/glm5.3",
     withTempDir("pi-custom-resolve-", async (dir) => {
-      await ensureCustomProvidersModelsJson(dir, { ...NAN_ENV, ...HELMCODE_ENV });
+      const models = await writeSessionModelsJson(dir, { ...NAN_ENV, ...HELMCODE_ENV });
       const runtime = await piCodingAgent.ModelRuntime.create({
         authPath: join(dir, "auth.json"),
-        modelsPath: join(dir, "models.json"),
+        modelsPath: models.modelsPath,
       });
+      await models.dispose();
       const nan = resolveModel("nan/qwen3.8-flash", NAN_ENV, runtime);
       expect(nan?.provider).toBe("nan");
       expect(nan?.id).toBe("qwen3.8-flash");
@@ -805,28 +834,26 @@ describe("resolveModel — models.json custom providers", () => {
   test(
     "a nan/<id> outside the table (nan/glm5.2) gets a bare entry and resolves",
     withTempDir("pi-custom-bare-", async (dir) => {
-      await ensureCustomProvidersModelsJson(dir, NAN_ENV, "nan/glm5.2");
-      const written = await readModelsJson(dir);
-      const ids = written.providers.nan.models.map((m: { id: string }) => m.id);
-      expect(ids).toContain("glm5.2");
-      expect(ids).toContain("glm5.3");
-      const runtime = await piCodingAgent.ModelRuntime.create({
-        authPath: join(dir, "auth.json"),
-        modelsPath: join(dir, "models.json"),
+      await withSessionModels(dir, NAN_ENV, "nan/glm5.2", async (s) => {
+        const written = await readModelsJson(s.modelsPath);
+        const ids = written.providers.nan.models.map((m: { id: string }) => m.id);
+        expect(ids).toContain("glm5.2");
+        expect(ids).toContain("glm5.3");
+        const runtime = await piCodingAgent.ModelRuntime.create({
+          authPath: join(dir, "auth.json"),
+          modelsPath: s.modelsPath,
+        });
+        const model = resolveModel("nan/glm5.2", NAN_ENV, runtime);
+        expect(model?.provider).toBe("nan");
+        expect(model?.id).toBe("glm5.2");
+        expect(model?.baseUrl).toBe(OPENAI_COMPATIBLE_PROVIDERS.nan.baseUrl);
       });
-      const model = resolveModel("nan/glm5.2", NAN_ENV, runtime);
-      expect(model?.provider).toBe("nan");
-      expect(model?.id).toBe("glm5.2");
-      expect(model?.baseUrl).toBe(OPENAI_COMPATIBLE_PROVIDERS.nan.baseUrl);
 
-      // The bare entry is part of our block: the next task's model replaces it.
-      await ensureCustomProvidersModelsJson(dir, NAN_ENV, "nan/glm5.3");
-      const next = await readModelsJson(dir);
-      expect(next.providers.nan.models.map((m: { id: string }) => m.id)).not.toContain("glm5.2");
-      // And a key removal still reverts the whole block.
-      await ensureCustomProvidersModelsJson(dir, NAN_ENV, "nan/glm5.2");
-      await ensureCustomProvidersModelsJson(dir, {});
-      expect(await Bun.file(join(dir, "models.json")).exists()).toBe(false);
+      // The bare entry belongs to that session: the next task's model never sees it.
+      await withSessionModels(dir, NAN_ENV, "nan/glm5.3", async (s) => {
+        const next = await readModelsJson(s.modelsPath);
+        expect(next.providers.nan.models.map((m: { id: string }) => m.id)).not.toContain("glm5.2");
+      });
     }),
   );
 

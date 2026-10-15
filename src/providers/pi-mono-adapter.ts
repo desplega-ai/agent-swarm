@@ -6,7 +6,16 @@
  * discovered at session creation and registered as custom tools.
  */
 
-import { existsSync, lstatSync, symlinkSync, unlinkSync } from "node:fs";
+import {
+  existsSync,
+  lstatSync,
+  readFileSync,
+  symlinkSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   type OpenAICompatibleProvider,
@@ -57,7 +66,7 @@ import { parseEnvFlag } from "../utils/env-flag";
 import { fetchInstalledMcpServers } from "../utils/mcp-server-fetcher";
 import { swarmRuntimeInstanceId } from "../utils/multi-runtime";
 import { DEFAULT_OPENROUTER_BASE_URL, getOpenRouterBaseUrl } from "../utils/openrouter-base-url";
-import { scrubSecrets } from "../utils/secret-scrubber";
+import { registerEnvSecrets, scrubObject, scrubSecrets } from "../utils/secret-scrubber";
 import { readPkgVersion } from "./harness-version";
 import { createSwarmHooksExtension } from "./pi-mono-extension";
 import { McpHttpClient, type McpTool } from "./pi-mono-mcp-client";
@@ -103,7 +112,7 @@ function modelToCredKeys(modelStr: string | undefined): string[] | null {
     if (provider === "openrouter") return ["OPENROUTER_API_KEY"];
     if (provider === "openai") return ["OPENAI_API_KEY"];
     if (provider === "google") return ["GOOGLE_API_KEY", "GEMINI_API_KEY"];
-    // models.json custom providers (`ensureCustomProvidersModelsJson`). The
+    // models.json custom providers (`writeSessionModelsJson`). The
     // runner normalizes key aliases (HELMCODE_API_NAN → NAN_API_KEY), but a
     // worker without that step (or a boot-time check) may only see the alias.
     const direct = openAICompatibleProvider(provider);
@@ -488,8 +497,13 @@ const PI_RUNTIME_API_KEYS: readonly (readonly [envKey: string, provider: string]
  */
 export async function createPiRuntimeAuth(
   env: Record<string, string | undefined> = process.env,
+  modelsPath?: string,
 ): Promise<ModelRuntime> {
-  const modelRuntime = await ModelRuntime.create();
+  // A per-session models.json (`writeSessionModelsJson`) still shares the
+  // agent dir's catalog cache, which only holds built-in provider catalogs.
+  const modelRuntime = await ModelRuntime.create(
+    modelsPath ? { modelsPath, modelsStorePath: join(getAgentDir(), "models-store.json") } : {},
+  );
   for (const [envKey, provider] of PI_RUNTIME_API_KEYS) {
     const apiKey = env[envKey];
     if (apiKey) {
@@ -667,20 +681,6 @@ async function revertOpenRouterModelsOverride(
 }
 
 /**
- * Sidecar marker recording the exact `providers.<id>` blocks WE wrote into
- * models.json for the OpenAI-compatible registry providers (`nan`, `helmcode`). A block
- * counts as ours only while models.json still carries it byte-for-byte equal
- * (as JSON) to the marker copy; anything else is user-authored and left alone.
- * Lives next to models.json; NOT part of pi's config surface.
- */
-const CUSTOM_PROVIDERS_MARKER = ".agent-swarm-custom-providers.json";
-
-interface CustomProvidersMarker {
-  /** Provider id → the block we wrote. */
-  written: Record<string, unknown>;
-}
-
-/**
  * The models.json `providers.<id>` block for one OpenAI-compatible registry
  * provider, at `baseUrl` (the `<ID>_BASE_URL` override or the registry default).
  *
@@ -719,127 +719,110 @@ export function customProviderModelsBlock(
   };
 }
 
-function jsonEqual(a: unknown, b: unknown): boolean {
-  return JSON.stringify(a) === JSON.stringify(b);
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** The models.json one pi session loads; see `writeSessionModelsJson`. */
+export interface SessionModelsJson {
+  /** Per-session models.json, or undefined to load the shared `<agentDir>/models.json`. */
+  modelsPath: string | undefined;
+  /** Remove the per-session file. Safe to call more than once. */
+  dispose(): Promise<void>;
 }
 
 /**
- * Materialize (or remove) the registry's custom providers (`nan`, `helmcode`)
- * in `<agentDir>/models.json` so pi's `ModelRuntime` (which loads that file at
- * create time) can resolve `<id>/<model>`; pi ships none of them. Each block
- * points at the provider's `<ID>_BASE_URL` from `env`, else its default.
+ * Compose the models.json this session loads from the shared
+ * `<agentDir>/models.json` plus this session's env, and write it to a private
+ * temp dir. Concurrent sessions in one worker share `<agentDir>`, so writing
+ * per-task values into the shared file lets one session load another's
+ * endpoint (and send its key there).
  *
- * Same guarantees as `ensureOpenRouterModelsOverride`, per provider:
- * - Key present (canonical var or alias): write our block when the provider is
- *   absent or still holds exactly the block the marker says we wrote. A block
- *   we did not write (hand-authored, or edited after we wrote it) is never
- *   overwritten: log, skip, and forget it in the marker.
- * - Key absent: remove the block only when it is still ours; otherwise leave it.
- * - Every other top-level key and provider (including the OpenRouter gateway
- *   override) is preserved. Empty `providers` / an empty file are dropped when
- *   our blocks were all they held.
- * - A corrupt models.json is rewritten with our blocks only when a key is
- *   present (pi cannot load it either way); without a key it is never touched.
+ * The private copy keeps every top-level key and provider of the shared file
+ * and adds, from `env` only:
+ * - `providers.openrouter.baseUrl`: the session's OpenRouter gateway. With the
+ *   default gateway, a value `ensureOpenRouterModelsOverride` recorded in its
+ *   marker is reverted, so another session's gateway never leaks in.
+ * - one block per registry provider (`nan`, `helmcode`) whose key (canonical
+ *   var or alias) is set, at its `<ID>_BASE_URL` or the registry default. A
+ *   block already in the shared file is user-authored and wins.
  * - `model` (the task's model) adds a bare entry to its provider's block when
- *   its id is outside the table; the entry is part of our block and marker.
+ *   its id is outside the table.
+ *
+ * Nothing to add (no registry key, default gateway, no override marker): no
+ * copy, the session loads the shared file as before. A corrupt shared file is
+ * replaced by an empty object in the copy; pi cannot load it either way.
  */
-export async function ensureCustomProvidersModelsJson(
+export async function writeSessionModelsJson(
   agentDir: string,
   env: Record<string, string | undefined> = process.env,
   model?: string,
-): Promise<void> {
-  const modelsPath = join(agentDir, "models.json");
-  const markerPath = join(agentDir, CUSTOM_PROVIDERS_MARKER);
-  const modelProvider = providerForModel(model);
-  const modelId = modelProvider && model ? model.slice(modelProvider.id.length + 1) : undefined;
-
+): Promise<SessionModelsJson> {
+  const sharedPath = join(agentDir, "models.json");
   const registry = openAICompatibleProviders();
-  const wanted = registry.filter((p) => providerKeyFromEnv(p, env) !== undefined).map((p) => p.id);
-  const priorMarker = (await readJsonFile(markerPath)) as CustomProvidersMarker | undefined;
-  const priorWritten =
-    priorMarker && typeof priorMarker.written === "object" && priorMarker.written !== null
-      ? priorMarker.written
-      : {};
-  if (wanted.length === 0 && Object.keys(priorWritten).length === 0) return;
+  const wanted = registry.filter((p) => providerKeyFromEnv(p, env) !== undefined);
+  const gateway = getOpenRouterBaseUrl(env as NodeJS.ProcessEnv);
+  const marker = (await readJsonFile(join(agentDir, OPENROUTER_OVERRIDE_MARKER))) as
+    | OpenRouterOverrideMarker
+    | undefined;
+  if (wanted.length === 0 && gateway === DEFAULT_OPENROUTER_BASE_URL && !marker) {
+    return { modelsPath: undefined, dispose: async () => {} };
+  }
 
-  const modelsFile = Bun.file(modelsPath);
-  const fileExists = await modelsFile.exists();
-  let existing: Record<string, unknown> = {};
-  let corrupt = false;
-  if (fileExists) {
+  let shared: Record<string, unknown> = {};
+  const sharedFile = Bun.file(sharedPath);
+  if (await sharedFile.exists()) {
     try {
-      const parsed: unknown = JSON.parse(await modelsFile.text());
-      if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-        throw new Error("not a JSON object");
-      }
-      existing = parsed as Record<string, unknown>;
+      const parsed: unknown = JSON.parse(await sharedFile.text());
+      if (!isPlainObject(parsed)) throw new Error("not a JSON object");
+      shared = parsed;
     } catch (err) {
-      corrupt = true;
-      if (wanted.length === 0) {
-        // Nothing to add, and we cannot tell our blocks apart in a file we
-        // cannot parse: leave it alone, forget the marker.
-        await Bun.file(markerPath).delete();
-        return;
-      }
       console.warn(
         scrubSecrets(
-          `[pi-mono] ${modelsPath} is unreadable/invalid (${err instanceof Error ? err.message : String(err)}); rewriting with the ${wanted.join(", ")} provider block(s)`,
+          `[pi-mono] ${sharedPath} is unreadable/invalid (${err instanceof Error ? err.message : String(err)}); this session loads its own provider blocks only`,
         ),
       );
     }
   }
 
-  const providers =
-    typeof existing.providers === "object" &&
-    existing.providers !== null &&
-    !Array.isArray(existing.providers)
-      ? { ...(existing.providers as Record<string, unknown>) }
-      : {};
-  const written: Record<string, unknown> = {};
+  const providers = isPlainObject(shared.providers) ? { ...shared.providers } : {};
+  const openrouter = isPlainObject(providers.openrouter) ? { ...providers.openrouter } : {};
+  if (gateway !== DEFAULT_OPENROUTER_BASE_URL) {
+    openrouter.baseUrl = gateway;
+  } else if (marker && openrouter.baseUrl === marker.baseUrl) {
+    if (marker.previous !== undefined) openrouter.baseUrl = marker.previous;
+    else delete openrouter.baseUrl;
+  }
+  if (Object.keys(openrouter).length > 0) providers.openrouter = openrouter;
+  else delete providers.openrouter;
 
-  for (const provider of registry) {
-    const id = provider.id;
-    const current = providers[id];
-    const ours =
-      current !== undefined &&
-      Object.hasOwn(priorWritten, id) &&
-      jsonEqual(current, priorWritten[id]);
-    if (wanted.includes(id)) {
-      if (current === undefined || ours) {
-        const block = customProviderModelsBlock(
-          provider,
-          modelProvider?.id === id ? modelId : undefined,
-          providerBaseUrl(provider, env),
-        );
-        providers[id] = block;
-        written[id] = block;
-      } else {
-        console.warn(
-          scrubSecrets(
-            `[pi-mono] ${modelsPath} already has a providers.${id} block agent-swarm did not write; leaving it as is`,
-          ),
-        );
-      }
-    } else if (ours) {
-      delete providers[id];
+  const modelProvider = providerForModel(model);
+  const modelId = modelProvider && model ? model.slice(modelProvider.id.length + 1) : undefined;
+  for (const provider of wanted) {
+    if (providers[provider.id] !== undefined) {
+      console.warn(
+        scrubSecrets(
+          `[pi-mono] ${sharedPath} already has a providers.${provider.id} block; using it as is`,
+        ),
+      );
+      continue;
     }
+    providers[provider.id] = customProviderModelsBlock(
+      provider,
+      modelProvider?.id === provider.id ? modelId : undefined,
+      providerBaseUrl(provider, env),
+    );
   }
 
-  const next: Record<string, unknown> = { ...existing, providers };
+  const next: Record<string, unknown> = { ...shared, providers };
   if (Object.keys(providers).length === 0) delete next.providers;
-
-  if (Object.keys(next).length === 0) {
-    if (fileExists) await modelsFile.delete();
-  } else if (corrupt || !fileExists || !jsonEqual(next, existing)) {
-    await Bun.write(modelsPath, `${JSON.stringify(next, null, 2)}\n`);
-  }
-
-  if (Object.keys(written).length === 0) {
-    if (priorMarker) await Bun.file(markerPath).delete();
-  } else if (!jsonEqual(written, priorWritten)) {
-    const marker: CustomProvidersMarker = { written };
-    await Bun.write(markerPath, `${JSON.stringify(marker, null, 2)}\n`);
-  }
+  const dir = await mkdtemp(join(tmpdir(), "pi-session-models-"));
+  const modelsPath = join(dir, "models.json");
+  await Bun.write(modelsPath, `${JSON.stringify(next, null, 2)}\n`);
+  return {
+    modelsPath,
+    dispose: () => rm(dir, { recursive: true, force: true }),
+  };
 }
 
 /**
@@ -1028,6 +1011,31 @@ function describeAssistantTurn(message: unknown): AssistantTurnShape {
 
 const TERMINAL_STORE_PROGRESS_STATUSES = new Set(["completed", "failed"]);
 
+/** Rewrite a pi session file with every line scrubbed. No-op when absent or clean. */
+function scrubSessionFileSync(path: string | undefined): void {
+  if (!path || !existsSync(path)) return;
+  const text = readFileSync(path, "utf-8");
+  const scrubbed = scrubSecrets(text);
+  if (scrubbed !== text) writeFileSync(path, scrubbed);
+}
+
+/**
+ * pi persists every session entry to its own `sessions/<cwd>/*.jsonl`, an
+ * egress none of ours covers: a provider error that echoes the request's key
+ * lands there verbatim. Scrub each entry on its way to disk. The in-memory
+ * entries (the model's context) are left as they are. pi's first write flushes
+ * every entry held so far, so that file is scrubbed once right after it.
+ */
+export function scrubPiSessionPersistence(sessionManager: SessionManager): void {
+  const persist = sessionManager._persist.bind(sessionManager);
+  sessionManager._persist = (entry) => {
+    const file = sessionManager.getSessionFile();
+    const existed = file ? existsSync(file) : true;
+    persist(scrubObject(entry));
+    if (!existed) scrubSessionFileSync(file);
+  };
+}
+
 export class PiMonoSession implements ProviderSession {
   private listeners: Array<(event: ProviderEvent) => void> = [];
   private eventQueue: ProviderEvent[] = [];
@@ -1082,14 +1090,18 @@ export class PiMonoSession implements ProviderSession {
   private emptyTurnReprompted = false;
   /** `abort()` was called: never prompt a session someone is trying to stop. */
   private abortRequested = false;
+  /** Removes this session's own models.json once the session ends. */
+  private disposeModels: () => Promise<void>;
 
   constructor(
     agentSession: AgentSession,
     config: ProviderSessionConfig,
     createdSymlink: boolean,
     appliedReasoningEffort: ReasoningEffort | null = null,
+    disposeModels: () => Promise<void> = async () => {},
   ) {
     this.agentSession = agentSession;
+    this.disposeModels = disposeModels;
     this.config = config;
     this.createdSymlink = createdSymlink;
     this.appliedReasoningEffort = appliedReasoningEffort;
@@ -1127,12 +1139,10 @@ export class PiMonoSession implements ProviderSession {
   }
 
   private emit(event: ProviderEvent): void {
-    // Scrub secrets from raw_log / raw_stderr content before egress (log file
-    // write, listener dispatch, downstream session-logs push + pretty-print).
-    const scrubbed: ProviderEvent =
-      event.type === "raw_log" || event.type === "raw_stderr"
-        ? { ...event, content: scrubSecrets(event.content) }
-        : event;
+    // Scrub every event before egress (log file write, listener dispatch,
+    // downstream session-logs push + pretty-print): an error or result event
+    // can carry a provider message that echoes the request's key.
+    const scrubbed = scrubObject(event);
 
     // Log all events
     this.logFileHandle.write(
@@ -1336,7 +1346,7 @@ export class PiMonoSession implements ProviderSession {
       // message; anything else surfaces its raw error text.
       if (this.terminalError) {
         const classification = classifyAwsSdkError(this.terminalError);
-        const message = classification?.message ?? this.terminalError;
+        const message = scrubSecrets(classification?.message ?? this.terminalError);
         const category = classification?.category;
         this.emit({ type: "error", message, category });
         return {
@@ -1385,7 +1395,7 @@ export class PiMonoSession implements ProviderSession {
         sessionId: this._sessionId,
         isError: true,
         errorCategory: awsCatchError?.category,
-        failureReason: awsCatchError?.message ?? errorMessage,
+        failureReason: scrubSecrets(awsCatchError?.message ?? errorMessage),
         appliedReasoningEffort: this.appliedReasoningEffort,
       };
     } finally {
@@ -1395,6 +1405,15 @@ export class PiMonoSession implements ProviderSession {
         cleanupAgentsMdSymlink(this.config.cwd);
       }
       this.agentSession.dispose();
+      // Entries pi wrote outside `_persist` (a rewrite on migration or
+      // branching) are covered here.
+      try {
+        // Test doubles of AgentSession may carry no session manager.
+        scrubSessionFileSync(this.agentSession.sessionManager?.getSessionFile());
+      } catch (err) {
+        console.warn(scrubSecrets(`[pi-mono] could not scrub the session file: ${String(err)}`));
+      }
+      await this.disposeModels();
     }
   }
 
@@ -1895,15 +1914,47 @@ export class PiMonoAdapter implements ProviderAdapter {
 
     const sessionEnv = config.env ?? process.env;
 
+    // A key picked from a pool for this task lives only in sessionEnv, so the
+    // scrubber's process.env pass cannot see it. Register it before anything
+    // (a provider error that echoes it, a log line) can reach an egress.
+    registerEnvSecrets(sessionEnv);
+
     // 3. Resolve model
     // Write the gateway override BEFORE ModelRuntime.create — the runtime
-    // loads `<agentDir>/models.json` exactly once at creation.
+    // loads models.json exactly once at creation.
     await ensureOpenRouterModelsOverride(getAgentDir(), sessionEnv);
-    // Same file: the registry's custom provider blocks (key-gated).
-    await ensureCustomProvidersModelsJson(getAgentDir(), sessionEnv, config.model);
+    // This session's own models.json: the shared file plus the gateway and
+    // the registry's custom provider blocks from sessionEnv. Concurrent
+    // sessions never read each other's endpoints.
+    const sessionModels = await writeSessionModelsJson(getAgentDir(), sessionEnv, config.model);
+    try {
+      return await this.createSessionWithModels(config, sessionEnv, sessionModels, {
+        createdSymlink,
+        customTools,
+        deferTools,
+        piMcpServers,
+      });
+    } catch (err) {
+      await sessionModels.dispose();
+      throw err;
+    }
+  }
+
+  private async createSessionWithModels(
+    config: ProviderSessionConfig,
+    sessionEnv: Record<string, string | undefined>,
+    sessionModels: SessionModelsJson,
+    setup: {
+      createdSymlink: boolean;
+      customTools: ToolDefinition[];
+      deferTools: boolean;
+      piMcpServers: Record<string, McpServerConfig>;
+    },
+  ): Promise<ProviderSession> {
+    const { createdSymlink, customTools, deferTools, piMcpServers } = setup;
     // The runtime is created before resolving so custom providers, which only
     // exist in its composed store, can resolve.
-    const modelRuntime = await createPiRuntimeAuth(sessionEnv);
+    const modelRuntime = await createPiRuntimeAuth(sessionEnv, sessionModels.modelsPath);
     const resolvedModel = resolveModel(config.model, sessionEnv, modelRuntime);
     // models.json overrides (e.g. the OpenRouter gateway baseUrl) only apply
     // to models resolved through the runtime's composed store; the builtin
@@ -1968,8 +2019,13 @@ export class PiMonoAdapter implements ProviderAdapter {
         spawnHook: (context) => ({ ...context, env: buildPiShellEnv(sessionEnv, context.env) }),
       }),
     );
+    // pi's own default session manager (same session dir), with its writes
+    // to `sessions/*.jsonl` scrubbed.
+    const sessionManager = SessionManager.create(config.cwd);
+    scrubPiSessionPersistence(sessionManager);
     const sessionOptions: CreateAgentSessionOptions = {
       cwd: config.cwd,
+      sessionManager,
       model,
       customTools: [...customTools, bashTool],
       resourceLoader,
@@ -1984,7 +2040,13 @@ export class PiMonoAdapter implements ProviderAdapter {
     const { session } = await createAgentSession(sessionOptions);
     await session.bindExtensions({});
 
-    return new PiMonoSession(session, config, createdSymlink, appliedReasoningEffort);
+    return new PiMonoSession(
+      session,
+      config,
+      createdSymlink,
+      appliedReasoningEffort,
+      sessionModels.dispose,
+    );
   }
 
   async canResume(sessionId: string): Promise<boolean> {

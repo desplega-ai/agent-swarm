@@ -402,6 +402,8 @@ NaN and Helmcode are entries in one registry: `packages/model-catalog/src/openai
 
 2. **The glyph.** Add an icon component for the id to `ICON_BY_PROVIDER` in `apps/ui/src/components/shared/provider-icon.tsx`. The type check fails until you do.
 
+The new key var is a secret-scrubber rule change: bump `SCRUBBER_RULES_VERSION` in `src/utils/secret-scrubber.ts` and its pin in `src/tests/secret-scrubber.test.ts`, which fails until you do.
+
 Nothing else changes. These surfaces derive from the entry: credential routing and pools, key aliases, the default harness, the opencode credential check, secret scrubbing, E2B and ACP env forwarding, the live key check, the pi `models.json` block, the opencode provider block, $0 pricing rows, the model catalog, and on the dashboard the Integrations card (key plus base URL), the API keys and usage labels, the setup card and the model picker. The `docker-entrypoint.sh` boot warning still names NaN and Helmcode only; it is a warning, not a gate.
 
 ---

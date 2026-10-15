@@ -1,10 +1,13 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { openAICompatibleKeyVars } from "@desplega/model-catalog";
 import {
   clearVolatileSecretsForTesting,
   isSensitiveKey,
   refreshSecretScrubberCache,
+  registerEnvSecrets,
   registerSensitiveKeyName,
   registerVolatileSecret,
+  SCRUBBER_RULES_VERSION,
   scrubObject,
   scrubSecrets,
   unregisterVolatileSecret,
@@ -89,6 +92,19 @@ describe("scrubSecrets — env-based replacement", () => {
       expect(isSensitiveKey(name)).toBe(true);
       expect(scrubSecrets(`Bearer ${value} tail`)).toBe(`Bearer [REDACTED:${name}] tail`);
     }
+  });
+
+  test("the registry key vars are pinned to SCRUBBER_RULES_VERSION", () => {
+    // Every registry key var is an exact sensitive key, so a new registry
+    // entry changes the rules: bump SCRUBBER_RULES_VERSION (the boot sweep
+    // re-redacts stored rows once per version), then update this pin.
+    expect({
+      version: SCRUBBER_RULES_VERSION,
+      keyVars: [...openAICompatibleKeyVars()].sort(),
+    }).toEqual({
+      version: 7,
+      keyVars: ["HELMCODE_API_KEY", "HELMCODE_API_NAN", "NAN_API_KEY"],
+    });
   });
 
   test("redacts any key with _TOKEN suffix", () => {
@@ -402,6 +418,23 @@ describe("registerVolatileSecret", () => {
     const out = scrubSecrets(`key=${secret}`);
     expect(out).toBe("key=[REDACTED:RUNTIME_TOKEN]");
     expect(out).not.toContain(secret);
+  });
+
+  test("registerEnvSecrets covers a per-task env that never reached process.env", () => {
+    const picked = `opaque${randomToken(20)}`;
+    const member = `opaque${randomToken(20)}`;
+    const env = {
+      HELMCODE_API_KEY: picked,
+      HELMCODE_API_NAN: `${member},opaque${randomToken(20)}`,
+      HELMCODE_BASE_URL: "http://127.0.0.1:9/v1",
+    };
+    expect(process.env.HELMCODE_API_KEY).not.toBe(picked);
+    expect(scrubSecrets(`echo ${picked}`)).toContain(picked);
+    registerEnvSecrets(env);
+    expect(scrubSecrets(`echo ${picked}`)).toBe("echo [REDACTED:HELMCODE_API_KEY]");
+    expect(scrubSecrets(`echo ${member}`)).toBe("echo [REDACTED:HELMCODE_API_NAN]");
+    // A non-secret key stays readable.
+    expect(scrubSecrets("http://127.0.0.1:9/v1")).toBe("http://127.0.0.1:9/v1");
   });
 
   test("ignores values shorter than the minimum length", () => {

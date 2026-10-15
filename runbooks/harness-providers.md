@@ -34,6 +34,15 @@ on `pi`, `opencode` and the ACP `opencode` target only; `claude` and `codex` rej
   `HELMCODE_API_KEY`). On opencode the adapter hands the picked key to the
   provider config of the active model's provider, `openrouter` included, so
   an `OPENROUTER_API_KEY` pool also works there.
+- **pi `models.json`**: each pi session loads its own copy, written to a temp
+  dir from the shared `<agentDir>/models.json` plus that session's env
+  (registry provider blocks, `<ID>_BASE_URL`, the OpenRouter gateway), and
+  removed when the session ends. Concurrent sessions never read each other's
+  endpoints. A `providers.<id>` block already in the shared file is
+  user-authored and wins.
+- **Scrubbing**: per-task keys exist only in the task env, so the runner and
+  the pi adapter register them with the scrubber. pi's error events, failure
+  reason, adapter log and native `sessions/*.jsonl` are scrubbed.
 - **Model ids**: NaN ids known to support tool calls are the seven in the
   provider registry, `packages/model-catalog/src/openai-compatible-providers.ts` (`nan/deepseek-v4-flash`,
   `nan/glm5.3`, `nan/glm5.3-flash`, `nan/qwen3.6`, `nan/qwen3.8-flash`,

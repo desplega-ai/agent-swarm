@@ -36,9 +36,13 @@ import { GITLEAKS_RULES } from "./secret-rules.generated";
  * 5, the vendored gitleaks rule set, plus hand-written Resend, Google OAuth,
  * Discord webhook, xAI and bare Telegram shapes in pass 2; v6 = pass 5 resumes
  * after the secret, not the match, so adjacent secrets that share a delimiter
- * both redact, and sourcegraph-access-token drops its bare 40-hex branch.
+ * both redact, and sourcegraph-access-token drops its bare 40-hex branch;
+ * v7 = the OpenAI-compatible registry key vars (`NAN_API_KEY`,
+ * `HELMCODE_API_KEY`, and the `HELMCODE_API_NAN` alias no suffix matches).
+ * A new registry entry adds key vars, so it is a rule change too
+ * (`secret-scrubber.test.ts` pins the list to this number).
  */
-export const SCRUBBER_RULES_VERSION = 6;
+export const SCRUBBER_RULES_VERSION = 7;
 
 /** Env-var names that are always considered secrets, even without suffix hints. */
 const SENSITIVE_KEY_EXACT = new Set<string>([
@@ -1032,6 +1036,21 @@ export function registerVolatileSecret(value: string, name: string): void {
     if (volatileSecrets.get(form) === name) continue;
     volatileSecrets.set(form, name);
     volatileGeneration++;
+  }
+}
+
+/**
+ * Register the sensitive values of an env map that is not `process.env`
+ * (a runner's per-task env, an adapter's session env). A key picked from a
+ * credential pool, or a row admitted after boot, lives only there, so the
+ * env pass never sees it. Comma-separated pools register each member too.
+ */
+export function registerEnvSecrets(env: Record<string, string | undefined>): void {
+  for (const [key, value] of Object.entries(env)) {
+    if (!value || !isSensitiveKey(key)) continue;
+    registerVolatileSecret(value, key);
+    if (!value.includes(",")) continue;
+    for (const member of value.split(",")) registerVolatileSecret(member.trim(), key);
   }
 }
 
