@@ -1,0 +1,157 @@
+{
+  "name": "open-oncall-failover",
+  "description": "Open Oncall provider failover block. Runs one agent-task prompt on a chain of up to three workers of different harnesses (default claude, then codex, then opencode). Each attempt that fails (provider down, rate limit, auth, crash, or a staged drill) re-runs the same prompt on the next harness. The pick node returns the first successful JSON output plus a per-attempt provider record (harness, agent, status, failure reason, providerError). Called as a sub-workflow by open-oncall for the investigate and fix steps.",
+  "triggers": [],
+  "triggerSchema": {
+    "type": "object",
+    "required": ["step", "prompt", "agent1", "harness1"],
+    "properties": {
+      "step": {
+        "type": "string"
+      },
+      "prompt": {
+        "type": "string"
+      },
+      "repo": {
+        "type": "string"
+      },
+      "agent1": {
+        "type": "string"
+      },
+      "harness1": {
+        "type": "string"
+      },
+      "agent2": {
+        "type": "string"
+      },
+      "harness2": {
+        "type": "string"
+      },
+      "agent3": {
+        "type": "string"
+      },
+      "harness3": {
+        "type": "string"
+      }
+    }
+  },
+  "definition": {
+    "nodes": [
+      {
+        "id": "try-1",
+        "type": "agent-task",
+        "label": "Attempt 1 (primary provider)",
+        "config": {
+          "agentId": "{{trigger.agent1}}",
+          "routingReason": "human_pinned",
+          "routingNote": "open-oncall failover attempt 1",
+          "template": "{{trigger.preamble1}}{{trigger.prompt}}\n\n(Open Oncall step: {{trigger.step}}. Attempt 1 on provider {{trigger.harness1}}.)",
+          "tags": ["open-oncall", "open-oncall-{{trigger.step}}"],
+          "priority": 90,
+          "vcsRepo": "{{trigger.repo}}",
+          "outputSchema": {
+            "type": "object"
+          }
+        },
+        "next": "down-1"
+      },
+      {
+        "id": "down-1",
+        "type": "property-match",
+        "label": "Attempt 1 failed?",
+        "config": {
+          "mode": "all",
+          "conditions": [
+            {
+              "field": "try-1.taskOutput",
+              "op": "contains",
+              "value": "[FAILED:"
+            }
+          ]
+        },
+        "next": {
+          "true": "try-2",
+          "false": "pick"
+        }
+      },
+      {
+        "id": "try-2",
+        "type": "agent-task",
+        "label": "Attempt 2 (failover provider)",
+        "config": {
+          "agentId": "{{trigger.agent2}}",
+          "routingReason": "human_pinned",
+          "routingNote": "open-oncall failover attempt 2",
+          "template": "{{trigger.preamble2}}{{trigger.prompt}}\n\n(Open Oncall step: {{trigger.step}}. Attempt 2 on provider {{trigger.harness2}}: the previous provider failed.)",
+          "tags": ["open-oncall", "open-oncall-{{trigger.step}}"],
+          "priority": 90,
+          "vcsRepo": "{{trigger.repo}}",
+          "outputSchema": {
+            "type": "object"
+          }
+        },
+        "next": "down-2"
+      },
+      {
+        "id": "down-2",
+        "type": "property-match",
+        "label": "Attempt 2 failed?",
+        "config": {
+          "mode": "all",
+          "conditions": [
+            {
+              "field": "try-2.taskOutput",
+              "op": "contains",
+              "value": "[FAILED:"
+            }
+          ]
+        },
+        "next": {
+          "true": "try-3",
+          "false": "pick"
+        }
+      },
+      {
+        "id": "try-3",
+        "type": "agent-task",
+        "label": "Attempt 3 (last provider)",
+        "config": {
+          "agentId": "{{trigger.agent3}}",
+          "routingReason": "human_pinned",
+          "routingNote": "open-oncall failover attempt 3",
+          "template": "{{trigger.preamble3}}{{trigger.prompt}}\n\n(Open Oncall step: {{trigger.step}}. Attempt 3 on provider {{trigger.harness3}}: two providers failed.)",
+          "tags": ["open-oncall", "open-oncall-{{trigger.step}}"],
+          "priority": 90,
+          "vcsRepo": "{{trigger.repo}}",
+          "outputSchema": {
+            "type": "object"
+          }
+        },
+        "next": "pick"
+      },
+      {
+        "id": "pick",
+        "type": "swarm-script",
+        "label": "Pick result + provider record",
+        "config": {
+          "scriptName": "open-oncall",
+          "fsMode": "none",
+          "timeoutMs": 30000,
+          "args": {
+            "op": "pick",
+            "runId": "{{run.id}}",
+            "step": "{{trigger.step}}",
+            "simulateProviderDown": "{{trigger.simulateProviderDown}}",
+            "agent1": "{{trigger.agent1}}",
+            "harness1": "{{trigger.harness1}}",
+            "agent2": "{{trigger.agent2}}",
+            "harness2": "{{trigger.harness2}}",
+            "agent3": "{{trigger.agent3}}",
+            "harness3": "{{trigger.harness3}}"
+          }
+        }
+      }
+    ],
+    "onNodeFailure": "continue"
+  }
+}
