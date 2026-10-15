@@ -43,12 +43,19 @@ import "../commands/templates";
 import { resolveTemplateAsync } from "../prompts/resolver";
 import { CORE_TOOLS } from "../tools/tool-config";
 import { classifyAwsSdkError } from "../utils/aws-error-classifier";
+import { NAN_KEY_VARS } from "../utils/credentials";
 import { parseEnvFlag } from "../utils/env-flag";
 import { fetchInstalledMcpServers } from "../utils/mcp-server-fetcher";
 import { swarmRuntimeInstanceId } from "../utils/multi-runtime";
 import { DEFAULT_OPENROUTER_BASE_URL, getOpenRouterBaseUrl } from "../utils/openrouter-base-url";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { readPkgVersion } from "./harness-version";
+import {
+  OPENAI_COMPATIBLE_PROVIDER_IDS,
+  OPENAI_COMPATIBLE_PROVIDERS,
+  type OpenAICompatibleProvider,
+  providerKeyFromEnv,
+} from "./openai-compatible-providers";
 import { createSwarmHooksExtension } from "./pi-mono-extension";
 import { McpHttpClient, type McpTool } from "./pi-mono-mcp-client";
 import { applyReasoningEffort, type ReasoningEffort } from "./reasoning-effort";
@@ -93,6 +100,11 @@ function modelToCredKeys(modelStr: string | undefined): string[] | null {
     if (provider === "openrouter") return ["OPENROUTER_API_KEY"];
     if (provider === "openai") return ["OPENAI_API_KEY"];
     if (provider === "google") return ["GOOGLE_API_KEY", "GEMINI_API_KEY"];
+    // models.json custom providers (`ensureCustomProvidersModelsJson`). The
+    // runner normalizes the HELMCODE_API_NAN alias into NAN_API_KEY, but a
+    // worker without that step (or a boot-time check) may only see the alias.
+    if (provider === "nan") return [...NAN_KEY_VARS];
+    if (provider === "helmcode") return ["HELMCODE_API_KEY"];
   }
   // Bare model name with no provider prefix — adapter falls through to a
   // best-effort resolution against multiple providers, so the boot loop
@@ -306,14 +318,22 @@ export async function checkPiMonoCredentials(
     };
   }
 
-  // Permissive case: any one supported key works.
-  if (env.ANTHROPIC_API_KEY || env.OPENROUTER_API_KEY || env.OPENAI_API_KEY) {
+  // Permissive case: any one supported key works. A NaN or Helmcode key only
+  // serves `nan/*` / `helmcode/*` models, but it is still a usable pi
+  // credential (the task's explicit model is checked above once it is set).
+  if (
+    env.ANTHROPIC_API_KEY ||
+    env.OPENROUTER_API_KEY ||
+    env.OPENAI_API_KEY ||
+    NAN_KEY_VARS.some((k) => env[k]) ||
+    env.HELMCODE_API_KEY
+  ) {
     return { ready: true, missing: [], satisfiedBy: "env" };
   }
   return {
     ready: false,
     missing: ["ANTHROPIC_API_KEY", "OPENROUTER_API_KEY", "OPENAI_API_KEY", authFile],
-    hint: "Set one of ANTHROPIC_API_KEY / OPENROUTER_API_KEY / OPENAI_API_KEY (any one suffices), or run `pi auth login` to create ~/.pi/agent/auth.json.",
+    hint: "Set one of ANTHROPIC_API_KEY / OPENROUTER_API_KEY / OPENAI_API_KEY (any one suffices; NAN_API_KEY or HELMCODE_API_KEY serve only nan/* or helmcode/* models), or run `pi auth login` to create ~/.pi/agent/auth.json.",
   };
 }
 
@@ -442,6 +462,14 @@ const PI_RUNTIME_API_KEYS = [
   ["OPENAI_API_KEY", "openai"],
   ["GEMINI_API_KEY", "google"],
   ["GOOGLE_API_KEY", "google"],
+  // models.json custom providers. A runtime key beats the file's
+  // `apiKey: "$NAN_API_KEY"`, which pi would otherwise read from the shared
+  // process.env, where a credential pool is still the raw comma list. Later
+  // rows overwrite earlier ones, so the canonical NAN_API_KEY wins over the
+  // HELMCODE_API_NAN alias when both are set.
+  ["HELMCODE_API_NAN", "nan"],
+  ["NAN_API_KEY", "nan"],
+  ["HELMCODE_API_KEY", "helmcode"],
 ] as const;
 
 /**
@@ -451,11 +479,15 @@ const PI_RUNTIME_API_KEYS = [
  * into `process.env` because that would freeze rotation globally. pi-mono runs
  * in-process, so pass selected keys through pi's runtime auth override instead
  * of relying on environment lookup.
+ *
+ * `options` is forwarded to `ModelRuntime.create` (tests point it at a temp
+ * agent dir); production uses pi's default agent dir.
  */
 export async function createPiRuntimeAuth(
   env: Record<string, string | undefined> = process.env,
+  options?: Parameters<typeof ModelRuntime.create>[0],
 ): Promise<ModelRuntime> {
-  const modelRuntime = await ModelRuntime.create();
+  const modelRuntime = await ModelRuntime.create(options);
   for (const [envKey, provider] of PI_RUNTIME_API_KEYS) {
     const apiKey = env[envKey];
     if (apiKey) {
@@ -633,6 +665,159 @@ async function revertOpenRouterModelsOverride(
 }
 
 /**
+ * Sidecar marker recording the exact `providers.<id>` blocks WE wrote into
+ * models.json for the OpenAI-compatible providers (`nan`, `helmcode`). A block
+ * counts as ours only while models.json still carries it byte-for-byte equal
+ * (as JSON) to the marker copy; anything else is user-authored and left alone.
+ * Lives next to models.json; NOT part of pi's config surface.
+ */
+const CUSTOM_PROVIDERS_MARKER = ".agent-swarm-custom-providers.json";
+
+interface CustomProvidersMarker {
+  /** Provider id → the block we wrote. */
+  written: Record<string, unknown>;
+}
+
+/**
+ * The models.json `providers.<id>` block for one OpenAI-compatible provider.
+ *
+ * `apiKey` is always the `"$VAR"` interpolation of the canonical env var, never
+ * a key value: pi reads a bare name as a literal key. The key a session really
+ * uses arrives as a runtime key (`createPiRuntimeAuth`), which beats this field.
+ * Costs are 0: these are flat-rate subscriptions (the server prices them at $0).
+ */
+export function customProviderModelsBlock(provider: OpenAICompatibleProvider) {
+  return {
+    baseUrl: provider.baseUrl,
+    api: "openai-completions",
+    apiKey: `$${provider.envVar}`,
+    models: provider.models.map((m) => ({
+      id: m.id,
+      name: m.name,
+      reasoning: m.reasoning,
+      input: [...m.input],
+      contextWindow: m.contextWindow,
+      maxTokens: m.maxOutputTokens,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+      compat: { ...m.compat },
+    })),
+  };
+}
+
+function jsonEqual(a: unknown, b: unknown): boolean {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
+/**
+ * Materialize (or remove) the `nan` / `helmcode` custom providers in
+ * `<agentDir>/models.json` so pi's `ModelRuntime` (which loads that file at
+ * create time) can resolve `nan/<id>` and `helmcode/<id>`; pi ships neither.
+ *
+ * Same guarantees as `ensureOpenRouterModelsOverride`, per provider:
+ * - Key present (canonical var or alias): write our block when the provider is
+ *   absent or still holds exactly the block the marker says we wrote. A block
+ *   we did not write (hand-authored, or edited after we wrote it) is never
+ *   overwritten: log, skip, and forget it in the marker.
+ * - Key absent: remove the block only when it is still ours; otherwise leave it.
+ * - Every other top-level key and provider (including the OpenRouter gateway
+ *   override) is preserved. Empty `providers` / an empty file are dropped when
+ *   our blocks were all they held.
+ * - A corrupt models.json is rewritten with our blocks only when a key is
+ *   present (pi cannot load it either way); without a key it is never touched.
+ */
+export async function ensureCustomProvidersModelsJson(
+  agentDir: string,
+  env: Record<string, string | undefined> = process.env,
+): Promise<void> {
+  const modelsPath = join(agentDir, "models.json");
+  const markerPath = join(agentDir, CUSTOM_PROVIDERS_MARKER);
+
+  const wanted = OPENAI_COMPATIBLE_PROVIDER_IDS.filter(
+    (id) => providerKeyFromEnv(OPENAI_COMPATIBLE_PROVIDERS[id], env) !== undefined,
+  );
+  const priorMarker = (await readJsonFile(markerPath)) as CustomProvidersMarker | undefined;
+  const priorWritten =
+    priorMarker && typeof priorMarker.written === "object" && priorMarker.written !== null
+      ? priorMarker.written
+      : {};
+  if (wanted.length === 0 && Object.keys(priorWritten).length === 0) return;
+
+  const modelsFile = Bun.file(modelsPath);
+  const fileExists = await modelsFile.exists();
+  let existing: Record<string, unknown> = {};
+  let corrupt = false;
+  if (fileExists) {
+    try {
+      const parsed: unknown = JSON.parse(await modelsFile.text());
+      if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+        throw new Error("not a JSON object");
+      }
+      existing = parsed as Record<string, unknown>;
+    } catch (err) {
+      corrupt = true;
+      if (wanted.length === 0) {
+        // Nothing to add, and we cannot tell our blocks apart in a file we
+        // cannot parse: leave it alone, forget the marker.
+        await Bun.file(markerPath).delete();
+        return;
+      }
+      console.warn(
+        scrubSecrets(
+          `[pi-mono] ${modelsPath} is unreadable/invalid (${err instanceof Error ? err.message : String(err)}); rewriting with the ${wanted.join(", ")} provider block(s)`,
+        ),
+      );
+    }
+  }
+
+  const providers =
+    typeof existing.providers === "object" &&
+    existing.providers !== null &&
+    !Array.isArray(existing.providers)
+      ? { ...(existing.providers as Record<string, unknown>) }
+      : {};
+  const written: Record<string, unknown> = {};
+
+  for (const id of OPENAI_COMPATIBLE_PROVIDER_IDS) {
+    const current = providers[id];
+    const ours =
+      current !== undefined &&
+      Object.hasOwn(priorWritten, id) &&
+      jsonEqual(current, priorWritten[id]);
+    if (wanted.includes(id)) {
+      if (current === undefined || ours) {
+        const block = customProviderModelsBlock(OPENAI_COMPATIBLE_PROVIDERS[id]);
+        providers[id] = block;
+        written[id] = block;
+      } else {
+        console.warn(
+          scrubSecrets(
+            `[pi-mono] ${modelsPath} already has a providers.${id} block agent-swarm did not write; leaving it as is`,
+          ),
+        );
+      }
+    } else if (ours) {
+      delete providers[id];
+    }
+  }
+
+  const next: Record<string, unknown> = { ...existing, providers };
+  if (Object.keys(providers).length === 0) delete next.providers;
+
+  if (Object.keys(next).length === 0) {
+    if (fileExists) await modelsFile.delete();
+  } else if (corrupt || !fileExists || !jsonEqual(next, existing)) {
+    await Bun.write(modelsPath, `${JSON.stringify(next, null, 2)}\n`);
+  }
+
+  if (Object.keys(written).length === 0) {
+    if (priorMarker) await Bun.file(markerPath).delete();
+  } else if (!jsonEqual(written, priorWritten)) {
+    const marker: CustomProvidersMarker = { written };
+    await Bun.write(markerPath, `${JSON.stringify(marker, null, 2)}\n`);
+  }
+}
+
+/**
  * Resolve a model string to a pi-ai Model object.
  *
  * When `modelStr` is an anthropic shortname (`sonnet`/`haiku`/`opus`) AND
@@ -642,10 +827,33 @@ async function revertOpenRouterModelsOverride(
  * anthropic-provider env lookup from failing at session-start with
  * "No API key found for anthropic" — see task 37a4a87a and the chronic
  * weekly-fire pattern (2026-04-13 → 2026-05-11) tracked in HEARTBEAT.md.
+ *
+ * `provider/id` strings that pi-ai's builtin catalog does not know (the
+ * models.json custom providers `nan` / `helmcode`) fall back to
+ * `modelRuntime.getModel(provider, id)` when a runtime is passed. When nothing
+ * resolves, a scrubbed warning names the model: the session then silently runs
+ * pi's own default model, which is otherwise invisible.
  */
 export function resolveModel(
   modelStr: string,
   env: Record<string, string | undefined> = process.env,
+  modelRuntime?: Pick<ModelRuntime, "getModel">,
+) {
+  const model = resolveModelInner(modelStr, env, modelRuntime);
+  if (modelStr && !model) {
+    console.warn(
+      scrubSecrets(
+        `[pi-mono] Model "${modelStr}" did not resolve to a builtin or models.json model; pi will fall back to its default model`,
+      ),
+    );
+  }
+  return model;
+}
+
+function resolveModelInner(
+  modelStr: string,
+  env: Record<string, string | undefined>,
+  modelRuntime: Pick<ModelRuntime, "getModel"> | undefined,
 ) {
   if (!modelStr) return undefined;
 
@@ -690,11 +898,17 @@ export function resolveModel(
     const slashIdx = modelStr.indexOf("/");
     const provider = modelStr.slice(0, slashIdx);
     const modelId = modelStr.slice(slashIdx + 1);
+    let builtin: ReturnType<typeof getModel> | undefined;
     try {
-      return getModel(provider as "anthropic", modelId as never);
+      // pi-ai returns undefined (does not throw) for an unknown provider/id.
+      builtin = getModel(provider as "anthropic", modelId as never);
     } catch {
-      return undefined;
+      builtin = undefined;
     }
+    if (builtin) return builtin;
+    // Custom providers live only in models.json, so only the runtime's
+    // composed store knows them.
+    return modelRuntime?.getModel(provider, modelId);
   }
 
   // Try as a full model ID with common providers
@@ -1660,15 +1874,19 @@ export class PiMonoAdapter implements ProviderAdapter {
     // Write the gateway override BEFORE ModelRuntime.create — the runtime
     // loads `<agentDir>/models.json` exactly once at creation.
     await ensureOpenRouterModelsOverride(getAgentDir(), sessionEnv);
-    const builtinModel = resolveModel(config.model, sessionEnv);
+    // Same file: the nan/helmcode custom provider blocks (key-gated).
+    await ensureCustomProvidersModelsJson(getAgentDir(), sessionEnv);
+    // The runtime is created before resolving so custom providers, which only
+    // exist in its composed store, can resolve.
     const modelRuntime = await createPiRuntimeAuth(sessionEnv);
+    const resolvedModel = resolveModel(config.model, sessionEnv, modelRuntime);
     // models.json overrides (e.g. the OpenRouter gateway baseUrl) only apply
     // to models resolved through the runtime's composed store; the builtin
     // catalog object from `resolveModel` carries the hardcoded upstream URL
     // and would be used verbatim by the session.
-    const model = builtinModel
-      ? (modelRuntime.getModel(builtinModel.provider, builtinModel.id) ?? builtinModel)
-      : builtinModel;
+    const model = resolvedModel
+      ? (modelRuntime.getModel(resolvedModel.provider, resolvedModel.id) ?? resolvedModel)
+      : resolvedModel;
 
     // 4. Create swarm hooks extension
     const swarmExtension = createSwarmHooksExtension({

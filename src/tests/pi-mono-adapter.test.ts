@@ -1,10 +1,23 @@
 import { afterAll, afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
-import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import * as piCodingAgent from "@earendil-works/pi-coding-agent";
 import { configureHttpResolver, resetHttpResolver } from "../prompts/resolver";
+import { OPENAI_COMPATIBLE_PROVIDERS } from "../providers/openai-compatible-providers";
 import {
+  checkPiMonoCredentials,
   createPiRuntimeAuth,
+  ensureCustomProvidersModelsJson,
+  ensureOpenRouterModelsOverride,
   extractPiAssistantText,
   PiMonoAdapter,
   resolveModel,
@@ -541,6 +554,306 @@ describe("createPiRuntimeAuth", () => {
     await expect(modelRuntime.getAuth("google")).resolves.toMatchObject({
       auth: { apiKey: "example-gemini-runtime" },
     });
+  });
+});
+
+// ─── NaN / Helmcode custom providers (models.json, runtime keys, resolve) ───
+
+const NAN_ENV = { NAN_API_KEY: "example-nan-picked" };
+const HELMCODE_ENV = { HELMCODE_API_KEY: "example-helmcode-picked" };
+const MARKER = ".agent-swarm-custom-providers.json";
+
+async function readModelsJson(dir: string): Promise<Record<string, any>> {
+  return JSON.parse(await Bun.file(join(dir, "models.json")).text());
+}
+
+function withTempDir(prefix: string, fn: (dir: string) => Promise<void>): () => Promise<void> {
+  return async () => {
+    const dir = mkdtempSync(join(tmpdir(), prefix));
+    try {
+      await fn(dir);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  };
+}
+
+describe("ensureCustomProvidersModelsJson (pi)", () => {
+  test(
+    "fresh dir: writes both blocks with $VAR apiKeys and never the key value",
+    withTempDir("pi-custom-fresh-", async (dir) => {
+      await ensureCustomProvidersModelsJson(dir, { ...NAN_ENV, ...HELMCODE_ENV });
+      const raw = await Bun.file(join(dir, "models.json")).text();
+      expect(raw).not.toContain("example-nan-picked");
+      expect(raw).not.toContain("example-helmcode-picked");
+      const written = JSON.parse(raw);
+      expect(written.providers.nan).toMatchObject({
+        baseUrl: OPENAI_COMPATIBLE_PROVIDERS.nan.baseUrl,
+        api: "openai-completions",
+        apiKey: "$NAN_API_KEY",
+      });
+      expect(written.providers.helmcode).toMatchObject({
+        baseUrl: OPENAI_COMPATIBLE_PROVIDERS.helmcode.baseUrl,
+        api: "openai-completions",
+        apiKey: "$HELMCODE_API_KEY",
+      });
+      expect(written.providers.helmcode.models.map((m: { id: string }) => m.id)).toEqual(
+        OPENAI_COMPATIBLE_PROVIDERS.helmcode.models.map((m) => m.id),
+      );
+      const glm = written.providers.nan.models.find((m: { id: string }) => m.id === "glm5.3");
+      expect(glm).toMatchObject({
+        contextWindow: 1000000,
+        maxTokens: 131072,
+        reasoning: true,
+        compat: { supportsDeveloperRole: true },
+      });
+      const marker = JSON.parse(await Bun.file(join(dir, MARKER)).text());
+      expect(Object.keys(marker.written).sort()).toEqual(["helmcode", "nan"]);
+    }),
+  );
+
+  test(
+    "only the HELMCODE_API_NAN alias set: nan block still uses $NAN_API_KEY",
+    withTempDir("pi-custom-alias-", async (dir) => {
+      await ensureCustomProvidersModelsJson(dir, { HELMCODE_API_NAN: "example-alias" });
+      const written = await readModelsJson(dir);
+      expect(written.providers.nan.apiKey).toBe("$NAN_API_KEY");
+      expect(written.providers.helmcode).toBeUndefined();
+      expect(JSON.stringify(written)).not.toContain("example-alias");
+    }),
+  );
+
+  test(
+    "no key and no marker: never creates or touches models.json",
+    withTempDir("pi-custom-noop-", async (dir) => {
+      await ensureCustomProvidersModelsJson(dir, {});
+      expect(await Bun.file(join(dir, "models.json")).exists()).toBe(false);
+      const userConfig = { providers: { nan: { baseUrl: "https://mine.example/v1" } } };
+      await Bun.write(join(dir, "models.json"), JSON.stringify(userConfig));
+      await ensureCustomProvidersModelsJson(dir, {});
+      expect(await readModelsJson(dir)).toEqual(userConfig);
+    }),
+  );
+
+  test(
+    "never overwrites a user-authored providers.nan; still writes helmcode",
+    withTempDir("pi-custom-user-", async (dir) => {
+      const userNan = { baseUrl: "https://mine.example/v1", apiKey: "$MY_VAR", models: [] };
+      await Bun.write(join(dir, "models.json"), JSON.stringify({ providers: { nan: userNan } }));
+      await ensureCustomProvidersModelsJson(dir, { ...NAN_ENV, ...HELMCODE_ENV });
+      const written = await readModelsJson(dir);
+      expect(written.providers.nan).toEqual(userNan);
+      expect(written.providers.helmcode.apiKey).toBe("$HELMCODE_API_KEY");
+      const marker = JSON.parse(await Bun.file(join(dir, MARKER)).text());
+      expect(Object.keys(marker.written)).toEqual(["helmcode"]);
+      // Key removed: only our helmcode block goes; the user's nan block stays.
+      await ensureCustomProvidersModelsJson(dir, {});
+      expect(await readModelsJson(dir)).toEqual({ providers: { nan: userNan } });
+      expect(await Bun.file(join(dir, MARKER)).exists()).toBe(false);
+    }),
+  );
+
+  test(
+    "preserves other providers, top-level keys and the OpenRouter gateway override",
+    withTempDir("pi-custom-merge-", async (dir) => {
+      const gateway = "https://control-plane.example/proxy/v1";
+      await Bun.write(
+        join(dir, "models.json"),
+        JSON.stringify({
+          $schema: "https://pi.dev/schemas/models.schema.json",
+          providers: {
+            custom: { baseUrl: "https://custom.example/v1", api: "openai-completions" },
+          },
+        }),
+      );
+      await ensureOpenRouterModelsOverride(dir, { OPENROUTER_BASE_URL: gateway });
+      await ensureCustomProvidersModelsJson(dir, NAN_ENV);
+      let written = await readModelsJson(dir);
+      expect(written.$schema).toBe("https://pi.dev/schemas/models.schema.json");
+      expect(written.providers.openrouter).toEqual({ baseUrl: gateway });
+      expect(written.providers.custom.baseUrl).toBe("https://custom.example/v1");
+      expect(written.providers.nan.apiKey).toBe("$NAN_API_KEY");
+
+      // Revert: only our nan block goes; everything else is untouched.
+      await ensureCustomProvidersModelsJson(dir, {});
+      written = await readModelsJson(dir);
+      expect(written.providers.nan).toBeUndefined();
+      expect(written.providers.openrouter).toEqual({ baseUrl: gateway });
+      expect(written.providers.custom.baseUrl).toBe("https://custom.example/v1");
+
+      // And the OpenRouter revert still works with our writer having run.
+      await ensureOpenRouterModelsOverride(dir, {});
+      written = await readModelsJson(dir);
+      expect(written.providers.openrouter).toBeUndefined();
+      expect(written.providers.custom.baseUrl).toBe("https://custom.example/v1");
+    }),
+  );
+
+  test(
+    "revert of a file that held only our blocks removes the file and the marker",
+    withTempDir("pi-custom-revert-", async (dir) => {
+      await ensureCustomProvidersModelsJson(dir, { ...NAN_ENV, ...HELMCODE_ENV });
+      await ensureCustomProvidersModelsJson(dir, HELMCODE_ENV);
+      let written = await readModelsJson(dir);
+      expect(written.providers.nan).toBeUndefined();
+      expect(written.providers.helmcode).toBeDefined();
+      await ensureCustomProvidersModelsJson(dir, {});
+      expect(await Bun.file(join(dir, "models.json")).exists()).toBe(false);
+      expect(await Bun.file(join(dir, MARKER)).exists()).toBe(false);
+      // Re-adding after a revert works (no stale state).
+      await ensureCustomProvidersModelsJson(dir, NAN_ENV);
+      written = await readModelsJson(dir);
+      expect(written.providers.nan.apiKey).toBe("$NAN_API_KEY");
+    }),
+  );
+
+  test(
+    "a block the user edited after we wrote it is left alone on revert and on re-write",
+    withTempDir("pi-custom-edited-", async (dir) => {
+      await ensureCustomProvidersModelsJson(dir, NAN_ENV);
+      const edited = await readModelsJson(dir);
+      edited.providers.nan.baseUrl = "https://edited.example/v1";
+      await Bun.write(join(dir, "models.json"), JSON.stringify(edited));
+      await ensureCustomProvidersModelsJson(dir, NAN_ENV);
+      expect((await readModelsJson(dir)).providers.nan.baseUrl).toBe("https://edited.example/v1");
+      await ensureCustomProvidersModelsJson(dir, {});
+      expect((await readModelsJson(dir)).providers.nan.baseUrl).toBe("https://edited.example/v1");
+      expect(await Bun.file(join(dir, MARKER)).exists()).toBe(false);
+    }),
+  );
+
+  test(
+    "corrupt models.json: rewritten when a key is present, untouched otherwise",
+    withTempDir("pi-custom-corrupt-", async (dir) => {
+      await Bun.write(join(dir, "models.json"), "{not json");
+      await ensureCustomProvidersModelsJson(dir, {});
+      expect(await Bun.file(join(dir, "models.json")).text()).toBe("{not json");
+      await ensureCustomProvidersModelsJson(dir, NAN_ENV);
+      expect((await readModelsJson(dir)).providers.nan.apiKey).toBe("$NAN_API_KEY");
+    }),
+  );
+
+  test(
+    "ModelRuntime resolves the written blocks as nan/<id> and helmcode/<id>",
+    withTempDir("pi-custom-runtime-", async (dir) => {
+      await ensureCustomProvidersModelsJson(dir, { ...NAN_ENV, ...HELMCODE_ENV });
+      const runtime = await piCodingAgent.ModelRuntime.create({
+        authPath: join(dir, "auth.json"),
+        modelsPath: join(dir, "models.json"),
+      });
+      expect(runtime.getError()).toBeUndefined();
+      expect(runtime.getModel("nan", "qwen3.8-flash")?.baseUrl).toBe(
+        OPENAI_COMPATIBLE_PROVIDERS.nan.baseUrl,
+      );
+      expect(runtime.getModel("helmcode", "glm5.3")?.contextWindow).toBe(1048576);
+    }),
+  );
+});
+
+describe("createPiRuntimeAuth — NaN and Helmcode", () => {
+  test(
+    "HELMCODE_API_NAN alone sets the nan runtime key; NAN_API_KEY wins when both are set",
+    withTempDir("pi-custom-auth-", async (dir) => {
+      await ensureCustomProvidersModelsJson(dir, { NAN_API_KEY: "x", HELMCODE_API_KEY: "y" });
+      const opts = { authPath: join(dir, "auth.json"), modelsPath: join(dir, "models.json") };
+
+      const aliasOnly = await createPiRuntimeAuth({ HELMCODE_API_NAN: "a" }, opts);
+      await expect(aliasOnly.getAuth("nan")).resolves.toMatchObject({ auth: { apiKey: "a" } });
+
+      const both = await createPiRuntimeAuth({ HELMCODE_API_NAN: "a", NAN_API_KEY: "b" }, opts);
+      await expect(both.getAuth("nan")).resolves.toMatchObject({ auth: { apiKey: "b" } });
+
+      const helm = await createPiRuntimeAuth({ HELMCODE_API_KEY: "h" }, opts);
+      await expect(helm.getAuth("helmcode")).resolves.toMatchObject({ auth: { apiKey: "h" } });
+
+      // Runtime keys never land in auth.json.
+      const auth = (await Bun.file(join(dir, "auth.json")).exists())
+        ? await Bun.file(join(dir, "auth.json")).text()
+        : "";
+      expect(auth).not.toContain('"a"');
+      expect(auth).not.toContain('"b"');
+      expect(auth).not.toContain('"h"');
+    }),
+  );
+});
+
+describe("resolveModel — models.json custom providers", () => {
+  test(
+    "falls back to the runtime for nan/qwen3.8-flash and helmcode/glm5.3",
+    withTempDir("pi-custom-resolve-", async (dir) => {
+      await ensureCustomProvidersModelsJson(dir, { ...NAN_ENV, ...HELMCODE_ENV });
+      const runtime = await piCodingAgent.ModelRuntime.create({
+        authPath: join(dir, "auth.json"),
+        modelsPath: join(dir, "models.json"),
+      });
+      const nan = resolveModel("nan/qwen3.8-flash", NAN_ENV, runtime);
+      expect(nan?.provider).toBe("nan");
+      expect(nan?.id).toBe("qwen3.8-flash");
+      const helm = resolveModel("helmcode/glm5.3", HELMCODE_ENV, runtime);
+      expect(helm?.provider).toBe("helmcode");
+      expect(helm?.id).toBe("glm5.3");
+      expect(helm?.baseUrl).toBe(OPENAI_COMPATIBLE_PROVIDERS.helmcode.baseUrl);
+    }),
+  );
+
+  test("builtin hits are unchanged when a runtime is passed", async () => {
+    const runtime = { getModel: () => undefined };
+    const model = resolveModel("anthropic/claude-sonnet-5", {}, runtime);
+    expect(model?.provider).toBe("anthropic");
+  });
+
+  test("an unknown provider returns undefined and logs a scrubbed warning", () => {
+    const warn = spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const runtime = { getModel: () => undefined };
+      expect(resolveModel("nope/model-x", {}, runtime)).toBeUndefined();
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(String(warn.mock.calls[0]?.[0])).toContain('"nope/model-x"');
+      expect(String(warn.mock.calls[0]?.[0])).toContain("default model");
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  test("without a runtime, nan/<id> does not resolve (pi-ai has no builtin nan)", () => {
+    const warn = spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      expect(resolveModel("nan/glm5.3", NAN_ENV)).toBeUndefined();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+});
+
+describe("checkPiMonoCredentials — NaN and Helmcode", () => {
+  const opts = { homeDir: "/home/worker", fs: { existsSync: () => false } };
+
+  test("MODEL_OVERRIDE=nan/* accepts NAN_API_KEY or the HELMCODE_API_NAN alias", async () => {
+    const env = { MODEL_OVERRIDE: "nan/glm5.3" };
+    expect((await checkPiMonoCredentials(env, opts)).ready).toBe(false);
+    expect((await checkPiMonoCredentials({ ...env, NAN_API_KEY: "x" }, opts)).ready).toBe(true);
+    expect((await checkPiMonoCredentials({ ...env, HELMCODE_API_NAN: "x" }, opts)).ready).toBe(
+      true,
+    );
+    // An OpenRouter key does not satisfy a nan/* model.
+    expect((await checkPiMonoCredentials({ ...env, OPENROUTER_API_KEY: "x" }, opts)).ready).toBe(
+      false,
+    );
+  });
+
+  test("MODEL_OVERRIDE=helmcode/* requires HELMCODE_API_KEY", async () => {
+    const env = { MODEL_OVERRIDE: "helmcode/glm5.3" };
+    const missing = await checkPiMonoCredentials({ ...env, NAN_API_KEY: "x" }, opts);
+    expect(missing.ready).toBe(false);
+    expect(missing.missing).toContain("HELMCODE_API_KEY");
+    expect((await checkPiMonoCredentials({ ...env, HELMCODE_API_KEY: "x" }, opts)).ready).toBe(
+      true,
+    );
+  });
+
+  test("permissive case accepts a NaN-only or Helmcode-only worker", async () => {
+    expect((await checkPiMonoCredentials({ HELMCODE_API_NAN: "x" }, opts)).ready).toBe(true);
+    expect((await checkPiMonoCredentials({ HELMCODE_API_KEY: "x" }, opts)).ready).toBe(true);
   });
 });
 
