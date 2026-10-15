@@ -2083,12 +2083,12 @@ type ContributionGraphComponentProps = InferComponentProps<
   "ContributionGraph"
 >;
 
-/** Panel width per `size`, on top of `SheetContent`'s `w-3/4` base. */
+/** Keep existing tablet widths as floors; grow desktop caps; phones stay full width. */
 const drawerSizeClass: Record<"sm" | "md" | "lg" | "xl", string> = {
-  sm: "sm:max-w-sm",
-  md: "sm:max-w-md",
-  lg: "sm:max-w-2xl",
-  xl: "sm:max-w-4xl",
+  sm: "sm:max-w-[clamp(24rem,33.333vw,40rem)]",
+  md: "sm:max-w-[clamp(28rem,46vw,60rem)]",
+  lg: "sm:max-w-[clamp(42rem,62vw,80rem)]",
+  xl: "sm:max-w-[clamp(56rem,70vw,100rem)]",
 };
 
 /**

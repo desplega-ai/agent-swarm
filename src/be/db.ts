@@ -782,7 +782,8 @@ export async function getSlackOutcomeMessage(taskId: string): Promise<SlackMessa
  *
  * The join is `agent_tasks.parentTaskId` — `defer-task` sets it on the
  * schedule and `createStandaloneScheduleTask` passes it through, so the
- * wake-up task points back at the task whose card announced the wait.
+ * wake-up task points back at the task whose card announced the wait. Follow
+ * subsequent re-defers to the latest wake, keeping the original card open.
  * `deferredAt` (not the `deferred` tag) identifies the deferring task,
  * because the wake-up task inherits the tag.
  */
@@ -790,15 +791,30 @@ export async function getResolvableDeferralOutcomes(
   limit = 50,
 ): Promise<{ card: SlackMessageRecord; deferredTaskId: string; wakeTaskId: string }[]> {
   const rows = await getDbClient().query<SlackMessageRow & { wake_task_id: string }>(
-    `SELECT card.*, wake.id AS wake_task_id
-       FROM slack_messages card
-       JOIN agent_tasks deferred ON deferred.id = card.task_id
-       JOIN agent_tasks wake ON wake.parentTaskId = deferred.id AND wake.taskType = 'deferred'
+    `WITH RECURSIVE chain(card_id, task_id) AS (
+         SELECT card.id, deferred.id FROM slack_messages card
+         JOIN agent_tasks deferred ON deferred.id = card.task_id
+         WHERE card.kind = 'outcome' AND deferred.deferredAt IS NOT NULL
+           AND card.deferral_resolved_at IS NULL AND card.finalized_at IS NOT NULL
+           AND card.ts NOT LIKE 'pending:%'
+         UNION
+         SELECT chain.card_id, wake.id FROM chain
+         JOIN agent_tasks parent ON parent.id = chain.task_id AND parent.deferredAt IS NOT NULL
+         JOIN agent_tasks wake ON wake.parentTaskId = parent.id AND wake.taskType = 'deferred'
+       )
+       SELECT card.*, wake.id AS wake_task_id
+       FROM chain
+       JOIN slack_messages card ON card.id = chain.card_id
+       JOIN agent_tasks wake ON wake.id = chain.task_id AND wake.id != card.task_id
        WHERE card.kind = 'outcome'
          AND card.finalized_at IS NOT NULL
          AND card.deferral_resolved_at IS NULL
          AND card.ts NOT LIKE 'pending:%'
-         AND deferred.deferredAt IS NOT NULL
+         AND NOT EXISTS (
+           SELECT 1 FROM agent_tasks child
+           WHERE child.parentTaskId = wake.id AND child.taskType = 'deferred'
+         )
+         AND (wake.deferredAt IS NULL OR wake.finishedAt > card.updated_at)
          AND wake.status IN ('completed', 'failed', 'cancelled')
        ORDER BY wake.finishedAt ASC
        LIMIT ?`,
