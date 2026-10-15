@@ -754,7 +754,7 @@ Even if the in-process MCP connection fails, the **runner** and the adapter's ow
 
 ### How it is built
 
-Composed by `getBasePrompt(args)` in [`src/prompts/base-prompt.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/prompts/base-prompt.ts) and orchestrated by `buildSystemPrompt()` in [`src/commands/runner.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/commands/runner.ts). Static blocks come first, per-task blocks last, so the cached prefix stays stable across tasks. The pieces, in order:
+Composed by `getBasePrompt(args)` in [`src/prompts/base-prompt.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/prompts/base-prompt.ts) and orchestrated by `buildTaskSessionPrompts()` in [`src/commands/runner.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/commands/runner.ts). The system prompt depends only on the agent (profile, harness, deployment), so it is byte-identical across that agent's sessions and the provider reads it from its prompt cache instead of re-writing it. Nothing per task, per requester or per session may enter it. The pieces, in order:
 
 | Source | Section | Gate |
 |---|---|---|
@@ -764,11 +764,17 @@ Composed by `getBasePrompt(args)` in [`src/prompts/base-prompt.ts`](https://gith
 | Template `system.agent.slack` | `## Slack` (both roles) | Slack tokens set, not scripts-only, `slack` capability |
 | Template `system.agent.steering` | `## Live task steering` | `STEERING_ENABLED`, adapter `steerModes`, `core` capability |
 | Template `system.agent.tools_skills` (skills + MCP server lines interpolated) | `## Tools and skills` | MCP. Count + discovery pointer for harnesses with native skill discovery (claude, pi), enumerated list otherwise |
-| `agentClaudeMd` | `## Your notes (CLAUDE.md)` (truncated at 20k) | Local environment, provider codex/opencode/pi, content differs from the generated default. Claude loads `~/.claude/CLAUDE.md` natively and excludes `/workspace/CLAUDE.md` via `claudeMdExcludes` |
+| `agentClaudeMd` | `## Your notes (CLAUDE.md)` (truncated at 20k) | Local environment, provider claude/codex/opencode/pi, content differs from the generated default. Claude excludes both `~/.claude/CLAUDE.md` and `/workspace/CLAUDE.md` from its memory load via `claudeMdExcludes`, so this is its only copy; the hook still writes `~/.claude/CLAUDE.md` as the file the agent edits |
+| `SYSTEM_PROMPT` env / `--system-prompt` | Appended | Operator config |
+
+Per-task context is appended to the **task prompt** (the first user turn), after the task text, by `getTaskContextPrompt(args)` and the runner:
+
+| Source | Section | Gate |
+|---|---|---|
+| Template `system.agent.scripts_only_mode.slack` | `## Slack (scripts-only)` | Worker, scripts-only, Slack-originated task |
 | Template `system.agent.repository` (per-task pieces interpolated) | `## Repository` | Task has a repo. Clone sentence + `get-repos` pointer, repo `CLAUDE.md` inlined for opencode only (12k cap), auto-stashes, guidelines, `code-quality` skill pointer |
 | `task.requester.profile` | `## Requester Profile` | Requester has role, notes, or comms |
-| `SYSTEM_PROMPT` env / `--system-prompt` | Appended | Operator config |
-| `task.additionalSystemPrompt` | Appended per-task | Task field |
+| cwd warning | `Note: The task requested working directory ...` | Task `dir` does not exist |
 
 The shared `system.agent.communication` template sets reply defaults for every session composite:
 

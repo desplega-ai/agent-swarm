@@ -3,6 +3,7 @@ import { mkdtemp, readFile, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ClaudeAdapter, getTaskFilePath } from "../providers/claude-adapter";
+import { userClaudeMdExclude } from "../providers/claude-flag-settings";
 import type { ProviderEvent, ProviderSessionConfig } from "../providers/types";
 import { CHILD_PROCESS_TEST_BUDGET_MS, runChild } from "./test-proc";
 
@@ -148,11 +149,11 @@ describe("Claude SDK production adapter lifecycle", () => {
             argument === "--system-prompt" && fixtureState.argv[index + 1] === "",
         ),
       ).toBeFalse();
-      // The SDK forwards `settings` as `--settings`: Claude skips /workspace/CLAUDE.md.
+      // The SDK forwards `settings` as `--settings`: Claude skips both agent CLAUDE.md copies.
       const settingsAt = fixtureState.argv.indexOf("--settings");
       expect(settingsAt).toBeGreaterThan(-1);
       expect(JSON.parse(fixtureState.argv[settingsAt + 1] ?? "")).toMatchObject({
-        claudeMdExcludes: ["/workspace/CLAUDE.md"],
+        claudeMdExcludes: ["/workspace/CLAUDE.md", userClaudeMdExclude()],
       });
     },
     { timeout: CHILD_PROCESS_TEST_BUDGET_MS },
@@ -191,7 +192,12 @@ describe("Claude SDK production adapter lifecycle", () => {
       expect(JSON.parse(argv[argv.indexOf("--settings") + 1] ?? "")).toEqual({
         model: "from-file",
         env: { X: "kept" },
-        claudeMdExcludes: ["/repo/CLAUDE.md", "/other/CLAUDE.md", "/workspace/CLAUDE.md"],
+        claudeMdExcludes: [
+          "/repo/CLAUDE.md",
+          "/other/CLAUDE.md",
+          "/workspace/CLAUDE.md",
+          userClaudeMdExclude(),
+        ],
       });
       expect(argv).not.toContain(settingsFile);
       // The version probe carries the same merged settings value.

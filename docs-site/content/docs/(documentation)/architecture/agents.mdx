@@ -142,7 +142,7 @@ Guidelines have three sections:
 ### How It Works
 
 1. **Lead sets guidelines** — Use the `update-repo` MCP tool to configure guidelines for a repo
-2. **Prompt injection** — When a task targets a repo, its guidelines are injected into the agent's system prompt as a mandatory "Repository Guidelines" section
+2. **Prompt injection** — When a task targets a repo, its guidelines are injected into the agent's task prompt as a mandatory "Repository Guidelines" section
 3. **Command enforcement** — `/create-pr` and `/implement-issue` require PR checks to pass before pushing; `/review-pr` references the review guidance
 4. **Lead gating** — The lead agent can block code tasks for repos that lack guidelines
 

@@ -115,6 +115,22 @@ describe("template registration — all sources", () => {
     expect(eventTypes).toContain("heartbeat.checklist");
   });
 
+  test("Heartbeat checklist puts the live status after the standing orders and instructions", () => {
+    // The status changes every tick; the orders and instructions usually do
+    // not, so they lead the text and the status goes last.
+    const { text } = resolveTemplate("heartbeat.checklist", {
+      system_status: "STATUS_MARKER",
+      heartbeat_content: "ORDERS_MARKER",
+    });
+    const orders = text.indexOf("ORDERS_MARKER");
+    const instructions = text.indexOf("## Instructions");
+    const status = text.indexOf("## Current System Status");
+    expect(orders).toBeGreaterThan(-1);
+    expect(instructions).toBeGreaterThan(orders);
+    expect(status).toBeGreaterThan(instructions);
+    expect(text.trimEnd()).toEndWith("STATUS_MARKER");
+  });
+
   test("Task lifecycle templates are registered (3 task_lifecycle)", () => {
     const all = getAllTemplateDefinitions();
     const eventTypes = all.map((d) => d.eventType);

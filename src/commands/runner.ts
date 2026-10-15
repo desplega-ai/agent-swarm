@@ -11,7 +11,14 @@ import {
   withSpan,
   withSpanContext,
 } from "../otel.ts";
-import { type BasePromptArgs, getBasePrompt } from "../prompts/base-prompt.ts";
+import {
+  type BasePromptArgs,
+  getBasePrompt,
+  getTaskContextPrompt,
+  type RepoContext,
+  type SlackTaskContext,
+  type TaskContextPromptArgs,
+} from "../prompts/base-prompt.ts";
 import {
   generateDefaultClaudeMd,
   generateDefaultIdentityMd,
@@ -3310,6 +3317,50 @@ export async function buildRequesterProfilePrompt(
   return result.skipped ? "" : result.text.trim();
 }
 
+/** Per-task context that rides in the task prompt, never the system prompt. */
+export type TaskSessionContext = Omit<TaskContextPromptArgs, keyof BasePromptArgs> & {
+  requestedBy?: RequesterProfile;
+  /** Set when the task's `dir` does not exist and the session falls back. */
+  cwdWarning?: string;
+};
+
+/**
+ * The two prompts of one task session. The system prompt depends only on the
+ * agent (profile, harness, deployment), so it is byte-identical across that
+ * agent's sessions and the provider reads it from cache instead of re-writing
+ * it. Everything that varies per task (repository block, scripts-only Slack
+ * note, requester profile, cwd warning) is appended to the task prompt.
+ */
+export async function buildTaskSessionPrompts(input: {
+  basePromptArgs: BasePromptArgs;
+  additionalSystemPrompt?: string;
+  taskPrompt: string;
+  context: TaskSessionContext;
+}): Promise<{ systemPrompt: string; prompt: string }> {
+  const { basePromptArgs, additionalSystemPrompt, context } = input;
+  const basePrompt = await getBasePrompt(basePromptArgs);
+  const systemPrompt = additionalSystemPrompt
+    ? `${basePrompt}\n\n${additionalSystemPrompt}`
+    : basePrompt;
+
+  const taskContext = [
+    await getTaskContextPrompt({
+      ...basePromptArgs,
+      repoContext: context.repoContext,
+      slackContext: context.slackContext,
+    }),
+    await buildRequesterProfilePrompt(context.requestedBy),
+    context.cwdWarning?.trim(),
+  ]
+    .filter((part): part is string => Boolean(part))
+    .join("\n\n");
+
+  return {
+    systemPrompt,
+    prompt: taskContext ? `${input.taskPrompt}\n\n${taskContext}` : input.taskPrompt,
+  };
+}
+
 /** A non-2xx answer from `POST /api/agents`; carries the status for retry triage. */
 export class AgentRegistrationHttpError extends Error {
   readonly status: number;
@@ -5720,17 +5771,13 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   let agentSkillsSummary: { name: string; description: string }[] | undefined;
   let agentMcpServers: string[] | undefined;
 
-  // Per-task repo context — set when processing a task with githubRepo
-  let currentRepoContext: BasePromptArgs["repoContext"] | undefined;
-  // Slack context for current task (gates Slack instructions in prompt)
-  let currentTaskSlackContext: BasePromptArgs["slackContext"] | undefined;
-
   // Generate base prompt (identity fields injected after profile fetch below).
   // Traits are read fresh on each call so a live adapter swap (Section 4)
-  // produces a prompt matching the new provider's capabilities.
-  const buildSystemPrompt = async () => {
+  // produces a prompt matching the new provider's capabilities. Per-task
+  // context never enters it; see buildTaskSessionPrompts.
+  const basePromptArgs = (): BasePromptArgs => {
     const { traits } = adapter;
-    return getBasePrompt({
+    return {
       role,
       agentId,
       capabilities,
@@ -5741,19 +5788,18 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
       name: agentProfileName,
       description: agentDescription,
       // SOUL.md is the persona and travels to every provider. base-prompt
-      // gates IDENTITY.md (inject when edited) and CLAUDE.md (local
-      // non-claude providers, inject when edited) itself.
+      // gates IDENTITY.md and CLAUDE.md (inject when edited) itself.
       soulMd: agentSoulMd,
       identityMd: agentIdentityMd,
       claudeMd: agentClaudeMd,
-      repoContext: currentRepoContext,
-      slackContext: currentTaskSlackContext,
       ...(traits.hasMcp && {
         skillsSummary: agentSkillsSummary,
         mcpServers: agentMcpServers,
       }),
-    });
+    };
   };
+
+  const buildSystemPrompt = async () => getBasePrompt(basePromptArgs());
 
   let basePrompt = await buildSystemPrompt();
 
@@ -6687,7 +6733,8 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
           }
         }
 
-        if (!resumeCwd && task.vcsRepo && apiUrl) {
+        let resumeRepoContext: RepoContext | undefined;
+        if (task.vcsRepo && apiUrl) {
           const repoConfig = await fetchRepoConfig(apiUrl, apiKey, task.vcsRepo);
           const effectiveConfig = repoConfig ?? {
             url: task.vcsRepo,
@@ -6698,10 +6745,30 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
           // This is the paused-task-resume-after-restart path — never a first
           // kickoff, so never force-reset the base branch here.
           const repoContext = await ensureRepoForTask(effectiveConfig, role, false);
-          if (repoContext?.clonePath) {
+          resumeRepoContext = { ...repoContext, guidelines: repoConfig?.guidelines ?? null };
+          if (!resumeCwd && repoContext?.clonePath) {
             resumeCwd = repoContext.clonePath;
           }
         }
+
+        // Same split as the main task path: stable system prompt, per-task
+        // context (repository, scripts-only Slack note) in the task prompt.
+        const resumeSlackChannelId = (task as { slackChannelId?: string }).slackChannelId;
+        const resumeSession = await buildTaskSessionPrompts({
+          basePromptArgs: basePromptArgs(),
+          additionalSystemPrompt,
+          taskPrompt: resumePrompt,
+          context: {
+            repoContext: resumeRepoContext,
+            slackContext: resumeSlackChannelId
+              ? {
+                  channelId: resumeSlackChannelId,
+                  threadTs: (task as { slackThreadTs?: string }).slackThreadTs,
+                }
+              : undefined,
+          },
+        });
+        resumePrompt = resumeSession.prompt;
 
         // Per-task runner session ID so session logs are scoped to this task
         const resumeRunnerSessionId = crypto.randomUUID();
@@ -6723,7 +6790,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
             {
               prompt: resumePrompt,
               logFile,
-              systemPrompt: resolvedSystemPrompt,
+              systemPrompt: resumeSession.systemPrompt,
               additionalArgs: opts.additionalArgs,
               // Native resume deprecated: always undefined. Follow-up continuity flows through
               // the context preamble injected above (see context-preamble.ts).
@@ -7133,11 +7200,12 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
           ?.slackChannelId;
         const taskSlackThreadTs = (trigger.task as { slackThreadTs?: string } | undefined)
           ?.slackThreadTs;
-        currentTaskSlackContext = taskSlackChannelId
+        const taskSlackContext: SlackTaskContext | undefined = taskSlackChannelId
           ? { channelId: taskSlackChannelId, threadTs: taskSlackThreadTs }
           : undefined;
 
         // Handle repo context for tasks with vcsRepo (GitHub/GitLab)
+        let currentRepoContext: RepoContext | undefined;
         const taskVcsRepo = (trigger.task as { vcsRepo?: string } | undefined)?.vcsRepo;
         if (taskVcsRepo && apiUrl) {
           const repoConfig = await fetchRepoConfig(apiUrl, apiKey, taskVcsRepo);
@@ -7161,8 +7229,6 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
             ...repoResult,
             guidelines: repoConfig?.guidelines ?? null,
           };
-        } else {
-          currentRepoContext = undefined;
         }
 
         // Resolve effective working directory (priority: task.dir > repoContext.clonePath > process.cwd())
@@ -7201,11 +7267,11 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
             " You can still access any path on the filesystem — this is just your starting directory.";
         }
 
-        // Warn in system prompt when task dir was specified but doesn't exist
-        let cwdWarning = "";
-        if (taskDir && !effectiveCwd) {
-          cwdWarning = `\n\nNote: The task requested working directory "${taskDir}" but it does not exist. Falling back to default directory.`;
-        }
+        // Warn when task dir was specified but doesn't exist
+        const cwdWarning =
+          taskDir && !effectiveCwd
+            ? `Note: The task requested working directory "${taskDir}" but it does not exist. Falling back to default directory.`
+            : undefined;
 
         // Per-task skill hot-reload. Reuses the boot-time helper; signature
         // probe short-circuits when nothing changed. Skipped for
@@ -7251,13 +7317,21 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
           );
         }
 
-        // Rebuild system prompt with per-task repo context
-        const taskBasePrompt = await buildSystemPrompt();
-        const requesterProfilePrompt = await buildRequesterProfilePrompt(trigger.requestedBy);
-        const taskPromptParts = [taskBasePrompt, requesterProfilePrompt, additionalSystemPrompt]
-          .filter((part): part is string => Boolean(part))
-          .join("\n\n");
-        const taskSystemPrompt = taskPromptParts + cwdWarning;
+        // Rebuild the system prompt (profile or skills may have changed) and
+        // append the per-task context to the task prompt.
+        const taskSession = await buildTaskSessionPrompts({
+          basePromptArgs: basePromptArgs(),
+          additionalSystemPrompt,
+          taskPrompt: triggerPrompt,
+          context: {
+            repoContext: currentRepoContext,
+            slackContext: taskSlackContext,
+            requestedBy: trigger.requestedBy,
+            cwdWarning,
+          },
+        });
+        const taskSystemPrompt = taskSession.systemPrompt;
+        triggerPrompt = taskSession.prompt;
 
         // The server refused the task's explicit model for this worker's CLI
         // version (harness_model_support = unsupported): fail fast, no spawn.
