@@ -522,6 +522,8 @@ describe("AgentRuntimeSettings Devin harness", () => {
     await pickSelect(view.container, "Claude", "Devin");
     expect(view.container.textContent).toContain("Devin runs in Cognition");
     expect(view.container.textContent).not.toContain("Reasoning effort");
+    expect(view.container.textContent).not.toContain("requires a missing provider key");
+    expect(view.container.textContent).not.toContain("per 1M tokens");
     await save(view.container);
     expect(harnessSwitches).toEqual([{ id: "agent-1", harnessProvider: "devin" }]);
     expect(saves).toEqual([]);

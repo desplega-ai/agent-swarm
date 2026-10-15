@@ -401,7 +401,7 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
   }
 
   const disabledChoice =
-    !customMode && modelOption
+    !devinSelected && !customMode && modelOption
       ? !groups.find((g) => g.provider === modelOption.provider)?.enabled
       : false;
 
@@ -725,7 +725,7 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
         ) : null}
       </div>
 
-      {modelOption?.cost || modelOption?.status || modelOption?.releaseDate ? (
+      {!devinSelected && (modelOption?.cost || modelOption?.status || modelOption?.releaseDate) ? (
         <p className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs text-muted-foreground">
           <ModelStatusBadge status={modelOption.status} />
           {modelOption.cost ? (
